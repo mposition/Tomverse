@@ -79,18 +79,19 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // that named the new prompt over the old sample would be the failure
         // the switch exists to avoid.
         assert.match(result.output, /gpt-5-6-luna::mem-extract-v8/);
-        // "frozen" since 2026-09-04. succ-8 spent a day unsigned and the header
-        // said so for exactly that day. A smoke run is admissible either way,
-        // because nothing is spent; the word is what stops a reader citing an
-        // unsigned sample's numbers as decision-grade, so it is asserted.
-        assert.match(result.output, /mem-eval-succ-8 \(decision, frozen\)/);
+        // "frozen" since 2026-09-04, for succ-9 as it was for succ-8 before
+        // it. Each spent a period unsigned and the header said so throughout.
+        // A smoke run is admissible either way, because nothing is spent; the
+        // word is what stops a reader citing an unsigned sample's numbers as
+        // decision-grade, so it is asserted.
+        assert.match(result.output, /mem-eval-succ-9 \(decision, frozen\)/);
         // The manifest digest as well as the sample's: a smoke run names the
         // record its numbers would be resolved against, not only the cases.
         assert.match(
             result.output,
-            /manifest: 24820f585c3c84aa….*binding: verified/
+            /manifest: 82d9aa48fe96037b….*binding: verified/
         );
-        assert.match(result.output, /digest: 9326730a/);
+        assert.match(result.output, /digest: 626f7136/);
         // succ-5 is an earlier target and must not be what a default run
         // reports; it stays reachable by name, which the harness-target tests
         // cover.
@@ -115,27 +116,34 @@ test("a smoke run scores the schema-3 set and reaches no provider", () => {
         // be ignored and every citation unchecked, and the run would still
         // pass — so the assertion that matters is the one below it.
         assert.equal(artifact.verdict.aggregate.failures, 0);
-        // 485 since the target moved to succ-7, whose cases succ-8 inherits by
-        // reference. The chain is derivable: succ-5 carried 474; succ-6 lost
-        // thirteen cases carrying nothing between them and gained thirteen
-        // carrying two (`ko-501`'s expertise gold and `ko-504`'s
+        // 486 since the target moved to succ-9. The chain is derivable and
+        // each step is a decision somebody took: succ-5 carried 474; succ-6
+        // lost thirteen cases carrying nothing between them and gained
+        // thirteen carrying two (`ko-501`'s expertise gold and `ko-504`'s
         // recurring_context), so 474 − 0 + 2 = 476; succ-7 rewrote sixteen
         // cases whose replacements state facts the originals left implicit,
-        // and those carry nine more. 476 + 9.
+        // and those carry nine more, so 485; succ-8 inherited succ-7's array
+        // by reference and added none. succ-9 retired five cases carrying six
+        // golds between them and replaced them with five carrying seven — the
+        // extra one is `succ-durable-ko-701`'s affirmed `expertise` gold, the
+        // repair its original was missing. 485 − 6 + 7 = 486.
         //
         // Written out rather than read from the dataset, for the reason the
         // whole file exists: a denominator computed from the same array the
-        // scorer walked would agree with itself whatever went wrong.
+        // scorer walked would agree with itself whatever went wrong. That is
+        // also why the arithmetic above is spelled out — a number nobody can
+        // derive is a number nobody will question when it next changes.
         //
-        // The *numerator* is the amendment's own evidence. Until
-        // `mem-score-v3.5` this read 484 against succ-7 — one gold the stub
-        // answered verbatim and the scorer marked wrong, because the Korean
-        // numeral rule reached inside 토요일 and canonicalised
-        // `succ-durable-ko-611`'s token to something no candidate contained.
-        // A stub that echoes every gold scoring anything but a perfect
-        // recall is a defect in the scorer, and 485 is what says it is fixed.
-        assert.equal(artifact.verdict.aggregate.recallNumerator, 485);
-        assert.equal(artifact.verdict.aggregate.recallDenominator, 485);
+        // The *numerator* is still the Korean numeral amendment's own
+        // evidence. Until `mem-score-v3.5` this read one short of its
+        // denominator against succ-7 — one gold the stub answered verbatim
+        // and the scorer marked wrong, because the Korean numeral rule
+        // reached inside 토요일 and canonicalised `succ-durable-ko-611`'s
+        // token to something no candidate contained. A stub that echoes every
+        // gold scoring anything but a perfect recall is a defect in the
+        // scorer, and numerator === denominator is what says it is fixed.
+        assert.equal(artifact.verdict.aggregate.recallNumerator, 486);
+        assert.equal(artifact.verdict.aggregate.recallDenominator, 486);
         assert.equal(
             artifact.verdict.aggregate.unboundCandidates,
             0,

@@ -340,7 +340,21 @@ test("every dataset a run could be scored against is in the scanned set", () => 
     const runnable = harnessTargetVersions().filter(
         (version) => harnessTargetBindingFailures(harnessTarget(version)).length === 0
     );
-    assert.ok(runnable.length > 0, "no dataset is runnable, so this proves nothing");
+    // The guard says what it saw. "No dataset is runnable" alone sent a
+    // reader looking for a logic error when the answer was in the refusals
+    // themselves, and this test has failed once in a concurrent local run
+    // whose cause is still unexplained — a message that carries the evidence
+    // is the difference between diagnosing that and guessing at it.
+    assert.ok(
+        runnable.length > 0,
+        "no dataset is runnable, so this proves nothing: " +
+            JSON.stringify(
+                harnessTargetVersions().map((version) => [
+                    version,
+                    [...harnessTargetBindingFailures(harnessTarget(version))],
+                ])
+            )
+    );
     for (const version of runnable) {
         assert.ok(
             scanned.has(version),
