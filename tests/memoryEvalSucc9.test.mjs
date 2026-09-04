@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { isCalendarDay } from "../lib/memoryEvalCalendarDay.ts";
@@ -165,6 +166,52 @@ test("confirming the subtype rows did not freeze the dataset", () => {
     // sample and its digests. `human_confirmed` is what `succ9Problems()`
     // requires *before* a freeze, never a substitute for one.
     assert.equal(MEMORY_EVAL_SUCC9_DATASET_FROZEN, false);
+});
+
+test("the reviewer rule lives in one place and both paths use it", () => {
+    // Two paths judge a reviewer's name: the subtype review record and the
+    // dataset approval. The second kept its own `/^@[A-Za-z0-9-]+$/` after the
+    // first was tightened, so `@-`, `@--` and `@a-` signed a dataset while
+    // being refused as a subtype confirmation. Whichever spelling is right,
+    // having two is what let a fix reach only one of them.
+    for (const punctuation of ["@-", "@--", "@a-", "-", "@", "@@", "-@-"]) {
+        assert.equal(
+            isReviewerHandle(punctuation),
+            false,
+            `${punctuation} was accepted as a name`
+        );
+    }
+    for (const name of ["@mposition", "mposition", "a-b", "m"]) {
+        assert.equal(isReviewerHandle(name), true, `${name} was rejected`);
+    }
+
+    // And structurally: nothing in succ-9's own files defines a second one.
+    // Read as source, because the branch that judges the dataset approval only
+    // runs once all five signature fields are filled, and the tree is unsigned
+    // — a test that could only observe it after a signature is a test that
+    // arrives too late to prevent one.
+    const files = [
+        "scripts/check-memory-eval-succ9.mjs",
+        "lib/memoryEvalSucc9.ts",
+        "lib/memoryEvalSucc9Subtypes.ts",
+    ];
+    let definitions = 0;
+    for (const path of files) {
+        const source = readFileSync(path, "utf8");
+        for (const line of source.split("\n")) {
+            // The rule's own definition is the one line allowed to spell it.
+            if (line.trimStart().startsWith("*") || line.trimStart().startsWith("//")) {
+                continue;
+            }
+            if (/\[A-Za-z0-9-\]/.test(line)) definitions += 1;
+        }
+    }
+    assert.equal(definitions, 1, `${definitions} handle patterns across ${files.join(", ")}`);
+    assert.match(
+        readFileSync("scripts/check-memory-eval-succ9.mjs", "utf8"),
+        /isReviewerHandle\(MEMORY_EVAL_SUCC9_APPROVAL\.approvedBy\)/,
+        "the dataset approval does not use the shared rule"
+    );
 });
 
 /* ------------------------------------------------------ grounds and rows -- */

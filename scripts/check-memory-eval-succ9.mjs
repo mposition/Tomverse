@@ -31,6 +31,7 @@ import { SUCC9_TRANSITION } from "../lib/memoryEvalSucc9Transition.ts";
 import { isCalendarDay } from "../lib/memoryEvalCalendarDay.ts";
 import {
     SUCC9_SUBTYPE_REVIEW,
+    isReviewerHandle,
     succ9Subtype,
 } from "../lib/memoryEvalSucc9Subtypes.ts";
 import { MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS } from "../lib/memoryExtractionPrompt.ts";
@@ -164,7 +165,20 @@ if (filled.length === 0) {
     );
 } else {
     ok("the approval's shape", `signed by ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
-    if (!/^@[A-Za-z0-9-]+$/.test(MEMORY_EVAL_SUCC9_APPROVAL.approvedBy ?? "")) {
+    // The same judgement the subtype review uses, not a second copy of it.
+    //
+    // The copy that stood here was `/^@[A-Za-z0-9-]+$/`, which accepts `@-`,
+    // `@--` and `@a-` — the exact hole closed on the review path two commits
+    // earlier, still open on the path that signs the dataset. Two spellings of
+    // one rule is how a fix reaches one of them.
+    //
+    // `isReviewerHandle()` drops this path's `@` requirement, deliberately: the
+    // repository already writes the same person both ways — `mposition` in the
+    // frozen subtype table, `@mposition` in succ-8's approval — so the shared
+    // rule tolerates both, and re-adding a prefix condition here would be the
+    // third rule rather than the end of the second. What it does not tolerate
+    // is a name made of punctuation, which is the thing that mattered.
+    if (!isReviewerHandle(MEMORY_EVAL_SUCC9_APPROVAL.approvedBy)) {
         fail(`the reviewer is not a handle: ${MEMORY_EVAL_SUCC9_APPROVAL.approvedBy}`);
     }
     // A day that exists, not merely a date-shaped string. `filled.length`
