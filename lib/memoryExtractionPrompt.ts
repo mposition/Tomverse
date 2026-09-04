@@ -451,37 +451,36 @@ export const MEMORY_EXTRACTION_EXAMPLE_LABEL = "m0";
 export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
     {
         language: "en",
-        message:
-            "The registration form lists two dependants; I have no dependants.",
+        message: "I have no plans to open a franchise, now or later.",
         candidate: {
-            kind: "relationship",
+            kind: "long_term_goal",
             polarity: "negated",
-            statement: "The user has no dependants",
+            statement: "The user does not plan to open a franchise",
             confidence: 0.9,
             sensitivity: "standard",
             expiresAt: null,
             evidence: [
                 {
                     messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
-                    quote: "I have no dependants",
+                    quote: "I have no plans to open a franchise",
                 },
             ],
         },
     },
     {
         language: "ko",
-        message: "코드 예시는 의사코드로 주지 말아 주세요. 바로 돌려볼 수 있어야 합니다.",
+        message: "저는 프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다.",
         candidate: {
-            kind: "code_style",
+            kind: "long_term_goal",
             polarity: "negated",
-            statement: "사용자는 코드 예시를 의사코드로 받는 것을 원하지 않습니다",
+            statement: "사용자는 프랜차이즈를 여는 것을 계획하고 있지 않습니다",
             confidence: 0.9,
             sensitivity: "standard",
             expiresAt: null,
             evidence: [
                 {
                     messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
-                    quote: "코드 예시는 의사코드로 주지 말아 주세요",
+                    quote: "프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다",
                 },
             ],
         },
@@ -521,21 +520,44 @@ export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
  * cases exist precisely because the originals were retired to buy an
  * independent holdout for this rule. Teaching their shape gave it back.
  *
- * So both subjects were chosen against a measurement rather than for how
- * natural they read, and the measurement is the (language, kind, polarity)
- * cell each one occupies. An example landing where the corpus has cases is
- * teaching a verdict the eval scores.
+ * So the subject was chosen against a measurement rather than for how natural
+ * it reads, and the measurement is the (language, kind, polarity) cell it
+ * occupies. An example landing where the corpus has cases is teaching a
+ * verdict the eval scores.
  *
- * The English example is the sentence the boundary rule above already calls a
- * negated relationship fact, so it introduces no mapping the approved prompt
- * had not already made. `en|relationship|negated` is scored nowhere in
- * succ-4 through succ-8.
+ * ## Why one fact, one kind, and this kind
  *
- * The Korean one could not be the same fact: `ko|relationship|negated` is
- * scored five times. Nor could it be any factual kind, because every factual
- * kind carries negated Korean cases — so it is an answer-style preference in
- * `ko|code_style|negated`, which is scored nowhere and which no `polarity44`
- * replacement touches at all.
+ * **One fact.** Both examples are a single sentence carrying a single durable
+ * claim, so one candidate is the complete answer. A draft used a two-sentence
+ * Korean message — no pseudocode, and it must run as given — and emitted one
+ * candidate, which taught the model to drop the second fact from a message
+ * carrying two. An example of complete output that is not complete is worse
+ * than no example.
+ *
+ * **One kind.** The pair differs in language and in nothing else, so it
+ * teaches one mapping twice rather than two mappings once, and what it
+ * isolates is the rule that a statement is written in the language of the
+ * evidence it cites.
+ *
+ * **This kind.** The negation has to be a fact that is not so of the user, not
+ * a preference against something: `MEMORY_EXTRACTION_POLARITY_RULE` above
+ * settles that "The user dislikes open-plan offices" is *affirmed*, because
+ * the dislike holds of them. That rules out every answer-style kind, whose
+ * natural negation — "does not want citations", "does not want pseudocode" —
+ * is a preference against something and therefore affirmed. A draft made
+ * exactly that mistake and shipped an example contradicting the rule two
+ * paragraphs above it.
+ *
+ * Of the factual kinds, `long_term_goal` is the only one scored zero times as
+ * negated in both languages, across succ-4 through succ-8 and in the live
+ * target alike, and it appears in no `polarity44` replacement. `relationship`
+ * would have been the natural choice — the boundary rule already calls "I have
+ * no dependants" a negated relationship fact — but `ko|relationship|negated`
+ * is scored once in the live target and five times across the corpora, so the
+ * pair could not have been the same kind there.
+ *
+ * The absence is stated as never held rather than given up ("now or later"),
+ * which keeps it clear of the retired `decision|negated` shape.
  */
 export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
     "Two complete examples of a negated candidate, one in each language. Each is a whole candidate object rather than a description of one, so the seven required fields are visible together and in the shape the schema asks for.",
@@ -561,8 +583,8 @@ export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
  * introducing a gold token without anybody adding it here.
  */
 export const MEMORY_EXTRACTION_EXAMPLE_TERMS: readonly string[] = [
-    "dependants",
-    "의사코드",
+    "franchise",
+    "프랜차이즈",
 ];
 
 const SYSTEM_PROMPT = [

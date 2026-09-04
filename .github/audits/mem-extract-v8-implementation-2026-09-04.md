@@ -9,7 +9,7 @@
   `memoryExtractionEnabled`·`memoryInjectionEnabled`
 - 기준: 동결된 `mem-eval-succ-8`(2026-09-04 서명), `mem-score-v3.5`
 
-**prompt digest: `cadb45a497eda079acbd70f99b82d72d1e3cb52460e4b768a80853306d1d90e5`**
+**prompt digest: `5eb52b1d08fb360a1643278659761ada25738dc7f77718ba7a9806e1bec5f86e`**
 
 ## 1. 추가된 문안
 
@@ -19,46 +19,49 @@
 **완결형의 의미는 "완결된 구조화 출력"입니다.** 필수 7개 필드
 (`kind`·`polarity`·`statement`·`confidence`·`sensitivity`·`expiresAt`·`evidence`)를
 모두 갖춘 candidate 객체 그대로이고, evidence도 `messageLabel`·`quote` 구조를
-그대로 씁니다. 첫 초안은 statement와 polarity만 산문으로 설명했는데, 그러면
-나머지 다섯 필드를 모델이 별도로 제시된 schema에서 추론해야 하고 그 추론이야말로
-예시가 없애려는 것입니다.
+그대로 씁니다.
 
 ```
-A user message labelled m0: The registration form lists two dependants; I have no dependants.
+A user message labelled m0: I have no plans to open a franchise, now or later.
 {
   "candidates": [
     {
-      "kind": "relationship",
+      "kind": "long_term_goal",
       "polarity": "negated",
-      "statement": "The user has no dependants",
+      "statement": "The user does not plan to open a franchise",
       "confidence": 0.9,
       "sensitivity": "standard",
       "expiresAt": null,
-      "evidence": [ { "messageLabel": "m0", "quote": "I have no dependants" } ]
+      "evidence": [ { "messageLabel": "m0", "quote": "I have no plans to open a franchise" } ]
     }
   ]
 }
 
-A user message labelled m0: 코드 예시는 의사코드로 주지 말아 주세요. 바로 돌려볼 수 있어야 합니다.
+A user message labelled m0: 저는 프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다.
 {
   "candidates": [
     {
-      "kind": "code_style",
+      "kind": "long_term_goal",
       "polarity": "negated",
-      "statement": "사용자는 코드 예시를 의사코드로 받는 것을 원하지 않습니다",
+      "statement": "사용자는 프랜차이즈를 여는 것을 계획하고 있지 않습니다",
       "confidence": 0.9,
       "sensitivity": "standard",
       "expiresAt": null,
-      "evidence": [ { "messageLabel": "m0", "quote": "코드 예시는 의사코드로 주지 말아 주세요" } ]
+      "evidence": [ { "messageLabel": "m0", "quote": "프랜차이즈를 여는 계획은 지금도 앞으로도 없습니다" } ]
     }
   ]
 }
 ```
 
-- **quote는 메시지 전체가 아니라 그 안의 span**입니다. prompt가 "복사한 짧은
-  span"을 요구하므로, 전체를 인용하는 예시는 반대를 가르칩니다.
-- **KO statement는 인용한 근거의 언어**로 씁니다. 기존 language 규칙을 negated
-  case 위에서 보여 주는 것이 두 번째 예시의 값입니다.
+세 가지가 의도적입니다.
+
+- **한 문장, 한 사실, 한 candidate.** `KIND_GUIDE`는 독립적으로 유용한 사실
+  둘을 담은 문장은 candidate 둘을 낳는다고 말합니다. 초안은 두 문장·두 사실
+  메시지에 candidate 하나를 보여, 둘째 사실을 버리라고 가르치고 있었습니다.
+  완결하지 않은 "완결 출력 예시"는 없느니만 못합니다.
+- **두 예시는 같은 kind.** 언어 외에는 다른 것이 없으므로 mapping 하나를 두 번
+  가르치고, 그래서 분리되는 것이 "진술은 인용한 근거의 언어로 쓴다"는 규칙입니다.
+- **quote는 메시지 전체가 아니라 그 안의 span**입니다.
 
 ## 2. 바꾸지 않은 것
 
@@ -75,7 +78,7 @@ diff로 확인하는 대신 테스트가 말할 수 있게 됩니다.
 scorer 기준(`MEMORY_EVAL_SCORING_RULES`, `scoreCaseV3`)은 손대지 않았고
 `mem-score-v3.5` descriptor digest는 `2d4bcb69…` 그대로입니다.
 
-## 3. 오염 — 두 번 틀렸고, 두 번째는 문자열 검사로 안 잡혔습니다
+## 3. 오염과 분류 — 세 번 틀렸습니다
 
 **예시는 모델이 입력보다 먼저 읽는 텍스트입니다.** 규칙은 판정하는 법을 적지만
 예시는 이미 판정된 사례를 건네므로, 그 사례가 채점 대상 dataset에서 왔다면
@@ -103,74 +106,105 @@ scorer 기준(`MEMORY_EVAL_SCORING_RULES`, `scoreCaseV3`)은 손대지 않았고
 목적이 이 규칙에 대한 독립 holdout 확보였는데, 예시가 그 대체본의 핵심 판정
 방향을 되돌려 주고 있었습니다.
 
-### 3.3 채택 — cell을 측정해서 고릅니다
+### 3.3 3차 — negated가 아니었고, 완결도 아니었습니다
 
-그래서 소재를 그럴듯함이 아니라 **(language, kind, polarity) cell**로 골랐습니다.
-예시가 corpus가 채점하는 cell에 앉으면 채점되는 판정을 가르치는 것입니다.
+cell로 고른 2차 수정본(EN `relationship`, KO `code_style`)은 세 가지가 틀렸습니다.
 
-- **EN — `relationship` / negated.** boundary 규칙이 *이미* "The registration
-  form lists two dependants; I have no dependants"를 negated relationship
-  fact라고 부르고 있으므로, 승인된 prompt가 하지 않던 mapping을 새로
-  도입하지 않습니다. `en|relationship|negated`는 succ-4~8에서 **0건**입니다.
-- **KO — `code_style` / negated.** 같은 사실을 쓸 수 없었습니다.
-  `ko|relationship|negated`가 **5건**이기 때문입니다. 사실 계열 kind는 전부
-  한국어 negated case를 갖고 있어서, 답변 방식 kind로 갔습니다.
-  `ko|code_style|negated`는 **0건**이고 `code_style`은 `polarity44` 44건에
-  **한 번도** 등장하지 않습니다.
+1. **KO 예시가 negated가 아니었습니다.** polarity 규칙은 두 문단 위에서
+   "The user dislikes open-plan offices"를 **affirmed**라고 정합니다 — 싫어함이
+   그 사람에게 성립하므로. 그런데 "의사코드로 받는 것을 원하지 않습니다"는
+   바로 그 부정적 선호이므로 affirmed입니다. **예시가 바로 위 규칙과 반대를
+   가르치고 있었습니다.** 답변 방식 kind는 전부 같은 함정입니다 — 그것들의
+   자연스러운 부정은 모두 "무엇을 원하지 않는다"이기 때문입니다.
+2. **완결 출력이 둘째 사실을 빠뜨렸습니다.** KO 메시지가 두 문장·두 사실
+   (의사코드 금지, 바로 실행 가능)인데 candidate는 하나였습니다.
+3. **EN과 KO의 kind가 갈라 진술 설계가 깨졌습니다.** 쌍이 mapping 하나를 두 번
+   가르치는 것이 아니라 mapping 둘을 한 번씩 가르치게 돼, 언어 규칙을 분리해
+   보여 주는 값이 사라졌습니다.
 
-어휘 검사(대소문자 접기 후): `dependants`·`의사코드` 모두 corpus에 없음.
-`낚시`·`philately`·`spreadsheet`는 있음(검사기 동작 확인).
+### 3.4 채택 — 제약을 동시에 만족하는 kind는 하나뿐입니다
 
-**남는 위험을 적어 둡니다.** `en|relationship|affirmed`는 45건이고
-`ko|code_style|affirmed`는 20건이므로, 두 예시 모두 채워진 affirmed cell의
-polarity 반대편입니다. 어떤 negated 예시를 써도 이는 피할 수 없습니다 — corpus가
-negated durable fact를 의도적으로 많이 담고 있기 때문입니다. 선택 기준은 "채점되는
-cell을 피한다"이지 "flip을 피한다"가 아니며, 그 기준은 검사로 강제됩니다.
+제약을 전부 적으면 답이 하나로 좁혀집니다.
+
+| 제약 | 근거 |
+| --- | --- |
+| 진짜 negated여야 함 → 사실 계열 kind | 답변 방식 kind의 부정은 부정적 선호 = affirmed |
+| 두 언어 같은 kind | 3.3의 3번 |
+| 해당 cell이 **0건** (두 언어, 두 기준) | 오염 검사 |
+| `polarity44` 형태가 아닐 것 | holdout 보호 |
+| 소재가 corpus에 없을 것 | 어휘 검사 |
+
+사실 계열 kind 중 **두 언어 모두, live target과 succ-4~8 합집합 모두에서
+negated 0건**인 것은 `long_term_goal` 하나입니다. `relationship`이 자연스러운
+선택이었지만(boundary 규칙이 이미 "I have no dependants"를 negated relationship
+fact라고 부릅니다), `ko|relationship|negated`가 **live 1건·합집합 5건**이라 쌍을
+같은 kind로 만들 수 없었습니다.
+
+소재는 `franchise`·`프랜차이즈` — 대소문자 접기 후 어느 corpus에도 없습니다.
+부재를 **포기한 것이 아니라 애초에 가진 적 없다**고 쓰면("지금도 앞으로도"),
+퇴역된 `decision|negated` 형태와도 거리가 생깁니다.
+
+**남는 위험.** `long_term_goal|affirmed`는 en 75·ko 80건이므로 이 예시는 채워진
+affirmed cell의 반대편입니다. 어떤 negated 예시를 써도 피할 수 없고(corpus가
+negated durable fact를 의도적으로 많이 담고 있으므로), 기준은 "채점되는 cell을
+피한다"이지 "flip을 피한다"가 아닙니다.
 
 ## 4. 테스트
 
-`tests/memoryExtractionPromptExamples.test.mjs` (신규, 13건)
+`tests/memoryExtractionPromptExamples.test.mjs` (신규, 16건)
 
 **구조화 출력과 parser**
 
 - 각 예시가 필수 7개 필드를 **정확히** 갖는다
 - quote가 message의 span이고 전체가 아니다
 - **실제 `parseExtractionOutput()`으로 파싱된다** — 진짜 label map을 만들고
-  거기에 결속해 통과시킵니다. pipeline이 거절할 예시는 거절당할 출력을
-  가르치는 예시입니다
+  거기에 결속해 통과시팝니다
+- **메시지가 한 문장이다** — 두 사실을 담은 메시지에 candidate 하나를 보이는
+  불완전 예시를 구조적으로 막습니다. 사실을 세는 것은 기계적이지 않지만
+  "한 문장에 candidate 하나"는 기계적입니다
+
+**polarity가 진짜 negated인가**
+
+- 예시의 kind가 **답변 방식 kind가 아니어야** 합니다. 그들의 부정은 부정적
+  선호이고, polarity 규칙이 그것을 affirmed로 정하기 때문입니다. 문구를 읽는
+  대신 kind를 열거합니다 — 초안을 속인 것이 바로 문구였습니다
+- 규칙이 실제로 그렇게 말하는지도 단언해, 그 선례가 바뀌면 조용히 어긋나지
+  않고 실패합니다
+- **두 예시가 같은 kind**이고 언어만 다르다
 
 **evidence — 복사되어도 안전한가**
 
 - 예시는 `m0`를 인용하고, `toExtractionPromptInput()`은 1부터 번호를 매기므로
   `m0`는 만들어질 수 없습니다. 메시지 1·2·5·20개에 대해 확인합니다
-- 예시를 **그대로 복사한 candidate는 parser가 버립니다** — label이 아무것도
-  가리키지 않기 때문. 라벨 규칙을 읽는 대신 결과로 확인합니다
+- 예시를 **그대로 복사한 candidate는 parser가 버립니다**
 - prompt가 "예시에서 본 label은 인용하지 말라"고 명시하는지도 확인
 
 **오염**
 
-- 등록 term이 어떤 corpus에도 없다(대소문자 접기, NFC). corpus 길이 하한 포함
-- **red-before-green 양방향**: `낚시`는 잡히고, `Philately`도 잡힙니다(대소문자
-  접기가 실제로 적용되는지)
+- 등록 term이 어느 corpus에도 없다(대소문자 접기, NFC). corpus 길이 하한 포함
+- **red-before-green 양방향**: `낚시`는 잡히고, `Philately`도 잡힙니다
 - 등록됐지만 예시에 없는 term은 실패(죽은 항목)
 - **양쪽 언어**에서, 예시 본문의 content word가 (1) 등록 term이 덮거나
-  (2) 어떤 corpus에도 없거나 (3) 검토된 allowlist에 있어야 합니다. (2)가
-  일반성을 줍니다 — 새 예시가 어떤 어휘든 쓸 수 있되, corpus에 있는 단어는
-  근거가 있어야 합니다
-- **구조 검사**: 두 예시의 cell이 corpus가 채점하는 cell이 아니다
-- **holdout 검사**: 두 예시가 `polarity44` 대체본의 (language, kind, polarity)
-  형태를 재현하지 않는다
+  (2) 어느 corpus에도 없거나 (3) 검토된 allowlist에 있어야 합니다
+- **구조 검사**: 두 예시의 cell이 **0건**이다 — `<= 1`이 아니라 정확히 0,
+  그리고 **live target과 합집합 두 기준 모두**. 이전 `<= 1` 여유는
+  `ko|relationship|negated`(live 1건)를 통과시켰을 것이므로 무해하지 않았습니다.
+  그 cell의 수치를 직접 단언해, 완화를 되돌리면 실패합니다
+- **holdout 검사**: 두 예시가 `polarity44` 대체본의 형태를 재현하지 않는다
 
-마지막 두 검사가 3.2를 잡습니다. 되돌려서 확인했습니다 — KO 예시를
-`decision`/negated로 되돌리면 두 검사가 실패하고, 현재 값에서는 통과합니다.
+**되돌려서 확인했습니다.**
+
+| 되돌린 것 | 실패하는 검사 |
+| --- | --- |
+| KO kind → `code_style` | 같은 kind, 답변 방식 kind 금지 |
+| KO kind → `relationship` | cell 0건, 같은 kind |
+| KO 메시지 → 두 문장 | 한 문장 검사, 미등록 content word |
 
 **이미 있던 gate도 걸렸습니다.** `tests/memoryEvalPromptDatasetSeparation.test.mjs`가
 초안 문구의 `at the end of the`가 `succ-injection-en-70`의 발화와 겹친다고
-거절했습니다. 문구를 고쳤습니다(case는 건드리지 않았습니다). 이 gate는 n-gram
-수준의 겹침을 이미 보고 있었고, 이번에 추가한 것은 그 위의 cell 수준 검사입니다.
+거절했습니다. 문구를 고쳤습니다(case는 건드리지 않았습니다).
 
-기존 파일 갱신: prompt digest 표, 버전 단언, rule 구현 표(v8이 같은 규칙을 다시
-주장).
+기존 파일 갱신: prompt digest 표, 버전 단언, rule 구현 표.
 
 ## 5. smoke 경로를 막고 있던 것
 
@@ -202,7 +236,7 @@ smoke run은 provider에 닿지 않고 한 푼도 쓰지 않으므로 거절해�
 
 ## 7. 검증
 
-- 전체 unit 파일 직접 실행: **7,188건 중 18건 실패**. develop에서 같은 명령으로
+- 전체 unit 파일 직접 실행: **7,191건 중 18건 실패**. develop에서 같은 명령으로
   받은 baseline도 **정확히 같은 18건**(목록 diff 공집합). 이 변경이 만든 실패는
   **0건**입니다.
 - `npm run test:unit` wrapper는 이 Windows 기계에서 출력 없이 exit 1입니다.

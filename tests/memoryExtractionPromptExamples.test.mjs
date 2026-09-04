@@ -350,14 +350,11 @@ test("no content word in either example escapes registration", () => {
     // registered and scanned.
     const ALLOWED = new Set([
         // English framing
-        "the", "user", "has", "have", "no", "i", "registration", "form",
-        "lists", "two",
+        "the", "user", "have", "has", "no", "plans", "plan", "to", "open",
+        "does", "not", "now", "or", "later",
         // Korean grammar and framing
-        "사용자는", "예시는", "예시를", "주지", "말아", "주세요", "받는",
-        "것을", "원하지", "않습니다", "바로", "돌려볼", "수", "있어야",
-        "합니다",
-        // Korean category words, not subjects
-        "코드",
+        "저는", "사용자는", "여는", "계획은", "계획하고", "지금도", "앞으로도",
+        "없습니다", "것을", "있지", "않습니다",
     ]);
     const corpus = corpusText();
     const registered = MEMORY_EXTRACTION_EXAMPLE_TERMS.map(fold);
@@ -388,18 +385,9 @@ test("no content word in either example escapes registration", () => {
     assert.ok(checked > 10, `only ${checked} words were walked`);
 });
 
-test("neither example sits in a cell the corpus scores", () => {
-    // The structural check, and the one that would have caught the second
-    // round. `kitesurfing` and `드론` were absent from every corpus as strings
-    // while their scenario — an activity tried and abandoned — was the core
-    // judgement of two `polarity44` replacements.
-    //
-    // A (language, kind, polarity) cell is a coarse stand-in for "scenario",
-    // but it is a checkable one, and it is the axis the eval actually scores.
-    // An example landing where the corpus has cases is teaching a verdict that
-    // gets measured.
+const cellCounts = (versions) => {
     const scored = new Map();
-    for (const version of CORPORA) {
+    for (const version of versions) {
         for (const testCase of harnessTarget(version).cases) {
             for (const gold of testCase.expected ?? []) {
                 const cell = `${testCase.language}|${gold.kind}|${gold.polarity}`;
@@ -407,19 +395,132 @@ test("neither example sits in a cell the corpus scores", () => {
             }
         }
     }
-    for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
-        const cell = `${example.language}|${example.candidate.kind}|${example.candidate.polarity}`;
-        const count = scored.get(cell) ?? 0;
-        assert.ok(
-            count <= 1,
-            `the ${example.language} example sits in ${cell}, which the corpus scores ${count} times`
-        );
+    return scored;
+};
+
+test("neither example sits in a cell any corpus scores, on either basis", () => {
+    // The structural check, and the one that would have caught the second
+    // round. `kitesurfing` and `드론` were absent from every corpus as strings
+    // while their scenario — an activity tried and abandoned — was the core
+    // judgement of two `polarity44` replacements.
+    //
+    // A (language, kind, polarity) cell is a coarse stand-in for "scenario",
+    // but it is a checkable one, and it is the axis the eval actually scores.
+    //
+    // **Zero, not "at most one".** This read `<= 1` for one revision, and the
+    // slack was not harmless: `ko|relationship|negated` is scored exactly once
+    // in the live target, so the tolerance would have admitted the one cell
+    // that made the pair same-kind. A cell the corpus scores once is a cell
+    // the corpus scores.
+    //
+    // Both bases are checked. The live target is what a run is measured on;
+    // the union is what any resolvable artifact was measured on, and an
+    // example contaminating a retired case still misleads whoever reads that
+    // artifact later.
+    for (const [label, versions] of [
+        ["every resolvable corpus", CORPORA],
+        ["the live target", ["mem-eval-succ-8"]],
+    ]) {
+        const scored = cellCounts(versions);
+        for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
+            const cell = `${example.language}|${example.candidate.kind}|${example.candidate.polarity}`;
+            assert.equal(
+                scored.get(cell) ?? 0,
+                0,
+                `the ${example.language} example sits in ${cell}, scored ${scored.get(cell)} times in ${label}`
+            );
+        }
     }
 
     // And the cell the retired scenario occupies is populated, so the
     // assertion above is not vacuously true of every cell.
-    assert.ok((scored.get("en|decision|negated") ?? 0) > 1);
-    assert.ok((scored.get("ko|decision|negated") ?? 0) > 1);
+    const all = cellCounts(CORPORA);
+    assert.ok((all.get("en|decision|negated") ?? 0) > 1);
+    assert.ok((all.get("ko|decision|negated") ?? 0) > 1);
+    // The cell that the `<= 1` tolerance used to admit, named so the tightening
+    // cannot be undone without this line failing.
+    assert.equal(all.get("ko|relationship|negated"), 5);
+    assert.equal(cellCounts(["mem-eval-succ-8"]).get("ko|relationship|negated"), 1);
+});
+
+test("both examples are the same kind, differing only in language", () => {
+    // The pair teaches one mapping twice rather than two mappings once, and
+    // what it isolates is that a statement is written in the language of the
+    // evidence it cites. A draft had `relationship` in English and
+    // `code_style` in Korean, which taught two mappings and isolated nothing.
+    const kinds = new Set(
+        MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES.map((example) => example.candidate.kind)
+    );
+    assert.equal(kinds.size, 1, `the examples span kinds: ${[...kinds].join(", ")}`);
+    const languages = MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES.map(
+        (example) => example.language
+    ).sort();
+    assert.deepEqual(languages, ["en", "ko"]);
+});
+
+test("a negated example is a fact that is not so, never a preference against", () => {
+    // `MEMORY_EXTRACTION_POLARITY_RULE` settles that "The user dislikes
+    // open-plan offices" is *affirmed*, because the dislike holds of them. So
+    // the natural negation of any answer-style kind — "does not want
+    // citations", "does not want pseudocode" — is a preference against
+    // something, which is affirmed, not negated.
+    //
+    // A draft shipped exactly that: a `code_style` candidate marked negated,
+    // two paragraphs below the rule saying it is not. The kinds are enumerated
+    // rather than the wording inspected, because the wording is what fooled
+    // the draft.
+    const ANSWER_STYLE = new Set([
+        "communication_style",
+        "tone",
+        "verbosity",
+        "structure",
+        "formatting",
+        "language",
+        "explanation_depth",
+        "citation_preference",
+        "code_style",
+    ]);
+    for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
+        assert.equal(example.candidate.polarity, "negated");
+        assert.ok(
+            !ANSWER_STYLE.has(example.candidate.kind),
+            `${example.candidate.kind} is an answer-style kind, whose negation is a ` +
+                "preference against something and therefore affirmed"
+        );
+    }
+    // And the rule really does say so, so this test fails if that precedent is
+    // ever reworded rather than silently disagreeing with it.
+    assert.match(MEMORY_EXTRACTION_POLARITY_RULE, /Polarity is not sentiment/);
+    assert.match(
+        MEMORY_EXTRACTION_POLARITY_RULE,
+        /"The user dislikes open-plan offices" is affirmed/
+    );
+});
+
+test("each example's message carries exactly one fact", () => {
+    // The completeness half. `KIND_GUIDE` says a sentence carrying two
+    // independently useful facts yields two candidates, so an example whose
+    // message carries two and shows one teaches the model to drop the second.
+    //
+    // A draft did that: "코드 예시는 의사코드로 주지 말아 주세요. 바로 돌려볼
+    // 수 있어야 합니다." is two claims and it showed one candidate.
+    //
+    // Enforced as one sentence rather than by counting facts, which is not
+    // mechanical: a single sentence with a single candidate cannot be
+    // incomplete in that way. An example that needs two facts has to show two
+    // candidates, and this assertion is what makes that a deliberate act.
+    for (const example of MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES) {
+        const terminators = example.message.match(/[.!?。]/g) ?? [];
+        assert.equal(
+            terminators.length,
+            1,
+            `the ${example.language} message has ${terminators.length} sentences: ${example.message}`
+        );
+        assert.ok(
+            example.message.trimEnd().endsWith(terminators[0]),
+            `the ${example.language} message continues past its only terminator`
+        );
+    }
 });
 
 test("no example reproduces a polarity44 replacement's verdict shape", () => {
