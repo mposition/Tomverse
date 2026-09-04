@@ -114,7 +114,7 @@ export const MEMORY_EVAL_SUCC8_CASES: readonly MemoryEvalCaseV3[] =
 /**
  * The human record, in the shape a signature actually takes.
  *
- * The four `signed*` fields are what makes this signable at all, and they are
+ * The two `signed*` digests are what make this signable at all, and they are
  * separate from the manifest on purpose: a signature has to be able to
  * **disagree** with the tree. If a reviewer's approval were represented by a
  * boolean beside a recomputed digest, then editing the dataset after signing
@@ -123,9 +123,12 @@ export const MEMORY_EVAL_SUCC8_CASES: readonly MemoryEvalCaseV3[] =
  * frozen text, and `succ8SignatureProblems()` fails when they stop matching
  * the pinned record.
  *
- * Null at rest. Signing means filling `approvedBy`, `approvedAt`,
- * `approvedCommit` and the two digests, and flipping
- * `MEMORY_EVAL_SUCC8_DATASET_FROZEN`. Nothing in this file may do that.
+ * Filled since 2026-09-04. Signing meant setting `approvedBy`, `approvedAt`,
+ * `approvedCommit` and the two digests together, and flipping
+ * `MEMORY_EVAL_SUCC8_DATASET_FROZEN`. All five move as one:
+ * `succ8SignatureProblems()` refuses a partly filled record, because half a
+ * signature can claim an approval of bytes nobody read. Nothing in this file
+ * may write them — they are a person's act, transcribed.
  */
 export const MEMORY_EVAL_SUCC8_APPROVAL: {
     approvedBy: string | null;
