@@ -32,8 +32,19 @@ import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
  *
  * Every subject here was checked against succ-4 through succ-8, the succ-7
  * regression corpus and the shipped prompt before it was used:
- * `사촌`, `welding`, `sourdough`, `soldering`, `백두대간`, `빙벽`, `야산`
- * occur in none of them.
+ * `사촌`, `welding`, `sourdough`, `soldering`, `백두대간`, `능선`, `야영`,
+ * `산행` occur in none of them. `종주` does occur, which is why the goal gold
+ * names `백두대간` and that word stays out of every scored value.
+ *
+ * ## The subtypes travel too
+ *
+ * Three of these are `assistant_only`, and all three of the cases they replace
+ * are subtype 3 under docs/ops/memory-extraction-eval-dataset.md §3.3 — one in
+ * the table frozen inside succ-6's manifest, two in succ-7's own declaration.
+ * Both arms sit exactly on the 30% floor, so a replacement arriving
+ * unclassified would put its arm under it. `memoryEvalSucc9Subtypes.ts`
+ * declares all three, kept separate for the reason succ-7 gives: the frozen
+ * table cannot be added to without moving a signed digest.
  */
 export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
     {
@@ -224,12 +235,23 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
         ],
     },
     {
-        // Replaces succ-durable-ko-422, and it is the one that carries two
-        // golds. The original paired a stated goal with the gap between it and
-        // the user's present ability, and both halves are independently
-        // useful, so both are kept: dropping the affirmed one would quietly
-        // narrow the case while claiming a 1:1 replacement. Subject moves from
-        // 오픈워터 수영 to 백두대간 종주, and from 바다 to 빙벽.
+        // Replaces succ-durable-ko-422, the one that carries two golds and the
+        // one whose boundary is easiest to lose. It is not "a goal, and
+        // separately a gap": the denial names the very setting the goal
+        // requires, inside a sentence that affirms the same ability in an
+        // easier one. succ-4's note on the original is explicit that the
+        // negated gold names what is denied (헤엄) *beside where* (바다)
+        // rather than the skill's topic alone, "because the opposite reading
+        // is live in the same conversation" — the user can swim, and a reader
+        // taking the topic alone would have scored a negation of swimming.
+        //
+        // So this keeps all of that: an ability affirmed in the easy setting
+        // (당일 산행) against one denied in the setting the goal demands
+        // (능선에서 야영), and a two-value gold naming the place and the act
+        // together. A first draft used 빙벽 — a different discipline
+        // altogether, single-valued, with nothing in the sentence to confuse
+        // it with. That is a case about a goal and an unrelated gap, which is
+        // not the case being replaced.
         id: "succ-durable-ko-701",
         category: "durable_facts",
         language: "ko",
@@ -242,7 +264,7 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
                 factValueAll: ["백두대간"],
                 evidence: {
                     evidenceMessageId: "succ-b901-5-m1",
-                    evidenceQuote: "내년 가을에 백두대간을 마치는 게 목표입니다",
+                    evidenceQuote: "내년 가을에 백두대간을 마치는 게 목표입니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -250,10 +272,10 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
                 id: "e2",
                 kind: "expertise",
                 polarity: "negated",
-                factValueAll: ["빙벽"],
+                factValueAll: ["능선", "야영"],
                 evidence: {
                     evidenceMessageId: "succ-b901-5-m3",
-                    evidenceQuote: "빙벽은 아직 못 오릅니다",
+                    evidenceQuote: "능선에서는 아직 야영을 못 합니다.",
                 },
                 expectedDisposition: "bulk_safe",
             },
@@ -261,7 +283,7 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
         conversations: [
             {
                 externalConversationId: "succ-b901-5",
-                title: "내년 목표",
+                title: "목표와 현재",
                 messages: [
                     {
                         externalMessageId: "succ-b901-5-m1",
@@ -278,7 +300,7 @@ export const MEMORY_EVAL_SUCC9_REPLACEMENTS: readonly MemoryEvalCaseV3[] = [
                         externalMessageId: "succ-b901-5-m3",
                         role: "user",
                         content:
-                            "동네 야산만 다녀 봤고 빙벽은 아직 못 오릅니다.",
+                            "당일 산행만 해 봤고 능선에서는 아직 야영을 못 합니다.",
                     },
                 ],
             },

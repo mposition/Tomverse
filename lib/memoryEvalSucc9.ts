@@ -16,6 +16,10 @@ import {
     MEMORY_EVAL_SUCC9_RETIRED_CASE_IDS,
 } from "@/lib/memoryEvalSucc9Replacements";
 import {
+    succ9Subtype,
+    succ9SubtypeProblems,
+} from "@/lib/memoryEvalSucc9Subtypes";
+import {
     SUCC9_TRANSITION,
     SUCC9_TRANSITION_DIGEST,
 } from "@/lib/memoryEvalSucc9Transition";
@@ -226,6 +230,97 @@ export function buildSucc9Manifest(): Succ9DatasetManifest {
 }
 
 /**
+ * Every axis on which a replacement has to match what it replaces.
+ *
+ * "Same boundary" was three axes for one round — category, language, and the
+ * sorted set of `kind|polarity` — and three axes let a replacement keep all of
+ * them while testing something else. `succ-durable-ko-422` is the case that
+ * shows it: its negated gold carries two values (`바다`, `헤엄`) because the
+ * sentence affirms the ability and denies the setting, and a single-valued
+ * replacement passes a `kind|polarity` comparison while dropping exactly the
+ * discrimination the case was written for.
+ *
+ * So the axes below are everything a scorer reads that is not the subject
+ * matter itself: what the gold demands, how completely it is meant to be
+ * found, how many values it names, where it anchors, and the shape of the
+ * conversation it anchors into. What is deliberately *not* here is the text —
+ * the subject changes, or the retirement bought nothing.
+ *
+ * Each entry is `[axis, was, now]`, compared as strings so a report can print
+ * both sides.
+ */
+function boundaryAxes(
+    original: MemoryEvalCaseV3,
+    replacement: MemoryEvalCaseV3
+): readonly (readonly [string, string, string])[] {
+    const golds = (testCase: MemoryEvalCaseV3) =>
+        [...(testCase.expected ?? [])]
+            .map(
+                (gold) =>
+                    `${gold.kind}|${gold.polarity}|${gold.expectedDisposition}` +
+                    `|all=${(gold.factValueAll ?? []).length}` +
+                    `|any=${(gold.factValueAny ?? []).length}`
+            )
+            .sort()
+            .join(",");
+    /**
+     * Where each gold anchors, by *position* rather than by message id: ids
+     * necessarily change with the case, and the boundary is that the first
+     * gold comes from the opening turn and the second from a later one.
+     */
+    const anchors = (testCase: MemoryEvalCaseV3) => {
+        const order = new Map<string, number>();
+        let index = 0;
+        for (const conversation of testCase.conversations ?? []) {
+            for (const message of conversation.messages ?? []) {
+                order.set(message.externalMessageId, index++);
+            }
+        }
+        const roleOf = new Map<string, string>();
+        for (const conversation of testCase.conversations ?? []) {
+            for (const message of conversation.messages ?? []) {
+                roleOf.set(message.externalMessageId, message.role);
+            }
+        }
+        return [...(testCase.expected ?? [])]
+            .map((gold) => {
+                const id = gold.evidence?.evidenceMessageId ?? "";
+                return `${order.get(id) ?? -1}:${roleOf.get(id) ?? "?"}`;
+            })
+            .sort()
+            .join(",");
+    };
+    const turns = (testCase: MemoryEvalCaseV3) =>
+        (testCase.conversations ?? [])
+            .map((conversation) =>
+                (conversation.messages ?? []).map((message) => message.role).join(">")
+            )
+            .join(" | ");
+    return [
+        ["category", original.category, replacement.category],
+        ["language", original.language, replacement.language],
+        [
+            "goldCompleteness",
+            String(original.goldCompleteness),
+            String(replacement.goldCompleteness),
+        ],
+        [
+            "criticalGoldMode",
+            String(original.criticalGoldMode),
+            String(replacement.criticalGoldMode),
+        ],
+        [
+            "gold count",
+            String((original.expected ?? []).length),
+            String((replacement.expected ?? []).length),
+        ],
+        ["gold shape", golds(original), golds(replacement)],
+        ["evidence anchoring", anchors(original), anchors(replacement)],
+        ["conversation shape", turns(original), turns(replacement)],
+    ];
+}
+
+/**
  * What has to hold for this to be the successor it says it is.
  *
  * Reported rather than thrown, so the check script prints every problem at
@@ -271,31 +366,13 @@ export function succ9Problems(
             problems.push(`${row.replacement} is named but not registered`);
             continue;
         }
-        // Same category and language, or the cell counts move and the
-        // replacement is not the 1:1 it claims to be.
-        if (replacement.category !== original.category) {
-            problems.push(
-                `${row.replacement} is ${replacement.category}, replacing a ${original.category}`
-            );
-        }
-        if (replacement.language !== original.language) {
-            problems.push(
-                `${row.replacement} is ${replacement.language}, replacing a ${original.language}`
-            );
-        }
-        // Same boundary means the same kinds and polarities, in the same
-        // number: a replacement that dropped the original's second gold would
-        // narrow the case while reporting a 1:1 move.
-        const shape = (testCase: MemoryEvalCaseV3) =>
-            (testCase.expected ?? [])
-                .map((gold) => `${gold.kind}|${gold.polarity}`)
-                .sort()
-                .join(",");
-        if (shape(replacement) !== shape(original)) {
-            problems.push(
-                `${row.replacement} tests ${shape(replacement)} where ${row.retired} ` +
-                    `tested ${shape(original)}`
-            );
+        for (const [axis, was, now] of boundaryAxes(original, replacement)) {
+            if (was !== now) {
+                problems.push(
+                    `${row.replacement} ${axis} is ${now}, where ${row.retired} ` +
+                        `was ${was}`
+                );
+            }
         }
     }
 
@@ -306,6 +383,60 @@ export function succ9Problems(
         if (before[cell] !== count) {
             problems.push(
                 `cell ${cell} moved from ${before[cell] ?? 0} to ${count}`
+            );
+        }
+    }
+
+    // The docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor, which
+    // a 1:1 case count hides completely. Three of the five leaving are subtype
+    // 3, both assistant_only arms sit exactly on the floor, and a replacement
+    // arriving unclassified takes its arm under without changing a single
+    // count this manifest records.
+    problems.push(...succ9SubtypeProblems(MEMORY_EVAL_SUCC9_CASES));
+    for (const language of ["ko", "en"]) {
+        const cell = MEMORY_EVAL_SUCC9_CASES.filter(
+            (testCase) =>
+                testCase.category === "assistant_only" &&
+                testCase.language === language
+        );
+        const hard = cell.filter((testCase) =>
+            [3, 4].includes(succ9Subtype(testCase.id) ?? 0)
+        ).length;
+        const floor = Math.ceil(cell.length * 0.3);
+        if (hard < floor) {
+            problems.push(
+                `assistant_only:${language} holds ${hard} subtype 3/4 cases ` +
+                    `against a floor of ${floor} (of ${cell.length})`
+            );
+        }
+    }
+    // And the composition, not merely the count: a subtype 4 arriving for a
+    // subtype 3 holds the floor while changing what the arm measures.
+    for (const language of ["ko", "en"]) {
+        const tally = (ids: readonly string[]) => {
+            const counts: Record<string, number> = {};
+            for (const id of ids) {
+                const subtype = succ9Subtype(id);
+                if (subtype === undefined) continue;
+                counts[subtype] = (counts[subtype] ?? 0) + 1;
+            }
+            return JSON.stringify(counts);
+        };
+        const prefix = `succ-assistant-${language}-`;
+        const out = tally(
+            SUCC9_TRANSITION.filter((row) => row.retired.startsWith(prefix)).map(
+                (row) => row.retired
+            )
+        );
+        const arriving = tally(
+            SUCC9_TRANSITION.filter((row) =>
+                row.replacement.startsWith(prefix)
+            ).map((row) => row.replacement)
+        );
+        if (out !== arriving) {
+            problems.push(
+                `assistant_only:${language} subtype composition changed — ` +
+                    `out ${out}, in ${arriving}`
             );
         }
     }

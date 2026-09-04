@@ -593,14 +593,22 @@ export const MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS: readonly string[] = [
  * mistake and shipped an example contradicting the rule two paragraphs above
  * it. "Has no dependants" is not a preference in either direction.
  *
- * **What that costs, stated rather than measured away.** No kind is both
- * licensed by the prompt and scored zero in both languages:
- * `relationship|negated` is scored once in Korean and `expertise|negated` —
- * the other licensed negation, "having no experience in a domain" — four
- * times. `relationship` is the better-licensed and smaller of the two, and the
- * single Korean case is named in
- * `MEMORY_EXTRACTION_EXAMPLE_CELL_EXCEPTIONS` rather than absorbed by a
- * tolerance, so a second case entering that cell still fails the check.
+ * **What that cost, and what was done about it.** No kind was both licensed by
+ * the prompt and scored zero in both languages, so choosing one meant counting:
+ * `relationship|negated` was scored once in Korean, `expertise|negated` — the
+ * other licensed negation, "having no experience in a domain" — four times, and
+ * `relationship` won as the better-licensed and smaller of the two.
+ *
+ * That count is a decision made out of scored cases, and an earlier version of
+ * this comment described naming the one case in the winning cell as an
+ * exception, which records the contamination without removing it. What removes
+ * it is a B+ retirement, and it covers **all five** golds rather than the one:
+ * the four on the losing side are what made the winner a choice, so the
+ * comparison is the boundary. `MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS` names
+ * them, `mem-eval-succ-9` retires them 1:1, and
+ * `memoryEvalSucc9Regression.ts` keeps them readable. The check that used to
+ * tolerate a count now asserts that each of the five is absent from the
+ * decision set and present in the regression corpus.
  */
 export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
     "Two complete examples of a negated candidate, one in each language. Each is a whole candidate object rather than a description of one, so the seven required fields are visible together and in the shape the schema asks for.",

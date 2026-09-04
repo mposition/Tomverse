@@ -28,6 +28,7 @@ import {
     succ9RegressionProblems,
 } from "../lib/memoryEvalSucc9Regression.ts";
 import { SUCC9_TRANSITION } from "../lib/memoryEvalSucc9Transition.ts";
+import { succ9Subtype } from "../lib/memoryEvalSucc9Subtypes.ts";
 import { MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS } from "../lib/memoryExtractionPrompt.ts";
 import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.ts";
 
@@ -83,6 +84,32 @@ if (stillScored.length > 0) {
         "the selection golds left the decision set",
         `${MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS.length} retired, all preserved`
     );
+}
+
+/* ------- the docs/ops/memory-extraction-eval-dataset.md §3.3 subtype floor -- */
+
+// Reported as numbers rather than only as a pass, because both arms sit
+// exactly on the floor: "38 of a floor of 38" tells an operator that the next
+// retirement out of this cell needs a declared replacement, and "OK" does not.
+for (const language of ["ko", "en"]) {
+    const cell = MEMORY_EVAL_SUCC9_CASES.filter(
+        (testCase) =>
+            testCase.category === "assistant_only" && testCase.language === language
+    );
+    const hard = cell.filter((testCase) =>
+        [3, 4].includes(succ9Subtype(testCase.id) ?? 0)
+    );
+    const floor = Math.ceil(cell.length * 0.3);
+    // `succ9Problems()` reports the shortfall; this line reports the number
+    // when there is not one, and stays silent rather than printing OK beside a
+    // count that is under the floor.
+    if (hard.length >= floor) {
+        ok(
+            `assistant_only:${language} subtype floor`,
+            `${hard.length} subtype 3/4 of ${cell.length}, floor ${floor}` +
+                (hard.length === floor ? " (no slack)" : "")
+        );
+    }
 }
 
 /* ------------------------------------ the signed predecessor, untouched --- */

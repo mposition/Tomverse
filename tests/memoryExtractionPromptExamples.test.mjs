@@ -54,12 +54,24 @@ import { SUCC7_TRANSITION } from "../lib/memoryEvalSucc7Transition.ts";
 import { MEMORY_EVAL_SUCC9_CASES } from "../lib/memoryEvalSucc9.ts";
 import { SUCC9_REGRESSION_CORPUS } from "../lib/memoryEvalSucc9Regression.ts";
 
+/**
+ * Every dataset a scored corpus can come from, the incoming one included.
+ *
+ * `mem-eval-succ-9` belongs here for the reason the whole list does: it is a
+ * decision set, its five replacement cases are 1,150 lines of text no scan had
+ * ever read, and it is the version the harness moves to next. Stopping at
+ * succ-8 would have checked the examples against every corpus except the one
+ * they will be measured on — and the replacements were written *after* the
+ * examples, which is the direction contamination is easiest to introduce in
+ * and hardest to notice.
+ */
 const CORPORA = [
     "mem-eval-succ-4",
     "mem-eval-succ-5",
     "mem-eval-succ-6",
     "mem-eval-succ-7",
     "mem-eval-succ-8",
+    "mem-eval-succ-9",
 ];
 
 const built = () =>
@@ -291,7 +303,12 @@ const corpusText = () => {
             }
         }
     }
+    // Both regression corpora too. Retired text is not scored, so this is
+    // stricter than the rule needs — and it is the cheap half of the rule,
+    // because a retired case can be recalled and an example that collided with
+    // one would then be a collision nobody re-checked.
     parts.push(JSON.stringify(SUCC7_REGRESSION_CORPUS));
+    parts.push(JSON.stringify(SUCC9_REGRESSION_CORPUS));
     return fold(parts.join("\n"));
 };
 
