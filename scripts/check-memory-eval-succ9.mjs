@@ -20,6 +20,7 @@ import {
     MEMORY_EVAL_SUCC9_APPROVAL,
     MEMORY_EVAL_SUCC9_CASES,
     MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC9_DATASET_VERSION,
     MEMORY_EVAL_SUCC9_MANIFEST,
     buildSucc9Manifest,
     succ9Problems,
@@ -36,7 +37,11 @@ import {
     succ9Subtype,
 } from "../lib/memoryEvalSucc9Subtypes.ts";
 import { MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS } from "../lib/memoryExtractionPrompt.ts";
-import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.ts";
+import {
+    HARNESS_TARGET_DATASET_VERSION,
+    harnessTarget,
+    harnessTargetBindingFailures,
+} from "../lib/memoryEvalHarnessTarget.ts";
 
 const failures = [];
 const notes = [];
@@ -143,6 +148,40 @@ if (missingFromSucc8.length > 0) {
     );
 } else {
     ok("succ-8 is unchanged", "the retirement is a new version, not an edit");
+}
+
+/* ------------------------------------------------------- the binding --- */
+
+// The target the harness would actually build, against the manifest that was
+// signed. This runs before a provider is reached: a run whose sample
+// fingerprints differently from the frozen record is not the run anybody
+// approved, and finding that out afterwards means the money is spent.
+if (HARNESS_TARGET_DATASET_VERSION === MEMORY_EVAL_SUCC9_DATASET_VERSION) {
+    const target = harnessTarget();
+    const bindingProblems = [...harnessTargetBindingFailures(target)];
+    if (bindingProblems.length > 0) {
+        for (const problem of bindingProblems) fail(problem);
+    } else {
+        ok(
+            "the harness target binds",
+            `${HARNESS_TARGET_DATASET_VERSION} against its pinned manifest`
+        );
+    }
+    // Both digests the target presents are the signed ones, and the dataset
+    // digest is computed from the cases rather than read from the record —
+    // otherwise this compares the literal with itself.
+    if (target.datasetDigest !== MEMORY_EVAL_SUCC9_MANIFEST.datasetDigest) {
+        fail(
+            `the target's dataset digest is ${target.datasetDigest}, the signed ` +
+                `record's is ${MEMORY_EVAL_SUCC9_MANIFEST.datasetDigest}`
+        );
+    }
+    if (target.datasetManifestDigest !== MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest) {
+        fail(
+            `the target's manifest digest is ${target.datasetManifestDigest}, the ` +
+                `signed record's is ${MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest}`
+        );
+    }
 }
 
 /* ------------------------------------------------ the pinned record --- */

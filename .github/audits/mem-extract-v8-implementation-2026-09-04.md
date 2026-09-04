@@ -306,11 +306,43 @@ digest여야 합니다.
   turn에 실제로 들어 있는지 대조합니다.
 - **succ-8은 손대지 않습니다.** 동결·서명된 역사본이고, 거기서 case를 빼면
   두 digest가 움직여 그 서명이 무효가 됩니다. 검사가 이것을 직접 단언합니다.
-- **동결됐지만 harness는 여전히 succ-8입니다.** 표본에 서명하는 것과 harness를
-  그리로 겨누는 것은 별개 결정이고, 뒤쪽은 아직 내려지지 않았습니다. 그동안
-  v8 예시는 live target(succ-8)과 겹치지만, pair가 등록되지 않아 유료 실행
-  자체가 `unknown_pair`로 거절됩니다 — 동결이 없앤 거절 사유는
-  `dataset_not_frozen` 하나뿐입니다.
+
+### 3.7 harness 이동 (2026-09-04, 별도 승인)
+
+동결 **뒤에** 별개 승인으로 `HARNESS_TARGET_DATASET_VERSION`을 succ-9로
+옮겼습니다. 순서가 요점입니다 — 미동결 표본을 겨눈 harness는
+`dataset_not_frozen`으로 거절되므로, 서명이 먼저입니다.
+
+```
+harness target    mem-eval-succ-9  (decision, frozen, 1150 cases)
+datasetDigest     626f7136…  = 고정본, 그리고 cases에서 계산한 값과 일치
+manifestDigest    82d9aa48…  = 고정본
+binding           실패 0건
+run tuple         mem-eval-succ-9 / 82d9aa48… / mem-score-v3.5
+smoke             precision 486/486 = 1.000, recall 486/486 = 1.000, failures 0
+live              여전히 `unknown_pair` — register에 pair 없음
+```
+
+- **target이 고정본을 씁니다.** `datasetManifestDigest`는
+  `MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest`이고, `targetManifestDigests()`도
+  builder가 아니라 고정본을 읽습니다. 실행이 제시하는 digest는 **누군가 서명한**
+  digest여야지 실행 시점에 다시 계산한 값이어서는 안 됩니다.
+- **`datasetDigest`는 계속 cases에서 계산합니다.** 양쪽 다 고정본을 읽으면
+  기록을 자기 자신과 비교하게 되고, 편집된 case가 아무도 서명하지 않은 digest를
+  얻습니다. 검사와 테스트가 "계산값 = 고정본"을 단언합니다.
+- **succ-8은 이름으로 계속 해석되고 동결본도 그대로입니다.** succ-9는 contract를
+  바꾼 것이 아니라 case를 바꾼 것이므로, succ-8은 succ-4·succ-7처럼 contract
+  결속으로 실격되지 **않습니다.** target이 옮겨 갔을 뿐이고, 그 밖에 아무것도
+  바뀌지 않았습니다.
+- **그래서 succ-8에 묶인 budget은 tuple 비교 하나로만 걸립니다.** succ-7 때와
+  다릅니다 — succ-7·succ-8은 표본을 공유해 version과 manifest 두 항목만
+  달랐지만, succ-9는 case 다섯이 움직였으므로 `datasetVersion`·`datasetDigest`·
+  `datasetManifestDigest` **셋 다** 어긋납니다. 그리고 그 거절은 provider에
+  닿기 전입니다.
+- **smoke의 486은 succ-8의 485에서 하나 늘어난 값**이며, ko-701의 세 번째
+  gold입니다. 실제 분자·분모를 보고합니다.
+- 네 digest(dataset·manifest·subtype·transition) 모두 이동 전후 동일합니다 —
+  harness가 어디를 겨누는지는 표본의 정체성이 아닙니다.
 
 ## 4. 테스트
 

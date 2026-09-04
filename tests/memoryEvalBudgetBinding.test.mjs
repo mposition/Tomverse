@@ -27,7 +27,7 @@ import {
     findEvalRegisterProblems,
 } from "../lib/memoryExtractionEvalRegister.ts";
 import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
-import { buildSucc8Manifest } from "../lib/memoryEvalSucc8.ts";
+import { MEMORY_EVAL_SUCC9_MANIFEST } from "../lib/memoryEvalSucc9.ts";
 import {
     MEMORY_EXTRACTION_PROMPT_VERSION,
     extractionPromptContract,
@@ -69,7 +69,7 @@ test("the v7 instrument no longer describes this tree, and says so", () => {
     //
     // Every field of the tuple has now moved, and each is named so a later
     // reader can see what moved together: the sample and its record
-    // (succ-6 -> succ-8), the scoring contract (`mem-score-v3.4` ->
+    // (succ-6 -> succ-8 -> succ-9), the scoring contract (`mem-score-v3.4` ->
     // `mem-score-v3.5`, the Korean numeral amendment), and the prompt
     // (`mem-extract-v7` -> `mem-extract-v8`, which added the worked negated
     // examples). Nothing is left to assert equal, which is itself the
@@ -94,7 +94,7 @@ test("the v7 instrument no longer describes this tree, and says so", () => {
     ]);
     assert.match(
         failures.find((line) => line.startsWith("datasetVersion")),
-        /approved mem-eval-succ-6, this run would use mem-eval-succ-8/
+        /approved mem-eval-succ-6, this run would use mem-eval-succ-9/
     );
     assert.match(
         failures.find((line) => line.startsWith("scoringContractVersion")),
@@ -228,9 +228,10 @@ test("v6's instrument cannot fund what this tree now ships", () => {
     // all. Four approved moves have happened since — the prompt to
     // `mem-extract-v7` on 2026-08-31, the harness target to the frozen
     // `mem-eval-succ-6` the same day, on to `mem-eval-succ-7` on 2026-09-03,
-    // and on again the same day to `mem-eval-succ-8`, which inherits succ-7's
-    // 1,150 cases and scores them under the amended `mem-score-v3.5` — so
-    // v6's instrument no longer describes the bytes a run would use. The
+    // on again the same day to `mem-eval-succ-8`, which inherits succ-7's
+    // 1,150 cases under the amended `mem-score-v3.5`, and on 2026-09-04 to
+    // `mem-eval-succ-9`, which replaces five of them — so v6's instrument no
+    // longer describes the bytes a run would use. The
     // comparison firing is the protection working. Asserting emptiness today
     // would assert that a v7 run against a different sample may proceed on
     // v6's approval, which is exactly what this file exists to prevent.
@@ -257,7 +258,7 @@ test("v6's instrument cannot fund what this tree now ships", () => {
     assert.equal(actual.datasetVersion, harnessTarget().datasetVersion);
     assert.equal(
         actual.datasetManifestDigest,
-        buildSucc8Manifest().manifestDigest
+        MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest
     );
     const failures = [...evalBudgetTupleFailures(budget.boundTuple, actual)];
     assert.ok(

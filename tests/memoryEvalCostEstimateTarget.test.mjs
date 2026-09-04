@@ -44,9 +44,9 @@ const runEstimate = () =>
         { cwd: REPO, encoding: "utf8" }
     );
 
-test("the estimate names mem-eval-succ-8 and the shipped pair", () => {
+test("the estimate names mem-eval-succ-9 and the shipped pair", () => {
     const output = runEstimate();
-    assert.match(output, /mem-eval-succ-8/);
+    assert.match(output, /mem-eval-succ-9/);
     assert.match(
         output,
         new RegExp(`gpt-5-6-luna\\s*::\\s*${MEMORY_EXTRACTION_PROMPT_VERSION}`)
@@ -57,14 +57,16 @@ test("the estimate names mem-eval-succ-8 and the shipped pair", () => {
     assert.doesNotMatch(output, /mem-eval-succ-5/);
     assert.doesNotMatch(output, /mem-eval-succ-6/);
     assert.doesNotMatch(output, /mem-eval-succ-7/);
+    assert.doesNotMatch(output, /mem-eval-succ-8/);
 });
 
 test("the case count it measures is the target's, not a constant", () => {
-    // 1,150 is the same in every target since succ-6 — and succ-8 inherits
-    // succ-7's cases by reference, so its count is identical by construction.
-    // A count alone would therefore not have caught any of the switches. The
-    // dataset name beside it is what does, and this asserts they appear
-    // together rather than each being right on its own.
+    // 1,150 is the same in every target since succ-6. succ-8 inherits
+    // succ-7's cases by reference, and succ-9 replaces five of succ-8's one
+    // for one, so the count is identical by construction across all of them
+    // and would not have caught a single switch. The dataset name beside it is
+    // what does, and this asserts they appear together rather than each being
+    // right on its own.
     const target = harnessTarget();
     const output = runEstimate();
     assert.match(
@@ -73,7 +75,7 @@ test("the case count it measures is the target's, not a constant", () => {
             `${target.cases.length} adopted case\\(s\\) of ${HARNESS_TARGET_DATASET_VERSION}`
         )
     );
-    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-8");
+    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-9");
 });
 
 test("it stays an estimate, and says so", () => {
