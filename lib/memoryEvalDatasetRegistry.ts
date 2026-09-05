@@ -80,6 +80,11 @@ import {
     verifySucc8Manifest,
 } from "@/lib/memoryEvalSucc8";
 import {
+    MEMORY_EVAL_SUCC9_CASES,
+    MEMORY_EVAL_SUCC9_MANIFEST,
+    verifySucc9Manifest,
+} from "@/lib/memoryEvalSucc9";
+import {
     MEMORY_EVAL_SUCC5_CASES,
     MEMORY_EVAL_SUCC5_MANIFEST,
     verifySucc5Manifest,
@@ -202,16 +207,50 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         verify: () => verifySucc7Manifest(),
     },
     {
-        // The live target. succ-8 shares succ-7's cases by reference, so its
-        // `datasetDigest` is succ-7's — which is why `resolveArtifactDataset`
-        // has to match on the version first and the digest second. Matching on
-        // the digest alone would resolve a succ-8 artifact to succ-7 and read
-        // its numbers under the superseded `mem-score-v3.4`.
+        // The live target until 2026-09-04, and superseded rather than
+        // retired: succ-9 replaced five of its cases, so nothing binds succ-8
+        // to a stale contract the way succ-4 and succ-7 are bound, and it
+        // stays resolvable and contract-eligible.
+        //
+        // succ-8 shares succ-7's cases by reference, so its `datasetDigest` is
+        // succ-7's — which is why `resolveArtifactDataset` has to match on the
+        // version first and the digest second. Matching on the digest alone
+        // would resolve a succ-8 artifact to succ-7 and read its numbers under
+        // the superseded `mem-score-v3.4`.
         manifest: MEMORY_EVAL_SUCC8_MANIFEST,
         cases: MEMORY_EVAL_SUCC8_CASES,
         verify: () => verifySucc8Manifest(),
     },
+    {
+        // The live target. Assembled, signed and frozen on 2026-09-04, and
+        // the harness was pointed here afterwards under its own approval —
+        // aiming at a sample is a separate decision from having one, and it
+        // has to come second, because a harness aimed at an unfrozen sample is
+        // refused as `dataset_not_frozen`.
+        //
+        // The pinned literal rather than `buildSucc9Manifest()`, for the reason
+        // succ-8's row gives — a resolver comparing an artifact against a
+        // recomputed manifest agrees with whatever the tree says today, which
+        // is what a signature exists to be able to disagree with.
+        manifest: MEMORY_EVAL_SUCC9_MANIFEST,
+        cases: MEMORY_EVAL_SUCC9_CASES,
+        verify: () => verifySucc9Manifest(),
+    },
 ];
+
+/**
+ * Every schema-3 dataset version this module can hand cases back for.
+ *
+ * Exported so a consumer that has to sweep all of them derives the list
+ * instead of writing its own. Two did write their own — the gold
+ * normalisation coverage test and the prompt example contamination scan — and
+ * both stopped at succ-8 when succ-9 was added, each silently excluding the
+ * newest decision set from the check it exists to run. A hand-written list is
+ * a copy of this table that nobody updates.
+ */
+export function schema3DatasetVersions(): readonly string[] {
+    return schema3Datasets().map((entry) => entry.manifest.datasetVersion);
+}
 
 export type ArtifactDatasetRefusalReason =
     | "no_dataset_version"

@@ -284,7 +284,17 @@ const registerEntry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
 );
 const budgetBinding = budgetBindingFor(registerEntry);
 
-if (!registerEntry) {
+// Only a live run needs a registered pair. `decideEvalRunMode()` answers
+// `smoke` before it looks at the register at all, and `unknown_pair` when a
+// live run has no entry, so this check adds nothing to the live path and used
+// to take the smoke path down with it: bumping `promptVersion` made the
+// harness unrunnable in every mode until somebody registered a pair, which is
+// a separate approval. A smoke run reaches no provider and spends nothing, and
+// refusing it protects no budget.
+//
+// Kept as an early exit rather than deferred to the refusal below because the
+// message names the file to edit, which `unknown_pair` does not.
+if (!registerEntry && live) {
     console.error(
         `No register entry for ${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}.\n` +
             "Add a candidate entry to lib/memoryExtractionEvalRegister.ts first (§12.1)."
@@ -950,7 +960,7 @@ if (costStopped) {
 }
 if (runMode.mode === "live") {
     line("\naccrued cost (USD, estimate)", accruedCostUsd.toFixed(4));
-    if (registerEntry.evalBudget) {
+    if (registerEntry?.evalBudget) {
         line("approved ceiling, this run (USD)", registerEntry.evalBudget.maxUsd);
         const { programmeMaxMicroUsd, maxProviderDispatchedRuns } =
             registerEntry.evalBudget;
@@ -1050,11 +1060,11 @@ const artifact = {
         // tell a per-run ceiling from a programme one -- which is the
         // confusion this pass was correcting.
         runOrdinal: runMode.mode === "live" ? (runOrdinal ?? null) : null,
-        perRunCeilingUsd: registerEntry.evalBudget?.maxUsd ?? null,
+        perRunCeilingUsd: registerEntry?.evalBudget?.maxUsd ?? null,
         approvedRunCount:
-            registerEntry.evalBudget?.maxProviderDispatchedRuns ?? null,
+            registerEntry?.evalBudget?.maxProviderDispatchedRuns ?? null,
         programmeMaxMicroUsd:
-            registerEntry.evalBudget?.programmeMaxMicroUsd ?? null,
+            registerEntry?.evalBudget?.programmeMaxMicroUsd ?? null,
     },
     verdict: {
         pass: verdict.pass,

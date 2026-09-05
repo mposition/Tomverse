@@ -303,24 +303,43 @@ test("freezing does not move the manifest digest", () => {
     );
 });
 
-test("the harness runs these cases, under a contract succ-7 is not bound to", () => {
+test("succ-7's cases outlived succ-7, and then outlived succ-8's copy of them", () => {
     // The signature covered the sample; pointing the harness at it was a
-    // separate decision. That decision was taken on 2026-09-03 and then
-    // immediately overtaken, in the same session, by the Korean numeral
-    // amendment: `mem-score-v3.5` moved the contract, and a frozen dataset
-    // records the contract it was frozen under rather than following the tree.
+    // separate decision. That decision was taken on 2026-09-03 and overtaken
+    // in the same session by the Korean numeral amendment: `mem-score-v3.5`
+    // moved the contract, and a frozen dataset records the contract it was
+    // frozen under rather than following the tree. So the harness ran
+    // `mem-eval-succ-8`, which inherited *these* cases by reference.
     //
-    // So the harness runs `mem-eval-succ-8`, which inherits *these* cases by
-    // reference under the amended contract. Both halves are asserted because
-    // this file is the one that would notice a signature and a target drifting
-    // apart: the sample is still succ-7's, and the name no longer is.
-    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-8");
+    // On 2026-09-04 it moved again, to `mem-eval-succ-9`, and this is where
+    // the inheritance stops being identity: succ-9 retired five of these cases
+    // and replaced them, so the live target no longer carries succ-7's array.
+    // This file is the one that would notice a signature and a target drifting
+    // apart, so it now asserts the relationship rather than the equality —
+    // succ-8 still holds succ-7's sample exactly, and the harness holds
+    // neither.
+    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-9");
     assert.equal(MEMORY_EVAL_SUCC7_CASES.length, 1150);
-    assert.deepEqual(harnessTarget().cases, MEMORY_EVAL_SUCC7_CASES);
-    assert.equal(
-        harnessTarget().datasetDigest,
-        MEMORY_EVAL_SUCC7_MANIFEST.datasetDigest
-    );
+
+    // succ-8's claim, unchanged: the same array, by reference.
+    const succ8 = harnessTarget("mem-eval-succ-8");
+    assert.deepEqual(succ8.cases, MEMORY_EVAL_SUCC7_CASES);
+    assert.equal(succ8.datasetDigest, MEMORY_EVAL_SUCC7_MANIFEST.datasetDigest);
+
+    // And succ-9's: the same count, five cases different, a different digest.
+    const target = harnessTarget();
+    assert.equal(target.cases.length, MEMORY_EVAL_SUCC7_CASES.length);
+    assert.notEqual(target.datasetDigest, MEMORY_EVAL_SUCC7_MANIFEST.datasetDigest);
+    const retired = MEMORY_EVAL_SUCC7_CASES.filter(
+        (testCase) => !target.cases.some((live) => live.id === testCase.id)
+    ).map((testCase) => testCase.id);
+    assert.deepEqual(retired.sort(), [
+        "succ-assistant-en-603",
+        "succ-assistant-en-608",
+        "succ-assistant-ko-407",
+        "succ-durable-en-423",
+        "succ-durable-ko-422",
+    ]);
 });
 
 /* ------------------------------------------- what the digests have to cover -- */

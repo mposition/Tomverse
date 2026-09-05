@@ -205,6 +205,15 @@ Date / timezone:    ____________________
       claim holds in both directions (the sample did not move, the
       contract did), and the approval is all five signed fields or none —
       a name without digests approves nothing in particular
+- [ ] `npm run check:memory-eval-succ9` — the successor that retires the five
+      cases the `mem-extract-v8` example kind was selected from. It proves
+      those five are out of the decision set *and* preserved runnable in the
+      regression corpus, because a retirement that deletes is a different act
+      from one that moves; that the replacements match their originals in
+      category, language, kind and polarity, so a 1:1 claim is a 1:1 fact; and
+      that succ-8 was not edited, since it is signed and a case removed from it
+      would void that signature. Unsigned by design until somebody signs its
+      two digests
 - [ ] `npm run check:tomverse-chat-release-gate-view`
 - [ ] `npm run verify:tomverse-chat-release-gates`
 - [ ] `npm run verify:review-parity-coverage`

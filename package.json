@@ -53,6 +53,7 @@
     "check:memory-eval-succ6": "node --import tsx scripts/check-memory-eval-succ6.mjs",
     "check:memory-eval-succ7": "node --import tsx scripts/check-memory-eval-succ7.mjs",
     "check:memory-eval-succ8": "node --import tsx scripts/check-memory-eval-succ8.mjs",
+    "check:memory-eval-succ9": "node --import tsx scripts/check-memory-eval-succ9.mjs",
     "make:memory-eval-succ7-review-sheet": "node --import tsx scripts/make-memory-eval-succ7-review-sheet.mjs",
     "report:polarity-calibration": "node --import tsx scripts/report-polarity-calibration.mjs",
     "draft:memory-eval-succ4-golds": "node --import tsx scripts/draft-memory-eval-succ4-golds.mjs",
