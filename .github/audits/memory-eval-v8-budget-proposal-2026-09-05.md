@@ -45,6 +45,46 @@ commit 조상 관계가 모두 통과한 상태이고 ordinal만 남아 있습�
 PR 병합은 별개 결정입니다. 예산은 `--live`를 여는 것이지 pair를 승인하는 것이
 아닙니다.
 
+## 이 승인이 어떻게 착지했는가 — 그리고 병합은 승인되지 않았습니다
+
+승인 값은 PR #1256의 브랜치에서 commit `bbc7440d`로 작성됐고, 그 PR이 develop에
+squash 병합되면서 commit `0c7eb828`로 착지했습니다. 지금 develop에서 이 예산을
+읽으면 `0c7eb828`이 나오고, 값을 손으로 쓴 commit은 `bbc7440d`입니다.
+
+**예산 승인 내용은 유효합니다. 병합 자체는 승인되지 않았습니다.**
+
+`@mposition`이 승인한 것은 위 표의 값이고 그 값은 지금 register에 그대로 있으며,
+승인 범위와 남은 gate는 이 문서가 적은 그대로입니다. 승인되지 않은 것은 **그
+변경이 언제 develop에 들어가는가**입니다. 지시는 병합을 보류하는 것이었고,
+PR #1256은 사람이 병합한 것이 아니라 `bbc7440d` push에 반응한
+`Auto PR to Develop` workflow가 auto-merge를 다시 켜서 병합됐습니다.
+
+```
+02:13:06Z   @mposition이 auto-merge를 끔
+02:13:07Z   PR을 draft로 전환
+   ...      draft 동안의 push 일곱 번은 workflow의 draft 검사가 건너뜀
+            ("Auto-merge not enabled: PR #1256 is still a draft.")
+05:04:33Z   ready로 전환 — draft라는 억제 조건이 사라짐
+05:20:11Z   bbc7440d push
+05:20:24Z   Auto PR to Develop의 "Enable auto-merge" 단계 실행, 05:20:28Z 성공
+05:33:47Z   required checks 통과 → squash 병합 0c7eb828
+```
+
+(GitHub Actions run 33946937737의 단계별 시각, PR #1256 timeline API. 병합
+attribution이 `@mposition`으로 남는 것은 workflow가 그 계정의 PAT로 auto-merge를
+켰기 때문이고, 사람이 병합 버튼을 누른 기록이 아닙니다.)
+
+**auto-merge를 끈 것은 02:13:06Z이고 다시 켠 것은 05:20:24Z입니다.** 그 사이
+3시간 동안 꺼진 상태가 유지된 것은 PR이 draft였기 때문이지 workflow가 사람의
+결정을 존중했기 때문이 아닙니다 — ready로 되돌린 순간 다음 push 한 번이면
+충분했습니다. 제 쪽의 실패는 push **전에** auto-merge가 꺼져 있는 것을 확인하고
+**push 다음에 다시 확인하지 않은 것**입니다.
+
+`0c7eb828`은 되돌리지 않습니다 — 담고 있는 값이 승인된 값이고, revert는 승인된
+예산을 register에서 다시 빼는 일이 됩니다. 대신 재발 원인을 고칩니다. workflow는
+이제 **자기 실행이 PR을 만들었을 때만** auto-merge를 켜고, 이미 열려 있는 PR에는
+켜지 않습니다(`tests/autoPrAutoMergeArming.test.mjs`).
+
 ## 1. 무엇을 처음 재는가
 
 **v8과 succ-9에서 실제 모델이 §12.3 기준을 충족하는지는 아직 아무도 모릅니다.**
