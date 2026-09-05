@@ -718,6 +718,66 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             },
             evaluation: null,
         },
+        {
+            // Registered 2026-09-05, unfunded, and the pair the tree now
+            // ships: `MEMORY_EXTRACTION_PROMPT_VERSION` is v8 and the harness
+            // targets `mem-eval-succ-9`, so until this entry existed the
+            // harness could not name the pair it would run — a state several
+            // gates report as a missing entry when what it should read as is a
+            // refusal.
+            //
+            // v7's budget is NOT carried over and could not be. It is bound to
+            // v7's prompt digest and to succ-6's dataset and manifest, and
+            // `evalBudgetTupleFailures()` compares that tuple against the tree:
+            // every one of its seven terms has moved. That comparison is
+            // exactly what stops a v8 run being funded by a v7 approval.
+            //
+            // v7 is also a recorded FAILURE rather than an unfinished
+            // measurement — precision 0.7123 against 0.95, recall 0.7268
+            // against 0.85, twenty critical bulk-safe adoptions against a gate
+            // of zero — and its blind review found no execution or scoring
+            // defect that would rescue it. What v8 and succ-9 change is the
+            // instrument, not the verdict: nothing here predicts that this
+            // pair will score differently, and the first live run is the first
+            // measurement of it.
+            extractionModelId: "gpt-5-6-luna",
+            // Written out, never the shipped constant, for the reason the v1
+            // entry gives: reading the constant would move every approval onto
+            // the next version without anybody approving anything.
+            promptVersion: "mem-extract-v8",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-09-05",
+            notes:
+                "Candidate for mem-extract-v8 against the frozen " +
+                "mem-eval-succ-9, scored under mem-score-v3.5. Registered " +
+                "unfunded and never run: `decideEvalRunMode()` refuses a live " +
+                "run as `unknown_pair` without an entry and as " +
+                "`pair_not_runnable` without a budget, and this closes only " +
+                "the first of those. " +
+                "A budget proposal with the figures to fill in is " +
+                ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md " +
+                "— US$6.495 per run and US$12.99 across two, the worst case " +
+                "from `npm run report:memory-eval-cost-estimate` on succ-9 " +
+                "with every answer at the 4,096-token ceiling. Approving it is " +
+                "a human act and is not done here. " +
+                "v7's budget, approval and run history do not transfer: the " +
+                "prompt digest, both dataset digests, the manifest digest and " +
+                "the contract version have all moved, and v7's own record is a " +
+                "decision-grade failure rather than an unfinished run. " +
+                "The five cases the v8 examples' kind was counted from left " +
+                "the decision set under B+ in succ-9, so this pair is measured " +
+                "on cases its prompt did not help select. " +
+                "Carried into blind review as a named observation rather than " +
+                "a blocker: the matcher's substring residue, " +
+                ".github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md " +
+                "section 4.14 — a digit-form gold reaches a candidate through " +
+                "an unrelated noun that begins with its counter, which no " +
+                "right boundary on the Korean-numeral rule can prevent " +
+                "because that rule constrains substitution only.",
+            evalBudget: null,
+            evaluation: null,
+        },
     ];
 
 /** §12.3 acceptance thresholds — the register check re-verifies them. */
