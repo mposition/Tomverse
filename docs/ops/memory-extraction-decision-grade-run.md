@@ -1,7 +1,15 @@
 # memory extraction decision-grade eval 실행 절차
 
-`(gpt-5-6-luna, mem-extract-v2)` 쌍을 실제로 재고, 그 결과로 register를
-승인하기까지의 절차입니다. 근거는
+모델·프롬프트 쌍을 실제로 재고, 그 결과로 register를 승인하기까지의 절차입니다.
+
+**현재 대상은 `(gpt-5-6-luna, mem-extract-v8)`이고 표본은 `mem-eval-succ-9`,
+계약은 `mem-score-v3.5`, 승인 예산은 회차당 US$7.00 · 2회 US$14.00입니다**
+(2026-09-05, `.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md`).
+이 문단이 처음 쓰였을 때는 `mem-extract-v2`·`mem-eval-seed-11`·US$20이었고,
+그 값들은 §1의 이력에 남아 있습니다 — 절차는 재사용되지만 대상은 회차마다
+바뀌므로, 대상은 여기 한 곳에서만 말합니다.
+
+근거는
 `docs/policy/external-conversation-import-and-memory.md` §12.2~§12.5이고,
 표본을 만들고 동결한 절차는 `docs/ops/memory-extraction-eval-dataset.md`입니다.
 
@@ -23,8 +31,8 @@
 |---|---|---|
 | 1 | 지침 합의 + 착수 승인 | 완료 (2026-08-23) |
 | 2 | batch 작성·검수 | 완료 — 28 batch, 1,150건 |
-| 3 | 동결 | 완료 (2026-08-24) — `mem-eval-seed-11`, `decision`, `frozen` |
-| 4 | eval 실행 예산 승인 | 완료 — US$20, issue #837 |
+| 3 | 동결 | 완료 — 처음 `mem-eval-seed-11`(2026-08-24), 현재 대상은 `mem-eval-succ-9`(2026-09-04 서명·동결) |
+| 4 | eval 실행 예산 승인 | 완료 — 현재 대상은 US$7.00 × 2회(2026-09-05). 이전: US$20/issue #837(v2), US$6.285 × 2(v6), US$6.39 × 2(v7) |
 | 5 | **decision-grade 실행 → blind review → 독립 재실행** | ← 여기 |
 | 6 | §12.3 판정 | |
 | 7 | register `approved` + 서명 | |
@@ -276,21 +284,34 @@ artifact(옛 harness가 만든 것)도 뒤의 둘에서는 걸린다는 뜻이�
 
 ## 4. 1회차 실행
 
+로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 `npm ci`가 끝나 있어야
+하고, **provider를 호출해 실제로 과금됩니다.**
+
 ```
-export OPENAI_API_KEY=...
-npm run eval:memory-extraction -- \
-  --live \
-  --model=gpt-5-6-luna \
-  --json=artifacts/mem-eval-run1.json \
-  --max-cost-usd=6
+$env:OPENAI_API_KEY = "..."
+npm run eval:memory-extraction -- `
+  --live `
+  --run-ordinal=1 `
+  --model=gpt-5-6-luna `
+  --json=artifacts/mem-eval-v8-run1.json
 ```
 
+- **`--run-ordinal`이 없으면 실행되지 않습니다.** 승인은 정해진 횟수의 provider
+  실행을 덮고 이 저장소는 그 원장을 갖고 있지 않으므로, 실행이 자기가 몇 번째인지
+  말하고 gate가 그것을 승인 범위와 대조합니다. 없으면
+  `run_ordinal_not_approved`로 거절됩니다.
 - `--json`은 **필수로 취급합니다.** 없으면 raw record가 남지 않고, raw record가
   없는 회차는 register에 인용할 수 없습니다(§12.1).
-- `--max-cost-usd`는 승인 예산을 **좁히기만** 합니다. 승인 상한(US$20)보다 큰
-  값을 주면 실행 자체가 거절됩니다.
+- **`--max-cost-usd`는 주지 않는 것이 기본입니다.** 생략하면 register의 승인
+  상한(현재 회차당 US$7.00)이 그대로 쓰입니다. 이 플래그는 승인 예산을 **좁히기만**
+  하고, 넓히려 하면 `run_cap_above_approved_ceiling`으로 거절됩니다. **모형 최악값
+  US$6.5574902보다 낮은 값을 주지 마십시오** — 대부분을 지불한 뒤 잘리고, 잘린
+  회차는 decision-grade가 아니므로 일부가 아니라 전액이 버려집니다.
 - 1,150건 전부를 한 번에 돕니다. 중간에 멈추면 `truncated`이고 전체 표본이
   아닙니다.
+- workflow(`memory-eval-decision-grade.yml`)로 돌릴 때는 `max_cost_usd` 기본값이
+  register와 같은 US$7.00이고, 어긋나면
+  `tests/memoryEvalRunWorkflow.test.mjs`가 실패합니다.
 
 끝나면 **판정을 읽기 전에** 회차가 인용 가능한지부터 확인합니다.
 
@@ -364,12 +385,20 @@ npm run make:memory-eval-blind-review -- \
 
 ## 6. 독립 재실행 (2회차)
 
+로컬 PC의 PowerShell, 1회차와 **같은 clone·같은 commit**. 역시 과금됩니다.
+
 ```
-npm run eval:memory-extraction -- \
-  --live --model=gpt-5-6-luna \
-  --json=artifacts/mem-eval-run2.json \
-  --max-cost-usd=6
+npm run eval:memory-extraction -- `
+  --live `
+  --run-ordinal=2 `
+  --model=gpt-5-6-luna `
+  --json=artifacts/mem-eval-v8-run2.json
 ```
+
+`--run-ordinal=2`가 이 회차를 승인의 두 번째로 지목합니다. 승인이 2회를 덮으므로
+`3` 이상은 `run_ordinal_not_approved`로 거절되고, 그때 필요한 것은 더 큰 숫자가
+아니라 새 예산 승인입니다. **1회차의 남은 예산은 2회차로 넘어오지 않습니다** —
+상한은 실행마다 US$7.00이고 `accruedCostUsd`는 매 실행 0에서 시작합니다.
 
 같은 commit, 같은 `promptVersion`, 같은 dataset digest여야 합니다 — artifact의
 manifest 세 값을 1회차와 대조합니다. 다르면 두 회차는 같은 것을 잰 것이
@@ -493,7 +522,16 @@ fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가
 | artifact 경로 | | |
 | 판정과 서명 | | |
 
-## 11. 2026-08-28 예산의 실행 조건 (재승인)
+## 11. 2026-08-28 예산의 실행 조건 (재승인) — 이력
+
+> **이 절의 숫자는 과거 것입니다.** `gpt-5-6-luna::mem-extract-v6`가
+> `mem-eval-succ-5` 위에서 US$6.285 × 2로 승인됐던 회차의 기록이며, 그 pair는
+> 2026-08-29에 revoked 됐습니다. **현재 실행 대상과 상한은 문서 첫머리와 §4·§6**
+> 이고, 지금은 `mem-extract-v8` · `mem-eval-succ-9` · US$7.00 × 2입니다.
+>
+> 남겨 두는 이유는 §11.2·§11.3의 절차 — 2회차는 재시도가 아니라는 것, 재시도가
+> 허용되는 유일한 경우 — 가 예산과 무관하게 계속 유효하고, §11.5·§11.6이 실제
+> 실행 기록이기 때문입니다.
 
 `gpt-5-6-luna::mem-extract-v6` 한 pair에 대해 승인된 예산의 실행 규칙입니다.
 등록은 `lib/memoryExtractionEvalRegister.ts`, 근거는
