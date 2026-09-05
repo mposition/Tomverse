@@ -65,9 +65,11 @@ import {
  * dataset records the contract it was frozen under.
  *
  * `mem-eval-succ-8` is untouched and stays resolvable. It was the dataset the
- * harness scored until succ-9 was signed and frozen; the move came afterwards
- * as its own step, for the reason succ-7's own record gives — a signature
- * covers a sample, and pointing the harness at one is a different decision.
+ * harness scored until the harness was moved — which is a later boundary than
+ * the freeze, and the distinction is the reason succ-7's own record gives: a
+ * signature covers a sample, and pointing the harness at one is a different
+ * decision. succ-9 was signed and frozen first, and succ-8 went on being the
+ * target after that until the move was approved on its own terms.
  */
 
 const sha256 = (input: string): string =>
