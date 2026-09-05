@@ -757,10 +757,14 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "the first of those. " +
                 "A budget proposal with the figures to fill in is " +
                 ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md " +
-                "— US$6.495 per run and US$12.99 across two, the worst case " +
-                "from `npm run report:memory-eval-cost-estimate` on succ-9 " +
-                "with every answer at the 4,096-token ceiling. Approving it is " +
-                "a human act and is not done here. " +
+                "— US$6.50 per run and US$13.00 across two: the raw worst " +
+                "case from `npm run report:memory-eval-cost-estimate` on succ-9 " +
+                "with every answer at the 4,096-token ceiling is US$6.4928602 " +
+                "per run, rounded UP to the cent. The report used to print that " +
+                "to nearest, which gave US$6.49 — a ceiling below the worst " +
+                "case it bounds — and it now rounds ceilings up and prints the " +
+                "raw value beside them. Approving is a human act and is not " +
+                "done here. " +
                 "v7's budget, approval and run history do not transfer: the " +
                 "prompt digest, both dataset digests, the manifest digest and " +
                 "the contract version have all moved, and v7's own record is a " +

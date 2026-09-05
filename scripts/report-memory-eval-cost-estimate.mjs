@@ -151,7 +151,28 @@ const assumedPerRun = costFor(floorTotal, ASSUMED_OUTPUT_TOKENS);
 const inputOnlyPerRun = costFor(floorTotal, 0);
 const perThousandOutputPerRun = costFor(floorTotal, 1_000) - inputOnlyPerRun;
 
+/**
+ * Two formatters, because one of these numbers is transcribed into a ceiling
+ * and the rest are read.
+ *
+ * `toFixed(2)` rounds to nearest, which rounds **down** about half the time,
+ * and this report's whole purpose is to hand somebody a figure to approve. On
+ * `mem-eval-succ-9` the raw per-run worst case is US$6.4928602 and the rounded
+ * display was `US$6.49` — a ceiling a fifth of a cent *below* the worst case it
+ * is supposed to bound. A run that hit the cap would have been truncated by its
+ * own approved ceiling, and a truncated run is not decision-grade.
+ *
+ * Nothing had gone wrong yet, because the figure being proposed was the two-run
+ * total, where 12.9857204 happens to round up. It rounded up by luck of that
+ * value rather than by construction, which is not a property worth relying on
+ * twice.
+ *
+ * So a ceiling is rounded **up** to the cent and says so, and the raw value is
+ * printed beside it: a reader checking the arithmetic should not have to
+ * reproduce this script to see what was rounded.
+ */
 const usd = (value) => `US$${value.toFixed(2)}`;
+const ceilCents = (value) => Math.ceil(value * 100 - 1e-9) / 100;
 const line = (label, value) => console.log(`${label.padEnd(42)} ${value}`);
 
 console.log(`memory extraction eval — cost estimate (NOT a quote)\n`);
@@ -177,12 +198,29 @@ line("at that assumption, all runs", usd(assumedPerRun * runs));
 line("per +1,000 output tokens/answer, all runs", usd(perThousandOutputPerRun * runs));
 line("if every answer hit the cap, all runs", usd(worstPerRun * runs));
 
+// The per-run ceiling first, and the programme total from *it* rather than
+// from the raw total rounded once. `findEvalRegisterProblems()` refuses a
+// budget whose `maxUsd × maxProviderDispatchedRuns` exceeds the programme
+// figure, so rounding the two ends independently is how a budget earns a
+// refusal by arithmetic nobody intended.
+const perRunCeilingUsd = ceilCents(worstPerRun);
+const programmeCeilingUsd = perRunCeilingUsd * runs;
+
+console.log("\nthe numbers to approve — rounded UP to the cent, never to nearest:");
+line("per run  (evalBudget.maxUsd)", `US$${perRunCeilingUsd.toFixed(2)}`);
+line(
+    "all runs (programmeMaxMicroUsd)",
+    `US$${programmeCeilingUsd.toFixed(2)}  ` +
+        `= ${Math.round(programmeCeilingUsd * 1_000_000)} microUSD`
+);
+line("raw worst case, per run / all runs", `${worstPerRun} / ${worstPerRun * runs}`);
+
 console.log(
-    `\nSet the ceiling from the worst case, not the assumption: ${usd(worstPerRun * runs)}.\n` +
-        "A run that behaves cannot exceed it, and a run that does not is exactly what a\n" +
-        "ceiling is for. A run stopped by that ceiling is truncated, and a truncated run\n" +
-        "is not decision-grade -- so the worst case is the number to approve, not the\n" +
-        "number to fear."
+    "\nSet the ceiling from the worst case, not the assumption. A run that behaves\n" +
+        "cannot exceed it, and a run that does not is exactly what a ceiling is for. A\n" +
+        "run stopped by that ceiling is truncated, and a truncated run is not\n" +
+        "decision-grade -- so the worst case is the number to approve, not the number to\n" +
+        "fear."
 );
 
 console.log(
