@@ -100,8 +100,13 @@ export const MEMORY_EVAL_SUCC9_CHANGE_REASON =
  *
  * Frozen is not runnable. `decideEvalRunMode()` has one fewer reason to refuse
  * a decision-grade run and still refuses: no pair is registered and no budget
- * is approved, which is `unknown_pair`. The harness also still scores succ-8;
- * pointing it here is its own decision and has not been taken.
+ * is approved, which is `unknown_pair`.
+ *
+ * The harness was pointed here on 2026-09-04, under an approval of its own and
+ * after this line became true. That order is not a formality — a harness aimed
+ * at an unfrozen sample is refused as `dataset_not_frozen`, so the freeze had
+ * to come first, and aiming at a sample stays a separate decision from having
+ * one.
  */
 export const MEMORY_EVAL_SUCC9_DATASET_FROZEN = true;
 
@@ -148,10 +153,12 @@ export const MEMORY_EVAL_SUCC9_APPROVAL: {
      * gold its original left unclaimed, and the 1,150-case sample the two
      * digests below identify.
      *
-     * It settles nothing downstream. The harness still scores succ-8, the pair
-     * register is empty, and no budget exists — each is its own decision, and
-     * a frozen sample is a precondition for them rather than a step toward
-     * them.
+     * It settled nothing downstream. At the moment it was given the harness
+     * still scored succ-8, the pair register was empty, and no budget existed;
+     * each of those is its own decision, and a frozen sample is a precondition
+     * for them rather than a step toward them. The harness moved here later
+     * the same day, under an approval that said so; the register and the
+     * budget have not moved at all.
      */
     approvedBy: "@mposition",
     approvedAt: "2026-09-04",

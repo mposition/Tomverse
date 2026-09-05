@@ -207,19 +207,26 @@ const schema3Datasets = (): readonly Schema3Dataset[] => [
         verify: () => verifySucc7Manifest(),
     },
     {
-        // The live target. succ-8 shares succ-7's cases by reference, so its
-        // `datasetDigest` is succ-7's — which is why `resolveArtifactDataset`
-        // has to match on the version first and the digest second. Matching on
-        // the digest alone would resolve a succ-8 artifact to succ-7 and read
-        // its numbers under the superseded `mem-score-v3.4`.
+        // The live target until 2026-09-04, and superseded rather than
+        // retired: succ-9 replaced five of its cases, so nothing binds succ-8
+        // to a stale contract the way succ-4 and succ-7 are bound, and it
+        // stays resolvable and contract-eligible.
+        //
+        // succ-8 shares succ-7's cases by reference, so its `datasetDigest` is
+        // succ-7's — which is why `resolveArtifactDataset` has to match on the
+        // version first and the digest second. Matching on the digest alone
+        // would resolve a succ-8 artifact to succ-7 and read its numbers under
+        // the superseded `mem-score-v3.4`.
         manifest: MEMORY_EVAL_SUCC8_MANIFEST,
         cases: MEMORY_EVAL_SUCC8_CASES,
         verify: () => verifySucc8Manifest(),
     },
     {
-        // Assembled, signed and frozen on 2026-09-04. The harness still scores
-        // succ-8: pointing it here is a separate decision from having the
-        // sample, and it has not been taken.
+        // The live target. Assembled, signed and frozen on 2026-09-04, and
+        // the harness was pointed here afterwards under its own approval —
+        // aiming at a sample is a separate decision from having one, and it
+        // has to come second, because a harness aimed at an unfrozen sample is
+        // refused as `dataset_not_frozen`.
         //
         // The pinned literal rather than `buildSucc9Manifest()`, for the reason
         // succ-8's row gives — a resolver comparing an artifact against a
