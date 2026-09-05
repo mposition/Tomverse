@@ -54,14 +54,23 @@ test("the workflow still has the two steps this contract is about", () => {
  * The stub carries the one piece of state that matters: whether an open pull
  * request exists for the branch. `gh pr create` writes the new number into it,
  * so the script's second `gh pr list` sees what a real one would.
+ *
+ * Every path handed to the shell is a bare filename, with the temporary
+ * directory supplied as the child's working directory instead. An absolute
+ * Windows path reaching `cat` or a redirect depends on which bash answers --
+ * Git Bash converts `C:\\...` and another does not -- and that is a property
+ * of the machine running the test, not of the workflow it is about.
  */
 function runCreateStep({ openPrNumber = "", createFails = false } = {}) {
     assert.ok(createStep, 'no step with id "create-pr"');
     const dir = mkdtempSync(join(tmpdir(), "auto-pr-arming-"));
     try {
-        const statePath = join(dir, "open-pr");
-        const callsPath = join(dir, "gh-calls");
-        const outputPath = join(dir, "github-output");
+        const stateName = "open-pr";
+        const callsName = "gh-calls";
+        const outputName = "github-output";
+        const statePath = join(dir, stateName);
+        const callsPath = join(dir, callsName);
+        const outputPath = join(dir, outputName);
         writeFileSync(statePath, openPrNumber ? `${openPrNumber}\n` : "");
         writeFileSync(callsPath, "");
         writeFileSync(outputPath, "");
@@ -89,12 +98,13 @@ function runCreateStep({ openPrNumber = "", createFails = false } = {}) {
         ].join("\n");
 
         const result = spawnSync("bash", ["-c", prelude + createStep.run], {
+            cwd: dir,
             env: {
                 ...process.env,
                 BRANCH: "claude/to-develop/example",
-                GITHUB_OUTPUT: outputPath,
-                STUB_STATE: statePath,
-                STUB_CALLS: callsPath,
+                GITHUB_OUTPUT: outputName,
+                STUB_STATE: stateName,
+                STUB_CALLS: callsName,
                 STUB_NEW_NUMBER: "4242",
                 STUB_CREATE_FAILS: createFails ? "1" : "0",
             },

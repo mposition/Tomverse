@@ -65,14 +65,16 @@ PR #1256은 사람이 병합한 것이 아니라 `bbc7440d` push에 반응한
    ...      draft 동안의 push 일곱 번은 workflow의 draft 검사가 건너뜀
             ("Auto-merge not enabled: PR #1256 is still a draft.")
 05:04:33Z   ready로 전환 — draft라는 억제 조건이 사라짐
-05:20:11Z   bbc7440d push
+05:20:16Z   bbc7440d push
 05:20:24Z   Auto PR to Develop의 "Enable auto-merge" 단계 실행, 05:20:28Z 성공
 05:33:47Z   required checks 통과 → squash 병합 0c7eb828
 ```
 
-(GitHub Actions run 33946937737의 단계별 시각, PR #1256 timeline API. 병합
-attribution이 `@mposition`으로 남는 것은 workflow가 그 계정의 PAT로 auto-merge를
-켰기 때문이고, 사람이 병합 버튼을 누른 기록이 아닙니다.)
+(GitHub Actions run 33946937737의 단계별 시각, PR #1256 timeline API. push 시각은
+그 run이 만들어진 시각입니다 — timeline의 `committed` 이벤트가 말하는 05:20:11Z는
+commit 시각이지 push 시각이 아니므로 둘을 바꿔 적지 않습니다. 병합 attribution이
+`@mposition`으로 남는 것은 workflow가 그 계정의 PAT로 auto-merge를 켰기 때문이고,
+사람이 병합 버튼을 누른 기록이 아닙니다.)
 
 **auto-merge를 끈 것은 02:13:06Z이고 다시 켠 것은 05:20:24Z입니다.** 그 사이
 3시간 동안 꺼진 상태가 유지된 것은 PR이 draft였기 때문이지 workflow가 사람의
