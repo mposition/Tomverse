@@ -11,11 +11,15 @@
  *
  * ## Why a script and not a reading
  *
- * The rules are five boolean fields in a manifest, and re-deciding what each
- * one means at the end of a run — with the verdict already on screen — is
- * exactly the drift the pre-registration exists to prevent. Written down here,
- * "was this run admissible" stops being a judgement and goes back to being a
- * lookup.
+ * The rules are a handful of signals in a manifest — mostly booleans, and one
+ * derived from a pair of numbers for artifacts that predate its flag — and
+ * re-deciding what each one means at the end of a run, with the verdict
+ * already on screen, is exactly the drift the pre-registration exists to
+ * prevent. Written down here, "was this run admissible" stops being a
+ * judgement and goes back to being a lookup.
+ *
+ * The count used to be written as "five boolean fields". It was six by the
+ * time anybody noticed, and one of them is not a boolean.
  *
  * ## What it does not decide
  *
@@ -25,6 +29,11 @@
  */
 
 import { readFileSync } from "node:fs";
+
+// Plain `.mjs`, so this script keeps running under bare `node` with no loader.
+// The same function decides the question inside the harness, which is what
+// stops the two drifting into different answers about the same run.
+import { manifestExceededSpendCeiling } from "../lib/memoryEvalSpendCeiling.mjs";
 
 const argValue = (name, fallback) => {
     const hit = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -84,7 +93,13 @@ const RULES = [
         // which an older artifact or a hand-edited one can — read as
         // Admissible with exit 0.
         key: "exceededCostCeiling",
-        fails: (m) => m.exceededCostCeiling === true,
+        // The flag when the artifact has one, **and the two figures when it
+        // does not**. The first version read only the flag, so an artifact
+        // written before 2026-09-05 — carrying `accruedCostUsd: 7.0001` beside
+        // `runCeilingUsd: 7` and no verdict — came back Admissible with exit
+        // 0. Every artifact this project has ever produced is in that
+        // category, which makes the fallback the part that matters.
+        fails: (m) => manifestExceededSpendCeiling(m).exceeded,
         discards: true,
         met: "finished having spent more than the approved ceiling",
         action: "discard — the run that happened is not the run approved",

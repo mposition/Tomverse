@@ -86,6 +86,7 @@ import { judgeEvalV2, scoreCaseV2 } from "../lib/memoryEvalScoringV2.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION as GATE_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 import { judgeEvalV3, scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import { createEvalLiveAdapter } from "../lib/memoryEvalLiveAdapter.ts";
+import { exceededSpendCeiling } from "../lib/memoryEvalSpendCeiling.mjs";
 
 const argValue = (name, fallback) => {
     const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -954,18 +955,27 @@ if (abortedOnFailures) {
  *
  * A different question from `costStopped`, and it went unasked. The loop
  * compares `accruedCostUsd` against the ceiling **before dispatching the next
- * case**, and cost is added **after** a response comes back, so the last call
- * of a run is never checked: a run whose final response carried it past the
- * ceiling ends with `costStopped === false` and reads as decision-grade.
+ * case**, and cost is added **after** a response comes back — so the last
+ * call's cost is not compared *before it is spent*. It is compared here,
+ * afterwards. Until this line existed it was not compared at all, and a run
+ * whose final response carried it past the ceiling ended with
+ * `costStopped === false` and read as decision-grade.
  *
- * This does not stop the spend — the money is gone by the time it can be
+ * So the ceiling is a **soft threshold**: where pricing resolves, the overrun
+ * it permits is bounded by one call's cost, and where pricing fails
+ * `spendCeilingReliable` goes false and that bound goes with it.
+ *
+ * It does not stop the spend — the money is gone by the time it can be
  * observed, and stopping it would mean reserving the next call's cost before
  * dispatch, against an estimate whose accuracy is the open question in the
  * budget proposal. What it stops is the *citation*: a run that spent more than
  * was approved is not the run that was approved, whatever its numbers say.
  */
-const ceilingExceeded =
-    runMode.mode === "live" && accruedCostUsd > runMode.ceilingUsd;
+const ceilingExceeded = exceededSpendCeiling({
+    live: runMode.mode === "live",
+    accruedCostUsd,
+    ceilingUsd: runMode.ceilingUsd,
+});
 
 if (ceilingExceeded && !costStopped) {
     console.log(
