@@ -1,14 +1,49 @@
-# `gpt-5-6-luna::mem-extract-v8` 유료 평가 예산 승인안 (2026-09-05)
+# `gpt-5-6-luna::mem-extract-v8` 유료 평가 예산 (2026-09-05)
 
-**이 문서는 제안이지 승인이 아닙니다.** 승인은 `@mposition`이
-`lib/memoryExtractionEvalRegister.ts`의 해당 항목에 §5의 블록을 써 넣고 별도
-변경으로 병합하는 행위이며, 그 commit이 감사 기록입니다. 이 문서는 그때 **옮겨
-적을 값**을 전부 담아, 승인이 계산이 아니라 전사(轉寫)가 되게 하는 것이
-목적입니다.
+## 상태 — 승인됨
 
-pair는 2026-09-05에 **candidate로 등록**됐고 예산은 비어 있습니다. 그래서 지금
-`--live`는 거절되며, 거절 사유가 `unknown_pair`에서 예산 부재로 **옮겨 갔을
-뿐**입니다.
+**2026-09-05, `@mposition`이 아래 값을 승인했습니다.** 승인 자체는 이 문서가
+아니라 `lib/memoryExtractionEvalRegister.ts`의 `evalBudget` 블록이고, 그것을 쓴
+commit이 감사 기록입니다. 이 문서는 그 값이 어떻게 나왔는지와 무엇을 승인하지
+않았는지를 담습니다.
+
+파일 이름은 `...budget-proposal-...`로 둡니다 — 승인이 `ticket`으로 이 경로를
+지목하므로, 이름을 고치면 승인이 가리키는 곳이 사라집니다.
+
+```
+approvedBy                 @mposition
+approvedAt                 2026-09-05
+maxUsd                     7.0
+programmeMaxMicroUsd       14_000_000
+maxProviderDispatchedRuns  2
+approvedImplementationSha  3503cd10c47a8a9e51b0766b1b52ee1d5f3ca3d7
+```
+
+**이 문서의 §2·§3·§5는 승인 *전에* 쓰인 제안이고 그대로 둡니다.** 제안 시점의
+근거를 승인 뒤에 고쳐 쓰면 무엇을 보고 승인했는지가 사라집니다. §2.2의 "여유 0"
+선택지와 §2.3의 표에 나란히 있던 US$6.56/US$13.12는 **채택되지 않은
+선택지**이며, 채택된 것은 US$7.00/US$14.00입니다.
+
+## 이 승인이 바꾼 것과 바꾸지 않은 것
+
+pair는 2026-09-05에 candidate로 등록됐고, 예산은 같은 날 승인돼 기록됐습니다.
+`--live`의 거절 사유가 그때마다 옮겨 갔습니다.
+
+```
+등록 전        unknown_pair                 register에 항목 없음
+등록 후        no_eval_budget               항목 있음, 예산 없음
+예산 승인 후    run_ordinal_not_approved     --run-ordinal 미지정
+```
+
+**세 번째가 마지막 gate입니다.** `--live --run-ordinal=1`은 이제 provider를
+호출합니다 — api key, 동결 dataset, schema, prompt rule, budget binding, tuple,
+commit 조상 관계가 모두 통과한 상태이고 ordinal만 남아 있습니다. 그것이 예산
+승인의 의미이며, 그 실행을 시작하는 것은 **사람의 명시적 지시**입니다.
+
+바뀌지 않은 것: `status`는 `candidate`, `evaluation`은 `null`,
+`memoryExtractionEnabled`·`memoryInjectionEnabled`는 둘 다 OFF, release gate와
+PR 병합은 별개 결정입니다. 예산은 `--live`를 여는 것이지 pair를 승인하는 것이
+아닙니다.
 
 ## 1. 무엇을 처음 재는가
 
@@ -224,7 +259,12 @@ decision-grade로 보고될 수 있었습니다.
 점수를 사후에 고치기 위해서가 아니라, matcher 질문에 실제 데이터를 붙이기
 위해서입니다.
 
-## 5. 승인 시 옮겨 적을 블록
+## 5. 승인 시 옮겨 적을 블록 (승인 전에 쓰인 것, 그대로 둠)
+
+> 2026-09-05에 이 블록이 register에 기록됐습니다. `approvedBy`는 아래에서
+> 빈칸으로 남겨 두었고 승인자가 자기 handle을 채웠습니다 — 채워진 이름은 승인의
+> 기록이지 승인의 제안이 아니기 때문입니다. 실제로 기록된 값은 문서 맨 위에
+> 있습니다.
 
 `lib/memoryExtractionEvalRegister.ts`의 `gpt-5-6-luna::mem-extract-v8` 항목에서
 `evalBudget: null`을 아래로 교체합니다. `ticket`은 이 문서이고, `approvedAt`은

@@ -786,7 +786,60 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "an unrelated noun that begins with its counter, which no " +
                 "right boundary on the Korean-numeral rule can prevent " +
                 "because that rule constrains substitution only.",
-            evalBudget: null,
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Per invocation, and half the programme total because the
+                // approval is for two runs. `accruedCostUsd` starts at zero on
+                // every invocation, so the programme figure written here would
+                // be spendable twice.
+                //
+                // US$6.5574902 is the worst case from
+                // `npm run report:memory-eval-cost-estimate` on succ-9: 1,150
+                // cases at the mean input length, every answer at the
+                // 4,096-token output ceiling, and the output JSON schema that
+                // rides on every request. US$7.00 is that rounded up and then
+                // given margin, because the token counts behind it are this
+                // repository's estimate rather than the provider's own — about
+                // 49% headroom against the estimated input cost of US$0.905 a
+                // run. The margin is @mposition's decision and the proposal
+                // records the zero-margin alternative beside it.
+                maxUsd: 7.0,
+                programmeMaxMicroUsd: 14_000_000,
+                ticket:
+                    ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md",
+                approvedAt: "2026-09-05",
+                // Two: the decision-grade run and the §12.4 independent
+                // reproduction. Recorded rather than enforced — see the field's
+                // own note — and neither is started by this entry. The second
+                // is a reproduction rather than a retry, and it is not made at
+                // all if the first shows a structural failure or a clear miss.
+                maxProviderDispatchedRuns: 2,
+                // The merge commit of #1255, which brought `mem-extract-v8`,
+                // the frozen `mem-eval-succ-9` and the harness move together.
+                // Every value in `boundTuple` was read from it. A run's own
+                // commit must descend from this and never equal it: a
+                // registration PR cannot contain its own merge SHA.
+                approvedImplementationSha:
+                    "3503cd10c47a8a9e51b0766b1b52ee1d5f3ca3d7",
+                boundTuple: {
+                    datasetVersion: "mem-eval-succ-9",
+                    datasetDigest:
+                        "626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6",
+                    datasetManifestDigest:
+                        "82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c",
+                    scoringContractVersion: "mem-score-v3.5",
+                    scoringContractDigest:
+                        "2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4",
+                    promptVersion: "mem-extract-v8",
+                    promptDigest:
+                        "a1d804c6b9359b722c60b1309c7324176f72c54008d2a616fa78dd520a6b44ae",
+                },
+            },
+            // Still null, and still the point. A budget opens `--live`; it does
+            // not approve the pair. `status` stays `candidate` until §12.4 has
+            // been walked — decision-grade run, blind review, independent
+            // reproduction, approver sign-off — and this field is where that
+            // evidence goes when it exists.
             evaluation: null,
         },
     ];

@@ -128,7 +128,8 @@ test("only the pair whose binding is satisfied can run live", () => {
     // than the binding's. Without that, every entry would refuse for the
     // binding and the list would say nothing about the register.
     //
-    // Two names. `gpt-5-6-luna::mem-extract-v6` is not one of them: it was
+    // Two names, and which two has changed twice.
+    // `gpt-5-6-luna::mem-extract-v6` is not one of them: it was
     // funded on 2026-08-28, ran on 2026-08-29 and was revoked the same day
     // for missing every §12.3 floor
     // (.github/audits/memory-eval-v6-succ5-run1-2026-08-29.md §7).
@@ -152,14 +153,24 @@ test("only the pair whose binding is satisfied can run live", () => {
                 })
             ).mode === "live"
     ).map((entry) => `${entry.extractionModelId}::${entry.promptVersion}`);
-    // One entry since 2026-09-02: v7 was revoked after run 1 came back an
-    // admissible §12.3 failure, so it refuses on the status ahead of its
+    // It was one entry from 2026-09-02: v7 was revoked after run 1 came back
+    // an admissible §12.3 failure, so it refuses on the status ahead of its
     // budget exactly as the v5 pairs do
     // (.github/audits/memory-eval-v7-run1-blind-review-2026-09-01.md). Its
     // approved US$6.39 x 2 is still on the record and would still cover a
     // second run; that is precisely why the status, not the ceiling, is what
     // closes it.
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
+    //
+    // Two again since 2026-09-05: `mem-extract-v8` was funded at US$7.00 x 2
+    // (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md) and is now
+    // the entry where the register and the binding both say yes. v4 is still
+    // here and still cannot fund a run, for the reason the next test gives —
+    // which is why this list is "the register would allow it", not "this would
+    // run".
+    assert.deepEqual(runnable, [
+        "gpt-5-6-luna::mem-extract-v4",
+        "gpt-5-6-luna::mem-extract-v8",
+    ]);
 });
 
 test("v4's budget cannot fund a run, because it names no instrument", () => {
