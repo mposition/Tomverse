@@ -239,7 +239,20 @@ test("only a funded, open pair can run live, and it is named", () => {
     // approved US$6.39 x 2 is still on the record and would still cover a
     // second run; that is precisely why the status, not the ceiling, is what
     // closes it.
-    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
+    assert.deepEqual(runnable, [
+        "gpt-5-6-luna::mem-extract-v4",
+        // Funded 2026-09-05 (US$7.00 x 2, @mposition), and the first pair in
+        // this list whose instrument is the one the tree currently assembles:
+        // `mem-eval-succ-9` under `mem-score-v3.5` with `mem-extract-v8`.
+        // Being here means the register would allow the run; the binding
+        // agrees too, so what stands between this pair and a provider is an
+        // explicit `--run-ordinal`, not another gate
+        // (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md).
+        //
+        // `status` is still `candidate`. A budget opens `--live`; approving
+        // the pair is §12.4 and has not happened.
+        "gpt-5-6-luna::mem-extract-v8",
+    ]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.
@@ -254,9 +267,16 @@ test("only a funded, open pair can run live, and it is named", () => {
     // is genuinely runnable, and the thing standing between it and a provider
     // is an explicit instruction to run — not another gate
     // (.github/audits/memory-eval-v7-budget-approval-2026-08-31.md section 3).
+    // v8's US$7.00 is the second entry for which both halves hold, and the
+    // first bound to `mem-eval-succ-9`. Its figure is not the raw worst case:
+    // `report:memory-eval-cost-estimate` puts that at US$6.5574902 a run, and
+    // the approval added margin because those token counts are this
+    // repository's estimate rather than the provider's own
+    // (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md section 2.3).
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
         "gpt-5-6-luna::mem-extract-v7": 6.39,
+        "gpt-5-6-luna::mem-extract-v8": 7.0,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(

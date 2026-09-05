@@ -718,6 +718,130 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             },
             evaluation: null,
         },
+        {
+            // Registered 2026-09-05, unfunded, and the pair the tree now
+            // ships: `MEMORY_EXTRACTION_PROMPT_VERSION` is v8 and the harness
+            // targets `mem-eval-succ-9`, so until this entry existed the
+            // harness could not name the pair it would run — a state several
+            // gates report as a missing entry when what it should read as is a
+            // refusal.
+            //
+            // v7's budget is NOT carried over and could not be. It is bound to
+            // v7's prompt digest and to succ-6's dataset and manifest, and
+            // `evalBudgetTupleFailures()` compares that tuple against the tree:
+            // every one of its seven terms has moved. That comparison is
+            // exactly what stops a v8 run being funded by a v7 approval.
+            //
+            // v7 is also a recorded FAILURE rather than an unfinished
+            // measurement — precision 0.7123 against 0.95, recall 0.7268
+            // against 0.85, twenty critical bulk-safe adoptions against a gate
+            // of zero — and its blind review found no execution or scoring
+            // defect that would rescue it. What v8 and succ-9 change is the
+            // instrument, not the verdict: nothing here predicts that this
+            // pair will score differently, and the first live run is the first
+            // measurement of it.
+            extractionModelId: "gpt-5-6-luna",
+            // Written out, never the shipped constant, for the reason the v1
+            // entry gives: reading the constant would move every approval onto
+            // the next version without anybody approving anything.
+            promptVersion: "mem-extract-v8",
+            status: "candidate",
+            owner: "@mposition",
+            registeredAt: "2026-09-05",
+            notes:
+                "Candidate for mem-extract-v8 against the frozen " +
+                "mem-eval-succ-9, scored under mem-score-v3.5. Registered " +
+                "unfunded and never run: `decideEvalRunMode()` refuses a live " +
+                "run as `unknown_pair` without an entry and as " +
+                "`no_eval_budget` without a budget, and this closes only the " +
+                "first of those. (`pair_not_runnable` is a third refusal, for " +
+                "a status that is neither candidate nor approved.) " +
+                "A budget proposal with the figures to fill in is " +
+                ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md " +
+                "— US$6.56 per run and US$13.12 across two. The raw worst case " +
+                "from `npm run report:memory-eval-cost-estimate` on succ-9, " +
+                "with every answer at the 4,096-token ceiling, is US$6.5574902 " +
+                "per run, rounded UP to the cent. Two corrections got it " +
+                "there: the report rounded ceilings to nearest, which can put " +
+                "a ceiling below the worst case it bounds, and it counted only " +
+                "the prompt text while every request also carries the output " +
+                "JSON schema as input. " +
+                "What is left over the worst case is US$0.0025 per run, about " +
+                "ten input tokens per case, and those token counts are " +
+                "estimated rather than the provider's own — so whether to hold " +
+                "margin above them for estimator error is the approver's " +
+                "judgement and is not decided here. Approving is a human act " +
+                "and is not done here. " +
+                "v7's budget, approval and run history do not transfer: the " +
+                "prompt digest, both dataset digests, the manifest digest and " +
+                "the contract version have all moved, and v7's own record is a " +
+                "decision-grade failure rather than an unfinished run. " +
+                "The five cases the v8 examples' kind was counted from left " +
+                "the decision set under B+ in succ-9, so this pair is measured " +
+                "on cases its prompt did not help select. " +
+                "Carried into blind review as a named observation rather than " +
+                "a blocker: the matcher's substring residue, " +
+                ".github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md " +
+                "section 4.14 — a digit-form gold reaches a candidate through " +
+                "an unrelated noun that begins with its counter, which no " +
+                "right boundary on the Korean-numeral rule can prevent " +
+                "because that rule constrains substitution only.",
+            evalBudget: {
+                approvedBy: "@mposition",
+                // Per invocation, and half the programme total because the
+                // approval is for two runs. `accruedCostUsd` starts at zero on
+                // every invocation, so the programme figure written here would
+                // be spendable twice.
+                //
+                // US$6.5574902 is the worst case from
+                // `npm run report:memory-eval-cost-estimate` on succ-9: 1,150
+                // cases at the mean input length, every answer at the
+                // 4,096-token output ceiling, and the output JSON schema that
+                // rides on every request. US$7.00 is that rounded up and then
+                // given margin, because the token counts behind it are this
+                // repository's estimate rather than the provider's own — about
+                // 49% headroom against the estimated input cost of US$0.905 a
+                // run. The margin is @mposition's decision and the proposal
+                // records the zero-margin alternative beside it.
+                maxUsd: 7.0,
+                programmeMaxMicroUsd: 14_000_000,
+                ticket:
+                    ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md",
+                approvedAt: "2026-09-05",
+                // Two: the decision-grade run and the §12.4 independent
+                // reproduction. Recorded rather than enforced — see the field's
+                // own note — and neither is started by this entry. The second
+                // is a reproduction rather than a retry, and it is not made at
+                // all if the first shows a structural failure or a clear miss.
+                maxProviderDispatchedRuns: 2,
+                // The merge commit of #1255, which brought `mem-extract-v8`,
+                // the frozen `mem-eval-succ-9` and the harness move together.
+                // Every value in `boundTuple` was read from it. A run's own
+                // commit must descend from this and never equal it: a
+                // registration PR cannot contain its own merge SHA.
+                approvedImplementationSha:
+                    "3503cd10c47a8a9e51b0766b1b52ee1d5f3ca3d7",
+                boundTuple: {
+                    datasetVersion: "mem-eval-succ-9",
+                    datasetDigest:
+                        "626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6",
+                    datasetManifestDigest:
+                        "82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c",
+                    scoringContractVersion: "mem-score-v3.5",
+                    scoringContractDigest:
+                        "2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4",
+                    promptVersion: "mem-extract-v8",
+                    promptDigest:
+                        "a1d804c6b9359b722c60b1309c7324176f72c54008d2a616fa78dd520a6b44ae",
+                },
+            },
+            // Still null, and still the point. A budget opens `--live`; it does
+            // not approve the pair. `status` stays `candidate` until §12.4 has
+            // been walked — decision-grade run, blind review, independent
+            // reproduction, approver sign-off — and this field is where that
+            // evidence goes when it exists.
+            evaluation: null,
+        },
     ];
 
 /** §12.3 acceptance thresholds — the register check re-verifies them. */

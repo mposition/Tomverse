@@ -239,13 +239,19 @@ jobs:
       # exit status, and a not-a-pass is a RESULT rather than an error.
       # Admissibility asks a different question -- may this run be cited -- and
       # the pre-registered table it applies names commitSha, a dirty tree,
-      # truncation, an aborted run, decisionGrade and the spend ceiling. Not
-      # one of them is the verdict. A failing run that is admissible is a
+      # truncation, an overrun of the spend ceiling, an aborted run,
+      # decisionGrade and whether the spend figure is reliable. Not one of them
+      # is the verdict. A failing run that is admissible is a
       # citable negative result, and that is the run whose records someone most
       # needs to read. Without `always()` the two steps that diagnose a failing
       # run were the two steps a failing run skipped: run1 on 2026-08-26
       # measured all 1,150 cases, missed the critical bulk-safe gate 49 times,
       # and produced neither.
+      #
+      # The overrun joined that table on 2026-09-05, and it is a separate signal
+      # from the truncation beside it: one says the run stopped early at the
+      # ceiling, the other that it finished having passed it on a call the
+      # harness could only compare after the money was spent.
       #
       # Skipped on a probe, and not because the check would be inconvenient:
       # a probe's `decisionGrade` is false by construction, so the rules would
