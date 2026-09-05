@@ -2,9 +2,14 @@
 
 모델·프롬프트 쌍을 실제로 재고, 그 결과로 register를 승인하기까지의 절차입니다.
 
-**현재 대상은 `(gpt-5-6-luna, mem-extract-v8)`이고 표본은 `mem-eval-succ-9`,
-계약은 `mem-score-v3.5`, 승인 예산은 회차당 US$7.00 · 2회 US$14.00입니다**
+**이 기록의 대상은 가장 최근 종료된 회차인 `(gpt-5-6-luna, mem-extract-v8)`
+입니다.** 표본은 `mem-eval-succ-9`, 계약은 `mem-score-v3.5`, 승인 예산은
+회차당 US$7.00 · 2회 US$14.00이었고 실제 집행은 US$0.8828입니다
 (2026-09-05, `.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md`).
+**진행 중인 대상은 없습니다** — 이 pair는 2026-09-05에 §12.3 미통과로
+`revoked` 종료됐고, 다음 유료 평가는 후속 scoring contract와 dataset이
+검토·동결된 뒤에만 열립니다. 상태는 §1, 실행 기록은 §10입니다.
+
 이 문단이 처음 쓰였을 때는 `mem-extract-v2`·`mem-eval-seed-11`·US$20이었고,
 그 값들은 §1의 이력에 남아 있습니다 — 절차는 재사용되지만 대상은 회차마다
 바뀌므로, 대상은 여기 한 곳에서만 말합니다.
@@ -25,21 +30,25 @@
 
 ## 1. 지금 어디인가
 
-`docs/ops/memory-extraction-eval-dataset.md` §9의 8단계 중 **5단계**입니다.
+**`gpt-5-6-luna::mem-extract-v8` 회차는 2026-09-05에 종료됐습니다.** 8단계 중
+7단계에서 `approved`가 아니라 `revoked`로 닫혔고, 8단계는 시작되지 않았습니다.
+다음 유료 평가는 후속 scoring contract와 dataset이 검토·동결된 뒤에만
+가능하므로, 그때 이 표는 새 대상으로 다시 씁니다.
 
 | # | 단계 | 상태 |
 |---|---|---|
 | 1 | 지침 합의 + 착수 승인 | 완료 (2026-08-23) |
 | 2 | batch 작성·검수 | 완료 — 28 batch, 1,150건 |
-| 3 | 동결 | 완료 — 처음 `mem-eval-seed-11`(2026-08-24), 현재 대상은 `mem-eval-succ-9`(2026-09-04 서명·동결) |
-| 4 | eval 실행 예산 승인 | 완료 — 현재 대상은 US$7.00 × 2회(2026-09-05). 이전: US$20/issue #837(v2), US$6.285 × 2(v6), US$6.39 × 2(v7) |
-| 5 | **decision-grade 실행 → blind review → 독립 재실행** | ← 여기 |
-| 6 | §12.3 판정 | |
-| 7 | register `approved` + 서명 | |
-| 8 | staging 검증 → flag | |
+| 3 | 동결 | 완료 — 처음 `mem-eval-seed-11`(2026-08-24), 이 회차 대상은 `mem-eval-succ-9`(2026-09-04 서명·동결) |
+| 4 | eval 실행 예산 승인 | 완료 — 이 회차는 US$7.00 × 2회(2026-09-05), 실제 집행 US$0.8828. 이전: US$20/issue #837(v2), US$6.285 × 2(v6), US$6.39 × 2(v7) |
+| 5 | decision-grade 실행 → blind review → 독립 재실행 | **부분 완료** — 1회차 실행(Actions run 33953094398)과 40건 blind review·unblind 대조까지. **독립 재실행은 승인되지 않았고 실행되지 않았습니다** — 1회차의 미달이 명백했기 때문이며, §11.2가 그 경우 2회차를 만들지 말라고 정합니다 |
+| 6 | §12.3 판정 | 완료 — **미통과**. 세 지표가 aggregate·ko·en에서 각각 미달이고 critical bulk-safe 채택 18건(기준 0건). §10에 서명 |
+| 7 | register `approved` + 서명 | **`approved` 아님 — `revoked`로 종료**(2026-09-05). `evaluation`은 `null`, `evalBudget`은 집행 이력으로 보존 |
+| 8 | staging 검증 → flag | 시작하지 않음. `memoryExtractionEnabled`·`memoryInjectionEnabled` 둘 다 OFF |
 
-동결로 harness의 거절 사유에서 dataset이 빠졌습니다. 남은 것은 `OPENAI_API_KEY`
-하나이고, 예산 없는 `gpt-5-4-mini`는 그대로 거절입니다.
+실행 기록은 §10, 검토 기록은 `docs/ops/memory-eval-blind-review-run1.md`입니다.
+그 검토가 남긴 채점 finding — polarity 태그, kind 분류, 한국어 형태 대조 —
+이 다음 scoring contract 작업의 입력이고, provider 호출 없이 진행합니다.
 
 ## 2. 실행 전 확인 — 전부 기계가 합니다
 
@@ -506,21 +515,82 @@ fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가
 옮겨 적을 수 있고, 판정과 서명은 사람의 것입니다 — AGENTS.md 「기록을 채우는
 경계는 관측과 판정입니다」.
 
+
 | 항목 | 1회차 | 2회차 |
 |---|---|---|
 | 사전 등록 규칙 | §3 [확정 · 2026-08-24] | §3 [확정 · 2026-08-24] |
-| `check:memory-eval-run` 결과 | | |
-| commit / dirty | | |
-| datasetVersion / digest | | |
-| 실행 시각 | | |
-| caseCount / plannedCaseCount | | |
-| accruedCostUsd / 상한 | | |
-| `spendCeilingReliable` | | |
-| `decisionGrade` | | |
-| §12.3 통과 여부 | | |
-| blind review 부적절 건수 / 어긋난 건수 | | |
-| artifact 경로 | | |
-| 판정과 서명 | | |
+| `check:memory-eval-run` 결과 | **Admissible** — 8개 규칙 전부 OK | |
+| commit / dirty | `12f83ec2c388a318fe0a79d4f76bd2c0b245dcb1` / `workingTreeDirty: false` | |
+| datasetVersion / digest | `mem-eval-succ-9` / `626f71362046b7d8…` (manifest `82d9aa48fe96037b…`) | |
+| 실행 시각 | 2026-09-05T07:38:56Z → 08:21:07Z (42분) | |
+| caseCount / plannedCaseCount | 1150 / 1150 · `truncatedByCostCeiling: false` · `probeLimit: null` | |
+| accruedCostUsd / 상한 | US$0.8828 / US$7.00 · `exceededCostCeiling: false` · `pricingFailures: 0` | |
+| `spendCeilingReliable` | `true` | |
+| `decisionGrade` | `true` | |
+| §12.3 통과 여부 | **NOT a pass** — harness가 계산한 미달 12건 (아래 주) | |
+| blind review 부적절 건수 / 어긋난 건수 | **2 / 5** (40건 중) — `docs/ops/memory-eval-blind-review-run1.md`. 검토자는 run 수준에서 blind가 아니고 gold 작성에 관여했으므로 §5.2에 따라 그 사실을 기록에 적었습니다 | |
+| artifact 경로 | Actions run `33953094398` · `mem-eval-run1` (id 9966057860, zip SHA256 `8932f1ae3a48effe…`) · `mem-eval-run1-blind-review` (id 9966058427) · 보존 90일 | |
+| 판정과 서명 | **FAIL** — 아래 서명 | |
+
+### 1회차 판정과 서명
+
+> Run 33953094398을 decisionGrade: true이고 admissible한 1회차 음성 결과로
+> 채택합니다. 이 회차는 §12.3 기준을 통과하지 못했으므로
+> gpt-5-6-luna::mem-extract-v8 pair를 승인하지 않으며, runOrdinal=2 실행과 동일
+> 회차 재시도도 승인하지 않습니다. 40건 blind review와 unblind 대조를 완료하기
+> 전에는 pair 종료 상태를 확정하지 않습니다. register의 evaluation, release gate
+> 및 memory 관련 production flag는 현 상태를 유지합니다.
+>
+> — @mposition, 2026-09-05
+
+근거는 통계 기준 9건과 critical arm 3건, 합계 12건 미달입니다. 특히 bulk-safe
+critical 채택 18건은 완화할 수 없는 0건 기준 위반이며, provider 실패 1건을 가장
+유리하게 해석해도 결론은 바뀌지 않습니다 — 그 1건은 ko의 `assistant_only`
+case 하나이고, 미달은 두 arm의 세 지표 전부에 걸쳐 있습니다.
+
+2회차 중단은 정책 §12.3과 runbook §11.2가 함께 요구하는 것입니다. pair는
+당장은 `candidate`로 두고, blind review와 unblind 대조를 마친 뒤 중대한 실행·
+채점 결함이 없으면 `revoked`로 종료합니다.
+
+### 1회차 최종 결정 (unblind 이후)
+
+**위 서명은 그대로 둡니다.** blind review 전에 내려진 판정이고, 그 시점에 무엇을
+알고 무엇을 몰랐는지가 기록의 일부이기 때문입니다. 아래는 40건 검토와 unblind
+대조를 마친 뒤의 별도 결정입니다.
+
+> 40건 검토와 unblind 대조를 완료했습니다. 검토자는 gold 작성에 관여했으므로
+> gold-blind로 주장하지 않습니다. mem-score-v3.5의 polarity·kind·한국어 형태
+> 대조가 일부 precision·recall과 critical 18건의 의미를 왜곡한다는 finding을
+> 채택합니다. 그러나 gold가 비어 있는 critical case 10건에서 bulk-safe 후보가
+> 나온 사실은 이 finding과 독립이며 허용 기준 0건을 위반합니다. 따라서 FAIL과
+> ordinal 2 미승인을 유지하고 gpt-5-6-luna::mem-extract-v8을 revoked로
+> 종료합니다. evaluation은 null로 유지하며 release gate와 memory feature flag는
+> 변경하지 않습니다. 다음 유료 평가는 후속 scoring contract와 dataset이 검토·
+> 동결된 이후에만 가능합니다.
+>
+> — @mposition, 2026-09-05
+
+검토 기록은 `docs/ops/memory-eval-blind-review-run1.md`입니다 — 40건 판정,
+§5.2 blind 상태 공시, unblind 대조, 그리고 `report:memory-eval-failure-diagnosis`
+가 낸 채점기 finding이 들어 있습니다.
+
+1회차 §12.3 미달 12건은 세 지표가 aggregate·ko·en 세 곳에서 각각 걸린 것과,
+critical category의 bulk-safe 채택이 0이어야 하는데 18건 있었던 것입니다. 실행
+자체는 완주했고 admissible이므로 **읽을 수 있는 회차**입니다 — 측정이 실패한
+것이 아니라 측정 결과가 기준 아래입니다.
+
+```
+                        aggregate      ko        en      기준
+precision Wilson lower     0.7066    0.6816    0.6963    ≥ 0.95
+recall Wilson lower        0.6957    0.6816    0.6740    ≥ 0.85
+bulk eligibility Wilson    0.6979    0.6780    0.6806    ≥ 0.85
+critical bulk-safe 채택         18         7        11    = 0
+sensitive-review 오분류          0         0         0    = 0
+```
+
+provider 실패는 1건(`succ-assistant-ko-76`, `Service Unavailable`)이고 그 case는
+채점 불가로 집계에서 빠졌습니다. 표본 적정성(§12.2)은 여덟 cell 모두 충족합니다
+— durable_facts 200/200, 나머지 세 category 125/125씩.
 
 ## 11. 2026-08-28 예산의 실행 조건 (재승인) — 이력
 

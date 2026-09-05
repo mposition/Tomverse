@@ -745,18 +745,27 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             // entry gives: reading the constant would move every approval onto
             // the next version without anybody approving anything.
             promptVersion: "mem-extract-v8",
-            status: "candidate",
+            // Closed on 2026-09-05 by the run recorded in `notes`. Revoked
+            // rather than left candidate because a decision-grade run
+            // happened and failed: leaving it open would invite a second
+            // budget against a pair whose measurement already exists.
+            status: "revoked",
             owner: "@mposition",
             registeredAt: "2026-09-05",
             notes:
-                "Candidate for mem-extract-v8 against the frozen " +
-                "mem-eval-succ-9, scored under mem-score-v3.5. Registered " +
-                "unfunded and never run: `decideEvalRunMode()` refuses a live " +
-                "run as `unknown_pair` without an entry and as " +
-                "`no_eval_budget` without a budget, and this closes only the " +
-                "first of those. (`pair_not_runnable` is a third refusal, for " +
-                "a status that is neither candidate nor approved.) " +
-                "A budget proposal with the figures to fill in is " +
+                "Closed. Ran once on 2026-09-05, failed §12.3 and was revoked " +
+                "the same day; the run is recorded further down. What " +
+                "follows first is the registration, kept in the tense it " +
+                "was written in so the sequence stays legible. " +
+                "REGISTERED 2026-09-05: candidate for mem-extract-v8 against " +
+                "the frozen mem-eval-succ-9, scored under mem-score-v3.5. " +
+                "Registered unfunded and not yet run: `decideEvalRunMode()` " +
+                "refused a live run as `unknown_pair` without an entry and " +
+                "as `no_eval_budget` without a budget, and registration " +
+                "closed only the first of those. (`pair_not_runnable` is a " +
+                "third refusal, for a status that is neither candidate nor " +
+                "approved — it is the one this entry refuses on now.) " +
+                "The budget proposal with the figures to fill in was " +
                 ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md " +
                 "— US$6.56 per run and US$13.12 across two. The raw worst case " +
                 "from `npm run report:memory-eval-cost-estimate` on succ-9, " +
@@ -770,8 +779,8 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "ten input tokens per case, and those token counts are " +
                 "estimated rather than the provider's own — so whether to hold " +
                 "margin above them for estimator error is the approver's " +
-                "judgement and is not decided here. Approving is a human act " +
-                "and is not done here. " +
+                "judgement and was not decided there. Approving was a human " +
+                "act and was done separately, on the same day. " +
                 "v7's budget, approval and run history do not transfer: the " +
                 "prompt digest, both dataset digests, the manifest digest and " +
                 "the contract version have all moved, and v7's own record is a " +
@@ -785,7 +794,42 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "section 4.14 — a digit-form gold reaches a candidate through " +
                 "an unrelated noun that begins with its counter, which no " +
                 "right boundary on the Korean-numeral rule can prevent " +
-                "because that rule constrains substitution only.",
+                "because that rule constrains substitution only. " +
+                "RUN 1 (2026-09-05, the only run): Actions run 33953094398 " +
+                "on commit 12f83ec2c388a318fe0a79d4f76bd2c0b245dcb1, " +
+                "artifacts 9966057860 (mem-eval-run1) and 9966058427 " +
+                "(blind review sheet), retained 90 days. 1150/1150 cases, " +
+                "US$0.8828 of the US$7.00 ceiling, decisionGrade true, " +
+                "admissible on all eight rules, not truncated, ceiling not " +
+                "exceeded. It did not pass §12.3: precision Wilson lower " +
+                "0.7066 against 0.95, recall 0.6957 against 0.85, bulk " +
+                "eligibility 0.6979 against 0.85, and 18 critical " +
+                "bulk-safe adoptions against a gate of zero. Ordinal 2 was " +
+                "not approved and was not run. " +
+                "The blind review found scoring defects and they were " +
+                "adopted as a finding rather than as a rescue: " +
+                "`report:memory-eval-failure-diagnosis` shows that of 128 " +
+                "unmatched gold entries, 100 had a candidate quoting the " +
+                "same message and 28 were silent. Quoting the same message " +
+                "is not proof of extracting the same fact -- one turn can " +
+                "carry several -- so those 100 are cases where the run " +
+                "produced something from that message which did not match, " +
+                "not 100 confirmed relabellings. Polarity, kind and Korean " +
+                "morphological matching distort part of precision, recall " +
+                "and the meaning of the 18. What survives all of it is 10 " +
+                "critical cases whose gold expects nothing at all and which " +
+                "still " +
+                "produced a bulk-safe candidate; that is independent of " +
+                "the scoring findings and violates a gate of zero on its " +
+                "own. So this is a valid negative result under " +
+                "mem-score-v3.5, and its precision, recall and critical " +
+                "count are not a measure of the model's absolute quality. " +
+                "Record: docs/ops/memory-eval-blind-review-run1.md and " +
+                "docs/ops/memory-extraction-decision-grade-run.md §10. " +
+                "The budget below is kept as spent history, not as " +
+                "remaining funding: a revoked pair cannot run. The next " +
+                "paid evaluation needs a successor scoring contract and " +
+                "dataset, reviewed and frozen first.",
             evalBudget: {
                 approvedBy: "@mposition",
                 // Per invocation, and half the programme total because the
@@ -835,11 +879,13 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                         "a1d804c6b9359b722c60b1309c7324176f72c54008d2a616fa78dd520a6b44ae",
                 },
             },
-            // Still null, and still the point. A budget opens `--live`; it does
-            // not approve the pair. `status` stays `candidate` until §12.4 has
-            // been walked — decision-grade run, blind review, independent
-            // reproduction, approver sign-off — and this field is where that
-            // evidence goes when it exists.
+            // Still null, and now permanently so. This field holds §12.4
+            // evidence for an approved pair; the pair was revoked instead, on
+            // a decision-grade run that failed clearly enough that the
+            // independent reproduction was not run at all. A budget opened
+            // `--live` and never approved anything, which is the distinction
+            // this field exists to keep: the run happened and is recorded in
+            // `notes`, and no approval followed it.
             evaluation: null,
         },
     ];
