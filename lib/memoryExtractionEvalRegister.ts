@@ -808,12 +808,17 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "not approved and was not run. " +
                 "The blind review found scoring defects and they were " +
                 "adopted as a finding rather than as a rescue: " +
-                "`report:memory-eval-failure-diagnosis` shows 100 of the " +
-                "128 unmatched gold entries were relabelled rather than " +
-                "missed, and polarity, kind and Korean morphological " +
-                "matching distort part of precision, recall and the " +
-                "meaning of the 18. What survives all of it is 10 critical " +
-                "cases whose gold expects nothing at all and which still " +
+                "`report:memory-eval-failure-diagnosis` shows that of 128 " +
+                "unmatched gold entries, 100 had a candidate quoting the " +
+                "same message and 28 were silent. Quoting the same message " +
+                "is not proof of extracting the same fact -- one turn can " +
+                "carry several -- so those 100 are cases where the run " +
+                "produced something from that message which did not match, " +
+                "not 100 confirmed relabellings. Polarity, kind and Korean " +
+                "morphological matching distort part of precision, recall " +
+                "and the meaning of the 18. What survives all of it is 10 " +
+                "critical cases whose gold expects nothing at all and which " +
+                "still " +
                 "produced a bulk-safe candidate; that is independent of " +
                 "the scoring findings and violates a gate of zero on its " +
                 "own. So this is a valid negative result under " +

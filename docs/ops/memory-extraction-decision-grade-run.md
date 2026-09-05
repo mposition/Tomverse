@@ -2,9 +2,14 @@
 
 모델·프롬프트 쌍을 실제로 재고, 그 결과로 register를 승인하기까지의 절차입니다.
 
-**현재 대상은 `(gpt-5-6-luna, mem-extract-v8)`이고 표본은 `mem-eval-succ-9`,
-계약은 `mem-score-v3.5`, 승인 예산은 회차당 US$7.00 · 2회 US$14.00입니다**
+**이 기록의 대상은 가장 최근 종료된 회차인 `(gpt-5-6-luna, mem-extract-v8)`
+입니다.** 표본은 `mem-eval-succ-9`, 계약은 `mem-score-v3.5`, 승인 예산은
+회차당 US$7.00 · 2회 US$14.00이었고 실제 집행은 US$0.8828입니다
 (2026-09-05, `.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md`).
+**진행 중인 대상은 없습니다** — 이 pair는 2026-09-05에 §12.3 미통과로
+`revoked` 종료됐고, 다음 유료 평가는 후속 scoring contract와 dataset이
+검토·동결된 뒤에만 열립니다. 상태는 §1, 실행 기록은 §10입니다.
+
 이 문단이 처음 쓰였을 때는 `mem-extract-v2`·`mem-eval-seed-11`·US$20이었고,
 그 값들은 §1의 이력에 남아 있습니다 — 절차는 재사용되지만 대상은 회차마다
 바뀌므로, 대상은 여기 한 곳에서만 말합니다.
