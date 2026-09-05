@@ -26,8 +26,13 @@
  *     be. Real answers are far shorter, so the total is a **worst case** and
  *     the typical figure is reported beside it.
  *
- * A ceiling set from the worst case cannot be exceeded by a run that behaves.
- * That is the direction an approver wants to be wrong in.
+ * A ceiling set from the worst case is the direction an approver wants to be
+ * wrong in. It is **not** a guarantee that a run cannot exceed it: these token
+ * counts come from this repository's estimator rather than the provider's
+ * tokenizer, and the harness compares spend against the ceiling before each
+ * dispatch while cost arrives after each response — so the last call of a run
+ * is never checked against it. The report says both, in as many words, further
+ * down.
  */
 
 // The set a decision-grade run will actually use. This used to read
@@ -107,10 +112,15 @@ const ASSUMED_OUTPUT_TOKENS = 1_024;
  *
  * `memoryExtractionProvider` sends `Output.object({ schema, name })` with
  * `strictJsonSchema`, so the schema is part of the request and is billed as
- * input on **every call** — 1,061 characters of it, about 281 tokens once the
- * name and the strict flag are counted. It was missing from this estimate
- * entirely, which understated the input side by roughly 7% per case and, at
- * 1,150 cases, by about US$0.065 per run.
+ * input on **every call** — 1,061 characters of it, which **this repository's
+ * estimator** puts at about 281 tokens once the name and the strict flag are
+ * wrapped around it. That figure is this script's estimate of the envelope, not
+ * a provider measurement: nothing here has seen what the provider actually
+ * counts for a schema, and the difference goes into the same bucket as every
+ * other gap between this estimator and their tokenizer.
+ *
+ * It was missing from this estimate entirely, which understated the input side
+ * by roughly 7% per case and, at 1,150 cases, by about US$0.065 per run.
  *
  * Estimated with the same estimator as the prompt rather than hard-coded: the
  * schema changes when the output contract does, and a number written here
@@ -217,7 +227,7 @@ line("output (USD / 1M tokens)", pricing.outputUsdPerMillionTokens);
 
 console.log(`\nmeasured on the ${MEMORY_EVAL_CASES.length} adopted case(s) of ${MEMORY_EVAL_DATASET_VERSION}:`);
 line("mean input tokens per case", Math.round(meanPromptTokens));
-line("  of which the JSON schema", schemaTokens);
+line("  of which the JSON schema", `${schemaTokens}  (estimated envelope, not a provider count)`);
 line("per-call output ceiling", MAX_OUTPUT_TOKENS);
 
 console.log(`\nprojected onto the §12.2 floor:`);

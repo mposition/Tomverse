@@ -1,21 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { spawnSync } from "node:child_process";
+import { estimatePromptTokens } from "../lib/chatTokenEstimate.ts";
+import {
+    MEMORY_EXTRACTION_OUTPUT_SCHEMA,
+    toExtractionPromptInput,
+} from "../lib/memoryExtractionPrompt.ts";
+import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 
 /**
  * A ceiling that rounds to nearest is not a ceiling.
  *
  * `report:memory-eval-cost-estimate` exists to hand somebody a figure to write
  * into `evalBudget.maxUsd`, and it formatted every figure with `toFixed(2)` —
- * which rounds down about half the time. On `mem-eval-succ-9` the raw per-run
- * worst case is US$6.4928602 and that display read `US$6.49`: a fifth of a cent
- * *below* the worst case it bounds. A run that hit the output cap would have
- * been stopped by its own approved ceiling, and a run stopped by its ceiling is
- * truncated rather than decision-grade — the one outcome the ceiling is set
- * from the worst case to avoid.
+ * which rounds down about half the time. Against the per-run worst case as it
+ * then stood, US$6.4928602, that display read `US$6.49`: **0.286 of a cent**
+ * below the number it was supposed to bound. (An earlier version of this note
+ * said "a fifth of a cent", which was wrong in the direction that flatters the
+ * defect.)
+ *
+ * What that costs is narrower than the first version of this note claimed. A
+ * ceiling below the worst case does not mean a run *is* truncated — it means
+ * nothing at all unless a run actually reaches that spend, and even then the
+ * harness compares against the ceiling only before dispatching the next case,
+ * so a run can pass it on its last call and finish. What is true is the
+ * conditional: a run stopped by its ceiling is truncated, and a truncated run
+ * is not decision-grade.
  *
  * It had not cost anything yet only because the figure being transcribed was
- * the two-run total, where 12.9857204 happens to round up. Luck of the value,
+ * the two-run total, where that value happens to round up. Luck of the value,
  * not a property of the formatter.
  *
  * So this parses the numbers the report tells an approver to use and asserts
@@ -130,18 +143,78 @@ test("the programme total is the per-run ceiling times the runs, not a separate 
     );
 });
 
-test("the schema every request carries is counted as input", () => {
+test("the schema every request carries is counted as input, and moves the figures", () => {
     // `memoryExtractionProvider` sends the output schema with
     // `strictJsonSchema`, so it is billed on every call. The estimate left it
-    // out entirely, understating the input side by about 7% per case — which is
-    // several times the rounding room the ceiling has.
+    // out entirely, understating the input side by about 7% per case — several
+    // times the rounding room the ceiling has.
+    //
+    // Asserted against the schema this repository actually ships rather than
+    // against `> 0`: a stub returning 1 satisfied that, and so would a report
+    // that printed a constant and summed something else. Recomputing the
+    // envelope here with the same estimator and requiring the printed figure to
+    // equal it is what ties the number to the schema, and the mean to the
+    // number.
     const output = run();
-    const schemaTokens = Number(numberAfter(output, "  of which the JSON schema").trim());
-    const meanTokens = Number(numberAfter(output, "mean input tokens per case").trim());
-    assert.ok(schemaTokens > 0, `the schema is not counted:\n${output}`);
-    assert.ok(
-        meanTokens > schemaTokens,
-        "the mean does not include the schema it reports"
+    // The row carries a qualifier after the number — it is an estimate of the
+    // envelope, not something the provider counted — so read the number off the
+    // front rather than parsing the whole row.
+    const printed = Number(
+        /^\s*(\d+)/.exec(numberAfter(output, "  of which the JSON schema"))?.[1]
+    );
+    const mean = Number(numberAfter(output, "mean input tokens per case").trim());
+
+    const envelope = estimatePromptTokens(
+        JSON.stringify({
+            name: "memory_extraction_candidates",
+            strict: true,
+            schema: MEMORY_EXTRACTION_OUTPUT_SCHEMA,
+        })
+    );
+    assert.equal(printed, envelope, "the printed schema cost is not this schema's");
+    assert.ok(printed > 100, `${printed} is too small to be this schema`);
+
+    // And the mean carries it: adding a field to the schema has to move the
+    // mean by the same amount, which a report summing only the prompt text
+    // would not do.
+    const withExtraField = estimatePromptTokens(
+        JSON.stringify({
+            name: "memory_extraction_candidates",
+            strict: true,
+            schema: {
+                ...MEMORY_EXTRACTION_OUTPUT_SCHEMA,
+                description: "an added field, to move the envelope",
+            },
+        })
+    );
+    assert.ok(withExtraField > envelope, "the envelope does not track the schema");
+
+    // And the mean really carries it. `mean > envelope` was the first version
+    // of this assertion and proves nothing — 3,654 is greater than 281 whether
+    // or not the schema was added. So the prompt-only mean is recomputed here
+    // the way the report computes it, and the printed mean has to be that plus
+    // the envelope.
+    const promptOnly =
+        harnessTarget().cases.reduce((sum, testCase) => {
+            const conversations = testCase.conversations.map((conversation) => ({
+                externalConversationId: conversation.externalConversationId,
+                title: conversation.title,
+                messages: conversation.messages.map((message) => ({
+                    externalMessageId: message.externalMessageId,
+                    role: message.role,
+                    content: message.content,
+                    contentDigest: "0".repeat(64),
+                })),
+            }));
+            const { prompt } = toExtractionPromptInput(conversations);
+            return sum + estimatePromptTokens(`${prompt.system}\n${prompt.user}`);
+        }, 0) / harnessTarget().cases.length;
+
+    assert.equal(
+        mean,
+        Math.round(promptOnly + envelope),
+        `the printed mean ${mean} is not the prompt mean ${promptOnly} plus the ` +
+            `${envelope}-token schema envelope`
     );
 });
 
