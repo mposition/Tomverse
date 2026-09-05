@@ -132,6 +132,52 @@ test("the figures decide when they can, and a false flag does not overrule them"
     );
 });
 
+test("a figure can be finite and still not be a cost or a ceiling", () => {
+    // `Number.isFinite` was the whole test, and it admits values that are not
+    // what the field means. A run cannot spend a negative amount, so an
+    // artifact saying it did is reporting something other than its spend; and a
+    // zero ceiling is not a ceiling any live run was approved under.
+    //
+    // Reproduced before it was fixed: `accruedCostUsd: -1` beside
+    // `runCeilingUsd: 7` and `exceededCostCeiling: false` came back Admissible
+    // with exit 0.
+    for (const [accruedCostUsd, ceilingUsd] of [
+        [-1, 7],
+        [-0.0001, 7],
+        [1, 0],
+        [1, -7],
+    ]) {
+        assert.equal(
+            exceededSpendCeiling({ live: true, accruedCostUsd, ceilingUsd }),
+            false,
+            `${accruedCostUsd} vs ${ceilingUsd} answered instead of declining`
+        );
+        // And declining is not the same as answering: the manifest form has to
+        // say `unknown`, and it must not let a `false` flag answer for figures
+        // that are there and unusable.
+        assert.deepEqual(
+            manifestExceededSpendCeiling({
+                mode: "live",
+                accruedCostUsd,
+                runCeilingUsd: ceilingUsd,
+                exceededCostCeiling: false,
+            }),
+            { exceeded: false, source: "unknown" },
+            `${accruedCostUsd} vs ${ceilingUsd} was answered by the flag`
+        );
+    }
+    // Zero spend is real: a live run refused at admission, or aborted before
+    // its first dispatch, reached no provider.
+    assert.deepEqual(
+        manifestExceededSpendCeiling({
+            mode: "live",
+            accruedCostUsd: 0,
+            runCeilingUsd: 7,
+        }),
+        { exceeded: false, source: "derived" }
+    );
+});
+
 test("a live run whose spend cannot be compared says so, and is not a pass", () => {
     // The hole this closes. `{ exceeded: false, source: "unknown" }` was read
     // by the checker as `.exceeded === false`, printed `OK`, and exited 0 — a

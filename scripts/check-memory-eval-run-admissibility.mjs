@@ -93,12 +93,17 @@ const RULES = [
         // which an older artifact or a hand-edited one can — read as
         // Admissible with exit 0.
         key: "exceededCostCeiling",
-        // The flag when the artifact has one, **and the two figures when it
-        // does not**. The first version read only the flag, so an artifact
-        // written before 2026-09-05 — carrying `accruedCostUsd: 7.0001` beside
-        // `runCeilingUsd: 7` and no verdict — came back Admissible with exit
-        // 0. Every artifact this project has ever produced is in that
-        // category, which makes the fallback the part that matters.
+        // The figures decide when they can, and the flag when they cannot —
+        // not "the flag first", which is how this comment used to read and is
+        // not what `manifestExceededSpendCeiling()` does. Numbers that say a
+        // run went over beat a `false` flag beside them; a `true` flag is
+        // agreed with rather than overridden.
+        //
+        // The first version read only the flag, so an artifact written before
+        // 2026-09-05 — carrying `accruedCostUsd: 7.0001` beside
+        // `runCeilingUsd: 7` and no verdict — came back Admissible with exit 0.
+        // Every artifact this project has ever produced is in that category,
+        // which makes reading the figures the part that matters.
         fails: (m) => manifestExceededSpendCeiling(m).exceeded,
         discards: true,
         met: "finished having spent more than the approved ceiling",

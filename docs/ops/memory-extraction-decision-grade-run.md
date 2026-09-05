@@ -243,7 +243,9 @@ decision-grade workflow와 같은 사전 검사를 두어, 그 경우 `Missing s
 막지 못하고 **인용을 막습니다.** 지출 자체를 막으려면 다음 호출 비용을 dispatch
 전에 예약해야 하며, 그것은 별도 작업입니다.
 
-**수치가 없거나 손상된 live artifact는 세 번째 경우**이고 위 표의 마지막 줄입니다.
+**수치가 없거나 사용할 수 없는 live artifact는 세 번째 경우**이고, 위 표에서
+`exceededCostCeiling` 바로 다음 줄(다섯째 줄)입니다 — 마지막 줄은
+`spendCeilingReliable`이고 그쪽은 판정을 폐기하지 않습니다.
 `exceededCostCeiling`이 없고 `accruedCostUsd`·`runCeilingUsd`도 비교할 수 없으면,
 그 artifact는 초과하지 않았다고 말하는 것이 아니라 **아무 말도 하지 못합니다.**
 검사기가 그것을 `OK`로 찍고 통과시킨 적이 있어(2026-09-05) 지금은 폐기 사유입니다.
