@@ -25,6 +25,7 @@ import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse } from "yaml";
+import { resolveBashCommand } from "./support/gitBash.mjs";
 
 const WORKFLOW_PATH = new URL(
     "../.github/workflows/auto-pr-to-develop.yml",
@@ -32,6 +33,16 @@ const WORKFLOW_PATH = new URL(
 );
 const workflowText = readFileSync(WORKFLOW_PATH, "utf8");
 const steps = parse(workflowText).jobs["auto-pr"].steps;
+
+// Resolved rather than looked up. `spawnSync("bash")` on Windows finds
+// System32's WSL launcher first unless the suite happens to have been
+// started from a Git Bash session, and on a machine with no distribution
+// installed that launcher fails talking about WSL -- three cases below then
+// fail for a reason that has nothing to do with the workflow.
+const bash = resolveBashCommand();
+const noBash = bash
+    ? false
+    : "no usable bash: git's installation has no bin/bash.exe or usr/bin/bash.exe, and PATH offers only the WSL launcher";
 
 // Looked up rather than asserted here: a workflow that has lost either step
 // should fail the test that names the property it lost, not the module load.
@@ -97,7 +108,7 @@ function runCreateStep({ openPrNumber = "", createFails = false } = {}) {
             "",
         ].join("\n");
 
-        const result = spawnSync("bash", ["-c", prelude + createStep.run], {
+        const result = spawnSync(bash, ["-c", prelude + createStep.run], {
             cwd: dir,
             env: {
                 ...process.env,
@@ -133,7 +144,7 @@ function runCreateStep({ openPrNumber = "", createFails = false } = {}) {
     }
 }
 
-test("a push to a branch whose PR is already open arms nothing", () => {
+test("a push to a branch whose PR is already open arms nothing", { skip: noBash }, () => {
     // The regression. A human turned auto-merge off on PR #1256; this is the
     // next push. The step must report that it created nothing, and must not
     // open a second pull request either.
@@ -156,7 +167,9 @@ test("a push to a branch whose PR is already open arms nothing", () => {
     );
 });
 
-test("the run that opens the pull request reports the number it opened", () => {
+test("the run that opens the pull request reports the number it opened", {
+    skip: noBash,
+}, () => {
     const run = runCreateStep({ openPrNumber: "" });
 
     assert.equal(run.status, 0, run.stderr);
@@ -165,7 +178,7 @@ test("the run that opens the pull request reports the number it opened", () => {
     assert.equal(run.createCalls, 1);
 });
 
-test("a failed creation is not reported as a creation", () => {
+test("a failed creation is not reported as a creation", { skip: noBash }, () => {
     // Without an explicit check `gh pr create` could fail and the step still
     // fall through to its success path -- which would hand the arming step a
     // number belonging to some other pull request, or none at all.
@@ -190,6 +203,69 @@ test("the arming step is handed a number and never looks one up", () => {
         "${{ steps.create-pr.outputs.number }}",
         "the number must come from the step that created the PR"
     );
+});
+
+test("the System32 launcher never wins, however early it sits on PATH", () => {
+    // The regression this guards is silent in the worst way: WSL's launcher
+    // is also called bash.exe, it is first on PATH in every Windows shell
+    // except Git Bash, and what it reports is its own absence of a
+    // distribution -- so the three cases above would fail with a message
+    // about installing Linux while the workflow they check was fine.
+    const system32 = "C:\\Windows\\System32";
+    const windowsApps = "C:\\Users\\x\\AppData\\Local\\Microsoft\\WindowsApps";
+    const gitBin = "C:\\Program Files\\Git\\usr\\bin";
+
+    const hostilePath = [system32, windowsApps, gitBin].join(";");
+    const resolved = resolveBashCommand({
+        platform: "win32",
+        env: { PATH: hostilePath },
+        // git cannot answer, so PATH is all there is -- the case where the
+        // exclusion by name is the only thing doing the work.
+        gitExecPath: () => null,
+        isFile: () => true,
+    });
+
+    assert.equal(resolved, `${gitBin}\\bash.exe`);
+});
+
+test("git's own installation is preferred over anything on PATH", () => {
+    const resolved = resolveBashCommand({
+        platform: "win32",
+        env: { PATH: "C:\\Windows\\System32" },
+        gitExecPath: () => "C:\\Program Files\\Git\\mingw64\\libexec\\git-core",
+        isFile: (candidate) => candidate === "C:\\Program Files\\Git\\bin\\bash.exe",
+    });
+
+    assert.equal(resolved, "C:\\Program Files\\Git\\bin\\bash.exe");
+});
+
+test("no usable interpreter is null, not a launcher that cannot run the script", () => {
+    // Reported as a skip by the caller. Returning the launcher instead would
+    // turn a missing tool into three failures blaming the workflow.
+    const resolved = resolveBashCommand({
+        platform: "win32",
+        env: { PATH: "C:\\Windows\\System32" },
+        gitExecPath: () => null,
+        isFile: () => true,
+    });
+
+    assert.equal(resolved, null);
+});
+
+test("everywhere but Windows the PATH lookup is the right answer", () => {
+    for (const platform of ["linux", "darwin"]) {
+        assert.equal(
+            resolveBashCommand({
+                platform,
+                env: { PATH: "/usr/bin" },
+                gitExecPath: () => {
+                    throw new Error("git must not be consulted off Windows");
+                },
+            }),
+            "bash",
+            platform
+        );
+    }
 });
 
 test("nothing else in the workflow can enable auto-merge", () => {
