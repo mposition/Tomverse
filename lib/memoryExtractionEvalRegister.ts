@@ -753,18 +753,25 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "mem-eval-succ-9, scored under mem-score-v3.5. Registered " +
                 "unfunded and never run: `decideEvalRunMode()` refuses a live " +
                 "run as `unknown_pair` without an entry and as " +
-                "`pair_not_runnable` without a budget, and this closes only " +
-                "the first of those. " +
+                "`no_eval_budget` without a budget, and this closes only the " +
+                "first of those. (`pair_not_runnable` is a third refusal, for " +
+                "a status that is neither candidate nor approved.) " +
                 "A budget proposal with the figures to fill in is " +
                 ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md " +
-                "— US$6.50 per run and US$13.00 across two: the raw worst " +
-                "case from `npm run report:memory-eval-cost-estimate` on succ-9 " +
-                "with every answer at the 4,096-token ceiling is US$6.4928602 " +
-                "per run, rounded UP to the cent. The report used to print that " +
-                "to nearest, which gave US$6.49 — a ceiling below the worst " +
-                "case it bounds — and it now rounds ceilings up and prints the " +
-                "raw value beside them. Approving is a human act and is not " +
-                "done here. " +
+                "— US$6.56 per run and US$13.12 across two. The raw worst case " +
+                "from `npm run report:memory-eval-cost-estimate` on succ-9, " +
+                "with every answer at the 4,096-token ceiling, is US$6.5574902 " +
+                "per run, rounded UP to the cent. Two corrections got it " +
+                "there: the report rounded ceilings to nearest, which can put " +
+                "a ceiling below the worst case it bounds, and it counted only " +
+                "the prompt text while every request also carries the output " +
+                "JSON schema as input. " +
+                "What is left over the worst case is US$0.0025 per run, about " +
+                "ten input tokens per case, and those token counts are " +
+                "estimated rather than the provider's own — so whether to hold " +
+                "margin above them for estimator error is the approver's " +
+                "judgement and is not decided here. Approving is a human act " +
+                "and is not done here. " +
                 "v7's budget, approval and run history do not transfer: the " +
                 "prompt digest, both dataset digests, the manifest digest and " +
                 "the contract version have all moved, and v7's own record is a " +

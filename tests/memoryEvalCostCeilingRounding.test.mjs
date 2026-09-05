@@ -24,7 +24,7 @@ import { spawnSync } from "node:child_process";
  * was correct.
  */
 
-const run = () =>
+const invoke = (args = []) =>
     spawnSync(
         process.execPath,
         [
@@ -32,9 +32,30 @@ const run = () =>
             "--import",
             "tsx",
             "scripts/report-memory-eval-cost-estimate.mjs",
+            ...args,
         ],
         { cwd: new URL("..", import.meta.url), encoding: "utf8" }
-    ).stdout;
+    );
+
+/**
+ * The output, and only after the command is known to have succeeded.
+ *
+ * The first version of this file read `.stdout` and threw the rest away, so a
+ * command that printed a correct-looking report and then exited non-zero — or
+ * printed nothing at all and failed — passed every assertion below, because a
+ * regex that finds nothing in an empty string is the only thing that would have
+ * complained, and these look for numbers that were already there.
+ */
+const run = (args = []) => {
+    const result = invoke(args);
+    assert.equal(
+        result.status,
+        0,
+        `the report exited ${result.status}:\n${result.stdout}${result.stderr}`
+    );
+    assert.equal(result.stderr, "", `the report wrote to stderr:\n${result.stderr}`);
+    return result.stdout;
+};
 
 const numberAfter = (output, label) => {
     const row = output
@@ -84,6 +105,9 @@ test("the programme total is the per-run ceiling times the runs, not a separate 
     // arithmetic nobody intended — US$6.50 per run against a US$12.99 programme
     // is exactly the shape.
     const output = run();
+    // The label is the report's own; the section it cites is
+    // docs/policy/external-conversation-import-and-memory.md §12.4, the
+    // independent re-run.
     const runs = Number(numberAfter(output, "runs (§12.4 independent re-run)").trim());
     const perRun = Number(
         /US\$([\d.]+)/.exec(numberAfter(output, "per run  (evalBudget.maxUsd)"))?.[1]
@@ -106,12 +130,55 @@ test("the programme total is the per-run ceiling times the runs, not a separate 
     );
 });
 
+test("the schema every request carries is counted as input", () => {
+    // `memoryExtractionProvider` sends the output schema with
+    // `strictJsonSchema`, so it is billed on every call. The estimate left it
+    // out entirely, understating the input side by about 7% per case — which is
+    // several times the rounding room the ceiling has.
+    const output = run();
+    const schemaTokens = Number(numberAfter(output, "  of which the JSON schema").trim());
+    const meanTokens = Number(numberAfter(output, "mean input tokens per case").trim());
+    assert.ok(schemaTokens > 0, `the schema is not counted:\n${output}`);
+    assert.ok(
+        meanTokens > schemaTokens,
+        "the mean does not include the schema it reports"
+    );
+});
+
+test("a fractional run count is refused rather than costed", () => {
+    // `--runs=1.5` produced a report and a ceiling derived from one and a half
+    // provider dispatches. `maxProviderDispatchedRuns` counts runs that either
+    // happen or do not, so there was nothing to approve in that figure.
+    for (const bad of ["--runs=1.5", "--runs=0", "--runs=-2", "--runs=two"]) {
+        const result = invoke([bad]);
+        assert.notEqual(result.status, 0, `${bad} produced a report:\n${result.stdout}`);
+        assert.match(result.stderr, /--runs must be a positive integer/);
+        assert.equal(result.stdout, "", `${bad} printed a costing before refusing`);
+    }
+    // And a whole one still works, so the guard is not refusing everything.
+    assert.match(run(["--runs=3"]), /runs \(§12\.4 independent re-run\) *3/);
+});
+
 test("the report still says what it does not cover", () => {
-    // The ceiling bounds this model of the worst case. It is not a bound on
-    // what the provider bills: rounding on their side is outside it and the
-    // report says so, which is the honest half of handing over a number.
+    // The ceiling bounds this script's model of the worst case. It is not a
+    // bound on what the provider bills — rounding on their side is outside it,
+    // and so is any difference between this estimator and the provider's
+    // tokenizer. Saying so is the honest half of handing over a number, and the
+    // report used to claim the opposite: "a run that behaves cannot exceed it".
     const output = run();
     assert.match(output, /does not include/);
     assert.match(output, /provider-side rounding/);
+    assert.match(output, /tokenizer/);
     assert.match(output, /NOT a quote/i);
+    // The old claim may appear, but only in quotation marks as the thing this
+    // report no longer says. A bare `doesNotMatch` caught the retraction itself,
+    // which would have pushed the next author to delete the sentence that
+    // explains the change rather than the claim.
+    for (const line of output.split("\n").filter((l) => l.includes("cannot exceed it"))) {
+        assert.match(line, /"[^"]*cannot exceed it/, `an unquoted claim: ${line}`);
+    }
+    assert.match(output, /the honest claim is narrower/);
+    // The room it does have, stated as a number rather than implied.
+    assert.match(output, /How much room the ceiling has over the worst case/);
+    assert.match(output, /input tokens per case/);
 });

@@ -44,6 +44,7 @@ import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_MIN_SAMPLES_PER_CATEGORY_ARM } from "../lib/memoryExtractionEvalCore.ts";
 import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
 import {
+    MEMORY_EXTRACTION_OUTPUT_SCHEMA,
     MEMORY_EXTRACTION_PROMPT_VERSION,
     toExtractionPromptInput,
 } from "../lib/memoryExtractionPrompt.ts";
@@ -63,7 +64,12 @@ const argValue = (name, fallback) => {
 
 const modelId = argValue("model", MEMORY_EXTRACTION_EVAL_REGISTER[0]?.extractionModelId);
 const runs = Number(argValue("runs", "2"));
-if (!Number.isFinite(runs) || runs < 1) {
+// Whole runs. The message said "positive integer" and the check tested
+// `Number.isFinite`, so `--runs=1.5` produced a report and a per-run ceiling
+// derived from one and a half provider dispatches — a figure with nothing to
+// approve, since `maxProviderDispatchedRuns` is a count of runs that either
+// happen or do not.
+if (!Number.isInteger(runs) || runs < 1) {
     console.error(`--runs must be a positive integer (got "${argValue("runs", "")}").`);
     process.exit(1);
 }
@@ -96,6 +102,28 @@ if (!model) {
  */
 const ASSUMED_OUTPUT_TOKENS = 1_024;
 
+/**
+ * The JSON schema every request carries, in input tokens.
+ *
+ * `memoryExtractionProvider` sends `Output.object({ schema, name })` with
+ * `strictJsonSchema`, so the schema is part of the request and is billed as
+ * input on **every call** — 1,061 characters of it, about 281 tokens once the
+ * name and the strict flag are counted. It was missing from this estimate
+ * entirely, which understated the input side by roughly 7% per case and, at
+ * 1,150 cases, by about US$0.065 per run.
+ *
+ * Estimated with the same estimator as the prompt rather than hard-coded: the
+ * schema changes when the output contract does, and a number written here
+ * would then describe a request nobody makes.
+ */
+const schemaTokens = estimatePromptTokens(
+    JSON.stringify({
+        name: "memory_extraction_candidates",
+        strict: true,
+        schema: MEMORY_EXTRACTION_OUTPUT_SCHEMA,
+    })
+);
+
 /** Input tokens for one case, built from the prompt the harness actually sends. */
 const promptTokensFor = (testCase) => {
     const conversations = testCase.conversations.map((conversation) => ({
@@ -109,7 +137,9 @@ const promptTokensFor = (testCase) => {
         })),
     }));
     const { prompt } = toExtractionPromptInput(conversations);
-    return estimatePromptTokens(`${prompt.system}\n${prompt.user}`);
+    // Plus the schema, which goes with every request rather than with the
+    // prompt text.
+    return estimatePromptTokens(`${prompt.system}\n${prompt.user}`) + schemaTokens;
 };
 
 const measured = MEMORY_EVAL_CASES.map(promptTokensFor);
@@ -172,7 +202,11 @@ const perThousandOutputPerRun = costFor(floorTotal, 1_000) - inputOnlyPerRun;
  * reproduce this script to see what was rounded.
  */
 const usd = (value) => `US$${value.toFixed(2)}`;
-const ceilCents = (value) => Math.ceil(value * 100 - 1e-9) / 100;
+// No epsilon. An epsilon large enough to absorb float noise is large enough
+// to pull a value that sits just above a cent boundary back down onto it, and
+// a ceiling that rounds *any* input down is not a ceiling. Over-approximating
+// by a cent is the safe direction and the only one available.
+const ceilCents = (value) => Math.ceil(value * 100) / 100;
 const line = (label, value) => console.log(`${label.padEnd(42)} ${value}`);
 
 console.log(`memory extraction eval — cost estimate (NOT a quote)\n`);
@@ -182,7 +216,8 @@ line("input (USD / 1M tokens)", pricing.inputUsdPerMillionTokens);
 line("output (USD / 1M tokens)", pricing.outputUsdPerMillionTokens);
 
 console.log(`\nmeasured on the ${MEMORY_EVAL_CASES.length} adopted case(s) of ${MEMORY_EVAL_DATASET_VERSION}:`);
-line("mean prompt tokens per case", Math.round(meanPromptTokens));
+line("mean input tokens per case", Math.round(meanPromptTokens));
+line("  of which the JSON schema", schemaTokens);
 line("per-call output ceiling", MAX_OUTPUT_TOKENS);
 
 console.log(`\nprojected onto the §12.2 floor:`);
@@ -216,18 +251,37 @@ line(
 line("raw worst case, per run / all runs", `${worstPerRun} / ${worstPerRun * runs}`);
 
 console.log(
-    "\nSet the ceiling from the worst case, not the assumption. A run that behaves\n" +
-        "cannot exceed it, and a run that does not is exactly what a ceiling is for. A\n" +
-        "run stopped by that ceiling is truncated, and a truncated run is not\n" +
-        "decision-grade -- so the worst case is the number to approve, not the number to\n" +
-        "fear."
+    "\nSet the ceiling from the worst case, not the assumption: the assumption is\n" +
+        "about answer length, and a ceiling exists for the run that does not behave.\n" +
+        "A run stopped by its ceiling is truncated, and a truncated run is not\n" +
+        "decision-grade."
+);
+
+console.log(
+    `\nHow much room the ceiling has over the worst case: US$${(perRunCeilingUsd - worstPerRun).toFixed(7)}\n` +
+        `per run, which is about ${Math.floor(
+            ((perRunCeilingUsd - worstPerRun) * 1_000_000) /
+                pricing.inputUsdPerMillionTokens /
+                floorTotal
+        )} input tokens per case. That is rounding room, not a margin\n` +
+        "for error, and the difference matters because the token counts above are\n" +
+        "**estimated**, not the provider's own. This script does not tokenise with the\n" +
+        "provider's tokenizer, so the worst case it computes can be low by more than a\n" +
+        "cent of rounding -- and a ceiling below the real worst case stops a run that\n" +
+        "was behaving.\n" +
+        "\n" +
+        "So the honest claim is narrower than \"a run that behaves cannot exceed it\":\n" +
+        "this bounds the model of the worst case that this script computes. Whether to\n" +
+        "hold margin above it for estimator error is a judgement, and it belongs to\n" +
+        "whoever approves the budget rather than to this line."
 );
 
 console.log(
     "\nWhat this figure does not include: blind review set generation, any\n" +
-        "re-run after a failure, and provider-side rounding. It also prices the\n" +
-        "adopted dataset's mean prompt length -- cases still in the candidate pool\n" +
-        "are not measured, and a longer conversation costs more."
+        "re-run after a failure, provider-side rounding, and any difference between\n" +
+        "this estimator and the provider's tokenizer. It also prices the adopted\n" +
+        "dataset's mean prompt length -- cases still in the candidate pool are not\n" +
+        "measured, and a longer conversation costs more."
 );
 
 if (MEMORY_EVAL_CASES.length < floorTotal) {
