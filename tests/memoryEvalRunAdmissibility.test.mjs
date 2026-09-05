@@ -25,6 +25,7 @@ const ADMISSIBLE = {
     commitSha: "0".repeat(40),
     workingTreeDirty: false,
     truncatedByCostCeiling: false,
+    exceededCostCeiling: false,
     abortedOnConsecutiveFailures: false,
     decisionGrade: true,
     spendCeilingReliable: true,
@@ -51,6 +52,11 @@ test("each discarding signal discards on its own", () => {
     for (const [field, value] of [
         ["workingTreeDirty", true],
         ["truncatedByCostCeiling", true],
+        // Added after an artifact carrying this and `decisionGrade: true` was
+        // fed to the checker by hand and came back Admissible with exit 0.
+        // Producing one is now impossible from the harness; reading one was
+        // not, and old artifacts predate the field entirely.
+        ["exceededCostCeiling", true],
         ["abortedOnConsecutiveFailures", true],
         ["decisionGrade", false],
         ["commitSha", "unknown"],

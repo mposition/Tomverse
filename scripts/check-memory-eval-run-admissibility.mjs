@@ -75,6 +75,21 @@ const RULES = [
         action: "discard and re-run with a ceiling that fits the run",
     },
     {
+        // Its own rule, not folded into the truncation above. The two are
+        // different facts about a run and only one of them was checked: a
+        // truncated run stopped early at the ceiling, an over-ceiling run
+        // finished having passed it on a call the pre-dispatch comparison
+        // could not see. An artifact carrying `exceededCostCeiling: true` and
+        // `decisionGrade: true` — which the harness will not now produce, but
+        // which an older artifact or a hand-edited one can — read as
+        // Admissible with exit 0.
+        key: "exceededCostCeiling",
+        fails: (m) => m.exceededCostCeiling === true,
+        discards: true,
+        met: "finished having spent more than the approved ceiling",
+        action: "discard — the run that happened is not the run approved",
+    },
+    {
         key: "abortedOnConsecutiveFailures",
         fails: (m) => m.abortedOnConsecutiveFailures === true,
         discards: true,

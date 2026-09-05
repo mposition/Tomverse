@@ -224,9 +224,23 @@ decision-grade workflow와 같은 사전 검사를 두어, 그 경우 `Missing s
 | `commitSha` 가 `unknown`(또는 없음) | 회차가 자기 commit을 대지 못함 | 폐기 |
 | `workingTreeDirty: true` | commit이 실행을 설명하지 못함 | 폐기·재실행 |
 | `truncatedByCostCeiling: true` | 상한에서 잘림, 전체 표본이 아님 | 폐기·재실행 |
+| `exceededCostCeiling: true` | 상한을 넘긴 채 완주 — 승인된 회차가 아님 | 폐기·재승인 |
 | `abortedOnConsecutiveFailures: true` | 5회 연속 실패 — 고장이지 불운이 아님 | 폐기, 원인 조사 |
 | `decisionGrade` 가 `true` 가 아님 | live·floor·frozen 중 하나가 빠짐 | 인용 불가 |
 | `spendCeilingReliable` 가 `true` 가 아님 | 가격 미해석 호출 있음 — 지출은 하한값 | **판정은 유효**, 비용만 청구서로 정산 |
+
+`truncatedByCostCeiling`과 `exceededCostCeiling`은 **같은 상한에 대한 서로 다른
+사실**입니다. 앞은 상한 때문에 일찍 멈춘 회차이고, 뒤는 상한을 넘긴 채 끝까지 간
+회차입니다. 둘이 필요한 이유는 상한 비교의 위치에 있습니다 — harness는
+**다음 호출을 보내기 전에** 누적 비용을 상한과 비교하고, 비용은 **응답이 온 뒤에**
+더해집니다. 그래서 마지막 호출의 비용은 **지출 전에는 비교되지 않고, 응답 뒤에
+사후 비교**됩니다.
+
+그러므로 `maxUsd`는 hard ceiling이 아니라 **soft threshold**입니다. 가격이
+해석되는 한 초과폭은 **최대 한 호출분**이고(가격 해석에 실패하면
+`spendCeilingReliable`이 `false`가 되어 그 보장도 없습니다), 사후 비교는 지출을
+막지 못하고 **인용을 막습니다.** 지출 자체를 막으려면 다음 호출 비용을 dispatch
+전에 예약해야 하며, 그것은 별도 작업입니다.
 
 `commitSha` 줄이 맨 위인 이유는 그것 없이는 `workingTreeDirty`를 믿을 수 없기
 때문입니다. git이 없는 곳에서 돌리면 `git rev-parse`가 실패해 commit이

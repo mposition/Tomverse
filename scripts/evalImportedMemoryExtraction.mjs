@@ -972,10 +972,11 @@ if (ceilingExceeded && !costStopped) {
         `\nOVER CEILING — finished having spent US$${accruedCostUsd.toFixed(4)} ` +
             `against an approved US$${runMode.ceilingUsd}.\n` +
             "The loop checks the ceiling before each dispatch and cost is added after\n" +
-            "each response, so the last call is never checked against it. The money is\n" +
-            "already spent; what this refuses is the claim that the run was the one\n" +
-            "approved. Not decision-grade, and the answer is a fresh approval rather\n" +
-            "than a note explaining the overrun."
+            "each response, so the last call was not checked BEFORE it was spent. It is\n" +
+            "checked now, which is what this line is. The money is already gone; what\n" +
+            "this refuses is the claim that the run was the one approved. Not\n" +
+            "decision-grade, and the answer is a fresh approval rather than a note\n" +
+            "explaining the overrun."
     );
 }
 if (costStopped) {
