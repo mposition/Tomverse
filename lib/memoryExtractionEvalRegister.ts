@@ -753,14 +753,19 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
             owner: "@mposition",
             registeredAt: "2026-09-05",
             notes:
-                "Candidate for mem-extract-v8 against the frozen " +
-                "mem-eval-succ-9, scored under mem-score-v3.5. Registered " +
-                "unfunded and never run: `decideEvalRunMode()` refuses a live " +
-                "run as `unknown_pair` without an entry and as " +
-                "`no_eval_budget` without a budget, and this closes only the " +
-                "first of those. (`pair_not_runnable` is a third refusal, for " +
-                "a status that is neither candidate nor approved.) " +
-                "A budget proposal with the figures to fill in is " +
+                "Closed. Ran once on 2026-09-05, failed §12.3 and was revoked " +
+                "the same day; the run is recorded further down. What " +
+                "follows first is the registration, kept in the tense it " +
+                "was written in so the sequence stays legible. " +
+                "REGISTERED 2026-09-05: candidate for mem-extract-v8 against " +
+                "the frozen mem-eval-succ-9, scored under mem-score-v3.5. " +
+                "Registered unfunded and not yet run: `decideEvalRunMode()` " +
+                "refused a live run as `unknown_pair` without an entry and " +
+                "as `no_eval_budget` without a budget, and registration " +
+                "closed only the first of those. (`pair_not_runnable` is a " +
+                "third refusal, for a status that is neither candidate nor " +
+                "approved — it is the one this entry refuses on now.) " +
+                "The budget proposal with the figures to fill in was " +
                 ".github/audits/memory-eval-v8-budget-proposal-2026-09-05.md " +
                 "— US$6.56 per run and US$13.12 across two. The raw worst case " +
                 "from `npm run report:memory-eval-cost-estimate` on succ-9, " +
@@ -774,8 +779,8 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                 "ten input tokens per case, and those token counts are " +
                 "estimated rather than the provider's own — so whether to hold " +
                 "margin above them for estimator error is the approver's " +
-                "judgement and is not decided here. Approving is a human act " +
-                "and is not done here. " +
+                "judgement and was not decided there. Approving was a human " +
+                "act and was done separately, on the same day. " +
                 "v7's budget, approval and run history do not transfer: the " +
                 "prompt digest, both dataset digests, the manifest digest and " +
                 "the contract version have all moved, and v7's own record is a " +
@@ -869,11 +874,13 @@ export const MEMORY_EXTRACTION_EVAL_REGISTER: readonly MemoryExtractionEvalEntry
                         "a1d804c6b9359b722c60b1309c7324176f72c54008d2a616fa78dd520a6b44ae",
                 },
             },
-            // Still null, and still the point. A budget opens `--live`; it does
-            // not approve the pair. `status` stays `candidate` until §12.4 has
-            // been walked — decision-grade run, blind review, independent
-            // reproduction, approver sign-off — and this field is where that
-            // evidence goes when it exists.
+            // Still null, and now permanently so. This field holds §12.4
+            // evidence for an approved pair; the pair was revoked instead, on
+            // a decision-grade run that failed clearly enough that the
+            // independent reproduction was not run at all. A budget opened
+            // `--live` and never approved anything, which is the distinction
+            // this field exists to keep: the run happened and is recorded in
+            // `notes`, and no approval followed it.
             evaluation: null,
         },
     ];

@@ -872,14 +872,28 @@ gold가 인정하지 않은 후보                        121
   gold가 인용하지 않는 message를 인용               1
 
 run이 매칭하지 못한 gold 항목                     128
-  relabelled (같은 message를 인용, 이름만 다름)   100
+  relabelled (같은 message를 인용한 후보가 있음)  100
   silent (그 사례에서 아무것도 내지 않음)          28
   elsewhere                                         0
 ```
 
-**`relabelled` 100건이 핵심입니다.** 보고서 자신의 표현으로 「the fact was found
-and named differently, which is a taxonomy question rather than a miss」입니다.
-놓친 gold 128건 중 100건이 여기 속합니다.
+**`relabelled` 100건이 핵심이되, 그 뜻을 좁혀서 읽어야 합니다.** 이 분류가
+말하는 것은 **「그 gold 항목과 같은 message를 인용한 후보가 존재했다」**뿐입니다.
+같은 message를 인용했다는 것이 **같은 사실을 뽑았다는 증명은 아닙니다** — 한
+발화에 여러 사실이 들어 있을 수 있고, 후보가 그중 다른 것을 말했을 수도
+있습니다.
+
+보고서 자신은 이 100건을 「the fact was found and named differently, which is
+a taxonomy question rather than a miss」라고 부르지만, 그것은 **가장 유력한
+해석이지 판정이 아닙니다.** 보고서도 마지막 줄에서 「It does not decide whether
+a group is a prompt defect, a taxonomy mismatch, a gold defect or a model
+error — that call is a person's」라고 적습니다. 이 문서에서 확인한 표본
+(11·25번, 그리고 아래 인용한 사례들)에서는 실제로 문장이 충실하고 라벨만
+달랐지만, 100건 전부가 그렇다고 말할 근거는 없습니다.
+
+그러므로 안전한 진술은 이것입니다 — **놓친 gold 128건 중 100건은 그 사례에서
+모델이 침묵한 것이 아니라 같은 발화를 근거로 무언가를 냈고, 그것이 gold와
+매칭되지 않았다.** 그 100건이 각각 무엇이었는지는 사례별 판정의 대상입니다.
 
 그리고 **미인정 후보 121건이 전부 사용자 자신의 발화를 인용했습니다.** assistant의
 말을 사용자 것으로 돌린 경우는 0건입니다 — 보고서가 이 열을 두는 이유가 그
@@ -896,11 +910,25 @@ gold=negated 인데 같은 kind 후보가 affirmed   (직접 비교)   31
 gold=negated 인데 후보 중 affirmed 가 있음     (느슨한 대조) 40
 ```
 
-> **미해결 하나.** @mposition은 「기존 정확 보고서에서 직접 비교되는
-> negated → affirmed는 26건」이라고 지시했습니다. 같은 보고서의 자료구조를
-> 두 정의로 세었으나 26이 나오지 않았고(31 / 40), gold 1건·후보 1건인
-> 사례로만 좁힌 세 번째 정의에서는 24가 나왔습니다. 재현하지 못한 숫자를
-> 적지 않고, 어느 정의에서 26이 나오는지 확인을 요청합니다.
+**26건이라는 숫자도 맞습니다. 다른 보고서의 다른 집계입니다.** 처음에는 이
+문서가 26을 재현하지 못했다고 적었는데, 같은 보고서 안에서만 찾았기
+때문이었습니다.
+
+```
+26   report:memory-eval-failures
+     후보 쪽 token 일치 near miss —「Tokens match, something else differs」
+     73건 중 polarity 만 negated -> affirmed 인 사례 (kind 동일, 중복 제거)
+
+31   report:memory-eval-failure-diagnosis
+     gold 쪽 same-message relabel — 같은 kind 후보가 affirmed
+40   같은 보고서, 후보 중 affirmed 가 하나라도 있으면
+24   같은 보고서, gold 1건·후보 1건인 사례로만 좁혔을 때
+```
+
+**둘은 서로의 근사치가 아닙니다.** 앞은 후보에서 출발해 token이 맞는지 보고,
+뒤는 gold에서 출발해 같은 message를 인용했는지 봅니다. 출발점도 대조 기준도
+달라서 같은 값이 나올 이유가 없고, 어느 쪽도 다른 쪽보다 정확한 것이
+아닙니다. **섞어 쓰지 않고 출처와 정의를 함께 적습니다.**
 
 정의가 무엇이든 방향은 하나입니다 — **gold는 `negated`, 모델은 `affirmed`**.
 그런데 모델이 쓴 문장은 부정을 제대로 담고 있습니다.
@@ -916,8 +944,8 @@ succ-assistant-en-604   gold constraint/negated     모델 constraint/affirmed
 **문장은 맞고 라벨만 틀렸습니다.** 이것이 중요한 이유는 이 세 건
 (`succ-assistant-ko-605`, `succ-assistant-en-604`, `succ-assistant-ko-606`)이
 **critical bulk-safe 채택으로 계산됐다**는 것입니다. zero-tolerance gate는
-「저장하면 안 될 것을 저장했다」를 세는 자리인데, 여기서는 「맞는 것을 잘못된
-라벨로 저장했다」를 세고 있습니다.
+「일괄 승인 대상이 되면 안 될 것을 그렇게 냈다」를 세는 자리인데, 여기서는
+「맞는 것을 잘못된 라벨로 냈다」를 세고 있습니다.
 
 ### 2. 한국어 굴절형
 
@@ -967,7 +995,11 @@ goldTotal >  0    8건   gold가 무언가를 기대했고 모델이 낸 것이 
 1건을 가장 유리하게 해석해도 결론은 바뀌지 않습니다」라고 적은 것과 같은
 구조이며, 라벨 오류까지 가장 유리하게 해석해도 마찬가지입니다.
 
-## revoked 전환 전에 정해야 하는 것
+## revoked 전환 전에 정해야 했던 것 — 검토 시점의 상태
+
+> **이 절은 결정 *전*의 상태를 남긴 것입니다.** 여기서 제기한 물음에는 아래
+> 「최종 결정」에서 답이 내려졌고, 이 절은 그때 무엇이 열려 있었는지를 보이기
+> 위해 고치지 않고 둡니다.
 
 서명은 「중대한 실행·채점 결함이 없으면 revoked로 종료」라고 조건을 달았습니다.
 실행 결함은 없습니다 — 완주했고 admissible이며 비용도 상한 안입니다. **채점
@@ -977,9 +1009,7 @@ goldTotal >  0    8건   gold가 무언가를 기대했고 모델이 낸 것이 
   「일괄 승인 대상이 되면 안 될 것을 그렇게 냄」으로 세어지는 경우가 관측됩니다.
   gate의 숫자와 gate가 말하려는 것이 어긋납니다. `bulk_safe`는 자동 저장이 아니라
   일괄 승인 자격이므로, 위반의 결과는 「몰래 저장됨」이 아니라 「개별로 보았어야
-  할 것이 일괄 승인 목록에 섞임」입니다. (`bulk_safe`는 자동 저장이 아니라
-  일괄 승인 자격이므로, 위반의 결과는 「몰래 저장됨」이 아니라 「사용자가 개별로
-  보았어야 할 것이 일괄 승인 목록에 섞임」입니다.)
+  할 것이 일괄 승인 목록에 섞임」입니다.
 - **한국어 값 대조가 활용형에서 어긋납니다.** ko arm이 en arm보다 낮은 것이
   모델 능력 차이인지 대조 방식 차이인지 지금 숫자로는 갈라낼 수 없습니다.
 
@@ -989,4 +1019,28 @@ v9 설계에 그대로 넘어가고, 그때 나오는 정밀도·재현율도 �
 §5가 「숫자가 재지 못한 것을 보는 자리」라고 말한 것이 이것입니다.
 
 **판단은 사람의 것입니다.** 이 문서는 관측과 그 해석까지이고, revoked 전환
-시점과 채점 계약 수정 여부는 결정하지 않았습니다.
+시점과 채점 계약 수정 여부는 이 시점에 결정하지 않았습니다.
+
+## 최종 결정 (2026-09-05)
+
+위 물음에 답이 내려졌습니다. **채점 결함은 finding으로 채택하되 v8을 구하지
+못하고, pair는 `revoked`로 종료합니다.**
+
+판정 근거는 하나로 갈립니다 — **gold가 아무것도 기대하지 않는 critical case
+10건에서 bulk-safe 후보가 나온 사실**입니다. 이것은 polarity·kind·한국어 형태
+대조 어느 것으로도 설명되지 않으며 허용 기준 0건을 독립적으로 위반합니다.
+그러므로 이 회차는 `mem-score-v3.5` 아래의 **유효한 부정 증거**이고, 동시에
+그 precision·recall과 critical 18건을 **모델의 절대 품질로 일반화해서는
+안 됩니다.**
+
+서명 전문과 register 반영은 다음에 있습니다.
+
+- `docs/ops/memory-extraction-decision-grade-run.md` §10 —
+  「1회차 판정과 서명」(blind review 전)과 「1회차 최종 결정 (unblind 이후)」
+  두 문단. 앞의 것은 고쳐 쓰지 않고 그대로 둡니다.
+- `lib/memoryExtractionEvalRegister.ts` — `status: "revoked"`,
+  `evaluation: null` 유지, `evalBudget`은 집행된 이력으로 보존.
+
+ordinal 2는 승인되지 않았고 실행되지 않았습니다. 다음 유료 평가는 후속 scoring
+contract와 dataset이 검토·동결된 뒤에만 가능합니다 — 이 문서가 남긴 채점
+finding이 그 작업의 입력입니다.

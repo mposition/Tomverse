@@ -161,7 +161,6 @@ test("only the pair whose binding is satisfied can run live", () => {
     // second run; that is precisely why the status, not the ceiling, is what
     // closes it.
     //
-    // Two again since 2026-09-05: `mem-extract-v8` was funded at US$7.00 x 2
     // Back to one on 2026-09-05, later the same day: v8 was funded at
     // US$7.00 x 2, ran once and was revoked on an admissible §12.3 failure
     // with 18 critical bulk-safe adoptions against a gate of zero

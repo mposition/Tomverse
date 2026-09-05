@@ -25,21 +25,25 @@
 
 ## 1. 지금 어디인가
 
-`docs/ops/memory-extraction-eval-dataset.md` §9의 8단계 중 **5단계**입니다.
+**`gpt-5-6-luna::mem-extract-v8` 회차는 2026-09-05에 종료됐습니다.** 8단계 중
+7단계에서 `approved`가 아니라 `revoked`로 닫혔고, 8단계는 시작되지 않았습니다.
+다음 유료 평가는 후속 scoring contract와 dataset이 검토·동결된 뒤에만
+가능하므로, 그때 이 표는 새 대상으로 다시 씁니다.
 
 | # | 단계 | 상태 |
 |---|---|---|
 | 1 | 지침 합의 + 착수 승인 | 완료 (2026-08-23) |
 | 2 | batch 작성·검수 | 완료 — 28 batch, 1,150건 |
-| 3 | 동결 | 완료 — 처음 `mem-eval-seed-11`(2026-08-24), 현재 대상은 `mem-eval-succ-9`(2026-09-04 서명·동결) |
-| 4 | eval 실행 예산 승인 | 완료 — 현재 대상은 US$7.00 × 2회(2026-09-05). 이전: US$20/issue #837(v2), US$6.285 × 2(v6), US$6.39 × 2(v7) |
-| 5 | **decision-grade 실행 → blind review → 독립 재실행** | ← 여기 |
-| 6 | §12.3 판정 | |
-| 7 | register `approved` + 서명 | |
-| 8 | staging 검증 → flag | |
+| 3 | 동결 | 완료 — 처음 `mem-eval-seed-11`(2026-08-24), 이 회차 대상은 `mem-eval-succ-9`(2026-09-04 서명·동결) |
+| 4 | eval 실행 예산 승인 | 완료 — 이 회차는 US$7.00 × 2회(2026-09-05), 실제 집행 US$0.8828. 이전: US$20/issue #837(v2), US$6.285 × 2(v6), US$6.39 × 2(v7) |
+| 5 | decision-grade 실행 → blind review → 독립 재실행 | **부분 완료** — 1회차 실행(Actions run 33953094398)과 40건 blind review·unblind 대조까지. **독립 재실행은 승인되지 않았고 실행되지 않았습니다** — 1회차의 미달이 명백했기 때문이며, §11.2가 그 경우 2회차를 만들지 말라고 정합니다 |
+| 6 | §12.3 판정 | 완료 — **미통과**. 세 지표가 aggregate·ko·en에서 각각 미달이고 critical bulk-safe 채택 18건(기준 0건). §10에 서명 |
+| 7 | register `approved` + 서명 | **`approved` 아님 — `revoked`로 종료**(2026-09-05). `evaluation`은 `null`, `evalBudget`은 집행 이력으로 보존 |
+| 8 | staging 검증 → flag | 시작하지 않음. `memoryExtractionEnabled`·`memoryInjectionEnabled` 둘 다 OFF |
 
-동결로 harness의 거절 사유에서 dataset이 빠졌습니다. 남은 것은 `OPENAI_API_KEY`
-하나이고, 예산 없는 `gpt-5-4-mini`는 그대로 거절입니다.
+실행 기록은 §10, 검토 기록은 `docs/ops/memory-eval-blind-review-run1.md`입니다.
+그 검토가 남긴 채점 finding — polarity 태그, kind 분류, 한국어 형태 대조 —
+이 다음 scoring contract 작업의 입력이고, provider 호출 없이 진행합니다.
 
 ## 2. 실행 전 확인 — 전부 기계가 합니다
 
