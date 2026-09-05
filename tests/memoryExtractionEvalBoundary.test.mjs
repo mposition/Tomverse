@@ -239,20 +239,18 @@ test("only a funded, open pair can run live, and it is named", () => {
     // approved US$6.39 x 2 is still on the record and would still cover a
     // second run; that is precisely why the status, not the ceiling, is what
     // closes it.
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        // Funded 2026-09-05 (US$7.00 x 2, @mposition), and the first pair in
-        // this list whose instrument is the one the tree currently assembles:
-        // `mem-eval-succ-9` under `mem-score-v3.5` with `mem-extract-v8`.
-        // Being here means the register would allow the run; the binding
-        // agrees too, so what stands between this pair and a provider is an
-        // explicit `--run-ordinal`, not another gate
-        // (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md).
-        //
-        // `status` is still `candidate`. A budget opens `--live`; approving
-        // the pair is §12.4 and has not happened.
-        "gpt-5-6-luna::mem-extract-v8",
-    ]);
+    // One entry again since 2026-09-05, later the same day. `mem-extract-v8`
+    // was funded at US$7.00 x 2, ran once (Actions run 33953094398) and was
+    // revoked on the result: an admissible decision-grade failure, US$0.8828
+    // of the ceiling spent, every §12.3 floor missed and 18 critical
+    // bulk-safe adoptions against a gate of zero. Its blind review found
+    // scoring defects and they did not rescue it — 10 of those adoptions sit
+    // in cases whose gold expects nothing at all, which no relabelling
+    // explains. So v8 joins v5, v6 and v7: funded, spent, closed on the
+    // status ahead of the budget
+    // (docs/ops/memory-eval-blind-review-run1.md,
+    // docs/ops/memory-extraction-decision-grade-run.md §10).
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
     // became.

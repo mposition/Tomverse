@@ -162,15 +162,17 @@ test("only the pair whose binding is satisfied can run live", () => {
     // closes it.
     //
     // Two again since 2026-09-05: `mem-extract-v8` was funded at US$7.00 x 2
-    // (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md) and is now
-    // the entry where the register and the binding both say yes. v4 is still
-    // here and still cannot fund a run, for the reason the next test gives —
-    // which is why this list is "the register would allow it", not "this would
-    // run".
-    assert.deepEqual(runnable, [
-        "gpt-5-6-luna::mem-extract-v4",
-        "gpt-5-6-luna::mem-extract-v8",
-    ]);
+    // Back to one on 2026-09-05, later the same day: v8 was funded at
+    // US$7.00 x 2, ran once and was revoked on an admissible §12.3 failure
+    // with 18 critical bulk-safe adoptions against a gate of zero
+    // (docs/ops/memory-eval-blind-review-run1.md). Its budget stays on the
+    // record and would still cover a second run — which is again why the
+    // status, not the ceiling, is what closes a pair.
+    //
+    // v4 is still here and still cannot fund a run, for the reason the next
+    // test gives — which is why this list is "the register would allow it",
+    // not "this would run".
+    assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
 });
 
 test("v4's budget cannot fund a run, because it names no instrument", () => {
