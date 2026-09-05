@@ -340,18 +340,27 @@ test("every dataset a run could be scored against is in the scanned set", () => 
     const runnable = harnessTargetVersions().filter(
         (version) => harnessTargetBindingFailures(harnessTarget(version)).length === 0
     );
-    // The guard says what it saw, and that is how its one failure was
-    // diagnosed. "No dataset is runnable" alone sent a reader looking for a
-    // logic error; the refusals it now prints said every schema-3 dataset was
-    // computing a dataset digest its manifest never recorded — the same wrong
-    // value each time, which is a stale module rather than a race.
+    // The guard says what it saw, and that is what diagnosed its one failure —
+    // eventually, and not before I got the diagnosis wrong once in writing.
     //
-    // It is tsx's transpile cache, and it is local: the failure reproduces
-    // when the whole suite runs concurrently with a warm cache, disappears
-    // when the cache is cleared, and returns once it refills. Standalone runs
-    // and CI, which starts from a cold cache, never see it. Nothing here is
-    // wrong; the instrument was. Clear it with
-    // `rm -rf $LOCALAPPDATA/Temp/tsx-*` before trusting a local sweep.
+    // "No dataset is runnable" alone sent a reader looking for a logic error.
+    // The refusals it now prints said every schema-3 dataset from succ-6 on was
+    // computing a dataset digest its manifest never recorded, with succ-4 and
+    // succ-5 unaffected and the same wrong value every run. I read "stable
+    // wrong value" as a stale transpile cache; clearing tsx's cache did make a
+    // run come back clean, which looked like confirmation and was coincidence.
+    //
+    // It was `memoryEvalSucc6FreezeDrift`, which appended `(drift)` to a case
+    // in the **working tree** and restored it in a `finally`. The suite runs
+    // concurrently, so every process loading that module inside the window read
+    // the mutation — succ-6 and everything downstream of it, always the same
+    // bytes, which is why the wrong digests were stable. Clearing the cache
+    // only changed the timing, and therefore which test overlapped the window.
+    // That test edits a sandbox copy now.
+    //
+    // Kept as a note because the guard is what made it findable at all: a bare
+    // `assert.ok(runnable.length > 0)` would have said only that a precondition
+    // failed.
     assert.ok(
         runnable.length > 0,
         "no dataset is runnable, so this proves nothing: " +

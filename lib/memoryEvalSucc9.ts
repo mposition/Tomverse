@@ -64,10 +64,10 @@ import {
  * its `scoringContractDigest` is recomputed rather than inherited is that a
  * dataset records the contract it was frozen under.
  *
- * `mem-eval-succ-8` is untouched and stays resolvable. It is the dataset the
- * harness scores until succ-9 is signed and frozen; the move is a separate
- * step, for the reason succ-7's own record gives — a signature covers a
- * sample, and pointing the harness at one is a different decision.
+ * `mem-eval-succ-8` is untouched and stays resolvable. It was the dataset the
+ * harness scored until succ-9 was signed and frozen; the move came afterwards
+ * as its own step, for the reason succ-7's own record gives — a signature
+ * covers a sample, and pointing the harness at one is a different decision.
  */
 
 const sha256 = (input: string): string =>
