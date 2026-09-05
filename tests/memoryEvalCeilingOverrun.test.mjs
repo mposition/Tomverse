@@ -178,6 +178,65 @@ test("a figure can be finite and still not be a cost or a ceiling", () => {
     );
 });
 
+test("a false flag never rescues, and a true flag can always condemn", () => {
+    // The contract, pinned in both directions because the code and its
+    // description disagreed about one corner of it: unusable figures beside
+    // `exceededCostCeiling: true` returned `flag`, while the note above the
+    // function said `unknown` regardless of the flag.
+    //
+    // Either behaviour discards the run, so what the choice decides is the
+    // reason that ends up in the record — "it overspent" or "nobody can tell".
+    // The `true` flag wins, because the harness wrote it from its own live
+    // state and unusable figures make the derivation impossible without making
+    // that statement false.
+    for (const [accruedCostUsd, runCeilingUsd] of [
+        [-1, 7],
+        [1, 0],
+        ["4.2", 7],
+    ]) {
+        assert.deepEqual(
+            manifestExceededSpendCeiling({
+                mode: "live",
+                accruedCostUsd,
+                runCeilingUsd,
+                exceededCostCeiling: true,
+            }),
+            { exceeded: true, source: "flag" },
+            `a true flag did not survive ${accruedCostUsd} vs ${runCeilingUsd}`
+        );
+        assert.deepEqual(
+            manifestExceededSpendCeiling({
+                mode: "live",
+                accruedCostUsd,
+                runCeilingUsd,
+                exceededCostCeiling: false,
+            }),
+            { exceeded: false, source: "unknown" },
+            `a false flag rescued ${accruedCostUsd} vs ${runCeilingUsd}`
+        );
+    }
+    // And with figures that read fine, the same asymmetry: `true` is agreed
+    // with, `false` is overruled by numbers that disagree.
+    assert.deepEqual(
+        manifestExceededSpendCeiling({
+            mode: "live",
+            accruedCostUsd: 1,
+            runCeilingUsd: 7,
+            exceededCostCeiling: true,
+        }),
+        { exceeded: true, source: "flag" }
+    );
+    assert.deepEqual(
+        manifestExceededSpendCeiling({
+            mode: "live",
+            accruedCostUsd: 7.1,
+            runCeilingUsd: 7,
+            exceededCostCeiling: false,
+        }),
+        { exceeded: true, source: "derived" }
+    );
+});
+
 test("a live run whose spend cannot be compared says so, and is not a pass", () => {
     // The hole this closes. `{ exceeded: false, source: "unknown" }` was read
     // by the checker as `.exceeded === false`, printed `OK`, and exited 0 — a

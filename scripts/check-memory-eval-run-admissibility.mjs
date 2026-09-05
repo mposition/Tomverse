@@ -93,11 +93,15 @@ const RULES = [
         // which an older artifact or a hand-edited one can — read as
         // Admissible with exit 0.
         key: "exceededCostCeiling",
-        // The figures decide when they can, and the flag when they cannot —
-        // not "the flag first", which is how this comment used to read and is
-        // not what `manifestExceededSpendCeiling()` does. Numbers that say a
-        // run went over beat a `false` flag beside them; a `true` flag is
-        // agreed with rather than overridden.
+        // A `false` flag never rescues; a `true` flag can always condemn.
+        //
+        // Not "the flag first", which is how this comment used to read and is
+        // not what `manifestExceededSpendCeiling()` does: numbers that say a
+        // run went over beat a `false` flag beside them, and numbers that
+        // cannot be read are not rescued by one either. A `true` flag outlives
+        // both — the harness wrote it from its own live state — and honouring
+        // it records the more specific reason, since either way the run is
+        // discarded.
         //
         // The first version read only the flag, so an artifact written before
         // 2026-09-05 — carrying `accruedCostUsd: 7.0001` beside
