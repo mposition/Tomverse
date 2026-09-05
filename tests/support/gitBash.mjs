@@ -17,19 +17,26 @@
  * `null` means no usable bash was found. The caller decides what that means --
  * a shell-behaviour test skips loudly rather than failing, because "this machine
  * has no Git Bash" is not the defect it is guarding.
+ *
+ * Paths are handled with the path module for the platform being *asked about*,
+ * never the one running. `node:path`'s default binding follows the host, so on
+ * Linux `join("C:\\Windows\\System32", "bash.exe")` is not a Windows path and
+ * `delimiter` is `:` -- which splits `C:\...` into `C` and the rest. The win32
+ * cases below are exercised on the Linux runner, so a resolver that borrowed the
+ * host's separators would answer `C/bash.exe` there and prove nothing.
  */
 
 import { existsSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { win32 as winPath } from "node:path";
 
-/** Ancestors of the git exec path, nearest first, up to the filesystem root. */
+/** Ancestors of the git exec path, nearest first, up to the drive root. */
 const ancestors = (start, limit = 8) => {
     const chain = [];
-    let current = resolve(start);
+    let current = winPath.normalize(start);
     for (let depth = 0; depth < limit; depth += 1) {
         chain.push(current);
-        const parent = dirname(current);
+        const parent = winPath.dirname(current);
         if (parent === current) break;
         current = parent;
     }
@@ -86,10 +93,10 @@ export function resolveBashCommand({
     if (execPath) {
         for (const root of ancestors(execPath)) {
             for (const relative of [
-                join("bin", "bash.exe"),
-                join("usr", "bin", "bash.exe"),
+                winPath.join("bin", "bash.exe"),
+                winPath.join("usr", "bin", "bash.exe"),
             ]) {
-                const candidate = join(root, relative);
+                const candidate = winPath.join(root, relative);
                 if (!isWindowsSystemLauncher(candidate) && isFile(candidate)) {
                     return candidate;
                 }
@@ -99,10 +106,11 @@ export function resolveBashCommand({
 
     // Last resort, for an installation laid out differently than the one this
     // was written against. Still not a PATH lookup by `spawnSync`: the entries
-    // are read here so the two system launchers can be refused by name.
-    for (const entry of (env.PATH ?? env.Path ?? "").split(delimiter)) {
+    // are read here so the two system launchers can be refused by name. The
+    // separator is Windows' own, not the host's.
+    for (const entry of (env.PATH ?? env.Path ?? "").split(";")) {
         if (!entry) continue;
-        const candidate = join(entry, "bash.exe");
+        const candidate = winPath.join(entry, "bash.exe");
         if (!isWindowsSystemLauncher(candidate) && isFile(candidate)) {
             return candidate;
         }
