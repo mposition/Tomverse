@@ -165,14 +165,15 @@ tokenizer보다 input을 그만큼 적게 세고 있어도 상한 안에 들어�
 
 ### 2.4 `maxUsd`는 hard ceiling이 아닙니다
 
-**harness는 상한을 다음 호출 직전에만 비교하고, 비용은 응답이 온 뒤에 더합니다.**
-그래서 **한 실행의 마지막 호출은 상한과 비교되지 않습니다.** 마지막 응답이
-상한을 넘겨도 `costStopped`는 false로 끝나고, 그 실행이 decision-grade로
-보고될 수 있었습니다.
+**harness는 상한을 다음 호출 직전에 비교하고, 비용은 응답이 온 뒤에 더합니다.**
+그래서 마지막 호출의 비용은 **지출 전에는 비교되지 않습니다.** 예전에는 그것으로
+끝이었고 — 마지막 응답이 상한을 넘겨도 `costStopped`가 false로 끝나 그 실행이
+decision-grade로 보고될 수 있었습니다.
 
-최소한의 방어를 넣었습니다 — 루프가 끝난 뒤 `accruedCostUsd > ceiling`이면
-`exceededCostCeiling`으로 기록하고 **decision-grade를 거절**합니다. 요약에도
-`OVER CEILING`으로 찍습니다.
+지금은 **루프가 끝난 뒤에 사후 비교**합니다. 초과면 `exceededCostCeiling`으로
+기록하고 **decision-grade를 거절**하며 요약에 `OVER CEILING`을 찍습니다. 판정은
+`lib/memoryEvalSpendCeiling.mjs`에 있고 harness·admissibility checker·테스트가
+같은 함수를 부릅니다.
 
 **이것은 지출을 막지 않습니다.** 관측되는 시점에 돈은 이미 나갔습니다. 막으려면
 **다음 호출의 비용을 dispatch 전에 예약**해야 하고, 그 예약값은 정확도가 지금

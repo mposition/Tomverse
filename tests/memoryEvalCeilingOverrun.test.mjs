@@ -94,7 +94,21 @@ test("an artifact from before the flag existed is still caught", () => {
     });
 });
 
-test("the flag is preferred, and its absence is not an answer", () => {
+test("the figures decide when they can, and a false flag does not overrule them", () => {
+    // An earlier version of this test was called "the flag is preferred", which
+    // is not what the code does and not what it should do: when the numbers are
+    // present they decide, and a `false` flag beside numbers that say otherwise
+    // loses. A `true` flag is agreed with rather than overridden, so the two
+    // directions cannot cancel each other out.
+    assert.deepEqual(
+        manifestExceededSpendCeiling({
+            mode: "live",
+            exceededCostCeiling: false,
+            accruedCostUsd: 7.1,
+            runCeilingUsd: 7,
+        }),
+        { exceeded: true, source: "derived" }
+    );
     assert.deepEqual(
         manifestExceededSpendCeiling({
             mode: "live",
@@ -104,21 +118,44 @@ test("the flag is preferred, and its absence is not an answer", () => {
         }),
         { exceeded: true, source: "flag" }
     );
+    // Figures present and under: `derived`, not `unknown`. The first version
+    // reported `derived` only when the derivation was true, so a bounded run
+    // looked indistinguishable from an artifact that could say nothing — and a
+    // caller failing closed on `unknown` discarded it.
     assert.deepEqual(
         manifestExceededSpendCeiling({
             mode: "live",
-            exceededCostCeiling: false,
-            accruedCostUsd: 1,
+            accruedCostUsd: 6.9,
             runCeilingUsd: 7,
         }),
+        { exceeded: false, source: "derived" }
+    );
+});
+
+test("a live run whose spend cannot be compared says so, and is not a pass", () => {
+    // The hole this closes. `{ exceeded: false, source: "unknown" }` was read
+    // by the checker as `.exceeded === false`, printed `OK`, and exited 0 — a
+    // live run whose spend nobody could compare against its ceiling, presented
+    // as one that stayed inside it.
+    for (const manifest of [
+        { mode: "live" },
+        { mode: "live", accruedCostUsd: "7.5", runCeilingUsd: 7 },
+        { mode: "live", accruedCostUsd: 7.5 },
+        { mode: "live", runCeilingUsd: 7 },
+        { mode: "live", accruedCostUsd: NaN, runCeilingUsd: 7 },
+    ]) {
+        assert.deepEqual(
+            manifestExceededSpendCeiling(manifest),
+            { exceeded: false, source: "unknown" },
+            JSON.stringify(manifest)
+        );
+    }
+    // A `false` flag is still an answer with nothing to compare: the harness
+    // wrote it, and it says what that run did.
+    assert.deepEqual(
+        manifestExceededSpendCeiling({ mode: "live", exceededCostCeiling: false }),
         { exceeded: false, source: "flag" }
     );
-    // No flag and nothing to derive from: `unknown`, so a reader can tell "did
-    // not overspend" from "cannot say".
-    assert.deepEqual(manifestExceededSpendCeiling({ mode: "live" }), {
-        exceeded: false,
-        source: "unknown",
-    });
 });
 
 /* ----------------------------------------------------------- the wiring -- */
@@ -160,4 +197,12 @@ test("the admissibility checker asks the same function", () => {
         /import \{ manifestExceededSpendCeiling \} from "\.\.\/lib\/memoryEvalSpendCeiling\.mjs";/
     );
     assert.match(source, /fails: \(m\) => manifestExceededSpendCeiling\(m\)\.exceeded,/);
+    // And reads the source, not only the verdict. Reading `.exceeded` alone is
+    // what let an uncomparable live run print OK.
+    assert.match(
+        source,
+        /manifestExceededSpendCeiling\(m\)\.source === "unknown"/,
+        "the checker no longer refuses a live run it cannot compare"
+    );
+    assert.match(source, /key: "spendComparableToCeiling"/);
 });

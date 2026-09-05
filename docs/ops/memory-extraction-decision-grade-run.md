@@ -138,9 +138,9 @@ harness는 모르는 flag를 조용히 버리므로 10건을 요청하고 1,150�
 상태로 알리므로 통과하지 못한 회차는 live 단계가 빨갛게 끝나는데, 그것은 오류가
 아니라 **결과**입니다. admissibility가 묻는 것은 다른 질문 — 이 회차를 인용해도
 되는가 — 이고, 그 판정이 읽는 신호(§3의 표: `commitSha`·dirty tree·상한 절단·
-연속 실패 중단·`decisionGrade`·`spendCeilingReliable`)에는 **판정이 들어 있지
-않습니다.** 통과하지 못했지만 인용 가능한 회차는 존재하며, 그것이 바로 기록을
-읽어야 하는 회차입니다.
+**상한 초과**·**상한과 비교 불가**·연속 실패 중단·`decisionGrade`·
+`spendCeilingReliable`)에는 **판정이 들어 있지 않습니다.** 통과하지 못했지만
+인용 가능한 회차는 존재하며, 그것이 바로 기록을 읽어야 하는 회차입니다.
 
 `always()`가 없던 동안 **실패한 회차를 진단하는 두 단계가 곧 실패한 회차가
 건너뛰는 두 단계**였습니다. 2026-08-26 run1이 1,150건을 전부 측정하고 critical
@@ -225,6 +225,7 @@ decision-grade workflow와 같은 사전 검사를 두어, 그 경우 `Missing s
 | `workingTreeDirty: true` | commit이 실행을 설명하지 못함 | 폐기·재실행 |
 | `truncatedByCostCeiling: true` | 상한에서 잘림, 전체 표본이 아님 | 폐기·재실행 |
 | `exceededCostCeiling: true` | 상한을 넘긴 채 완주 — 승인된 회차가 아님 | 폐기·재승인 |
+| live인데 지출·상한 수치를 비교할 수 없음 | 이 회차가 승인 범위 안이었는지 말할 수 있는 것이 없음 | 폐기 |
 | `abortedOnConsecutiveFailures: true` | 5회 연속 실패 — 고장이지 불운이 아님 | 폐기, 원인 조사 |
 | `decisionGrade` 가 `true` 가 아님 | live·floor·frozen 중 하나가 빠짐 | 인용 불가 |
 | `spendCeilingReliable` 가 `true` 가 아님 | 가격 미해석 호출 있음 — 지출은 하한값 | **판정은 유효**, 비용만 청구서로 정산 |
@@ -241,6 +242,13 @@ decision-grade workflow와 같은 사전 검사를 두어, 그 경우 `Missing s
 `spendCeilingReliable`이 `false`가 되어 그 보장도 없습니다), 사후 비교는 지출을
 막지 못하고 **인용을 막습니다.** 지출 자체를 막으려면 다음 호출 비용을 dispatch
 전에 예약해야 하며, 그것은 별도 작업입니다.
+
+**수치가 없거나 손상된 live artifact는 세 번째 경우**이고 위 표의 마지막 줄입니다.
+`exceededCostCeiling`이 없고 `accruedCostUsd`·`runCeilingUsd`도 비교할 수 없으면,
+그 artifact는 초과하지 않았다고 말하는 것이 아니라 **아무 말도 하지 못합니다.**
+검사기가 그것을 `OK`로 찍고 통과시킨 적이 있어(2026-09-05) 지금은 폐기 사유입니다.
+`spendCeilingReliable`과는 다릅니다 — 그쪽은 *일부 호출*의 가격을 못 구해 지출이
+하한값이라는 뜻이고 판정은 유효합니다.
 
 `commitSha` 줄이 맨 위인 이유는 그것 없이는 `workingTreeDirty`를 믿을 수 없기
 때문입니다. git이 없는 곳에서 돌리면 `git rev-parse`가 실패해 commit이

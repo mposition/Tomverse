@@ -105,6 +105,28 @@ const RULES = [
         action: "discard — the run that happened is not the run approved",
     },
     {
+        // Not the same as "did not overspend". A live artifact carrying no
+        // spend figures, or a corrupted one, produces
+        // `{ exceeded: false, source: "unknown" }` — and the rule above reads
+        // only `.exceeded`, so it printed `OK exceededCostCeiling` and the run
+        // exited 0. That is a live run whose spend nobody can compare against
+        // its ceiling, presented as one that stayed inside it.
+        //
+        // Distinct from `spendCeilingReliable`, which is deliberately not a
+        // discard: that says *some calls* could not be priced, so the accrued
+        // figure is a lower bound and the verdict stands while the cost is
+        // settled from the invoice. This says the artifact cannot state what it
+        // spent at all, which is not a cost-accounting problem but a missing
+        // fact about the run.
+        key: "spendComparableToCeiling",
+        fails: (m) =>
+            m.mode === "live" &&
+            manifestExceededSpendCeiling(m).source === "unknown",
+        discards: true,
+        met: "a live run with no comparable spend and ceiling figures",
+        action: "discard — nothing here can say the run stayed within approval",
+    },
+    {
         key: "abortedOnConsecutiveFailures",
         fails: (m) => m.abortedOnConsecutiveFailures === true,
         discards: true,
