@@ -10,6 +10,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { MEMORY_EXTRACTION_EVAL_REGISTER } from "../lib/memoryExtractionEvalRegister.ts";
+import { MEMORY_EXTRACTION_PROMPT_VERSION } from "../lib/memoryExtractionPrompt.ts";
 
 /** The guard's own needle, written once so the escaping is stated in one place. */
 const HARNESS_LIMIT_GUARD = `harness.includes(${JSON.stringify('argValue("limit"')})`;
@@ -212,21 +214,60 @@ test("the checkout can answer the ancestry the budget gate asks about", () => {
     assert.deepEqual(depths, ["0"], "a numeric depth expires without saying so");
 });
 
-test("the per-run ceiling defaults to the approved per-run figure", () => {
-    // US$6.285, not the US$12.57 programme total. The harness compares this
-    // against `accruedCostUsd`, which starts at zero every invocation, so a
-    // default carrying the programme figure would authorise it once per run.
-    // Pinned rather than range-checked: a default that drifts upward without
-    // this line moving is a ceiling nobody approved.
+test("the per-run ceiling defaults to the register's approved figure", () => {
+    // Compared against the register rather than pinned as a second copy of
+    // the number, which is how it went stale: the default sat at v6's US$6.285
+    // while the shipped pair became `mem-extract-v8` on `mem-eval-succ-9`,
+    // whose raw worst case is US$6.5574902. A default BELOW the worst case is
+    // not a conservative default — a dispatch taking it could pay for most of
+    // a run and then be truncated at a ceiling nobody approved for this
+    // instrument, and a truncated run is not decision-grade, so the whole
+    // spend is lost rather than part of it.
+    //
+    // The pair is resolved the way the harness resolves it: `gpt-5-6-luna` is
+    // its default `--model`, and the prompt version is whatever the tree
+    // ships. So this fails the day either moves without the workflow moving
+    // with it.
+    const entry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
+        (candidate) =>
+            candidate.extractionModelId === "gpt-5-6-luna" &&
+            candidate.promptVersion === MEMORY_EXTRACTION_PROMPT_VERSION
+    );
+    assert.ok(
+        entry,
+        `no register entry for gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION}`
+    );
+    assert.ok(
+        entry.evalBudget,
+        `gpt-5-6-luna::${MEMORY_EXTRACTION_PROMPT_VERSION} is unfunded, so this ` +
+            "workflow has no approved ceiling to default to"
+    );
+
     const inputs = workflow.slice(
         workflow.indexOf("      max_cost_usd:"),
         workflow.indexOf("      limit:")
     );
-    assert.match(inputs, /default: "6\.285"/);
-    assert.ok(
-        !inputs.includes('default: "12.57"'),
-        "the programme total is not a per-run ceiling"
+    const shown = /default: "([\d.]+)"/.exec(inputs)?.[1];
+    assert.ok(shown, `no default found:\n${inputs}`);
+    assert.equal(
+        Number(shown),
+        entry.evalBudget.maxUsd,
+        `the workflow defaults to US$${shown} and the register approves ` +
+            `US$${entry.evalBudget.maxUsd} per run`
     );
+
+    // And it is the per-run figure, not the programme total: the harness
+    // compares it against `accruedCostUsd`, which starts at zero every
+    // invocation, so a default carrying the programme figure would authorise
+    // that amount once per run.
+    const programme = entry.evalBudget.programmeMaxMicroUsd;
+    if (programme !== undefined) {
+        assert.notEqual(
+            Number(shown),
+            programme / 1_000_000,
+            "the programme total is not a per-run ceiling"
+        );
+    }
 });
 
 test("the free refusals run before the paid ones", () => {

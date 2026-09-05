@@ -3601,8 +3601,21 @@ const checks = [
     // and the module without the glob would run the job on every push.
     name: "Auto PR to Develop opens a PR only for branches that name develop as their target",
     file: ".github/workflows/auto-pr-to-develop.yml",
-    test: (source) => {
+    test: (raw) => {
+      // Newlines normalised first. On Windows this file is checked out with
+      // CRLF, and the branch-list parse below anchors with `^\s*` under `m`
+      // -- `\r` is a line terminator to that regex, so the match starts one
+      // character early and the list reads as empty. The rule then fails for
+      // a reason that has nothing to do with what it guards, which is the
+      // worst state for a check to be in: red for a non-defect, so a real
+      // drift underneath it goes unread.
+      const source = raw.replace(/\r\n/g, "\n");
       const policy = read("scripts/auto-pr-branch-policy.mjs");
+      // The arming step's own block, so what is asserted about it does not
+      // depend on where it sits in the file.
+      const armStep = source
+        .split(/\r?\n {6}- name: /)
+        .find((block) => /^[^\r\n]*auto-merge/i.test(block));
       // The whole list, not a match inside it. A pattern that only asserted
       // the two entries were present would pass with `- "claude/**"` appended
       // underneath them, which is the opt-out rule restored one line at a
@@ -3625,10 +3638,27 @@ const checks = [
         listed[0] === "to-develop/**" &&
         listed[1] === "**/to-develop/**" &&
         source.includes('node scripts/auto-pr-branch-policy.mjs "$BRANCH"') &&
-        // Every step that creates a pull request or arranges its merge, plus
-        // the diff check they both read. A step left ungated would run on a
-        // widened glob alone.
-        (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 3 &&
+        // The diff check and the step that creates the pull request. Two,
+        // not three: the arming step used to carry this same condition and
+        // now reads the create step's output instead, which is a stricter
+        // gate rather than a missing one -- `created` can only be `true` on
+        // a run where the create step ran, and that step is gated on the
+        // module. The chain is asserted rather than assumed, because an
+        // arming step that went back to consulting the glob directly would
+        // restore the count and lose the property.
+        (source.match(/steps\.target\.outputs\.create == 'true'/g) ?? []).length === 2 &&
+        // Armed once, by the run that opened the pull request. This step
+        // used to run on every push: it looked up whatever PR was open for
+        // the branch and called `gh pr merge --auto` on it, so auto-merge
+        // turned off by a person came back on at the next commit -- on
+        // 2026-09-05 #1256 merged into develop that way, under an
+        // instruction to hold it.
+        Boolean(armStep) &&
+        source.includes("if: steps.create-pr.outputs.created == 'true'") &&
+        // And it is handed the number rather than searching for one. A
+        // lookup here reaches an already-open pull request whatever the
+        // create step decided, which is the same defect by another route.
+        !armStep.includes("gh pr list") &&
         // The namespaces that open their own PRs are still refused, and still
         // refused ahead of the marker -- `feedback-autofix` records the number
         // of the PR its own workflow created, so a second one is not a
