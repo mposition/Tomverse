@@ -340,11 +340,18 @@ test("every dataset a run could be scored against is in the scanned set", () => 
     const runnable = harnessTargetVersions().filter(
         (version) => harnessTargetBindingFailures(harnessTarget(version)).length === 0
     );
-    // The guard says what it saw. "No dataset is runnable" alone sent a
-    // reader looking for a logic error when the answer was in the refusals
-    // themselves, and this test has failed once in a concurrent local run
-    // whose cause is still unexplained — a message that carries the evidence
-    // is the difference between diagnosing that and guessing at it.
+    // The guard says what it saw, and that is how its one failure was
+    // diagnosed. "No dataset is runnable" alone sent a reader looking for a
+    // logic error; the refusals it now prints said every schema-3 dataset was
+    // computing a dataset digest its manifest never recorded — the same wrong
+    // value each time, which is a stale module rather than a race.
+    //
+    // It is tsx's transpile cache, and it is local: the failure reproduces
+    // when the whole suite runs concurrently with a warm cache, disappears
+    // when the cache is cleared, and returns once it refills. Standalone runs
+    // and CI, which starts from a cold cache, never see it. Nothing here is
+    // wrong; the instrument was. Clear it with
+    // `rm -rf $LOCALAPPDATA/Temp/tsx-*` before trusting a local sweep.
     assert.ok(
         runnable.length > 0,
         "no dataset is runnable, so this proves nothing: " +
