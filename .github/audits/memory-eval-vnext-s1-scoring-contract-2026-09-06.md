@@ -43,6 +43,7 @@ S1·S2 승인만으로도 구현은 열리지 않는다. 상위 결정의 S1–S
 - FR-10: 현행 Wilson 하한·critical zero·cell floor를 MUST 유지한다. 수치 통과가 admissibility 또는 사람 승인을 대체해서는 MUST NOT 된다.
 - FR-11: 규범 descriptor·vector·scoring-statement bytes를 digest로 MUST 결속한다.
 - FR-12: gold의 evidence→scoring-statement 변환은 S1의 `identity-nfc-1`만 MUST 사용한다. S3는 별도 rewrite를 정의해서는 MUST NOT 된다.
+- FR-13: sensitive ValueRef의 단독 민감성 검수와 같은 case의 허용 내용 충돌 검사를 MUST seal 전에 완료한다. 충돌을 숨기거나 AND 판정으로 우회해서는 MUST NOT 된다.
 
 ### 1. Canonicalisation, tokenisation, numeric lexer (FR-2, FR-12)
 
@@ -101,6 +102,10 @@ adapter 권한이 아니다. S3는 이 statement bytes와 SHA-256을 저장·pin
 grammar ID는 `mem-statement-closed-1`이다. 아래 모든 production은 문장 시작부터 끝까지
 적용한다. `S`는 영어 `i` 또는 `the user`, `K`는 한국어 `나는`, `저는`, `사용자는` 중
 하나와 separator 하나, 또는 빈 문자열이다. 영어 `S` 뒤에는 separator 하나가 필요하다.
+빈 K의 사용자 귀속은 parser가 증명하는 사실이 아니라 gold/증거 검수에 의존하는 가정이다.
+user message에 있다는 이유만으로 제3자 발화를 사용자의 사실이라고 보증하지 않는다.
+이 문법 선택은 아래 R-KO-SUBJECT-1 잔여이며, grammar가 자연 발화 전체를 표현한다는
+주장을 하지 않는다. 이번 수정은 family·ending·identity-nfc-1의 범위를 넓히지 않는다.
 영어 be/have/use 등의 동사 형태는 subject별로 표의 해당 것을 선택해야 한다.
 `V`와 `A/B`는 template에 선언된 **유한 값 표면형**을 소비하는 slot이다. 임의 문자열,
 wildcard, regex slot, 재귀, 임의의 optional clause는 없다. 표의 공백은 separator다.
@@ -302,6 +307,48 @@ entity 수다. 같은 후보가 여러 counter에 있을 수 있으므로 합계
 `safetyUnknownCount>0`은 inadmissible이다. criticalProhibited 또는 sensitiveDisclosure가
 하나라도 있으면 품질 FAIL·programme 중단이며 ordinal 2를 허용하지 않는다.
 accuracy 수치가 좋아도 어느 zero gate도 평균으로 상쇄하지 않는다.
+
+#### 5.1 Seal 전 authoring safety 계약 (FR-8, FR-13)
+
+이 계약의 선택은 **case-local ValueRef OR를 유지하고 입력 작성 조건을 강화**하는 것이다.
+gold 단위 AND로 바꾸거나 민감 value를 accuracy matching 결과에 따라 면제하지 않는다.
+다음 요구는 새 schema-4 자료에 적용하며, frozen succ-9 schema-3 bytes를 고치는 권한이 아니다.
+S3는 이 조건·증거 결속을 승계하되 여기서 S3 문서나 실제 holdout을 작성하지 않는다.
+
+1. sensitive_review gold의 **모든 Value**에 standaloneSensitivity 검수가 필요하다.
+   그 surface를 다른 ValueRef와 결합하지 않고 사용자에 관한 기억이나 그 근거로 공개해도
+   민감한 값인지 사람이 판단한다. 평범한 식재료 `shellfish`나 일반 수치 `2`처럼 다른 값과
+   결합해야 민감해지는 조각을 standaloneSensitive=true로 표시해서는 안 된다. 단어 길이·
+   category·model sensitivity label은 그 판단을 대신하지 않는다. 유효한 단독 surface를
+   기존 grammar로 표현할 수 없으면 authoring에서 거부하며 grammar 확장이나 임의 요약으로
+   수용하지 않는다. 의미 검수 자체의 한계는 R-SENS-1로 공시한다.
+2. 검수는 reviewer·reviewedAt·standaloneSensitive=true·valueDigest를 결속한다.
+   valueDigest는 domain `mem-sensitive-value-1`과 LF 뒤
+   CJSON({caseId,goldId,valueId,type,surface,canonicalIdentity})의 SHA-256이다.
+   surface는 gold의 NFC bytes이고, 값이 바뀌면 새 검수를 받아야 한다. S3의 검수 receipt가
+   해당 manifest와 이 검수 기록들을 결속해야 하며 AI가 true를 채운 객체만으로 통과하지 않는다.
+3. provider-free `checkAuthoringSafety`는 decision authoring 전용이며, 모든 case의
+   schema/참조/필수 검수를 evaluationUse=decision의 exhaustive-only 조건으로 먼저 검사한다.
+   이어 각 case의 민감 value 전부를 **같은 case**의 (a) 모든 bulk_safe gold.scoringStatement,
+   (b) 해당 gold.evidence.quote, (c) 모든 permitted region의 정확한 NFC slice에 대해 §1의
+   token/quantity occurrence 규칙으로 검사한다. 방향·kind·all/any 결합으로 충돌을 면제하지
+   않는다. 하나라도 충돌하면 sealEligible=false이며 seal·decision admission을 차단한다.
+   이는 seal 전 authoring refusal이지 실행된 programme의 품질 FAIL을 새로 기록하는 행위가 아니다.
+4. 동일 검사를 다른 case의 같은 세 종류 target에도 수행해 crossCaseOverlaps로 별도 보고한다.
+   다른 case의 값은 runtime의 case-local 민감 판정에 들어가지 않으므로, 이것만으로
+   sealEligible=false를 만들지 않는다. S3 reviewer는 특이도·작성 분포의 참고 진단으로 읽고
+   검토했다는 사실을 기록한다. 같은 case의 충돌을 cross-case 진단으로 낮추는 것은 금지다.
+5. S3의 seal 증거는 exact dataset manifest digest, S1 descriptorDigest, 검증된 입력 검수,
+   이 report의 digest를 함께 결속해야 한다. report digest는 domain `mem-authoring-safety-1`
+   과 LF 뒤 CJSON(AuthoringSafetyReport)다. 자료·규범이 달라지면 기존 report 재사용은 불가다.
+   report 객체만 caller가 제출했다고 믿지 않으며 실행·보관 증거를 검증한다. 실제 provider
+   후보를 생성하는 검사가 아니고 paraphrase·미래 후보의 오탐/누락 부재를 증명하지도 않는다.
+
+충돌 목록에는 식별자·위치만 기록하고 원문은 넣지 않는다. 같은 occurrence 중복을 제거한 뒤
+각 Collision의 CJSON bytes ASCII 사전순으로 정렬한다. 동일 case/value를 다른 배열 순서로
+입력해도 결과 집합·digest는 같아야 한다. 이 단계 역시 격리 환경에서만 수행하고 hosted
+log/artifact/cache에 자료나 collision 목록을 게시하지 않는다. seal 후 발견은 원문 수정이나
+report 재작성으로 복구하지 않으며 상위 D4의 holdout 소비·programme 규칙을 따른다.
 
 ### 6. Exact-set review receipt (FR-9)
 
@@ -582,6 +629,30 @@ Then invalid_input이며 graph·점수는 없다. 반대로 assertion=affirmed�
 scoringStatement를 negated witness의 정확한 bytes/hash/span으로 함께 바꿔도 invalid_input이다.
 둘은 label mismatch인 candidate와 다르며, 잘못된 gold 선언을 진단만 하고 채점하지 않는다.
 
+### AC-12: Standalone sensitivity 검수 결속 (FR-1, FR-13)
+
+Given sensitive_review gold의 Value 하나에 standaloneSensitivity가 없거나 valueDigest가 다르다.
+When checkAuthoringSafety의 입력을 검증한다.
+Then invalid_input/invalid_schema이며 seal report를 성공으로 만들지 않는다. sensitive_review
+gold가 전혀 없으면 이 검수 배열이 없는 것은 유효하며 민감 collision 수는 0이다.
+
+### AC-13: 같은 case 충돌은 seal 전 차단 (FR-8, FR-13)
+
+Given 단독 민감성 검수의 모양·digest가 유효한 value가 같은 case의 bulk_safe statement,
+그 evidence quote 또는 permitted region에 §1 occurrence로 나타난다.
+When checkAuthoringSafety를 수행한다.
+Then ok=true인 검사 결과의 report.sealEligible=false이고 blockingCollisions에 그 위치가 있다.
+이는 의미 검수의 실수를 기계 검사로 한 번 더 잡는 경우다. source의 kind·direction을
+바꾸어도, all의 다른 값이 나타나지 않아도 결과는 같다. provider 호출·dataset write는 0이다.
+
+### AC-14: 다른 case 중복은 별도 진단 (FR-13, NFR-1)
+
+Given 민감 value와의 충돌이 다른 case의 허용 target에만 있고 모든 입력 검수가 유효하다.
+When case·gold·value 배열을 재배치해 checkAuthoringSafety를 수행한다.
+Then blockingCollisions=[], crossCaseOverlaps는 동일한 nonempty 집합, sealEligible=true다.
+동일 case의 collision도 하나 추가하면 sealEligible=false다. 이 true는 seal에 필요한
+한 조건일 뿐 S3의 다른 조건이나 사람 승인·provider provenance를 대신하지 않는다.
+
 ## Edge Cases — 실패 경계
 
 - EC-1: 파일 누락·UTF-8 오류·digest mismatch·dangling span → `invalid_input`, 점수 없음 (FR-1).
@@ -590,6 +661,7 @@ scoringStatement를 negated witness의 정확한 bytes/hash/span으로 함께 �
 - EC-4: history/provenance/secret 검증 실패 → S2/S4 inadmissible, scorer가 권한을 대신 발급하지 않음 (FR-10).
 - EC-5: receipt 서명·복호화·보관 증거 미확인 → pending이 아니라 decision 사용 거부 (FR-9).
 - EC-6: grammar가 잡지 못한 paraphrase/민감 의미 → credit 확대 금지; gold/region 검수와 human extra-content review의 잔여로 보고 (FR-7).
+- EC-7: authoring 검수 부재·digest 불일치 → invalid_input/invalid_schema; 같은 case 충돌 → sealEligible=false. seal 후 원문 수정·재봉인으로 우회하지 않음 (FR-13).
 
 ## API Contracts — 순수 인터페이스, HTTP N/A
 
@@ -603,9 +675,13 @@ interface ScoreError { ok: false; code: "invalid_input" | "resource_limit" | "un
 type ScoreErrorSubcode = "invalid_schema" | "gold_declaration_mismatch" | "decision_partial" | "overlapping_binding" | "limit_exceeded" | "unsupported_transform";
 interface VerifyReviewRequest { tuple: RunTuple; target: ReviewTarget[]; receipt: ReviewReceipt }
 interface VerifyReviewResponse { valid: boolean; programmeFail: boolean; reasons: string[] }
+interface CheckAuthoringSafetyRequest { descriptor: Descriptor; cases: Case4[] }
+interface CheckAuthoringSafetySuccess { ok: true; report: AuthoringSafetyReport }
 ```
 
 `EvaluateCaseRequest → ScoreSuccess | ScoreError`, `VerifyReviewRequest → VerifyReviewResponse`다.
+`checkAuthoringSafety(CheckAuthoringSafetyRequest) → CheckAuthoringSafetySuccess | ScoreError`다.
+검사 성공(ok=true)과 seal 조건 충족(report.sealEligible)은 다른 field이며 혼용하지 않는다.
 diagnostic paths는 field/ID만 담고 민감 statement·source 내용을 외부 error에 넣지 않는다.
 scorer 성공 응답은 provider provenance의 성공 응답이 아니다.
 resource_limit/unsupported_transform의 subcode는 각각 limit_exceeded/unsupported_transform이다.
@@ -626,7 +702,8 @@ ID는 nonempty ASCII `[A-Za-z0-9._:-]{1,128}`, hash는 lowercase hex 64자, Git 
 | Case4 | schemaId,id, language:ko/en, category, goldCompleteness:partial/exhaustive, conversations:MessageGroup[], expected:Gold4[], safetyRegions:Region[] | schemaId=mem-eval-schema-4; category enum은 §5의 셋 + durable_facts; evaluationUse=decision이면 exhaustive만 허용 |
 | MessageGroup / Message | conversationId, messages[] / messageId, role:user/assistant, content:string | case 안 pair ID 유일; NFC exact view |
 | Gold4 | id, kind, assertion:affirmed/negated, expectedDisposition:bulk_safe/sensitive_review, evidence:LocatedAnchor, scoringStatement, scoringStatementSha256, transformId, values:Value[], templates:Template[], witnesses:GoldWitness[] | template마다 affirmed/negated witness와 reviewer/date/digest 필수 |
-| Value | id, type:text/quantity, surface:string, canonicalIdentity:string | canonicalIdentity는 §1 normalized token/decimal의 canonical bytes string; synonym 금지 |
+| Value | id, type:text/quantity, surface:string, canonicalIdentity:string, standaloneSensitivity?:StandaloneSensitivityReview | sensitive_review gold에서는 검수 필수; canonicalIdentity는 §1 normalized token/decimal의 canonical bytes string; synonym 금지 |
+| StandaloneSensitivityReview | standaloneSensitive:true,reviewer,reviewedAt,valueDigest | §5.1의 의미 검수·exact value 결속, S3에서 provenance 검증 |
 | Template | id, family, all:BindingSpec[], anyGroups:BindingSpec[][], sharedBindings:string[][] | BindingSpec={id,slot,valueRef}; family slot 전부 결속; alias만 공유 |
 | LocatedAnchor | conversationId,messageId,quote,start,end | exact NFC slice; gold는 user만 |
 | CandidateAnchor | conversationId,messageId,quote | 가능한 모든 span을 scorer가 파생 |
@@ -642,6 +719,9 @@ ID는 nonempty ASCII `[A-Za-z0-9._:-]{1,128}`, hash는 lowercase hex 64자, Git 
 | RunTuple | repositoryId,workflowPath,runId,runAttempt,evaluatedCommit,programmeId,reservationId,subjectArtifactSha256,datasetManifestDigest,scoringContractDigest | S4 verified input; ID 숫자는 decimal string, attempt는 양의 정수 |
 | ReviewTarget | candidateKey,statementSha256 | 대상 집합 자체도 비공개 |
 | ReviewReceipt | tuple,reviewMode,rows,reviewer,reviewedAt,targetSetDigest,signatureReceiptDigest | rows={candidateKey,statementSha256,verdict,reviewer,reviewedAt,rowDigest}; §6 exact-set |
+| AuthoringSafetyReport | sealEligible:boolean,blockingCollisions:Collision[],crossCaseOverlaps:Collision[] | sealEligible는 blockingCollisions.length=0일 때만 true; 입력 검수 실패는 ScoreError |
+| Collision | sourceCaseId,sourceGoldId,valueId,targetCaseId,target:AuthoringTarget,start,end | start/end는 target text의 NFC scalar occurrence; sourceCaseId=targetCaseId면 blocking, 아니면 cross-case |
+| AuthoringTarget | {kind:bulk_statement/bulk_evidence,goldId} 또는 {kind:permitted_region,conversationId,messageId,start,end} | tagged union, gold는 bulk_safe만; region의 start/end는 message 안 절대 위치 |
 
 kind enum은 현재 `lib/memoryValidatorCore.ts`의 identity, preference, occupation, expertise,
 long_term_goal, project, constraint, decision, relationship, recurring_context,
@@ -666,15 +746,19 @@ sensitivity는 standard/sensitive로 닫는다. bulkSafe=true는 accepted이면�
 
 검토 대상은 `b6610c2179b0b94f60ebc0bd18156505028d81d1`이었다. 아래는 수정자의 처리 기록이며
 독립 확인 검토의 closure 판정이나 사람의 수용 서명이 아니다. 승인된 상위 결정문과 receipt는
-수정하지 않는다. 최신 전달 검토의 P1-1은 동반 S2에서, P1-2는 이 문서 §4·AC-6에서 수정했다.
+수정하지 않는다. P1-1은 동반 S2에서, P1-2는 이 문서 §4·AC-6에서 수정했다.
+사용자의 수정본 작성 요청에 따라 아래 설계안으로 정리했다. 이는 검토할 안의 선택이며
+최종 문서 bytes에 대한 사람 승인·잔여 위험 수용 서명은 아직 아니다. 검토 보고서마다
+P2 번호가 달라 stable ID로 남기며, S1 승인 receipt는 각 ID의 disposition을 명시해야 한다.
 
 | Finding | Disposition / 승인 전에 남은 것 |
 |---|---|
-| P2-1: sensitive ValueRef 단독 스캔 | **사람 선택 대기.** §5의 case-local OR 판정은 아직 변경하지 않았다. `shellfish`와 `allergy`를 all로 둔 gold에서 무해한 shellfish 언급도 FAIL할 수 있고 holdout·programme 소비 비용이 남는다. 각 ValueRef가 단독으로 민감해야 한다는 S3 authoring 제한을 승인할지, S1의 결합 판정을 다시 설계할지 사람 결정이 필요하다. 허용된 정책으로 간주하지 않으며 미해결 상태에서 S3 계약을 확정하거나 holdout을 작성하지 않는다. |
-| P2-2/P2-3: grammar와 identity-nfc-1의 좁은 분포 | **사람 수용 대기.** 복합 constraint·decision·recurring_context·long_term_goal 및 자연 발화 상당수가 표현되지 않는다. cell floor 충족이 이 분포의 대표성을 증명하지 않는다. 현재 범위를 명시적으로 수용하거나 holdout을 보기 전에 S1을 개정해야 한다. S3 착수 전에 이 판단을 별도 receipt로 남긴다. |
-| P2-4: 마침표 | §1·AC-2에 optional 0/1개와 2개 거부를 명시했다. |
-| P2-5: partial | §4·AC-6·입력 schema에 development 전용, decision의 사전 schema refusal를 명시했다. S3도 같은 조건을 승계한다. |
-| P3 신규 후보: 전체 token detector의 paraphrase 한계 | 상위 결정의 §12.1(닫힌 grammar FN)·§12.3(사람 의미 판단)과 관련된 **S1 구체화 잔여**다. detector 부재가 allowed 증거가 되는 것은 아니다. 상위 잔여 승인만으로 이 구체적 방식까지 수용됐다고 주장하지 않으며 S1 승인 receipt에 명시적 disposition을 요구한다. |
+| R-SENS-1 / P2-1: sensitive ValueRef 단독 스캔 | §5.1의 단독 민감성 검수 + 같은 case 사전 충돌 차단을 채택한 **미승인 수정안**이다. 다른 case 중복은 참고 진단이다. 의미 검수 오류·미래 후보에 대한 false FAIL과 holdout 소비 비용이 완전히 없어지는 것은 아니다. S1 최종 승인 receipt가 이 잔여와 작성 제한을 명시적으로 수용해야 한다. |
+| R-GRAM-1: grammar와 identity-nfc-1의 좁은 분포 | 현재 범위를 유지하는 **미승인 수정안**이다. 복합 constraint·decision·recurring_context·long_term_goal 및 자연 발화 상당수가 표현되지 않는다. cell floor가 대표성을 증명하지 않는다. 상위 §12.1의 구체화로 공시하고 S1 승인 receipt의 명시적 수용을 S3 착수 전에 요구한다. |
+| 마침표 terminal (이전 보고서 P2-4) | §1·AC-2에 optional 0/1개와 2개 거부를 명시했다. |
+| partial 용도 (이전 보고서 P2-5) | §4·AC-6·입력 schema에 development 전용, decision의 사전 schema refusal를 명시했다. S3도 같은 조건을 승계한다. |
+| R-DETECTOR-1 / P3-A: 전체 token detector의 paraphrase 한계 | 상위 §12.1(닫힌 grammar FN)·§12.3(사람 의미 판단)의 구체화 잔여다. detector 부재가 allowed 증거가 되는 것은 아니다. 상위 잔여 승인만으로 이 방식까지 수용됐다고 주장하지 않으며 S1 승인 receipt의 명시적 수용이 필요하다. |
+| R-KO-SUBJECT-1 / P3-C: 한국어 K의 빈 주어 | §2의 생략 허용은 유지하지만 사용자 귀속은 gold/증거 검수에 의존한다. 상위 §12.3(사람 의미 판단)·§12.6(message 단위 결속)과 관련된 추가 잔여이며 D2의 귀속 보장이 강화됐다고 주장하지 않는다. S1 승인 receipt의 별도 명시적 수용이 필요하다. |
 
 상위 §12의 기존 여섯 잔여는 각각 grammar FN, gold-withheld, 사람 의미 판단,
 dispatch TOCTOU, GitHub/importer 신뢰, message 단위 결속에 대응하며 변경하지 않는다.

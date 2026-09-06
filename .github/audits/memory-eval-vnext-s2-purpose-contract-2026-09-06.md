@@ -41,8 +41,9 @@ S1–S4 사람 승인, 별도 activation 승인, 실제 전환과 불변 검사 
 - FR-8: historical admissibility와 품질 FAIL·revocation을 MUST 함께 보존한다. 새 run·재채점·예산 권한으로 바꾸어서는 MUST NOT 된다.
 - FR-9: caller는 structured refusal를 MUST 처리한다. 누락·오류를 decision default로 바꾸어서는 MUST NOT 된다.
 - FR-10: activation 검증은 모든 기존 digest와 전체 1,150-case identity의 전후 일치를 MUST 증명한다.
+- FR-11: historical snapshot의 전체 dependency 보존과 forwardFrozenFiles의 전방 불변 검사를 MUST 분리한다. snapshot-only 공유 module의 후속 변경을 history tampering으로 판정해서는 MUST NOT 된다.
 
-### 1. 불변 identity와 frozen scope (FR-1, FR-10)
+### 1. 불변 identity와 두 보존 범위 (FR-1, FR-10, FR-11)
 
 | Field | Pinned value |
 |---|---|
@@ -57,19 +58,44 @@ S1–S4 사람 승인, 별도 activation 승인, 실제 전환과 불변 검사 
 | frozen | true |
 
 기준 snapshot은 실제 v8 evaluated commit `12f83ec2c388a318fe0a79d4f76bd2c0b245dcb1`이다.
-activation의 `frozenFiles`는 그 snapshot의 `lib/memoryEvalSucc9.ts`에서 시작하는 모든
+activation의 `frozenFiles`는 **그 immutable snapshot에 대해서만 검증하는 historical 목록**이다.
+그 snapshot의 `lib/memoryEvalSucc9.ts`에서 시작하는 모든
 repository-owned import의 transitive closure(type-only 포함)를 **정렬된 전체 목록**으로
 기록한다. root-relative `@/`와 상대 경로를 repository tree에서 resolve하며 node builtin은
 목록 밖, 외부 package는 당시 lockfile identity로 기록한다. unresolved import·동적 경로·
 빠진 dependency는 closure refusal다. 파일별 path·Git blob OID·raw SHA-256을 담는다.
 그 closure는 case sources, composition/transition/subtype, manifest builder, 기존 scoring
-descriptor를 포함한다. 기존 approval record가 참조하는 감사 파일도 frozenFiles에 더한다.
-root 이름만 보고 몇 파일을 수동 선택하는 축약은 불가다.
+descriptor와 공유 validator까지 포함한 121개 파일이다. originalApproval.record의 실제
+출처인 `.github/audits/mem-extract-v8-implementation-2026-09-04.md`를 같은 basis tree에서
+추가해 historical frozenFiles는 122개다. root 이름만 보고 closure를 축약할 수 없다.
+§5의 나중 사람 결론 문서는 각각 명시된 sourceCommit의 evidenceSources로 따로 보존한다.
+closure 경로는 basis tree에서 재도출하고 file mode·blob OID·raw SHA-256을 대조한다.
+이 목록은 현재 tree의 전체 파일을 영구 동결하겠다는 뜻이 아니다.
 
-activation 전후와 이후 모든 검증에서 각 frozen file의 bytes와 위 dataset/manifest/scoring
-digest가 같아야 한다. 과거 lockfile 자체의 현재 동일성은 요구하지 않되, 과거 snapshot에서
-그 digest를 재현할 때는 보존된 dependency identity만 사용한다. dependency drift로
-재현할 수 없으면 unknown/refusal이지 새 digest로 재서명하지 않는다.
+전방 불변 대상 `forwardFrozenFiles`는 **부록 A에 명시된 109개 path 전부**다. case/batch/
+replacement/assembly/transition/subtype 입력, literal manifest·composition, 기존 승인 기록을
+열거했다. 각 항목은 historical frozenFiles의 동일 path·mode·OID·raw SHA-256이어야 한다.
+glob·prefix·현재 tree의 새 import·caller가 축약한 목록으로 대체하지 않는다. ledger는 별도
+필수 전방 불변 대상이고 이 109개 목록에는 포함하지 않는다. 두 목록과 각 digest는
+genesis 및 별도의 ActivationApproval 서명에 모두 결속한다. 누락·추가·교체·scope 축소는
+frozen_scope_mismatch이며, final S2 승인 없이 목록을 바꿀 수 없다.
+
+activation의 C 및 C를 포함하지 않은 모든 부모에서 109개 forward file이 basis와 같은지
+검사한다. C 이후의 DAG 검사는 ledger와 이 forward 목록에만 동일 bytes를 요구한다.
+historical-only 13개 공유 module(예: memoryValidatorCore, memoryHealthSignals,
+memoryExtractionEvalCore, memoryEvalScoringContractDigest)의 현재 bytes는 비교하지 않는다.
+그 변경이 허용된다는 뜻은 **S2가 전방 동결하지 않는다**는 것뿐이며 다른 정책·검사·변경
+승인을 면제하지 않는다. 경로 이동도 forward 목록에 있으면 불변 위반이고, snapshot-only
+파일의 현재 경로 이동은 basis의 보존 object가 검증되는 한 그 자체로 위반이 아니다.
+
+case order/count와 위 dataset/manifest/scoring/subtype digest는 전환 전후 모두 **basis의
+전체 snapshot·보존 dependency identity로 재현**한다. 전환은 그 dataset의 외부 purpose
+기록만 바꾸며 case·manifest를 새로 만들지 않는다. current helper/validator로 계산한 다른
+digest를 역사적 identity로 재서명하거나, forward 목록 밖 module을 현재 버전으로 섞어
+succ-9 materialisation을 만드는 것은 금지다. historicalRead와 succ-9 identity 소비자는
+완전한 pinned snapshot의 산출물을 사용해야 한다. 필요한 bytes·runtime/dependency 증거를
+보존하지 못해 재현할 수 없으면 unknown/refusal이다. 현재 shared module 변경 자체는
+원래 v8 verdict·당시 admissibility·검증 가능한 snapshot을 소급 무효화하지 않는다.
 기존 `MEMORY_EVAL_SUCC9_DATASET_PURPOSE`도 역사적 bytes 일부여서 직접 수정하지 않는다.
 향후 current gate가 별도 purpose history를 authority로 읽도록 바꾸는 것이 activation의
 명시 scope다. 이 resolver 연결만 후속 승인된 activation 구현 범위이며, scorer 구현이나
@@ -83,7 +109,8 @@ register 재승인을 그 변경에 묶지 않는다.
    승인한 receipt를 담은 commit이다. S1/S2만 서명된 상태는 insufficient_contract_approval다.
 3. `activationApprovalCommit`은 실제 succ-9 전환을 별도로 승인한 receipt의 commit이다.
    그 사람 receipt는 operation `activate_succ9_development`, old/new purpose, frozen identity,
-   예정 genesisDigest·transitionPayloadDigest·legacySubjectDigest와 허용되는 resolver 연결 변경을
+   예정 genesisDigest·transitionPayloadDigest·legacySubjectDigest, historical frozenFilesDigest,
+   전체 forwardFrozenFiles와 forwardFrozenFilesDigest, 허용되는 resolver 연결 변경을
    정확히 명시한다. contractApprovalCommit을 조상으로 갖고 activation commit의 **strict
    ancestor**여야 한다. 같은 commit에서 승인과 실행을 스스로 만들지 않는다.
 
@@ -111,7 +138,7 @@ payload.prevDigest는 직전 recordDigest다. 자신의 digest는 자신의 payl
 
 | seq / type | Required payload fields (공통 field 외) | Meaning |
 |---|---|---|
-| 0 / legacy_snapshot | basisCommit, identity, frozenFiles, frozenFilesDigest | §1의 historical snapshot만, prevDigest=null |
+| 0 / legacy_snapshot | basisCommit, identity, frozenFiles, frozenFilesDigest, forwardFrozenFiles, forwardFrozenFilesDigest | historical 목록과 별도 전방 목록; prevDigest=null |
 | 1 / purpose_transition | from:decision, to:development, approvalCommit, contractApprovalCommit, activationApprovalCommit, reason:exposed_distribution, identityDigest | seq0 hash에 연결, succ-9 전체 전환 |
 | 2 / legacy_run_receipt | subject, historicalVerdict, evidenceSources, sourceReceiptDigests | §5의 정확히 하나인 예외, seq1 hash에 연결 |
 
@@ -123,6 +150,8 @@ legacy receipt가 transition 뒤에 있는 것은 그 과거 run을 현재로 �
 identityDigest와 frozenFilesDigest는 각각 domain `mem-purpose-identity-1`,
 `mem-purpose-frozen-files-1`과 LF 뒤 CJSON bytes로 계산한다. frozenFiles는 repository-relative
 POSIX path 순서로 정렬하고 duplicate path를 거부한다. Git file mode도 목록에 담는다.
+forwardFrozenFiles는 같은 FrozenFile 형태와 정렬·중복 거부 규칙이며 digest domain은
+`mem-purpose-forward-files-1`이다. 목록이 겹쳐도 두 digest의 이름·domain을 혼용하지 않는다.
 sourceReceiptDigests는 source 역할 이름 순서로 정렬하며 digest 중복이 아니라 role 중복을
 거부한다. artifact 후보/실행 unit을 wildcard array로 확장할 수 없다.
 
@@ -145,10 +174,12 @@ repositoryId, effectiveCommit C, chainHeadDigest, inclusionCommit, 승인 receip
 3. C를 최초 bundle introduction으로 유일하게 식별한다. C 부모들에는 해당 ledger가 없어야
    하고 C에는 정확한 세 줄이 있어야 한다. 이미 있는 ledger를 새 C라고 신고할 수 없다.
 4. C의 후손이면서 T의 조상인 **모든 commit**의 tree를 읽는다. 각 tree에 동일 ledger와
-   frozenFiles가 있어야 한다. 이 구간의 모든 parent-child edge를 검사한다. merge도 부모를
+   forwardFrozenFiles의 파일들이 있어야 한다. historical frozenFiles는 basis tree·보존
+   object에 대해서만 검증하고 각 후손 tree의 동일성 조건으로 쓰지 않는다.
+   이 구간의 모든 parent-child edge를 검사한다. merge도 부모를
    전부 보되 C를 아직 포함하지 않은 부모의 ledger 부재는 삭제로 세지 않는다. C를 포함한
    부모에서의 삭제·수정·축약·이름 변경은 뒤에서 복원돼도 history_tampered다.
-5. hash chain, 세 승인 layer, identity, closure, exact legacy tuple을 검증한다. 독립 branch가
+5. hash chain, 세 승인 layer, identity, basis closure, 부록 A와 두 signed 목록, exact legacy tuple을 검증한다. 독립 branch가
    같은 전환을 다시 기록한 경우 최초 C가 둘이므로 divergent_activation이다. 단순한 동일 C의
    merge 전달은 중복 activation이 아니다.
 
@@ -213,7 +244,7 @@ subject JSON은 **evaluatedCommit tree에 고정된** `check:memory-eval-run`의
 dependency closure, lockfile, 실행 조건을 immutable evidence bundle에 pin하고, 당시 package
 script의 플래그를 그대로 사용한다. 현재 HEAD의 checker로 역사적 판정을 바꾸지 않는다.
 checker 증거는 별도의 git evidenceSources로 path·sourceCommit·contentSha256을 기록한다.
-이는 §1 dataset frozenFiles의 전방 동결 범위를 확장하는 규칙이 아니다. 보존된 실행 조건을
+이는 historical-only checker 보존이며 §1 forwardFrozenFiles를 확장하지 않는다. 보존된 실행 조건을
 provider contact 없이 재현할 수 없으면 legacy_evidence_unavailable이며 성공을 추정하지 않는다.
 
 historicalVerdict는 다음 사실을 함께 담는다.
@@ -242,7 +273,8 @@ ordinal 2, 새 prompt, 새 scorer로 v8 수치 덮어쓰기, pair 복권, 예산
 
 승인된 후속 작업에서 다음을 **전부** 증명해야 activation_complete다.
 
-1. C 전후 frozenFiles/raw bytes·case order/count·모든 §1 digest 동일.
+1. basis의 전체 frozenFiles·보존 dependency 증거 검증, C와 각 부모의 forwardFrozenFiles
+   raw bytes 동일, pinned snapshot으로 재현한 case order/count·모든 §1 digest 동일.
 2. A와 S1–S4 contract approval 및 activation approval가 검증됨.
 3. 원자적 세 줄 bundle·hash chain·effective C·protected inclusion·checkpoint가 검증됨.
 4. purposeAt(C)=development, purposeAt(current protected tip)=development.
@@ -272,7 +304,7 @@ T는 C를 보존한 protected tip, V는 §5의 evaluatedCommit이라는 **기호
 
 ### AC-1: Immutable whole-dataset transition (FR-1, FR-2, FR-10)
 
-Given 1150 cases와 §1 digest·frozenFiles가 C 전후 동일하다.
+Given 1150 cases와 §1 digest가 pinned snapshot에서 재현되고 C 전후 forwardFrozenFiles가 동일하다.
 When 별도 승인된 bundle C를 검증한다.
 Then purposeAt(C)=development, frozen=true이고 dataset·manifest digest는 그대로다.
 case 하나 수정, 순서 변경, old purpose 상수 수정은 각각 frozen_identity_changed다.
@@ -340,6 +372,34 @@ When verifier를 실행한다.
 Then 검사 과정의 provider 호출·원본 write는 0이고 refusal는 typed result다.
 legacy provider failure 1건을 지우지 않으며 quality FAIL을 PASS로 고치지 않는다.
 
+### AC-9: 공유 module 변경과 역사 재현 분리 (FR-1, FR-8, FR-11)
+
+Given 유효 C→X→T에서 X가 snapshot-only memoryValidatorCore.ts만 변경하고 모든 다른
+history·승인·forward file·보존 snapshot 증거가 유효하다.
+When T의 history와 V의 exact legacy receipt를 검증한다.
+Then 그 변경 때문에 history_tampered가 되지 않는다. purposeAt(T)=development,
+historicalRead(V)는 원래 admissible FAIL·revoked를 반환한다. current decision admission은
+여전히 dataset_development로 거부한다. 같은 보존 bytes로 계산한 identity digest도 같다.
+
+### AC-10: 전방 scope 축소와 파일 복원 거부 (FR-4, FR-5, FR-11)
+
+Given 부록 A의 path 하나를 genesis 또는 ActivationApproval 목록에서 빼거나 snapshot-only
+공유 module을 임의로 목록에 추가했다.
+When scope를 검증한다.
+Then frozen_scope_mismatch이며 digest를 다시 계산해도 통과하지 않는다.
+Given C→X→Y→T에서 X가 forward file 하나를 수정하고 Y가 정확히 복원했다.
+When T의 DAG를 검증한다.
+Then history_tampered다. snapshot-only 변경의 AC-9 예외를 forward file에 적용하지 않는다.
+
+### AC-11: 역사 snapshot 부재는 현재 코드로 대체 불가 (FR-8, FR-11, NFR-4)
+
+Given current forward files는 그대로지만 basis의 shared module blob 또는 보존 dependency
+증거가 없어 pinned 재현을 할 수 없다.
+When historicalRead를 수행한다.
+Then verified=false다. historyContext 자체가 검증되지 않으면 §4의 reverification_unavailable,
+historyContext는 유효하나 checker/runtime 증거가 없으면 legacy_evidence_unavailable다.
+현재 module로 대신 계산해 성공시키지 않으며 이미 보존된 원래 receipt는 유지한다.
+
 ## Edge Cases — 외부 의존성의 실패
 
 - EC-1: Git shallow clone, missing blob/parent, replace/graft → history_unverifiable (FR-5).
@@ -349,6 +409,7 @@ legacy provider failure 1건을 지우지 않으며 quality FAIL을 PASS로 고�
 - EC-5: archive와 JSON의 연결 증거 없음, artifact 만료와 보존 bytes 없음 → legacy_evidence_unavailable (FR-7).
 - EC-6: API/ref TOCTOU·force-push → trusted checkpoint와 C ancestry로 거부, 완전한 방지 보장은 S4의 신뢰 잔여로 공시 (FR-5).
 - EC-7: branch 동시 activation → 최초 introduction 두 개로 divergent_activation, 자동 병합·하나 선택 금지 (FR-5).
+- EC-8: 두 signed scope 목록과 부록 A 불일치 → frozen_scope_mismatch; snapshot-only 현재 변경은 이 오류의 근거가 아님 (FR-11).
 
 ## API Contracts — HTTP N/A, read-only verifier
 
@@ -378,11 +439,11 @@ exception/IO 오류를 잡아 `allowed=true`로 바꾸는 fallback은 없다.
 | Entity | Fields / types | Constraints |
 |---|---|---|
 | Identity | datasetVersion,schemaVersion,caseCount,datasetDigest,manifestDigest,scoringContractVersion,scoringContractDigest,subtypeDigest,frozen,originalApproval | §1 exact constants; originalApproval={approvedBy,approvedAt,approvedCommit} |
-| FrozenFile | path,mode,gitBlobOid,rawSha256 | path 정렬, symlink/경로 이탈 거부; repository file만 |
+| FrozenFile | path,mode,gitBlobOid,rawSha256 | path 정렬, symlink/경로 이탈 거부; repository file만; historical는 basis와, forward는 basis 및 후속 tree와 대조 |
 | RecordEnvelope | payload:PurposePayload,recordDigest:Sha256 | §3 seq별 closed payload |
 | HistoryContext | repositoryId,protectedRef,protectedTip,completeGitBundleDigest,activationCheckpoint,approvalEvidenceDigests | S4가 검증해 제공; caller self-attestation 금지 |
 | ActivationCheckpoint | repositoryId,effectiveCommit,chainHeadDigest,inclusionCommit,approvalReceiptDigest,signatureReceiptDigest | 외부 보존된 신뢰 anchor, C 이전 tip으로 후퇴 불가 |
-| ActivationApproval | operation,approvalCommit,contractApprovalCommit,from,to,identityDigest,genesisDigest,transitionPayloadDigest,legacySubjectDigest,allowedResolverPaths,approvedBy,approvedAt | transitionPayloadDigest는 activationApprovalCommit field를 제외한 예정 payload digest; 자기 hash 순환 금지 |
+| ActivationApproval | operation,approvalCommit,contractApprovalCommit,from,to,identityDigest,genesisDigest,transitionPayloadDigest,legacySubjectDigest,frozenFilesDigest,forwardFrozenFiles:FrozenFile[],forwardFrozenFilesDigest,allowedResolverPaths,approvedBy,approvedAt | transitionPayloadDigest는 activationApprovalCommit field를 제외한 예정 payload digest; scope 목록은 §1·부록 A와 exact 일치; 자기 hash 순환 금지 |
 | LegacySubject | §5 Subject field 전부 | repo/run/artifact ID는 decimal string; runAttempt는 integer 1 |
 | EvidenceSource | role,kind:git/github/archive/json,contentSha256,sourceCommit:string/null,path:string/null,observedAt | 어떤 field를 어느 source가 증명하는지는 §5 |
 | HistoricalVerdict | datasetPurposeAtRun,datasetFrozen,scoringContract,historicalDecisionGrade,historicalAdmissible,qualityVerdict,workflowConclusion,plannedCaseCount,executedCaseCount,providerFailureCount,pairStatusAfterDecision,ordinal2Executed,ordinal2Allowed,humanDecisionBy,humanDecisionAt | §5 facts 전체, scope=historical_read_only |
@@ -396,7 +457,7 @@ RefusalCode는 다음으로 닫는다.
 `missing_contract_approval`, `insufficient_contract_approval`, `missing_activation_approval`,
 `approval_not_prior`, `approval_ancestry_mismatch`, `activation_ancestry_mismatch`,
 `legacy_subject_mismatch`, `legacy_evidence_unavailable`, `approval_unverifiable`,
-`frozen_closure_unresolvable`, `partial_bundle`.
+`frozen_closure_unresolvable`, `frozen_scope_mismatch`, `partial_bundle`.
 §1의 closure refusal는 frozen_closure_unresolvable, §2의 반쪽 bundle은 partial_bundle,
 §4의 A 소실/C force-reset은 각각 approval_ancestry_mismatch/activation_ancestry_mismatch다.
 unknown field·schema 오류의 invalid history는 invalid_history다. pre-C의 비예외 Q·unknown
@@ -424,19 +485,140 @@ DB schema·migration·삭제 정책: N/A — 이력은 append-only라 정상 삭
 실제 JSON의 promptVersion과 출처로 수정했다. P1-2는 동반 S1의 accuracy 모집단에서
 수정했다. 이 기록은 수정자의 주장이지 독립 확인 검토의 closure 판정이 아니다.
 
-P3 신규 후보인 **V 외 pre-ledger purpose는 unknown**은 D1(4)의 유일한 v8 보존 예외와
+R-PRELEDGER-1 / P3-B인 **V 외 pre-ledger purpose는 unknown**은 D1(4)의 유일한 v8 보존 예외와
 모순되지 않지만 다른 과거 run의 purpose를 이 resolver로 새로 증명할 수 없다는 제한이다.
 상위 §12의 기존 여섯 잔여 중 하나로 자동 흡수하거나 이미 사람이 수용했다고 표시하지 않는다.
 S2 승인 receipt에 이 제한의 명시적인 수용 또는 개정 결정을 요구한다. 현재 pair가 전부
 revoked라고 가정해 이 판단을 면제하지 않는다. v8 revoked 사실과 다른 pair 상태는 별개다.
 
-보조 문언 검토는 §1의 전체 import closure 전방 동결이 공유 module의 후속 변경까지
-제약한다는 가용성 위험도 지적했다. 이 수정에서 frozen scope를 임의로 축소하지 않는다.
-closure drift가 생기면 새 검증은 fail-closed이고, §4처럼 보존된 기존 historical receipt와
-당시 admissible FAIL·revocation 사실을 삭제하거나 소급 무효화하지 않는다. 그러나 재검증과
-후속 단계는 중단될 수 있으므로 **이 장기 동결 범위 역시 S2 승인 전 사람의 명시적 판단 대기**다.
-동결 범위를 바꾸려면 activation 전에 S2를 다시 고정·검토해야 하며, 현재 상태에서 활성화를
-승인한 것으로 읽지 않는다. S3는 succ-9 내용의 새 decision dataset 부분 재사용 금지도 승계한다.
+R-SCOPE-1 / P2-7은 사용자의 수정본 작성 요청에 따라 **historical snapshot 보존과 전방
+동결 목록을 분리한 미승인 수정안**으로 정리했다. 전체 121개 import와 원래 승인 감사 파일은
+과거 tree에서 보존하고, 전방 동결은 부록 A의 109개 파일 + ledger로 한정한다. 이 선택은
+당시 승인·digest의 변경이나 current shared module 사용으로 역사적 판정을 대체하는 허가가 아니다.
+S1–S4 및 activation의 별도 사람 승인은 그대로 필요하다. S2 최종 승인 receipt는
+R-SCOPE-1(범위 분리와 snapshot 증거 보관의 비용)·R-PRELEDGER-1(제한된 과거 조회)을
+명시적으로 수용해야 한다. 지금 수용 서명이나 activation 완료를 기록하지 않는다.
+S3는 succ-9 내용의 새 decision dataset 부분 재사용 금지도 승계한다.
+
+## 부록 A — Forward frozen path inventory
+
+아래 109개는 §1의 **정확한 전방 목록**이다. 패턴이나 예시가 아니며 항목 추가·삭제는
+새 S2 계약 승인이 필요하다. 각 mode/OID/raw SHA-256은 명시된 basis tree에서 채우고
+activation 전에 전체 목록과 digest를 사람이 서명한다. 현재 ledger·manifest를 만든 것이 아니다.
+
+```json
+[
+  ".github/audits/mem-extract-v8-implementation-2026-09-04.md",
+  "lib/memoryEvalDatasetCompositions.ts",
+  "lib/memoryEvalDatasetManifests.ts",
+  "lib/memoryEvalSucc3Adopted/index.ts",
+  "lib/memoryEvalSucc3Fixtures.ts",
+  "lib/memoryEvalSucc4Assembly.ts",
+  "lib/memoryEvalSucc4Dataset.ts",
+  "lib/memoryEvalSucc4Manifest.ts",
+  "lib/memoryEvalSucc4Replacements/tranche1.ts",
+  "lib/memoryEvalSucc4Replacements/tranche2.ts",
+  "lib/memoryEvalSucc4Replacements/tranche3.ts",
+  "lib/memoryEvalSucc4Replacements/tranche4.ts",
+  "lib/memoryEvalSucc4Replacements/tranche5.ts",
+  "lib/memoryEvalSucc4Review/anchors.ts",
+  "lib/memoryEvalSucc4Review/batches.ts",
+  "lib/memoryEvalSucc4Review/factValueAny.ts",
+  "lib/memoryEvalSucc4Review/readings.ts",
+  "lib/memoryEvalSucc4Transition.ts",
+  "lib/memoryEvalSucc5.ts",
+  "lib/memoryEvalSucc6.ts",
+  "lib/memoryEvalSucc6CompositionRepairs.ts",
+  "lib/memoryEvalSucc6Replacements.ts",
+  "lib/memoryEvalSucc6Transition.ts",
+  "lib/memoryEvalSucc7.ts",
+  "lib/memoryEvalSucc7Replacements/assistantOnly.ts",
+  "lib/memoryEvalSucc7Replacements/durableFacts.ts",
+  "lib/memoryEvalSucc7Replacements/index.ts",
+  "lib/memoryEvalSucc7Replacements/injectionDirectives.ts",
+  "lib/memoryEvalSucc7Replacements/subtypes.ts",
+  "lib/memoryEvalSucc7Transition.ts",
+  "lib/memoryEvalSucc8.ts",
+  "lib/memoryEvalSucc9.ts",
+  "lib/memoryEvalSucc9Replacements.ts",
+  "lib/memoryEvalSucc9Subtypes.ts",
+  "lib/memoryEvalSucc9Transition.ts",
+  "lib/memoryEvalSuccessorAdopted/batch101DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch102DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch103DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch104DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch105DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch106DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch107DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch108DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch109DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch110DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch111DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch112DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch113DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch114DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch115InjectionKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch116InjectionKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch117InjectionKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch118InjectionEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch119InjectionEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch120InjectionEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch121AssistantKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch122AssistantKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch123AssistantKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch124AssistantEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch125AssistantEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch126AssistantEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch127SecretKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch128SecretKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch129SecretKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch130SecretEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch131SecretEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch132SecretEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch133InjectionKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch134InjectionEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch135SecretKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch136SecretEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch162DurableKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch163DurableEn.ts",
+  "lib/memoryEvalSuccessorAdopted/batch164AssistantKo.ts",
+  "lib/memoryEvalSuccessorAdopted/batch165AssistantEn.ts",
+  "lib/memoryEvalSuccessorAdopted/index.ts",
+  "lib/memoryEvalSuccessorAdopted/tranche1Successors.ts",
+  "lib/memoryEvalSuccessorAdopted/tranche2Successors.ts",
+  "lib/memoryEvalSuccessorFixtures.ts",
+  "lib/memoryExtractionEvalAdopted/batch001DurableKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch002DurableEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch003AssistantKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch004AssistantEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch005SecretKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch006SecretEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch007InjectionKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch008InjectionEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch009DurableKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch010DurableEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch011DurableKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch012DurableEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch013DurableKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch014DurableEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch015DurableKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch016DurableEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch017AssistantKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch018AssistantEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch019AssistantKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch020AssistantEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch021SecretKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch022SecretEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch023InjectionKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch024InjectionEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch025SecretKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch026SecretEn.ts",
+  "lib/memoryExtractionEvalAdopted/batch027InjectionKo.ts",
+  "lib/memoryExtractionEvalAdopted/batch028InjectionEn.ts",
+  "lib/memoryExtractionEvalAdopted/index.ts",
+  "lib/memoryExtractionEvalFixtures.ts"
+]
+```
 
 ## Out of Scope — 이번 작성이 하지 않는 것
 
