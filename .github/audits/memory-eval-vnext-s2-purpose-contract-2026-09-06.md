@@ -186,7 +186,7 @@ purpose_history_unavailable로 거부한다. exact legacy exception은 historica
 | workflowPath | `.github/workflows/memory-eval-decision-grade.yml` |
 | runId / runAttempt | `33953094398` / `1` |
 | evaluatedCommit | `12f83ec2c388a318fe0a79d4f76bd2c0b245dcb1` |
-| modelId / promptVersion | `gpt-5-6-luna` / `8` |
+| modelId / promptVersion | `gpt-5-6-luna` / `mem-extract-v8` |
 | promptDigest | `a1d804c6b9359b722c60b1309c7324176f72c54008d2a616fa78dd520a6b44ae` |
 | dataset | §1의 exact identity, datasetVersion `mem-eval-succ-9` |
 | artifactSchema / datasetSchema | `3` / `3` |
@@ -203,7 +203,18 @@ GitHub archive metadata의 digest를 서로 바꾸어 쓰지 않는다. legacy a
 실제로 없는 promptDigest·manifestDigest·runId·runAttempt를 들어 있었다고 주장하지 않는다.
 prompt/dataset manifest는 evaluatedCommit의 frozen code·승인 기록에서, run/attempt/artifact
 귀속은 GitHub run/artifact 보존 metadata에서 검증하여 evidenceSources에 출처를 구분한다.
-subject JSON은 기존 `check:memory-eval-run`의 admissibility 조건도 통과해야 한다.
+`modelId`와 `promptVersion`의 직접 출처는 subject JSON manifest다. 이 둘의 evidenceSource는
+kind=`json`, path=`mem-eval-run1.json`, contentSha256=위 subject content SHA-256이며,
+역할은 `subject_manifest_model_prompt`다. promptVersion은 exact string `mem-extract-v8`이고
+숫자 8 또는 문자열 `8`로 축약하지 않는다. evaluatedCommit의 prompt/register 상수는
+교차 검증 출처이지 JSON field를 대신 만들어 주는 출처가 아니다.
+subject JSON은 **evaluatedCommit tree에 고정된** `check:memory-eval-run`의 admissibility
+조건도 통과해야 한다. 해당 tree의 package.json script와 checker의 repository-owned
+dependency closure, lockfile, 실행 조건을 immutable evidence bundle에 pin하고, 당시 package
+script의 플래그를 그대로 사용한다. 현재 HEAD의 checker로 역사적 판정을 바꾸지 않는다.
+checker 증거는 별도의 git evidenceSources로 path·sourceCommit·contentSha256을 기록한다.
+이는 §1 dataset frozenFiles의 전방 동결 범위를 확장하는 규칙이 아니다. 보존된 실행 조건을
+provider contact 없이 재현할 수 없으면 legacy_evidence_unavailable이며 성공을 추정하지 않는다.
 
 historicalVerdict는 다음 사실을 함께 담는다.
 
@@ -306,10 +317,13 @@ Given §5 tuple·JSON bytes·source receipt가 전부 검증됐다.
 When historicalRead를 수행한다.
 Then historicalDecisionGrade=true, historicalAdmissible=true, qualityVerdict=FAIL,
 pairStatusAfterDecision=revoked, ordinal2Allowed=false다.
-attempt=2, 다른 artifactId, 다른 JSON hash, 다른 evaluatedCommit 중 하나라도 바꾸면
+attempt=2, promptVersion=`8`, 다른 artifactId, 다른 JSON hash, 다른 evaluatedCommit 중 하나라도 바꾸면
 legacy_subject_mismatch다. archive hash를 content hash 자리에 넣어도 거부한다.
 artifact가 만료돼도 보존된 exact bytes/receipt가 있으면 재현하며, 없으면
 legacy_evidence_unavailable이지 새 API 관측을 꾸며 채우지 않는다.
+같은 subject의 promptVersion=`mem-extract-v8`과 JSON source 결속은 통과해야 한다.
+현재 HEAD의 checker가 바뀌어도 pinned evaluatedCommit checker의 판정은 바뀌지 않는다.
+이 검사는 historical admissibility이며 quality FAIL을 PASS로 바꾸지 않는다.
 
 ### AC-7: Rewritten ancestry와 cold verifier (FR-5, FR-6)
 
@@ -373,7 +387,22 @@ exception/IO 오류를 잡아 `allowed=true`로 바꾸는 fallback은 없다.
 | EvidenceSource | role,kind:git/github/archive/json,contentSha256,sourceCommit:string/null,path:string/null,observedAt | 어떤 field를 어느 source가 증명하는지는 §5 |
 | HistoricalVerdict | datasetPurposeAtRun,datasetFrozen,scoringContract,historicalDecisionGrade,historicalAdmissible,qualityVerdict,workflowConclusion,plannedCaseCount,executedCaseCount,providerFailureCount,pairStatusAfterDecision,ordinal2Executed,ordinal2Allowed,humanDecisionBy,humanDecisionAt | §5 facts 전체, scope=historical_read_only |
 | EvidenceBundle | subjectArchiveBytes,subjectJsonBytes,sourceDocuments,metadataReceipts,bundleDigest | 원본 immutable bytes 보존; hosted 재업로드 권한 아님 |
-| RefusalCode | §AC·EC 및 본문의 lowercase snake_case codes | 보고하지 않은 임의 성공 default 없음 |
+| RefusalCode | 아래 폐쇄 목록의 string | 보고하지 않은 임의 성공 default 없음 |
+
+RefusalCode는 다음으로 닫는다.
+`history_unverifiable`, `history_tampered`, `divergent_activation`,
+`purpose_history_unavailable`, `dataset_development`, `reverification_unavailable`,
+`invalid_history`, `invalid_transition`, `frozen_identity_changed`,
+`missing_contract_approval`, `insufficient_contract_approval`, `missing_activation_approval`,
+`approval_not_prior`, `approval_ancestry_mismatch`, `activation_ancestry_mismatch`,
+`legacy_subject_mismatch`, `legacy_evidence_unavailable`, `approval_unverifiable`,
+`frozen_closure_unresolvable`, `partial_bundle`.
+§1의 closure refusal는 frozen_closure_unresolvable, §2의 반쪽 bundle은 partial_bundle,
+§4의 A 소실/C force-reset은 각각 approval_ancestry_mismatch/activation_ancestry_mismatch다.
+unknown field·schema 오류의 invalid history는 invalid_history다. pre-C의 비예외 Q·unknown
+dataset·C와 무관한 branch는 purpose_history_unavailable이다. 검증은 §4의 단계 순서이며
+같은 단계의 복수 실패는 code의 ASCII 사전순 첫 값을 반환하고 evidencePaths도 정렬한다.
+이 내부 진단보다 current admission의 외부 refusal 의미는 §4의 current gate 규칙이 우선한다.
 
 `transitionPayloadDigest`의 domain은 `mem-purpose-transition-intent-1`이고 제외 field는
 정확히 activationApprovalCommit 하나다. 나머지 fields·prevDigest·identity·approvalCommit은
@@ -388,6 +417,26 @@ seq2 자신이나 그 detached 서명은 들어가지 않는다. 따라서 diges
 
 DB schema·migration·삭제 정책: N/A — 이력은 append-only라 정상 삭제·rollback operation이 없다.
 오류가 있으면 기존 history를 고치지 않고 inadmissible로 보존한 뒤 별도 정책 결정이 필요하다.
+
+## Review disposition — 역사 보존과 남은 수용 범위
+
+검토 대상 `b6610c2179b0b94f60ebc0bd18156505028d81d1`의 P1-1은 §5·AC-6에서
+실제 JSON의 promptVersion과 출처로 수정했다. P1-2는 동반 S1의 accuracy 모집단에서
+수정했다. 이 기록은 수정자의 주장이지 독립 확인 검토의 closure 판정이 아니다.
+
+P3 신규 후보인 **V 외 pre-ledger purpose는 unknown**은 D1(4)의 유일한 v8 보존 예외와
+모순되지 않지만 다른 과거 run의 purpose를 이 resolver로 새로 증명할 수 없다는 제한이다.
+상위 §12의 기존 여섯 잔여 중 하나로 자동 흡수하거나 이미 사람이 수용했다고 표시하지 않는다.
+S2 승인 receipt에 이 제한의 명시적인 수용 또는 개정 결정을 요구한다. 현재 pair가 전부
+revoked라고 가정해 이 판단을 면제하지 않는다. v8 revoked 사실과 다른 pair 상태는 별개다.
+
+보조 문언 검토는 §1의 전체 import closure 전방 동결이 공유 module의 후속 변경까지
+제약한다는 가용성 위험도 지적했다. 이 수정에서 frozen scope를 임의로 축소하지 않는다.
+closure drift가 생기면 새 검증은 fail-closed이고, §4처럼 보존된 기존 historical receipt와
+당시 admissible FAIL·revocation 사실을 삭제하거나 소급 무효화하지 않는다. 그러나 재검증과
+후속 단계는 중단될 수 있으므로 **이 장기 동결 범위 역시 S2 승인 전 사람의 명시적 판단 대기**다.
+동결 범위를 바꾸려면 activation 전에 S2를 다시 고정·검토해야 하며, 현재 상태에서 활성화를
+승인한 것으로 읽지 않는다. S3는 succ-9 내용의 새 decision dataset 부분 재사용 금지도 승계한다.
 
 ## Out of Scope — 이번 작성이 하지 않는 것
 
