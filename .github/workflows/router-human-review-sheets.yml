@@ -347,7 +347,7 @@ jobs:
           find out-manifest out-key "out-sheet-$A" "out-sheet-$B" -type f | sort
 
       - name: Manifest (committable)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: human-review-manifest
           path: out-manifest/
@@ -355,7 +355,7 @@ jobs:
           retention-days: 90
 
       - name: Sheet for reviewer A
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: human-review-sheet-${{ inputs.reviewer_a }}
           path: out-sheet-${{ inputs.reviewer_a }}/
@@ -363,7 +363,7 @@ jobs:
           retention-days: 30
 
       - name: Sheet for reviewer B
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: human-review-sheet-${{ inputs.reviewer_b }}
           path: out-sheet-${{ inputs.reviewer_b }}/
@@ -371,7 +371,7 @@ jobs:
           retention-days: 30
 
       - name: Encrypted key
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: human-review-key-encrypted
           path: out-key/
