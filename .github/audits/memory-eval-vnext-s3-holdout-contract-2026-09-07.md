@@ -203,6 +203,11 @@ authoring 거부는 실행된 programme의 품질 FAIL이 아니다. seal 이전
 암호 primitive는 AES-256-GCM, nonce 96 bits, tag 128 bits로 고정한다. tag 축약과 임의
 crypto 구현을 허용하지 않는다. primitive 근거는 [NIST SP 800-38D](https://csrc.nist.gov/pubs/sp/800/38/d/final)이며
 아래 key 분리·한도·보관은 이 계약의 선택이다. nonce 유일성은 재시작을 포함해야 한다.
+2026-09-07 보완에서는 [NIST 원문 PDF](https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf)의
+§8/§8.1(같은 key·IV 재사용 방지와 fresh key), §8.2.1(96-bit deterministic IV),
+§9.1(전원 상실 후 재사용 방지)을 직접 대조했다. 이 계약의 해석은 key별 단일 암호화 context,
+32-bit fixed field=0, 64-bit invocation field=0을 한 번만 사용하는 것이다. NIST가 이 저장소의
+구현·RNG·custody를 인증했다는 주장이 아니다. 원문의 조건과 아래 운영 선택은 구분한다.
 
 각 encrypted object는 **새 256-bit random key를 한 번만** 사용한다. keyId/objectId는
 별도 random 128-bit lowercase hex이고 내용에서 유도하지 않는다. 한 key의 nonce는
@@ -211,6 +216,10 @@ encryption 1회다. custody journal에 allocation·encryption 시작을 durable 
 encrypt하지 않는다. 중단·성공 여부 불명이어도 그 key를 재사용하지 않는다. 전달 재시도는
 이미 저장된 동일 암호문 복사뿐이다. 다시 암호화해야 하면 새 objectId와 새 key를 배정한다.
 nonce/key 재사용·journal 유실·이중 writer·random source 실패는 crypto_unverifiable다.
+fresh key는 새 keyId만 뜻하지 않는다. 승인한 CSPRNG의 key 생성/수송 경로에서 snapshot
+복원·seed replay·이전 key 재주입을 차단한 증거가 필요하다. 같은 key material은 복호화
+복제본을 포함한 모든 장치에서 암호화 1회 한도를 공유한다. 복구 backup은 복호화 전용이며
+freshness/사용 기록을 증명 못 하면 새 암호화는 차단한다. 동일 입력의 재암호화도 금지다.
 
 EncryptedObject는 CJSON({header,ciphertextBase64,tagBase64}) exact bytes다. header는
 {schemaVersion:1,suite:"AES-256-GCM-1",objectId,keyId,role,repositoryId,programmeId,runId,
@@ -226,6 +235,11 @@ rawSha256·base64를 가진다. 경로순으로 정렬하며 duplicate/path trav
 raw bytes를 Base64로 운반하므로 NFD 원문도 손실 없이 보존한다. 외부 CJSON의 NFC 요건을
 만족시키려고 raw source를 정규화하지 않는다. body 한도는 256 MiB, 개별 파일 64 MiB,
 파일 10,000개다. 초과는 resource_limit이지 부분 암호화/잘라내기 허가가 아니다.
+subject가 아직 없어 S1 RunTuple을 만들 수 없는 grant/claim/no-contact/환경 증거는
+receipt/evidence의 protocol binding으로 보관하고 내부 record의 실제 RunUnit/holdoutId를
+검증한다. protocol **package binding**이 KeyGrant의 작업 scope를 protocol로 바꾸는 것은 아니다.
+일반 run 보관물은 subject 생성 뒤 run binding을 사용한다. 미실행 unit에는 subject hash나
+RunTuple을 꾸며 넣지 않으며 wrapper 때문에 미래 subject를 요구하는 순환을 만들지 않는다.
 
 서로 다른 holdout/subject/review_sheet/evidence/receipt object는 key를 공유하지 않는다.
 machine dataset/subject 복호화 key는 승인된 단일 실행 환경에만, review_sheet key는
@@ -234,11 +248,58 @@ machine dataset/subject 복호화 key는 승인된 단일 실행 환경에만, r
 뒤의 full_unblind 절차를 요구한다. key plaintext는 Git·Actions artifact/log/cache에 0개다.
 
 custodian은 암호문과 key를 별개 접근 경계에 보관하고, 무제한 범용 CI secret으로 key를
-주입하지 않는다. 세션·unit·role·objectId가 결속된 KeyGrant가 필요하다. Grant 유효시간은
-최대 30분이며 대상이 종료/차단되면 즉시 폐기한다. 실행 환경에는 swap/core dump/telemetry/
-stdout capture를 차단하고 비공개 처리용 tmpfs 또는 같은 수준으로 검증된 volatile store만
-쓴다. 설치·cache restore 등 제3자 도구 실행은 key 주입 **전**에 끝나야 한다.
+주입하지 않는다. 세션·GrantScope·role·objectId가 결속된 KeyGrant가 필요하다. Grant 유효시간은
+최대 30분이며 대상이 종료/차단되면 즉시 폐기한다. plaintext worker의 swap/core dump/
+telemetry/stdout·stderr capture를 차단하고 비공개 처리용 tmpfs 또는 같은 수준으로 검증된
+volatile store만 쓴다. runner 관리 log는 opaque ID/비밀 없는 상태 allowlist만 외부 보존하며
+worker plaintext/error를 관리 log에 중계하지 않는다. 설치·cache restore 등 제3자 도구
+실행은 key 주입 **전**에 끝나야 한다.
 보관소·key 관리 방식과 복구를 확인하지 못한 실행 환경은 사용하지 않는다.
+
+S4 provider-contact/기계 복호화 job은 **전용 ephemeral self-hosted runner**에서만 허용하며
+이 버전은 GitHub-hosted plaintext job을 허용하지 않는다. self-hosted label이나 일회 등록만으로
+충족했다고 보지 않는다. [GitHub secure-use](https://docs.github.com/en/actions/reference/security/secure-use)의
+runner 위험 설명처럼 host 재사용/공유 job의 노출 위험은 별도 통제로 다뤄야 한다. 이 문서는
+hosted 서비스가 언제나 불안전하다는 주장 대신 이 계약에서 검증할 환경을 한정한다.
+
+EnvironmentApproval은 사람이 승인한 policy·image·외부 supervisor·측정 verifier와 attester
+key를 고정한다. EnvironmentAttestation은 매 세션마다 worker 밖의 custodian이 fresh challenge와
+원 측정 bytes를 대조해 발급한다. 동일 machine에 다른 job/process가 접근하지 못하는 격리,
+새 비공유 volatile store, swap/dump/telemetry/worker-output 차단, egress allowlist, 상시
+provider credential 부재, key 전 dependency 설치 완료를 전부 증명해야 한다. 단순 성공
+boolean이나 worker 자기 서명은 증거가 아니다. 정책에는 각 통제의 측정 방법·허용값·실패
+조건을 명시하고 S4 ProtocolImplementation에 verifier/supervisor 의존성을 포함한다.
+증명 환경 밖의 관리자가 key/plaintext를 볼 수 있는 잔여는 R-S3-CUSTODY로 공시한다.
+
+job 환경은 한 RunUnit 전용이며 reviewer/authoring/materialisation 비공개 session도 같은
+통제의 목적별 policy와 attestation을 요구한다(그 session에 GitHub run을 새로 만들지 않는다).
+attestation 유효시간은 최대 30분이며 key/credential 발급 때마다 유효성·세션·목적을 확인한다.
+환경 변경·만료면 재측정 전 신규 grant/접촉을 막고 유출 불명은 소비한다. 후속 CleanupReceipt를
+사전 attestation에 넣어 미래 cleanup 성공을 미리 요구하지 않는다. 실제 환경 구축은 별도 단계다.
+
+#### 4.1 RunUnit이 없는 grant와 bootstrap 경계
+
+GrantScope는 run/holdout/protocol 세 tagged variant만 허용한다. redacted review와 recovery는
+UI session이 offline이어도 **원 subject의 RunUnit**을 run scope에 넣고 새 sessionId를 쓴다.
+다른 ordinal sheet는 그 ordinal의 unit/새 OpenIntent다. 가짜 runId/attempt로 비실행 작업을
+표현하지 않는다. authoring 검증·seal 검증·holdout 보관 복구·소비 뒤 materialisation은 holdout
+scope와 원 holdoutId를 사용한다. run 보관물의 복구는 원 run scope의 retention_restore다.
+protocol 증거만 읽을 때는 protocol scope이며 holdout/subject key를 이 scope로 요청할 수 없다.
+
+KeyGrant.authority는 bootstrap 또는 journal로 닫는다. bootstrap은 genesis 이전 protocol
+receipt/evidence의 암호화·복구 검증에 필요한 grant만 별도 사람 bootstrap 승인으로 허용한다.
+S4의 미래 checkpoint/root를 요구하지 않지만 holdout/provider/review 권한은 0이다. genesis 뒤에는
+journal authority와 검증된 최신 Checkpoint가 필수다. grant의 approvalDigest는 실제 작업의
+사람 승인(해당 bundle/seal/retention/review/materialisation/full-unblind 승인)에 결속한다.
+authoring/검증은 승인된 기계만 plaintext를 읽고 사람 full 접근은 별도 소비를 선행한다.
+
+run scope의 machine_eval은 유효 Programme/Reservation과 미소비 상태, redacted_review는
+해당 새 opening intent, redacted_recovery는 기존 intent·RecoveryReceipt를 요구한다.
+둘 모두 key role=review_sheet만 허용한다. full_unblind/development_materialisation은
+consumptionEventDigest가 필요하며 소비 이전에는 grant하지 않는다. retention_restore와
+evidence_verification은 승인된 기계 검증만 허용하고 새 평가·사람 full opening을 허용하지 않는다.
+object의 private binding, scope의 holdout/unit/protocol, 환경 목적, 승인 범위를 전부 대조하며
+scope를 넓혀 key를 공유하지 않는다. S4 clock 증거가 없는 유효시간 자기 선언도 거부한다.
 
 SignatureReceipt는 Ed25519(pure, ph/ctx 아님) detached signature다. signature bytes는
 64 bytes, trusted public key는 32 bytes이며 [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032.html)의
@@ -265,6 +326,7 @@ S4의 공통 append-only ledger가 상태 이력을 소유한다. 별도의 muta
 | draft | 검수·서명·암호화·복구 검증 완료 | sealed; 아직 programme 미배정 |
 | sealed | programme_bound | sealed; exact pair 한 개에 영구 배정 |
 | sealed | 승인된 사람 opening_started | opened; intent를 key release보다 먼저 기록 |
+| opened | 같은 bound programme의 다른 허용 ordinal sheet에 대한 승인된 opening_started | opened; 해당 unit closure·새 승인·새 intent, key 전에 기록 |
 | opened | 같은 bound programme의 redacted review 재개·완결 | opened; 새 pair 배정 없음 |
 | sealed 또는 opened | full_unblind / tuning_exposure / programme_end / final_verdict | development; 되돌릴 수 없음 |
 | development | materialisation 또는 보존 검증 | development; decision 재사용 없음 |
@@ -286,6 +348,10 @@ ordinal 2는 API re-run이나 실패 재시도가 아니다. ordinal 1의 S4 tec
 중간 reviewer에게 gold/metric/실패 분포를 주지 않고 검증소의 `continuationAllowed`만
 controller가 읽는다. 이 boolean은 최종 사람 판정이 아니며 S1 기준을 완화하지 않는다.
 opened라도 이 조건을 전부 만족하면 이미 bound된 ordinal 2가 가능하다.
+ordinal 2 technical closure 뒤 sheet를 여는 것은 ordinal 1 sheet의 recovery가 아니다.
+ordinal 2의 exact tuple/cipher·reviewer session·ReviewOpenApproval·OpenIntent를 새로 만들고
+opening_started를 먼저 기록한다. ordinal 1 intent/승인을 재사용하지 않으며 소비된 holdout/
+새 pair/ordinal 3에 대한 opening은 허용하지 않는다. 같은 sheet의 중단 재개만 §7 RecoveryReceipt 경로다.
 
 ### 6. Redacted opening과 exact-set review (FR-10, FR-11)
 
@@ -458,6 +524,31 @@ inadmissible로 보수 처리하며 provider 재접촉은 0회다. full-unblind 
 **Then** key release/upload 전에 차단한다. cleanup 확인 불명은 성공이 아니라 봉쇄·소비이며
 실패 출력에도 plaintext를 싣지 않는다.
 
+### AC-10: opened에서 ordinal 2의 새 sheet (FR-9, FR-10)
+
+**Given** ordinal 1 review로 opened이고 같은 Programme의 ordinal 2가 적법하게 실행·technical closure됐다.
+**When** ordinal 2 tuple/cipher에 대한 새 ReviewOpenApproval과 새 OpenIntent로 opening을 요청한다.
+**Then** opening_started를 key release 전에 기록하고 opened를 유지한다. ordinal 1 intent/cipher
+재사용, 다른 programme, 미승인 ordinal, 소비 상태는 거부한다. 같은 sheet의 복구는 별도
+RecoveryReceipt 경로이며 신규 ordinal opening의 대체가 아니다.
+
+### AC-11: 비실행 grant와 원 subject unit (FR-7, FR-12, FR-14)
+
+**Given** 원 unit U의 review 복구, seal 검증, 소비 뒤 materialisation, genesis 이전 protocol 검증.
+**When** 각각 새 session의 KeyGrant scope와 authority를 검증한다.
+**Then** 복구는 run/U/redacted_recovery와 기존 intent, seal은 holdout/seal_verification,
+materialisation은 holdout/development_materialisation과 실제 consumption event, bootstrap은
+protocol_evidence_verify만 허용한다. 임의 null unit/가짜 run, 소비 없는 materialisation,
+bootstrap으로 holdout/provider 접근, reviewer의 full key는 거부한다.
+
+### AC-12: 환경 증명과 key 전 설치 (FR-7, FR-13, NFR-2)
+
+**Given** self-hosted label만 있는 runner, 공유 host, worker가 자기 서명한 attestation 또는 만료 증거.
+**When** key/provider credential 발급을 요청한다.
+**Then** 모두 발급 0건으로 거부한다. 승인 policy와 fresh 외부 측정이 단일 unit 격리·volatile
+store·swap/dump/telemetry/output 차단·egress·상시 credential 부재·설치 완료를 증명할 때만
+해당 gate를 통과한다. hosted plaintext job은 거부하고 cleanup 유실/유출 불명은 보수 소비다.
+
 ## Edge Cases — 경계 사례
 
 - EC-1: zero allowed target — review 생략이 아니라 서명된 empty exact-set receipt다.
@@ -486,7 +577,7 @@ interface VerifySealRequest {
   datasetBytes: Uint8Array;
   manifest: DatasetManifest;
   evidence: SealEvidence;
-  history: VerifiedHistory; // S4 output, never caller-asserted trust.
+  history: VerifiedHistory; // S4 unregistered state after trusted genesis, never caller assertion.
 }
 interface PlanOpeningRequest {
   tuple: RunTuple; // Exact S1 RunTuple, including plaintext subject hash.
@@ -537,7 +628,11 @@ set은 아래 순서, sequence는 사건/원문 순서다. digest self field를 
 | PrivatePackage | schemaVersion:1,kind,binding,files:PrivateFile[] | binding은 {scope:holdout,holdoutId,manifestDigest}, {scope:run,tuple:RunTuple,protocolDigest}, {scope:protocol,repositoryId,protocolDigest} union; holdout은 첫째, subject/review_sheet는 둘째만; receipt/evidence는 해당 단계 scope; path 순 |
 | SignatureReceipt | payload,signatureBase64 | §4 exact fields/encoding; 자체 receipt digest는 외부 참조 |
 | TrustAnchor | trustEpoch,signerId,keyId,publicKeyBase64,roles,validFrom,validUntil,revokedAt,registrationReceipt:BlobRef,previousEpochDigest | roles ASCII set; 시각 null은 무기한/미폐기만; 첫 epoch의 previous=null; 사람 등록 원본 보존 |
-| KeyGrant | grantId,keyId,objectId,role,sessionId,unit,issuedAt,expiresAt,approvalDigest,stateCheckpointDigest,signatureReceiptDigest | unit=null은 seal용만, 나머지 S4 RunUnit; max 30분; mem-key-grant-1 |
+| KeyGrant | grantId,keyId,objectId,role,sessionId,scope:GrantScope,authority:GrantAuthority,environmentAttestationDigest,issuedAt,expiresAt,approvalDigest,signatureReceiptDigest | §4.1 scope/권한/환경 일치; max 30분; mem-key-grant-1 |
+| GrantScope | 아래 세 variant | additional field/가짜 RunUnit/null unit 불허 |
+| GrantAuthority | {kind:bootstrap,bootstrapApprovalDigest} 또는 {kind:journal,stateCheckpointDigest} | bootstrap은 genesis 이전 protocol 증거만; 그 외 최신 S4 검증 checkpoint |
+| EnvironmentApproval | policy:BlobRef,imageDigest,supervisorDigest,verifierImplementationDigest,attesterKeyId,approvedAt,signatureReceiptDigest | 사람 approver; policyDigest=policy.rawSha256; 측정·실패 조건 포함; mem-environment-approval-1 |
+| EnvironmentAttestation | environmentId,sessionId,scope:GrantScope,approvalDigest,challengeNonce,measurements:BlobRef,issuedAt,expiresAt,signatureReceiptDigest | worker 밖 등록 custodian 서명; nonce는 fresh 128-bit random hex; max 30분; mem-environment-attestation-1 |
 | ReviewOpenApproval | tuple,sheetCipherSha256,reviewer,environmentPolicyDigest,purpose:redacted_review,approvedAt,signatureReceiptDigest | mem-review-open-approval-1; 실제 승인한 사람 |
 | OpenIntent | intentId,tuple,sheetCipherSha256,sessionId,approvalDigest,stateCheckpointDigest,createdAt | mem-open-intent-1; journal durable 이후 key release |
 | OpenReceipt | intentDigest,outcome,exposure,observedAt,signatureReceiptDigest | outcome=opened/failed/unknown; exposure=redacted_only/full/unknown; mem-open-observation-1 |
@@ -546,6 +641,27 @@ set은 아래 순서, sequence는 사건/원문 순서다. digest self field를 
 | MaterialisationReceipt | approvalDigest,consumptionEventDigest,datasetRawSha256,absolutePath,byteLength,completedAt,signatureReceiptDigest | 소비 불변; mem-materialise-1 |
 | RetentionProof | objectRefs,keyBackupReceipt:BlobRef,stores,restoreEvidence:BlobRef,verifiedAt,signatureReceiptDigest | stores는 서로 독립인 opaque store ID 정확히 2개, ASCII 순; mem-retention-proof-1 |
 | CleanupReceipt | sessionId,revokedGrantIds,volatileStoreReleased,keysReleased,publicAllowlistClean,completedAt,signatureReceiptDigest | 세 boolean 전부 true만 성공; ID 순; mem-cleanup-1 |
+
+GrantScope의 정확한 union은 다음과 같다. 명시적 nullable 외 field는 전부 필수다.
+
+- `{kind:run,unit:RunUnit,purpose,openingIntentDigest,consumptionEventDigest}`: purpose는
+  machine_eval/redacted_review/redacted_recovery/full_unblind/retention_restore/evidence_verification.
+  openingIntentDigest는 두 redacted 목적에서만 필수이고 다른 목적은 null이다.
+  consumptionEventDigest는 full_unblind에서 필수이고 다른 목적은 null이다. recovery의
+  openingIntentDigest는 기존 원 intent이고 새 승인은 KeyGrant.approvalDigest로 결속한다.
+- `{kind:holdout,holdoutId,purpose,consumptionEventDigest}`: purpose는 authoring_validation/
+  seal_verification/retention_restore/development_materialisation/full_unblind. 마지막 둘만
+  consumptionEventDigest가 필수이며 나머지는 null이다.
+- `{kind:protocol,repositoryId,protocolDigest,purpose:protocol_evidence_verify}`: receipt/evidence
+  role만 허용하며 평가·holdout opening·provider 접촉은 불허한다.
+
+EnvironmentAttestation.scope는 KeyGrant.scope와 exact 같고 source job이 없는 session도 위
+형식 그대로다. KeyGrant signer는 custodian, environment_approval은 사람 approver,
+environment_attestation은 그 approval에 등록된 custodian key다. ReviewOpenApproval의
+environmentPolicyDigest는 EnvironmentApproval.policy의 raw SHA와 같아야 한다.
+EnvironmentApproval/ClockPolicy의 verifierImplementationDigest는 해당 측정 verifier의
+ExecutionClosure(S4 형식·domain) digest다. 자기 policy/approval/상위 ProtocolImplementation
+전체 digest를 포함하지 않으며, 그 verifier 파일·dependency들은 P의 closure에도 전부 포함된다.
 
 표의 mem-* signature body domain은 **signatureReceiptDigest 한 field만 제외한 body**에
 적용하고 SignatureReceipt.payload.contentDigest로 결속한다. 표에 domain이 없는 BlobRef는
@@ -556,7 +672,8 @@ raw bytes hash다. Boolean/시각을 자기 보고로 신뢰하지 않고 signer
 
 SignatureReceipt.purpose는 authoring_bundle, isolation, batch_review, holdout_seal,
 key_grant, review_open, review_row, review_complete, open_observation, open_recovery,
-materialise_approval, materialise, retention_proof, cleanup 및 S4의 명시적 purpose만 허용한다.
+materialise_approval, materialise, retention_proof, cleanup, environment_approval,
+environment_attestation 및 S4의 명시적 purpose만 허용한다.
 trust role은 authoring_reviewer / reviewer / approver / custodian / controller / importer이며,
 사람 채택·검토에는 앞의 해당 사람 역할이 필수다. custody의 자기 서명만으로 scope를 늘리지 않는다.
 DB entity/index/migration은 N/A — 이 문서는 저장 테이블을 생성하지 않는다.
@@ -575,11 +692,25 @@ R-KO-SUBJECT-1, R-PRELEDGER-1, R-SCOPE-1을 변경하지 않는다. 아래는 **
 잔여**이며 기존 승인이 자동으로 덮지 않는다. S3/S4 최종 receipt는 exact 문서 SHA와 함께
 이를 명시적으로 수용해야 한다.
 
+최초 독립 검토 대상은 `3f1e1e261951b946e0e066dc510aad160a73d9f8`이며 판정은 BLOCK이었다.
+아래는 그 지적에 대한 **작성자 수정안**이다. 확인 검토 closure와 최종 사람 승인은 미완료다.
+
+| Finding | 수정/disposition | 확인 검토 대상 |
+|---|---|---|
+| F-S3-01 (P2) | opened에서 같은 programme의 다른 ordinal sheet 신규 opening을 명시 | §5–§7, AC-10 |
+| F-S3-02 (P2) | 전용 attested ephemeral self-hosted와 비실행 session의 증명 요건 선택 | §4, EnvironmentApproval/Attestation, AC-12 |
+| F-S3-03 (P3) | GrantScope/GrantAuthority union, 원 subject unit과 비실행 scope 분리 | §4.1, Data Models, AC-11 |
+| F-S4-01 (P1 연동) | genesis 이후 unregistered context에서 seal 검증, 미래 E 불필요 | VerifySealRequest, S4 AC-13 |
+| Crypto 확인 공백 | NIST PDF §8/§8.1/§8.2.1/§9.1 직접 대조; fresh key/복구 범위 명시 | §4, AC-4; 독립 재확인 필요 |
+
 - R-S3-ISOLATION: 규범 projection의 누락 0건은 사람 검토·환경 통제에 의존한다. 제한된
   grammar의 분포 편향과 단독 민감성 오판은 여전히 남고 floor는 대표성을 증명하지 않는다.
 - R-S3-CUSTODY: AES-GCM per-object 일회 key, Ed25519 trust bootstrap, 30분 grant,
   분리된 보관소 두 곳과 복구 검증을 선택했다. custodian/controller 침해·OS side channel·
   RAM 잔존을 완전히 제거하지 못하며 구성 증명 부재는 실행 차단이다.
+  전용 ephemeral self-hosted와 외부 환경 attestation을 선택했지만 현재 준비됐다는 뜻은 아니다.
+  동일인이 관리·custodian·승인 역할을 겸할 때 독립 통제의 한계를 숨기지 않는다. NIST 원문 대조는
+  구현의 인증이 아니며 key freshness/단일 사용 기록과 환경 검증 실패는 모두 실행을 막는다.
 - R-S3-HUMAN: gold-withheld와 사람이 실제 본 내용을 되돌릴 수 없다는 한계가 남는다.
   conservative opened/consumed 때문에 실제 미노출 crash에서도 holdout을 잃을 수 있다.
 - R-S3-RETENTION: 근거 사용 기간의 암호화 보존·별도 key backup은 장기 접근 위험과
