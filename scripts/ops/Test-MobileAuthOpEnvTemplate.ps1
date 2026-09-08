@@ -195,6 +195,11 @@ foreach ($refusal in $parseRefusals) {
         # alone leaves the parser free to print the line through any other one:
         # a Write-Warning of the offending line put a synthetic ring on screen
         # while this case still passed.
+        #
+        # The output stream is the exception, and deliberately so: `$null =`
+        # below discards it, and at the top of this file a throw means the
+        # assignment never completes, so nothing emitted that way reaches an
+        # operator. It is not a disclosure path, so this case does not chase it.
         $captured = & {
             $VerbosePreference = "Continue"
             $DebugPreference = "Continue"
