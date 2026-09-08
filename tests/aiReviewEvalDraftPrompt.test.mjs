@@ -239,11 +239,59 @@ test("the planted answer is told to believe itself", () => {
   assert.match(instruction, /element 2 justifies ITS OWN recommendation/);
   assert.match(instruction, /never state the principle that makes it wrong/);
   assert.match(instruction, /Do not reuse the reasoning sentences of the answers that are right/);
-  // The element count in the rule tracks the shape rather than being typed in.
-  assert.match(
-    instruction,
-    new RegExp(`elements 3 to ${ANSWER_SHAPE[cell.taskType].length} follow from it`)
-  );
+  // The rule names "the later elements" rather than a count. It used to
+  // interpolate the shape's length, which was right while there was one rule
+  // for every phenomenon; the rules are now chosen per phenomenon and live
+  // outside the request, so a number would have to be typed in -- and a typed
+  // number is what that assertion existed to prevent.
+  assert.doesNotMatch(instruction, /elements 3 to \d/);
+  assert.match(instruction, /the later elements follow from it/);
+});
+
+test("an omission batch is told what an omission is, not what a wrong answer is", () => {
+  // Rules 8 and 9 were written for a fault that is stated. Read by an omission
+  // batch they ask for the wrong thing: rule 8 for a wrong ACTION where the
+  // fault is a missing one, rule 9 for a recommendation to justify where there
+  // is nothing to justify.
+  //
+  // The only omission material that exists -- four hand-written cases in
+  // development-v0 -- misses on exactly this: in every one the accused answer
+  // is short of TWO things the others have.
+  const omission = draftInstruction({
+    ...cell,
+    phenomenon: "omission",
+    count: 2,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, phenomenon: "omission", count: 2 }),
+  });
+  assert.match(omission, /the only one missing ONE required element/);
+  // Required by the question, not by what the other answers happen to say.
+  assert.match(omission, /not merely that the other answers happen to mention it/);
+  // Met in substance, so a gold cannot score vocabulary.
+  assert.match(omission, /met, not worded alike/);
+  assert.match(omission, /required under every reading of the question/);
+  // The assigned answer owes correctness, not a self-consistent mistake.
+  assert.match(omission, /correct in everything it does say/);
+  assert.match(omission, /Do not add a mistake to make the omission easier to spot/);
+  assert.doesNotMatch(omission, /believes itself/);
+  assert.doesNotMatch(omission, /justifies ITS OWN recommendation/);
+  // And the reply shape asks for the gold kind this phenomenon produces.
+  assert.match(omission, /"missingPoints": \[/);
+  assert.match(omission, /"goldCompleteness": \{ "missingPoints": true \}/);
+  assert.doesNotMatch(omission, /"contradictions": \[/);
+
+  // The contradiction wording is unchanged for the phenomena it was written
+  // for, which is every phenomenon that plants something stated.
+  const contradiction = draftInstruction({
+    ...cell,
+    count: 2,
+    existingQuestions: [],
+    targetLabels: assignTargetLabels({ ...cell, count: 2 }),
+  });
+  assert.match(contradiction, /differs from the others on ONE point/);
+  assert.match(contradiction, /believes itself/);
+  assert.match(contradiction, /"contradictions": \[/);
+  assert.doesNotMatch(contradiction, /missing ONE required element/);
 });
 
 test("one difference means one reportable action, wrong in every reading", () => {
