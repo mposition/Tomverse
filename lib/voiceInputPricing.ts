@@ -189,7 +189,12 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
         "calls -- and the aggregate token counts equal the per-request counts " +
         "recorded in #1247 (352/112), which extra traffic could not net to. " +
         "Across 30 days a transcribe line item appears on 2026-09-02 only. " +
-        "Key key_X8plaVKnXzfMjbCA, project proj_gvGv5Ftkw4UtzUh45jpfHMWY.",
+        // Digests, not the identifiers. Whoever holds the operations record can
+        // confirm these name the key and project the calls were made on;
+        // nobody else learns which account this is. See the policy note in
+        // §6.1.3-4 for why an isolation string does not carry them in full.
+        "Key sha256:67ad26189fa0, project sha256:35539b590847 (originals in " +
+        "the private operations record).",
       source:
         "GET /organization/costs, bucket_width=1d, group_by=line_item, " +
         "bucket 2026-09-02: audio input 0.001056 + text input 0.0 + text " +

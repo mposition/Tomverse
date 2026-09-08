@@ -223,6 +223,26 @@ test("an observed cost carries the invoice it was read from", () => {
   );
 });
 
+test("an observation names no raw account identifier", () => {
+  // This register lives in a public repository, and an API key id, project id
+  // or organization id is not needed to check any of the arithmetic above.
+  // What the isolation claim actually needs is that the calls can be pinned to
+  // one key -- a digest does that for anyone holding the operations record,
+  // and tells everyone else nothing (docs/policy/voice-input.md §6.1.3-4).
+  const rawIdentifier = /\b(key|proj|org|user)[-_][A-Za-z0-9]{12,}\b/;
+
+  for (const entry of VOICE_MODEL_PRICE_REGISTER) {
+    if (!entry.costObservation) continue;
+    for (const [field, value] of Object.entries(entry.costObservation)) {
+      if (typeof value !== "string") continue;
+      assert.ok(
+        !rawIdentifier.test(value),
+        `${entry.modelId}.${field} carries what looks like a raw account identifier`
+      );
+    }
+  }
+});
+
 test("the observed charge reproduces the recorded rates exactly", () => {
   // The reconciliation that makes the evidence load-bearing rather than
   // decorative. If this drifts, one of the two numbers was edited alone.

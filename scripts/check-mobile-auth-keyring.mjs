@@ -167,9 +167,22 @@ const describe = (
       );
       console.log(`  ${keyId}  RETIRED, grace over`);
     } else {
+      // The remaining window, not just its end. The retirement instant is
+      // written before the deploy and the grace runs from it, so preparing and
+      // deploying spends the window -- an instant backdated two minutes with
+      // an eight-minute deploy leaves five of the approved fifteen. Printing
+      // the end alone made that arithmetic the operator's to do.
+      const remainingSeconds = Math.round((expiresAt - now) / 1000);
       console.log(
-        `  ${keyId}  RETIRED, verifies until ${new Date(expiresAt).toISOString()}`
+        `  ${keyId}  RETIRED, verifies until ${new Date(expiresAt).toISOString()} ` +
+          `(${remainingSeconds}s left of ${graceSeconds}s, as of this check)`
       );
+      if (remainingSeconds < graceSeconds / 2) {
+        notes.push(
+          `${label}: "${keyId}" has ${remainingSeconds}s of its ${graceSeconds}s window left, and the deploy has not happened yet. ` +
+            `Whatever is still holding credentials from that generation gets the remainder, not the window. Re-date the retirement and re-run this check if that is not enough.`
+        );
+      }
     }
   }
 

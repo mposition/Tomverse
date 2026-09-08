@@ -134,7 +134,12 @@ test("a deployment running the candidate material passes", () => {
   assert.equal(result.code, 0, result.stdout);
   assert.match(result.stdout, /OK {4}signing key material/);
   assert.match(result.stdout, /OK {4}pepper material/);
-  assert.match(result.stdout, /Not covered: retired entries/);
+  // The PASS is scoped: it says what the evidence shows, and says plainly that
+  // it does not tie that evidence to the running deployment.
+  assert.match(result.stdout, /NOT established: that this evidence came from the deployment/);
+  assert.match(result.stdout, /NOT covered: retired entries/);
+  assert.match(result.stdout, /does not satisfy the promotion condition/);
+  assert.equal(/the running deployment holds/.test(result.stdout), false);
 });
 
 test("a different signing key under the same kid fails, and the ids do not hide it", () => {
@@ -330,4 +335,52 @@ test("preflight failures say stop the deploy, not roll back after one", () => {
   assert.equal(result.code, 1, result.stdout);
   assert.match(result.stdout, /Do NOT deploy/);
   assert.equal(/Roll Railway back to Active/.test(result.stdout), false);
+});
+
+test("expired evidence holds the promotion instead of ordering a rollback", () => {
+  // Every id, both rings and both claims are right; only the token is stale.
+  // The remedy used to come from the mode alone, so a copy-paste from ten
+  // minutes earlier produced "restore Railway from Active", "roll back" or
+  // "disable mobile auth" depending on the flag. Evidence that cannot be
+  // judged is not a verdict on the deployment.
+  const signing = ed25519();
+  const stale = () =>
+    evidence({
+      signing,
+      pepper: PEPPER_INTENDED,
+      issuedAt: Math.floor(Date.now() / 1000) - 120,
+      ttlSeconds: 60,
+    });
+
+  for (const mode of ["preflight", "rotation", "emergency"]) {
+    const result = run({
+      ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED, mode }),
+      ...stale(),
+    });
+    assert.equal(result.code, 1, `${mode}: ${result.stdout}`);
+    assert.match(result.stdout, /Nothing was decided about the deployment/);
+    assert.match(result.stdout, /Collect a fresh exchange/);
+    assert.equal(/Do NOT deploy/.test(result.stdout), false, mode);
+    assert.equal(/Roll Railway back to Active/.test(result.stdout), false, mode);
+    assert.equal(/disable mobile/.test(result.stdout), false, mode);
+  }
+});
+
+test("a real mismatch alongside stale evidence still gets the mode's remedy", () => {
+  // The hold is for evidence-only failures. A deployment running the wrong key
+  // is a finding about the deployment, and it does not stop being one because
+  // the token was also old.
+  const deployed = ed25519();
+  const intended = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: intended.pkcs8, pepper: PEPPER_INTENDED, mode: "rotation" }),
+    ...evidence({
+      signing: deployed,
+      pepper: PEPPER_INTENDED,
+      issuedAt: Math.floor(Date.now() / 1000) - 8 * 24 * 3600,
+    }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /Roll Railway back to Active/);
+  assert.equal(/Nothing was decided about the deployment/.test(result.stdout), false);
 });

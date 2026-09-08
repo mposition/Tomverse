@@ -445,9 +445,18 @@ input을 고정하면 **output 241 tokens/분**에서 공급자 추정치 US$0.0
   트래픽이 이 값으로 상쇄될 수 없습니다.
 - 30일 중 transcribe line item은 **2026-09-02에만** 있습니다.
 
-키 `key_X8plaVKnXzfMjbCA`, project `proj_gvGv5Ftkw4UtzUh45jpfHMWY`, 요청 키와
-같은 조직입니다. 같은 키의 다른 모델 트래픽은 이 대조를 오염시키지 않습니다 —
+키 `sha256:67ad26189fa0`, project `sha256:35539b590847`, 요청 키와 같은
+조직입니다. 같은 키의 다른 모델 트래픽은 이 대조를 오염시키지 않습니다 —
 line item과 usage 행이 둘 다 모델별이기 때문입니다.
+
+**격리 근거에 계정 식별자를 원본으로 적지 않습니다.** API key ID·project ID·
+organization ID는 bearer secret이 아니지만, 이 저장소는 공개이고 그 값들은
+검증에 필요하지 않습니다. 필요한 것은 **"그 3회가 한 키에서 나왔고 그 키를
+지목할 수 있다"**는 사실뿐이고, SHA-256 앞자리가 그 일을 합니다 — 원본을
+가진 사람은 대조할 수 있고, 나머지는 어느 계정인지 알 수 없습니다. 원본은
+비공개 운영 기록에 둡니다.
+
+이 규칙은 앞으로의 `costObservation` 항목에도 적용됩니다.
 
 **5. `gpt-4o-transcribe`는 보류입니다.**
 
