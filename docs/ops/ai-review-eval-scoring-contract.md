@@ -385,10 +385,12 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
 
 이 넷이 정해지기 전에는 이 계약으로 **비교 점수를 만들지 않는다.**
 
-선택지와 그 결과는 `.github/audits/ai-review-scoring-policy-options-2026-09-08.md`
-에 실제 후보 case 위에서 계산해 두었다(2판). **그 문서도 아무것도 승인하지
-않는다** — 사람이 고르면 그 결과가 여기 본문으로 올라오고, 정해지지 않은 것은
-이 목록에 남는다.
+선택지와 그 결과는 실제 후보 case 위에서 계산해 두었다 — 분해 단위와 부분 일치는
+`.github/audits/ai-review-scoring-policy-options-2026-09-08.md`(3판), 보조 설명과
+불충분한 발견은 `.github/audits/ai-review-scoring-policy-decision-2026-09-08.md`,
+재현은 `npm run experiment:ai-review-scoring-policies`다. **그 문서들도 아무것도
+승인하지 않고, 제안된 선택지는 어느 것도 이 파일에 구현돼 있지 않다** — 사람이
+고르면 그 결과가 여기 본문으로 올라오고, 정해지지 않은 것은 이 목록에 남는다.
 
 ## 6. 구현 범위
 
