@@ -966,6 +966,48 @@ It is a floor under every lane above and a substitute for none of them: it
 answers "did the checks finish", never "was this exercised anywhere real".
 https://docs.railway.com/deployments/github-autodeploys#wait-for-ci
 
+### 7.9.5 The next full release after `main` has carried a cherry-pick
+
+A `release/**` lane (7.9.1) leaves `main` holding commits that also exist on
+`develop` **as different objects**. The next full `develop` -> `main` release
+meets them again, and how it meets them has to be checked rather than assumed.
+
+**`main` having the files does not mean the branches converged.** On 2026-09-08
+twenty-one Voice commits were cherry-picked to `main` so that a production
+deployment would carry the code an operational check needed. `main` gained 46
+voice files and stayed thousands of commits behind `develop`. Anyone reading
+"main has voice now" as "main and develop agree" would be wrong about
+everything else.
+
+Before merging the next full release, for each commit the earlier cherry-pick
+moved:
+
+- [ ] **Compared by patch, not by SHA.** A cherry-picked commit is a different
+      object with different parents, so `git branch --contains` and any SHA
+      equality answer "not there" about a change that is. `git cherry
+      origin/main origin/develop` marks patch-equivalent commits with `-` and
+      genuinely absent ones with `+`; `git range-diff` shows what changed
+      between the two versions of one
+- [ ] **Both branches' own changes are listed.** `main` is not only behind:
+      hotfixes, deviations and the cherry-picks themselves are on it, and a
+      release that assumes a fast-forward will silently drop them
+- [ ] **Conflict resolutions are recorded.** A resolution the original commit
+      never had is new code on the release, and it is reviewed as new code.
+      The same applies to a resolution made during the original cherry-pick:
+      it is on `main` and not on `develop`, so the merge meets it as a
+      difference
+- [ ] **Checked for the same patch applied twice**, which a merge can produce
+      when one side was cherry-picked and the other later rewritten -- and for
+      a patch **dropped** because the merge resolved it as "already present"
+      when only part of it was
+- [ ] **`main === develop` is never inferred.** After the merge, if the two
+      are meant to agree, `git diff origin/main origin/develop --stat` is empty
+      or its output is explained in the release record
+
+None of this reopens the earlier release. A cherry-pick that was verified and
+signed stays verified and signed; this is about the merge that comes after it,
+which is a different change with its own evidence.
+
 ## 8. Unverified items and waivers
 
 Anything above that could not be verified from this environment goes here with
