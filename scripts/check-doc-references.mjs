@@ -4,7 +4,7 @@
 // See scripts/check-doc-references-core.mjs for why.
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -88,10 +88,22 @@ const sourceFiles = [];
 for (const file of SOURCE_FILES) {
   if (existsSync(join(root, file))) sourceFiles.push(file);
 }
+// Repository paths are written with "/" everywhere this check compares them:
+// in the documents, in the source comments, and in the historical registry. So
+// they are BUILT with "/" too, rather than with the platform's separator.
+//
+// `join()` produces "lib\\documentLanguage.ts" on Windows, and the comparison
+// that skips a comment naming its own file then never matches -- so every such
+// heading is reported as a broken reference, and the check fails on Windows
+// while passing on Linux and in CI. The user of this repository is on Windows,
+// so that is not a corner: it is the check being unusable where it is run by
+// hand. Reported 2026-09-08 with eight failures of exactly this shape.
+const repoPath = (...segments) => segments.join("/");
+
 const collectSources = (directory) => {
   for (const entry of readdirSync(join(root, directory))) {
     if (SKIPPED_DIRECTORIES.has(entry)) continue;
-    const relativePath = join(directory, entry);
+    const relativePath = repoPath(directory, entry);
     if (statSync(join(root, relativePath)).isDirectory()) {
       collectSources(relativePath);
     } else if (SOURCE_EXTENSION.test(entry)) {
@@ -108,8 +120,9 @@ for (const file of sourceFiles) {
   for (const path of sourceCommentReferences(
     readFileSync(join(root, file), "utf8")
   )) {
-    // A comment naming its own file is a heading, not a pointer.
-    if (path === relative(root, join(root, file))) continue;
+    // A comment naming its own file is a heading, not a pointer. Compared as a
+    // repository path, so it matches on every platform.
+    if (path === file) continue;
     if (!commentReferences.has(path)) commentReferences.set(path, new Set());
     commentReferences.get(path).add(file);
   }
