@@ -63,7 +63,7 @@ export const MOBILE_STORE_FINGERPRINT_PLACEHOLDERS = {
   ],
 };
 
-const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?Z$/;
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?Z$/;
 const ROTATION_ID = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const SHA = /^[0-9a-f]{40}$/;
 /** Railway's own ids are UUIDs; anything else is accepted but must be sane. */
@@ -79,13 +79,21 @@ const FINGERPRINT_VALUE = /^[A-Za-z0-9+/=:._-]{8,128}$/;
  * meant, and both survive into the pair check, where `NaN` or a silently moved
  * day makes the ordering rule say nothing. So the components are re-derived
  * from the parsed instant and have to come back unchanged.
+ *
+ * **The fraction is part of the instant.** The pattern accepts up to three
+ * decimal places, so dropping them here would make `10:00:00.900Z` and
+ * `10:00:00.100Z` the same moment and the ordering rule would hold a Pending
+ * written before Active to be written after it. A value the shape accepts is a
+ * value the comparison has to carry.
  */
 const isoInstantMs = (value) => {
   if (typeof value !== "string") return undefined;
   const parts = ISO_INSTANT.exec(value);
   if (!parts) return undefined;
-  const [, year, month, day, hour, minute, second] = parts.map(Number);
-  const ms = Date.UTC(year, month - 1, day, hour, minute, second);
+  const [year, month, day, hour, minute, second] = parts.slice(1, 7).map(Number);
+  // `.5` is five hundred milliseconds, not five: the digits are a fraction.
+  const millisecond = parts[7] === undefined ? 0 : Number(parts[7].padEnd(3, "0"));
+  const ms = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
   const back = new Date(ms);
   const same =
     back.getUTCFullYear() === year &&
@@ -93,7 +101,8 @@ const isoInstantMs = (value) => {
     back.getUTCDate() === day &&
     back.getUTCHours() === hour &&
     back.getUTCMinutes() === minute &&
-    back.getUTCSeconds() === second;
+    back.getUTCSeconds() === second &&
+    back.getUTCMilliseconds() === millisecond;
   return same ? ms : undefined;
 };
 
@@ -145,40 +154,62 @@ const FINGERPRINT_KEYS = ["$comment", "algorithm", "value"];
 const isPlainObject = (value) =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** Every name this shape declares. Anything else is not printed, only located. */
+const KNOWN_NAMES = new Set([...ENTRY_KEYS, ...FINGERPRINT_KEYS]);
+
 /**
  * A field name safe to print.
  *
- * A JSON key is arbitrary text, so an unknown key could itself be the pasted
- * material. Anything that is not a short, plain identifier is described rather
- * than quoted.
+ * A JSON key is arbitrary text, and **a shape that looks harmless says nothing
+ * about what the text is**: a 32-character alphanumeric pepper is a perfectly
+ * ordinary-looking identifier. So the rule is membership, not appearance --
+ * only names this shape declares are quoted, and every other key is located by
+ * its position instead. The operator opens the file at that position; the
+ * checker never repeats what is written there.
  */
-const safeName = (key) => (/^[A-Za-z0-9_.$-]{1,40}$/.test(key) ? `"${key}"` : "an unnamed extra field");
+const nameFor = (key, index) =>
+  KNOWN_NAMES.has(key) ? `"${key}"` : `an unregistered field (position ${index + 1})`;
 
 /**
  * Every string the document carries, with a printable path to it.
  *
- * Only the structure declared above is walked, because only that structure is
- * allowed -- an object or array somewhere unexpected is refused by the caller
- * before this runs, so there is no corner for a string to hide in.
+ * Recursive on purpose. The shape check refuses structure it does not declare,
+ * but the two run over the same document and this one must not depend on that
+ * one having fired: a walk that stops one level early is a corner a ring can
+ * sit in, which is exactly what happened to `fingerprint.$comment`.
  */
 const stringsIn = (entry) => {
   const found = [];
-  const push = (path, value) => {
-    if (typeof value === "string") found.push([path, value]);
-  };
-  for (const [key, value] of Object.entries(entry)) {
-    const path = safeName(key);
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => push(`${path}[${index}]`, item));
-    } else if (isPlainObject(value)) {
-      for (const [inner, innerValue] of Object.entries(value)) {
-        push(`${path}.${safeName(inner)}`, innerValue);
-      }
-    } else {
-      push(path, value);
+  const join = (at, part) => (at === "" ? part : `${at}.${part}`);
+  const visit = (node, at, depth) => {
+    if (typeof node === "string") {
+      found.push([at, node]);
+      return;
     }
-  }
+    if (depth > 6) return;
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => visit(item, `${at}[${index}]`, depth + 1));
+      return;
+    }
+    if (isPlainObject(node)) {
+      Object.entries(node).forEach(([key, value], index) =>
+        visit(value, join(at, nameFor(key, index)), depth + 1)
+      );
+    }
+  };
+  visit(entry, "", 0);
   return found;
+};
+
+/** The one path where the ring test is weaker, and nothing around it. */
+const FINGERPRINT_VALUE_PATH = '"fingerprint"."value"';
+
+/** `$comment` is prose, wherever it appears. */
+const commentProblem = (value) => {
+  if (typeof value === "string") return undefined;
+  if (!Array.isArray(value)) return "must be a string or an array of strings";
+  if (value.some((item) => typeof item !== "string")) return "must contain only strings";
+  return undefined;
 };
 
 /**
@@ -220,10 +251,14 @@ export const mobileStoreEntryProblems = (entry, label = "entry", { allowPlacehol
   if (!isPlainObject(entry.fingerprint)) {
     say("fingerprint must be an object with algorithm and value.");
   } else {
-    for (const key of Object.keys(entry.fingerprint)) {
+    Object.keys(entry.fingerprint).forEach((key, index) => {
       if (!FINGERPRINT_KEYS.includes(key)) {
-        say(`fingerprint carries ${safeName(key)}, which is not part of its shape (algorithm, value).`);
+        say(`fingerprint carries ${nameFor(key, index)}, which is not part of its shape (algorithm, value).`);
       }
+    });
+    const comment = commentProblem(entry.fingerprint.$comment);
+    if (entry.fingerprint.$comment !== undefined && comment) {
+      say(`fingerprint.$comment ${comment}.`);
     }
     for (const field of ["algorithm", "value"]) {
       const value = entry.fingerprint[field];
@@ -276,31 +311,34 @@ export const mobileStoreEntryProblems = (entry, label = "entry", { allowPlacehol
 
   // Structure first: the ring scan below only reaches strings, so a nested
   // object or array somewhere unexpected would be a place it cannot look.
-  for (const [key, value] of Object.entries(entry)) {
+  Object.entries(entry).forEach(([key, value], index) => {
     if (FORBIDDEN_KEYS.includes(key)) {
-      say(`has a ${safeName(key)} field. The rings live in the vault's secret fields, never in this document.`);
-      continue;
+      // Safe to quote: `key` here *is* one of the constants above, so the
+      // message prints a name this file already contains.
+      say(`has a "${key}" field. The rings live in the vault's secret fields, never in this document.`);
+      return;
     }
     if (!ENTRY_KEYS.includes(key)) {
-      say(`carries ${safeName(key)}, which is not part of an entry. Extra fields are refused because nothing checks what is inside them.`);
-      continue;
+      say(`carries ${nameFor(key, index)}, which is not part of an entry. Extra fields are refused because nothing checks what is inside them.`);
+      return;
     }
     if (key === "$comment") {
-      if (!Array.isArray(value) && typeof value !== "string") {
-        say("$comment must be a string or an array of strings.");
-      } else if (Array.isArray(value) && value.some((item) => typeof item !== "string")) {
-        say("$comment must contain only strings.");
-      }
-      continue;
+      const problem = commentProblem(value);
+      if (problem) say(`$comment ${problem}.`);
+      return;
     }
-    if (key === "fingerprint") continue;
+    if (key === "fingerprint") return;
     if (typeof value !== "string") {
-      say(`${safeName(key)} must be a string; an entry has no nested structure other than fingerprint.`);
+      say(`${nameFor(key, index)} must be a string; an entry has no nested structure other than fingerprint and $comment.`);
     }
-  }
+  });
 
   for (const [path, value] of stringsIn(entry)) {
-    const ring = path.startsWith('"fingerprint"') ? fingerprintLooksLikeRing(value) : looksLikeRing(value);
+    // The weaker rule is for the fingerprint's own value and nothing else:
+    // that is the one field whose legitimate content is an opaque run. An
+    // algorithm name and a comment are prose and get the ordinary rule.
+    const ring =
+      path === FINGERPRINT_VALUE_PATH ? fingerprintLooksLikeRing(value) : looksLikeRing(value);
     if (ring) {
       // The value is not repeated: if it is a ring, quoting it back is the
       // mistake this check exists to prevent.

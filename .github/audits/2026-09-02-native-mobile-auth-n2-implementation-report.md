@@ -1390,7 +1390,7 @@ README는 "재실행은 새 파일"이라고 하는데 파일명이 날짜와 SH
 | 판정(순수) | `scripts/mobile-auth-store-entry-core.mjs` |
 | template 둘 | `docs/ops/mobile-auth-store-entries/{active,pending}.template.json` |
 | 검사기 | `npm run check:mobile-auth-store-entries` |
-| 합성 테스트 | `tests/mobileAuthStoreEntry.test.mjs` (26차 검토 뒤 20건) |
+| 합성 테스트 | `tests/mobileAuthStoreEntry.test.mjs` (27차 검토 뒤 22건) |
 
 **`phase`를 둔 이유.** Pending은 배포가 존재하기 **전에** 쓰이므로 그 시점에는 적을
 deployment ID가 없습니다. 그렇다고 자리표시자를 넣으면 **없는 field는 "아직"으로 읽히고
@@ -1505,6 +1505,54 @@ template 모드에서도 나머지 규칙은 그대로 걸립니다. 어느 파�
 
 ---
 
+### 5.29 27차 검토(2026-09-03)에서 지적돼 고친 것
+
+세 건이고 **전부 §5.28이 만든 것**입니다 — 즉 앞 회차의 수정 자체에 남은 구멍입니다.
+
+**1. [높음] field 이름의 비밀값은 여전히 출력됐습니다.**
+§5.28은 값을 인용하지 않게 고치면서 **이름은 "짧고 평범한 식별자 모양이면" 인용**하도록
+남겼습니다. 32자 영숫자 pepper가 정확히 그 모양입니다 — JSON key로 넣으면 exit 1이면서
+합성 비밀값이 출력됐습니다.
+
+**모양이 안전한 것과 내용이 비밀이 아닌 것은 다릅니다.** 그리고 값이 아니라 key로도
+들어올 수 있다는 것을 §5.28의 주석에 적어 놓고, 판정은 여전히 모양으로 했습니다.
+
+→ 규칙을 **모양에서 소속으로** 바꿨습니다. 이 shape가 선언한 이름
+(`ENTRY_KEYS`·`FINGERPRINT_KEYS`)만 인용하고, 그 밖의 key는 내용과 무관하게 **위치로만**
+가리킵니다(`an unregistered field (position N)`). 운영자는 그 위치로 자기 파일을 열고,
+검사기는 거기 쓰인 것을 옮기지 않습니다. `FORBIDDEN_KEYS`는 인용합니다 — 그 문자열은
+검사기 자신이 들고 있는 상수이지 입력이 아닙니다.
+
+**2. [높음] `fingerprint.$comment`가 검사에서 빠졌습니다.**
+문자열 순회가 **한 단계 짧았습니다**: `fingerprint` 아래는 문자열만 읽고 배열·객체는
+읽지 않았습니다. 그리고 구조 검사도 `$comment`의 타입을 보지 않았으므로,
+`$comment: ["id:합성재료"]`는 **exit 0 · OK**였습니다.
+
+**같이 있던 두 번째 결함**: 약한 링 탐지의 적용 범위가 `path.startsWith('"fingerprint"')`
+였으므로 `algorithm`과 `$comment`까지 덮었습니다. 그 둘은 산문이고, 긴 base64를 담을
+자리가 됩니다.
+
+→ 순회를 **재귀**로 바꿨습니다. 구조 검사가 선언되지 않은 중첩을 거절하기는 하지만,
+**두 검사가 같은 문서를 각자 읽는 이상 한쪽이 다른 쪽의 발화에 기대면 안 됩니다** — 그
+의존이 정확히 이번 구멍이었습니다. `$comment`는 어디에 있든 문자열이나 문자열 배열이어야
+하고, 약한 규칙은 **`"fingerprint"."value"` 한 경로에만** 적용합니다.
+
+**3. [낮음] 날짜 비교에서 밀리초가 사라졌습니다.**
+패턴은 소수점 이하 세 자리까지 받는데 `Date.UTC(...)` 호출이 초까지만 넘겼으므로,
+Active `10:00:00.900Z` · Pending `10:00:00.100Z`가 **같은 순간**이 되어 순서 대조가
+통과했습니다. **모양이 받아들인 값은 비교도 실어 날라야 합니다.**
+
+→ 소수부를 세 자리로 채워 `Date.UTC`에 넘기고 왕복 확인에도 `getUTCMilliseconds()`를
+넣었습니다. `.5`는 5밀리초가 아니라 500밀리초라는 것도 사례로 고정했습니다.
+
+**mutation 다섯으로 확인했습니다** — 이름을 모양으로 판정하도록 되돌림(17번 실패),
+순회를 한 단계 짧게(18번), 약한 규칙을 fingerprint 전체로(18번), `$comment` 타입 검사
+제거(18번), 밀리초 절단(21번).
+
+**테스트는 20 → 22건**입니다. **코드·API·schema는 바뀌지 않았습니다.**
+
+---
+
 ## 6. 검증
 
 이 보고서를 쓴 시점에 실행한 것입니다.
@@ -1530,6 +1578,10 @@ template 모드에서도 나머지 규칙은 그대로 걸립니다. 어느 파�
 > `check:encoding:strict`(통과)입니다. **wrapper 자체는 실행하지 못했습니다** —
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
+>
+> **rev.33 (2026-09-03).** 27차 검토의 세 건은 §5.29이고 **전부 rev.32가 만든 것**
+> 입니다. 값 인용은 막았는데 **이름 인용을 모양으로 판정**했고, 순회는 한 단계 짧았고,
+> 허용한 밀리초를 비교가 버렸습니다.
 >
 > **rev.32 (2026-09-03).** 26차 검토의 다섯 건은 §5.28이고 **전부 rev.31이 만든 것**
 > 입니다. 그중 1번은 §5.22에서 이미 한 번 고친 실수를 **새 검사기에 옮겨 적지 않은**
@@ -1625,6 +1677,13 @@ template 모드에서도 나머지 규칙은 그대로 걸립니다. 어느 파�
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.33 회차.** `test:unit` **7,913 pass / 0 fail**(1 skipped, 이 기능 22건),
+> `lint scripts tests`, `typecheck`, `check:mobile-auth-store-entries` ·
+> `check:mobile-auth-keyring` · `check:staging-verification-records`(12 feature) ·
+> `check:doc-references` · `check:policy-section-references` · `check:encoding:strict`
+> 통과. 세 반례를 실제 CLI로 재현해 전부 거절, 합성값 출력 0회. `lib/`·`app/`·schema
+> 무변경.
 >
 > **rev.31 회차.** `test:unit` **7,891 pass / 0 fail**(1 skipped, 신규 14건 포함),
 > `lint scripts tests`, `typecheck`, `check:mobile-auth-store-entries`(신규) ·
