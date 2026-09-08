@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
+import { getVoiceModelPriceReadiness } from "@/lib/voiceModelPriceReadiness";
 import { getVoiceProviderBudgetReadiness } from "@/lib/voiceProviderBudgetReadiness";
 import { getSearchProviderBudgetReadiness } from "@/lib/searchProviderBudgetReadiness";
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
@@ -107,6 +108,23 @@ const readinessResponse = async (head = false) => {
     })
   );
   const voiceProviderBudget = voiceBudgetStatus.status?.ready ?? false;
+  // Whether this deployment knows what its configured transcription model
+  // costs, which is a different question from whether it has a budget: a
+  // budget in seconds bounds how much audio leaves, and says nothing about a
+  // model whose per-token price nobody has observed. CI cannot answer this one
+  // because the model is an environment variable
+  // (docs/policy/voice-input.md §6.1.4), so the running deployment has to.
+  const voiceModelPriceStatus = await getVoiceModelPriceReadiness().then(
+    (status) => ({ status, error: null as string | null }),
+    (error: unknown) => ({
+      status: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The voice transcription model price readiness check threw.",
+    })
+  );
+  const voiceModelPrice = voiceModelPriceStatus.status?.ready ?? false;
   // The search vendor this application calls itself. Unlike the image budget
   // there is no flag to be off: the capability register is compiled in, so a
   // build that ships Google models searching through a backend has already
@@ -173,7 +191,8 @@ const readinessResponse = async (head = false) => {
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
-    imageProviderBudget && voiceProviderBudget && searchProviderBudget &&
+    imageProviderBudget && voiceProviderBudget && voiceModelPrice &&
+    searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
     emailBusinessIdentity;
   const headers = ready
@@ -251,6 +270,33 @@ const readinessResponse = async (head = false) => {
             (voiceBudgetStatus.status?.budget.problems ?? [])
               .map((problem) => `${problem.envName}:${problem.code}`)
               .join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "voice-transcription-model-price",
+        healthy: voiceModelPrice,
+        code: "VOICE_TRANSCRIPTION_MODEL_PRICE_NOT_READY",
+        title: "The configured voice transcription model has no known cost",
+        error: voiceModelPrice
+          ? "The configured transcription model's cost is known (or the feature flag is off)."
+          : voiceModelPriceStatus.error ??
+            voiceModelPriceStatus.status?.refusal?.detail ??
+            "Voice input is enabled but its transcription model's cost is unknown.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          voiceModelPriceCheckThrew: voiceModelPriceStatus.error !== null,
+          voiceInputFlagEnabled:
+            voiceModelPriceStatus.status?.flagEnabled ?? false,
+          // The model id is configuration an operator chose, and naming it is
+          // the whole remedy: the refusal is unactionable without knowing
+          // which model was configured.
+          voiceTranscriptionModel:
+            voiceModelPriceStatus.status?.modelId ?? "unknown",
+          voiceModelPriceRefusal:
+            voiceModelPriceStatus.status?.refusal?.code ?? "none",
           traceId,
         },
       }),
@@ -443,6 +489,7 @@ const readinessResponse = async (head = false) => {
         providerBudgets,
         imageProviderBudget,
         voiceProviderBudget,
+        voiceModelPrice,
         searchProviderBudget,
         emailSendingIdentity,
         emailSnapshotKeyring,

@@ -180,16 +180,30 @@ const REMEDIES = {
  * expired -- every id, both rings and both claims correct -- produced "restore
  * Railway from Active", "roll back", or "disable mobile auth". Three different
  * dangerous instructions for a stale copy-paste.
+ *
+ * **One evidence failure is enough to hold the whole run**, and that is the
+ * second version of this rule. The first held only when *every* failure was an
+ * evidence one, which still ordered a rollback for the commonest case there
+ * is: evidence minted by the previous key, eight days old, compared against a
+ * new candidate. Of course the material differs -- it was made with a
+ * different key. The mismatch is a fact about the evidence, not about the
+ * deployment, and there is no way to tell those apart once the evidence is
+ * stale. So a material finding standing next to an evidence failure is not
+ * attributable to the deployment, and the run decides nothing.
  */
 const EVIDENCE_REMEDY =
   "  Nothing was decided about the deployment: the evidence could not be judged.\n" +
+  "  Any mismatch above is a fact about this evidence, not about what is\n" +
+  "  running -- evidence minted under an earlier key differs from a new\n" +
+  "  candidate because it was made with a different key, not because the deploy\n" +
+  "  went wrong.\n" +
   "  Do NOT promote, roll back, restore or disable anything on the strength of\n" +
   "  this run. Collect a fresh exchange against the deployment -- an access\n" +
   "  token, its refresh token, and the MobileRefreshRotation row they created --\n" +
   "  and run this again: docs/ops/mobile-auth-key-rotation.md";
 
 const remedy = (mode) =>
-  failures.every((failure) => failure.kind === EVIDENCE_FAILURE)
+  failures.some((failure) => failure.kind === EVIDENCE_FAILURE)
     ? EVIDENCE_REMEDY
     : REMEDIES[mode];
 
