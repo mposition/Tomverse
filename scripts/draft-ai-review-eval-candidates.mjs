@@ -4,7 +4,11 @@
 //
 //   npm run draft:ai-review-eval-candidates -- --model=gpt-5-6-luna --language=ko \
 //     --task-type=safety_sensitive --phenomenon=omission --mode=balanced --count=8
-//   ... --send   to actually call the provider
+//   ... --send             to actually call the provider
+//   ... --ledger=<path>    spend against an existing ledger rather than one
+//                          derived from --set; use it whenever a template bump
+//                          forces a new set, so the approved cumulative total
+//                          carries rather than restarting at zero
 //
 // ## It drafts; it does not adopt
 //
@@ -310,7 +314,21 @@ console.log(`\n--- instruction ---\n${instruction}\n--- end ---`);
 // A settle-only ledger lost every call that returned nothing usable, every
 // reply that would not parse, every process that died after the response, and
 // let two processes read the same balance and both proceed.
-const ledgerPath = join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
+// The ledger belongs to the DRAFTING EFFORT, not to one file of cases.
+//
+// It defaults beside the set, which is right while one set is being filled.
+// But the mixed-template guard means a new template needs a new `--set`, and
+// with the path derived the new set would start its own ledger at zero -- so a
+// template bump would silently reset an approved cumulative total, and the
+// approval a person gave for "$0.18 in total" would buy $0.18 more.
+//
+// `--ledger` points a new set at the ledger that already holds the history.
+// The lock derives from it too, so every run against a shared ledger is
+// serialised against every other -- which is what has to happen: they are
+// spending the same approved total.
+const ledgerPath = argValue("ledger")
+  ? resolve(process.cwd(), argValue("ledger"))
+  : join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
 const lockPath = `${ledgerPath}.lock`;
 
 const readLedger = () =>
