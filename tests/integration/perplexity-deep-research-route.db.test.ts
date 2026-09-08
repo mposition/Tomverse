@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { after, afterEach, before, beforeEach, mock, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { Prisma } from "@prisma/client";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 
 // Financial + persistence contract for the one model that submits work to a
@@ -61,6 +62,38 @@ const scriptedResponse = (scripted: ScriptedResponse | undefined) => {
 const shift = (script: ScriptedResponse[]) =>
   script.length > 1 ? script.shift()! : script[0]!;
 
+/**
+ * Holds every poll inside Perplexity's own HTTP call until `count` of them
+ * have arrived.
+ *
+ * The route reads the job row, takes the already-finalized early return if it
+ * can, and only then talks to Perplexity. So a barrier here is a barrier on
+ * "both requests have read pre-finalize state" -- which is the interleaving
+ * the claim path exists for, and the one a bare `Promise.all` reaches only
+ * when the scheduler happens to cooperate.
+ */
+let pollBarrier: {
+  arrive: () => Promise<void>;
+  arrived: number;
+} | null = null;
+
+const armPollBarrier = (count: number) => {
+  let release: () => void = () => {};
+  const opened = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const barrier = {
+    arrived: 0,
+    arrive: async () => {
+      barrier.arrived += 1;
+      if (barrier.arrived >= count) release();
+      await opened;
+    },
+  };
+  pollBarrier = barrier;
+  return barrier;
+};
+
 // Nothing in this suite may reach the network. Perplexity is scripted; any
 // other host (a monitoring webhook, say) gets an inert 204 and is recorded.
 globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
@@ -82,6 +115,7 @@ globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
     url,
     body: init?.body ? JSON.parse(String(init.body)) : null,
   });
+  if (url !== PERPLEXITY_SUBMIT_URL && pollBarrier) await pollBarrier.arrive();
   return scriptedResponse(url === PERPLEXITY_SUBMIT_URL ? shift(submitScript) : shift(pollScript));
 }) as typeof fetch;
 
@@ -102,6 +136,8 @@ let buildChatTurnContext: (typeof import("@/lib/chatTurnContext"))["buildChatTur
 let issueChatContextBundle: (typeof import("@/lib/chatContextBundleService"))["issueChatContextBundle"];
 let chatRoute: RouteModule;
 let statusRoute: RouteModule;
+let deepResearchSettlement: typeof import("@/lib/deepResearchSettlement");
+let chatSecurity: typeof import("@/lib/chatSecurity");
 
 before(async () => {
   ({ prisma } = (await import(mod("lib/prisma.ts"))) as typeof import("@/lib/prisma"));
@@ -115,6 +151,12 @@ before(async () => {
   ({ issueChatContextBundle } = (await import(
     mod("lib/chatContextBundleService.ts")
   )) as typeof import("@/lib/chatContextBundleService"));
+  deepResearchSettlement = (await import(
+    mod("lib/deepResearchSettlement.ts")
+  )) as typeof import("@/lib/deepResearchSettlement");
+  chatSecurity = (await import(
+    mod("lib/chatSecurity.ts")
+  )) as typeof import("@/lib/chatSecurity");
 });
 
 const resetDeepResearchTestData = () =>
@@ -144,6 +186,7 @@ beforeEach(async () => {
   submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
   pollScript = [{ json: { status: "IN_PROGRESS" } }];
   sessionOverride = null;
+  pollBarrier = null;
 });
 
 afterEach(() => {
@@ -681,41 +724,51 @@ for (const scenario of [
 }
 
 // --- G. concurrent terminal polls ------------------------------------------
-test("two concurrent terminal polls settle the job once and agree on the final state", async () => {
-  const user = await seedProUser();
-  const conversation = await seedConversation(user.id);
-  const perplexityJobId = `pplx-${randomUUID()}`;
-  submitScript = [{ json: { id: perplexityJobId, status: "CREATED" } }];
-  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+/* ------------------------------------ exactly-once settlement (issue #1285) */
 
-  pollScript = [
-    {
-      json: {
-        status: "COMPLETED",
-        response: {
-          choices: [{ message: { content: "동시 폴링 보고서" } }],
-          usage: {
-            prompt_tokens: 400,
-            completion_tokens: 900,
-            cost: { total_cost: 0.03 },
-          },
-        },
+const COMPLETED_POLL = {
+  json: {
+    status: "COMPLETED",
+    response: {
+      choices: [{ message: { content: "동시 폴링 보고서" } }],
+      usage: {
+        prompt_tokens: 400,
+        completion_tokens: 900,
+        cost: { total_cost: 0.03 },
       },
     },
-  ];
+  },
+};
 
+/** Every reservation this suite would call settled, however it got there. */
+const settledReservationCount = () =>
+  prisma.chatCreditReservation.count({ where: { status: "settled" } });
+
+test("two concurrent claims settle exactly once, and the loser claims nothing", async () => {
+  // Deterministic by construction, not by scheduling luck: the barrier holds
+  // both requests inside Perplexity's own call, which the route reaches only
+  // after it has read the job and declined the already-finalized early
+  // return. Both are therefore provably racing on the claim.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  pollScript = [COMPLETED_POLL];
+
+  const barrier = armPollBarrier(2);
   const [first, second] = await Promise.all([
     pollStatus(assistantMessageId).then((response) => response.json()),
     pollStatus(assistantMessageId).then((response) => response.json()),
   ]);
-  const statuses = [first, second].map(
-    (payload) => (payload as { status?: string }).status
-  );
-  assert.equal(
-    statuses.filter((status) => status === "completed").length,
-    1,
-    `exactly one poll may claim the job, saw ${JSON.stringify(statuses)}`
-  );
+  assert.equal(barrier.arrived, 2, "both polls must have raced the claim");
+
+  const statuses = [first, second]
+    .map((payload) => (payload as { status?: string }).status)
+    .sort();
+  // The CAS decides this one: exactly one poll may win the claim, and the
+  // loser is told the job is still running rather than being handed a
+  // completion it did not produce.
+  assert.deepEqual(statuses, ["completed", "in_progress"]);
 
   const message = await prisma.message.findUniqueOrThrow({
     where: { id: assistantMessageId },
@@ -730,6 +783,8 @@ test("two concurrent terminal polls settle the job once and agree on the final s
   assert.equal(job.status, "completed");
   assert.equal(job.resultText, "동시 폴링 보고서");
 
+  // What must be exactly once is the settlement, and this is where it is
+  // asserted -- on the ledger, not on how many responses said "completed".
   const reservation = await onlyReservation();
   assert.equal(reservation.status, "settled");
   assert.equal(reservation.outcome, "completed");
@@ -737,14 +792,299 @@ test("two concurrent terminal polls settle the job once and agree on the final s
   assert.equal(reservation.settledCostMicroUsd, BigInt(30_000));
   assert.equal(reservation.settledInputTokens, 400);
   assert.equal(reservation.settledOutputTokens, 900);
-  assert.equal(
-    await prisma.chatCreditReservation.count({ where: { status: "settled" } }),
-    1
-  );
+  assert.equal(await settledReservationCount(), 1);
   assert.equal(
     await prisma.perplexityAsyncJob.count({ where: { status: "completed" } }),
     1
   );
+});
+
+test("a poll that finds an already-finalized job may answer completed, and that is not a claim", async () => {
+  // The contract the old assertion got wrong. Two responses saying
+  // "completed" is a legal interleaving: the second poll's first read landed
+  // after the first had committed, so it answered from the stored outcome.
+  // The job *is* completed, so that is the correct answer -- and it settled
+  // nothing, which is the part that matters.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  pollScript = [COMPLETED_POLL];
+
+  const claimed = await pollStatus(assistantMessageId).then((r) => r.json());
+  assert.equal((claimed as { status?: string }).status, "completed");
+  const afterClaim = await usageBucketSnapshot();
+  const pollsSoFar = perplexityCalls.length;
+
+  const cached = await pollStatus(assistantMessageId).then((r) => r.json());
+  assert.equal((cached as { status?: string }).status, "completed");
+  assert.equal(
+    (cached as { content?: string }).content,
+    "동시 폴링 보고서",
+    "the cached answer carries the stored report"
+  );
+
+  assert.equal(
+    perplexityCalls.length,
+    pollsSoFar,
+    "a cached answer must not call Perplexity again"
+  );
+  assert.deepEqual(
+    await usageBucketSnapshot(),
+    afterClaim,
+    "a cached answer must not move the ledger"
+  );
+  assert.equal(await settledReservationCount(), 1);
+});
+
+/**
+ * Exactly what the route stores for COMPLETED_POLL.
+ *
+ * Hand-written, and therefore guarded: "a completed poll stores exactly what a
+ * later settlement needs" asserts the route's own write deep-equals this. That
+ * assertion is the whole reason the constant is safe to reuse below -- the
+ * first version of it invented a plausible-looking snapshot, the recovered
+ * settlement silently fell back to token pricing, and the reservation settled
+ * at 8,000 microUSD instead of the 30,000 Perplexity actually charged. A
+ * fixture that describes a column nobody writes is worse than no fixture,
+ * because the test still passes.
+ */
+const COMPLETED_SETTLEMENT_USAGE = {
+  outcome: "completed",
+  inputTokens: 400,
+  outputTokens: 900,
+  providerUsageSnapshot: {
+    source: "perplexity_response_usage",
+    currency: "USD",
+    totalCostMicroUsd: 30000,
+    inputTokensCostMicroUsd: null,
+    outputTokensCostMicroUsd: null,
+    reasoningTokensCostMicroUsd: null,
+    requestCostMicroUsd: null,
+    citationTokensCostMicroUsd: null,
+    searchQueriesCostMicroUsd: null,
+    promptTokens: 400,
+    completionTokens: 900,
+    totalTokens: null,
+    reasoningTokens: null,
+    citationTokens: null,
+    searchQueries: null,
+    searchContextSize: null,
+  },
+} as const;
+
+/**
+ * The state a process killed between the finalize commit and the settle call
+ * leaves behind, written directly because that is the only way to produce it
+ * in one process: the transaction really committed, and the settlement really
+ * never ran.
+ */
+const interruptAfterFinalize = async (assistantMessageId: string) => {
+  const job = await prisma.perplexityAsyncJob.findUniqueOrThrow({
+    where: { assistantMessageId },
+  });
+  await prisma.$transaction([
+    prisma.perplexityAsyncJob.update({
+      where: { id: job.id },
+      data: {
+        status: "completed",
+        resultText: "중단된 보고서",
+        completedAt: new Date(),
+        settlementUsage: COMPLETED_SETTLEMENT_USAGE,
+      },
+    }),
+    prisma.message.update({
+      where: { id: assistantMessageId },
+      data: { content: "중단된 보고서", status: "normal", pendingJobId: null },
+    }),
+  ]);
+  const reservation = await onlyReservation();
+  assert.equal(
+    reservation.status,
+    "reserved",
+    "the interrupted state is a finalized job whose reservation never settled"
+  );
+  return reservation;
+};
+
+test("a completed poll stores exactly what a later settlement needs", async () => {
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  pollScript = [COMPLETED_POLL];
+  await pollStatus(assistantMessageId);
+
+  const job = await prisma.perplexityAsyncJob.findUniqueOrThrow({
+    where: { assistantMessageId },
+  });
+  // It has to parse, or a later settlement cannot read it back.
+  deepResearchSettlement.deepResearchSettlementUsageSchema.parse(
+    job.settlementUsage
+  );
+  // And it has to be exactly this, because the interruption fixture below
+  // reuses the constant. Anything less than equality lets the route change
+  // what it stores while the recovery tests keep passing against a shape
+  // nothing writes -- which is how a recovered settlement came to price a
+  // 30,000 microUSD job at 8,000 from tokens alone.
+  assert.deepEqual(job.settlementUsage, COMPLETED_SETTLEMENT_USAGE);
+});
+
+test("a settlement interrupted after finalize is completed by the next poll, exactly once", async () => {
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  await interruptAfterFinalize(assistantMessageId);
+  const pollsSoFar = perplexityCalls.length;
+
+  const recovered = await pollStatus(assistantMessageId).then((r) => r.json());
+  assert.equal((recovered as { status?: string }).status, "completed");
+  assert.equal(
+    perplexityCalls.length,
+    pollsSoFar,
+    "recovery reads the stored usage; it must not re-poll a finished job"
+  );
+
+  const settled = await onlyReservation();
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.outcome, "completed");
+  assert.equal(settled.settledCostMicroUsd, BigInt(30_000));
+  assert.equal(settled.settledInputTokens, 400);
+  assert.equal(settled.settledOutputTokens, 900);
+  assert.equal(await settledReservationCount(), 1);
+
+  // The count, not just the eventual shape: a second poll must find nothing
+  // to do rather than charging the account again.
+  const afterRecovery = await usageBucketSnapshot();
+  await pollStatus(assistantMessageId);
+  await pollStatus(assistantMessageId);
+  assert.deepEqual(await usageBucketSnapshot(), afterRecovery);
+  assert.equal(await settledReservationCount(), 1);
+});
+
+test("the maintenance sweep completes an interrupted settlement nobody polled again", async () => {
+  // The tab was closed. Without the sweep this reservation sits `reserved`
+  // until it expires, and the expiry reconciliation refunds a job that really
+  // ran at Perplexity.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  await interruptAfterFinalize(assistantMessageId);
+
+  // Inside the grace window the sweep leaves it alone: a job finalized
+  // seconds ago is probably being settled by the poll that finalized it.
+  assert.deepEqual(
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
+    { examined: 0, settled: 0, alreadySettled: 0, failed: 0 }
+  );
+  assert.equal((await onlyReservation()).status, "reserved");
+
+  const past = new Date(
+    Date.now() - deepResearchSettlement.DEEP_RESEARCH_SETTLEMENT_GRACE_MS - 1_000
+  );
+  await prisma.perplexityAsyncJob.updateMany({
+    where: { assistantMessageId },
+    data: { completedAt: past },
+  });
+
+  assert.deepEqual(
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
+    { examined: 1, settled: 1, alreadySettled: 0, failed: 0 }
+  );
+  const settled = await onlyReservation();
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.settledCostMicroUsd, BigInt(30_000));
+
+  // Running again is a no-op, not a second charge.
+  const afterSweep = await usageBucketSnapshot();
+  assert.deepEqual(
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
+    { examined: 1, settled: 0, alreadySettled: 1, failed: 0 }
+  );
+  assert.deepEqual(await usageBucketSnapshot(), afterSweep);
+  assert.equal(await settledReservationCount(), 1);
+});
+
+test("an interrupted deep research job is settled at its real cost, not refunded by the expiry sweep", async () => {
+  // The money assertion. Both sweeps would act on this reservation and they
+  // disagree: this one settles it at what Perplexity charged, the expiry one
+  // refunds it in full. The maintenance pass runs them in the order that
+  // makes the true cost win, and this proves the order is the one that
+  // matters rather than an incidental line ordering.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  const reservation = await interruptAfterFinalize(assistantMessageId);
+
+  const past = new Date(
+    Date.now() - deepResearchSettlement.DEEP_RESEARCH_SETTLEMENT_GRACE_MS - 1_000
+  );
+  await prisma.perplexityAsyncJob.updateMany({
+    where: { assistantMessageId },
+    data: { completedAt: past },
+  });
+  // Expired: the refund sweep would take it on its next pass.
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { expiresAt: past },
+  });
+
+  await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements();
+  const reconcileResult =
+    await chatSecurity.reconcileExpiredChatCreditReservations();
+
+  const settled = await onlyReservation();
+  assert.equal(settled.status, "settled");
+  assert.equal(
+    settled.outcome,
+    "completed",
+    "a job that really ran must not end up refunded as a failure"
+  );
+  assert.equal(settled.settledCostMicroUsd, BigInt(30_000));
+  assert.equal(settled.settledInputTokens, 400);
+  assert.equal(settled.settledOutputTokens, 900);
+  assert.equal(
+    reconcileResult.refunded,
+    0,
+    "the expiry sweep must find nothing left to refund"
+  );
+});
+
+test("the sweep will not invent a settlement for a job finalized before the column existed", async () => {
+  // Migration reality: every row that predates `settlementUsage` holds NULL.
+  // Whatever happened to those reservations has already happened, and
+  // guessing their token counts would be writing a charge nobody measured.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  await interruptAfterFinalize(assistantMessageId);
+  await prisma.perplexityAsyncJob.updateMany({
+    where: { assistantMessageId },
+    data: {
+      settlementUsage: Prisma.DbNull,
+      completedAt: new Date(
+        Date.now() -
+          deepResearchSettlement.DEEP_RESEARCH_SETTLEMENT_GRACE_MS -
+          1_000
+      ),
+    },
+  });
+
+  assert.deepEqual(
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
+    { examined: 0, settled: 0, alreadySettled: 0, failed: 0 }
+  );
+  assert.equal((await onlyReservation()).status, "reserved");
+
+  // And a poll on such a job still answers correctly -- it just has nothing
+  // to settle from.
+  const answered = await pollStatus(assistantMessageId).then((r) => r.json());
+  assert.equal((answered as { status?: string }).status, "completed");
+  assert.equal((await onlyReservation()).status, "reserved");
 });
 
 /* -------------------------------------------------- §22 memory attribution */
