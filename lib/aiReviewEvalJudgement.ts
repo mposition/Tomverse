@@ -1151,3 +1151,154 @@ export function verifyRecordAgainstObservation(
     }
     return problems;
 }
+
+// ---------------------------------------------------------------------------
+// One entry point, for every caller
+// ---------------------------------------------------------------------------
+
+/** The run's journal, reduced to what a judged artifact has to be found in. */
+export type AiReviewJudgedJournalEntry = {
+    caseId?: string;
+    observation?: unknown;
+};
+
+/** The frozen dataset, reduced to the same. */
+export type AiReviewJudgedDatasetCase = {
+    id?: string;
+    responses?: readonly { label?: string }[];
+};
+
+export type AiReviewJudgedEvidence = {
+    /** Everything wrong with the evidence, in the order it was checked. */
+    problems: readonly string[];
+    /**
+     * Whether these files may be counted in a score or cited in a promotion.
+     *
+     * Separate from `problems` on purpose. A correctly recorded refusal is
+     * sound evidence -- of a refusal. Reading an empty `problems` as "usable"
+     * would let a case nobody finished judging into an aggregate as though it
+     * had been judged and found wanting.
+     */
+    eligibleForAggregation: boolean;
+    /** Why not, when not. Empty when it is. */
+    ineligibleReasons: readonly string[];
+};
+
+/**
+ * The whole judged-scoring check, in the order it has to happen.
+ *
+ * **The order lives here and nowhere else.** Two callers each remembering a
+ * sequence is how the old evidence checks drifted: each pile checked what its
+ * author remembered, and the gaps were the same shape every time. The CLI and
+ * the evidence bundle call this; neither owns a copy.
+ *
+ *   1. shapes -- before any meaning is read;
+ *   2. the case's own registration;
+ *   3. the record against the output it names;
+ *   4. the record's identity and signatures;
+ *   5. the score, recomputed and compared whole;
+ *   6. the output and the case against the run's journal and the dataset.
+ *
+ * Step 6 is why file-to-file agreement is not enough. Three files can agree
+ * perfectly and be about an output this run never produced, or a case that is
+ * not in the frozen set -- a consistent statement about nothing.
+ */
+export function verifyJudgedScoringEvidence(input: {
+    testCase: unknown;
+    observation: unknown;
+    record: unknown;
+    artifact: unknown;
+    /** The run's journal entries, when the caller has them. */
+    journal?: readonly AiReviewJudgedJournalEntry[];
+    /** The frozen dataset's cases, when the caller has them. */
+    datasetCases?: readonly AiReviewJudgedDatasetCase[];
+}): AiReviewJudgedEvidence {
+    const shapes = [
+        ...judgedCaseShapeProblems(input.testCase),
+        ...observationShapeProblems(input.observation),
+        ...judgementRecordShapeProblems(input.record),
+        ...scoringArtifactShapeProblems(input.artifact),
+    ];
+    if (shapes.length > 0) {
+        return {
+            problems: shapes,
+            eligibleForAggregation: false,
+            ineligibleReasons: ["the evidence files do not have the shape this contract reads"],
+        };
+    }
+
+    const testCase = input.testCase as AiReviewJudgedCase;
+    const observation = input.observation as AiReviewJudgedObservation;
+    const record = input.record as AiReviewJudgementRecord;
+    const artifact = input.artifact as AiReviewJudgedScoringArtifact;
+
+    const problems = [
+        ...validateJudgedCase(testCase),
+        ...verifyRecordAgainstObservation(observation, record),
+        ...verifyScoringArtifact({ testCase, record, observation, artifact }),
+    ];
+
+    // The output has to be the one this run recorded for this case, and the
+    // case has to be one the frozen set contains. Digests between three files
+    // in a directory say those three agree; they say nothing about whether the
+    // run ever produced that output.
+    if (input.journal) {
+        const entries = input.journal.filter((entry) => entry.caseId === testCase.caseId);
+        if (entries.length === 0) {
+            problems.push(
+                `the run's journal has no entry for ${testCase.caseId}, so this output ` +
+                    `is not one the run recorded`
+            );
+        } else if (
+            !entries.some(
+                (entry) => observationRefFor(entry.observation) === artifact.observationRef
+            )
+        ) {
+            problems.push(
+                `the journal's output for ${testCase.caseId} is not the one that was ` +
+                    `judged and scored here`
+            );
+        }
+    }
+    if (input.datasetCases) {
+        const datasetCase = input.datasetCases.find((item) => item.id === testCase.caseId);
+        if (!datasetCase) {
+            problems.push(
+                `the frozen dataset has no case ${testCase.caseId}, so nothing here is ` +
+                    `about a case the run was measured on`
+            );
+        } else {
+            const labels = (datasetCase.responses ?? []).map((response) => response.label);
+            const judged = [...testCase.responseLabels].sort();
+            if (JSON.stringify([...labels].sort()) !== JSON.stringify(judged)) {
+                problems.push(
+                    `${testCase.caseId} has answers ${labels.join(", ")} in the dataset and ` +
+                        `${testCase.responseLabels.join(", ")} here, so a gold item could ` +
+                        `name an answer the run never showed`
+                );
+            }
+        }
+    }
+
+    // Integrity and usefulness are different questions, and running them
+    // together is how a refusal becomes a score. A `scored: false` artifact
+    // whose integrity checks out is exactly right -- it correctly records that
+    // nobody finished judging this case -- and it must not reach an aggregate
+    // or a promotion, where it would read as a case that was judged.
+    const ineligibleReasons: string[] = [];
+    if (problems.length > 0) {
+        ineligibleReasons.push("the evidence does not verify");
+    }
+    if (!artifact.outcome?.scored) {
+        ineligibleReasons.push(
+            "the case is not scored, which is a correctly recorded refusal and not a " +
+                "result: counting it would report a case nobody finished judging as one " +
+                "that was judged"
+        );
+    }
+    return {
+        problems,
+        eligibleForAggregation: ineligibleReasons.length === 0,
+        ineligibleReasons,
+    };
+}

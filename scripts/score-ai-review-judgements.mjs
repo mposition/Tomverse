@@ -5,6 +5,8 @@
 //
 //   npm run score:ai-review-judgements -- --dir <directory>
 //   npm run score:ai-review-judgements -- --dir <directory> --verify
+//     ... --journal=<run journal .jsonl>   also check the output is one the run recorded
+//     ... --dataset=<frozen set .json>     also check the case is one the set contains
 //
 // The directory holds three inputs and one output:
 //
@@ -34,9 +36,9 @@ import {
   observationShapeProblems,
   scoringArtifactShapeProblems,
   validateJudgedCase,
+  verifyJudgedScoringEvidence,
   verifyJudgementRecord,
   verifyRecordAgainstObservation,
-  verifyScoringArtifact,
 } from "../lib/aiReviewEvalJudgement.ts";
 
 const argValue = (name) =>
@@ -69,6 +71,45 @@ const readJson = (name) => {
 const testCase = readJson("case.json");
 const observation = readJson("observation.json");
 const record = readJson("record.json");
+
+// The run's journal and the frozen dataset, when the caller names them.
+//
+// Three files in a directory can agree perfectly and be about an output this
+// run never produced, or a case the frozen set does not contain -- a
+// consistent statement about nothing. These are how that is caught, and they
+// are optional only because a judgement can be checked before a run exists.
+const readOptional = (flag) => {
+  const path = argValue(flag);
+  if (!path) return undefined;
+  const resolved = resolve(process.cwd(), path);
+  if (!existsSync(resolved)) die(`--${flag}=${path} does not exist.`);
+  return readFileSync(resolved, "utf8");
+};
+const readJournal = () => {
+  const text = readOptional("journal");
+  if (text === undefined) return undefined;
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line, index) => {
+      try {
+        return JSON.parse(line);
+      } catch (error) {
+        die(`--journal line ${index + 1} is not valid JSON: ${error.message}`);
+        return {};
+      }
+    });
+};
+const readDatasetCases = () => {
+  const text = readOptional("dataset");
+  if (text === undefined) return undefined;
+  try {
+    return JSON.parse(text).cases ?? [];
+  } catch (error) {
+    die(`--dataset is not valid JSON: ${error.message}`);
+    return [];
+  }
+};
 
 const report = (heading, problems) => {
   console.log(`\n${heading}`);
@@ -110,11 +151,18 @@ if (report("file shapes", shape)) die("\nNothing was read further.");
 let failed = report("case registration", validateJudgedCase(testCase));
 
 if (verifyMode) {
-  failed =
-    report(
-      "stored score, against the files beside it",
-      verifyScoringArtifact({ testCase, record, observation, artifact })
-    ) || failed;
+  // One entry point. The order of these checks lives in the library, so the
+  // evidence bundle and this script cannot drift into remembering different
+  // sequences -- which is how the old evidence checks grew their gaps.
+  const evidence = verifyJudgedScoringEvidence({
+    testCase,
+    observation,
+    record,
+    artifact,
+    journal: readJournal(),
+    datasetCases: readDatasetCases(),
+  });
+  failed = report("stored score, against the files beside it", evidence.problems) || failed;
   if (failed) {
     die(
       "\nThe stored score is not about these files. Re-run without --verify to " +
@@ -122,6 +170,15 @@ if (verifyMode) {
     );
   }
   console.log("\nThe stored score is about these files.");
+  // Sound evidence and usable evidence are different things. A correctly
+  // recorded refusal verifies -- it is a true statement that nobody finished
+  // judging this case -- and it must not be counted or cited.
+  if (evidence.eligibleForAggregation) {
+    console.log("It may be counted in a score.");
+  } else {
+    console.log("\nIt may NOT be counted in a score or cited as promotion evidence:");
+    for (const reason of evidence.ineligibleReasons) console.log(`  - ${reason}`);
+  }
   process.exit(0);
 }
 

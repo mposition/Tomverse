@@ -42,6 +42,10 @@ import {
     type AiReviewEvalCase,
     type AiReviewEvalObservation,
 } from "@/lib/aiReviewEvalCore";
+import {
+    verifyJudgedScoringEvidence,
+    type AiReviewJudgedEvidence,
+} from "@/lib/aiReviewEvalJudgement";
 import { rebuildBlindSheet, renderBlindSheet } from "@/lib/aiReviewEvalBlindSheet";
 import {
     blindReviewRecordProblems,
@@ -106,6 +110,38 @@ export type AiReviewEvidenceInputs = {
      * names, so the bar an approval is judged against is the signed one.
      */
     minimumReviewedCases?: number;
+    /**
+     * Cases scored under the judged contract, when there are any.
+     *
+     * Checked by `verifyJudgedScoringEvidence()` -- the same entry point the
+     * scoring CLI calls, so the two cannot drift into remembering different
+     * orders of checks. That is not a hypothetical: this module exists because
+     * two piles of conditions each checked what their author remembered.
+     *
+     * Absent by default. The judged contract is unapproved and wired to no
+     * evaluation, so a caller that passes nothing gets exactly today's checks.
+     */
+    judged?: readonly {
+        testCase: unknown;
+        observation: unknown;
+        record: unknown;
+        artifact: unknown;
+    }[];
+};
+
+export type AiReviewJudgedEvidenceSummary = {
+    /** Cases supplied under the judged contract. */
+    supplied: number;
+    /**
+     * Of those, the ones that verify AND carry a score.
+     *
+     * A correctly recorded refusal verifies and is not counted here: it is a
+     * true statement that nobody finished judging that case, and an aggregate
+     * that included it would report an unjudged case as a judged one.
+     */
+    eligible: number;
+    /** Why each excluded case was excluded, so the number is readable. */
+    ineligible: readonly { caseId: string; reasons: readonly string[] }[];
 };
 
 export type AiReviewEvidenceBundle = {
@@ -128,6 +164,8 @@ export type AiReviewEvidenceBundle = {
         signedBy: string | null;
         signedAt: string | null;
     };
+    /** Present only when the caller supplied judged cases. */
+    judged: AiReviewJudgedEvidenceSummary | null;
 };
 
 /**
@@ -197,10 +235,63 @@ const parseJournal = (
     return { entries, problems };
 };
 
+/**
+ * The journal's entries for the judged cross-check, read leniently.
+ *
+ * `parseJournal()` already reports a malformed line as a problem, so this must
+ * not throw over one: it skips what it cannot read and lets that check do the
+ * reporting. Its job is only to answer "did the run record this output".
+ */
+const journalEntriesFor = (journalText: string): { caseId?: string; observation?: unknown }[] =>
+    journalText
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .flatMap((line) => {
+            try {
+                return [JSON.parse(line) as { caseId?: string; observation?: unknown }];
+            } catch {
+                return [];
+            }
+        });
+
 export const verifyEvidenceBundle = (
     input: AiReviewEvidenceInputs
 ): AiReviewEvidenceBundle => {
     const problems: string[] = [];
+    // Judged cases go through `verifyJudgedScoringEvidence()` -- the same
+    // function the scoring CLI calls. Neither caller owns a copy of the order.
+    const judgedResults: { caseId: string; evidence: AiReviewJudgedEvidence }[] = (
+        input.judged ?? []
+    ).map((entry, index) => ({
+        caseId:
+            (entry.testCase as { caseId?: string } | null)?.caseId ?? `judged[${index}]`,
+        evidence: verifyJudgedScoringEvidence({
+            testCase: entry.testCase,
+            observation: entry.observation,
+            record: entry.record,
+            artifact: entry.artifact,
+            journal: journalEntriesFor(input.journalText),
+            datasetCases: input.dataset.cases,
+        }),
+    }));
+    for (const { caseId, evidence } of judgedResults) {
+        problems.push(...evidence.problems.map((problem) => `judged ${caseId}: ${problem}`));
+    }
+    const judged: AiReviewJudgedEvidenceSummary | null =
+        input.judged === undefined
+            ? null
+            : {
+                  supplied: judgedResults.length,
+                  eligible: judgedResults.filter(
+                      (result) => result.evidence.eligibleForAggregation
+                  ).length,
+                  ineligible: judgedResults
+                      .filter((result) => !result.evidence.eligibleForAggregation)
+                      .map((result) => ({
+                          caseId: result.caseId,
+                          reasons: result.evidence.ineligibleReasons,
+                      })),
+              };
     const empty = (): AiReviewEvidenceBundle => ({
         problems,
         metrics: null,
@@ -220,6 +311,7 @@ export const verifyEvidenceBundle = (
             signedBy: null,
             signedAt: null,
         },
+        judged,
     });
 
     problems.push(...datasetProblems(input.dataset).map((p) => `dataset: ${p}`));
@@ -404,6 +496,7 @@ export const verifyEvidenceBundle = (
             signedBy: record.signedBy,
             signedAt: record.signedAt,
         },
+        judged,
     };
 };
 
