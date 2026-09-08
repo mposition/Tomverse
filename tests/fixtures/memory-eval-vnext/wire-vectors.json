@@ -1,0 +1,1015 @@
+{
+  "kind": "non_operational_offline_component_vectors",
+  "authorityEstablished": false,
+  "provenance": {
+    "packageCommit": "7e5491f5fa24295912d5da7a6cc5e86ddb637f43",
+    "documentRawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+    "packageRawSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+    "approvalReceiptCommit": "bd69a817006fb45ee88aa399940acec3d4e36470",
+    "approvalReceiptRawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+    "implementationBasis": "718aaf974e254e32bcb010ff2c1170a06011eed5",
+    "note": "Identifies the approved scope, not an operational receipt. Git/CI/environment/preservation checks are external verification, never established by this fixture."
+  },
+  "goldenCanonical": [
+    {
+      "id": "G01",
+      "canonicalText": "{\"a\":\"한\",\"b\":1}",
+      "utf8Hex": "7b2261223a22ed959c222c2262223a317d",
+      "byteLength": 17,
+      "rawSha256": "67f2fd255e411935d63adb1352ddb23efd6054c61d3131965ab2809e0c10d61f",
+      "fileWithLfSha256": "56c2983b681f1fa15614e6d1426ddfb1600c469c6b10c804607b2f6533a51e57",
+      "testDomain": "mem-signature-receipt-1",
+      "domainSha256": "c5c83a86cf3cfe8b43c8d649c3006cae880c2bbfaabc2ff47c2573e997824cb9"
+    },
+    {
+      "id": "G02",
+      "canonicalText": "{\"a\":\"\\u000a\\u0009\\u0000\",\"b\":\"\\\"\\\\/\"}",
+      "utf8Hex": "7b2261223a225c75303030615c75303030395c7530303030222c2262223a225c225c5c2f227d",
+      "byteLength": 38,
+      "rawSha256": "b102c5769b28782ff067cd00d5398bf3d646788e0ada274ba184d3a6c0987f94",
+      "fileWithLfSha256": "e2c7afb11c04f5331d593f4c484d79c550b044cbd482cc4bb066d742e2ff5dfa",
+      "testDomain": "mem-signature-receipt-1",
+      "domainSha256": "e1a7eb19e92e89625bcff626437c724499bc3514ffb5a55e60259bf88f42bb04"
+    },
+    {
+      "id": "G03",
+      "canonicalText": "[null,true,false,-9007199254740991,9007199254740991,0]",
+      "utf8Hex": "5b6e756c6c2c747275652c66616c73652c2d393030373139393235343734303939312c393030373139393235343734303939312c305d",
+      "byteLength": 54,
+      "rawSha256": "2527c39823667232c24655a1a051b2bcf052991596fe398a2e5417e55ced1036",
+      "fileWithLfSha256": "e21dc53eb696f769d8ba6d15412e62a81c2be59a24e975f75f74f31ea78b906f",
+      "testDomain": "mem-signature-receipt-1",
+      "domainSha256": "c1c1b3572eb1903f5c192b9996eb650e9bd3bd6bf01859aa8c72288d48fce79f"
+    },
+    {
+      "id": "G04",
+      "canonicalText": "[\"b\",\"a\",\"b\"]",
+      "utf8Hex": "5b2262222c2261222c2262225d",
+      "byteLength": 13,
+      "rawSha256": "9cd295f267be3f6ef4bc845a31e8ef660f20fd75b97a16916fd7959c57329e0d",
+      "fileWithLfSha256": "a824f2b1937b007d84d3ca2d8a903af07aa58dd18259397f884ebcc3637e6915",
+      "testDomain": "mem-signature-receipt-1",
+      "domainSha256": "34ce7e0545377f5f6e31eaf8d305bc36d52872b9540d3889d31ffe9e7ae4f276"
+    }
+  ],
+  "publicEd25519": [
+    {
+      "id": "G05",
+      "name": "RFC 8032 section 7.1 TEST 1",
+      "source": "https://www.rfc-editor.org/rfc/rfc8032.txt#section-7.1",
+      "publicKeyHex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "messageHex": "",
+      "signatureHex": "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+    },
+    {
+      "id": "G06",
+      "name": "RFC 8032 section 7.1 TEST 2",
+      "source": "https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1",
+      "publicKeyHex": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+      "messageHex": "72",
+      "signatureHex": "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
+    },
+    {
+      "id": "G07",
+      "name": "RFC 8032 section 7.1 TEST 3",
+      "source": "https://www.rfc-editor.org/rfc/rfc8032.html#section-7.1",
+      "publicKeyHex": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+      "messageHex": "af82",
+      "signatureHex": "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a"
+    }
+  ],
+  "publicNonPureEd25519": [
+    {
+      "name": "RFC 8032 section 7.2 Ed25519ctx foo: reject as PureEd25519",
+      "source": "https://www.rfc-editor.org/rfc/rfc8032.html#section-7.2",
+      "publicKeyHex": "dfc9425e4f968f7f0c29f0259cf5f9aed6851c2bb4ad8bfb860cfee0ab248292",
+      "messageHex": "f726936d19c800494e3fdaff20b276a8",
+      "contextHex": "666f6f",
+      "signatureHex": "55a4cc2f70a54e04288c5f4cd1e45a7bb520b36292911876cada7323198dd87a8b36950b95130022907a7fb7c4e9b2d5f6cca685a587b4b21f4b888e4e7edb0d"
+    },
+    {
+      "name": "RFC 8032 section 7.3 Ed25519ph TEST abc: reject as PureEd25519",
+      "source": "https://www.rfc-editor.org/rfc/rfc8032.html#section-7.3",
+      "publicKeyHex": "ec172b93ad5e563bf4932c70e1245034c35467ef2efd4d64ebf819683467e2bf",
+      "messageHex": "616263",
+      "signatureHex": "98a70222f0b8121aa9d30f813d683f809e462b469c7ff87639499bb94e6dae4131f85042463c2a355a2003d062adf5aaa10b8c61e636062aaad11c2a26083406"
+    }
+  ],
+  "publicOpaqueBytes": {
+    "registration": {
+      "text": "synthetic opaque registration\n",
+      "byteLength": 30,
+      "rawSha256": "b8fe5ab78459691cd7187ee04532fe5fb0e7a912e25db537998caada13193460"
+    },
+    "D": {
+      "text": "synthetic D bytes\n",
+      "byteLength": 18,
+      "rawSha256": "5755bec3dc71a4e4a21d6dd35bef1fe0fa2da1ca1fad17cf9423f417891b3998"
+    },
+    "K": {
+      "text": "synthetic K bytes\n",
+      "byteLength": 18,
+      "rawSha256": "a6321b7c718d919140ea9a4c9bd55db70a1bde5063c01689f3bc8199a92a328d"
+    }
+  },
+  "closedTypes": {
+    "BlobRef": {
+      "required": [
+        "path",
+        "byteLength",
+        "rawSha256"
+      ],
+      "nullable": []
+    },
+    "GitFileRef": {
+      "required": [
+        "commit",
+        "path",
+        "rawSha256"
+      ],
+      "nullable": []
+    },
+    "SignaturePayload": {
+      "required": [
+        "schemaVersion",
+        "purpose",
+        "signerId",
+        "keyId",
+        "trustEpoch",
+        "contentDigest",
+        "issuedAt"
+      ],
+      "nullable": []
+    },
+    "SignatureReceipt": {
+      "required": [
+        "payload",
+        "signatureBase64"
+      ],
+      "nullable": []
+    },
+    "TrustAnchor": {
+      "required": [
+        "trustEpoch",
+        "signerId",
+        "keyId",
+        "publicKeyBase64",
+        "roles",
+        "validFrom",
+        "validUntil",
+        "revokedAt",
+        "registrationReceipt",
+        "previousEpochDigest"
+      ],
+      "nullable": [
+        "validUntil",
+        "revokedAt",
+        "previousEpochDigest"
+      ]
+    }
+  },
+  "purposeRoles": [
+    {
+      "purpose": "s2_activation_approval",
+      "role": "approver"
+    },
+    {
+      "purpose": "s2_source_evidence",
+      "role": "importer"
+    },
+    {
+      "purpose": "s2_activation_inclusion",
+      "role": "importer"
+    }
+  ],
+  "acTrace": [
+    {
+      "id": "AC-1",
+      "title": "canonical bytes",
+      "requirementIds": [
+        "FR-3"
+      ],
+      "caseIds": [
+        "F01",
+        "F02",
+        "F03"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "title": "canonical refusal",
+      "requirementIds": [
+        "FR-3",
+        "FR-4"
+      ],
+      "caseIds": [
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F11"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "title": "raw, file, domain 분리",
+      "requirementIds": [
+        "FR-3",
+        "FR-5"
+      ],
+      "caseIds": [
+        "F10",
+        "F11",
+        "F12",
+        "F23",
+        "F24"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "title": "closed shape와 leaf 제약",
+      "requirementIds": [
+        "FR-4"
+      ],
+      "caseIds": [
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "F17",
+        "F18",
+        "F19"
+      ]
+    },
+    {
+      "id": "AC-5",
+      "title": "PureEd25519 검증",
+      "requirementIds": [
+        "FR-5"
+      ],
+      "caseIds": [
+        "F12",
+        "F20",
+        "F21",
+        "F22",
+        "F23",
+        "F24"
+      ]
+    },
+    {
+      "id": "AC-6",
+      "title": "purpose·role·identity 분리",
+      "requirementIds": [
+        "FR-5",
+        "FR-6"
+      ],
+      "caseIds": [
+        "F19",
+        "F22",
+        "F25",
+        "F26",
+        "F27",
+        "F28",
+        "F29"
+      ]
+    },
+    {
+      "id": "AC-7",
+      "title": "epoch·등록 미정 경계",
+      "requirementIds": [
+        "FR-4",
+        "FR-6"
+      ],
+      "caseIds": [
+        "F29",
+        "F30",
+        "F31",
+        "F32",
+        "F33",
+        "F39"
+      ]
+    },
+    {
+      "id": "AC-8",
+      "title": "GitFileRef와 raw bytes",
+      "requirementIds": [
+        "FR-4",
+        "FR-6"
+      ],
+      "caseIds": [
+        "F34",
+        "F35",
+        "F36"
+      ]
+    },
+    {
+      "id": "AC-9",
+      "title": "합성 시험과 권한 비승격",
+      "requirementIds": [
+        "FR-6",
+        "FR-7",
+        "NFR-2",
+        "NFR-3"
+      ],
+      "caseIds": [
+        "F36",
+        "F37",
+        "F38",
+        "F39"
+      ]
+    },
+    {
+      "id": "AC-10",
+      "title": "exact 파일·범위",
+      "requirementIds": [
+        "FR-2",
+        "FR-7",
+        "NFR-4"
+      ],
+      "caseIds": [
+        "F40",
+        "F41"
+      ]
+    },
+    {
+      "id": "AC-11",
+      "title": "승인 전 실행 금지",
+      "requirementIds": [
+        "FR-1",
+        "FR-8"
+      ],
+      "caseIds": [
+        "F42",
+        "F43"
+      ]
+    },
+    {
+      "id": "AC-12",
+      "title": "문서와 감사 보존",
+      "requirementIds": [
+        "FR-1",
+        "NFR-1"
+      ],
+      "caseIds": [
+        "F44"
+      ]
+    }
+  ],
+  "caseTrace": [
+    {
+      "id": "F01",
+      "acIds": [
+        "AC-1"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F02",
+      "acIds": [
+        "AC-1"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F03",
+      "acIds": [
+        "AC-1"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F04",
+      "acIds": [
+        "AC-2"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F05",
+      "acIds": [
+        "AC-2"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F06",
+      "acIds": [
+        "AC-2"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F07",
+      "acIds": [
+        "AC-2"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F08",
+      "acIds": [
+        "AC-2"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F09",
+      "acIds": [
+        "AC-2"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F10",
+      "acIds": [
+        "AC-3"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F11",
+      "acIds": [
+        "AC-2",
+        "AC-3"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F12",
+      "acIds": [
+        "AC-3",
+        "AC-5"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F13",
+      "acIds": [
+        "AC-4"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F14",
+      "acIds": [
+        "AC-4"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F15",
+      "acIds": [
+        "AC-4"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F16",
+      "acIds": [
+        "AC-4"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F17",
+      "acIds": [
+        "AC-4"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F18",
+      "acIds": [
+        "AC-4"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F19",
+      "acIds": [
+        "AC-4",
+        "AC-6"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F20",
+      "acIds": [
+        "AC-5"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F21",
+      "acIds": [
+        "AC-5"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F22",
+      "acIds": [
+        "AC-5",
+        "AC-6"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F23",
+      "acIds": [
+        "AC-3",
+        "AC-5"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F24",
+      "acIds": [
+        "AC-3",
+        "AC-5"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F25",
+      "acIds": [
+        "AC-6"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F26",
+      "acIds": [
+        "AC-6"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F27",
+      "acIds": [
+        "AC-6"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F28",
+      "acIds": [
+        "AC-6"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F29",
+      "acIds": [
+        "AC-6",
+        "AC-7"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F30",
+      "acIds": [
+        "AC-7"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F31",
+      "acIds": [
+        "AC-7"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F32",
+      "acIds": [
+        "AC-7"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F33",
+      "acIds": [
+        "AC-7"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F34",
+      "acIds": [
+        "AC-8"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F35",
+      "acIds": [
+        "AC-8"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F36",
+      "acIds": [
+        "AC-8",
+        "AC-9"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F37",
+      "acIds": [
+        "AC-9"
+      ],
+      "verification": "unit_and_external_import_audit"
+    },
+    {
+      "id": "F38",
+      "acIds": [
+        "AC-9"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F39",
+      "acIds": [
+        "AC-7",
+        "AC-9"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F40",
+      "acIds": [
+        "AC-10"
+      ],
+      "verification": "external_repository_audit"
+    },
+    {
+      "id": "F41",
+      "acIds": [
+        "AC-10"
+      ],
+      "verification": "unit"
+    },
+    {
+      "id": "F42",
+      "acIds": [
+        "AC-11"
+      ],
+      "verification": "external_repository_audit"
+    },
+    {
+      "id": "F43",
+      "acIds": [
+        "AC-11"
+      ],
+      "verification": "external_repository_audit"
+    },
+    {
+      "id": "F44",
+      "acIds": [
+        "AC-12"
+      ],
+      "verification": "external_repository_audit"
+    }
+  ],
+  "externalVerificationNote": "F40/F42/F43/F44 require actual repository and approval evidence outside T01. Unit tests do not read Git, policy files or credentials and do not fabricate their results. F37 also requires a static import/call audit. These checks must be rerun for each reviewed implementation.",
+  "upstreamDisposition": [
+    {
+      "namespace": "S3",
+      "id": "AC-1",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-2",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-3",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-4",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-5",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-6",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-7",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-8",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-9",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-10",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-11",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-12",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-1",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-2",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-3",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-4",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-5",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-6",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-7",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-8",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-9",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-10",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-11",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-12",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-13",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-14",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-15",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-16",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-17",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-1",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-2",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-3",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-4",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-5",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-6",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-7",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-8",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-9",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-10",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-11",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-12",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-13",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-14",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-15",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-16",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-17",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-18",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-19",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-20",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-21",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-22",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-23",
+      "disposition": "partial_components",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-24",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    },
+    {
+      "namespace": "D",
+      "id": "AC-25",
+      "disposition": "deferred",
+      "fullySatisfied": false
+    }
+  ],
+  "upstreamCounts": {
+    "S3": 12,
+    "S4": 17,
+    "D": 25,
+    "total": 54,
+    "fullySatisfied": 0,
+    "partialComponents": 9,
+    "deferred": 45
+  }
+}
