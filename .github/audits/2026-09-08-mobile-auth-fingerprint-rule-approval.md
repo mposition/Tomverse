@@ -68,10 +68,11 @@
 
 **1차(계산 규칙 11건)는 2026-09-08에 승인됐고, 2차·3차는 미승인입니다** — §9.4.
 `docs/ops/mobile-auth-key-rotation.md` §6의 2번 (a)가 "결정 필요"로 올려 둔 것에 대한
-비교안으로 시작한 문서이며, **계산 규칙은 이제 확정됐고 구현은 아직 없습니다.**
-`scripts/mobile-auth-store-entry-core.mjs`의 fingerprint 계약은 **그대로 구조만 봅니다**
-(`algorithm`이 비어 있지 않고 `value`가 8~128자) — 계산기가 생겨도 검사기가 값을
-검증하지는 않습니다.
+비교안으로 시작한 문서이며, **계산 규칙은 확정됐고 계산기도 있습니다 — 운영 경로에는
+붙어 있지 않습니다**(`scripts/mobile-auth-fingerprint-core.mjs`,
+`tests/mobileAuthFingerprint.test.mjs`). `scripts/mobile-auth-store-entry-core.mjs`의
+fingerprint 계약은 **그대로 구조만 봅니다**(`algorithm`이 비어 있지 않고 `value`가
+8~128자) — **검사기는 계산기를 부르지 않고, 값을 만드는 CLI도 없습니다.**
 
 **이 문서가 승인하지 않는 것**: 운영값(§6의 3번), 증거-배포 결속(§6의 5번), 서명 쪽
 미판정 시 종료 조건(§6의 6번), 실제 항목 생성(§6의 2번 (b)), N1b 개방, production

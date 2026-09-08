@@ -12,8 +12,13 @@
 // the count of vectors can be compared without a table.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHmac, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   MOBILE_FINGERPRINT_KEY_BYTES,
@@ -35,6 +40,10 @@ import {
 } from "../lib/mobileAuthKeyring.ts";
 
 // --- the approved fixtures (section 5.6) -----------------------------------
+
+const coreUrl = pathToFileURL(
+  join(process.cwd(), "scripts", "mobile-auth-fingerprint-core.mjs")
+).href;
 
 const K = Buffer.from("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "hex");
 const spki = (publicHex) =>
@@ -224,6 +233,61 @@ test("V12 nothing the calculator returns or throws carries key material", () => 
   }
   assert.match(keyMessage, /32 bytes/);
   assert.equal(keyMessage.includes(Buffer.alloc(8, 7).toString("base64")), false);
+
+  // A material of the wrong type is refused by name and position. Left to
+  // `Buffer.concat`, its TypeError quotes the first 25 characters of the
+  // value -- and the value is key material.
+  for (const wrong of [
+    { signingMaterials: [material], pepperMaterials: [] },
+    { signingMaterials: [], pepperMaterials: [material] },
+    { signingMaterials: material, pepperMaterials: [] },
+  ]) {
+    let thrown = "";
+    try {
+      mobileKeyringFingerprintFromMaterials({ key: K, ...wrong });
+    } catch (error) {
+      thrown = error.message;
+    }
+    assert.match(thrown, /must be an array of byte buffers|must be a byte buffer/);
+    assert.equal(thrown.includes(secret), false);
+  }
+});
+
+test("V12a a whole run of the calculator writes nothing to stdout or stderr", () => {
+  // The assertions above read return values and messages. A calculator that
+  // printed its key would satisfy every one of them -- checked by mutation,
+  // and it did. This reads what an operator's terminal reads instead.
+  const directory = mkdtempSync(join(tmpdir(), "mobile-fingerprint-"));
+  try {
+    const key = Buffer.alloc(32, 0x5a);
+    const pepper = "PEPPER-SYNTHETIC-0000000000000000";
+    const script = join(directory, "run.mjs");
+    writeFileSync(
+      script,
+      [
+        `import { mobileKeyringFingerprint } from ${JSON.stringify(coreUrl)};`,
+        `const key = Buffer.from(${JSON.stringify(key.toString("base64"))}, "base64");`,
+        `const signing = [${JSON.stringify(SIGN_1)}];`,
+        `const peppers = [${JSON.stringify(pepper)}];`,
+        `mobileKeyringFingerprint({ key, signing, peppers });`,
+        // The failure path too: an unusable entry, in the same process.
+        `try { mobileKeyringFingerprint({ key, signing: ["not-a-key"], peppers }); } catch {}`,
+        `try { mobileKeyringFingerprint({ key, signing, peppers: [Buffer.alloc(0)] }); } catch {}`,
+      ].join("\n")
+    );
+
+    const run = spawnSync(process.execPath, [script], { encoding: "utf8" });
+    assert.equal(run.status, 0, run.stderr);
+    const output = `${run.stdout}${run.stderr}`;
+    assert.equal(output.includes(key.toString("base64")), false, "the key reached a stream");
+    assert.equal(output.includes(key.toString("hex")), false, "the key reached a stream");
+    assert.equal(output.includes(pepper), false, "a pepper reached a stream");
+    assert.equal(output.includes(SIGN_1.slice(0, 24)), false, "signing material reached a stream");
+    // Nothing at all, in fact: a calculator has no reason to print.
+    assert.equal(output.trim(), "");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("V14 the three ordinary procedures are not refused as 'the same material'", () => {

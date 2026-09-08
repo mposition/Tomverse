@@ -158,6 +158,25 @@ const pepperMaterial = (secret) => {
   return Buffer.from(secret, "utf8");
 };
 
+/**
+ * Every material is bytes, and the list is a list.
+ *
+ * Positions, never values: an element that is the wrong type is still material
+ * somebody meant to fingerprint.
+ */
+const assertMaterials = (materials, name) => {
+  if (!Array.isArray(materials)) {
+    throw new MobileFingerprintError(`${name} must be an array of byte buffers.`);
+  }
+  materials.forEach((material, index) => {
+    if (!Buffer.isBuffer(material) && !(material instanceof Uint8Array)) {
+      throw new MobileFingerprintError(
+        `${name}[${index}] must be a byte buffer; derive the material before hashing it.`
+      );
+    }
+  });
+};
+
 const leaf = (key, tag, material) =>
   createHmac("sha256", key).update(Buffer.concat([Buffer.from(tag, "ascii"), SEPARATOR, material])).digest();
 
@@ -204,6 +223,13 @@ export const mobileKeyringFingerprintFromMaterials = ({ key, signingMaterials, p
       `The fingerprint key must be ${MOBILE_FINGERPRINT_KEY_BYTES} bytes.`
     );
   }
+
+  // Checked here rather than left to `Buffer.concat`, whose `TypeError` quotes
+  // the first 25 characters of what it was given -- and what it was given is
+  // key material. A wrong type is an ordinary programming mistake; it must not
+  // be the one path that prints a secret.
+  assertMaterials(signingMaterials, "signingMaterials");
+  assertMaterials(pepperMaterials, "pepperMaterials");
 
   const leaves = [
     ...signingMaterials.map((material) => leaf(key, SIGNING_TAG, material)),
