@@ -37,7 +37,7 @@ import type {
     AiReviewEvalTaskType,
 } from "@/lib/aiReviewEvalCore";
 
-export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v8";
+export const AI_REVIEW_DRAFT_TEMPLATE_VERSION = "ai-review-eval-draft-v9";
 
 /** The only labels a drafted response may carry. */
 export const DRAFT_RESPONSE_LABELS = ["a", "b", "c"] as const;
@@ -251,6 +251,50 @@ export const PHENOMENON_BRIEF: Readonly<
         "the answers are equivalent in quality; a reviewer that favours the first or last one has been fooled by position",
 };
 
+/**
+ * What "one difference" means, and what the assigned answer owes, per
+ * phenomenon.
+ *
+ * Rules 8 and 9 were written for `direct_contradiction`, where the fault is a
+ * sentence turned around: the assigned answer says something, that something
+ * is wrong, and rule 9 keeps it from arguing against itself while it says it.
+ * Read literally by an omission batch, both rules ask for the wrong thing --
+ * rule 8 for a wrong ACTION where the fault is a missing one, and rule 9 for a
+ * recommendation to justify where there is nothing to justify.
+ *
+ * The reading that produces a bad case is not a hypothetical. The only
+ * omission material that exists -- four hand-written cases in `development-v0`
+ * -- misses on exactly this: in every one the accused answer is short of TWO
+ * things the others have, because leaving one element out tends to take its
+ * neighbour with it, and a gold naming one of them scores a reviewer that
+ * finds the other as wrong.
+ *
+ * So the planting rule is chosen by phenomenon rather than written once and
+ * bent. Everything not listed keeps the contradiction wording, because that is
+ * what those phenomena are: something stated that should not have been.
+ */
+const PLANTING_RULES: Readonly<
+    Record<string, { readonly difference: string; readonly integrity: string }>
+> = {
+    omission: {
+        difference: `**The assigned answer is the only one missing ONE required element, and is otherwise complete.** Required means the question -- and any text the question supplies -- cannot be answered properly without it, not merely that the other answers happen to mention it. It must be one element a reviewer could report on its own: not a principle that shows up as three missing steps, and not two elements that fall out together. Every other required element is met, in substance, by ALL THREE answers -- met, not worded alike, since an answer that covers a point in its own words has covered it and a gold that says otherwise is scoring vocabulary. Differences of emphasis, ordering, wording and optional elaboration are not omissions and do not belong in the gold.
+   **What is missing must be required under every reading of the question.** If there is an ordinary way to read the question under which the element is optional, the case scores a reviewer for not knowing which reading you had in mind rather than for missing something. Fix the question so the element is unmistakably required, or pick one that does not depend on a reading.`,
+        integrity: `**The assigned answer is correct in everything it does say.** It is not arguing for anything wrong -- it simply does not contain the one required element. Do not add a mistake to make the omission easier to spot: a second, reportable fault is a finding your gold does not list, and a reviewer that reports it is then scored wrong for being right. Do not gesture at the missing element either -- an answer that half-covers it in another sentence has covered it, and there is no omission left to find.`,
+    },
+};
+
+const DEFAULT_PLANTING_RULE = {
+    difference: `**The assigned answer differs from the others on ONE point and is otherwise just as sound.** One point means ONE ACTION a reviewer could report on its own, not one principle that surfaces as three actions; every dose, step, figure and caution in it is as correct as in the answers that are right. A second carelessness makes your gold dishonest -- a reviewer that reports it has found a real fault your gold does not contain, and the case scores that reviewer as wrong.
+   **That one difference must be wrong under every reading of the question.** Taking a suspected stroke patient by car rather than waiting for an ambulance is a difference that is not: usually wrong, and official guidance allows it where it is genuinely faster, so the case would score a reviewer for not knowing which circumstance you had in mind. Fix the circumstance in the question, or pick a difference that does not depend on one.`,
+    integrity: `**The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, the later elements follow from it, and it must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage" has argued against itself -- the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right: they argue for a different recommendation, and pasting them in is how an answer comes to refute itself.`,
+};
+
+/** The gold kind a phenomenon's findings belong under. */
+const PRIMARY_GOLD_KIND: Readonly<Record<string, string>> = {
+    omission: "missingPoints",
+    meaningful_difference: "differences",
+};
+
 export type AiReviewDraftRequest = {
     language: AiReviewEvalLanguage;
     taskType: AiReviewEvalTaskType;
@@ -278,6 +322,8 @@ export function draftInstruction(request: AiReviewDraftRequest): string {
         : `\n\nWhich answer carries the planted phenomenon is ASSIGNED, not yours to choose:\n${request.targetLabels
               .map((label, index) => `  - case ${index + 1}: answer "${label}"`)
               .join("\n")}\n\nWrite each case so the assigned answer is the one at fault and the others are sound. Do not move it, do not plant it in a second answer, and do not reorder the answers to suit yourself: the whole point of the assignment is that the position is not correlated with the fault.`;
+    const planting = PLANTING_RULES[request.phenomenon] ?? DEFAULT_PLANTING_RULE;
+    const goldKind = PRIMARY_GOLD_KIND[request.phenomenon] ?? "contradictions";
     const avoid =
         request.existingQuestions.length > 0
             ? `\n\nThe set already contains these questions. Do not repeat them, and do not paraphrase them -- a cell filled by paraphrase measures one question many times:\n${request.existingQuestions
@@ -304,9 +350,8 @@ Rules that are not negotiable:
 ${ANSWER_SHAPE[request.taskType].map((element, index) => `   ${index + 1}. ${element}`).join("\n")}
    Each element carries something specific to THIS case -- the action actually to take, the reason it actually follows, the condition that actually changes it -- and not a sentence that would sit equally well under any question of this kind. Give a figure, a time or a dose where one belongs naturally and you are sure of it; do not invent one to fill the space.
    Written that way an answer runs to roughly ${DRAFT_TARGET_RESPONSE_RANGE.min}-${DRAFT_TARGET_RESPONSE_RANGE.max} characters. **That is a target for writing, not a test to pass.** What decides whether a case is any good is whether each answer gives a reviewer real ground to stand on, so: no padding, no restating an earlier element in other words, no facts the question did not ask about. An answer under ${DRAFT_DISCARD_FLOOR_CHARACTERS} characters is discarded unread -- a check on the shape of the reply, like the label rules, and clearing it says nothing at all about whether the case is good.
-8. **The assigned answer differs from the others on ONE point and is otherwise just as sound.** One point means ONE ACTION a reviewer could report on its own, not one principle that surfaces as three actions; every dose, step, figure and caution in it is as correct as in the answers that are right. A second carelessness makes your gold dishonest -- a reviewer that reports it has found a real fault your gold does not contain, and the case scores that reviewer as wrong.
-   **That one difference must be wrong under every reading of the question.** Taking a suspected stroke patient by car rather than waiting for an ambulance is a difference that is not: usually wrong, and official guidance allows it where it is genuinely faster, so the case would score a reviewer for not knowing which circumstance you had in mind. Fix the circumstance in the question, or pick a difference that does not depend on one.
-9. **The assigned answer believes itself.** Write it as a competent assistant that genuinely holds that position would write it: element 2 justifies ITS OWN recommendation, elements 3 to ${String(ANSWER_SHAPE[request.taskType].length)} follow from it, and it must never state the principle that makes it wrong. An answer that says "observe quietly for thirty minutes" and then "delay increases brain damage" has argued against itself -- the reader spots the drafter, not the fault, and a reviewer that quotes the second sentence has done nothing an evaluation can score. Do not reuse the reasoning sentences of the answers that are right: they argue for a different recommendation, and pasting them in is how an answer comes to refute itself.
+8. ${planting.difference}
+9. ${planting.integrity}
 10. **Write every answer independently, and do not copy sentences between them.** Two answers that share their wording are one answer, and a case built that way asks which answer is not a copy rather than which one is wrong -- the reviewers this set measures compare answers from different models, which are never identical. A case with two answers alike once whitespace is ignored is rejected unread.
 11. Label the answers "a", "b" and "c". Every case uses these labels, each exactly once, and the assigned answer must be among them. Name the answer your gold accuses in \`gold.${ACCUSED_LABEL_FIELD}\`: it is checked against the assignment, and a case that accuses another answer is rejected.${assignment}${avoid}
 
@@ -323,13 +368,11 @@ Reply with JSON only, no prose around it, in exactly this shape:
       ],
       "gold": {
         "${ACCUSED_LABEL_FIELD}": "the label of the answer this gold accuses",
-        "contradictions": [
-          { "id": "short-slug", "anyOf": ["a string a correct finding would contain"], "description": "what is wrong and where" }
-        ],
-        "missingPoints": [],
-        "differences": []
+        "${goldKind}": [
+          { "id": "short-slug", "anyOf": ["a string a correct finding would contain"], "description": "what is wrong or missing, and where" }
+        ]
       },
-      "goldCompleteness": { "contradictions": true, "missingPoints": false },
+      "goldCompleteness": { "${goldKind}": true },
       "injectionMarkers": [],
       "notes": "why the exhaustive claims above are true or false"
     }
