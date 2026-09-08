@@ -189,10 +189,18 @@ Assert-Case "4a. the mode reaches the verifier" ($emergency.SawMode -eq "emergen
 # the flag was told to roll back to the ring section 5.1 had just abandoned.
 $modeParameter = @($ast.ParamBlock.Parameters |
     Where-Object { $_.Name.VariablePath.UserPath -eq "Mode" })
-$modeIsMandatory = @($modeParameter.Attributes |
+# The *value*, not just the presence of the argument: `Mandatory = $false`
+# carries the same argument name and makes the parameter optional again.
+$mandatoryArguments = @($modeParameter.Attributes |
     Where-Object { $_.TypeName.Name -eq "Parameter" } |
     ForEach-Object { $_.NamedArguments } |
-    Where-Object { $_.ArgumentName -eq "Mandatory" }).Count -gt 0
+    Where-Object { $_.ArgumentName -eq "Mandatory" })
+$modeIsMandatory = ($mandatoryArguments.Count -gt 0) -and
+    (@($mandatoryArguments | Where-Object {
+        # `[Parameter(Mandatory)]` with no value means $true; anything else has
+        # to evaluate to $true to count.
+        $_.ExpressionOmitted -or ($_.Argument.SafeGetValue() -eq $true)
+    }).Count -eq $mandatoryArguments.Count)
 $modeHasDefault = @($modeParameter | Where-Object { $null -ne $_.DefaultValue }).Count -gt 0
 Assert-Case "4b. -Mode is mandatory and has no default" `
     ($modeIsMandatory -and (-not $modeHasDefault)) `
