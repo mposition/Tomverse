@@ -127,8 +127,8 @@ test("the report names which rule it applied and why", () => {
 });
 
 test("the per-subject guardrail is named as a different layer", () => {
-  // §6.1-4 and §7 must not be confused by whoever reads this output while
-  // deciding a number.
+  // docs/policy/voice-input.md §6.1-4 and §7 must not be confused by whoever
+  // reads this output while deciding a number.
   const { output } = run({
     NODE_ENV: "production",
     VOICE_PROVIDER_SECONDS_PER_DAY: "3600",
