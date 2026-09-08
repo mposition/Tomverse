@@ -102,15 +102,25 @@ SELECT value FROM "AppSetting" WHERE key = 'feature.voiceInputEnabled';
 행이 없으면 꺼진 상태입니다. `VOICE_INPUT_KILL_SWITCH`가 비어 있지 않으면 DB
 값과 무관하게 꺼집니다.
 
-### 0.3 production은 아직 이 코드를 갖고 있지 않습니다
+### 0.3 production은 2026-09-08에 이 코드를 받았습니다
 
-`e8815457`(#1280) · `0a25820a`(#1281) · `dde6ad87`(#1282)는 **`develop`에만
-있고 `main`에 없습니다.** production이 서비스 중인 `500ce79f`에는
-`voice-transcription-model-price` readiness 검사가 없습니다.
+**2026-09-08 이전**: `e8815457`(#1280) · `0a25820a`(#1281) · `dde6ad87`(#1282)가
+`develop`에만 있었고, production이 서비스하던 `500ce79f`에는
+`voice-transcription-model-price` readiness 검사도 검사기도 없었습니다.
+**§5.2가 설정과 검증을 다른 단계로 나눠 놓은 이유가 이것입니다** — 변수를 먼저
+넣는 것은 가능했고, 그 값이 맞는지 확인하는 것만 불가능했습니다.
 
-그러므로 production 환경변수를 지금 넣어도 되지만, **그 값이 맞는지
-`/api/ready`가 말해 주는 것은 main이 이 커밋들을 받은 뒤**입니다. §5의 순서가
-그렇게 짜여 있습니다.
+**2026-09-08**: #1288이 voice 경로를 건드린 21개 commit을 `main`으로
+cherry-pick했고, `main`은 `4b2a0cfd`가 됐습니다. production이 그 커밋을
+배포하면서 §5.2 5번이 실행 가능해졌습니다.
+
+**이것이 `develop` → `main` 전체 릴리스는 아닙니다.** cherry-pick이므로 `main`은
+여전히 `develop`의 나머지를 갖고 있지 않습니다. `main`에 voice 파일이 있다는
+사실에서 "이제 두 브랜치가 같다"를 유도하지 마십시오 — 다음에 이 문서를 읽는
+사람이 어떤 브랜치에서 무엇을 실행할 수 있는지 판단할 때 이 구분이 필요합니다.
+
+**바뀌지 않은 것**: production flag는 계속 꺼져 있고, 두 readiness 검사는 꺼져
+있는 동안 아무 말도 하지 않습니다(§4.1). 이 배포는 기능을 켜지 않았습니다.
 
 ---
 
