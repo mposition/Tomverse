@@ -329,6 +329,36 @@ console.log(`\n--- instruction ---\n${instruction}\n--- end ---`);
 const ledgerPath = argValue("ledger")
   ? resolve(process.cwd(), argValue("ledger"))
   : join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
+
+// A named ledger must already exist. A derived one may not.
+//
+// Missing is read as empty everywhere else in this script, and for the derived
+// path that is right: the first run against a new set has no history and
+// creates the file. For a named one it is exactly wrong. `--ledger` is only
+// ever passed to CONTINUE a history, so a path that is not there means a typo,
+// a wrong working directory or a file that was moved -- and reading any of
+// those as $0 committed silently hands back every approval the real ledger was
+// holding. The failure is invisible: the run proceeds, prints a total that
+// looks fine because it is small, and spends against nothing.
+//
+// Refused here, before the lock and before any reservation, so a mistyped path
+// costs nothing and leaves nothing behind.
+if (argValue("ledger")) {
+  try {
+    readFileSync(ledgerPath, "utf8");
+  } catch (error) {
+    die(
+      `\n--ledger=${argValue("ledger")} could not be read: ${
+        error instanceof Error ? error.message : error
+      }\n\n` +
+        "That flag continues an existing ledger, so a path that is not there is a\n" +
+        "mistake rather than an empty history -- and treating it as one would read\n" +
+        "the committed total as $0 and spend the whole approved budget again.\n" +
+        "Check the path, or leave --ledger off to start one beside --set."
+    );
+  }
+}
+
 const lockPath = `${ledgerPath}.lock`;
 
 const readLedger = () =>

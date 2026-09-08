@@ -610,3 +610,53 @@ test("a new set can spend against the ledger that already holds the history", as
   assert.equal(JSON.parse(readFileSync(first.setPath, "utf8")).cases.length, 1);
   assert.equal(JSON.parse(readFileSync(second.setPath, "utf8")).cases.length, 1);
 });
+
+test("a named ledger that is not there is refused before anything is spent", async (t) => {
+  // The flag exists to CONTINUE a history, so a path that is not there is a
+  // typo, a wrong working directory, or a file that was moved. Read as an
+  // empty ledger it would report $0 committed and hand back the whole approved
+  // budget -- invisibly, because a small total is what a first run looks like.
+  //
+  // The stub answers normally, so if the refusal did not happen the call would
+  // go through and this test would see it.
+  const provider = await stubProvider(usableReply("m1"));
+  const fix = fixture();
+  const missing = join(fix.root, "not-here", "decision-v1.spend.jsonl");
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await run(
+    fix.setPath,
+    ["--send", `--ledger=${missing}`, "--max-total-cost-usd=1"],
+    provider.url
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /could not be read/);
+  assert.match(result.stderr, /leave --ledger off/);
+
+  // Nothing reserved, nothing settled, no ledger conjured at either path, no
+  // lock left behind, and no set written -- so no provider call was made.
+  assert.equal(existsSync(missing), false);
+  assert.equal(existsSync(`${missing}.lock`), false);
+  assert.equal(existsSync(fix.ledgerPath), false);
+  assert.equal(existsSync(fix.setPath), false);
+});
+
+test("a derived ledger may be missing, because the first run creates it", async (t) => {
+  // The other half of the rule. Without --ledger a new set has no history and
+  // the file is made on the way through; turning that into an error would stop
+  // every first run.
+  const provider = await stubProvider(usableReply("m1"));
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  assert.equal(existsSync(fix.ledgerPath), false);
+  const result = await run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fix.balance().settledCount, 1);
+});
