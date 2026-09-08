@@ -236,7 +236,7 @@ test("a live probe with no key refuses before it reaches a provider", () => {
     // cannot: the real entry point exits non-zero and prints no report.
     assert.match(
         output,
-        /OPENAI_API_KEY is required|has no approved eval budget|in the\s+register/i,
+        /OPENAI_API_KEY is required|has no approved eval budget|in the\s+register|No register entry/i,
         output
     );
     // The refusal came before the run: no report was printed.

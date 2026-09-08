@@ -77,6 +77,7 @@ import {
     APPROVED_STEMS,
     CANON_STEP_ORDER,
     KOREAN_COUNTERS,
+    KOREAN_NUMERAL_EXPRESSIONS,
     NUMERAL_TABLE,
 } from "@/lib/memoryEvalCanonicalisation";
 import {
@@ -97,7 +98,7 @@ import {
  * change regardless — this string is for people, so a manifest row can be
  * read without recomputing anything.
  */
-export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.4";
+export const MEMORY_EVAL_SCORING_CONTRACT_VERSION = "mem-score-v3.5";
 
 /**
  * The approved records that define the contract, oldest first.
@@ -112,6 +113,7 @@ export const MEMORY_EVAL_SCORING_AMENDMENTS: readonly string[] = [
     ".github/audits/memory-eval-mixed-critical-amendment-2026-08-26.md",
     ".github/audits/memory-eval-kind-boundary-amendment-2026-08-27.md",
     ".github/audits/memory-eval-gold-contract-2026-08-27.md",
+    ".github/audits/memory-eval-korean-numeral-amendment-2026-09-03.md",
 ];
 
 /**
@@ -242,8 +244,40 @@ export const MEMORY_EVAL_SCORING_RULES: readonly {
         statement:
             "Both sides of a comparison pass through canon in the fixed step order, then " +
             "through the language's matching form: Korean drops every space, English keeps " +
-            "them. Canonicalisation rewrites a token to a canonical form by a fixed table " +
-            "and never decides that two different facts are the same.",
+            "them. Every step rewrites by a fixed table. Korean numerals are rewritten " +
+            "only by the reviewed rows of canonKoreanNumeralExpressions, matched as one " +
+            "alternation in a single pass with the longest form first, and an unlisted " +
+            "numeral is left as written. A row is bounded on the left and only on the " +
+            "left: it matches where no Hangul syllable immediately precedes the numeral, " +
+            "and it does not read what follows the counter. That one character is the " +
+            "only context the Korean numeral step reads. It is not the only context any " +
+            "step reads: the contraction step, the digit-group separator step and the " +
+            "English numeral step each anchor on a word boundary, and the separator step " +
+            "also looks ahead for the three digits that make a group. Every one of those " +
+            "is a boundary or a fixed-width lookahead written into the step, and no step " +
+            "reads a word, a distance, a sentence or anything a later edit could change " +
+            "at range. A registered Korean numeral expression therefore canonicalises " +
+            "the same alone as inside a sentence provided no Hangul syllable " +
+            "immediately precedes it, and the same however the expression itself is " +
+            "spaced. That condition is not a word boundary and is deliberately weaker " +
+            "than one: the rule reads the single character before the numeral and asks " +
+            "only whether it is Hangul, so an expression preceded by a letter or a " +
+            "digit still rewrites. It is stated in those terms rather than as a word " +
+            "boundary because the two are not the same test and the difference changes " +
+            "results. The general form of the guarantee is weaker again, and is stated " +
+            "as it is rather than borrowed from the Korean step: a token canonicalises " +
+            "the same alone as in a sentence exactly when every condition its own step " +
+            "imposes is satisfied. The English numeral step imposes a word boundary on " +
+            "both sides, so one becomes 1 while oneway is left as written; the " +
+            "digit-group separator step imposes none before the digit, so it fires " +
+            "inside a longer token as well. No canonical form may be a substring of " +
+            "another. This contract states no bound on what a canonical form may be a " +
+            "substring OF: a gold token is matched as a substring, so a candidate stating " +
+            "a different fact whose text contains the token is credited for it, in either " +
+            "spelling and whether or not a row rewrote anything. That is a property of " +
+            "the matcher, it predates this rule, and no boundary inside canonicalisation " +
+            "can remove it. Canonicalisation rewrites a token to a canonical form by a " +
+            "fixed table and never decides that two different facts are the same.",
     },
     {
         id: "v3-evidence-binding",
@@ -473,6 +507,34 @@ export function scoringContractDescriptorInput(): string {
         descriptorListRow("canonStepOrder", CANON_STEP_ORDER),
         descriptorSortedTableRow("canonNumeralTable", NUMERAL_TABLE),
         descriptorSortedListRow("canonKoreanCounters", KOREAN_COUNTERS),
+        // The rows that actually rewrite Korean text, and the reason they are
+        // here rather than left to the two rows above.
+        //
+        // Until `mem-score-v3.5` the Korean rewrite was `NUMERAL_TABLE` crossed
+        // with `KOREAN_COUNTERS`, so hashing those two hashed the matcher. v3.5
+        // replaced the cross-product with a reviewed list, and for one commit
+        // the digest covered the *vocabulary* a row may draw from while the
+        // rows themselves sat outside it: adding, removing or retargeting a row
+        // changed what every comparison did and moved nothing. A contract
+        // digest that cannot see the matcher is not pinning the contract.
+        //
+        // The `rejects` are inside for the reason `approvedStemsFor` states —
+        // a row whose reviewed over-matches were quietly dropped is a different
+        // rule wearing the same spelling — and the whole row is sorted, because
+        // rewriting rows in another order is the same matcher.
+        descriptorSortedListRow(
+            "canonKoreanNumeralExpressions",
+            KOREAN_NUMERAL_EXPRESSIONS.map(
+                (entry) =>
+                    `${entry.numeral}+${entry.counter}=${entry.canonical}` +
+                    // There is no right boundary to hash since 2026-09-04: a
+                    // row reads nothing after its counter, so the row is the
+                    // numeral, the counter, the canonical form, the gold that
+                    // requires it and its reviewed over-matches.
+                    `:by=${entry.requiredBy}` +
+                    `:-${[...entry.rejects].sort().join("|")}`
+            )
+        ),
         // Empty at freeze, and that emptiness is the record: registering the
         // first stem moves this digest, which under the contract's §5 is a new
         // scoring contract version.

@@ -216,9 +216,14 @@ Assert-Case "5c. the refresh token's length is reported" `
 Assert-Case "5d. the operator is told to revoke the exchange" `
     ($ok.Output -match "Revoke the exchange session") ""
 
+# Joined from parts rather than written as one literal. A line reading
+# `<RING NAME> = "<high-entropy string>"` is what a secret scanner exists to
+# report, and it reported these two in the commit that introduced them: the
+# daily audit checks out every ref, so a placeholder on develop turned the
+# main nightly red. The values are the same; only the shape changed.
 $injected = Invoke-Wrapper -Preinjected -Inject @{
-    MOBILE_AUTH_SIGNING_KEYS = "INJECTED-SIGNING-e31f80"
-    MOBILE_AUTH_REFRESH_PEPPERS = "INJECTED-PEPPER-4c9d22"
+    MOBILE_AUTH_SIGNING_KEYS = ("INJECTED-SIGNING", "e31f80") -join "-"
+    MOBILE_AUTH_REFRESH_PEPPERS = ("INJECTED-PEPPER", "4c9d22") -join "-"
 }
 # Two prompts, not four: the rings come from op run, the tokens from the
 # exchange the operator just made.

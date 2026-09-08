@@ -58,15 +58,24 @@ on:
           - "1"
           - "2"
       max_cost_usd:
-        # 6.285, which is the approved PER-RUN ceiling and not a headroom
-        # figure chosen here.
+        # 7.0, the approved PER-RUN ceiling for the pair this workflow now
+        # runs, and not a headroom figure chosen here.
         #
-        # The 2026-08-28 approval funds `gpt-5-6-luna::mem-extract-v6` for two
-        # runs on `mem-eval-succ-5`, with a programme total of US$12.57 --
-        # every one of the 1,150 answers at the 4,096-token cap, twice
-        # (`npm run report:memory-eval-cost-estimate`). Half of that is one
-        # run's worst case, and it is what the register records as
-        # `evalBudget.maxUsd`.
+        # The 2026-09-05 approval funds `gpt-5-6-luna::mem-extract-v8` for two
+        # runs on `mem-eval-succ-9`, with a programme total of US$14.00
+        # (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md). The
+        # raw worst case is US$6.5574902 a run -- 1,150 answers at the
+        # 4,096-token cap, plus the output schema every request carries -- and
+        # the approval added margin because those token counts are this
+        # repository's estimate rather than the provider's own.
+        #
+        # It read 6.285 until then, which was v6's approved figure on
+        # `mem-eval-succ-5`. Left behind, it was BELOW the current worst case:
+        # a default-value dispatch could have paid for most of a run and then
+        # been truncated at a ceiling nobody had approved for this instrument,
+        # losing the whole spend rather than part of it.
+        # `tests/memoryEvalRunWorkflow.test.mjs` now compares this against the
+        # register instead of pinning a second copy of the number.
         #
         # This is a PER-RUN ceiling and the harness keeps no cumulative
         # ledger, so raising it here does not buy headroom -- it spends the
@@ -75,7 +84,7 @@ on:
         # part of it; the answer to a truncation is a fresh approval.
         description: "Per-run ceiling in USD. May only narrow the approved budget."
         required: true
-        default: "6.285"
+        default: "7.0"
       limit:
         description: "Compatibility probe: run only the first N cases. Empty means a full run."
         required: false
@@ -239,13 +248,19 @@ jobs:
       # exit status, and a not-a-pass is a RESULT rather than an error.
       # Admissibility asks a different question -- may this run be cited -- and
       # the pre-registered table it applies names commitSha, a dirty tree,
-      # truncation, an aborted run, decisionGrade and the spend ceiling. Not
-      # one of them is the verdict. A failing run that is admissible is a
+      # truncation, an overrun of the spend ceiling, an aborted run,
+      # decisionGrade and whether the spend figure is reliable. Not one of them
+      # is the verdict. A failing run that is admissible is a
       # citable negative result, and that is the run whose records someone most
       # needs to read. Without `always()` the two steps that diagnose a failing
       # run were the two steps a failing run skipped: run1 on 2026-08-26
       # measured all 1,150 cases, missed the critical bulk-safe gate 49 times,
       # and produced neither.
+      #
+      # The overrun joined that table on 2026-09-05, and it is a separate signal
+      # from the truncation beside it: one says the run stopped early at the
+      # ceiling, the other that it finished having passed it on a call the
+      # harness could only compare after the money was spent.
       #
       # Skipped on a probe, and not because the check would be inconvenient:
       # a probe's `decisionGrade` is false by construction, so the rules would

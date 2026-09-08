@@ -25,6 +25,12 @@ const ADMISSIBLE = {
     commitSha: "0".repeat(40),
     workingTreeDirty: false,
     truncatedByCostCeiling: false,
+    exceededCostCeiling: false,
+    // A live artifact needs comparable figures too: without them the run is
+    // discarded as `spendComparableToCeiling`, which is its own rule.
+    mode: "live",
+    accruedCostUsd: 4.2,
+    runCeilingUsd: 7,
     abortedOnConsecutiveFailures: false,
     decisionGrade: true,
     spendCeilingReliable: true,
@@ -47,10 +53,57 @@ test("a clean run is admissible", () => {
     assert.match(result.stdout, /Admissible/);
 });
 
+test("a live run whose spend cannot be compared is discarded, not passed", () => {
+    // Its own test rather than a row in the loop below, because the loop
+    // asserts the failing rule is named after the field it set — and here the
+    // field that is missing (`accruedCostUsd`) is not the rule that fires
+    // (`spendComparableToCeiling`). That mismatch is the point of the rule:
+    // the artifact's defect is an absence, so nothing in it can be named.
+    //
+    // Every one of these used to print `OK exceededCostCeiling` and exit 0,
+    // because the rule read the verdict and not the source behind it.
+    // Without the flag, which is the shape a real artifact from before
+    // 2026-09-05 has. A `false` flag is an answer even with nothing to compare
+    // — the harness wrote it — and that case is asserted admissible below.
+    const noFlag = { ...ADMISSIBLE };
+    delete noFlag.exceededCostCeiling;
+    for (const manifest of [
+        { ...noFlag, accruedCostUsd: undefined, runCeilingUsd: undefined },
+        { ...noFlag, accruedCostUsd: null },
+        { ...noFlag, runCeilingUsd: "7" },
+        { ...noFlag, accruedCostUsd: "4.2" },
+    ]) {
+        const result = check(manifest);
+        assert.equal(result.status, 1, result.stdout);
+        assert.match(result.stdout, /Not admissible:.*spendComparableToCeiling/);
+    }
+    // A smoke run has no ceiling to compare against, and is not caught by it.
+    const smoke = check({
+        ...noFlag,
+        mode: "smoke",
+        accruedCostUsd: undefined,
+        runCeilingUsd: undefined,
+    });
+    assert.equal(smoke.status, 0, smoke.stdout);
+    // And a live run whose harness wrote `exceededCostCeiling: false` is
+    // answered by that, figures or no figures.
+    const flagged = check({
+        ...ADMISSIBLE,
+        accruedCostUsd: undefined,
+        runCeilingUsd: undefined,
+    });
+    assert.equal(flagged.status, 0, flagged.stdout);
+});
+
 test("each discarding signal discards on its own", () => {
     for (const [field, value] of [
         ["workingTreeDirty", true],
         ["truncatedByCostCeiling", true],
+        // Added after an artifact carrying this and `decisionGrade: true` was
+        // fed to the checker by hand and came back Admissible with exit 0.
+        // Producing one is now impossible from the harness; reading one was
+        // not, and old artifacts predate the field entirely.
+        ["exceededCostCeiling", true],
         ["abortedOnConsecutiveFailures", true],
         ["decisionGrade", false],
         ["commitSha", "unknown"],

@@ -64,10 +64,98 @@
  * not a record. Instead a `correct` entry names the reservation, carries the
  * ceiling it was written with and the ceiling it should have had, and the
  * difference lands in the running total.
+ *
+ * ### Corrections that lower a ceiling
+ *
+ * Raising one is the easy direction: more was committed than the ledger knew.
+ * Lowering one says a reservation stood for money that was never at stake, and
+ * that claim is only ever true for a narrow reason -- so it carries a
+ * structured ground from `DOWNWARD_CORRECTION_GROUNDS` as well as its
+ * sentence. A prose reason can say anything; a code is a thing the reader of
+ * an approval can count.
+ *
+ * The first one was `transport_blocked_before_provider`. On 2026-09-03 an
+ * approved call was refused by this environment's egress proxy: the request
+ * never reached OpenAI, nothing was generated, and nothing was billed -- yet
+ * it settled at the full ceiling and left $0.0086 of an approved $0.18, which
+ * would have refused the very batch the $0.18 was approved for. A ceiling that
+ * counts calls the provider never saw is not a bound on spending; it is a slow
+ * leak out of an approval.
+ *
+ * Lowering a ceiling under a settlement that already stands would, read
+ * naively, make that settlement look like it closed for more than its
+ * reservation held. It did not: it closed against the ceiling standing at the
+ * time. So a settlement is checked against the HIGHEST ceiling its reservation
+ * ever stood at, and the running total uses the one that stands now. A
+ * settlement above every ceiling the reservation ever had is still a defect,
+ * and still refused.
  */
 
 const isNonEmptyString = (value: unknown): value is string =>
     typeof value === "string" && value.trim() !== "";
+
+/**
+ * The reasons a ceiling may be lowered, as codes rather than sentences.
+ *
+ * Adding one is a decision about what counts as money that was never at
+ * stake, and it belongs in this list where it can be reviewed -- not in the
+ * prose of a single correction, where the next reader has to judge it again.
+ */
+export const DOWNWARD_CORRECTION_GROUNDS = [
+    /**
+     * The request was refused before it reached the provider, by something
+     * between this machine and it -- here, the session's egress proxy. No
+     * tokens were generated and nothing was billed, so the reservation stood
+     * for nothing.
+     *
+     * Narrow on purpose. A 403 from the PROVIDER, a 5xx, a timeout and a
+     * dropped connection all keep their full ceiling: each of them can follow
+     * a request the provider accepted and worked on, and this tool never
+     * learns whether it did.
+     */
+    "transport_blocked_before_provider",
+] as const;
+
+export type AiReviewDraftDownwardCorrectionGround =
+    (typeof DOWNWARD_CORRECTION_GROUNDS)[number];
+
+/**
+ * The egress proxy's own refusal, spelled out.
+ *
+ * Built from the host that was actually asked for, so the check answers both
+ * questions at once: is this the proxy's sentence, and is it about the request
+ * we made? A body naming another host is not evidence about this call.
+ */
+const egressRefusalBody = (host: string): string =>
+    `Host not in allowlist: ${host}. Add this host to your network egress ` +
+    `settings to allow access.`;
+
+/**
+ * Whether a failed response proves the request never reached the provider.
+ *
+ * Three conditions, all required, because the consequence is that an approved
+ * budget gets money back:
+ *
+ *   * the status is 403;
+ *   * the body is the proxy's refusal, matched in full rather than searched
+ *     for -- a provider that happened to mention an allowlist must not be able
+ *     to buy a refund by phrasing an error a certain way;
+ *   * the host that refusal names is the host this call asked for.
+ *
+ * Anything else is false, and false means the reservation keeps its ceiling.
+ * That is the direction to be wrong in: a ceiling held for a call that was
+ * free costs an approval some room, and a ceiling released for a call that was
+ * billed spends money nobody approved.
+ */
+export const transportBlockedBeforeProvider = (input: {
+    status: number;
+    body: string;
+    host: string;
+}): boolean => {
+    if (input.status !== 403) return false;
+    if (!isNonEmptyString(input.host)) return false;
+    return input.body.trim() === egressRefusalBody(input.host);
+};
 
 export type AiReviewDraftLedgerEntry =
     | {
@@ -101,6 +189,12 @@ export type AiReviewDraftLedgerEntry =
           costCeilingUsd: number;
           /** Why, in a sentence a person can audit. */
           reason: string;
+          /**
+           * Required when this correction LOWERS the ceiling, and one of
+           * `DOWNWARD_CORRECTION_GROUNDS`. Raising a ceiling needs no code:
+           * it commits more, so the worst a wrong one does is refuse a call.
+           */
+          grounds?: string;
           [key: string]: unknown;
       };
 
@@ -156,6 +250,7 @@ export const ledgerBalance = (
     // settlement has to be checked against the ceiling that ends up standing,
     // not the one that happened to be read first.
     const reservations = new Map<string, number>();
+    const highest = new Map<string, number>();
     for (const { entry, line } of parsed) {
         if (entry.op !== "reserve") continue;
         if (typeof entry.id !== "string" || entry.id === "") {
@@ -171,6 +266,11 @@ export const ledgerBalance = (
             continue;
         }
         reservations.set(entry.id, entry.costCeilingUsd);
+        // The most this reservation has ever stood at. A settlement is judged
+        // against this rather than against the ceiling standing at the end,
+        // because a correction that LOWERS a ceiling would otherwise make the
+        // settlement it explains look like an overrun.
+        highest.set(entry.id, entry.costCeilingUsd);
     }
     for (const { entry, line } of parsed) {
         if (entry.op !== "correct") continue;
@@ -203,7 +303,28 @@ export const ledgerBalance = (
             );
             continue;
         }
+        // Lowering a ceiling gives an approval room back, so it states WHY as
+        // a code and not only as a sentence. Raising one needs no code: it
+        // commits more, and the worst a wrong one does is refuse a later call.
+        if (entry.costCeilingUsd < held) {
+            const grounds = entry.grounds;
+            if (
+                typeof grounds !== "string" ||
+                !(DOWNWARD_CORRECTION_GROUNDS as readonly string[]).includes(grounds)
+            ) {
+                problems.push(
+                    `line ${line}: correction of "${entry.reservationId}" lowers the ` +
+                        `ceiling from ${held} to ${entry.costCeilingUsd} without one of ` +
+                        `${DOWNWARD_CORRECTION_GROUNDS.join(", ")} as its grounds`
+                );
+                continue;
+            }
+        }
         reservations.set(entry.reservationId, entry.costCeilingUsd);
+        highest.set(
+            entry.reservationId,
+            Math.max(highest.get(entry.reservationId) ?? 0, entry.costCeilingUsd)
+        );
     }
 
     // Second pass: settlements, against the ceilings that stand.
@@ -230,14 +351,20 @@ export const ledgerBalance = (
             problems.push(`line ${line}: settlement has no cost`);
             continue;
         }
-        // A settlement may not close for more than its reservation holds. If
-        // it did, the reservation was not a bound and the budget check that
-        // let the call through was measuring the wrong number. A correction
-        // that raised the ceiling makes this pass; that is the point of one.
-        if (entry.costCeilingUsd > held) {
+        // A settlement may not close for more than its reservation has EVER
+        // held. If it did, the reservation was not a bound and the budget
+        // check that let the call through was measuring the wrong number.
+        //
+        // Ever, not now: a correction that raised the ceiling makes this pass,
+        // which is the point of one, and a correction that lowered it must not
+        // turn the settlement it explains into a defect. The settlement closed
+        // against the ceiling standing at the time; what the total then uses is
+        // the ceiling standing at the end.
+        const ceiling = highest.get(entry.reservationId) ?? held;
+        if (entry.costCeilingUsd > ceiling) {
             problems.push(
                 `line ${line}: "${entry.reservationId}" settled at ` +
-                    `${entry.costCeilingUsd} above its reservation of ${held}`
+                    `${entry.costCeilingUsd} above its reservation of ${ceiling}`
             );
         }
         settled.add(entry.reservationId);

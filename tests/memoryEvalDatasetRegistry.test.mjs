@@ -115,8 +115,13 @@ test("an artifact with no version or no digest is refused", () => {
 });
 
 test("an unregistered version is refused rather than guessed at", () => {
+    // The placeholder is a version that will never exist, not the next one.
+    // This read `mem-eval-succ-9` until that dataset was assembled, at which
+    // point the case stopped testing the refusal it is named for and started
+    // reporting `digest_mismatch` — a real version is a hostage to the day
+    // somebody builds it.
     assert.equal(
-        refusal(historical({ datasetVersion: "mem-eval-succ-9" })),
+        refusal(historical({ datasetVersion: "mem-eval-succ-99" })),
         "unregistered_version"
     );
 });

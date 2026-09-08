@@ -131,6 +131,23 @@ test("every model the deployment can reach has a recorded price", () => {
     now: new Date("2026-09-02T00:00:00Z"),
   });
 
+  // One gap, and it is the register reporting it rather than papering over
+  // it: gpt-4o-transcribe has never been invoiced and the provider publishes
+  // no audio rate for it (docs/policy/voice-input.md §6.1.3-5).
+  assert.deepEqual(
+    problems.map((problem) => [problem.modelId, problem.code]),
+    [["gpt-4o-transcribe", "audio_input_rate_unknown"]]
+  );
+});
+
+test("the default model's price is not the one that is unknown", () => {
+  // The split the check script relies on: an unknown audio rate blocks the
+  // model this build actually uses, and is only reported for the others.
+  const problems = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+  });
+
   assert.deepEqual(problems, []);
 });
 
@@ -177,18 +194,115 @@ test("every entry names a person and a ticket", () => {
   }
 });
 
-test("no entry claims an observed cost, because none has been observed", () => {
-  // §6.1.2: the paid verification needs its own approval and has not run. The
-  // register has to be able to say "read" without saying "charged", and this
-  // is the line that fails on the day somebody flips the flag without doing
-  // the work.
-  for (const entry of VOICE_MODEL_PRICE_REGISTER) {
-    assert.equal(
-      entry.costObserved,
-      false,
-      `${entry.modelId} claims an observed cost; §6.1.2 says none has been`
-    );
-  }
+test("an observed cost carries the invoice it was read from", () => {
+  // §6.1.3: the paid verification ran on 2026-09-08 for the default model and
+  // not for the other one. The register has to be able to say "read" without
+  // saying "charged", and it now has to say both about different entries.
+  const byId = Object.fromEntries(
+    VOICE_MODEL_PRICE_REGISTER.map((entry) => [entry.modelId, entry])
+  );
+
+  const observed = byId["gpt-4o-mini-transcribe"].costObservation;
+  assert.notEqual(observed, null, "the verified model records no invoice");
+  assert.ok(observed.totalUsd > 0, "an observation with no charge is not one");
+  assert.ok(observed.requests > 0);
+  assert.ok(
+    observed.isolation.trim() && observed.source.trim(),
+    "an aggregate charge is only evidence if it says how it was isolated"
+  );
+
+  assert.equal(
+    byId["gpt-4o-transcribe"].costObservation,
+    null,
+    "gpt-4o-transcribe has never been called; it cannot have been invoiced"
+  );
+});
+
+test("the observed charge reproduces the recorded rates exactly", () => {
+  // The reconciliation that makes the evidence load-bearing rather than
+  // decorative. If this drifts, one of the two numbers was edited alone.
+  const entry = VOICE_MODEL_PRICE_REGISTER.find(
+    (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+  );
+  const { audioInputPerMillionTokensUsd, outputPerMillionTokensUsd } =
+    entry.price;
+  const observation = entry.costObservation;
+
+  const implied =
+    (observation.audioInputTokens * audioInputPerMillionTokensUsd) / 1e6 +
+    (observation.outputTokens * outputPerMillionTokensUsd) / 1e6;
+
+  assert.ok(
+    Math.abs(implied - observation.totalUsd) < 5e-7,
+    `rates imply ${implied} but the invoice recorded ${observation.totalUsd}`
+  );
+});
+
+test("the audio rate is not the published text rate", () => {
+  // The specific defect §6.1.3 found: the pricing table's `Input` column is
+  // the text rate, and costing transcription with it understates the input
+  // side by 2.4x. A future edit that collapses the two fields back into one
+  // has to fail here.
+  const entry = VOICE_MODEL_PRICE_REGISTER.find(
+    (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+  );
+
+  assert.equal(entry.price.textInputPerMillionTokensUsd, 1.25);
+  assert.equal(entry.price.audioInputPerMillionTokensUsd, 3.0);
+});
+
+test("a rate the invoice does not support is refused", () => {
+  // Why the observation is an object and not a boolean: correcting a rate
+  // without re-observing it stops the arithmetic closing, and the audit says
+  // so. A boolean could not have noticed.
+  const drifted = [
+    {
+      ...VOICE_MODEL_PRICE_REGISTER.find(
+        (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+      ),
+      price: {
+        audioInputPerMillionTokensUsd: 1.25,
+        textInputPerMillionTokensUsd: 1.25,
+        outputPerMillionTokensUsd: 5.0,
+        estimatedCostPerMinuteUsd: 0.003,
+      },
+    },
+  ];
+
+  const problems = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+    register: drifted,
+  });
+
+  assert.equal(problems[0].code, "observation_does_not_reconcile");
+});
+
+test("an invoice recorded against no audio rate at all is refused", () => {
+  const contradictory = [
+    {
+      ...VOICE_MODEL_PRICE_REGISTER.find(
+        (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+      ),
+      price: {
+        audioInputPerMillionTokensUsd: null,
+        textInputPerMillionTokensUsd: 1.25,
+        outputPerMillionTokensUsd: 5.0,
+        estimatedCostPerMinuteUsd: 0.003,
+      },
+    },
+  ];
+
+  const problems = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+    register: contradictory,
+  });
+
+  assert.deepEqual(problems.map((problem) => problem.code).sort(), [
+    "audio_input_rate_unknown",
+    "observation_does_not_reconcile",
+  ]);
 });
 
 test("a ticket that names nothing is refused", () => {

@@ -86,6 +86,7 @@ import { judgeEvalV2, scoreCaseV2 } from "../lib/memoryEvalScoringV2.ts";
 import { MEMORY_EVAL_DATASET_SCHEMA_VERSION as GATE_DATASET_SCHEMA_VERSION } from "../lib/memoryExtractionEvalCore.ts";
 import { judgeEvalV3, scoreCaseV3 } from "../lib/memoryEvalScoringV3.ts";
 import { createEvalLiveAdapter } from "../lib/memoryEvalLiveAdapter.ts";
+import { exceededSpendCeiling } from "../lib/memoryEvalSpendCeiling.mjs";
 
 const argValue = (name, fallback) => {
     const match = process.argv.find((arg) => arg.startsWith(`--${name}=`));
@@ -284,7 +285,17 @@ const registerEntry = MEMORY_EXTRACTION_EVAL_REGISTER.find(
 );
 const budgetBinding = budgetBindingFor(registerEntry);
 
-if (!registerEntry) {
+// Only a live run needs a registered pair. `decideEvalRunMode()` answers
+// `smoke` before it looks at the register at all, and `unknown_pair` when a
+// live run has no entry, so this check adds nothing to the live path and used
+// to take the smoke path down with it: bumping `promptVersion` made the
+// harness unrunnable in every mode until somebody registered a pair, which is
+// a separate approval. A smoke run reaches no provider and spends nothing, and
+// refusing it protects no budget.
+//
+// Kept as an early exit rather than deferred to the refusal below because the
+// message names the file to edit, which `unknown_pair` does not.
+if (!registerEntry && live) {
     console.error(
         `No register entry for ${modelId}::${MEMORY_EXTRACTION_PROMPT_VERSION}.\n` +
             "Add a candidate entry to lib/memoryExtractionEvalRegister.ts first (§12.1)."
@@ -720,7 +731,17 @@ console.log(`\nMemory extraction eval — ${modelId}::${MEMORY_EXTRACTION_PROMPT
 console.log(
     `  mode: ${runMode.mode === "live" ? "LIVE" : "SMOKE"}   commit: ${commitSha}\n` +
         `  dataset: ${MEMORY_EVAL_DATASET_VERSION} (${MEMORY_EVAL_DATASET_PURPOSE}, ` +
-        `${MEMORY_EVAL_DATASET_FROZEN ? "frozen" : "not frozen"})  digest: ${datasetDigest.slice(0, 16)}…`
+        `${MEMORY_EVAL_DATASET_FROZEN ? "frozen" : "not frozen"})  digest: ${datasetDigest.slice(0, 16)}…\n` +
+        // The manifest digest as well as the sample's. The dataset digest says
+        // which cases ran; the manifest digest is what the signature was given
+        // for, and it covers what the sample cannot — the retired-to-
+        // replacement pairing among them. A header naming only the first
+        // leaves a reader unable to tell which record this run answers to.
+        `  manifest: ${
+            target.datasetManifestDigest
+                ? `${target.datasetManifestDigest.slice(0, 16)}…`
+                : "none recorded (schema-2 dataset)"
+        }  binding: verified against the recorded manifest`
 );
 
 console.log("\nAggregate");
@@ -929,6 +950,45 @@ if (abortedOnFailures) {
             "would only prove it again."
     );
 }
+/**
+ * Did the run finish having spent more than its ceiling?
+ *
+ * A different question from `costStopped`, and it went unasked. The loop
+ * compares `accruedCostUsd` against the ceiling **before dispatching the next
+ * case**, and cost is added **after** a response comes back — so the last
+ * call's cost is not compared *before it is spent*. It is compared here,
+ * afterwards. Until this line existed it was not compared at all, and a run
+ * whose final response carried it past the ceiling ended with
+ * `costStopped === false` and read as decision-grade.
+ *
+ * So the ceiling is a **soft threshold**: where pricing resolves, the overrun
+ * it permits is bounded by one call's cost, and where pricing fails
+ * `spendCeilingReliable` goes false and that bound goes with it.
+ *
+ * It does not stop the spend — the money is gone by the time it can be
+ * observed, and stopping it would mean reserving the next call's cost before
+ * dispatch, against an estimate whose accuracy is the open question in the
+ * budget proposal. What it stops is the *citation*: a run that spent more than
+ * was approved is not the run that was approved, whatever its numbers say.
+ */
+const ceilingExceeded = exceededSpendCeiling({
+    live: runMode.mode === "live",
+    accruedCostUsd,
+    ceilingUsd: runMode.ceilingUsd,
+});
+
+if (ceilingExceeded && !costStopped) {
+    console.log(
+        `\nOVER CEILING — finished having spent US$${accruedCostUsd.toFixed(4)} ` +
+            `against an approved US$${runMode.ceilingUsd}.\n` +
+            "The loop checks the ceiling before each dispatch and cost is added after\n" +
+            "each response, so the last call was not checked BEFORE it was spent. It is\n" +
+            "checked now, which is what this line is. The money is already gone; what\n" +
+            "this refuses is the claim that the run was the one approved. Not\n" +
+            "decision-grade, and the answer is a fresh approval rather than a note\n" +
+            "explaining the overrun."
+    );
+}
 if (costStopped) {
     console.log(
         `\nTRUNCATED — stopped at the US$${runMode.ceilingUsd} ceiling after ` +
@@ -940,7 +1000,7 @@ if (costStopped) {
 }
 if (runMode.mode === "live") {
     line("\naccrued cost (USD, estimate)", accruedCostUsd.toFixed(4));
-    if (registerEntry.evalBudget) {
+    if (registerEntry?.evalBudget) {
         line("approved ceiling, this run (USD)", registerEntry.evalBudget.maxUsd);
         const { programmeMaxMicroUsd, maxProviderDispatchedRuns } =
             registerEntry.evalBudget;
@@ -998,6 +1058,9 @@ const artifact = {
         caseCount: outcomes.length,
         plannedCaseCount: MEMORY_EVAL_CASES.length,
         truncatedByCostCeiling: costStopped,
+        // Recorded separately from the truncation: one says the run stopped
+        // early, the other that it finished having spent more than approved.
+        exceededCostCeiling: ceilingExceeded,
         // Non-null means this was a probe, and the fields below say so too.
         probeLimit,
         maxCostUsd,
@@ -1026,7 +1089,11 @@ const artifact = {
             runMode.mode === "live" &&
             MEMORY_EVAL_DATASET_FROZEN &&
             probeLimit === null &&
-            !costStopped,
+            !costStopped &&
+            // And not over it either. The check above catches a run cut short
+            // by the ceiling; this catches one that ran past it on its last
+            // call, which the pre-dispatch comparison cannot see.
+            !ceilingExceeded,
         datasetFrozen: MEMORY_EVAL_DATASET_FROZEN,
         datasetPurpose: MEMORY_EVAL_DATASET_PURPOSE,
         abortedOnConsecutiveFailures: abortedOnFailures,
@@ -1040,11 +1107,11 @@ const artifact = {
         // tell a per-run ceiling from a programme one -- which is the
         // confusion this pass was correcting.
         runOrdinal: runMode.mode === "live" ? (runOrdinal ?? null) : null,
-        perRunCeilingUsd: registerEntry.evalBudget?.maxUsd ?? null,
+        perRunCeilingUsd: registerEntry?.evalBudget?.maxUsd ?? null,
         approvedRunCount:
-            registerEntry.evalBudget?.maxProviderDispatchedRuns ?? null,
+            registerEntry?.evalBudget?.maxProviderDispatchedRuns ?? null,
         programmeMaxMicroUsd:
-            registerEntry.evalBudget?.programmeMaxMicroUsd ?? null,
+            registerEntry?.evalBudget?.programmeMaxMicroUsd ?? null,
     },
     verdict: {
         pass: verdict.pass,

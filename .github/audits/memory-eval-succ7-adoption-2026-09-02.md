@@ -1,25 +1,29 @@
 # `mem-eval-succ-7` 채택·동결 기록
 
-**상태: 1차 서명됨 · 2026-09-02 같은 날 무효화됨. 재서명 대기.**
+**상태: 채택됨 · 동결됨 (2026-09-03, 2차 서명).**
 
-> **이 기록은 유효한 채택이 아닙니다.** `@mposition`이 2026-09-02에 54개 케이스를
+> **1차 서명(2026-09-02)은 무효화됐고, 2차 서명(2026-09-03)으로 채택됐습니다.**
+> 아래 §1은 **2차 서명이 결속한 값**입니다. 무효화 경위는 §9에 있습니다.
+>
+> 1차 서명 이야기: `@mposition`이 2026-09-02에 54개 케이스를
 > 읽고 서명했고 dataset은 그 서명으로 동결됐습니다. 이어진 동결 장치 검토에서
 > manifest가 **원본↔대체본 대응을 덮지 않는다**는 것이 확인돼 `transitionDigest`를
 > 추가했고, 그 결과 manifest digest가 `42c9b0a8…` → `ecfb84a4…`로 이동했습니다.
 > **서명은 version 번호가 아니라 digest에 대한 것이므로** 이 서명은 새 manifest를
-> 덮지 못합니다. `MEMORY_EVAL_SUCC7_REVIEW.status`는 `superseded`이고 `frozen`은
-> 다시 `false`입니다.
+> 덮지 못했습니다. 1차 서명은 삭제하지 않고
+> `MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS`에 사유와 함께 보존합니다.
 >
-> **표본은 움직이지 않았습니다** — dataset digest `9326730a…`는 검수자가 읽은 그
-> 값이고 54개 케이스도 그대로입니다. 다시 서명받아야 하는 것은 **manifest이지
-> 표본이 아닙니다.** 자세한 내용은 §9.
+> **표본은 움직이지 않았습니다** — dataset digest `9326730a…`는 1차 검수자가 읽은
+> 그 값이고 54개 케이스도 그대로입니다. 그래서 2차 서명은 54건을 다시 읽는 일이
+> 아니라 **manifest를 다시 읽는 일**이었습니다.
 
 - 검수자: **@mposition**
-- 검수일: **2026-09-02**
+- 검수일: **2026-09-03** (2차 서명). 1차 서명일은 2026-09-02.
+- 검수 대상 commit: **`3ce908f29620d95d0be1bfa25079dd84735126ee`**
 - dataset: `mem-eval-succ-7` (`lib/memoryEvalSucc7.ts`)
 - 선행: `mem-eval-succ-6`, digest `2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63`
 - 검수 시트: `npm run make:memory-eval-succ7-review-sheet` (생성물, 저장소에 두지 않음)
-- 검수 대상 commit: `e522796dd11e3d009d23a13836b7a45b005f3bc8`
+- 1차 검수 대상 commit: `e522796dd11e3d009d23a13836b7a45b005f3bc8` *(무효화됨, §9)*
 
 ## 1. 결속된 값
 
@@ -30,9 +34,10 @@
 | source dataset digest (succ-6) | `2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63` |
 | scoring contract | `mem-score-v3.4`, digest `a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd` |
 | fingerprint | v4 (대화 `title` 포함) |
+| manifest digest | `ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902` |
+| transition digest | `36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1` |
 | 1차 동결 commit SHA (40자리) | `79ffe61687e61d31a74b1800fc9361d6b7cf1da4` *(무효화됨, §9)* |
-| 현재 manifest digest | `ecfb84a40d1df50d2df59402711473c37dfe1c59310bfc1d7b69ccfdc9e40902` |
-| 현재 transition digest | `36a18e179bb1e5b2e0de79872f7f458696abac0ed1f3ddb3ed14fae7c9241bb1` |
+| 2차 동결 commit SHA (40자리) | `7762fb9e14df870da93cbee48de9ebc07cb58780` |
 
 SHA는 동결 commit 자신을 가리키므로 그 commit 안에 담을 수 없습니다. succ-6과 같은
 순서로, 바로 다음 commit이 기입합니다. 그 사이에 dataset·manifest digest는 움직이지
@@ -247,7 +252,51 @@ drift가 있으면 사유를 적고 비정상 종료하며 파일을 쓰지 않�
 택했는데, 그 논리가 통하려면 **완화된 경로가 예외여야** 합니다. 여기서는 그것이
 유일한 경로였으므로 근거가 성립하지 않았습니다.
 
-### 9.7 재서명
+### 9.7 재서명 (2026-09-03, 완료)
 
-표본을 다시 읽을 필요는 없습니다. dataset digest와 source digest는 1차 서명 값
+표본을 다시 읽을 필요는 없었습니다. dataset digest와 source digest는 1차 서명 값
 그대로이고, `tests/memoryEvalSucc7Adoption.test.mjs`가 그 사실을 고정합니다.
+
+2차 서명은 `3ce908f29620d95d0be1bfa25079dd84735126ee`에 한정해 주어졌습니다. 그
+commit은 #1252가 develop에 병합된 뒤의 develop이며, 그 시점에 시트를 생성하고
+검사를 돌려 네 digest를 확인했습니다. **서명 대상은 움직이는 `develop`이라는
+이름이 아니라 그 40자리 SHA와 digest 네 개입니다** — 이후 commit이 쌓여도 서명이
+가리키는 곳은 바뀌지 않고, `succ7SignatureProblems()`가 `reviewedCommit`을 HEAD의
+조상으로 요구합니다.
+
+1차 서명은 `MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS`에 보존됩니다. 삭제하면 저장소가
+**왜 지금 서명이 두 번째인지** 말할 수 없게 됩니다.
+### 9.8 이력 항목의 훼손을 막는 것 (2026-09-03, 검토 5회차)
+
+1차 서명을 보존한 첫 판에서는 `succ7SupersededReviewProblems()`가 `status`,
+사유, "트리와 digest 하나 이상이 다른가" 셋만 봤습니다. 그런데 1차 서명에는
+`signedTransitionDigest`가 **없으므로** 그 비교가 항상 참이 되어, 세 번째 검사가
+사실상 공짜로 통과했습니다. 그 결과 다음이 전부 검사 통과 상태로 들어갈 수
+있었습니다 — `reviewer: ""`, `reviewedCommit: ""`, `record: "missing.md"`,
+`signedSourceDatasetDigest: "corrupt"`, 판정 0/53·문제 53건·다양성 불충분, 그리고
+같은 항목의 중복 등재.
+
+**"1차 서명을 덮어쓰지 않고 보존했다"는 주장이 기계적으로 보호되지 않았던
+것입니다.** 살아 있는 서명은 트리가 지켜 주지만, 폐기된 서명은 아무것과도
+대조되지 않습니다.
+
+지금은 이렇게 막습니다.
+
+- **형식 검사를 살아 있는 서명과 공유합니다**(`signatureShapeProblems()`).
+  검수자·ISO 날짜·40자리 SHA·audit 경로·digest 64자리·판정(53/53, 문제 0,
+  다양성 충분)을 한 곳에서 봅니다. 같은 필드를 두 경로가 다르게 검사하던 것이
+  이 결함의 형태였습니다.
+- **1차 서명의 값을 고정값으로 못 박습니다**(`LEGACY_SIGNATURE_VALUES`).
+  그것이 실제로 말했던 내용입니다.
+- **낡음 판정은 실제로 가진 digest로만** 합니다. 없는 필드를 비교해 낡았다고
+  하지 않습니다.
+- **중복 등재를 거절합니다.** 한 서명이 두 번 실리면 승인 두 건으로 읽힙니다.
+- **`signedTransitionDigest` 부재는 commit `e522796d…` 하나에만** 허용합니다.
+  "서명은 그 필드를 생략할 수 있다"는 **규칙**이 1차 서명을 그 필드 없이
+  서명하게 만든 원인이므로, 예외는 범주가 아니라 commit 하나여야 합니다.
+- **기록 파일 존재와 commit 조상 관계를 이력 항목에도** 확인합니다.
+
+여섯 가지 변조를 각각 거절하는 회귀 테스트가
+`tests/memoryEvalSucc7Adoption.test.mjs`에 있습니다.
+
+이 수정은 재서명을 필요로 하지 않습니다 — digest 넷이 움직이지 않습니다.
