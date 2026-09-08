@@ -183,3 +183,78 @@ test("no output carries key material", () => {
     assert.equal(out.includes(secret), false);
   }
 });
+
+// --- the two must not disagree -------------------------------------------
+//
+// The failure this section exists for: the report shared only the per-key
+// states, so four configurations the check rejected came back as "nothing
+// wants attention". Sharing half a diagnosis reads as agreement.
+//
+// Every case here asserts both sides -- the check refuses, and the report has
+// something to say -- because either alone would have passed while the pair
+// was broken.
+const CONTRADICTIONS = [
+  {
+    name: "an active id that names nothing",
+    variables: () => ({ ...configured, MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-9" }),
+    attention: /active id "sign-9" is not in the ring/,
+  },
+  {
+    name: "an active key that cannot sign",
+    variables: () => ({
+      ...configured,
+      MOBILE_AUTH_SIGNING_KEYS: `sign-2:${"z".repeat(48)}`,
+    }),
+    attention: /cannot sign/,
+  },
+  {
+    name: "two signing ids holding one key",
+    variables: () => ({
+      ...configured,
+      MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_2},sign-2:${SIGN_2}`,
+      MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${isoAgo(60)}`,
+    }),
+    attention: /same material/,
+  },
+  {
+    name: "two pepper ids holding one pepper",
+    variables: () => ({
+      ...configured,
+      MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_2},pep-2:${PEPPER_2}`,
+      MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${isoAgo(60)}`,
+    }),
+    attention: /same material/,
+  },
+  {
+    name: "the active key also carrying a retirement",
+    variables: () => ({
+      ...configured,
+      MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-2@${isoAgo(60)}`,
+    }),
+    attention: /active key and is also retired/,
+  },
+];
+
+for (const contradiction of CONTRADICTIONS) {
+  test(`${contradiction.name}: the check refuses and the report says so`, () => {
+    const variables = contradiction.variables();
+    assert.equal(check(variables).code, 1, "the check should refuse this");
+
+    const { code, out } = report(variables);
+    assert.equal(code, 0, out);
+    assert.match(out, contradiction.attention);
+    assert.equal(/Nothing wants attention/.test(out), false, out);
+  });
+}
+
+test("a partial configuration is not reported as nothing to attend to", () => {
+  // The same shape one level up: every endpoint answers 503 and none of them
+  // says which variable is missing, and the report used to call that quiet.
+  const partial = { ...configured };
+  delete partial.MOBILE_AUTH_TOKEN_AUDIENCE;
+  const { code, out } = report(partial);
+  assert.equal(code, 0, out);
+  assert.match(out, /partly configured/);
+  assert.equal(/Nothing wants attention/.test(out), false, out);
+  assert.equal(check(partial).code, 1);
+});

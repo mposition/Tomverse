@@ -15,10 +15,16 @@
 
 ```
 YYYY-MM-DD__<40자리 SHA>.md
+YYYY-MM-DD__<40자리 SHA>__<실행 라벨>.md
 ```
 
 여기서 SHA는 **그 실행 시점에 대상 배포가 서빙하고 있던 커밋**입니다. 로컬에서 검사만
 돌린 회차라면 그 검사가 읽은 저장소의 `HEAD`이고, 어느 쪽인지 실행 환경 표에 적습니다.
+
+**같은 날 같은 SHA로 두 번 실행하는 일은 실제로 생깁니다** — 변수 하나를 고치고 다시
+검사하면 날짜도 SHA도 그대로입니다. 그때 두 번째 회차는 `--run`으로 라벨을 붙입니다
+(`2`, `after-fix`처럼 짧게). 라벨이 없으면 생성기가 **거절하고 이 방법을 알려 줍니다** —
+덮어쓰기는 하지 않습니다.
 
 ## 규칙
 
@@ -60,6 +66,7 @@ YYYY-MM-DD__<40자리 SHA>.md
 
 ```
 npm run new:staging-verification-record -- --feature mobile-auth-key-rotation --sha <40자리 SHA>
+npm run new:staging-verification-record -- --feature mobile-auth-key-rotation --sha <40자리 SHA> --run 2
 ```
 
 체크리스트의 전 구획을 읽어 항목마다 한 행씩 펼친 빈 기록을 만듭니다. `--preview`를

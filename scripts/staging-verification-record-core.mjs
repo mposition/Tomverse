@@ -16,6 +16,9 @@
 // skeleton is a fact about the checklist as it is on the day, and the
 // `templateRevision` beside it says which day that was.
 
+/** CRLF and CR to LF, so every pattern in this file can anchor on one. */
+export const normalizeLineEndings = (text) => text.replace(/\r\n?/g, "\n");
+
 /** `- [ ] text`, possibly continued on indented following lines. */
 const ITEM_START = /^-\s+\[\s?\]\s+(.*)$/;
 const SECTION = /^##\s+(.+)$/;
@@ -132,7 +135,11 @@ export function renderRecord({
   checklistSourceSha,
 }) {
   const table = renderItemTable(items);
-  return template
+  // Line endings first. Every replacement below anchors on "\n", and a
+  // template checked out with CRLF -- the ordinary state on Windows -- matched
+  // none of them: the generator reported "25 item(s)" and wrote a record with
+  // one empty row, which reads as a checklist that has one item.
+  return normalizeLineEndings(template)
     .replace(/^templateRevision:.*$/m, `templateRevision: ${revision}`)
     .replace(
       /^checklistSourceSha:.*$/m,
@@ -147,6 +154,12 @@ export function renderRecord({
       /^# Staging 검증 실행 — .*$/m,
       `# Staging 검증 실행 — ${date} / ${deploySha.slice(0, 7)}`
     )
+    // A title that is not the staging one. The heading above is the original
+    // wording and stays exact; a template with its own title says so with
+    // these two placeholders, which were otherwise shipped into the record
+    // verbatim.
+    .replace(/<날짜>/g, date)
+    .replace(/<deploy SHA>/g, deploySha.slice(0, 7))
     .replace(
       /^\| 배포 SHA \(전체 40자리\) \|.*$/m,
       `| 배포 SHA (전체 40자리) | \`${deploySha}\` |`
