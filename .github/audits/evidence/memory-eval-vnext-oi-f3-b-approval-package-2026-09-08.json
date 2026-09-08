@@ -6,9 +6,9 @@
   "preparedBy": "Codex",
   "document": {
     "path": ".github/audits/memory-eval-vnext-oi-f3-b-approval-package-draft-2026-09-08.md",
-    "rawSha256": "5465da2fcd13dd920cbfdd7e1cfbc5f05575ce36f4524f726acbcf227007dc53",
-    "bytes": 37637,
-    "lines": 500
+    "rawSha256": "a2241c6f48dc79d43ebf159494bdeadbf06c0e86de6db05fdcff4f00a77be9a9",
+    "bytes": 43955,
+    "lines": 578
   },
   "hashBinding": "This JSON binds the Markdown raw bytes only; no self hash or future commit hash. A separate human receipt must bind both final file hashes and reviewCommit.",
   "authorization": {
@@ -458,13 +458,15 @@
     },
     {
       "id": "PB-D2",
-      "proposal": "Two node:util predicates, exact intrinsic copy, internal helper; test-only constant node:vm fixture",
-      "status": "pending"
+      "proposal": "Two node:util predicates, exact intrinsic copy, internal helper; test-only constant node:vm fixture; inseparable approval pair with PB-D3",
+      "status": "pending",
+      "inseparableWith": "PB-D3"
     },
     {
       "id": "PB-D3",
-      "proposal": "Genuine Uint8Array storage boundary and explicit compatibility exceptions",
-      "status": "pending"
+      "proposal": "Genuine Uint8Array storage boundary and explicit compatibility exceptions; inseparable approval pair with PB-D2, including cross-realm acceptance",
+      "status": "pending",
+      "inseparableWith": "PB-D2"
     },
     {
       "id": "PB-D4",
@@ -587,7 +589,7 @@
     "detachedOrOutOfBounds": "invalid_input; even when intrinsic length is zero",
     "compatibilityExceptions": [
       "Proxy wrappers rejected even if accidentally accepted by I",
-      "genuine cross-realm Uint8Array newly accepted if PB-D3 approved",
+      "genuine cross-realm Uint8Array newly accepted only if PB-D2 and PB-D3 are jointly approved as an inseparable pair",
       "fake/detached/out-of-bounds rejected",
       "shadow properties/custom prototype cannot override genuine view storage"
     ],
@@ -1071,6 +1073,11 @@
       "url": "https://nodejs.org/docs/latest-v22.x/api/util.json",
       "use": "Context7 Node 22 util types documentation",
       "role": "documentation_not_implementation_execution"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/v8/v8/12.4.254.21/src/builtins/typed-array-set.tq",
+      "use": "Pinned V8 source: genuine JSTypedArray branch; both target/source attachment and bounds validation precede zero-length return; array-like property path is distinct",
+      "role": "supplemental_design_basis_not_Node_build_attestation_or_test_result"
     }
   ],
   "preservationBaseline": {
@@ -1509,5 +1516,522 @@
     "dependency installation",
     "git checkout/branch/stage/commit/push/PR/merge",
     "CI dispatch/rerun"
-  ]
+  ],
+  "requestedDecisionGroups": [
+    {
+      "id": "PB-D2-D3",
+      "members": [
+        "PB-D2",
+        "PB-D3"
+      ],
+      "approvalMode": "inseparable",
+      "allPackageDecisionsRequired": [
+        "PB-D1",
+        "PB-D2",
+        "PB-D3",
+        "PB-D4",
+        "PB-D5"
+      ],
+      "partialAcceptanceEffect": "exact package approval remains incomplete; no implementation or new builtin authority",
+      "rejectionOrDeferralOfEitherEffect": "exact package approval remains incomplete; no implementation or new builtin authority",
+      "crossRealmRejectionRequires": "a separately specified, independently reviewed and exactly approved replacement design/scope/test package",
+      "adHocRealmOrPrototypeEqualityCheckAuthorized": false,
+      "status": "pending"
+    }
+  ],
+  "requestedFixtureExtension": {
+    "path": "tests/fixtures/memory-eval-vnext/wire-vectors.json",
+    "field": "proxySafety",
+    "requiredFields": [
+      "id",
+      "acId",
+      "fixtureKind",
+      "placement",
+      "expectedError",
+      "trapNames",
+      "hookNames",
+      "expectedInvocationCount"
+    ],
+    "trapNamesMustEqual": [
+      "getPrototypeOf",
+      "setPrototypeOf",
+      "isExtensible",
+      "preventExtensions",
+      "getOwnPropertyDescriptor",
+      "defineProperty",
+      "has",
+      "get",
+      "set",
+      "deleteProperty",
+      "ownKeys",
+      "apply",
+      "construct"
+    ],
+    "hookNamesMustEqual": [
+      "getter",
+      "setter",
+      "toJSON",
+      "Symbol.iterator",
+      "Symbol.toPrimitive",
+      "Symbol.toStringTag",
+      "constructor",
+      "Symbol.species"
+    ],
+    "uniqueNamesRequired": true,
+    "expectedInvocationCount": 0,
+    "expectationAppliesTo": "each named trap and hook counter individually, not only their aggregate",
+    "missingNameCounterOrExpectation": "incomplete_verification_not_pass",
+    "implementationExecution": "not_run",
+    "existingSubtreesChangedNow": false
+  },
+  "revision": {
+    "id": "PB-R1",
+    "recordStatus": "draft_pending_confirmation_and_exact_human_approval",
+    "authoringHead": "60486e971c94a189ab418c4743f48428a402ea52",
+    "authoringBranch": "codex/memory-eval-vnext-oi-f3-b-approval-package",
+    "preWriteObservedAt": "2026-09-08T10:46:41.713Z",
+    "originalReviewCommit": "60486e971c94a189ab418c4743f48428a402ea52",
+    "originalReviewParent": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+    "originalFiles": [
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f3-b-approval-package-draft-2026-09-08.md",
+        "rawSha256": "5465da2fcd13dd920cbfdd7e1cfbc5f05575ce36f4524f726acbcf227007dc53",
+        "bytes": 37637,
+        "lines": 500
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-oi-f3-b-approval-package-2026-09-08.json",
+        "rawSha256": "eb15aec4a53c605bc97e82bd9a38b189e0af499e9c2e42b54c5ab089f89c807e",
+        "bytes": 78067,
+        "lines": 1513
+      }
+    ],
+    "initialReview": {
+      "reportPath": "C:/Users/Vyper/.codex/attachments/e7f117bd-75ae-4fcf-b48a-dfce11806a92/pasted-text.txt",
+      "reportRawSha256": "76989963726c2a1a0b0334269af46588fadd23cbb7a9debfaf1e384149b0b1a7",
+      "reviewedCommit": "60486e971c94a189ab418c4743f48428a402ea52",
+      "verdict": "PASS_WITH_WARNINGS",
+      "severityCounts": {
+        "P1": 0,
+        "P2": 1,
+        "P3": 3
+      },
+      "blockingFindingCount": 0,
+      "verdictAppliesOnlyTo": "original R; not the revised working files, implementation or human approval"
+    },
+    "revisedReviewCommit": null,
+    "externalConfirmationVerdict": null,
+    "newApprovalReceiptCreated": false,
+    "implementationChangeAuthorizedNow": false,
+    "newBuiltinAuthorizedNow": false,
+    "implementationExecuted": false,
+    "findings": [
+      {
+        "id": "PB-F1",
+        "severity": "P2",
+        "response": "Declare PB-D2/PB-D3 inseparable; partial acceptance, rejection or deferral leaves the exact package incomplete and grants no implementation or builtin authority. A cross-realm rejection needs a separately specified/reviewed/approved replacement package.",
+        "status": "addressed_in_draft_pending_confirmation"
+      },
+      {
+        "id": "PB-F2",
+        "severity": "P3",
+        "response": "Declare hookNames and literal expectedInvocationCount=0 alongside all 13 trapNames; each of all eight named hooks requires its own counter and expectation; any missing name/counter/expectation is incomplete verification.",
+        "status": "addressed_in_draft_pending_confirmation"
+      },
+      {
+        "id": "PB-F3",
+        "severity": "P3",
+        "response": "Retain the ECMAScript standard reference and add pinned V8 12.4.254.21 typed-array-set.tq as supplemental source-level design evidence, not a Node build attestation or runtime test.",
+        "status": "addressed_in_draft_pending_confirmation"
+      },
+      {
+        "id": "PB-F4",
+        "severity": "P3",
+        "response": "Preserve original AOD identity/validation; separately record fresh clean-R results and R-plus-document-working-changes results. Do not replace old failures or describe current local checks as develop CI.",
+        "status": "separately_recorded_pending_confirmation"
+      }
+    ],
+    "historicalBlocksPreserved": [
+      "identity",
+      "ciObservation",
+      "sourceFiles",
+      "supportFiles",
+      "runtimeObservation",
+      "preservationBaseline",
+      "validation",
+      "notExecuted"
+    ],
+    "historicalBlocksMeaning": "original PB authoring observations at AOD with source basis M; historical notExecuted is not a statement that R was never later committed/pushed",
+    "verification": {
+      "scope": "new PB-R1 document revision only; clean R before edits versus R plus working document changes after edits",
+      "runtime": {
+        "node": "v22.22.2",
+        "v8": "12.4.254.21-node.39",
+        "platform": "win32",
+        "arch": "x64"
+      },
+      "credentialHandling": "allowlisted OS/PATH/TEMP child only; absent DOTENV_CONFIG_PATH; no production credentials",
+      "cleanRBaseline": {
+        "head": "60486e971c94a189ab418c4743f48428a402ea52",
+        "trackedClean": true,
+        "indexClean": true,
+        "protectedSourceAndSupportFileCount": 45,
+        "runs": [
+          {
+            "script": "check:encoding:strict",
+            "args": [
+              "run",
+              "check:encoding:strict"
+            ],
+            "start": "2026-09-08T10:46:43.428Z",
+            "end": "2026-09-08T10:46:44.621Z",
+            "exit": 0,
+            "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+            "output": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n"
+          },
+          {
+            "script": "check:policy-section-references",
+            "args": [
+              "run",
+              "check:policy-section-references"
+            ],
+            "start": "2026-09-08T10:46:43.444Z",
+            "end": "2026-09-08T10:46:44.478Z",
+            "exit": 0,
+            "outputSha256": "d0a05f454dbd4dcf0dee7b7063a040f139b439245ce6846a25685ed2886df703",
+            "output": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4101 citation(s) against 30 policy document(s). 2451 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).\n"
+          },
+          {
+            "script": "check:release-records",
+            "args": [
+              "run",
+              "check:release-records"
+            ],
+            "start": "2026-09-08T10:46:43.445Z",
+            "end": "2026-09-08T10:46:43.769Z",
+            "exit": 0,
+            "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+            "output": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n"
+          },
+          {
+            "script": "check:memory-eval-succ9",
+            "args": [
+              "run",
+              "check:memory-eval-succ9"
+            ],
+            "start": "2026-09-08T10:46:43.444Z",
+            "end": "2026-09-08T10:46:44.330Z",
+            "exit": 0,
+            "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+            "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n"
+          },
+          {
+            "script": "check:memory-extraction-eval",
+            "args": [
+              "run",
+              "check:memory-extraction-eval"
+            ],
+            "start": "2026-09-08T10:46:43.471Z",
+            "end": "2026-09-08T10:46:44.002Z",
+            "exit": 0,
+            "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+            "output": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n"
+          },
+          {
+            "script": "check:memory-eval-freeze",
+            "args": [
+              "run",
+              "check:memory-eval-freeze"
+            ],
+            "start": "2026-09-08T10:46:43.472Z",
+            "end": "2026-09-08T10:46:44.362Z",
+            "exit": 0,
+            "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+            "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n"
+          },
+          {
+            "script": "check:doc-references",
+            "args": [
+              "run",
+              "check:doc-references"
+            ],
+            "start": "2026-09-08T10:46:43.476Z",
+            "end": "2026-09-08T10:46:44.764Z",
+            "exit": 0,
+            "outputSha256": "f0c574a06149cbd6be1e8701576fcb3a4cf108ee319f89b99ced64be4d059ef4",
+            "output": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 733 referenced path(s) across 92 instruction document(s), and 860 path(s) named by comments across 2570 source file(s), all present.\n"
+          }
+        ],
+        "failedScriptNames": []
+      },
+      "afterWriting": {
+        "status": "executed",
+        "head": "60486e971c94a189ab418c4743f48428a402ea52",
+        "trackedState": "two package working-file modifications; index clean; not a committed revision",
+        "runs": [
+          {
+            "script": "check:encoding:strict",
+            "args": [
+              "run",
+              "check:encoding:strict"
+            ],
+            "start": "2026-09-08T10:52:51.394Z",
+            "end": "2026-09-08T10:52:52.533Z",
+            "exit": 0,
+            "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+            "output": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n",
+            "sameExitAndOutputAsCleanR": true
+          },
+          {
+            "script": "check:policy-section-references",
+            "args": [
+              "run",
+              "check:policy-section-references"
+            ],
+            "start": "2026-09-08T10:52:51.391Z",
+            "end": "2026-09-08T10:52:52.374Z",
+            "exit": 0,
+            "outputSha256": "d0a05f454dbd4dcf0dee7b7063a040f139b439245ce6846a25685ed2886df703",
+            "output": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4101 citation(s) against 30 policy document(s). 2451 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).\n",
+            "sameExitAndOutputAsCleanR": true
+          },
+          {
+            "script": "check:release-records",
+            "args": [
+              "run",
+              "check:release-records"
+            ],
+            "start": "2026-09-08T10:52:51.391Z",
+            "end": "2026-09-08T10:52:51.683Z",
+            "exit": 0,
+            "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+            "output": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n",
+            "sameExitAndOutputAsCleanR": true
+          },
+          {
+            "script": "check:memory-eval-succ9",
+            "args": [
+              "run",
+              "check:memory-eval-succ9"
+            ],
+            "start": "2026-09-08T10:52:51.392Z",
+            "end": "2026-09-08T10:52:52.229Z",
+            "exit": 0,
+            "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+            "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n",
+            "sameExitAndOutputAsCleanR": true
+          },
+          {
+            "script": "check:memory-extraction-eval",
+            "args": [
+              "run",
+              "check:memory-extraction-eval"
+            ],
+            "start": "2026-09-08T10:52:51.410Z",
+            "end": "2026-09-08T10:52:51.902Z",
+            "exit": 0,
+            "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+            "output": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n",
+            "sameExitAndOutputAsCleanR": true
+          },
+          {
+            "script": "check:memory-eval-freeze",
+            "args": [
+              "run",
+              "check:memory-eval-freeze"
+            ],
+            "start": "2026-09-08T10:52:51.414Z",
+            "end": "2026-09-08T10:52:52.282Z",
+            "exit": 0,
+            "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+            "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n",
+            "sameExitAndOutputAsCleanR": true
+          },
+          {
+            "script": "check:doc-references",
+            "args": [
+              "run",
+              "check:doc-references"
+            ],
+            "start": "2026-09-08T10:52:51.411Z",
+            "end": "2026-09-08T10:52:52.658Z",
+            "exit": 0,
+            "outputSha256": "f0c574a06149cbd6be1e8701576fcb3a4cf108ee319f89b99ced64be4d059ef4",
+            "output": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 733 referenced path(s) across 92 instruction document(s), and 860 path(s) named by comments across 2570 source file(s), all present.\n",
+            "sameExitAndOutputAsCleanR": true
+          }
+        ],
+        "failedScriptNames": [],
+        "newFailureCount": 0,
+        "unchangedExitAndOutputCount": 7,
+        "manualChecks": {
+          "observedAt": "2026-09-08T10:54:00.866Z",
+          "head": "60486e971c94a189ab418c4743f48428a402ea52",
+          "changed": [
+            ".github/audits/evidence/memory-eval-vnext-oi-f3-b-approval-package-2026-09-08.json",
+            ".github/audits/memory-eval-vnext-oi-f3-b-approval-package-draft-2026-09-08.md"
+          ],
+          "changedJsonKeys": [
+            "document",
+            "requestedDecisions",
+            "inputBoundary",
+            "officialReferences",
+            "requestedDecisionGroups",
+            "requestedFixtureExtension",
+            "revision"
+          ],
+          "historicalBlocksUnchanged": [
+            "identity",
+            "ciObservation",
+            "sourceFiles",
+            "supportFiles",
+            "runtimeObservation",
+            "preservationBaseline",
+            "validation",
+            "notExecuted"
+          ],
+          "protectedGitAndWorkingFilesUnchanged": 45,
+          "unrelatedUntrackedFilesUnchanged": 22,
+          "ignoredFilesUnchanged": 3,
+          "originalRFilesUnchanged": 2,
+          "strictUtf8AndFormatting": true,
+          "documentHashBinding": true,
+          "relativeLinksExist": 9,
+          "fr": 16,
+          "nfr": 6,
+          "ac": 12,
+          "bCases": 24,
+          "unitGroupCount": 19,
+          "externalGroupCount": 5,
+          "allFutureCasesNotRun": true,
+          "allApprovalsPending": true,
+          "diffCheckExit": 0,
+          "indexClean": true
+        },
+        "resultMetadataRecording": "These runs preceded serialization of this result subsection and creation of the confirmation prompt. Final serialization/hash/status checks are repeated afterward; no self hash is embedded."
+      },
+      "specValidator": {
+        "command": "python .codex/skills/spec-driven-workflow/scripts/spec_validator.py --file .github/audits/memory-eval-vnext-oi-f3-b-approval-package-draft-2026-09-08.md --strict --json",
+        "exit": 1,
+        "score": 98,
+        "errors": 0,
+        "warnings": [
+          "No HTTP method + path found (expected e.g., POST /api/endpoint)"
+        ],
+        "disposition": "unchanged generic HTTP warning; local component contract explicitly N/A; no invented endpoint"
+      },
+      "ciQueriedThisRevision": false,
+      "ciDispatched": false,
+      "runtimeOrImplementationProbesExecuted": false,
+      "allFutureCasesRemainNotRun": true,
+      "unrelatedUntrackedFilesAtStart": [
+        {
+          "path": ".github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+          "rawSha256": "bcb69780466af1df892f6d82eec186f06836e581b259424e797b5e95274881f2"
+        },
+        {
+          "path": ".github/audits/evidence/memory-eval-vnext-os-f4-reinstallation-revalidation-2026-09-08.json",
+          "rawSha256": "316d715a989fa8bb0967794e2d93f9f93ab734fc28741be5cfd9d7bd1f458a88"
+        },
+        {
+          "path": ".github/audits/evidence/memory-eval-vnext-os-f4-start-tip-revalidation-2026-09-08.json",
+          "rawSha256": "ecd5efb933a3f263ace5c2fe7893e70e07e7cc581181d1ed38e6096e9c6e9178"
+        },
+        {
+          "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+          "rawSha256": "06b104bf7b5ea0d7d207d55db3520d2a968a7d3a6d5bf96e8fb1e182aaa4fcc5"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-bootstrap-p-independent-review-prompt-2026-09-07.md",
+          "rawSha256": "93f5477a792f07b0765a209472c7d05c8faf91776d024f00f9d58dfc1d837eee"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-independent-review-prompt-2026-09-08.md",
+          "rawSha256": "6dc5824aa26e0d2661ff42b9afca5a6de2a5656338bc4b9c2ae7d49baee9abd9"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-offline-subset-disposition-confirmation-review-prompt-2026-09-08.md",
+          "rawSha256": "fa04d321e67ebc78a02fa0e4eb9df515d217b40900e11b54e534852100867f3b"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-offline-subset-disposition-independent-review-prompt-2026-09-08.md",
+          "rawSha256": "7ed8131932280fbd5962c1bc8489b02499494c1ee1d8af65afb58b305c0569e0"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-offline-subset-implementation-independent-review-prompt-2026-09-08.md",
+          "rawSha256": "06f66804d3e936dbe80f2a5db0c050c1fe7224b548ec2b2c0d569c79cec3ddfb"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-offline-subset-independent-review-prompt-2026-09-08.md",
+          "rawSha256": "93fd1e540841b1be671c6157e2b231d09c14ea144f830b19c4d53cc4a4b9f3b3"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-oi-f3-b-independent-review-prompt-draft-2026-09-08.md",
+          "rawSha256": "29433490041fe8a8f1a5cb1f8ffd804e96073c29e0e54e389eaf19e09cb401e5"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-os-f4-reinstallation-revalidation-2026-09-08.md",
+          "rawSha256": "89653d6e854491e082d393c01ae8cb1acfabfd56eb50d8b1c1f5c73cb8b09404"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-os-f4-start-tip-revalidation-2026-09-08.md",
+          "rawSha256": "b1a0d71cbe49ccb8f7018bb95788640388398a4a111dac2133e198844094c008"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+          "rawSha256": "74b02f5035ab6766f4e93d9335c7cf7919ba19283173f9cede639c6b66a101be"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+          "rawSha256": "fea5b992a050d1ba160a0153ea3a7a8da714e57c5193b81bd140e105c7866826"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+          "rawSha256": "6a06a68271d827667a9d04784ea2eb74642179147bb96b107a946cfecc79a481"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+          "rawSha256": "bed852fa4fbdb53cd7ddce2b1d453759244fd43bb290b2cd72c2550c7ac3cbdb"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+          "rawSha256": "ccb1af8d606cc27fb30b1654712f9e61065b8a2d2e8123d25dd64c91f0c07f65"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+          "rawSha256": "7aecf2f7744840cf6161065278103ebcacabef74b808f3e0eadb1748ecaff142"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+          "rawSha256": "9e64bf111a1cadde38e01386738e4642d42f6a5018dfad52c5c33af5e961d238"
+        },
+        {
+          "path": ".github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+          "rawSha256": "7b5e62eb77fdc36a39de1e73fc88cde729090ebc2d4a3d03f26bdbce851ae77c"
+        },
+        {
+          "path": "attachment-audit.json",
+          "rawSha256": "52b9ea37d7dae4cb09931651cb9955e0447c06b25fd126b485211c7228bb93fa"
+        }
+      ],
+      "protectedIgnoredFilesAtStart": [
+        {
+          "path": "docs/ops/app-managed-web-search-staging-verification-records/2026-08-27__8fc628d63c31d4e2d1a52278263dc08bf0cc1677.md",
+          "rawSha256": "1a57bfcb5fb33f2f2b19a3dfa7eb80b1d5a05078678b869101fe343f7916a3ee"
+        },
+        {
+          "path": "docs/ops/external-conversation-continuation-staging-verification-records/2026-08-31__5e187218c536af33094154e4174a3af4267a094a.md",
+          "rawSha256": "7ff9b19e7c8b3fc92248a28b12d22c0a24e6d047e1b3a399021a045dbc4c93f9"
+        },
+        {
+          "path": "docs/ops/external-conversation-continuation-staging-verification-records/2026-08-31__f1d136dc279088fbe08b3c6704284e2f850d050e.md",
+          "rawSha256": "be151ed569f0cd374edf695febb80452537a09595f54eb4db8ea149d72d1b5ab"
+        }
+      ],
+      "protectedDirectoriesNotTraversed": [
+        ".claude/",
+        ".codex/"
+      ]
+    }
+  }
 }

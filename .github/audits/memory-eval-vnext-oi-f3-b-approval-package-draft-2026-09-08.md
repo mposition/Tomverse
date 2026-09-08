@@ -4,6 +4,12 @@
 **Date:** 2026-09-08
 **Status:** Draft — pending independent review and exact human approval
 **Reviewers:** 독립 검토자 미지정; 사람 승인자 미지정
+**Revision:** PB-R1 — PB-F1–PB-F4 response; pending confirmation and exact human approval
+
+아래 Identity/CI/Document preparation verification과 JSON의 기존 identity/validation은
+원 PB 작성 당시의 AOD/M 관측을 보존한다. 이번 수정의 authoring HEAD는 R이며,
+최초 검토 결과·수정 범위·R 기준 검사는 끝의 PB-R1 구획과 JSON revision에 별도로 기록한다.
+원 R에 대한 PASS_WITH_WARNINGS를 이 수정본의 확인 검토 결과로 승계하지 않는다.
 
 ## Context
 
@@ -105,10 +111,18 @@ JSON 자체/미래 receipt/commit SHA를 자기 hash 계산에 넣지 않는다.
 | ID | 요청하는 exact 결정 | 범위와 대가 |
 |---|---|---|
 | PB-D1 | 기존 6파일 중 C01/C03/C04/T01/T11 5파일만 변경 | bytes 경계를 위해 C03/C04 포함; C02 및 6파일 밖 불변 |
-| PB-D2 | C01에 node:util types.isProxy/isUint8Array, 한정 intrinsic snapshot; T01에 node:vm runInNewContext | 새 builtin 승인 요청; vm은 상수 cross-realm 시료 생성 전용이며 sandbox 아님 |
-| PB-D3 | genuine Uint8Array raw-storage 경계, private copy 및 명시된 호환성 예외 | Buffer/기존 정상 view 결과 유지; genuine cross-realm도 허용하는 추가 입력 범위는 별도 명시 수용 필요 |
+| PB-D2 | C01에 node:util types.isProxy/isUint8Array, 한정 intrinsic snapshot; T01에 node:vm runInNewContext | PB-D3와 불가분 승인 묶음; 새 builtin 승인 요청; vm은 상수 cross-realm 시료 생성 전용이며 sandbox 아님 |
+| PB-D3 | genuine Uint8Array raw-storage 경계, private copy 및 명시된 호환성 예외 | PB-D2와 불가분 승인 묶음; Buffer/기존 정상 view 결과 유지와 genuine cross-realm 추가 수용을 함께 명시 승인 |
 | PB-D4 | B01–B24·AC-1–AC-12·전 trap 0회와 회귀/정적 감사 기준 | 모든 미래 시험 not_run; 기존 40 unit/4 external 분류 보존 |
 | PB-D5 | 미해결 잔여·비운영 경계·실제 착수 Gate 및 비소급 효력 | 새 구현 이후에만 판정; 운영 권한·활성화·full P 동결 없음 |
+
+PB-D2와 PB-D3는 **불가분 승인 묶음**이다. native brand 설계에는 realm을 구별하는 단계가
+없으므로 D2만 수용하고 D3를 거절하는 조합은 이 설계를 승인한 것이 아니다. 둘 중 하나만
+수용하거나 어느 하나를 거절·보류하면 PB exact 승인 전체가 미완료이며, 구현·새 builtin 사용
+권한은 생기지 않는다. D1·D4·D5도 포함한 다섯 결정 전부의 명시적 승인이 필요하다.
+cross-realm 수용을 거절하려면 대체 설계·허용 범위·시험을 별도 exact 패키지로 정의하여
+검토·승인받아야 한다. 임의 realm/prototype 동일성 검사를 추가하여 정상 subclass 또는
+Proxy-prototype genuine view의 B12/B13·AC-5 결과를 바꾸는 권한은 주지 않는다.
 
 ### Exact file allowlist
 
@@ -151,6 +165,10 @@ Proxy 판별을 V8 type 검사로 연결한다. [Uint8Array predicate 구현](ht
 캡처된 TypedArray intrinsic을 사용한다. Context7의 Node 22 문서도 함께 대조했다.
 [ECMAScript 2024 typed-array set 규칙](https://tc39.es/ecma262/2024/multipage/indexed-collections.html#sec-settypedarrayfromtypedarray)은
 genuine typed-array source를 array-like property 접근과 다른 경로로 복사한다.
+[V8 12.4.254.21 typed-array-set.tq](https://raw.githubusercontent.com/v8/v8/12.4.254.21/src/builtins/typed-array-set.tq)도
+버전을 고정해 대조했다. source를 JSTypedArray로 분류한 경로에서 target/source 양쪽의
+EnsureAttachedAndReadLength가 srcLength 0 조기 반환보다 먼저 있고, array-like 경로의
+ToObject/GetLengthProperty와 구분된다. 이는 설계 근거이지 특정 Node binary의 빌드 증명은 아니다.
 이로부터 아래 무호출 설계를 도출했다. 공식 문서/소스 읽기는 미래 구현의 trap 0회 실증이나
 Node/V8 버전 변경의 자동 승인으로 대체되지 않는다.
 
@@ -165,7 +183,7 @@ Node/V8 버전 변경의 자동 승인으로 대체되지 않는다.
 - FR-7: bytes 소비자는 MUST hash/decode/native verify/길이 비교를 private copy에서만 수행하고 caller 속성을 다시 읽지 않는다.
 - FR-8: detached/out-of-bounds bytes는 MUST invalid_input으로 반환하며 attached empty view와 구별한다.
 - FR-9: Proxy 거절은 MUST invalid_input이며 모든 측정 trap/hook 0회, native 예외 유출 0건이어야 한다.
-- FR-10: PB-D3가 승인된 경우 genuine cross-realm Uint8Array는 MUST raw-storage 경계로 수용하되 CJSON object 범위를 넓히지 않는다.
+- FR-10: PB-D2·PB-D3가 불가분 묶음으로 함께 승인된 경우 genuine cross-realm Uint8Array는 MUST raw-storage 경계로 수용하되 CJSON object 범위를 넓히지 않는다.
 - FR-11: 기존 정상 입력은 MUST byte-for-byte canonical/hash/framing 결과와 기존 성공/실패 코드·metadata를 보존한다.
 - FR-12: 미래 diff는 MUST 위 5파일 및 한정 import/helper/fixture 변경 안에 있고 C02 bytes는 불변이어야 한다.
 - FR-13: T01/T11은 MUST B inventory를 별도로 추가하고 기존 F01–F44와 상위 54 AC 분류를 보존한다.
@@ -210,7 +228,8 @@ Buffer, attached empty/offset Uint8Array, 정상 subclass의 같은 storage는 �
 genuine view가 가진 shadow getter/iterator/constructor도 호출하지 않는다.
 
 **명시적 차이:** Proxy wrapper는 과거 우연히 통과했어도 거절한다. fake view 및 detached/OOB는
-거절한다. genuine cross-realm Uint8Array는 기존 instanceof 거절과 달리 허용하는 PB-D3 제안이다.
+거절한다. genuine cross-realm Uint8Array는 기존 instanceof 거절과 달리 허용하는 PB-D2·PB-D3
+불가분 묶음 제안이다. 이 호환성 예외만 거절하고 나머지 설계로 구현을 시작할 수 없다.
 genuine view의 custom prototype/shadow byteLength로 유도된 과거 결과를 보존 대상으로 삼지 않고
 실제 storage를 따른다. 이 예외 목록을 숨긴 채 모든 JavaScript 입력의 결과가 같다고 말하지 않는다.
 cross-realm object/array를 CJSON 정상 값으로 추가하는 결정은 아니다.
@@ -303,7 +322,7 @@ Then invalid_input이며 instanceof·getter·iterator·native 예외 유출이 �
 ### AC-5: 정상 view와 명시된 adapter 변경 (FR-7, FR-10, FR-11, NFR-1, NFR-4)
 
 Given offset/empty/Buffer/subclass/cross-realm 및 안정적인 SAB/RAB/GSAB view와 shadow hook.
-When PB-D3에 따른 bytes 처리를 수행한다(B11–B14).
+When PB-D2·PB-D3의 불가분 공동 승인에 따른 bytes 처리를 수행한다(B11–B14).
 Then raw-storage expected bytes/hash/length와 일치하고 unused metadata/모든 hook은 실행하지 않는다.
 새 cross-realm 허용은 명시된 호환성 변경으로 보고하며 기존 정상 결과 차이는 0이다.
 
@@ -370,7 +389,12 @@ forwarding handler와 호출 즉시 throw하는 handler 양쪽을 포함한다. 
 단계의 승인 범위에서만 수행하며 현재는 시료·코드·테스트 stub을 만들지 않는다.
 
 T11은 Proxy를 JSON에 직렬화하지 않는다. 새로운 proxySafety 배열에 id/acId/fixtureKind/
-placement/expectedError/trapNames를 선언하고 T01이 합성 fixture를 생성한다.
+placement/expectedError/trapNames/hookNames/expectedInvocationCount를 선언하고 T01이 합성
+fixture를 생성한다. trapNames는 위 13개 전부, hookNames는 getter, setter, toJSON,
+Symbol.iterator, Symbol.toPrimitive, Symbol.toStringTag, constructor, Symbol.species의
+8개 전부를 중복 없이 포함한다. expectedInvocationCount는 literal 0이며 각 이름의 counter에
+개별 적용한다. trap/hook 총합만 보고하지 않는다. 필수 이름·counter·기대값이 빠지면
+검증 불완전이며 통과로 처리할 수 없다. 이는 선언형 규격이고 현재 T01/T11은 수정하지 않는다.
 기존 모든 top-level subtree 값과 기존 caseTrace/acTrace 순서·값을 그대로 보존한다.
 새 B 그룹의 등록/완료 set은 기존 F41 set과 분리한다. B01–B19는 unit 시험 구획이고
 B20–B24는 정적·외부 감사/사전 Gate 구획이다. T01이 외부5건을 실행했다고 표시하지 않는다.
@@ -413,6 +437,7 @@ B20–B24는 정적·외부 감사/사전 Gate 구획이다. T01이 외부5건�
 | ComponentResult | TypeScript union | 기존 metadata/error union; 새 wire 필드 없음 |
 | BCase | id/acId/coverage/implementationExecution | B01–B24 unique, AC-1–AC-12 참조, 현재 not_run |
 | TrapCounters | 13개 이름별 nonnegative integer | API 측정 구간에서 각각 0; hook counter 별도 |
+| ProxySafetyCounters | trapNames + hookNames + expectedInvocationCount | trap 13개/hook 8개 완전·고유 목록; literal 0을 이름별 적용; 누락은 검증 불완전 |
 | FutureEvidence | commit + runtime + command + exit + case results | baseline/new failure·skip 구분; 실제 실행 뒤 작성 |
 | FutureApprovalReceipt | 두 path/hash + reviewCommit + 사람 판단/날짜 | PB 원문 불변; 별도 기록, 아직 생성하지 않음 |
 
@@ -450,7 +475,8 @@ DB schema/persistent model: N/A — 운영 저장소·ledger/등록 schema를 �
 2. 고정 commit을 대상으로 독립 검토한다. 새 builtin·bytes 설계·호환성 예외·13-trap 계측과
    파일 allowlist를 함께 본다. 차단점 수정 뒤 한정 확인 검토는 최대 한 번을 제안한다.
    이는 PB의 회차이며 기존 OD-R1/D의 완료된 회차를 초기화하는 뜻이 아니다.
-3. 사람이 PB-D1–PB-D5와 두 파일 각각의 hash/reviewCommit에 exact 승인한다.
+3. 사람이 PB-D1–PB-D5 전부와 두 파일 각각의 hash/reviewCommit에 exact 승인한다.
+   PB-D2·PB-D3는 불가분 묶음이며 일부 수용·거절·보류는 구현/새 builtin 권한을 만들지 않는다.
    별도 receipt를 작성하며 PB 원문 pending/null은 작성 시점의 사실로 보존한다.
 4. 별도 publication/merge 지시 아래 PB/receipt의 원 SHA를 보존한 merge commit으로 develop에
    반영한다. 실제 착수 tip/해당 CI·원문 hash/승인 ancestry를 확인한다.
@@ -498,3 +524,55 @@ HTTP method/path가 없다는 일반 항목이며 이 component 문서에는 N/A
 이번 작성에서는 T01/전체 unit suite/lint/typecheck/새 Proxy probe·fixture·keygen/signing을
 실행하지 않는다. PB B01–B24는 모두 not_run이다. 기존 실행 보고서를 이번 시험 결과로
 복사하지 않는다. GitHub 조회는 PR/CI 상태 read-only 확인뿐이며 재실행·환경 변경은 없다.
+
+## PB-R1 review response and R verification
+
+이번 수정의 authoring HEAD와 원 검토 commit R은
+60486e971c94a189ab418c4743f48428a402ea52이며 parent는 M이다.
+R의 원문 Git object는 수정하지 않는다. 아래 원 hash는 최초 검토 대상의 identity이지
+수정본 승인 hash가 아니다. 수정본 MD의 최종 raw hash는 JSON document가 결속한다.
+
+| 원 R 대상 | raw SHA-256 |
+|---|---|
+| PB Markdown | 5465da2fcd13dd920cbfdd7e1cfbc5f05575ce36f4524f726acbcf227007dc53 |
+| PB JSON | eb15aec4a53c605bc97e82bd9a38b189e0af499e9c2e42b54c5ab089f89c807e |
+
+사용자가 전달한 Claude 최초 독립 검토 보고서의 raw SHA-256은
+76989963726c2a1a0b0334269af46588fadd23cbb7a9debfaf1e384149b0b1a7이다.
+로컬 수신 경로는 JSON revision.initialReview에 기록한다. R에 대한 판정은
+PASS_WITH_WARNINGS(P1 0/P2 1/P3 3), 차단 finding 0건이었다.
+이 판정은 사람 승인·수정본 CONFIRMED·F07 구현 통과가 아니다.
+
+| Finding | 이번 문서 대응 | 상태 |
+|---|---|---|
+| PB-F1 (P2) | D2/D3 불가분 승인과 부분 수용 시 권한 없음; cross-realm 거절은 별도 대체 패키지 필요 | 초안 반영, 확인 검토 대기 |
+| PB-F2 (P3) | T11 선언에 hookNames·expectedInvocationCount 추가; trap/hook 전부 이름별 0과 누락 시 불완전 | 초안 반영, 확인 검토 대기 |
+| PB-F3 (P3) | 버전 고정 V8 source를 보조 설계 근거로 추가; 기존 표준 링크 보존 | 초안 반영, 확인 검토 대기 |
+| PB-F4 (P3) | 기존 AOD validation 불변; 이번 R clean 기준 7개 결과를 별도 결속 | 별도 관측 기록, 확인 검토 대기 |
+
+2026-09-08T10:46:41.713Z의 R HEAD에서 tracked/index clean과 보호 대상 36+9파일을
+고정한 뒤, 수정 **전** 7개 package script를 실행했다. 명령은 각각 npm run <script>이며
+위와 같은 무자격증명 child 환경을 사용했다. 실행 시각·exit·전체 출력·출력 SHA-256은
+JSON revision.verification.cleanRBaseline에 있다. 다른 문서의 과거 실행을 복사한 것이 아니다.
+
+| R clean 기준 script | exit / 결과 |
+|---|---|
+| check:encoding:strict | 0 / 통과 |
+| check:policy-section-references | 0 / 통과 |
+| check:release-records | 0 / 통과 |
+| check:memory-eval-succ9 | 0 / 통과 |
+| check:memory-extraction-eval | 0 / 통과 |
+| check:memory-eval-freeze | 0 / 통과 |
+| check:doc-references | 0 / 통과 |
+
+R의 policy 검사는 citation 4101/named 2451/unscoped historical 1421을 보고했고,
+doc-reference 검사는 733 referenced paths/92 instruction documents/860 comment paths/
+2570 source files가 모두 존재한다고 보고했다. AOD의 policy 4059/2424/1406 및
+doc-reference 기존 8건 실패와 다른 **R의 관측**이다. AOD 결과를 R의 실패로 전이하거나
+R 결과로 AOD 기록을 덮어쓰지 않는다. 수정 후 검사는 R+작업 파일 변경 위에서 수행하며
+JSON revision.verification.afterWriting에 별도로 기록한다. 로컬 검사는 develop CI 증명이 아니다.
+
+이번 수정의 확인 검토 commit은 아직 없다. 별도 commit 지시 뒤 R을 parent로 하는 두 파일
+수정 commit의 40자 SHA를 고정하고, 그 SHA와 두 raw hash에 결속한 한정 확인 검토를
+최대 한 번 진행한다. 원 R이나 untracked prompt를 수정본 reviewCommit으로 대용하지 않는다.
+PB-D1–PB-D5는 계속 pending이고 승인 receipt·구현·fixture·새 시험 결과는 생성하지 않는다.
