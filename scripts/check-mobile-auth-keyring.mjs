@@ -39,6 +39,11 @@ import {
 } from "node:crypto";
 
 import {
+  classifyMobileRingKey,
+  mobileAuthConfigurationState,
+  unmatchedMobileRetirements,
+} from "./mobile-auth-keyring-state.mjs";
+import {
   normalizeMobileKeyId,
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
   MOBILE_ACTIVE_SIGNING_KEY_ENV,
@@ -83,7 +88,14 @@ const OPTIONAL = [MOBILE_RETIRED_SIGNING_KEYS_ENV, MOBILE_RETIRED_REFRESH_PEPPER
 
 const isSet = (variable) => (process.env[variable] ?? "").trim() !== "";
 const setRequired = REQUIRED.filter(isSet);
-const missingRequired = REQUIRED.filter((variable) => !isSet(variable));
+// Same three-way answer the standing report uses. The wording and the exits
+// stay here; what "partly configured" means does not get decided twice.
+const configuration = mobileAuthConfigurationState({
+  required: REQUIRED,
+  optional: OPTIONAL,
+  isSet,
+});
+const missingRequired = configuration.missing;
 
 /** Ed25519, exercised rather than shape-checked. */
 const signsAndVerifies = (base64Pkcs8) => {
@@ -117,7 +129,18 @@ const describe = (
 
   for (const keyId of ring.keys()) {
     const retiredAt = retirements.get(keyId);
-    if (keyId === activeId) {
+    // The state itself comes from the shared judgement, so this check and the
+    // standing report cannot disagree about what a key is. The wording, and
+    // which states fail a deploy, stay here.
+    const { state, remainingSeconds, expiresAtMs } = classifyMobileRingKey({
+      keyId,
+      activeKeyId: activeId,
+      retiredAtMs: retiredAt,
+      graceSeconds,
+      nowMs: now,
+    });
+
+    if (state === "active") {
       if (retiredAt !== undefined) {
         problems.push(
           `${label}: "${keyId}" is the active key and is also retired. It would keep minting credentials under a key you have stopped trusting.`
@@ -133,7 +156,7 @@ const describe = (
       continue;
     }
 
-    if (retiredAt === undefined) {
+    if (state === "undeclared") {
       // The finding this check exists for. At runtime this key silently
       // verifies nothing; here it is said out loud.
       problems.push(
@@ -149,7 +172,7 @@ const describe = (
     // `sign-old@2099-01-01T00:00:00Z` is seventy years of trust reported as
     // "RETIRED, verifies until 2099". The runtime refuses such a key; this
     // says why before the deploy.
-    if (retiredAt > now) {
+    if (state === "retirement_in_future") {
       problems.push(
         `${label}: "${keyId}" is retired at ${new Date(retiredAt).toISOString()}, which is in the future. ` +
           `A retirement records when trust was withdrawn, so write the instant a couple of minutes in the past. There is no tolerance here on purpose: honouring a future instant and still measuring the grace from it would lengthen the approved window. Until this is fixed the key verifies nothing.`
@@ -160,8 +183,8 @@ const describe = (
       continue;
     }
 
-    const expiresAt = retiredAt + graceSeconds * 1000;
-    if (now >= expiresAt) {
+    const expiresAt = expiresAtMs;
+    if (state === "retired_grace_over") {
       notes.push(
         `${label}: "${keyId}" retired at ${new Date(retiredAt).toISOString()} and its grace has passed, so it already verifies nothing. Removing it and its retirement line together is tidy, and optional.`
       );
@@ -182,7 +205,6 @@ const describe = (
       // reads one set of variables, not two -- so the instruction lives in
       // section 3 step 5 of the runbook, where the line in question is the one
       // just written and not yet deployed.
-      const remainingSeconds = Math.round((expiresAt - now) / 1000);
       console.log(
         `  ${keyId}  RETIRED, verifies until ${new Date(expiresAt).toISOString()} ` +
           `(${remainingSeconds}s left of ${graceSeconds}s, as of this check)`
@@ -194,15 +216,10 @@ const describe = (
   // id it cannot find in the ring (that is what keeps a leftover line from
   // taking the deployment down), so by the time it hands back a map the very
   // thing an operator needs to see here is gone.
-  for (const entry of (rawRetirements ?? "").split(",")) {
-    const trimmed = entry.trim();
-    if (trimmed === "") continue;
-    const keyId = trimmed.slice(0, trimmed.indexOf("@"));
-    if (keyId && !ring.has(keyId)) {
-      problems.push(
-        `${label}: a retirement names "${keyId}", which is not in the ring. It is either a leftover from a cleanup -- harmless -- or a mistyped id, in which case the key you meant to retire is undeclared above and verifies nothing.`
-      );
-    }
+  for (const keyId of unmatchedMobileRetirements({ ring, rawRetirements })) {
+    problems.push(
+      `${label}: a retirement names "${keyId}", which is not in the ring. It is either a leftover from a cleanup -- harmless -- or a mistyped id, in which case the key you meant to retire is undeclared above and verifies nothing.`
+    );
   }
 
   if (activeId === "") {
@@ -214,7 +231,7 @@ const describe = (
 
 // Nothing at all: a choice in the default mode, a failure when the caller says
 // this deployment is supposed to serve mobile auth.
-if (setRequired.length === 0 && !OPTIONAL.some(isSet)) {
+if (configuration.state === "unconfigured") {
   if (requireConfigured) {
     console.error(
       "FAIL mobile auth keyring: --require-configured was given and nothing is configured.\n" +
@@ -231,7 +248,7 @@ if (setRequired.length === 0 && !OPTIONAL.some(isSet)) {
 
 // Something but not everything. The runtime answers 503 to this and says
 // nothing about which half is missing, so it is said here.
-if (missingRequired.length > 0) {
+if (configuration.state === "partial") {
   console.error(
     `FAIL mobile auth keyring: partly configured (${setRequired.length} of ${REQUIRED.length} variables set).\n` +
       "  Mobile auth would answer 503 to every request, and the endpoints do not say which variable is missing.\n" +
