@@ -129,6 +129,102 @@ export const unmatchedMobileRetirements = ({ ring, rawRetirements }) => {
 };
 
 /**
+ * Every fault one ring can be in, as codes rather than sentences.
+ *
+ * The classifier above answers "what state is this key in". That is only part
+ * of what the pre-deploy check refuses over, and for a while it was the only
+ * part the standing report shared -- so a configuration the check rejected
+ * (active id naming nothing, an active key that cannot sign, two ids holding
+ * one key) came back from the report as "nothing wants attention". Sharing
+ * half a diagnosis is worse than sharing none: it reads as agreement.
+ *
+ * So the findings are shared and the *consequence* is not. The check turns
+ * these into a non-zero exit; the report prints them and exits 0.
+ *
+ * `signsAndVerifies` is injected because it needs crypto and this module is
+ * pure. Pass `null` for a ring where signing is not the question -- pepper
+ * material is an HMAC key, not a signer -- and the check is skipped rather
+ * than assumed to pass.
+ */
+export const mobileRingFindings = ({
+  ring,
+  retirements,
+  rawRetirements,
+  activeKeyId,
+  graceSeconds,
+  nowMs,
+  signsAndVerifies = null,
+  materialIdentity = null,
+}) => {
+  const findings = [];
+
+  if (!activeKeyId) {
+    findings.push({ code: "no_active_key_named" });
+  } else if (!ring.has(activeKeyId)) {
+    findings.push({ code: "active_key_not_in_ring", keyId: activeKeyId });
+  }
+
+  for (const key of classifyMobileRing({
+    ring,
+    retirements,
+    activeKeyId,
+    graceSeconds,
+    nowMs,
+  })) {
+    if (key.state === "active") {
+      if (key.alsoRetired) {
+        findings.push({ code: "active_key_also_retired", keyId: key.keyId });
+      }
+      if (signsAndVerifies && !signsAndVerifies(ring.get(key.keyId))) {
+        findings.push({ code: "active_key_cannot_sign", keyId: key.keyId });
+      }
+      continue;
+    }
+    if (key.state === "undeclared") {
+      findings.push({ code: "undeclared", keyId: key.keyId });
+      continue;
+    }
+    if (key.state === "retirement_in_future") {
+      findings.push({
+        code: "retirement_in_future",
+        keyId: key.keyId,
+        retiredAtMs: key.retiredAtMs,
+      });
+      continue;
+    }
+    if (key.state === "retired_grace_over") {
+      findings.push({
+        code: "grace_over",
+        keyId: key.keyId,
+        retiredAtMs: key.retiredAtMs,
+      });
+    }
+  }
+
+  for (const keyId of unmatchedMobileRetirements({ ring, rawRetirements })) {
+    findings.push({ code: "retirement_names_nothing", keyId });
+  }
+
+  if (materialIdentity) {
+    // Two ids, one key. Renaming is not rotating, and after a leak the leaked
+    // material would still be the material in use.
+    const seen = new Map();
+    for (const [keyId, secret] of ring.entries()) {
+      const identity = materialIdentity(secret);
+      if (identity === null || identity === undefined) continue;
+      const earlier = seen.get(identity);
+      if (earlier === undefined) {
+        seen.set(identity, keyId);
+        continue;
+      }
+      findings.push({ code: "duplicate_material", keyId, otherKeyId: earlier });
+    }
+  }
+
+  return findings;
+};
+
+/**
  * Whether a deployment is configured for mobile auth at all.
  *
  * Three answers rather than a boolean, because the middle one is the dangerous

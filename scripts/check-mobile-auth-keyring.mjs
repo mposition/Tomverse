@@ -41,7 +41,7 @@ import {
 import {
   classifyMobileRingKey,
   mobileAuthConfigurationState,
-  unmatchedMobileRetirements,
+  mobileRingFindings,
 } from "./mobile-auth-keyring-state.mjs";
 import {
   normalizeMobileKeyId,
@@ -112,6 +112,20 @@ const signsAndVerifies = (base64Pkcs8) => {
   }
 };
 
+/**
+ * The findings this check words for itself, rather than letting the per-key
+ * branches above say them twice.
+ */
+const CHECK_FINDING_TEXT = {
+  no_active_key_named: () => "no active key is named.",
+  active_key_not_in_ring: ({ keyId }) => `the active id "${keyId}" is not in the ring.`,
+  retirement_names_nothing: ({ keyId }) =>
+    `a retirement names "${keyId}", which is not in the ring. It is either a leftover from a cleanup -- harmless -- or a mistyped id, in which case the key you meant to retire is undeclared above and verifies nothing.`,
+  duplicate_material: ({ keyId, otherKeyId }) =>
+    `"${keyId}" and "${otherKeyId}" are different ids holding the same material. ` +
+    `Renaming a key is not rotating it -- if this is a leak response, the leaked material is still in use.`,
+};
+
 const describe = (
   label,
   ring,
@@ -119,7 +133,8 @@ const describe = (
   rawRetirements,
   activeId,
   graceSeconds,
-  canSign
+  canSign,
+  identity
 ) => {
   console.log(`\n${label}`);
   if (ring.size === 0) {
@@ -216,16 +231,29 @@ const describe = (
   // id it cannot find in the ring (that is what keeps a leftover line from
   // taking the deployment down), so by the time it hands back a map the very
   // thing an operator needs to see here is gone.
-  for (const keyId of unmatchedMobileRetirements({ ring, rawRetirements })) {
-    problems.push(
-      `${label}: a retirement names "${keyId}", which is not in the ring. It is either a leftover from a cleanup -- harmless -- or a mistyped id, in which case the key you meant to retire is undeclared above and verifies nothing.`
-    );
-  }
-
-  if (activeId === "") {
-    problems.push(`${label}: no active key is named.`);
-  } else if (!ring.has(activeId)) {
-    problems.push(`${label}: the active id "${activeId}" is not in the ring.`);
+  // Everything above prints a line per key. What is *wrong* comes from the
+  // shared findings, so the standing report cannot see a subset of it -- for a
+  // while it saw only the per-key states, and answered "nothing wants
+  // attention" for a configuration this check rejected.
+  //
+  // `grace_over` is the one finding that is a note rather than a problem here:
+  // a spent window verifies nothing already, so tidying it is optional.
+  for (const finding of mobileRingFindings({
+    ring,
+    retirements,
+    rawRetirements,
+    activeKeyId: activeId,
+    graceSeconds,
+    nowMs: now,
+    signsAndVerifies: canSign ? signsAndVerifies : null,
+    materialIdentity: identity,
+  })) {
+    if (finding.code === "grace_over") continue;
+    if (finding.code === "active_key_also_retired") continue;
+    if (finding.code === "active_key_cannot_sign") continue;
+    if (finding.code === "undeclared") continue;
+    if (finding.code === "retirement_in_future") continue;
+    problems.push(`${label}: ${CHECK_FINDING_TEXT[finding.code](finding)}`);
   }
 };
 
@@ -294,35 +322,6 @@ const sameSecret = (left, right) => {
   return timingSafeEqual(a, b);
 };
 
-/**
- * Two ids, one key. The failure this catches is the one that matters most.
- *
- * Rotating means replacing the material. Renaming it does not: after a leak,
- * `sign-old` retired and `sign-new` active with the *same* private key reads as
- * a completed rotation in every other check here -- ids differ, one is active,
- * one is retired inside its grace, the active key signs -- while the leaked key
- * is still the one signing every token.
- *
- * Compared by material, never by id, for the same reason the post-deploy
- * verifier compares material: an id is a label somebody typed.
- */
-const reportDuplicateMaterial = (label, ring, identity) => {
-  const seen = new Map();
-  for (const [keyId, secret] of ring.entries()) {
-    const key = identity(secret);
-    if (key === null) continue;
-    const earlier = seen.get(key);
-    if (earlier === undefined) {
-      seen.set(key, keyId);
-      continue;
-    }
-    problems.push(
-      `${label}: "${keyId}" and "${earlier}" are different ids holding the same material. ` +
-        `Renaming a key is not rotating it -- if this is a leak response, the leaked material is still in use.`
-    );
-  }
-};
-
 const pepperIdentities = new Map();
 
 let signingRing;
@@ -343,7 +342,8 @@ try {
     process.env[MOBILE_RETIRED_SIGNING_KEYS_ENV],
     normalizeMobileKeyId(process.env[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
     MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
-    true
+    true,
+    signingFingerprint
   );
   describe(
     `${MOBILE_REFRESH_PEPPERS_ENV} (grace ${MOBILE_PREVIOUS_PEPPER_SECONDS}s)`,
@@ -352,23 +352,19 @@ try {
     process.env[MOBILE_RETIRED_REFRESH_PEPPERS_ENV],
     normalizeMobileKeyId(process.env[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
     MOBILE_PREVIOUS_PEPPER_SECONDS,
-    false
+    false,
+    (secret) => {
+      for (const [candidate] of pepperIdentities) {
+        if (sameSecret(candidate, secret)) return candidate;
+      }
+      pepperIdentities.set(secret, true);
+      return secret;
+    }
   );
 } catch (error) {
   console.error(`\nFAIL mobile auth keyring: ${error.message}`);
   process.exit(1);
 }
-
-reportDuplicateMaterial(MOBILE_SIGNING_KEYS_ENV, signingRing, signingFingerprint);
-// The pepper has no derived identity to compare, so the secrets themselves are
-// compared in constant time and never leave this process.
-reportDuplicateMaterial(MOBILE_REFRESH_PEPPERS_ENV, pepperRing, (secret) => {
-  for (const [candidate] of pepperIdentities) {
-    if (sameSecret(candidate, secret)) return candidate;
-  }
-  pepperIdentities.set(secret, true);
-  return secret;
-});
 
 // Named so the report is a complete picture of what the runtime will read.
 console.log(

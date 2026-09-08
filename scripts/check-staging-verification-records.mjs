@@ -43,7 +43,11 @@ export { recordDigest };
 const TEMPLATE = "_record-template.md";
 const README = "README.md";
 
-const RECORD_NAME = /^(\d{4}-\d{2}-\d{2})__([0-9a-f]{40})\.md$/;
+// The optional third part is a run label: two runs on the same day against the
+// same build are a real thing (change one variable, check again), and without
+// it the second could only be written by overwriting the first. Optional, so
+// every record named before it stays valid.
+const RECORD_NAME = /^(\d{4}-\d{2}-\d{2})__([0-9a-f]{40})(?:__([a-z0-9-]{1,20}))?\.md$/;
 
 
 const digestArgument = process.argv.indexOf("--digest");

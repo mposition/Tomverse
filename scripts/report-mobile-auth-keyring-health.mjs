@@ -27,6 +27,15 @@
 // Procedure: docs/ops/mobile-auth-key-rotation.md
 
 import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+  timingSafeEqual,
+  verify,
+} from "node:crypto";
+
+import {
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
   MOBILE_ACTIVE_SIGNING_KEY_ENV,
   MOBILE_REFRESH_PEPPERS_ENV,
@@ -48,6 +57,7 @@ import {
 import {
   classifyMobileRing,
   mobileAuthConfigurationState,
+  mobileRingFindings,
   unmatchedMobileRetirements,
 } from "./mobile-auth-keyring-state.mjs";
 
@@ -60,6 +70,57 @@ const REQUIRED = [
   MOBILE_TOKEN_AUDIENCE_ENV,
 ];
 const OPTIONAL = [MOBILE_RETIRED_SIGNING_KEYS_ENV, MOBILE_RETIRED_REFRESH_PEPPERS_ENV];
+
+/**
+ * The same probes the pre-deploy check uses, for the findings that need
+ * crypto. Kept beside each other so a reader can see they are the same two
+ * questions: can the active key sign, and are two ids holding one key.
+ */
+const signsAndVerifies = (base64Pkcs8) => {
+  try {
+    const privateKey = createPrivateKey({
+      key: Buffer.from(base64Pkcs8, "base64"),
+      format: "der",
+      type: "pkcs8",
+    });
+    const probe = Buffer.from("mobile-auth-keyring-check", "utf8");
+    return verify(null, probe, createPublicKey(privateKey), sign(null, probe, privateKey));
+  } catch {
+    return false;
+  }
+};
+
+/** A hash of the derived public key: nothing secret, and equal for equal keys. */
+const signingIdentity = (base64Pkcs8) => {
+  try {
+    const publicKey = createPublicKey(
+      createPrivateKey({
+        key: Buffer.from(base64Pkcs8, "base64"),
+        format: "der",
+        type: "pkcs8",
+      })
+    );
+    return createHash("sha256")
+      .update(publicKey.export({ format: "der", type: "spki" }))
+      .digest("hex");
+  } catch {
+    return null;
+  }
+};
+
+/** Peppers have no derived form, so equality is a constant-time comparison. */
+const pepperIdentities = new Map();
+const pepperIdentity = (secret) => {
+  const candidate = Buffer.from(secret, "utf8");
+  for (const [known] of pepperIdentities) {
+    const other = Buffer.from(known, "utf8");
+    if (other.length === candidate.length && timingSafeEqual(other, candidate)) {
+      return known;
+    }
+  }
+  pepperIdentities.set(secret, true);
+  return secret;
+};
 
 const asJson = process.argv.includes("--json");
 const nowMs = Date.now();
@@ -115,7 +176,17 @@ const render = (report) => {
 };
 
 if (configuration.state !== "configured") {
-  render({ ...emptyReport(configuration), attention: [] });
+  // Partial configuration is a finding, not a quiet fact: every mobile
+  // endpoint answers 503 and none of them says which variable is missing. It
+  // used to reach the operator as "nothing wants attention".
+  const attention =
+    configuration.state === "partial"
+      ? [
+          `partly configured: ${configuration.missing.join(", ")} missing. ` +
+            "Mobile auth answers 503 to every request, and the endpoints do not say which variable it is.",
+        ]
+      : [];
+  render({ ...emptyReport(configuration), attention });
   process.exit(0);
 }
 
@@ -129,6 +200,8 @@ try {
       retirements: mobileSigningKeyRetirements(),
       raw: process.env[MOBILE_RETIRED_SIGNING_KEYS_ENV],
       activeKeyId: normalizeMobileKeyId(process.env[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
+      signsAndVerifies,
+      materialIdentity: signingIdentity,
     },
     {
       variable: MOBILE_REFRESH_PEPPERS_ENV,
@@ -137,6 +210,9 @@ try {
       retirements: mobileRefreshPepperRetirements(),
       raw: process.env[MOBILE_RETIRED_REFRESH_PEPPERS_ENV],
       activeKeyId: normalizeMobileKeyId(process.env[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
+      // A pepper is an HMAC key, not a signer: there is nothing to sign with.
+      signsAndVerifies: null,
+      materialIdentity: pepperIdentity,
     },
   ];
 } catch (error) {
@@ -149,6 +225,31 @@ try {
   );
   process.exit(1);
 }
+
+/**
+ * One sentence per finding code. Exhaustive on purpose: a code with no entry
+ * here would be dropped silently, which is the failure this whole change is
+ * about.
+ */
+const FINDING_TEXT = {
+  no_active_key_named: () => "no active key is named.",
+  active_key_not_in_ring: ({ keyId }) =>
+    `the active id "${keyId}" is not in the ring, so nothing can be minted.`,
+  active_key_also_retired: ({ keyId }) =>
+    `"${keyId}" is the active key and is also retired.`,
+  active_key_cannot_sign: ({ keyId }) =>
+    `the active key "${keyId}" cannot sign. Every mobile auth request answers 503.`,
+  undeclared: ({ keyId }) =>
+    `"${keyId}" is neither active nor retired, so it verifies nothing.`,
+  retirement_in_future: ({ keyId, retiredAtMs }) =>
+    `"${keyId}" is retired at ${new Date(retiredAtMs).toISOString()}, which has not arrived, so it verifies nothing.`,
+  grace_over: ({ keyId }) =>
+    `"${keyId}" has spent its window and verifies nothing. Removing it and its retirement line together is tidy, and optional.`,
+  retirement_names_nothing: ({ keyId }) =>
+    `a retirement names "${keyId}", which is not in the ring.`,
+  duplicate_material: ({ keyId, otherKeyId }) =>
+    `"${keyId}" and "${otherKeyId}" are different ids holding the same material. Renaming a key is not rotating it.`,
+};
 
 const attention = [];
 const report = {
@@ -167,40 +268,27 @@ const report = {
       rawRetirements: entry.raw,
     });
 
-    for (const key of keys) {
-      // Wording, not judgement: what these states mean is decided once, in the
-      // shared module, and said in two places.
-      if (key.state === "undeclared") {
-        attention.push(
-          `${entry.variable}: "${key.keyId}" is neither active nor retired, so it verifies nothing.`
-        );
-      }
-      if (key.state === "retirement_in_future") {
-        attention.push(
-          `${entry.variable}: "${key.keyId}" is retired at ${new Date(key.retiredAtMs).toISOString()}, which has not arrived, so it verifies nothing.`
-        );
-      }
-      if (key.state === "active" && key.alsoRetired) {
-        attention.push(
-          `${entry.variable}: "${key.keyId}" is the active key and is also retired.`
-        );
-      }
-      if (key.state === "retired_grace_over") {
-        attention.push(
-          `${entry.variable}: "${key.keyId}" has spent its window and verifies nothing. Removing it and its retirement line together is tidy, and optional.`
-        );
-      }
-    }
-    for (const keyId of retirementsNamingNothing) {
-      attention.push(
-        `${entry.variable}: a retirement names "${keyId}", which is not in the ring.`
-      );
+    // Wording, not judgement: which findings exist is decided once, in the
+    // shared module, and said in two places with two consequences.
+    const findings = mobileRingFindings({
+      ring: entry.ring,
+      retirements: entry.retirements,
+      rawRetirements: entry.raw,
+      activeKeyId: entry.activeKeyId,
+      graceSeconds: entry.graceSeconds,
+      nowMs,
+      signsAndVerifies: entry.signsAndVerifies,
+      materialIdentity: entry.materialIdentity,
+    });
+    for (const finding of findings) {
+      attention.push(`${entry.variable}: ${FINDING_TEXT[finding.code](finding)}`);
     }
     return {
       variable: entry.variable,
       graceSeconds: entry.graceSeconds,
       keys,
       retirementsNamingNothing,
+      findings,
     };
   }),
 };
