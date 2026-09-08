@@ -122,6 +122,12 @@ Date / timezone:    ____________________
       `event`·`reason`에서 읽습니다. **시료는 앱이 들고 있지
       않은 통제된 세션에서 받습니다** — 자동 refresh가 시료를 소비합니다(§3의 7번) 은퇴 항목은 이것 말고 관측 경로가
       없습니다. 실패하면 승격하지 않습니다
+- [ ] 모바일 인증을 서비스하는 배포이고 `op run`으로 링을 주입한다면
+      `./scripts/ops/Test-MobileAuthOpEnvTemplate.ps1` — `docs/ops/mobile-auth-op-env.template`이
+      **reference만 담고 링 둘만 담는지**(평문 링이 커밋되면 여기서 걸립니다), 그리고
+      주입된 값이 프롬프트에 덮어써지지 않고 검사기까지 가는지를 **합성값으로**
+      고정합니다(16건). **1Password는 실행되지 않습니다** — 실제 vault 해석은 별개
+      항목이며 이 검사로 대체되지 않습니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1`
       — 배포 후 wrapper가 지키는 계약을 고정합니다(17 사례). 이쪽은 링 둘에 더해 **live
       credential 둘**(access·refresh token)을 다루므로, 같은 부재 계약이 더 중요합니다.

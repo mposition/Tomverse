@@ -117,16 +117,27 @@ D6과 승인 결정 3번입니다.
 덮어쓰지 않습니다.**
 
 ```powershell
-op run --env-file ./mobile-auth.env -- pwsh -File ./scripts/ops/Check-MobileAuthKeyring.ps1 `
+op run --env-file docs/ops/mobile-auth-op-env.template -- `
+  pwsh -File ./scripts/ops/Check-MobileAuthKeyring.ps1 `
   -ActiveSigningKeyId "<배포할 값>" -ActiveRefreshPepperId "<배포할 값>" `
   -TokenIssuer "<배포할 값>" -TokenAudience "<배포할 값>" `
   -RetiredSigningKeys "<배포할 값>" -RetiredRefreshPeppers "<배포할 값>" `
   -RequireConfigured -UsePreinjectedRings
 ```
 
-`op.env` 파일에는 secret reference만 들어가고 비밀은 들어가지 않습니다. **그 파일의
-정확한 문구는 아직 정하지 않았습니다**(§6). 주입 없이 손으로 넣을 때는 스위치를 빼고
-프롬프트를 씁니다.
+**`docs/ops/mobile-auth-op-env.template`을 그대로 씁니다 — 복사하지 않습니다.** 안에는
+`op://` reference만 있고 비밀은 없으므로 저장소에 두는 것이 안전하고, 복사본을 만들지
+않는 것이 **나중에 손으로 값을 채워 넣은 사본**이 생길 자리를 없앱니다. **링 둘만**
+들어갑니다 — 나머지 여섯은 wrapper의 인수이고, 그것을 여기로 옮기면 명령줄에서 눈으로
+확인하던 것이 사라집니다. Active를 볼지 Pending을 볼지는 단계마다 다르므로 파일의 두
+줄을 그때 가리키는 항목으로 바꿔 씁니다.
+
+주입 없이 손으로 넣을 때는 스위치를 빼고 프롬프트를 씁니다.
+
+**여기까지가 합성값으로 검증된 범위입니다** — `./scripts/ops/Test-MobileAuthOpEnvTemplate.ps1`
+(14건)이 template의 모양(reference만, 링 둘만)과 `op run`이 하는 일(자식 프로세스
+환경변수 주입)을 합성값으로 재현해 wrapper를 실제로 돌립니다. **1Password 바이너리는
+실행되지 않고 reference는 아무것에도 해석되지 않습니다.** 그 둘은 §6의 1번입니다.
 
 ```powershell
 ./scripts/ops/Check-MobileAuthKeyring.ps1 `
@@ -213,6 +224,7 @@ credential 둘**을 다루므로 같은 계약이 더 중요합니다.
 ```powershell
 ./scripts/ops/Test-CheckMobileAuthKeyring.ps1
 ./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1
+./scripts/ops/Test-MobileAuthOpEnvTemplate.ps1
 ```
 
 **로컬 PC의 PowerShell, clone 폴더 안.** 자격증명이 필요 없고 네트워크에 닿지 않으며
@@ -226,6 +238,15 @@ credential 둘**을 다루므로 같은 계약이 더 중요합니다.
 | 3a–3c | 성공·실패·**중단** 뒤 `MOBILE_AUTH_*` 여덟 개가 전부 사라집니다 |
 | 4a–4c | 두 비밀이 **어느 stream에도** 없고(`*>&1`로 전부 수집합니다), **두 길이**는 각각 있습니다 |
 | 5a–5f | `-UsePreinjectedRings`에서 **프롬프트가 뜨지 않고**, `op run`이 주입한 두 링이 **덮어써지지 않은 채 검사기까지 가고**, 주입이 없으면 검사를 돌리지 않고 실패하며, 어느 경우에도 환경은 비워지고 링은 출력에 없습니다 |
+
+| 사례 (`Test-MobileAuthOpEnvTemplate.ps1`, 16건) | 무엇을 고정하나 |
+|---|---|
+| 1z · 1a–1d | template이 **링 둘만** 담고, 모든 값이 `op://` reference이며(평문 링이 커밋되면 여기서 걸립니다), vault·item·field가 **비어 있지 않고**, **같은 변수를 두 번 쓰면 거절**하며(`op run`은 마지막 것을 쓰므로 앞줄의 평문이 그대로 남습니다), **거절 메시지가 문제의 줄을 되풀이하지 않습니다** |
+| 2a–2e | `op run`이 하는 주입을 합성값으로 재현했을 때 **프롬프트가 뜨지 않고**, 주입값이 **덮어써지지 않은 채** 검사기까지 가고, 종료 코드가 그대로 반환됩니다 |
+| 3a–3d | 주입이 없으면 검사를 돌리지 않고 실패하며, 세 경우 모두 환경이 비워지고, 합성값은 어느 stream에도 없고 길이만 나옵니다 |
+
+**이 script는 1Password를 실행하지 않습니다.** reference가 실제 항목을 가리키는지는
+§6의 1번입니다.
 
 | 사례 (`Test-InvokeMobileAuthDeploymentVerify.ps1`, 17건) | 무엇을 고정하나 |
 |---|---|
@@ -843,12 +864,22 @@ Active로 승격합니다. store만 정리하고 Railway를 두면 다음 회전
 
 production 활성화를 결정할 때 함께 정할 것 여섯:
 
-1. **1Password 명령의 실제 문구** — §2.2가 제품·vault·복구 권한을 확정했고 §3·§5.1이
-   "store에서 읽는다 / store에 먼저 저장한다"를 절차에 넣었지만, **그 문장을 실행하는
-   명령은 아직 없습니다.** wrapper 쪽은 준비됐습니다 — `-UsePreinjectedRings`가 `op run`이
-   주입한 두 변수를 그대로 소비하고, 프롬프트가 그것을 덮어쓰지 않습니다
-   (§2.1.1의 5a–5f). 남은 것은 `op.env` 파일의 secret reference 문구와, 그 동작을 그
-   자리에서 확인하는 일입니다.
+1. **실제 vault 연동 확인.** 명령과 template은 이제 있습니다 —
+   `docs/ops/mobile-auth-op-env.template`, 그리고 §2.1의 `op run` 명령. 합성값 검증도
+   끝났습니다(`Test-MobileAuthOpEnvTemplate.ps1` 14건). **남은 것은 그 reference가 실제
+   vault에서 해석되는지**이고, 그것은 여기서 할 수 없습니다.
+
+   - **항목의 id를 vault에서 읽어 template의 두 줄에 넣습니다.** vault 이름의 공백은
+     따옴표로 처리되지만, 항목 이름의 **em dash는 reference가 지원하는 문자 집합에
+     없습니다**. 그런 이름의 항목은 **id로 참조**하는 것이 문서화된 방법이므로 —
+     `op://Tomverse Production Secrets/<item id>/signing-ring` — **항목 이름을 바꿀
+     필요가 없습니다.** §2.2의 이름은 그대로 둡니다.
+   - **해석 확인은 `op read`로 하지 않습니다.** `op read`는 비밀값을 stdout에 그대로
+     출력하므로, 확인하려다 터미널과 그 기록에 링을 남기게 됩니다. 대신 **§2.1의
+     `op run` 명령을 그대로 돌립니다** — 그것이 해석과 주입을 한 번에 확인하고, 출력에는
+     길이만 나옵니다. reference 하나만 따로 확인해야 한다면 **출력을 버리고 종료 코드만**
+     봅니다.
+   - **항목 생성과 실제 자격증명 배포는 또 별개**이며 이 항목에 포함되지 않습니다.
 2. **Active·Pending 두 항목의 최초 생성** — 첫 설정에서 만들어지며, 그것이 §3의 0번이
    읽을 대상입니다. Pending의 다섯 field(§2.2)를 어디에 어떻게 적을지도 여기서
    정합니다.
