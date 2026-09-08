@@ -442,3 +442,132 @@ test("the evidence directories are pinned to LF, or a Windows clone fails its ow
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// Judged cases, through the one shared entry point
+// ---------------------------------------------------------------------------
+
+test("judged cases are checked here by the same function the scoring CLI calls", async () => {
+    // Not "an equivalent sequence": the same function. Two callers each
+    // remembering an order is how the old evidence checks grew their gaps, and
+    // that is what this module was written to end.
+    const {
+        AI_REVIEW_SCORING_CONTRACT_VERSION,
+        buildScoringArtifact,
+        judgedSourceCaseDigest,
+        observationRefFor,
+    } = await import("../lib/aiReviewEvalJudgement.ts");
+
+    const judgedCase = {
+        caseId: DATASET.cases[0].id,
+        contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+        sourceCaseDigest: judgedSourceCaseDigest(DATASET.cases[0]),
+        responseLabels: DATASET.cases[0].responses.map((response) => response.label),
+        requirements: [{ id: "year", description: "the year the answers disagree about" }],
+        gold: { contradictions: [{ requirementId: "year", targetLabel: "b" }] },
+        goldCompleteness: { contradictions: true },
+    };
+    const output = observation();
+    const judgedRecord = {
+        caseId: judgedCase.caseId,
+        contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+        observationRef: observationRefFor(output),
+        reviewedBy: "operator",
+        reviewedAt: "2026-09-08T00:00:00.000Z",
+        sourceCaseDigest: judgedSourceCaseDigest(DATASET.cases[0]),
+        claims: [
+            {
+                targetLabel: "b",
+                requirementId: "year",
+                assertion: "missing",
+                speechAct: "finding",
+                submittedAs: "contradictions",
+                sourceIndex: 0,
+                evidenceQuote: "B says 1887",
+                status: "confirmed",
+                confirmedBy: "operator",
+                confirmedAt: "2026-09-08T00:00:00.000Z",
+            },
+        ],
+    };
+    const judgedArtifact = buildScoringArtifact({
+        testCase: judgedCase,
+        record: judgedRecord,
+        observation: output,
+        scoredAt: "2026-09-08T00:00:00.000Z",
+    });
+
+    const { inputs } = bundleFor();
+    const judged = [
+        {
+            testCase: judgedCase,
+            observation: output,
+            record: judgedRecord,
+            artifact: judgedArtifact,
+        },
+    ];
+
+    const bundle = verifyEvidenceBundle({ ...inputs, judged });
+    assert.deepEqual(bundle.problems, []);
+    assert.equal(bundle.judged.supplied, 1);
+    assert.equal(bundle.judged.eligible, 1);
+
+    // A case whose output the run never recorded is caught HERE, against the
+    // journal -- not merely against the other files in its own directory.
+    const elsewhere = { ...output, allText: "this run never produced that" };
+    const moved = verifyEvidenceBundle({
+        ...inputs,
+        judged: [
+            {
+                testCase: judgedCase,
+                observation: elsewhere,
+                record: {
+                    ...judgedRecord,
+                    observationRef: observationRefFor(elsewhere),
+                },
+                artifact: buildScoringArtifact({
+                    testCase: judgedCase,
+                    record: { ...judgedRecord, observationRef: observationRefFor(elsewhere) },
+                    observation: elsewhere,
+                    scoredAt: "2026-09-08T00:00:00.000Z",
+                }),
+            },
+        ],
+    });
+    assert.ok(
+        moved.problems.some((problem) => /is not the one that was judged and scored here/.test(problem)),
+        moved.problems.join("\n")
+    );
+
+    // And a bundle with no judged cases reports nothing about them, so today's
+    // callers see exactly today's checks.
+    assert.equal(verifyEvidenceBundle(inputs).judged, null);
+});
+
+test("a recorded refusal is sound evidence and is not counted", () => {
+    // The distinction the bundle has to carry too: `problems` empty means the
+    // evidence is honest, not that it may be aggregated.
+    const { inputs } = bundleFor();
+    const bundle = verifyEvidenceBundle({
+        ...inputs,
+        judged: [
+            {
+                testCase: {
+                    caseId: DATASET.cases[0].id,
+                    contractVersion: "ai-review-scoring-judged-v1",
+                    sourceCaseDigest: "sha256:not-the-one",
+                    responseLabels: ["a", "b"],
+                    requirements: [],
+                    gold: {},
+                    goldCompleteness: {},
+                },
+                observation: observation(),
+                record: {},
+                artifact: {},
+            },
+        ],
+    });
+    assert.equal(bundle.judged.supplied, 1);
+    assert.equal(bundle.judged.eligible, 0);
+    assert.equal(bundle.judged.ineligible.length, 1);
+});

@@ -68,9 +68,14 @@
 사람 확인               claim마다 confirmedBy·confirmedAt,
                         기록에 reviewedBy·reviewedAt. 그 전까지 채점 불가
       ↓
-채점                    scoreJudgedCase()
+채점                    scoreJudgedCase() / score:ai-review-judgements
       ↓
-증거 묶음 검증          verifyEvidenceBundle()에 결속 (미구현)
+결속                    artifact가 case·기록·출력의 digest를 함께 들고 있음
+      ↓
+공유 검증               verifyJudgedScoringEvidence() — CLI와 증거 묶음이
+                        모두 이것을 부른다
+      ↓
+집계 적격성             검증 통과 ≠ 셀 수 있음 (§ 아래)
 ```
 
 - **평가 대상 모델에는 gold도 requirement id도 주지 않는다.** 채점 어휘를 본
@@ -128,15 +133,21 @@ requirement든 **전부 `outsideGoldVerdict`를 요구한다.** `undetermined`�
 아니면 — 반대 주장, 인용을 발견 필드에 제출 — 그 자체로 잘못된 발견이고 추가
 판정이 필요 없다.
 
-### exhaustive 주장이 반증되면 그 kind는 채점하지 않는다
+### exhaustive 주장이 반증되면 case 전체를 채점하지 않는다
 
 `gold_incomplete`가 확정됐는데 그 kind의 gold가 `exhaustive`를 주장하고 있으면
 **둘 다 참일 수 없다.** 진단을 옆에 적어 두는 것으로 숫자를 살릴 수 없다 —
 precision 분모는 이미 짧다고 밝혀진 목록에 대해 발견을 세었고, recall 분모는 그
 짧은 목록 **자체**였다.
 
-그래서 그 case는 `scored: false`이고, `goldGaps`는 **거절을 넘어 보존된다** —
-그것이 case를 고칠 때 쓰는 재료다.
+그래서 **case 전체**가 `scored: false`다. 문제가 된 kind만 빼지 않는 이유는,
+검토자의 점수가 kind를 가로질러 읽히기 때문이다 — 그 절반은 더 작은 점수가
+아니라 **같은 이름을 쓴 다른 측정**이다.
+
+`goldGaps`는 **거절을 넘어 보존된다** — 그것이 case를 고칠 때 쓰는 재료다.
+그리고 **다른 이유로 거절될 때에도 보존된다.** 미판정 claim 하나가 이미 확정된
+gold 결함을 삼켜서, 운영자가 "가서 판정하라"는 안내만 받고 전체 재채점이
+필요하다는 사실은 못 보는 일이 있었다. **거절은 보고이므로, 아는 것을 보고한다.**
 
 **gold를 고친 뒤에는 그 case를 쓴 모든 reviewer 결과를 새 gold로 다시 채점한다.**
 gap을 발견한 reviewer만 제외하면 나머지는 자기가 측정된 것과 다른 목록 위에서
@@ -166,11 +177,14 @@ gold가 exhaustive를 주장하지 **않는** 경우에는 `goldGaps`로 보고�
 버전만 확인하면 과거 계약으로 만든 기록이나 다른 case의 기록이 이 case에 붙어도
 아무도 그 사실을 말하지 않는다.
 
-**`observationRef`는 지금 "기입 여부 검사"다.** 비어 있지 않은지만 보므로, 존재
-하지 않는 출력을 가리켜도 통과한다. 호출자가 실제로 채점 중인 출력의 식별값을
-넘기면(`expected.observationRef`) 그때 **대조**가 되며, 그 식별값을 출력 자체에
-결속하는 것은 증거 묶음 연결에서 할 일이다. 이 문서도 코드도 그 이상을 주장하지
-않는다.
+**`observationRef`는 이제 출력 내용에서 유도한다.** `observationRefFor()`가 출력
+자체의 정규화 digest를 만들고, 파일 흐름은 그것을 기록·artifact와 대조한다. 손으로
+적은 참조는 이름표일 뿐이고, 이름표는 가리키는 것이 바뀌어도 계속 맞는다 —
+이전 판이 바로 그 상태였고 스스로 그렇게 적고 있었다.
+
+`scoreJudgedCase()`는 여전히 `expected.observationRef`를 받을 때만 대조한다.
+그 값을 출력에서 유도해 넘기는 것이 호출자의 몫이며, `score:ai-review-judgements`가
+그렇게 한다.
 
 두 가지를 명시해 둔다.
 
@@ -188,6 +202,172 @@ gold가 exhaustive를 주장하지 **않는** 경우에는 `goldGaps`로 보고�
   그것이 M5 계약이 지목한 바로 그 실패다. non-exhaustive는 **분자와 분모 모두**
   에서 빠진다.
 
+### case의 등록 검증 — gold 밖의 발견과는 별개다
+
+`validateJudgedCase()`는 **case가 자기 자신과 일관되게 등록됐는지**만 본다. gold가
+가리키는 requirement가 `requirements`에 있는지, gold가 가리키는 label이
+`responseLabels`에 있는지, gold 항목이 중복되지 않는지, gold가 있는 kind마다
+완전성 주장이 적혀 있는지.
+
+id 하나를 잘못 타이핑하면 **아무도 만족시킬 수 없는 gold 항목**이 되고, 그 miss는
+검토자의 실패로 기록된다. 그래서 채점기도 이 검사를 먼저 돌리며 호출자가 건너뛸
+수 없다.
+
+**이 검사는 검토자가 무엇을 보고할 수 있는지에 대해 아무 말도 하지 않는다.**
+등록되지 않은 requirement에 대한 발견은 등록 오류가 아니라 **gold 밖의 발견**이고,
+`outsideGoldVerdict`가 그것을 판정한다. 미등록이라는 이유로 거절하면 **불완전한
+gold를 발견하는 유일한 경로**가 닫힌다. case의 목록은 그 case에 대해 참인 것의
+한계가 아니다.
+
+### 저장된 점수는 자기가 계산된 것들에 결속된다
+
+`buildScoringArtifact()`가 점수와 함께 셋의 digest를 적는다 — case, 판정 기록,
+그리고 **출력에서 유도한** 참조. `verifyScoringArtifact()`는 그것을 다시 계산해
+대조한다.
+
+gold를 고치거나, 판정을 수정하거나, 다른 출력을 채점하면 digest가 어긋나고
+artifact는 **낡은 것**이 된다 — 틀린 것도, 대충 맞는 것도 아니고, **지금 여기
+있는 어떤 것에 대한 진술도 아닌 것**이다. 다시 채점해야만 다시 진술이 된다.
+
+**digest만으로는 부족하다.** digest가 증명하는 것은 **입력이 그대로**라는 사실
+이지, 옆에 적힌 숫자가 그 입력에서 계산됐다는 사실이 아니다. artifact의
+`truePositives`를 999로 고쳐도, `outcome`을 통째로 지워도 검증을 통과했다.
+그래서 `verifyScoringArtifact()`는 **같은 scorer로 다시 계산해 저장된 outcome
+전체와 대조**한다 — 점수뿐 아니라 `scored: false`와 거절 사유, gap 진단까지.
+셋 다 읽는 사람이 행동의 근거로 삼는 것이기 때문이다.
+
+`npm run score:ai-review-judgements -- --dir <디렉터리>`가 `case.json` ·
+`observation.json` · `record.json`을 읽어 `artifact.json`을 쓰고, `--verify`가
+저장된 점수가 아직 그 파일들에 대한 것인지 묻는다. **거절도 artifact에 쓴다** —
+어떤 판정이 비어 있고 어떤 gold가 반증됐는지가 case를 고칠 때 쓰는 재료이기
+때문이다. provider는 호출하지 않는다.
+
+### 기록이 실제로 그 출력을 읽었는가
+
+출력 digest는 **같은 바이트가 있었다**는 것만 말한다. 판정이 그 안 어딘가를
+가리키는지는 말하지 않고, 두 실패가 모두 통과했다 — 항목이 하나뿐인 출력에
+`sourceIndex: 999`와 존재하지 않는 인용문을 적은 기록이 TP 1을 받았고, 제출된
+발견 둘 중 하나만 담은 기록이 깨끗한 성적을 받았다.
+
+`verifyRecordAgainstObservation()`이 셋만 본다.
+
+1. **인덱스가 자기가 이름 댄 배열 범위 안**에 있는가
+2. **인용문이 그 지목한 원문에 실제로 있는가**
+3. **제출된 발견마다 최소 한 claim이 있는가**
+
+한 발견을 여러 claim으로 나누는 것은 허용한다. 허용하지 않는 것은 **아무 claim도
+언급하지 않은 발견**이다 — 그것이 잘못된 발견이 사라지는 방식이다.
+
+**여기서 분해 방법을 정하지 않고, 의미도 판정하지 않는다.** 그 둘은 미승인
+정책이며, 이 검사는 나중에 무엇으로 정해지든 그것이 **출력의 일부가 아니라
+전체에** 적용되게 하려고 있다.
+
+### 파일 입력의 타입 검사
+
+TypeScript는 누군가 써 놓은 JSON에 대해 아무 말도 하지 않는다.
+`goldCompleteness.missingPoints: "true"`는 **오류가 아니라 틀린 점수**를
+만들었고(`precisionCounted: false`), `submittedAs: "missingPoint"`는 `ok` 두
+구획을 출력한 뒤 TypeError로 죽었다.
+
+`judgedCaseShapeProblems()` · `observationShapeProblems()` ·
+`judgementRecordShapeProblems()` · `scoringArtifactShapeProblems()`가 boolean ·
+enum · 배열 · 정수 인덱스를 검사하고, **파일과 필드 경로를 포함한 문제 목록**을
+돌려준다. 의미를 읽기 전에 먼저 돈다.
+
+**`--verify`는 flag로만 판정한다.** 읽은 artifact 값의 truthiness로 모드를
+정했더니, `artifact.json`이 `null`·`false`·`0`·`""`를 담고 있을 때 자기 shape
+검사를 건너뛰고 일반 채점 경로로 떨어져 **파일을 새 점수로 덮어썼다.** 증거를
+검증해 달라는 요청이 증거를 거절하는 대신 교체한 것이다. 회귀는 exit code만이
+아니라 **파일이 바이트 단위로 그대로인지**를 확인한다.
+
+**빈 인용문은 인용이 아니다.** 모든 문자열은 빈 문자열을 포함하므로
+`includes("")`는 어떤 출력에 대해서도 참이고, 인용을 쓰지 않은 claim이 "원문에
+근거가 있다"를 통과해 TP를 받았다. 발견과 산문 양쪽에서, 공백만 있는 것도 함께
+거절한다. **인용의 최소 길이나 내용의 옳고 그름을 정하는 것이 아니라, 썼는지
+안 썼는지의 차이일 뿐이다.**
+
+### 검증 순서는 한 곳에만 있다
+
+`verifyJudgedScoringEvidence()`가 여섯 단계를 이 순서로 수행한다.
+
+1. shape — 의미를 읽기 전
+2. case 자신의 등록
+3. 기록 ↔ 그것이 이름 댄 출력
+4. 기록의 신원과 서명
+5. 점수 재계산과 저장 outcome 대조
+6. 출력과 case ↔ **실행 journal과 동결 dataset**
+
+`scripts/score-ai-review-judgements.mjs`와 `verifyEvidenceBundle()`이 **같은
+함수**를 부른다. "동등한 순서"가 아니라 같은 함수다 — 두 호출자가 각자 순서를
+기억하는 것이 옛 증거 검사가 구멍을 키운 방식이고,
+`lib/aiReviewEvidenceBundle.ts` 머리말이 그 사고를 셋 적어 두고 있다.
+
+**6번이 파일끼리의 일치로는 부족한 이유다.** 한 디렉터리의 세 파일이 완벽하게
+일치하면서 **이 실행이 낸 적 없는 출력**이나 **동결 세트에 없는 case**에 대한
+것일 수 있다 — 아무것에 대한 것도 아닌 일관된 진술이다.
+
+- journal에 그 case의 항목이 있고, 그 항목의 출력이 **채점된 그 출력**인가
+- dataset에 그 case가 있고, 답변 label이 같은가 — 다르면 gold가 **실행이 보여 준
+  적 없는 답변**을 지목할 수 있다
+- **원본 case의 내용이 그대로인가** — `sourceCaseDigest`
+
+`caseDigest`는 **채점용 case**(gold와 catalogue)의 digest이지 사람이 읽은
+**질문과 답변**의 digest가 아니다. 그래서 id와 label을 그대로 두고 질문을 바꾼
+새 증거 묶음에 옛 판정과 옛 점수를 붙여도 전부 통과했다. `sourceCaseDigest`는
+**id · 질문 · 각 답변의 label과 본문**을 덮는다. cell 이름이나 현상 이름 같은
+주변 메타데이터는 덮지 않는다 — 그것이 바뀌어도 판정한 텍스트는 그대로이고,
+그걸로 거절하면 검사가 잡음이 된다.
+
+**`sourceCaseDigest`는 판정 기록에도 있다.** case에만 두면 소용이 없었다 — 원본을
+바꾸고, **case의 digest만 새 원본에 맞게 고치고**, 재채점하면 불일치가 사라졌다.
+판정은 한 번도 다시 이뤄지지 않았는데 점수는 집계 가능한 상태로 돌아왔다.
+
+기록은 **사람이 서명한 것**이므로 그들이 읽은 텍스트의 digest가 거기 있어야 하고,
+**재채점은 기록의 digest를 절대 새로 쓰지 않는다.** 대조는 세 겹이다 —
+기록 ↔ 채점용 case ↔ 실제 원본. **재채점은 재판정이 아니다.**
+
+**이것은 의미를 자동 판정하는 검사가 아니다.** 사람이 판단했던 원문이 지금도
+그대로인지를 묻는 것뿐이다.
+
+### 정확히 기록된 거절과 평가 적격성은 다르다
+
+`problems`가 비었다는 것은 **증거가 정직하다**는 뜻이지 **쓸 수 있다**는 뜻이
+아니다. `scored: false` artifact는 무결성 검증을 통과하는 것이 맞다 — 아무도 이
+case의 판정을 끝내지 않았다는 참인 진술이기 때문이다. 그것을 집계나 승급 증거로
+쓰면 **판정되지 않은 case가 판정돼 미달한 case처럼** 읽힌다.
+
+그래서 `eligibleForAggregation`과 `ineligibleReasons`가 따로 있고, CLI는
+`It may be counted in a score` / `It may NOT be counted...`를 나눠 출력하며,
+증거 묶음은 `judged.supplied` · `judged.eligible` · `judged.ineligible`을 따로
+보고한다.
+
+**외부 결속이 확인되지 않으면 집계 적격이 아니다.** journal과 dataset을 넘기지
+않고 검증하는 것은 허용한다 — 실행이 존재하기 전에 판정을 점검하는 것은
+유용하다. 다만 그 결과는 "이 파일들이 서로 일치한다"이지 "이 실행의 집계에 쓸 수
+있다"가 아니다. `externalBinding: "not checked"`로 표시하고, 그 이유를
+`ineligibleReasons`에 넣는다. 둘 중 하나만 넘겨도 마찬가지다.
+
+**journal과 dataset도 shape 검사를 받는다.** 이 둘이 가장 나중에 추가된 입력이고,
+그래서 유일하게 검사받지 않는 입력이었다 — `cases: false`는 비교를 통째로
+건너뛰고 case를 **집계 가능한 상태로 남겼고**, `cases: {}`는 `.find is not a
+function`으로, `null` journal 줄은 `.caseId` 접근으로 죽었다. **넘겼는가와 그 값이
+truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것이 깨진 파일을 없는
+파일처럼 만들었다.
+
+**중첩 구조까지 검사한다.** `responses: [null]`은 문제 목록이 비어 있은 채
+`.label`에서 죽었다 — 보고하라고 있는 도구가 보고 대신 멈춘 것이다. 이제
+`dataset.cases[0].responses[0].content is 7, not a string`처럼 **위치를 포함해**
+돌려준다.
+
+다만 **질문과 답변의 깊은 검사는 이 증거가 다루는 case에만** 한다. `id`는 찾기
+위해 모든 case에서 보지만, 동결 세트는 1,200건이고 관련 없는 case의 field 하나로
+실행 전체를 거절하는 것은 별개 결정이며 dataset 자신의 validator가 이미 내리는
+결정이다.
+
+`verifyEvidenceBundle()`의 `judged` 입력은 **선택**이다. 넘기지 않은 호출자는
+오늘과 정확히 같은 검사를 받는다 — 이 계약은 아직 미승인이고 어떤 평가에도
+연결되어 있지 않다.
+
 ### 아직 정해지지 않은 것
 
 - **한 문장에 여러 결함이 섞인 경우의 분해 단위.** 지금은 추출 단계에서 claim
@@ -197,6 +377,10 @@ gold가 exhaustive를 주장하지 **않는** 경우에는 `goldGaps`로 보고�
   아니다.
 
 이 둘이 정해지기 전에는 이 계약으로 **비교 점수를 만들지 않는다.**
+
+선택지와 그 결과는 `.github/audits/ai-review-scoring-policy-options-2026-09-08.md`
+에 실제 후보 case 위에서 계산해 두었다. **그 문서도 아무것도 승인하지 않는다** —
+사람이 고르면 그 결과가 여기 본문으로 올라온다.
 
 ## 6. 구현 범위
 
@@ -208,9 +392,22 @@ gold가 exhaustive를 주장하지 **않는** 경우에는 `goldGaps`로 보고�
   버전의 기록은 **변환하지 않고 거절한다.**
 - `tests/aiReviewEvalJudgementScoring.test.mjs` — 위 표를 요구로 표현.
 
+- `validateJudgedCase()` — case 등록 검증. 채점기가 먼저 돌린다.
+- `observationRefFor()` · `judgedCaseDigest()` · `judgementRecordDigest()` ·
+  `buildScoringArtifact()` · `verifyScoringArtifact()` — 점수를 자기가 계산된
+  것들에 결속하고, **저장된 outcome을 재계산해 대조**.
+- `verifyRecordAgainstObservation()` — 기록이 실제 출력을 읽었는지.
+- shape 검사 넷 — 파일 입력의 런타임 타입 검증.
+- `verifyJudgedScoringEvidence()` — 공유 진입점. journal·dataset 대조와 집계
+  적격성 판정을 포함하며, CLI와 `verifyEvidenceBundle()`이 함께 부른다.
+- `scripts/score-ai-review-judgements.mjs`와 파일 흐름 회귀
+  (`tests/aiReviewJudgementScoringCli.test.mjs`).
+
 **하지 않은 것, 그리고 하지 않을 것**
 
-- `verifyEvidenceBundle()` 결속과 기록 변경 시 재계산 — 다음 작업이다.
+- **승인된 평가에 연결하는 것** — 이 계약이 승인되고, 미승인 정책 둘이 정해진
+  뒤의 일이다. `verifyEvidenceBundle()`은 이미 `judged`를 받지만 아무 평가도
+  그것을 넘기지 않으며, 넘기지 않는 호출자는 오늘과 같은 검사를 받는다.
 - 기존 `anyOf` 채점 제거 — 남기되 **키워드 진단값**으로 분리해 이름을 바꿔야
   한다. 지금 지우면 비교할 기준이 사라진다.
 - 기존 점수·승인·임계값의 자동 승계 — **하지 않는다.** 새 계약의 숫자는 새

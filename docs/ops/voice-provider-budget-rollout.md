@@ -367,8 +367,19 @@ Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너�
 
 5. **[staging Postgres shell — 쓰기]** staging에서만 flag를 켭니다.
    ```sql
-   INSERT INTO "AppSetting" (key, value) VALUES ('feature.voiceInputEnabled', 'true')
-   ON CONFLICT (key) DO UPDATE SET value = 'true';
+   INSERT INTO "AppSetting" (key, value, "updatedAt")
+   VALUES ('feature.voiceInputEnabled', 'true', NOW())
+   ON CONFLICT (key) DO UPDATE SET value = 'true', "updatedAt" = NOW();
+   ```
+
+   **`updatedAt`을 직접 넣어야 합니다.** Prisma의 `@updatedAt`은 클라이언트가
+   채우는 값이라 DB에 default가 없고, raw SQL로 넣으면 `NOT NULL` 위반으로
+   실패합니다. 대소문자가 섞여 있으므로 큰따옴표도 필요합니다.
+   (`createdAt`은 `@default(now())`라 생략해도 됩니다.)
+
+   확인 — 읽기 전용:
+   ```sql
+   SELECT key, value, "updatedAt" FROM "AppSetting" WHERE key = 'feature.voiceInputEnabled';
    ```
 
 6. **[로컬 PowerShell 또는 브라우저]** readiness를 읽습니다. 자격증명 불필요,
@@ -392,18 +403,58 @@ Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너�
 **production flag는 이 절차에서 켜지 않습니다.** B-5와 B-6이 남아 있는 동안
 production 활성화는 §14가 막습니다.
 
-지금 할 수 있는 것은 **값을 미리 넣어 두는 것**뿐이고, 그것이 env-first의
-production 쪽 절반입니다.
+**변수는 지금 넣습니다. 검증만 릴리스 뒤로 갑니다.** 이 둘은 분리됩니다.
+
+2026-09-08 확인한 사실:
+
+> `main`에는 **voice 관련 파일이 하나도 없습니다.** `lib/voiceProviderBudget.ts`
+> 자체가 없고, 검사기도 npm script도 없습니다. `main`은 `develop`보다 3,339 커밋
+> 뒤에 있습니다.
+
+**이 사실이 막는 것은 검증이지 설정이 아닙니다.** env-first가 지키는 것은
+"**읽을 것이 오기 전에 변수가 자리에 있어야 한다**"이고, 코드가 아직 없다는
+것은 그 원칙을 무효화하지 않습니다 — 오히려 그것이 원칙이 적용되는 상황입니다.
+릴리스가 코드와 변수를 동시에 들여오게 만들면, env-first가 막으려던 바로 그
+동시 변경이 됩니다.
+
+#### 순서
 
 1. **[Railway 웹 대시보드 — production 환경]** 변수 두 개 설정. **쓰기.**
-2. **[production 서비스 shell]** `npm run check:voice-provider-budget-env`.
-   `500ce79f`에도 `lib/voiceProviderBudget.ts`는 있으므로 이 검사는 지금도
-   동작합니다.
-3. `/api/ready`는 **flag가 꺼져 있으므로 이 값들에 대해 아무 말도 하지
-   않습니다.** 그것이 정상이고, 그래서 2번이 필요합니다.
-4. `voice-transcription-model-price` 검사는 **main이 `dde6ad87`을 받은 뒤에야**
-   production에 존재합니다(§0.3). 그 전까지 production readiness에 그 항목은
-   없습니다.
+   §3.4에서 고른 production 값. flag는 건드리지 않습니다.
+2. **[에이전트 또는 사람]** 변수 **이름**만 확인합니다(§0.1의 서비스 설정 조회).
+   값은 확인할 수 없고, 이 시점에는 확인할 방법도 없습니다.
+3. **`develop` → `main` 릴리스.** 별도 결정이며 이 문서의 범위 밖입니다.
+4. **[production Postgres shell — 읽기]** Voice flag가 여전히 off인지 확인합니다
+   (§0.2). 릴리스가 flag를 켜지 않았음을 확인하는 것이지, 켜는 단계가
+   아닙니다.
+5. **[릴리스된 배포의 production 서비스 shell]**
+   `npm run check:voice-provider-budget-env` → `usable`. **이 단계가 3번
+   이전에는 불가능합니다** — script가 존재하지 않기 때문입니다.
+6. 증거와 서명을 기록에 남기고 B-4를 해결로 바꿉니다.
+
+#### 이 시점에 참인 것과 아닌 것
+
+1번을 마친 뒤 릴리스 전까지:
+
+- 그 변수를 읽을 코드가 없습니다 — 정상입니다. 읽을 코드가 오는 것이 3번입니다.
+- `/api/ready`가 그것에 대해 아무 말도 하지 않습니다 — flag가 꺼져 있으니
+  릴리스 뒤에도 그렇습니다(§4.1).
+- **검사기로 확인할 수 없습니다.** 이것이 유일한 실질적 제약이고, 그래서 2번이
+  이름 확인까지만인 것입니다.
+
+**production flag는 이 절차의 어느 단계에서도 켜지 않습니다.** B-4가 해결돼도
+B-5·B-6이 별도 차단 사유로 남습니다.
+
+#### 이 절은 세 번 고쳐졌습니다
+
+처음에는 "값을 미리 넣어 두는 것이 env-first의 production 쪽 절반"이라고
+적었습니다 — 결론은 맞았지만 근거가 없었습니다. 다음에는 `main`에 코드가 없다는
+사실을 확인하고 **"그러니 넣지 말라"**로 뒤집었는데, 그것이 틀렸습니다:
+검증할 수 없다는 것에서 설정하지 말라는 결론은 따라 나오지 않고, 둘은 다른
+단계입니다. 지금 판이 그 둘을 분리합니다.
+
+세 번 고친 것을 지우지 않고 적어 두는 이유는, 이 절이 **틀리기 쉬운 자리**라는
+것 자체가 다음 사람에게 필요한 정보이기 때문입니다.
 
 ### 5.3 롤백
 
@@ -411,7 +462,8 @@ production 쪽 절반입니다.
 
 1. **[Postgres shell — 쓰기]** flag를 끕니다.
    ```sql
-   UPDATE "AppSetting" SET value = 'false' WHERE key = 'feature.voiceInputEnabled';
+   UPDATE "AppSetting" SET value = 'false', "updatedAt" = NOW()
+   WHERE key = 'feature.voiceInputEnabled';
    ```
 2. 더 급하면 **[Railway 웹 대시보드]** `VOICE_INPUT_KILL_SWITCH`에 아무 값이나
    넣습니다. DB를 읽지 않고 끕니다.
@@ -508,6 +560,27 @@ production:
 켜질 수 없기 때문입니다. production 쪽 증거는 1·2번(값이 있고 검사기가
 통과)까지이고, flag를 켜는 순간의 readiness 확인은 **B-5·B-6이 풀린 뒤 그
 활성화 절차의 일부**입니다.
+
+**production 절반은 두 조건이 서로 다른 시점에 충족됩니다**(§5.2).
+
+| 조건 | production 쪽 | 언제 |
+|---|---|---|
+| 1. 값이 설정돼 있다 | **지금 가능** | 릴리스와 무관 |
+| 2. 검사기가 `usable`을 낸다 | **릴리스 이후** | script가 `main`에 없음 |
+
+그러므로 B-4는 `develop` → `main` 릴리스 이전에는 해결로 바뀔 수 없지만,
+**그것이 유일한 대기는 아닙니다.** 릴리스 뒤에도 **환경 쓰기 한 번과 shell
+실행 한 번**이 더 필요하고, 둘 다 저장소 밖의 권한입니다.
+
+**"저장소가 스스로 끝낼 수 있다"고 적지 않습니다.** 이전 판이 그렇게 적었고
+틀렸습니다 — 릴리스는 저장소의 결정이지만 환경값 쓰기와 검사 실행은 아닙니다.
+B-5·B-6이 외부의 답을 기다리는 것과 종류가 다를 뿐, 사람의 손이 필요하다는
+점은 같습니다.
+
+정확한 표현은 **"production 환경값 쓰기와 main 릴리스 후 검사 대기"**입니다.
+
+staging 절반은 2026-09-08에 충족됐습니다:
+`docs/ops/voice-provider-budget-records/2026-09-08-staging-d79d3c8673db4a9f5f4cd109bc99c50c21e182e3.md`.
 
 이 다섯이 갖춰지기 전까지 B-4는 **"결정·코드 완료, 환경별 실제 한도 설정
 대기"** 그대로입니다.

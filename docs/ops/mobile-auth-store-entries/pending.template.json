@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "The next candidate, written before the deploy exists.",
+    "While phase is 'drafted' there is no deploymentId field at all -- an absent",
+    "field reads as 'not yet', a placeholder reads as an answer. Add it, and set",
+    "phase to 'deployed', once Railway has created the deployment.",
+    "Promotion replaces the Active entry with this one; it is never edited into",
+    "Active in place, because a half-edited Active is an Active nobody can trust.",
+    "Section 5.1's entry has this shape with kind 'emergency-pending'.",
+    "Contract: docs/ops/mobile-auth-key-rotation.md section 2.2.",
+    "Checked by: npm run check:mobile-auth-store-entries"
+  ],
+  "kind": "pending",
+  "phase": "drafted",
+  "rotationId": "rot-2026-09-03-b",
+  "createdAt": "2026-09-03T11:00:00Z",
+  "fingerprint": {
+    "$comment": "How this is computed is NOT decided; see section 6, item 2.",
+    "algorithm": "<undecided -- see docs/ops/mobile-auth-key-rotation.md section 6>",
+    "value": "<the fingerprint of the candidate material>"
+  },
+  "targetSha": "0000000000000000000000000000000000000000"
+}
