@@ -29,8 +29,13 @@ import { join, resolve } from "node:path";
 
 import {
   buildScoringArtifact,
+  judgedCaseShapeProblems,
+  judgementRecordShapeProblems,
+  observationShapeProblems,
+  scoringArtifactShapeProblems,
   validateJudgedCase,
   verifyJudgementRecord,
+  verifyRecordAgainstObservation,
   verifyScoringArtifact,
 } from "../lib/aiReviewEvalJudgement.ts";
 
@@ -75,17 +80,29 @@ const report = (heading, problems) => {
   return true;
 };
 
-// The case's own registration first. A gold naming a requirement the case
-// never registered would produce a miss nothing could ever satisfy, and the
-// miss would be recorded against the reviewer.
+// Shape before meaning. TypeScript says nothing about JSON somebody wrote:
+// `"true"` where a boolean belongs quietly produced a wrong score rather than
+// an error, and a mistyped `submittedAs` printed two sections of `ok` before
+// throwing. Every problem names its file and field path.
+const artifact = hasFlag("verify") ? readJson("artifact.json") : null;
+const shape = [
+  ...judgedCaseShapeProblems(testCase),
+  ...observationShapeProblems(observation),
+  ...judgementRecordShapeProblems(record),
+  ...(artifact ? scoringArtifactShapeProblems(artifact) : []),
+];
+if (report("file shapes", shape)) die("\nNothing was read further.");
+
+// The case's own registration. A gold naming a requirement the case never
+// registered would produce a miss nothing could ever satisfy, and the miss
+// would be recorded against the reviewer.
 //
 // This checks the CASE. It never rejects a claim: a finding about something
 // unregistered is a finding outside the gold, which is a judgement and not a
 // registration error.
 let failed = report("case registration", validateJudgedCase(testCase));
 
-if (hasFlag("verify")) {
-  const artifact = readJson("artifact.json");
+if (artifact) {
   failed =
     report(
       "stored score, against the files beside it",
@@ -102,9 +119,15 @@ if (hasFlag("verify")) {
 }
 
 failed = report("judgement record", verifyJudgementRecord(testCase, record)) || failed;
+// And that the record actually read THIS output: indexes in range, quotes
+// present, every submitted finding accounted for. The digest says the same
+// bytes were there and nothing more.
+failed =
+  report("record against the output", verifyRecordAgainstObservation(observation, record)) ||
+  failed;
 if (failed) die("\nNothing was scored.");
 
-const artifact = buildScoringArtifact({
+const scored = buildScoringArtifact({
   testCase,
   record,
   observation,
@@ -113,17 +136,17 @@ const artifact = buildScoringArtifact({
 
 writeFileSync(
   join(root, "artifact.json"),
-  `${JSON.stringify(artifact, null, 2)}\n`,
+  `${JSON.stringify(scored, null, 2)}\n`,
   "utf8"
 );
 
-console.log(`\nobservation  ${artifact.observationRef}`);
-console.log(`case         ${artifact.caseDigest}`);
-console.log(`record       ${artifact.recordDigest}`);
+console.log(`\nobservation  ${scored.observationRef}`);
+console.log(`case         ${scored.caseDigest}`);
+console.log(`record       ${scored.recordDigest}`);
 
-if (artifact.outcome.scored) {
+if (scored.outcome.scored) {
   console.log("\nscored");
-  for (const [kind, outcome] of Object.entries(artifact.outcome.byKind)) {
+  for (const [kind, outcome] of Object.entries(scored.outcome.byKind)) {
     const empty =
       outcome.truePositives === 0 &&
       outcome.falseNegatives === 0 &&
@@ -140,9 +163,9 @@ if (artifact.outcome.scored) {
   // A refusal is a report. It is written to the artifact rather than thrown
   // away, because what it says -- which judgements are missing, which gold is
   // disproved -- is what the case has to be corrected with.
-  console.log(`\nnot scored\n${artifact.outcome.reason}`);
-  if (artifact.outcome.goldGaps) {
-    const gaps = Object.entries(artifact.outcome.goldGaps).filter(([, count]) => count > 0);
+  console.log(`\nnot scored\n${scored.outcome.reason}`);
+  if (scored.outcome.goldGaps) {
+    const gaps = Object.entries(scored.outcome.goldGaps).filter(([, count]) => count > 0);
     for (const [kind, count] of gaps) {
       console.log(`  confirmed gold gap: ${kind} ${count}`);
     }

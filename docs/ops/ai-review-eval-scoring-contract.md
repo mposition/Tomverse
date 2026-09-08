@@ -226,11 +226,50 @@ gold를 고치거나, 판정을 수정하거나, 다른 출력을 채점하면 d
 artifact는 **낡은 것**이 된다 — 틀린 것도, 대충 맞는 것도 아니고, **지금 여기
 있는 어떤 것에 대한 진술도 아닌 것**이다. 다시 채점해야만 다시 진술이 된다.
 
+**digest만으로는 부족하다.** digest가 증명하는 것은 **입력이 그대로**라는 사실
+이지, 옆에 적힌 숫자가 그 입력에서 계산됐다는 사실이 아니다. artifact의
+`truePositives`를 999로 고쳐도, `outcome`을 통째로 지워도 검증을 통과했다.
+그래서 `verifyScoringArtifact()`는 **같은 scorer로 다시 계산해 저장된 outcome
+전체와 대조**한다 — 점수뿐 아니라 `scored: false`와 거절 사유, gap 진단까지.
+셋 다 읽는 사람이 행동의 근거로 삼는 것이기 때문이다.
+
 `npm run score:ai-review-judgements -- --dir <디렉터리>`가 `case.json` ·
 `observation.json` · `record.json`을 읽어 `artifact.json`을 쓰고, `--verify`가
 저장된 점수가 아직 그 파일들에 대한 것인지 묻는다. **거절도 artifact에 쓴다** —
 어떤 판정이 비어 있고 어떤 gold가 반증됐는지가 case를 고칠 때 쓰는 재료이기
 때문이다. provider는 호출하지 않는다.
+
+### 기록이 실제로 그 출력을 읽었는가
+
+출력 digest는 **같은 바이트가 있었다**는 것만 말한다. 판정이 그 안 어딘가를
+가리키는지는 말하지 않고, 두 실패가 모두 통과했다 — 항목이 하나뿐인 출력에
+`sourceIndex: 999`와 존재하지 않는 인용문을 적은 기록이 TP 1을 받았고, 제출된
+발견 둘 중 하나만 담은 기록이 깨끗한 성적을 받았다.
+
+`verifyRecordAgainstObservation()`이 셋만 본다.
+
+1. **인덱스가 자기가 이름 댄 배열 범위 안**에 있는가
+2. **인용문이 그 지목한 원문에 실제로 있는가**
+3. **제출된 발견마다 최소 한 claim이 있는가**
+
+한 발견을 여러 claim으로 나누는 것은 허용한다. 허용하지 않는 것은 **아무 claim도
+언급하지 않은 발견**이다 — 그것이 잘못된 발견이 사라지는 방식이다.
+
+**여기서 분해 방법을 정하지 않고, 의미도 판정하지 않는다.** 그 둘은 미승인
+정책이며, 이 검사는 나중에 무엇으로 정해지든 그것이 **출력의 일부가 아니라
+전체에** 적용되게 하려고 있다.
+
+### 파일 입력의 타입 검사
+
+TypeScript는 누군가 써 놓은 JSON에 대해 아무 말도 하지 않는다.
+`goldCompleteness.missingPoints: "true"`는 **오류가 아니라 틀린 점수**를
+만들었고(`precisionCounted: false`), `submittedAs: "missingPoint"`는 `ok` 두
+구획을 출력한 뒤 TypeError로 죽었다.
+
+`judgedCaseShapeProblems()` · `observationShapeProblems()` ·
+`judgementRecordShapeProblems()` · `scoringArtifactShapeProblems()`가 boolean ·
+enum · 배열 · 정수 인덱스를 검사하고, **파일과 필드 경로를 포함한 문제 목록**을
+돌려준다. 의미를 읽기 전에 먼저 돈다.
 
 ### 아직 정해지지 않은 것
 
@@ -255,13 +294,18 @@ artifact는 **낡은 것**이 된다 — 틀린 것도, 대충 맞는 것도 아
 - `validateJudgedCase()` — case 등록 검증. 채점기가 먼저 돌린다.
 - `observationRefFor()` · `judgedCaseDigest()` · `judgementRecordDigest()` ·
   `buildScoringArtifact()` · `verifyScoringArtifact()` — 점수를 자기가 계산된
-  것들에 결속.
+  것들에 결속하고, **저장된 outcome을 재계산해 대조**.
+- `verifyRecordAgainstObservation()` — 기록이 실제 출력을 읽었는지.
+- shape 검사 넷 — 파일 입력의 런타임 타입 검증.
 - `scripts/score-ai-review-judgements.mjs`와 파일 흐름 회귀
   (`tests/aiReviewJudgementScoringCli.test.mjs`).
 
 **하지 않은 것, 그리고 하지 않을 것**
 
-- `verifyEvidenceBundle()` 결속 — 다음 작업이다. 위 digest들이 거기에 붙는다.
+- `verifyEvidenceBundle()` 결속 — 다음 작업이다. 붙는 것은 digest 셋이 아니라
+  **공유 검증 경로 전체**다: 입력 타입 → case 등록 → 기록·출력 대조 → 기록 서명
+  → 재계산 → 저장 outcome 대조. digest는 그 경로의 한 부분이지 검증 전체가
+  아니다.
 - 기존 `anyOf` 채점 제거 — 남기되 **키워드 진단값**으로 분리해 이름을 바꿔야
   한다. 지금 지우면 비교할 기준이 사라진다.
 - 기존 점수·승인·임계값의 자동 승계 — **하지 않는다.** 새 계약의 숫자는 새
