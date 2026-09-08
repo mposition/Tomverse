@@ -191,25 +191,40 @@ foreach ($refusal in $parseRefusals) {
         # A valid file plus the offending line, which is the shape that matters:
         # the earlier lines resolve, so nothing else notices.
         Set-Content -LiteralPath $scratch -Value (@(Get-Content -LiteralPath $template) + $refusal.Line)
-        $message = $null
-        try {
-            $null = Read-TemplateAssignments -Path $scratch
+        # Every stream, not just the exception's message. Checking the message
+        # alone leaves the parser free to print the line through any other one:
+        # a Write-Warning of the offending line put a synthetic ring on screen
+        # while this case still passed.
+        #
+        # The output stream is the exception, and deliberately so: `$null =`
+        # below discards it, and at the top of this file a throw means the
+        # assignment never completes, so nothing emitted that way reaches an
+        # operator. It is not a disclosure path, so this case does not chase it.
+        $captured = & {
+            $VerbosePreference = "Continue"
+            $DebugPreference = "Continue"
+            $WarningPreference = "Continue"
+            try {
+                $null = Read-TemplateAssignments -Path $scratch
+                Write-Output "PARSER-ACCEPTED"
+            }
+            catch {
+                Write-Output ("PARSER-REFUSED " + $_.Exception.Message)
+            }
+        } *>&1 | Out-String
+
+        if ($captured -notmatch "PARSER-REFUSED") {
             $refusalFailures += ("{0}: accepted" -f $refusal.Name)
         }
-        catch {
-            $message = $_.Exception.Message
-        }
-        if ($message) {
-            if ($message -like "*PLAINTEXT-RING-8fa213*") {
-                $refusalFailures += ("{0}: the refusal quoted the line" -f $refusal.Name)
-            }
+        if ($captured -like "*PLAINTEXT-RING-8fa213*") {
+            $refusalFailures += ("{0}: the line reached the output" -f $refusal.Name)
         }
     }
     finally {
         Remove-Item -LiteralPath $scratch -ErrorAction SilentlyContinue
     }
 }
-Assert-Case "1d. a bad line is refused, and the refusal does not repeat it" `
+Assert-Case "1d. a bad line is refused, and nothing the parser writes repeats it" `
     ($refusalFailures.Count -eq 0) ($refusalFailures -join "; ")
 
 # --- 2. the injection, as op run performs it ---------------------------------
