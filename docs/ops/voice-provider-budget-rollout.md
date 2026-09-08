@@ -17,20 +17,39 @@
 SHA로 적습니다 — `develop`은 움직이고, 움직이는 순간 브랜치 링크는 이 상태를
 가리키지 않습니다.
 
+**B-4가 묻는 것**입니다.
+
 | 항목 | staging | production | 출처 |
 |---|---|---|---|
 | 서비스 중 배포 | `dde6ad87` | `500ce79f` | Railway 배포 목록 |
 | 배포 브랜치 | `develop` | `main` | 서비스 설정 |
-| 기동 명령 | `next start` | `next start` | 같음 |
 | `VOICE_PROVIDER_SECONDS_PER_DAY` | **미설정** | **미설정** | 변수 **이름** 목록 |
 | `VOICE_PROVIDER_SECONDS_PER_MONTH` | **미설정** | **미설정** | 같음 |
-| `VOICE_TRANSCRIPTION_API_KEY` | 미설정 | 미설정 | 같음 |
-| `VOICE_INPUT_KILL_SWITCH` | 미설정 | 미설정 | 같음 |
-| `VOICE_INPUT_*` 주체별 override | 미설정 (기본값 사용) | 미설정 | 같음 |
-| Voice flag(`feature.voiceInputEnabled`) | **미확인** — §0.2 | **미확인** | — |
+| 두 값의 **유효성** | **미확인** — §0.1 | **미확인** | — |
+| 적용되는 규칙(production/development) | **미확인** — §0.1.1 | **미확인** | — |
 
-**두 환경 모두 `VOICE_` 로 시작하는 변수가 하나도 없습니다.** B-4가 요구하는
-설정은 아직 어느 쪽에도 존재하지 않습니다.
+**두 환경 모두 `VOICE_PROVIDER_SECONDS_*`가 없습니다.** B-4가 요구하는 설정은
+아직 어느 쪽에도 존재하지 않습니다.
+
+**맥락으로만 적는 것** — 아래는 B-4의 조건이 아니고, 판정에 섞지 않습니다.
+
+| 항목 | staging | production | B-4와의 관계 |
+|---|---|---|---|
+| 기동 명령 | `next start` | `next start` | §0.1.1의 **정황**이지 판정이 아님 |
+| `VOICE_TRANSCRIPTION_API_KEY` | 미설정 | 미설정 | **차단 사유 아님** — 아래 |
+| `VOICE_INPUT_KILL_SWITCH` | 미설정 | 미설정 | **flag 상태의 증거 아님** — 아래 |
+| `VOICE_INPUT_*` 주체별 override | 미설정 | 미설정 | §7의 다른 층(§1) |
+| Voice flag(`feature.voiceInputEnabled`) | **미확인** | **미확인** | §0.2로만 확인 가능 |
+
+- **`VOICE_TRANSCRIPTION_API_KEY`가 없는 것은 B-4의 문제가 아닙니다.**
+  전용 키가 없으면 `OPENAI_API_KEY`로 내려가고(§11.3), 그 키는 두 환경에 다
+  있습니다. 어느 계정으로 오디오가 나가는가는 **B-5**의 질문이고, 예산이
+  설정됐는가는 B-4의 질문입니다. B-4 기록에 이 줄을 넣지 않습니다.
+- **`VOICE_INPUT_KILL_SWITCH`가 비어 있다는 것은 flag가 꺼져 있다는 증거가
+  아닙니다.** kill switch는 DB를 **덮어쓰는** 층이고, 비어 있다는 것은
+  "덮어쓰지 않는다"는 뜻일 뿐입니다. 실제 상태는 `AppSetting`에 있고, 읽기
+  전에는 **켜져 있을 수도 있습니다.** 그래서 두 환경 모두 `미확인`이며, §5는
+  그 확인을 1단계로 둡니다.
 
 ### 0.1 값을 보지 않고 확인하는 방법
 
@@ -47,15 +66,26 @@ Railway의 **변수 조회**(`list-variables`)는 한 서비스의 모든 변수
 정수이고 `month >= day`라는 것은 다른 사실이고, 이름만으로는 구분되지 않습니다.
 그 판정은 §4의 검사기가 각 환경 안에서 하며, 그 출력에도 값은 없습니다.
 
-### 0.1.1 지금 flag를 켜면 어떻게 되는가
+### 0.1.1 어느 규칙이 적용되는지는 아직 관측되지 않았습니다
 
-두 환경 다 `next start`로 기동하므로 **production 규칙이 적용되고 개발
-fallback이 없습니다**(§4.3). 두 변수가 없는 상태에서 Voice flag를 켜면
-`/api/ready`가 즉시 `voiceProviderBudget: false`를 내고 배포 전체가 503이
-됩니다.
+두 환경의 기동 명령이 `next start`이므로 **production 규칙이 적용될 것으로
+예상**합니다 — Next.js가 그때 `NODE_ENV=production`을 씁니다.
 
-**이것은 결함이 아니라 fail-closed가 작동하는 모습입니다.** §5의 순서가
-변수를 먼저 넣는 이유가 이것이고, 순서를 지키면 이 상태를 만나지 않습니다.
+**그러나 기동 명령은 정황이지 판정이 아닙니다.** 실제로 어느 규칙이 걸렸는지를
+말하는 것은 그 환경 안에서 읽은 `NODE_ENV`이고, 그것을 출력하는 것은 검사기의
+**첫 줄**입니다.
+
+```
+Voice provider usage budget (seconds) — production rule (NODE_ENV=production)
+```
+
+그 줄을 보기 전까지 이 칸은 `미확인`입니다. 기록에도 예상이 아니라 그 줄을
+붙입니다.
+
+**예상이 맞다면** 개발 fallback이 없으므로, 두 변수가 없는 상태에서 Voice
+flag를 켜면 `/api/ready`가 즉시 `voiceProviderBudget: false`를 내고 배포
+전체가 503이 됩니다. **결함이 아니라 fail-closed가 작동하는 모습**이고, §5가
+변수를 먼저 넣는 이유입니다.
 
 ### 0.2 Voice flag를 읽는 방법
 
@@ -291,11 +321,31 @@ Gate에 넣으면 항상 같은 답만 하는 검사가 됩니다.
 
 각 단계마다 **어디서 실행하는지**를 적습니다.
 
+### 5.0 누가 무엇을 하는가, 그리고 왜
+
+이 절차에서 사람이 실행하는 단계가 **두 종류**이고, 기록에서 섞으면 안 됩니다.
+
+| 왜 사람이 하는가 | 어느 단계 | 해석·기록은 |
+|---|---|---|
+| **판단** — 감당할 노출량을 정하는 결정 | 값 선택(§3.4), 최종 서명 | 사람 |
+| **접근 권한** — 에이전트에게 실행 수단이 없음 | 변수 설정, 검사기 실행, DB flag 쓰기 | **에이전트** |
+
+두 번째 줄은 AGENTS.md가 말하는 "사람만 할 수 있는 것"이 **아닙니다.**
+Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너에 없어서 사람이
+**대신 실행**하는 것뿐입니다. 그러므로 **출력의 해석과 기록 작성은 계속
+에이전트의 몫이고**, 실행자에게 "이 출력을 읽고 판정하라"고 넘기지 않습니다.
+실행자가 하는 것은 명령을 돌리고 나온 것을 그대로 전달하는 일입니다.
+
+이 구분이 흐려지면 접근 권한의 한계가 사람의 작업으로 굳어집니다. 도구가
+생기면 두 번째 줄은 에이전트로 돌아옵니다.
+
 ### 5.1 staging
 
 1. **[Railway 웹 대시보드 — staging 환경, `Tomverse` 서비스]**
-   Voice flag가 꺼져 있는 것을 먼저 확인합니다(§0.2). 켜져 있다면 이 절차가
-   아니라 롤백(§5.3)이 먼저입니다.
+   Voice flag의 **현재 상태를 읽습니다**(§0.2). 아직 아무도 읽지 않았으므로
+   꺼져 있다고 가정하지 않습니다 — `VOICE_INPUT_KILL_SWITCH`가 비어 있는 것은
+   flag가 꺼져 있다는 증거가 아닙니다. 켜져 있다면 이 절차가 아니라
+   롤백(§5.3)이 먼저입니다.
 
 2. **[같은 화면]** 변수 두 개를 설정합니다. **쓰기 작업입니다.**
    `VOICE_PROVIDER_SECONDS_PER_DAY`, `VOICE_PROVIDER_SECONDS_PER_MONTH`.
@@ -305,8 +355,12 @@ Gate에 넣으면 항상 같은 답만 하는 검사가 됩니다.
    ```
    npm run check:voice-provider-budget-env
    ```
-   **`usable — both values are set and consistent`이 아니면 여기서 멈춥니다.**
-   출력을 기록(§6)에 붙입니다. 자격증명은 필요 없고, 출력에 값이 없습니다.
+   **출력 전체를 그대로 전달합니다** — 판정하지 않아도 됩니다. 첫 줄이 어느
+   규칙이 걸렸는지 말하고(§0.1.1), 마지막 줄이 판정입니다. 자격증명은 필요
+   없고 출력에 값이 없으므로, 어디에 붙여도 안전합니다.
+
+   `usable — both values are set and consistent`가 아니면 다음 단계로 가지
+   않습니다.
 
 4. **[Railway 웹 대시보드]** staging이 `dde6ad87` 이상을 서비스 중인지
    확인합니다. 아니라면 `develop`을 배포합니다.
@@ -369,8 +423,12 @@ production 쪽 절반입니다.
 
 ## 6. 검증 기록 초안
 
-실행자가 §5를 밟으면서 **관측한 것**을 채웁니다. 판정과 서명은 사람이 합니다.
-지어낸 관측은 어느 칸에도 넣지 않습니다.
+**실행자는 관측을 전달하고, 초안은 에이전트가 씁니다**(§5.0). 실행자가 직접
+채워야 하는 것은 **판정과 서명**뿐입니다. 지어낸 관측은 어느 칸에도 넣지
+않습니다.
+
+**B-4에 속하지 않는 것을 이 기록에 넣지 않습니다** — 전용 transcription 키의
+유무(B-5), 주체별 guardrail override(§7), kill switch의 상태.
 
 ````
 # B-4 provider 예산 운영 설정 기록
@@ -401,6 +459,17 @@ production:
 (같은 것)
 ```
 
+## 적용된 규칙 (검사기 첫 줄을 그대로)
+
+- staging:
+- production:
+
+## Voice flag 상태 (§0.2로 읽은 값)
+
+- staging (설정 전):
+- staging (설정 후):
+- production:
+
 ## staging /api/ready
 
 - `checks.voiceProviderBudget`:
@@ -425,7 +494,9 @@ production:
 
 1. **staging과 production 양쪽**에 두 변수가 사람이 고른 값으로 설정돼 있다.
 2. 양쪽에서 `check:voice-provider-budget-env`가
-   `usable — both values are set and consistent`를 냈고, 그 출력이 기록에 있다.
+   `usable — both values are set and consistent`를 냈고, 그 출력이 기록에
+   있다. **그 출력의 첫 줄이 어느 규칙이 걸렸는지도 함께 남습니다** — 기동
+   명령에서 추론한 것은 증거가 아닙니다(§0.1.1).
 3. staging에서 flag를 켠 상태의 `/api/ready`가
    `voiceProviderBudget`과 `voiceModelPrice` **둘 다** healthy였고, 그 관측이
    기록에 있다.
