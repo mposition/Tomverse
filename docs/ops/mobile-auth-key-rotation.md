@@ -987,9 +987,11 @@ production 활성화를 결정할 때 함께 정할 것 여섯:
 
    **(a) fingerprint 계산 규칙 — 2026-09-08 승인됐습니다(1차 11건).** 승인자
    `mposition`, `7c19509` 검토 후, 전부 권장대로. 명세·고정 벡터·승인란은
-   `.github/audits/2026-09-08-mobile-auth-fingerprint-rule-approval.md`의 5절 · 5.6절 · 9.4절입니다. **확정된 것은 규칙뿐이고 구현은 아직 없으며**, 검사기는
-   `algorithm`과 `value`가 비어 있지 않은지만 보고 값이 옳은지는 보지 않습니다 — 그 계약은
-   바뀌지 않았습니다. **2차(운영 절차 5건)와 3차(다중 계정 세션 폐기)는 미승인**이므로
+   `.github/audits/2026-09-08-mobile-auth-fingerprint-rule-approval.md`의 5절 · 5.6절 · 9.4절입니다. **규칙이 확정됐고 계산기도 있습니다 —
+   `scripts/mobile-auth-fingerprint-core.mjs`, 벡터는 `tests/mobileAuthFingerprint.test.mjs`.
+   운영 경로에는 붙어 있지 않습니다**: 검사기는 여전히 `algorithm`과 `value`가 비어 있지
+   않은지만 보고 계산기를 부르지 않으며, 값을 만드는 CLI도 없습니다 — 그 계약은 바뀌지
+   않았습니다. **2차(운영 절차 5건)와 3차(다중 계정 세션 폐기)는 미승인**이므로
    재계산 절차와 긴급 면제는 아직 코드로도 계약으로도 넣지 않습니다.
    확정된 답: **두 링의 재료만**(id·활성 id·은퇴 목록 제외)을 vault가 든 `K` 아래
    HMAC-SHA256으로 leaf를 만들고 정렬해 root를 내며, 출력은 hex 64자, 식별자는
