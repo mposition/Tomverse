@@ -17,24 +17,45 @@
 SHA로 적습니다 — `develop`은 움직이고, 움직이는 순간 브랜치 링크는 이 상태를
 가리키지 않습니다.
 
-| 항목 | 값 | 출처 |
-|---|---|---|
-| staging 서비스 중 배포 | `dde6ad87` (SUCCESS, 2026-09-08) | Railway 배포 목록 |
-| production 서비스 중 배포 | `500ce79f` (branch `main`) | 같음 |
-| `VOICE_PROVIDER_SECONDS_PER_DAY` 설정 여부 | **미확인** — §0.1 | — |
-| `VOICE_PROVIDER_SECONDS_PER_MONTH` 설정 여부 | **미확인** — §0.1 | — |
-| Voice flag(`feature.voiceInputEnabled`) | **미확인** — §0.2 | — |
+| 항목 | staging | production | 출처 |
+|---|---|---|---|
+| 서비스 중 배포 | `dde6ad87` | `500ce79f` | Railway 배포 목록 |
+| 배포 브랜치 | `develop` | `main` | 서비스 설정 |
+| 기동 명령 | `next start` | `next start` | 같음 |
+| `VOICE_PROVIDER_SECONDS_PER_DAY` | **미설정** | **미설정** | 변수 **이름** 목록 |
+| `VOICE_PROVIDER_SECONDS_PER_MONTH` | **미설정** | **미설정** | 같음 |
+| `VOICE_TRANSCRIPTION_API_KEY` | 미설정 | 미설정 | 같음 |
+| `VOICE_INPUT_KILL_SWITCH` | 미설정 | 미설정 | 같음 |
+| `VOICE_INPUT_*` 주체별 override | 미설정 (기본값 사용) | 미설정 | 같음 |
+| Voice flag(`feature.voiceInputEnabled`) | **미확인** — §0.2 | **미확인** | — |
 
-### 0.1 왜 환경변수 설정 여부가 미확인인가
+**두 환경 모두 `VOICE_` 로 시작하는 변수가 하나도 없습니다.** B-4가 요구하는
+설정은 아직 어느 쪽에도 존재하지 않습니다.
 
-Railway의 변수 조회는 **한 서비스의 모든 변수를 값까지** 돌려주며, 세션 토큰으로
-호출하면 평문입니다. 그것을 호출하면 `DATABASE_URL`·`NEXTAUTH_SECRET`·provider
-API key가 전부 이 작업의 대화 기록에 영구히 남습니다. 확인하려던 것은 **숫자 두
-개의 존재 여부**인데 대가가 자격증명 전체 노출입니다.
+### 0.1 값을 보지 않고 확인하는 방법
 
-그래서 호출하지 않았고, 대신 **값을 출력하지 않는 검사기**를 만들었습니다(§4).
-각 환경에서 한 번 실행하면 이 표의 두 칸이 채워지고, 그 출력은 그대로 붙여도
-안전합니다.
+Railway의 **변수 조회**(`list-variables`)는 한 서비스의 모든 변수를 **값까지**
+돌려주며, 세션 토큰으로 호출하면 평문입니다. 그것으로 숫자 두 개의 존재 여부를
+확인하면 `DATABASE_URL`·`NEXTAUTH_SECRET`·provider API key가 전부 작업 기록에
+남습니다. 그 대가는 확인하려던 사실에 비해 터무니없습니다.
+
+**서비스 설정 조회(`get-service-config`)는 변수 이름만 돌려주고 값을 담지
+않습니다.** 위 표는 그것으로 채웠습니다 — 존재 여부를 묻는 질문에는 존재 여부만
+답하는 도구가 있고, 그것을 쓰면 됩니다.
+
+**이름 목록이 답하지 못하는 것은 값의 유효성입니다.** 설정돼 있다는 것과 양의
+정수이고 `month >= day`라는 것은 다른 사실이고, 이름만으로는 구분되지 않습니다.
+그 판정은 §4의 검사기가 각 환경 안에서 하며, 그 출력에도 값은 없습니다.
+
+### 0.1.1 지금 flag를 켜면 어떻게 되는가
+
+두 환경 다 `next start`로 기동하므로 **production 규칙이 적용되고 개발
+fallback이 없습니다**(§4.3). 두 변수가 없는 상태에서 Voice flag를 켜면
+`/api/ready`가 즉시 `voiceProviderBudget: false`를 내고 배포 전체가 503이
+됩니다.
+
+**이것은 결함이 아니라 fail-closed가 작동하는 모습입니다.** §5의 순서가
+변수를 먼저 넣는 이유가 이것이고, 순서를 지키면 이 상태를 만나지 않습니다.
 
 ### 0.2 Voice flag를 읽는 방법
 
