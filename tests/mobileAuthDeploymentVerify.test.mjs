@@ -35,11 +35,28 @@ const AUDIENCE = "tomverse-mobile-api";
 const b64url = (value) =>
   Buffer.from(value).toString("base64url");
 
-/** A compact JWS shaped the way the runtime mints one. */
-const mintToken = ({ privateKey, kid, iss = ISSUER, aud = AUDIENCE }) => {
+const TTL_SECONDS = 600;
+
+/** A compact JWS shaped the way the runtime mints one, including its clock. */
+const mintToken = ({
+  privateKey,
+  kid,
+  iss = ISSUER,
+  aud = AUDIENCE,
+  issuedAt = Math.floor(Date.now() / 1000),
+  ttlSeconds = TTL_SECONDS,
+}) => {
   const header = b64url(JSON.stringify({ alg: "EdDSA", typ: "at+jwt", kid }));
   const claims = b64url(
-    JSON.stringify({ iss, aud, sub: "user_1", tkn: "access", exp: 4102444800 })
+    JSON.stringify({
+      iss,
+      aud,
+      sub: "user_1",
+      tkn: "access",
+      iat: issuedAt,
+      nbf: issuedAt,
+      exp: issuedAt + ttlSeconds,
+    })
   );
   const signingInput = `${header}.${claims}`;
   const signature = sign(null, Buffer.from(signingInput, "utf8"), privateKey);
@@ -70,12 +87,21 @@ const run = (environment) => {
  * One deployment's worth of evidence: the rings that were deployed, a token
  * that deployment minted, and the row its refresh created.
  */
-const evidence = ({ signing, pepper, signingKid = "sign-2", pepperKid = "pep-2" }) => {
+const evidence = ({
+  signing,
+  pepper,
+  signingKid = "sign-2",
+  pepperKid = "pep-2",
+  issuedAt = Math.floor(Date.now() / 1000),
+  ttlSeconds = TTL_SECONDS,
+}) => {
   const secret = randomBytes(32).toString("base64url");
   return {
     MOBILE_AUTH_VERIFY_ACCESS_TOKEN: mintToken({
       privateKey: signing.privateKey,
       kid: signingKid,
+      issuedAt,
+      ttlSeconds,
     }),
     MOBILE_AUTH_VERIFY_REFRESH_TOKEN: `${randomBytes(16).toString("base64url")}.${secret}`,
     MOBILE_AUTH_VERIFY_SECRET_DIGEST: createHmac("sha256", pepper)
@@ -188,4 +214,86 @@ test("neither the refresh secret nor the rings appear in the output", () => {
   assert.equal(result.stdout.includes(secret), false);
   assert.equal(result.stdout.includes(signing.pkcs8), false);
   assert.equal(result.stdout.includes(pepper), false);
+});
+
+test("evidence kept from an earlier deployment does not pass", () => {
+  // The material checks cannot see age: a token minted a week ago verifies
+  // against the same key exactly as well, so without a freshness bound the
+  // whole script proves the key was right *then*. Everything else here is
+  // correct -- the same rings, the same ids -- which is what makes it
+  // dangerous.
+  const signing = ed25519();
+  const eightDaysAgo = Math.floor(Date.now() / 1000) - 8 * 24 * 3600;
+  const result = run({
+    ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED }),
+    ...evidence({ signing, pepper: PEPPER_INTENDED, issuedAt: eightDaysAgo }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /OK {4}signing key material/);
+  assert.match(result.stdout, /FAIL {2}evidence is fresh/);
+});
+
+test("an expired token is refused even when it is minutes old", () => {
+  const signing = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED }),
+    ...evidence({
+      signing,
+      pepper: PEPPER_INTENDED,
+      issuedAt: Math.floor(Date.now() / 1000) - 120,
+      ttlSeconds: 60,
+    }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /expired at/);
+});
+
+test("a retirement dated in the future fails before anything is promoted", () => {
+  // The pre-deploy check refuses this too. Repeated here because this script
+  // is the last thing between a bad candidate and a promotion to Active, and a
+  // retirement at 2099 is seventy years of trust that reads as healthy.
+  const signing = ed25519();
+  const facts = evidence({ signing, pepper: PEPPER_INTENDED });
+  const rings = candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED });
+  const result = run({
+    ...rings,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${ed25519().pkcs8},${rings.MOBILE_AUTH_SIGNING_KEYS}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: "sign-1@2099-01-01T00:00:00.000Z",
+    ...facts,
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /MOBILE_AUTH_RETIRED_SIGNING_KEYS instants have arrived/);
+});
+
+test("the emergency mode does not tell anyone to roll back", () => {
+  // The remedy is the whole output in a failure, and section 5.1 is reached
+  // precisely because the previous ring is untrusted or gone. "Roll Railway
+  // back to Active" there means restoring the abandoned ring -- in a leak,
+  // the leaked one.
+  const deployed = ed25519();
+  const intended = ed25519();
+  const failing = {
+    ...candidate({ signingPkcs8: intended.pkcs8, pepper: PEPPER_INTENDED }),
+    ...evidence({ signing: deployed, pepper: PEPPER_INTENDED }),
+  };
+
+  const rotation = run(failing);
+  assert.match(rotation.stdout, /Roll Railway back to Active/);
+
+  const emergency = run({ ...failing, MOBILE_AUTH_VERIFY_MODE: "emergency" });
+  assert.equal(emergency.code, 1, emergency.stdout);
+  assert.match(emergency.stdout, /do NOT roll back/);
+  assert.match(emergency.stdout, /disable mobile\n?\s*auth|roll forward/);
+  assert.equal(/Roll Railway back to Active/.test(emergency.stdout), false);
+});
+
+test("an unrecognised mode fails rather than defaulting to the rollback advice", () => {
+  const signing = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED }),
+    ...evidence({ signing, pepper: PEPPER_INTENDED }),
+    MOBILE_AUTH_VERIFY_MODE: "incident",
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /expected one of rotation, emergency/);
 });

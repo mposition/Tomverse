@@ -32,6 +32,7 @@
 import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 
 import {
+  MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS,
   normalizeMobileKeyId,
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
   MOBILE_ACTIVE_SIGNING_KEY_ENV,
@@ -134,6 +135,22 @@ const describe = (
           `Either retire it (check the id you typed) or remove it from the ring.`
       );
       console.log(`  ${keyId}  UNDECLARED -- verifies nothing`);
+      continue;
+    }
+
+    // A retirement instant that has not arrived is not a retirement. Left
+    // alone it reads as healthy and keeps the key trusted until that date --
+    // `sign-old@2099-01-01T00:00:00Z` is seventy years of trust reported as
+    // "RETIRED, verifies until 2099". The runtime refuses such a key; this
+    // says why before the deploy.
+    if (retiredAt > now + MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS * 1000) {
+      problems.push(
+        `${label}: "${keyId}" is retired at ${new Date(retiredAt).toISOString()}, which is in the future. ` +
+          `A retirement records when trust was withdrawn, so that is a typo, and until it is fixed the key verifies nothing.`
+      );
+      console.log(
+        `  ${keyId}  RETIREMENT IN THE FUTURE (${new Date(retiredAt).toISOString()}) -- verifies nothing`
+      );
       continue;
     }
 

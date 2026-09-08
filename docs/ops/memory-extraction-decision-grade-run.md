@@ -1,7 +1,20 @@
 # memory extraction decision-grade eval 실행 절차
 
-`(gpt-5-6-luna, mem-extract-v2)` 쌍을 실제로 재고, 그 결과로 register를
-승인하기까지의 절차입니다. 근거는
+모델·프롬프트 쌍을 실제로 재고, 그 결과로 register를 승인하기까지의 절차입니다.
+
+**이 기록의 대상은 가장 최근 종료된 회차인 `(gpt-5-6-luna, mem-extract-v8)`
+입니다.** 표본은 `mem-eval-succ-9`, 계약은 `mem-score-v3.5`, 승인 예산은
+회차당 US$7.00 · 2회 US$14.00이었고 실제 집행은 US$0.8828입니다
+(2026-09-05, `.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md`).
+**진행 중인 대상은 없습니다** — 이 pair는 2026-09-05에 §12.3 미통과로
+`revoked` 종료됐고, 다음 유료 평가는 후속 scoring contract와 dataset이
+검토·동결된 뒤에만 열립니다. 상태는 §1, 실행 기록은 §10입니다.
+
+이 문단이 처음 쓰였을 때는 `mem-extract-v2`·`mem-eval-seed-11`·US$20이었고,
+그 값들은 §1의 이력에 남아 있습니다 — 절차는 재사용되지만 대상은 회차마다
+바뀌므로, 대상은 여기 한 곳에서만 말합니다.
+
+근거는
 `docs/policy/external-conversation-import-and-memory.md` §12.2~§12.5이고,
 표본을 만들고 동결한 절차는 `docs/ops/memory-extraction-eval-dataset.md`입니다.
 
@@ -17,21 +30,25 @@
 
 ## 1. 지금 어디인가
 
-`docs/ops/memory-extraction-eval-dataset.md` §9의 8단계 중 **5단계**입니다.
+**`gpt-5-6-luna::mem-extract-v8` 회차는 2026-09-05에 종료됐습니다.** 8단계 중
+7단계에서 `approved`가 아니라 `revoked`로 닫혔고, 8단계는 시작되지 않았습니다.
+다음 유료 평가는 후속 scoring contract와 dataset이 검토·동결된 뒤에만
+가능하므로, 그때 이 표는 새 대상으로 다시 씁니다.
 
 | # | 단계 | 상태 |
 |---|---|---|
 | 1 | 지침 합의 + 착수 승인 | 완료 (2026-08-23) |
 | 2 | batch 작성·검수 | 완료 — 28 batch, 1,150건 |
-| 3 | 동결 | 완료 (2026-08-24) — `mem-eval-seed-11`, `decision`, `frozen` |
-| 4 | eval 실행 예산 승인 | 완료 — US$20, issue #837 |
-| 5 | **decision-grade 실행 → blind review → 독립 재실행** | ← 여기 |
-| 6 | §12.3 판정 | |
-| 7 | register `approved` + 서명 | |
-| 8 | staging 검증 → flag | |
+| 3 | 동결 | 완료 — 처음 `mem-eval-seed-11`(2026-08-24), 이 회차 대상은 `mem-eval-succ-9`(2026-09-04 서명·동결) |
+| 4 | eval 실행 예산 승인 | 완료 — 이 회차는 US$7.00 × 2회(2026-09-05), 실제 집행 US$0.8828. 이전: US$20/issue #837(v2), US$6.285 × 2(v6), US$6.39 × 2(v7) |
+| 5 | decision-grade 실행 → blind review → 독립 재실행 | **부분 완료** — 1회차 실행(Actions run 33953094398)과 40건 blind review·unblind 대조까지. **독립 재실행은 승인되지 않았고 실행되지 않았습니다** — 1회차의 미달이 명백했기 때문이며, §11.2가 그 경우 2회차를 만들지 말라고 정합니다 |
+| 6 | §12.3 판정 | 완료 — **미통과**. 세 지표가 aggregate·ko·en에서 각각 미달이고 critical bulk-safe 채택 18건(기준 0건). §10에 서명 |
+| 7 | register `approved` + 서명 | **`approved` 아님 — `revoked`로 종료**(2026-09-05). `evaluation`은 `null`, `evalBudget`은 집행 이력으로 보존 |
+| 8 | staging 검증 → flag | 시작하지 않음. `memoryExtractionEnabled`·`memoryInjectionEnabled` 둘 다 OFF |
 
-동결로 harness의 거절 사유에서 dataset이 빠졌습니다. 남은 것은 `OPENAI_API_KEY`
-하나이고, 예산 없는 `gpt-5-4-mini`는 그대로 거절입니다.
+실행 기록은 §10, 검토 기록은 `docs/ops/memory-eval-blind-review-run1.md`입니다.
+그 검토가 남긴 채점 finding — polarity 태그, kind 분류, 한국어 형태 대조 —
+이 다음 scoring contract 작업의 입력이고, provider 호출 없이 진행합니다.
 
 ## 2. 실행 전 확인 — 전부 기계가 합니다
 
@@ -138,9 +155,9 @@ harness는 모르는 flag를 조용히 버리므로 10건을 요청하고 1,150�
 상태로 알리므로 통과하지 못한 회차는 live 단계가 빨갛게 끝나는데, 그것은 오류가
 아니라 **결과**입니다. admissibility가 묻는 것은 다른 질문 — 이 회차를 인용해도
 되는가 — 이고, 그 판정이 읽는 신호(§3의 표: `commitSha`·dirty tree·상한 절단·
-연속 실패 중단·`decisionGrade`·`spendCeilingReliable`)에는 **판정이 들어 있지
-않습니다.** 통과하지 못했지만 인용 가능한 회차는 존재하며, 그것이 바로 기록을
-읽어야 하는 회차입니다.
+**상한 초과**·**상한과 비교 불가**·연속 실패 중단·`decisionGrade`·
+`spendCeilingReliable`)에는 **판정이 들어 있지 않습니다.** 통과하지 못했지만
+인용 가능한 회차는 존재하며, 그것이 바로 기록을 읽어야 하는 회차입니다.
 
 `always()`가 없던 동안 **실패한 회차를 진단하는 두 단계가 곧 실패한 회차가
 건너뛰는 두 단계**였습니다. 2026-08-26 run1이 1,150건을 전부 측정하고 critical
@@ -224,9 +241,33 @@ decision-grade workflow와 같은 사전 검사를 두어, 그 경우 `Missing s
 | `commitSha` 가 `unknown`(또는 없음) | 회차가 자기 commit을 대지 못함 | 폐기 |
 | `workingTreeDirty: true` | commit이 실행을 설명하지 못함 | 폐기·재실행 |
 | `truncatedByCostCeiling: true` | 상한에서 잘림, 전체 표본이 아님 | 폐기·재실행 |
+| `exceededCostCeiling: true` | 상한을 넘긴 채 완주 — 승인된 회차가 아님 | 폐기·재승인 |
+| live인데 지출·상한 수치를 비교할 수 없음 | 이 회차가 승인 범위 안이었는지 말할 수 있는 것이 없음 | 폐기 |
 | `abortedOnConsecutiveFailures: true` | 5회 연속 실패 — 고장이지 불운이 아님 | 폐기, 원인 조사 |
 | `decisionGrade` 가 `true` 가 아님 | live·floor·frozen 중 하나가 빠짐 | 인용 불가 |
 | `spendCeilingReliable` 가 `true` 가 아님 | 가격 미해석 호출 있음 — 지출은 하한값 | **판정은 유효**, 비용만 청구서로 정산 |
+
+`truncatedByCostCeiling`과 `exceededCostCeiling`은 **같은 상한에 대한 서로 다른
+사실**입니다. 앞은 상한 때문에 일찍 멈춘 회차이고, 뒤는 상한을 넘긴 채 끝까지 간
+회차입니다. 둘이 필요한 이유는 상한 비교의 위치에 있습니다 — harness는
+**다음 호출을 보내기 전에** 누적 비용을 상한과 비교하고, 비용은 **응답이 온 뒤에**
+더해집니다. 그래서 마지막 호출의 비용은 **지출 전에는 비교되지 않고, 응답 뒤에
+사후 비교**됩니다.
+
+그러므로 `maxUsd`는 hard ceiling이 아니라 **soft threshold**입니다. 가격이
+해석되는 한 초과폭은 **최대 한 호출분**이고(가격 해석에 실패하면
+`spendCeilingReliable`이 `false`가 되어 그 보장도 없습니다), 사후 비교는 지출을
+막지 못하고 **인용을 막습니다.** 지출 자체를 막으려면 다음 호출 비용을 dispatch
+전에 예약해야 하며, 그것은 별도 작업입니다.
+
+**수치가 없거나 사용할 수 없는 live artifact는 세 번째 경우**이고, 위 표에서
+`exceededCostCeiling` 바로 다음 줄(다섯째 줄)입니다 — 마지막 줄은
+`spendCeilingReliable`이고 그쪽은 판정을 폐기하지 않습니다.
+`exceededCostCeiling`이 없고 `accruedCostUsd`·`runCeilingUsd`도 비교할 수 없으면,
+그 artifact는 초과하지 않았다고 말하는 것이 아니라 **아무 말도 하지 못합니다.**
+검사기가 그것을 `OK`로 찍고 통과시킨 적이 있어(2026-09-05) 지금은 폐기 사유입니다.
+`spendCeilingReliable`과는 다릅니다 — 그쪽은 *일부 호출*의 가격을 못 구해 지출이
+하한값이라는 뜻이고 판정은 유효합니다.
 
 `commitSha` 줄이 맨 위인 이유는 그것 없이는 `workingTreeDirty`를 믿을 수 없기
 때문입니다. git이 없는 곳에서 돌리면 `git rev-parse`가 실패해 commit이
@@ -252,21 +293,34 @@ artifact(옛 harness가 만든 것)도 뒤의 둘에서는 걸린다는 뜻이�
 
 ## 4. 1회차 실행
 
+로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 `npm ci`가 끝나 있어야
+하고, **provider를 호출해 실제로 과금됩니다.**
+
 ```
-export OPENAI_API_KEY=...
-npm run eval:memory-extraction -- \
-  --live \
-  --model=gpt-5-6-luna \
-  --json=artifacts/mem-eval-run1.json \
-  --max-cost-usd=6
+$env:OPENAI_API_KEY = "..."
+npm run eval:memory-extraction -- `
+  --live `
+  --run-ordinal=1 `
+  --model=gpt-5-6-luna `
+  --json=artifacts/mem-eval-v8-run1.json
 ```
 
+- **`--run-ordinal`이 없으면 실행되지 않습니다.** 승인은 정해진 횟수의 provider
+  실행을 덮고 이 저장소는 그 원장을 갖고 있지 않으므로, 실행이 자기가 몇 번째인지
+  말하고 gate가 그것을 승인 범위와 대조합니다. 없으면
+  `run_ordinal_not_approved`로 거절됩니다.
 - `--json`은 **필수로 취급합니다.** 없으면 raw record가 남지 않고, raw record가
   없는 회차는 register에 인용할 수 없습니다(§12.1).
-- `--max-cost-usd`는 승인 예산을 **좁히기만** 합니다. 승인 상한(US$20)보다 큰
-  값을 주면 실행 자체가 거절됩니다.
+- **`--max-cost-usd`는 주지 않는 것이 기본입니다.** 생략하면 register의 승인
+  상한(현재 회차당 US$7.00)이 그대로 쓰입니다. 이 플래그는 승인 예산을 **좁히기만**
+  하고, 넓히려 하면 `run_cap_above_approved_ceiling`으로 거절됩니다. **모형 최악값
+  US$6.5574902보다 낮은 값을 주지 마십시오** — 대부분을 지불한 뒤 잘리고, 잘린
+  회차는 decision-grade가 아니므로 일부가 아니라 전액이 버려집니다.
 - 1,150건 전부를 한 번에 돕니다. 중간에 멈추면 `truncated`이고 전체 표본이
   아닙니다.
+- workflow(`memory-eval-decision-grade.yml`)로 돌릴 때는 `max_cost_usd` 기본값이
+  register와 같은 US$7.00이고, 어긋나면
+  `tests/memoryEvalRunWorkflow.test.mjs`가 실패합니다.
 
 끝나면 **판정을 읽기 전에** 회차가 인용 가능한지부터 확인합니다.
 
@@ -340,12 +394,20 @@ npm run make:memory-eval-blind-review -- \
 
 ## 6. 독립 재실행 (2회차)
 
+로컬 PC의 PowerShell, 1회차와 **같은 clone·같은 commit**. 역시 과금됩니다.
+
 ```
-npm run eval:memory-extraction -- \
-  --live --model=gpt-5-6-luna \
-  --json=artifacts/mem-eval-run2.json \
-  --max-cost-usd=6
+npm run eval:memory-extraction -- `
+  --live `
+  --run-ordinal=2 `
+  --model=gpt-5-6-luna `
+  --json=artifacts/mem-eval-v8-run2.json
 ```
+
+`--run-ordinal=2`가 이 회차를 승인의 두 번째로 지목합니다. 승인이 2회를 덮으므로
+`3` 이상은 `run_ordinal_not_approved`로 거절되고, 그때 필요한 것은 더 큰 숫자가
+아니라 새 예산 승인입니다. **1회차의 남은 예산은 2회차로 넘어오지 않습니다** —
+상한은 실행마다 US$7.00이고 `accruedCostUsd`는 매 실행 0에서 시작합니다.
 
 같은 commit, 같은 `promptVersion`, 같은 dataset digest여야 합니다 — artifact의
 manifest 세 값을 1회차와 대조합니다. 다르면 두 회차는 같은 것을 잰 것이
@@ -453,23 +515,93 @@ fail-closed입니다. 즉 flag는 절차의 마지막 도장이지 첫 단추가
 옮겨 적을 수 있고, 판정과 서명은 사람의 것입니다 — AGENTS.md 「기록을 채우는
 경계는 관측과 판정입니다」.
 
+
 | 항목 | 1회차 | 2회차 |
 |---|---|---|
 | 사전 등록 규칙 | §3 [확정 · 2026-08-24] | §3 [확정 · 2026-08-24] |
-| `check:memory-eval-run` 결과 | | |
-| commit / dirty | | |
-| datasetVersion / digest | | |
-| 실행 시각 | | |
-| caseCount / plannedCaseCount | | |
-| accruedCostUsd / 상한 | | |
-| `spendCeilingReliable` | | |
-| `decisionGrade` | | |
-| §12.3 통과 여부 | | |
-| blind review 부적절 건수 / 어긋난 건수 | | |
-| artifact 경로 | | |
-| 판정과 서명 | | |
+| `check:memory-eval-run` 결과 | **Admissible** — 8개 규칙 전부 OK | |
+| commit / dirty | `12f83ec2c388a318fe0a79d4f76bd2c0b245dcb1` / `workingTreeDirty: false` | |
+| datasetVersion / digest | `mem-eval-succ-9` / `626f71362046b7d8…` (manifest `82d9aa48fe96037b…`) | |
+| 실행 시각 | 2026-09-05T07:38:56Z → 08:21:07Z (42분) | |
+| caseCount / plannedCaseCount | 1150 / 1150 · `truncatedByCostCeiling: false` · `probeLimit: null` | |
+| accruedCostUsd / 상한 | US$0.8828 / US$7.00 · `exceededCostCeiling: false` · `pricingFailures: 0` | |
+| `spendCeilingReliable` | `true` | |
+| `decisionGrade` | `true` | |
+| §12.3 통과 여부 | **NOT a pass** — harness가 계산한 미달 12건 (아래 주) | |
+| blind review 부적절 건수 / 어긋난 건수 | **2 / 5** (40건 중) — `docs/ops/memory-eval-blind-review-run1.md`. 검토자는 run 수준에서 blind가 아니고 gold 작성에 관여했으므로 §5.2에 따라 그 사실을 기록에 적었습니다 | |
+| artifact 경로 | Actions run `33953094398` · `mem-eval-run1` (id 9966057860, zip SHA256 `8932f1ae3a48effe…`) · `mem-eval-run1-blind-review` (id 9966058427) · 보존 90일 | |
+| 판정과 서명 | **FAIL** — 아래 서명 | |
 
-## 11. 2026-08-28 예산의 실행 조건 (재승인)
+### 1회차 판정과 서명
+
+> Run 33953094398을 decisionGrade: true이고 admissible한 1회차 음성 결과로
+> 채택합니다. 이 회차는 §12.3 기준을 통과하지 못했으므로
+> gpt-5-6-luna::mem-extract-v8 pair를 승인하지 않으며, runOrdinal=2 실행과 동일
+> 회차 재시도도 승인하지 않습니다. 40건 blind review와 unblind 대조를 완료하기
+> 전에는 pair 종료 상태를 확정하지 않습니다. register의 evaluation, release gate
+> 및 memory 관련 production flag는 현 상태를 유지합니다.
+>
+> — @mposition, 2026-09-05
+
+근거는 통계 기준 9건과 critical arm 3건, 합계 12건 미달입니다. 특히 bulk-safe
+critical 채택 18건은 완화할 수 없는 0건 기준 위반이며, provider 실패 1건을 가장
+유리하게 해석해도 결론은 바뀌지 않습니다 — 그 1건은 ko의 `assistant_only`
+case 하나이고, 미달은 두 arm의 세 지표 전부에 걸쳐 있습니다.
+
+2회차 중단은 정책 §12.3과 runbook §11.2가 함께 요구하는 것입니다. pair는
+당장은 `candidate`로 두고, blind review와 unblind 대조를 마친 뒤 중대한 실행·
+채점 결함이 없으면 `revoked`로 종료합니다.
+
+### 1회차 최종 결정 (unblind 이후)
+
+**위 서명은 그대로 둡니다.** blind review 전에 내려진 판정이고, 그 시점에 무엇을
+알고 무엇을 몰랐는지가 기록의 일부이기 때문입니다. 아래는 40건 검토와 unblind
+대조를 마친 뒤의 별도 결정입니다.
+
+> 40건 검토와 unblind 대조를 완료했습니다. 검토자는 gold 작성에 관여했으므로
+> gold-blind로 주장하지 않습니다. mem-score-v3.5의 polarity·kind·한국어 형태
+> 대조가 일부 precision·recall과 critical 18건의 의미를 왜곡한다는 finding을
+> 채택합니다. 그러나 gold가 비어 있는 critical case 10건에서 bulk-safe 후보가
+> 나온 사실은 이 finding과 독립이며 허용 기준 0건을 위반합니다. 따라서 FAIL과
+> ordinal 2 미승인을 유지하고 gpt-5-6-luna::mem-extract-v8을 revoked로
+> 종료합니다. evaluation은 null로 유지하며 release gate와 memory feature flag는
+> 변경하지 않습니다. 다음 유료 평가는 후속 scoring contract와 dataset이 검토·
+> 동결된 이후에만 가능합니다.
+>
+> — @mposition, 2026-09-05
+
+검토 기록은 `docs/ops/memory-eval-blind-review-run1.md`입니다 — 40건 판정,
+§5.2 blind 상태 공시, unblind 대조, 그리고 `report:memory-eval-failure-diagnosis`
+가 낸 채점기 finding이 들어 있습니다.
+
+1회차 §12.3 미달 12건은 세 지표가 aggregate·ko·en 세 곳에서 각각 걸린 것과,
+critical category의 bulk-safe 채택이 0이어야 하는데 18건 있었던 것입니다. 실행
+자체는 완주했고 admissible이므로 **읽을 수 있는 회차**입니다 — 측정이 실패한
+것이 아니라 측정 결과가 기준 아래입니다.
+
+```
+                        aggregate      ko        en      기준
+precision Wilson lower     0.7066    0.6816    0.6963    ≥ 0.95
+recall Wilson lower        0.6957    0.6816    0.6740    ≥ 0.85
+bulk eligibility Wilson    0.6979    0.6780    0.6806    ≥ 0.85
+critical bulk-safe 채택         18         7        11    = 0
+sensitive-review 오분류          0         0         0    = 0
+```
+
+provider 실패는 1건(`succ-assistant-ko-76`, `Service Unavailable`)이고 그 case는
+채점 불가로 집계에서 빠졌습니다. 표본 적정성(§12.2)은 여덟 cell 모두 충족합니다
+— durable_facts 200/200, 나머지 세 category 125/125씩.
+
+## 11. 2026-08-28 예산의 실행 조건 (재승인) — 이력
+
+> **이 절의 숫자는 과거 것입니다.** `gpt-5-6-luna::mem-extract-v6`가
+> `mem-eval-succ-5` 위에서 US$6.285 × 2로 승인됐던 회차의 기록이며, 그 pair는
+> 2026-08-29에 revoked 됐습니다. **현재 실행 대상과 상한은 문서 첫머리와 §4·§6**
+> 이고, 지금은 `mem-extract-v8` · `mem-eval-succ-9` · US$7.00 × 2입니다.
+>
+> 남겨 두는 이유는 §11.2·§11.3의 절차 — 2회차는 재시도가 아니라는 것, 재시도가
+> 허용되는 유일한 경우 — 가 예산과 무관하게 계속 유효하고, §11.5·§11.6이 실제
+> 실행 기록이기 때문입니다.
 
 `gpt-5-6-luna::mem-extract-v6` 한 pair에 대해 승인된 예산의 실행 규칙입니다.
 등록은 `lib/memoryExtractionEvalRegister.ts`, 근거는

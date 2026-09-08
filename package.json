@@ -52,6 +52,8 @@
     "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
     "check:memory-eval-succ6": "node --import tsx scripts/check-memory-eval-succ6.mjs",
     "check:memory-eval-succ7": "node --import tsx scripts/check-memory-eval-succ7.mjs",
+    "check:memory-eval-succ8": "node --import tsx scripts/check-memory-eval-succ8.mjs",
+    "check:memory-eval-succ9": "node --import tsx scripts/check-memory-eval-succ9.mjs",
     "make:memory-eval-succ7-review-sheet": "node --import tsx scripts/make-memory-eval-succ7-review-sheet.mjs",
     "report:polarity-calibration": "node --import tsx scripts/report-polarity-calibration.mjs",
     "draft:memory-eval-succ4-golds": "node --import tsx scripts/draft-memory-eval-succ4-golds.mjs",
@@ -200,25 +202,25 @@
     "verify:mobile-auth-deployment": "node --conditions=react-server --import tsx scripts/verify-mobile-auth-deployment.mjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.44",
-    "@ai-sdk/google": "^4.0.54",
-    "@ai-sdk/moonshotai": "^3.0.41",
-    "@ai-sdk/openai": "^4.0.50",
+    "@ai-sdk/anthropic": "^4.0.49",
+    "@ai-sdk/google": "^4.0.63",
+    "@ai-sdk/moonshotai": "^3.0.45",
+    "@ai-sdk/openai": "^4.0.57",
     "@auth/prisma-adapter": "^2.11.3",
-    "@aws-sdk/client-s3": "^3.1119.0",
-    "@aws-sdk/s3-request-presigner": "^3.1119.0",
+    "@aws-sdk/client-s3": "^3.1125.0",
+    "@aws-sdk/s3-request-presigner": "^3.1125.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@prisma/config": "^7.10.0",
-    "@sentry/nextjs": "^10.71.0",
-    "ai": "^7.0.83",
+    "@sentry/nextjs": "^10.73.0",
+    "ai": "^7.0.91",
     "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
-    "lucide-react": "^1.34.0",
-    "next": "16.3.3",
+    "lucide-react": "^1.39.0",
+    "next": "16.3.4",
     "next-auth": "^4.24.15",
     "officeparser": "^7.8.0",
-    "openai": "^7.7.0",
+    "openai": "^7.9.0",
     "pdfjs-dist": "^6.2.108",
     "pg": "^8.23.0",
     "prisma": "^7.10.0",
@@ -231,9 +233,9 @@
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
     "sharp": "^0.35.4",
-    "stripe": "^22.6.0",
+    "stripe": "^22.6.1",
     "yaml": "^2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -243,10 +245,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.3",
+    "eslint-config-next": "16.3.4",
     "js-tiktoken": "^1.0.21",
     "tailwindcss": "^4",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.13",
     "typescript": "^6",
     "vite": "^8.2.2"
   },
@@ -270,11 +272,14 @@
     "eslint-config-next": {
       "brace-expansion": "^1.1.17"
     },
-    "fast-uri": "3.1.5",
+    "fast-uri": "^3.1.6",
     "pdfjs-dist": "^6.2.108",
     "postcss": {
       ".": "8.5.25",
       "nanoid": "^3.3.17"
+    },
+    "prisma": {
+      "mysql2": "^3.23.1"
     },
     "sharp": "$sharp",
     "uuid": "11.1.1"

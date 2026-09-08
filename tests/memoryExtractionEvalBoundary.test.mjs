@@ -30,7 +30,7 @@ import { MEMORY_EVAL_DATASET_FROZEN } from "../lib/memoryExtractionEvalFixtures.
  */
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-import { MEMORY_EVAL_SUCC3_DATASET_FROZEN } from "../lib/memoryEvalSucc3Fixtures.ts";
+import { harnessTarget } from "../lib/memoryEvalHarnessTarget.ts";
 
 const HARNESS = "scripts/evalImportedMemoryExtraction.mjs";
 const NETWORK_GUARD = fileURLToPath(
@@ -239,6 +239,17 @@ test("only a funded, open pair can run live, and it is named", () => {
     // approved US$6.39 x 2 is still on the record and would still cover a
     // second run; that is precisely why the status, not the ceiling, is what
     // closes it.
+    // One entry again since 2026-09-05, later the same day. `mem-extract-v8`
+    // was funded at US$7.00 x 2, ran once (Actions run 33953094398) and was
+    // revoked on the result: an admissible decision-grade failure, US$0.8828
+    // of the ceiling spent, every §12.3 floor missed and 18 critical
+    // bulk-safe adoptions against a gate of zero. Its blind review found
+    // scoring defects and they did not rescue it — 10 of those adoptions sit
+    // in cases whose gold expects nothing at all, which no relabelling
+    // explains. So v8 joins v5, v6 and v7: funded, spent, closed on the
+    // status ahead of the budget
+    // (docs/ops/memory-eval-blind-review-run1.md,
+    // docs/ops/memory-extraction-decision-grade-run.md §10).
     assert.deepEqual(runnable, ["gpt-5-6-luna::mem-extract-v4"]);
     // Pinned rather than range-checked: a budget that drifts upward without
     // these lines moving is a budget nobody approved for the figure it
@@ -254,9 +265,16 @@ test("only a funded, open pair can run live, and it is named", () => {
     // is genuinely runnable, and the thing standing between it and a provider
     // is an explicit instruction to run — not another gate
     // (.github/audits/memory-eval-v7-budget-approval-2026-08-31.md section 3).
+    // v8's US$7.00 is the second entry for which both halves hold, and the
+    // first bound to `mem-eval-succ-9`. Its figure is not the raw worst case:
+    // `report:memory-eval-cost-estimate` puts that at US$6.5574902 a run, and
+    // the approval added margin because those token counts are this
+    // repository's estimate rather than the provider's own
+    // (.github/audits/memory-eval-v8-budget-proposal-2026-09-05.md section 2.3).
     const ceilings = {
         "gpt-5-6-luna::mem-extract-v4": 15,
         "gpt-5-6-luna::mem-extract-v7": 6.39,
+        "gpt-5-6-luna::mem-extract-v8": 7.0,
     };
     for (const label of runnable) {
         const funded = MEMORY_EXTRACTION_EVAL_REGISTER.find(
@@ -537,12 +555,14 @@ test("the shipped pair refuses without a key, and reaches no network", () => {
     assert.equal(result.status, 1, "the run must refuse");
     assert.doesNotMatch(result.output, /is not frozen/i);
     // Which gate stops it depends on what the register says today: with every
-    // pair revoked it is the status, and with a candidate registered it would
-    // be the key. Any refusal is correct; reaching the network is not, and
-    // that is what this test exists for.
+    // pair revoked it is the status, with a candidate registered it would be
+    // the key, and with the prompt bumped past every registered pair — which
+    // is where `mem-extract-v8` leaves it — it is the missing entry. Any
+    // refusal is correct; reaching the network is not, and that is what this
+    // test exists for.
     assert.match(
         result.output,
-        /OPENAI_API_KEY|no approved eval budget|in the\s+register/i
+        /OPENAI_API_KEY|no approved eval budget|in the\s+register|No register entry/i
     );
     assert.doesNotMatch(
         result.output,
@@ -574,9 +594,14 @@ test("a smoke run that passes every rule still says it proves nothing", () => {
     const result = runHarness([]);
     assert.match(result.output, /SMOKE RUN — NOT an eval result/);
     assert.match(result.output, /No provider was called/);
+    // Read from the *target's* freeze flag, not succ-3's. The harness prints
+    // the state of whatever it is pointed at, and succ-3 stopped being that
+    // four datasets ago — the two agreed by coincidence until 2026-09-03,
+    // when the harness moved to the unfrozen `mem-eval-succ-8` and this
+    // assertion started demanding a word the harness had no reason to print.
     assert.match(
         result.output,
-        MEMORY_EVAL_SUCC3_DATASET_FROZEN
+        harnessTarget().datasetFrozen
             ? /\(decision, frozen\)/
             : /\(decision, not frozen\)/
     );

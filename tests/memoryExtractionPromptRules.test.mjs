@@ -38,8 +38,8 @@ const promptText = () => {
     return `${prompt.system}\n${prompt.user}`;
 };
 
-test("the version is v7", () => {
-    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v7");
+test("the version is v8", () => {
+    assert.equal(MEMORY_EXTRACTION_PROMPT_VERSION, "mem-extract-v8");
 });
 
 /* ------------------------------------------------- A. output language -- */

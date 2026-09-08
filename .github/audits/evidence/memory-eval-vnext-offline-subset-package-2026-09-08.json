@@ -1,0 +1,2617 @@
+{
+  "schemaVersion": 1,
+  "kind": "memory_eval_vnext_offline_subset_approval_preparation",
+  "status": "DRAFT_OFFLINE_SUBSET_APPROVAL_PENDING",
+  "preparedDate": "2026-09-08",
+  "documentPath": ".github/audits/memory-eval-vnext-offline-subset-approval-draft-2026-09-08.md",
+  "documentRawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+  "hashBinding": {
+    "documentRawSha256": "hash of the Markdown only; no self-hash for this JSON",
+    "futureApproval": "Separate receipt must bind both final raw file hashes and actual document commit; N/report hashes are not substitutes."
+  },
+  "authorization": {
+    "preparationAuthorized": true,
+    "implementationAuthorized": false,
+    "activationAuthorized": false,
+    "decision": "pending",
+    "approvedBy": null,
+    "approvedAt": null,
+    "documentCommit": null,
+    "approvalReceiptCommit": null,
+    "commitPushPrAuthorized": false,
+    "operationalEvidenceProduced": false
+  },
+  "basis": {
+    "repository": "mposition/Tomverse",
+    "B": "48df8e428061003115aad8d66c27fd1dddd56f7a",
+    "R": "2a13acea05805f18528a205d5caeba37f0d800c9",
+    "N": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+    "repositoryBasis": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+    "mergeParents": [
+      "48df8e428061003115aad8d66c27fd1dddd56f7a",
+      "2b652cb9f8a729b40fe325be06503f92a62c524d"
+    ],
+    "mergeTreeEqualsN": true,
+    "pr": 1274,
+    "branch": "codex/memory-eval-vnext-offline-subset-approval",
+    "originalShaAncestryVerified": true,
+    "developCi": [
+      {
+        "runId": 34172915045,
+        "attempt": 1,
+        "headSha": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+        "event": "push",
+        "branch": "develop",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34172915045",
+        "jobs": [
+          {
+            "name": "Admin Console E2E (PostgreSQL)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Production build",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run the Admin Console E2E suite",
+                "conclusion": "success"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "runId": 34172915046,
+        "attempt": 1,
+        "headSha": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+        "event": "push",
+        "branch": "develop",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34172915046",
+        "jobs": [
+          {
+            "name": "Credit and finance PostgreSQL scenarios (email)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios (memory)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios (finance)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios (assistant)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios (import)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios (accounts)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios (routing)",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Run financial DB integration tests",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "name": "Credit and finance PostgreSQL scenarios",
+            "conclusion": "success",
+            "executedCriticalSteps": [
+              {
+                "name": "Require every lane to have passed",
+                "conclusion": "success"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "ciIsNewPackageOrImplementationEvidence": false
+  },
+  "currentWriteAllowlist": [
+    ".github/audits/memory-eval-vnext-offline-subset-approval-draft-2026-09-08.md",
+    ".github/audits/evidence/memory-eval-vnext-offline-subset-package-2026-09-08.json"
+  ],
+  "sourceFiles": [
+    {
+      "commit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+      "path": ".github/audits/memory-eval-vnext-s1-scoring-contract-2026-09-06.md",
+      "rawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+      "blobOid": "4dc1ea945850b283ad9654a4bcaf8967e241e863",
+      "byteLength": 65000,
+      "lineCount": 778
+    },
+    {
+      "commit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+      "path": ".github/audits/memory-eval-vnext-s2-purpose-contract-2026-09-06.md",
+      "rawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+      "blobOid": "6ab7c0813818a2575cf20915c9f42ba84b5d28e1",
+      "byteLength": 45965,
+      "lineCount": 632
+    },
+    {
+      "commit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+      "path": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "rawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+      "blobOid": "bd45e60dcaa9a0c7193fda87d6022d0e429ff54c",
+      "byteLength": 61926,
+      "lineCount": 726
+    },
+    {
+      "commit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+      "path": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "rawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+      "blobOid": "761c5debe81e48f25870b9ea36a71c1de8165bd1",
+      "byteLength": 76581,
+      "lineCount": 847
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "path": ".github/audits/memory-eval-vnext-contract-decision-2026-09-05.md",
+      "rawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+      "blobOid": "19d49c386743265b92851cf6ca158f1c16f14ae2",
+      "byteLength": 23526,
+      "lineCount": 400
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "path": ".github/audits/memory-eval-vnext-contract-decision-approval-2026-09-06.md",
+      "rawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+      "blobOid": "883166bf495d0bf10bdb512beff56bda3a6dea60",
+      "byteLength": 2792,
+      "lineCount": 60
+    },
+    {
+      "commit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-2026-09-07.md",
+      "rawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+      "blobOid": "9546274f54cab223fc1835330b86af420a7542e7",
+      "byteLength": 9406,
+      "lineCount": 142
+    },
+    {
+      "commit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+      "blobOid": "c926a58c1d7ec93ee03ebc7032f4d598c7e66716",
+      "byteLength": 14881,
+      "lineCount": 200
+    },
+    {
+      "commit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-2026-09-07.md",
+      "rawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+      "blobOid": "fe2a9f6bf1cfc8cdc599a6116e0d10f6189bd4b6",
+      "byteLength": 11833,
+      "lineCount": 162
+    },
+    {
+      "commit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+      "blobOid": "d0046c7128a22644fa07b028b166144174f22afb",
+      "byteLength": 20644,
+      "lineCount": 244
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+      "blobOid": "f88ec0794a87414a78686d432de45a78d63965da",
+      "byteLength": 20392,
+      "lineCount": 281
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-2026-09-07.md",
+      "rawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+      "blobOid": "b8638d84a1a8d5ae2a31b2146c2a131719e6e3e7",
+      "byteLength": 13677,
+      "lineCount": 223
+    },
+    {
+      "commit": "159267a80acee97da3a297c637343ea15de725f9",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "rawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+      "blobOid": "69aac932970fc0950cef1fedbf45bb51acab4220",
+      "byteLength": 56169,
+      "lineCount": 820
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-clarification-approval.json",
+      "rawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+      "blobOid": "f761e116ebf3ffefe7ba4beb8e6762526c20cfc9",
+      "byteLength": 686,
+      "lineCount": 1
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-2026-09-07.md",
+      "rawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+      "blobOid": "01d0bfdf242ca1488522153b0490c53236da3cd0",
+      "byteLength": 13296,
+      "lineCount": 214
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-request-draft-2026-09-07.md",
+      "rawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+      "blobOid": "2c6bfe0f61df203da552f86909337b4804805192",
+      "byteLength": 15573,
+      "lineCount": 214
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-recalculated-package-2026-09-07.json",
+      "rawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+      "blobOid": "541cc93cbe9d764fe2a1c4aa3ca2adf862c37f09",
+      "byteLength": 206389,
+      "lineCount": 4972
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-recalculated-approval-draft-2026-09-07.md",
+      "rawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+      "blobOid": "0717ceac2440bac5584368ad41c67ec767f461d9",
+      "byteLength": 20986,
+      "lineCount": 313
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+      "commit": "2a13acea05805f18528a205d5caeba37f0d800c9",
+      "rawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+      "blobOid": "0c86cb83a805f0197a1e6e75b6644823121496c6",
+      "byteLength": 36453,
+      "lineCount": 397
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-scope-evidence-2026-09-07.json",
+      "commit": "2a13acea05805f18528a205d5caeba37f0d800c9",
+      "rawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+      "blobOid": "9d1fd1b332d6dc26e3d9cb5693fb0e479a85916f",
+      "byteLength": 37723,
+      "lineCount": 633
+    },
+    {
+      "commit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+      "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-detailed-plan-2026-09-07.md",
+      "rawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+      "blobOid": "51151ce4d15717a3fbea2b35639ce3784943b6f5",
+      "byteLength": 42190,
+      "lineCount": 477
+    },
+    {
+      "commit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+      "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-next1-plan-2026-09-07.json",
+      "rawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+      "blobOid": "3ace168c233c54d9fe650107f8463dd7a7cb35fa",
+      "byteLength": 75176,
+      "lineCount": 1878
+    }
+  ],
+  "supportFiles": [
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "AGENTS.md",
+      "gitRawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad",
+      "workingRawSha256": "f4e48afffa926681e07e93634509d75eb4abbc2fda19b6ab7a83ff57d4387dd1"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "package.json",
+      "gitRawSha256": "226f30f650aaba3e8fe61be37b3e11499991be451902b48abd7c3c2d8e7fb58a",
+      "workingRawSha256": "d2450cb980d700ed852b659c30139e42732dd0bed38c65844c50c2c21f141c91"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "package-lock.json",
+      "gitRawSha256": "5d523a170217f6b6e693a40cb8a3385d138b85d12ca9e0f290046422666e188e",
+      "workingRawSha256": "00b524ced702d6c915e6fceb861f23ff0618c13049c2dad17e59319a3c244c0a"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "tsconfig.json",
+      "gitRawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959",
+      "workingRawSha256": "a90dbaf3d7885d0e4d1db827497488e0d905cffc528d65836634b549e4c1a098"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "scripts/run-unit-tests.mjs",
+      "gitRawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9",
+      "workingRawSha256": "e6af763f362e6a31a838d7e5fc9a7c7d5dbbe42d8bceede1da6c9fba24986e76"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "scripts/check-text-encoding.mjs",
+      "gitRawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e",
+      "workingRawSha256": "6f43f15a2c30afcfe9050897ca9db53b3f5e443d5d7ebf37fa7d4aa94cc8c473"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "scripts/check-doc-references.mjs",
+      "gitRawSha256": "943eee2e34ca059e911e4f7dcf58992345acdd288d79f56eaf2f269fb40c7f45",
+      "workingRawSha256": "32ac89f0f955054b5ac8710b72cc0c0a9e2fb2c7d585de2e83c44abb0d7c3843"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "scripts/check-policy-section-references.mjs",
+      "gitRawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50",
+      "workingRawSha256": "15a73f7cd7f2ed624a129c41be42406243f83e6fa6e19d5a8ca8d6a6cc946d49"
+    },
+    {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "path": "scripts/check-release-records.mjs",
+      "gitRawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080",
+      "workingRawSha256": "12466afec65a4f8728ef5972f33459757e365682c065d077fb76b014020d6999"
+    }
+  ],
+  "review": {
+    "targetCommit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+    "report": {
+      "path": "C:/Users/Vyper/.codex/attachments/f03f32b2-4035-4af2-affd-d5753bb7ffec/pasted-text.txt",
+      "rawSha256": "569f9ef21a0918855e1baba91b915e4802906b2a340ca6e090fafe9064da9ce3",
+      "byteLength": 11199
+    },
+    "verdict": "PASS_WITH_WARNINGS",
+    "p1": 0,
+    "p2": 0,
+    "p3": 2,
+    "findings": [
+      {
+        "id": "N-F1",
+        "severity": "P3",
+        "authorDisposition": "C04 registration remains opaque; this proposal limits comparison to S3 structures, epoch equality, D three purpose/role pairs, D/K refs and supplied bytes. Registration parser/schema/trust digest construction and actual authority require HD-1 plus separate exact decision.",
+        "reviewerClosure": null
+      },
+      {
+        "id": "N-F2",
+        "severity": "P3",
+        "authorDisposition": "R/N original SHA preserved in M merge; both develop push CI verified. Historical R-not-merged wording in N retained.",
+        "reviewerClosure": null
+      }
+    ],
+    "newPackageIndependentReview": null,
+    "newPackageConfirmation": null,
+    "prCiCorrection": "N PR docs-only Fast Gate had skipped build/smoke/UI steps despite workflow success; not all steps actually ran. This does not alter the pasted report bytes."
+  },
+  "requestedImplementationFiles": [
+    {
+      "id": "C01",
+      "path": "lib/memoryEvalVnext/protocol/canonicalJson.ts",
+      "classification": "runtime_component_candidate",
+      "responsibility": "CJSON encode/strict canonical decode, raw/domain SHA; no new protocol fields",
+      "allowedLocalImports": [],
+      "testIds": [
+        "T01",
+        "T11"
+      ],
+      "existsNow": false,
+      "executionAuthorizedNow": false
+    },
+    {
+      "id": "C02",
+      "path": "lib/memoryEvalVnext/protocol/wire.ts",
+      "classification": "runtime_component_candidate",
+      "responsibility": "Only BlobRef/GitFileRef/SignaturePayload/SignatureReceipt/TrustAnchor structural decoder; not all S3/S4/D records",
+      "allowedLocalImports": [
+        "C01"
+      ],
+      "testIds": [
+        "T01",
+        "T11"
+      ],
+      "existsNow": false,
+      "executionAuthorizedNow": false
+    },
+    {
+      "id": "C03",
+      "path": "lib/memoryEvalVnext/protocol/signatures.ts",
+      "classification": "runtime_component_candidate",
+      "responsibility": "PureEd25519 verification/framing/receipt digest for the three D purposes; no operational signer or authority",
+      "allowedLocalImports": [
+        "C01",
+        "C02"
+      ],
+      "testIds": [
+        "T01",
+        "T11"
+      ],
+      "existsNow": false,
+      "executionAuthorizedNow": false
+    },
+    {
+      "id": "C04",
+      "path": "lib/memoryEvalVnext/protocol/trust.ts",
+      "classification": "runtime_component_candidate",
+      "responsibility": "Structure and explicit equality/obvious incompatibility only; no registration parser, digest construction, epoch authority or Git resolver",
+      "allowedLocalImports": [
+        "C01",
+        "C02"
+      ],
+      "testIds": [
+        "T01",
+        "T11"
+      ],
+      "existsNow": false,
+      "executionAuthorizedNow": false
+    },
+    {
+      "id": "T01",
+      "path": "tests/memoryEvalVnextWire.test.mjs",
+      "classification": "test_only",
+      "responsibility": "All subset cases using public vectors and, only after separate approval, volatile synthetic key/signature",
+      "allowedLocalImports": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "T11"
+      ],
+      "testIds": [],
+      "existsNow": false,
+      "executionAuthorizedNow": false
+    },
+    {
+      "id": "T11",
+      "path": "tests/fixtures/memory-eval-vnext/wire-vectors.json",
+      "classification": "test_only",
+      "responsibility": "Public synthetic wire/golden data only; no operational key/receipt/holdout content",
+      "allowedLocalImports": [],
+      "testIds": [
+        "T01"
+      ],
+      "existsNow": false,
+      "executionAuthorizedNow": false
+    }
+  ],
+  "requestedDecisions": [
+    {
+      "id": "limitedOfflineImplementation",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "testOnlySyntheticSignatures",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "noAuthorityPromotion",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "deferredRegistrationParser",
+      "status": "pending",
+      "selectedValue": null
+    }
+  ],
+  "closedTypes": {
+    "BlobRef": {
+      "required": [
+        "path",
+        "byteLength",
+        "rawSha256"
+      ],
+      "nullable": []
+    },
+    "GitFileRef": {
+      "required": [
+        "commit",
+        "path",
+        "rawSha256"
+      ],
+      "nullable": []
+    },
+    "SignaturePayload": {
+      "required": [
+        "schemaVersion",
+        "purpose",
+        "signerId",
+        "keyId",
+        "trustEpoch",
+        "contentDigest",
+        "issuedAt"
+      ],
+      "nullable": []
+    },
+    "SignatureReceipt": {
+      "required": [
+        "payload",
+        "signatureBase64"
+      ],
+      "nullable": []
+    },
+    "TrustAnchor": {
+      "required": [
+        "trustEpoch",
+        "signerId",
+        "keyId",
+        "publicKeyBase64",
+        "roles",
+        "validFrom",
+        "validUntil",
+        "revokedAt",
+        "registrationReceipt",
+        "previousEpochDigest"
+      ],
+      "nullable": [
+        "validUntil",
+        "revokedAt",
+        "previousEpochDigest"
+      ]
+    }
+  },
+  "scalarAndWireRules": {
+    "additionalFields": false,
+    "schemaVersion": 1,
+    "digest": "^[0-9a-f]{64}$",
+    "commit": "^[0-9a-f]{40}$",
+    "keyId": "^[0-9a-f]{32}$",
+    "byteLength": "non-negative safe integer",
+    "stringIds": "NFC ASCII; exact equality",
+    "trustEpoch": "opaque NFC ASCII equality only; no invented issuance/ordering schema",
+    "newDApproverHandle": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$",
+    "newDApproverHandleNotAppliedToOtherRolesOrHistoricReceipts": true,
+    "utc": "real calendar UTC YYYY-MM-DDTHH:mm:ssZ; operational boundary policy deferred",
+    "path": "relative POSIX, nonempty segments, no drive/backslash/dot/dotdot; actual Git mode not checked",
+    "base64": "standard padded decode/re-encode equality, no noncanonical pad bits; publicKey=32 and signature=64 bytes",
+    "knownRoles": [
+      "approver",
+      "authoring_reviewer",
+      "controller",
+      "custodian",
+      "importer",
+      "reviewer"
+    ],
+    "roles": "ASCII sorted unique set",
+    "previousEpochDigest": "nullable for first-epoch structure only; first-epoch truth/chain not established",
+    "registrationReceipt": "opaque BlobRef; optional supplied bytes compared only",
+    "trustPolicyDigest": "explicit comparison input only, never added to TrustAnchor wire; no construction formula",
+    "canonical": "S1 mem-cjson-1; no NFC normalization, duplicate-key loss, unsafe integers or non-scalar UTF8"
+  },
+  "supportedPurposeRoles": [
+    {
+      "purpose": "s2_activation_approval",
+      "role": "approver"
+    },
+    {
+      "purpose": "s2_source_evidence",
+      "role": "importer"
+    },
+    {
+      "purpose": "s2_activation_inclusion",
+      "role": "importer"
+    }
+  ],
+  "componentResultProposal": {
+    "operationalWire": false,
+    "scope": "offline_component_only",
+    "authorityEstablished": false,
+    "errorPriority": [
+      "invalid_input",
+      "unsupported_subset",
+      "bytes_mismatch",
+      "signature_mismatch",
+      "binding_mismatch"
+    ],
+    "authorityRequestError": "authority_unavailable",
+    "notAS2RefusalEnum": true,
+    "authorityContextTypesForbidden": [
+      "VerifiedHistory",
+      "HistoryContext",
+      "ApprovedTrustRoot"
+    ],
+    "scopeLimits": "C04 expected facts are test/comparison input, never a registration schema. No callback that supplies purported trust authority."
+  },
+  "acceptanceCriteria": [
+    {
+      "id": "AC-1",
+      "title": "canonical bytes",
+      "frIds": [
+        "FR-3"
+      ],
+      "caseIds": [
+        "F01",
+        "F02",
+        "F03"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-2",
+      "title": "canonical refusal",
+      "frIds": [
+        "FR-3",
+        "FR-4"
+      ],
+      "caseIds": [
+        "F04",
+        "F05",
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F11"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-3",
+      "title": "raw, file, domain 분리",
+      "frIds": [
+        "FR-3",
+        "FR-5"
+      ],
+      "caseIds": [
+        "F10",
+        "F11",
+        "F12",
+        "F23",
+        "F24"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-4",
+      "title": "closed shape와 leaf 제약",
+      "frIds": [
+        "FR-4"
+      ],
+      "caseIds": [
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "F17",
+        "F18",
+        "F19"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-5",
+      "title": "PureEd25519 검증",
+      "frIds": [
+        "FR-5"
+      ],
+      "caseIds": [
+        "F12",
+        "F20",
+        "F21",
+        "F22",
+        "F23",
+        "F24"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-6",
+      "title": "purpose·role·identity 분리",
+      "frIds": [
+        "FR-5",
+        "FR-6"
+      ],
+      "caseIds": [
+        "F19",
+        "F22",
+        "F25",
+        "F26",
+        "F27",
+        "F28",
+        "F29"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-7",
+      "title": "epoch·등록 미정 경계",
+      "frIds": [
+        "FR-4",
+        "FR-6"
+      ],
+      "caseIds": [
+        "F29",
+        "F30",
+        "F31",
+        "F32",
+        "F33",
+        "F39"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-8",
+      "title": "GitFileRef와 raw bytes",
+      "frIds": [
+        "FR-4",
+        "FR-6"
+      ],
+      "caseIds": [
+        "F34",
+        "F35",
+        "F36"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-9",
+      "title": "합성 시험과 권한 비승격",
+      "frIds": [
+        "FR-6",
+        "FR-7"
+      ],
+      "caseIds": [
+        "F36",
+        "F37",
+        "F38",
+        "F39"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-10",
+      "title": "exact 파일·범위",
+      "frIds": [
+        "FR-2",
+        "FR-7"
+      ],
+      "caseIds": [
+        "F40",
+        "F41"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-11",
+      "title": "승인 전 실행 금지",
+      "frIds": [
+        "FR-1",
+        "FR-8"
+      ],
+      "caseIds": [
+        "F42",
+        "F43"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "AC-12",
+      "title": "문서와 감사 보존",
+      "frIds": [
+        "FR-1"
+      ],
+      "caseIds": [
+        "F44"
+      ],
+      "implementationExecution": "not_run"
+    }
+  ],
+  "futureCases": [
+    {
+      "id": "F01",
+      "acIds": [
+        "AC-1"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "G01/G02의 object를 역순 key 삽입으로 구성한다.",
+      "when": "CJSON encode",
+      "then": "각 G의 canonicalText/utf8Hex/byteLength exact equality; key만 ASCII 순 정렬.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F02",
+      "acIds": [
+        "AC-1"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "G03 safe integer 양 경계와 JS -0, null/bool.",
+      "when": "CJSON encode",
+      "then": "G03와 같음; JS -0은 0. unsafe 범위 확장 없음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F03",
+      "acIds": [
+        "AC-1"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "G04 sequence [b,a,b].",
+      "when": "CJSON encode",
+      "then": "순서·중복 보존; set 정렬/중복 제거를 일반 array에 적용하지 않음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F04",
+      "acIds": [
+        "AC-2"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "NFD 문자열 및 비ASCII key.",
+      "when": "encoder/strict decoder",
+      "then": "invalid_input; normalize하지 않음.",
+      "variations": [
+        "value e + U+0301",
+        "key U+00E9",
+        "key U+D55C"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F05",
+      "acIds": [
+        "AC-2"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "JSON object의 같은 key 2개.",
+      "when": "strict decoder",
+      "then": "invalid_input; JSON.parse의 last-wins로 성공하지 않음.",
+      "variations": [
+        "{\"a\":1,\"a\":2}",
+        "{\"a\":1,\"\\u0061\":2}"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F06",
+      "acIds": [
+        "AC-2"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "정수가 아닌/안전하지 않은 값.",
+      "when": "encoder/strict decoder",
+      "then": "invalid_input.",
+      "variations": [
+        "0.5",
+        "9007199254740992",
+        "-9007199254740992",
+        "NaN",
+        "Infinity",
+        "-Infinity"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F07",
+      "acIds": [
+        "AC-2"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "JS 비JSON 또는 관측 부작용 가능 object.",
+      "when": "encoder",
+      "then": "invalid_input; accessor 호출 등 사용자 코드를 실행하지 않음.",
+      "variations": [
+        "undefined",
+        "BigInt(1)",
+        "function",
+        "symbol",
+        "sparse array",
+        "accessor property",
+        "custom prototype",
+        "cycle"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F08",
+      "acIds": [
+        "AC-2"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "깨진 UTF-8 또는 scalar 아닌 surrogate.",
+      "when": "strict decode/encode",
+      "then": "invalid_input; replacement character 대체 없음.",
+      "variations": [
+        "UTF8 hex c080",
+        "UTF8 hex eda080",
+        "unpaired high surrogate",
+        "unpaired low surrogate"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F09",
+      "acIds": [
+        "AC-2"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "parse할 수 있어도 canonical 아닌 JSON bytes.",
+      "when": "strict canonical decoder",
+      "then": "invalid_input; trim/re-encode로 채택하지 않음.",
+      "variations": [
+        "BOM",
+        "trailing token",
+        "leading/trailing whitespace",
+        "{\"b\":1,\"a\":2}",
+        "1.0",
+        "1e0",
+        "-0",
+        "\"\\n\"",
+        "\"\\u000A\"",
+        "\"\\/\"",
+        "\"\\uD55C\""
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F10",
+      "acIds": [
+        "AC-3"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "G01의 canonical, LF file, domain+LF+canonical bytes.",
+      "when": "raw/domain hash",
+      "then": "G01의 세 고정 SHA와 각각 equality; 서로 다름.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F11",
+      "acIds": [
+        "AC-2",
+        "AC-3"
+      ],
+      "components": [
+        "C01"
+      ],
+      "given": "G01 또는 그 뒤 LF 1/2개, CRLF, 끝 공백.",
+      "when": "명시적 canonical / file-with-single-LF mode로 각각 decode",
+      "then": "canonical은 원 bytes만; file mode는 끝 LF 정확히 한 개만. 나머지 invalid_input.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F12",
+      "acIds": [
+        "AC-3",
+        "AC-5"
+      ],
+      "components": [
+        "C01",
+        "C03"
+      ],
+      "given": "S3 payload의 CJSON과 mem-signature-1 literal.",
+      "when": "서명 message 구성",
+      "then": "UTF8(domain+LF)||CJSON(payload) exact; hash hex를 서명 message로 대용하지 않음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F13",
+      "acIds": [
+        "AC-4"
+      ],
+      "components": [
+        "C02"
+      ],
+      "given": "closedTypes 다섯 구조의 합성 정상 입력. nullable은 명시한 세 field만.",
+      "when": "C02 구조 검사",
+      "then": "listed fields/leaf/nested type 통과만; authority 의미 없음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F14",
+      "acIds": [
+        "AC-4"
+      ],
+      "components": [
+        "C02"
+      ],
+      "given": "F13의 다섯 구조 각각에 대한 field 변형.",
+      "when": "다섯 구조의 모든 required field에서 delete/null/wrong-type를 전수 생성하고 extra field를 한 개씩 삽입",
+      "then": "누락·불허 null·잘못된 type·추가는 invalid_input. nullable field의 null만 유지; nested BlobRef/payload에서도 같은 전수 검사.",
+      "variations": [
+        {
+          "type": "BlobRef",
+          "eachRequiredField": [
+            "path",
+            "byteLength",
+            "rawSha256"
+          ],
+          "allowedNullFields": [],
+          "extraField": "unexpected"
+        },
+        {
+          "type": "GitFileRef",
+          "eachRequiredField": [
+            "commit",
+            "path",
+            "rawSha256"
+          ],
+          "allowedNullFields": [],
+          "extraField": "unexpected"
+        },
+        {
+          "type": "SignaturePayload",
+          "eachRequiredField": [
+            "schemaVersion",
+            "purpose",
+            "signerId",
+            "keyId",
+            "trustEpoch",
+            "contentDigest",
+            "issuedAt"
+          ],
+          "allowedNullFields": [],
+          "extraField": "unexpected"
+        },
+        {
+          "type": "SignatureReceipt",
+          "eachRequiredField": [
+            "payload",
+            "signatureBase64"
+          ],
+          "allowedNullFields": [],
+          "extraField": "unexpected"
+        },
+        {
+          "type": "TrustAnchor",
+          "eachRequiredField": [
+            "trustEpoch",
+            "signerId",
+            "keyId",
+            "publicKeyBase64",
+            "roles",
+            "validFrom",
+            "validUntil",
+            "revokedAt",
+            "registrationReceipt",
+            "previousEpochDigest"
+          ],
+          "allowedNullFields": [
+            "validUntil",
+            "revokedAt",
+            "previousEpochDigest"
+          ],
+          "extraField": "unexpected"
+        }
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F15",
+      "acIds": [
+        "AC-4"
+      ],
+      "components": [
+        "C02"
+      ],
+      "given": "Digest/Commit/ID 및 byteLength leaf 변형.",
+      "when": "공통 leaf 검사",
+      "then": "invalid_input.",
+      "variations": [
+        "SHA uppercase/63/65 chars/nonhex",
+        "commit uppercase/39/41 chars/nonhex",
+        "keyId uppercase/31/33 chars/nonhex",
+        "byteLength -1/0.5/unsafe/string"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F16",
+      "acIds": [
+        "AC-4"
+      ],
+      "components": [
+        "C02"
+      ],
+      "given": "UTC second-Z와 그 문법·달력 변형.",
+      "when": "issuedAt/validFrom/nonnull validUntil/revokedAt 각각 검사",
+      "then": "정상만 구조 통과. 운영 유효기간의 권한 판정 아님.",
+      "variations": [
+        "2026-09-08T00:00:00Z positive",
+        "2026-02-30T00:00:00Z reject",
+        "timezone offset reject",
+        "fractional seconds reject",
+        "missing seconds reject",
+        "lowercase z reject"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F17",
+      "acIds": [
+        "AC-4"
+      ],
+      "components": [
+        "C02"
+      ],
+      "given": "BlobRef/GitFileRef path를 각각 변형.",
+      "when": "relative POSIX path 검사",
+      "then": "안전한 상대 path만 구조 통과; symlink/Git mode 사실은 여전히 미검증.",
+      "variations": [
+        "fixtures/public.json positive",
+        "/absolute reject",
+        "C:/drive reject",
+        "a\\b reject",
+        "a//b reject",
+        "./a reject",
+        "a/../b reject",
+        "empty reject"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F18",
+      "acIds": [
+        "AC-4"
+      ],
+      "components": [
+        "C02"
+      ],
+      "given": "32-byte public key, 64-byte signature의 padded Base64 및 변형.",
+      "when": "decode/re-encode equality와 길이 비교",
+      "then": "정상만 수용.",
+      "variations": [
+        "missing padding",
+        "extra padding",
+        "whitespace",
+        "URL-safe '-'/'_'",
+        "nonzero unused pad bits",
+        "public key 31/33 bytes",
+        "signature 63/65 bytes"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F19",
+      "acIds": [
+        "AC-4",
+        "AC-6"
+      ],
+      "components": [
+        "C02",
+        "C04"
+      ],
+      "given": "S3 role ASCII set.",
+      "when": "shape 및 D required role membership 검사",
+      "then": "정렬·고유·known role 구조만 통과; actual authorityEstablished=false.",
+      "variations": [
+        "[\"approver\",\"importer\"] positive",
+        "[\"importer\",\"approver\"] reject",
+        "[\"approver\",\"approver\"] reject",
+        "[\"invented_role\"] reject"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F20",
+      "acIds": [
+        "AC-5"
+      ],
+      "components": [
+        "C03"
+      ],
+      "given": "G05 공개 RFC vector; private seed 없음.",
+      "when": "Node PureEd25519 verify",
+      "then": "기본 true, 한 bit signature mutation false, message mutation false. P 구현 시험은 아직 not_run.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F21",
+      "acIds": [
+        "AC-5"
+      ],
+      "components": [
+        "C03"
+      ],
+      "given": "별도 승인 후 T01 내부에서만 생성할 volatile test key와 세 D purpose payload.",
+      "when": "mem-signature-1 message 서명 후 C03 verify",
+      "then": "각 positive signature 일치. private key export/store/log 없음; authority 미성립.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F22",
+      "acIds": [
+        "AC-5",
+        "AC-6"
+      ],
+      "components": [
+        "C03"
+      ],
+      "given": "F21의 정상 receipt에서 payload field 또는 signature를 변경.",
+      "when": "원 public key로 검증",
+      "then": "signature_mismatch (shape가 유효한 mutation); malformed shape는 invalid_input.",
+      "variations": [
+        "purpose를 다른 지원 purpose로 변경",
+        "signerId 변경",
+        "keyId 변경",
+        "trustEpoch 변경",
+        "contentDigest 변경",
+        "issuedAt 변경",
+        "signature one bit",
+        "다른 public key"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F23",
+      "acIds": [
+        "AC-3",
+        "AC-5"
+      ],
+      "components": [
+        "C03"
+      ],
+      "given": "F21 서명 message를 대용하거나 framing을 변경.",
+      "when": "PureEd25519 verify",
+      "then": "signature_mismatch for substituted bytes; ph/ctx 선택 API 자체를 제공하지 않음.",
+      "variations": [
+        "sha256(message) bytes로 대용",
+        "digest hex UTF8 대용",
+        "Ed25519ph SHA512 prehash 대용",
+        "domain 오타",
+        "LF 제거",
+        "CRLF prefix",
+        "message 끝 LF 추가"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F24",
+      "acIds": [
+        "AC-3",
+        "AC-5"
+      ],
+      "components": [
+        "C03"
+      ],
+      "given": "정상 receipt와 그 raw/file SHA.",
+      "when": "mem-signature-receipt-1 digest 구성",
+      "then": "domain+LF+CJSON(receipt)만; receipt에 self-digest field 추가는 invalid_input. raw/file SHA를 semantic digest로 대용하지 않음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F25",
+      "acIds": [
+        "AC-6"
+      ],
+      "components": [
+        "C03",
+        "C04"
+      ],
+      "given": "세 D purpose와 명시 expected signer/key/epoch/contentDigest, 해당 role의 합성 anchor.",
+      "when": "component 비교",
+      "then": "세 쌍만 fieldsMatch=true; scope=offline_component_only, authorityEstablished=false.",
+      "variations": [
+        "s2_activation_approval -> approver",
+        "s2_source_evidence -> importer",
+        "s2_activation_inclusion -> importer"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F26",
+      "acIds": [
+        "AC-6"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "approver 아닌 importer만 가진 anchor와 activation approval payload.",
+      "when": "purpose→role 비교",
+      "then": "binding_mismatch; importer의 서명 유효성으로 사람 승인 대체 금지.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F27",
+      "acIds": [
+        "AC-6"
+      ],
+      "components": [
+        "C03",
+        "C04"
+      ],
+      "given": "첫 subset 밖의 purpose.",
+      "when": "purpose 지원 검사",
+      "then": "unsupported_subset; 원 S3/S4에서 유효한 purpose 자체를 계약 위반으로 재정의하지 않음.",
+      "variations": [
+        "provenance_checkpoint",
+        "authoring_bundle",
+        "unknown_purpose"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F28",
+      "acIds": [
+        "AC-6"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "신규 D approver exact handle와 다른 역할 handle.",
+      "when": "approver 문법/expected exact identity 검사",
+      "then": "D 신규 approver만 regex 적용. normalize/@ 제거/lowercase 금지.",
+      "variations": [
+        "mposition positive when expected exact",
+        "@mposition invalid_input for new D approver",
+        "Mposition vs expected mposition binding_mismatch",
+        "40 chars invalid_input for new D approver",
+        "importer @synthetic retained; no D approver regex"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F29",
+      "acIds": [
+        "AC-6",
+        "AC-7"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "payload/anchor/expected tuple의 signer/key/epoch 중 하나를 각각 변경.",
+      "when": "exact comparison",
+      "then": "binding_mismatch; 값 누락은 invalid_input. epoch ordinal 연산·이력 추정 없음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F30",
+      "acIds": [
+        "AC-7"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "opaque epoch 및 first-epoch previous=null 운반형.",
+      "when": "shape/expected epoch/previous digest comparison",
+      "then": "값이 같아도 첫 epoch의 진위·전체 chain은 미검증. 타입/입력 부재는 invalid_input; explicit expected와 다르면 binding_mismatch.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F31",
+      "acIds": [
+        "AC-7"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "시험이 명시한 timestamp가 validFrom보다 이전, validUntil보다 이후, revokedAt보다 이후.",
+      "when": "입력값만 비교",
+      "then": "binding_mismatch; 시스템 clock 읽기 0. 정확한 경계의 운영 권한 요청은 authority_unavailable.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F32",
+      "acIds": [
+        "AC-7"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "registrationReceipt BlobRef 및 임의 공개 raw bytes.",
+      "when": "명시적 bytes/length/raw hash 비교",
+      "then": "참조 일치만; Markdown/YAML/JSON 해석 0. bytes 불일치=bytes_mismatch; parser 요구=unsupported_subset.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F33",
+      "acIds": [
+        "AC-7"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "expected trustPolicyDigest/previousEpochDigest 값과 비교값.",
+      "when": "문법 및 equality만 검사",
+      "then": "malformed=invalid_input; mismatch=binding_mismatch; 생성/epoch chain authority 요청=authority_unavailable. 새 domain 정의 없음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F34",
+      "acIds": [
+        "AC-8"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "명시 expected D와 K의 GitFileRef 및 각각 제공한 raw bytes.",
+      "when": "commit/path/hash equality 및 bytes SHA 비교",
+      "then": "정상은 component match만; 실제 Git object/ancestry/K 인간 수용은 증명되지 않음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F35",
+      "acIds": [
+        "AC-8"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "F34의 D와 K 각각에서 commit/path/hash 또는 원 bytes/끝 LF를 변형.",
+      "when": "GitFileRef+bytes 비교",
+      "then": "ref mismatch=binding_mismatch; raw bytes mismatch=bytes_mismatch; bytes 미제공=invalid_input.",
+      "variations": [
+        "D.commit",
+        "D.path",
+        "D.rawSha256",
+        "D.bytes",
+        "K.commit",
+        "K.path",
+        "K.rawSha256",
+        "K.bytes",
+        "동일 JSON에 LF 추가"
+      ],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F36",
+      "acIds": [
+        "AC-8",
+        "AC-9"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "합성 commit/path/hash, bytes가 전부 자체 일치하나 실제 Git에 존재하지 않는다.",
+      "when": "component 비교 뒤 운영 권한 요청",
+      "then": "자체 equality가 가능해도 authority_unavailable; Git 존재·조상·보호를 fabricated success로 반환하지 않음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F37",
+      "acIds": [
+        "AC-9"
+      ],
+      "components": [
+        "C01",
+        "C02",
+        "C03",
+        "C04"
+      ],
+      "given": "runtime의 정적 import graph와 test 실행 관측.",
+      "when": "side-effect/import 검사",
+      "then": "network/DB/fs read·write/process/clock/random/keygen/sign=0; operational env/credential 접근 없음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F38",
+      "acIds": [
+        "AC-9"
+      ],
+      "components": [
+        "T01",
+        "T11"
+      ],
+      "given": "미래 test-only 공개 fixtures와 volatile synthetic envelope 시험.",
+      "when": "fixture 내용과 test 산출/로그를 검사",
+      "then": "운영 key·seed·private key export·실제 receipt/holdout 자료·실서비스 호출 0.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F39",
+      "acIds": [
+        "AC-7",
+        "AC-9"
+      ],
+      "components": [
+        "C04"
+      ],
+      "given": "모든 component가 positive이고 유효한 합성 signature가 있다.",
+      "when": "trusted context/approval/activation 요청",
+      "then": "authority_unavailable; 함수 반환에 authorityEstablished=true/VerifiedHistory/ApprovedTrustRoot 없음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F40",
+      "acIds": [
+        "AC-10"
+      ],
+      "components": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "T01",
+        "T11"
+      ],
+      "given": "미래 구현의 Git diff 및 imports.",
+      "when": "requestedImplementationFiles exact 6경로와 책임 검사",
+      "then": "추가 helper/package/lock/config/runner/adapter 금지; C04↔C03 imports와 숨은 callback도 금지.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F41",
+      "acIds": [
+        "AC-10"
+      ],
+      "components": [
+        "T01",
+        "T11"
+      ],
+      "given": "AC-1..12와 모든 futureCases 및 upstream 54 disposition.",
+      "when": "ID 전수 대응 및 실행 결과 점검",
+      "then": "orphan/missing/skip은 incomplete; T01 성공을 T02 또는 전체 상위 AC/P 성공으로 선언 금지.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F42",
+      "acIds": [
+        "AC-11"
+      ],
+      "components": [],
+      "given": "현재 pending 초안과 기존 A/CA/K/N review·M CI만 존재한다.",
+      "when": "권한 확인",
+      "then": "implementationAuthorized=false; 기존 서명을 현재 새문서로 전사하지 않음.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F43",
+      "acIds": [
+        "AC-11"
+      ],
+      "components": [],
+      "given": "미래 사람 승인과 별도 receipt를 받은 뒤의 착수 후보.",
+      "when": "문서/JSON raw SHA·문서 commit/receipt 및 SHA보존 merge·develop CI·별도 착수 지시 확인",
+      "then": "하나라도 없거나 bytes 불일치이면 착수 차단. 문서 준비/단순 병합은 실행 지시 아님.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    },
+    {
+      "id": "F44",
+      "acIds": [
+        "AC-12"
+      ],
+      "components": [],
+      "given": "M 보존 기준선과 새 두 파일.",
+      "when": "source22/source positions/relative links/raw UTF8/MD-JSON 일치 및 Git diff 확인",
+      "then": "새 실패 0, tracked/index 변경 0, untracked 13파일 hash/기존15항목 보존, 실제 추가2문서. 실행 결과는 validation으로 별도 기록.",
+      "variations": [],
+      "implementationExecution": "not_run"
+    }
+  ],
+  "upstreamAcDisposition": [
+    {
+      "namespace": "S3",
+      "id": "AC-1",
+      "title": "작성 선행·격리 (FR-1, FR-2, NFR-5)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 462,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "작성 선행·격리 (FR-1, FR-2, NFR-5): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-2",
+      "title": "schema·quota·batch (FR-3, FR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 469,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "schema·quota·batch (FR-3, FR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-3",
+      "title": "승인된 민감성·좌표 경계 (FR-5)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 476,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "승인된 민감성·좌표 경계 (FR-5): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-4",
+      "title": "exact bytes와 key 일회성 (FR-6, FR-7, NFR-1, NFR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 484,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "raw bytes/Base64만. fresh key·AEAD·allocation/crash 복구는 후속."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-5",
+      "title": "상태·programme 불변 (FR-8, FR-9)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 491,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "상태·programme 불변 (FR-8, FR-9): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-6",
+      "title": "review exact-set과 순환 없는 서명 (FR-10, FR-11)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 498,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "signature framing/primitive만. review exact-set·실제 reviewer 권한·consumption·bundle DAG는 후속."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-7",
+      "title": "opening 복구와 불명 노출 (FR-8, FR-10, FR-12)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 506,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "opening 복구와 불명 노출 (FR-8, FR-10, FR-12): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-8",
+      "title": "만료·소비 이후 materialisation (FR-13, FR-14, NFR-3)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 513,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "만료·소비 이후 materialisation (FR-13, FR-14, NFR-3): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-9",
+      "title": "비밀성·cleanup (FR-7, FR-13, NFR-2, NFR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 520,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "비밀성·cleanup (FR-7, FR-13, NFR-2, NFR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-10",
+      "title": "opened에서 ordinal 2의 새 sheet (FR-9, FR-10)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 527,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "opened에서 ordinal 2의 새 sheet (FR-9, FR-10): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-11",
+      "title": "비실행 grant와 원 subject unit (FR-7, FR-12, FR-14)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 535,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "비실행 grant와 원 subject unit (FR-7, FR-12, FR-14): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S3",
+      "id": "AC-12",
+      "title": "환경 증명과 key 전 설치 (FR-7, FR-13, NFR-2)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "line": 544,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "환경 증명과 key 전 설치 (FR-7, FR-13, NFR-2): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-1",
+      "title": "승인 층과 원래 SHA (FR-1, FR-2)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 485,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "GitFileRef equality만. 승인 계층·원 SHA DAG·K/등록·보호·사람 수용은 후속."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-2",
+      "title": "E/R/T와 self-hash (FR-3, FR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 492,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "E/R/T와 self-hash (FR-3, FR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-3",
+      "title": "rollback·복구·claim (FR-4, FR-5)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 499,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "rollback·복구·claim (FR-4, FR-5): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-4",
+      "title": "dispatch 200과 불명 응답 (FR-6, FR-15)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 506,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "dispatch 200과 불명 응답 (FR-6, FR-15): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-5",
+      "title": "pagination와 전 attempt (FR-7, NFR-2)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 513,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "pagination와 전 attempt (FR-7, NFR-2): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-6",
+      "title": "unknown·duplicate contact (FR-7, FR-10)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 520,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "unknown·duplicate contact (FR-7, FR-10): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-7",
+      "title": "artifact attempt와 hash 계층 (FR-8, FR-12)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 527,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "raw/domain SHA 구분만. archive extraction·attempt/artifact identity·receipt linkage는 후속."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-8",
+      "title": "terminal/stability/cutoff (FR-9, NFR-5, NFR-6)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 535,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "terminal/stability/cutoff (FR-9, NFR-5, NFR-6): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-9",
+      "title": "비용과 품질 분리 (FR-11, FR-14)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 542,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "비용과 품질 분리 (FR-11, FR-14): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-10",
+      "title": "redacted review와 ordinal 2 (FR-14)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 549,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "redacted review와 ordinal 2 (FR-14): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-11",
+      "title": "만료 뒤 재현·현재 판단 (FR-13, NFR-3)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 556,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "만료 뒤 재현·현재 판단 (FR-13, NFR-3): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-12",
+      "title": "secret 경계 (FR-5, FR-12, NFR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 563,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "secret 경계 (FR-5, FR-12, NFR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-13",
+      "title": "E 없는 genesis와 ledger 수명 (FR-1, FR-3, FR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 570,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "E 없는 genesis와 ledger 수명 (FR-1, FR-3, FR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-14",
+      "title": "controller가 시작되지 않은 attempt (FR-7, FR-10, FR-12)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 578,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "controller가 시작되지 않은 attempt (FR-7, FR-10, FR-12): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-15",
+      "title": "journal/checkpoint 권한 (FR-4, FR-5)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 588,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "journal/checkpoint 권한 (FR-4, FR-5): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-16",
+      "title": "clock 증거와 보수 경계 (NFR-5, FR-5, FR-9)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 595,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "clock 증거와 보수 경계 (NFR-5, FR-5, FR-9): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "S4",
+      "id": "AC-17",
+      "title": "dispatch_unknown 만료와 미접촉 손실 (FR-6, FR-14)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "line": 604,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "dispatch_unknown 만료와 미접촉 손실 (FR-6, FR-14): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-1",
+      "title": "원문과 K 승인 연결 (FR-1, FR-11)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 618,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "D/K ref와 제공 bytes 비교만. 실제 원 commit·repository·등록 원문·K 수용·D<K 계보는 후속."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-2",
+      "title": "미승인 purpose 거부 (FR-1, FR-7, NFR-3)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 624,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "미승인 purpose 거부 (FR-1, FR-7, NFR-3): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-3",
+      "title": "LegacySubject wire golden (FR-2, NFR-1)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 629,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "LegacySubject wire golden (FR-2, NFR-1): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-4",
+      "title": "설명형 alias 거부 (FR-2)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 634,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "설명형 alias 거부 (FR-2): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-5",
+      "title": "source receipt positive binding (FR-3, FR-4, FR-8)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 639,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "source receipt positive binding (FR-3, FR-4, FR-8): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-6",
+      "title": "raw hash 대용 거부 (FR-3, FR-8, NFR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 644,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "raw hash 대용 거부 (FR-3, FR-8, NFR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-7",
+      "title": "역할 중복 거부 (FR-3, FR-10)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 649,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "역할 중복 거부 (FR-3, FR-10): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-8",
+      "title": "사람 승인 대리 거부 (FR-5, FR-7, NFR-3)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 654,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "D 세 purpose의 요구 role 비교만. 실제 사람·등록·발급 자격의 증명은 후속."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-9",
+      "title": "signature identity 교환 거부 (FR-6, FR-8)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 659,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "signature payload identity와 digest bytes 일부만. body/evidence/activation authorization 전수 binding은 후속."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-10",
+      "title": "정확한 사후 inclusion (FR-6, FR-9, FR-10)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 664,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "정확한 사후 inclusion (FR-6, FR-9, FR-10): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-11",
+      "title": "hash 순환 거부 (FR-4, FR-8, NFR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 670,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "hash 순환 거부 (FR-4, FR-8, NFR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-12",
+      "title": "evidence 부재 거부 (FR-4, FR-9)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 675,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "evidence 부재 거부 (FR-4, FR-9): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-13",
+      "title": "역사 판정 보존 (FR-4, FR-10, NFR-2)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 680,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "역사 판정 보존 (FR-4, FR-10, NFR-2): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-14",
+      "title": "실행과 문서 승인 분리 (FR-11)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 685,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "실행과 문서 승인 분리 (FR-11): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-15",
+      "title": "다른 purpose 재사용 거부 (FR-6, FR-7)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 690,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "미지원 purpose 및 지원 purpose간 서명 message 치환 거절만. 전체 purpose matrix·운영 서명 권한 검증은 후속."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-16",
+      "title": "closed proof 종류 거부 (FR-4, NFR-1)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 695,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "closed proof 종류 거부 (FR-4, NFR-1): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-17",
+      "title": "role별 필수 proof 누락 (FR-3, FR-4, FR-9)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 700,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "role별 필수 proof 누락 (FR-3, FR-4, FR-9): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-18",
+      "title": "archive/JSON 연결 치환 (FR-4, FR-8)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 705,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "archive/JSON 연결 치환 (FR-4, FR-8): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-19",
+      "title": "checker의 주장만으로 통과 금지 (FR-4, FR-9)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 710,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "checker의 주장만으로 통과 금지 (FR-4, FR-9): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-20",
+      "title": "register 교차 검증 증거 누락 (FR-4, FR-10)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 715,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "register 교차 검증 증거 누락 (FR-4, FR-10): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-21",
+      "title": "F-2 정책의 묵시 승인 거부 (FR-1, FR-5, FR-11)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 720,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "F-2 정책의 묵시 승인 거부 (FR-1, FR-5, FR-11): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-22",
+      "title": "직접 inclusion 거부 (FR-6, FR-9)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 725,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "직접 inclusion 거부 (FR-6, FR-9): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-23",
+      "title": "signer handle 자동 변환 거부 (FR-5, FR-7)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 730,
+      "disposition": "partial_components",
+      "fullySatisfied": false,
+      "remaining": "신규 D approver handle 문법·대소문자 exact 비교만. 실제 사람 approval와 등록 결속은 후속."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-24",
+      "title": "K의 repository 재사용 거부 (FR-1)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 735,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "K의 repository 재사용 거부 (FR-1): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    },
+    {
+      "namespace": "D",
+      "id": "AC-25",
+      "title": "잘못된 proof kind 추가 거부 (FR-3, FR-4)",
+      "sourcePath": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "line": 740,
+      "disposition": "deferred",
+      "fullySatisfied": false,
+      "remaining": "잘못된 proof kind 추가 거부 (FR-3, FR-4): 해당 full business record/동작·운영 증거·전건 판정은 첫 subset 밖이며 후속 구현·시험이 필요함."
+    }
+  ],
+  "upstreamAcCounts": {
+    "S3": 12,
+    "S4": 17,
+    "D": 25,
+    "total": 54,
+    "fullySatisfied": 0,
+    "partialComponents": 9,
+    "deferred": 45
+  },
+  "additionalUpstreamMapping": {
+    "namespace": "S1",
+    "id": "AC-10",
+    "disposition": "partial_components",
+    "remaining": "CJSON/hash component only; scoring inventory/statement resource_limit/full scoring contract not satisfied"
+  },
+  "referenceGoldens": {
+    "goldens": [
+      {
+        "id": "G01",
+        "canonicalText": "{\"a\":\"한\",\"b\":1}",
+        "utf8Hex": "7b2261223a22ed959c222c2262223a317d",
+        "byteLength": 17,
+        "rawSha256": "67f2fd255e411935d63adb1352ddb23efd6054c61d3131965ab2809e0c10d61f",
+        "fileWithLfSha256": "56c2983b681f1fa15614e6d1426ddfb1600c469c6b10c804607b2f6533a51e57",
+        "testDomain": "mem-signature-receipt-1",
+        "domainSha256": "c5c83a86cf3cfe8b43c8d649c3006cae880c2bbfaabc2ff47c2573e997824cb9"
+      },
+      {
+        "id": "G02",
+        "canonicalText": "{\"a\":\"\\u000a\\u0009\\u0000\",\"b\":\"\\\"\\\\/\"}",
+        "utf8Hex": "7b2261223a225c75303030615c75303030395c7530303030222c2262223a225c225c5c2f227d",
+        "byteLength": 38,
+        "rawSha256": "b102c5769b28782ff067cd00d5398bf3d646788e0ada274ba184d3a6c0987f94",
+        "fileWithLfSha256": "e2c7afb11c04f5331d593f4c484d79c550b044cbd482cc4bb066d742e2ff5dfa",
+        "testDomain": "mem-signature-receipt-1",
+        "domainSha256": "e1a7eb19e92e89625bcff626437c724499bc3514ffb5a55e60259bf88f42bb04"
+      },
+      {
+        "id": "G03",
+        "canonicalText": "[null,true,false,-9007199254740991,9007199254740991,0]",
+        "utf8Hex": "5b6e756c6c2c747275652c66616c73652c2d393030373139393235343734303939312c393030373139393235343734303939312c305d",
+        "byteLength": 54,
+        "rawSha256": "2527c39823667232c24655a1a051b2bcf052991596fe398a2e5417e55ced1036",
+        "fileWithLfSha256": "e21dc53eb696f769d8ba6d15412e62a81c2be59a24e975f75f74f31ea78b906f",
+        "testDomain": "mem-signature-receipt-1",
+        "domainSha256": "c1c1b3572eb1903f5c192b9996eb650e9bd3bd6bf01859aa8c72288d48fce79f"
+      },
+      {
+        "id": "G04",
+        "canonicalText": "[\"b\",\"a\",\"b\"]",
+        "utf8Hex": "5b2262222c2261222c2262225d",
+        "byteLength": 13,
+        "rawSha256": "9cd295f267be3f6ef4bc845a31e8ef660f20fd75b97a16916fd7959c57329e0d",
+        "fileWithLfSha256": "a824f2b1937b007d84d3ca2d8a903af07aa58dd18259397f884ebcc3637e6915",
+        "testDomain": "mem-signature-receipt-1",
+        "domainSha256": "34ce7e0545377f5f6e31eaf8d305bc36d52872b9540d3889d31ffe9e7ae4f276"
+      }
+    ],
+    "publicVector": {
+      "id": "G05",
+      "source": "https://www.rfc-editor.org/rfc/rfc8032.txt#section-7.1",
+      "name": "RFC 8032 section 7.1 TEST 1; public data only",
+      "publicKeyHex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+      "messageHex": "",
+      "signatureHex": "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
+      "publicKeyBytes": 32,
+      "signatureBytes": 64,
+      "verifiedWithNodeCrypto": true,
+      "oneBitSignatureMutation": false,
+      "messageMutation": false
+    },
+    "runtime": {
+      "node": "v22.22.2",
+      "openssl": "3.5.5"
+    },
+    "scope": "audit reference arithmetic and published public vector verification only; no protocol module/test/key/signature generation"
+  },
+  "runtimeProposal": {
+    "existingNodeVersion": "v22.22.2",
+    "observedOpenSsl": "3.5.5",
+    "officialNodeDocumentation": "https://nodejs.org/docs/latest-v22.x/api/crypto.html#cryptoverifyalgorithm-data-key-signature-callback",
+    "documentationLookup": "Context7 /websites/nodejs_latest-v22_x_api; null algorithm/key type verification and boolean result only",
+    "runtimeFrozen": false,
+    "externalDependencySelected": false,
+    "newDependenciesAllowed": false,
+    "runtimeSideEffectsAllowed": [],
+    "testOnlyAfterApproval": [
+      "node:test and node:assert",
+      "read T11 public fixture only",
+      "volatile synthetic key/signature with node:crypto; no private key export/persistence/log"
+    ],
+    "runtimeCryptoAllowed": [
+      "C01 SHA-256",
+      "C03 public-key parsing and PureEd25519 verify"
+    ],
+    "testScript": "test:unit",
+    "testScriptAdditionalArgsAreSingleFileFilter": false,
+    "implementationTestsRunNow": false
+  },
+  "remainingDecisions": [
+    {
+      "id": "HD-1",
+      "topic": "실제 signer·role·key·epoch 및 등록/폐기 운영",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "실제 TrustAnchor 등록 및 운영 서명"
+    },
+    {
+      "id": "HD-2",
+      "topic": "ProtectionPolicy·bypassDisclosure",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "보호 정책 고정·신뢰된 genesis/root"
+    },
+    {
+      "id": "HD-3",
+      "topic": "암호문 2개 독립 보관소·분리 key backup·복구",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "실제 key custody·RetentionProof·폐기/복구 운영"
+    },
+    {
+      "id": "HD-4",
+      "topic": "중앙 journal·controller·독립 custodian/credential 발급",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "live journal·controller signing·credential/key grant"
+    },
+    {
+      "id": "HD-5",
+      "topic": "비공개 실행·review session 환경",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "실제 plaintext 처리·attestation·grant"
+    },
+    {
+      "id": "HD-6",
+      "topic": "인증된 UTC source·ClockPolicy",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "유효시간·cutoff·grant/dispatch 운영 판정"
+    },
+    {
+      "id": "HD-7",
+      "topic": "P 구현 exact scope·dependency closure·검증 권한",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "코드/테스트/workflow 작성 및 최종 P 동결"
+    },
+    {
+      "id": "HD-8",
+      "topic": "D N-1/N-3의 실제 실행 증명 공백",
+      "status": "pending",
+      "selectedValue": null,
+      "blocks": "source receipt 발급·activation 실행 판정"
+    }
+  ],
+  "remainingOperations": [
+    "OP-TRUST",
+    "OP-P-ROOT",
+    "OP-CUSTODY",
+    "OP-SOURCES",
+    "OP-ACTIVATION-APPROVAL",
+    "OP-RESOLVER",
+    "OP-C-INCLUSION"
+  ],
+  "residualBoundaries": {
+    "allAAndCAPriorConditionsPreserved": true,
+    "s3s4Conditions": [
+      "N-1 controller key separation",
+      "N-2 no-contact closure"
+    ],
+    "dNamespace": "s2_clarification_confirmation_2026_09_07",
+    "dConditions": [
+      "N-1 request-header evidence gap; no importer-attest adoption",
+      "N-2 V exact subject all eight rules OK",
+      "N-3 ReplayEnvironment is not network isolation evidence; no new D EnvironmentAttestation"
+    ],
+    "dConfirmationRoundsUsed": 1,
+    "dConfirmationRoundsMaximum": 1,
+    "dConfirmationReportSha256": "52ea1b94d745142eef9347aff9e831e0c8364cc83014ec1773571471d1f14b38"
+  },
+  "futureOperationalValues": {
+    "protocolImplementation": null,
+    "environmentApproval": null,
+    "clockPolicy": null,
+    "trustPolicyDigest": null,
+    "genesis": null,
+    "checkpoint": null,
+    "approvedTrustRoot": null,
+    "sourceEvidenceReceipt": null,
+    "activationAuthorization": null,
+    "activationApprovalCommit": null,
+    "transitionCommit": null
+  },
+  "fullHd7ClosureApproved": false,
+  "fullPClosure": false,
+  "fullUpstreamContractConformance": false,
+  "preservationBaseline": {
+    "head": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+    "list": [
+      "?? .claude/",
+      "?? .codex/",
+      "?? .github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+      "?? .github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+      "?? .github/audits/memory-eval-vnext-bootstrap-p-independent-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-bootstrap-p-next1-independent-review-prompt-2026-09-08.md",
+      "?? .github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+      "?? .github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+      "?? attachment-audit.json"
+    ],
+    "untracked": [
+      {
+        "path": ".github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+        "rawSha256": "bcb69780466af1df892f6d82eec186f06836e581b259424e797b5e95274881f2"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+        "rawSha256": "06b104bf7b5ea0d7d207d55db3520d2a968a7d3a6d5bf96e8fb1e182aaa4fcc5"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "93f5477a792f07b0765a209472c7d05c8faf91776d024f00f9d58dfc1d837eee"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-independent-review-prompt-2026-09-08.md",
+        "rawSha256": "6dc5824aa26e0d2661ff42b9afca5a6de2a5656338bc4b9c2ae7d49baee9abd9"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+        "rawSha256": "74b02f5035ab6766f4e93d9335c7cf7919ba19283173f9cede639c6b66a101be"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+        "rawSha256": "fea5b992a050d1ba160a0153ea3a7a8da714e57c5193b81bd140e105c7866826"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+        "rawSha256": "6a06a68271d827667a9d04784ea2eb74642179147bb96b107a946cfecc79a481"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+        "rawSha256": "bed852fa4fbdb53cd7ddce2b1d453759244fd43bb290b2cd72c2550c7ac3cbdb"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+        "rawSha256": "ccb1af8d606cc27fb30b1654712f9e61065b8a2d2e8123d25dd64c91f0c07f65"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "7aecf2f7744840cf6161065278103ebcacabef74b808f3e0eadb1748ecaff142"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+        "rawSha256": "9e64bf111a1cadde38e01386738e4642d42f6a5018dfad52c5c33af5e961d238"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "7b5e62eb77fdc36a39de1e73fc88cde729090ebc2d4a3d03f26bdbce851ae77c"
+      },
+      {
+        "path": "attachment-audit.json",
+        "rawSha256": "52b9ea37d7dae4cb09931651cb9955e0447c06b25fd126b485211c7228bb93fa"
+      }
+    ],
+    "observedAt": "2026-09-08T01:02:43.208Z"
+  },
+  "validation": {
+    "baseline": {
+      "commit": "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff",
+      "trackedClean": true,
+      "indexClean": true,
+      "commands": [
+        {
+          "script": "check:encoding:strict",
+          "exitCode": 0
+        },
+        {
+          "script": "check:policy-section-references",
+          "exitCode": 0
+        },
+        {
+          "script": "check:release-records",
+          "exitCode": 0
+        },
+        {
+          "script": "check:memory-eval-succ9",
+          "exitCode": 0
+        },
+        {
+          "script": "check:memory-extraction-eval",
+          "exitCode": 0
+        },
+        {
+          "script": "check:memory-eval-freeze",
+          "exitCode": 0
+        },
+        {
+          "script": "check:doc-references",
+          "exitCode": 1
+        }
+      ],
+      "docReferenceNamedFailures": [
+        "- app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+        "- app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+        "- app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+        "- app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.",
+        "- lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+        "- app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+        "- scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.",
+        "- tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry."
+      ]
+    },
+    "after": {
+      "status": "checked_against_M_baseline",
+      "commands": [
+        {
+          "script": "check:encoding:strict",
+          "exitCode": 0,
+          "baselineExitCode": 0,
+          "outputIdenticalToBaseline": true
+        },
+        {
+          "script": "check:policy-section-references",
+          "exitCode": 0,
+          "baselineExitCode": 0,
+          "outputIdenticalToBaseline": true
+        },
+        {
+          "script": "check:release-records",
+          "exitCode": 0,
+          "baselineExitCode": 0,
+          "outputIdenticalToBaseline": true
+        },
+        {
+          "script": "check:memory-eval-succ9",
+          "exitCode": 0,
+          "baselineExitCode": 0,
+          "outputIdenticalToBaseline": true
+        },
+        {
+          "script": "check:memory-extraction-eval",
+          "exitCode": 0,
+          "baselineExitCode": 0,
+          "outputIdenticalToBaseline": true
+        },
+        {
+          "script": "check:memory-eval-freeze",
+          "exitCode": 0,
+          "baselineExitCode": 0,
+          "outputIdenticalToBaseline": true
+        },
+        {
+          "script": "check:doc-references",
+          "exitCode": 1,
+          "baselineExitCode": 1,
+          "outputIdenticalToBaseline": true
+        }
+      ],
+      "newNamedFailures": [],
+      "existingDocReferenceFailures": 8,
+      "customDocumentChecks": {
+        "status": "pass",
+        "strictUtf8NoBomCrOrTrailingWhitespace": true,
+        "sourceOriginalCommitAndMAndWorktreeEqual": 22,
+        "supportGitAndWorkingHashRechecked": 9,
+        "previousUntrackedFileHashesPreserved": 13,
+        "previousStatusEntriesPreserved": 15,
+        "subsetAcCount": 12,
+        "futureCaseGroups": 44,
+        "upstreamAcCount": 54,
+        "sourceAcNamesAndLinesVerified": true,
+        "mdJsonAcAndAllowlistMatched": true,
+        "relativeLinksResolved": 1,
+        "pendingAuthorityPreserved": true,
+        "implementationPathsAbsent": 6,
+        "rawAndDomainGoldensRecalculated": 4,
+        "publicRfcPrimitiveVectorVerified": true,
+        "trackedAndIndexClean": true,
+        "onlyTwoNewDocumentPaths": true
+      },
+      "whitespace": {
+        "gitDiffCheckExit": 0,
+        "eachNewFileNoIndexCheckExit": 1,
+        "noIndexDiagnosticLines": 0,
+        "interpretation": "--no-index returns 1 for a file added against /dev/null; no whitespace diagnostics. Per-invocation core.autocrlf=false avoids Windows checkout conversion warning; no repository config was changed."
+      },
+      "notRun": [
+        "future C01-C04/T01/T11 implementation tests",
+        "full P closure/conformance",
+        "operational proof/activation/provider calls",
+        "new independent review",
+        "human implementation approval"
+      ]
+    },
+    "specValidator": {
+      "command": "spec_validator.py --file <documentPath> --strict --json",
+      "exitCode": 1,
+      "score": 98,
+      "errors": 0,
+      "warnings": [
+        {
+          "name": "No HTTP method + path found",
+          "disposition": "N/A: no HTTP API in component-only approval proposal; no invented endpoint"
+        }
+      ]
+    },
+    "limits": [
+      "public reference arithmetic is not future implementation test success",
+      "all future implementation cases remain not_run",
+      "no new independent review or human approval",
+      "existing doc-reference Windows path baseline failures are not fixed in this scope"
+    ]
+  }
+}

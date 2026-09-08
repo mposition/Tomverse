@@ -10,9 +10,17 @@
  * one did.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { resolveArtifactDataset } from "@/lib/memoryEvalDatasetRegistry";
+import {
+    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    scoringContractDescriptorInput,
+} from "@/lib/memoryEvalScoringContractDigest";
+
+const sha256 = (input) =>
+    createHash("sha256").update(input, "utf8").digest("hex");
 
 import {
     analyseArtifact,
@@ -90,6 +98,12 @@ const analysis = analyseArtifact({
     // already refused an artifact whose claim disagrees with the record, so
     // this is the checked value and the artifact's is the claim.
     datasetSchemaVersion: resolved.manifest.schemaVersion,
+    // The contract the matchers below would actually apply — the live one,
+    // because `candidateMatchesGoldV3` calls the tree's `canon`. Passing the
+    // artifact's own value here would compare it with itself and check
+    // nothing.
+    scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+    scoringContractDigest: sha256(scoringContractDescriptorInput()),
 });
 
 console.log(renderReport(analysis, { maxRows }));

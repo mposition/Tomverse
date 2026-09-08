@@ -153,6 +153,24 @@ create` 한 번이지만, opt-out에서는 **잘못된 base의 PR에 auto-merge�
 기존에 열린 PR과 브랜치는 그대로 둡니다. 새 규칙은 이 변경 이후 만드는
 브랜치부터 적용합니다.
 
+## auto-merge는 PR을 만든 실행이 한 번만 켭니다
+
+`Auto PR to Develop`은 **자기 실행이 PR을 새로 열었을 때만** auto-merge를
+켭니다. 이미 열려 있는 PR에는 켜지 않습니다 — push마다 다시 켜면 사람이 끈
+auto-merge가 다음 commit까지만 유효해지고, 그 사실을 아무도 말해 주지 않습니다.
+
+2026-09-05에 그렇게 됐습니다. PR #1256은 02:13:06Z에 auto-merge가 꺼졌고,
+draft인 동안의 push 일곱 번은 draft 검사가 막았지만, ready로 되돌린 뒤
+05:20:16Z push 하나에 workflow가 다시 켰고 13분 뒤 병합됐습니다. 병합을
+보류하라는 지시가 있던 PR입니다.
+
+**끈 것은 꺼진 채로 있습니다.** 판정은 workflow의 `if:`가 create 단계의
+`created` 출력을 읽는 것이고, `tests/autoPrAutoMergeArming.test.mjs`가 그 단계의
+실제 shell을 stub `gh`로 돌려 양쪽 경로를 고정합니다.
+
+그래서 이미 열린 PR에 auto-merge가 필요하면 **사람이 켭니다.** 그것이 이 규칙이
+지키려는 결정입니다.
+
 # 다음 작업 고를 때 — 열린 이슈를 그대로 믿지 않습니다
 
 이슈가 **열려 있다**는 것과 **아직 안 됐다**는 것은 다른 사실입니다. 이 저장소는

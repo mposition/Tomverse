@@ -94,6 +94,46 @@ test("it refuses a same-version artifact whose digest moved", () => {
     assert.match(analysis.refusal, /digest/);
 });
 
+test("it refuses an artifact scored under a different scoring contract", () => {
+    // The gap `mem-score-v3.5` opened on 2026-09-03, and the reason it needs
+    // its own guard: the matchers here are the *tree's*
+    // (`candidateMatchesGoldV3` calls the live `canon`), so an artifact scored
+    // under v3.4 would be silently re-classified under v3.5. Neither check
+    // above can see it — a contract change moves neither the dataset version
+    // nor the dataset digest, which is exactly what a contract-only successor
+    // demonstrates.
+    const analysis = analyseArtifact({
+        artifact: artifactOf([], {
+            scoringContractVersion: "mem-score-v3.4",
+            scoringContractDigest: "a".repeat(64),
+        }),
+        casesById,
+        datasetVersion: MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
+        datasetDigest,
+        scoringContractVersion: "mem-score-v3.5",
+        scoringContractDigest: "b".repeat(64),
+    });
+    assert.match(analysis.refusal, /mem-score-v3\.4/);
+    assert.match(analysis.refusal, /mem-score-v3\.5/);
+    assert.match(analysis.refusal, /moves neither/);
+
+    // And the same artifact read under the contract it was actually scored
+    // with is not refused — without this half the assertion above would hold
+    // just as well if the guard refused everything.
+    const agreeing = analyseArtifact({
+        artifact: artifactOf([], {
+            scoringContractVersion: "mem-score-v3.4",
+            scoringContractDigest: "a".repeat(64),
+        }),
+        casesById,
+        datasetVersion: MEMORY_EVAL_SUCCESSOR_DATASET_VERSION,
+        datasetDigest,
+        scoringContractVersion: "mem-score-v3.4",
+        scoringContractDigest: "a".repeat(64),
+    });
+    assert.equal(agreeing.refusal ?? null, null);
+});
+
 test("it refuses a file that is not an eval artifact", () => {
     assert.ok(analyse({ hello: "world" }).refusal);
 });

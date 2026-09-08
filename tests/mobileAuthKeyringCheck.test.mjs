@@ -203,6 +203,33 @@ test("a malformed or duplicated retirement line fails, and says which variable",
   }
 });
 
+test("a retirement dated in the future fails, on either ring", () => {
+  // A syntactically fine line that means seventy years of trust. Nothing else
+  // in this check sees it: the id is in the ring, the date parses, and the
+  // report used to read "RETIRED, verifies until 2099-01-01" as though that
+  // were a healthy deployment.
+  const rotated = {
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-2:${PEPPER_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${justRetired()}`,
+  };
+  for (const variable of [
+    "MOBILE_AUTH_RETIRED_SIGNING_KEYS",
+    "MOBILE_AUTH_RETIRED_REFRESH_PEPPERS",
+  ]) {
+    const keyId = variable.includes("PEPPER") ? "pep-1" : "sign-1";
+    const { code, out } = run({
+      ...rotated,
+      [variable]: `${keyId}@2099-01-01T00:00:00.000Z`,
+    });
+    assert.equal(code, 1, `${variable}: ${out}`);
+    assert.match(out, /which is in the future/);
+    assert.match(out, /RETIREMENT IN THE FUTURE/);
+  }
+});
+
 test("no output carries key material", () => {
   const { out } = run({
     ...healthy,

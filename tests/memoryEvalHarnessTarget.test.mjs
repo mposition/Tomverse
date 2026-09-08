@@ -14,44 +14,201 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
     HARNESS_TARGET_DATASET_VERSION,
+    harnessRunTuple,
     harnessTarget,
     harnessTargetBindingFailures,
     targetManifestDigests,
 } from "../lib/memoryEvalHarnessTarget.ts";
 import { MEMORY_EVAL_SUCC4_MANIFEST } from "../lib/memoryEvalSucc4Manifest.ts";
 import { MEMORY_EVAL_SUCC5_MANIFEST } from "../lib/memoryEvalSucc5.ts";
+import { MEMORY_EVAL_SUCC7_MANIFEST } from "../lib/memoryEvalSucc7.ts";
+import {
+    MEMORY_EVAL_SUCC8_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC8_MANIFEST,
+} from "../lib/memoryEvalSucc8.ts";
+import {
+    MEMORY_EVAL_SUCC9_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC9_MANIFEST,
+} from "../lib/memoryEvalSucc9.ts";
+import { evalBudgetTupleFailures } from "../lib/memoryEvalBudgetBinding.ts";
+import { datasetFingerprintInputV3 } from "../lib/memoryEvalDatasetSchemaV3.ts";
+import { datasetFingerprintInputV4 } from "../lib/memoryEvalDatasetFingerprintV4.ts";
+import { createHash } from "node:crypto";
 
-test("the harness target is the frozen schema-3 set", () => {
-    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-6");
+const sha256 = (input) => createHash("sha256").update(input, "utf8").digest("hex");
+
+test("the harness target is the schema-3 set the live contract scores", () => {
+    assert.equal(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-9");
     const target = harnessTarget();
     assert.equal(target.datasetSchemaVersion, 3);
-    assert.equal(target.datasetFrozen, true);
     assert.equal(target.datasetPurpose, "decision");
     assert.equal(target.cases.length, 1150);
+    // Frozen since 2026-09-04, when @mposition signed its two digests against
+    // commit 25b3f503. The freeze came before this move, not with it: a
+    // harness pointed at an unfrozen sample is refused as `dataset_not_frozen`,
+    // and that refusal is the reason the two are separate decisions.
+    assert.equal(target.datasetFrozen, true);
+    assert.equal(target.datasetFrozen, MEMORY_EVAL_SUCC9_DATASET_FROZEN);
 });
 
-test("its digests are the ones the manifest froze", () => {
-    // The whole point of the binding. These are the values recorded in
-    // docs/release-gates/evidence/memory-extraction-instrument-2026-08-28.md
-    // and in the release-gate registry, and a run that computed anything else
-    // would produce an artifact no reader could resolve.
+test("its digests are the ones the pinned manifest records", () => {
+    // The whole point of the binding. A run that computed anything else would
+    // produce an artifact no reader could resolve.
     //
-    // The dataset digest moved on 2026-08-31 and this is the first time it
-    // has: succ-5 was a contract-only successor sharing succ-4's cases, so
-    // all three of them recorded `0a516821…`. succ-6 replaced thirteen cases,
-    // so a digest that still read `0a516821…` here would mean the harness was
-    // pointed at the old sample under the new name.
+    // Both sides are named: the digest is computed from the cases the target
+    // actually carries, and it has to equal the literal that was signed. A
+    // target reading the pinned value for both would compare the record with
+    // itself, which is how an edited case gets a digest nobody signed.
     const target = harnessTarget();
     assert.equal(
         target.datasetDigest,
-        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
+        "626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6"
+    );
+    assert.equal(target.datasetDigest, sha256(datasetFingerprintInputV4(target.cases)));
+    assert.equal(target.datasetDigest, MEMORY_EVAL_SUCC9_MANIFEST.datasetDigest);
+    assert.equal(
+        target.datasetManifestDigest,
+        MEMORY_EVAL_SUCC9_MANIFEST.manifestDigest
+    );
+    assert.deepEqual([...harnessTargetBindingFailures(target)], []);
+});
+
+test("succ-9 is fingerprinted with v4, not succ-6's v3", () => {
+    // The move's own failure mode, inherited from succ-7's. v3 omits
+    // `conversation.title`, which the prompt sends, so a target hashing with
+    // it would compute a digest the manifest never recorded and refuse the
+    // dataset for a difference this module invented.
+    const target = harnessTarget();
+    assert.equal(
+        target.datasetDigest,
+        sha256(datasetFingerprintInputV4(target.cases))
+    );
+    assert.notEqual(
+        target.datasetDigest,
+        sha256(datasetFingerprintInputV3(target.cases))
+    );
+});
+
+test("the run tuple describes succ-9, and a budget for succ-8 is refused", () => {
+    // The tuple is what a budget is bound to, so pointing the harness at a new
+    // dataset has to move it. It used to name succ-5's manifest directly,
+    // which meant a moved target left the tuple describing the old dataset and
+    // the mismatch only surfaced as a refusal at spend time.
+    const tuple = harnessRunTuple({
+        promptVersion: "mem-extract-v8",
+        promptDigest: "a".repeat(64),
+    });
+    assert.equal(tuple.datasetVersion, "mem-eval-succ-9");
+    assert.equal(
+        tuple.datasetDigest,
+        "626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6"
     );
     assert.equal(
-        target.scoringContractDigest,
-        "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd"
+        tuple.datasetManifestDigest,
+        "82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c"
     );
-    assert.equal(target.scoringContractVersion, "mem-score-v3.4");
-    assert.deepEqual([...harnessTargetBindingFailures(target)], []);
+    assert.equal(tuple.scoringContractVersion, "mem-score-v3.5");
+
+    // A budget bound to exactly this run passes, and one bound to succ-8 does
+    // not — without the second half the first proves nothing.
+    assert.deepEqual([...evalBudgetTupleFailures({ ...tuple }, tuple)], []);
+    const stale = evalBudgetTupleFailures(
+        {
+            ...tuple,
+            datasetVersion: "mem-eval-succ-8",
+            datasetDigest: MEMORY_EVAL_SUCC8_MANIFEST.datasetDigest,
+            datasetManifestDigest: MEMORY_EVAL_SUCC8_MANIFEST.manifestDigest,
+        },
+        tuple
+    );
+    // Three terms, not two, and the difference from the succ-7 case is the
+    // point: succ-8 and succ-9 do **not** share a sample. Five cases moved, so
+    // the dataset digest separates them as well as the version and the
+    // manifest. succ-8 is also still bound to the live contract, so nothing
+    // else refuses it — this tuple check is the whole of the protection.
+    assert.equal(stale.length, 3, stale.join(" | "));
+    assert.match(
+        stale.find((line) => line.startsWith("datasetVersion")),
+        /approved mem-eval-succ-8.*would use mem-eval-succ-9/
+    );
+    assert.ok(stale.some((line) => line.startsWith("datasetDigest:")), stale.join(" | "));
+    assert.ok(
+        stale.some((line) => line.startsWith("datasetManifestDigest")),
+        stale.join(" | ")
+    );
+});
+
+test("succ-8 stays resolvable, unedited, and is still contract-eligible", () => {
+    // succ-9 replaced cases, not the contract, so succ-8 does not lose its
+    // binding the way succ-4 and succ-7 did. It stopped being the target
+    // because the target moved, and nothing else about it changed — which is
+    // exactly why the tuple comparison above is the only thing standing
+    // between a succ-8 budget and a succ-9 run.
+    const succ8 = harnessTarget("mem-eval-succ-8");
+    assert.equal(succ8.cases.length, 1150);
+    assert.equal(succ8.datasetFrozen, MEMORY_EVAL_SUCC8_DATASET_FROZEN);
+    assert.equal(succ8.datasetDigest, MEMORY_EVAL_SUCC8_MANIFEST.datasetDigest);
+    assert.deepEqual([...harnessTargetBindingFailures(succ8)], []);
+    // And it is not what the harness would run.
+    assert.notEqual(succ8.datasetVersion, HARNESS_TARGET_DATASET_VERSION);
+    assert.notEqual(succ8.datasetDigest, harnessTarget().datasetDigest);
+});
+
+test("succ-6 stays resolvable by name, with its own sample", () => {
+    // The same historical guarantee succ-5 has. The 2026-09-01 decision-grade
+    // run against `mem-extract-v7` was scored on succ-6, and its artifact has
+    // to stay readable.
+    const succ6 = harnessTarget("mem-eval-succ-6");
+    assert.equal(succ6.datasetVersion, "mem-eval-succ-6");
+    assert.equal(succ6.cases.length, 1150);
+    assert.equal(
+        succ6.datasetDigest,
+        "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
+    );
+    // Resolvable, and no longer runnable: succ-6 is bound to `mem-score-v3.4`
+    // and the tree ships `mem-score-v3.5`. Reading an artifact scored under it
+    // and starting a new run against it are different acts, and only the first
+    // one survives a contract bump.
+    const failures = [...harnessTargetBindingFailures(succ6)];
+    assert.equal(failures.length, 1, failures.join(" | "));
+    assert.match(failures[0], /mem-score-v3\.4.*superseded contract is evidence/s);
+    assert.equal(succ6.scoringContractVersion, "mem-score-v3.4");
+    assert.notEqual(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-6");
+    assert.notEqual(succ6.datasetDigest, harnessTarget().datasetDigest);
+});
+
+test("succ-7 stays resolvable by name, and is no longer a run target", () => {
+    // succ-7 was frozen and signed on 2026-09-03 and never ran. It is kept
+    // resolvable because the signature and the manifest are records, and it
+    // stops being runnable the same day for the same reason succ-6 did: the
+    // Korean numeral amendment moved the contract underneath it.
+    //
+    // succ-8 is what carries these cases forward, and the two halves below are
+    // what make it a contract-only successor rather than a new dataset.
+    //
+    // Compared against succ-8 rather than against the live target: that
+    // identity is succ-8's claim, and it stopped describing the target on
+    // 2026-09-04 when the harness moved to succ-9, whose sample really is
+    // different. Leaving it pointed at `harnessTarget()` would have made this
+    // assertion mean a different thing after every move.
+    const succ7 = harnessTarget("mem-eval-succ-7");
+    assert.equal(succ7.datasetVersion, "mem-eval-succ-7");
+    assert.equal(succ7.cases.length, 1150);
+    assert.equal(succ7.datasetDigest, MEMORY_EVAL_SUCC8_MANIFEST.datasetDigest);
+    assert.notEqual(
+        succ7.datasetManifestDigest,
+        MEMORY_EVAL_SUCC8_MANIFEST.manifestDigest
+    );
+    // And neither succ-7 nor succ-8 is the sample a run would now score.
+    assert.notEqual(succ7.datasetDigest, harnessTarget().datasetDigest);
+    assert.equal(
+        succ7.datasetManifestDigest,
+        MEMORY_EVAL_SUCC7_MANIFEST.manifestDigest
+    );
+    const failures = [...harnessTargetBindingFailures(succ7)];
+    assert.equal(failures.length, 1, failures.join(" | "));
+    assert.match(failures[0], /mem-score-v3\.4.*superseded contract is evidence/s);
+    assert.notEqual(HARNESS_TARGET_DATASET_VERSION, "mem-eval-succ-7");
 });
 
 test("succ-5 stays resolvable by name, with its own sample", () => {
@@ -68,6 +225,9 @@ test("succ-5 stays resolvable by name, with its own sample", () => {
     );
     assert.equal(succ5.scoringContractVersion, "mem-score-v3.4");
     assert.equal(succ5.datasetDigest, MEMORY_EVAL_SUCC5_MANIFEST.datasetDigest);
+    // Bound to the contract it was frozen under, so the same superseded-
+    // contract refusal applies to it as to succ-6 and succ-7.
+    assert.equal([...harnessTargetBindingFailures(succ5)].length, 1);
     // And it is not the default any more, which is the other half of the
     // switch: a test that only checked succ-5 still resolves would pass with
     // the harness never having moved.
@@ -86,6 +246,8 @@ test("succ-6's manifest is what the binding resolves against", () => {
         "2ffc8c09d6a20c2ad150d222fd71b891bf160b6c26b4d27684708ccbcf20fb63"
     );
     assert.equal(recorded.scoringContractVersion, "mem-score-v3.4");
+    // And the live target binds, which is the half that says the record and
+    // the tree still describe the same thing today.
     assert.deepEqual([...harnessTargetBindingFailures(harnessTarget())], []);
 });
 

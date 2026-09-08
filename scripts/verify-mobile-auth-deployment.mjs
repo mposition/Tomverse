@@ -49,6 +49,12 @@
 //   MOBILE_AUTH_VERIFY_PEPPER_KID          MobileRefreshRotation.pepperKid
 //                                          (both read from the row that
 //                                          exchange created)
+//   MOBILE_AUTH_VERIFY_MODE                rotation (default) or emergency --
+//                                          decides what a failure tells you to
+//                                          do, since an emergency has no
+//                                          trustworthy Active to roll back to
+//   MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS     how old the evidence may be
+//                                          (default 900)
 //
 // The exchange it reads is a real session. Revoke it when you are done --
 // the runbook says so at the same step.
@@ -62,11 +68,16 @@ import { createPrivateKey, createPublicKey, verify } from "node:crypto";
 import {
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
   MOBILE_ACTIVE_SIGNING_KEY_ENV,
+  MOBILE_RETIRED_REFRESH_PEPPERS_ENV,
+  MOBILE_RETIRED_SIGNING_KEYS_ENV,
   MOBILE_TOKEN_AUDIENCE_ENV,
   MOBILE_TOKEN_ISSUER_ENV,
   activeMobileRefreshPepper,
   activeMobileSigningKey,
+  futureDatedMobileRetirements,
+  mobileRefreshPepperRetirements,
   mobileSigningKeyById,
+  mobileSigningKeyRetirements,
   mobileTokenAudience,
   mobileTokenIssuer,
   normalizeMobileKeyId,
@@ -81,6 +92,31 @@ const ACCESS_TOKEN_ENV = "MOBILE_AUTH_VERIFY_ACCESS_TOKEN";
 const REFRESH_TOKEN_ENV = "MOBILE_AUTH_VERIFY_REFRESH_TOKEN";
 const SECRET_DIGEST_ENV = "MOBILE_AUTH_VERIFY_SECRET_DIGEST";
 const PEPPER_KID_ENV = "MOBILE_AUTH_VERIFY_PEPPER_KID";
+const MAX_AGE_ENV = "MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS";
+const MODE_ENV = "MOBILE_AUTH_VERIFY_MODE";
+
+/**
+ * How old the evidence may be.
+ *
+ * Everything below verifies material, and material does not change when a
+ * token gets old -- a token this deployment's predecessor minted a week ago
+ * verifies against the same key just as well. So a stale token proves the key
+ * was right *then*, which is not the question. Fifteen minutes is long enough
+ * to collect an exchange and read a row, and short enough that the evidence is
+ * from the deployment being checked.
+ */
+const DEFAULT_MAX_AGE_SECONDS = 900;
+
+/**
+ * What to do when a check fails, which is not the same in both situations the
+ * runbook sends people here from.
+ *
+ *   rotation   there is a trustworthy Active to go back to. Roll back to it.
+ *   emergency  there is not -- an untrusted or lost previous ring is why this
+ *              procedure is running. Rolling "back" would restore the ring
+ *              that was abandoned, which in a leak is the leaked one.
+ */
+const MODES = new Set(["rotation", "emergency"]);
 
 const EVIDENCE = [
   ACCESS_TOKEN_ENV,
@@ -98,7 +134,17 @@ const fail = (name, detail) => {
   lines.push(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`);
 };
 
-const report = () => {
+const remedy = (mode) =>
+  mode === "emergency"
+    ? "  Do NOT promote Emergency Pending to Active, and do NOT roll back: the\n" +
+      "  previous ring is the one this procedure abandoned. Either disable mobile\n" +
+      "  auth (remove the six required variables) or roll forward to a new\n" +
+      "  candidate: docs/ops/mobile-auth-key-rotation.md section 5.1"
+    : "  Do NOT promote Pending to Active. Roll Railway back to Active using the\n" +
+      "  deployment id on the Pending entry, and discard this candidate:\n" +
+      "  docs/ops/mobile-auth-key-rotation.md";
+
+const report = (mode) => {
   console.log("Mobile auth deployment verification");
   for (const line of lines) console.log(line);
   console.log("");
@@ -113,11 +159,29 @@ const report = () => {
   }
   console.log(
     `FAIL mobile auth deployment: ${failures.length} check(s) failed (${failures.join(", ")}).\n` +
-      "  Do NOT promote Pending to Active. Roll Railway back to Active and\n" +
-      "  discard this candidate: docs/ops/mobile-auth-key-rotation.md"
+      remedy(mode)
   );
   return 1;
 };
+
+const mode = (process.env[MODE_ENV] ?? "rotation").trim() || "rotation";
+if (!MODES.has(mode)) {
+  console.log("Mobile auth deployment verification");
+  console.log(
+    `FAIL mobile auth deployment: ${MODE_ENV} is "${mode}"; expected one of ${[...MODES].join(", ")}.\n` +
+      "  The mode decides what a failure tells you to do, and guessing it wrong\n" +
+      "  is how an emergency gets told to roll back to the ring it abandoned."
+  );
+  process.exit(1);
+}
+
+const maxAgeRaw = (process.env[MAX_AGE_ENV] ?? "").trim();
+const maxAgeSeconds = maxAgeRaw === "" ? DEFAULT_MAX_AGE_SECONDS : Number(maxAgeRaw);
+if (!Number.isFinite(maxAgeSeconds) || maxAgeSeconds <= 0) {
+  console.log("Mobile auth deployment verification");
+  console.log(`FAIL mobile auth deployment: ${MAX_AGE_ENV} is not a positive number of seconds.`);
+  process.exit(1);
+}
 
 const missingEvidence = EVIDENCE.filter((name) => !(process.env[name] ?? "").trim());
 if (missingEvidence.length > 0) {
@@ -144,6 +208,28 @@ try {
       "  Run npm run check:mobile-auth-keyring -- --require-configured first."
   );
   process.exit(1);
+}
+
+// A retirement that has not arrived yet is not a retirement, and the key it
+// names verifies nothing. The pre-deploy check refuses one; repeated here
+// because this script is the last thing between a bad candidate and a
+// promotion to Active, and the candidate rings are right here.
+const nowMs = Date.now();
+for (const [variable, retirements] of [
+  [MOBILE_RETIRED_SIGNING_KEYS_ENV, mobileSigningKeyRetirements(process.env)],
+  [MOBILE_RETIRED_REFRESH_PEPPERS_ENV, mobileRefreshPepperRetirements(process.env)],
+]) {
+  const misdated = futureDatedMobileRetirements(retirements, nowMs);
+  if (misdated.length === 0) {
+    pass(`${variable} instants have arrived`);
+    continue;
+  }
+  fail(
+    `${variable} instants have arrived`,
+    misdated
+      .map(({ keyId, retiredAtMs }) => `${keyId} is retired at ${new Date(retiredAtMs).toISOString()}`)
+      .join("; ") + " -- a retirement records when trust was withdrawn, so that is in the future"
+  );
 }
 
 const parsed = parseCompactJws((process.env[ACCESS_TOKEN_ENV] ?? "").trim());
@@ -196,6 +282,34 @@ if (!parsed) {
         "signature does not verify -- the deployed key differs from the candidate under the same id"
       );
     }
+  }
+
+  // Freshness. Everything above compares material, and material does not age:
+  // a token minted a week ago by a deployment that is no longer running
+  // verifies against the same key exactly as well. Without this, evidence kept
+  // from a previous rotation passes every check and proves nothing about the
+  // deployment in front of us. An expired token (`exp` in the past) is the
+  // loud version of the same problem.
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const exp = typeof parsed.claims.exp === "number" ? parsed.claims.exp : null;
+  const iat = typeof parsed.claims.iat === "number" ? parsed.claims.iat : null;
+
+  if (exp === null || iat === null) {
+    fail("evidence is fresh", "the token carries no numeric iat/exp to judge age by");
+  } else if (exp <= nowSeconds) {
+    fail(
+      "evidence is fresh",
+      `the token expired at ${new Date(exp * 1000).toISOString()} -- collect a new exchange against the deployment`
+    );
+  } else if (nowSeconds - iat > maxAgeSeconds) {
+    fail(
+      "evidence is fresh",
+      `the token was issued ${nowSeconds - iat}s ago, over the ${maxAgeSeconds}s limit (${MAX_AGE_ENV})`
+    );
+  } else if (iat > nowSeconds + 60) {
+    fail("evidence is fresh", "the token is issued in the future; check the clocks");
+  } else {
+    pass("evidence is fresh", `issued ${nowSeconds - iat}s ago`);
   }
 
   const issuer = mobileTokenIssuer(process.env);
@@ -251,4 +365,4 @@ if (!refresh) {
   }
 }
 
-process.exit(report());
+process.exit(report(mode));

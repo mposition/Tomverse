@@ -51,11 +51,23 @@ import {
     MEMORY_EVAL_SUCC4_MANIFEST,
     succ4DatasetDigest,
 } from "@/lib/memoryEvalSucc4Manifest";
-import {
-    MEMORY_EVAL_SCORING_CONTRACT_VERSION,
-    scoringContractDescriptorInput,
-} from "@/lib/memoryEvalScoringContractDigest";
 import type { MemoryEvalCaseV3 } from "@/lib/memoryEvalDatasetSchemaV3";
+
+/**
+ * The contract this dataset was frozen under, recorded rather than recomputed.
+ *
+ * It read the live contract until `mem-score-v3.5` shipped. That was correct
+ * while this dataset's contract *was* the live one and wrong the moment it
+ * stopped being: an earlier contract's constants are gone from the tree, so
+ * its descriptor cannot be rebuilt, and recomputing would have moved this
+ * manifest's digest — the value a person signed — for a change to a contract
+ * this dataset is not scored under. It is bound to v3.4 for good, and its
+ * successor carries the same cases under v3.5.
+ */
+export const MEMORY_EVAL_SUCC5_SCORING_CONTRACT = {
+    version: "mem-score-v3.4",
+    digest: "a62f4bdd8d2073345e19e478541c20d81275a0d11fb78aa6e4df86ec0489b4cd",
+} as const;
 
 const sha256 = (input: string): string =>
     createHash("sha256").update(input, "utf8").digest("hex");
@@ -196,8 +208,8 @@ export function buildSucc5Manifest(): Succ5DatasetManifest {
         caseCount: MEMORY_EVAL_SUCC5_CASES.length,
         cellCounts: cellCountsOf(MEMORY_EVAL_SUCC5_CASES),
         datasetDigest,
-        scoringContractDigest: sha256(scoringContractDescriptorInput()),
-        scoringContractVersion: MEMORY_EVAL_SCORING_CONTRACT_VERSION,
+        scoringContractDigest: MEMORY_EVAL_SUCC5_SCORING_CONTRACT.digest,
+        scoringContractVersion: MEMORY_EVAL_SUCC5_SCORING_CONTRACT.version,
     };
     return {
         ...withoutDigest,

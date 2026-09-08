@@ -1,0 +1,633 @@
+{
+  "schemaVersion": 1,
+  "kind": "bootstrap_control_plane_preparation_scope_inventory",
+  "status": "DRAFT_HUMAN_DECISIONS_PENDING_NOT_IMPLEMENTATION_AUTHORIZATION",
+  "preparedOn": "2026-09-07",
+  "documentPath": ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+  "authorization": {
+    "preparationOnly": true,
+    "decision": "pending",
+    "approvedBy": null,
+    "approvedAt": null,
+    "implementationAuthorized": false,
+    "operationalBootstrapAuthorized": false,
+    "activationAuthorized": false,
+    "providerCallsAuthorized": false,
+    "commitPushPrAuthorized": false
+  },
+  "basis": {
+    "commit": "48df8e428061003115aad8d66c27fd1dddd56f7a",
+    "preparedPackageCommit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+    "branch": "codex/memory-eval-vnext-bootstrap-p-scope",
+    "observedAt": "2026-09-07T12:00:56.902Z",
+    "mergeParents": [
+      "19ff015112e6cf908cd8dc057ca41ace8cef4e87",
+      "a19ae39d0da61295eb17e1545c74bc5b7e702c1a"
+    ],
+    "ci": [
+      {
+        "id": 34118053612,
+        "name": "Admin Console E2E",
+        "headSha": "48df8e428061003115aad8d66c27fd1dddd56f7a",
+        "attempt": 1,
+        "conclusion": "success",
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34118053612"
+      },
+      {
+        "id": 34118053684,
+        "name": "Credit Finance DB Integration",
+        "headSha": "48df8e428061003115aad8d66c27fd1dddd56f7a",
+        "attempt": 1,
+        "conclusion": "success",
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34118053684"
+      }
+    ],
+    "ciMeaning": "Exact basis CI only; not bootstrap/activation/production-readiness evidence."
+  },
+  "approvalLineage": {
+    "A": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+    "CA": "80842e62925c05af9450e6acc6ceb70b56f67655",
+    "D": "159267a80acee97da3a297c637343ea15de725f9",
+    "K": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+    "allAncestorsOfBasis": true,
+    "DStrictAncestorOfK": true,
+    "originalDecisionSection13PreservedBlank": true
+  },
+  "sourceFiles": [
+    {
+      "commit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+      "path": ".github/audits/memory-eval-vnext-s1-scoring-contract-2026-09-06.md",
+      "rawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7"
+    },
+    {
+      "commit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+      "path": ".github/audits/memory-eval-vnext-s2-purpose-contract-2026-09-06.md",
+      "rawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5"
+    },
+    {
+      "commit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+      "path": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "rawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05"
+    },
+    {
+      "commit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+      "path": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "rawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb"
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "path": ".github/audits/memory-eval-vnext-contract-decision-2026-09-05.md",
+      "rawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da"
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "path": ".github/audits/memory-eval-vnext-contract-decision-approval-2026-09-06.md",
+      "rawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5"
+    },
+    {
+      "commit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-2026-09-07.md",
+      "rawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2"
+    },
+    {
+      "commit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38"
+    },
+    {
+      "commit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-2026-09-07.md",
+      "rawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf"
+    },
+    {
+      "commit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f"
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138"
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-2026-09-07.md",
+      "rawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77"
+    },
+    {
+      "commit": "159267a80acee97da3a297c637343ea15de725f9",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "rawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98"
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-clarification-approval.json",
+      "rawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423"
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-2026-09-07.md",
+      "rawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262"
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-request-draft-2026-09-07.md",
+      "rawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67"
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-recalculated-package-2026-09-07.json",
+      "rawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f"
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-recalculated-approval-draft-2026-09-07.md",
+      "rawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0"
+    }
+  ],
+  "currentWriteAllowlist": [
+    ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+    ".github/audits/evidence/memory-eval-vnext-bootstrap-p-scope-evidence-2026-09-07.json"
+  ],
+  "codeProbe": {
+    "commit": "48df8e428061003115aad8d66c27fd1dddd56f7a",
+    "command": "git grep -n -E 'ProtocolImplementation|ApprovedTrustRoot|mem-provenance-checkpoint-1|mem-signature-receipt-1|mem-sealed-object-1' HEAD -- lib scripts tests .github/workflows",
+    "exitCode": 1,
+    "matches": 0,
+    "meaning": "No matching tracked tokens in lib/scripts/tests/.github/workflows; not an exhaustive semantic or external environment inventory."
+  },
+  "proposedWorkUnits": [
+    {
+      "id": "P-01",
+      "scope": "Closed wire, mem-cjson-1/domain digest, Ed25519 verification and role/epoch authorization",
+      "source": "S3 §4/Data Models; S4 Data Models; D B-S2-01/F-1",
+      "futurePathFamily": "lib/memoryEvalVnext/protocol/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-02",
+      "scope": "Complete Git DAG, D/K binding, protection, external trust root and current checkpoint verification",
+      "source": "S4 §1–§2, AC-13/AC-15; D K binding",
+      "futurePathFamily": "lib/memoryEvalVnext/history/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-03",
+      "scope": "Central controller, durable single-writer journal, fencing, mirror and checkpoint signatures",
+      "source": "S4 §3, AC-15; S3/S4 approval N-1",
+      "futurePathFamily": "lib/memoryEvalVnext/controller/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-04",
+      "scope": "Independent custodian adapter, single-use object keys, bootstrap/journal grants and retention/recovery",
+      "source": "S3 §4/§4.1/Data Models; S4 §3/§8",
+      "futurePathFamily": "lib/memoryEvalVnext/custody/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-05",
+      "scope": "External environment supervision/measurement and authenticated clock evidence verification",
+      "source": "S3 §4/AC-12; S4 NFR-5/AC-16",
+      "futurePathFamily": "lib/memoryEvalVnext/environment/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-06",
+      "scope": "Authorization-gated dispatch and credential/contact control; complete run/attempt enumeration and no-contact refusal",
+      "source": "S4 §4–§5, AC-14/AC-17; S3/S4 approval N-2",
+      "futurePathFamily": "lib/memoryEvalVnext/dispatch/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-07",
+      "scope": "Artifact binding, priced/unknown spend evidence, technical closure, offline import and invalidation",
+      "source": "S4 §6–§8/API Contracts",
+      "futurePathFamily": "lib/memoryEvalVnext/importer/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-08",
+      "scope": "Dedicated workflow, authenticated controller client, runtime/actions/supervisor dependency closure",
+      "source": "S4 §1–§3; S3 §4; S3/S4 approval N-1",
+      "futurePathFamily": ".github/workflows/memory-eval-vnext-decision-grade.yml",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-09",
+      "scope": "D closed proof verification and exact source/signature/activation/inclusion binding, no transition writer",
+      "source": "D B-S2-01/B-S2-02/F-1; S2 contract",
+      "futurePathFamily": "lib/memoryEvalVnext/s2Evidence/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    },
+    {
+      "id": "P-10",
+      "scope": "Offline synthetic conformance, negative/crash/replay tests, audit-only command entrypoints and complete closure inventory",
+      "source": "S3/S4/D acceptance criteria; S2 invariants",
+      "futurePathFamily": "tests/memoryEvalVnext/ and scripts/memory-eval-vnext/",
+      "status": "PROPOSAL_NOT_FILE_ALLOWLIST_OR_IMPLEMENTATION_APPROVAL"
+    }
+  ],
+  "humanDecisionQueue": [
+    {
+      "id": "HD-1",
+      "topic": "실제 signer·role·key·epoch 및 등록/폐기 운영",
+      "agentPreparation": "역할/purpose 대응표, public key 검산·등록 대상 draft, 겸직·복구·폐기 영향 표",
+      "humanDecision": "실제 담당자와 독립성 한계, key 보관/생성 경로, 유효기간·epoch·등록/폐기 정책",
+      "blocks": "실제 TrustAnchor 등록 및 운영 서명",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-2",
+      "topic": "ProtectionPolicy·bypassDisclosure",
+      "agentPreparation": "읽기 전용 재조회 대상과 exact snapshot 비교 계획, 관리자 우회/적용 경로 차이 표",
+      "humanDecision": "실제 classic/rules/bypass snapshot과 허용 운영 경계 승인",
+      "blocks": "보호 정책 고정·신뢰된 genesis/root",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-3",
+      "topic": "암호문 2개 독립 보관소·분리 key backup·복구",
+      "agentPreparation": "접근 경계·동일인 관리 위험·raw 자료 목록·복구/단일 key 사용 검증 계획",
+      "humanDecision": "실제 보관 대상/운영자/보존 기간·복구 경계 승인",
+      "blocks": "실제 key custody·RetentionProof·폐기/복구 운영",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-4",
+      "topic": "중앙 journal·controller·독립 custodian/credential 발급",
+      "agentPreparation": "writer/lock/fsync/fencing 및 중단·복구·rollback 시험 계획, runner key 부재 증명 계획",
+      "humanDecision": "실제 배치·관리 경계·독립 checkpoint 저장·발급 우회 차단 정책",
+      "blocks": "live journal·controller signing·credential/key grant",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-5",
+      "topic": "비공개 실행·review session 환경",
+      "agentPreparation": "전용 ephemeral self-hosted/비실행 session의 image·supervisor·측정 verifier와 원 증거 매핑",
+      "humanDecision": "EnvironmentApproval의 실제 환경·policy·attester 및 관리자 잔여 승인",
+      "blocks": "실제 plaintext 처리·attestation·grant",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-6",
+      "topic": "인증된 UTC source·ClockPolicy",
+      "agentPreparation": "인증 trust·측정·원 proof·verifier closure 후보와 S4 오차/경계 시험 계획",
+      "humanDecision": "실제 source·인증 경로·측정 policy/구현 및 drift 상한 승인",
+      "blocks": "유효시간·cutoff·grant/dispatch 운영 판정",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-7",
+      "topic": "P 구현 exact scope·dependency closure·검증 권한",
+      "agentPreparation": "P-01–P-10을 실제 파일별 diff allowlist·외부 dependency/runtime/action digest·FR/AC로 상세화",
+      "humanDecision": "별도 offline 구현/시험 범위와 이후 실제 bootstrap 운영 권한을 각각 결정",
+      "blocks": "코드/테스트/workflow 작성 및 최종 P 동결",
+      "status": "pending",
+      "selectedValue": null
+    },
+    {
+      "id": "HD-8",
+      "topic": "D N-1/N-3의 실제 실행 증명 공백",
+      "agentPreparation": "요청 version 원 관측과 독립 network 차단 사실의 증명 가능성/공백 보고; 새 wire 없이 대조",
+      "humanDecision": "필수 조건을 입증하지 못하거나 계약 의미 변경이 필요하면 별도 범위 결정",
+      "blocks": "source receipt 발급·activation 실행 판정",
+      "status": "pending",
+      "selectedValue": null
+    }
+  ],
+  "acceptedClarificationResiduals": {
+    "namespace": "s2_clarification_confirmation_2026_09_07",
+    "approvalCommit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+    "confirmationReport": {
+      "path": "C:/Users/Vyper/.codex/attachments/5d2cea28-1d56-4419-b431-045d1348aeba/pasted-text.txt",
+      "rawSha256": "52ea1b94d745142eef9347aff9e831e0c8364cc83014ec1773571471d1f14b38",
+      "result": "CONFIRMED_WITH_WARNINGS",
+      "confirmationRoundsConsumed": 1,
+      "confirmationRoundLimit": 1,
+      "reviewCommit": null,
+      "reviewedDraftRawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98"
+    },
+    "entries": [
+      {
+        "id": "N-1",
+        "status": "accepted_not_resolved_or_waived",
+        "boundary": "ApiCapture request-header gap remains; do not infer request version from response headers or adopt the reviewer's importer-attest interpretation."
+      },
+      {
+        "id": "N-2",
+        "status": "accepted_not_resolved_or_waived",
+        "boundary": "Exact V subject must independently replay all eight rules OK. Exit 0 alone is insufficient; do not relax D for generic NOTE outcomes."
+      },
+      {
+        "id": "N-3",
+        "status": "accepted_not_resolved_or_waived",
+        "boundary": "ReplayEnvironment does not prove network blocking. Actual blocked environment required; runtime/self-attestation is not proof. No EnvironmentAttestation adopted."
+      }
+    ],
+    "stopRule": "If ambiguity affects execution judgment or a mandatory requirement cannot be proved, stop execution and request separate direction. Preparation completion is not execution readiness.",
+    "upstreamConditions": "All A/CA S1-S4 conditions and accepted residuals remain; no waiver or replacement."
+  },
+  "priorS3S4ConditionScope": {
+    "receipt": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-2026-09-07.md",
+    "N1": "No controller signing key on runner; authenticated central controller client only.",
+    "N2": "No external_not_executed without complete S4 required evidence; API gaps remain contacted_unknown.",
+    "note": "Distinct namespace from D confirmation N-1/N-2/N-3. All A/CA conditions and residuals remain."
+  },
+  "unresolvedPrerequisites": [
+    {
+      "id": "OP-TRUST",
+      "status": "not_established_in_package",
+      "required": "Actual human key/role/epoch/policy registration binding exact D/K and three new purposes; ProtectionPolicy approval including bypass disclosure.",
+      "nextWork": "Separate scoped bootstrap preparation/registration authority; no key generation or provider credentials now."
+    },
+    {
+      "id": "OP-P-ROOT",
+      "status": "not_established_in_package",
+      "required": "Explicit implementation authority for control-plane P; ProtocolImplementation -> ProtocolDescriptor -> genesis/event -> signed mirror -> checkpoint -> externally registered ApprovedTrustRoot.",
+      "nextWork": "Define and obtain separate implementation/bootstrap scope; do not reuse A/CA/K or this draft as P/TrustRoot approval."
+    },
+    {
+      "id": "OP-CUSTODY",
+      "status": "not_established_in_package",
+      "required": "Complete native Git A/V graph and raw leaf custody, independent stores/key backup/recovery checks under S3/S4.",
+      "nextWork": "Prepare only after separate authority; existing local ZIPs are not trusted custody."
+    },
+    {
+      "id": "OP-SOURCES",
+      "status": "not_established_in_package",
+      "required": "D's exact 15 source receipts, four closed proof kinds, register cross-check, actual importer signatures and independent fixed-script network-blocked replay.",
+      "nextWork": "Resolve execution-relevant N-1/N-3 evidence gaps before claiming proof completion; all eight checker rules must be OK."
+    },
+    {
+      "id": "OP-ACTIVATION-APPROVAL",
+      "status": "not_requested_as_ready_not_approved",
+      "required": "Final exact approval target including resolver scope, actual human approval and registered Ed25519 signature; completed authorization committed after K and before C.",
+      "nextWork": "Do not request a signature on this incomplete plan or fill approval fields from K."
+    },
+    {
+      "id": "OP-RESOLVER",
+      "status": "not_implemented_not_tested",
+      "required": "Explicitly scoped resolver implementation and offline S2/D acceptance tests; allowedResolverPaths finalized by separate approval.",
+      "nextWork": "Nine paths below are an unsigned proposal, not all control-plane dependencies or permission to implement them."
+    },
+    {
+      "id": "OP-C-INCLUSION",
+      "status": "not_created",
+      "required": "Atomic three-line C, SHA-preserving protected develop merge, exact-tip CI, detached inclusion signature and external verified ActivationCheckpoint.",
+      "nextWork": "Only after prior gates; no ledger, seq1/seq2 recordDigest or future commit guesses."
+    }
+  ],
+  "futureValues": {
+    "implementationCommitP": null,
+    "protocolImplementationDigest": null,
+    "protocolDigest": null,
+    "trustPolicyDigest": null,
+    "workflowId": null,
+    "journalId": null,
+    "genesisEventDigest": null,
+    "gitMirrorCommit": null,
+    "checkpointDigest": null,
+    "approvedTrustRoot": null,
+    "activationApprovalCommit": null,
+    "activationCommitC": null,
+    "inclusionCommit": null
+  },
+  "operationalEvidenceProduced": [],
+  "notProduced": [
+    "key material",
+    "operational signatures",
+    "TrustAnchor registration",
+    "ProtectionPolicy approval",
+    "EnvironmentApproval/Attestation",
+    "ClockPolicy/Evidence",
+    "live journal",
+    "ProtocolImplementation/Descriptor",
+    "GenesisRecord/event",
+    "Checkpoint/ApprovedTrustRoot",
+    "native signed source proofs",
+    "S2 ActivationAuthorization",
+    "S2 transition/inclusion",
+    "provider/holdout/S5"
+  ],
+  "existingUntrackedPreservation": {
+    "status": [
+      "?? .claude/",
+      "?? .codex/",
+      "?? .github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+      "?? .github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+      "?? .github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+      "?? .github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+      "?? .github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+      "?? attachment-audit.json"
+    ],
+    "regularFiles": [
+      {
+        "path": ".github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+        "rawSha256": "bcb69780466af1df892f6d82eec186f06836e581b259424e797b5e95274881f2"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+        "rawSha256": "06b104bf7b5ea0d7d207d55db3520d2a968a7d3a6d5bf96e8fb1e182aaa4fcc5"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+        "rawSha256": "74b02f5035ab6766f4e93d9335c7cf7919ba19283173f9cede639c6b66a101be"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+        "rawSha256": "fea5b992a050d1ba160a0153ea3a7a8da714e57c5193b81bd140e105c7866826"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+        "rawSha256": "6a06a68271d827667a9d04784ea2eb74642179147bb96b107a946cfecc79a481"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+        "rawSha256": "bed852fa4fbdb53cd7ddce2b1d453759244fd43bb290b2cd72c2550c7ac3cbdb"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+        "rawSha256": "ccb1af8d606cc27fb30b1654712f9e61065b8a2d2e8123d25dd64c91f0c07f65"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "7aecf2f7744840cf6161065278103ebcacabef74b808f3e0eadb1748ecaff142"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+        "rawSha256": "9e64bf111a1cadde38e01386738e4642d42f6a5018dfad52c5c33af5e961d238"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "7b5e62eb77fdc36a39de1e73fc88cde729090ebc2d4a3d03f26bdbce851ae77c"
+      },
+      {
+        "path": "attachment-audit.json",
+        "rawSha256": "52b9ea37d7dae4cb09931651cb9955e0447c06b25fd126b485211c7228bb93fa"
+      }
+    ],
+    "excludedDirectories": [
+      ".claude/",
+      ".codex/"
+    ],
+    "directoryClaim": "Neither directory was written; no recursive digest inventory claimed."
+  },
+  "baseline": {
+    "trackedAndIndexClean": true,
+    "scripts": [
+      {
+        "script": "check:encoding:strict",
+        "exitCode": 0,
+        "output": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n"
+      },
+      {
+        "script": "check:policy-section-references",
+        "exitCode": 0,
+        "output": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4049 citation(s) against 30 policy document(s). 2414 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1406 and 229 predate this change).\n"
+      },
+      {
+        "script": "check:release-records",
+        "exitCode": 0,
+        "output": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n"
+      },
+      {
+        "script": "check:memory-eval-succ9",
+        "exitCode": 0,
+        "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n"
+      },
+      {
+        "script": "check:memory-extraction-eval",
+        "exitCode": 0,
+        "output": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n"
+      },
+      {
+        "script": "check:memory-eval-freeze",
+        "exitCode": 0,
+        "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n"
+      },
+      {
+        "script": "check:doc-references",
+        "exitCode": 1,
+        "output": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\n\n8 broken reference(s) in source comments:\n  - app/layout.tsx does not exist, and lib\\documentLanguage.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and app\\[locale]\\layout.tsx points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and scripts\\security-regression-check.mjs points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - app/layout.tsx does not exist, and tests\\e2e\\ssr-root-language.spec.ts points a reader at it. If the comment is describing something that was removed, register it as historical with the reason; otherwise repoint it at the path that replaced it.\n  - lib/documentLanguage.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - app/[locale]/layout.tsx -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - scripts/security-regression-check.mjs -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n  - tests/e2e/ssr-root-language.spec.ts -> app/layout.tsx is listed as historical but no comment makes that reference any more. Remove the entry.\n\nA comment that names a test file is making a claim about coverage, and a\ncomment that names a module is telling the next reader where to look. Both\nare believed without being opened, which is exactly why neither is checked\nby anything else.\n\n"
+      }
+    ],
+    "docReferenceMeaning": "Eight pre-existing Windows path/reference diagnostics; compare exact names after preparation edits."
+  },
+  "preparationValidation": {
+    "status": "PREPARATION_CHECKED_WITH_PREEXISTING_DOC_REFERENCE_FAILURES",
+    "claimsOperationalReadiness": false,
+    "scriptResults": [
+      {
+        "script": "check:encoding:strict",
+        "exitCode": 0,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      },
+      {
+        "script": "check:policy-section-references",
+        "exitCode": 0,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      },
+      {
+        "script": "check:release-records",
+        "exitCode": 0,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      },
+      {
+        "script": "check:memory-eval-succ9",
+        "exitCode": 0,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      },
+      {
+        "script": "check:memory-extraction-eval",
+        "exitCode": 0,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      },
+      {
+        "script": "check:memory-eval-freeze",
+        "exitCode": 0,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      },
+      {
+        "script": "check:doc-references",
+        "exitCode": 1,
+        "exactOutputEqualToCleanTrackedBaseline": true
+      }
+    ],
+    "newScriptFailures": [],
+    "existingDocReferenceDiagnostics": 8,
+    "sourceCommitBasisWorkingHashMatch": true,
+    "sourceFilesVerified": 18,
+    "originalDecision400LinesPreserved": true,
+    "oldUntrackedRegularFilesPreserved": 11,
+    "trackedAndIndexClean": true,
+    "onlyTwoCurrentAllowlistFilesAdded": true,
+    "strictUtf8NoBomNoCrLf": true,
+    "jsonParses": true,
+    "sourceReferenceTableMatchesInventory": true,
+    "gitDiffCheck": "passed_no_diagnostics",
+    "newFileNoIndexDiffCheck": {
+      "exitCode": 1,
+      "stdout": "",
+      "stderr": "",
+      "meaning": "New-file differences; zero whitespace diagnostics, not a whitespace failure."
+    },
+    "manualScopeTraceability": {
+      "FR1to7": "AC1to6",
+      "NFR1to3": "AC7",
+      "NFR4": "AC4",
+      "NFR5": "AC5",
+      "workUnits": 10,
+      "pendingHumanDecisions": 8,
+      "wireRecordsCreated": 0
+    },
+    "specValidator": {
+      "script": ".codex/skills/spec-driven-workflow/scripts/spec_validator.py",
+      "arguments": [
+        "--file",
+        ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+        "--strict",
+        "--json"
+      ],
+      "exitCode": 1,
+      "score": 98,
+      "grade": "A",
+      "findings": [
+        {
+          "severity": "warning",
+          "section": "api_contracts",
+          "message": "No HTTP method + path found (expected e.g., POST /api/endpoint)"
+        },
+        {
+          "severity": "info",
+          "section": "api_contracts",
+          "message": "No TypeScript interfaces found. Consider defining request/response shapes."
+        }
+      ],
+      "disposition": "HTTP endpoint/TypeScript interface absent because this is preparation documentation with no new API. No endpoint invented to silence the generic warning."
+    },
+    "operationalTests": "NOT_RUN_NOT_AUTHORIZED",
+    "verificationLimitations": [
+      "No proof of actual key/custody/environment/clock/protection deployment or independent external review.",
+      "Git grep is a scoped token observation, not a semantic inventory.",
+      "Audits are excluded by check:doc-references; source identities and cross-document mappings were checked separately.",
+      "No recursive hash comparison of .claude/ or .codex/; neither directory was written."
+    ]
+  },
+  "notes": [
+    "This JSON is explanatory audit inventory, not an S3/S4/D wire record, proof, SignatureReceipt, trusted root, or human approval.",
+    "Source hashes identify only their own raw bytes. No self hash or future commit SHA is fabricated.",
+    "The current two-file allowlist is not the future P implementation closure and does not extend S2 allowedResolverPaths."
+  ]
+}

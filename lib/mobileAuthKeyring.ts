@@ -260,6 +260,48 @@ const withinGrace = (retiredAtMs: number, graceSeconds: number, nowMs: number) =
   nowMs < retiredAtMs + graceSeconds * 1000;
 
 /**
+ * How far ahead of now a retirement instant may sit and still be one.
+ *
+ * A retirement records when trust was withdrawn, so it is a past instant by
+ * construction. A small allowance covers the operator writing "now" against a
+ * clock that is a little ahead of the server's.
+ */
+export const MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS = 300;
+
+/**
+ * Whether a retirement instant has actually arrived.
+ *
+ * A future-dated retirement is the same hole the mistyped id was, wearing a
+ * different hat: `sign-old@2099-01-01T00:00:00Z` parses, reports itself as
+ * `RETIRED, verifies until 2099`, and leaves the previous key trusted for
+ * seventy years. The fifteen-minute contract does not apply to it, and nothing
+ * says so out loud.
+ *
+ * So the answer is the same as for every other unclear declaration here: the
+ * key verifies nothing. That is stricter than the contract rather than laxer,
+ * it is visible immediately (tokens that key signed are refused and clients
+ * refresh), and `npm run check:mobile-auth-keyring` fails on it before a
+ * deploy rather than after one.
+ */
+const retirementHasArrived = (retiredAtMs: number, nowMs: number) =>
+  retiredAtMs <= nowMs + MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS * 1000;
+
+/**
+ * The retirement lines whose instant has not arrived yet, for the pre-deploy
+ * check and the post-deploy verifier to report by name.
+ *
+ * Returned rather than thrown: a caller that is about to refuse a deploy wants
+ * to list every one of them, not the first.
+ */
+export const futureDatedMobileRetirements = (
+  retirements: ReadonlyMap<string, number>,
+  nowMs: number = Date.now()
+): readonly { keyId: string; retiredAtMs: number }[] =>
+  [...retirements.entries()]
+    .filter(([, retiredAtMs]) => !retirementHasArrived(retiredAtMs, nowMs))
+    .map(([keyId, retiredAtMs]) => ({ keyId, retiredAtMs }));
+
+/**
  * Whether a ring key may verify anything right now.
  *
  * **A key is usable only if it is the active one, or it is explicitly retired
@@ -287,6 +329,10 @@ const withinGrace = (retiredAtMs: number, graceSeconds: number, nowMs: number) =
  * which is stricter than the contract rather than laxer, is visible (tokens it
  * signed are refused and clients refresh), and takes nothing else down.
  *
+ * A retirement dated in the *future* is the same hole a third time -- it
+ * parses, it reads as "retired", and it leaves the key trusted until that
+ * date. It gets the same answer: not usable.
+ *
  * The cost is that forgetting the retirement line is not free: for a pepper it
  * means those refresh tokens stop verifying and those people sign in again.
  * `npm run check:mobile-auth-keyring` exists so that is found before a deploy
@@ -306,6 +352,12 @@ const usableEntry = (
 
   const retiredAt = retirements.get(keyId);
   if (retiredAt === undefined) return null;
+  if (!retirementHasArrived(retiredAt, nowMs)) {
+    reportOnce(
+      `A retirement for "${keyId}" is dated in the future, so it is not a retirement and the key verifies nothing. Fix the instant and redeploy.`
+    );
+    return null;
+  }
   if (!withinGrace(retiredAt, graceSeconds, nowMs)) return null;
   return { keyId, secret };
 };

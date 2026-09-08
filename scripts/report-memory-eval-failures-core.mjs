@@ -22,6 +22,16 @@
  * against. The gold labels decide every classification below, so reading an
  * old artifact against a newer dataset produces confident, wrong answers —
  * which is the failure this programme has already had four times in its tools.
+ *
+ * It refuses on the **scoring contract** for the same reason, and that guard
+ * had to be added on 2026-09-03. The matchers below are the live ones:
+ * `candidateMatchesGoldV3` calls the tree's `canon`, not the artifact's. While
+ * the contract had not moved since `mem-score-v3.4` that was harmless and
+ * invisible. `mem-score-v3.5` changed Korean canonicalisation, so every
+ * artifact scored under v3.4 would have been re-classified here under v3.5 —
+ * silently, with the same dataset version and the same dataset digest, since a
+ * contract change moves neither. The lines would have disagreed with the
+ * artifact's own totals and nothing would have said why.
  */
 
 import {
@@ -120,6 +130,10 @@ const emptyCell = (category, language) => ({
  * @param {string} input.datasetVersion the tree's dataset version
  * @param {string} input.datasetDigest  the tree's dataset digest
  * @param {number} input.datasetSchemaVersion which scorer's rules to classify by
+ * @param {string} [input.scoringContractVersion] the contract the tree would
+ *   classify with. Omitted means "not checked", which is only right for a
+ *   caller that has already established it.
+ * @param {string} [input.scoringContractDigest] the same, as a digest.
  */
 export function analyseArtifact({
     artifact,
@@ -127,6 +141,8 @@ export function analyseArtifact({
     datasetVersion,
     datasetDigest,
     datasetSchemaVersion = 2,
+    scoringContractVersion = null,
+    scoringContractDigest = null,
 }) {
     const manifest = artifact?.manifest;
     if (!manifest || !Array.isArray(artifact?.records)) {
@@ -153,6 +169,34 @@ export function analyseArtifact({
                 `${datasetDigest.slice(0, 16)}…. A frozen dataset that fingerprints differently ` +
                 `has been edited, and the cases no longer line up with the records.`,
         };
+    }
+
+    // The contract, after the dataset and for a different reason. A dataset
+    // mismatch means the gold labels differ; a contract mismatch means the
+    // labels are the same and the rules for meeting them are not. Both produce
+    // a confident wrong answer, and only this one survives an identical
+    // `datasetVersion` and `datasetDigest` — which is exactly what a
+    // contract-only successor has.
+    //
+    // Compared only when the caller supplies a value, because a caller that
+    // has already established the contract by other means should not be forced
+    // to restate it. The resolver does supply it.
+    const recordedContract = manifest.scoringContractDigest ?? null;
+    if (scoringContractDigest && recordedContract) {
+        if (recordedContract !== scoringContractDigest) {
+            return {
+                refusal:
+                    `The artifact was scored under ` +
+                    `${manifest.scoringContractVersion ?? "an unnamed contract"} ` +
+                    `(${String(recordedContract).slice(0, 16)}…) and this tree would ` +
+                    `classify it under ${scoringContractVersion ?? "its own contract"} ` +
+                    `(${scoringContractDigest.slice(0, 16)}…). The matchers below are ` +
+                    `the tree's, so every line would be decided by rules the run never ` +
+                    `used — and the dataset version and digest cannot show it, because ` +
+                    `a contract change moves neither. Check out the commit the artifact ` +
+                    `names (${manifest.commitSha ?? "unknown"}).`,
+            };
+        }
     }
 
     const tools = schemaTools(datasetSchemaVersion);

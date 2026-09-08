@@ -21,16 +21,22 @@ import { SUCC7_ASSISTANT_ONLY_SUBTYPES } from "../lib/memoryEvalSucc7Replacement
 import {
     MEMORY_EVAL_SUCC7_CASES,
     MEMORY_EVAL_SUCC7_DATASET_FROZEN,
+    MEMORY_EVAL_SUCC7_DATASET_VERSION,
+    MEMORY_EVAL_SUCC7_MANIFEST,
     MEMORY_EVAL_SUCC7_REVIEW,
     MEMORY_EVAL_SUCC7_REVIEWED,
+    MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
     buildSucc7DraftManifest,
     succ7AssemblyProblems,
     succ7SignatureProblems,
+    succ7SupersededReviewProblems,
     verifySucc7Manifest,
 } from "../lib/memoryEvalSucc7.ts";
 import { SUCC7_REGRESSION_CORPUS } from "../lib/memoryEvalSucc7Regression.ts";
 import { MEMORY_EVAL_SUCC6_MANIFEST, verifySucc6Manifest } from "../lib/memoryEvalSucc6.ts";
 import { manifestFingerprintInput } from "../lib/memoryEvalSucc7.ts";
+import { HARNESS_TARGET_DATASET_VERSION } from "../lib/memoryEvalHarnessTarget.ts";
+import { MEMORY_EVAL_SCORING_CONTRACT_VERSION } from "../lib/memoryEvalScoringContractDigest.ts";
 
 const failures = [];
 const notes = [];
@@ -420,16 +426,43 @@ if (MEMORY_EVAL_SUCC7_REVIEWED) {
     );
 }
 
+{
+    const stale = succ7SupersededReviewProblems();
+    if (stale.length > 0) {
+        fail(`the superseded signature history is wrong: ${stale.join("; ")}`);
+    } else {
+        ok(
+            "the superseded signatures are genuinely superseded",
+            `${MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS.length} kept with reasons`
+        );
+    }
+}
+
 // Two things a module cannot check for itself: whether the record it names is
 // a file, and whether the commit it names is in this history. Both were blank
 // strings away from meaningless on 2026-09-02.
-if (!existsSync(fileURLToPath(new URL(`../${MEMORY_EVAL_SUCC7_REVIEW.record}`, import.meta.url)))) {
-    fail(`the signature's record does not exist: ${MEMORY_EVAL_SUCC7_REVIEW.record}`);
-} else {
-    ok("the signature's record exists", MEMORY_EVAL_SUCC7_REVIEW.record);
-}
-{
-    const sha = MEMORY_EVAL_SUCC7_REVIEW.reviewedCommit;
+//
+// Applied to the superseded signatures as well as the live one. History was
+// checked for its shape and never for these, so an entry could name a record
+// that is not a file and a commit that is not in the repository.
+for (const signature of [
+    MEMORY_EVAL_SUCC7_REVIEW,
+    ...MEMORY_EVAL_SUCC7_SUPERSEDED_REVIEWS,
+]) {
+    const where =
+        signature === MEMORY_EVAL_SUCC7_REVIEW
+            ? "the signature"
+            : `the ${signature.reviewedAt} signature`;
+    if (
+        !existsSync(
+            fileURLToPath(new URL(`../${signature.record}`, import.meta.url))
+        )
+    ) {
+        fail(`${where}'s record does not exist: ${signature.record}`);
+    } else {
+        ok(`${where}'s record exists`, signature.record);
+    }
+    const sha = signature.reviewedCommit;
     const git = (args) =>
         execFileSync("git", args, {
             cwd: fileURLToPath(new URL("..", import.meta.url)),
@@ -452,18 +485,18 @@ if (!existsSync(fileURLToPath(new URL(`../${MEMORY_EVAL_SUCC7_REVIEW.record}`, i
         // other caller cannot, the honest answer is that this cannot be
         // checked there, which is a failure and not an OK.
         fail(
-            `the reviewed commit ${sha.slice(0, 12)}… is not in this checkout, ` +
-                "so the signature cannot be tied to a history. Fetch full " +
-                "history (actions/checkout with fetch-depth: 0) and re-run."
+            `${where}'s commit ${sha.slice(0, 12)}… is not in this checkout, ` +
+                "so it cannot be tied to a history. Fetch full history " +
+                "(actions/checkout with fetch-depth: 0) and re-run."
         );
     } else {
         try {
             git(["merge-base", "--is-ancestor", sha, "HEAD"]);
-            ok("the reviewed commit is an ancestor of HEAD", `${sha.slice(0, 12)}…`);
+            ok(`${where}'s commit is an ancestor of HEAD`, `${sha.slice(0, 12)}…`);
         } catch {
             fail(
-                `the signature names ${sha.slice(0, 12)}…, which is not an ` +
-                    "ancestor of HEAD: it describes a history this tree does not have"
+                `${where} names ${sha.slice(0, 12)}…, which is not an ancestor ` +
+                    "of HEAD: it describes a history this tree does not have"
             );
         }
     }
@@ -522,7 +555,11 @@ console.log(
 console.log(`  unresolvedPolicy  ${manifest.unresolvedPolicies.length}`);
 console.log(`  fingerprint       v${manifest.fingerprintVersion}`);
 console.log(`  frozen            ${manifest.frozen}`);
-console.log(`  harness target    mem-eval-succ-6 (unchanged — a separate change)`);
+// Read, never named. This line said `mem-eval-succ-6 (unchanged — a separate
+// change)` while the summary below already said succ-8, so one run of one
+// check printed two different harness targets. A hard-coded fact in an output
+// whose job is to report facts is worse than no line at all.
+console.log(`  harness target    ${HARNESS_TARGET_DATASET_VERSION}`);
 console.log("");
 
 /* ------------------------------------------------------------- report --- */
@@ -537,8 +574,20 @@ if (failures.length > 0) {
     );
     process.exit(1);
 }
+// The harness target is read rather than named, because this sentence was
+// wrong within a day of being written: it said "still targets mem-eval-succ-6"
+// after the harness had moved twice. A summary line that states a fact it does
+// not check is worse than one that omits it.
 console.log(
     `\nsucc-7 structural checks all hold. reviewed=${MEMORY_EVAL_SUCC7_REVIEWED}, ` +
-        `frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}; the harness still targets ` +
-        "mem-eval-succ-6."
+        `frozen=${MEMORY_EVAL_SUCC7_DATASET_FROZEN}; the harness targets ` +
+        `${HARNESS_TARGET_DATASET_VERSION}.`
 );
+if (HARNESS_TARGET_DATASET_VERSION !== MEMORY_EVAL_SUCC7_DATASET_VERSION) {
+    console.log(
+        `succ-7 is not a run target: it is bound to ` +
+            `${MEMORY_EVAL_SUCC7_MANIFEST.scoringContractVersion} and this tree ` +
+            `ships ${MEMORY_EVAL_SCORING_CONTRACT_VERSION}. Its records stay ` +
+            "resolvable; its successor carries the same cases forward."
+    );
+}

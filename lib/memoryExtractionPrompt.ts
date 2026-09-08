@@ -198,7 +198,7 @@ import {
  * `tests/memoryExtractionPromptFingerprint.test.mjs` pins a digest over all
  * four, so changing any of them without bumping this fails the build.
  */
-export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v7";
+export const MEMORY_EXTRACTION_PROMPT_VERSION = "mem-extract-v8";
 
 /** Bounds carried into the schema so the model is told them, not just checked. */
 export const MEMORY_EXTRACTION_MAX_CANDIDATES_PER_CHUNK = 25;
@@ -396,6 +396,248 @@ export const MEMORY_EXTRACTION_POLARITY_RULE = [
     "Never answer an unsettled case with a lower confidence instead. Confidence says how sure you are of something you did assert; it has no reading for a statement whose direction was never fixed.",
 ].join("\n");
 
+/**
+ * Two worked negated candidates, added in `mem-extract-v8`.
+ *
+ * Separate from `MEMORY_EXTRACTION_POLARITY_RULE` on purpose. The rule's
+ * sentences were approved as they stand and are unchanged by this version —
+ * `tests/memoryExtractionPromptExamples.test.mjs` pins their bytes — so the
+ * examples are a second constant rather than an edit to the first. That way
+ * "the rule did not change" is something a test can say rather than something
+ * a reader has to diff.
+ *
+ * Complete rather than fragmentary: each shows the span cited, the statement
+ * written from it, and the polarity that follows, because the field's failures
+ * are in `negated`, and a fragment does not show which of the three the model
+ * got wrong.
+ *
+ * ## Why these two subjects and not the obvious ones
+ *
+ * An example is text the model reads before it reads the input, so an example
+ * built from a case in a scored dataset teaches that case's answer. The
+ * frozen `mem-eval-succ-8` sample contains exactly the fact this rule is
+ * hardest on — a hobby the user tried and gave up, with `낚시` as its gold
+ * token — which is the first thing anyone reaches for when writing a Korean
+ * negated example. Writing it here would have made `succ-durable-ko-*`
+ * unscorable as evidence of anything.
+ *
+ * So the subjects are checked against every resolvable corpus rather than
+ * chosen for plausibility. `MEMORY_EXTRACTION_EXAMPLE_TERMS` is what that
+ * check reads.
+ */
+/**
+ * The label the examples cite.
+ *
+ * `toExtractionPromptInput()` numbers messages from 1, so `m0` is a label it
+ * can never produce. That matters because a worked example is text the model
+ * may copy: if the example cited `m1`, a copied citation would name a real
+ * message and the model would be one lucky substring away from a candidate
+ * nobody's evidence supports. Citing a label that cannot exist means a copied
+ * citation resolves to nothing and the candidate is discarded, which is what
+ * `tests/memoryExtractionPromptExamples.test.mjs` asserts against the real
+ * parser rather than by reading this comment.
+ */
+export const MEMORY_EXTRACTION_EXAMPLE_LABEL = "m0";
+
+/**
+ * The examples as data, so every check about them can be exact.
+ *
+ * Held as records rather than as prose because three separate things need to
+ * read them and each was getting a regex before: the parser test needs the
+ * candidate object, the contamination scan needs the subject matter and
+ * nothing else, and the corpus-cell check needs the kind and polarity. A
+ * regex over rendered prose answers none of those precisely.
+ */
+export const MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES = [
+    {
+        language: "en",
+        message:
+            "The registration form lists two dependants; I have no dependants.",
+        candidate: {
+            kind: "relationship",
+            polarity: "negated",
+            statement: "The user has no dependants",
+            confidence: 0.9,
+            sensitivity: "standard",
+            expiresAt: null,
+            evidence: [
+                {
+                    messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
+                    quote: "I have no dependants",
+                },
+            ],
+        },
+    },
+    {
+        language: "ko",
+        message:
+            "가입 서류에는 부양가족이 둘로 적혀 있는데, 저는 부양가족이 없습니다.",
+        candidate: {
+            kind: "relationship",
+            polarity: "negated",
+            statement: "사용자는 부양가족이 없습니다",
+            confidence: 0.9,
+            sensitivity: "standard",
+            expiresAt: null,
+            evidence: [
+                {
+                    messageLabel: MEMORY_EXTRACTION_EXAMPLE_LABEL,
+                    quote: "저는 부양가족이 없습니다",
+                },
+            ],
+        },
+    },
+] as const;
+
+/**
+ * The golds whose counts chose this example's kind.
+ *
+ * Choosing between `relationship` and `expertise` — the two negations the
+ * approved prompt licenses — meant counting how many cases each already
+ * scores. `relationship` had one and `expertise` four, and the smaller count
+ * won. These five are that comparison, and all five are part of the decision:
+ * the four on the losing side are what made the winner a choice rather than
+ * the only option.
+ *
+ * A case that helped select a prompt cannot then measure it, so they leave the
+ * decision set. `mem-eval-succ-9` retires them 1:1 and
+ * `lib/memoryEvalSucc9Regression.ts` preserves them runnable.
+ *
+ * Recorded here because this is where the decision was made. The check that
+ * reads it asserts they are absent from succ-9 and preserved in its regression
+ * corpus — not that some tolerance absorbs them, which is what an earlier
+ * revision of this constant did under a different name.
+ */
+export const MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS: readonly string[] = [
+    "succ-assistant-ko-407#g1",
+    "succ-assistant-en-603#g1",
+    "succ-assistant-en-608#g1",
+    "succ-durable-en-423#e1",
+    "succ-durable-ko-422#e2",
+];
+
+/**
+ * Two complete negated candidates, added in `mem-extract-v8`.
+ *
+ * Separate from `MEMORY_EXTRACTION_POLARITY_RULE` on purpose. The rule's
+ * sentences were approved as they stand and are unchanged by this version —
+ * `tests/memoryExtractionPromptExamples.test.mjs` pins their bytes — so the
+ * examples are a second constant rather than an edit to the first. That way
+ * "the rule did not change" is something a test can say rather than something
+ * a reader has to diff.
+ *
+ * Complete in the sense that matters for a structured-output prompt: the whole
+ * candidate object, with all seven required fields and the evidence array
+ * shaped as the schema asks. A prose gloss naming only the statement and the
+ * polarity leaves the model to infer `kind`, `confidence`, `sensitivity` and
+ * `expiresAt` from a schema it is shown separately, which is the gap an
+ * example is for.
+ *
+ * ## Why this subject and not a more natural one
+ *
+ * An example is text the model reads before it reads the input, so an example
+ * built from a case in a scored dataset teaches that case's answer. Two rounds
+ * of that happened here and both are worth keeping written down.
+ *
+ * The first was lexical: `낚시` is the gold token of a frozen durable-facts
+ * case, and it is the obvious subject for a Korean negated example.
+ *
+ * The second was structural, and a term scan could not see it. Replacing the
+ * subjects with `kitesurfing` and `드론` kept the *scenario* — an activity
+ * tried and abandoned — which is the core judgement of `succ-durable-en-608`
+ * and `succ-durable-ko-602`. Both are `polarity44` replacements, and those
+ * cases exist precisely because the originals were retired to buy an
+ * independent holdout for this rule. Teaching their shape gave it back.
+ *
+ * So the subject was chosen against a measurement rather than for how natural
+ * it reads, and the measurement is the (language, kind, polarity) cell it
+ * occupies. An example landing where the corpus has cases is teaching a
+ * verdict the eval scores.
+ *
+ * ## Why one fact, one kind, and this kind
+ *
+ * **One fact.** Both examples are a single sentence carrying a single durable
+ * claim, so one candidate is the complete answer. A draft used a two-sentence
+ * Korean message — no pseudocode, and it must run as given — and emitted one
+ * candidate, which taught the model to drop the second fact from a message
+ * carrying two. An example of complete output that is not complete is worse
+ * than no example.
+ *
+ * **One kind.** The pair differs in language and in nothing else, so it
+ * teaches one mapping twice rather than two mappings once, and what it
+ * isolates is the rule that a statement is written in the language of the
+ * evidence it cites.
+ *
+ * **This kind, and why the cell did not choose it.** A kind is a taxonomy
+ * judgement, and an empty cell is a safety measurement; they are different
+ * claims, and a draft let the second stand in for the first. It shipped
+ * `long_term_goal|negated` — a mapping the approved prompt states nowhere,
+ * and one that sits ambiguously against `decision`, which is the retired
+ * holdout shape — on the sole ground that the cell was unscored. An example
+ * introducing a taxonomy rule nobody approved is worse than one landing on a
+ * measured case.
+ *
+ * So the kind comes from the prompt. `MEMORY_EXTRACTION_BOUNDARY_RULE` says
+ * that "The registration form lists two dependants; I have no dependants"
+ * **establishes a negated relationship fact**, and `KIND_GUIDE` says that how
+ * many siblings a user has, **or has none**, is a relationship. The mapping
+ * these examples show is therefore one the approved prompt already makes,
+ * twice, and the examples add the output shape rather than the judgement.
+ *
+ * The negation also has to be a fact that is not so of the user rather than a
+ * preference against something: `MEMORY_EXTRACTION_POLARITY_RULE` settles that
+ * "The user dislikes open-plan offices" is *affirmed*, because the dislike
+ * holds of them. That rules out every answer-style kind, whose natural
+ * negation — "does not want citations", "does not want pseudocode" — is a
+ * preference and therefore affirmed. An earlier draft made exactly that
+ * mistake and shipped an example contradicting the rule two paragraphs above
+ * it. "Has no dependants" is not a preference in either direction.
+ *
+ * **What that cost, and what was done about it.** No kind was both licensed by
+ * the prompt and scored zero in both languages, so choosing one meant counting:
+ * `relationship|negated` was scored once in Korean, `expertise|negated` — the
+ * other licensed negation, "having no experience in a domain" — four times, and
+ * `relationship` won as the better-licensed and smaller of the two.
+ *
+ * That count is a decision made out of scored cases, and an earlier version of
+ * this comment described naming the one case in the winning cell as an
+ * exception, which records the contamination without removing it. What removes
+ * it is a B+ retirement, and it covers **all five** golds rather than the one:
+ * the four on the losing side are what made the winner a choice, so the
+ * comparison is the boundary. `MEMORY_EXTRACTION_EXAMPLE_SELECTION_GOLDS` names
+ * them, `mem-eval-succ-9` retires them 1:1, and
+ * `memoryEvalSucc9Regression.ts` keeps them readable. The check that used to
+ * tolerate a count now asserts that each of the five is absent from the
+ * decision set and present in the regression corpus.
+ */
+export const MEMORY_EXTRACTION_NEGATED_EXAMPLES = [
+    "Two complete examples of a negated candidate, one in each language. Each is a whole candidate object rather than a description of one, so the seven required fields are visible together and in the shape the schema asks for.",
+    "",
+    `Both cite the placeholder label ${MEMORY_EXTRACTION_EXAMPLE_LABEL}, which never appears in real input. Cite only the labels listed beneath the imported content, never a label you saw in an example.`,
+    "",
+    ...MEMORY_EXTRACTION_NEGATED_EXAMPLE_CASES.flatMap((example) => [
+        `A user message labelled ${MEMORY_EXTRACTION_EXAMPLE_LABEL}: ${example.message}`,
+        JSON.stringify({ candidates: [example.candidate] }, null, 2),
+        "",
+    ]),
+    "In each, the polarity is negated because the statement asserts something is not so of the user, not because the message contains a negation word. The quote is a span copied from the message rather than the whole of it, and the statement is written in the language of the evidence it cites.",
+].join("\n");
+
+/**
+ * The subject-matter terms the examples introduce.
+ *
+ * Read by the contamination scan, which asserts that none occurs in any corpus
+ * the harness can resolve, case-folded on both sides. Registered by hand and
+ * checked from both ends: an entry appearing in no example is dead, and a
+ * content word in an example's own text that no registered term covers fails
+ * the same test — in both languages, which is what stops a future example
+ * introducing a gold token without anybody adding it here.
+ */
+export const MEMORY_EXTRACTION_EXAMPLE_TERMS: readonly string[] = [
+    "dependants",
+    "부양가족",
+];
+
 const SYSTEM_PROMPT = [
     "You extract durable, reusable facts and answer-style preferences about ONE user from conversations they exported from another AI service.",
     "",
@@ -418,6 +660,8 @@ const SYSTEM_PROMPT = [
     "A correction or rejection can itself be an assertion. Extract it only when the user unambiguously states a stable fact about themselves, outside quoted or task material, and that fact would remain useful in a future, unrelated conversation. Negation does not make a fact non-durable. Do not extract a rejection that only resolves a premise for the current artifact, role-play, hypothetical, or one-off task and provides no independently reusable fact.",
     "",
     MEMORY_EXTRACTION_POLARITY_RULE,
+    "",
+    MEMORY_EXTRACTION_NEGATED_EXAMPLES,
     "",
     MEMORY_EXTRACTION_BOUNDARY_RULE,
     "",

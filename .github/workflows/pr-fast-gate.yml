@@ -44,7 +44,11 @@ jobs:
   # and main, so removing this would take secret scanning off the
   # merge-blocking path entirely. Remove it only after
   # "Scan repository history for secrets" is itself made a required check.
-  # `fetch-depth: 0` exists for this job, and only for this job.
+  # `fetch-depth: 0` here is for gitleaks, which scans base..head and needs
+  # both ends. Every job in this workflow now checks out full history, each
+  # for its own reason stated at its own checkout, so no comment here claims
+  # anything about the others: the line this replaces said the depth existed
+  # "for this job, and only for this job", and three other jobs had it.
   secret-scan:
     name: Secret scan (PR commits)
     runs-on: ubuntu-latest
@@ -308,6 +312,20 @@ jobs:
       - name: Memory eval succ-7 structure
         timeout-minutes: 5
         run: npm run check:memory-eval-succ7
+
+      # succ-8 is the harness target and the dataset a signature is pending on,
+      # and until this step existed its verifiers ran nowhere. Both are
+      # reachable only from `resolveArtifactDataset()`, which runs when someone
+      # reads an old artifact -- not on a commit, and not before a signature.
+      # So succ-8 could have lost its pinned manifest and gone back to
+      # recomputing it, carried a half-filled approval, or been frozen with
+      # nobody's name on it, and every required check would still be green.
+      - name: Memory eval succ-8 structure
+        timeout-minutes: 5
+        run: npm run check:memory-eval-succ8
+
+      - name: Memory eval succ-9 structural checks
+        run: npm run check:memory-eval-succ9
 
       # Tomverse Chat release thresholds live only in the canonical registry
       # (docs/release-gates/tomverse-chat-v1.yaml); prose documents reference
