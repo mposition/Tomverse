@@ -810,3 +810,147 @@ test("a malformed answer inside the dataset is reported with its position", asyn
     const elsewhere = await run(root, bound());
     assert.equal(elsewhere.status, 0, elsewhere.stderr);
 });
+
+// ---------------------------------------------------------------------------
+// The draft tool: it prepares the form and checks it, and never judges
+// ---------------------------------------------------------------------------
+
+const runDraft = (directory) =>
+    new Promise((resolve) => {
+        const child = spawn(
+            process.execPath,
+            [
+                "--conditions=react-server",
+                "--import",
+                "tsx",
+                "scripts/draft-ai-review-judgement.mjs",
+                // The spaced spelling on purpose: every usage line in the
+                // repository writes it this way, and only `--dir=` used to
+                // work, so the documented command failed as if the argument
+                // were absent.
+                "--dir",
+                directory,
+            ],
+            { env: process.env }
+        );
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (chunk) => {
+            stdout += chunk;
+        });
+        child.stderr.on("data", (chunk) => {
+            stderr += chunk;
+        });
+        child.on("close", (status) => resolve({ status, stdout, stderr }));
+    });
+
+test("the draft tool writes one pending claim per submitted finding", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase());
+    write(root, "observation.json", observation());
+
+    const drafted = await runDraft(root);
+    assert.equal(drafted.status, 0, drafted.stderr);
+
+    const skeleton = read(root, "record.json");
+    assert.equal(skeleton.claims.length, 1);
+    assert.equal(skeleton.claims[0].status, "pending");
+    assert.equal(skeleton.claims[0].submittedAs, "missingPoints");
+    assert.equal(skeleton.claims[0].sourceIndex, 0);
+    // Nothing that takes reading is filled in.
+    assert.equal(skeleton.claims[0].targetLabel, "");
+    assert.equal(skeleton.claims[0].requirementId, "");
+    assert.equal(skeleton.claims[0].evidenceQuote, "");
+    // What is derived IS filled in: a hand-written reference is a label, and a
+    // label goes on matching after the thing it names has changed.
+    assert.equal(skeleton.observationRef, observationRefFor(observation()));
+    assert.equal(skeleton.sourceCaseDigest, judgedSourceCaseDigest(sourceCase()));
+});
+
+test("the draft tool never overwrites a judgement somebody started", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase());
+    write(root, "observation.json", observation());
+    const mine = record(observationRefFor(observation()));
+    write(root, "record.json", mine);
+
+    const checked = await runDraft(root);
+    assert.equal(checked.status, 0, checked.stderr);
+    assert.match(checked.stdout, /it was not changed/);
+    assert.deepEqual(read(root, "record.json"), mine);
+});
+
+test("the draft tool does not say a record is ready when the scorer would refuse", async (t) => {
+    // It said exactly that once: the output reference was not compared, so
+    // "Nothing is missing" was printed about a record the scorer then rejected.
+    // A checker that passes what the real check fails is worse than none.
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase());
+    write(root, "observation.json", observation());
+    write(root, "record.json", record("run-1/attempt-1"));
+
+    const checked = await runDraft(root);
+    assert.match(checked.stdout, /Still to do/);
+    assert.doesNotMatch(checked.stdout, /Nothing is missing/);
+
+    const scored = await run(root);
+    assert.notEqual(scored.status, 0);
+});
+
+test("a filled draft scores, and supporting material costs nothing", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase());
+    write(root, "observation.json", observation());
+    const reference = observationRefFor(observation());
+    write(
+        root,
+        "record.json",
+        record(reference, [
+            claim(),
+            claim({
+                requirementId: "evidence_preservation",
+                assertion: "present",
+                speechAct: "mention",
+                evidenceQuote: "기한을 제시하지 않는다",
+                role: "support",
+            }),
+        ])
+    );
+
+    const checked = await runDraft(root);
+    assert.match(checked.stdout, /Nothing is missing/);
+
+    const scored = await run(root);
+    assert.equal(scored.status, 0, scored.stderr);
+    const outcome = read(root, "artifact.json").outcome.byKind.missingPoints;
+    assert.equal(outcome.truePositives, 1);
+    assert.equal(outcome.falsePositives, 0);
+    assert.equal(outcome.supportClaims, 1);
+    assert.match(scored.stdout, /support 1/);
+});
+
+test("an insufficient finding is reported apart from the false positives", async (t) => {
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase());
+    write(root, "observation.json", observation());
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(observation()), [claim({ sufficiency: "insufficient" })])
+    );
+
+    const scored = await run(root);
+    assert.equal(scored.status, 0, scored.stderr);
+    const outcome = read(root, "artifact.json").outcome.byKind.missingPoints;
+    assert.deepEqual(
+        [outcome.truePositives, outcome.falseNegatives, outcome.falsePositives],
+        [0, 1, 1]
+    );
+    assert.equal(outcome.insufficientFindings, 1);
+    assert.match(scored.stdout, /insufficient 1 \(inside FP\)/);
+});

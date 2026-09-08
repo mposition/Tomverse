@@ -14,6 +14,7 @@ import test from "node:test";
 
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
+    judgementRecordShapeProblems,
     scoreJudgedCase,
     validateJudgedCase,
     verifyJudgementRecord,
@@ -613,4 +614,235 @@ test("a duplicated gold item and a duplicated requirement are both named", () =>
     assert.ok(
         validateJudgedCase(registeredTwice).some((problem) => /registered twice/.test(problem))
     );
+});
+
+// ---------------------------------------------------------------------------
+// v2: the claim's scoring role, and a finding judged insufficient
+//
+// Approved 2026-09-08. The comparison that chose these is in
+// `.github/audits/ai-review-scoring-policy-decision-2026-09-08.md`, and its
+// four inputs are the first four tests here -- an option that fixes the first
+// and breaks the third is the failure this axis exists to avoid.
+// ---------------------------------------------------------------------------
+
+const SUPPORT_QUOTE = "다만 증빙 보존은 이미 안내돼 있다";
+
+test("a supporting remark beside a finding is not a second finding", () => {
+    // Input 1. Both claims came out of ONE submitted item: the first reports
+    // the gold, the second explains. Extracted as a finding it used to be a
+    // wrong finding, which punished a reviewer for saying something true.
+    const outcome = score(judgedCase(), [
+        claim({ role: "finding" }),
+        claim({
+            requirementId: "evidence_preservation",
+            assertion: "present",
+            speechAct: "mention",
+            evidenceQuote: SUPPORT_QUOTE,
+            role: "support",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [1, 0, 0]);
+    assert.equal(outcome.byKind.missingPoints.supportClaims, 1);
+});
+
+test("an independent invented finding stays a wrong finding", () => {
+    // Input 2. The role axis must not become a way to drop these. Marked as a
+    // finding, it scores exactly as it did before the axis existed.
+    assert.deepEqual(
+        counts(
+            score(judgedCase(), [
+                claim({ role: "finding" }),
+                claim({
+                    requirementId: "transport_mode",
+                    evidenceQuote: "c는 이송 수단을 말하지 않는다",
+                    outsideGoldVerdict: "false_finding",
+                    role: "finding",
+                }),
+            ])
+        ),
+        [1, 0, 1]
+    );
+});
+
+test("a submission that is only a quotation still scores as a wrong finding", () => {
+    // Input 3, and the reason `support` is a DEPENDENT role. Excluding every
+    // non-`finding` speech act instead would drop this to FP 0 and overturn a
+    // rule the contract already settled: what is put in a findings field is a
+    // finding, whatever it contains.
+    const outcome = score(judgedCase(), [
+        claim({ speechAct: "quotation", role: "support" }),
+    ]);
+    assert.deepEqual(counts(outcome), [0, 1, 1]);
+    assert.equal(outcome.byKind.missingPoints.supportClaims, 0);
+});
+
+test("opposite assertions in one submission are not merged away", () => {
+    // Input 4. The triple is the key a claim is matched by, never a licence to
+    // fold two different assertions into one claim.
+    assert.deepEqual(
+        counts(
+            score(judgedCase(), [
+                claim(),
+                claim({ assertion: "present", evidenceQuote: "c에는 기한이 이미 있다" }),
+            ])
+        ),
+        [1, 0, 1]
+    );
+});
+
+test("a claim with no role is scored", () => {
+    // The default is `finding` on purpose: a forgotten mark must never be the
+    // quiet way to delete a finding.
+    assert.deepEqual(counts(score(judgedCase(), [claim()])), [1, 0, 0]);
+});
+
+test("supporting material does not need an outside-gold verdict", () => {
+    // It is not a finding the reviewer put forward, so there is no question
+    // about whether they invented it. The cost is stated in the next test.
+    const outcome = score(judgedCase(), [
+        claim(),
+        claim({
+            requirementId: "transport_mode",
+            speechAct: "mention",
+            evidenceQuote: "이송 수단은 질문 밖이다",
+            role: "support",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [1, 0, 0]);
+});
+
+test("KNOWN GAP: an invented finding mislabelled as support loses its FP", () => {
+    // Pinned deliberately, the way the keyword-scorer gap is pinned. The
+    // dependency check asks whether an independent claim sits beside this one,
+    // and it cannot ask whether the mark is honest.
+    //
+    // The contract's answer is COUNTING, not detection: the claim lands in
+    // `supportClaims`, so an output full of them is visible. If a later change
+    // makes this detectable, this test fails and that is the good outcome.
+    const outcome = score(judgedCase(), [
+        claim({ role: "finding" }),
+        claim({
+            requirementId: "transport_mode",
+            evidenceQuote: "c는 이송 수단을 말하지 않는다",
+            role: "support",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [1, 0, 0]);
+    assert.equal(outcome.byKind.missingPoints.supportClaims, 1);
+});
+
+test("an insufficient finding is not a hit, and its gold item stays unmatched", () => {
+    // Judged complete and judged inadequate. Before this state a person had to
+    // write `pending` (the judging is not finished) or `false_finding` (the
+    // requirement is invented), and both say something untrue.
+    const outcome = score(judgedCase(), [
+        claim({ evidenceQuote: "c의 기한 안내는 부족하다", sufficiency: "insufficient" }),
+    ]);
+    assert.deepEqual(counts(outcome), [0, 1, 1]);
+    assert.equal(outcome.byKind.missingPoints.insufficientFindings, 1);
+});
+
+test("insufficient findings are counted apart from invented ones", () => {
+    // `falsePositives` now holds two different things, so nothing that
+    // measures invention may be derived from it -- the invented-issue rate is
+    // a per-case ratio over no-issue cases, not a false-positive count.
+    const outcome = score(judgedCase(), [
+        claim({ evidenceQuote: "c의 기한 안내는 부족하다", sufficiency: "insufficient" }),
+        claim({
+            requirementId: "transport_mode",
+            sourceIndex: 1,
+            evidenceQuote: "c는 이송 수단을 말하지 않는다",
+            outsideGoldVerdict: "false_finding",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [0, 1, 2]);
+    assert.equal(outcome.byKind.missingPoints.insufficientFindings, 1);
+});
+
+test("an insufficient finding costs precision only where the gold is exhaustive", () => {
+    // Same rule every other wrong finding follows: an incomplete gold cannot
+    // tell an extra finding from one it forgot.
+    const outcome = score(
+        judgedCase({ goldCompleteness: { missingPoints: false } }),
+        [claim({ evidenceQuote: "c의 기한 안내는 부족하다", sufficiency: "insufficient" })]
+    );
+    assert.deepEqual(counts(outcome), [0, 1, 0]);
+    assert.equal(outcome.byKind.missingPoints.precisionCounted, false);
+    assert.equal(outcome.byKind.missingPoints.insufficientFindings, 1);
+});
+
+test("insufficiency is refused where another axis already answers", () => {
+    // Three places it must not be written, each refused rather than ignored:
+    // supporting material is not scored, prose was never submitted, and a
+    // claim outside the gold is settled by `outsideGoldVerdict`.
+    const cases = [
+        [{ role: "support", sufficiency: "insufficient" }, "supporting material is not scored"],
+        [
+            { submittedAs: "prose", sourceIndex: null, sufficiency: "insufficient" },
+            "never submitted as a finding",
+        ],
+        [
+            { targetLabel: "a", outsideGoldVerdict: "false_finding", sufficiency: "insufficient" },
+            "settled by outsideGoldVerdict",
+        ],
+    ];
+    for (const [overrides, fragment] of cases) {
+        const problems = verifyJudgementRecord(judgedCase(), record([claim(overrides)]));
+        assert.ok(
+            problems.some((problem) => problem.includes(fragment)),
+            `${JSON.stringify(overrides)} -> ${JSON.stringify(problems)}`
+        );
+    }
+});
+
+test("a record written under the previous contract is refused, not converted", () => {
+    // The rules moved, so the same record can score differently. Old scores
+    // are re-judged or left alone; they are never carried across.
+    const problems = verifyJudgementRecord(
+        judgedCase(),
+        record([claim()], { contractVersion: "ai-review-scoring-judged-v1" })
+    );
+    assert.ok(problems.some((problem) => problem.includes("cannot be re-read under these")));
+});
+
+test("vagueness reaches the aggregate as submissions, not as silence", () => {
+    // The decision that chose this option: excluding insufficient findings
+    // from the denominator measures the accuracy of whatever survives the
+    // exclusion, which says nothing about vagueness. Counting them makes
+    // precision fall with it.
+    const requirements = Array.from({ length: 10 }, (_, index) => ({
+        id: `req-${index + 1}`,
+        description: `요구 ${index + 1}`,
+    }));
+    const outcome = score(
+        judgedCase({
+            requirements,
+            gold: {
+                missingPoints: requirements.map((requirement) => ({
+                    requirementId: requirement.id,
+                    targetLabel: "c",
+                })),
+            },
+        }),
+        requirements.map((requirement, index) =>
+            claim({
+                requirementId: requirement.id,
+                sourceIndex: index,
+                evidenceQuote: `c의 ${requirement.id} 안내`,
+                ...(index < 2 ? {} : { sufficiency: "insufficient" }),
+            })
+        )
+    );
+    assert.deepEqual(counts(outcome), [2, 8, 8]);
+    assert.equal(outcome.byKind.missingPoints.insufficientFindings, 8);
+});
+
+test("a mistyped role or sufficiency is reported, not defaulted", () => {
+    // `"suport"` would otherwise read as `finding` and score the claim --
+    // silently the opposite of what somebody wrote.
+    const problems = judgementRecordShapeProblems(
+        record([claim({ role: "suport", sufficiency: "kind-of" })])
+    );
+    assert.ok(problems.some((problem) => problem.includes("claims[0].role")));
+    assert.ok(problems.some((problem) => problem.includes("claims[0].sufficiency")));
 });

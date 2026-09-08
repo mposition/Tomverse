@@ -6,6 +6,16 @@
 //
 //   npm run experiment:ai-review-scoring-policies
 //
+// ## The decision this fed has been made
+//
+// A3 and B2 were adopted on 2026-09-08 and are now in the contract itself
+// (`ai-review-scoring-judged-v2`). This script is kept as the reproduction of
+// the comparison, not as a description of current behaviour: the rows labelled
+// `current` are the contract as it stood BEFORE v2, which is what the options
+// were weighed against. It reaches that baseline by stripping the proposed
+// axes from each record before scoring, so it keeps working against the v2
+// scorer without asserting anything about it.
+//
 // ## What this is and is not
 //
 // **It is an experiment, not a scorer.** Nothing here is wired into an
@@ -17,7 +27,8 @@
 //
 // Rows are labelled by how they were obtained:
 //
-//   current      the record as written, scored by the contract's scorer
+//   baseline     the record as written, with the v2 axes stripped: the
+//                contract as it stood before this decision
 //   experiment   the record transformed by the option, then that same scorer
 //   uncomputable the option needs a state the contract does not have; the
 //                document states an expectation and this script prints none
@@ -232,7 +243,7 @@ const hasIndependentSibling = (claims, claim) =>
 // `rewrite` edits the record itself; `exclude` leaves it and skips the claim
 // when scoring. The difference decides whether the coverage rule still holds.
 const OPTIONS_A = [
-    { label: "A0 현행 — 아무것도 하지 않음", how: "current", rewrite: (claims) => claims },
+    { label: "A0 v2 이전 — 아무것도 하지 않음", how: "baseline", rewrite: (claims) => claims },
     {
         label: "A1 보조 설명을 submittedAs: prose 로",
         how: "experiment",
@@ -337,9 +348,9 @@ console.log("\n=== Policy B — 판단이 끝난 불충분한 발견 ===");
 console.log("case: decision-v1 ko-safety-sensitive-002, gold = c/no-oral-fluid…, exhaustive");
 console.log(`제출: ${VAGUE}\n`);
 
-console.log("[B0 현행 — 상태가 없어 셋 중 하나로 잘못 적어야 한다]");
-line("정상 발견으로 적음 (충분하다고 말함)", "current", score(caseB, observationB, [claimB({})]), "contradictions");
-line("pending 으로 적음 (판단 안 끝났다고 말함)", "current", score(caseB, observationB, [claimB({ status: "pending", confirmedBy: null, confirmedAt: null })]), "contradictions");
+console.log("[B0 v2 이전 — 상태가 없어 셋 중 하나로 잘못 적어야 한다]");
+line("정상 발견으로 적음 (충분하다고 말함)", "baseline", score(caseB, observationB, [claimB({})]), "contradictions");
+line("pending 으로 적음 (판단 안 끝났다고 말함)", "baseline", score(caseB, observationB, [claimB({ status: "pending", confirmedBy: null, confirmedAt: null })]), "contradictions");
 
 console.log("\n[제안 선택지]");
 line(
