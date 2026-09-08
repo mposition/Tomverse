@@ -15,6 +15,7 @@ import test from "node:test";
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
     scoreJudgedCase,
+    validateJudgedCase,
     verifyJudgementRecord,
 } from "../lib/aiReviewEvalJudgement.ts";
 
@@ -23,6 +24,12 @@ const DEADLINE = "objection_deadline";
 const judgedCase = (overrides = {}) => ({
     caseId: "ko-safety-sensitive-003",
     contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+    responseLabels: ["a", "b", "c"],
+    requirements: [
+        { id: DEADLINE, description: "송달일부터 2주 이내 이의신청 기한" },
+        { id: "evidence_preservation", description: "변제 입증 자료 보존" },
+        { id: "transport_mode", description: "이송 수단" },
+    ],
     gold: { missingPoints: [{ requirementId: DEADLINE, targetLabel: "c" }] },
     goldCompleteness: { missingPoints: true },
     ...overrides,
@@ -510,4 +517,98 @@ test("the verifier lists every problem, rather than stopping at the first", () =
 
 test("a verified record has nothing to report", () => {
     assert.deepEqual(verifyJudgementRecord(judgedCase(), record([claim()])), []);
+});
+
+// ---------------------------------------------------------------------------
+// The case's own registration
+//
+// A different question from anything the scorer asks, and it stays different:
+// it constrains the case's GOLD and never a reviewer's finding.
+// ---------------------------------------------------------------------------
+
+test("a gold naming an unregistered requirement or a missing answer is refused", () => {
+    // A mistyped id would otherwise become a gold item nothing could satisfy,
+    // and the miss would be recorded against the reviewer.
+    const mistyped = judgedCase({
+        gold: { missingPoints: [{ requirementId: "objection_deadlien", targetLabel: "c" }] },
+    });
+    assert.ok(
+        validateJudgedCase(mistyped).some((problem) =>
+            /does not register/.test(problem)
+        ),
+        validateJudgedCase(mistyped).join("\n")
+    );
+
+    const wrongLabel = judgedCase({
+        gold: { missingPoints: [{ requirementId: DEADLINE, targetLabel: "d" }] },
+    });
+    assert.ok(
+        validateJudgedCase(wrongLabel).some((problem) => /does not have/.test(problem))
+    );
+
+    // And a caller cannot skip it: the scorer runs it too.
+    const outcome = score(mistyped, [claim()]);
+    assert.equal(outcome.scored, false);
+    assert.match(outcome.reason, /does not register/);
+});
+
+test("a completeness claim has to be stated wherever there is gold", () => {
+    // Whether wrong findings may be counted at all depends on it, so it is not
+    // something a case may leave unsaid.
+    const unsaid = judgedCase({ goldCompleteness: {} });
+    assert.ok(
+        validateJudgedCase(unsaid).some((problem) =>
+            /cannot be left unsaid/.test(problem)
+        )
+    );
+    // And stating it where there is no gold is a different mistake, also named.
+    const orphan = judgedCase({
+        gold: { missingPoints: [{ requirementId: DEADLINE, targetLabel: "c" }] },
+        goldCompleteness: { missingPoints: true, contradictions: false },
+    });
+    assert.ok(
+        validateJudgedCase(orphan).some((problem) =>
+            /there is no contradictions gold/.test(problem)
+        )
+    );
+});
+
+test("registration says nothing about what a reviewer may report", () => {
+    // The boundary. A finding about an unregistered requirement is a JUDGEMENT
+    // -- settled by `outsideGoldVerdict` -- and never a registration error.
+    // Closing that route would close the only way this contract has of
+    // discovering that a gold is short an item.
+    assert.deepEqual(validateJudgedCase(judgedCase()), []);
+    const outcome = score(judgedCase({ goldCompleteness: { missingPoints: false } }), [
+        claim(),
+        claim({
+            requirementId: "never_registered_anywhere",
+            sourceIndex: 1,
+            outsideGoldVerdict: "gold_incomplete",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [1, 0, 0]);
+    assert.equal(outcome.byKind.missingPoints.goldGaps, 1);
+});
+
+test("a duplicated gold item and a duplicated requirement are both named", () => {
+    const twice = judgedCase({
+        gold: {
+            missingPoints: [
+                { requirementId: DEADLINE, targetLabel: "c" },
+                { requirementId: DEADLINE, targetLabel: "c" },
+            ],
+        },
+    });
+    assert.ok(validateJudgedCase(twice).some((problem) => /lists c objection_deadline twice/.test(problem)));
+
+    const registeredTwice = judgedCase({
+        requirements: [
+            { id: DEADLINE, description: "기한" },
+            { id: DEADLINE, description: "기한, 다시" },
+        ],
+    });
+    assert.ok(
+        validateJudgedCase(registeredTwice).some((problem) => /registered twice/.test(problem))
+    );
 });
