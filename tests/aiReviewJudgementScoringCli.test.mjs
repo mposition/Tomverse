@@ -75,13 +75,16 @@ const claim = (overrides = {}) => ({
     ...overrides,
 });
 
-const record = (observationRef, claims = [claim()]) => ({
+const record = (observationRef, claims = [claim()], overrides = {}) => ({
     caseId: "ko-safety-sensitive-003",
     contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
     observationRef,
     reviewedBy: "operator",
     reviewedAt: "2026-09-08T00:00:00.000Z",
+    // What a person read when they judged, in the record they signed.
+    sourceCaseDigest: judgedSourceCaseDigest(sourceCase()),
     claims,
+    ...overrides,
 });
 
 const run = (directory, extra = []) =>
@@ -719,4 +722,91 @@ test("files that agree only with each other are not countable", async (t) => {
     ]);
     assert.equal(bound.status, 0, bound.stderr);
     assert.match(bound.stdout, /It may be counted in a score/);
+});
+
+test("re-scoring is not re-judging: an updated case with an old record is refused", async (t) => {
+    // The way the source binding was got round. Change the dataset, update the
+    // JUDGED case's digest to match, run the scorer again -- and the mismatch
+    // disappeared while the judgement was never re-made. The record is what a
+    // person signed, so the digest of what they read lives in it too, and
+    // re-scoring never writes a new one.
+    const { root } = fixture(t);
+    await run(root);
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: observation() }]);
+    write(root, "dataset.json", datasetWith());
+    const bound = [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ];
+    assert.equal((await run(root, bound)).status, 0);
+
+    // 1. the source changes, and the stored score is refused.
+    const rewritten = sourceCase({ question: "완전히 다른 질문입니다" });
+    write(root, "dataset.json", { version: "decision-v2", cases: [rewritten] });
+    const stale = await run(root, bound);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stdout, /question or answers are not the ones this judgement was made from/);
+
+    // 2. the judged case's digest is brought up to date...
+    write(root, "case.json", testCase({ sourceCaseDigest: judgedSourceCaseDigest(rewritten) }));
+
+    // 3. ...and re-scoring is REFUSED, because the signed record still says
+    //    which text it was made from.
+    const rescored = await run(root);
+    assert.equal(rescored.status, 1);
+    assert.match(rescored.stdout, /re-scoring does not re-judge/);
+    assert.match(rescored.stderr, /Nothing was scored/);
+
+    // Only a record made against the text that is there now goes through.
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(observation()), [claim()], {
+            sourceCaseDigest: judgedSourceCaseDigest(rewritten),
+        })
+    );
+    const rejudged = await run(root);
+    assert.equal(rejudged.status, 0, rejudged.stderr);
+    assert.equal((await run(root, bound)).status, 0);
+});
+
+test("a malformed answer inside the dataset is reported with its position", async (t) => {
+    // `responses: [null]` produced no problem at all and then threw on
+    // `.label`, so a malformed dataset stopped the process instead of being
+    // reported by it.
+    const { root } = fixture(t);
+    await run(root);
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: observation() }]);
+    const bound = () => [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ];
+
+    write(root, "dataset.json", datasetWith({ responses: [null] }));
+    const nullResponse = await run(root, bound());
+    assert.equal(nullResponse.status, 1);
+    assert.match(nullResponse.stdout, /dataset: cases\[0\]\.responses\[0\] is null, not an object/);
+    assert.doesNotMatch(nullResponse.stderr, /TypeError/);
+
+    write(root, "dataset.json", datasetWith({ responses: [{ label: "a", content: 7 }] }));
+    const badContent = await run(root, bound());
+    assert.equal(badContent.status, 1);
+    assert.match(badContent.stdout, /cases\[0\]\.responses\[0\]\.content is 7, not a string/);
+
+    write(root, "dataset.json", datasetWith({ question: 42 }));
+    const badQuestion = await run(root, bound());
+    assert.equal(badQuestion.status, 1);
+    assert.match(badQuestion.stdout, /cases\[0\]\.question is 42, not a string/);
+
+    // A different case being malformed does not refuse this run: the frozen
+    // set has its own validator, and a whole run is not refused over a field
+    // in a case this evidence is not about.
+    write(root, "dataset.json", {
+        version: "decision-v2",
+        cases: [sourceCase(), { id: "somewhere-else", responses: [null] }],
+    });
+    const elsewhere = await run(root, bound());
+    assert.equal(elsewhere.status, 0, elsewhere.stderr);
 });

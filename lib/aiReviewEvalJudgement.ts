@@ -190,6 +190,17 @@ export type AiReviewJudgementRecord = {
      */
     reviewedBy: string;
     reviewedAt: string;
+    /**
+     * The digest of the source case a person judged, repeated here.
+     *
+     * Not redundant with the one on the judged case: that one is edited when
+     * the case is, and re-scoring then makes the mismatch go away. The record
+     * is what a person SIGNED, so the digest of what they read belongs in it,
+     * and re-scoring must never write a new one. Updating the case's digest
+     * and running the scorer again used to be enough -- the judgement was
+     * never re-made, and the score came back countable.
+     */
+    sourceCaseDigest: string;
     claims: readonly AiReviewJudgedClaim[];
 };
 
@@ -370,6 +381,21 @@ export function verifyJudgementRecord(
         problems.push(
             `the record was made from ${record.observationRef} and the output being ` +
                 `scored is ${expected.observationRef}`
+        );
+    }
+    // The record was made from a particular question and set of answers, and
+    // says so itself. Editing the case's digest and re-scoring cannot make
+    // that agree again -- only re-judging can, which is the point: a score is
+    // not a substitute for reading the text a second time.
+    if (!isSignedName(record.sourceCaseDigest)) {
+        problems.push(
+            "the record does not say which question and answers it was made from"
+        );
+    } else if (record.sourceCaseDigest !== testCase.sourceCaseDigest) {
+        problems.push(
+            `the record was made from ${record.sourceCaseDigest} and this case is about ` +
+                `${testCase.sourceCaseDigest}; re-scoring does not re-judge, so the ` +
+                `judgement has to be made again against the text that is there now`
         );
     }
     // The record's own sign-off, which no per-claim signature can stand in for:
@@ -1014,7 +1040,14 @@ export function judgementRecordShapeProblems(
 ): readonly string[] {
     const problems: string[] = [];
     if (!isPlainObject(value)) return [at(file, "is not an object")];
-    for (const field of ["caseId", "contractVersion", "observationRef", "reviewedBy", "reviewedAt"]) {
+    for (const field of [
+        "caseId",
+        "contractVersion",
+        "observationRef",
+        "reviewedBy",
+        "reviewedAt",
+        "sourceCaseDigest",
+    ]) {
         if (typeof value[field] !== "string") {
             problems.push(typeProblem(file, field, value[field], "a string"));
         }
@@ -1141,7 +1174,17 @@ export function judgedJournalShapeProblems(
 
 export function judgedDatasetShapeProblems(
     value: unknown,
-    file = "dataset"
+    file = "dataset",
+    /**
+     * The case being judged, when the caller knows it.
+     *
+     * Every case is checked for an `id`, because finding one requires reading
+     * all of them. The question and the answers are checked only for the case
+     * this evidence is about: the frozen set holds 1,200 of them and refusing
+     * a whole run over an unrelated case's field is a different decision,
+     * already made by the dataset's own validator.
+     */
+    caseId?: string
 ): readonly string[] {
     if (!isPlainObject(value)) return [typeProblem(file, "", value, "an object")];
     if (!Array.isArray(value.cases)) {
@@ -1152,17 +1195,38 @@ export function judgedDatasetShapeProblems(
     }
     const problems: string[] = [];
     for (const [index, item] of value.cases.entries()) {
+        const path = `cases[${index}]`;
         if (!isPlainObject(item)) {
-            problems.push(typeProblem(file, `cases[${index}]`, item, "an object"));
+            problems.push(typeProblem(file, path, item, "an object"));
             continue;
         }
         if (typeof item.id !== "string") {
-            problems.push(typeProblem(file, `cases[${index}].id`, item.id, "a string"));
+            problems.push(typeProblem(file, `${path}.id`, item.id, "a string"));
         }
-        if (item.responses !== undefined && !Array.isArray(item.responses)) {
-            problems.push(
-                typeProblem(file, `cases[${index}].responses`, item.responses, "an array")
-            );
+        if (caseId !== undefined && item.id !== caseId) continue;
+        // The nested shape. `responses: [null]` produced no problem at all and
+        // then threw on `.label`, so a malformed dataset stopped the process
+        // instead of being reported by it.
+        if (typeof item.question !== "string") {
+            problems.push(typeProblem(file, `${path}.question`, item.question, "a string"));
+        }
+        if (!Array.isArray(item.responses)) {
+            problems.push(typeProblem(file, `${path}.responses`, item.responses, "an array"));
+            continue;
+        }
+        for (const [position, response] of item.responses.entries()) {
+            const where = `${path}.responses[${position}]`;
+            if (!isPlainObject(response)) {
+                problems.push(typeProblem(file, where, response, "an object"));
+                continue;
+            }
+            for (const field of ["label", "content"]) {
+                if (typeof response[field] !== "string") {
+                    problems.push(
+                        typeProblem(file, `${where}.${field}`, response[field], "a string")
+                    );
+                }
+            }
         }
     }
     return problems;
@@ -1334,7 +1398,16 @@ export function verifyJudgedScoringEvidence(input: {
         ...judgementRecordShapeProblems(input.record),
         ...scoringArtifactShapeProblems(input.artifact),
         ...(input.journal === undefined ? [] : judgedJournalShapeProblems(input.journal)),
-        ...(input.dataset === undefined ? [] : judgedDatasetShapeProblems(input.dataset)),
+        ...(input.dataset === undefined
+            ? []
+            : judgedDatasetShapeProblems(
+                  input.dataset,
+                  "dataset",
+                  // Read defensively: the case's own shape may not have passed.
+                  typeof (input.testCase as { caseId?: unknown } | null)?.caseId === "string"
+                      ? ((input.testCase as { caseId: string }).caseId)
+                      : undefined
+              )),
     ];
     if (shapes.length > 0) {
         return {

@@ -474,6 +474,7 @@ test("judged cases are checked here by the same function the scoring CLI calls",
         observationRef: observationRefFor(output),
         reviewedBy: "operator",
         reviewedAt: "2026-09-08T00:00:00.000Z",
+        sourceCaseDigest: judgedSourceCaseDigest(DATASET.cases[0]),
         claims: [
             {
                 targetLabel: "b",
