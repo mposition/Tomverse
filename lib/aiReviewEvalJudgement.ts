@@ -409,7 +409,16 @@ export function verifyJudgementRecord(
 export function scoreJudgedCase(
     testCase: AiReviewJudgedCase,
     record: AiReviewJudgementRecord,
-    expected: { observationRef?: string } = {}
+    expected: {
+        observationRef?: string;
+        /**
+         * The output the record was made from. Given it, the claims are
+         * checked against it -- indexes in range, quotes present, every
+         * submitted finding accounted for. A digest says the same bytes were
+         * there; only this says the judgements point into them.
+         */
+        observation?: AiReviewJudgedObservation;
+    } = {}
 ): AiReviewJudgedOutcome {
     // The case's own registration first, then the record. A gold naming a
     // requirement the case never registered produces a miss nothing can
@@ -418,6 +427,9 @@ export function scoreJudgedCase(
     const problems = [
         ...validateJudgedCase(testCase),
         ...verifyJudgementRecord(testCase, record, expected),
+        ...(expected.observation
+            ? verifyRecordAgainstObservation(expected.observation, record)
+            : []),
     ];
     if (problems.length > 0) {
         return {
@@ -705,7 +717,7 @@ export type AiReviewJudgedScoringArtifact = {
 export function buildScoringArtifact(input: {
     testCase: AiReviewJudgedCase;
     record: AiReviewJudgementRecord;
-    observation: unknown;
+    observation: AiReviewJudgedObservation;
     scoredAt: string;
 }): AiReviewJudgedScoringArtifact {
     const observationRef = observationRefFor(input.observation);
@@ -716,7 +728,10 @@ export function buildScoringArtifact(input: {
         caseDigest: judgedCaseDigest(input.testCase),
         recordDigest: judgementRecordDigest(input.record),
         scoredAt: input.scoredAt,
-        outcome: scoreJudgedCase(input.testCase, input.record, { observationRef }),
+        outcome: scoreJudgedCase(input.testCase, input.record, {
+            observationRef,
+            observation: input.observation,
+        }),
     };
 }
 
@@ -735,7 +750,7 @@ export function buildScoringArtifact(input: {
 export function verifyScoringArtifact(input: {
     testCase: AiReviewJudgedCase;
     record: AiReviewJudgementRecord;
-    observation: unknown;
+    observation: AiReviewJudgedObservation;
     artifact: AiReviewJudgedScoringArtifact;
 }): readonly string[] {
     const problems: string[] = [];
@@ -776,6 +791,345 @@ export function verifyScoringArtifact(input: {
         problems.push(
             "the judgement record names a different reviewer output than the one here"
         );
+    }
+    // And the number itself, recomputed.
+    //
+    // The digests prove the inputs have not moved. They prove nothing about
+    // the outcome written beside them, which is a separate object anybody can
+    // edit -- a stored `truePositives: 999`, and a deleted `outcome`, both
+    // verified clean. So the score is computed again from these inputs and
+    // compared whole: the counts, the refusal, its reason, and the gap
+    // diagnosis, because each of those is something a reader would act on.
+    const recomputed = scoreJudgedCase(testCase, record, { observationRef, observation: input.observation });
+    if (canonical(artifact.outcome) !== canonical(recomputed)) {
+        problems.push(
+            "the stored outcome is not what these inputs produce. A digest says the " +
+                "inputs have not changed; it says nothing about the number written " +
+                "beside them, so the score is recomputed and compared whole"
+        );
+    }
+    return problems;
+}
+
+// ---------------------------------------------------------------------------
+// Shape, before meaning
+// ---------------------------------------------------------------------------
+
+/**
+ * The reviewer output a judgement record is made from.
+ *
+ * Only what the binding needs: the findings a claim can point into, and the
+ * whole text a prose claim can be quoted from. Extra fields are ignored rather
+ * than refused -- the product's observation carries more, and this contract
+ * has no business dictating its shape.
+ */
+export type AiReviewJudgedObservation = {
+    findings: Partial<Record<AiReviewEvalFindingKind, readonly string[]>>;
+    allText: string;
+};
+
+const at = (file: string, path: string) => `${file}: ${path}`;
+
+const typeProblem = (file: string, path: string, value: unknown, wanted: string) =>
+    at(file, `${path} is ${JSON.stringify(value) ?? "undefined"}, not ${wanted}`);
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Whether a file holds the shape this contract expects.
+ *
+ * TypeScript says nothing about JSON somebody wrote. `"true"` where a boolean
+ * belongs quietly turned `precisionCounted` false -- a wrong score, not an
+ * error -- and a mistyped `submittedAs` printed two sections of `ok` before
+ * throwing a TypeError. Both are checked here, before any meaning is read, and
+ * every problem names the file and the field path so it can be fixed rather
+ * than hunted.
+ */
+export function judgedCaseShapeProblems(
+    value: unknown,
+    file = "case.json"
+): readonly string[] {
+    const problems: string[] = [];
+    if (!isPlainObject(value)) return [at(file, "is not an object")];
+    for (const field of ["caseId", "contractVersion"]) {
+        if (typeof value[field] !== "string") {
+            problems.push(typeProblem(file, field, value[field], "a string"));
+        }
+    }
+    if (
+        !Array.isArray(value.responseLabels) ||
+        value.responseLabels.some((label) => typeof label !== "string")
+    ) {
+        problems.push(typeProblem(file, "responseLabels", value.responseLabels, "an array of strings"));
+    }
+    if (!Array.isArray(value.requirements)) {
+        problems.push(typeProblem(file, "requirements", value.requirements, "an array"));
+    } else {
+        for (const [index, requirement] of value.requirements.entries()) {
+            if (!isPlainObject(requirement)) {
+                problems.push(typeProblem(file, `requirements[${index}]`, requirement, "an object"));
+                continue;
+            }
+            for (const field of ["id", "description"]) {
+                if (typeof requirement[field] !== "string") {
+                    problems.push(
+                        typeProblem(file, `requirements[${index}].${field}`, requirement[field], "a string")
+                    );
+                }
+            }
+        }
+    }
+    if (!isPlainObject(value.gold)) {
+        problems.push(typeProblem(file, "gold", value.gold, "an object"));
+    } else {
+        for (const [kind, items] of Object.entries(value.gold)) {
+            if (!(AI_REVIEW_EVAL_FINDING_KINDS as readonly string[]).includes(kind)) {
+                problems.push(at(file, `gold.${kind} is not a finding kind`));
+                continue;
+            }
+            if (!Array.isArray(items)) {
+                problems.push(typeProblem(file, `gold.${kind}`, items, "an array"));
+                continue;
+            }
+            for (const [index, item] of items.entries()) {
+                if (!isPlainObject(item)) {
+                    problems.push(typeProblem(file, `gold.${kind}[${index}]`, item, "an object"));
+                    continue;
+                }
+                for (const field of ["requirementId", "targetLabel"]) {
+                    if (typeof item[field] !== "string") {
+                        problems.push(
+                            typeProblem(file, `gold.${kind}[${index}].${field}`, item[field], "a string")
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if (!isPlainObject(value.goldCompleteness)) {
+        problems.push(typeProblem(file, "goldCompleteness", value.goldCompleteness, "an object"));
+    } else {
+        for (const [kind, claimed] of Object.entries(value.goldCompleteness)) {
+            if (!(AI_REVIEW_EVAL_FINDING_KINDS as readonly string[]).includes(kind)) {
+                problems.push(at(file, `goldCompleteness.${kind} is not a finding kind`));
+                continue;
+            }
+            // The one that produced a wrong score rather than an error.
+            if (typeof claimed !== "boolean") {
+                problems.push(
+                    typeProblem(file, `goldCompleteness.${kind}`, claimed, "a boolean") +
+                        ` -- anything else reads as "not exhaustive" and silently drops the ` +
+                        `kind out of precision`
+                );
+            }
+        }
+    }
+    return problems;
+}
+
+export function observationShapeProblems(
+    value: unknown,
+    file = "observation.json"
+): readonly string[] {
+    const problems: string[] = [];
+    if (!isPlainObject(value)) return [at(file, "is not an object")];
+    if (typeof value.allText !== "string") {
+        problems.push(typeProblem(file, "allText", value.allText, "a string"));
+    }
+    if (!isPlainObject(value.findings)) {
+        return [...problems, typeProblem(file, "findings", value.findings, "an object")];
+    }
+    for (const [kind, items] of Object.entries(value.findings)) {
+        if (!(AI_REVIEW_EVAL_FINDING_KINDS as readonly string[]).includes(kind)) {
+            problems.push(at(file, `findings.${kind} is not a finding kind`));
+            continue;
+        }
+        if (!Array.isArray(items) || items.some((item) => typeof item !== "string")) {
+            problems.push(typeProblem(file, `findings.${kind}`, items, "an array of strings"));
+        }
+    }
+    return problems;
+}
+
+export function judgementRecordShapeProblems(
+    value: unknown,
+    file = "record.json"
+): readonly string[] {
+    const problems: string[] = [];
+    if (!isPlainObject(value)) return [at(file, "is not an object")];
+    for (const field of ["caseId", "contractVersion", "observationRef", "reviewedBy", "reviewedAt"]) {
+        if (typeof value[field] !== "string") {
+            problems.push(typeProblem(file, field, value[field], "a string"));
+        }
+    }
+    if (!Array.isArray(value.claims)) {
+        return [...problems, typeProblem(file, "claims", value.claims, "an array")];
+    }
+    const submittedValues = [...AI_REVIEW_EVAL_FINDING_KINDS, "prose"] as readonly string[];
+    for (const [index, claim] of value.claims.entries()) {
+        const path = `claims[${index}]`;
+        if (!isPlainObject(claim)) {
+            problems.push(typeProblem(file, path, claim, "an object"));
+            continue;
+        }
+        for (const field of ["targetLabel", "requirementId", "evidenceQuote"]) {
+            if (typeof claim[field] !== "string") {
+                problems.push(typeProblem(file, `${path}.${field}`, claim[field], "a string"));
+            }
+        }
+        if (!(JUDGED_ASSERTIONS as readonly string[]).includes(claim.assertion as string)) {
+            problems.push(
+                typeProblem(file, `${path}.assertion`, claim.assertion, `one of ${JUDGED_ASSERTIONS.join(", ")}`)
+            );
+        }
+        if (!(JUDGED_SPEECH_ACTS as readonly string[]).includes(claim.speechAct as string)) {
+            problems.push(
+                typeProblem(file, `${path}.speechAct`, claim.speechAct, `one of ${JUDGED_SPEECH_ACTS.join(", ")}`)
+            );
+        }
+        // The one that printed `ok` twice and then threw.
+        if (!submittedValues.includes(claim.submittedAs as string)) {
+            problems.push(
+                typeProblem(file, `${path}.submittedAs`, claim.submittedAs, `one of ${submittedValues.join(", ")}`)
+            );
+        }
+        if (
+            claim.sourceIndex !== null &&
+            (typeof claim.sourceIndex !== "number" || !Number.isInteger(claim.sourceIndex))
+        ) {
+            problems.push(typeProblem(file, `${path}.sourceIndex`, claim.sourceIndex, "an integer or null"));
+        }
+        if (claim.status !== "pending" && claim.status !== "confirmed") {
+            problems.push(typeProblem(file, `${path}.status`, claim.status, "pending or confirmed"));
+        }
+        for (const field of ["confirmedBy", "confirmedAt"]) {
+            if (claim[field] !== null && typeof claim[field] !== "string") {
+                problems.push(typeProblem(file, `${path}.${field}`, claim[field], "a string or null"));
+            }
+        }
+        if (
+            claim.outsideGoldVerdict !== undefined &&
+            !(JUDGED_OUTSIDE_GOLD_VERDICTS as readonly string[]).includes(claim.outsideGoldVerdict as string)
+        ) {
+            problems.push(
+                typeProblem(
+                    file,
+                    `${path}.outsideGoldVerdict`,
+                    claim.outsideGoldVerdict,
+                    `one of ${JUDGED_OUTSIDE_GOLD_VERDICTS.join(", ")}`
+                )
+            );
+        }
+    }
+    return problems;
+}
+
+export function scoringArtifactShapeProblems(
+    value: unknown,
+    file = "artifact.json"
+): readonly string[] {
+    const problems: string[] = [];
+    if (!isPlainObject(value)) return [at(file, "is not an object")];
+    for (const field of [
+        "caseId",
+        "contractVersion",
+        "observationRef",
+        "caseDigest",
+        "recordDigest",
+        "scoredAt",
+    ]) {
+        if (typeof value[field] !== "string") {
+            problems.push(typeProblem(file, field, value[field], "a string"));
+        }
+    }
+    if (!isPlainObject(value.outcome)) {
+        problems.push(
+            typeProblem(file, "outcome", value.outcome, "an object") +
+                " -- an artifact with no outcome is not a score"
+        );
+    }
+    return problems;
+}
+
+// ---------------------------------------------------------------------------
+// The record against the output it was made from
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the record actually read THIS output.
+ *
+ * The output digest says the same bytes were present. It does not say the
+ * judgements point anywhere in them, and both failures got through: a claim
+ * with `sourceIndex: 999` and an invented quote scored a true positive, and a
+ * record covering one of two submitted findings scored a clean sheet by
+ * leaving the other one out.
+ *
+ * Three checks, and no more:
+ *
+ *   * an index is within the array it names;
+ *   * the quote appears in the text it points at;
+ *   * every submitted finding is accounted for by at least one claim.
+ *
+ * Splitting one finding into several claims is allowed -- what is not allowed
+ * is a finding no claim mentions, which is how a wrong finding disappears.
+ * **Nothing here decides how to split one, and nothing here judges meaning.**
+ * Those are the undecided rules, and this check exists so that whatever is
+ * decided later is applied to all of the output rather than to a chosen part.
+ */
+export function verifyRecordAgainstObservation(
+    observation: AiReviewJudgedObservation,
+    record: AiReviewJudgementRecord
+): readonly string[] {
+    const problems: string[] = [];
+    const covered = new Map<string, Set<number>>();
+
+    for (const [index, claim] of record.claims.entries()) {
+        const where = `claim[${index}] (${claim.targetLabel}/${claim.requirementId})`;
+        if (claim.submittedAs === "prose") {
+            if (claim.sourceIndex !== null) {
+                problems.push(
+                    `${where} was read from prose and carries sourceIndex ` +
+                        `${claim.sourceIndex}, which indexes nothing`
+                );
+            }
+            if (!observation.allText.includes(claim.evidenceQuote)) {
+                problems.push(`${where} quotes a sentence this output does not contain`);
+            }
+            continue;
+        }
+        const items = observation.findings[claim.submittedAs] ?? [];
+        if (
+            claim.sourceIndex === null ||
+            claim.sourceIndex < 0 ||
+            claim.sourceIndex >= items.length
+        ) {
+            problems.push(
+                `${where} points at ${claim.submittedAs}[${claim.sourceIndex}] and this ` +
+                    `output has ${items.length} such finding(s)`
+            );
+            continue;
+        }
+        if (!items[claim.sourceIndex].includes(claim.evidenceQuote)) {
+            problems.push(
+                `${where} quotes a sentence ${claim.submittedAs}[${claim.sourceIndex}] ` +
+                    `does not contain`
+            );
+        }
+        if (!covered.has(claim.submittedAs)) covered.set(claim.submittedAs, new Set());
+        covered.get(claim.submittedAs)?.add(claim.sourceIndex);
+    }
+
+    for (const kind of AI_REVIEW_EVAL_FINDING_KINDS) {
+        const items = observation.findings[kind] ?? [];
+        for (const [index] of items.entries()) {
+            if (covered.get(kind)?.has(index)) continue;
+            problems.push(
+                `${kind}[${index}] of this output has no claim about it. A submitted ` +
+                    `finding nobody judged is a wrong finding that disappears, so it is ` +
+                    `left as a gap rather than passed over`
+            );
+        }
     }
     return problems;
 }

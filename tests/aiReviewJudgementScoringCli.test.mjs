@@ -15,7 +15,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { AI_REVIEW_SCORING_CONTRACT_VERSION } from "../lib/aiReviewEvalJudgement.ts";
+import {
+    AI_REVIEW_SCORING_CONTRACT_VERSION,
+    observationRefFor,
+} from "../lib/aiReviewEvalJudgement.ts";
 
 const DEADLINE = "objection_deadline";
 
@@ -102,21 +105,20 @@ const read = (root, name) => JSON.parse(readFileSync(join(root, name), "utf8"));
  * the output and the record is rewritten to match, which is the same order the
  * real flow uses -- read the output, then say which output you read.
  */
-const fixture = async (t) => {
+const fixture = (t) => {
     const root = mkdtempSync(join(tmpdir(), "ai-review-judged-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
+    const output = observation();
     write(root, "case.json", testCase());
-    write(root, "observation.json", observation());
-    write(root, "record.json", record("unknown-until-scored"));
-    // One pass to learn the derived reference, then a record that names it.
-    await run(root);
-    const observationRef = read(root, "artifact.json").observationRef;
-    write(root, "record.json", record(observationRef));
-    return { root, observationRef };
+    write(root, "observation.json", output);
+    // The reference is derived from the output rather than invented, which is
+    // the order the real flow uses: read the output, then say which one.
+    write(root, "record.json", record(observationRefFor(output)));
+    return { root, observationRef: observationRefFor(output) };
 };
 
 test("a signed record over a registered case scores, and the score verifies", async (t) => {
-    const { root } = await fixture(t);
+    const { root } = fixture(t);
 
     const scored = await run(root);
     assert.equal(scored.status, 0, scored.stderr);
@@ -137,7 +139,7 @@ test("editing the judgement record makes the stored score stale until re-scored"
     // The failure a file flow exists to catch. Nothing about the artifact
     // changes when the record does, so without recomputing the digests it goes
     // on reporting a true positive for a judgement nobody is making any more.
-    const { root, observationRef } = await fixture(t);
+    const { root, observationRef } = fixture(t);
     await run(root);
 
     write(
@@ -162,7 +164,7 @@ test("editing the judgement record makes the stored score stale until re-scored"
 });
 
 test("editing the gold makes the stored score stale, and the reference is derived", async (t) => {
-    const { root } = await fixture(t);
+    const { root } = fixture(t);
     await run(root);
 
     const widened = testCase();
@@ -190,7 +192,7 @@ test("editing the gold makes the stored score stale, and the reference is derive
 });
 
 test("a gold naming something the case never registered is refused before scoring", async (t) => {
-    const { root } = await fixture(t);
+    const { root } = fixture(t);
     const mistyped = testCase();
     mistyped.gold.missingPoints = [{ requirementId: "objection_deadlien", targetLabel: "c" }];
     write(root, "case.json", mistyped);
@@ -213,15 +215,26 @@ test("a reviewer's finding about an unregistered requirement is NOT a registrati
     // else -- a case's list is not the limit of what is true about it, and
     // rejecting a new finding for being unlisted would close the one route
     // this contract has for discovering an incomplete gold.
-    const { root, observationRef } = await fixture(t);
+    const { root } = fixture(t);
+    const twoFindings = observation();
+    twoFindings.findings.missingPoints = [
+        "c는 이의신청 기한을 제시하지 않는다",
+        "c는 재발화 방지 안내가 없다",
+    ];
+    twoFindings.allText = twoFindings.findings.missingPoints.join(" ");
+    write(root, "observation.json", twoFindings);
+    // A changed output is a different reference, so the record names the new
+    // one -- and covers both findings, because a submitted finding nobody
+    // judged is a wrong finding that disappears.
     write(
         root,
         "record.json",
-        record(observationRef, [
+        record(observationRefFor(twoFindings), [
             claim(),
             claim({
                 requirementId: "reignition_guard",
                 sourceIndex: 1,
+                evidenceQuote: "c는 재발화 방지 안내가 없다",
                 outsideGoldVerdict: "gold_incomplete",
             }),
         ])
@@ -240,4 +253,173 @@ test("a reviewer's finding about an unregistered requirement is NOT a registrati
     const artifact = read(root, "artifact.json");
     assert.equal(artifact.outcome.scored, false);
     assert.equal(artifact.outcome.goldGaps.missingPoints, 1);
+});
+
+test("editing the stored score itself is caught, because the score is recomputed", async (t) => {
+    // The digests prove the INPUTS have not moved. They prove nothing about
+    // the number written beside them, which is a separate object anybody can
+    // edit -- and both of these verified clean before the outcome was
+    // recomputed and compared whole.
+    const { root } = fixture(t);
+    await run(root);
+
+    const inflated = read(root, "artifact.json");
+    inflated.outcome.byKind.missingPoints.truePositives = 999;
+    inflated.outcome.byKind.missingPoints.precisionTruePositives = 999;
+    write(root, "artifact.json", inflated);
+
+    const edited = await run(root, ["--verify"]);
+    assert.equal(edited.status, 1);
+    assert.match(edited.stdout, /stored outcome is not what these inputs produce/);
+
+    // And an artifact with the outcome deleted is not a score at all.
+    const gutted = read(root, "artifact.json");
+    delete gutted.outcome;
+    write(root, "artifact.json", gutted);
+    const missing = await run(root, ["--verify"]);
+    assert.equal(missing.status, 1);
+    assert.match(missing.stdout, /an artifact with no outcome is not a score/);
+
+    // Re-scoring restores a statement about these files.
+    await run(root);
+    const verified = await run(root, ["--verify"]);
+    assert.equal(verified.status, 0, verified.stderr);
+});
+
+test("a refusal is verified too, not only a score", async (t) => {
+    // A stored refusal is also something a reader acts on -- which judgements
+    // are missing, which gold is disproved -- so editing it away has to be
+    // caught by the same recomputation.
+    const { root } = fixture(t);
+    const twoFindings = observation();
+    twoFindings.findings.missingPoints = [
+        "c는 이의신청 기한을 제시하지 않는다",
+        "c는 재발화 방지 안내가 없다",
+    ];
+    twoFindings.allText = twoFindings.findings.missingPoints.join(" ");
+    write(root, "observation.json", twoFindings);
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(twoFindings), [
+            claim(),
+            claim({
+                requirementId: "reignition_guard",
+                sourceIndex: 1,
+                evidenceQuote: "c는 재발화 방지 안내가 없다",
+                outsideGoldVerdict: "gold_incomplete",
+            }),
+        ])
+    );
+    await run(root);
+    assert.equal(read(root, "artifact.json").outcome.scored, false);
+
+    const laundered = read(root, "artifact.json");
+    laundered.outcome = {
+        scored: true,
+        contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+        byKind: {
+            contradictions: {},
+            missingPoints: { truePositives: 1 },
+            differences: {},
+        },
+    };
+    write(root, "artifact.json", laundered);
+
+    const result = await run(root, ["--verify"]);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /stored outcome is not what these inputs produce/);
+});
+
+test("a judgement pointing nowhere in the output is refused", async (t) => {
+    // The digest says these bytes were present. It does not say the judgements
+    // point into them, and both of these scored a true positive before.
+    const { root, observationRef } = fixture(t);
+
+    write(root, "record.json", record(observationRef, [claim({ sourceIndex: 999 })]));
+    const outOfRange = await run(root);
+    assert.equal(outOfRange.status, 1);
+    assert.match(outOfRange.stdout, /points at missingPoints\[999\] and this output has 1/);
+
+    write(
+        root,
+        "record.json",
+        record(observationRef, [claim({ evidenceQuote: "이 출력에 없는 문장" })])
+    );
+    const inventedQuote = await run(root);
+    assert.equal(inventedQuote.status, 1);
+    assert.match(inventedQuote.stdout, /quotes a sentence missingPoints\[0\] does not contain/);
+});
+
+test("a submitted finding no claim mentions is a gap, not a pass", async (t) => {
+    // How a wrong finding disappears: judge the one that scores, leave the
+    // other out, and a record that is signed and digest-matched reports a
+    // clean sheet.
+    const { root } = fixture(t);
+    const twoFindings = observation();
+    twoFindings.findings.missingPoints = [
+        "c는 이의신청 기한을 제시하지 않는다",
+        "a도 기한을 말하지 않는다",
+    ];
+    twoFindings.allText = twoFindings.findings.missingPoints.join(" ");
+    write(root, "observation.json", twoFindings);
+    write(root, "record.json", record(observationRefFor(twoFindings), [claim()]));
+
+    const result = await run(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /missingPoints\[1\] of this output has no claim about it/);
+
+    // Splitting one finding into several claims stays allowed: this check does
+    // not decide how to split anything.
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(twoFindings), [
+            claim(),
+            claim({
+                sourceIndex: 0,
+                requirementId: "evidence_preservation",
+                outsideGoldVerdict: "false_finding",
+            }),
+            claim({
+                sourceIndex: 1,
+                targetLabel: "a",
+                evidenceQuote: "a도 기한을 말하지 않는다",
+                outsideGoldVerdict: "false_finding",
+            }),
+        ])
+    );
+    const split = await run(root);
+    assert.equal(split.status, 0, split.stderr);
+    assert.match(split.stdout, /record against the output\n {2}ok/);
+});
+
+test("a wrongly typed field is named with its file and path, before anything is read", async (t) => {
+    // TypeScript says nothing about JSON somebody wrote. The first of these
+    // produced a WRONG SCORE rather than an error; the second printed two
+    // sections of `ok` and then threw a TypeError.
+    const { root, observationRef } = fixture(t);
+
+    const stringBoolean = testCase();
+    stringBoolean.goldCompleteness.missingPoints = "true";
+    write(root, "case.json", stringBoolean);
+    const boolish = await run(root);
+    assert.equal(boolish.status, 1);
+    assert.match(boolish.stdout, /case\.json: goldCompleteness\.missingPoints is "true", not a boolean/);
+    assert.match(boolish.stdout, /silently drops the kind out of precision/);
+    assert.match(boolish.stderr, /Nothing was read further/);
+
+    write(root, "case.json", testCase());
+    write(
+        root,
+        "record.json",
+        record(observationRef, [claim({ submittedAs: "missingPoint" })])
+    );
+    const misspelled = await run(root);
+    assert.equal(misspelled.status, 1);
+    assert.match(misspelled.stdout, /record\.json: claims\[0\]\.submittedAs is "missingPoint"/);
+    // And it is reported rather than thrown: no section of `ok` was printed
+    // before the failure.
+    assert.doesNotMatch(misspelled.stdout, /case registration/);
+    assert.doesNotMatch(misspelled.stderr, /TypeError/);
 });
