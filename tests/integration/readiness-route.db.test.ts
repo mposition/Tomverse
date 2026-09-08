@@ -77,6 +77,48 @@ mock.module(mod("lib/imageProviderBudgetReadiness.ts"), {
     },
 });
 
+/** The audio usage budget, on the same terms. `null` = the derivation threw. */
+let voiceBudget: { ready: boolean; flagEnabled: boolean } | null = {
+    ready: true,
+    flagEnabled: false,
+};
+/**
+ * Whether the configured transcription model's cost is known.
+ *
+ * A separate dependency from the budget above: a budget in seconds bounds how
+ * much audio leaves, and says nothing about a model whose per-token price
+ * nobody has observed (docs/policy/voice-input.md §6.1.4). `null` = it threw.
+ */
+let voiceModelPrice: { ready: boolean; flagEnabled: boolean } | null = {
+    ready: true,
+    flagEnabled: false,
+};
+mock.module(mod("lib/voiceModelPriceReadiness.ts"), {
+    namedExports: {
+        getVoiceModelPriceReadiness: async () => {
+            if (!voiceModelPrice) throw new Error("voice model price check exploded");
+            return {
+                ...voiceModelPrice,
+                modelId: "gpt-4o-mini-transcribe",
+                refusal: voiceModelPrice.ready
+                    ? null
+                    : { code: "cost_never_observed", detail: "no invoice recorded" },
+            };
+        },
+    },
+});
+mock.module(mod("lib/voiceProviderBudgetReadiness.ts"), {
+    namedExports: {
+        getVoiceProviderBudgetReadiness: async () => {
+            if (!voiceBudget) throw new Error("voice budget derivation exploded");
+            return {
+                ...voiceBudget,
+                budget: { limits: voiceBudget.ready ? { secondsPerDay: 1, secondsPerMonth: 1 } : null, problems: [] },
+            };
+        },
+    },
+});
+
 /**
  * The sending-identity readiness the route folds in.
  *
@@ -237,6 +279,8 @@ beforeEach(() => {
     securityChecks = { stripeLiveMode: true };
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
+    voiceBudget = { ready: true, flagEnabled: false };
+    voiceModelPrice = { ready: true, flagEnabled: false };
     searchBudget = { ready: true };
     setBusinessIdentity(true);
     sendingIdentityReady = true;
@@ -256,6 +300,8 @@ type ReadinessBody = {
         securityEnvironment: boolean;
         providerBudgets: boolean;
         imageProviderBudget: boolean;
+        voiceProviderBudget: boolean;
+        voiceModelPrice: boolean;
         emailSendingIdentity: boolean;
         emailSnapshotKeyring: boolean;
         emailUnsubscribeKeyring: boolean;
@@ -286,6 +332,8 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         securityEnvironment: true,
         providerBudgets: true,
         imageProviderBudget: true,
+        voiceProviderBudget: true,
+        voiceModelPrice: true,
         emailSendingIdentity: true,
         emailSnapshotKeyring: true,
         emailUnsubscribeKeyring: true,
@@ -324,6 +372,18 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             name: "imageProviderBudget",
             arrange: () => {
                 imageBudget = { ready: false, flagEnabled: true };
+            },
+        },
+        {
+            name: "voiceProviderBudget",
+            arrange: () => {
+                voiceBudget = { ready: false, flagEnabled: true };
+            },
+        },
+        {
+            name: "voiceModelPrice",
+            arrange: () => {
+                voiceModelPrice = { ready: false, flagEnabled: true };
             },
         },
         {
@@ -386,6 +446,8 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         securityChecks = { stripeLiveMode: true };
         providerBudgetReady = true;
         imageBudget = { ready: true, flagEnabled: false };
+        voiceBudget = { ready: true, flagEnabled: false };
+        voiceModelPrice = { ready: true, flagEnabled: false };
         searchBudget = { ready: true };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
@@ -512,6 +574,65 @@ test("the image budget check throwing is not ready", async () => {
     assert.deepEqual(
         reported.find((entry) => entry.dependency === "image-provider-cost-budget"),
         { dependency: "image-provider-cost-budget", healthy: false }
+    );
+});
+
+test("the voice budget check throwing is not ready", async () => {
+    // Same reasoning as the image budget above: a derivation that explodes is
+    // not evidence that the budget is fine. Nobody knows, and "nobody knows"
+    // refuses traffic.
+    voiceBudget = null;
+
+    const { response, body } = await get();
+    assert.equal(response.status, 503);
+    assert.equal(body.checks.voiceProviderBudget, false);
+
+    await runDeferred();
+    assert.deepEqual(
+        reported.find(
+            (entry) => entry.dependency === "voice-provider-seconds-budget"
+        ),
+        { dependency: "voice-provider-seconds-budget", healthy: false }
+    );
+});
+
+test("a voice budget absent while the flag is off is still ready", async () => {
+    // docs/policy/voice-input.md §6.1-4: the state every deployment that has
+    // never enabled voice input sits in permanently. Failing here would brick
+    // production for a feature nobody turned on.
+    voiceBudget = { ready: true, flagEnabled: false };
+
+    const { response, body } = await get();
+    assert.equal(response.status, 200);
+    assert.equal(body.checks.voiceProviderBudget, true);
+});
+
+test("an unpriced transcription model while the flag is off is still ready", async () => {
+    // The same env-first reasoning as the budget above. A deployment that has
+    // never switched voice input on must not be refused traffic over the price
+    // of a model it never calls (docs/policy/voice-input.md §6.1.4).
+    voiceModelPrice = { ready: true, flagEnabled: false };
+
+    const { response, body } = await get();
+    assert.equal(response.status, 200);
+    assert.equal(body.checks.voiceModelPrice, true);
+});
+
+test("the transcription model price check throwing is not ready", async () => {
+    // Same reasoning as the budgets: a check that explodes is not evidence
+    // that the price is known. Nobody knows, and that refuses traffic.
+    voiceModelPrice = null;
+
+    const { response, body } = await get();
+    assert.equal(response.status, 503);
+    assert.equal(body.checks.voiceModelPrice, false);
+
+    await runDeferred();
+    assert.deepEqual(
+        reported.find(
+            (entry) => entry.dependency === "voice-transcription-model-price"
+        ),
+        { dependency: "voice-transcription-model-price", healthy: false }
     );
 });
 

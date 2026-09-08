@@ -472,6 +472,50 @@ organization ID는 bearer secret이 아니지만, 이 저장소는 공개이고 
 운영하는 것**이고, 그 선택에는 §6.1-3의 마지막 문단이 요구하는 승인이
 필요합니다.
 
+#### 6.1.4 설정된 모델은 register를 만족해야 합니다 (fail-closed)
+
+§6.1.3이 남긴 상태는 **"기본 모델은 검증됐고 다른 하나는 아니다"**입니다. 그
+구분은 문서와 CI 검사에만 있었고 **운영 설정에는 없었습니다** —
+`VOICE_TRANSCRIPTION_MODEL`은 배포의 환경변수라 CI가 그 값을 볼 수 없고
+(§6.1.3-5), 그래서 검증되지 않은 모델을 고른 배포를 아무것도 막지 않았습니다.
+"기본 모델 기준 해결"이 운영에서도 참이 되려면 운영 설정이 그것을 강제해야
+합니다.
+
+**voice flag가 켜져 있으면, 설정된 모델은 register에서 셋을 만족해야 합니다.**
+
+| 조건 | 판정 |
+|---|---|
+| register에 항목이 없음 (오타·모르는 모델 문자열 포함) | **not ready** |
+| `audioInputPerMillionTokensUsd`가 `null` | **not ready** |
+| `costObservation`이 `null` | **not ready** |
+| 셋 다 만족 | ready |
+
+**flag가 꺼져 있으면 언제나 ready입니다.** provider 예산과 같은 근거입니다
+(§6.1-4) — 음성을 한 번도 켠 적 없는 배포는 영구히 그 상태에 있고, 거기서
+readiness를 실패시키면 아무도 켜지 않은 기능 때문에 production이 죽습니다.
+
+**모르는 모델 문자열은 "판단 보류"가 아니라 실패입니다.** 오타 하나가 원가를
+모르는 모델로 트래픽을 보내는 길이 되어서는 안 됩니다. 이름을 모르면 가격도
+모르고, 가격을 모르면 §6.1-3이 만든 층이 그 배포에 대해 아무 말도 하지
+못합니다.
+
+**`reverifyBy` 만료는 여기서 막지 않습니다 — 의도적인 제외입니다.** readiness는
+"지금 이 설정이 쓸 수 있는가"를 묻고, 만료는 사람이 다시 읽어야 한다는 절차상의
+사실입니다. 날짜만으로 readiness를 실패시키면 배포도 코드 변경도 없이 달력이
+production을 끄게 되고, 그것은 이 검사가 막으려는 종류의 사고가 아닙니다.
+만료는 `check:voice-price-register`가 CI에서 계속 실패로 잡습니다.
+
+**설정된 모델을 정하는 곳은 하나입니다** —
+`resolveVoiceTranscriptionModel()`(`lib/voiceTranscriptionPortCore.ts`).
+readiness가 판정하는 모델과 port가 실제로 호출하는 모델이 갈라지면 이 검사는
+아무것도 보장하지 않습니다. 두 곳에서 `process.env`를 각각 읽지 않습니다.
+
+**승인된 예외는 아직 없고, 만들 때도 이 검사를 느슨하게 해서 만들지
+않습니다.** §6.1-3은 관측되지 않은 원가로 production을 허용하려면 사람의
+승인과 근거를 기록하라고 합니다. 오늘 그런 경우는 없습니다 — 기본 모델은
+관측됐습니다. 필요해지면 그 우회는 **이름을 가진 별도 장치**여야 하며, 그래야
+우회가 쓰였다는 사실이 설정에 남습니다.
+
 ### 6.2 결정이 지켜지려면
 
 - **entitlement 층을 만들지 않습니다.** 이것은 이제 미결정의 결과가 아니라
@@ -849,7 +893,7 @@ ON CONFLICT ("key") DO UPDATE SET "value" = 'true';
 | `VOICE_INPUT_REQUESTS_PER_DAY` | 선택 | 주체별 override. 상한 아래로만 (§7) |
 | `VOICE_INPUT_REQUESTS_PER_MINUTE` | 선택 | 같음 |
 | `VOICE_INPUT_SECONDS_PER_DAY` | 선택 | 같음 |
-| `VOICE_TRANSCRIPTION_MODEL` | 선택 | 기본 `gpt-4o-mini-transcribe` |
+| `VOICE_TRANSCRIPTION_MODEL` | 선택 | 기본 `gpt-4o-mini-transcribe`. register가 원가를 아는 모델만 (§6.1.4) |
 | `VOICE_INPUT_KILL_SWITCH` | 선택 | 있으면 DB를 읽지 않고 끕니다 |
 
 **`VOICE_PROVIDER_*`와 `VOICE_INPUT_*`은 다른 층입니다.** 앞은 배포 전체의
@@ -861,6 +905,10 @@ provider 예산(§6.1-4), 뒤는 주체별 guardrail(§7)입니다. 이름이 �
 예산이 없는 것은 정상 상태이고 `/api/ready`가 통과합니다. flag를 켜는 순간
 예산 부재는 오설정이며 readiness가 실패합니다
 (`lib/voiceProviderBudgetReadiness.ts`).
+
+**`VOICE_TRANSCRIPTION_MODEL`도 같은 순간에 검사받습니다.** flag가 켜져 있는데
+설정된 모델의 원가를 register가 모르면 readiness가 실패합니다
+(§6.1.4, `lib/voiceModelPriceReadiness.ts`).
 
 ### 즉시 끄기 (production kill switch)
 

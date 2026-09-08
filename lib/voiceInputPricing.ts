@@ -223,6 +223,63 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
   },
 ];
 
+/**
+ * Whether a deployment configured to call `modelId` knows what that costs.
+ *
+ * Separate from `auditVoicePriceRegister` because the two answer different
+ * questions at different times. The audit asks "is this register well-formed",
+ * runs in CI over every entry, and treats an expired reading as a failure. This
+ * asks "may this deployment send audio to this model right now", runs against
+ * one model in `/api/ready`, and deliberately ignores expiry: a stale reading
+ * is a process fact, and failing readiness on a calendar date would take a
+ * running production down with no deploy and no code change
+ * (docs/policy/voice-input.md §6.1.4).
+ *
+ * `null` means the model may be called.
+ */
+export const voiceModelPriceRefusal = (input: {
+  modelId: string;
+  register?: readonly VoiceModelPriceEntry[];
+}): { code: VoiceModelPriceRefusalCode; detail: string } | null => {
+  const register = input.register ?? VOICE_MODEL_PRICE_REGISTER;
+  const entry = register.find(
+    (candidate) => candidate.modelId === input.modelId
+  );
+
+  // An unrecognised name is a refusal, not an unknown. A typo must not be a
+  // route to a model whose cost nothing in this repository can state.
+  if (!entry) {
+    return {
+      code: "model_not_in_register",
+      detail:
+        "the configured transcription model has no entry in the price " +
+        "register, so what its calls cost is unknown",
+    };
+  }
+  if (entry.price.audioInputPerMillionTokensUsd === null) {
+    return {
+      code: "audio_input_rate_unknown",
+      detail:
+        "the configured transcription model has no known audio input rate; " +
+        "the provider publishes none and no invoice has shown one",
+    };
+  }
+  if (entry.costObservation === null) {
+    return {
+      code: "cost_never_observed",
+      detail:
+        "the configured transcription model's price has only been read, " +
+        "never seen on an invoice (docs/policy/voice-input.md §6.1-3)",
+    };
+  }
+  return null;
+};
+
+export type VoiceModelPriceRefusalCode =
+  | "model_not_in_register"
+  | "audio_input_rate_unknown"
+  | "cost_never_observed";
+
 export type VoicePriceRegisterProblem = {
   modelId: string;
   code:
