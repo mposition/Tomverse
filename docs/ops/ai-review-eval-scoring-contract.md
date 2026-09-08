@@ -72,7 +72,10 @@
       ↓
 결속                    artifact가 case·기록·출력의 digest를 함께 들고 있음
       ↓
-증거 묶음 검증          verifyEvidenceBundle()에 결속 (미구현)
+공유 검증               verifyJudgedScoringEvidence() — CLI와 증거 묶음이
+                        모두 이것을 부른다
+      ↓
+집계 적격성             검증 통과 ≠ 셀 수 있음 (§ 아래)
 ```
 
 - **평가 대상 모델에는 gold도 requirement id도 주지 않는다.** 채점 어휘를 본
@@ -283,6 +286,45 @@ enum · 배열 · 정수 인덱스를 검사하고, **파일과 필드 경로를
 거절한다. **인용의 최소 길이나 내용의 옳고 그름을 정하는 것이 아니라, 썼는지
 안 썼는지의 차이일 뿐이다.**
 
+### 검증 순서는 한 곳에만 있다
+
+`verifyJudgedScoringEvidence()`가 여섯 단계를 이 순서로 수행한다.
+
+1. shape — 의미를 읽기 전
+2. case 자신의 등록
+3. 기록 ↔ 그것이 이름 댄 출력
+4. 기록의 신원과 서명
+5. 점수 재계산과 저장 outcome 대조
+6. 출력과 case ↔ **실행 journal과 동결 dataset**
+
+`scripts/score-ai-review-judgements.mjs`와 `verifyEvidenceBundle()`이 **같은
+함수**를 부른다. "동등한 순서"가 아니라 같은 함수다 — 두 호출자가 각자 순서를
+기억하는 것이 옛 증거 검사가 구멍을 키운 방식이고,
+`lib/aiReviewEvidenceBundle.ts` 머리말이 그 사고를 셋 적어 두고 있다.
+
+**6번이 파일끼리의 일치로는 부족한 이유다.** 한 디렉터리의 세 파일이 완벽하게
+일치하면서 **이 실행이 낸 적 없는 출력**이나 **동결 세트에 없는 case**에 대한
+것일 수 있다 — 아무것에 대한 것도 아닌 일관된 진술이다. journal에 그 case의
+항목이 있는지, 그 항목의 출력이 채점된 그 출력인지, dataset에 그 case가 있고
+답변 label이 같은지를 대조한다. label이 다르면 gold가 **실행이 보여 준 적 없는
+답변**을 지목할 수 있다.
+
+### 정확히 기록된 거절과 평가 적격성은 다르다
+
+`problems`가 비었다는 것은 **증거가 정직하다**는 뜻이지 **쓸 수 있다**는 뜻이
+아니다. `scored: false` artifact는 무결성 검증을 통과하는 것이 맞다 — 아무도 이
+case의 판정을 끝내지 않았다는 참인 진술이기 때문이다. 그것을 집계나 승급 증거로
+쓰면 **판정되지 않은 case가 판정돼 미달한 case처럼** 읽힌다.
+
+그래서 `eligibleForAggregation`과 `ineligibleReasons`가 따로 있고, CLI는
+`It may be counted in a score` / `It may NOT be counted...`를 나눠 출력하며,
+증거 묶음은 `judged.supplied` · `judged.eligible` · `judged.ineligible`을 따로
+보고한다.
+
+`verifyEvidenceBundle()`의 `judged` 입력은 **선택**이다. 넘기지 않은 호출자는
+오늘과 정확히 같은 검사를 받는다 — 이 계약은 아직 미승인이고 어떤 평가에도
+연결되어 있지 않다.
+
 ### 아직 정해지지 않은 것
 
 - **한 문장에 여러 결함이 섞인 경우의 분해 단위.** 지금은 추출 단계에서 claim
@@ -309,15 +351,16 @@ enum · 배열 · 정수 인덱스를 검사하고, **파일과 필드 경로를
   것들에 결속하고, **저장된 outcome을 재계산해 대조**.
 - `verifyRecordAgainstObservation()` — 기록이 실제 출력을 읽었는지.
 - shape 검사 넷 — 파일 입력의 런타임 타입 검증.
+- `verifyJudgedScoringEvidence()` — 공유 진입점. journal·dataset 대조와 집계
+  적격성 판정을 포함하며, CLI와 `verifyEvidenceBundle()`이 함께 부른다.
 - `scripts/score-ai-review-judgements.mjs`와 파일 흐름 회귀
   (`tests/aiReviewJudgementScoringCli.test.mjs`).
 
 **하지 않은 것, 그리고 하지 않을 것**
 
-- `verifyEvidenceBundle()` 결속 — 다음 작업이다. 붙는 것은 digest 셋이 아니라
-  **공유 검증 경로 전체**다: 입력 타입 → case 등록 → 기록·출력 대조 → 기록 서명
-  → 재계산 → 저장 outcome 대조. digest는 그 경로의 한 부분이지 검증 전체가
-  아니다.
+- **승인된 평가에 연결하는 것** — 이 계약이 승인되고, 미승인 정책 둘이 정해진
+  뒤의 일이다. `verifyEvidenceBundle()`은 이미 `judged`를 받지만 아무 평가도
+  그것을 넘기지 않으며, 넘기지 않는 호출자는 오늘과 같은 검사를 받는다.
 - 기존 `anyOf` 채점 제거 — 남기되 **키워드 진단값**으로 분리해 이름을 바꿔야
   한다. 지금 지우면 비교할 기준이 사라진다.
 - 기존 점수·승인·임계값의 자동 승계 — **하지 않는다.** 새 계약의 숫자는 새

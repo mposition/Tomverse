@@ -488,3 +488,119 @@ test("a blank evidence quote is not evidence", async (t) => {
     assert.equal(prose.status, 1);
     assert.match(prose.stdout, /has no evidence quote/);
 });
+
+// ---------------------------------------------------------------------------
+// The judged score, against the run and the frozen set
+//
+// Three files in a directory can agree perfectly and be about an output the
+// run never produced, or a case the frozen set does not contain -- a
+// consistent statement about nothing.
+// ---------------------------------------------------------------------------
+
+const writeJournal = (root, entries) =>
+    writeFileSync(
+        join(root, "journal.jsonl"),
+        `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+        "utf8"
+    );
+
+const datasetWith = (labels = ["a", "b", "c"]) => ({
+    version: "decision-v2",
+    cases: [
+        {
+            id: "ko-safety-sensitive-003",
+            responses: labels.map((label) => ({ label })),
+        },
+    ],
+});
+
+test("a judged score is checked against the run's journal and the frozen set", async (t) => {
+    const { root } = fixture(t);
+    await run(root);
+    writeJournal(root, [
+        { caseId: "ko-safety-sensitive-003", observation: observation() },
+    ]);
+    write(root, "dataset.json", datasetWith());
+
+    const bound = [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ];
+    const ok = await run(root, bound);
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.match(ok.stdout, /It may be counted in a score/);
+
+    // An output the run never recorded.
+    const elsewhere = observation();
+    elsewhere.findings.missingPoints = ["이 실행이 낸 적 없는 출력"];
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: elsewhere }]);
+    const wrongOutput = await run(root, bound);
+    assert.equal(wrongOutput.status, 1);
+    assert.match(wrongOutput.stdout, /is not the one that was judged and scored here/);
+
+    // A case the run never had an entry for.
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-001", observation: observation() }]);
+    const noEntry = await run(root, bound);
+    assert.equal(noEntry.status, 1);
+    assert.match(noEntry.stdout, /journal has no entry for ko-safety-sensitive-003/);
+
+    // A case the frozen set does not contain.
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: observation() }]);
+    write(root, "dataset.json", { version: "decision-v2", cases: [{ id: "somewhere-else" }] });
+    const notInSet = await run(root, bound);
+    assert.equal(notInSet.status, 1);
+    assert.match(notInSet.stdout, /frozen dataset has no case ko-safety-sensitive-003/);
+
+    // And a case whose answers are not the answers the run showed: a gold item
+    // could then name an answer nobody was ever given.
+    write(root, "dataset.json", datasetWith(["a", "b"]));
+    const differentAnswers = await run(root, bound);
+    assert.equal(differentAnswers.status, 1);
+    assert.match(differentAnswers.stdout, /a gold item could name an answer the run never showed/);
+});
+
+test("a correctly recorded refusal verifies and is still not countable", async (t) => {
+    // Integrity and usefulness are different questions. This artifact is sound
+    // evidence -- of a refusal -- and reading its clean verification as
+    // "usable" would let a case nobody finished judging into an aggregate as
+    // though it had been judged and found wanting.
+    const { root } = fixture(t);
+    const twoFindings = observation();
+    twoFindings.findings.missingPoints = [
+        "c는 이의신청 기한을 제시하지 않는다",
+        "c는 재발화 방지 안내가 없다",
+    ];
+    twoFindings.allText = twoFindings.findings.missingPoints.join(" ");
+    write(root, "observation.json", twoFindings);
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(twoFindings), [
+            claim(),
+            claim({
+                requirementId: "reignition_guard",
+                sourceIndex: 1,
+                evidenceQuote: "c는 재발화 방지 안내가 없다",
+            }),
+        ])
+    );
+    await run(root);
+    assert.equal(read(root, "artifact.json").outcome.scored, false);
+
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: twoFindings }]);
+    write(root, "dataset.json", datasetWith());
+
+    const verified = await run(root, [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ]);
+    // The evidence is sound...
+    assert.equal(verified.status, 0, verified.stderr);
+    assert.match(verified.stdout, /The stored score is about these files/);
+    // ...and it may not be counted.
+    assert.match(verified.stdout, /may NOT be counted in a score or cited as promotion evidence/);
+    assert.match(verified.stdout, /correctly recorded refusal and not a result/);
+    assert.doesNotMatch(verified.stdout, /It may be counted in a score/);
+});
