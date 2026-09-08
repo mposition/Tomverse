@@ -68,6 +68,7 @@ import {
 import {
   admitDraftCall,
   ledgerBalance,
+  transportBlockedBeforeProvider,
 } from "../lib/aiReviewDraftLedger.ts";
 
 const args = process.argv.slice(2);
@@ -465,6 +466,23 @@ process.on("exit", releaseLock);
  * left unsettled keeps holding the budget for ever, which is the safe
  * direction: it stands for a call that was very likely charged.
  */
+const correctToZero = (reason) => {
+  if (!reserved) return;
+  appendFileSync(
+    ledgerPath,
+    `${JSON.stringify({
+      op: "correct",
+      reservationId,
+      at: new Date().toISOString(),
+      previousCostCeilingUsd: callCeilingUsd,
+      costCeilingUsd: 0,
+      grounds: "transport_blocked_before_provider",
+      reason,
+    })}\n`,
+    "utf8"
+  );
+};
+
 const settle = (outcome) => {
   if (!reserved) return;
   reserved = false;
@@ -509,6 +527,31 @@ try {
 }
 const body = await response.text();
 if (!response.ok) {
+  // A refusal from between here and the provider is the one failure that
+  // reached nothing and was billed nothing, so it is the one that gives its
+  // ceiling back. The correction goes in FIRST: if the process dies between
+  // the two lines the reservation is left outstanding, and an outstanding
+  // reservation refuses the next call until a person accounts for it. The
+  // other order would leave a settled call at a ceiling of zero, which reads
+  // as a free call that happened.
+  if (
+    transportBlockedBeforeProvider({
+      status: response.status,
+      body,
+      host: new URL(baseUrl).host,
+    })
+  ) {
+    correctToZero(
+      `the request was refused before it reached the provider: ${body.trim()}`
+    );
+    settle("transport_blocked_before_provider");
+    die(
+      `\nHTTP ${response.status}: ${body.slice(0, 500)}\n\n` +
+        `The request never reached the provider, so its reservation was corrected ` +
+        `to $0 and settled. Nothing was generated and nothing was billed. Report ` +
+        `the blocked host rather than retrying.`
+    );
+  }
   settle(`http_${response.status}`);
   die(`\nHTTP ${response.status}: ${body.slice(0, 500)}`);
 }

@@ -93,18 +93,30 @@ const ARGS_TARGET_LABELS = assignTargetLabels({
  * `spawnSync` blocks this event loop, and a server that cannot accept a
  * connection looks exactly like a provider that never replies.
  */
-const stubProvider = async (reply) => {
+const stubProvider = async (reply, options = {}) => {
+  const { status = 200, contentType = "application/json", body } = options;
   const server = createServer((request, response) => {
-    if (reply === null) return; // hangs, so the caller can be killed mid-flight
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(reply);
+    if (reply === null && body === undefined) return; // hangs, so the caller can be killed mid-flight
+    response.writeHead(status, { "Content-Type": contentType });
+    // `body` is a function so a refusal can name the port, which is not known
+    // until the server is listening -- and naming it is the point: the zero
+    // correction requires the refusal to be about the host actually asked for.
+    response.end(typeof body === "function" ? body(url) : (body ?? reply));
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const host = `127.0.0.1:${server.address().port}`;
+  const url = `http://${host}/v1`;
   return {
-    url: `http://127.0.0.1:${server.address().port}/v1`,
+    url,
+    host,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 };
+
+/** The egress proxy's refusal, as it actually arrived on 2026-09-03. */
+const egressRefusal = (host) =>
+  `Host not in allowlist: ${host}. Add this host to your network egress ` +
+  `settings to allow access.`;
 
 
 /**
@@ -463,4 +475,83 @@ test("a set holding an older template's cases is refused before anything is rese
   assert.equal(result.status, 1, result.stdout);
   assert.match(result.stderr, /ai-review-eval-draft-v1/);
   assert.equal(existsSync(fix.ledgerPath), false, "nothing may be reserved");
+});
+
+
+test("a call refused before the provider is corrected to zero and settled", async (t) => {
+  // 2026-09-03. An approved call was refused by this session's egress proxy:
+  // the request never reached OpenAI, nothing was generated, nothing was
+  // billed -- and it settled at the full ceiling, leaving $0.0086 of an
+  // approved $0.18, which would have refused the very batch that $0.18 was
+  // approved for.
+  const provider = await stubProvider(null, {
+    status: 403,
+    contentType: "text/plain",
+    body: (url) => egressRefusal(new URL(url).host),
+  });
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /never reached the provider/);
+
+  const balance = fix.balance();
+  assert.deepEqual(balance.problems, []);
+  assert.equal(balance.committedUsd, 0);
+  assert.equal(balance.settledCount, 1);
+  assert.equal(balance.outstandingCount, 0);
+
+  // The correction is written BEFORE the settlement, so a run that dies
+  // between them leaves an outstanding reservation rather than a settled call
+  // at a ceiling of zero -- which would read as a free call that happened.
+  const ops = readFileSync(fix.ledgerPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    ops.map((entry) => entry.op),
+    ["reserve", "correct", "settle"]
+  );
+  assert.equal(ops[1].grounds, "transport_blocked_before_provider");
+  assert.equal(ops[1].costCeilingUsd, 0);
+  assert.equal(ops[1].previousCostCeilingUsd, ops[0].costCeilingUsd);
+  assert.equal(ops[2].outcome, "transport_blocked_before_provider");
+
+  // Nothing was drafted, so nothing was written to the set.
+  assert.equal(existsSync(fix.setPath), false);
+});
+
+test("a provider's own 403 keeps its full ceiling", async (t) => {
+  // The failure that must NOT be refunded: a 403 from the provider can follow
+  // a request it accepted, and this tool never learns whether it did.
+  const provider = await stubProvider(null, {
+    status: 403,
+    body: JSON.stringify({ error: { message: "You do not have access to this model" } }),
+  });
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(result.status, 1);
+
+  const balance = fix.balance();
+  assert.deepEqual(balance.problems, []);
+  assert.ok(balance.committedUsd > 0, "a provider refusal must keep its ceiling");
+  assert.equal(balance.outstandingCount, 0);
+  const ops = readFileSync(fix.ledgerPath, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((entry) => JSON.parse(entry));
+  assert.deepEqual(
+    ops.map((entry) => entry.op),
+    ["reserve", "settle"]
+  );
+  assert.equal(ops[1].outcome, "http_403");
 });
