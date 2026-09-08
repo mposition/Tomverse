@@ -56,6 +56,7 @@ const record = (claims, overrides = {}) => ({
     observationRef: "run-1/attempt-1",
     reviewedBy: "operator",
     reviewedAt: "2026-09-08T00:00:00.000Z",
+    sourceCaseDigest: "sha256:the-question-and-answers-a-person-read",
     claims,
     ...overrides,
 });
