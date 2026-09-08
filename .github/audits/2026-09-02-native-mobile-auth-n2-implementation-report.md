@@ -1076,7 +1076,7 @@ rev.21의 판정표는 `secret_mismatch`(배포 결함)와 `reuse_detected`(미�
 | `mobile_auth.refreshed` | — | 이전 pepper가 살아 있습니다 |
 | `mobile_auth.refresh_rejected` | `secret_mismatch` | **배포 결함** |
 | `mobile_auth.refresh_rejected` | `record_expired` · `unknown_record` · `family_revoked` · `device_revoked` · `account_not_active` | **미판정** |
-| `mobile_auth.reuse_detected` | `consumed` · `invalidated` | **미판정**, 그리고 그 실행이 family를 폐기했습니다 |
+| `mobile_auth.reuse_detected` | `reuse_detected` | **미판정**, 그리고 그 실행이 family를 폐기했습니다 |
 
 **대응 행이 없거나 모호하면 미판정으로 둡니다**(시각 구간이 겹쳐 다른 요청과 구분되지
 않는 경우 포함). 그리고 **공개 오류 코드만으로 추정하지 않습니다** — 그 코드 하나에
@@ -1087,6 +1087,26 @@ rev.21의 판정표는 `secret_mismatch`(배포 결함)와 `reuse_detected`(미�
 남고 있는 감사 기록을 읽는 방법을 절차에 붙인 것입니다.
 
 **문서만 바뀌었습니다.**
+
+---
+
+### 5.20 21차 검토(2026-09-03)에서 지적돼 고친 것
+
+**[중간] 감사 표의 `reason` 한 줄이 실제 기록 값과 달랐습니다.**
+rev.22는 재사용 행의 `reason`을 `consumed` · `invalidated`로 적었습니다. **그 둘은
+`decideMobileRefresh()`가 돌려주는 값이고 감사 행에는 가지 않습니다** —
+`revokeFamily()`는 양쪽 모두를 `reason: "reuse_detected"`로 기록합니다(쓰기 경로를
+다시 읽어 확인했습니다). 표대로 조회하면 실제 재사용 행과 맞지 않습니다.
+
+→ `reuse_detected` 하나로 고치고, **두 원인의 구분은 감사 행에 보존되지 않는다**고
+적었습니다. 그 구분이 여기서 필요하지도 않습니다 — 어느 쪽이든 미판정이고 세션은
+버립니다.
+
+**결정 모듈의 값과 저장되는 값이 다를 수 있다**는 것이 이 회차의 교훈입니다. 순수 모듈의
+반환값을 읽고 그것이 곧 기록되는 값이라고 적었고, 그 사이에 `revokeFamily()`가
+있었습니다.
+
+**코드·API 변경 없이 문서만 바뀌었습니다.**
 
 ---
 
@@ -1115,6 +1135,10 @@ rev.21의 판정표는 `secret_mismatch`(배포 결함)와 `reuse_detected`(미�
 > `check:encoding:strict`(통과)입니다. **wrapper 자체는 실행하지 못했습니다** —
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
+>
+> **rev.23 (2026-09-03).** 21차 검토의 한 건은 §5.20입니다 — 재사용 행의 `reason`을
+> 결정 모듈의 값(`consumed`·`invalidated`)으로 적었는데, 저장되는 값은
+> `reuse_detected` 하나입니다.
 >
 > **rev.22 (2026-09-03).** 20차 검토의 한 건은 §5.19입니다 — 판정표가 **응답에서 읽을
 > 수 없는 구분**을 전제하고 있었습니다. 감사 기록을 읽는 절차를 붙였고 공개 API는
@@ -1169,6 +1193,9 @@ rev.21의 판정표는 `secret_mismatch`(배포 결함)와 `reuse_detected`(미�
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.23 회차.** 문서 둘만 바뀌었습니다(코드·테스트 무변경).
+> `check:doc-references`·`check:policy-section-references`·`check:encoding:strict` 통과.
 >
 > **rev.22 회차.** 문서 셋만 바뀌었습니다(코드·테스트 무변경). `check:doc-references`·
 > `check:policy-section-references`·`check:encoding:strict` 통과.

@@ -625,7 +625,12 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    | `mobile_auth.refreshed` | — | 회전 성공. 이전 pepper가 살아 있습니다 |
    | `mobile_auth.refresh_rejected` | `secret_mismatch` | **배포 결함** — 이 세대의 digest를 지금 pepper로 계산할 수 없습니다 |
    | `mobile_auth.refresh_rejected` | `record_expired` · `unknown_record` · `family_revoked` · `device_revoked` · `account_not_active` | **미판정.** 시료나 그 family의 상태이지 키 재료의 문제가 아닙니다 |
-   | `mobile_auth.reuse_detected` | `consumed` · `invalidated` | **미판정.** 시료가 이미 쓰였고, 이 실행이 family를 폐기했습니다 |
+   | `mobile_auth.reuse_detected` | `reuse_detected` | **미판정.** 시료가 이미 쓰였고, 이 실행이 family를 폐기했습니다 |
+
+   **`consumed`인지 `invalidated`인지는 감사 행에 남지 않습니다.** 그 둘은
+   `decideMobileRefresh()`가 돌려주는 값이고, `revokeFamily()`는 양쪽 모두를
+   `reason: "reuse_detected"`로 기록합니다. 여기서는 그 구분이 필요 없습니다 — 어느
+   쪽이든 미판정이고 세션은 버립니다.
 
    **대응하는 행이 없거나 어느 쪽인지 모호하면 미판정으로 둡니다.** 시각 구간이 겹쳐
    다른 요청의 행과 구분되지 않는 경우도 여기입니다.
