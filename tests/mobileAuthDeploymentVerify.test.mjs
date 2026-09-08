@@ -111,7 +111,9 @@ const evidence = ({
   };
 };
 
-const candidate = ({ signingPkcs8, pepper }) => ({
+const candidate = ({ signingPkcs8, pepper, mode = "rotation" }) => ({
+  // Required, never defaulted -- see the mode cases below.
+  MOBILE_AUTH_VERIFY_MODE: mode,
   MOBILE_AUTH_SIGNING_KEYS: `sign-2:${signingPkcs8}`,
   MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
   MOBILE_AUTH_RETIRED_SIGNING_KEYS: "",
@@ -295,5 +297,37 @@ test("an unrecognised mode fails rather than defaulting to the rollback advice",
     MOBILE_AUTH_VERIFY_MODE: "incident",
   });
   assert.equal(result.code, 1, result.stdout);
-  assert.match(result.stdout, /expected one of rotation, emergency/);
+  assert.match(result.stdout, /must be one of preflight, rotation, emergency/);
+});
+
+test("the mode is required, because forgetting it used to mean rotation", () => {
+  // The dangerous default. An emergency run that dropped the flag was told to
+  // roll back to the ring section 5.1 had just abandoned -- in a leak, the
+  // leaked one. A mode nobody chose is not a mode.
+  const signing = ed25519();
+  const rings = candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED });
+  delete rings.MOBILE_AUTH_VERIFY_MODE;
+  const result = run({
+    ...rings,
+    ...evidence({ signing, pepper: PEPPER_INTENDED }),
+    MOBILE_AUTH_VERIFY_MODE: "",
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /is not set/);
+  assert.equal(/Roll Railway back to Active/.test(result.stdout), false);
+});
+
+test("preflight failures say stop the deploy, not roll back after one", () => {
+  // Section 3 step 4 checks Active against the running deployment *before*
+  // deploying. "Roll Railway back to Active" there is nonsense: nothing has
+  // been deployed to roll back from.
+  const deployed = ed25519();
+  const intended = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: intended.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
+    ...evidence({ signing: deployed, pepper: PEPPER_INTENDED }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /Do NOT deploy/);
+  assert.equal(/Roll Railway back to Active/.test(result.stdout), false);
 });

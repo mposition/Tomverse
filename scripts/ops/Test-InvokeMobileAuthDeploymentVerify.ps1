@@ -185,6 +185,21 @@ $emergency = Invoke-Wrapper -Mode "emergency"
 Assert-Case "4a. the mode reaches the verifier" ($emergency.SawMode -eq "emergency") `
     ("verifier saw: {0}" -f $emergency.SawMode)
 
+# No default. The one it had was "rotation", so an emergency run that forgot
+# the flag was told to roll back to the ring section 5.1 had just abandoned.
+$modeParameter = @($ast.ParamBlock.Parameters |
+    Where-Object { $_.Name.VariablePath.UserPath -eq "Mode" })
+$modeIsMandatory = @($modeParameter.Attributes |
+    Where-Object { $_.TypeName.Name -eq "Parameter" } |
+    ForEach-Object { $_.NamedArguments } |
+    Where-Object { $_.ArgumentName -eq "Mandatory" }).Count -gt 0
+$modeHasDefault = @($modeParameter | Where-Object { $null -ne $_.DefaultValue }).Count -gt 0
+Assert-Case "4b. -Mode is mandatory and has no default" `
+    ($modeIsMandatory -and (-not $modeHasDefault)) `
+    ("mandatory={0} default={1}" -f $modeIsMandatory, $modeHasDefault)
+Assert-Case "4c. preflight is an accepted mode" `
+    ((Invoke-Wrapper -Mode "preflight").SawMode -eq "preflight") ""
+
 $leaked = @()
 foreach ($run in @($ok, $bad, $emergency)) {
     foreach ($secret in $SECRETS.Values) {

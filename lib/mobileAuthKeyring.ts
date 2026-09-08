@@ -260,15 +260,6 @@ const withinGrace = (retiredAtMs: number, graceSeconds: number, nowMs: number) =
   nowMs < retiredAtMs + graceSeconds * 1000;
 
 /**
- * How far ahead of now a retirement instant may sit and still be one.
- *
- * A retirement records when trust was withdrawn, so it is a past instant by
- * construction. A small allowance covers the operator writing "now" against a
- * clock that is a little ahead of the server's.
- */
-export const MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS = 300;
-
-/**
  * Whether a retirement instant has actually arrived.
  *
  * A future-dated retirement is the same hole the mistyped id was, wearing a
@@ -282,9 +273,23 @@ export const MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS = 300;
  * it is visible immediately (tokens that key signed are refused and clients
  * refresh), and `npm run check:mobile-auth-keyring` fails on it before a
  * deploy rather than after one.
+ *
+ * **There is no tolerance, and that is the point.** A version of this allowed
+ * a retirement up to five minutes ahead, for an operator writing "now" against
+ * a clock running fast. It did not stop there: the grace was still measured
+ * from the declared instant, so a retirement four minutes ahead kept the
+ * previous signing key usable for nineteen minutes instead of the approved
+ * fifteen. The allowance had quietly added itself to the contract, and no
+ * stateless rule can both honour a future instant and bound trust at the
+ * approved window -- the deployment does not know when it first saw the value.
+ *
+ * The tension is resolved by procedure instead: the operator writes the
+ * instant a couple of minutes in the *past*, which costs nothing and is what
+ * the runbook says. Being early is then a refusal the pre-deploy check reports,
+ * not a silent extension.
  */
 const retirementHasArrived = (retiredAtMs: number, nowMs: number) =>
-  retiredAtMs <= nowMs + MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS * 1000;
+  retiredAtMs <= nowMs;
 
 /**
  * The retirement lines whose instant has not arrived yet, for the pre-deploy

@@ -49,9 +49,12 @@
     MOBILE_AUTH_RETIRED_REFRESH_PEPPERS
 
 .PARAMETER Mode
-    rotation (default) or emergency. It decides what a failure tells you to do:
-    an emergency has no trustworthy Active to roll back to, so being told to
-    roll back there means restoring the ring the procedure abandoned.
+    preflight, rotation or emergency. **Required, with no default.** It decides
+    what a failure tells you to do, and the default it used to have was
+    `rotation` -- so an emergency run that forgot the flag was told to roll back
+    to the ring section 5.1 had just abandoned, which in a leak is the leaked
+    one. Preflight is section 3 step 4: Active against the deployment running
+    now, before anything is deployed.
 
 .PARAMETER UsePreinjectedRings
     Take the two rings from the environment instead of prompting -- what
@@ -63,7 +66,7 @@
       -ActiveSigningKeyId sign-2 -ActiveRefreshPepperId pep-2 `
       -TokenIssuer https://tomverse.app -TokenAudience tomverse-mobile-api `
       -RetiredSigningKeys "sign-1@2026-09-02T10:00:00Z" `
-      -SecretDigest "<from the row>" -PepperKid pep-2
+      -SecretDigest "<from the row>" -PepperKid pep-2 -Mode rotation
 #>
 [CmdletBinding()]
 param(
@@ -75,7 +78,7 @@ param(
     [Parameter(Mandatory = $true)][string] $PepperKid,
     [string] $RetiredSigningKeys = "",
     [string] $RetiredRefreshPeppers = "",
-    [ValidateSet("rotation", "emergency")][string] $Mode = "rotation",
+    [Parameter(Mandatory = $true)][ValidateSet("preflight", "rotation", "emergency")][string] $Mode,
     [switch] $UsePreinjectedRings
 )
 

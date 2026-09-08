@@ -49,10 +49,11 @@
 //   MOBILE_AUTH_VERIFY_PEPPER_KID          MobileRefreshRotation.pepperKid
 //                                          (both read from the row that
 //                                          exchange created)
-//   MOBILE_AUTH_VERIFY_MODE                rotation (default) or emergency --
-//                                          decides what a failure tells you to
-//                                          do, since an emergency has no
-//                                          trustworthy Active to roll back to
+//   MOBILE_AUTH_VERIFY_MODE                preflight, rotation or emergency --
+//                                          required, never defaulted: it decides
+//                                          what a failure tells you to do, and an
+//                                          emergency has no trustworthy Active to
+//                                          roll back to
 //   MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS     how old the evidence may be
 //                                          (default 900)
 //
@@ -108,15 +109,24 @@ const MODE_ENV = "MOBILE_AUTH_VERIFY_MODE";
 const DEFAULT_MAX_AGE_SECONDS = 900;
 
 /**
- * What to do when a check fails, which is not the same in both situations the
- * runbook sends people here from.
+ * What to do when a check fails, which is not the same in the three situations
+ * the runbook sends people here from.
  *
- *   rotation   there is a trustworthy Active to go back to. Roll back to it.
- *   emergency  there is not -- an untrusted or lost previous ring is why this
- *              procedure is running. Rolling "back" would restore the ring
- *              that was abandoned, which in a leak is the leaked one.
+ *   preflight  before a deploy, against the *Active* values and the deployment
+ *              that is running now. A failure means Railway has drifted from
+ *              the authority: stop, restore from Active, start again.
+ *   rotation   after a deploy, against Pending. There is a trustworthy Active
+ *              to go back to.
+ *   emergency  after a deploy in section 5.1. There is not -- an untrusted or
+ *              lost previous ring is why that procedure is running, so rolling
+ *              "back" would restore the ring it abandoned, which in a leak is
+ *              the leaked one.
+ *
+ * **There is no default.** One was `rotation`, and forgetting the flag in an
+ * emergency then produced the single most dangerous sentence this script can
+ * print. A mode nobody chose is not a mode.
  */
-const MODES = new Set(["rotation", "emergency"]);
+const MODES = new Set(["preflight", "rotation", "emergency"]);
 
 const EVIDENCE = [
   ACCESS_TOKEN_ENV,
@@ -134,15 +144,24 @@ const fail = (name, detail) => {
   lines.push(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`);
 };
 
-const remedy = (mode) =>
-  mode === "emergency"
-    ? "  Do NOT promote Emergency Pending to Active, and do NOT roll back: the\n" +
-      "  previous ring is the one this procedure abandoned. Either disable mobile\n" +
-      "  auth (remove the six required variables) or roll forward to a new\n" +
-      "  candidate: docs/ops/mobile-auth-key-rotation.md section 5.1"
-    : "  Do NOT promote Pending to Active. Roll Railway back to Active using the\n" +
-      "  deployment id on the Pending entry, and discard this candidate:\n" +
-      "  docs/ops/mobile-auth-key-rotation.md";
+const REMEDIES = {
+  preflight:
+    "  Do NOT deploy. Railway is not running the Active values, so this rotation\n" +
+    "  would start from a state the authority does not describe. Restore Railway\n" +
+    "  from Active, re-run this check, and only then continue:\n" +
+    "  docs/ops/mobile-auth-key-rotation.md section 3",
+  rotation:
+    "  Do NOT promote Pending to Active. Roll Railway back to Active using the\n" +
+    "  deployment id on the Pending entry, and discard this candidate:\n" +
+    "  docs/ops/mobile-auth-key-rotation.md",
+  emergency:
+    "  Do NOT promote Emergency Pending to Active, and do NOT roll back: the\n" +
+    "  previous ring is the one this procedure abandoned. Either disable mobile\n" +
+    "  auth (remove the six required variables) or roll forward to a new\n" +
+    "  candidate: docs/ops/mobile-auth-key-rotation.md section 5.1",
+};
+
+const remedy = (mode) => REMEDIES[mode];
 
 const report = (mode) => {
   console.log("Mobile auth deployment verification");
@@ -164,13 +183,15 @@ const report = (mode) => {
   return 1;
 };
 
-const mode = (process.env[MODE_ENV] ?? "rotation").trim() || "rotation";
+const mode = (process.env[MODE_ENV] ?? "").trim();
 if (!MODES.has(mode)) {
   console.log("Mobile auth deployment verification");
   console.log(
-    `FAIL mobile auth deployment: ${MODE_ENV} is "${mode}"; expected one of ${[...MODES].join(", ")}.\n` +
-      "  The mode decides what a failure tells you to do, and guessing it wrong\n" +
-      "  is how an emergency gets told to roll back to the ring it abandoned."
+    `FAIL mobile auth deployment: ${MODE_ENV} is ${mode === "" ? "not set" : `"${mode}"`}; ` +
+      `it must be one of ${[...MODES].join(", ")}.\n` +
+      "  The mode decides what a failure tells you to do, so it is required rather\n" +
+      "  than defaulted: an emergency run that forgot the flag used to be told to\n" +
+      "  roll back to the ring it had just abandoned."
   );
   process.exit(1);
 }

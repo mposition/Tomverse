@@ -29,10 +29,16 @@
 //
 // Procedure: docs/ops/mobile-auth-key-rotation.md
 
-import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign,
+  timingSafeEqual,
+  verify,
+} from "node:crypto";
 
 import {
-  MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS,
   normalizeMobileKeyId,
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
   MOBILE_ACTIVE_SIGNING_KEY_ENV,
@@ -143,10 +149,10 @@ const describe = (
     // `sign-old@2099-01-01T00:00:00Z` is seventy years of trust reported as
     // "RETIRED, verifies until 2099". The runtime refuses such a key; this
     // says why before the deploy.
-    if (retiredAt > now + MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS * 1000) {
+    if (retiredAt > now) {
       problems.push(
         `${label}: "${keyId}" is retired at ${new Date(retiredAt).toISOString()}, which is in the future. ` +
-          `A retirement records when trust was withdrawn, so that is a typo, and until it is fixed the key verifies nothing.`
+          `A retirement records when trust was withdrawn, so write the instant a couple of minutes in the past. There is no tolerance here on purpose: honouring a future instant and still measuring the grace from it would lengthen the approved window. Until this is fixed the key verifies nothing.`
       );
       console.log(
         `  ${keyId}  RETIREMENT IN THE FUTURE (${new Date(retiredAt).toISOString()}) -- verifies nothing`
@@ -218,6 +224,73 @@ if (missingRequired.length > 0) {
   process.exit(1);
 }
 
+/**
+ * A signing key's identity, independent of the id somebody typed next to it.
+ *
+ * The public key is derived from the private one and hashed, so two ring
+ * entries holding the same key material get the same fingerprint whatever they
+ * are called. Nothing secret comes out: this is a hash of the *public* key.
+ */
+const signingFingerprint = (base64Pkcs8) => {
+  try {
+    const publicKey = createPublicKey(
+      createPrivateKey({
+        key: Buffer.from(base64Pkcs8, "base64"),
+        format: "der",
+        type: "pkcs8",
+      })
+    );
+    return createHash("sha256")
+      .update(publicKey.export({ format: "der", type: "spki" }))
+      .digest("hex");
+  } catch {
+    // Unusable material is somebody else's failure to report -- the active key
+    // has its own sign/verify check, and a ring entry that cannot be parsed
+    // never got this far.
+    return null;
+  }
+};
+
+const sameSecret = (left, right) => {
+  const a = Buffer.from(left, "utf8");
+  const b = Buffer.from(right, "utf8");
+  // Length first: timingSafeEqual throws on a mismatch, the same guard
+  // lib/emailLogin.ts uses.
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+};
+
+/**
+ * Two ids, one key. The failure this catches is the one that matters most.
+ *
+ * Rotating means replacing the material. Renaming it does not: after a leak,
+ * `sign-old` retired and `sign-new` active with the *same* private key reads as
+ * a completed rotation in every other check here -- ids differ, one is active,
+ * one is retired inside its grace, the active key signs -- while the leaked key
+ * is still the one signing every token.
+ *
+ * Compared by material, never by id, for the same reason the post-deploy
+ * verifier compares material: an id is a label somebody typed.
+ */
+const reportDuplicateMaterial = (label, ring, identity) => {
+  const seen = new Map();
+  for (const [keyId, secret] of ring.entries()) {
+    const key = identity(secret);
+    if (key === null) continue;
+    const earlier = seen.get(key);
+    if (earlier === undefined) {
+      seen.set(key, keyId);
+      continue;
+    }
+    problems.push(
+      `${label}: "${keyId}" and "${earlier}" are different ids holding the same material. ` +
+        `Renaming a key is not rotating it -- if this is a leak response, the leaked material is still in use.`
+    );
+  }
+};
+
+const pepperIdentities = new Map();
+
 let signingRing;
 let pepperRing;
 try {
@@ -251,6 +324,17 @@ try {
   console.error(`\nFAIL mobile auth keyring: ${error.message}`);
   process.exit(1);
 }
+
+reportDuplicateMaterial(MOBILE_SIGNING_KEYS_ENV, signingRing, signingFingerprint);
+// The pepper has no derived identity to compare, so the secrets themselves are
+// compared in constant time and never leave this process.
+reportDuplicateMaterial(MOBILE_REFRESH_PEPPERS_ENV, pepperRing, (secret) => {
+  for (const [candidate] of pepperIdentities) {
+    if (sameSecret(candidate, secret)) return candidate;
+  }
+  pepperIdentities.set(secret, true);
+  return secret;
+});
 
 // Named so the report is a complete picture of what the runtime will read.
 console.log(

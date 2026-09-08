@@ -230,6 +230,43 @@ test("a retirement dated in the future fails, on either ring", () => {
   }
 });
 
+test("two ids holding the same material fail, on either ring", () => {
+  // The leak-response failure. Every other check here reads this as a finished
+  // rotation: the ids differ, one is active, the other is retired inside its
+  // grace, and the active key signs. Only the material says the leaked key is
+  // still the one signing.
+  const sameKey = ed25519();
+  const samePepper = "s".repeat(48);
+
+  const renamedSigningKey = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-old:${sameKey},sign-new:${sameKey}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-new",
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-old@${justRetired()}`,
+  });
+  assert.equal(renamedSigningKey.code, 1, renamedSigningKey.out);
+  assert.match(renamedSigningKey.out, /different ids holding the same material/);
+  assert.match(renamedSigningKey.out, /Renaming a key is not rotating it/);
+
+  const renamedPepper = run({
+    ...healthy,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-old:${samePepper},pep-new:${samePepper}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-new",
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-old@${justRetired()}`,
+  });
+  assert.equal(renamedPepper.code, 1, renamedPepper.out);
+  assert.match(renamedPepper.out, /different ids holding the same material/);
+
+  // And a genuine rotation still passes: the check is about material, not
+  // about having more than one entry.
+  const genuine = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+  });
+  assert.equal(genuine.code, 0, genuine.out);
+});
+
 test("no output carries key material", () => {
   const { out } = run({
     ...healthy,
