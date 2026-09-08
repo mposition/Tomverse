@@ -138,9 +138,21 @@ const EVIDENCE = [
 const lines = [];
 const failures = [];
 
+/**
+ * Why a check failed, which decides the remedy more than the mode does.
+ *
+ *   evidence  the evidence is unusable -- unparseable, expired, too old. It
+ *             says nothing about the deployment, so the answer is to collect
+ *             it again, never to undo a deploy.
+ *   material  the deployment is not holding what the candidate says. This is
+ *             the finding the modes were written for.
+ */
+const EVIDENCE_FAILURE = "evidence";
+const MATERIAL_FAILURE = "material";
+
 const pass = (name, detail) => lines.push(`  OK    ${name}${detail ? ` -- ${detail}` : ""}`);
-const fail = (name, detail) => {
-  failures.push(name);
+const fail = (name, detail, kind = MATERIAL_FAILURE) => {
+  failures.push({ name, kind });
   lines.push(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`);
 };
 
@@ -161,23 +173,68 @@ const REMEDIES = {
     "  candidate: docs/ops/mobile-auth-key-rotation.md section 5.1",
 };
 
-const remedy = (mode) => REMEDIES[mode];
+/**
+ * Evidence that cannot be judged is not a verdict on the deployment.
+ *
+ * The remedy used to come from the mode alone, so a token that had simply
+ * expired -- every id, both rings and both claims correct -- produced "restore
+ * Railway from Active", "roll back", or "disable mobile auth". Three different
+ * dangerous instructions for a stale copy-paste.
+ *
+ * **One evidence failure is enough to hold the whole run**, and that is the
+ * second version of this rule. The first held only when *every* failure was an
+ * evidence one, which still ordered a rollback for the commonest case there
+ * is: evidence minted by the previous key, eight days old, compared against a
+ * new candidate. Of course the material differs -- it was made with a
+ * different key. The mismatch is a fact about the evidence, not about the
+ * deployment, and there is no way to tell those apart once the evidence is
+ * stale. So a material finding standing next to an evidence failure is not
+ * attributable to the deployment, and the run decides nothing.
+ */
+const EVIDENCE_REMEDY =
+  "  Nothing was decided about the deployment: the evidence could not be judged.\n" +
+  "  Any mismatch above is a fact about this evidence, not about what is\n" +
+  "  running -- evidence minted under an earlier key differs from a new\n" +
+  "  candidate because it was made with a different key, not because the deploy\n" +
+  "  went wrong.\n" +
+  "  Do NOT promote, roll back, restore or disable anything on the strength of\n" +
+  "  this run. Collect a fresh exchange against the deployment -- an access\n" +
+  "  token, its refresh token, and the MobileRefreshRotation row they created --\n" +
+  "  and run this again: docs/ops/mobile-auth-key-rotation.md";
+
+const remedy = (mode) =>
+  failures.some((failure) => failure.kind === EVIDENCE_FAILURE)
+    ? EVIDENCE_REMEDY
+    : REMEDIES[mode];
 
 const report = (mode) => {
   console.log("Mobile auth deployment verification");
   for (const line of lines) console.log(line);
   console.log("");
   if (failures.length === 0) {
+    // Scoped deliberately. What was compared is the evidence handed in against
+    // the candidate material -- nothing here ties that evidence to the
+    // deployment now running, because nothing in the token or the row names a
+    // deployment. Saying "the running deployment holds the candidate material"
+    // claimed exactly the binding that is still an open decision.
     console.log(
-      "PASS mobile auth deployment: the running deployment holds the candidate " +
-        "active signing key and active pepper, and issues the candidate iss/aud.\n" +
-        "  Not covered: retired entries and any other ring member. Nothing " +
-        "observes those; see the runbook's previous-generation check."
+      "PASS mobile auth deployment: the evidence provided was produced with the " +
+        "candidate active signing key and active pepper, under the candidate " +
+        "iss/aud.\n" +
+        "  NOT established: that this evidence came from the deployment now\n" +
+        "  running. Nothing binds it to a Railway deployment id, a rotationId or\n" +
+        "  a SHA -- freshness only bounds its age. Collecting it immediately after\n" +
+        "  the deploy is procedure, not proof.\n" +
+        "  NOT covered: retired entries and any other ring member; see the\n" +
+        "  runbook's previous-generation check.\n" +
+        "  This result alone does not satisfy the promotion condition:\n" +
+        "  docs/ops/mobile-auth-key-rotation.md"
     );
     return 0;
   }
   console.log(
-    `FAIL mobile auth deployment: ${failures.length} check(s) failed (${failures.join(", ")}).\n` +
+    `FAIL mobile auth deployment: ${failures.length} check(s) failed ` +
+      `(${failures.map((failure) => failure.name).join(", ")}).\n` +
       remedy(mode)
   );
   return 1;
@@ -255,7 +312,7 @@ for (const [variable, retirements] of [
 
 const parsed = parseCompactJws((process.env[ACCESS_TOKEN_ENV] ?? "").trim());
 if (!parsed) {
-  fail("access token parses", "not a three-segment compact JWS");
+  fail("access token parses", "not a three-segment compact JWS", EVIDENCE_FAILURE);
 } else {
   const kid = normalizeMobileKeyId(
     typeof parsed.header.kid === "string" ? parsed.header.kid : null
@@ -316,19 +373,29 @@ if (!parsed) {
   const iat = typeof parsed.claims.iat === "number" ? parsed.claims.iat : null;
 
   if (exp === null || iat === null) {
-    fail("evidence is fresh", "the token carries no numeric iat/exp to judge age by");
+    fail(
+      "evidence is fresh",
+      "the token carries no numeric iat/exp to judge age by",
+      EVIDENCE_FAILURE
+    );
   } else if (exp <= nowSeconds) {
     fail(
       "evidence is fresh",
-      `the token expired at ${new Date(exp * 1000).toISOString()} -- collect a new exchange against the deployment`
+      `the token expired at ${new Date(exp * 1000).toISOString()} -- collect a new exchange against the deployment`,
+      EVIDENCE_FAILURE
     );
   } else if (nowSeconds - iat > maxAgeSeconds) {
     fail(
       "evidence is fresh",
-      `the token was issued ${nowSeconds - iat}s ago, over the ${maxAgeSeconds}s limit (${MAX_AGE_ENV})`
+      `the token was issued ${nowSeconds - iat}s ago, over the ${maxAgeSeconds}s limit (${MAX_AGE_ENV})`,
+      EVIDENCE_FAILURE
     );
   } else if (iat > nowSeconds + 60) {
-    fail("evidence is fresh", "the token is issued in the future; check the clocks");
+    fail(
+      "evidence is fresh",
+      "the token is issued in the future; check the clocks",
+      EVIDENCE_FAILURE
+    );
   } else {
     pass("evidence is fresh", `issued ${nowSeconds - iat}s ago`);
   }
@@ -362,7 +429,7 @@ if (pepperKid !== activePepper.keyId) {
 
 const refresh = parseMobileRefreshToken((process.env[REFRESH_TOKEN_ENV] ?? "").trim());
 if (!refresh) {
-  fail("refresh token parses", "expected <recordId>.<secret>");
+  fail("refresh token parses", "expected <recordId>.<secret>", EVIDENCE_FAILURE);
 } else if (!pepperKid) {
   fail("pepper material", `${PEPPER_KID_ENV} is not a usable key id`);
 } else {

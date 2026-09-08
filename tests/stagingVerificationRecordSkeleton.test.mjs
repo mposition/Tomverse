@@ -194,3 +194,68 @@ test("an unknown checklist source is left blank rather than guessed", () => {
     });
     assert.match(record, /^checklistSourceSha:\s*$/m);
 });
+
+// --- line endings, and titles that are not the staging one -----------------
+
+test("a template checked out with CRLF renders the same record as one with LF", () => {
+    // Windows checks these files out with CRLF, and every replacement in the
+    // renderer anchors on "\n". The generator reported "25 item(s)" and wrote
+    // a record with a single empty row -- which reads as a checklist that has
+    // one item, not as a generator that matched nothing.
+    const checklist = readFileSync(
+        "docs/ops/mobile-auth-key-rotation-checklist.md",
+        "utf8"
+    );
+    const template = readFileSync(
+        "docs/ops/mobile-auth-key-rotation-verification-records/_record-template.md",
+        "utf8"
+    );
+    const crlf = (text) => text.replace(/\n/g, "\r\n");
+    const render = (checklistText, templateText) =>
+        renderRecord({
+            template: templateText,
+            items: checklistItems(checklistText),
+            date: "2026-09-03",
+            deploySha: "a".repeat(40),
+            revision: "2026-09-03a",
+            checklistSourceSha: "b".repeat(40),
+        });
+
+    const fromLf = render(checklist, template);
+    const fromCrlf = render(crlf(checklist), crlf(template));
+    assert.equal(fromCrlf, fromLf);
+
+    const rows = fromLf.split("\n").filter((line) => /^\| \| /.test(line));
+    assert.equal(rows.length, checklistItems(checklist).length);
+    assert.ok(rows.length > 1, "one row would mean the table anchor did not match");
+});
+
+test("a record's own title placeholders are filled, not shipped", () => {
+    // The heading pattern is the staging one word for word, so a template with
+    // a different title kept "<날짜> / <deploy SHA>" in the file somebody was
+    // supposed to fill in.
+    const rendered = renderRecord({
+        template: [
+            "---",
+            "templateRevision:",
+            "checklistSourceSha:",
+            "deploySha:",
+            "---",
+            "",
+            "# 모바일 인증 키 회전 실행 — <날짜> / <deploy SHA>",
+            "",
+            "| 구획 | 항목 | 결과 | 증거 | 후속 티켓 |",
+            "|---|---|---|---|---|",
+            "| A | | | | |",
+            "",
+        ].join("\n"),
+        items: [{ section: "A. 하나", subsection: null, text: "항목" }],
+        date: "2026-09-03",
+        deploySha: "c".repeat(40),
+        revision: "2026-09-03a",
+        checklistSourceSha: "d".repeat(40),
+    });
+
+    assert.match(rendered, /^# 모바일 인증 키 회전 실행 — 2026-09-03 \/ ccccccc$/m);
+    assert.equal(/<날짜>|<deploy SHA>/.test(rendered), false);
+});

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import { recordDigest } from "../scripts/check-staging-verification-records.mjs";
@@ -129,4 +131,55 @@ test("the digest ignores the front matter, so recording it is not circular", () 
     const source = read(LEGACY);
     const rewritten = source.replace(/^digest:.*$/m, "digest: something-else");
     assert.equal(recordDigest(source), recordDigest(rewritten));
+});
+
+// --- a second run on the same day against the same build --------------------
+
+test("the generator offers a run label instead of only refusing", () => {
+    // Change one variable and check again: the date and the SHA are both
+    // unchanged, so the second run could only be written by overwriting the
+    // first -- and overwriting is the one thing this directory does not do.
+    const sha = "e".repeat(40);
+    const feature = "mobile-auth-key-rotation";
+    const records = "docs/ops/mobile-auth-key-rotation-verification-records";
+    const written = [];
+    const generate = (args) =>
+        spawnSync(
+            process.execPath,
+            [
+                "scripts/new-staging-verification-record.mjs",
+                "--feature",
+                feature,
+                "--sha",
+                sha,
+                "--date",
+                "2099-01-01",
+                ...args,
+            ],
+            { encoding: "utf8" }
+        );
+
+    try {
+        const first = generate([]);
+        assert.equal(first.status, 0, `${first.stdout}${first.stderr}`);
+        written.push(join(records, `2099-01-01__${sha}.md`));
+
+        // The same command again refuses, and the refusal says how to proceed
+        // rather than leaving the operator to invent a filename.
+        const repeat = generate([]);
+        assert.notEqual(repeat.status, 0);
+        assert.match(`${repeat.stdout}${repeat.stderr}`, /--run/);
+
+        const labelled = generate(["--run", "2"]);
+        assert.equal(labelled.status, 0, `${labelled.stdout}${labelled.stderr}`);
+        written.push(join(records, `2099-01-01__${sha}__2.md`));
+
+        // And the checker reads both names, so the labelled one is a record
+        // rather than a file it complains about the name of.
+        for (const path of written) {
+            assert.match(readFileSync(path, "utf8"), /deploySha: e{40}/);
+        }
+    } finally {
+        for (const path of written) rmSync(path, { force: true });
+    }
 });

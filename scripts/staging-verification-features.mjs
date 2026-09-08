@@ -78,6 +78,17 @@ export const STAGING_VERIFICATION_FEATURES = [
             "docs/ops/external-conversation-continuation-staging-verification-records",
     },
     {
+        // Not a staging flag verification: what this one records is a procedure
+        // an operator carried out, and a run that only executed the pre-deploy
+        // check is still a run worth a file. The machinery is identical, which
+        // is the point -- a second copy of it would be a second thing to keep
+        // in step.
+        key: "mobile-auth-key-rotation",
+        label: "mobile auth key rotation (operator procedure)",
+        checklist: "docs/ops/mobile-auth-key-rotation-checklist.md",
+        records: "docs/ops/mobile-auth-key-rotation-verification-records",
+    },
+    {
         key: "deep-research",
         label: "deep research expansion offer and the model swap at the cap",
         checklist: "docs/ops/deep-research-staging-checklist.md",

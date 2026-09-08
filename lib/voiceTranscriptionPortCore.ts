@@ -169,6 +169,20 @@ export interface VoiceTranscriptionPort {
  */
 export const DEFAULT_VOICE_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
 
+/**
+ * The model this deployment will actually call.
+ *
+ * One resolver rather than the same `||` expression in each caller, because
+ * readiness checks a model's price and the port calls a model, and if those
+ * two ever disagree the check guarantees nothing about the calls
+ * (docs/policy/voice-input.md §6.1.4). A blank or whitespace-only value falls
+ * through to the default: an env var set to "" is not a model choice.
+ */
+export const resolveVoiceTranscriptionModel = (
+  env: Readonly<Record<string, string | undefined>>
+): string =>
+  env.VOICE_TRANSCRIPTION_MODEL?.trim() || DEFAULT_VOICE_TRANSCRIPTION_MODEL;
+
 /** Beyond this the user has been staring at a spinner too long anyway. */
 export const VOICE_TRANSCRIPTION_TIMEOUT_MS = 30_000;
 

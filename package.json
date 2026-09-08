@@ -124,6 +124,7 @@
     "check:release-gate-coverage": "node scripts/check-release-gate-coverage.mjs",
     "check:ui-tier-coverage": "node scripts/check-ui-tier-coverage.mjs",
     "check:voice-price-register": "node --import tsx scripts/check-voice-price-register.mjs",
+    "check:voice-provider-budget-env": "node --import tsx scripts/check-voice-provider-budget-env.mjs",
     "check:doc-references": "node scripts/check-doc-references.mjs",
     "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
     "check:staging-verification-records": "node scripts/check-staging-verification-records.mjs",
@@ -199,7 +200,8 @@
     "check:native-token-boundary": "node scripts/check-native-token-boundary.mjs",
     "report:ai-review-drafting-plan": "node --conditions=react-server --import tsx scripts/report-ai-review-drafting-plan.mjs",
     "check:mobile-auth-keyring": "node --import tsx scripts/check-mobile-auth-keyring.mjs",
-    "verify:mobile-auth-deployment": "node --conditions=react-server --import tsx scripts/verify-mobile-auth-deployment.mjs"
+    "verify:mobile-auth-deployment": "node --conditions=react-server --import tsx scripts/verify-mobile-auth-deployment.mjs",
+    "report:mobile-auth-keyring-health": "node --import tsx scripts/report-mobile-auth-keyring-health.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.49",

@@ -555,3 +555,108 @@ test("a provider's own 403 keeps its full ceiling", async (t) => {
   );
   assert.equal(ops[1].outcome, "http_403");
 });
+
+test("a new set can spend against the ledger that already holds the history", async (t) => {
+  // The mixed-template guard means a template bump needs a new --set, and the
+  // ledger path is derived from the set -- so without this the new set starts
+  // its own ledger at zero, and an approval given for "$0.18 in total" quietly
+  // buys $0.18 more. The budget belongs to the drafting effort, not to one
+  // file of cases.
+  const provider = await stubProvider(usableReply("m1"));
+  const first = fixture();
+  const second = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(first.root, { recursive: true, force: true });
+    rmSync(second.root, { recursive: true, force: true });
+  });
+
+  const one = await run(first.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(one.status, 0, one.stderr);
+  const after = first.balance();
+  assert.equal(after.settledCount, 1);
+  assert.ok(after.committedUsd > 0);
+
+  // Pointed at the first ledger, a run against a DIFFERENT set sees the
+  // history and is refused when the remaining room is gone.
+  const refused = await run(
+    second.setPath,
+    ["--send", `--ledger=${first.ledgerPath}`, `--max-total-cost-usd=${after.committedUsd}`],
+    provider.url
+  );
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /already committed/);
+  // Refused before the call, so it left no reservation of its own.
+  assert.deepEqual(first.balance(), after);
+  // And it did not quietly start a ledger beside its own set.
+  assert.equal(existsSync(second.ledgerPath), false);
+
+  // With room, the same run goes ahead and its spend lands in the shared
+  // ledger rather than in a fresh one.
+  const allowed = await run(
+    second.setPath,
+    ["--send", `--ledger=${first.ledgerPath}`, "--max-total-cost-usd=1"],
+    provider.url
+  );
+  assert.equal(allowed.status, 0, allowed.stderr);
+  const shared = first.balance();
+  assert.deepEqual(shared.problems, []);
+  assert.equal(shared.settledCount, 2);
+  assert.equal(shared.outstandingCount, 0);
+  assert.ok(shared.committedUsd > after.committedUsd);
+  assert.equal(existsSync(second.ledgerPath), false);
+
+  // Each set holds its own cases; only the money is shared.
+  assert.equal(JSON.parse(readFileSync(first.setPath, "utf8")).cases.length, 1);
+  assert.equal(JSON.parse(readFileSync(second.setPath, "utf8")).cases.length, 1);
+});
+
+test("a named ledger that is not there is refused before anything is spent", async (t) => {
+  // The flag exists to CONTINUE a history, so a path that is not there is a
+  // typo, a wrong working directory, or a file that was moved. Read as an
+  // empty ledger it would report $0 committed and hand back the whole approved
+  // budget -- invisibly, because a small total is what a first run looks like.
+  //
+  // The stub answers normally, so if the refusal did not happen the call would
+  // go through and this test would see it.
+  const provider = await stubProvider(usableReply("m1"));
+  const fix = fixture();
+  const missing = join(fix.root, "not-here", "decision-v1.spend.jsonl");
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  const result = await run(
+    fix.setPath,
+    ["--send", `--ledger=${missing}`, "--max-total-cost-usd=1"],
+    provider.url
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /could not be read/);
+  assert.match(result.stderr, /leave --ledger off/);
+
+  // Nothing reserved, nothing settled, no ledger conjured at either path, no
+  // lock left behind, and no set written -- so no provider call was made.
+  assert.equal(existsSync(missing), false);
+  assert.equal(existsSync(`${missing}.lock`), false);
+  assert.equal(existsSync(fix.ledgerPath), false);
+  assert.equal(existsSync(fix.setPath), false);
+});
+
+test("a derived ledger may be missing, because the first run creates it", async (t) => {
+  // The other half of the rule. Without --ledger a new set has no history and
+  // the file is made on the way through; turning that into an error would stop
+  // every first run.
+  const provider = await stubProvider(usableReply("m1"));
+  const fix = fixture();
+  t.after(async () => {
+    await provider.close();
+    rmSync(fix.root, { recursive: true, force: true });
+  });
+
+  assert.equal(existsSync(fix.ledgerPath), false);
+  const result = await run(fix.setPath, ["--send", "--max-total-cost-usd=1"], provider.url);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fix.balance().settledCount, 1);
+});

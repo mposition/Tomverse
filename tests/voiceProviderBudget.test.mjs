@@ -7,10 +7,22 @@ import {
   VOICE_PROVIDER_BUDGET_ENV_NAMES,
 } from "../lib/voiceProviderBudget.ts";
 import {
+  secondsUntilVoiceBudgetDayReset,
+  secondsUntilVoiceBudgetMonthReset,
+  voiceBudgetDayStart,
+  voiceBudgetMonthStart,
+  voiceBudgetNextMonthStart,
+} from "../lib/voiceProviderBudget.ts";
+import {
   auditVoicePriceRegister,
+  voiceModelPriceRefusal,
   VOICE_MODEL_PRICE_REGISTER,
   VOICE_PRICE_REVERIFY_MAX_DAYS,
 } from "../lib/voiceInputPricing.ts";
+import {
+  DEFAULT_VOICE_TRANSCRIPTION_MODEL,
+  resolveVoiceTranscriptionModel,
+} from "../lib/voiceTranscriptionPortCore.ts";
 
 /**
  * The audio provider budget and the audio price register:
@@ -218,6 +230,26 @@ test("an observed cost carries the invoice it was read from", () => {
   );
 });
 
+test("an observation names no raw account identifier", () => {
+  // This register lives in a public repository, and an API key id, project id
+  // or organization id is not needed to check any of the arithmetic above.
+  // What the isolation claim actually needs is that the calls can be pinned to
+  // one key -- a digest does that for anyone holding the operations record,
+  // and tells everyone else nothing (docs/policy/voice-input.md §6.1.3-4).
+  const rawIdentifier = /\b(key|proj|org|user)[-_][A-Za-z0-9]{12,}\b/;
+
+  for (const entry of VOICE_MODEL_PRICE_REGISTER) {
+    if (!entry.costObservation) continue;
+    for (const [field, value] of Object.entries(entry.costObservation)) {
+      if (typeof value !== "string") continue;
+      assert.ok(
+        !rawIdentifier.test(value),
+        `${entry.modelId}.${field} carries what looks like a raw account identifier`
+      );
+    }
+  }
+});
+
 test("the observed charge reproduces the recorded rates exactly", () => {
   // The reconciliation that makes the evidence load-bearing rather than
   // decorative. If this drifts, one of the two numbers was edited alone.
@@ -316,4 +348,194 @@ test("a ticket that names nothing is refused", () => {
       `${entry.modelId}: ${entry.ticket} is not something a person can open`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// Readiness: the configured model has to be one whose cost is known
+// docs/policy/voice-input.md §6.1.4
+// ---------------------------------------------------------------------------
+
+test("the configured model is resolved in one place", () => {
+  // Readiness checks a model's price and the port calls a model. If those two
+  // read the environment separately they can drift, and then the check is
+  // verifying a model nobody calls.
+  assert.equal(
+    resolveVoiceTranscriptionModel({}),
+    DEFAULT_VOICE_TRANSCRIPTION_MODEL
+  );
+  assert.equal(
+    resolveVoiceTranscriptionModel({ VOICE_TRANSCRIPTION_MODEL: "gpt-4o-transcribe" }),
+    "gpt-4o-transcribe"
+  );
+  // Set-but-blank is not a model choice.
+  assert.equal(
+    resolveVoiceTranscriptionModel({ VOICE_TRANSCRIPTION_MODEL: "   " }),
+    DEFAULT_VOICE_TRANSCRIPTION_MODEL
+  );
+});
+
+test("the default model may be called", () => {
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: DEFAULT_VOICE_TRANSCRIPTION_MODEL }),
+    null
+  );
+});
+
+test("a model with no known audio rate is refused", () => {
+  // The concrete case this rule exists for: an operator setting
+  // VOICE_TRANSCRIPTION_MODEL to the entry that has never been invoiced.
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "gpt-4o-transcribe" })?.code,
+    "audio_input_rate_unknown"
+  );
+});
+
+test("an unrecognised model string is refused, not shrugged at", () => {
+  // A typo must not be a route to a model whose cost nothing here can state.
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "gpt-4o-mini-transcirbe" })?.code,
+    "model_not_in_register"
+  );
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "whisper-1" })?.code,
+    "model_not_in_register"
+  );
+});
+
+test("a priced model that has never been invoiced is refused", () => {
+  // §6.1-3: running on an unobserved cost needs a recorded human approval, so
+  // the default is refusal rather than silent acceptance.
+  const pricedButUnobserved = [
+    {
+      ...VOICE_MODEL_PRICE_REGISTER.find(
+        (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+      ),
+      costObservation: null,
+    },
+  ];
+
+  assert.equal(
+    voiceModelPriceRefusal({
+      modelId: "gpt-4o-mini-transcribe",
+      register: pricedButUnobserved,
+    })?.code,
+    "cost_never_observed"
+  );
+});
+
+test("an expired reading does not refuse readiness", () => {
+  // Deliberate: readiness asks whether this configuration is usable now, and
+  // failing it on a calendar date would take a running production down with no
+  // deploy and no code change. CI keeps failing on expiry instead.
+  const stale = [
+    {
+      ...VOICE_MODEL_PRICE_REGISTER.find(
+        (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+      ),
+      reverifyBy: "2020-01-01",
+    },
+  ];
+
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "gpt-4o-mini-transcribe", register: stale }),
+    null
+  );
+  // ...but the audit still calls it expired.
+  assert.ok(
+    auditVoicePriceRegister({
+      modelIds: ["gpt-4o-mini-transcribe"],
+      now: new Date("2026-09-08T00:00:00Z"),
+      register: stale,
+    }).some((problem) => problem.code === "expired")
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Budget bucket boundaries and the retry-after they imply
+// docs/policy/voice-input.md §6.1-4; docs/ops/voice-provider-budget-rollout.md §2
+// ---------------------------------------------------------------------------
+
+const at = (iso) => new Date(iso);
+
+test("buckets open on UTC calendar boundaries", () => {
+  // Not local time: a KST-anchored day would roll at 15:00 UTC and the ledger
+  // would book into a bucket the refusal never refers to.
+  const now = at("2026-09-08T23:30:00.000Z");
+
+  assert.equal(voiceBudgetDayStart(now).toISOString(), "2026-09-08T00:00:00.000Z");
+  assert.equal(voiceBudgetMonthStart(now).toISOString(), "2026-09-01T00:00:00.000Z");
+});
+
+test("a daily refusal points at the next UTC midnight", () => {
+  const now = at("2026-09-08T23:59:00.000Z");
+
+  assert.equal(secondsUntilVoiceBudgetDayReset(now), 60);
+});
+
+test("a monthly refusal points at the 1st, not at tomorrow", () => {
+  // The defect this fixes: the month bucket does not recover until the 1st, so
+  // quoting the daily figure sends the user back into the same refusal every
+  // day until then.
+  const now = at("2026-09-08T00:00:00.000Z");
+
+  assert.equal(secondsUntilVoiceBudgetDayReset(now), 86_400);
+  assert.equal(secondsUntilVoiceBudgetMonthReset(now), 23 * 86_400);
+  assert.ok(
+    secondsUntilVoiceBudgetMonthReset(now) > secondsUntilVoiceBudgetDayReset(now)
+  );
+});
+
+test("the month rolls over the year end without a special case", () => {
+  // `Date.UTC` normalises a 13th month into the next January. A hand-written
+  // `month + 1` guard is the thing that gets this wrong.
+  const now = at("2026-12-31T23:59:00.000Z");
+
+  assert.equal(
+    voiceBudgetNextMonthStart(now).toISOString(),
+    "2027-01-01T00:00:00.000Z"
+  );
+  assert.equal(secondsUntilVoiceBudgetMonthReset(now), 60);
+});
+
+test("month ends of every length land on the 1st", () => {
+  // 30-day, 31-day, a common-year February and a leap February. Month length
+  // is never computed here, and these fix that it stays that way.
+  for (const [now, expected] of [
+    ["2026-04-30T12:00:00.000Z", "2026-05-01T00:00:00.000Z"],
+    ["2026-01-31T12:00:00.000Z", "2026-02-01T00:00:00.000Z"],
+    ["2026-02-28T12:00:00.000Z", "2026-03-01T00:00:00.000Z"],
+    ["2028-02-29T12:00:00.000Z", "2028-03-01T00:00:00.000Z"],
+  ]) {
+    assert.equal(
+      voiceBudgetNextMonthStart(at(now)).toISOString(),
+      expected,
+      `${now} -> ${expected}`
+    );
+  }
+});
+
+test("a leap day is a day like any other for the daily bucket", () => {
+  const now = at("2028-02-29T23:00:00.000Z");
+
+  assert.equal(voiceBudgetDayStart(now).toISOString(), "2028-02-29T00:00:00.000Z");
+  assert.equal(secondsUntilVoiceBudgetDayReset(now), 3_600);
+});
+
+test("a reset is never zero or in the past", () => {
+  // `resetAt` must be in the future -- an already-elapsed one reads as
+  // "retryable now" and the caller retries straight into the same refusal.
+  for (const now of [
+    at("2026-09-08T23:59:59.999Z"),
+    at("2026-09-30T23:59:59.999Z"),
+    at("2026-12-31T23:59:59.999Z"),
+  ]) {
+    assert.ok(secondsUntilVoiceBudgetDayReset(now) >= 1, `day ${now.toISOString()}`);
+    assert.ok(secondsUntilVoiceBudgetMonthReset(now) >= 1, `month ${now.toISOString()}`);
+  }
+});
+
+test("the first instant of a month is a whole month away from the next", () => {
+  const now = at("2026-09-01T00:00:00.000Z");
+
+  assert.equal(secondsUntilVoiceBudgetMonthReset(now), 30 * 86_400);
 });

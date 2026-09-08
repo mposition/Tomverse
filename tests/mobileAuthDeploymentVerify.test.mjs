@@ -27,7 +27,7 @@ const ed25519 = () => {
 // The ring parser refuses a short entry, so these are full-length and
 // obviously not real.
 const PEPPER_INTENDED = `intended-pepper-${"i".repeat(48)}`;
-const PEPPER_DEPLOYED = `deployed-pepper-${"d".repeat(48)}`;
+const PEPPER_EVIDENCE = `evidence-pepper-${"d".repeat(48)}`;
 
 const ISSUER = "https://tomverse.example";
 const AUDIENCE = "tomverse-mobile-api";
@@ -84,8 +84,12 @@ const run = (environment) => {
 };
 
 /**
- * One deployment's worth of evidence: the rings that were deployed, a token
- * that deployment minted, and the row its refresh created.
+ * One exchange's worth of evidence: a token minted with the given ring, its
+ * refresh token, and the row that refresh created.
+ *
+ * Not "the deployment's": which deployment produced a piece of evidence is
+ * exactly what the script cannot establish, so the fixtures do not name it
+ * that way either.
  */
 const evidence = ({
   signing,
@@ -124,7 +128,7 @@ const candidate = ({ signingPkcs8, pepper, mode = "rotation" }) => ({
   MOBILE_AUTH_TOKEN_AUDIENCE: AUDIENCE,
 });
 
-test("a deployment running the candidate material passes", () => {
+test("evidence produced with the candidate material passes", () => {
   const signing = ed25519();
   const pepper = PEPPER_INTENDED;
   const result = run({
@@ -134,16 +138,23 @@ test("a deployment running the candidate material passes", () => {
   assert.equal(result.code, 0, result.stdout);
   assert.match(result.stdout, /OK {4}signing key material/);
   assert.match(result.stdout, /OK {4}pepper material/);
-  assert.match(result.stdout, /Not covered: retired entries/);
+  // The PASS is scoped: it says what the evidence shows, and says plainly that
+  // it does not tie that evidence to the running deployment.
+  assert.match(result.stdout, /NOT established: that this evidence came from the deployment/);
+  assert.match(result.stdout, /NOT covered: retired entries/);
+  assert.match(result.stdout, /does not satisfy the promotion condition/);
+  assert.equal(/the running deployment holds/.test(result.stdout), false);
 });
 
 test("a different signing key under the same kid fails, and the ids do not hide it", () => {
-  const deployed = ed25519();
-  const intended = ed25519();
+  // Named for what it is: the key that produced the evidence. Whether it is
+  // the deployed one is exactly what this script cannot establish.
+  const evidenceKey = ed25519();
+  const candidateKey = ed25519();
   const pepper = PEPPER_INTENDED;
   const result = run({
-    ...candidate({ signingPkcs8: intended.pkcs8, pepper }),
-    ...evidence({ signing: deployed, pepper }),
+    ...candidate({ signingPkcs8: candidateKey.pkcs8, pepper }),
+    ...evidence({ signing: evidenceKey, pepper }),
   });
   assert.equal(result.code, 1, result.stdout);
   // The id check passes -- that is the whole point of the material check.
@@ -156,7 +167,7 @@ test("a different pepper under the same kid fails", () => {
   const signing = ed25519();
   const result = run({
     ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED }),
-    ...evidence({ signing, pepper: PEPPER_DEPLOYED }),
+    ...evidence({ signing, pepper: PEPPER_EVIDENCE }),
   });
   assert.equal(result.code, 1, result.stdout);
   assert.match(result.stdout, /OK {4}pepper kid -- pep-2/);
@@ -272,11 +283,11 @@ test("the emergency mode does not tell anyone to roll back", () => {
   // precisely because the previous ring is untrusted or gone. "Roll Railway
   // back to Active" there means restoring the abandoned ring -- in a leak,
   // the leaked one.
-  const deployed = ed25519();
-  const intended = ed25519();
+  const evidenceKey = ed25519();
+  const candidateKey = ed25519();
   const failing = {
-    ...candidate({ signingPkcs8: intended.pkcs8, pepper: PEPPER_INTENDED }),
-    ...evidence({ signing: deployed, pepper: PEPPER_INTENDED }),
+    ...candidate({ signingPkcs8: candidateKey.pkcs8, pepper: PEPPER_INTENDED }),
+    ...evidence({ signing: evidenceKey, pepper: PEPPER_INTENDED }),
   };
 
   const rotation = run(failing);
@@ -321,13 +332,83 @@ test("preflight failures say stop the deploy, not roll back after one", () => {
   // Section 3 step 4 checks Active against the running deployment *before*
   // deploying. "Roll Railway back to Active" there is nonsense: nothing has
   // been deployed to roll back from.
-  const deployed = ed25519();
-  const intended = ed25519();
+  const evidenceKey = ed25519();
+  const candidateKey = ed25519();
   const result = run({
-    ...candidate({ signingPkcs8: intended.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
-    ...evidence({ signing: deployed, pepper: PEPPER_INTENDED }),
+    ...candidate({ signingPkcs8: candidateKey.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
+    ...evidence({ signing: evidenceKey, pepper: PEPPER_INTENDED }),
   });
   assert.equal(result.code, 1, result.stdout);
   assert.match(result.stdout, /Do NOT deploy/);
   assert.equal(/Roll Railway back to Active/.test(result.stdout), false);
+});
+
+test("expired evidence holds the promotion instead of ordering a rollback", () => {
+  // Every id, both rings and both claims are right; only the token is stale.
+  // The remedy used to come from the mode alone, so a copy-paste from ten
+  // minutes earlier produced "restore Railway from Active", "roll back" or
+  // "disable mobile auth" depending on the flag. Evidence that cannot be
+  // judged is not a verdict on the deployment.
+  const signing = ed25519();
+  const stale = () =>
+    evidence({
+      signing,
+      pepper: PEPPER_INTENDED,
+      issuedAt: Math.floor(Date.now() / 1000) - 120,
+      ttlSeconds: 60,
+    });
+
+  for (const mode of ["preflight", "rotation", "emergency"]) {
+    const result = run({
+      ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED, mode }),
+      ...stale(),
+    });
+    assert.equal(result.code, 1, `${mode}: ${result.stdout}`);
+    assert.match(result.stdout, /Nothing was decided about the deployment/);
+    assert.match(result.stdout, /Collect a fresh exchange/);
+    assert.equal(/Do NOT deploy/.test(result.stdout), false, mode);
+    assert.equal(/Roll Railway back to Active/.test(result.stdout), false, mode);
+    assert.equal(/disable mobile/.test(result.stdout), false, mode);
+  }
+});
+
+test("a mismatch found in stale evidence is not blamed on the deployment", () => {
+  // The ordinary case, and the one the first version of this rule got wrong:
+  // evidence minted by the previous key, days old, compared against the new
+  // candidate. Of course the material differs -- it was made with a different
+  // key. Holding only when *every* failure was an evidence one meant this run
+  // ordered a rollback, and there is no way to tell "the deployment is wrong"
+  // from "the evidence is old" once the evidence is old.
+  const previousKey = ed25519();
+  const candidateKey = ed25519();
+  for (const mode of ["preflight", "rotation", "emergency"]) {
+    const result = run({
+      ...candidate({ signingPkcs8: candidateKey.pkcs8, pepper: PEPPER_INTENDED, mode }),
+      ...evidence({
+        signing: previousKey,
+        pepper: PEPPER_INTENDED,
+        issuedAt: Math.floor(Date.now() / 1000) - 8 * 24 * 3600,
+      }),
+    });
+    assert.equal(result.code, 1, `${mode}: ${result.stdout}`);
+    assert.match(result.stdout, /Nothing was decided about the deployment/);
+    assert.match(result.stdout, /not about what is\n?\s*running/);
+    assert.equal(/Roll Railway back to Active/.test(result.stdout), false, mode);
+    assert.equal(/Do NOT deploy/.test(result.stdout), false, mode);
+    assert.equal(/disable mobile/.test(result.stdout), false, mode);
+  }
+});
+
+test("a mismatch in fresh evidence is the deployment's, and gets the mode's remedy", () => {
+  // The signal the modes exist for. Nothing here is stale, so the mismatch has
+  // only one explanation left.
+  const runningKey = ed25519();
+  const candidateKey = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: candidateKey.pkcs8, pepper: PEPPER_INTENDED, mode: "rotation" }),
+    ...evidence({ signing: runningKey, pepper: PEPPER_INTENDED }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /Roll Railway back to Active/);
+  assert.equal(/Nothing was decided about the deployment/.test(result.stdout), false);
 });

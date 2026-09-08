@@ -4,7 +4,11 @@
 //
 //   npm run draft:ai-review-eval-candidates -- --model=gpt-5-6-luna --language=ko \
 //     --task-type=safety_sensitive --phenomenon=omission --mode=balanced --count=8
-//   ... --send   to actually call the provider
+//   ... --send             to actually call the provider
+//   ... --ledger=<path>    spend against an existing ledger rather than one
+//                          derived from --set; use it whenever a template bump
+//                          forces a new set, so the approved cumulative total
+//                          carries rather than restarting at zero
 //
 // ## It drafts; it does not adopt
 //
@@ -310,7 +314,51 @@ console.log(`\n--- instruction ---\n${instruction}\n--- end ---`);
 // A settle-only ledger lost every call that returned nothing usable, every
 // reply that would not parse, every process that died after the response, and
 // let two processes read the same balance and both proceed.
-const ledgerPath = join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
+// The ledger belongs to the DRAFTING EFFORT, not to one file of cases.
+//
+// It defaults beside the set, which is right while one set is being filled.
+// But the mixed-template guard means a new template needs a new `--set`, and
+// with the path derived the new set would start its own ledger at zero -- so a
+// template bump would silently reset an approved cumulative total, and the
+// approval a person gave for "$0.18 in total" would buy $0.18 more.
+//
+// `--ledger` points a new set at the ledger that already holds the history.
+// The lock derives from it too, so every run against a shared ledger is
+// serialised against every other -- which is what has to happen: they are
+// spending the same approved total.
+const ledgerPath = argValue("ledger")
+  ? resolve(process.cwd(), argValue("ledger"))
+  : join(dirname(resolvedSetPath), `${basename(setPath, ".json")}.spend.jsonl`);
+
+// A named ledger must already exist. A derived one may not.
+//
+// Missing is read as empty everywhere else in this script, and for the derived
+// path that is right: the first run against a new set has no history and
+// creates the file. For a named one it is exactly wrong. `--ledger` is only
+// ever passed to CONTINUE a history, so a path that is not there means a typo,
+// a wrong working directory or a file that was moved -- and reading any of
+// those as $0 committed silently hands back every approval the real ledger was
+// holding. The failure is invisible: the run proceeds, prints a total that
+// looks fine because it is small, and spends against nothing.
+//
+// Refused here, before the lock and before any reservation, so a mistyped path
+// costs nothing and leaves nothing behind.
+if (argValue("ledger")) {
+  try {
+    readFileSync(ledgerPath, "utf8");
+  } catch (error) {
+    die(
+      `\n--ledger=${argValue("ledger")} could not be read: ${
+        error instanceof Error ? error.message : error
+      }\n\n` +
+        "That flag continues an existing ledger, so a path that is not there is a\n" +
+        "mistake rather than an empty history -- and treating it as one would read\n" +
+        "the committed total as $0 and spend the whole approved budget again.\n" +
+        "Check the path, or leave --ledger off to start one beside --set."
+    );
+  }
+}
+
 const lockPath = `${ledgerPath}.lock`;
 
 const readLedger = () =>

@@ -39,6 +39,11 @@ import {
 } from "node:crypto";
 
 import {
+  classifyMobileRingKey,
+  mobileAuthConfigurationState,
+  mobileRingFindings,
+} from "./mobile-auth-keyring-state.mjs";
+import {
   normalizeMobileKeyId,
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
   MOBILE_ACTIVE_SIGNING_KEY_ENV,
@@ -83,7 +88,14 @@ const OPTIONAL = [MOBILE_RETIRED_SIGNING_KEYS_ENV, MOBILE_RETIRED_REFRESH_PEPPER
 
 const isSet = (variable) => (process.env[variable] ?? "").trim() !== "";
 const setRequired = REQUIRED.filter(isSet);
-const missingRequired = REQUIRED.filter((variable) => !isSet(variable));
+// Same three-way answer the standing report uses. The wording and the exits
+// stay here; what "partly configured" means does not get decided twice.
+const configuration = mobileAuthConfigurationState({
+  required: REQUIRED,
+  optional: OPTIONAL,
+  isSet,
+});
+const missingRequired = configuration.missing;
 
 /** Ed25519, exercised rather than shape-checked. */
 const signsAndVerifies = (base64Pkcs8) => {
@@ -100,6 +112,20 @@ const signsAndVerifies = (base64Pkcs8) => {
   }
 };
 
+/**
+ * The findings this check words for itself, rather than letting the per-key
+ * branches above say them twice.
+ */
+const CHECK_FINDING_TEXT = {
+  no_active_key_named: () => "no active key is named.",
+  active_key_not_in_ring: ({ keyId }) => `the active id "${keyId}" is not in the ring.`,
+  retirement_names_nothing: ({ keyId }) =>
+    `a retirement names "${keyId}", which is not in the ring. It is either a leftover from a cleanup -- harmless -- or a mistyped id, in which case the key you meant to retire is undeclared above and verifies nothing.`,
+  duplicate_material: ({ keyId, otherKeyId }) =>
+    `"${keyId}" and "${otherKeyId}" are different ids holding the same material. ` +
+    `Renaming a key is not rotating it -- if this is a leak response, the leaked material is still in use.`,
+};
+
 const describe = (
   label,
   ring,
@@ -107,7 +133,8 @@ const describe = (
   rawRetirements,
   activeId,
   graceSeconds,
-  canSign
+  canSign,
+  identity
 ) => {
   console.log(`\n${label}`);
   if (ring.size === 0) {
@@ -117,7 +144,18 @@ const describe = (
 
   for (const keyId of ring.keys()) {
     const retiredAt = retirements.get(keyId);
-    if (keyId === activeId) {
+    // The state itself comes from the shared judgement, so this check and the
+    // standing report cannot disagree about what a key is. The wording, and
+    // which states fail a deploy, stay here.
+    const { state, remainingSeconds, expiresAtMs } = classifyMobileRingKey({
+      keyId,
+      activeKeyId: activeId,
+      retiredAtMs: retiredAt,
+      graceSeconds,
+      nowMs: now,
+    });
+
+    if (state === "active") {
       if (retiredAt !== undefined) {
         problems.push(
           `${label}: "${keyId}" is the active key and is also retired. It would keep minting credentials under a key you have stopped trusting.`
@@ -133,7 +171,7 @@ const describe = (
       continue;
     }
 
-    if (retiredAt === undefined) {
+    if (state === "undeclared") {
       // The finding this check exists for. At runtime this key silently
       // verifies nothing; here it is said out loud.
       problems.push(
@@ -149,7 +187,7 @@ const describe = (
     // `sign-old@2099-01-01T00:00:00Z` is seventy years of trust reported as
     // "RETIRED, verifies until 2099". The runtime refuses such a key; this
     // says why before the deploy.
-    if (retiredAt > now) {
+    if (state === "retirement_in_future") {
       problems.push(
         `${label}: "${keyId}" is retired at ${new Date(retiredAt).toISOString()}, which is in the future. ` +
           `A retirement records when trust was withdrawn, so write the instant a couple of minutes in the past. There is no tolerance here on purpose: honouring a future instant and still measuring the grace from it would lengthen the approved window. Until this is fixed the key verifies nothing.`
@@ -160,15 +198,31 @@ const describe = (
       continue;
     }
 
-    const expiresAt = retiredAt + graceSeconds * 1000;
-    if (now >= expiresAt) {
+    const expiresAt = expiresAtMs;
+    if (state === "retired_grace_over") {
       notes.push(
         `${label}: "${keyId}" retired at ${new Date(retiredAt).toISOString()} and its grace has passed, so it already verifies nothing. Removing it and its retirement line together is tidy, and optional.`
       );
       console.log(`  ${keyId}  RETIRED, grace over`);
     } else {
+      // The remaining window, not just its end. The retirement instant is
+      // written before the deploy and the grace runs from it, so preparing and
+      // deploying spends the window -- an instant backdated two minutes with
+      // an eight-minute deploy leaves five of the approved fifteen. Printing
+      // the end alone made that arithmetic the operator's to do.
+      //
+      // Reported, and nothing more. A version of this advised re-dating the
+      // retirement when less than half the window was left, which was right
+      // for a line written minutes ago and wrong for every other one: told to
+      // re-date a pepper retired twenty days earlier, an operator would extend
+      // that generation's trust by twenty days, and both runs exit 0. This
+      // check cannot tell a candidate retirement from a deployed one -- it
+      // reads one set of variables, not two -- so the instruction lives in
+      // section 3 step 5 of the runbook, where the line in question is the one
+      // just written and not yet deployed.
       console.log(
-        `  ${keyId}  RETIRED, verifies until ${new Date(expiresAt).toISOString()}`
+        `  ${keyId}  RETIRED, verifies until ${new Date(expiresAt).toISOString()} ` +
+          `(${remainingSeconds}s left of ${graceSeconds}s, as of this check)`
       );
     }
   }
@@ -177,27 +231,35 @@ const describe = (
   // id it cannot find in the ring (that is what keeps a leftover line from
   // taking the deployment down), so by the time it hands back a map the very
   // thing an operator needs to see here is gone.
-  for (const entry of (rawRetirements ?? "").split(",")) {
-    const trimmed = entry.trim();
-    if (trimmed === "") continue;
-    const keyId = trimmed.slice(0, trimmed.indexOf("@"));
-    if (keyId && !ring.has(keyId)) {
-      problems.push(
-        `${label}: a retirement names "${keyId}", which is not in the ring. It is either a leftover from a cleanup -- harmless -- or a mistyped id, in which case the key you meant to retire is undeclared above and verifies nothing.`
-      );
-    }
-  }
-
-  if (activeId === "") {
-    problems.push(`${label}: no active key is named.`);
-  } else if (!ring.has(activeId)) {
-    problems.push(`${label}: the active id "${activeId}" is not in the ring.`);
+  // Everything above prints a line per key. What is *wrong* comes from the
+  // shared findings, so the standing report cannot see a subset of it -- for a
+  // while it saw only the per-key states, and answered "nothing wants
+  // attention" for a configuration this check rejected.
+  //
+  // `grace_over` is the one finding that is a note rather than a problem here:
+  // a spent window verifies nothing already, so tidying it is optional.
+  for (const finding of mobileRingFindings({
+    ring,
+    retirements,
+    rawRetirements,
+    activeKeyId: activeId,
+    graceSeconds,
+    nowMs: now,
+    signsAndVerifies: canSign ? signsAndVerifies : null,
+    materialIdentity: identity,
+  })) {
+    if (finding.code === "grace_over") continue;
+    if (finding.code === "active_key_also_retired") continue;
+    if (finding.code === "active_key_cannot_sign") continue;
+    if (finding.code === "undeclared") continue;
+    if (finding.code === "retirement_in_future") continue;
+    problems.push(`${label}: ${CHECK_FINDING_TEXT[finding.code](finding)}`);
   }
 };
 
 // Nothing at all: a choice in the default mode, a failure when the caller says
 // this deployment is supposed to serve mobile auth.
-if (setRequired.length === 0 && !OPTIONAL.some(isSet)) {
+if (configuration.state === "unconfigured") {
   if (requireConfigured) {
     console.error(
       "FAIL mobile auth keyring: --require-configured was given and nothing is configured.\n" +
@@ -214,7 +276,7 @@ if (setRequired.length === 0 && !OPTIONAL.some(isSet)) {
 
 // Something but not everything. The runtime answers 503 to this and says
 // nothing about which half is missing, so it is said here.
-if (missingRequired.length > 0) {
+if (configuration.state === "partial") {
   console.error(
     `FAIL mobile auth keyring: partly configured (${setRequired.length} of ${REQUIRED.length} variables set).\n` +
       "  Mobile auth would answer 503 to every request, and the endpoints do not say which variable is missing.\n" +
@@ -260,35 +322,6 @@ const sameSecret = (left, right) => {
   return timingSafeEqual(a, b);
 };
 
-/**
- * Two ids, one key. The failure this catches is the one that matters most.
- *
- * Rotating means replacing the material. Renaming it does not: after a leak,
- * `sign-old` retired and `sign-new` active with the *same* private key reads as
- * a completed rotation in every other check here -- ids differ, one is active,
- * one is retired inside its grace, the active key signs -- while the leaked key
- * is still the one signing every token.
- *
- * Compared by material, never by id, for the same reason the post-deploy
- * verifier compares material: an id is a label somebody typed.
- */
-const reportDuplicateMaterial = (label, ring, identity) => {
-  const seen = new Map();
-  for (const [keyId, secret] of ring.entries()) {
-    const key = identity(secret);
-    if (key === null) continue;
-    const earlier = seen.get(key);
-    if (earlier === undefined) {
-      seen.set(key, keyId);
-      continue;
-    }
-    problems.push(
-      `${label}: "${keyId}" and "${earlier}" are different ids holding the same material. ` +
-        `Renaming a key is not rotating it -- if this is a leak response, the leaked material is still in use.`
-    );
-  }
-};
-
 const pepperIdentities = new Map();
 
 let signingRing;
@@ -309,7 +342,8 @@ try {
     process.env[MOBILE_RETIRED_SIGNING_KEYS_ENV],
     normalizeMobileKeyId(process.env[MOBILE_ACTIVE_SIGNING_KEY_ENV]),
     MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
-    true
+    true,
+    signingFingerprint
   );
   describe(
     `${MOBILE_REFRESH_PEPPERS_ENV} (grace ${MOBILE_PREVIOUS_PEPPER_SECONDS}s)`,
@@ -318,23 +352,19 @@ try {
     process.env[MOBILE_RETIRED_REFRESH_PEPPERS_ENV],
     normalizeMobileKeyId(process.env[MOBILE_ACTIVE_REFRESH_PEPPER_ENV]),
     MOBILE_PREVIOUS_PEPPER_SECONDS,
-    false
+    false,
+    (secret) => {
+      for (const [candidate] of pepperIdentities) {
+        if (sameSecret(candidate, secret)) return candidate;
+      }
+      pepperIdentities.set(secret, true);
+      return secret;
+    }
   );
 } catch (error) {
   console.error(`\nFAIL mobile auth keyring: ${error.message}`);
   process.exit(1);
 }
-
-reportDuplicateMaterial(MOBILE_SIGNING_KEYS_ENV, signingRing, signingFingerprint);
-// The pepper has no derived identity to compare, so the secrets themselves are
-// compared in constant time and never leave this process.
-reportDuplicateMaterial(MOBILE_REFRESH_PEPPERS_ENV, pepperRing, (secret) => {
-  for (const [candidate] of pepperIdentities) {
-    if (sameSecret(candidate, secret)) return candidate;
-  }
-  pepperIdentities.set(secret, true);
-  return secret;
-});
 
 // Named so the report is a complete picture of what the runtime will read.
 console.log(
