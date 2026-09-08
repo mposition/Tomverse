@@ -1,10 +1,19 @@
 import "server-only";
 
-import { Prisma } from "@prisma/client";
-import { z } from "zod";
 import { deserializeReservation, settleChatUsage } from "@/lib/chatSecurity";
+import {
+  deepResearchSettlementUsageSchema,
+  type DeepResearchSettlementUsage,
+} from "@/lib/deepResearchSettlementHandoff";
 import { prisma } from "@/lib/prisma";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
+
+export {
+  deepResearchSettlementUsageSchema,
+  findDeepResearchHandoff,
+  serializeDeepResearchSettlementUsage,
+  type DeepResearchSettlementUsage,
+} from "@/lib/deepResearchSettlementHandoff";
 
 /**
  * Exactly-once settlement for the one model that finishes after its request
@@ -53,86 +62,93 @@ import { safeErrorMetadata } from "@/lib/providerErrorClassification";
  * terminal and here is what it owes" -- never "it has been settled". Whether
  * it settled is the reservation's `status`, which stays the only place that
  * fact lives.
- */
-
-/**
- * What a terminal deep research job owes.
  *
- * Deliberately the settlement inputs and nothing else -- no timestamps, no
- * status mirror, no copy of the report. Anything else recorded here would be a
- * second copy of something that already has an owner, and the value of this
- * column is that it is the one thing nowhere else holds.
- */
-export const deepResearchSettlementUsageSchema = z
-  .object({
-    inputTokens: z.number().int().min(0).optional(),
-    outputTokens: z.number().int().min(0).optional(),
-    outcome: z.enum(["completed", "failed", "empty"]),
-    /**
-     * Perplexity's own reported cost for the job, when it reported one.
-     *
-     * Read back through the same schema that wrote it rather than trusted:
-     * this is stored JSON, and a row written by an older deployment is not
-     * required to match today's shape. `passthrough()` because the snapshot's
-     * own fields belong to lib/perplexityUsageCore.ts, which validates them
-     * where it consumes them; this schema's job is to refuse a value that is
-     * not an object at all.
-     */
-    providerUsageSnapshot: z.object({}).passthrough().nullish(),
-  })
-  .strict();
-
-export type DeepResearchSettlementUsage = z.infer<
-  typeof deepResearchSettlementUsageSchema
->;
-
-/**
- * The column value for a settlement payload.
+ * ## Ordering is not the guarantee
  *
- * Not a cast. `undefined` is not JSON, and a Prisma `Json` field will not take
- * a shape that admits it -- so the absent fields are dropped here rather than
- * asserted away, and what lands in the column is exactly what
- * `deepResearchSettlementUsageSchema` will parse back out of it.
+ * The sweep below runs before the expiry reconciliation in the fifteen-minute
+ * maintenance route, and that is a preference, not a mechanism:
+ * `lib/maintenance.ts` calls the expiry reconciliation on its own, and
+ * `startScheduledJob` records a run rather than holding a lock, so nothing
+ * stops the two passes overlapping. The guarantee lives in
+ * `reconcileExpiredChatCreditReservations` itself, which looks for this
+ * handoff before it refunds anything and settles at the real cost when it
+ * finds one.
  */
-export const serializeDeepResearchSettlementUsage = (
-  usage: DeepResearchSettlementUsage
-): Prisma.InputJsonObject => ({
-  outcome: usage.outcome,
-  ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
-  ...(usage.outputTokens === undefined
-    ? {}
-    : { outputTokens: usage.outputTokens }),
-  ...(usage.providerUsageSnapshot === undefined ||
-  usage.providerUsageSnapshot === null
-    ? {}
-    : {
-        providerUsageSnapshot:
-          usage.providerUsageSnapshot as Prisma.InputJsonObject,
-      }),
-});
 
 export type DeepResearchSettlementOutcome =
   /** This call applied the settlement. */
-  | { settled: true; alreadySettled: false }
-  /** Somebody else got there first, or the reservation is already terminal. */
-  | { settled: false; alreadySettled: true }
-  /** Nothing to do: no stored usage, or no reservation row to settle. */
-  | { settled: false; alreadySettled: false; reason: DeepResearchSettlementSkip }
+  | { kind: "settled" }
+  /** Somebody else got there first, and settled it the way this job says. */
+  | { kind: "already_settled" }
+  /**
+   * Already terminal, and NOT as this job says it should have been -- a
+   * pre-fix deployment refunded work that really ran. Unfixable here: the
+   * money already moved and re-settling a terminal reservation is exactly
+   * what the lock forbids. Reported so it is countable rather than invisible.
+   */
+  | {
+      kind: "settlement_mismatch";
+      storedOutcome: string;
+      reservationOutcome: string | null;
+    }
+  /** No stored usage: a job still in flight, or one finalized before the column existed. */
+  | { kind: "no_stored_usage" }
+  /** Stored usage this deployment cannot read. Never guessed at. */
+  | { kind: "unreadable" }
+  /** The reservation row is gone. */
+  | { kind: "missing_reservation" }
   /** Tried and failed. The caller decides whether that is fatal. */
-  | { settled: false; alreadySettled: false; reason: "error"; error: unknown };
+  | { kind: "failed"; error: unknown };
 
-export type DeepResearchSettlementSkip =
-  | "no_stored_usage"
-  | "unreadable_stored_usage"
-  | "no_reservation";
+const logSettlementEvent = (event: string, detail: Record<string, unknown>) => {
+  console.error(
+    JSON.stringify({ event, ...detail, timestamp: new Date().toISOString() })
+  );
+};
+
+/**
+ * Whether a reservation that is already terminal ended the way this job says
+ * it should have.
+ *
+ * A job whose stored outcome is `completed` beside a reservation that was
+ * refunded is the damage this fix arrives too late for. Nothing here can undo
+ * it, but a count nobody can see is the state this whole issue was about, so
+ * it is separated from the ordinary "somebody else settled it" case rather
+ * than folded in with it.
+ */
+const terminalReservationOutcome = (
+  job: { id: string; traceId?: string },
+  usage: DeepResearchSettlementUsage,
+  reservationOutcome: string | null
+): DeepResearchSettlementOutcome => {
+  const agrees =
+    usage.outcome === "completed"
+      ? reservationOutcome === "completed"
+      : reservationOutcome !== "completed";
+  if (agrees) return { kind: "already_settled" };
+  logSettlementEvent("deep_research_settlement_mismatch", {
+    jobId: job.id,
+    traceId: job.traceId,
+    storedOutcome: usage.outcome,
+    reservationOutcome,
+  });
+  return {
+    kind: "settlement_mismatch",
+    storedOutcome: usage.outcome,
+    reservationOutcome,
+  };
+};
 
 /**
  * Settle one terminal job's reservation, if it still needs it.
  *
  * Safe to call from a poll, from the sweep, and from both at once. It never
- * throws: settlement failing is a thing to report and retry, not a reason to
- * fail the poll that noticed -- the caller has already answered the user's
- * question correctly, and the job's own row is not in doubt.
+ * throws -- settlement failing is a thing to report and retry, not a reason to
+ * fail the poll that noticed, which has already answered the user's question
+ * correctly. "Never throws" is a contract, so every database read is inside
+ * the guard rather than only the settlement call: the reservation lookup sat
+ * outside it once, and a dropped connection there would have escaped into the
+ * route.
  */
 export const settleDeepResearchJob = async (job: {
   id: string;
@@ -143,40 +159,42 @@ export const settleDeepResearchJob = async (job: {
   if (job.settlementUsage === null || job.settlementUsage === undefined) {
     // A job finalized before this column existed, or one still in flight.
     // Inventing numbers for it would be writing a charge nobody measured.
-    return { settled: false, alreadySettled: false, reason: "no_stored_usage" };
+    return { kind: "no_stored_usage" };
   }
-  const parsed = deepResearchSettlementUsageSchema.safeParse(job.settlementUsage);
+  const parsed = deepResearchSettlementUsageSchema.safeParse(
+    job.settlementUsage
+  );
   if (!parsed.success) {
-    console.error(
-      JSON.stringify({
-        event: "deep_research_settlement_usage_unreadable",
-        jobId: job.id,
-        traceId: job.traceId,
-        timestamp: new Date().toISOString(),
-      })
-    );
-    return {
-      settled: false,
-      alreadySettled: false,
-      reason: "unreadable_stored_usage",
-    };
-  }
-
-  const reservationRow = await prisma.chatCreditReservation.findUnique({
-    where: { id: job.reservationId },
-    select: { status: true, reservationPayload: true },
-  });
-  if (!reservationRow) {
-    return { settled: false, alreadySettled: false, reason: "no_reservation" };
-  }
-  // Not the guarantee -- settleChatUsage's own lock is. This only avoids
-  // taking that lock on the hot path, where a second open tab polls a job
-  // that settled minutes ago and there is nothing to do.
-  if (reservationRow.status !== "reserved") {
-    return { settled: false, alreadySettled: true };
+    logSettlementEvent("deep_research_settlement_usage_unreadable", {
+      jobId: job.id,
+      traceId: job.traceId,
+    });
+    return { kind: "unreadable" };
   }
 
   try {
+    const reservationRow = await prisma.chatCreditReservation.findUnique({
+      where: { id: job.reservationId },
+      select: { status: true, outcome: true, reservationPayload: true },
+    });
+    if (!reservationRow) {
+      logSettlementEvent("deep_research_settlement_reservation_missing", {
+        jobId: job.id,
+        traceId: job.traceId,
+      });
+      return { kind: "missing_reservation" };
+    }
+    // Not the exactly-once guarantee -- settleChatUsage's own lock is. This
+    // avoids taking that lock on the hot path, where a second open tab polls a
+    // job that settled minutes ago and there is nothing to do.
+    if (reservationRow.status !== "reserved") {
+      return terminalReservationOutcome(
+        job,
+        parsed.data,
+        reservationRow.outcome
+      );
+    }
+
     const result = await settleChatUsage(
       deserializeReservation(reservationRow.reservationPayload),
       {
@@ -189,22 +207,17 @@ export const settleDeepResearchJob = async (job: {
           (parsed.data.providerUsageSnapshot as never) ?? null,
       }
     );
-    // `applied: false` is the race resolving under the lock: another poller
-    // or the sweep settled between the read above and this call.
-    return result.applied
-      ? { settled: true, alreadySettled: false }
-      : { settled: false, alreadySettled: true };
+    if (result.applied) return { kind: "settled" };
+    // The race resolving under the lock: another poller or a sweep settled
+    // between the read above and this call.
+    return terminalReservationOutcome(job, parsed.data, result.status ?? null);
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        event: "deep_research_settlement_failed",
-        jobId: job.id,
-        traceId: job.traceId,
-        ...safeErrorMetadata(error),
-        timestamp: new Date().toISOString(),
-      })
-    );
-    return { settled: false, alreadySettled: false, reason: "error", error };
+    logSettlementEvent("deep_research_settlement_failed", {
+      jobId: job.id,
+      traceId: job.traceId,
+      ...safeErrorMetadata(error),
+    });
+    return { kind: "failed", error };
   }
 };
 
@@ -220,54 +233,132 @@ export const settleDeepResearchJob = async (job: {
  */
 export const DEEP_RESEARCH_SETTLEMENT_GRACE_MS = 60_000;
 
+export type DeepResearchSweepResult = {
+  examined: number;
+  settled: number;
+  alreadySettled: number;
+  settlementMismatch: number;
+  unreadable: number;
+  missingReservation: number;
+  failed: number;
+  /**
+   * The sweep could not read its own work list.
+   *
+   * Its own field because `examined: 0, failed: 0` is also what a healthy pass
+   * with nothing to do reports, and those two must never look the same: one
+   * says the ledger is clean and the other says nobody knows.
+   */
+  queryFailed: boolean;
+};
+
+const EMPTY_SWEEP: DeepResearchSweepResult = {
+  examined: 0,
+  settled: 0,
+  alreadySettled: 0,
+  settlementMismatch: 0,
+  unreadable: 0,
+  missingReservation: 0,
+  failed: 0,
+  queryFailed: false,
+};
+
 /**
  * Finish the settlements that a killed process left open.
  *
- * Rides the fifteen-minute maintenance pass, and must run BEFORE
- * `reconcileExpiredChatCreditReservations` in it. Both are idempotent and
- * either order is safe, but they disagree about what a stuck deep research
- * reservation owes: this one settles it at what the job actually cost, and
- * that one refunds it in full. Running first means the true cost wins when
- * both would act.
+ * ## Why the work list is selected on the reservation, not only on the job
+ *
+ * A settled job keeps its `settlementUsage`: the handoff is evidence of what a
+ * recovered settlement was computed from, not a queue token, and clearing it
+ * would delete the only record of that. So a query asking "terminal job with a
+ * handoff, oldest first" would return the same long-settled rows every pass --
+ * past `take`, the oldest N settled jobs starve every unsettled one behind
+ * them forever while the sweep reports a clean `alreadySettled`.
+ *
+ * The backlog is therefore "jobs whose reservation is still `reserved`", which
+ * is the real debt and shrinks as it is worked. `reservationId` is a plain
+ * column with no Prisma relation, so the join is raw SQL; the predicate is the
+ * point, not the syntax.
  */
 export const reconcileUnsettledDeepResearchSettlements = async (
   now = new Date(),
   maximum = 200
-) => {
+): Promise<DeepResearchSweepResult> => {
   const limit = Math.min(1_000, Math.max(1, maximum));
-  const jobs = await prisma.perplexityAsyncJob.findMany({
-    where: {
-      status: { in: ["completed", "failed"] },
-      settlementUsage: { not: Prisma.DbNull },
-      completedAt: { lte: new Date(now.getTime() - DEEP_RESEARCH_SETTLEMENT_GRACE_MS) },
-    },
-    orderBy: [{ completedAt: "asc" }],
-    take: limit,
-    select: {
-      id: true,
-      reservationId: true,
-      settlementUsage: true,
-      traceId: true,
-    },
-  });
+  const cutoff = new Date(now.getTime() - DEEP_RESEARCH_SETTLEMENT_GRACE_MS);
 
-  let settled = 0;
-  let alreadySettled = 0;
-  let failed = 0;
+  type SweepRow = {
+    id: string;
+    reservationId: string;
+    settlementUsage: unknown;
+    traceId: string;
+  };
+  let jobs: SweepRow[];
+  try {
+    jobs = await prisma.$queryRaw<SweepRow[]>`
+      SELECT j."id", j."reservationId", j."settlementUsage", j."traceId"
+      FROM "PerplexityAsyncJob" j
+      JOIN "ChatCreditReservation" r ON r."id" = j."reservationId"
+      WHERE j."status" IN ('completed', 'failed')
+        AND j."settlementUsage" IS NOT NULL
+        AND j."completedAt" <= ${cutoff}
+        AND r."status" = 'reserved'
+      ORDER BY j."completedAt" ASC
+      LIMIT ${limit}
+    `;
+  } catch (error) {
+    logSettlementEvent("deep_research_settlement_sweep_query_failed", {
+      ...safeErrorMetadata(error),
+    });
+    return { ...EMPTY_SWEEP, queryFailed: true };
+  }
+
+  const result: DeepResearchSweepResult = {
+    ...EMPTY_SWEEP,
+    examined: jobs.length,
+  };
   for (const job of jobs) {
     const outcome = await settleDeepResearchJob(job);
-    if (outcome.settled) settled += 1;
-    else if (outcome.alreadySettled) alreadySettled += 1;
-    else if ("reason" in outcome && outcome.reason === "error") failed += 1;
+    switch (outcome.kind) {
+      case "settled":
+        result.settled += 1;
+        break;
+      case "already_settled":
+        result.alreadySettled += 1;
+        break;
+      case "settlement_mismatch":
+        result.settlementMismatch += 1;
+        break;
+      case "unreadable":
+        result.unreadable += 1;
+        break;
+      case "missing_reservation":
+        result.missingReservation += 1;
+        break;
+      case "failed":
+        result.failed += 1;
+        break;
+      case "no_stored_usage":
+        // Unreachable: the query requires a handoff. Counted rather than
+        // dropped, because reaching it would mean the predicate and this loop
+        // disagree about what was selected.
+        result.unreadable += 1;
+        break;
+    }
   }
-  return { examined: jobs.length, settled, alreadySettled, failed };
+  return result;
 };
 
-/** Never throws, so it cannot turn a successful maintenance pass into a failed one. */
-export const reconcileUnsettledDeepResearchSettlementsQuietly = async () =>
-  reconcileUnsettledDeepResearchSettlements().catch(() => ({
-    examined: 0,
-    settled: 0,
-    alreadySettled: 0,
-    failed: 0,
-  }));
+/**
+ * Never throws, so it cannot turn a successful maintenance pass into a failed
+ * one -- and never reports silence as success either. A pass that could not
+ * run says `queryFailed: true` rather than the `examined: 0, failed: 0` a
+ * healthy pass with nothing to do also reports.
+ */
+export const reconcileUnsettledDeepResearchSettlementsQuietly =
+  async (): Promise<DeepResearchSweepResult> =>
+    reconcileUnsettledDeepResearchSettlements().catch((error) => {
+      logSettlementEvent("deep_research_settlement_sweep_failed", {
+        ...safeErrorMetadata(error),
+      });
+      return { ...EMPTY_SWEEP, queryFailed: true };
+    });

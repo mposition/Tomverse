@@ -744,6 +744,18 @@ const COMPLETED_POLL = {
 const settledReservationCount = () =>
   prisma.chatCreditReservation.count({ where: { status: "settled" } });
 
+/** A sweep pass that found nothing to do -- distinct from one that could not look. */
+const emptySweep = () => ({
+  examined: 0,
+  settled: 0,
+  alreadySettled: 0,
+  settlementMismatch: 0,
+  unreadable: 0,
+  missingReservation: 0,
+  failed: 0,
+  queryFailed: false,
+});
+
 test("two concurrent claims settle exactly once, and the loser claims nothing", async () => {
   // Deterministic by construction, not by scheduling luck: the barrier holds
   // both requests inside Perplexity's own call, which the route reaches only
@@ -977,7 +989,7 @@ test("the maintenance sweep completes an interrupted settlement nobody polled ag
   // seconds ago is probably being settled by the poll that finalized it.
   assert.deepEqual(
     await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
-    { examined: 0, settled: 0, alreadySettled: 0, failed: 0 }
+    emptySweep()
   );
   assert.equal((await onlyReservation()).status, "reserved");
 
@@ -991,17 +1003,19 @@ test("the maintenance sweep completes an interrupted settlement nobody polled ag
 
   assert.deepEqual(
     await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
-    { examined: 1, settled: 1, alreadySettled: 0, failed: 0 }
+    { ...emptySweep(), examined: 1, settled: 1 }
   );
   const settled = await onlyReservation();
   assert.equal(settled.status, "settled");
   assert.equal(settled.settledCostMicroUsd, BigInt(30_000));
 
-  // Running again is a no-op, not a second charge.
+  // And the settled job leaves the work list entirely rather than being
+  // re-examined every pass. That is what keeps the sweep from starving:
+  // the backlog is "reservations still reserved", not "jobs with a handoff".
   const afterSweep = await usageBucketSnapshot();
   assert.deepEqual(
     await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
-    { examined: 1, settled: 0, alreadySettled: 1, failed: 0 }
+    emptySweep()
   );
   assert.deepEqual(await usageBucketSnapshot(), afterSweep);
   assert.equal(await settledReservationCount(), 1);
@@ -1076,7 +1090,7 @@ test("the sweep will not invent a settlement for a job finalized before the colu
 
   assert.deepEqual(
     await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
-    { examined: 0, settled: 0, alreadySettled: 0, failed: 0 }
+    emptySweep()
   );
   assert.equal((await onlyReservation()).status, "reserved");
 
@@ -1085,6 +1099,222 @@ test("the sweep will not invent a settlement for a job finalized before the colu
   const answered = await pollStatus(assistantMessageId).then((r) => r.json());
   assert.equal((answered as { status?: string }).status, "completed");
   assert.equal((await onlyReservation()).status, "reserved");
+});
+
+test("a settled backlog cannot starve the sweep out of reaching an unsettled job", async () => {
+  // The starvation this query shape exists to prevent. A settled job keeps its
+  // handoff -- it is evidence, not a queue token -- so a work list of "terminal
+  // jobs with a handoff, oldest first" would return the same long-settled rows
+  // every pass. Past `take`, the oldest N settled jobs starve every unsettled
+  // one behind them, forever, while the sweep reports a clean pass.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+
+  // One real unsettled debt, made the OLDEST so that a job-only query would
+  // still find it -- and then buried under more settled rows than the limit,
+  // which is the case a job-only query cannot survive.
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  const debt = await interruptAfterFinalize(assistantMessageId);
+  const oldest = new Date(Date.now() - 86_400_000);
+  await prisma.perplexityAsyncJob.updateMany({
+    where: { assistantMessageId },
+    data: { completedAt: oldest },
+  });
+
+  // 200 already-settled jobs, all newer than the debt. Written directly:
+  // driving 200 requests through the route would take minutes and prove
+  // nothing this does not.
+  const noise = Array.from({ length: 200 }, (_, index) => index);
+  await prisma.chatCreditReservation.createMany({
+    data: noise.map((index) => ({
+      id: `noise-reservation-${index}`,
+      userId: user.id,
+      subjectKey: `noise-${index}`,
+      traceId: `noise-trace-${index}`,
+      source: "chat",
+      provider: "perplexity",
+      modelId: DEEP_RESEARCH_MODEL_ID,
+      status: "settled",
+      outcome: "completed",
+      idempotencyKey: `noise-idempotency-${index}`,
+      reservationPayload: {},
+      reservedCredits: 0,
+      reservedCostMicroUsd: BigInt(0),
+      planReservedCredits: 0,
+      addOnReservedCredits: 0,
+      expiresAt: new Date(Date.now() + 3_600_000),
+    })),
+  });
+  await prisma.perplexityAsyncJob.createMany({
+    data: noise.map((index) => ({
+      perplexityJobId: `noise-pplx-${index}`,
+      conversationId: conversation.id,
+      assistantMessageId: `noise-message-${index}`,
+      modelId: DEEP_RESEARCH_MODEL_ID,
+      reservationId: `noise-reservation-${index}`,
+      traceId: `noise-trace-${index}`,
+      status: "completed",
+      settlementUsage: COMPLETED_SETTLEMENT_USAGE,
+      completedAt: new Date(oldest.getTime() + 1_000 + index),
+    })),
+  });
+
+  // The default limit is 200, so a job-only work list would be entirely noise.
+  const swept =
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements();
+  assert.deepEqual(
+    swept,
+    { ...emptySweep(), examined: 1, settled: 1 },
+    "the sweep must see the one real debt and none of the settled noise"
+  );
+
+  const recovered = await prisma.chatCreditReservation.findUniqueOrThrow({
+    where: { id: debt.id },
+  });
+  assert.equal(recovered.status, "settled");
+  assert.equal(recovered.outcome, "completed");
+  assert.equal(recovered.settledCostMicroUsd, BigInt(30_000));
+});
+
+test("the expiry sweep settles an interrupted job at its real cost even when it gets there first", async () => {
+  // Ordering is a preference, not a mechanism: lib/maintenance.ts calls the
+  // expiry reconciliation on its own, and startScheduledJob records a run
+  // rather than holding a lock. So the guarantee cannot live in the order the
+  // fifteen-minute route happens to use -- it has to live in the expiry sweep
+  // itself, which is what this drives: the deep research sweep never runs.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  const reservation = await interruptAfterFinalize(assistantMessageId);
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { expiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  const result = await chatSecurity.reconcileExpiredChatCreditReservations();
+  assert.equal(
+    result.refunded,
+    0,
+    "a job that really ran must never be refunded by the expiry sweep"
+  );
+  assert.equal(result.settledFromHandoff, 1);
+
+  const settled = await onlyReservation();
+  assert.equal(settled.status, "settled");
+  assert.equal(settled.outcome, "completed");
+  assert.equal(settled.settledCostMicroUsd, BigInt(30_000));
+  assert.equal(settled.settledInputTokens, 400);
+  assert.equal(settled.settledOutputTokens, 900);
+});
+
+test("an expired reservation with no deep research handoff is still refunded", async () => {
+  // The other half of the branch above: the handoff lookup must not turn the
+  // expiry sweep into something that stops refunding ordinary stuck turns.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  await submitDeepResearch(conversation.id);
+  const reservation = await onlyReservation();
+  assert.equal(reservation.status, "reserved");
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { expiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  const result = await chatSecurity.reconcileExpiredChatCreditReservations();
+  assert.equal(result.refunded, 1);
+  assert.equal(result.settledFromHandoff, 0);
+  assert.equal((await onlyReservation()).status, "refunded");
+});
+
+test("a settlement recovery that cannot read its own stored usage is reported, not counted as done", async () => {
+  // "examined 0, failed 0" and "nothing to do" must never be the same answer.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  await interruptAfterFinalize(assistantMessageId);
+  await prisma.perplexityAsyncJob.updateMany({
+    where: { assistantMessageId },
+    data: {
+      settlementUsage: { outcome: "not-an-outcome" },
+      completedAt: new Date(
+        Date.now() -
+          deepResearchSettlement.DEEP_RESEARCH_SETTLEMENT_GRACE_MS -
+          1_000
+      ),
+    },
+  });
+
+  assert.deepEqual(
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
+    { ...emptySweep(), examined: 1, unreadable: 1 },
+    "an unreadable handoff is its own outcome, not a silent success"
+  );
+  assert.equal(
+    (await onlyReservation()).status,
+    "reserved",
+    "and nothing is settled from a payload nobody can read"
+  );
+
+  // The expiry sweep refuses to price it too, and refunds rather than
+  // guessing -- which is the conservative direction when the record of what
+  // the job cost is unreadable.
+  const reservation = await onlyReservation();
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { expiresAt: new Date(Date.now() - 1_000) },
+  });
+  const result = await chatSecurity.reconcileExpiredChatCreditReservations();
+  assert.equal(result.settledFromHandoff, 0);
+  assert.equal(result.refunded, 1);
+});
+
+test("a reservation already refunded by the old behaviour is reported as a mismatch, not as settled", async () => {
+  // The damage this fix arrives too late for: rows that a pre-fix deployment
+  // already refunded for work that really ran. Nothing here can undo one --
+  // re-settling a terminal reservation is exactly what the lock forbids -- so
+  // the requirement is that it is countable rather than folded into the
+  // "somebody else settled it" case and invisible.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  const reservation = await interruptAfterFinalize(assistantMessageId);
+  await prisma.perplexityAsyncJob.updateMany({
+    where: { assistantMessageId },
+    data: {
+      completedAt: new Date(
+        Date.now() -
+          deepResearchSettlement.DEEP_RESEARCH_SETTLEMENT_GRACE_MS -
+          1_000
+      ),
+    },
+  });
+  // Exactly what the pre-fix expiry sweep left behind.
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { status: "refunded", outcome: "failed", settledAt: new Date() },
+  });
+
+  const job = await prisma.perplexityAsyncJob.findFirstOrThrow({
+    where: { assistantMessageId },
+  });
+  assert.deepEqual(await deepResearchSettlement.settleDeepResearchJob(job), {
+    kind: "settlement_mismatch",
+    storedOutcome: "completed",
+    reservationOutcome: "failed",
+  });
+
+  // The sweep's work list is reservations still `reserved`, so a row already
+  // refunded is out of scope for it -- the mismatch surfaces where the job is
+  // looked at directly, which is the poll path.
+  assert.deepEqual(
+    await deepResearchSettlement.reconcileUnsettledDeepResearchSettlements(),
+    emptySweep()
+  );
 });
 
 /* -------------------------------------------------- §22 memory attribution */
