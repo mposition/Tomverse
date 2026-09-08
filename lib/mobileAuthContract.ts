@@ -82,6 +82,7 @@ export const MOBILE_AUTH_RATE_LIMITS = {
  */
 export const MOBILE_AUTH_PRE_AUTH_RATE_LIMIT = { minute: 60, day: 2_000 } as const;
 
+
 /** 8.1.1 #9 -- `MobileAuthEvent` retention ceiling. */
 export const MOBILE_AUTH_EVENT_RETENTION_DAYS = 90;
 

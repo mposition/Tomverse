@@ -74,6 +74,12 @@ Date / timezone:    ____________________
       어느 쪽이든 키마다 active / 은퇴+유예 / 선언되지 않음을 보고하고, 선언되지 않은
       키·오타 난 은퇴 id·일부만 설정된 상태에서 실패합니다. CI 항목이 아닙니다 — CI에는
       모바일 키가 없습니다. 절차와 한계는 `docs/ops/mobile-auth-key-rotation.md`
+- [ ] 모바일 인증을 서비스하는 배포라면 **배포 전 `-Mode preflight` 확인** —
+      `./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1 ... -Mode preflight`를
+      **Active 값으로** 돌려, 지금 돌고 있는 배포가 Active의 재료를 쓰고 있는지 봅니다.
+      실패하면 **배포하지 않습니다**: Active를 기준으로 Railway를 복구하고 다시 확인합니다.
+      이 확인이 덮는 것은 활성 서명 키·활성 pepper·`iss`·`aud`이고, 유예 지난 잔여 항목은
+      덮지 않습니다(§2.2)
 - [ ] 모바일 인증을 서비스하는 배포라면 **1Password vault `Tomverse Production Secrets`의
       `Mobile Auth Keyrings — Active`가 Railway 값과 일치**함 —
       `docs/ops/mobile-auth-key-rotation.md` §2.2(2026-09-02 승인). 대조 대상은 **Active
@@ -84,8 +90,13 @@ Date / timezone:    ____________________
       `./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1` → Pending 승격** — 통제된
       exchange를 한 번 성공시켜 access token · refresh token과 그때 생긴
       `MobileRefreshRotation` 행의 `secretDigest`·`pepperKid`를 모아 Pending 값으로
-      실행합니다. **증거는 15분 안에 모읍니다** — 재료 대조는 나이를 못 보므로 오래된
-      token은 "그때 맞았다"만 증명합니다. **그 exchange 세션은 폐기합니다.** **id가 아니라 재료를 대조합니다**: 같은 id 아래 다른 개인키나
+      실행합니다. `-Mode rotation`을 **명시합니다**(기본값이 없습니다).
+      **`PASS`는 "건네준 증거가 후보 재료로 만들어졌다"만 말합니다** — 그 증거가 지금
+      돌고 있는 배포의 것이라는 결속은 아직 없습니다(§6의 5번). 증거를 판정할 수 없으면
+      (만료·파싱 실패) 안내는 **보류·재수집**이지 롤백이 아닙니다.
+      **증거는 15분 안에 모읍니다** — 재료 대조는 나이를 못 보므로 오래된 token은 "그때
+      맞았다"만 증명합니다. 신선함이 배제하는 것은 **오래된 증거**이고, "이 배포의
+      것"까지 증명하지는 않습니다(§2.2·§6의 5번). **그 exchange 세션은 폐기합니다.** **id가 아니라 재료를 대조합니다**: 같은 id 아래 다른 개인키나
       pepper가 들어가도 id 대조는 통과하고, 그 값이 Active로 승격되면 롤백이나 다음
       회전에서 토큰이 끊깁니다. **통과한 뒤에만** Pending을 Active로 승격하고, 실패하면
       Pending의 deployment ID를 기준으로 롤백하고 Pending을 폐기합니다. 그 exchange
@@ -96,7 +107,8 @@ Date / timezone:    ____________________
       성공하는지. 이것이 증명하는 것은 **새 배포가 이전 세대를 계속 받아 준다**는 정방향
       호환성이고, 배포 순간 아무도 로그아웃되지 않는 이유입니다. **롤백 호환성이
       아닙니다** — 되돌린 배포에는 새 키가 없으므로 배포 이후 발급된 자격증명은 전부
-      거절되며, 그것이 롤백의 값입니다(§2.2). 은퇴 항목은 이것 말고 관측 경로가
+      거절되며, 그것이 롤백의 값입니다(§2.2). 실패가 뜻하는 것도 롤백 불가가 아니라
+      **지금 이 배포가 그 세대를 끊고 있다**는 것입니다. 은퇴 항목은 이것 말고 관측 경로가
       없습니다. 실패하면 승격하지 않습니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1`
       — 배포 후 wrapper가 지키는 계약을 고정합니다(17 사례). 이쪽은 링 둘에 더해 **live

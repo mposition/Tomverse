@@ -230,6 +230,70 @@ test("a retirement dated in the future fails, on either ring", () => {
   }
 });
 
+test("two ids holding the same material fail, on either ring", () => {
+  // The leak-response failure. Every other check here reads this as a finished
+  // rotation: the ids differ, one is active, the other is retired inside its
+  // grace, and the active key signs. Only the material says the leaked key is
+  // still the one signing.
+  const sameKey = ed25519();
+  const samePepper = "s".repeat(48);
+
+  const renamedSigningKey = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-old:${sameKey},sign-new:${sameKey}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-new",
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-old@${justRetired()}`,
+  });
+  assert.equal(renamedSigningKey.code, 1, renamedSigningKey.out);
+  assert.match(renamedSigningKey.out, /different ids holding the same material/);
+  assert.match(renamedSigningKey.out, /Renaming a key is not rotating it/);
+
+  const renamedPepper = run({
+    ...healthy,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-old:${samePepper},pep-new:${samePepper}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-new",
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-old@${justRetired()}`,
+  });
+  assert.equal(renamedPepper.code, 1, renamedPepper.out);
+  assert.match(renamedPepper.out, /different ids holding the same material/);
+
+  // And a genuine rotation still passes: the check is about material, not
+  // about having more than one entry.
+  const genuine = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+  });
+  assert.equal(genuine.code, 0, genuine.out);
+});
+
+test("the remaining grace is reported, and a mostly spent window is called out", () => {
+  // The grace runs from the retirement instant, which is written before the
+  // deploy -- so preparing and deploying spends it. Printing only the end
+  // instant left that arithmetic to the operator, and being two minutes early
+  // with an eight-minute deploy leaves five of the approved fifteen.
+  const justNow = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${justRetired()}`,
+  });
+  assert.equal(justNow.code, 0, justNow.out);
+  assert.match(justNow.out, /\d+s left of 900s, as of this check/);
+  assert.equal(/has \d+s of its 900s window left/.test(justNow.out), false);
+
+  const mostlySpent = new Date(Date.now() - 600_000).toISOString();
+  const late = run({
+    ...healthy,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${mostlySpent}`,
+  });
+  // A note, not a failure: a short window is a judgement about who still holds
+  // credentials from that generation, and the check cannot make it.
+  assert.equal(late.code, 0, late.out);
+  assert.match(late.out, /has \d+s of its 900s window left, and the deploy has not happened yet/);
+  assert.match(late.out, /Re-date the retirement/);
+});
+
 test("no output carries key material", () => {
   const { out } = run({
     ...healthy,

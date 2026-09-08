@@ -6,7 +6,6 @@ import {
   MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
 } from "../lib/mobileAuthContract.ts";
 import {
-  MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS,
   MobileAuthKeyringError,
   activeMobileRefreshPepper,
   activeMobileSigningKey,
@@ -338,15 +337,41 @@ test("a retirement dated in the future is not a retirement", () => {
   assert.equal(activeMobileSigningKey(misdated).keyId, "sign-2");
 });
 
-test("a retirement a few minutes ahead of the server clock still counts", () => {
-  // The allowance exists for an operator writing "now" against a clock that is
-  // slightly ahead. Without it, a correct rotation would take the previous key
-  // out immediately and log that generation out.
-  const aheadSeconds = MOBILE_RETIREMENT_FUTURE_SKEW_SECONDS - 60;
+test("no future instant is tolerated, so trust never exceeds the approved window", () => {
+  // A version of this allowed five minutes of clock skew, and the grace was
+  // still measured from the declared instant -- so a retirement four minutes
+  // ahead kept the previous signing key usable for nineteen minutes rather
+  // than fifteen, and the allowance had joined the contract without being
+  // approved. No stateless rule can honour a future instant and still bound
+  // trust at the window: the deployment does not know when it first saw the
+  // value. So the instant must have arrived, full stop, and the runbook tells
+  // the operator to write it a couple of minutes in the past.
+  const aheadSeconds = 240;
   const retired = env({ MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${RETIRED_AT}` });
+  const grace = MOBILE_PREVIOUS_SIGNING_KEY_SECONDS * 1000;
   const serverNow = retiredAtMs - aheadSeconds * 1000;
 
-  assert.equal(mobileSigningKeyById("sign-1", retired, serverNow)?.secret, KEY_A);
+  // Refused while the instant is still ahead, by a second or by four minutes.
+  assert.equal(mobileSigningKeyById("sign-1", retired, serverNow), null);
+  assert.equal(mobileSigningKeyById("sign-1", retired, retiredAtMs - 1), null);
+
+  // And once it arrives, exactly the approved window and not a second more --
+  // whatever the clocks did earlier.
+  assert.equal(mobileSigningKeyById("sign-1", retired, retiredAtMs)?.secret, KEY_A);
+  assert.equal(
+    mobileSigningKeyById("sign-1", retired, retiredAtMs + grace - 1)?.secret,
+    KEY_A
+  );
+  assert.equal(mobileSigningKeyById("sign-1", retired, retiredAtMs + grace), null);
+});
+
+test("the pepper's much longer window is bounded the same way", () => {
+  const retired = env({ MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${RETIRED_AT}` });
+  const grace = MOBILE_PREVIOUS_PEPPER_SECONDS * 1000;
+
+  assert.equal(mobileRefreshPepperById("pep-1", retired, retiredAtMs - 1), null);
+  assert.equal(mobileRefreshPepperById("pep-1", retired, retiredAtMs + grace - 1)?.secret, KEY_A);
+  assert.equal(mobileRefreshPepperById("pep-1", retired, retiredAtMs + grace), null);
 });
 
 test("a future-dated pepper retirement is refused the same way", () => {
