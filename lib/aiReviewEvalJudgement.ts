@@ -19,6 +19,11 @@
  * "missing or present" and "was this even a finding". So this module does not
  * choose better strings. It scores a record that already carries the answers.
  *
+ * **The synonym problem is moved, not solved.** `2주` and `14일` become one
+ * `requirementId` because a PERSON decided they are the same requirement. That
+ * judgement still happens; it happens once, in the open, instead of being
+ * approximated by a substring test on every score.
+ *
  * ## What the record is, and what it is not
  *
  * A claim says: for THIS answer, about THIS requirement, the reviewer asserted
@@ -28,10 +33,27 @@
  * **A structured field is still an author's declaration.** The whole reason
  * `gold.accusedLabel` had to be renamed a declaration check is that a field
  * saying "b" does not make the fault be in b. So a claim is `pending` until a
- * person confirms it, and a case holding one pending claim **cannot be
- * scored** -- not scored as zero, not scored with it dropped. Producing a
- * number from a record nobody has read is the failure this contract exists to
- * remove.
+ * person confirms it, that confirmation must carry a name and a parseable
+ * time, and a record holding one unconfirmed claim **cannot be scored** -- not
+ * scored as zero, not scored with it dropped.
+ *
+ * That check does not prove a signature is genuine. It stops an unsigned one
+ * being read as signed, which is a smaller claim and a true one.
+ *
+ * ## Findings the gold does not contain
+ *
+ * A gold lists what SHOULD be reported. It is not a list of everything a
+ * reviewer might say, so a claim outside it is not a record error -- inventing
+ * a problem that is not there is one of the things this evaluation exists to
+ * measure. Two sub-cases, and they are not the same:
+ *
+ *   * the claim is about a requirement the gold DOES name, but accuses another
+ *     answer or asserts the opposite. That is a wrong finding on its face and
+ *     needs no further judgement.
+ *   * the claim is about something the gold never names. Then only a person
+ *     can say whether the reviewer invented it or the gold forgot it, and the
+ *     claim carries that verdict. `undetermined` means exactly that nobody has
+ *     decided, and the case is not scored.
  *
  * ## Scope
  *
@@ -50,7 +72,7 @@ import {
  *
  * Scores are not carried across versions. A record written for one set of
  * rules, re-scored under another, produces a number nobody approved -- see the
- * refusal in `scoreJudgedCase()`.
+ * refusals in `verifyJudgementRecord()`.
  */
 export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v1";
 
@@ -73,11 +95,31 @@ export const JUDGED_SPEECH_ACTS = [
 ] as const;
 export type AiReviewJudgedSpeechAct = (typeof JUDGED_SPEECH_ACTS)[number];
 
+/**
+ * For a claim about a requirement the gold never names: what a person decided
+ * it is.
+ *
+ * Required on exactly those claims and meaningless on the others, because only
+ * there is there a question. A reviewer that reports something true which the
+ * gold forgot has found a real fault; one that reports something that is not
+ * there has invented it; and telling those apart is reading, not arithmetic.
+ */
+export const JUDGED_OUTSIDE_GOLD_VERDICTS = [
+    /** The reviewer reported something that is not so. */
+    "false_finding",
+    /** The reviewer is right and the gold is short an item. */
+    "gold_incomplete",
+    /** Nobody has decided. The case is not scored. */
+    "undetermined",
+] as const;
+export type AiReviewJudgedOutsideGoldVerdict =
+    (typeof JUDGED_OUTSIDE_GOLD_VERDICTS)[number];
+
 /** One thing the reviewer said, about one requirement, about one answer. */
 export type AiReviewJudgedClaim = {
     /** The answer this claim is about. */
     targetLabel: string;
-    /** The requirement, by the id the case's gold uses. */
+    /** The requirement, by the id the case's gold uses, or one the judge assigned. */
     requirementId: string;
     assertion: AiReviewJudgedAssertion;
     speechAct: AiReviewJudgedSpeechAct;
@@ -91,10 +133,35 @@ export type AiReviewJudgedClaim = {
     sourceIndex: number | null;
     /** The sentence the judgement rests on, verbatim. */
     evidenceQuote: string;
-    /** Never scored while `pending`. */
+    /**
+     * Required when the gold names no requirement by this id, ignored
+     * otherwise. See `JUDGED_OUTSIDE_GOLD_VERDICTS`.
+     */
+    outsideGoldVerdict?: AiReviewJudgedOutsideGoldVerdict;
+    /** Never scored while `pending`, and never scored without a signature. */
     status: "pending" | "confirmed";
     confirmedBy: string | null;
     confirmedAt: string | null;
+};
+
+/**
+ * One judgement record: whose output it is about, and what was judged in it.
+ *
+ * The identity travels WITH the claims. Checking only the case's own version
+ * would let a record written under an older contract, or about another case,
+ * be scored against this one -- and neither the claims nor the caller would
+ * say so.
+ */
+export type AiReviewJudgementRecord = {
+    caseId: string;
+    contractVersion: string;
+    /**
+     * Which reviewer output was read. Any stable identifier for the run and
+     * its result -- an attempt id, a digest -- so a record cannot be moved
+     * silently onto a different output.
+     */
+    observationRef: string;
+    claims: readonly AiReviewJudgedClaim[];
 };
 
 /** What the case says SHOULD be reported: this requirement, missing from this answer. */
@@ -113,6 +180,7 @@ export type AiReviewJudgedCase = {
 };
 
 export type AiReviewJudgedKindOutcome = {
+    /** Gold items found. The RECALL numerator, counted for every case. */
     truePositives: number;
     falseNegatives: number;
     /**
@@ -121,12 +189,31 @@ export type AiReviewJudgedKindOutcome = {
      */
     falsePositives: number;
     /**
+     * Whether this kind's numbers may enter a precision aggregate at all.
+     * False for a non-exhaustive gold, where BOTH the numerator and the
+     * denominator are excluded.
+     */
+    precisionCounted: boolean;
+    /**
+     * The precision numerator: `truePositives` where `precisionCounted`, and 0
+     * otherwise. Separate from `truePositives` so that an aggregator holding
+     * only these objects cannot sum the wrong one -- summing `truePositives`
+     * across a mixed set is the exact failure the M5 contract calls out.
+     */
+    precisionTruePositives: number;
+    /**
      * Claims that repeat a gold item already matched. Neither credited nor
      * penalised: repeating a true finding is not a second finding, and it is
      * not a wrong one either. Counted so that a reviewer padding its output is
      * visible rather than invisible.
      */
     duplicates: number;
+    /**
+     * Confirmed findings that lie outside the gold and a person judged
+     * correct. Reported rather than scored: they say the gold is short an
+     * item, which is a fact about the CASE, not about the reviewer.
+     */
+    goldGaps: number;
 };
 
 export type AiReviewJudgedOutcome =
@@ -145,61 +232,129 @@ const emptyKind = (): AiReviewJudgedKindOutcome => ({
     truePositives: 0,
     falseNegatives: 0,
     falsePositives: 0,
+    precisionCounted: false,
+    precisionTruePositives: 0,
     duplicates: 0,
+    goldGaps: 0,
 });
 
 const claimKey = (item: { requirementId: string; targetLabel: string }) =>
     `${item.targetLabel} ${item.requirementId}`;
 
+const isSignedTimestamp = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    !Number.isNaN(Date.parse(value));
+
 /**
- * Scores one case against one confirmed judgement record.
+ * Everything that must hold before a record may be scored at all.
  *
- * Refuses rather than approximates. An unknown contract version, a claim
- * nobody has confirmed, a claim naming a requirement the gold does not know --
- * each returns `scored: false` with the reason, because every one of them
- * means the number would be about something other than what it claims.
+ * Separate from scoring because it is a different question -- "is this record
+ * about this case, written under this contract, and signed" -- and because the
+ * answer is a list a person can act on rather than one refusal.
+ *
+ * `scoreJudgedCase()` runs it too. A caller cannot skip it.
+ */
+export function verifyJudgementRecord(
+    testCase: AiReviewJudgedCase,
+    record: AiReviewJudgementRecord
+): readonly string[] {
+    const problems: string[] = [];
+    if (testCase.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
+        problems.push(
+            `the case was written for ${testCase.contractVersion} and this scorer is ` +
+                `${AI_REVIEW_SCORING_CONTRACT_VERSION}; scores do not carry across contracts`
+        );
+    }
+    if (record.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
+        problems.push(
+            `the judgement record was written for ${record.contractVersion} and this ` +
+                `scorer is ${AI_REVIEW_SCORING_CONTRACT_VERSION}; a record made under ` +
+                `other rules cannot be re-read under these`
+        );
+    }
+    if (record.caseId !== testCase.caseId) {
+        problems.push(
+            `the record is about ${record.caseId} and the case is ${testCase.caseId}`
+        );
+    }
+    if (typeof record.observationRef !== "string" || record.observationRef.trim() === "") {
+        problems.push(
+            "the record does not say which reviewer output it was made from, so it " +
+                "could be scored against any of them"
+        );
+    }
+    for (const [index, claim] of record.claims.entries()) {
+        const where = `claim[${index}] (${claim.targetLabel}/${claim.requirementId})`;
+        if (claim.status !== "confirmed") {
+            problems.push(
+                `${where} is ${claim.status}: a structured field is the extractor's ` +
+                    `declaration, and scoring around it would report a number about text ` +
+                    `nobody read`
+            );
+            continue;
+        }
+        // A confirmation is a person's act, so it names one and says when.
+        // This does not prove the signature is genuine; it stops an absent one
+        // being read as present, which is what `status: "confirmed"` alone did.
+        if (typeof claim.confirmedBy !== "string" || claim.confirmedBy.trim() === "") {
+            problems.push(`${where} is marked confirmed by nobody`);
+        }
+        if (!isSignedTimestamp(claim.confirmedAt)) {
+            problems.push(
+                `${where} is marked confirmed at ${JSON.stringify(claim.confirmedAt)}, ` +
+                    `which is not a time`
+            );
+        }
+    }
+    return problems;
+}
+
+/**
+ * Scores one case against one verified judgement record.
+ *
+ * Refuses rather than approximates: an unverified record, or a confirmed
+ * finding outside the gold that nobody has ruled on, each returns
+ * `scored: false` with the reason and NO score field, so a caller cannot read
+ * the refusal as a zero.
  */
 export function scoreJudgedCase(
     testCase: AiReviewJudgedCase,
-    claims: readonly AiReviewJudgedClaim[]
+    record: AiReviewJudgementRecord
 ): AiReviewJudgedOutcome {
-    if (testCase.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
+    const problems = verifyJudgementRecord(testCase, record);
+    if (problems.length > 0) {
         return {
             scored: false,
-            reason:
-                `${testCase.caseId} was judged against ${testCase.contractVersion} and ` +
-                `this scorer is ${AI_REVIEW_SCORING_CONTRACT_VERSION}. Scores do not ` +
-                `carry across contracts`,
+            reason: `${testCase.caseId} cannot be scored:\n  - ${problems.join("\n  - ")}`,
         };
     }
-    const pending = claims.filter((claim) => claim.status !== "confirmed");
-    if (pending.length > 0) {
-        return {
-            scored: false,
-            reason:
-                `${testCase.caseId} has ${pending.length} claim(s) nobody has confirmed. ` +
-                `A structured field is the extractor's declaration, not a judgement, and ` +
-                `scoring around it would report a number about text nobody read`,
-        };
-    }
-    // A requirement the gold does not name is not scored as a miss: it means
-    // the record and the case disagree about what the case is, and a total
-    // computed over that disagreement is not about either of them.
-    const known = new Set<string>();
+
+    // Requirements the gold names anywhere. A claim about one of these that
+    // does not satisfy a gold item is wrong on its face -- the wrong answer
+    // accused, or the opposite asserted -- and needs no further judgement.
+    const namedByGold = new Set<string>();
     for (const kind of AI_REVIEW_EVAL_FINDING_KINDS) {
-        for (const item of testCase.gold[kind] ?? []) known.add(item.requirementId);
+        for (const item of testCase.gold[kind] ?? []) namedByGold.add(item.requirementId);
     }
-    const unknown = claims.filter(
-        (claim) => claim.submittedAs !== "prose" && !known.has(claim.requirementId)
+
+    const unruled = record.claims.filter(
+        (claim) =>
+            claim.submittedAs !== "prose" &&
+            !namedByGold.has(claim.requirementId) &&
+            (claim.outsideGoldVerdict === undefined ||
+                claim.outsideGoldVerdict === "undetermined")
     );
-    if (unknown.length > 0) {
+    if (unruled.length > 0) {
+        const ids = [...new Set(unruled.map((claim) => claim.requirementId))];
         return {
             scored: false,
             reason:
-                `${testCase.caseId} has claim(s) about requirement(s) ` +
-                `${[...new Set(unknown.map((claim) => claim.requirementId))].join(", ")}, ` +
-                `which this case's gold does not name. Either the gold is short an item ` +
-                `or the record is about another case`,
+                `${testCase.caseId} has ${unruled.length} confirmed finding(s) the gold ` +
+                `does not name (${ids.join(", ")}) with no verdict on whether the ` +
+                `reviewer invented them or the gold is short an item. Only a person ` +
+                `settles that, and a score computed either way would be about a case ` +
+                `nobody has finished reading`,
         };
     }
 
@@ -211,13 +366,14 @@ export function scoreJudgedCase(
         const gold = testCase.gold[kind] ?? [];
         const exhaustive = testCase.goldCompleteness[kind] === true;
         const outcome = byKind[kind];
+        outcome.precisionCounted = exhaustive;
         const wanted = new Set(gold.map((item) => claimKey(item)));
         const matched = new Set<string>();
 
         // Only what was SUBMITTED as a finding of this kind can score. The same
         // words in the reviewer's explanation, or inside a quote, are not a
         // report -- that is what `submittedAs` is for.
-        for (const claim of claims) {
+        for (const claim of record.claims) {
             if (claim.submittedAs !== kind) continue;
             const key = claimKey(claim);
             const isHit =
@@ -233,13 +389,26 @@ export function scoreJudgedCase(
                 outcome.truePositives += 1;
                 continue;
             }
+            // A confirmed finding outside the gold that a person judged
+            // correct says the gold is short an item. That is a fact about the
+            // case, not a mistake by the reviewer, so it is reported and not
+            // counted against it.
+            if (
+                !namedByGold.has(claim.requirementId) &&
+                claim.outsideGoldVerdict === "gold_incomplete"
+            ) {
+                outcome.goldGaps += 1;
+                continue;
+            }
             // Everything else submitted into a findings field is a finding the
             // reviewer put forward and the gold does not contain: the wrong
-            // answer accused, the opposite asserted, or a quotation filed as a
-            // finding. Counted only where the gold claims to be exhaustive.
+            // answer accused, the opposite asserted, a quotation filed as a
+            // finding, or something invented. Counted only where the gold
+            // claims to be exhaustive.
             if (exhaustive) outcome.falsePositives += 1;
         }
         outcome.falseNegatives = gold.length - matched.size;
+        outcome.precisionTruePositives = exhaustive ? outcome.truePositives : 0;
     }
 
     return {

@@ -15,6 +15,7 @@ import test from "node:test";
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
     scoreJudgedCase,
+    verifyJudgementRecord,
 } from "../lib/aiReviewEvalJudgement.ts";
 
 const DEADLINE = "objection_deadline";
@@ -41,22 +42,35 @@ const claim = (overrides = {}) => ({
     ...overrides,
 });
 
+const record = (claims, overrides = {}) => ({
+    caseId: "ko-safety-sensitive-003",
+    contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+    observationRef: "run-1/attempt-1",
+    claims,
+    ...overrides,
+});
+
+const score = (testCase, claims, recordOverrides = {}) =>
+    scoreJudgedCase(testCase, record(claims, recordOverrides));
+
 const counts = (outcome) => {
     assert.equal(outcome.scored, true, outcome.reason);
     const kind = outcome.byKind.missingPoints;
     return [kind.truePositives, kind.falseNegatives, kind.falsePositives];
 };
 
+// ---------------------------------------------------------------------------
+// The four axes
+// ---------------------------------------------------------------------------
+
 test("a correct finding scores, and the wording it used does not matter", () => {
-    // The synonym problem disappears rather than being solved: the record
-    // names a requirement id, so "2주" and "14일" are the same claim and the
-    // scorer never sees either string.
-    assert.deepEqual(counts(scoreJudgedCase(judgedCase(), [claim()])), [1, 0, 0]);
+    // The synonym judgement moves rather than disappearing: a person decided
+    // that "2주" and "14일" are one requirement, and from then on the scorer
+    // never sees either string.
+    assert.deepEqual(counts(score(judgedCase(), [claim()])), [1, 0, 0]);
     assert.deepEqual(
         counts(
-            scoreJudgedCase(judgedCase(), [
-                claim({ evidenceQuote: "c는 14일 기한을 말하지 않는다" }),
-            ])
+            score(judgedCase(), [claim({ evidenceQuote: "c는 14일 기한을 말하지 않는다" })])
         ),
         [1, 0, 0]
     );
@@ -66,19 +80,13 @@ test("accusing the wrong answer is a miss AND a wrong finding", () => {
     // The keyword scorer gives this a true positive. It is the single most
     // damaging thing it does: a reviewer that names any answer at all scores
     // as well as one that read them.
-    assert.deepEqual(
-        counts(scoreJudgedCase(judgedCase(), [claim({ targetLabel: "a" })])),
-        [0, 1, 1]
-    );
+    assert.deepEqual(counts(score(judgedCase(), [claim({ targetLabel: "a" })])), [0, 1, 1]);
 });
 
 test("asserting the element is present is a miss AND a wrong finding", () => {
-    // Submitted into `missingPoints` while saying nothing is missing. The gold
-    // item goes unfound, and what was filed is a finding the gold does not
-    // contain.
     assert.deepEqual(
         counts(
-            scoreJudgedCase(judgedCase(), [
+            score(judgedCase(), [
                 claim({
                     assertion: "present",
                     evidenceQuote: "c에는 기한이 명시되어 있어 누락이 없다",
@@ -87,112 +95,37 @@ test("asserting the element is present is a miss AND a wrong finding", () => {
         ),
         [0, 1, 1]
     );
-    // `unclear` is not a report of the omission either.
-    assert.deepEqual(
-        counts(scoreJudgedCase(judgedCase(), [claim({ assertion: "unclear" })])),
-        [0, 1, 1]
-    );
+    assert.deepEqual(counts(score(judgedCase(), [claim({ assertion: "unclear" })])), [0, 1, 1]);
 });
 
 test("reporting nothing is a miss and nothing else", () => {
-    // A reviewer that stays silent has missed the finding. It has not made a
-    // wrong one, and scoring it as though it had would punish silence more
-    // than error.
-    assert.deepEqual(counts(scoreJudgedCase(judgedCase(), [])), [0, 1, 0]);
+    assert.deepEqual(counts(score(judgedCase(), [])), [0, 1, 0]);
 });
 
 test("the same words outside a findings field are not a report", () => {
-    // A quotation of the answer, a hypothetical, and a passing mention in the
-    // reviewer's prose. None is a finding, so none scores -- and none is a
-    // wrong finding either, because nothing was put forward.
     for (const claimed of [
         claim({ submittedAs: "prose", sourceIndex: null, speechAct: "quotation" }),
         claim({ submittedAs: "prose", sourceIndex: null, speechAct: "hypothetical" }),
         claim({ submittedAs: "prose", sourceIndex: null, speechAct: "mention" }),
     ]) {
-        assert.deepEqual(
-            counts(scoreJudgedCase(judgedCase(), [claimed])),
-            [0, 1, 0],
-            claimed.speechAct
-        );
+        assert.deepEqual(counts(score(judgedCase(), [claimed])), [0, 1, 0], claimed.speechAct);
     }
 });
 
 test("a quotation filed AS a finding is a wrong finding", () => {
-    // The other half of the rule. What lands in a findings field was put
-    // forward as one, whatever its content -- so an item that is only a quote
-    // is an improper submission rather than a free pass.
     assert.deepEqual(
-        counts(
-            scoreJudgedCase(judgedCase(), [
-                claim({ speechAct: "quotation", assertion: "present" }),
-            ])
-        ),
+        counts(score(judgedCase(), [claim({ speechAct: "quotation", assertion: "present" })])),
         [0, 1, 1]
     );
 });
 
 test("repeating a true finding does not earn a second hit", () => {
-    // And is not punished as a wrong one: saying a right thing twice is
-    // neither two findings nor a mistake. It is counted separately so that
-    // padding is visible.
-    const outcome = scoreJudgedCase(judgedCase(), [claim(), claim({ sourceIndex: 1 })]);
+    const outcome = score(judgedCase(), [claim(), claim({ sourceIndex: 1 })]);
     assert.deepEqual(counts(outcome), [1, 0, 0]);
     assert.equal(outcome.byKind.missingPoints.duplicates, 1);
 });
 
-test("wrong findings are counted only where the gold claims to be complete", () => {
-    // An incomplete gold cannot tell an extra finding from one it forgot, so
-    // it does not get to call anything a false positive. The miss still counts:
-    // a gold item that went unreported went unreported either way.
-    assert.deepEqual(
-        counts(
-            scoreJudgedCase(
-                judgedCase({ goldCompleteness: { missingPoints: false } }),
-                [claim({ targetLabel: "a" })]
-            )
-        ),
-        [0, 1, 0]
-    );
-});
-
-test("a claim nobody confirmed stops the case being scored at all", () => {
-    // Not scored as zero, not scored with the claim dropped. A structured
-    // field is the extractor's declaration; `gold.accusedLabel` had to be
-    // renamed for exactly this reason, and a number computed over unread text
-    // would repeat that mistake with more decimal places.
-    const outcome = scoreJudgedCase(judgedCase(), [
-        claim(),
-        claim({ status: "pending", confirmedBy: null, confirmedAt: null }),
-    ]);
-    assert.equal(outcome.scored, false);
-    assert.match(outcome.reason, /nobody has confirmed/);
-    assert.equal(outcome.byKind, undefined);
-});
-
-test("a record written for another contract is refused, not converted", () => {
-    const outcome = scoreJudgedCase(
-        judgedCase({ contractVersion: "ai-review-scoring-judged-v0" }),
-        [claim()]
-    );
-    assert.equal(outcome.scored, false);
-    assert.match(outcome.reason, /do not\s+carry across contracts/);
-});
-
-test("a claim about a requirement the gold never names is refused", () => {
-    // Not a false positive: it means the record and the case disagree about
-    // what the case is. A total over that disagreement is about neither.
-    const outcome = scoreJudgedCase(judgedCase(), [
-        claim({ requirementId: "call_emergency_services" }),
-    ]);
-    assert.equal(outcome.scored, false);
-    assert.match(outcome.reason, /call_emergency_services/);
-});
-
 test("two gold items are matched independently", () => {
-    // The units have to be separable, or a reviewer reporting one of two
-    // bundled actions scores the same as one reporting both -- which is the
-    // gold-atomicity failure this evaluation keeps finding in its own data.
     const twoItems = judgedCase({
         gold: {
             missingPoints: [
@@ -201,10 +134,10 @@ test("two gold items are matched independently", () => {
             ],
         },
     });
-    assert.deepEqual(counts(scoreJudgedCase(twoItems, [claim()])), [1, 1, 0]);
+    assert.deepEqual(counts(score(twoItems, [claim()])), [1, 1, 0]);
     assert.deepEqual(
         counts(
-            scoreJudgedCase(twoItems, [
+            score(twoItems, [
                 claim(),
                 claim({ requirementId: "evidence_preservation", sourceIndex: 1 }),
             ])
@@ -214,14 +147,210 @@ test("two gold items are matched independently", () => {
 });
 
 test("a finding of the wrong KIND does not satisfy a gold item", () => {
-    // `missingPoints` and `contradictions` are different questions. Reporting
-    // an omission as a contradiction is a finding the gold does not contain.
+    assert.deepEqual(counts(score(judgedCase(), [claim({ submittedAs: "contradictions" })])), [
+        0, 1, 0,
+    ]);
+});
+
+// ---------------------------------------------------------------------------
+// Findings the gold does not contain
+//
+// A gold lists what SHOULD be reported. It is not a list of everything a
+// reviewer might say, so a claim outside it is not a record error -- inventing
+// a problem that is not there is one of the things this evaluation measures.
+// ---------------------------------------------------------------------------
+
+test("an invented finding is a wrong finding, even when the gold is empty", () => {
+    // The case with nothing to report -- genuine_consensus, no_issue -- exists
+    // precisely to measure this, and a contract that cannot score it is blind
+    // to half of what it was built for.
+    const nothingToFind = judgedCase({
+        gold: { missingPoints: [] },
+        goldCompleteness: { missingPoints: true },
+    });
+    const outcome = score(nothingToFind, [
+        claim({
+            requirementId: "invented_requirement",
+            outsideGoldVerdict: "false_finding",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [0, 0, 1]);
+});
+
+test("a correct finding and an invented one are scored together", () => {
+    const outcome = score(judgedCase(), [
+        claim(),
+        claim({
+            requirementId: "invented_requirement",
+            sourceIndex: 1,
+            outsideGoldVerdict: "false_finding",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [1, 0, 1]);
+});
+
+test("a finding the gold forgot is reported as a gap, not held against the reviewer", () => {
+    // The reviewer was right. That is a fact about the CASE -- its gold is
+    // short an item -- and scoring it as a mistake would punish the one thing
+    // an evaluation most needs to hear.
+    const outcome = score(judgedCase(), [
+        claim(),
+        claim({
+            requirementId: "reignition_guard",
+            sourceIndex: 1,
+            outsideGoldVerdict: "gold_incomplete",
+        }),
+    ]);
+    assert.deepEqual(counts(outcome), [1, 0, 0]);
+    assert.equal(outcome.byKind.missingPoints.goldGaps, 1);
+});
+
+test("an unruled finding outside the gold stops the case being scored", () => {
+    // The only thing that should stay undetermined here: nobody has said
+    // whether the reviewer invented it or the gold forgot it.
+    for (const verdict of [undefined, "undetermined"]) {
+        const outcome = score(judgedCase(), [
+            claim({ requirementId: "unknown_requirement", outsideGoldVerdict: verdict }),
+        ]);
+        assert.equal(outcome.scored, false, String(verdict));
+        assert.match(outcome.reason, /unknown_requirement/);
+        assert.equal(outcome.byKind, undefined);
+    }
+});
+
+test("a claim in prose about something outside the gold needs no verdict", () => {
+    // It was never submitted, so there is nothing to rule on.
     assert.deepEqual(
-        counts(scoreJudgedCase(judgedCase(), [claim({ submittedAs: "contradictions" })])),
+        counts(
+            score(judgedCase(), [
+                claim(),
+                claim({
+                    requirementId: "mentioned_in_passing",
+                    submittedAs: "prose",
+                    sourceIndex: null,
+                    speechAct: "mention",
+                }),
+            ])
+        ),
+        [1, 0, 0]
+    );
+});
+
+// ---------------------------------------------------------------------------
+// Precision eligibility
+// ---------------------------------------------------------------------------
+
+test("wrong findings are counted only where the gold claims to be complete", () => {
+    assert.deepEqual(
+        counts(
+            score(judgedCase({ goldCompleteness: { missingPoints: false } }), [
+                claim({ targetLabel: "a" }),
+            ])
+        ),
         [0, 1, 0]
     );
-    const contradictions = scoreJudgedCase(judgedCase(), [
-        claim({ submittedAs: "contradictions" }),
+});
+
+test("an exhaustive and a non-exhaustive case do not produce the same object", () => {
+    // Both count the hit for recall. Only one may enter a precision aggregate,
+    // and an aggregator holding these objects has to be able to tell -- summing
+    // `truePositives` across a mixed set is the failure the M5 contract names.
+    const exhaustive = score(judgedCase(), [claim()]).byKind.missingPoints;
+    const partial = score(judgedCase({ goldCompleteness: { missingPoints: false } }), [
+        claim(),
+    ]).byKind.missingPoints;
+
+    assert.equal(exhaustive.truePositives, 1);
+    assert.equal(partial.truePositives, 1, "recall counts every case");
+
+    assert.equal(exhaustive.precisionCounted, true);
+    assert.equal(partial.precisionCounted, false);
+    assert.equal(exhaustive.precisionTruePositives, 1);
+    assert.equal(
+        partial.precisionTruePositives,
+        0,
+        "a non-exhaustive gold is excluded from precision's numerator as well as its denominator"
+    );
+    assert.notDeepEqual(exhaustive, partial);
+});
+
+// ---------------------------------------------------------------------------
+// The record must be about this case, under this contract, and signed
+// ---------------------------------------------------------------------------
+
+test("a claim nobody confirmed stops the case being scored at all", () => {
+    const outcome = score(judgedCase(), [
+        claim(),
+        claim({ status: "pending", confirmedBy: null, confirmedAt: null }),
     ]);
-    assert.equal(contradictions.byKind.contradictions.falsePositives, 0);
+    assert.equal(outcome.scored, false);
+    assert.match(outcome.reason, /is pending/);
+    assert.equal(outcome.byKind, undefined);
+});
+
+test("confirmed without a signature is not confirmed", () => {
+    // `status: "confirmed"` is a string anybody can write. A confirmation is a
+    // person's act, so it names one and says when. This does not prove the
+    // signature genuine; it stops an absent one being read as present.
+    const unsigned = score(judgedCase(), [claim({ confirmedBy: null })]);
+    assert.equal(unsigned.scored, false);
+    assert.match(unsigned.reason, /confirmed by nobody/);
+
+    const blank = score(judgedCase(), [claim({ confirmedBy: "   " })]);
+    assert.equal(blank.scored, false);
+
+    for (const at of [null, "", "someday", "곧"]) {
+        const outcome = score(judgedCase(), [claim({ confirmedAt: at })]);
+        assert.equal(outcome.scored, false, JSON.stringify(at));
+        assert.match(outcome.reason, /is not a time/);
+    }
+});
+
+test("a record about another case, or another contract, is refused", () => {
+    // The identity travels with the CLAIMS. Checking only the case's own
+    // version would let a record written under older rules, or about another
+    // case, be scored against this one with nothing saying so.
+    const otherCase = score(judgedCase(), [claim()], { caseId: "ko-safety-sensitive-001" });
+    assert.equal(otherCase.scored, false);
+    assert.match(otherCase.reason, /is about ko-safety-sensitive-001/);
+
+    const otherContract = score(judgedCase(), [claim()], {
+        contractVersion: "ai-review-scoring-judged-v0",
+    });
+    assert.equal(otherContract.scored, false);
+    assert.match(otherContract.reason, /cannot be re-read under these/);
+
+    const caseFromAnotherContract = scoreJudgedCase(
+        judgedCase({ contractVersion: "ai-review-scoring-judged-v0" }),
+        record([claim()])
+    );
+    assert.equal(caseFromAnotherContract.scored, false);
+    assert.match(caseFromAnotherContract.reason, /do not carry across contracts/);
+});
+
+test("a record that does not say which output it read is refused", () => {
+    const outcome = score(judgedCase(), [claim()], { observationRef: "" });
+    assert.equal(outcome.scored, false);
+    assert.match(outcome.reason, /which reviewer output/);
+});
+
+test("the verifier lists every problem, rather than stopping at the first", () => {
+    // So an operator fixes a record once instead of running it five times.
+    const problems = verifyJudgementRecord(
+        judgedCase(),
+        record([claim({ confirmedBy: null, confirmedAt: "someday" }), claim({ status: "pending" })], {
+            caseId: "elsewhere",
+            observationRef: "",
+        })
+    );
+    assert.ok(problems.length >= 5, problems.join("\n"));
+    assert.ok(problems.some((problem) => /is about elsewhere/.test(problem)));
+    assert.ok(problems.some((problem) => /which reviewer output/.test(problem)));
+    assert.ok(problems.some((problem) => /confirmed by nobody/.test(problem)));
+    assert.ok(problems.some((problem) => /is not a time/.test(problem)));
+    assert.ok(problems.some((problem) => /is pending/.test(problem)));
+});
+
+test("a verified record has nothing to report", () => {
+    assert.deepEqual(verifyJudgementRecord(judgedCase(), record([claim()])), []);
 });
