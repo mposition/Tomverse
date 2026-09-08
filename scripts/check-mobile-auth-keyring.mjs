@@ -137,10 +137,14 @@ const describe = (
   identity
 ) => {
   console.log(`\n${label}`);
-  if (ring.size === 0) {
-    console.log("  (nothing configured)");
-    return;
-  }
+  // An empty ring prints nothing per key, and used to return here -- which
+  // skipped the findings below as well. `MOBILE_AUTH_SIGNING_KEYS=",,,"` with
+  // every other variable set therefore passed even under
+  // --require-configured, while the runtime read the same environment as not
+  // configured at all and answered 503. The loop has nothing to iterate; the
+  // findings still have something to say, and "the active id is not in the
+  // ring" is the whole of what is wrong.
+  if (ring.size === 0) console.log("  (nothing configured)");
 
   for (const keyId of ring.keys()) {
     const retiredAt = retirements.get(keyId);

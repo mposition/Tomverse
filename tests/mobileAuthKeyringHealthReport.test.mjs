@@ -226,6 +226,19 @@ const CONTRADICTIONS = [
     attention: /same material/,
   },
   {
+    // An empty ring prints no key rows, and the check used to return before
+    // its findings ran -- so this passed even under --require-configured while
+    // the runtime read the same environment as unconfigured and answered 503.
+    name: "a signing ring that parses to nothing",
+    variables: () => ({ ...configured, MOBILE_AUTH_SIGNING_KEYS: ",,," }),
+    attention: /active id "sign-2" is not in the ring/,
+  },
+  {
+    name: "a pepper ring that parses to nothing",
+    variables: () => ({ ...configured, MOBILE_AUTH_REFRESH_PEPPERS: ",,," }),
+    attention: /active id "pep-2" is not in the ring/,
+  },
+  {
     name: "the active key also carrying a retirement",
     variables: () => ({
       ...configured,
@@ -238,7 +251,10 @@ const CONTRADICTIONS = [
 for (const contradiction of CONTRADICTIONS) {
   test(`${contradiction.name}: the check refuses and the report says so`, () => {
     const variables = contradiction.variables();
+    // --require-configured too: an empty ring passed the default mode as well,
+    // and the flag is the mode a deployment that serves mobile auth runs in.
     assert.equal(check(variables).code, 1, "the check should refuse this");
+    assert.equal(check(variables, ["--require-configured"]).code, 1);
 
     const { code, out } = report(variables);
     assert.equal(code, 0, out);
