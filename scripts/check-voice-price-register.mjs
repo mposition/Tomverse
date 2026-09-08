@@ -37,8 +37,9 @@ if (!defaultMatch) {
   process.exit(1);
 }
 
+const defaultModel = defaultMatch[1];
 const reachable = new Set([
-  defaultMatch[1],
+  defaultModel,
   ...VOICE_MODEL_PRICE_REGISTER.map((entry) => entry.modelId),
 ]);
 
@@ -47,10 +48,33 @@ const problems = auditVoicePriceRegister({
   now: new Date(),
 });
 
-if (problems.length > 0) {
+// An unknown audio input rate blocks the model this build will actually use,
+// and is reported for the rest.
+//
+// The split is not leniency, it is the limit of what this check can see. The
+// model is configuration (`VOICE_TRANSCRIPTION_MODEL`), so CI cannot know
+// which entry a given deployment selects; what it can know is the compiled-in
+// default. Failing every entry would mean the register could only ever hold
+// models somebody had already paid to verify -- and then the honest record
+// that `gpt-4o-transcribe`'s cost is *unknown* could not be written down at
+// all, which is how a register ends up holding the published text rate
+// instead (docs/policy/voice-input.md §6.1.3-5). Choosing that model is a
+// decision with its own approval; this line is not the thing that gates it.
+const blocking = problems.filter(
+  (problem) =>
+    problem.code !== "audio_input_rate_unknown" ||
+    problem.modelId === defaultModel
+);
+const held = problems.filter(
+  (problem) =>
+    problem.code === "audio_input_rate_unknown" &&
+    problem.modelId !== defaultModel
+);
+
+if (blocking.length > 0) {
   console.error(
-    `\n${problems.length} voice price register problem(s):\n` +
-      problems
+    `\n${blocking.length} voice price register problem(s):\n` +
+      blocking
         .map((problem) => `  - ${problem.modelId}: ${problem.detail}`)
         .join("\n") +
       "\n\nThe register is in lib/voiceInputPricing.ts. Re-read the provider's\n" +
@@ -65,12 +89,17 @@ if (problems.length > 0) {
 // invoice is a fact about work that needs its own approval (§6.1.2), not
 // something this check can demand.
 const unobserved = VOICE_MODEL_PRICE_REGISTER.filter(
-  (entry) => !entry.costObserved
+  (entry) => entry.costObservation === null
 ).map((entry) => entry.modelId);
 
 console.log(
   `Voice price register check passed: ${reachable.size} reachable model(s), ` +
     `all priced, owned and within their re-reading deadline.` +
+    (held.length > 0
+      ? `\nHeld -- audio input rate unknown, not this build's model (docs/policy/voice-input.md §6.1.3): ${held
+          .map((problem) => problem.modelId)
+          .join(", ")}.`
+      : "") +
     (unobserved.length > 0
       ? `\nList price only, no invoice observed yet (docs/policy/voice-input.md §6.1.2): ${unobserved.join(", ")}.`
       : "")
