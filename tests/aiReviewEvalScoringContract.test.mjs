@@ -21,6 +21,11 @@
 //
 // Three different reviews -- one right, one accusing the wrong answer, one
 // asserting the opposite -- are one string to it.
+//
+// What replaces it is `lib/aiReviewEvalJudgement.ts`, whose requirements are
+// stated in `tests/aiReviewEvalJudgementScoring.test.mjs`. Until that contract
+// is wired into an evaluation, both files stand: this one says what today's
+// scorer does, and that one says what a scorer has to do.
 
 import assert from "node:assert/strict";
 import test from "node:test";
