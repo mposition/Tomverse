@@ -1,0 +1,21 @@
+{
+  "$comment": [
+    "The metadata beside the Active ring in the 1Password item, not the ring.",
+    "The rings live in the item's own secret fields; nothing secret goes in here.",
+    "Active describes what is deployed, so its phase is always 'deployed' and it",
+    "always names the deployment that carried it.",
+    "Contract: docs/ops/mobile-auth-key-rotation.md section 2.2.",
+    "Checked by: npm run check:mobile-auth-store-entries"
+  ],
+  "kind": "active",
+  "phase": "deployed",
+  "rotationId": "rot-2026-09-03-a",
+  "createdAt": "2026-09-03T10:00:00Z",
+  "fingerprint": {
+    "$comment": "How this is computed is NOT decided; see section 6, item 2.",
+    "algorithm": "<undecided -- see docs/ops/mobile-auth-key-rotation.md section 6>",
+    "value": "<the fingerprint of the material this entry describes>"
+  },
+  "targetSha": "0000000000000000000000000000000000000000",
+  "deploymentId": "00000000-0000-0000-0000-000000000000"
+}

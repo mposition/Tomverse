@@ -86,6 +86,16 @@ Date / timezone:    ____________________
       뿐입니다**: `Pending`은 다음 배포 후보이므로 배포 전에 Railway와 다른 것이
       정상입니다. Active가 어긋나면 이번 배포와 무관한 드리프트이므로 배포를 중단하고,
       Active를 기준으로 복구한 뒤 §2.1 검사와 단일 staged 배포를 다시 합니다
+- [ ] 모바일 인증을 서비스하는 배포이고 **Pending 항목이 있다면**
+      `npm run check:mobile-auth-store-entries -- --active <Active 사본> --pending <Pending 사본>`
+      — 두 항목의 **비밀이 아닌 절반**(`kind`·`phase`·`rotationId`·`createdAt`·
+      fingerprint·`targetSha`·`deploymentId`)이 §2.2의 모양인지, 그리고 Pending이 이미
+      끝난 회전의 잔여물이 아닌지(같은 `rotationId`·같은 fingerprint·같은 deployment ID·
+      Active보다 이른 `createdAt`)를 봅니다. **링을 사본에 붙여 넣으면 실패합니다.**
+      **이것은 구조 검사이지 배포 결속이 아닙니다** — deployment ID를 포함한 모든 값을
+      사람이 손으로 적으므로, 통과가 "그 배포에 그 재료가 들어 있다"를 뜻하지 않습니다
+      (§2.2·§6의 5번). fingerprint는 `algorithm`·`value`가 비어 있지 않은지만 보며,
+      **계산 규칙은 아직 미결입니다**(§6의 2번)
 - [ ] 모바일 인증을 서비스하는 배포라면 **배포 후
       `./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1` → Pending 승격** — 통제된
       exchange를 한 번 성공시켜 access token · refresh token과 그때 생긴

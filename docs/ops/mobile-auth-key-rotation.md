@@ -362,6 +362,49 @@ Railway에는 아직 이전 링이 있는 것이 맞습니다. 그래서 항목�
 `rotationId`와 deployment ID가 없으면 "이 Pending이 실린 배포"를 지목할 수 없고,
 그러면 롤백 대상도 지목할 수 없습니다.
 
+#### 그 다섯 field에 모양을 줍니다 — 그리고 그것이 증명하지 않는 것
+
+위 표를 산문으로만 두면 **다섯 field가 실질적으로 전부 선택 사항**이 됩니다. 그렇게
+해서 생기는 상태가 정확히 위험한 것입니다 — deployment ID가 빠진 Pending은 롤백
+대상을 지목할 수 없고, 끝난 회전의 Pending이 남아 있으면 그것이 다음 후보처럼
+읽힙니다.
+
+그래서 항목의 **비밀이 아닌 절반**(위 다섯 field)을 JSON 한 덩이로 적고, 그 모양을
+검사합니다. 링 자체는 vault 항목의 secret field에 있고 여기 들어오지 않습니다.
+
+```
+npm run check:mobile-auth-store-entries
+npm run check:mobile-auth-store-entries -- --active <파일> --pending <파일>
+```
+
+- 판정은 `scripts/mobile-auth-store-entry-core.mjs`에 있고, 인수를 주지 않으면
+  저장소의 template 둘(`docs/ops/mobile-auth-store-entries/`)을 검사합니다 — template이
+  규칙과 갈라지지 않게 하기 위해서입니다.
+- `phase`가 둘입니다. **`drafted`에서는 `deploymentId` field가 아예 없어야 하고**,
+  `deployed`에서는 반드시 있어야 합니다. 자리표시자를 넣지 않는 이유는 **없는 field는
+  "아직"으로 읽히고 자리표시자는 답으로 읽히기** 때문입니다. `kind`가 `active`이면
+  정의상 배포된 것이므로 `phase`는 `deployed`입니다.
+- **두 항목을 서로에 대해서도 봅니다.** 같은 `rotationId`, 같은 fingerprint, 같은
+  deployment ID, Active보다 이른 `createdAt` — 넷 다 "Pending이 사실은 이미 끝난
+  회전의 잔여물"인 모양입니다. 회전이 성공해 승격되면 Pending은 비므로, 이 대조는
+  **Pending이 있는 동안**의 검사입니다.
+- §5.1의 전면 교체는 같은 모양을 `kind: "emergency-pending"`으로 씁니다. 회전이 아닌
+  것이 회전으로 기록되지 않게 하기 위해서입니다.
+- **링을 붙여 넣으면 거절합니다.** `signingKeys`·`refreshPeppers` 같은 field 이름과
+  `id:재료` 모양·긴 base64 값을 거절하며, **거절 메시지는 그 값을 되풀이하지
+  않습니다** — 되풀이하는 순간 검사기가 막으려던 노출을 검사기가 하게 됩니다.
+
+**fingerprint는 구조만 봅니다.** `algorithm`과 `value`가 비어 있지 않은지만 확인하고
+값이 옳은지는 보지 않습니다 — **fingerprint를 무엇으로 계산할지가 아직 정해지지
+않았기 때문입니다**(§6의 2번). template의 그 두 칸은 자리표시자이고, 검사기가 규칙을
+임의로 정해 template을 통과시키지 않습니다.
+
+> **이 검사가 증명하지 않는 것.** 여기 있는 모든 값은 **사람이 손으로 적습니다 —
+> deployment ID를 포함해서.** 그러므로 통과는 "두 항목이 서로 모순되지 않고 한쪽이
+> 다른 쪽의 잔여물이 아니다"까지이며, **배포에 그 재료가 들어 있다는 증거가
+> 아닙니다.** 재료 대조는 배포 후 `verify:mobile-auth-deployment`의 일이고, 증거를
+> 그 배포에 결속하는 방법은 아직 미결입니다(§6의 5번).
+
 ### 결정란 — 확정(2026-09-02)
 
 | 결정란 | 확정값 |
@@ -526,6 +569,15 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    fingerprint·target SHA와 함께(§2.2 "Active와 Pending"). Active는 건드리지
    않습니다. **이 시점에 Railway가 Pending과 다른 것은 정상입니다**(§2.2 "Active와
    Pending").
+
+   `phase`는 아직 `drafted`이고 **`deploymentId` field는 없습니다** — 배포가 아직
+   없으므로 적을 것이 없습니다. 적은 뒤 모양을 확인합니다.
+
+   ```
+   npm run check:mobile-auth-store-entries -- --active <Active 사본> --pending <Pending 사본>
+   ```
+
+   **통과는 모양에 대한 것이지 배포에 대한 것이 아닙니다**(§2.2의 마지막 인용).
 3. §2.1의 검사를 **Pending 값으로** 실행합니다. 이전 키가 `RETIRED, verifies until …`로,
    새 키가 `ACTIVE (signs)`로 나와야 합니다.
 4. **Active와 Railway가 일치하는지 확인합니다** — 배포 **전에**, 지금 돌고 있는 배포를
@@ -568,7 +620,8 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    회전이 아니라 **그 세대의 신뢰를 연장하는 일**입니다(§2의 rev.18 정정).
 
    그런 다음 Pending의 셋을 **한 번에** 저장하고 배포합니다. **Railway deployment ID를
-   Pending에 적습니다** — 롤백 대상을 지목하는 유일한 값입니다.
+   Pending에 적고 `phase`를 `deployed`로 바꿉니다** — 그 id가 롤백 대상을 지목하는 유일한
+   값입니다. 이제 검사기가 그 field를 요구합니다.
 6. **배포 뒤 재료를 대조합니다**(계약 4번). 통제된 exchange를 한 번 성공시켜 access
    token·refresh token과 그때 생긴 `MobileRefreshRotation` 행의
    `secretDigest`·`pepperKid`를 모으고,
@@ -675,9 +728,11 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    > **틀렸습니다.** Active로 되돌리면 이전 자격증명은 오히려 **다시 받아들여집니다** —
    > 되돌린 배포가 그 세대의 키를 갖고 있으니까요. 이 확인의 실패가 말하는 것은 롤백이
    > 아니라 **지금 이 배포가 이전 세대를 끊고 있다**는 것입니다.
-8. **6·7이 통과하면 Pending을 Active로 승격**하고 Pending을 비웁니다. 승격이 검증 뒤에
-   있으므로 실패한 배포가 정본을 오염시키지 않습니다. **통과하지 못했을 때는 두
-   갈래입니다.**
+8. **6·7이 통과하면 Pending을 Active로 승격**하고 Pending을 비웁니다. 승격은 Pending
+   항목을 Active 자리에 **통째로 옮겨 쓰고 `kind`를 `active`로 바꾸는 것**입니다 —
+   Active를 제자리에서 반쯤 고치면 어느 순간에도 믿을 수 없는 Active가 됩니다. `phase`는
+   5번에서 이미 `deployed`입니다. 승격이 검증 뒤에 있으므로 실패한 배포가 정본을
+   오염시키지 않습니다. **통과하지 못했을 때는 두 갈래입니다.**
 
    - **증거 불충분**(`Nothing was decided about the deployment`) — **승격도 롤백도 하지
      않습니다.** Pending은 그대로 두고 exchange를 다시 해서 6번을 다시 돌립니다. 판정이
@@ -804,7 +859,9 @@ Active로 승격합니다. store만 정리하고 Railway를 두면 다음 회전
 5. **기존 Active를 `untrusted/unavailable`로 표시합니다.** 지우지 않습니다 — 나중에
    그 값이 나타나면 무엇이었는지 알아야 합니다.
 6. **새 값을 `Emergency Pending`으로 저장합니다.** Railway에서 store로 옮기는 방향이
-   아닙니다: 1번에서 만든 값을 store에 먼저 씁니다.
+   아닙니다: 1번에서 만든 값을 store에 먼저 씁니다. 메타데이터는 Pending과 같은 모양에
+   `kind: "emergency-pending"`을 씁니다(§2.2) — 회전이 아닌 것이 나중에 회전으로 읽히지
+   않게 하기 위해서입니다.
 7. §2.1의 검사를 그 값으로 실행하고, **단일 staged 배포**로 여덟 변수를 함께 씁니다.
    deployment ID를 적습니다.
 8. **배포 후 두 가지를 확인합니다** — `-Mode emergency`로 verify를 돌려 새 재료가
@@ -866,7 +923,7 @@ production 활성화를 결정할 때 함께 정할 것 여섯:
 
 1. **실제 vault 연동 확인.** 명령과 template은 이제 있습니다 —
    `docs/ops/mobile-auth-op-env.template`, 그리고 §2.1의 `op run` 명령. 합성값 검증도
-   끝났습니다(`Test-MobileAuthOpEnvTemplate.ps1` 14건). **남은 것은 그 reference가 실제
+   끝났습니다(`Test-MobileAuthOpEnvTemplate.ps1` 16건). **남은 것은 그 reference가 실제
    vault에서 해석되는지**이고, 그것은 여기서 할 수 없습니다.
 
    - **항목의 id를 vault에서 읽어 template의 두 줄에 넣습니다.** vault 이름의 공백은
@@ -880,9 +937,26 @@ production 활성화를 결정할 때 함께 정할 것 여섯:
      길이만 나옵니다. reference 하나만 따로 확인해야 한다면 **출력을 버리고 종료 코드만**
      봅니다.
    - **항목 생성과 실제 자격증명 배포는 또 별개**이며 이 항목에 포함되지 않습니다.
-2. **Active·Pending 두 항목의 최초 생성** — 첫 설정에서 만들어지며, 그것이 §3의 0번이
-   읽을 대상입니다. Pending의 다섯 field(§2.2)를 어디에 어떻게 적을지도 여기서
-   정합니다.
+2. **Active·Pending 두 항목 — 모양은 정해졌고, 두 가지가 남았습니다.**
+   다섯 field를 어떤 모양으로 적는지는 §2.2의 "그 다섯 field에 모양을 줍니다"가
+   정하고, `npm run check:mobile-auth-store-entries`가 그 모양을 검사합니다.
+   저장소에는 template 둘(`docs/ops/mobile-auth-store-entries/`)과 합성 테스트
+   (`tests/mobileAuthStoreEntry.test.mjs`)가 있습니다.
+
+   **남은 것 (a) — fingerprint를 무엇으로 계산할지가 미결입니다.** 검사기는
+   `algorithm`과 `value`가 비어 있지 않은지만 보고 값이 옳은지는 보지 않습니다.
+   무엇을 해싱할지(링 문자열 전체인지 활성 키 하나인지), 어떤 함수로, 어떤 인코딩으로,
+   그리고 salt·pepper 없이 해싱한 값이 **저비용 사전 공격의 표적이 되지 않는지**가
+   함께 정해져야 하며, **제가 임의로 고르지 않았습니다.** 정해지기 전까지 template의 그
+   두 칸은 자리표시자이고, 검사기는 template에 한해 그 자리표시자를 통과시킵니다.
+
+   **남은 것 (b) — 실제 항목의 최초 생성.** 첫 설정에서 만들어지며 그것이 §3의 0번이
+   읽을 대상입니다. 이 저장소에서는 하지 않았습니다: 1번(실제 vault 연동)과 마찬가지로
+   vault 접근이 필요하고, 그것은 별개 승인입니다.
+
+   **구조 검사는 배포 결속이 아닙니다.** 모든 field를 사람이 손으로 적으므로 —
+   deployment ID를 포함해서 — 통과는 두 항목이 서로 모순되지 않는다는 것까지입니다.
+   5번은 이것으로 해결되지 않습니다.
 3. **상시 점검 — 도구는 있고, 운영은 미결입니다.**
    `npm run report:mobile-auth-keyring-health`(`--json` 지원)가 지금 설정된 링의 상태를
    보고합니다 — 활성 / 선언되지 않음 / 미래 시각 은퇴 / 유예 안(남은 초) / 유예 지남,
