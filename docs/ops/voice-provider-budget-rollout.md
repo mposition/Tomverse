@@ -367,8 +367,19 @@ Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너�
 
 5. **[staging Postgres shell — 쓰기]** staging에서만 flag를 켭니다.
    ```sql
-   INSERT INTO "AppSetting" (key, value) VALUES ('feature.voiceInputEnabled', 'true')
-   ON CONFLICT (key) DO UPDATE SET value = 'true';
+   INSERT INTO "AppSetting" (key, value, "updatedAt")
+   VALUES ('feature.voiceInputEnabled', 'true', NOW())
+   ON CONFLICT (key) DO UPDATE SET value = 'true', "updatedAt" = NOW();
+   ```
+
+   **`updatedAt`을 직접 넣어야 합니다.** Prisma의 `@updatedAt`은 클라이언트가
+   채우는 값이라 DB에 default가 없고, raw SQL로 넣으면 `NOT NULL` 위반으로
+   실패합니다. 대소문자가 섞여 있으므로 큰따옴표도 필요합니다.
+   (`createdAt`은 `@default(now())`라 생략해도 됩니다.)
+
+   확인 — 읽기 전용:
+   ```sql
+   SELECT key, value, "updatedAt" FROM "AppSetting" WHERE key = 'feature.voiceInputEnabled';
    ```
 
 6. **[로컬 PowerShell 또는 브라우저]** readiness를 읽습니다. 자격증명 불필요,
@@ -392,18 +403,26 @@ Railway MCP에 명령 실행 도구가 없고 CLI도 토큰도 이 컨테이너�
 **production flag는 이 절차에서 켜지 않습니다.** B-5와 B-6이 남아 있는 동안
 production 활성화는 §14가 막습니다.
 
-지금 할 수 있는 것은 **값을 미리 넣어 두는 것**뿐이고, 그것이 env-first의
-production 쪽 절반입니다.
+**그리고 지금은 변수도 넣지 않습니다.** 2026-09-08 확인:
 
-1. **[Railway 웹 대시보드 — production 환경]** 변수 두 개 설정. **쓰기.**
-2. **[production 서비스 shell]** `npm run check:voice-provider-budget-env`.
-   `500ce79f`에도 `lib/voiceProviderBudget.ts`는 있으므로 이 검사는 지금도
-   동작합니다.
-3. `/api/ready`는 **flag가 꺼져 있으므로 이 값들에 대해 아무 말도 하지
-   않습니다.** 그것이 정상이고, 그래서 2번이 필요합니다.
-4. `voice-transcription-model-price` 검사는 **main이 `dde6ad87`을 받은 뒤에야**
-   production에 존재합니다(§0.3). 그 전까지 production readiness에 그 항목은
-   없습니다.
+> `main`에는 **voice 관련 파일이 하나도 없습니다.** `lib/voiceProviderBudget.ts`
+> 자체가 없고, 검사기도 npm script도 없습니다. `main`은 `develop`보다 3,339 커밋
+> 뒤에 있습니다.
+
+이 문서의 이전 판은 "값을 미리 넣어 두는 것이 env-first의 production 쪽 절반"
+이라고 적었고, **그것은 틀렸습니다.** env-first가 지키는 것은 "flag를 켜기 전에
+변수가 있어야 한다"인데, production에는 켤 flag를 읽을 코드가 없습니다. 지금
+넣으면:
+
+- 그 변수를 읽을 코드가 없습니다
+- `/api/ready`가 그것에 대해 아무 말도 하지 않습니다
+- 검사기는 script가 없어 **실행되지 않습니다** — 검증 자체가 불가능합니다
+- 대가로 효과 없는 production 재배포가 한 번 일어납니다
+
+**production 설정은 `develop` → `main` 릴리스와 함께 합니다.** 그 시점에 코드와
+변수가 같이 들어가고, 같은 시점에 검사기로 검증됩니다. 순서는 §5.1과 같습니다 —
+flag가 꺼진 상태에서 변수를 넣고, 검사기로 확인하고, flag는 **B-5·B-6이 풀릴
+때까지 켜지 않습니다.**
 
 ### 5.3 롤백
 
@@ -411,7 +430,8 @@ production 쪽 절반입니다.
 
 1. **[Postgres shell — 쓰기]** flag를 끕니다.
    ```sql
-   UPDATE "AppSetting" SET value = 'false' WHERE key = 'feature.voiceInputEnabled';
+   UPDATE "AppSetting" SET value = 'false', "updatedAt" = NOW()
+   WHERE key = 'feature.voiceInputEnabled';
    ```
 2. 더 급하면 **[Railway 웹 대시보드]** `VOICE_INPUT_KILL_SWITCH`에 아무 값이나
    넣습니다. DB를 읽지 않고 끕니다.
@@ -508,6 +528,14 @@ production:
 켜질 수 없기 때문입니다. production 쪽 증거는 1·2번(값이 있고 검사기가
 통과)까지이고, flag를 켜는 순간의 readiness 확인은 **B-5·B-6이 풀린 뒤 그
 활성화 절차의 일부**입니다.
+
+**1·2번의 production 절반은 오늘 충족 불가능합니다** — `main`에 voice 코드가
+없어 검사기가 존재하지 않습니다(§5.2). 그러므로 B-4는 **`develop` → `main`
+릴리스 이전에는 해결로 바뀔 수 없습니다.** B-5·B-6과 달리 이것은 이 저장소가
+스스로 풀 수 있는 대기이며, 릴리스 결정에 딸린 것입니다.
+
+staging 절반은 2026-09-08에 충족됐습니다:
+`docs/ops/voice-provider-budget-records/2026-09-08-staging-d79d3c8673db4a9f5f4cd109bc99c50c21e182e3.md`.
 
 이 다섯이 갖춰지기 전까지 B-4는 **"결정·코드 완료, 환경별 실제 한도 설정
 대기"** 그대로입니다.
