@@ -172,17 +172,21 @@ const describe = (
       // deploying spends the window -- an instant backdated two minutes with
       // an eight-minute deploy leaves five of the approved fifteen. Printing
       // the end alone made that arithmetic the operator's to do.
+      //
+      // Reported, and nothing more. A version of this advised re-dating the
+      // retirement when less than half the window was left, which was right
+      // for a line written minutes ago and wrong for every other one: told to
+      // re-date a pepper retired twenty days earlier, an operator would extend
+      // that generation's trust by twenty days, and both runs exit 0. This
+      // check cannot tell a candidate retirement from a deployed one -- it
+      // reads one set of variables, not two -- so the instruction lives in
+      // section 3 step 5 of the runbook, where the line in question is the one
+      // just written and not yet deployed.
       const remainingSeconds = Math.round((expiresAt - now) / 1000);
       console.log(
         `  ${keyId}  RETIRED, verifies until ${new Date(expiresAt).toISOString()} ` +
           `(${remainingSeconds}s left of ${graceSeconds}s, as of this check)`
       );
-      if (remainingSeconds < graceSeconds / 2) {
-        notes.push(
-          `${label}: "${keyId}" has ${remainingSeconds}s of its ${graceSeconds}s window left, and the deploy has not happened yet. ` +
-            `Whatever is still holding credentials from that generation gets the remainder, not the window. Re-date the retirement and re-run this check if that is not enough.`
-        );
-      }
     }
   }
 

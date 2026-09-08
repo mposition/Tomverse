@@ -267,7 +267,7 @@ test("two ids holding the same material fail, on either ring", () => {
   assert.equal(genuine.code, 0, genuine.out);
 });
 
-test("the remaining grace is reported, and a mostly spent window is called out", () => {
+test("the remaining grace is reported, and nothing is advised about it", () => {
   // The grace runs from the retirement instant, which is written before the
   // deploy -- so preparing and deploying spends it. Printing only the end
   // instant left that arithmetic to the operator, and being two minutes early
@@ -281,17 +281,30 @@ test("the remaining grace is reported, and a mostly spent window is called out",
   assert.match(justNow.out, /\d+s left of 900s, as of this check/);
   assert.equal(/has \d+s of its 900s window left/.test(justNow.out), false);
 
+  // And no advice attached to it. Advising a re-date when less than half the
+  // window is left reads as sound until the entry is one that was deployed
+  // days ago: re-dating that one extends the trust it already spent, and the
+  // check exits 0 either way. It cannot tell the two apart -- it sees one set
+  // of variables -- so it reports the number and stops.
   const mostlySpent = new Date(Date.now() - 600_000).toISOString();
   const late = run({
     ...healthy,
     MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1},sign-2:${SIGN_2}`,
     MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${mostlySpent}`,
   });
-  // A note, not a failure: a short window is a judgement about who still holds
-  // credentials from that generation, and the check cannot make it.
   assert.equal(late.code, 0, late.out);
-  assert.match(late.out, /has \d+s of its 900s window left, and the deploy has not happened yet/);
-  assert.match(late.out, /Re-date the retirement/);
+  assert.match(late.out, /\d+s left of 900s, as of this check/);
+  assert.equal(/[Rr]e-date/.test(late.out), false, late.out);
+
+  // The same for a pepper long past most of its thirty days.
+  const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 3600 * 1000).toISOString();
+  const oldPepper = run({
+    ...healthy,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-2:${PEPPER_2}`,
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `pep-1@${twentyDaysAgo}`,
+  });
+  assert.equal(oldPepper.code, 0, oldPepper.out);
+  assert.equal(/[Rr]e-date/.test(oldPepper.out), false, oldPepper.out);
 });
 
 test("no output carries key material", () => {
