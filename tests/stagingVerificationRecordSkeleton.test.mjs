@@ -210,7 +210,12 @@ test("a template checked out with CRLF renders the same record as one with LF", 
         "docs/ops/mobile-auth-key-rotation-verification-records/_record-template.md",
         "utf8"
     );
-    const crlf = (text) => text.replace(/\n/g, "\r\n");
+    // Normalise first. On a Windows checkout these files are already CRLF, and
+    // replacing "\n" in one produces "\r\r\n" -- a third line ending that
+    // neither the generator nor this test is about, and the test failed on the
+    // very platform it was written for.
+    const lf = (text) => text.replace(/\r\n?/g, "\n");
+    const crlf = (text) => lf(text).replace(/\n/g, "\r\n");
     const render = (checklistText, templateText) =>
         renderRecord({
             template: templateText,
@@ -221,12 +226,15 @@ test("a template checked out with CRLF renders the same record as one with LF", 
             checklistSourceSha: "b".repeat(40),
         });
 
-    const fromLf = render(checklist, template);
+    const fromLf = render(lf(checklist), lf(template));
     const fromCrlf = render(crlf(checklist), crlf(template));
     assert.equal(fromCrlf, fromLf);
+    // The samples really are different, so the equality above is the
+    // generator's doing rather than two identical inputs.
+    assert.notEqual(crlf(template), lf(template));
 
     const rows = fromLf.split("\n").filter((line) => /^\| \| /.test(line));
-    assert.equal(rows.length, checklistItems(checklist).length);
+    assert.equal(rows.length, checklistItems(lf(checklist)).length);
     assert.ok(rows.length > 1, "one row would mean the table anchor did not match");
 });
 
