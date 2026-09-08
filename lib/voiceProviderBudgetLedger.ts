@@ -11,6 +11,10 @@ import {
 import { VoiceBudgetError } from "@/lib/voiceInputBudget";
 import {
   resolveVoiceProviderBudget,
+  secondsUntilVoiceBudgetDayReset,
+  secondsUntilVoiceBudgetMonthReset,
+  voiceBudgetDayStart,
+  voiceBudgetMonthStart,
   VOICE_PROVIDER_BUDGET_PERIODS,
 } from "@/lib/voiceProviderBudget";
 
@@ -68,15 +72,6 @@ const providerKey = () =>
   `voice:${createHash("sha256")
     .update(`voice-provider-seconds:${secret()}`)
     .digest("hex")}`;
-
-const dayStart = (now: Date) =>
-  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-
-const monthStart = (now: Date) =>
-  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-
-const secondsUntilTomorrow = (now: Date) =>
-  Math.max(1, Math.ceil((dayStart(now).getTime() + 86_400_000 - now.getTime()) / 1000));
 
 /** One booking in one bucket. `periodStart` travels so settlement cannot drift. */
 type ProviderBooking = {
@@ -144,27 +139,30 @@ export const reserveVoiceProviderSeconds = async (input: {
     );
   }
 
-  if (
-    seconds > limits.secondsPerDay ||
-    seconds > limits.secondsPerMonth
-  ) {
+  // A clip larger than a whole bucket. Which bucket decides the retry hint:
+  // over the day it is tomorrow, over only the month it is the 1st. (The month
+  // can sit below the day outside production, where that is reported rather
+  // than refused, so this is not unreachable.)
+  if (seconds > limits.secondsPerDay || seconds > limits.secondsPerMonth) {
     throw new VoiceBudgetError(
       429,
       VOICE_OPERATIONAL_LIMIT_REACHED,
       "Voice input has reached its operational limit.",
-      secondsUntilTomorrow(now)
+      seconds > limits.secondsPerDay
+        ? secondsUntilVoiceBudgetDayReset(now)
+        : secondsUntilVoiceBudgetMonthReset(now)
     );
   }
 
   const key = providerKey();
   const day: ProviderBooking = {
     period: VOICE_PROVIDER_BUDGET_PERIODS.day,
-    periodStart: dayStart(now),
+    periodStart: voiceBudgetDayStart(now),
     seconds,
   };
   const month: ProviderBooking = {
     period: VOICE_PROVIDER_BUDGET_PERIODS.month,
-    periodStart: monthStart(now),
+    periodStart: voiceBudgetMonthStart(now),
     seconds,
   };
 
@@ -174,7 +172,7 @@ export const reserveVoiceProviderSeconds = async (input: {
       429,
       VOICE_OPERATIONAL_LIMIT_REACHED,
       "Voice input has reached its operational limit.",
-      secondsUntilTomorrow(now)
+      secondsUntilVoiceBudgetDayReset(now)
     );
   }
 
@@ -188,11 +186,14 @@ export const reserveVoiceProviderSeconds = async (input: {
     // caller sees the refusal, or a month-capped deployment burns its daily
     // budget on requests that never ran.
     await unbook(key, day).catch(() => undefined);
+    // The month's own boundary, not the day's. Answering a monthly refusal
+    // with "try tomorrow" sends the user back into the same refusal every day
+    // until the 1st, and the retry-after they were given was never true.
     throw new VoiceBudgetError(
       429,
       VOICE_OPERATIONAL_LIMIT_REACHED,
       "Voice input has reached its operational limit.",
-      secondsUntilTomorrow(now)
+      secondsUntilVoiceBudgetMonthReset(now)
     );
   }
 
