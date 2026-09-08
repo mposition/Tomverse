@@ -201,7 +201,8 @@
     "report:ai-review-drafting-plan": "node --conditions=react-server --import tsx scripts/report-ai-review-drafting-plan.mjs",
     "check:mobile-auth-keyring": "node --import tsx scripts/check-mobile-auth-keyring.mjs",
     "verify:mobile-auth-deployment": "node --conditions=react-server --import tsx scripts/verify-mobile-auth-deployment.mjs",
-    "report:mobile-auth-keyring-health": "node --import tsx scripts/report-mobile-auth-keyring-health.mjs"
+    "report:mobile-auth-keyring-health": "node --import tsx scripts/report-mobile-auth-keyring-health.mjs",
+    "score:ai-review-judgements": "node --conditions=react-server --import tsx scripts/score-ai-review-judgements.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.49",

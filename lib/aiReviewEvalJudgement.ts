@@ -75,6 +75,8 @@
  * it produces, and the judgement is made about that output afterwards.
  */
 
+import { createHash } from "node:crypto";
+
 import {
     AI_REVIEW_EVAL_FINDING_KINDS,
     type AiReviewEvalFindingKind,
@@ -197,9 +199,30 @@ export type AiReviewJudgedGoldItem = {
     targetLabel: string;
 };
 
+/**
+ * A requirement this case knows about, by the id its gold refers to.
+ *
+ * The catalogue exists so a gold cannot name something the case never
+ * registered -- a typo in an id would otherwise become a gold item nothing
+ * could ever satisfy, and it would read as the reviewer's failure.
+ *
+ * **It does not constrain what a reviewer may find.** A claim about an
+ * unregistered requirement is not a registration error; it is a finding
+ * outside the gold, and `outsideGoldVerdict` is where that is settled. The
+ * catalogue is about the case's own bookkeeping and nothing else.
+ */
+export type AiReviewJudgedRequirement = {
+    id: string;
+    description: string;
+};
+
 export type AiReviewJudgedCase = {
     caseId: string;
     contractVersion: string;
+    /** The answers this case has, by label. Gold items must name one. */
+    responseLabels: readonly string[];
+    /** Requirements the case registers. Gold items must name one. */
+    requirements: readonly AiReviewJudgedRequirement[];
     /** Per finding kind, what a correct review reports. */
     gold: Partial<Record<AiReviewEvalFindingKind, readonly AiReviewJudgedGoldItem[]>>;
     /** Per kind: is the gold above everything reportable of that kind? */
@@ -388,7 +411,14 @@ export function scoreJudgedCase(
     record: AiReviewJudgementRecord,
     expected: { observationRef?: string } = {}
 ): AiReviewJudgedOutcome {
-    const problems = verifyJudgementRecord(testCase, record, expected);
+    // The case's own registration first, then the record. A gold naming a
+    // requirement the case never registered produces a miss nothing can
+    // satisfy, and it would be recorded against the reviewer -- so a caller
+    // cannot skip it, for the same reason it cannot skip the record check.
+    const problems = [
+        ...validateJudgedCase(testCase),
+        ...verifyJudgementRecord(testCase, record, expected),
+    ];
     if (problems.length > 0) {
         return {
             scored: false,
@@ -527,4 +557,225 @@ export function scoreJudgedCase(
         contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
         byKind,
     };
+}
+
+// ---------------------------------------------------------------------------
+// Gold registration
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the CASE is registered consistently with itself.
+ *
+ * A different question from anything the scorer asks, and it has to stay
+ * different. This checks that the gold points at requirements and answers the
+ * case declares -- a mistyped id would otherwise become a gold item nothing
+ * can satisfy, and the miss would be recorded against the reviewer.
+ *
+ * **It says nothing about what a reviewer may report.** A finding about an
+ * unregistered requirement is not a registration error: it is a finding
+ * outside the gold, settled by `outsideGoldVerdict`, and the whole point of
+ * that route is that a case's list is not the limit of what is true about it.
+ * Nothing here may reject a claim, and nothing here reads the claims at all.
+ */
+export function validateJudgedCase(
+    testCase: AiReviewJudgedCase
+): readonly string[] {
+    const problems: string[] = [];
+    if (testCase.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
+        problems.push(
+            `the case is written for ${testCase.contractVersion} and this contract is ` +
+                `${AI_REVIEW_SCORING_CONTRACT_VERSION}`
+        );
+    }
+    const labels = new Set(testCase.responseLabels ?? []);
+    if (labels.size === 0) {
+        problems.push("the case registers no answer labels, so no gold item can name one");
+    }
+    const requirementIds = new Set<string>();
+    for (const requirement of testCase.requirements ?? []) {
+        if (!isSignedName(requirement?.id)) {
+            problems.push("a registered requirement has no id");
+            continue;
+        }
+        if (requirementIds.has(requirement.id)) {
+            problems.push(`requirement "${requirement.id}" is registered twice`);
+            continue;
+        }
+        if (!isSignedName(requirement.description)) {
+            problems.push(
+                `requirement "${requirement.id}" has no description, so nobody reading ` +
+                    `a score can tell what was required`
+            );
+        }
+        requirementIds.add(requirement.id);
+    }
+    for (const kind of AI_REVIEW_EVAL_FINDING_KINDS) {
+        const gold = testCase.gold[kind];
+        if (gold === undefined) {
+            if (testCase.goldCompleteness[kind] !== undefined) {
+                problems.push(
+                    `goldCompleteness.${kind} is stated and there is no ${kind} gold to ` +
+                        `be complete about`
+                );
+            }
+            continue;
+        }
+        if (testCase.goldCompleteness[kind] === undefined) {
+            problems.push(
+                `${kind} has gold and no completeness claim; whether wrong findings may ` +
+                    `be counted depends on it, so it cannot be left unsaid`
+            );
+        }
+        const seen = new Set<string>();
+        for (const item of gold) {
+            const key = claimKey(item);
+            if (!requirementIds.has(item.requirementId)) {
+                problems.push(
+                    `${kind} gold names requirement "${item.requirementId}", which the ` +
+                        `case does not register`
+                );
+            }
+            if (!labels.has(item.targetLabel)) {
+                problems.push(
+                    `${kind} gold names answer "${item.targetLabel}", which the case does ` +
+                        `not have`
+                );
+            }
+            if (seen.has(key)) {
+                problems.push(`${kind} gold lists ${key} twice`);
+            }
+            seen.add(key);
+        }
+    }
+    return problems;
+}
+
+// ---------------------------------------------------------------------------
+// Binding a score to the things it was computed from
+// ---------------------------------------------------------------------------
+
+/** Stable JSON: object keys sorted, so a digest is about content and not order. */
+const canonical = (value: unknown): string => {
+    if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+    const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+    return `{${entries
+        .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+        .join(",")}}`;
+};
+
+const digest = (value: unknown): string =>
+    `sha256:${createHash("sha256").update(canonical(value), "utf8").digest("hex")}`;
+
+/**
+ * The identifier a judgement record must carry to be about THIS output.
+ *
+ * Derived from the output's own content rather than assigned beside it. A
+ * hand-written reference is a label, and a label can name an output that does
+ * not exist -- which is what `observationRef` was until now, by its own
+ * admission.
+ */
+export const observationRefFor = (observation: unknown): string => digest(observation);
+
+/** Content digests of the two things a score is computed from. */
+export const judgedCaseDigest = (testCase: AiReviewJudgedCase): string =>
+    digest(testCase);
+export const judgementRecordDigest = (record: AiReviewJudgementRecord): string =>
+    digest(record);
+
+/**
+ * A score, bound to the case, the record and the output it came from.
+ *
+ * Stored beside them, so a later reader can ask the only question that matters
+ * about a stored number: is it still about these files.
+ */
+export type AiReviewJudgedScoringArtifact = {
+    caseId: string;
+    contractVersion: string;
+    observationRef: string;
+    caseDigest: string;
+    recordDigest: string;
+    scoredAt: string;
+    outcome: AiReviewJudgedOutcome;
+};
+
+/** Scores, and binds the result to exactly what produced it. */
+export function buildScoringArtifact(input: {
+    testCase: AiReviewJudgedCase;
+    record: AiReviewJudgementRecord;
+    observation: unknown;
+    scoredAt: string;
+}): AiReviewJudgedScoringArtifact {
+    const observationRef = observationRefFor(input.observation);
+    return {
+        caseId: input.testCase.caseId,
+        contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+        observationRef,
+        caseDigest: judgedCaseDigest(input.testCase),
+        recordDigest: judgementRecordDigest(input.record),
+        scoredAt: input.scoredAt,
+        outcome: scoreJudgedCase(input.testCase, input.record, { observationRef }),
+    };
+}
+
+/**
+ * Whether a stored score is still about the files beside it.
+ *
+ * Edit the gold, edit a judgement, or score a different output, and the
+ * digests stop matching. The artifact is then STALE -- not wrong, not
+ * approximately right, just no longer a statement about anything present --
+ * and re-scoring is the only thing that makes it a statement again.
+ *
+ * This is why the observation reference is derived rather than written down.
+ * A reference somebody typed can go on matching after the output it names has
+ * changed underneath it.
+ */
+export function verifyScoringArtifact(input: {
+    testCase: AiReviewJudgedCase;
+    record: AiReviewJudgementRecord;
+    observation: unknown;
+    artifact: AiReviewJudgedScoringArtifact;
+}): readonly string[] {
+    const problems: string[] = [];
+    const { artifact, testCase, record } = input;
+    if (artifact.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
+        problems.push(
+            `the artifact was scored under ${artifact.contractVersion} and this contract ` +
+                `is ${AI_REVIEW_SCORING_CONTRACT_VERSION}`
+        );
+    }
+    if (artifact.caseId !== testCase.caseId) {
+        problems.push(
+            `the artifact is about ${artifact.caseId} and the case is ${testCase.caseId}`
+        );
+    }
+    const observationRef = observationRefFor(input.observation);
+    if (artifact.observationRef !== observationRef) {
+        problems.push(
+            "the artifact was scored from a different reviewer output than the one here"
+        );
+    }
+    if (artifact.caseDigest !== judgedCaseDigest(testCase)) {
+        problems.push(
+            "the case has changed since this was scored, so the score is about a gold " +
+                "that no longer exists"
+        );
+    }
+    if (artifact.recordDigest !== judgementRecordDigest(record)) {
+        problems.push(
+            "the judgement record has changed since this was scored, so the score is " +
+                "about judgements nobody is making any more"
+        );
+    }
+    // The record must also still be about this output, by the same derived
+    // reference. An artifact whose digests match a record that does not is a
+    // consistent statement about an inconsistent pair.
+    if (record.observationRef !== observationRef) {
+        problems.push(
+            "the judgement record names a different reviewer output than the one here"
+        );
+    }
+    return problems;
 }
