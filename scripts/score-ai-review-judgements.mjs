@@ -33,6 +33,7 @@ import {
   buildScoringArtifact,
   judgedCaseShapeProblems,
   judgementRecordShapeProblems,
+  observationRefFor,
   observationShapeProblems,
   scoringArtifactShapeProblems,
   validateJudgedCase,
@@ -41,11 +42,24 @@ import {
   verifyRecordAgainstObservation,
 } from "../lib/aiReviewEvalJudgement.ts";
 
-const argValue = (name) =>
-  process.argv
-    .slice(2)
-    .find((argument) => argument.startsWith(`--${name}=`))
-    ?.slice(name.length + 3);
+/**
+ * A named argument, in either form the header documents.
+ *
+ * `--dir=<path>` and `--dir <path>` both work. Only the first was accepted,
+ * while every usage line in this repository writes the second -- so the
+ * documented command failed with "--dir=<directory> is required", which reads
+ * as the argument being absent rather than being spelled the other way.
+ * A following token starting with `--` is the next flag, never this value.
+ */
+const argValue = (name) => {
+  const args = process.argv.slice(2);
+  const inline = args.find((argument) => argument.startsWith(`--${name}=`));
+  if (inline !== undefined) return inline.slice(name.length + 3);
+  const at = args.indexOf(`--${name}`);
+  if (at === -1) return undefined;
+  const next = args[at + 1];
+  return next === undefined || next.startsWith("--") ? undefined : next;
+};
 const hasFlag = (name) => process.argv.slice(2).includes(`--${name}`);
 
 const die = (message) => {
@@ -188,7 +202,17 @@ if (verifyMode) {
   process.exit(0);
 }
 
-failed = report("judgement record", verifyJudgementRecord(testCase, record)) || failed;
+// The derived reference is passed here, not only inside the scorer. Without
+// it this section printed `ok` for a record the very next step refused on
+// exactly that ground -- the same defect the draft tool had, where a checker
+// passes what the real check fails.
+failed =
+  report(
+    "judgement record",
+    verifyJudgementRecord(testCase, record, {
+      observationRef: observationRefFor(observation),
+    })
+  ) || failed;
 // And that the record actually read THIS output: indexes in range, quotes
 // present, every submitted finding accounted for. The digest says the same
 // bytes were there and nothing more.
@@ -221,13 +245,26 @@ if (scored.outcome.scored) {
       outcome.truePositives === 0 &&
       outcome.falseNegatives === 0 &&
       outcome.falsePositives === 0 &&
-      outcome.goldGaps === 0;
+      outcome.goldGaps === 0 &&
+      outcome.supportClaims === 0 &&
+      outcome.insufficientFindings === 0;
     if (empty) continue;
     console.log(
       `  ${kind.padEnd(16)} TP ${outcome.truePositives}  FN ${outcome.falseNegatives}  ` +
         `FP ${outcome.falsePositives}  gaps ${outcome.goldGaps}  ` +
         `precision ${outcome.precisionCounted ? "counted" : "excluded"}`
     );
+    // The two diagnostics, printed rather than folded into the numbers above.
+    // `supportClaims` is the exclusion an extractor could abuse, and
+    // `insufficientFindings` is the part of `falsePositives` that is a real
+    // problem named too vaguely rather than a problem invented -- nothing
+    // measuring invention may be derived from the false-positive count.
+    if (outcome.supportClaims > 0 || outcome.insufficientFindings > 0) {
+      console.log(
+        `  ${"".padEnd(16)} support ${outcome.supportClaims}  ` +
+          `insufficient ${outcome.insufficientFindings} (inside FP)`
+      );
+    }
   }
 } else {
   // A refusal is a report. It is written to the artifact rather than thrown
