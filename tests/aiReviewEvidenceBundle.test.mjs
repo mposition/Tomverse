@@ -451,12 +451,17 @@ test("judged cases are checked here by the same function the scoring CLI calls",
     // Not "an equivalent sequence": the same function. Two callers each
     // remembering an order is how the old evidence checks grew their gaps, and
     // that is what this module was written to end.
-    const { AI_REVIEW_SCORING_CONTRACT_VERSION, buildScoringArtifact, observationRefFor } =
-        await import("../lib/aiReviewEvalJudgement.ts");
+    const {
+        AI_REVIEW_SCORING_CONTRACT_VERSION,
+        buildScoringArtifact,
+        judgedSourceCaseDigest,
+        observationRefFor,
+    } = await import("../lib/aiReviewEvalJudgement.ts");
 
     const judgedCase = {
         caseId: DATASET.cases[0].id,
         contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+        sourceCaseDigest: judgedSourceCaseDigest(DATASET.cases[0]),
         responseLabels: DATASET.cases[0].responses.map((response) => response.label),
         requirements: [{ id: "year", description: "the year the answers disagree about" }],
         gold: { contradictions: [{ requirementId: "year", targetLabel: "b" }] },
@@ -549,6 +554,7 @@ test("a recorded refusal is sound evidence and is not counted", () => {
                 testCase: {
                     caseId: DATASET.cases[0].id,
                     contractVersion: "ai-review-scoring-judged-v1",
+                    sourceCaseDigest: "sha256:not-the-one",
                     responseLabels: ["a", "b"],
                     requirements: [],
                     gold: {},

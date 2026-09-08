@@ -24,6 +24,7 @@ const DEADLINE = "objection_deadline";
 const judgedCase = (overrides = {}) => ({
     caseId: "ko-safety-sensitive-003",
     contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+    sourceCaseDigest: "sha256:the-question-and-answers-a-person-read",
     responseLabels: ["a", "b", "c"],
     requirements: [
         { id: DEADLINE, description: "송달일부터 2주 이내 이의신청 기한" },

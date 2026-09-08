@@ -17,14 +17,28 @@ import test from "node:test";
 
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
+    judgedSourceCaseDigest,
     observationRefFor,
 } from "../lib/aiReviewEvalJudgement.ts";
 
 const DEADLINE = "objection_deadline";
 
-const testCase = () => ({
+/** The dataset entry a person judged: the question and the answers themselves. */
+const sourceCase = (overrides = {}) => ({
+    id: "ko-safety-sensitive-003",
+    question: "지급명령에 어떻게 대응해야 합니까?",
+    responses: [
+        { label: "a", content: "a의 답변" },
+        { label: "b", content: "b의 답변" },
+        { label: "c", content: "c의 답변" },
+    ],
+    ...overrides,
+});
+
+const testCase = (overrides = {}) => ({
     caseId: "ko-safety-sensitive-003",
     contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+    sourceCaseDigest: judgedSourceCaseDigest(sourceCase()),
     responseLabels: ["a", "b", "c"],
     requirements: [
         { id: DEADLINE, description: "송달일부터 2주 이내 이의신청 기한" },
@@ -32,6 +46,7 @@ const testCase = () => ({
     ],
     gold: { missingPoints: [{ requirementId: DEADLINE, targetLabel: "c" }] },
     goldCompleteness: { missingPoints: true },
+    ...overrides,
 });
 
 const observation = () => ({
@@ -504,14 +519,9 @@ const writeJournal = (root, entries) =>
         "utf8"
     );
 
-const datasetWith = (labels = ["a", "b", "c"]) => ({
+const datasetWith = (overrides = {}) => ({
     version: "decision-v2",
-    cases: [
-        {
-            id: "ko-safety-sensitive-003",
-            responses: labels.map((label) => ({ label })),
-        },
-    ],
+    cases: [sourceCase(overrides)],
 });
 
 test("a judged score is checked against the run's journal and the frozen set", async (t) => {
@@ -554,7 +564,11 @@ test("a judged score is checked against the run's journal and the frozen set", a
 
     // And a case whose answers are not the answers the run showed: a gold item
     // could then name an answer nobody was ever given.
-    write(root, "dataset.json", datasetWith(["a", "b"]));
+    write(
+        root,
+        "dataset.json",
+        datasetWith({ responses: [{ label: "a", content: "a의 답변" }, { label: "b", content: "b의 답변" }] })
+    );
     const differentAnswers = await run(root, bound);
     assert.equal(differentAnswers.status, 1);
     assert.match(differentAnswers.stdout, /a gold item could name an answer the run never showed/);
@@ -603,4 +617,106 @@ test("a correctly recorded refusal verifies and is still not countable", async (
     assert.match(verified.stdout, /may NOT be counted in a score or cited as promotion evidence/);
     assert.match(verified.stdout, /correctly recorded refusal and not a result/);
     assert.doesNotMatch(verified.stdout, /It may be counted in a score/);
+});
+
+test("a rewritten question breaks the binding, even with the same id and labels", async (t) => {
+    // The gap a digest of the JUDGED case could not close: `caseDigest` covers
+    // the gold and the catalogue, not the text a person read. Same id, same
+    // labels, a different question -- and an old judgement with its old score
+    // verified against it.
+    const { root } = fixture(t);
+    await run(root);
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: observation() }]);
+    write(root, "dataset.json", datasetWith());
+    const bound = [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ];
+    assert.equal((await run(root, bound)).status, 0);
+
+    write(root, "dataset.json", datasetWith({ question: "완전히 다른 질문입니다" }));
+    const rewrittenQuestion = await run(root, bound);
+    assert.equal(rewrittenQuestion.status, 1);
+    assert.match(
+        rewrittenQuestion.stdout,
+        /question or answers are not the ones this judgement was made from/
+    );
+
+    // An answer rewritten under the same label is the same failure.
+    write(
+        root,
+        "dataset.json",
+        datasetWith({
+            responses: [
+                { label: "a", content: "a의 답변" },
+                { label: "b", content: "b의 답변" },
+                { label: "c", content: "c의 답변이 완전히 바뀌었습니다" },
+            ],
+        })
+    );
+    const rewrittenAnswer = await run(root, bound);
+    assert.equal(rewrittenAnswer.status, 1);
+    assert.match(rewrittenAnswer.stdout, /judgement is about text the dataset no longer holds/);
+});
+
+test("a broken journal or dataset is a problem, not a skipped check", async (t) => {
+    // The newest inputs were the unchecked ones. `cases: false` skipped the
+    // comparison and left the case countable; `cases: {}` threw `.find is not
+    // a function`; a `null` journal line threw on `.caseId`.
+    const { root } = fixture(t);
+    await run(root);
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: observation() }]);
+
+    for (const cases of [false, 0, "", {}]) {
+        write(root, "dataset.json", { version: "decision-v2", cases });
+        const result = await run(root, [
+            "--verify",
+            `--journal=${join(root, "journal.jsonl")}`,
+            `--dataset=${join(root, "dataset.json")}`,
+        ]);
+        assert.equal(result.status, 1, JSON.stringify(cases));
+        assert.match(result.stdout, /dataset: cases is .*, not an array/, JSON.stringify(cases));
+        assert.match(result.stdout, /left the case countable/);
+    }
+
+    write(root, "dataset.json", datasetWith());
+    writeFileSync(join(root, "journal.jsonl"), "null\n", "utf8");
+    const nullLine = await run(root, [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ]);
+    assert.equal(nullLine.status, 1);
+    assert.match(nullLine.stdout, /journal: \[0\] is null, not an object/);
+    assert.doesNotMatch(nullLine.stderr, /TypeError/);
+});
+
+test("files that agree only with each other are not countable", async (t) => {
+    // Checking a judgement before a run exists is allowed and useful. Calling
+    // the result countable is not: they have been shown to agree with each
+    // other, and an aggregate is about a run.
+    const { root } = fixture(t);
+    await run(root);
+
+    const unbound = await run(root, ["--verify"]);
+    assert.equal(unbound.status, 0, unbound.stderr);
+    assert.match(unbound.stdout, /The stored score is about these files/);
+    assert.match(unbound.stdout, /may NOT be counted/);
+    assert.match(unbound.stdout, /checked against each other and against no run/);
+
+    // Supplying only one of the two is still not the run.
+    writeJournal(root, [{ caseId: "ko-safety-sensitive-003", observation: observation() }]);
+    const halfBound = await run(root, ["--verify", `--journal=${join(root, "journal.jsonl")}`]);
+    assert.equal(halfBound.status, 0, halfBound.stderr);
+    assert.match(halfBound.stdout, /may NOT be counted/);
+
+    write(root, "dataset.json", datasetWith());
+    const bound = await run(root, [
+        "--verify",
+        `--journal=${join(root, "journal.jsonl")}`,
+        `--dataset=${join(root, "dataset.json")}`,
+    ]);
+    assert.equal(bound.status, 0, bound.stderr);
+    assert.match(bound.stdout, /It may be counted in a score/);
 });

@@ -93,21 +93,27 @@ const readJournal = () => {
     .filter((line) => line.trim() !== "")
     .map((line, index) => {
       try {
+        // Parsed only. Whether an entry is an object with a usable caseId is
+        // the shared entry point's question -- a `null` line used to reach it
+        // and throw on `.caseId`.
         return JSON.parse(line);
       } catch (error) {
         die(`--journal line ${index + 1} is not valid JSON: ${error.message}`);
-        return {};
+        return null;
       }
     });
 };
-const readDatasetCases = () => {
+const readDataset = () => {
   const text = readOptional("dataset");
   if (text === undefined) return undefined;
   try {
-    return JSON.parse(text).cases ?? [];
+    // Handed over as it was parsed. Its shape is checked in the shared entry
+    // point, which is where a `cases: false` has to become a problem rather
+    // than a skipped comparison.
+    return JSON.parse(text);
   } catch (error) {
     die(`--dataset is not valid JSON: ${error.message}`);
-    return [];
+    return undefined;
   }
 };
 
@@ -160,7 +166,7 @@ if (verifyMode) {
     record,
     artifact,
     journal: readJournal(),
-    datasetCases: readDatasetCases(),
+    dataset: readDataset(),
   });
   failed = report("stored score, against the files beside it", evidence.problems) || failed;
   if (failed) {
