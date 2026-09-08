@@ -368,29 +368,74 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
 오늘과 정확히 같은 검사를 받는다 — 이 계약은 아직 미승인이고 어떤 평가에도
 연결되어 있지 않다.
 
+### 보조 설명과 불충분한 발견 — v2에서 정해졌다
+
+**2026-09-08 승인.** 비교와 계산은
+`.github/audits/ai-review-scoring-policy-decision-2026-09-08.md`에 있고, 재현은
+`npm run experiment:ai-review-scoring-policies`다. 나머지 계약이 미승인인 것과
+별개로 **이 두 규칙은 결정됐다.**
+
+계약 버전이 `ai-review-scoring-judged-v2`로 올라갔다. 규칙이 움직였으므로 같은
+기록이 다르게 채점될 수 있고, **v1 기록은 변환되지 않고 거절된다** — 옛 점수는
+새 정책의 결과로 승계되지 않는다. 다시 판정하거나 그대로 둔다.
+
+#### `role` — 발견인가 보조 설명인가
+
+`submittedAs`는 **실제 원본 필드로 그대로 둔다.** 채점 제외는 새 축이 정한다.
+
+- `role: "finding" | "support"`, **없으면 `finding`**. 빠뜨린 표시가 발견을
+  지우면 안 되기 때문이고, 반대 기본값은 누락이 곧 은폐가 되게 만든다.
+- **`support`는 종속 역할이다.** 같은 제출 항목(`submittedAs` + `sourceIndex`)에
+  독립 claim이 있을 때만 채점에서 빠지고, **기록에서는 지우지 않는다** — 자기
+  `sourceIndex`와 인용을 그대로 들고 있어 coverage를 계속 만족한다.
+- **인용만 제출한 경우는 그대로 발견이다.** claim 하나뿐이면 곁에 독립 claim이
+  없으므로 `support`로 적어도 제외되지 않고, 「발견 필드에 제출한 것은 내용이
+  무엇이든 발견 제출」이 그대로 성립한다. 이것이 `speechAct !== finding`을 전부
+  제외하는 안을 버린 이유다 — 그 안은 이 규칙을 뒤집었다.
+- **`prose`로 옮기는 안은 버렸다.** 출처 기록이 달라지고, 제출 항목에 claim이
+  하나도 남지 않아 기록 자체가 거절된다.
+
+**잘못 표시된 `support`는 막지 못한다.** 독립 발견을 `support`로 적으면 그 FP가
+사라지고, 종속성 검사는 곁에 독립 claim이 있는지만 묻는다. 계약의 답은 **세는
+것**이다 — `supportClaims`가 제외된 claim을 전부 세므로 유난히 많은 것이 눈에
+보인다. **탐지가 아니라 가시성이고, 그것이 주장할 수 있는 전부다.**
+`tests/aiReviewEvalJudgementScoring.test.mjs`가 이 구멍을 일부러 고정한다.
+
+#### `sufficiency` — 판단이 끝난 불충분한 발견
+
+- `sufficiency: "sufficient" | "insufficient"`, **없으면 `sufficient`**.
+- **TP가 아니고, 그 gold 항목은 미발견으로 남으며(FN), 제출로 세어 FP가 된다**
+  (exhaustive gold에서만 — 다른 잘못된 발견과 같은 규칙이다). 모호함을 제출
+  품질의 실패로 세겠다는 **측정 목적의 선택**이다.
+- **`pending`·`false_finding`과 별개 상태다.** 앞은 아직 판단하지 못한 것이고
+  뒤는 gold 밖의 지어낸 발견이며, 상태가 없던 동안에는 둘 중 하나로 적어야 했고
+  **둘 다 참이 아닌 말**이었다.
+- **다른 축이 이미 답하는 자리에서는 거절한다** — `support` 역할, `prose`,
+  그리고 gold 밖의 조합. 어떤 곳에서는 읽히고 어떤 곳에서는 조용히 버려지는
+  field가 판정이 사라지는 방식이다.
+- **`insufficientFindings`를 따로 센다.** `falsePositives`가 이제 두 가지를
+  담기 때문이다 — 없는 문제를 지어냄, 있는 문제를 흐리게 말함.
+  **`invented-issue rate`를 `falsePositives`에서 유도하지 않는다.** 그 지표는
+  `docs/policy/ai-review-m5-quality-contract.md`가 「문제가 없는 case에서 모순을
+  보고한 비율」로 정의하는 **case 단위 비율**이고, FP에는 인용 제출과 반대 주장도
+  섞여 있다.
+
 ### 아직 정해지지 않은 것
 
-- **한 문장에 여러 결함이 섞인 경우의 분해 단위.** 지금은 추출 단계에서 claim
-  여럿으로 나누는 것을 전제하지만, 무엇을 한 claim으로 볼지의 규칙이 없다.
+- **한 문장에 여러 결함이 섞인 경우의 분해 단위.** 추출 단계에서 claim 여럿으로
+  나누는 것을 전제하지만, 무엇을 한 claim으로 볼지의 규칙이 없다. `role`이 그중
+  **보조 설명을 가르는 부분만** 답했고, 무엇이 독립 주장인지는 여전히 사람이
+  판정한다.
 - **부분 일치.** 필수 항목을 절반만 지적한 발견을 무엇으로 셀지 정하지 않았다.
-  현재 계약에는 그런 상태가 없고, `unclear`는 검토자의 주장이지 채점자의 판정이
-  아니다.
+  `sufficiency`는 **판단이 끝난 불충분**을 담을 뿐, 요구가 여러 행동을 묶고
+  있어서 생기는 반쪽(gold 원자성)은 별개 결정이다.
 
-- **발견 필드 안의 설명 문장을 어느 `submittedAs`로 적는가.** `prose`는 「산문에서
-  읽은 것」인데, 제출된 발견 항목 **안**의 근거 문장이 그것인지 말하지 않는다.
-  같은 보조 언급을 findings kind로 적으면 FP 1, `prose`로 적으면 FP 0이다.
-- **판단 결과 불충분한 발견.** 요구가 단일 행동이어도 검토자는 모호하게 지적할 수
-  있다. `pending`(아직 판단 못 함)과 gold 묶음 오류(요구가 원자적이지 않음)는
-  처리 경로가 있지만, **판단을 마쳤는데 발견이 모자란 경우**는 없다.
+이 둘이 정해지기 전에는 이 계약으로 **비교 점수를 만들지 않는다.**
 
-이 넷이 정해지기 전에는 이 계약으로 **비교 점수를 만들지 않는다.**
-
-선택지와 그 결과는 실제 후보 case 위에서 계산해 두었다 — 분해 단위와 부분 일치는
-`.github/audits/ai-review-scoring-policy-options-2026-09-08.md`(3판), 보조 설명과
-불충분한 발견은 `.github/audits/ai-review-scoring-policy-decision-2026-09-08.md`,
-재현은 `npm run experiment:ai-review-scoring-policies`다. **그 문서들도 아무것도
-승인하지 않고, 제안된 선택지는 어느 것도 이 파일에 구현돼 있지 않다** — 사람이
-고르면 그 결과가 여기 본문으로 올라오고, 정해지지 않은 것은 이 목록에 남는다.
+분해 단위와 부분 일치의 선택지는 실제 후보 case 위에서 계산해
+`.github/audits/ai-review-scoring-policy-options-2026-09-08.md`(3판)에 두었다.
+**그 문서는 아무것도 승인하지 않고, 거기 제안된 선택지는 어느 것도 이 파일에
+구현돼 있지 않다** — 사람이 고르면 그 결과가 여기 본문으로 올라온다.
 
 ## 6. 구현 범위
 
@@ -401,6 +446,18 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
 - `AI_REVIEW_SCORING_CONTRACT_VERSION` — 기록이 어느 계약으로 쓰였는지. 다른
   버전의 기록은 **변환하지 않고 거절한다.**
 - `tests/aiReviewEvalJudgementScoring.test.mjs` — 위 표를 요구로 표현.
+
+**v2에서 더한 것**(2026-09-08 승인, 위 절)
+
+- `AiReviewJudgedClaim.role`과 `.sufficiency`, 그리고 그 둘의 배치 규칙을
+  강제하는 `verifyJudgementRecord()`·shape 검사.
+- `AiReviewJudgedKindOutcome.supportClaims`와 `.insufficientFindings` —
+  숫자 안에 접어 넣지 않고 따로 센다.
+- `npm run draft:ai-review-judgement -- --dir <디렉터리>`
+  (`scripts/draft-ai-review-judgement.mjs`) — 제출된 발견마다 `pending` claim
+  하나로 된 기록 뼈대를 쓰고, 사람이 채운 뒤에는 **채점기와 같은 검사**를 돌려
+  무엇이 남았는지 말한다. **판정하지 않는다** — 어느 답변인지, 없다는 것인지
+  있다는 것인지, 발견인지 설명인지, 충분한지는 전부 읽어야 답할 수 있다.
 
 - `validateJudgedCase()` — case 등록 검증. 채점기가 먼저 돌린다.
 - `observationRefFor()` · `judgedCaseDigest()` · `judgementRecordDigest()` ·

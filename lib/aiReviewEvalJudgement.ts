@@ -89,7 +89,16 @@ import {
  * rules, re-scored under another, produces a number nobody approved -- see the
  * refusals in `verifyJudgementRecord()`.
  */
-export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v1";
+/**
+ * v2 adds the claim's scoring `role` and its `sufficiency`.
+ *
+ * The version moves because the RULES moved: the same record can now score
+ * differently, so a v1 record read under v2 would be a number about judgements
+ * nobody made under these rules. `verifyJudgementRecord()` refuses both
+ * directions rather than converting -- old scores are not carried across, they
+ * are re-judged or left alone.
+ */
+export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v2";
 
 /** What the reviewer asserted about a requirement in one answer. */
 export const JUDGED_ASSERTIONS = ["missing", "present", "unclear"] as const;
@@ -109,6 +118,43 @@ export const JUDGED_SPEECH_ACTS = [
     "mention",
 ] as const;
 export type AiReviewJudgedSpeechAct = (typeof JUDGED_SPEECH_ACTS)[number];
+
+/**
+ * What a claim is DOING in the submission it was extracted from.
+ *
+ * Separate from `submittedAs`, which stays the field the text actually came
+ * from, and from `speechAct`, which stays what the sentence is. This axis
+ * exists because an explanation sitting inside a submitted finding is neither
+ * a second finding nor prose: recording it as prose falsified its provenance
+ * and left the submission with no claim covering it, and excluding every
+ * non-`finding` speech act instead overturned the rule that a quotation filed
+ * as a finding is a wrong finding.
+ *
+ * `support` is a DEPENDENT role. It only excludes a claim from scoring when an
+ * independent claim was extracted from the same submitted item; a submission
+ * whose only claim is `support` is the submission, and scores as one.
+ */
+export const JUDGED_CLAIM_ROLES = ["finding", "support"] as const;
+export type AiReviewJudgedClaimRole = (typeof JUDGED_CLAIM_ROLES)[number];
+
+/**
+ * Whether a finding that aims at a gold requirement actually reports it.
+ *
+ * A person can finish judging and conclude the reviewer gestured at the right
+ * requirement without naming anything -- "the fluid advice is thin for the
+ * situation". That is not `pending` (the judging is done) and not
+ * `false_finding` (the requirement is real and in the gold), and with no state
+ * of its own it had to be written as one of those two, both of which say
+ * something untrue.
+ *
+ * An insufficient finding is not a true positive, its gold item stays
+ * unmatched, and the submission still counts against precision -- vagueness is
+ * treated as a failure of submission quality. It is counted separately as
+ * well, because `falsePositives` then holds two different things and only the
+ * separate count can take them apart.
+ */
+export const JUDGED_CLAIM_SUFFICIENCY = ["sufficient", "insufficient"] as const;
+export type AiReviewJudgedClaimSufficiency = (typeof JUDGED_CLAIM_SUFFICIENCY)[number];
 
 /**
  * For a submitted claim the gold does not contain: what a person decided.
@@ -150,8 +196,37 @@ export type AiReviewJudgedClaim = {
     /**
      * Required when this exact (kind, label, requirement) is not a gold item,
      * ignored otherwise. See `JUDGED_OUTSIDE_GOLD_VERDICTS`.
+     *
+     * Not required on a claim excluded from scoring as `support`: it is not a
+     * finding the reviewer put forward, so there is no question about whether
+     * it was invented. The cost of that is stated at `role`.
      */
     outsideGoldVerdict?: AiReviewJudgedOutsideGoldVerdict;
+    /**
+     * Finding or supporting material. Absent means `finding`.
+     *
+     * The default is deliberate: a claim nobody classified is scored, because
+     * a forgotten mark must never delete a finding. The opposite default would
+     * make omission the quiet way to lose one.
+     *
+     * **This does not detect a mislabelled finding.** An extractor that marks
+     * an invented finding `support` erases its false positive, and the
+     * dependency check cannot see that -- it only asks whether an independent
+     * claim sits beside it. What the contract does instead is COUNT: every
+     * excluded claim lands in `supportClaims`, so an output carrying an
+     * unusual number of them is visible rather than invisible. Visibility, not
+     * detection, and that is the whole of the claim.
+     */
+    role?: AiReviewJudgedClaimRole;
+    /**
+     * Whether this finding actually reports the requirement. Absent means
+     * `sufficient`.
+     *
+     * Only meaningful on a `finding`-role claim about a requirement the gold
+     * contains; `verifyJudgementRecord()` refuses it elsewhere, so it cannot
+     * quietly overlap with `outsideGoldVerdict`.
+     */
+    sufficiency?: AiReviewJudgedClaimSufficiency;
     /** Never scored while `pending`, and never scored without a signature. */
     status: "pending" | "confirmed";
     confirmedBy: string | null;
@@ -290,6 +365,20 @@ export type AiReviewJudgedKindOutcome = {
      * be exhaustive, the fact that stops the kind being scored at all.
      */
     goldGaps: number;
+    /**
+     * Claims excluded from scoring as supporting material. Neither credited
+     * nor penalised, and reported because that exclusion is the one an
+     * extractor could abuse -- see `role`.
+     */
+    supportClaims: number;
+    /**
+     * Submitted findings a person judged insufficient. Already inside
+     * `falsePositives`; counted again on its own so that "invented a problem"
+     * and "named a real one too vaguely" can be told apart. Nothing that
+     * measures invention may be derived from `falsePositives`, which also
+     * holds quotations filed as findings and opposite assertions.
+     */
+    insufficientFindings: number;
 };
 
 export type AiReviewJudgedOutcome =
@@ -318,7 +407,48 @@ const emptyKind = (): AiReviewJudgedKindOutcome => ({
     precisionTruePositives: 0,
     duplicates: 0,
     goldGaps: 0,
+    supportClaims: 0,
+    insufficientFindings: 0,
 });
+
+/** Absent means `finding`: a forgotten mark must never delete a finding. */
+const claimRole = (claim: AiReviewJudgedClaim): AiReviewJudgedClaimRole =>
+    claim.role ?? "finding";
+
+/** Absent means `sufficient`, for the same reason. */
+const claimSufficiency = (claim: AiReviewJudgedClaim): AiReviewJudgedClaimSufficiency =>
+    claim.sufficiency ?? "sufficient";
+
+/**
+ * Whether a support claim has an independent claim beside it.
+ *
+ * "Beside" is the same submitted item -- the same findings field and the same
+ * index -- because that is what supporting material is supporting. Without
+ * this, a submission consisting only of a quotation could be marked `support`
+ * and vanish, which is exactly the rule this contract already settled the
+ * other way.
+ */
+const excludedAsSupport = (
+    claims: readonly AiReviewJudgedClaim[],
+    claim: AiReviewJudgedClaim
+): boolean =>
+    claimRole(claim) === "support" &&
+    claims.some(
+        (other) =>
+            other !== claim &&
+            claimRole(other) === "finding" &&
+            other.submittedAs === claim.submittedAs &&
+            other.sourceIndex === claim.sourceIndex
+    );
+
+/** The gold's scope per kind, keyed by the whole triple. */
+const goldKeysOf = (testCase: AiReviewJudgedCase) =>
+    Object.fromEntries(
+        AI_REVIEW_EVAL_FINDING_KINDS.map((kind) => [
+            kind,
+            new Set((testCase.gold[kind] ?? []).map((item) => claimKey(item))),
+        ])
+    ) as Record<AiReviewEvalFindingKind, Set<string>>;
 
 const claimKey = (item: { requirementId: string; targetLabel: string }) =>
     `${item.targetLabel} ${item.requirementId}`;
@@ -351,6 +481,7 @@ export function verifyJudgementRecord(
     expected: { observationRef?: string } = {}
 ): readonly string[] {
     const problems: string[] = [];
+    const goldKeys = goldKeysOf(testCase);
     if (testCase.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
         problems.push(
             `the case was written for ${testCase.contractVersion} and this scorer is ` +
@@ -453,6 +584,33 @@ export function verifyJudgementRecord(
                     `which is not a time`
             );
         }
+        // Insufficiency is a judgement about a submitted finding that aims at
+        // a requirement the gold contains. Anywhere else it would overlap
+        // something that already has an answer -- supporting material is not
+        // scored at all, prose was never submitted, and a claim outside the
+        // gold is settled by `outsideGoldVerdict`. Refused rather than
+        // ignored, because a field that is read in some places and silently
+        // dropped in others is how a judgement disappears.
+        if (claimSufficiency(claim) === "insufficient") {
+            if (claimRole(claim) !== "finding") {
+                problems.push(
+                    `${where} is marked insufficient and its role is ` +
+                        `${claimRole(claim)}; only a finding can fail to report a ` +
+                        `requirement, and supporting material is not scored at all`
+                );
+            } else if (claim.submittedAs === "prose") {
+                problems.push(
+                    `${where} is marked insufficient and was read from prose, which ` +
+                        `was never submitted as a finding`
+                );
+            } else if (!goldKeys[claim.submittedAs].has(claimKey(claim))) {
+                problems.push(
+                    `${where} is marked insufficient and the gold does not contain ` +
+                        `that ${claim.submittedAs} item; a finding outside the gold is ` +
+                        `settled by outsideGoldVerdict, not by sufficiency`
+                );
+            }
+        }
     }
     return problems;
 }
@@ -500,16 +658,18 @@ export function scoreJudgedCase(
     // The gold's scope, per kind, keyed by the whole triple. A claim about the
     // same requirement in ANOTHER answer is a different question: "c omits the
     // deadline" says nothing about whether `a` gives it.
-    const goldKeys = Object.fromEntries(
-        AI_REVIEW_EVAL_FINDING_KINDS.map((kind) => [
-            kind,
-            new Set((testCase.gold[kind] ?? []).map((item) => claimKey(item))),
-        ])
-    ) as Record<AiReviewEvalFindingKind, Set<string>>;
+    const goldKeys = goldKeysOf(testCase);
 
     const submitted = record.claims.filter(
         (claim) => claim.submittedAs !== "prose"
     ) as readonly (AiReviewJudgedClaim & { submittedAs: AiReviewEvalFindingKind })[];
+    // Supporting material stays in the record -- it covers its submitted item
+    // and keeps its own provenance -- and drops out of the scoring pass only.
+    // Everything below reads `scored`, including the unruled-verdict refusal:
+    // an explanation is not a finding put forward, so there is no question
+    // about whether the reviewer invented it.
+    const excluded = submitted.filter((claim) => excludedAsSupport(record.claims, claim));
+    const scored = submitted.filter((claim) => !excluded.includes(claim));
     const outsideGold = (claim: (typeof submitted)[number]) =>
         !goldKeys[claim.submittedAs].has(claimKey(claim));
 
@@ -523,7 +683,7 @@ export function scoreJudgedCase(
     const gaps = Object.fromEntries(
         AI_REVIEW_EVAL_FINDING_KINDS.map((kind) => [
             kind,
-            submitted.filter(
+            scored.filter(
                 (claim) =>
                     claim.submittedAs === kind &&
                     outsideGold(claim) &&
@@ -532,7 +692,7 @@ export function scoreJudgedCase(
         ])
     ) as Record<AiReviewEvalFindingKind, number>;
 
-    const unruled = submitted.filter(
+    const unruled = scored.filter(
         (claim) =>
             outsideGold(claim) &&
             (claim.outsideGoldVerdict === undefined ||
@@ -586,12 +746,28 @@ export function scoreJudgedCase(
         outcome.goldGaps = gaps[kind];
         const matched = new Set<string>();
 
+        outcome.supportClaims = excluded.filter(
+            (claim) => claim.submittedAs === kind
+        ).length;
+
         // Only what was SUBMITTED as a finding of this kind can score. The same
         // words in the reviewer's explanation, or inside a quote, are not a
-        // report -- that is what `submittedAs` is for.
-        for (const claim of submitted) {
+        // report -- that is what `submittedAs` is for -- and neither is
+        // supporting material sitting beside a finding in the same item.
+        for (const claim of scored) {
             if (claim.submittedAs !== kind) continue;
             const key = claimKey(claim);
+            // Judged complete and judged inadequate. It aimed at a gold
+            // requirement and named nothing, so it is not a hit, its gold item
+            // stays unmatched below, and it still counts as a submission --
+            // vagueness is a failure of submission quality, not a free pass.
+            // Counted on its own as well, so the two things now inside
+            // `falsePositives` can be told apart.
+            if (claimSufficiency(claim) === "insufficient") {
+                outcome.insufficientFindings += 1;
+                if (exhaustive) outcome.falsePositives += 1;
+                continue;
+            }
             if (
                 !outsideGold(claim) &&
                 claim.assertion === "missing" &&
@@ -1107,6 +1283,30 @@ export function judgementRecordShapeProblems(
                     `${path}.outsideGoldVerdict`,
                     claim.outsideGoldVerdict,
                     `one of ${JUDGED_OUTSIDE_GOLD_VERDICTS.join(", ")}`
+                )
+            );
+        }
+        // Both default when absent, and both are refused when present and
+        // mistyped. A misspelt `"suport"` would otherwise read as `finding`
+        // and score the claim -- silently the opposite of what was written.
+        if (
+            claim.role !== undefined &&
+            !(JUDGED_CLAIM_ROLES as readonly string[]).includes(claim.role as string)
+        ) {
+            problems.push(
+                typeProblem(file, `${path}.role`, claim.role, `one of ${JUDGED_CLAIM_ROLES.join(", ")}`)
+            );
+        }
+        if (
+            claim.sufficiency !== undefined &&
+            !(JUDGED_CLAIM_SUFFICIENCY as readonly string[]).includes(claim.sufficiency as string)
+        ) {
+            problems.push(
+                typeProblem(
+                    file,
+                    `${path}.sufficiency`,
+                    claim.sufficiency,
+                    `one of ${JUDGED_CLAIM_SUFFICIENCY.join(", ")}`
                 )
             );
         }
