@@ -57,6 +57,7 @@ import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
+import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -532,12 +533,22 @@ export function ChatPageClient({
   // this component's very first render already knows the guest default.
   guestDefaultModelId,
   imageGenerationEnabled = false,
+  voiceInputEnabled = false,
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
 }: {
   guestDefaultModelId: string;
   /** The image generation opt-in flag, resolved server-side in page.tsx. */
   imageGenerationEnabled?: boolean;
+  /**
+   * The voice input opt-in flag AND its kill switch AND the signed-in
+   * requirement, already folded into one boolean on the server
+   * (docs/policy/voice-input.md §3). Resolved there rather than here for the
+   * reason `imageGroupMaxModels` is: a Client Component cannot read the
+   * process environment, so a local copy would keep offering a microphone
+   * after an operator pulled the kill switch.
+   */
+  voiceInputEnabled?: boolean;
   /**
    * How many models one image comparison may fan out to, read from the running
    * server in page.tsx. Passed rather than resolved here: `process.env` in a
@@ -624,6 +635,32 @@ export function ChatPageClient({
   >(undefined);
   const { data: session, status } = useSession();
   const sessionUserId = session?.user?.id || null;
+  // Which identity this tab is operating as. A conversation id belongs to
+  // exactly one of them (see lib/chatIdentityNamespace.ts), and crossing the
+  // boundary with one is what sent /api/conversations/guest_* to the account
+  // API and got CONVERSATION_FORBIDDEN back -- once for the detail request,
+  // once for the model-settings sync, and once per comparison panel.
+  const identityNamespace = useMemo(
+    () => resolveIdentityNamespace(status, sessionUserId),
+    [sessionUserId, status]
+  );
+  /*
+    Who this tab is, as one string, for everything below that has to notice the
+    person changing rather than merely the conversation.
+
+    `identityNamespaceKey` yields `account:` and the user id, so account A
+    becoming account B is visible; a two-valued guest/account flag was not, and
+    that is the transition that matters most. `unresolved` is reported as
+    `null` — "not known yet" — and every consumer decides for itself what that
+    means: the composer's drafts give it a namespace of its own
+    (docs/policy/conversation-draft-identity-scope.md), and a running voice
+    session treats it as no change so the session provider settling cannot
+    cancel a recording that just started (docs/policy/voice-input.md §8.4).
+  */
+  const identityKey =
+    identityNamespace.kind === "unresolved"
+      ? null
+      : identityNamespaceKey(identityNamespace);
   // Declared before any model state below because the initial selected models
   // depend on it. The session is server-resolved and handed to
   // SessionProviderWrapper, so this is already final on the first render --
@@ -662,7 +699,7 @@ export function ChatPageClient({
     hasDraft,
     discardDraft,
     migrateDraft,
-  } = useConversationDrafts(currentChatId);
+  } = useConversationDrafts(currentChatId, identityKey);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -1354,15 +1391,9 @@ export function ChatPageClient({
   /* --------------------------------------------------------------------- */
   /* Identity namespace                                                     */
   /* --------------------------------------------------------------------- */
-  // Which identity this tab is operating as. A conversation id belongs to
-  // exactly one of them (see lib/chatIdentityNamespace.ts), and crossing the
-  // boundary with one is what sent /api/conversations/guest_* to the account
-  // API and got CONVERSATION_FORBIDDEN back -- once for the detail request,
-  // once for the model-settings sync, and once per comparison panel.
-  const identityNamespace = useMemo(
-    () => resolveIdentityNamespace(status, sessionUserId),
-    [sessionUserId, status]
-  );
+  // `identityNamespace` and `identityKey` are declared with the session above:
+  // the composer's drafts are scoped by identity, and that hook runs long
+  // before this point in the file.
   const identityNamespaceRef = useRef<IdentityNamespace>(identityNamespace);
   const appliedIdentityKeyRef = useRef<string | null>(null);
   // Ids this identity has already been refused. Kept so a stale selection is
@@ -5399,6 +5430,32 @@ export function ChatPageClient({
   // Local files yes, Google Drive no: Drive needs an OAuth grant an anonymous
   // session cannot hold, and one ephemeral file per message is the guest
   // allowance the server independently enforces.
+  /*
+    A finished voice transcript, written into the conversation it was recorded
+    in (docs/policy/voice-input.md §8.4).
+
+    Two things make this correct where a plain `setInputValue(text)` was not:
+
+      * the explicit `scopeId`, so a transcription that finishes after the user
+        opened another conversation lands in the one they spoke into rather
+        than the one on screen — `ChatInput` is not remounted by a switch, so
+        nothing else would have caught this; and
+      * the functional update, so anything typed while the server was working
+        is preserved and the transcript is appended once, after it.
+
+    `appendVoiceTranscript` never replaces: the microphone must not be the one
+    control in the composer that can destroy work with no undo.
+  */
+  const handleVoiceTranscript = useCallback(
+    (transcript: string, scopeId: string | null) => {
+      setInputValue(
+        (current) => appendVoiceTranscript(current, transcript),
+        scopeId
+      );
+    },
+    [setInputValue]
+  );
+
   const attachmentCapabilities: ChatAttachmentCapabilities = isGuestMode
     ? {
         canAttachLocalFiles: true,
@@ -5941,6 +5998,9 @@ export function ChatPageClient({
           availableCredits={comparisonAvailableCredits}
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
+          voiceInputEnabled={voiceInputEnabled}
+          onVoiceTranscript={handleVoiceTranscript}
+          identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}
@@ -6057,6 +6117,9 @@ export function ChatPageClient({
           availableCredits={comparisonAvailableCredits}
           aiReviewAccess={aiReviewAccess}
           attachmentCapabilities={attachmentCapabilities}
+          voiceInputEnabled={voiceInputEnabled}
+          onVoiceTranscript={handleVoiceTranscript}
+          identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
           onResponseComplete={handleResponseComplete}

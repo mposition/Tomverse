@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
 import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
+import { getVoiceModelPriceReadiness } from "@/lib/voiceModelPriceReadiness";
+import { getVoiceProviderBudgetReadiness } from "@/lib/voiceProviderBudgetReadiness";
 import { getSearchProviderBudgetReadiness } from "@/lib/searchProviderBudgetReadiness";
 import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
@@ -88,6 +90,41 @@ const readinessResponse = async (head = false) => {
     })
   );
   const imageProviderBudget = imageBudgetStatus.status?.ready ?? false;
+  // The audio budget, on the same terms and for the same reason: flag off is
+  // the legal intermediate state of an env-first deploy, flag on with no
+  // budget is a misconfiguration between this product and unbounded
+  // third-party usage (docs/policy/voice-input.md §6.1-4). It is a usage
+  // budget, in seconds: it bounds how much audio leaves here, not how many
+  // dollars that becomes. A thrown check is not "ready" -- nobody knows,
+  // which is the answer that refuses traffic.
+  const voiceBudgetStatus = await getVoiceProviderBudgetReadiness().then(
+    (status) => ({ status, error: null as string | null }),
+    (error: unknown) => ({
+      status: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The voice provider budget readiness check threw.",
+    })
+  );
+  const voiceProviderBudget = voiceBudgetStatus.status?.ready ?? false;
+  // Whether this deployment knows what its configured transcription model
+  // costs, which is a different question from whether it has a budget: a
+  // budget in seconds bounds how much audio leaves, and says nothing about a
+  // model whose per-token price nobody has observed. CI cannot answer this one
+  // because the model is an environment variable
+  // (docs/policy/voice-input.md §6.1.4), so the running deployment has to.
+  const voiceModelPriceStatus = await getVoiceModelPriceReadiness().then(
+    (status) => ({ status, error: null as string | null }),
+    (error: unknown) => ({
+      status: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The voice transcription model price readiness check threw.",
+    })
+  );
+  const voiceModelPrice = voiceModelPriceStatus.status?.ready ?? false;
   // The search vendor this application calls itself. Unlike the image budget
   // there is no flag to be off: the capability register is compiled in, so a
   // build that ships Google models searching through a backend has already
@@ -154,8 +191,10 @@ const readinessResponse = async (head = false) => {
   const database = databaseResult.ready;
   const ready =
     database && securityEnvironment && providerBudgets &&
-    imageProviderBudget && searchProviderBudget && emailSendingIdentity &&
-    emailSnapshotKeyring && emailUnsubscribeKeyring && emailBusinessIdentity;
+    imageProviderBudget && voiceProviderBudget && voiceModelPrice &&
+    searchProviderBudget &&
+    emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
+    emailBusinessIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
     : {
@@ -202,6 +241,62 @@ const readinessResponse = async (head = false) => {
             [
               ...new Set(budgetStatus.errors.map((problem) => problem.provider)),
             ].join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "voice-provider-seconds-budget",
+        healthy: voiceProviderBudget,
+        code: "VOICE_PROVIDER_SECONDS_BUDGET_NOT_READY",
+        title: "Voice provider usage budget (seconds) is not configured correctly",
+        error: voiceProviderBudget
+          ? "Voice provider budget is configured (or the feature flag is off)."
+          : voiceBudgetStatus.error ??
+            ((voiceBudgetStatus.status?.budget.problems ?? [])
+              .map((problem) => `${problem.envName}: ${problem.detail}`)
+              .join(" | ") ||
+              "Voice input is enabled but its provider budget is unusable."),
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          voiceBudgetCheckThrew: voiceBudgetStatus.error !== null,
+          voiceInputFlagEnabled: voiceBudgetStatus.status?.flagEnabled ?? false,
+          // Names only. The numbers are an operational decision, not a secret,
+          // but a readiness log is not where an operator should have to read
+          // them -- and a problem list that carries values grows into one that
+          // carries the values of things that are secret.
+          voiceBudgetProblems:
+            (voiceBudgetStatus.status?.budget.problems ?? [])
+              .map((problem) => `${problem.envName}:${problem.code}`)
+              .join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
+        dependency: "voice-transcription-model-price",
+        healthy: voiceModelPrice,
+        code: "VOICE_TRANSCRIPTION_MODEL_PRICE_NOT_READY",
+        title: "The configured voice transcription model has no known cost",
+        error: voiceModelPrice
+          ? "The configured transcription model's cost is known (or the feature flag is off)."
+          : voiceModelPriceStatus.error ??
+            voiceModelPriceStatus.status?.refusal?.detail ??
+            "Voice input is enabled but its transcription model's cost is unknown.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          voiceModelPriceCheckThrew: voiceModelPriceStatus.error !== null,
+          voiceInputFlagEnabled:
+            voiceModelPriceStatus.status?.flagEnabled ?? false,
+          // The model id is configuration an operator chose, and naming it is
+          // the whole remedy: the refusal is unactionable without knowing
+          // which model was configured.
+          voiceTranscriptionModel:
+            voiceModelPriceStatus.status?.modelId ?? "unknown",
+          voiceModelPriceRefusal:
+            voiceModelPriceStatus.status?.refusal?.code ?? "none",
           traceId,
         },
       }),
@@ -393,6 +488,8 @@ const readinessResponse = async (head = false) => {
         securityEnvironment,
         providerBudgets,
         imageProviderBudget,
+        voiceProviderBudget,
+        voiceModelPrice,
         searchProviderBudget,
         emailSendingIdentity,
         emailSnapshotKeyring,

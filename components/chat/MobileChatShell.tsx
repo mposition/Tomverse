@@ -149,6 +149,13 @@ type MobileChatShellProps = {
   aiReviewAccess: AiReviewAccess;
   /** What this caller may do with file attachments. */
   attachmentCapabilities: ChatAttachmentCapabilities;
+  /** Passed straight through to the composer; see ChatInput's own prop. */
+  voiceInputEnabled?: boolean;
+  /** Passed straight through to the composer; see ChatInput's own prop. */
+  onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
+  /** Passed straight through to the composer; see ChatInput's own prop. */
+  /** Who this tab is; see ChatInput's prop of the same name. */
+  identityKey: string | null;
   guestPreviewMode?: boolean;
   guestMessageCount: number;
   maxGuestMessages: number;
@@ -326,6 +333,9 @@ export function MobileChatShell({
   isGuestMode,
   aiReviewAccess,
   attachmentCapabilities,
+  voiceInputEnabled = false,
+  onVoiceTranscript,
+  identityKey,
   guestPreviewMode = false,
   guestMessageCount,
   maxGuestMessages,
@@ -1596,6 +1606,9 @@ export function MobileChatShell({
             attachments={attachments}
             onAttachmentsChange={setAttachments}
             attachmentCapabilities={attachmentCapabilities}
+            voiceInputEnabled={voiceInputEnabled}
+            onVoiceTranscript={onVoiceTranscript}
+            identityKey={identityKey}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}
             guestPreviewMode={guestPreviewMode}

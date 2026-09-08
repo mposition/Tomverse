@@ -128,6 +128,14 @@ jobs:
         timeout-minutes: 5
         run: npm run check:release-gate-coverage
 
+      # A provider price nobody has re-read is a price that used to be true.
+      # The register carries a deadline per model (docs/policy/voice-input.md
+      # §6.1-3) and the unit tests pin their own clock, so only a check that
+      # runs against today can notice one going stale.
+      - name: Voice price register
+        timeout-minutes: 5
+        run: npm run check:voice-price-register
+
       # The @ui-risk tier blocks merges and is selected by a tag, so a spec
       # joins it by being tagged and the document that records the tier does
       # not notice. It had drifted to 25 tagged files against a table naming

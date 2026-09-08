@@ -57,6 +57,13 @@ import type {
 } from "@/lib/conversationProfileBinding";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
+import {
+  VoiceInputButton,
+  VoiceInputStatus,
+} from "@/components/chat/VoiceInputControl";
+import { useVoiceRecorder } from "@/components/chat/useVoiceRecorder";
+import { resolveVoiceInputCopy } from "@/components/chat/voiceInputCopy";
+import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import { dispatchAppToast } from "@/lib/appToast";
 import {
   attachmentKindForFormat,
@@ -667,6 +674,49 @@ type ChatInputProps = {
     modelId?: string,
     options?: { fromImageRequest?: boolean }
   ) => void;
+  /**
+   * Whether this viewer may record voice input (docs/policy/voice-input.md §3).
+   *
+   * The server's single boolean, resolved per request: it already folds the
+   * rollout flag, the kill switch and the signed-in requirement together, so
+   * nothing here derives availability from any of them separately. False
+   * renders no microphone at all — not a disabled one. A control that is
+   * visible but refuses would be advertising a feature this deployment has
+   * deliberately not turned on.
+   */
+  voiceInputEnabled?: boolean;
+  /**
+   * Appends a finished transcript to one conversation's draft
+   * (docs/policy/voice-input.md §8.4).
+   *
+   * Takes the scope explicitly because the conversation a recording started in
+   * is not necessarily the one on screen when the server answers, and
+   * `ChatInput` is not remounted by a conversation switch. The caller writes
+   * through the draft store's own scoped, functional update, so text the user
+   * typed while waiting is preserved and the words land in the right place.
+   *
+   * Absent only where no draft store exists; the composer then falls back to
+   * appending to the value it currently holds.
+   */
+  onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
+  /**
+   * Which *person* this tab is operating as
+   * (`identityNamespaceKey`, lib/chatIdentityNamespace.ts).
+   *
+   * A running voice session ends when this changes, so it has to distinguish
+   * account A from account B rather than only "guest" from "signed in": the
+   * two-valued form could not see one account replacing another in the same
+   * tab, and that is a privacy boundary. `null` while the session provider is
+   * still resolving, which is never treated as a change.
+   */
+  /**
+   * Who this tab is operating as (`identityNamespaceKey`), or `null` before the
+   * session resolves. Required, not defaulted: the composer scopes its drafts
+   * and its upload state by it, and a shell that forgot to pass it would put
+   * every identity's unsent work in one namespace again — the defect
+   * docs/policy/conversation-draft-identity-scope.md exists for.
+   */
+  identityKey: string | null;
   /** Set when image generation is visible to this viewer but not usable. */
   imageGenerationLock?: "sign_in" | "upgrade" | null;
   onLockedImageGenerationClick?: (lock: "sign_in" | "upgrade") => void;
@@ -802,6 +852,9 @@ export function ChatInput({
   onWebSearchModeChange,
   onOpenDeepResearchSetup,
   onStartImageDraft,
+  voiceInputEnabled = false,
+  onVoiceTranscript,
+  identityKey,
   imageGenerationLock = null,
   onLockedImageGenerationClick,
   isDeepResearchPending = false,
@@ -824,7 +877,7 @@ export function ChatInput({
   // scoped to this, not to the component instance: the composer is shared by
   // every conversation and is deliberately never remounted between them (that
   // would take the portal host, focus and in-flight uploads with it).
-  const draftScopeId = draftKeyFor(currentChatId);
+  const draftScopeId = draftKeyFor(currentChatId, identityKey);
   const draftScopeIdRef = useRef(draftScopeId);
   useEffect(() => {
     draftScopeIdRef.current = draftScopeId;
@@ -1211,6 +1264,48 @@ export function ChatInput({
     : t("chat.inputPlaceholder");
   
   const isDisabled = disabled || isSending || isUploading || isUsageLimitReached;
+
+  /*
+    Voice input (docs/policy/voice-input.md §8.3).
+
+    The transcript is *appended to the draft*. It is not submitted, and there
+    is deliberately no path from here to `onSubmit`: the user reads what the
+    recogniser heard, edits it if it is wrong, and presses Send themselves.
+    That is the feature's first invariant, and `tests/e2e/voice-input-composer.spec.ts`
+    fails if a recording ever produces a message on its own.
+
+    Appending rather than replacing keeps the microphone non-destructive: a
+    half-typed question plus a spoken ending is a normal way to use this, and
+    replacing would make it the one control in the composer that can silently
+    destroy work with no undo.
+  */
+  const voiceCopy = useMemo(() => resolveVoiceInputCopy({ t }), [t]);
+  // The composer's own draft key, not the raw conversation id. `draftKeyFor`
+  // is idempotent and never undefined, and `undefined` is the one value the
+  // draft store reads as "whatever is open now" — which is exactly what a
+  // scoped write must never mean here. The key names the identity too, so a
+  // transcript can only ever be written into the draft of the person who spoke
+  // it (docs/policy/conversation-draft-identity-scope.md).
+  const voiceScopeId = draftScopeId;
+  const voice = useVoiceRecorder({
+    scopeId: voiceScopeId,
+    // The real per-account key, not a two-valued guest/account flag: account A
+    // becoming account B in one tab has to end the session, and only a key
+    // that names the account can see that.
+    identityKey: identityKey,
+    onTranscript: (transcript, scopeId) => {
+      if (onVoiceTranscript) {
+        onVoiceTranscript(transcript, scopeId);
+      } else {
+        onChange(appendVoiceTranscript(value, transcript));
+      }
+      // Focus returns to the textarea only when the transcript landed in the
+      // conversation still on screen. Pulling focus into a composer the user
+      // has already left would be this feature reaching into a conversation it
+      // no longer belongs to.
+      if (scopeId === voiceScopeId) textareaRef.current?.focus();
+    },
+  });
 
   // Why Send is unavailable, for the cases a user cannot work out from the
   // button itself. `title` alone does not reach a screen reader or a keyboard
@@ -3344,6 +3439,23 @@ export function ChatInput({
           </div>
         )}
         {/*
+          Voice input's status gets a row of its own above the textarea, for
+          the same reason the tool chips do: it grows (an elapsed timer, a
+          cancel control, a wrapped error sentence) and anything that grows
+          beside the input eventually takes the input's width. It renders
+          nothing at rest, so the common state costs no height.
+        */}
+        {voiceInputEnabled && (
+          <VoiceInputStatus
+            state={voice.state}
+            copy={voiceCopy}
+            elapsedSeconds={voice.elapsedSeconds}
+            serverCode={voice.serverCode}
+            onCancel={voice.cancel}
+            onDismissError={voice.dismissError}
+          />
+        )}
+        {/*
           The textarea's own row. Nothing else may enter it: no chip, no badge,
           no absolutely positioned control. Whatever the tool state is, the
           input keeps the composer's full inner width and at least one complete
@@ -3418,6 +3530,27 @@ export function ChatInput({
               <Plus className="h-5 w-5" />
             )}
           </button>
+          {/*
+            The microphone sits with the other 44px controls in the actions
+            row, never beside the textarea. The row already wraps and the model
+            button already truncates, so one more fixed-width control here
+            cannot push Send outside the composer at 320px or at 200% zoom --
+            which the composer contract's geometry specs measure rather than
+            assume.
+          */}
+          {voiceInputEnabled && (
+            <VoiceInputButton
+              state={voice.state}
+              copy={voiceCopy}
+              isMobileShell={isMobileShell}
+              // The composer's own disabled state, not the voice machine's:
+              // recording into a locked or sending composer would produce a
+              // transcript with nowhere to go.
+              disabled={isDisabled}
+              onStart={voice.start}
+              onStop={voice.stop}
+            />
+          )}
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
