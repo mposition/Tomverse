@@ -33,6 +33,7 @@
 
 import { readFileSync } from "node:fs";
 
+import { wilsonInterval } from "../../lib/memoryExtractionEvalCore.ts";
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
     judgedSourceCaseDigest,
@@ -111,12 +112,12 @@ const score = (testCase, observation, verifyClaims, scoreClaims = verifyClaims) 
 const line = (label, how, result, kind, extra = "") => {
     const head = `  ${label.padEnd(38)} ${how.padEnd(11)}`;
     if (!result.verified) {
-        console.log(`${head} aggregable no — record rejected: ${result.problems[0]}`);
+        console.log(`${head} arithmetic-aggregable no — record rejected: ${result.problems[0]}`);
         return;
     }
     if (!result.scored) {
         console.log(
-            `${head} aggregable no — not scored: ${result.reason.split("\n")[1]?.trim() ?? ""}`
+            `${head} arithmetic-aggregable no — not scored: ${result.reason.split("\n")[1]?.trim() ?? ""}`
         );
         return;
     }
@@ -127,7 +128,7 @@ const line = (label, how, result, kind, extra = "") => {
     console.log(
         `${head} TP ${outcome.truePositives}  FN ${outcome.falseNegatives}  ` +
             `FP ${outcome.falsePositives}  precision denom ${denominator}  ` +
-            `aggregable yes${extra}`
+            `arithmetic-aggregable yes${extra}`
     );
 };
 
@@ -404,20 +405,63 @@ const aggClaims = REQUIREMENTS.map((requirement, index) => ({
 }));
 const sufficient = aggClaims.slice(0, 2);
 
-console.log("\n[집계 효과 — 합성 case, 요구 10개. 2건은 제대로, 8건은 모호하게]");
+console.log("\n[집계 효과 — 합성 case, 요구 10개]");
 const show = (label, how, result) => {
     const outcome = result.byKind.contradictions;
     const denominator = outcome.truePositives + outcome.falsePositives;
-    const precision = denominator === 0 ? "정의 불가 (0/0)" : (outcome.truePositives / denominator).toFixed(2);
+    const precision =
+        denominator === 0
+            ? "정의 불가 (0/0)"
+            : `${(outcome.truePositives / denominator).toFixed(3)} (${outcome.truePositives}/${denominator})`;
+    const bound =
+        denominator === 0
+            ? "n/a"
+            : wilsonInterval(outcome.truePositives, denominator).lower.toFixed(3);
     console.log(
-        `  ${label.padEnd(38)} ${how.padEnd(11)} TP ${outcome.truePositives}  ` +
+        `  ${label.padEnd(40)} ${how.padEnd(11)} TP ${outcome.truePositives}  ` +
             `FN ${outcome.falseNegatives}  FP ${outcome.falsePositives}  ` +
-            `precision ${precision}  recall ${(outcome.truePositives / 10).toFixed(2)}`
+            `precision ${precision.padEnd(18)} wilson lower ${bound}  ` +
+            `recall ${(outcome.truePositives / 10).toFixed(2)}`
     );
 };
-show("B1 FN 만", "experiment", score(caseAgg, observationAgg, aggClaims, sufficient));
+
+// An eleventh submitted finding, outside the gold and ruled invented. It is
+// what separates "B1 ignores vagueness" from "B1 ignores wrong findings".
+const INVENTED = "c는 존재하지 않는 항목도 어겼습니다";
+const observationAggPlus = {
+    findings: { contradictions: [...aggText, INVENTED] },
+    allText: [...aggText, INVENTED].join("\n"),
+};
+const inventedClaim = {
+    targetLabel: "a",
+    requirementId: "req-invented",
+    assertion: "missing",
+    speechAct: "finding",
+    submittedAs: "contradictions",
+    sourceIndex: 10,
+    evidenceQuote: INVENTED,
+    outsideGoldVerdict: "false_finding",
+    ...SIGNED,
+};
+
+show("B1, 10건 모두 불충분", "experiment", score(caseAgg, observationAgg, aggClaims, []));
 show(
-    "B2 FN + FP",
+    "B1, 충분 2 + 불충분 8",
+    "experiment",
+    score(caseAgg, observationAgg, aggClaims, sufficient)
+);
+show(
+    "B1, 충분 2 + 불충분 8 + 허위 1",
+    "experiment",
+    score(
+        caseAgg,
+        observationAggPlus,
+        [...aggClaims, inventedClaim],
+        [...sufficient, inventedClaim]
+    )
+);
+show(
+    "B2, 충분 2 + 불충분 8",
     "experiment",
     score(
         caseAgg,
@@ -425,6 +469,13 @@ show(
         aggClaims,
         aggClaims.map((claim, index) => (index < 2 ? claim : { ...claim, assertion: "unclear" }))
     )
+);
+
+console.log(
+    "\n  `arithmetic-aggregable` 는 제안 정책상 산술이 집계에 들어갈 수 있다는 뜻일 뿐이다.\n" +
+        "  실제 증거 적격성(`verifyJudgedScoringEvidence()` 의 journal·dataset 결속)은\n" +
+        "  이 스크립트가 호출하지 않으며, 결속 없는 artifact 는 그 경로에서\n" +
+        "  `eligibleForAggregation: false` 다."
 );
 
 console.log("\nNo provider was called and no file was written.");
