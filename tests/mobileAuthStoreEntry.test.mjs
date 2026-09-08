@@ -279,6 +279,60 @@ test("no refusal quotes the value it is refusing", () => {
   assert.equal(both.includes(ring), false);
 });
 
+test("a field name is printed only when the shape declares it", () => {
+  // A shape that looks harmless says nothing about what the text is: a
+  // 32-character alphanumeric pepper is an ordinary-looking identifier, and it
+  // can be a JSON key as easily as a value. Only declared names are quoted.
+  const pepper = "K7pQ2mZx9Lb4Vn6Rt8Wy1Cs3Df5Gh0J";
+  const found = problems(active({ [pepper]: "x" })).join("\n");
+  assert.match(found, /not part of an entry/);
+  assert.match(found, /position \d+/);
+  assert.equal(found.includes(pepper), false, "the refusal printed the key");
+
+  // A declared name is quoted, because naming it is how the operator finds it.
+  assert.match(problems(active({ targetSha: 5 })).join("\n"), /"targetSha"/);
+
+  // Including a forbidden name, which is declared by the rings themselves.
+  assert.match(problems(active({ signingKeys: "x" })).join("\n"), /"signingKeys"/);
+});
+
+test("the fingerprint's comment is read like every other string", () => {
+  // `fingerprint.$comment` was the corner the walk stopped one level short of:
+  // an array inside it was never read, and the shape check accepted it because
+  // only algorithm and value were being judged.
+  const ring = `pep-1:${"B".repeat(40)}`;
+  const inComment = problems(
+    active({ fingerprint: { algorithm: "sha256", value: "aaaaaaaa", $comment: [ring] } })
+  ).join("\n");
+  assert.match(inComment, /looks like key material/);
+  assert.equal(inComment.includes(ring), false);
+
+  // And its type is checked, so there is no deeper structure to hide in.
+  assert.match(
+    problems(
+      active({ fingerprint: { algorithm: "sha256", value: "aaaaaaaa", $comment: { a: [ring] } } })
+    ).join("\n"),
+    /\$comment must be a string or an array of strings/
+  );
+
+  // The weaker ring test belongs to `fingerprint.value` alone: an algorithm
+  // name and a comment are prose and get the ordinary rule, which is the one
+  // that catches a long base64 run.
+  const base64 = "C".repeat(72);
+  assert.match(
+    problems(active({ fingerprint: { algorithm: base64, value: "aaaaaaaa" } })).join("\n"),
+    /looks like key material/
+  );
+  assert.match(
+    problems(
+      active({ fingerprint: { algorithm: "sha256", value: "aaaaaaaa", $comment: base64 } })
+    ).join("\n"),
+    /looks like key material/
+  );
+  // ... and only there: a real digest of that shape is a value, not a ring.
+  assert.deepEqual(problems(active({ fingerprint: { algorithm: "sha256", value: "d".repeat(64) } })), []);
+});
+
 test("the whole command says nothing about the values it read", () => {
   // The unit assertions above read the messages; this one reads what an
   // operator's terminal reads -- every stream of the real script, on a file
@@ -358,6 +412,32 @@ test("an instant-shaped string that is not an instant is refused", () => {
   for (const value of ["2028-02-29T00:00:00Z", "2026-09-03T10:00:00.500Z"]) {
     assert.deepEqual(problems(active({ createdAt: value })), [], value);
   }
+
+  // A fraction the shape accepts is a fraction the comparison has to carry:
+  // truncating to the second makes these two the same moment, and the ordering
+  // rule then holds a Pending written first to have been written second.
+  assert.match(
+    pair({
+      active: active({ createdAt: "2026-09-03T10:00:00.900Z" }),
+      pending: pending({ createdAt: "2026-09-03T10:00:00.100Z" }),
+    }).join("\n"),
+    /created before Active/
+  );
+  assert.deepEqual(
+    pair({
+      active: active({ createdAt: "2026-09-03T10:00:00.100Z" }),
+      pending: pending({ createdAt: "2026-09-03T10:00:00.900Z" }),
+    }),
+    []
+  );
+  // `.5` is five hundred milliseconds, not five.
+  assert.match(
+    pair({
+      active: active({ createdAt: "2026-09-03T10:00:00.5Z" }),
+      pending: pending({ createdAt: "2026-09-03T10:00:00.050Z" }),
+    }).join("\n"),
+    /created before Active/
+  );
 
   // And the ordering rule reads the same validated instant, so an impossible
   // date can no longer walk past it.
