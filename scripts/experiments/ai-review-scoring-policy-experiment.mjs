@@ -433,7 +433,11 @@ const observationAggPlus = {
     allText: [...aggText, INVENTED].join("\n"),
 };
 const inventedClaim = {
-    targetLabel: "a",
+    // The same answer the sentence names. Neither label is in the gold for
+    // `req-invented`, so the arithmetic is unchanged either way -- but a claim
+    // that accuses one answer while quoting a sentence about another is the
+    // mis-accusation this whole contract exists to tell apart.
+    targetLabel: "c",
     requirementId: "req-invented",
     assertion: "missing",
     speechAct: "finding",
