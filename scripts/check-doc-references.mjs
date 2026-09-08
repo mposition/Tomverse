@@ -37,7 +37,11 @@ for (const dir of DOCUMENT_ROOTS) {
   const full = join(root, dir);
   if (!existsSync(full)) continue;
   for (const entry of readdirSync(full)) {
-    if (entry.endsWith(".md")) markdownFiles.push(join(dir, entry));
+    // `repoPath`, not `join`, for the reason spelled out below the source
+    // collector: a document named "docs\\ops\\x.md" in an error message is a
+    // path nobody can paste back, and it is the same slash inconsistency one
+    // list further down.
+    if (entry.endsWith(".md")) markdownFiles.push(`${dir}/${entry}`);
   }
 }
 
