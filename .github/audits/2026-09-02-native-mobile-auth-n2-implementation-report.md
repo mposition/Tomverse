@@ -1110,6 +1110,49 @@ rev.22는 재사용 행의 `reason`을 `consumed` · `invalidated`로 적었습�
 
 ---
 
+### 5.21 §6의 1번 — 합성값까지 (2026-09-03)
+
+**범위는 ①(template + 합성값 연동 검증)만입니다.** ② 실제 vault 연동과 ③ 항목 생성·
+자격증명 배포는 제외이고, N1b·production·릴리스 게이트 상태도 건드리지 않았습니다.
+
+**만든 것 둘.**
+
+- `docs/ops/mobile-auth-op-env.template` — `op://` reference **둘만**. 복사하지 않고
+  그대로 `op run --env-file`에 넘깁니다. 복사본을 만들지 않는 것이 **나중에 손으로 값을
+  채운 사본**이 생길 자리를 없앱니다. 나머지 여섯 변수를 여기 넣지 않는 이유도 적었습니다 —
+  wrapper의 인수로 두어야 명령줄에서 눈으로 확인됩니다.
+- `scripts/ops/Test-MobileAuthOpEnvTemplate.ps1` (14건) — template의 모양과, `op run`이
+  문서상 하는 일(자식 프로세스 환경변수 주입)을 **합성값으로** 재현한 뒤 **진짜
+  wrapper**를 돌립니다.
+
+**mutation 넷으로 검사가 실제로 잡는지 확인했습니다.**
+
+| 고의 결함 | 걸린 사례 |
+|---|---|
+| template에 평문 링 | 1b · 1c |
+| 세 번째 변수 밀반입 | 1a |
+| field 없는 reference | 1c |
+| wrapper가 주입 대신 프롬프트 | 2a · 2b · 3a · 3d |
+
+**확인하지 못한 것을 분명히 적습니다.**
+
+- **1Password는 실행되지 않았고 reference는 아무것에도 해석되지 않았습니다.** 이 검사는
+  `op run`의 검증이 아니라 wrapper의 검증입니다.
+- **reference 문법을 공식 문서로 확인하지 못했습니다** — `developer.1password.com`과
+  `www.1password.dev`가 이 환경의 egress proxy에서 차단됩니다. 형식
+  (`op://<vault>/<item>/[section/]<field>`)과 `op run`이 값을 자식 프로세스 환경에
+  주입한다는 동작은 **검색 결과 요약에서 얻은 것이고 원문을 읽은 것이 아닙니다.**
+- **vault 이름의 공백과 항목 이름의 em dash가 reference에서 그대로 통하는지 모릅니다.**
+  template과 §6의 1번에 그것이 실제 확인의 **첫 대상**이라고 적었고, 실패하면 항목
+  이름을 ASCII로 바꾸고 template과 §2.2를 함께 고치는 것으로 정했습니다(vault 이름은
+  승인된 값이라 바꾸지 않습니다).
+
+**§6의 1번은 "실제 vault 연동 확인"으로 다시 씌었습니다** — 명령과 template이 생겼으므로
+남은 것은 `op read`로 두 reference를 해석해 보고 `op run` 아래에서 §2.1 명령을 돌리는
+일입니다.
+
+---
+
 ## 6. 검증
 
 이 보고서를 쓴 시점에 실행한 것입니다.
@@ -1135,6 +1178,10 @@ rev.22는 재사용 행의 `reason`을 `consumed` · `invalidated`로 적었습�
 > `check:encoding:strict`(통과)입니다. **wrapper 자체는 실행하지 못했습니다** —
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
+>
+> **rev.24 (2026-09-03).** §6의 1번에 ①(template + 합성값 연동 검증)까지 착수했습니다 —
+> §5.21. **1Password는 실행되지 않았고 reference 문법도 공식 문서로 확인하지
+> 못했습니다**(egress 차단). 실제 vault 연동은 그대로 미결입니다.
 >
 > **rev.23 (2026-09-03).** 21차 검토의 한 건은 §5.20입니다 — 재사용 행의 `reason`을
 > 결정 모듈의 값(`consumed`·`invalidated`)으로 적었는데, 저장되는 값은
@@ -1193,6 +1240,12 @@ rev.22는 재사용 행의 `reason`을 `consumed` · `invalidated`로 적었습�
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.24 회차.** 새 파일 둘(template, 합성 검증 script)과 문서 셋. `pwsh` smoke test
+> **14/14**(신규) · **19/19** · **19/19**, `check:doc-references`·
+> `check:policy-section-references`·`check:encoding:strict` 통과. **`lib/`·`app/`·schema·
+> 기존 테스트는 건드리지 않았으므로** unit·server-contract·DB·build는 다시 돌리지
+> 않았습니다.
 >
 > **rev.23 회차.** 문서 둘만 바뀌었습니다(코드·테스트 무변경).
 > `check:doc-references`·`check:policy-section-references`·`check:encoding:strict` 통과.

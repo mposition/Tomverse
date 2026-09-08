@@ -1,0 +1,37 @@
+# 1Password secret references for the mobile auth key rings.
+#
+# Used directly, not copied:
+#
+#   op run --env-file docs/ops/mobile-auth-op-env.template -- \
+#     pwsh -File ./scripts/ops/Check-MobileAuthKeyring.ps1 ... -UsePreinjectedRings
+#
+# `op run` resolves each reference and puts the value on the environment of the
+# child process only. Nothing here is a secret: a reference is a pointer, which
+# is why this file is committed and a resolved copy of it never is. Keeping the
+# file in the repository rather than copying it to a local `.env` also removes
+# the copy that could later be filled in by hand.
+#
+# ONLY the two rings belong here. The other six variables are ordinary
+# parameters of the wrapper -- they are already visible in the Railway
+# dashboard, and reading them off the command line is how an operator checks
+# they typed them right. Adding them here would move that check out of sight.
+#
+# Which entry to point at is the operator's decision at the time:
+#
+#   ...Active     what is deployed now  -- section 3 step 4, the preflight check
+#   ...Pending    the next candidate    -- section 3 steps 3 and 6
+#
+# Both lines below name Active. Point them at Pending for the steps that check
+# the candidate. Contract and entry names: docs/ops/mobile-auth-key-rotation.md
+# section 2.2.
+#
+# UNVERIFIED FROM THE REPOSITORY: the vault name contains spaces and the item
+# name an em dash, and this environment cannot reach 1Password's documentation
+# to confirm how those are handled in a reference. Resolving these two lines
+# with `op read` is the first step of the real-vault check, and if either fails
+# that is where it shows -- rename the item to something ASCII-only and update
+# these lines and section 2.2 together. The vault name itself is approved and
+# does not change.
+
+MOBILE_AUTH_SIGNING_KEYS="op://Tomverse Production Secrets/Mobile Auth Keyrings — Active/signing-ring"
+MOBILE_AUTH_REFRESH_PEPPERS="op://Tomverse Production Secrets/Mobile Auth Keyrings — Active/refresh-pepper-ring"
