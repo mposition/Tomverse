@@ -271,7 +271,7 @@ export const verifyEvidenceBundle = (
             record: entry.record,
             artifact: entry.artifact,
             journal: journalEntriesFor(input.journalText),
-            datasetCases: input.dataset.cases,
+            dataset: input.dataset,
         }),
     }));
     for (const { caseId, evidence } of judgedResults) {

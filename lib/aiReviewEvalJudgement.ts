@@ -219,6 +219,21 @@ export type AiReviewJudgedRequirement = {
 export type AiReviewJudgedCase = {
     caseId: string;
     contractVersion: string;
+    /**
+     * A digest of the DATASET case a person read when judging: its id, its
+     * question, and every answer's label and text.
+     *
+     * `caseDigest` in the artifact is a digest of THIS object -- the gold and
+     * the catalogue. It says nothing about the question and answers the
+     * judgement was made from, so a new evidence bundle keeping the same id and
+     * labels while changing the question could carry an old judgement and an
+     * old score, and everything verified.
+     *
+     * Compared against the frozen dataset by `verifyJudgedScoringEvidence()`.
+     * It does not read the text or judge it; it asks whether the text a person
+     * judged is the text that is there now.
+     */
+    sourceCaseDigest: string;
     /** The answers this case has, by label. Gold items must name one. */
     responseLabels: readonly string[];
     /** Requirements the case registers. Gold items must name one. */
@@ -712,6 +727,29 @@ export const observationRefFor = (observation: unknown): string => digest(observ
 /** Content digests of the two things a score is computed from. */
 export const judgedCaseDigest = (testCase: AiReviewJudgedCase): string =>
     digest(testCase);
+
+/**
+ * A digest of the source case's SUBSTANCE: what a person actually read.
+ *
+ * The id, the question, and every answer's label and text. Not the metadata
+ * around them -- a cell label or a phenomenon name changing does not change
+ * what was judged, and refusing over it would make the check noise. What it
+ * covers is the text the judgement rests on, so an edited question or a
+ * rewritten answer cannot keep an old judgement attached to it.
+ */
+export const judgedSourceCaseDigest = (datasetCase: {
+    id?: string;
+    question?: string;
+    responses?: readonly { label?: string; content?: string }[];
+}): string =>
+    digest({
+        id: datasetCase.id,
+        question: datasetCase.question,
+        responses: (datasetCase.responses ?? []).map((response) => ({
+            label: response.label,
+            content: response.content,
+        })),
+    });
 export const judgementRecordDigest = (record: AiReviewJudgementRecord): string =>
     digest(record);
 
@@ -870,7 +908,7 @@ export function judgedCaseShapeProblems(
 ): readonly string[] {
     const problems: string[] = [];
     if (!isPlainObject(value)) return [at(file, "is not an object")];
-    for (const field of ["caseId", "contractVersion"]) {
+    for (const field of ["caseId", "contractVersion", "sourceCaseDigest"]) {
         if (typeof value[field] !== "string") {
             problems.push(typeProblem(file, field, value[field], "a string"));
         }
@@ -1070,6 +1108,66 @@ export function scoringArtifactShapeProblems(
     return problems;
 }
 
+/**
+ * Shape checks for the run's journal and the frozen dataset.
+ *
+ * The four files in a scoring directory were validated and these two were not,
+ * so the newest inputs were the unchecked ones: a dataset whose `cases` was
+ * `false` skipped the comparison entirely and the case stayed countable, one
+ * whose `cases` was `{}` threw `.find is not a function`, and a journal with a
+ * `null` line threw on `.caseId`. Whether a caller SUPPLIED an input and what
+ * that input holds are two questions, and reading the second as the first is
+ * what let a broken file count as an absent one.
+ */
+export function judgedJournalShapeProblems(
+    value: unknown,
+    file = "journal"
+): readonly string[] {
+    if (!Array.isArray(value)) {
+        return [typeProblem(file, "", value, "an array of entries")];
+    }
+    const problems: string[] = [];
+    for (const [index, entry] of value.entries()) {
+        if (!isPlainObject(entry)) {
+            problems.push(typeProblem(file, `[${index}]`, entry, "an object"));
+            continue;
+        }
+        if (entry.caseId !== undefined && typeof entry.caseId !== "string") {
+            problems.push(typeProblem(file, `[${index}].caseId`, entry.caseId, "a string"));
+        }
+    }
+    return problems;
+}
+
+export function judgedDatasetShapeProblems(
+    value: unknown,
+    file = "dataset"
+): readonly string[] {
+    if (!isPlainObject(value)) return [typeProblem(file, "", value, "an object")];
+    if (!Array.isArray(value.cases)) {
+        return [
+            typeProblem(file, "cases", value.cases, "an array") +
+                " -- anything else skipped the comparison entirely and left the case countable",
+        ];
+    }
+    const problems: string[] = [];
+    for (const [index, item] of value.cases.entries()) {
+        if (!isPlainObject(item)) {
+            problems.push(typeProblem(file, `cases[${index}]`, item, "an object"));
+            continue;
+        }
+        if (typeof item.id !== "string") {
+            problems.push(typeProblem(file, `cases[${index}].id`, item.id, "a string"));
+        }
+        if (item.responses !== undefined && !Array.isArray(item.responses)) {
+            problems.push(
+                typeProblem(file, `cases[${index}].responses`, item.responses, "an array")
+            );
+        }
+    }
+    return problems;
+}
+
 // ---------------------------------------------------------------------------
 // The record against the output it was made from
 // ---------------------------------------------------------------------------
@@ -1174,14 +1272,21 @@ export type AiReviewJudgedEvidence = {
     /**
      * Whether these files may be counted in a score or cited in a promotion.
      *
-     * Separate from `problems` on purpose. A correctly recorded refusal is
-     * sound evidence -- of a refusal. Reading an empty `problems` as "usable"
-     * would let a case nobody finished judging into an aggregate as though it
-     * had been judged and found wanting.
+     * Separate from `problems` on purpose, and stricter than it. A correctly
+     * recorded refusal is sound evidence -- of a refusal. Files that agree with
+     * each other but were never checked against the run are sound evidence too
+     * -- of agreement. Reading either as "usable" is how a case nobody
+     * finished judging, or one from no run at all, reaches an aggregate as
+     * though it had been measured.
      */
     eligibleForAggregation: boolean;
     /** Why not, when not. Empty when it is. */
     ineligibleReasons: readonly string[];
+    /**
+     * Whether the output and the case were checked against the run's journal
+     * and the frozen dataset, or only against each other.
+     */
+    externalBinding: "checked" | "not checked";
 };
 
 /**
@@ -1192,38 +1297,51 @@ export type AiReviewJudgedEvidence = {
  * author remembered, and the gaps were the same shape every time. The CLI and
  * the evidence bundle call this; neither owns a copy.
  *
- *   1. shapes -- before any meaning is read;
+ *   1. shapes -- every input, including the journal and the dataset;
  *   2. the case's own registration;
  *   3. the record against the output it names;
  *   4. the record's identity and signatures;
  *   5. the score, recomputed and compared whole;
- *   6. the output and the case against the run's journal and the dataset.
+ *   6. the output and the case against the run's journal and the dataset,
+ *      including the SOURCE case's question and answers.
  *
  * Step 6 is why file-to-file agreement is not enough. Three files can agree
- * perfectly and be about an output this run never produced, or a case that is
- * not in the frozen set -- a consistent statement about nothing.
+ * perfectly and be about an output this run never produced, a case that is not
+ * in the frozen set, or a case whose question has been rewritten since a
+ * person judged it -- a consistent statement about nothing.
  */
 export function verifyJudgedScoringEvidence(input: {
     testCase: unknown;
     observation: unknown;
     record: unknown;
     artifact: unknown;
-    /** The run's journal entries, when the caller has them. */
-    journal?: readonly AiReviewJudgedJournalEntry[];
-    /** The frozen dataset's cases, when the caller has them. */
-    datasetCases?: readonly AiReviewJudgedDatasetCase[];
+    /**
+     * The run's journal entries, and the frozen dataset, when the caller has
+     * them. `undefined` means NOT SUPPLIED; anything else is checked, because
+     * reading a broken file as an absent one is how a dataset holding `false`
+     * skipped its own comparison and stayed countable.
+     */
+    journal?: unknown;
+    dataset?: unknown;
 }): AiReviewJudgedEvidence {
+    const externalBinding =
+        input.journal !== undefined && input.dataset !== undefined
+            ? "checked"
+            : "not checked";
     const shapes = [
         ...judgedCaseShapeProblems(input.testCase),
         ...observationShapeProblems(input.observation),
         ...judgementRecordShapeProblems(input.record),
         ...scoringArtifactShapeProblems(input.artifact),
+        ...(input.journal === undefined ? [] : judgedJournalShapeProblems(input.journal)),
+        ...(input.dataset === undefined ? [] : judgedDatasetShapeProblems(input.dataset)),
     ];
     if (shapes.length > 0) {
         return {
             problems: shapes,
             eligibleForAggregation: false,
             ineligibleReasons: ["the evidence files do not have the shape this contract reads"],
+            externalBinding,
         };
     }
 
@@ -1239,11 +1357,12 @@ export function verifyJudgedScoringEvidence(input: {
     ];
 
     // The output has to be the one this run recorded for this case, and the
-    // case has to be one the frozen set contains. Digests between three files
-    // in a directory say those three agree; they say nothing about whether the
-    // run ever produced that output.
-    if (input.journal) {
-        const entries = input.journal.filter((entry) => entry.caseId === testCase.caseId);
+    // case has to be the one the frozen set holds -- the same question and the
+    // same answers, not merely the same id.
+    if (input.journal !== undefined) {
+        const entries = (input.journal as AiReviewJudgedJournalEntry[]).filter(
+            (entry) => entry.caseId === testCase.caseId
+        );
         if (entries.length === 0) {
             problems.push(
                 `the run's journal has no entry for ${testCase.caseId}, so this output ` +
@@ -1260,8 +1379,9 @@ export function verifyJudgedScoringEvidence(input: {
             );
         }
     }
-    if (input.datasetCases) {
-        const datasetCase = input.datasetCases.find((item) => item.id === testCase.caseId);
+    if (input.dataset !== undefined) {
+        const cases = (input.dataset as { cases: AiReviewJudgedDatasetCase[] }).cases;
+        const datasetCase = cases.find((item) => item.id === testCase.caseId);
         if (!datasetCase) {
             problems.push(
                 `the frozen dataset has no case ${testCase.caseId}, so nothing here is ` +
@@ -1269,22 +1389,31 @@ export function verifyJudgedScoringEvidence(input: {
             );
         } else {
             const labels = (datasetCase.responses ?? []).map((response) => response.label);
-            const judged = [...testCase.responseLabels].sort();
-            if (JSON.stringify([...labels].sort()) !== JSON.stringify(judged)) {
+            if (
+                JSON.stringify([...labels].sort()) !==
+                JSON.stringify([...testCase.responseLabels].sort())
+            ) {
                 problems.push(
                     `${testCase.caseId} has answers ${labels.join(", ")} in the dataset and ` +
                         `${testCase.responseLabels.join(", ")} here, so a gold item could ` +
                         `name an answer the run never showed`
                 );
             }
+            // And the substance. Same id, same labels, rewritten question is a
+            // different case to a person, and an old judgement attached to it
+            // is a judgement of text that is no longer there.
+            if (testCase.sourceCaseDigest !== judgedSourceCaseDigest(datasetCase)) {
+                problems.push(
+                    `${testCase.caseId}'s question or answers are not the ones this ` +
+                        `judgement was made from, so the judgement is about text the ` +
+                        `dataset no longer holds`
+                );
+            }
         }
     }
 
     // Integrity and usefulness are different questions, and running them
-    // together is how a refusal becomes a score. A `scored: false` artifact
-    // whose integrity checks out is exactly right -- it correctly records that
-    // nobody finished judging this case -- and it must not reach an aggregate
-    // or a promotion, where it would read as a case that was judged.
+    // together is how a refusal becomes a score.
     const ineligibleReasons: string[] = [];
     if (problems.length > 0) {
         ineligibleReasons.push("the evidence does not verify");
@@ -1296,9 +1425,19 @@ export function verifyJudgedScoringEvidence(input: {
                 "that was judged"
         );
     }
+    // Checking a judgement before a run exists is allowed and useful. Calling
+    // the result countable is not: files that agree with each other have been
+    // shown to agree with each other, and an aggregate is about a run.
+    if (externalBinding === "not checked") {
+        ineligibleReasons.push(
+            "the run's journal and the frozen dataset were not supplied, so these files " +
+                "have been checked against each other and against no run"
+        );
+    }
     return {
         problems,
         eligibleForAggregation: ineligibleReasons.length === 0,
         ineligibleReasons,
+        externalBinding,
     };
 }
