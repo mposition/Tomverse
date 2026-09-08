@@ -37,7 +37,7 @@
 | 축 | 기록 | 이유 |
 |---|---|---|
 | **대상** | `targetLabel` — `a`·`b`·`c` | 오지목과 올바른 발견을 가른다 |
-| **내용** | `requirementId` — 예: `objection_deadline` | 동의어 문제가 사라진다. `2주`와 `14일`은 같은 id이고 채점기는 두 문자열을 보지 않는다 |
+| **내용** | `requirementId` — 예: `objection_deadline` | **동의어 판정이 채점기에서 사람의 의미 판정 단계로 옮겨 간다.** `2주`와 `14일`이 같은 요구라고 **사람이 한 번 정하면** 채점기는 두 문자열을 보지 않는다 |
 | **주장** | `assertion` — `missing` · `present` · `unclear` | 반대 주장을 가른다 |
 | **발화 성격** | `speechAct` — `finding` · `quotation` · `hypothetical` · `mention` | 인용·가정·언급을 발견에서 제외한다 |
 
@@ -88,7 +88,7 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 | 제출 결과 | TP / FN / FP |
 |---|---|
 | 올바른 발견 (대상 c, 내용 일치, `missing`, `finding`) | 1 / 0 / 0 |
-| 같은 뜻을 다른 말로 (`14일`) | 1 / 0 / 0 — id가 같으므로 문자열을 보지 않는다 |
+| 같은 뜻을 다른 말로 (`14일`) | 1 / 0 / 0 — 사람이 같은 id로 판정했으므로 |
 | a를 잘못 지목 | 0 / 1 / 1 |
 | `missing`이 아니라 `present`·`unclear` | 0 / 1 / 1 |
 | 발견을 제출하지 않음 | 0 / 1 / 0 |
@@ -96,7 +96,46 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 | 인용을 발견 필드에 제출 | 0 / 1 / 1 |
 | 같은 gold를 두 번 제출 | 1 / 0 / 0, `duplicates: 1` |
 | 다른 kind로 제출 | 0 / 1 / 0 |
+| gold에 없는 것을 지어냄 (`false_finding`) | 0 / 0 / **1** |
+| gold에 없지만 옳은 지적 (`gold_incomplete`) | 0 / 0 / 0, `goldGaps: 1` |
+| gold에 없고 판정 안 됨 (`undetermined`) | **채점 거부** |
 | 미확인 claim이 하나라도 있음 | **채점 거부** |
+| `confirmed`인데 확인자·확인 시각이 없음 | **채점 거부** |
+| 기록의 `caseId`·`contractVersion`이 다름 | **채점 거부** |
+
+### gold 밖의 발견
+
+**gold는 보고되어야 할 결함 목록이지, 검토자가 말할 수 있는 모든 것의 목록이
+아니다.** 그러므로 gold 밖의 주장은 기록 오류가 아니다 — **없는 문제를 지어내는
+능력**은 이 평가가 재려는 것 중 하나이고, `genuine_consensus`·`no_issue` cell은
+바로 그것을 재려고 존재한다. 그것을 채점하지 못하는 계약은 목적의 절반에 대해
+눈이 멀어 있다.
+
+두 갈래이며 서로 다르다.
+
+- **gold가 그 requirement를 이름 대는 경우** — 다른 답변을 지목했거나 반대를
+  주장한 것이다. 그 자체로 잘못된 발견이고 추가 판정이 필요 없다.
+- **gold가 전혀 이름 대지 않는 경우** — 검토자가 지어낸 것인지 gold가 빠뜨린
+  것인지는 **사람만 말할 수 있다.** claim의 `outsideGoldVerdict`가 그 판정을
+  담고, `undetermined`는 아무도 정하지 않았다는 뜻이며 그 case는 채점되지 않는다.
+
+`gold_incomplete`로 판정된 것은 `goldGaps`로 **보고만** 한다. 검토자가 옳았다는
+뜻이고, 그것은 **case에 관한 사실**이지 검토자의 잘못이 아니다.
+
+### 서명
+
+`status: "confirmed"`는 누구나 적을 수 있는 문자열이다. 그래서 확인은
+`confirmedBy`(이름)와 `confirmedAt`(파싱 가능한 시각)을 함께 요구하며,
+`verifyJudgementRecord()`가 그 경계를 지키고 검증된 기록만 채점기에 들어간다.
+
+**이것이 서명의 진위를 증명하지는 않는다.** 없는 서명을 있다고 읽지 않을 뿐이며,
+그것은 더 작은 주장이고 참인 주장이다.
+
+### 기록의 신원
+
+`caseId`·`contractVersion`·`observationRef`는 **claim과 함께** 다닌다. case의
+버전만 확인하면 과거 계약으로 만든 기록이나 다른 case의 기록이 이 case에 붙어도
+아무도 그 사실을 말하지 않는다.
 
 두 가지를 명시해 둔다.
 
@@ -108,6 +147,11 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 - **FP는 exhaustive gold에서만 센다.** 불완전한 gold는 "추가 발견"과 "빠뜨린
   항목"을 구별할 수 없으므로 무엇도 false positive라고 부를 자격이 없다. FN은
   양쪽 다 센다.
+- **precision 자격이 결과에 남는다.** kind별로 `precisionCounted`와
+  `precisionTruePositives`를 함께 돌려준다. 결과 객체만 받은 집계기가
+  `truePositives`를 그냥 더하면 non-exhaustive case가 precision 분자에 섞이는데,
+  그것이 M5 계약이 지목한 바로 그 실패다. non-exhaustive는 **분자와 분모 모두**
+  에서 빠진다.
 
 ### 아직 정해지지 않은 것
 
@@ -123,8 +167,8 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 
 **이번에 한 것**
 
-- `lib/aiReviewEvalJudgement.ts` — 타입과 `scoreJudgedCase()`. 순수 함수이며
-  파일도 DB도 provider도 읽지 않는다.
+- `lib/aiReviewEvalJudgement.ts` — 타입과 `verifyJudgementRecord()`,
+  `scoreJudgedCase()`. 순수 함수이며 파일도 DB도 provider도 읽지 않는다.
 - `AI_REVIEW_SCORING_CONTRACT_VERSION` — 기록이 어느 계약으로 쓰였는지. 다른
   버전의 기록은 **변환하지 않고 거절한다.**
 - `tests/aiReviewEvalJudgementScoring.test.mjs` — 위 표를 요구로 표현.
