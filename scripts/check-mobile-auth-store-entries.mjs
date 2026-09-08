@@ -16,6 +16,7 @@
 // docs/ops/mobile-auth-key-rotation.md section 6.
 
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   MOBILE_STORE_ENTRY_DISCLAIMER,
@@ -35,7 +36,12 @@ const DEFAULTS = {
 
 const activePath = argument("active") ?? DEFAULTS.active;
 const pendingPath = argument("pending") ?? DEFAULTS.pending;
-const checkingTemplates = activePath === DEFAULTS.active && pendingPath === DEFAULTS.pending;
+// Resolved, so `./docs/...` and `docs/...` are the same two files. Whether the
+// placeholders are tolerated has to depend on which file is being read, not on
+// how the operator spelled the path.
+const isTemplate = (given, standard) => resolve(given) === resolve(standard);
+const checkingTemplates =
+  isTemplate(activePath, DEFAULTS.active) && isTemplate(pendingPath, DEFAULTS.pending);
 
 const read = (path) => {
   try {
@@ -51,23 +57,22 @@ const read = (path) => {
 const active = read(activePath);
 const pending = read(pendingPath);
 
+// The templates carry the two placeholders on purpose -- the fingerprint rule
+// is not decided, and a template that invented one would be that decision. The
+// exemption is those exact strings and nothing else: an earlier version
+// dropped every problem whose text mentioned the fingerprint, which exempted a
+// missing field as readily as a placeholder.
+const options = { allowPlaceholders: checkingTemplates };
+
 const problems = [
-  ...mobileStoreEntryProblems(active, `active (${activePath})`),
-  ...mobileStoreEntryProblems(pending, `pending (${pendingPath})`),
+  ...mobileStoreEntryProblems(active, `active (${activePath})`, options),
+  ...mobileStoreEntryProblems(pending, `pending (${pendingPath})`, options),
   ...mobileStorePairProblems({ active, pending }),
 ];
 
-// The templates carry placeholders on purpose -- the fingerprint rule is not
-// decided, and a template that invented one would be that decision. They are
-// still checked for everything else, so the shape cannot drift from the rules.
-const templatePlaceholders = checkingTemplates
-  ? problems.filter((problem) => /fingerprint/.test(problem))
-  : [];
-const real = problems.filter((problem) => !templatePlaceholders.includes(problem));
-
-if (real.length > 0) {
-  console.error(`FAIL mobile auth store entries (${real.length} problem${real.length === 1 ? "" : "s"})\n`);
-  for (const problem of real) console.error(`  - ${problem}`);
+if (problems.length > 0) {
+  console.error(`FAIL mobile auth store entries (${problems.length} problem${problems.length === 1 ? "" : "s"})\n`);
+  for (const problem of problems) console.error(`  - ${problem}`);
   console.error(`\n  ${MOBILE_STORE_ENTRY_DISCLAIMER}`);
   console.error("  docs/ops/mobile-auth-key-rotation.md section 2.2");
   process.exit(1);

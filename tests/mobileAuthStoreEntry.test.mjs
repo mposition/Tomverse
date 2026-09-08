@@ -9,7 +9,10 @@
 // None of this is evidence about a deployment. Every field is written by hand.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -26,7 +29,7 @@ const active = (overrides = {}) => ({
   phase: "deployed",
   rotationId: "rot-2026-09-03-a",
   createdAt: "2026-09-03T10:00:00Z",
-  fingerprint: { algorithm: "sha256-of-public-keys", value: "aaaa" },
+  fingerprint: { algorithm: "sha256-of-public-keys", value: "aaaaaaaa" },
   targetSha: SHA_A,
   deploymentId: "11111111-1111-1111-1111-111111111111",
   ...overrides,
@@ -37,7 +40,7 @@ const pending = (overrides = {}) => ({
   phase: "drafted",
   rotationId: "rot-2026-09-03-b",
   createdAt: "2026-09-03T11:00:00Z",
-  fingerprint: { algorithm: "sha256-of-public-keys", value: "bbbb" },
+  fingerprint: { algorithm: "sha256-of-public-keys", value: "bbbbbbbb" },
   targetSha: SHA_B,
   ...overrides,
 });
@@ -56,19 +59,54 @@ test("the two shapes in the repository are the shapes the rules describe", () =>
     ["pending", "docs/ops/mobile-auth-store-entries/pending.template.json"],
   ]) {
     loaded[slot] = JSON.parse(readFileSync(path, "utf8"));
-    const found = mobileStoreEntryProblems(loaded[slot], path).filter(
-      (problem) => !/fingerprint/.test(problem)
+    assert.deepEqual(
+      mobileStoreEntryProblems(loaded[slot], path, { allowPlaceholders: true }),
+      []
     );
-    assert.deepEqual(found, []);
   }
 
   // And as a pair: the two templates must not read as each other's leftovers
   // either, or an operator copying both starts from a state the checker
   // refuses.
-  assert.deepEqual(
-    mobileStorePairProblems(loaded).filter((problem) => !/fingerprint/.test(problem)),
-    []
-  );
+  assert.deepEqual(mobileStorePairProblems(loaded), []);
+});
+
+test("the placeholders are tolerated by exact text, and only where they belong", () => {
+  // The exemption used to be "any problem mentioning the fingerprint", which
+  // exempted a missing field as readily as a placeholder, and it applied to a
+  // path spelled exactly one way. Both are the same mistake: a rule that
+  // approximates what it is excusing.
+  for (const path of [
+    "docs/ops/mobile-auth-store-entries/active.template.json",
+    "docs/ops/mobile-auth-store-entries/pending.template.json",
+  ]) {
+    const entry = JSON.parse(readFileSync(path, "utf8"));
+
+    // Without the option -- which is every real entry -- a placeholder is a
+    // value nobody has computed yet, and it fails.
+    assert.match(
+      mobileStoreEntryProblems(entry, path).join("\n"),
+      /still the template placeholder/
+    );
+
+    // And with the option, everything except those exact strings still holds.
+    const missing = { ...entry, fingerprint: { value: entry.fingerprint.value } };
+    assert.match(
+      mobileStoreEntryProblems(missing, path, { allowPlaceholders: true }).join("\n"),
+      /fingerprint.algorithm must name/
+    );
+    // A near miss is not the placeholder. It falls through to the ordinary
+    // rule for a value, which refuses it -- the exemption is those exact
+    // strings, not "anything in angle brackets".
+    const nearly = {
+      ...entry,
+      fingerprint: { ...entry.fingerprint, value: `${entry.fingerprint.value} ` },
+    };
+    assert.match(
+      mobileStoreEntryProblems(nearly, path, { allowPlaceholders: true }).join("\n"),
+      /fingerprint.value must be 8-128 characters/
+    );
+  }
 });
 
 test("every required field is required", () => {
@@ -92,7 +130,7 @@ test("a field of the wrong form is refused, not accepted as a string", () => {
     [{ targetSha: SHA_A.toUpperCase() }, /targetSha/],
     [{ deploymentId: "short" }, /deploymentId/],
     [{ fingerprint: "aaaa" }, /fingerprint must be an object/],
-    [{ fingerprint: { value: "aaaa" } }, /algorithm/],
+    [{ fingerprint: { value: "aaaaaaaa" } }, /algorithm/],
     [{ fingerprint: { algorithm: "sha256", value: "" } }, /value/],
   ];
   for (const [overrides, pattern] of cases) {
@@ -146,7 +184,7 @@ test("a pending carrying the deployed rotation is refused", () => {
   // candidate while being what is already running.
   assert.match(
     pair({ pending: pending({ rotationId: active().rotationId }) }).join("\n"),
-    /same rotationId|both entries carry rotationId/
+    /same rotationId/
   );
 });
 
@@ -162,7 +200,7 @@ test("a pending reusing the deployed deployment id is refused", () => {
     pair({
       pending: pending({ phase: "deployed", deploymentId: active().deploymentId }),
     }).join("\n"),
-    /both entries name deployment/
+    /name the same deployment/
   );
 });
 
@@ -176,7 +214,7 @@ test("a pending older than active is a leftover, not a candidate", () => {
 
 test("the kinds are checked against the slots they were read from", () => {
   assert.match(pair({ pending: active() }).join("\n"), /declares itself active/);
-  assert.match(pair({ active: pending() }).join("\n"), /declares kind "pending"/);
+  assert.match(pair({ active: pending() }).join("\n"), /does not declare kind 'active'/);
 });
 
 // --- the document is metadata, not a ring ----------------------------------
@@ -192,6 +230,144 @@ test("a ring pasted into the metadata is refused, and not echoed back", () => {
     assert.match(found, /vault's secret fields/);
     assert.equal(found.includes(ring), false, "the refusal repeated the material");
   }
+});
+
+test("a ring reached through a nested field is refused too", () => {
+  // The scan used to read top-level strings only, so a ring one level down --
+  // in the fingerprint, or in a field somebody added -- passed with no
+  // problems at all. Two rules answer that: the shape is closed, and every
+  // string inside it is read.
+  const ring = `sign-2:${"A".repeat(64)}`;
+
+  const inFingerprint = problems(active({ fingerprint: { algorithm: "sha256", value: ring } })).join("\n");
+  assert.match(inFingerprint, /looks like key material/);
+  assert.equal(inFingerprint.includes(ring), false);
+
+  const inExtra = problems(active({ note: { signingKeys: ring } })).join("\n");
+  assert.match(inExtra, /looks like key material/);
+  assert.match(inExtra, /not part of an entry/);
+  assert.equal(inExtra.includes(ring), false);
+
+  // The closed shape is what makes the scan complete: there is no third place
+  // to put an object.
+  assert.match(problems(active({ targetSha: { nested: SHA_A } })).join("\n"), /must be a string/);
+  assert.match(
+    problems(active({ fingerprint: { algorithm: "sha256", value: "aaaaaaaa", extra: ring } })).join("\n"),
+    /not part of its shape/
+  );
+  assert.match(problems(active({ $comment: [ring] })).join("\n"), /looks like key material/);
+});
+
+test("no refusal quotes the value it is refusing", () => {
+  // The reason a value is suspect is usually that it might be key material,
+  // and `kind` is as good a place to paste one as any other. A checker that
+  // serialises the input into its own error does the disclosure it exists to
+  // prevent.
+  const ring = `sign-2:${"A".repeat(64)}`;
+  for (const field of ["kind", "phase", "rotationId", "createdAt", "targetSha", "deploymentId"]) {
+    const found = problems(active({ [field]: ring })).join("\n");
+    assert.ok(found.length > 0, `${field} accepted a ring`);
+    assert.equal(found.includes(ring), false, `the refusal for ${field} repeated the material`);
+  }
+
+  // Including the pair diagnostics, which run whatever the entries hold.
+  const both = mobileStorePairProblems({
+    active: active({ rotationId: ring, deploymentId: ring }),
+    pending: pending({ rotationId: ring, deploymentId: ring, phase: "deployed" }),
+  }).join("\n");
+  assert.ok(both.length > 0);
+  assert.equal(both.includes(ring), false);
+});
+
+test("the whole command says nothing about the values it read", () => {
+  // The unit assertions above read the messages; this one reads what an
+  // operator's terminal reads -- every stream of the real script, on a file
+  // whose fields hold synthetic material.
+  const directory = mkdtempSync(join(tmpdir(), "mobile-store-entry-"));
+  try {
+    const ring = `sign-2:${"A".repeat(64)}`;
+    const activePath = join(directory, "active.json");
+    const pendingPath = join(directory, "pending.json");
+    writeFileSync(activePath, JSON.stringify({ ...active(), kind: ring, note: { signingKeys: ring } }));
+    writeFileSync(pendingPath, JSON.stringify({ ...pending(), rotationId: ring }));
+
+    const run = spawnSync(
+      process.execPath,
+      ["scripts/check-mobile-auth-store-entries.mjs", "--active", activePath, "--pending", pendingPath],
+      { encoding: "utf8" }
+    );
+
+    assert.equal(run.status, 1, "the synthetic entries were accepted");
+    const output = `${run.stdout}${run.stderr}`;
+    assert.match(output, /FAIL mobile auth store entries/);
+    assert.equal(output.includes(ring), false, "the command printed the material");
+    assert.equal(output.includes("A".repeat(24)), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// --- what the pair check can and cannot compare ----------------------------
+
+test("fingerprints computed by different rules are not compared", () => {
+  // Two values from different algorithms are not the same measurement:
+  // equality between them means nothing. Saying so is not the same as passing,
+  // so it is still a problem -- it just is not the "you renamed instead of
+  // rotating" one, which would be a false accusation.
+  const found = pair({
+    active: active({ fingerprint: { algorithm: "sha256", value: "samesame" } }),
+    pending: pending({ fingerprint: { algorithm: "blake3", value: "samesame" } }),
+  }).join("\n");
+  assert.match(found, /different fingerprint algorithms/);
+  assert.match(found, /undetermined/);
+  assert.doesNotMatch(found, /renaming is not rotating/);
+
+  // Under one rule the identity check is meaningful again.
+  assert.match(
+    pair({
+      active: active({ fingerprint: { algorithm: "sha256", value: "samesame" } }),
+      pending: pending({ fingerprint: { algorithm: "sha256", value: "samesame" } }),
+    }).join("\n"),
+    /renaming is not rotating/
+  );
+
+  // An entry that names no algorithm has its own problem; the pair does not
+  // add a claim about material on top of it.
+  assert.doesNotMatch(
+    pair({ active: active({ fingerprint: { value: "samesame" } }) }).join("\n"),
+    /same fingerprint|different fingerprint algorithms/
+  );
+});
+
+// --- a date has to be a date -----------------------------------------------
+
+test("an instant-shaped string that is not an instant is refused", () => {
+  // The pattern alone accepts 2026-13-40T99:99:99Z, and `Date.parse` alone
+  // rolls 2026-02-31 into March. Both then reach the pair check, where a NaN
+  // or a silently moved day makes the ordering rule say nothing at all.
+  for (const value of [
+    "2026-13-40T99:99:99Z",
+    "2026-02-31T00:00:00Z",
+    "2026-00-10T00:00:00Z",
+    "2026-09-31T00:00:00Z",
+    "2026-09-03T24:00:00Z",
+    "2026-09-03T10:60:00Z",
+  ]) {
+    assert.match(problems(active({ createdAt: value })).join("\n"), /real UTC instant/, value);
+  }
+  for (const value of ["2028-02-29T00:00:00Z", "2026-09-03T10:00:00.500Z"]) {
+    assert.deepEqual(problems(active({ createdAt: value })), [], value);
+  }
+
+  // And the ordering rule reads the same validated instant, so an impossible
+  // date can no longer walk past it.
+  assert.match(
+    pair({
+      active: active({ createdAt: "2026-09-03T10:00:00Z" }),
+      pending: pending({ createdAt: "2026-09-02T10:00:00Z" }),
+    }).join("\n"),
+    /created before Active/
+  );
 });
 
 test("the disclaimer says what a pass does not mean", () => {
