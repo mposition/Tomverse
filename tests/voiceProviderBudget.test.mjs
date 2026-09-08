@@ -8,9 +8,14 @@ import {
 } from "../lib/voiceProviderBudget.ts";
 import {
   auditVoicePriceRegister,
+  voiceModelPriceRefusal,
   VOICE_MODEL_PRICE_REGISTER,
   VOICE_PRICE_REVERIFY_MAX_DAYS,
 } from "../lib/voiceInputPricing.ts";
+import {
+  DEFAULT_VOICE_TRANSCRIPTION_MODEL,
+  resolveVoiceTranscriptionModel,
+} from "../lib/voiceTranscriptionPortCore.ts";
 
 /**
  * The audio provider budget and the audio price register:
@@ -316,4 +321,104 @@ test("a ticket that names nothing is refused", () => {
       `${entry.modelId}: ${entry.ticket} is not something a person can open`
     );
   }
+});
+
+// ---------------------------------------------------------------------------
+// Readiness: the configured model has to be one whose cost is known
+// docs/policy/voice-input.md §6.1.4
+// ---------------------------------------------------------------------------
+
+test("the configured model is resolved in one place", () => {
+  // Readiness checks a model's price and the port calls a model. If those two
+  // read the environment separately they can drift, and then the check is
+  // verifying a model nobody calls.
+  assert.equal(
+    resolveVoiceTranscriptionModel({}),
+    DEFAULT_VOICE_TRANSCRIPTION_MODEL
+  );
+  assert.equal(
+    resolveVoiceTranscriptionModel({ VOICE_TRANSCRIPTION_MODEL: "gpt-4o-transcribe" }),
+    "gpt-4o-transcribe"
+  );
+  // Set-but-blank is not a model choice.
+  assert.equal(
+    resolveVoiceTranscriptionModel({ VOICE_TRANSCRIPTION_MODEL: "   " }),
+    DEFAULT_VOICE_TRANSCRIPTION_MODEL
+  );
+});
+
+test("the default model may be called", () => {
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: DEFAULT_VOICE_TRANSCRIPTION_MODEL }),
+    null
+  );
+});
+
+test("a model with no known audio rate is refused", () => {
+  // The concrete case this rule exists for: an operator setting
+  // VOICE_TRANSCRIPTION_MODEL to the entry that has never been invoiced.
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "gpt-4o-transcribe" })?.code,
+    "audio_input_rate_unknown"
+  );
+});
+
+test("an unrecognised model string is refused, not shrugged at", () => {
+  // A typo must not be a route to a model whose cost nothing here can state.
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "gpt-4o-mini-transcirbe" })?.code,
+    "model_not_in_register"
+  );
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "whisper-1" })?.code,
+    "model_not_in_register"
+  );
+});
+
+test("a priced model that has never been invoiced is refused", () => {
+  // §6.1-3: running on an unobserved cost needs a recorded human approval, so
+  // the default is refusal rather than silent acceptance.
+  const pricedButUnobserved = [
+    {
+      ...VOICE_MODEL_PRICE_REGISTER.find(
+        (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+      ),
+      costObservation: null,
+    },
+  ];
+
+  assert.equal(
+    voiceModelPriceRefusal({
+      modelId: "gpt-4o-mini-transcribe",
+      register: pricedButUnobserved,
+    })?.code,
+    "cost_never_observed"
+  );
+});
+
+test("an expired reading does not refuse readiness", () => {
+  // Deliberate: readiness asks whether this configuration is usable now, and
+  // failing it on a calendar date would take a running production down with no
+  // deploy and no code change. CI keeps failing on expiry instead.
+  const stale = [
+    {
+      ...VOICE_MODEL_PRICE_REGISTER.find(
+        (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+      ),
+      reverifyBy: "2020-01-01",
+    },
+  ];
+
+  assert.equal(
+    voiceModelPriceRefusal({ modelId: "gpt-4o-mini-transcribe", register: stale }),
+    null
+  );
+  // ...but the audit still calls it expired.
+  assert.ok(
+    auditVoicePriceRegister({
+      modelIds: ["gpt-4o-mini-transcribe"],
+      now: new Date("2026-09-08T00:00:00Z"),
+      register: stale,
+    }).some((problem) => problem.code === "expired")
+  );
 });

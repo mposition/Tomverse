@@ -82,6 +82,31 @@ let voiceBudget: { ready: boolean; flagEnabled: boolean } | null = {
     ready: true,
     flagEnabled: false,
 };
+/**
+ * Whether the configured transcription model's cost is known.
+ *
+ * A separate dependency from the budget above: a budget in seconds bounds how
+ * much audio leaves, and says nothing about a model whose per-token price
+ * nobody has observed (docs/policy/voice-input.md §6.1.4). `null` = it threw.
+ */
+let voiceModelPrice: { ready: boolean; flagEnabled: boolean } | null = {
+    ready: true,
+    flagEnabled: false,
+};
+mock.module(mod("lib/voiceModelPriceReadiness.ts"), {
+    namedExports: {
+        getVoiceModelPriceReadiness: async () => {
+            if (!voiceModelPrice) throw new Error("voice model price check exploded");
+            return {
+                ...voiceModelPrice,
+                modelId: "gpt-4o-mini-transcribe",
+                refusal: voiceModelPrice.ready
+                    ? null
+                    : { code: "cost_never_observed", detail: "no invoice recorded" },
+            };
+        },
+    },
+});
 mock.module(mod("lib/voiceProviderBudgetReadiness.ts"), {
     namedExports: {
         getVoiceProviderBudgetReadiness: async () => {
@@ -255,6 +280,7 @@ beforeEach(() => {
     providerBudgetReady = true;
     imageBudget = { ready: true, flagEnabled: false };
     voiceBudget = { ready: true, flagEnabled: false };
+    voiceModelPrice = { ready: true, flagEnabled: false };
     searchBudget = { ready: true };
     setBusinessIdentity(true);
     sendingIdentityReady = true;
@@ -275,6 +301,7 @@ type ReadinessBody = {
         providerBudgets: boolean;
         imageProviderBudget: boolean;
         voiceProviderBudget: boolean;
+        voiceModelPrice: boolean;
         emailSendingIdentity: boolean;
         emailSnapshotKeyring: boolean;
         emailUnsubscribeKeyring: boolean;
@@ -306,6 +333,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         providerBudgets: true,
         imageProviderBudget: true,
         voiceProviderBudget: true,
+        voiceModelPrice: true,
         emailSendingIdentity: true,
         emailSnapshotKeyring: true,
         emailUnsubscribeKeyring: true,
@@ -350,6 +378,12 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             name: "voiceProviderBudget",
             arrange: () => {
                 voiceBudget = { ready: false, flagEnabled: true };
+            },
+        },
+        {
+            name: "voiceModelPrice",
+            arrange: () => {
+                voiceModelPrice = { ready: false, flagEnabled: true };
             },
         },
         {
@@ -413,6 +447,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         providerBudgetReady = true;
         imageBudget = { ready: true, flagEnabled: false };
         voiceBudget = { ready: true, flagEnabled: false };
+        voiceModelPrice = { ready: true, flagEnabled: false };
         searchBudget = { ready: true };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
@@ -570,6 +605,35 @@ test("a voice budget absent while the flag is off is still ready", async () => {
     const { response, body } = await get();
     assert.equal(response.status, 200);
     assert.equal(body.checks.voiceProviderBudget, true);
+});
+
+test("an unpriced transcription model while the flag is off is still ready", async () => {
+    // The same env-first reasoning as the budget above. A deployment that has
+    // never switched voice input on must not be refused traffic over the price
+    // of a model it never calls (docs/policy/voice-input.md §6.1.4).
+    voiceModelPrice = { ready: true, flagEnabled: false };
+
+    const { response, body } = await get();
+    assert.equal(response.status, 200);
+    assert.equal(body.checks.voiceModelPrice, true);
+});
+
+test("the transcription model price check throwing is not ready", async () => {
+    // Same reasoning as the budgets: a check that explodes is not evidence
+    // that the price is known. Nobody knows, and that refuses traffic.
+    voiceModelPrice = null;
+
+    const { response, body } = await get();
+    assert.equal(response.status, 503);
+    assert.equal(body.checks.voiceModelPrice, false);
+
+    await runDeferred();
+    assert.deepEqual(
+        reported.find(
+            (entry) => entry.dependency === "voice-transcription-model-price"
+        ),
+        { dependency: "voice-transcription-model-price", healthy: false }
+    );
 });
 
 test("an image budget absent while the flag is off is still ready", async () => {

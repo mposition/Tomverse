@@ -2,7 +2,7 @@ import "server-only";
 
 import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
-  DEFAULT_VOICE_TRANSCRIPTION_MODEL,
+  resolveVoiceTranscriptionModel,
   transcribeWithOpenAi,
   type VoiceTranscriptionPort,
   type VoiceTranscriptionRequest,
@@ -62,9 +62,7 @@ export class OpenAiVoiceTranscriptionProvider implements VoiceTranscriptionPort 
 
     return transcribeWithOpenAi(request, {
       apiKey,
-      model:
-        process.env.VOICE_TRANSCRIPTION_MODEL ||
-        DEFAULT_VOICE_TRANSCRIPTION_MODEL,
+      model: resolveVoiceTranscriptionModel(process.env),
       fetchImpl: fetch,
     });
   }
