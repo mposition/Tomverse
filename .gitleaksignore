@@ -85,9 +85,10 @@ fc1e3368e4d14f3d3552c677184a9a88b7a05697:tests/assistantPackageReview.test.mjs:g
 # checks out every ref (fetch-depth 0), which is how a develop-only commit
 # turned the main run red from 2026-09-04 on.
 #
-# The introducing commit is immutable history and stays pinned here. If those
-# two lines are edited again, join the values from parts instead of writing
-# the shape, as tests/assistantPackageReview.test.mjs does with `forge()`.
+# The introducing commit is immutable history and stays pinned here. The
+# follow-up commit stopped writing the shape -- the two values are now joined
+# from parts, as tests/assistantPackageReview.test.mjs does with `forge()` --
+# so no later edit of those lines recreates the finding under a new commit.
 #
 # Scope: exactly these two findings in that one commit -- nothing wider.
 866e0693603aee6d1b315d7e82d7889d82b1736e:scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1:generic-api-key:205
