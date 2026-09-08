@@ -1121,7 +1121,7 @@ rev.22는 재사용 행의 `reason`을 `consumed` · `invalidated`로 적었습�
   그대로 `op run --env-file`에 넘깁니다. 복사본을 만들지 않는 것이 **나중에 손으로 값을
   채운 사본**이 생길 자리를 없앱니다. 나머지 여섯 변수를 여기 넣지 않는 이유도 적었습니다 —
   wrapper의 인수로 두어야 명령줄에서 눈으로 확인됩니다.
-- `scripts/ops/Test-MobileAuthOpEnvTemplate.ps1` (14건) — template의 모양과, `op run`이
+- `scripts/ops/Test-MobileAuthOpEnvTemplate.ps1` (16건) — template의 모양과, `op run`이
   문서상 하는 일(자식 프로세스 환경변수 주입)을 **합성값으로** 재현한 뒤 **진짜
   wrapper**를 돌립니다.
 
@@ -1371,6 +1371,71 @@ README는 "재실행은 새 파일"이라고 하는데 파일명이 날짜와 SH
 
 ---
 
+### 5.27 §6의 2번 — Active·Pending의 모양까지 (2026-09-03)
+
+**범위는 저장소 안의 template과 합성 테스트까지입니다.** 실제 vault 항목 생성도,
+자격증명 생성·배포도, 승인 상태 변경도 하지 않았습니다. §6의 3번 운영값(주기·수신자·
+보관 기간)과 5·6번은 그대로 미결입니다.
+
+**문제는 산문이 다섯 field를 전부 선택 사항으로 남겼다는 것입니다.** §2.2는 Pending이
+`rotationId`·`createdAt`·candidate fingerprint·target SHA·Railway deployment ID를
+"최소한 함께 적는다"고 말하지만, 표에 적힌 다섯 줄은 무엇도 강제하지 않습니다. 그렇게
+생기는 상태가 이 절이 겨냥한 것입니다 — **deployment ID 없는 Pending은 롤백 대상을
+지목할 수 없고**, 끝난 회전의 Pending이 남아 있으면 그것이 다음 후보처럼 읽힙니다.
+
+**만든 것 넷.**
+
+| 무엇 | 어디 |
+|---|---|
+| 판정(순수) | `scripts/mobile-auth-store-entry-core.mjs` |
+| template 둘 | `docs/ops/mobile-auth-store-entries/{active,pending}.template.json` |
+| 검사기 | `npm run check:mobile-auth-store-entries` |
+| 합성 테스트 | `tests/mobileAuthStoreEntry.test.mjs` (14건) |
+
+**`phase`를 둔 이유.** Pending은 배포가 존재하기 **전에** 쓰이므로 그 시점에는 적을
+deployment ID가 없습니다. 그렇다고 자리표시자를 넣으면 **없는 field는 "아직"으로 읽히고
+자리표시자는 답으로 읽힙니다.** 그래서 `drafted`에서는 field 자체가 없어야 하고
+(있으면 거절), `deployed`에서는 반드시 있어야 합니다. `kind`가 `active`이면 정의상
+배포된 것이므로 `phase`는 `deployed`입니다.
+
+**두 항목을 서로에 대해서도 봅니다.** 같은 `rotationId` · 같은 fingerprint · 같은
+deployment ID · Active보다 이른 `createdAt` — 넷 다 "Pending이 사실은 이미 끝난 회전의
+잔여물"인 모양입니다. §5.1의 전면 교체는 같은 모양에 `kind: "emergency-pending"`을
+쓰므로, 회전이 아닌 것이 나중에 회전으로 읽히지 않습니다.
+
+**링을 붙여 넣으면 거절하고, 거절 메시지는 그 값을 되풀이하지 않습니다.** §5.22의 1번과
+같은 규칙입니다 — 되풀이하는 순간 검사기가 막으려던 노출을 검사기가 합니다. 파일이
+JSON으로 파싱되지 않을 때도 파일 내용을 찍지 않고 오류 이름만 냅니다.
+
+**fingerprint의 계산 규칙은 정하지 않았습니다.** 검사기는 `algorithm`과 `value`가 비어
+있지 않은지만 봅니다. 무엇을 해싱할지(링 문자열 전체인지 활성 키 하나인지), 어떤 함수로,
+어떤 인코딩으로, 그리고 salt 없이 해싱한 값이 저비용 사전 공격의 표적이 되지 않는지가
+함께 정해져야 하고, **그것은 제가 고를 것이 아닙니다.** template의 두 칸은 자리표시자로
+두었고, 검사기는 **template에 한해** 그 자리표시자를 통과시킵니다 — 규칙을 지어내
+template을 통과시키면 그 지어낸 규칙이 곧 결정이 됩니다. §6의 2번에 **결정 필요
+사항**으로 올렸습니다.
+
+**이것이 §6의 5번을 해결하지 않습니다.** deployment ID를 포함한 모든 field를 사람이 손으로
+적으므로, 통과는 "두 항목이 서로 모순되지 않고 한쪽이 다른 쪽의 잔여물이 아니다"까지입니다.
+**구조 검사는 배포 결속의 증거가 아닙니다.** 그 문장을 판정 모듈의
+`MOBILE_STORE_ENTRY_DISCLAIMER`에 두어, 검사기가 통과할 때도 실패할 때도 함께 출력하도록
+했습니다 — 누군가 덧붙이기를 기억해야 하는 문장이 아니라 판정과 같이 다니는 문장입니다.
+
+**mutation 넷으로 검사가 실제로 잡는지 확인했습니다.**
+
+| 고의 결함 | 걸린 사례 |
+|---|---|
+| `deployed`인데 `deploymentId` 없음 | 필수 field 사례 |
+| `drafted`인데 `deploymentId: ""` 자리표시자 | drafted 사례 |
+| Active와 같은 `rotationId`·fingerprint를 가진 Pending | 교차 오염 사례 넷 |
+| 메타데이터에 붙여 넣은 합성 링 | 비노출 사례(값이 메시지에 없음) |
+
+**문서에 반영한 곳.** §2.2에 "그 다섯 field에 모양을 줍니다"를 넣고, §3의 2번(Pending
+작성)·5번(deployment ID 기록과 `phase` 전환)·8번(승격은 통째로 옮겨 쓰기), §5.1의
+6번(`emergency-pending`), 그리고 릴리스 체크리스트 한 항목에 연결했습니다.
+
+---
+
 ## 6. 검증
 
 이 보고서를 쓴 시점에 실행한 것입니다.
@@ -1396,6 +1461,12 @@ README는 "재실행은 새 파일"이라고 하는데 파일명이 날짜와 SH
 > `check:encoding:strict`(통과)입니다. **wrapper 자체는 실행하지 못했습니다** —
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
+>
+> **rev.31 (2026-09-03).** §6의 2번(Active·Pending)에 **모양까지** 착수했습니다 —
+> §5.27. template 둘 · 순수 판정 · 검사기 · 합성 테스트 14건입니다. **fingerprint의
+> 계산 규칙은 정하지 않고 결정 필요 사항으로 올렸고**, 통과가 배포 결속을 뜻하지
+> 않는다는 문장을 판정 모듈에 두어 출력마다 따라다니게 했습니다. 실제 vault 항목
+> 생성·자격증명 배포·승인 상태 변경은 범위 밖입니다.
 >
 > **rev.30 (2026-09-03).** 25차 검토의 두 건은 §5.26입니다 — 공유한 진단에 **도달하지
 > 못하는 경로**(빈 링)와, CRLF를 겨냥한 테스트가 **CRLF에서 실패**하던 것.
@@ -1481,6 +1552,12 @@ README는 "재실행은 새 파일"이라고 하는데 파일명이 날짜와 SH
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.31 회차.** `test:unit` **7,891 pass / 0 fail**(1 skipped, 신규 14건 포함),
+> `lint scripts tests`, `typecheck`, `check:mobile-auth-store-entries`(신규) ·
+> `check:mobile-auth-keyring` · `check:staging-verification-records`(12 feature) ·
+> `check:doc-references` · `check:policy-section-references` · `check:encoding:strict`
+> 통과. smoke test **19/19 · 19/19 · 16/16**. `lib/`·`app/`·schema 무변경.
 >
 > **rev.30 회차.** `test:unit` **7,874 pass / 0 fail**, `lint scripts tests`,
 > `typecheck`, `check:staging-verification-records`(12 feature) ·
@@ -1663,7 +1740,8 @@ fail-closed로 답합니다. production 활성화를 결정할 때 `/api/ready`�
 | **웹 `sessionSecurity` 캐시 조사** | 승인 항목 18 — 별도 후속. N2에는 D12의 강화된 계약을 처음부터 적용했습니다 |
 | **maintenance stub 검사** | §8의 재발 방지. 아직 없습니다 |
 | **1Password 명령의 실제 문구** | **활성화 전에 채웁니다.** §2.2가 제품·vault·복구 권한을 확정했고 §3·§5.1이 "store에서 읽는다 / store에 먼저 저장한다"를 절차에 넣었지만, 그 문장을 실행하는 CLI 명령은 아직 없습니다. 추가 계약 5번이 **secret reference 주입**을 요구하므로 명령을 쓸 때 그 동작을 그 자리에서 확인합니다 |
-| **Active·Pending 항목의 최초 생성** | 첫 설정에서 만들어지며, 그것이 §3의 0번이 읽을 대상입니다 |
+| **Active·Pending 항목의 최초 생성** | 첫 설정에서 만들어지며, 그것이 §3의 0번이 읽을 대상입니다. 모양과 검사기는 §5.27에서 생겼습니다 |
+| **fingerprint 계산 규칙** | **결정 필요.** 무엇을 · 어떤 함수로 · 어떤 인코딩으로 해싱하는지, 그리고 salt 없는 값이 사전 공격의 표적이 되지 않는지. 정해지기 전까지 검사기는 구조만 봅니다(§5.27) |
 | **wrapper smoke test를 Windows PowerShell에서** | `scripts/ops/Test-CheckMobileAuthKeyring.ps1`은 여기서 13/13(Linux, PowerShell 7.4.6), `1093f96`에서 검토자의 Windows PowerShell Core 7.6.4와 Windows PowerShell 5.1.19041.6456 양쪽으로 13/13 통과했습니다. **전부 개발 중 증거**이고, 체크리스트가 요구하는 것은 **최종 release SHA에 묶인 기록**입니다 |
 | **검사기를 배포 이미지에서 실행 가능하게** | 순수 판정 부분을 의존성 없는 `.mjs`로. 그래야 `railway ssh`로 들어가 **살아 있는** 설정을 감사할 수 있습니다. 지금은 배포할 값을 손으로 넣는 사전 검증만 됩니다 |
 | **은퇴 키 자동 제거·상시 보고** | 유예가 지난 항목과 선언되지 않은 키를 코드가 쓰지 않을 뿐, 배포 전 확인을 **돌리게 하는 것은 문서뿐**입니다. 상시 점검은 production 활성화와 함께 정합니다 |
