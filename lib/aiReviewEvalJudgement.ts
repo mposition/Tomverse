@@ -382,6 +382,24 @@ export function verifyJudgementRecord(
             );
             continue;
         }
+        // An empty quote is not a quote.
+        //
+        // Every string contains the empty string, so `includes("")` is true of
+        // any output -- a claim with no quote at all passed the check that its
+        // evidence appears in the text it points at, in both the findings and
+        // the prose branch. Refused here, in the record check, so it is refused
+        // whether or not a caller supplies the output to compare against.
+        //
+        // This says nothing about how long a quote must be or whether it says
+        // the right thing. Those are judgements; this is only the difference
+        // between writing one and not.
+        if (!isSignedName(claim.evidenceQuote)) {
+            problems.push(
+                `${where} has no evidence quote. Every string contains the empty ` +
+                    `string, so a blank one would satisfy any output it was checked ` +
+                    `against`
+            );
+        }
         // A confirmation is a person's act, so it names one and says when.
         // This does not prove the signature is genuine; it stops an absent one
         // being read as present, which is what `status: "confirmed"` alone did.

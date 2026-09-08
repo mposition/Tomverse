@@ -423,3 +423,68 @@ test("a wrongly typed field is named with its file and path, before anything is 
     assert.doesNotMatch(misspelled.stdout, /case registration/);
     assert.doesNotMatch(misspelled.stderr, /TypeError/);
 });
+
+test("--verify never writes, whatever the artifact file holds", async (t) => {
+    // The mode used to be inferred from the truthiness of the artifact, so an
+    // `artifact.json` holding a falsy value skipped its own shape check, fell
+    // through to the scoring path, and was OVERWRITTEN -- a request to verify
+    // evidence replacing it instead of refusing it.
+    const { root } = fixture(t);
+    const path = join(root, "artifact.json");
+
+    for (const held of ["null", "false", "0", '""']) {
+        writeFileSync(path, `${held}\n`, "utf8");
+        const before = readFileSync(path, "utf8");
+
+        const result = await run(root, ["--verify"]);
+        assert.equal(result.status, 1, held);
+        assert.match(result.stdout, /artifact\.json: is not an object/, held);
+        // Not merely a non-zero exit: the file has to be untouched, byte for
+        // byte, because the failure was that it got replaced.
+        assert.equal(readFileSync(path, "utf8"), before, held);
+    }
+
+    // A verify against a well-formed artifact still passes, and still writes
+    // nothing.
+    await run(root);
+    const scored = readFileSync(path, "utf8");
+    const verified = await run(root, ["--verify"]);
+    assert.equal(verified.status, 0, verified.stderr);
+    assert.equal(readFileSync(path, "utf8"), scored);
+});
+
+test("a blank evidence quote is not evidence", async (t) => {
+    // Every string contains the empty string, so `includes("")` is true of any
+    // output: a claim with no quote passed the check that its evidence appears
+    // in the text it points at, and scored a true positive.
+    const { root, observationRef } = fixture(t);
+
+    for (const quote of ["", "   ", "\n\t"]) {
+        write(root, "record.json", record(observationRef, [claim({ evidenceQuote: quote })]));
+        const result = await run(root);
+        assert.equal(result.status, 1, JSON.stringify(quote));
+        assert.match(result.stdout, /has no evidence quote/, JSON.stringify(quote));
+    }
+
+    // Prose claims too: the same `includes` was doing the same nothing there.
+    const twoFindings = observation();
+    twoFindings.findings.missingPoints = ["c는 이의신청 기한을 제시하지 않는다"];
+    write(root, "observation.json", twoFindings);
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(twoFindings), [
+            claim(),
+            claim({
+                requirementId: "evidence_preservation",
+                submittedAs: "prose",
+                sourceIndex: null,
+                speechAct: "mention",
+                evidenceQuote: "  ",
+            }),
+        ])
+    );
+    const prose = await run(root);
+    assert.equal(prose.status, 1);
+    assert.match(prose.stdout, /has no evidence quote/);
+});

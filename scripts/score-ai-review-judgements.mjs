@@ -84,12 +84,19 @@ const report = (heading, problems) => {
 // `"true"` where a boolean belongs quietly produced a wrong score rather than
 // an error, and a mistyped `submittedAs` printed two sections of `ok` before
 // throwing. Every problem names its file and field path.
-const artifact = hasFlag("verify") ? readJson("artifact.json") : null;
+// The mode is the FLAG, never the value read.
+//
+// `--verify` used to be inferred from the truthiness of the artifact, so an
+// `artifact.json` holding `null`, `false`, `0` or `""` skipped its own shape
+// check, fell through to the scoring path, and was OVERWRITTEN with a fresh
+// score -- a request to verify evidence replacing it instead of refusing it.
+const verifyMode = hasFlag("verify");
+const artifact = verifyMode ? readJson("artifact.json") : null;
 const shape = [
   ...judgedCaseShapeProblems(testCase),
   ...observationShapeProblems(observation),
   ...judgementRecordShapeProblems(record),
-  ...(artifact ? scoringArtifactShapeProblems(artifact) : []),
+  ...(verifyMode ? scoringArtifactShapeProblems(artifact) : []),
 ];
 if (report("file shapes", shape)) die("\nNothing was read further.");
 
@@ -102,7 +109,7 @@ if (report("file shapes", shape)) die("\nNothing was read further.");
 // registration error.
 let failed = report("case registration", validateJudgedCase(testCase));
 
-if (artifact) {
+if (verifyMode) {
   failed =
     report(
       "stored score, against the files beside it",
