@@ -126,7 +126,7 @@ Date / timezone:    ____________________
       `./scripts/ops/Test-MobileAuthOpEnvTemplate.ps1` — `docs/ops/mobile-auth-op-env.template`이
       **reference만 담고 링 둘만 담는지**(평문 링이 커밋되면 여기서 걸립니다), 그리고
       주입된 값이 프롬프트에 덮어써지지 않고 검사기까지 가는지를 **합성값으로**
-      고정합니다(14건). **1Password는 실행되지 않습니다** — 실제 vault 해석은 별개
+      고정합니다(16건). **1Password는 실행되지 않습니다** — 실제 vault 해석은 별개
       항목이며 이 검사로 대체되지 않습니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1`
       — 배포 후 wrapper가 지키는 계약을 고정합니다(17 사례). 이쪽은 링 둘에 더해 **live

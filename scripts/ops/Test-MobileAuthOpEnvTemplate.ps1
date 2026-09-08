@@ -104,6 +104,19 @@ function Get-LeftoverManaged {
   Deliberately strict about the shape: a line this parser silently skipped
   would be a line nobody checks, and an unchecked line in this file is where a
   plaintext ring would sit.
+
+  Two things it will not do.
+
+  It never puts the line in an error. The line is the thing under suspicion --
+  if it is malformed, the reason may well be that somebody pasted a ring where
+  a reference belongs, and quoting it back would print that ring to the screen
+  and into whatever captured this run. Line number and, where it parsed, the
+  variable name are enough to find it.
+
+  It refuses a repeated name rather than overwriting. `op run` takes the last
+  assignment, so a file that says the ring in plaintext and then says it again
+  as a reference resolves correctly and still has the plaintext ring sitting in
+  it -- and a parser that overwrites reports the file as clean.
 #>
 function Read-TemplateAssignments {
     param([string] $Path)
@@ -115,15 +128,35 @@ function Read-TemplateAssignments {
         $trimmed = $line.Trim()
         if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
         if ($trimmed -notmatch '^(?<name>[A-Za-z_][A-Za-z0-9_]*)="(?<value>[^"]*)"$') {
-            throw "line ${lineNumber} is neither blank, a comment, nor NAME=`"value`": $trimmed"
+            throw "line ${lineNumber} is neither blank, a comment, nor NAME=`"value`" (the line itself is not repeated here: it may be a secret)"
         }
-        $assignments[$Matches.name] = $Matches.value
+        $name = $Matches.name
+        if ($assignments.Contains($name)) {
+            throw "line ${lineNumber} assigns ${name} again; op run would take the last one and the earlier line would go unchecked"
+        }
+        $assignments[$name] = $Matches.value
     }
     return $assignments
 }
 
 # --- 1. the template is references, and only the two rings -------------------
-$assignments = Read-TemplateAssignments -Path $template
+#
+# Reported as a failed case rather than left to propagate: an uncaught throw
+# ends the run before the other cases say anything, and the one line an
+# operator then reads is a stack trace.
+$assignments = $null
+try {
+    $assignments = Read-TemplateAssignments -Path $template
+    Assert-Case "1z. the template parses" $true ""
+}
+catch {
+    Assert-Case "1z. the template parses" $false $_.Exception.Message
+}
+if ($null -eq $assignments) {
+    Write-Host ""
+    Write-Host "1 case(s), 1 failed"
+    exit 1
+}
 $names = @($assignments.Keys)
 $unexpected = @($names | Where-Object { $RING_VARIABLES -notcontains $_ })
 $missing = @($RING_VARIABLES | Where-Object { $names -notcontains $_ })
@@ -136,11 +169,48 @@ $notReferences = @($names | Where-Object { -not $assignments[$_].StartsWith("op:
 Assert-Case "1b. every value is an op:// reference, never a value" `
     ($notReferences.Count -eq 0) ("plaintext: {0}" -f ($notReferences -join ", "))
 $malformed = @($names | Where-Object {
-    # vault / item / field, with the optional section making four.
-    @($assignments[$_].Substring("op://".Length) -split "/").Count -lt 3
+    # vault / item / field, with the optional section making four. Empty
+    # segments are counted too: "op://vault//field" splits into three and names
+    # no item.
+    $segments = @($assignments[$_].Substring("op://".Length) -split "/")
+    ($segments.Count -lt 3) -or (@($segments | Where-Object { $_ -eq "" }).Count -gt 0)
 })
-Assert-Case "1c. each reference names a vault, an item and a field" `
+Assert-Case "1c. each reference names a vault, an item and a field, none of them empty" `
     ($malformed.Count -eq 0) ("malformed: {0}" -f ($malformed -join ", "))
+
+# The parser's own refusals, checked here rather than left to a stack trace an
+# operator would read after the fact.
+$parseRefusals = @(
+    @{ Name = "a plaintext value where a reference belongs"; Line = 'MOBILE_AUTH_SIGNING_KEYS=sign-2:PLAINTEXT-RING-8fa213' },
+    @{ Name = "the same variable assigned twice"; Line = "MOBILE_AUTH_SIGNING_KEYS=`"op://v/i/f`"" }
+)
+$refusalFailures = @()
+foreach ($refusal in $parseRefusals) {
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("op-env-{0}.template" -f [guid]::NewGuid())
+    try {
+        # A valid file plus the offending line, which is the shape that matters:
+        # the earlier lines resolve, so nothing else notices.
+        Set-Content -LiteralPath $scratch -Value (@(Get-Content -LiteralPath $template) + $refusal.Line)
+        $message = $null
+        try {
+            $null = Read-TemplateAssignments -Path $scratch
+            $refusalFailures += ("{0}: accepted" -f $refusal.Name)
+        }
+        catch {
+            $message = $_.Exception.Message
+        }
+        if ($message) {
+            if ($message -like "*PLAINTEXT-RING-8fa213*") {
+                $refusalFailures += ("{0}: the refusal quoted the line" -f $refusal.Name)
+            }
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $scratch -ErrorAction SilentlyContinue
+    }
+}
+Assert-Case "1d. a bad line is refused, and the refusal does not repeat it" `
+    ($refusalFailures.Count -eq 0) ($refusalFailures -join "; ")
 
 # --- 2. the injection, as op run performs it ---------------------------------
 function Invoke-WithInjection {
@@ -178,6 +248,11 @@ function Invoke-WithInjection {
     }
 
     [pscustomobject]@{
+        # Whitespace-collapsed as well as raw: Windows PowerShell 5.1 wraps host
+        # output at the console width, so a phrase written as one line can
+        # arrive split across two. An assertion that fails on the console being
+        # narrow is testing the console.
+        Flattened  = ($output -replace "\s+", " ")
         Output     = $output
         ExitCode   = $(if ($threw) { 1 } else { $LASTEXITCODE })
         Leftover   = (Get-LeftoverManaged)
@@ -209,7 +284,7 @@ Assert-Case "2e. the check's failure is returned, not swallowed" `
 $notInjected = Invoke-WithInjection -SkipInjection
 Assert-Case "3a. a missing injection fails without running the check" `
     (($notInjected.ExitCode -ne 0) -and ($null -eq $notInjected.NpmArgs) -and
-     ($notInjected.Output -match "Nothing injected it")) `
+     ($notInjected.Flattened -match "Nothing injected it")) `
     ("exit={0} npmArgs=[{1}]" -f $notInjected.ExitCode, $notInjected.NpmArgs)
 
 foreach ($run in @(
@@ -230,7 +305,7 @@ foreach ($run in @($injected, $failing, $notInjected)) {
 Assert-Case "3c. no injected ring appears in any stream" ($leaked.Count -eq 0) `
     ("leaked: {0}" -f $leaked.Count)
 Assert-Case "3d. the signing ring's length is reported" `
-    ($injected.Output -match ("MOBILE_AUTH_SIGNING_KEYS length: {0}\b" -f $SYNTHETIC.MOBILE_AUTH_SIGNING_KEYS.Length)) ""
+    ($injected.Flattened -match ("MOBILE_AUTH_SIGNING_KEYS length: {0}\b" -f $SYNTHETIC.MOBILE_AUTH_SIGNING_KEYS.Length)) ""
 
 $failed = @($global:results | Where-Object { -not $_.Ok })
 Write-Host ""
