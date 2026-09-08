@@ -116,7 +116,10 @@ Date / timezone:    ____________________
       먼저 봅니다** — access token은 10분짜리라 증거 수집이 길어지면 스스로 만료되고,
       refresh token은 **1회용이라 `exp` 이전이어도 이미 소비됐으면 `reuse_detected`**
       입니다(그 실행이 family를 폐기하므로 그 세션은 버립니다). 둘 다 시료 문제이지
-      배포 문제가 아니므로 `미판정`이고 롤백 근거가 아닙니다. **시료는 앱이 들고 있지
+      배포 문제가 아니므로 `미판정`이고 롤백 근거가 아닙니다. **응답은 그 구분을 주지
+      않습니다** — refresh는 다섯 가지를 전부 `MOBILE_REFRESH_REJECTED` 하나로 답하므로
+      (D15), 판정은 시료의 `familyId`와 실행 시각으로 좁힌 `MobileAuthEvent`의
+      `event`·`reason`에서 읽습니다. **시료는 앱이 들고 있지
       않은 통제된 세션에서 받습니다** — 자동 refresh가 시료를 소비합니다(§3의 7번) 은퇴 항목은 이것 말고 관측 경로가
       없습니다. 실패하면 승격하지 않습니다
 - [ ] 모바일 인증을 서비스하는 배포라면 `./scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1`

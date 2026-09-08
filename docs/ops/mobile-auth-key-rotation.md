@@ -605,12 +605,34 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    | access | 〃 | 거절 | **배포 결함.** 그 세대 token이 지금 거절되고 있습니다 |
    | access | 만료됨 | 거절 | **미판정** |
    | refresh | 미소비·미무효화, family·device·계정 정상 | 회전 성공 | 새 배포가 이전 pepper를 받아 줍니다 |
-   | refresh | 〃 | `secret_mismatch`로 실패 | **배포 결함.** 그 세대가 재로그인하게 됩니다 |
+   | refresh | 〃 | 실패, 감사 기록이 `secret_mismatch` | **배포 결함.** 그 세대가 재로그인하게 됩니다 |
    | refresh | 소비·무효화됨, 또는 family/device/계정이 이미 정상이 아님 | 무엇이든 | **미판정.** 시료 문제이지 배포 문제가 아닙니다 |
 
    **`reuse_detected`도 미판정입니다** — 그것은 시료가 이미 쓰였다는 사실이지 배포에
    대한 사실이 아니고, **그 실행이 family를 폐기했다는 뜻이므로 그 세션은 버립니다.**
    이것을 배포 결함으로 읽고 롤백하지 않습니다.
+
+   **다만 그 구분은 응답에서 읽을 수 없습니다.** `POST /api/auth/mobile/refresh`는
+   만료·위조·재사용·secret 불일치·경쟁의 패자를 **전부 `MOBILE_REFRESH_REJECTED`
+   하나로** 답합니다(D15). 의도된 계약이고 완화하지 않습니다 — 정확한 이유는 공격자가
+   아니라 운영자에게 갑니다. **그러므로 위 표의 분기는 감사 기록에서 읽습니다.**
+
+   `MobileAuthEvent`를 **읽기 전용으로**, 통제된 시료의 `familyId`와 그 실행 시각
+   구간으로 좁혀 봅니다.
+
+   | `event` | `reason` | 뜻 |
+   |---|---|---|
+   | `mobile_auth.refreshed` | — | 회전 성공. 이전 pepper가 살아 있습니다 |
+   | `mobile_auth.refresh_rejected` | `secret_mismatch` | **배포 결함** — 이 세대의 digest를 지금 pepper로 계산할 수 없습니다 |
+   | `mobile_auth.refresh_rejected` | `record_expired` · `unknown_record` · `family_revoked` · `device_revoked` · `account_not_active` | **미판정.** 시료나 그 family의 상태이지 키 재료의 문제가 아닙니다 |
+   | `mobile_auth.reuse_detected` | `consumed` · `invalidated` | **미판정.** 시료가 이미 쓰였고, 이 실행이 family를 폐기했습니다 |
+
+   **대응하는 행이 없거나 어느 쪽인지 모호하면 미판정으로 둡니다.** 시각 구간이 겹쳐
+   다른 요청의 행과 구분되지 않는 경우도 여기입니다.
+
+   **공개 오류 코드만 보고 재료 불일치나 재사용을 추정하지 않습니다.**
+   `MOBILE_REFRESH_REJECTED` 하나에 위 다섯 줄이 전부 들어 있고, 그중 하나만이 배포
+   결함입니다. 추정으로 롤백하면 시료 문제 때문에 멀쩡한 배포를 되돌리게 됩니다.
 
    **서명 쪽이 미판정으로 남으면 이 회전에서 더 볼 방법은 없습니다.** 이전 키로 새
    access token을 만들 수 없기 때문입니다. 그 미확인의 크기 자체는 제한적입니다 — 이전

@@ -1059,6 +1059,37 @@ family·device 상태보다 **먼저** 걸리므로, 발급 2분 뒤에 만료�
 
 ---
 
+### 5.19 20차 검토(2026-09-03)에서 지적돼 고친 것
+
+**[중간] 분기에 필요한 실패 이유를 어디서 읽는지가 빠져 있었습니다.**
+rev.21의 판정표는 `secret_mismatch`(배포 결함)와 `reuse_detected`(미판정)를 구분해
+놓고, **그 구분을 어디서 얻는지는 적지 않았습니다.**
+`POST /api/auth/mobile/refresh`는 만료·위조·재사용·secret 불일치·경쟁의 패자를 **전부
+`MOBILE_REFRESH_REJECTED` 하나로** 답합니다 — D15의 의도된 계약이고, 정확한 이유는
+감사 행에만 있습니다. 그래서 표는 **운영자가 얻을 수 없는 정보를 전제**하고 있었습니다.
+
+→ 7번에 감사 기록 읽는 절차를 붙였습니다. `MobileAuthEvent`를 **읽기 전용으로**,
+통제된 시료의 `familyId`와 그 실행 시각 구간으로 좁혀 봅니다.
+
+| `event` | `reason` | 뜻 |
+|---|---|---|
+| `mobile_auth.refreshed` | — | 이전 pepper가 살아 있습니다 |
+| `mobile_auth.refresh_rejected` | `secret_mismatch` | **배포 결함** |
+| `mobile_auth.refresh_rejected` | `record_expired` · `unknown_record` · `family_revoked` · `device_revoked` · `account_not_active` | **미판정** |
+| `mobile_auth.reuse_detected` | `consumed` · `invalidated` | **미판정**, 그리고 그 실행이 family를 폐기했습니다 |
+
+**대응 행이 없거나 모호하면 미판정으로 둡니다**(시각 구간이 겹쳐 다른 요청과 구분되지
+않는 경우 포함). 그리고 **공개 오류 코드만으로 추정하지 않습니다** — 그 코드 하나에
+다섯 줄이 다 들어 있고 그중 **하나만** 배포 결함이므로, 추정으로 롤백하면 시료 문제
+때문에 멀쩡한 배포를 되돌립니다.
+
+**공개 API는 건드리지 않았습니다.** 지적대로 상세 이유를 응답에 넣는 것이 아니라, 이미
+남고 있는 감사 기록을 읽는 방법을 절차에 붙인 것입니다.
+
+**문서만 바뀌었습니다.**
+
+---
+
 ## 6. 검증
 
 이 보고서를 쓴 시점에 실행한 것입니다.
@@ -1084,6 +1115,10 @@ family·device 상태보다 **먼저** 걸리므로, 발급 2분 뒤에 만료�
 > `check:encoding:strict`(통과)입니다. **wrapper 자체는 실행하지 못했습니다** —
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
+>
+> **rev.22 (2026-09-03).** 20차 검토의 한 건은 §5.19입니다 — 판정표가 **응답에서 읽을
+> 수 없는 구분**을 전제하고 있었습니다. 감사 기록을 읽는 절차를 붙였고 공개 API는
+> 그대로입니다.
 >
 > **rev.21 (2026-09-03).** 19차 검토의 두 건은 §5.18입니다 — refresh 시료의 유효성은
 > `exp`가 아니라 **소비 여부**이고(확인이 세션을 폐기할 수 있습니다), 서명 미판정일 때의
@@ -1134,6 +1169,9 @@ family·device 상태보다 **먼저** 걸리므로, 발급 2분 뒤에 만료�
 >
 > **rev.9 (2026-09-02).** 8차 검토의 세 건은 §5.8입니다. 그중 하나는 **제가 없다고
 > 단언한 것이 있었던 경우**입니다 — `MobileRefreshRotation.pepperKid`.
+>
+> **rev.22 회차.** 문서 셋만 바뀌었습니다(코드·테스트 무변경). `check:doc-references`·
+> `check:policy-section-references`·`check:encoding:strict` 통과.
 >
 > **rev.21 회차.** 문서 둘만 바뀌었습니다(코드·테스트 무변경). `check:doc-references`·
 > `check:policy-section-references`·`check:encoding:strict` 통과.
