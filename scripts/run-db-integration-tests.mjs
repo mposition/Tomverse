@@ -508,6 +508,19 @@ run(
   ],
   "Running the readiness endpoint's dependency conjunction"
 );
+// The audio budget ledger: which bucket refused decides which boundary the
+// caller is told to wait for, and only a database has two buckets to refuse in.
+run(
+  [
+    "--conditions=react-server",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/voice-provider-budget-ledger.db.test.ts",
+  ],
+  "Running the voice provider budget ledger's refusal boundaries"
+);
 // Its own process for the same reason as the refund decision suite: it wraps
 // the notification queue module to inject an enqueue failure, and it stubs the
 // session and admin-auth seams for the feedback routes.

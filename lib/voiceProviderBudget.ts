@@ -87,6 +87,49 @@ export const VOICE_PROVIDER_BUDGET_PERIODS = {
   month: "voice-provider-seconds-month",
 } as const;
 
+/**
+ * Where the buckets open, and when a refusal actually lifts.
+ *
+ * UTC calendar boundaries, stated once. The ledger books against these and a
+ * refusal has to quote the same instant, or the `resetAt` it hands the user is
+ * a time at which nothing changes.
+ *
+ * These live here rather than in the ledger because the ledger is server-only
+ * and this is arithmetic on a `Date`. Two definitions of "when does the month
+ * roll" is one more than a system can keep in agreement.
+ */
+export const voiceBudgetDayStart = (now: Date): Date =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+export const voiceBudgetMonthStart = (now: Date): Date =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+/**
+ * `Date.UTC` normalises a 13th month into January of the next year, so the
+ * year-end rollover needs no special case -- and must not be given one.
+ */
+export const voiceBudgetNextMonthStart = (now: Date): Date =>
+  new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+/** At least 1: a `resetAt` in the past reads as "already retryable". */
+const secondsUntil = (now: Date, boundary: Date) =>
+  Math.max(1, Math.ceil((boundary.getTime() - now.getTime()) / 1000));
+
+/** Seconds until the daily bucket empties. */
+export const secondsUntilVoiceBudgetDayReset = (now: Date): number =>
+  secondsUntil(now, new Date(voiceBudgetDayStart(now).getTime() + 86_400_000));
+
+/**
+ * Seconds until the monthly bucket empties.
+ *
+ * A monthly refusal answered with the daily figure tells the user to come back
+ * tomorrow, where the same refusal is waiting -- every day until the month
+ * turns. The two buckets recover at different times, so they cannot share one
+ * answer.
+ */
+export const secondsUntilVoiceBudgetMonthReset = (now: Date): number =>
+  secondsUntil(now, voiceBudgetNextMonthStart(now));
+
 const readSeconds = (
   env: Record<string, string | undefined>,
   envName: string,
