@@ -65,7 +65,8 @@
       ↓
 평가용 판정 초안        에이전트가 원문 위치·대조표·claim 초안을 만든다
       ↓
-사람 확인               claim마다 confirmedBy·confirmedAt. 그 전까지 pending
+사람 확인               claim마다 confirmedBy·confirmedAt,
+                        기록에 reviewedBy·reviewedAt. 그 전까지 채점 불가
       ↓
 채점                    scoreJudgedCase()
       ↓
@@ -96,11 +97,13 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 | 인용을 발견 필드에 제출 | 0 / 1 / 1 |
 | 같은 gold를 두 번 제출 | 1 / 0 / 0, `duplicates: 1` |
 | 다른 kind로 제출 | 0 / 1 / 0 |
-| gold에 없는 것을 지어냄 (`false_finding`) | 0 / 0 / **1** |
-| gold에 없지만 옳은 지적 (`gold_incomplete`) | 0 / 0 / 0, `goldGaps: 1` |
-| gold에 없고 판정 안 됨 (`undetermined`) | **채점 거부** |
+| gold 밖의 것을 지어냄 (`false_finding`) | 0 / 0 / **1** |
+| gold 밖이지만 옳은 지적 (`gold_incomplete`), gold가 exhaustive **아님** | 0 / 0 / 0, `goldGaps: 1` |
+| gold 밖이지만 옳은 지적 (`gold_incomplete`), gold가 **exhaustive** | **채점 거부**, `goldGaps` 보존 |
+| gold 밖이고 판정 안 됨 (`undetermined`) | **채점 거부** |
 | 미확인 claim이 하나라도 있음 | **채점 거부** |
 | `confirmed`인데 확인자·확인 시각이 없음 | **채점 거부** |
+| 기록에 완료 확인자·시각이 없음 | **채점 거부** |
 | 기록의 `caseId`·`contractVersion`이 다름 | **채점 거부** |
 
 ### gold 밖의 발견
@@ -111,22 +114,48 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 바로 그것을 재려고 존재한다. 그것을 채점하지 못하는 계약은 목적의 절반에 대해
 눈이 멀어 있다.
 
-두 갈래이며 서로 다르다.
+**판정 단위는 `kind + targetLabel + requirementId` 셋 전부다.** requirement id만
+보면 안 된다 — "c에 기한이 없다"는 **a에는 반드시 있다는 증거가 아니고**, a도
+빠뜨렸을 수 있다. id만으로 범위를 잡으면 그 claim이 자동으로 잘못된 발견이 되어
+사람의 판정을 버리게 되고, 그러면 **불완전한 gold를 발견하는 경로를 열어 두고
+그 발견이 가장 자주 취하는 모양만 무시하는 계약**이 된다.
 
-- **gold가 그 requirement를 이름 대는 경우** — 다른 답변을 지목했거나 반대를
-  주장한 것이다. 그 자체로 잘못된 발견이고 추가 판정이 필요 없다.
-- **gold가 전혀 이름 대지 않는 경우** — 검토자가 지어낸 것인지 gold가 빠뜨린
-  것인지는 **사람만 말할 수 있다.** claim의 `outsideGoldVerdict`가 그 판정을
-  담고, `undetermined`는 아무도 정하지 않았다는 뜻이며 그 case는 채점되지 않는다.
+그러므로 gold가 그 조합을 갖고 있지 않으면, 다른 답변을 지목한 것이든 처음 보는
+requirement든 **전부 `outsideGoldVerdict`를 요구한다.** `undetermined`이거나
+비어 있으면 채점되지 않는다.
 
-`gold_incomplete`로 판정된 것은 `goldGaps`로 **보고만** 한다. 검토자가 옳았다는
-뜻이고, 그것은 **case에 관한 사실**이지 검토자의 잘못이 아니다.
+같은 조합이 gold에 **있는데** 주장이 `missing`이 아니거나 발화가 `finding`이
+아니면 — 반대 주장, 인용을 발견 필드에 제출 — 그 자체로 잘못된 발견이고 추가
+판정이 필요 없다.
+
+### exhaustive 주장이 반증되면 그 kind는 채점하지 않는다
+
+`gold_incomplete`가 확정됐는데 그 kind의 gold가 `exhaustive`를 주장하고 있으면
+**둘 다 참일 수 없다.** 진단을 옆에 적어 두는 것으로 숫자를 살릴 수 없다 —
+precision 분모는 이미 짧다고 밝혀진 목록에 대해 발견을 세었고, recall 분모는 그
+짧은 목록 **자체**였다.
+
+그래서 그 case는 `scored: false`이고, `goldGaps`는 **거절을 넘어 보존된다** —
+그것이 case를 고칠 때 쓰는 재료다.
+
+**gold를 고친 뒤에는 그 case를 쓴 모든 reviewer 결과를 새 gold로 다시 채점한다.**
+gap을 발견한 reviewer만 제외하면 나머지는 자기가 측정된 것과 다른 목록 위에서
+비교된다.
+
+gold가 exhaustive를 주장하지 **않는** 경우에는 `goldGaps`로 보고만 한다. 검토자가
+옳았다는 뜻이고, 그것은 case에 관한 사실이지 검토자의 잘못이 아니다.
 
 ### 서명
 
 `status: "confirmed"`는 누구나 적을 수 있는 문자열이다. 그래서 확인은
 `confirmedBy`(이름)와 `confirmedAt`(파싱 가능한 시각)을 함께 요구하며,
 `verifyJudgementRecord()`가 그 경계를 지키고 검증된 기록만 채점기에 들어간다.
+
+**기록 자체도 서명한다**(`reviewedBy`·`reviewedAt`). claim별 서명으로는 말할 수
+없는 것이 있기 때문이다 — claim이 0건인 기록은 "끝까지 읽었고 보고할 것이
+없었다"일 수도, "아직 아무도 추출하지 않았다"일 수도 있고, 서명할 claim이 없으니
+그 둘을 가를 것도 없다. 앞은 발견을 못 한 검토자이고 뒤는 측정이 아니다.
+빈 배열 자체는 금지하지 않는다.
 
 **이것이 서명의 진위를 증명하지는 않는다.** 없는 서명을 있다고 읽지 않을 뿐이며,
 그것은 더 작은 주장이고 참인 주장이다.
@@ -136,6 +165,12 @@ gold가 "c의 `objection_deadline` 누락" 하나이고 exhaustive일 때다.
 `caseId`·`contractVersion`·`observationRef`는 **claim과 함께** 다닌다. case의
 버전만 확인하면 과거 계약으로 만든 기록이나 다른 case의 기록이 이 case에 붙어도
 아무도 그 사실을 말하지 않는다.
+
+**`observationRef`는 지금 "기입 여부 검사"다.** 비어 있지 않은지만 보므로, 존재
+하지 않는 출력을 가리켜도 통과한다. 호출자가 실제로 채점 중인 출력의 식별값을
+넘기면(`expected.observationRef`) 그때 **대조**가 되며, 그 식별값을 출력 자체에
+결속하는 것은 증거 묶음 연결에서 할 일이다. 이 문서도 코드도 그 이상을 주장하지
+않는다.
 
 두 가지를 명시해 둔다.
 

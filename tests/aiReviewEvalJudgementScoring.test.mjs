@@ -46,6 +46,8 @@ const record = (claims, overrides = {}) => ({
     caseId: "ko-safety-sensitive-003",
     contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
     observationRef: "run-1/attempt-1",
+    reviewedBy: "operator",
+    reviewedAt: "2026-09-08T00:00:00.000Z",
     claims,
     ...overrides,
 });
@@ -76,11 +78,40 @@ test("a correct finding scores, and the wording it used does not matter", () => 
     );
 });
 
-test("accusing the wrong answer is a miss AND a wrong finding", () => {
+test("accusing the wrong answer is a miss AND a wrong finding, once ruled", () => {
     // The keyword scorer gives this a true positive. It is the single most
     // damaging thing it does: a reviewer that names any answer at all scores
     // as well as one that read them.
-    assert.deepEqual(counts(score(judgedCase(), [claim({ targetLabel: "a" })])), [0, 1, 1]);
+    //
+    // But it takes a person to say so. "c omits the deadline" is not evidence
+    // that `a` gives it, so this claim is outside the gold and carries the
+    // same verdict as any other claim outside it.
+    assert.deepEqual(
+        counts(
+            score(judgedCase(), [
+                claim({ targetLabel: "a", outsideGoldVerdict: "false_finding" }),
+            ])
+        ),
+        [0, 1, 1]
+    );
+});
+
+test("the same requirement in another answer can be a gold gap", () => {
+    // The contract contradicted itself here: it offered a route for reporting
+    // an incomplete gold, then keyed the gold's scope by requirement id alone
+    // and threw that verdict away for the shape such findings most often take.
+    // `a` may genuinely omit the deadline too.
+    const outcome = score(
+        judgedCase({ goldCompleteness: { missingPoints: false } }),
+        [claim(), claim({ targetLabel: "a", sourceIndex: 1, outsideGoldVerdict: "gold_incomplete" })]
+    );
+    assert.deepEqual(counts(outcome), [1, 0, 0]);
+    assert.equal(outcome.byKind.missingPoints.goldGaps, 1);
+
+    // And with no verdict it is undetermined, not a wrong finding.
+    const unruled = score(judgedCase(), [claim(), claim({ targetLabel: "a", sourceIndex: 1 })]);
+    assert.equal(unruled.scored, false);
+    assert.match(unruled.reason, /a objection_deadline/);
 });
 
 test("asserting the element is present is a miss AND a wrong finding", () => {
@@ -147,9 +178,16 @@ test("two gold items are matched independently", () => {
 });
 
 test("a finding of the wrong KIND does not satisfy a gold item", () => {
-    assert.deepEqual(counts(score(judgedCase(), [claim({ submittedAs: "contradictions" })])), [
-        0, 1, 0,
+    // The gold's scope is per kind, so an omission filed under contradictions
+    // is outside it and takes a verdict like anything else outside it.
+    const outcome = score(judgedCase(), [
+        claim({ submittedAs: "contradictions", outsideGoldVerdict: "false_finding" }),
     ]);
+    assert.deepEqual(counts(outcome), [0, 1, 0]);
+    // And it is not a false positive against a `contradictions` gold that
+    // never claimed to be exhaustive.
+    assert.equal(outcome.byKind.contradictions.falsePositives, 0);
+    assert.equal(outcome.byKind.contradictions.precisionCounted, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -193,7 +231,7 @@ test("a finding the gold forgot is reported as a gap, not held against the revie
     // The reviewer was right. That is a fact about the CASE -- its gold is
     // short an item -- and scoring it as a mistake would punish the one thing
     // an evaluation most needs to hear.
-    const outcome = score(judgedCase(), [
+    const outcome = score(judgedCase({ goldCompleteness: { missingPoints: false } }), [
         claim(),
         claim({
             requirementId: "reignition_guard",
@@ -203,6 +241,27 @@ test("a finding the gold forgot is reported as a gap, not held against the revie
     ]);
     assert.deepEqual(counts(outcome), [1, 0, 0]);
     assert.equal(outcome.byKind.missingPoints.goldGaps, 1);
+});
+
+test("an exhaustive gold a confirmed gap disproved is not scored, and the gap survives", () => {
+    // Both cannot stand. Leaving the numbers valid beside the gap would report
+    // a precision denominator counted against a list now known to be short,
+    // and a recall denominator that WAS that short list.
+    const outcome = score(judgedCase(), [
+        claim(),
+        claim({
+            requirementId: "reignition_guard",
+            sourceIndex: 1,
+            outsideGoldVerdict: "gold_incomplete",
+        }),
+    ]);
+    assert.equal(outcome.scored, false);
+    assert.equal(outcome.byKind, undefined);
+    assert.match(outcome.reason, /declares its missingPoints gold exhaustive/);
+    // The diagnosis is what the case has to be corrected with, so it survives.
+    assert.equal(outcome.goldGaps.missingPoints, 1);
+    // And correcting it means re-scoring everyone, not excluding the finder.
+    assert.match(outcome.reason, /re-score EVERY reviewer/);
 });
 
 test("an unruled finding outside the gold stops the case being scored", () => {
@@ -244,7 +303,7 @@ test("wrong findings are counted only where the gold claims to be complete", () 
     assert.deepEqual(
         counts(
             score(judgedCase({ goldCompleteness: { missingPoints: false } }), [
-                claim({ targetLabel: "a" }),
+                claim({ targetLabel: "a", outsideGoldVerdict: "false_finding" }),
             ])
         ),
         [0, 1, 0]
@@ -334,6 +393,50 @@ test("a record that does not say which output it read is refused", () => {
     assert.match(outcome.reason, /which reviewer output/);
 });
 
+test("the observation reference is compared only when the caller says what it is", () => {
+    // On its own this field is a "did anyone write it down" check, and the
+    // contract says so rather than claiming more. Any non-empty string passes.
+    assert.deepEqual(
+        counts(score(judgedCase(), [claim()], { observationRef: "another-run/nowhere" })),
+        [1, 0, 0]
+    );
+
+    // Given the output actually being scored, it becomes a comparison. Binding
+    // that identifier to the output itself belongs with the evidence bundle.
+    const mismatched = scoreJudgedCase(
+        judgedCase(),
+        record([claim()], { observationRef: "another-run/nowhere" }),
+        { observationRef: "run-1/attempt-1" }
+    );
+    assert.equal(mismatched.scored, false);
+    assert.match(mismatched.reason, /the output being\s+scored is run-1\/attempt-1/);
+
+    const matched = scoreJudgedCase(judgedCase(), record([claim()]), {
+        observationRef: "run-1/attempt-1",
+    });
+    assert.equal(matched.scored, true);
+});
+
+test("an empty record still has to be signed off as read through", () => {
+    // "Read it through, there was nothing to report" and "nobody has started"
+    // are the same empty array. Per-claim signatures cannot separate them --
+    // there are no claims to sign -- so the record signs itself off.
+    const unsigned = score(judgedCase(), [], { reviewedBy: "", reviewedAt: "" });
+    assert.equal(unsigned.scored, false);
+    assert.match(unsigned.reason, /signed the record off as read through/);
+    assert.match(unsigned.reason, /is not a time/);
+
+    // Signed, an empty record is a reviewer that found nothing: a miss, and no
+    // wrong finding.
+    assert.deepEqual(counts(score(judgedCase(), [])), [0, 1, 0]);
+});
+
+test("the record sign-off is checked even when every claim is signed", () => {
+    const outcome = score(judgedCase(), [claim()], { reviewedBy: "  " });
+    assert.equal(outcome.scored, false);
+    assert.match(outcome.reason, /signed the record off as read through/);
+});
+
 test("the verifier lists every problem, rather than stopping at the first", () => {
     // So an operator fixes a record once instead of running it five times.
     const problems = verifyJudgementRecord(
@@ -341,9 +444,11 @@ test("the verifier lists every problem, rather than stopping at the first", () =
         record([claim({ confirmedBy: null, confirmedAt: "someday" }), claim({ status: "pending" })], {
             caseId: "elsewhere",
             observationRef: "",
+            reviewedBy: "",
         })
     );
-    assert.ok(problems.length >= 5, problems.join("\n"));
+    assert.ok(problems.length >= 6, problems.join("\n"));
+    assert.ok(problems.some((problem) => /signed the record off/.test(problem)));
     assert.ok(problems.some((problem) => /is about elsewhere/.test(problem)));
     assert.ok(problems.some((problem) => /which reviewer output/.test(problem)));
     assert.ok(problems.some((problem) => /confirmed by nobody/.test(problem)));
