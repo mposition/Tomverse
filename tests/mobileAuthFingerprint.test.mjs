@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHmac, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -253,36 +253,80 @@ test("V12 nothing the calculator returns or throws carries key material", () => 
   }
 });
 
-test("V12a a whole run of the calculator writes nothing to stdout or stderr", () => {
-  // The assertions above read return values and messages. A calculator that
-  // printed its key would satisfy every one of them -- checked by mutation,
-  // and it did. This reads what an operator's terminal reads instead.
+test("V12a every refusal path runs in a child process and writes nothing to either stream", () => {
+  // The assertions above read return values and thrown messages. A calculator
+  // that printed its key would satisfy every one of them -- checked by
+  // mutation, and it did.
+  //
+  // Reaching only the top-level entry point is not enough either: the material
+  // check and the key decoder refuse *before* it, so a leak planted in one of
+  // those branches never executes. Mutation again, and again it passed. The
+  // child therefore walks every refusal path and reports what happened
+  // **through a file** -- printing the outcomes would defeat what is measured.
   const directory = mkdtempSync(join(tmpdir(), "mobile-fingerprint-"));
   try {
     const key = Buffer.alloc(32, 0x5a);
     const pepper = "PEPPER-SYNTHETIC-0000000000000000";
+    const shortKey = Buffer.alloc(16, 0x3c);
+    const notBase64 = "PEPPER-SYNTHETIC-NOT-BASE64!!!!!!";
     const script = join(directory, "run.mjs");
+    const outcomesPath = join(directory, "outcomes.json");
+
     writeFileSync(
       script,
       [
-        `import { mobileKeyringFingerprint } from ${JSON.stringify(coreUrl)};`,
+        `import { writeFileSync } from "node:fs";`,
+        `import {`,
+        `  mobileFingerprintKeyFromBase64,`,
+        `  mobileKeyringFingerprint,`,
+        `  mobileKeyringFingerprintFromMaterials,`,
+        `} from ${JSON.stringify(coreUrl)};`,
         `const key = Buffer.from(${JSON.stringify(key.toString("base64"))}, "base64");`,
         `const signing = [${JSON.stringify(SIGN_1)}];`,
         `const peppers = [${JSON.stringify(pepper)}];`,
-        `mobileKeyringFingerprint({ key, signing, peppers });`,
-        // The failure path too: an unusable entry, in the same process.
-        `try { mobileKeyringFingerprint({ key, signing: ["not-a-key"], peppers }); } catch {}`,
-        `try { mobileKeyringFingerprint({ key, signing, peppers: [Buffer.alloc(0)] }); } catch {}`,
+        `const outcomes = {};`,
+        `const walk = (name, body) => {`,
+        `  try { body(); outcomes[name] = "no throw"; }`,
+        `  catch (error) { outcomes[name] = error.constructor.name; }`,
+        `};`,
+        `walk("success", () => mobileKeyringFingerprint({ key, signing, peppers }));`,
+        `walk("unusable signing", () => mobileKeyringFingerprint({ key, signing: ["not-a-key"], peppers }));`,
+        `walk("pepper not a string", () => mobileKeyringFingerprint({ key, signing, peppers: [Buffer.alloc(0)] }));`,
+        `walk("material element signing", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: signing, pepperMaterials: [] }));`,
+        `walk("material element pepper", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: [], pepperMaterials: peppers }));`,
+        `walk("materials not an array", () => mobileKeyringFingerprintFromMaterials({ key, signingMaterials: ${JSON.stringify(SIGN_1)}, pepperMaterials: [] }));`,
+        `walk("key wrong length", () => mobileFingerprintKeyFromBase64(${JSON.stringify(shortKey.toString("base64"))}));`,
+        `walk("key not base64", () => mobileFingerprintKeyFromBase64(${JSON.stringify(notBase64)}));`,
+        `walk("key not bytes", () => mobileKeyringFingerprint({ key: ${JSON.stringify(key.toString("base64"))}, signing, peppers }));`,
+        `walk("raw key wrong length", () => mobileKeyringFingerprint({ key: Buffer.from(${JSON.stringify(shortKey.toString("base64"))}, "base64"), signing, peppers }));`,
+        `writeFileSync(${JSON.stringify(outcomesPath)}, JSON.stringify(outcomes));`,
       ].join("\n")
     );
 
     const run = spawnSync(process.execPath, [script], { encoding: "utf8" });
     assert.equal(run.status, 0, run.stderr);
+
+    // Every refusal path was actually walked -- otherwise "nothing was
+    // printed" is a statement about code that did not run.
+    const walked = JSON.parse(readFileSync(outcomesPath, "utf8"));
+    assert.equal(Object.keys(walked).length, 10);
+    assert.equal(walked.success, "no throw");
+    for (const [name, result] of Object.entries(walked)) {
+      if (name === "success") continue;
+      assert.equal(result, "MobileFingerprintError", `${name} did not refuse`);
+    }
+
     const output = `${run.stdout}${run.stderr}`;
-    assert.equal(output.includes(key.toString("base64")), false, "the key reached a stream");
-    assert.equal(output.includes(key.toString("hex")), false, "the key reached a stream");
-    assert.equal(output.includes(pepper), false, "a pepper reached a stream");
-    assert.equal(output.includes(SIGN_1.slice(0, 24)), false, "signing material reached a stream");
+    for (const [what, value] of [
+      ["the key (base64)", key.toString("base64")],
+      ["the key (hex)", key.toString("hex")],
+      ["a pepper", pepper],
+      ["signing material", SIGN_1.slice(0, 24)],
+      ["the short key", shortKey.toString("base64")],
+      ["the malformed key", notBase64],
+    ]) {
+      assert.equal(output.includes(value), false, `${what} reached a stream`);
+    }
     // Nothing at all, in fact: a calculator has no reason to print.
     assert.equal(output.trim(), "");
   } finally {
