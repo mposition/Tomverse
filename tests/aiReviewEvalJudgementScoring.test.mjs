@@ -257,11 +257,63 @@ test("an exhaustive gold a confirmed gap disproved is not scored, and the gap su
     ]);
     assert.equal(outcome.scored, false);
     assert.equal(outcome.byKind, undefined);
-    assert.match(outcome.reason, /declares its missingPoints gold exhaustive/);
+    assert.match(outcome.reason, /missingPoints gold is declared exhaustive/);
     // The diagnosis is what the case has to be corrected with, so it survives.
     assert.equal(outcome.goldGaps.missingPoints, 1);
     // And correcting it means re-scoring everyone, not excluding the finder.
     assert.match(outcome.reason, /re-score EVERY reviewer/);
+});
+
+test("a confirmed gold gap survives a refusal caused by something else", () => {
+    // The gap count used to be computed after the undetermined refusal, so one
+    // unrelated unruled claim swallowed it. The operator was told to go and
+    // rule on something and never told that a gold defect had already been
+    // confirmed -- and with it, that every reviewer on this case needs
+    // re-scoring. A refusal is a report, so it reports what is known.
+    const outcome = score(judgedCase(), [
+        claim(),
+        claim({
+            requirementId: "reignition_guard",
+            sourceIndex: 1,
+            outsideGoldVerdict: "gold_incomplete",
+        }),
+        claim({ requirementId: "something_else", sourceIndex: 2 }),
+    ]);
+    assert.equal(outcome.scored, false);
+    assert.equal(outcome.goldGaps.missingPoints, 1);
+    // Both reasons, not the first one to fire.
+    assert.match(outcome.reason, /something_else/);
+    assert.match(outcome.reason, /missingPoints gold is declared exhaustive/);
+    assert.match(outcome.reason, /re-score EVERY reviewer/);
+});
+
+test("the refusal stops the whole case, not the kind that caused it", () => {
+    // A reviewer's score is read across kinds, and half of one is not a
+    // smaller score -- it is a different measurement wearing the same name.
+    const twoKinds = judgedCase({
+        gold: {
+            missingPoints: [{ requirementId: DEADLINE, targetLabel: "c" }],
+            contradictions: [{ requirementId: "transport_mode", targetLabel: "b" }],
+        },
+        goldCompleteness: { missingPoints: true, contradictions: true },
+    });
+    const outcome = score(twoKinds, [
+        claim(),
+        claim({
+            submittedAs: "contradictions",
+            requirementId: "transport_mode",
+            targetLabel: "b",
+            sourceIndex: 0,
+        }),
+        claim({
+            requirementId: "reignition_guard",
+            sourceIndex: 1,
+            outsideGoldVerdict: "gold_incomplete",
+        }),
+    ]);
+    assert.equal(outcome.scored, false);
+    assert.equal(outcome.byKind, undefined, "no kind is scored, including the sound one");
+    assert.match(outcome.reason, /is not scored/);
 });
 
 test("an unruled finding outside the gold stops the case being scored", () => {

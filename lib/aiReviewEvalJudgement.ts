@@ -58,10 +58,15 @@
  * beside them: the precision denominator counted findings against a list now
  * known to be short, and the recall denominator was that same short list.
  *
- * So the kind is not scored, and the gap is reported so the case can be
- * corrected. **Correcting it means re-scoring every reviewer against the new
- * gold** -- dropping only the reviewer that found the gap would compare the
+ * So the CASE is not scored -- not the offending kind alone, because a
+ * reviewer's score is read across kinds and half of one is a different
+ * measurement wearing the same name -- and the gap is reported so the case can
+ * be corrected. **Correcting it means re-scoring every reviewer against the
+ * new gold**: dropping only the reviewer that found the gap would compare the
  * others on a different list from the one it was measured against.
+ *
+ * Every refusal that gets this far carries `goldGaps`, whatever else is also
+ * wrong with the record. A refusal is a report.
  *
  * ## Scope
  *
@@ -407,27 +412,13 @@ export function scoreJudgedCase(
     const outsideGold = (claim: (typeof submitted)[number]) =>
         !goldKeys[claim.submittedAs].has(claimKey(claim));
 
-    const unruled = submitted.filter(
-        (claim) =>
-            outsideGold(claim) &&
-            (claim.outsideGoldVerdict === undefined ||
-                claim.outsideGoldVerdict === "undetermined")
-    );
-    if (unruled.length > 0) {
-        return {
-            scored: false,
-            reason:
-                `${testCase.caseId} has ${unruled.length} confirmed finding(s) the gold ` +
-                `does not contain (${[
-                    ...new Set(unruled.map((claim) => claimKey(claim))),
-                ].join(", ")}) with no verdict on whether the reviewer invented them or ` +
-                `the gold is short an item. Only a person settles that, and a score ` +
-                `computed either way would be about a case nobody has finished reading`,
-        };
-    }
-
-    // Gaps first, because an exhaustive gold with a confirmed gap cannot be
-    // scored at all and the gap has to survive the refusal.
+    // Both states are collected BEFORE anything returns.
+    //
+    // The gap count used to be computed after the undetermined refusal, so one
+    // unrelated unruled claim swallowed it: the operator was told to go and
+    // rule on something, and never told that a gold defect had already been
+    // confirmed and every reviewer on this case would need re-scoring. A
+    // refusal is a report, and it reports what is known.
     const gaps = Object.fromEntries(
         AI_REVIEW_EVAL_FINDING_KINDS.map((kind) => [
             kind,
@@ -440,21 +431,45 @@ export function scoreJudgedCase(
         ])
     ) as Record<AiReviewEvalFindingKind, number>;
 
+    const unruled = submitted.filter(
+        (claim) =>
+            outsideGold(claim) &&
+            (claim.outsideGoldVerdict === undefined ||
+                claim.outsideGoldVerdict === "undetermined")
+    );
     const disproved = AI_REVIEW_EVAL_FINDING_KINDS.filter(
         (kind) => testCase.goldCompleteness[kind] === true && gaps[kind] > 0
     );
+
+    // Both refusals stop the WHOLE case, not the kind that caused them. A
+    // reviewer's score is read across kinds, and half of one is not a smaller
+    // score -- it is a different measurement wearing the same name.
+    const refusals: string[] = [];
+    if (unruled.length > 0) {
+        refusals.push(
+            `${unruled.length} confirmed finding(s) the gold does not contain ` +
+                `(${[...new Set(unruled.map((claim) => claimKey(claim)))].join(", ")}) ` +
+                `have no verdict on whether the reviewer invented them or the gold is ` +
+                `short an item. Only a person settles that, and a score computed either ` +
+                `way would be about a case nobody has finished reading`
+        );
+    }
     if (disproved.length > 0) {
+        refusals.push(
+            `the ${disproved.join(", ")} gold is declared exhaustive and a confirmed ` +
+                `finding outside it says otherwise. Both cannot stand: the precision ` +
+                `denominator counted findings against a list now known to be short, and ` +
+                `recall's denominator was that same list. Correct the gold and re-score ` +
+                `EVERY reviewer against the corrected one -- dropping only the reviewer ` +
+                `that found the gap would compare the rest on a different list from the ` +
+                `one they were measured against`
+        );
+    }
+    if (refusals.length > 0) {
         return {
             scored: false,
             goldGaps: gaps,
-            reason:
-                `${testCase.caseId} declares its ${disproved.join(", ")} gold exhaustive, ` +
-                `and a confirmed finding outside it says otherwise. Both cannot stand: ` +
-                `the precision denominator counted findings against a list now known to ` +
-                `be short, and recall's denominator was that same list. Correct the gold ` +
-                `and re-score EVERY reviewer against the corrected one -- dropping only ` +
-                `the reviewer that found the gap would compare the rest on a different ` +
-                `list from the one they were measured against`,
+            reason: `${testCase.caseId} is not scored:\n  - ${refusals.join("\n  - ")}`,
         };
     }
 
