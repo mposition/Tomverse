@@ -210,7 +210,18 @@ export const settleDeepResearchJob = async (job: {
     if (result.applied) return { kind: "settled" };
     // The race resolving under the lock: another poller or a sweep settled
     // between the read above and this call.
-    return terminalReservationOutcome(job, parsed.data, result.status ?? null);
+    //
+    // Re-read rather than judged from `result.status`. That field is the
+    // reservation's *status* -- "settled", "refunded" -- and the question here
+    // is its *outcome*. Comparing a status against an outcome reported every
+    // ordinary race as a mismatch, which is worse than not counting them: the
+    // count exists to name reservations refunded for work that really ran, and
+    // a counter that also fires on the healthy path names nothing.
+    const afterRace = await prisma.chatCreditReservation.findUnique({
+      where: { id: job.reservationId },
+      select: { outcome: true },
+    });
+    return terminalReservationOutcome(job, parsed.data, afterRace?.outcome ?? null);
   } catch (error) {
     logSettlementEvent("deep_research_settlement_failed", {
       jobId: job.id,
