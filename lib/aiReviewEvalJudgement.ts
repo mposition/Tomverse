@@ -90,15 +90,21 @@ import {
  * refusals in `verifyJudgementRecord()`.
  */
 /**
- * v2 adds the claim's scoring `role` and its `sufficiency`.
+ * v2 added the claim's scoring `role` and its `sufficiency`. v3 adds the
+ * extraction rule: one claim per triple, per submitted item.
  *
- * The version moves because the RULES moved: the same record can now score
- * differently, so a v1 record read under v2 would be a number about judgements
- * nobody made under these rules. `verifyJudgementRecord()` refuses both
- * directions rather than converting -- old scores are not carried across, they
- * are re-judged or left alone.
+ * The version covers **the rules a record was made under**, not only the
+ * arithmetic. v3 changes no computation at all -- it changes how a person is
+ * required to extract -- and that is exactly why it moves: a record written
+ * submission-unit style scores one true positive where the same reviewer,
+ * extracted under v3, scores two. Reading the old record under the new rules
+ * would report a number as though a rule had been followed that nobody was
+ * following.
+ *
+ * `verifyJudgementRecord()` refuses both directions rather than converting. Old
+ * scores are not carried across: they are re-judged, or they are left alone.
  */
-export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v2";
+export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v3";
 
 /** What the reviewer asserted about a requirement in one answer. */
 export const JUDGED_ASSERTIONS = ["missing", "present", "unclear"] as const;
@@ -194,8 +200,14 @@ export type AiReviewJudgedClaim = {
     /** The sentence the judgement rests on, verbatim. */
     evidenceQuote: string;
     /**
-     * Required when this exact (kind, label, requirement) is not a gold item,
-     * ignored otherwise. See `JUDGED_OUTSIDE_GOLD_VERDICTS`.
+     * Required when this exact (kind, label, requirement) is NOT a gold item,
+     * and refused when it is. See `JUDGED_OUTSIDE_GOLD_VERDICTS`.
+     *
+     * It used to say "ignored otherwise", and ignored was not nothing. The C1
+     * duplicate check reads every judged field, so a verdict written onto one
+     * of two otherwise identical in-gold claims made them read as different
+     * judgements: the record was accepted and the score moved with it. A field
+     * that cannot apply may not be written.
      *
      * Not required on a claim excluded from scoring as `support`: it is not a
      * finding the reviewer put forward, so there is no question about whether
@@ -544,6 +556,49 @@ export function verifyJudgementRecord(
                 `which is not a time`
         );
     }
+    // One claim per triple, per submitted item -- the extraction rule, checked
+    // where it is structural and nowhere else.
+    //
+    // Two claims that say the SAME thing about the same triple, out of the same
+    // submitted item, are one assertion written twice. Opposite assertions are
+    // not: they differ in `assertion` (or in speech act, role or sufficiency),
+    // and folding those was the failure that made the triple a matching key
+    // rather than a licence to merge.
+    //
+    // Refused rather than folded. Folding would quietly change a score -- a
+    // repeated false or insufficient finding costs one false positive per
+    // claim -- and a rule enforced by silently rewriting the record is a rule
+    // nobody can see was broken.
+    //
+    // This says nothing about whether two DIFFERENT submitted items repeat each
+    // other. That is the reviewer padding its own output, and `duplicates`
+    // counts it.
+    const seenJudgements = new Map<string, number>();
+    for (const [index, claim] of record.claims.entries()) {
+        const judgement = JSON.stringify([
+            claim.submittedAs,
+            claim.sourceIndex,
+            claim.targetLabel,
+            claim.requirementId,
+            claim.assertion,
+            claim.speechAct,
+            claimRole(claim),
+            claimSufficiency(claim),
+            claim.outsideGoldVerdict ?? null,
+        ]);
+        const first = seenJudgements.get(judgement);
+        if (first === undefined) {
+            seenJudgements.set(judgement, index);
+        } else {
+            problems.push(
+                `claim[${index}] repeats claim[${first}] exactly: the same judgement ` +
+                    `about ${claim.targetLabel}/${claim.requirementId} out of the same ` +
+                    `submitted item is one assertion, not two. An opposite assertion is ` +
+                    `a different claim and stays`
+            );
+        }
+    }
+
     for (const [index, claim] of record.claims.entries()) {
         const where = `claim[${index}] (${claim.targetLabel}/${claim.requirementId})`;
         if (claim.status !== "confirmed") {
@@ -582,6 +637,30 @@ export function verifyJudgementRecord(
             problems.push(
                 `${where} is marked confirmed at ${JSON.stringify(claim.confirmedAt)}, ` +
                     `which is not a time`
+            );
+        }
+        // A verdict on a claim the gold DOES contain is not ignorable.
+        //
+        // The field's contract says "required outside the gold, ignored
+        // otherwise", and `ignored` was a hole: the C1 duplicate check keys on
+        // every judged field, so writing a verdict onto one of two otherwise
+        // identical in-gold claims made them look like different judgements.
+        // The record was accepted and the score moved -- a second true
+        // positive's worth of `duplicates` where the finding was sufficient,
+        // and a second false positive where it was insufficient.
+        //
+        // Refused rather than ignored. An opposite assertion is still a
+        // different claim, and a real verdict outside the gold is untouched:
+        // this only says a field that cannot apply may not be written.
+        if (
+            claim.outsideGoldVerdict !== undefined &&
+            claim.submittedAs !== "prose" &&
+            goldKeys[claim.submittedAs].has(claimKey(claim))
+        ) {
+            problems.push(
+                `${where} carries outsideGoldVerdict ${JSON.stringify(claim.outsideGoldVerdict)} ` +
+                    `and the gold contains that ${claim.submittedAs} item; the verdict ` +
+                    `settles findings the gold does NOT contain, and nothing reads it here`
             );
         }
         // Insufficiency is a judgement about a submitted finding that aims at

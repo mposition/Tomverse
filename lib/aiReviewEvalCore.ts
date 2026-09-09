@@ -236,6 +236,10 @@ export const AI_REVIEW_EVAL_BLIND_SHEET_RULES: readonly AiReviewEvalZeroToleranc
  * "anywhere in the output", so a contradiction mentioned only in the
  * synthesis does not count as having been filed as a contradiction.
  *
+ * **Scoping is not meaning.** A term appearing in the right field still says
+ * nothing about which answer was accused or what was asserted about it; see
+ * `AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`.
+ *
  * `mustAlsoContain` narrows it: every listed term must appear too. It exists
  * for cases where a single token is ambiguous ("1887" alone would match a
  * reviewer merely restating dates).
@@ -247,6 +251,72 @@ export type AiReviewEvalGoldItem = {
     /** Human-readable statement of what this item is, for the blind sheet. */
     description: string;
 };
+
+/**
+ * What the keyword-derived metrics are, said once so no surface can drift.
+ *
+ * `scoreCase()` decides whether a gold item was found by looking for its
+ * `anyOf` terms inside the reviewer's own text for that finding kind. That
+ * answers one question -- did this wording appear -- and it is not the question
+ * the evaluation is about.
+ *
+ * **The scoping is real; the reading is not.** Only the findings field for that
+ * kind is searched, so the same words in the reviewer's surrounding prose score
+ * nothing. What it cannot do is tell apart what is INSIDE that field: an
+ * independent finding, a quotation of the answer, and an aside are one string
+ * to it. Nor can it say which answer was accused, or whether the reviewer
+ * claimed the point was missing or present.
+ *
+ * It is wrong in BOTH directions, and neither is about reading the answers --
+ * this scorer never looks at them. A correct finding worded with a synonym the
+ * term list does not carry is counted as a miss; a short term counts a
+ * mis-accusation, or a flat denial of the gold, as a hit. Both are pinned in
+ * `tests/aiReviewEvalScoringContract.test.mjs`, and the contract written to
+ * replace this screen is `docs/ops/ai-review-eval-scoring-contract.md`.
+ *
+ * **`falseConsensusRate` is derived from the same matching.** A case counts as
+ * false consensus when the keyword pass found none of its planted items, so a
+ * reviewer that reported every one of them in its own words is recorded as
+ * having agreed with everything. `inventedIssueRate` is NOT derived this way --
+ * it counts findings submitted on a no-issue case, whatever they say.
+ *
+ * So these counts are a KEYWORD DIAGNOSTIC. Every surface that prints them
+ * prints this beside them; nothing renames the fields, because the artifacts
+ * already written are evidence and must keep verifying.
+ */
+export const AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE =
+    "Keyword diagnostic, not semantic accuracy. The contradiction and omission " +
+    "precision/recall counts, and the false-consensus rate derived from them, " +
+    "come from matching each gold item's `anyOf` terms against the reviewer's " +
+    "own text for that finding kind. A match says the wording appeared. Only " +
+    "that kind's findings field is read, but inside it an independent finding, " +
+    "a quotation and an aside are indistinguishable -- and nothing says which " +
+    "answer was accused or whether the point was claimed missing or present. It " +
+    "is wrong in both directions: a correct finding in words the term list does " +
+    "not carry is scored as a miss, and a mis-accusation or a flat denial of the " +
+    "gold is scored as a hit. Read them as a screen, never as a measure of " +
+    "review quality.";
+
+/**
+ * Where the keyword diagnostic still drives a decision.
+ *
+ * Naming a number a diagnostic does not disconnect it. These counts remain
+ * wired to the approval gate, and a label that quietly implied otherwise would
+ * be worse than the old wording -- so the connection is reported, not fixed by
+ * relabelling. Substituting the judged contract's scores here, or moving a
+ * threshold to suit them, are separate decisions nobody has made.
+ */
+export const AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS: readonly string[] = [
+    "scoreCase() derives falseConsensus from the same matching: a case counts " +
+        "as false consensus when the keyword pass found none of its planted items",
+    "aggregateOutcomes() turns these counts into the arm metrics stored on a " +
+        "register entry's runs, including falseConsensusRate",
+    "thresholdShortfalls() reads falseConsensusRateWilsonUpper against the " +
+        "approved ceiling, alongside the four precision/recall floors",
+    "thresholdShortfalls() compares those metrics with the approved threshold " +
+        "set, so approvedEntryProblems() can pass or fail an entry on them",
+    "check:ai-review-eval runs that gate, which is what an M5 promotion reads",
+];
 
 export const AI_REVIEW_EVAL_FINDING_KINDS = [
     "contradictions",
@@ -411,10 +481,20 @@ const goldItemMatched = (item: AiReviewEvalGoldItem, haystack: string) => {
     return item.mustAlsoContain.every((term) => text.includes(normalize(term)));
 };
 
+/**
+ * Per finding kind, what the KEYWORD screen counted.
+ *
+ * "Found" here means the gold item's terms appeared in this kind's findings
+ * field -- see `AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`, and note that
+ * `falseConsensus` on the case is derived from these same counts. The names are
+ * the ordinary ones because the artifacts already written use them and must
+ * keep verifying; what they mean is stated there rather than encoded in a
+ * rename.
+ */
 export type AiReviewFindingKindOutcome = {
-    /** Gold items this reviewer found. */
+    /** Gold items whose terms appeared in this reviewer's text for this kind. */
     truePositives: number;
-    /** Gold items it missed. */
+    /** Gold items whose terms did not appear. */
     falseNegatives: number;
     /**
      * Reported findings that matched no gold item. Counted ONLY when the
@@ -440,8 +520,14 @@ export type AiReviewCaseOutcome = {
      */
     inventedIssue: boolean;
     /**
-     * A case that planted a real issue on which the reviewer reported none of
-     * it AND reported consensus instead. The "false consensus" rate.
+     * A case that planted a real issue on which the keyword screen matched none
+     * of it. The "false consensus" rate.
+     *
+     * Derived from `truePositives`, so it inherits every limit of the screen:
+     * a reviewer that reported all of it in words the term list does not carry
+     * is recorded here as having agreed with everything, and one that named the
+     * terms while denying the gold is not. See
+     * `AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`.
      */
     falseConsensus: boolean;
     /** The union of both lists below; a rule breached is a rule breached. */

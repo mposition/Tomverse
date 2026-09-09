@@ -102,14 +102,19 @@ if (registration.length > 0) {
 // open. Each one is a decision that was made because getting it wrong produced
 // a wrong number -- see the contract's own sections.
 const RULES = [
-    "One claim per INDEPENDENT assertion. A submission naming two faults gets two.",
-    "Never merge opposite assertions under one claim: the triple is a key, not a licence.",
+    "One claim per (kind, targetLabel, requirementId) this item asserts about.",
+    "A submission naming two requirements gets two claims; naming two answers also gets two.",
+    "The same assertion twice out of ONE item is one claim -- the record is refused otherwise.",
+    "Never merge opposite assertions: differing assertion, speechAct, role or sufficiency is a separate claim.",
     "Grounds, explanation and quotation inside a submitted finding get role: \"support\".",
     "role: \"support\" only excludes a claim when an independent claim sits in the SAME item.",
     "A submission that is only a quotation is a finding. Leave it role: \"finding\".",
     "A finding aimed at a gold requirement that names nothing: sufficiency: \"insufficient\".",
     "Do not use \"insufficient\" for something outside the gold -- that is outsideGoldVerdict.",
     "A claim about a triple the gold does not contain needs an outsideGoldVerdict.",
+    "Assigning ids to content outside the gold is YOUR judgement, and it moves the score:",
+    "  one id or two for the same sentence is one false positive or two. Name one",
+    "  independently judgeable requirement per id, the same test the gold is registered by.",
     "status stays \"pending\" until a person confirms it, with a name and a time.",
 ];
 

@@ -222,7 +222,7 @@ export type ItemDiagnostic = {
     /** Every model in the catalogue, in catalogue order. */
     models: readonly ModelDisposition[];
     fallback: {
-        /** Best first, from the Router; what §7 may try. */
+        /** Best first, from the Router; what docs/policy/tomverse-chat-routing.md §7 may try. */
         rankedCandidateModelIds: readonly string[];
         /** How many of those a turn may actually fall back to. */
         maxModelFallbacks: number;

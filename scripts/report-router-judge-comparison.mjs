@@ -52,7 +52,7 @@ const pct = (v) => `${(v * 100).toFixed(1)}%`;
 console.log(`Judges against humans — ${report.pairs} settled pair(s) of ${human.length}, seed ${report.seed}, ${report.resamples} resamples`);
 console.log(`  human baseline margin  ${pp(report.humanBaselineMarginPp)}`);
 for (const j of [report.luna, report.fable]) {
-  const id = j.judgeId === "luna" ? luna.judge : fable.judge;
+  const id = (j.judgeId === "luna" ? luna.judge : fable.judge).modelId;
   console.log(`  ${j.judgeId.padEnd(6)} ${String(id).padEnd(28)} shift ${pp(j.marginShiftPp).padStart(9)}  D ${pp(j.marginErrorPp).padStart(9)}  agree ${pct(j.exactAgreement).padStart(6)}  inverted ${pct(j.oppositeVerdictRate)}`);
 }
 console.log(`  dD = D_luna - D_fable   ${pp(report.marginErrorDifferencePp)}   95% CI [${pp(report.marginErrorDifferenceCi.lowerPp)}, ${pp(report.marginErrorDifferenceCi.upperPp)}]`);

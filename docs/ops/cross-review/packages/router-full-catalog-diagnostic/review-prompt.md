@@ -1,5 +1,7 @@
 # Independent review — task router-full-catalog-diagnostic-v1, round 0
 
+Historical source clarification: the embedded diff's fallback citation refers to docs/policy/tomverse-chat-routing.md §7. The embedded diff and its recorded digest are unchanged; this package does not cover subsequent changes.
+
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
 
