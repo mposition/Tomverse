@@ -8,7 +8,8 @@
     "Active in place, because a half-edited Active is an Active nobody can trust.",
     "Section 5.1's entry has this shape with kind 'emergency-pending'.",
     "Contract: docs/ops/mobile-auth-key-rotation.md section 2.2.",
-    "Checked by: npm run check:mobile-auth-store-entries"
+    "Checked by: npm run check:mobile-auth-store-entries",
+    "Once phase is 'deployed', this entry's deploymentId is what a rotation run compares evidence against (-DeploymentId). A match there is a self-report measured against this hand-typed value, not proof of origin: section 2.2 rev.19."
   ],
   "kind": "pending",
   "phase": "drafted",

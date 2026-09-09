@@ -56,6 +56,31 @@
     one. Preflight is section 3 step 4: Active against the deployment running
     now, before anything is deployed.
 
+.PARAMETER DeploymentId
+    The Railway deployment id written on the store entry this run checks --
+    Pending for a rotation, Active for a preflight. **Required.** The evidence
+    is compared against it, so a run without it would have nothing to compare.
+    Note what a match is worth: this value was typed by a person and the
+    evidence reports its own, so agreement is a self-report against a
+    hand-entered expectation, not proof of where the evidence came from.
+
+.PARAMETER MintedByDeploymentId
+    MobileRefreshRotation.mintedByDeploymentId from the same row. Leave it
+    empty when the column was NULL -- empty and "a different deployment" are
+    different findings and the script keeps them apart.
+
+.PARAMETER BindingTolerance
+    open or closed. **Required, with no default.** `open` while Active predates
+    the binding, so evidence carrying no identifier is undetermined; `closed`
+    once Active is a generation that stamps its evidence, after which such
+    evidence is refused. A default would have to be `open`, which is wrong on
+    exactly the runs where the tolerance has ended.
+
+.PARAMETER SummaryPath
+    Optional. Write this run's non-secret facts there, for
+    `npm run judge:mobile-auth-binding-round`. No token, digest, ring or key id
+    is written.
+
 .PARAMETER UsePreinjectedRings
     Take the two rings from the environment instead of prompting -- what
     `op run` provides. The two tokens are still prompted for: they come from an
@@ -66,7 +91,9 @@
       -ActiveSigningKeyId sign-2 -ActiveRefreshPepperId pep-2 `
       -TokenIssuer https://tomverse.app -TokenAudience tomverse-mobile-api `
       -RetiredSigningKeys "sign-1@2026-09-02T10:00:00Z" `
-      -SecretDigest "<from the row>" -PepperKid pep-2 -Mode rotation
+      -SecretDigest "<from the row>" -PepperKid pep-2 -Mode rotation `
+      -DeploymentId "<from the Pending entry>" `
+      -MintedByDeploymentId "<from the row>" -BindingTolerance open
 #>
 [CmdletBinding()]
 param(
@@ -76,6 +103,10 @@ param(
     [Parameter(Mandatory = $true)][string] $TokenAudience,
     [Parameter(Mandatory = $true)][string] $SecretDigest,
     [Parameter(Mandatory = $true)][string] $PepperKid,
+    [Parameter(Mandatory = $true)][string] $DeploymentId,
+    [Parameter(Mandatory = $true)][ValidateSet("open", "closed")][string] $BindingTolerance,
+    [string] $MintedByDeploymentId = "",
+    [string] $SummaryPath = "",
     [string] $RetiredSigningKeys = "",
     [string] $RetiredRefreshPeppers = "",
     [Parameter(Mandatory = $true)][ValidateSet("preflight", "rotation", "emergency")][string] $Mode,
@@ -120,7 +151,11 @@ $assigned = @(
     "MOBILE_AUTH_VERIFY_REFRESH_TOKEN",
     "MOBILE_AUTH_VERIFY_SECRET_DIGEST",
     "MOBILE_AUTH_VERIFY_PEPPER_KID",
-    "MOBILE_AUTH_VERIFY_MODE"
+    "MOBILE_AUTH_VERIFY_MODE",
+    "MOBILE_AUTH_VERIFY_DEPLOYMENT_ID",
+    "MOBILE_AUTH_VERIFY_MINTED_BY_DEPLOYMENT_ID",
+    "MOBILE_AUTH_VERIFY_BINDING_TOLERANCE",
+    "MOBILE_AUTH_VERIFY_SUMMARY_PATH"
 )
 
 try {
@@ -158,6 +193,15 @@ try {
         $env:MOBILE_AUTH_VERIFY_SECRET_DIGEST = $SecretDigest
         $env:MOBILE_AUTH_VERIFY_PEPPER_KID = $PepperKid
         $env:MOBILE_AUTH_VERIFY_MODE = $Mode
+        # Not credentials: a deployment identifier is a fact about our own
+        # infrastructure that /api/build-info already publishes, so these are
+        # parameters rather than prompts. They are still cleared in `finally`,
+        # because a stale expectation left on the session would be compared by
+        # the next run without anyone choosing it.
+        $env:MOBILE_AUTH_VERIFY_DEPLOYMENT_ID = $DeploymentId
+        $env:MOBILE_AUTH_VERIFY_MINTED_BY_DEPLOYMENT_ID = $MintedByDeploymentId
+        $env:MOBILE_AUTH_VERIFY_BINDING_TOLERANCE = $BindingTolerance
+        $env:MOBILE_AUTH_VERIFY_SUMMARY_PATH = $SummaryPath
 
         # Lengths, never values.
         Write-Host ("MOBILE_AUTH_SIGNING_KEYS length: {0}" -f $env:MOBILE_AUTH_SIGNING_KEYS.Length)

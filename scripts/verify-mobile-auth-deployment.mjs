@@ -56,6 +56,31 @@
 //                                          roll back to
 //   MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS     how old the evidence may be
 //                                          (default 900)
+//   MOBILE_AUTH_VERIFY_DEPLOYMENT_ID       the deployment the evidence is
+//                                          supposed to have come from -- the
+//                                          value written by hand onto the
+//                                          Pending (or Active) store entry
+//   MOBILE_AUTH_VERIFY_MINTED_BY_DEPLOYMENT_ID
+//                                          MobileRefreshRotation.mintedByDeploymentId
+//                                          off the same row. Unset or empty
+//                                          means the row carried NULL
+//   MOBILE_AUTH_VERIFY_BINDING_TOLERANCE   open or closed -- required, never
+//                                          defaulted (E9). See below
+//   MOBILE_AUTH_VERIFY_SUMMARY_PATH        optional: write this run's
+//                                          non-secret facts to that path, for
+//                                          the three-sample round judge
+//
+// The binding axis (approved 2026-09-09, evidence-binding packet, option A):
+// the access token carries a `dep` claim and the rotation row carries
+// `mintedByDeploymentId`, both stamped by the process that produced them from
+// its own RAILWAY_DEPLOYMENT_ID. Compared here against the expected id above.
+//
+// **A match is a self-report measured against a hand-entered expectation.** It
+// is not proof that the evidence came from a given Railway deployment, and it
+// does not establish that the deployment is stable or that no older instance
+// is still serving. It also cannot see reuse (the id is constant for the
+// deployment's life) or a repeat submission (nothing here keeps state -- E11's
+// record-based detection is approved in direction only and NOT implemented).
 //
 // The exchange it reads is a real session. Revoke it when you are done --
 // the runbook says so at the same step.
@@ -65,6 +90,7 @@
 // Procedure: docs/ops/mobile-auth-key-rotation.md
 
 import { createPrivateKey, createPublicKey, verify } from "node:crypto";
+import { writeFileSync } from "node:fs";
 
 import {
   MOBILE_ACTIVE_REFRESH_PEPPER_ENV,
@@ -85,6 +111,12 @@ import {
 } from "../lib/mobileAuthKeyring.ts";
 import { parseCompactJws } from "../lib/mobileAccessToken.ts";
 import {
+  MOBILE_ACCESS_TOKEN_DEPLOYMENT_CLAIM,
+  MOBILE_BINDING_TOLERANCE_STATES,
+  mobileBindingVerdict,
+  normalizeDeploymentId,
+} from "../lib/mobileDeploymentBinding.ts";
+import {
   mobileRefreshSecretMatches,
   parseMobileRefreshToken,
 } from "../lib/mobileRefreshToken.ts";
@@ -95,6 +127,10 @@ const SECRET_DIGEST_ENV = "MOBILE_AUTH_VERIFY_SECRET_DIGEST";
 const PEPPER_KID_ENV = "MOBILE_AUTH_VERIFY_PEPPER_KID";
 const MAX_AGE_ENV = "MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS";
 const MODE_ENV = "MOBILE_AUTH_VERIFY_MODE";
+const EXPECTED_DEPLOYMENT_ENV = "MOBILE_AUTH_VERIFY_DEPLOYMENT_ID";
+const ROW_DEPLOYMENT_ENV = "MOBILE_AUTH_VERIFY_MINTED_BY_DEPLOYMENT_ID";
+const TOLERANCE_ENV = "MOBILE_AUTH_VERIFY_BINDING_TOLERANCE";
+const SUMMARY_PATH_ENV = "MOBILE_AUTH_VERIFY_SUMMARY_PATH";
 
 /**
  * How old the evidence may be.
@@ -139,6 +175,49 @@ const lines = [];
 const failures = [];
 
 /**
+ * The non-secret facts of this run, for the three-sample round judge.
+ *
+ * Written only when MOBILE_AUTH_VERIFY_SUMMARY_PATH is set, so the ordinary run
+ * writes nothing to disk. It exists because E5 judges three samples *together*
+ * and re-checks all three at judgement time -- doing that from three consoles
+ * means retyping `iat` and `exp` off tokens, and a transcription is exactly the
+ * step this repository keeps taking away from people.
+ *
+ * What it holds is bounded on purpose: no token, no digest, no ring, no key id,
+ * and **no `jti`**. A round file carrying a token identifier would be the raw
+ * material for the duplicate detection of E11, which is approved in direction
+ * only -- writing it down now would make it look implemented.
+ */
+const summary = {
+  schema: "tomverse.mobile-auth-verify.v1",
+  mode: null,
+  tolerance: null,
+  expectedDeploymentId: null,
+  tokenIssuedAt: null,
+  tokenExpiresAt: null,
+  signingBinding: null,
+  signingDeploymentId: null,
+  pepperBinding: null,
+  pepperDeploymentId: null,
+  failures: [],
+  passed: false,
+};
+
+const writeSummary = () => {
+  const target = (process.env[SUMMARY_PATH_ENV] ?? "").trim();
+  if (!target) return;
+  summary.failures = failures.map(({ name, kind }) => ({ name, kind }));
+  summary.passed = failures.length === 0;
+  try {
+    writeFileSync(target, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  } catch (error) {
+    // Reported, never fatal: the verdict is already decided and losing the
+    // round file must not turn a pass into a failure or the other way round.
+    lines.push(`  NOTE  could not write ${SUMMARY_PATH_ENV} (${error.message})`);
+  }
+};
+
+/**
  * Why a check failed, which decides the remedy more than the mode does.
  *
  *   evidence  the evidence is unusable -- unparseable, expired, too old. It
@@ -149,11 +228,69 @@ const failures = [];
  */
 const EVIDENCE_FAILURE = "evidence";
 const MATERIAL_FAILURE = "material";
+/**
+ *   binding   the evidence names no deployment at all, after the tolerance for
+ *             that closed (E9). Distinct from both of the above: it is not a
+ *             mismatch between two known values, and it is not a claim that the
+ *             deployed key material is wrong. What it says is that a deployment
+ *             which is supposed to stamp its evidence did not.
+ */
+const BINDING_FAILURE = "binding";
 
 const pass = (name, detail) => lines.push(`  OK    ${name}${detail ? ` -- ${detail}` : ""}`);
 const fail = (name, detail, kind = MATERIAL_FAILURE) => {
   failures.push({ name, kind });
   lines.push(`  FAIL  ${name}${detail ? ` -- ${detail}` : ""}`);
+};
+
+/**
+ * One binding axis, reported the same way for both halves of the evidence.
+ *
+ * The two halves are separate evidence and are judged separately: binding the
+ * token says nothing about the row, and binding the row says nothing about the
+ * signature (W8, W9). Nothing here is folded into a single "bound" verdict.
+ */
+const bindingAxis = (name, evidenceDeploymentId) => {
+  const verdict = mobileBindingVerdict({
+    evidenceDeploymentId,
+    expectedDeploymentId,
+    tolerance,
+  });
+  switch (verdict.outcome) {
+    case "matched":
+      // Deliberately not "came from that deployment": what was compared is a
+      // self-report against a hand-entered expectation.
+      pass(name, "the evidence reports the expected deployment id");
+      break;
+    case "mismatched":
+      fail(
+        name,
+        "the evidence reports a different deployment id -- normal during a rolling " +
+          "deploy, so this is evidence to collect again rather than a deployment finding",
+        EVIDENCE_FAILURE
+      );
+      break;
+    case "undetermined":
+      fail(
+        name,
+        "the evidence carries no deployment id; the tolerance is open, so this is " +
+          "undetermined -- neither a pass nor a defect",
+        EVIDENCE_FAILURE
+      );
+      break;
+    case "refused":
+      fail(
+        name,
+        "the evidence carries no deployment id and the tolerance is closed",
+        BINDING_FAILURE
+      );
+      break;
+    default:
+      // Unreachable: a missing expectation exits before any axis runs. Kept so
+      // a future outcome cannot fall through as a pass.
+      fail(name, `unhandled binding outcome ${verdict.outcome}`, EVIDENCE_FAILURE);
+  }
+  return verdict.outcome;
 };
 
 const REMEDIES = {
@@ -202,10 +339,37 @@ const EVIDENCE_REMEDY =
   "  token, its refresh token, and the MobileRefreshRotation row they created --\n" +
   "  and run this again: docs/ops/mobile-auth-key-rotation.md";
 
-const remedy = (mode) =>
-  failures.some((failure) => failure.kind === EVIDENCE_FAILURE)
-    ? EVIDENCE_REMEDY
-    : REMEDIES[mode];
+/**
+ * Evidence with no deployment identifier, once the tolerance has closed.
+ *
+ * Two things could produce it and this run cannot tell them apart: evidence
+ * older than the change, or a running deployment that is not stamping. So the
+ * remedy names the one action that distinguishes them, and refuses to promote
+ * either way -- E9 accepted that a legitimate older piece of evidence gets
+ * refused here, which is the whole cost of closing the tolerance.
+ */
+const BINDING_REMEDY =
+  "  Do NOT promote. The evidence names no deployment, and the tolerance for\n" +
+  "  that has closed: the Active generation is one that stamps its evidence, so\n" +
+  "  evidence without an identifier is refused.\n" +
+  "  Two causes look identical here -- evidence collected before the change, or\n" +
+  "  a running deployment that is not stamping. Collect a fresh exchange against\n" +
+  "  the deployment. If the new evidence still carries no identifier, the\n" +
+  "  deployment is not running the code the Active entry describes:\n" +
+  "  docs/ops/mobile-auth-key-rotation.md";
+
+/**
+ * Which remedy, in order of how little the run established.
+ *
+ * Evidence first: if the evidence could not be judged, nothing else in the run
+ * is attributable to the deployment. Binding second: it is a finding, but not
+ * one the mode's rollback instructions fit. The mode's own remedy is last.
+ */
+const remedy = (mode) => {
+  if (failures.some((failure) => failure.kind === EVIDENCE_FAILURE)) return EVIDENCE_REMEDY;
+  if (failures.some((failure) => failure.kind === BINDING_FAILURE)) return BINDING_REMEDY;
+  return REMEDIES[mode];
+};
 
 const report = (mode) => {
   console.log("Mobile auth deployment verification");
@@ -220,11 +384,18 @@ const report = (mode) => {
     console.log(
       "PASS mobile auth deployment: the evidence provided was produced with the " +
         "candidate active signing key and active pepper, under the candidate " +
-        "iss/aud.\n" +
-        "  NOT established: that this evidence came from the deployment now\n" +
-        "  running. Nothing binds it to a Railway deployment id, a rotationId or\n" +
-        "  a SHA -- freshness only bounds its age. Collecting it immediately after\n" +
-        "  the deploy is procedure, not proof.\n" +
+        "iss/aud, and both halves report the expected deployment id.\n" +
+        "  What the binding establishes: the processes that signed the token and\n" +
+        "  wrote the row each read that identifier out of their own environment,\n" +
+        "  and it equals the value a person typed onto the store entry. It is a\n" +
+        "  self-report against a hand-entered expectation -- NOT proof that this\n" +
+        "  evidence came from that Railway deployment.\n" +
+        "  NOT established: that the deployment is stable, or that no older\n" +
+        "  instance is still serving. One sample says nothing about that; the\n" +
+        "  three-sample round is a separate step and does not prove it either.\n" +
+        "  NOT caught: reuse of older evidence from the same deployment (the id is\n" +
+        "  constant for its life -- freshness is what bounds that), and the same\n" +
+        "  evidence submitted twice (nothing here keeps state).\n" +
         "  NOT covered: retired entries and any other ring member; see the\n" +
         "  runbook's previous-generation check.\n" +
         "  This result alone does not satisfy the promotion condition:\n" +
@@ -253,6 +424,25 @@ if (!MODES.has(mode)) {
   process.exit(1);
 }
 
+const tolerance = (process.env[TOLERANCE_ENV] ?? "").trim();
+if (!MOBILE_BINDING_TOLERANCE_STATES.includes(tolerance)) {
+  console.log("Mobile auth deployment verification");
+  console.log(
+    `FAIL mobile auth deployment: ${TOLERANCE_ENV} is ${tolerance === "" ? "not set" : `"${tolerance}"`}; ` +
+      `it must be one of ${MOBILE_BINDING_TOLERANCE_STATES.join(", ")}.\n` +
+      "  It says whether evidence carrying no deployment identifier is undetermined\n" +
+      "  (open -- Active predates the binding) or refused (closed -- Active is a\n" +
+      "  generation that stamps its evidence). That is a fact about the store, not\n" +
+      "  about this process, so it is required rather than defaulted: a default\n" +
+      "  would have to be `open`, and `open` is wrong on exactly the runs where the\n" +
+      "  tolerance has ended."
+  );
+  process.exit(1);
+}
+
+summary.mode = mode;
+summary.tolerance = tolerance;
+
 const maxAgeRaw = (process.env[MAX_AGE_ENV] ?? "").trim();
 const maxAgeSeconds = maxAgeRaw === "" ? DEFAULT_MAX_AGE_SECONDS : Number(maxAgeRaw);
 if (!Number.isFinite(maxAgeSeconds) || maxAgeSeconds <= 0) {
@@ -271,6 +461,23 @@ if (missingEvidence.length > 0) {
   );
   process.exit(1);
 }
+
+// The expected identifier. Hand-entered from the store entry (E6), and that
+// stays true of the verdict: what a match establishes is that the evidence
+// reports the same value a person typed, not that either is the deployment.
+const expectedDeploymentId = normalizeDeploymentId(process.env[EXPECTED_DEPLOYMENT_ENV]);
+if (!expectedDeploymentId) {
+  console.log("Mobile auth deployment verification");
+  console.log(
+    `FAIL mobile auth deployment: ${EXPECTED_DEPLOYMENT_ENV} is not a usable deployment id.\n` +
+      "  Take it from the deployment id recorded on the store entry this run is\n" +
+      "  checking -- Pending for a rotation, Active for a preflight:\n" +
+      "  docs/ops/mobile-auth-key-rotation.md section 3"
+  );
+  process.exit(1);
+}
+
+summary.expectedDeploymentId = expectedDeploymentId;
 
 // The candidate rings. A configuration error here is the checker's business,
 // not this script's, so it says so rather than reporting a mismatch.
@@ -415,6 +622,18 @@ if (!parsed) {
   } else {
     pass("aud", audience);
   }
+
+  // A1. Additive: the freshness and material axes above still have to pass on
+  // their own, and this one does not stand in for either (W5, W6).
+  summary.tokenIssuedAt = iat;
+  summary.tokenExpiresAt = exp;
+  summary.signingDeploymentId = normalizeDeploymentId(
+    parsed.claims[MOBILE_ACCESS_TOKEN_DEPLOYMENT_CLAIM]
+  );
+  summary.signingBinding = bindingAxis(
+    "signing binding",
+    parsed.claims[MOBILE_ACCESS_TOKEN_DEPLOYMENT_CLAIM]
+  );
 }
 
 const pepperKid = normalizeMobileKeyId(process.env[PEPPER_KID_ENV]);
@@ -452,5 +671,12 @@ if (!refresh) {
     );
   }
 }
+
+// A2. The row's own stamp, judged separately from the token's: one half being
+// bound says nothing about the other.
+summary.pepperDeploymentId = normalizeDeploymentId(process.env[ROW_DEPLOYMENT_ENV]);
+summary.pepperBinding = bindingAxis("pepper binding", process.env[ROW_DEPLOYMENT_ENV]);
+
+writeSummary();
 
 process.exit(report(mode));

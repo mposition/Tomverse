@@ -28,6 +28,7 @@ import {
   activeMobileRefreshPepper,
   mobileRefreshPepperById,
 } from "@/lib/mobileAuthKeyring";
+import { deploymentIdentifierFrom } from "@/lib/mobileDeploymentBinding";
 
 type Environment = Record<string, string | undefined>;
 
@@ -45,6 +46,16 @@ export type MintedMobileRefreshToken = {
   recordId: string;
   secretDigest: string;
   pepperKid: string;
+  /**
+   * A2 of the evidence-binding approval (2026-09-09): the deployment this
+   * process read out of its own environment while computing the digest above.
+   *
+   * Null when the platform set nothing. Null and "some other deployment" are
+   * different findings -- the first is undetermined while the tolerance is
+   * open, the second is evidence to collect again -- so the absence is stored
+   * as absence rather than as an empty string.
+   */
+  mintedByDeploymentId: string | null;
 };
 
 /**
@@ -66,6 +77,7 @@ export const mintMobileRefreshToken = (
     recordId,
     secretDigest: digestSecret(pepper.secret, secret),
     pepperKid: pepper.keyId,
+    mintedByDeploymentId: deploymentIdentifierFrom(environment),
   };
 };
 

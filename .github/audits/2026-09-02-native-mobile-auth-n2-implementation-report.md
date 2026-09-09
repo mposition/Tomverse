@@ -1835,12 +1835,46 @@ refresh 축 통과입니다). 롤백의 대가는 **배포 후 발급된 세션 
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
 >
-> **rev.61 (2026-09-09).** **§6의 5번(증거-배포 결속)이 승인됐습니다** — `mposition`,
-> 2026-09-09T10:27:12Z, `f68f5ad` 검토 후. **E1·E2·E3·E4·E5·E6·E8·E9 승인**(A안 +
+> **rev.62 검증.** `npm run test:unit` **8,126 pass / 0 fail**(주 lane 8,082 +
+> client lane 44, 기존 skip 1). db integration은 이 컨테이너에 PostgreSQL 16을
+> 세우고 migration 이력 전체로 만든 DB에 대해 **1,174 중 1,173 pass**입니다.
+> **실패 1건은 `tests/integration/mobile-auth-service.db.test.ts`의 "every
+> client-facing code in the contract is one a route actually returns"**이며,
+> IP 분당 한도가 80회 안에 도달하는지를 보는 부분(`the admission limit must be
+> reachable from the route`)입니다. **같은 DB에 그 파일만 단독 실행하면 28/28
+> 통과**했습니다. 이 회차는 rate limit 코드를 건드리지 않았고, 그 assertion은
+> 같은 실행의 앞 suite들과 분당 버킷·분 경계를 공유합니다 — **원인을 확정하지
+> 못했으므로 "flake"라고 적지 않고 관측만 남깁니다.** 그 외 실행: `tsc --noEmit`
+> 통과, `npm run lint` 통과, `check:data-domain-registry`·`check:enum-constraints`·
+> `check:native-token-boundary`·`check:doc-references`·`check:policy-section-references`·
+> `check:encoding:strict`·`check:mobile-auth-store-entries` 전부 통과.
+> **실행하지 않은 것**: E2E(Playwright), 부하, 실기기, PowerShell wrapper
+> (`pwsh`가 이 컨테이너에 없습니다), 그리고 실제 배포·롤백·vault 작업.
+>
+> > **rev.62 (2026-09-09).** **승인된 §6의 5번을 구현했습니다.** A1 — access token이
+> `dep` claim을 싣습니다(`lib/mobileAccessToken.ts`). 값이 없으면 **claim 자체를
+> 넣지 않습니다**: 빈 문자열은 "안 찍은 배포"와 구분되지 않고, 그 구분이 미판정
+> 분기의 전제입니다. A2 — `MobileRefreshRotation.mintedByDeploymentId`(nullable,
+> **backfill 없음**)를 `lib/mobileRefreshToken.ts`가 채우고 두 create 경로가 씁니다.
+> 판정은 `lib/mobileDeploymentBinding.ts` 한 곳이고 runtime과 verifier가 같이
+> 씁니다. verifier에는 **축이 둘 더** 생겼습니다(signing binding · pepper binding) —
+> 재료·신선함을 **대체하지 않고 더합니다**. `MOBILE_AUTH_VERIFY_BINDING_TOLERANCE`는
+> **기본값 없이 필수**이고(E9: 관용 중 미판정, 종료 후 거절), `MOBILE_AUTH_VERIFY_DEPLOYMENT_ID`도
+> 필수입니다. E5의 세 시료 회차는 `scripts/mobile-auth-binding-round-core.mjs`와
+> `npm run judge:mobile-auth-binding-round`이고, verifier가 쓰는 run 파일에는
+> **token·digest·링·key id·`jti`가 없습니다**.
+>
+> **하지 않은 것**: E11의 기록 기반 중복 탐지(§10.3의 넷이 미결이라 **미구현**이고,
+> W14·W19가 "지금은 잡지 못한다"를 고정합니다), E7의 롤백 실측(W10·W11 보류),
+> W18. 실제 배포·vault·키 생성·롤백·N1b·production도 하지 않았습니다.
+>
+> > **rev.61 (2026-09-09).** **§6의 5번(증거-배포 결속)이 승인됐습니다** — `mposition`,
+> `f68f5ad` 검토 후. **E1·E2·E3·E4·E5·E6·E8·E9 승인**(A안 +
 > A1 token claim + A2 행 컬럼), **E11 부분 승인**(범위 한정과 방향만 — §10.3의 넷이
 > 정해질 때까지 **기능 구현 보류**), **E10 해당 없음**(B2 미선택), **E7 미결**(롤백 id
-> 실측 필요, 이번 승인에 실측 권한 없음). 비교안 11절에 옮겨 적었고 **승인 일시가 무엇을
-> 뜻하는지**(제가 전사한 시각이지 승인자의 시계를 관측한 것이 아님)도 함께 적었습니다.
+> 실측 필요, 이번 승인에 실측 권한 없음). **승인 일시는 미확인으로 남깁니다** —
+> `2026-09-09T10:27:12Z`는 제가 비교안 11절에 **전사한 시각**이고, 승인 발화가 있었던
+> 시각은 제가 관측하지 못했습니다. 두 칸을 비교안에서 분리했습니다.
 > **확정 범위의 저장소 구현과 합성 검증 착수가 허용**되며, **구현은 아직 없습니다.**
 >
 > **rev.60 (2026-09-09).** 같은 절이 **수용 대상을 다시 숫자로 지정**하고 있었습니다 —

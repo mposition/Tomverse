@@ -31,6 +31,10 @@ const PEPPER_EVIDENCE = `evidence-pepper-${"d".repeat(48)}`;
 
 const ISSUER = "https://tomverse.example";
 const AUDIENCE = "tomverse-mobile-api";
+// The deployment the store entry names. Every fixture here reports it, so
+// these cases stay about the material and freshness axes they were written
+// for; the binding axis has its own file.
+const DEPLOYMENT = "dep-11111111-2222-3333-4444-555555555555";
 
 const b64url = (value) =>
   Buffer.from(value).toString("base64url");
@@ -45,6 +49,7 @@ const mintToken = ({
   aud = AUDIENCE,
   issuedAt = Math.floor(Date.now() / 1000),
   ttlSeconds = TTL_SECONDS,
+  dep = DEPLOYMENT,
 }) => {
   const header = b64url(JSON.stringify({ alg: "EdDSA", typ: "at+jwt", kid }));
   const claims = b64url(
@@ -53,6 +58,7 @@ const mintToken = ({
       aud,
       sub: "user_1",
       tkn: "access",
+      ...(dep === null ? {} : { dep }),
       iat: issuedAt,
       nbf: issuedAt,
       exp: issuedAt + ttlSeconds,
@@ -98,6 +104,7 @@ const evidence = ({
   pepperKid = "pep-2",
   issuedAt = Math.floor(Date.now() / 1000),
   ttlSeconds = TTL_SECONDS,
+  dep = DEPLOYMENT,
 }) => {
   const secret = randomBytes(32).toString("base64url");
   return {
@@ -106,18 +113,24 @@ const evidence = ({
       kid: signingKid,
       issuedAt,
       ttlSeconds,
+      dep,
     }),
     MOBILE_AUTH_VERIFY_REFRESH_TOKEN: `${randomBytes(16).toString("base64url")}.${secret}`,
     MOBILE_AUTH_VERIFY_SECRET_DIGEST: createHmac("sha256", pepper)
       .update(secret)
       .digest("hex"),
     MOBILE_AUTH_VERIFY_PEPPER_KID: pepperKid,
+    MOBILE_AUTH_VERIFY_MINTED_BY_DEPLOYMENT_ID: dep ?? "",
   };
 };
 
 const candidate = ({ signingPkcs8, pepper, mode = "rotation" }) => ({
   // Required, never defaulted -- see the mode cases below.
   MOBILE_AUTH_VERIFY_MODE: mode,
+  MOBILE_AUTH_VERIFY_DEPLOYMENT_ID: DEPLOYMENT,
+  // Open, so these cases fail on the axis each was written for rather than on
+  // a missing identifier.
+  MOBILE_AUTH_VERIFY_BINDING_TOLERANCE: "open",
   MOBILE_AUTH_SIGNING_KEYS: `sign-2:${signingPkcs8}`,
   MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-2",
   MOBILE_AUTH_RETIRED_SIGNING_KEYS: "",
@@ -140,7 +153,8 @@ test("evidence produced with the candidate material passes", () => {
   assert.match(result.stdout, /OK {4}pepper material/);
   // The PASS is scoped: it says what the evidence shows, and says plainly that
   // it does not tie that evidence to the running deployment.
-  assert.match(result.stdout, /NOT established: that this evidence came from the deployment/);
+  assert.match(result.stdout, /self-report against a hand-entered expectation/);
+  assert.match(result.stdout, /NOT proof that this/);
   assert.match(result.stdout, /NOT covered: retired entries/);
   assert.match(result.stdout, /does not satisfy the promotion condition/);
   assert.equal(/the running deployment holds/.test(result.stdout), false);
