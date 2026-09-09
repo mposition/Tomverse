@@ -127,3 +127,33 @@ geometry spec.
 `main`과 `develop` 양쪽에 필요합니다. spec은 두 branch가 같은 파일이고,
 `package.json`의 세 줄도 같습니다. lockfile은 전날과 같은 이유(develop은
 prisma 7.10.0)로 develop 쪽에서 다시 해석합니다.
+
+## 5. 후속 — run #64, WebKit에서의 첫 실행
+
+PR #1294·#1296 병합 뒤 `workflow_dispatch`로 돌린
+[#64 · 34314204563](https://github.com/mposition/Tomverse/actions/runs/34314204563)
+(main @ `bde7cf4`, 05:16Z ~ 05:57Z)의 결과입니다.
+
+12개 검사 중 11개가 `success`이고 — production dependency audit 포함 —
+E2E만 `failure`입니다. shard 5: **2 failed / 2 flaky / 783 passed**. 전날의
+14건이 2건으로 줄었고, stub recorder는 WebKit에서 녹음 시작 → 취소·전환·업로드
+→ transcript까지 흐름 전체를 통과시켰습니다. 남은 것은 셋인데 전부 spec의
+**측정** 문제이고, 제품 동작에 대한 발견은 없습니다.
+
+| spec | 관측 | 원인 |
+|---|---|---|
+| `a transcript lands in the draft…` | `byteLength` 기대 `> 2048`, 실제 `0` (content type은 `audio/mp4`로 정상) | Playwright WebKit은 Blob body를 route의 `postDataBuffer()`로 노출하지 않습니다. 서버는 바이트를 받았고 spec만 못 읽었습니다 |
+| `cancelling never reaches the server…` (flaky), `switching conversation mid-recording…` (failed), `signing out mid-recording…` (flaky) | `openTracks` 기대 `0`, 실제 `1` | 해제 판정이 spec이 덮어쓴 `track.stop` 카운터의 **단발 읽기**였습니다. 카운터는 엔진이 같은 track에 다른 wrapper를 돌려줬는지, 해제가 아직 안 왔는지 구분하지 못합니다 |
+
+**수정.** 둘 다 측정을 엔진 진실로 옮깁니다.
+
+- 업로드 크기는 페이지의 `fetch`가 받은 body의 `size`를 `__qaVoice.uploads`에
+  기록해 읽습니다. 어댑터는 `fetch`를 호출 시점에 해석하므로 wrapper가 그
+  호출을 받습니다.
+- 마이크 해제는 넘겨준 stream들의 track 중 `readyState === "live"`인 수를
+  세고, `expect.poll`로 기다립니다. 해제는 세션 teardown의 마지막 effect라
+  spec이 먼저 assert하는 상태보다 늦게 오는 것이 설계입니다. 실패 시 grant
+  횟수를 같이 보여 페이지가 마이크를 두 번 요청했는지도 드러납니다.
+
+두 변경 모두 Chromium(native·stub)에서 다시 돌렸고, WebKit 확인은 다시 다음
+run입니다.

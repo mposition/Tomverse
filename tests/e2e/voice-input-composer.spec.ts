@@ -75,7 +75,12 @@ const STUB_RECORDER_FORCED = process.env.VOICE_E2E_STUB_RECORDER === "1";
 type VoiceQaState = {
   denied: boolean;
   unsupported: boolean;
+  /** Microphone tracks still live, read from the tracks themselves. */
   openTracks: number;
+  /** How many times the page asked for the microphone. */
+  grants: number;
+  /** Body size of every upload the page handed to `fetch`, in order. */
+  uploads: number[];
   recorder: "native" | "stub" | "none";
 };
 
@@ -106,14 +111,50 @@ test.afterEach(async ({ page }, testInfo) => {
 const installFakeMicrophone = async (page: Page) => {
   await page.addInitScript(
     ({ preference, forceStub }) => {
+      // Every stream handed out, so "is the microphone released?" is read
+      // from the tracks' own `readyState` rather than from a counter kept in
+      // an overridden `stop`. Run #64 (2026-09-09) is why: on WebKit the
+      // counter read 1 after a release Chromium reported as clean, and a
+      // counter cannot say whether the engine returned a different wrapper
+      // for the same track or the release simply had not landed yet. The
+      // engine's own state answers both.
+      const streams: MediaStream[] = [];
       const state: VoiceQaState = {
         denied: false,
         unsupported: false,
-        /** Tracks handed out, so a spec can prove they were stopped. */
-        openTracks: 0,
+        get openTracks() {
+          return streams
+            .flatMap((stream) => stream.getTracks())
+            .filter((track) => track.readyState === "live").length;
+        },
+        grants: 0,
+        uploads: [],
         recorder: "native",
       };
       (window as unknown as { __qaVoice: VoiceQaState }).__qaVoice = state;
+
+      // The bytes the page hands to `fetch`, measured here because the
+      // route's `postDataBuffer()` is empty for a Blob body on WebKit -- the
+      // same run #64 saw `byteLength: 0` beside a correct content type. The
+      // adapter resolves `fetch` at call time, so this wrapper is what it
+      // calls.
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url;
+        const body = init?.body as { size?: number } | null | undefined;
+        if (
+          url.includes("/api/chat/voice-transcription") &&
+          typeof body?.size === "number"
+        ) {
+          state.uploads.push(body.size);
+        }
+        return nativeFetch(input, init);
+      };
 
       const original = navigator.mediaDevices?.getUserMedia?.bind(
         navigator.mediaDevices
@@ -136,14 +177,8 @@ const installFakeMicrophone = async (page: Page) => {
             oscillator.connect(destination);
             oscillator.start();
             const stream = destination.stream;
-            for (const track of stream.getTracks()) {
-              state.openTracks++;
-              const stop = track.stop.bind(track);
-              track.stop = () => {
-                state.openTracks--;
-                stop();
-              };
-            }
+            streams.push(stream);
+            state.grants++;
             return stream;
           },
         },
@@ -243,6 +278,10 @@ const installUnsupportedRecorder = async (page: Page) => {
 };
 
 type VoiceServer = {
+  /**
+   * `byteLength` is what the route could see, which on WebKit is nothing for
+   * a Blob body. The size the page actually sent is `__qaVoice.uploads`.
+   */
   requests: Array<{ contentType: string | null; byteLength: number }>;
 };
 
@@ -393,6 +432,36 @@ const switchToConversation = async (page: Page, title: string) => {
     .click();
 };
 
+/**
+ * Waits for every microphone track the page was handed to end. Polled rather
+ * than read once: the release is the last effect of a session's teardown and
+ * lands after the state the specs assert on first, and on WebKit it landed
+ * late enough for a single read to see a track still live (run #64). The
+ * grant count travels with the answer so a failure says whether the page
+ * asked for the microphone more than once.
+ */
+const expectMicrophoneReleased = async (page: Page) => {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const qa = (window as unknown as { __qaVoice: VoiceQaState })
+            .__qaVoice;
+          return { live: qa.openTracks, grants: qa.grants };
+        }),
+      {
+        message: "every microphone track handed out must end with the session",
+      }
+    )
+    .toMatchObject({ live: 0 });
+};
+
+/** The body sizes the page handed to `fetch` for the voice endpoint. */
+const uploadedBytes = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { __qaVoice: VoiceQaState }).__qaVoice.uploads
+  );
+
 /** Records for `ms` and waits for the flow to settle. */
 const recordFor = async (page: Page, ms: number) => {
   await page.getByTestId("composer-voice-button").click();
@@ -424,7 +493,9 @@ test.describe("voice input in the composer", () => {
     });
     expect(voiceServer.requests).toHaveLength(1);
     expect(voiceServer.requests[0].contentType).toMatch(/^audio\/(webm|mp4)$/);
-    expect(voiceServer.requests[0].byteLength).toBeGreaterThan(2048);
+    const uploads = await uploadedBytes(page);
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]).toBeGreaterThan(2048);
 
     // The message was not sent, and nothing is waiting to send it.
     expect(chatRequests).toEqual([]);
@@ -473,10 +544,7 @@ test.describe("voice input in the composer", () => {
 
     // The browser's recording indicator is driven by live tracks; a flow that
     // leaves one open looks, to the user, like the product is still listening.
-    const openTracks = await page.evaluate(
-      () => (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice.openTracks
-    );
-    expect(openTracks).toBe(0);
+    await expectMicrophoneReleased(page);
   });
 
   test("a denied microphone explains itself and offers a way out", async ({
@@ -744,10 +812,7 @@ test.describe("a voice session belongs to one conversation", () => {
     expect(chatRequests).toEqual([]);
 
     // And the microphone was closed by the switch.
-    const openTracks = await page.evaluate(
-      () => (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice.openTracks
-    );
-    expect(openTracks).toBe(0);
+    await expectMicrophoneReleased(page);
   });
 
   test("a switch mid-transcription abandons the upload and writes no draft @ui-risk", async ({
@@ -1096,12 +1161,7 @@ test.describe("a voice session belongs to one person", () => {
     await expect(textarea).toHaveValue("");
 
     // And the microphone was closed by the switch, not left listening.
-    const openTracks = await page.evaluate(
-      () =>
-        (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice
-          .openTracks
-    );
-    expect(openTracks).toBe(0);
+    await expectMicrophoneReleased(page);
   });
 
   test("an account switch mid-transcription abandons the upload @ui-risk", async ({
@@ -1185,11 +1245,6 @@ test.describe("a voice session belongs to one person", () => {
     );
     await page.waitForTimeout(800);
     expect(voiceServer.requests).toEqual([]);
-    const openTracks = await page.evaluate(
-      () =>
-        (window as unknown as { __qaVoice: { openTracks: number } }).__qaVoice
-          .openTracks
-    );
-    expect(openTracks).toBe(0);
+    await expectMicrophoneReleased(page);
   });
 });
