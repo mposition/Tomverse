@@ -1,0 +1,11 @@
+{
+  "taskId": "demo-sum-helper",
+  "requirement": "Add a pure helper `sum(numbers)` in lib/ that returns the total of an array of numbers, with 0 for an empty array, and a test for the empty case.",
+  "completionCriteria": [
+    "sum([]) returns 0",
+    "sum([1, 2, 3]) returns 6",
+    "only files under lib/ and tests/ change"
+  ],
+  "baseCommit": "0000000000000000000000000000000000000000",
+  "writableScope": ["lib/", "tests/"]
+}

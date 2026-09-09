@@ -208,7 +208,9 @@
     "score:ai-review-judgements": "node --conditions=react-server --import tsx scripts/score-ai-review-judgements.mjs",
     "draft:ai-review-judgement": "node --conditions=react-server --import tsx scripts/draft-ai-review-judgement.mjs",
     "notify:voice-price-reverification": "node --import tsx scripts/notify-voice-price-reverification.mjs",
-    "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs"
+    "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs",
+    "report:router-full-catalog": "node --import tsx scripts/report-router-full-catalog.mjs",
+    "cross-review": "node --import tsx scripts/cross-review.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.49",
