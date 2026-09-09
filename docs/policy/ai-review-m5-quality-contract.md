@@ -186,15 +186,31 @@ false-consensus rate는 의미 정확도가 아닙니다.** `scoreCase()`는 gol
 **전환안이 있습니다(미승인).** 이 연결을 judged-v3로 옮기는 설계는
 `.github/audits/ai-review-judged-gate-transition-2026-09-09.md`이고, 재현은
 `npm run experiment:ai-review-judged-gate-transition`입니다. **그 문서는 게이트도
-임계값도 지표 정의도 바꾸지 않았고**, `falseConsensusRate`·`inventedIssueRate`의
-정의는 열린 채로 둡니다 — TP·FP에서 임의로 유도하지 않습니다.
+임계값도 바꾸지 않습니다.**
 
-**미해결 연결.** 이름을 바꿨다고 연결이 끊기지는 않습니다. 이 수치는 지금도
-`aggregateOutcomes()` → register 항목의 run metrics → `thresholdShortfalls()` →
-`approvedEntryProblems()`로 흘러 **승인 판정에 도달합니다.** `check:ai-review-eval`
-이 실행될 때마다 그 연결을 출력합니다. 이것을 대신할 판정 계약
-(`docs/ops/ai-review-eval-scoring-contract.md`)은 **이 게이트에 연결돼 있지 않으며,
-연결하는 것도 §6 임계값을 그에 맞춰 바꾸는 것도 아무도 결정하지 않았습니다.**
+**그 문서가 열어 둔 두 지표의 정의는 2026-09-09에 승인됐습니다**(승인자
+mposition). judged-v3 위의 대체 지표는 `missedEveryPlantedIssueRate`와
+`inventedFindingRate`이며, 정의는
+`docs/ops/ai-review-eval-scoring-contract.md`, 구현은
+`lib/aiReviewJudgedRunAggregate.ts`입니다.
+
+**그 둘은 여기의 `falseConsensusRate`·`inventedIssueRate`가 아닙니다.** 이름이
+다른 것은 측정이 다르기 때문이고, **값도 임계값도 승계하지 않습니다.** 이 절이
+설명하는 키워드 지표는 그대로 남아 있으며, 아래 "미해결 연결"이 말하는 흐름도
+그대로입니다.
+
+**미해결 연결.** 이름을 바꿨다고, 대체 지표가 정의됐다고 연결이 끊기지는
+않습니다. 이 수치는 지금도 `aggregateOutcomes()` → register 항목의 run metrics →
+`thresholdShortfalls()` → `approvedEntryProblems()`로 흘러 **승인 판정에
+도달합니다.** `check:ai-review-eval`이 실행될 때마다 그 연결을 출력합니다.
+이것을 대신할 판정 계약(`docs/ops/ai-review-eval-scoring-contract.md`)과 그
+집계기는 **이 게이트에 연결돼 있지 않으며, 연결하는 것도 §6 임계값을 그에 맞춰
+바꾸는 것도 아무도 결정하지 않았습니다.**
+
+**`false_consensus_safety`가 재는 범위.** 그 규칙은 **안전 관련** 허위 합의
+주장이고, 안전과 무관한 맥락에서 잘못 "모두 일치한다"고 말하는 것은 그 규칙에도
+`missedEveryPlantedIssueRate`에도 잡히지 않습니다. **그 자리를 재는 지표는 이
+저장소에 없으며**, 2026-09-09 승인은 그것을 채우지 않았습니다.
 
 ## 4. zero-tolerance 규칙
 

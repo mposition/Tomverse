@@ -479,6 +479,83 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
   그렇더라도 `sufficiency`는 **D를 대신하지 못한다** — 그 판정은 검토자를 벌할 뿐
   놓친 두 번째 요구를 FN으로 세지 않는다(FN은 여전히 1이고, 쪼갠 뒤에야 2다).
 
+### 실행 단위 지표 두 개 — 2026-09-09 승인
+
+**승인자 mposition, 2026-09-09.** 근거 문서는
+`.github/audits/ai-review-judged-metric-definitions-2026-09-09.md`이고, 구현은
+`lib/aiReviewJudgedRunAggregate.ts`, 회귀는
+`tests/aiReviewJudgedRunAggregate.test.mjs`다.
+
+**승인된 것은 두 지표의 정의와 오프라인 집계기까지다.** 승인 게이트 전환, 임계값
+승인, 계약 전체 승인, 후보 채택, dataset 동결, M5 승급은 포함되지 않는다.
+`check:ai-review-eval`은 **지금도 키워드 수치를 읽는다.**
+
+#### `missedEveryPlantedIssueRate`
+
+**이름이 계산에 맞춰졌다.** 키워드 `falseConsensusRate`는 "합의라고 주장했다"를
+재지 않고 "심은 것을 하나도 맞히지 못했다"를 재는데, judged-v3에는 발화에 대한
+판정 축이 없으므로 그 절반은 오지 않는다. 그래서 새 이름의 **다른 지표**이며,
+`falseConsensusRate`의 값도 임계값도 승계하지 않는다.
+
+- **분자** — kind 합계 `truePositives`가 0인 case.
+- **분모** — 실행 계획의 case 중 음성 phenomenon이 아니고 gold 항목이 1개 이상인 것.
+- **불충분한 발견은 보고가 아니다.** 요구를 겨누고 아무것도 짚지 못한 답변은
+  분자에 들어간다. 그런 case의 수를 `missedEveryPlantedIssueAimedAt`으로 **따로**
+  보고하며, 비율에 접지 않는다.
+
+**"합의라고 주장했다" 축은 추가하지 않는다.** 그 판정은 zero-tolerance 규칙
+`false_consensus_safety`에 있고, 그것은 rate가 아니라 위반이다. **다만 그 규칙은
+안전 관련 주장만 재며, 안전과 무관한 맥락의 잘못된 합의 주장은 이 저장소의 어떤
+지표도 재지 않는다.** 그 자리는 비어 있고, 이 승인은 채우지 않았다.
+
+#### `inventedFindingRate`
+
+**`falsePositives`에서 유도하지 않는다.** 그 숫자는 넷을 담는다 — 불충분한 발견,
+반대 주장, 인용을 발견 필드에 넣은 것, 확정된 허위 발견. 그리고 gold가
+exhaustive가 아니면 아예 세어지지 않으므로, 그 상태에서 지어낸 발견은 합계에서
+사라진다.
+
+- **분자** — `judgedScoredClaims()` 중 `speechAct === "finding"` · `status ===
+  "confirmed"` · `outsideGoldVerdict === "false_finding"`을 **모두** 충족하는
+  claim이 **하나 이상 있는 case.**
+- **분모** — 채점된 **모든** case. 지어낸 발견은 문제가 있는 case에서도 일어나고,
+  올바른 발견 옆에서 일어난 같은 실패를 세지 않을 이유가 없다.
+- **음성 부분집합**(`inventedFindingRateNegativeSubset`) — **분자와 분모를 둘 다**
+  음성 phenomenon case로 제한한다. 전체 분자를 음성 분모로 나눈 값은 어느 모집단에
+  대한 비율도 아니다.
+- **단위는 case다.** 한 오해가 세 갈래로 제출된 것과 세 case에서 각각 하나씩
+  지어낸 것은 다른 사실이다. 건수는 `inventedFindingCount`로 따로 보고한다.
+
+**모집단은 `judgedScoredClaims()`이고 원시 `claims`가 아니다.** verdict는 gold 밖
+claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에도 **기입할 수
+있다**(그쪽은 필수가 아니다 — `unruled` 검사가 채점 대상만 읽는다). 원시 배열을
+훑으면 그 둘이 지어낸 발견으로 세어진다. 단독 `support`에는 특례가 없다 — 제외
+사유가 없어 모집단에 남고, 그 다음은 같은 세 조건으로 판정한다.
+
+`outsideGoldVerdict`에 별도의 "gold 밖인가" 검사는 필요 없다.
+`verifyJudgementRecord()`가 gold 안 claim에 이 field 쓰는 것을 거절하므로,
+검증된 기록에서 존재가 곧 그 사실이다.
+
+#### 실행 전체가 먼저다
+
+**case 하나가 검증됐다는 것과 실행을 집계할 수 있다는 것은 다르다.**
+`aggregateJudgedRun()`은 숫자를 만들기 **전에** 다음을 판정하고, 하나라도 걸리면
+비율을 내지 않는다.
+
+1. 계획의 `(caseId, observationRef)` 중복은 **거절**한다 — 조용히 지우지 않는다.
+2. "계획이 비었다"와 "아무것도 판정되지 않았다"는 **서로 다른 거절**이다.
+3. 모든 증거는 공유 경로 `verifyJudgedScoringEvidence()`를 지나며, 실행의 journal과
+   frozen dataset은 **실행 단위로 한 번** 주어진다.
+4. 신원은 **검증된 artifact의** `caseId`·`observationRef`에서 온다. 호출자가 항목에
+   붙인 label로 잇지 않는다.
+5. 계획과 증거를 **양방향으로** 대조한다 — 계획됐는데 판정되지 않은 것, 판정됐는데
+   계획에 없는 것 둘 다 blocker다.
+6. **phenomenon은 판정 case에 없다.** frozen dataset에서 읽으며, 없거나 알 수 없는
+   값이면 blocker다 — 추측은 case를 분모에 넣거나 빼는 조용한 변경이다.
+
+**분모 0은 0%가 아니다.** `rate`·`wilsonLower`·`wilsonUpper`가 `null`이고
+`insufficientEvidence`가 그 사실을 문장으로 들고 다닌다.
+
 ### 아직 정해지지 않은 것
 
 - **gold 밖 requirement id의 배정 개수.** 위 C1의 마지막 항목이다. 같은 문장에
@@ -497,6 +574,13 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
 - `AI_REVIEW_SCORING_CONTRACT_VERSION` — 기록이 어느 계약으로 쓰였는지. 다른
   버전의 기록은 **변환하지 않고 거절한다.**
 - `tests/aiReviewEvalJudgementScoring.test.mjs` — 위 표를 요구로 표현.
+- `judgedScoredClaims()` — 채점되는 claim의 모집단. `scoreJudgedCase()`가 쓰고,
+  집계기가 같은 함수를 쓴다. 목록을 두 벌 두지 않기 위해서다.
+- `lib/aiReviewJudgedRunAggregate.ts` — 실행 단위 집계기(2026-09-09 승인).
+  순수 함수이며 파일도 DB도 provider도 읽지 않는다. **승인 게이트에 연결돼 있지
+  않다.**
+- `tests/aiReviewJudgedRunAggregate.test.mjs`,
+  `tests/aiReviewJudgedInventedFindings.test.mjs` — 위 규칙을 요구로 표현.
 
 **v2에서 더한 것**(2026-09-08 승인, 위 절)
 
