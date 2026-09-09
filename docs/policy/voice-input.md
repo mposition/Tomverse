@@ -553,9 +553,14 @@ readiness가 판정하는 모델과 port가 실제로 호출하는 모델이 갈
 
 | 시점 | 무엇이 일어나는가 | 막는가 |
 |---|---|---|
-| 마감 30일 전 ~ 하루 전 | `check:voice-price-register`가 남은 일수를 **출력** | 아니오 |
+| 마감 30일 전 ~ **하루 전** | `check:voice-price-register`가 남은 일수를 **출력** | 아니오 |
 | 마감 30·14·7일 전 | 일일 workflow가 register 항목의 `ticket`에 코멘트 **한 번** | 아니오 |
-| 마감일부터 | 같은 검사가 `expired`로 **실패** | 예 |
+| **마감일부터** | 같은 검사가 `expired`로 **실패** | 예 |
+
+**두 층은 같은 날 함께 말하지 않습니다.** 경고 창은 마감 **하루 전**에 닫히고
+마감일은 audit의 것입니다. 첫 판은 `daysRemaining < 0`으로 걸러서 마감 당일에
+`expired` 실패와 "0일 남음" 경고가 동시에 나왔습니다 — 실패를 예고로 서술한
+것이고, 이 절이 금지한 바로 그 상태입니다.
 
 지키는 것 넷입니다.
 
@@ -575,6 +580,32 @@ readiness가 판정하는 모델과 port가 실제로 호출하는 모델이 갈
    읽는 일이 아니고, **가격을 다시 읽지 않은 채 마감만 옮기는 것은 아무것도
    고치지 않는 유일한 수리**입니다. 그렇게 할 수 있는 script가 있으면 언젠가
    그것이 그 일을 합니다.
+
+**scheduled workflow는 기본 브랜치에 있어야 실행됩니다.** GitHub Actions의
+`schedule`은 **기본 브랜치의 최신 commit에 있는 workflow 파일만** 돌립니다
+(https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+이 저장소의 기본 브랜치는 `main`이고 개발은 `develop`에서 하므로, **`develop`에
+병합된 것만으로는 이 알림이 한 번도 실행되지 않습니다.** 2026-09-09에 실제로
+그랬습니다 — PR은 CI 20개를 통과해 병합됐고, workflow는 `main`에 없어서 조회하면
+404였습니다. 통과한 gate가 그 workflow가 돈다는 뜻이 아니었던 것입니다.
+
+그러므로 이 알림을 바꿀 때는 **`main`에도 반영**하고, `main`에서
+`workflow_dispatch`로 한 번 기동합니다. `develop`만 고치고 끝내면 검사는 전부
+초록인 채로 알림만 조용히 사라집니다.
+
+**그 한 번이 증명하는 것과 아닌 것을 나눠 적습니다.** 창 밖에서 돌린 dispatch는
+스크립트가 GitHub Issues API를 부르기 **전에** 종료하므로, 쓰기 경로를 지나지
+않습니다.
+
+| | |
+|---|---|
+| 증명됨 | workflow가 `main`에 등록됨 · checkout·Node·`npm ci`·script 실행 성공 · 보낼 것이 없어 정상 종료 |
+| 증명 안 됨 | `issues: write`의 실동작 · 코멘트 작성 · marker 중복 방지 경로 |
+
+`issues: write`는 **YAML에 선언돼 있다는 것까지만** 확인됩니다. 실제 쓰기까지
+보려면 시험용 이슈에 코멘트를 남겼다 지우는 별도 검증이 필요하고, 그것은 이
+절차와 별개의 승인 항목입니다. 기록에는 **"workflow 설치·기동 확인"**으로
+적습니다 — 그 이상으로 적으면 하지 않은 검증을 한 것으로 남깁니다.
 
 절차는 `.github/workflows/voice-price-reverification-notice.yml`,
 계산은 `lib/voiceInputPricing.ts`입니다.

@@ -351,9 +351,10 @@ export type VoicePriceReverificationNotice = {
  * "a warning cannot block" structural rather than a rule somebody has to
  * remember.
  *
- * An already-expired deadline is not here either. That is the audit's
- * `expired` problem, which blocks -- and a check that reported it twice, once
- * as a warning, would be describing a failure as a heads-up.
+ * The deadline day and anything past it are not here. Those are the audit's
+ * `expired` problem, which blocks -- and a check that reported the same fact
+ * twice, once as a warning, would be describing a failure as a heads-up. The
+ * window is 30 days out to the day before, and stops there.
  *
  * Days are whole UTC days from the start of today, so a daily run sees each
  * mark exactly once and the answer does not depend on the hour it runs at.
@@ -376,7 +377,12 @@ export const voicePriceReverificationNotices = (input: {
     const reverifyBy = parseDay(entry.reverifyBy);
     if (reverifyBy === null) continue;
     const daysRemaining = Math.floor((reverifyBy - today) / dayMs);
-    if (daysRemaining < 0) continue;
+    // The deadline day itself is the audit's, not this function's. `< 0` let
+    // it through, so on 2026-12-01 both layers would have spoken at once --
+    // `expired` failing the gate while a notice called the same fact a
+    // heads-up. The warning window ends the day before the deadline, which is
+    // what the table in docs/policy/voice-input.md §6.1.5 says it does.
+    if (daysRemaining <= 0) continue;
     if (daysRemaining > VOICE_PRICE_REVERIFY_WARNING_WINDOW_DAYS) continue;
     // The last match, not the first: the marks descend, and every mark wider
     // than the deadline's distance also satisfies the comparison. Taking the
