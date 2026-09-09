@@ -1,6 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import {
-  componentError, componentValue, domainSha256, encodeCanonical, type ComponentResult,
+  componentError, componentValue, copyByteInput, domainSha256, encodeCanonical, type ComponentResult,
 } from "./canonicalJson";
 import { checkWire, decodeBase64, requiredRole, type ComponentCheck } from "./wire";
 
@@ -33,12 +33,13 @@ export function verifyPureEd25519(
 ): ComponentResult<ComponentCheck> {
   const publicKey = decodeBase64(publicKeyBase64, 32);
   const signature = decodeBase64(signatureBase64, 64);
-  if (!(message instanceof Uint8Array) || !publicKey.ok || !signature.ok) return componentError("invalid_input");
+  const copy = copyByteInput(message);
+  if (!copy.ok || !publicKey.ok || !signature.ok) return componentError("invalid_input");
   try {
     const key = createPublicKey({
       key: Buffer.concat([spkiHeader, publicKey.value]), type: "spki", format: "der",
     });
-    return verify(null, message, key, signature.value) ? matched() : componentError("signature_mismatch");
+    return verify(null, copy.value, key, signature.value) ? matched() : componentError("signature_mismatch");
   } catch {
     // Do not expose native exception text, malformed key bytes or a key object.
     return componentError("invalid_input");
