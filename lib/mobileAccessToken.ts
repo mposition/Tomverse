@@ -32,6 +32,10 @@ import {
   MOBILE_ACCESS_TOKEN_TTL_SECONDS,
 } from "@/lib/mobileAuthContract";
 import {
+  MOBILE_ACCESS_TOKEN_DEPLOYMENT_CLAIM,
+  deploymentIdentifierFrom,
+} from "@/lib/mobileDeploymentBinding";
+import {
   activeMobileSigningKey,
   mobileAuthConfigured,
   mobileSigningKeyById,
@@ -235,6 +239,18 @@ export const mintMobileAccessToken = (
     typ: MOBILE_ACCESS_TOKEN_JOSE_TYPE,
     kid: key.keyId,
   });
+  // A1 of the evidence-binding approval (2026-09-09): the signing process
+  // stamps the deployment it read out of its own environment, so a rotation
+  // check can tell evidence from *this* deployment apart from equally fresh
+  // evidence an older instance minted during a rolling deploy.
+  //
+  // Omitted rather than sent empty when the platform did not set the variable.
+  // A `dep` claim that is present and blank would be indistinguishable from a
+  // deployment that stamped nothing, and the verifier's "undetermined" branch
+  // depends on being able to tell those apart. `exactOptionalPropertyTypes`
+  // is not in play here because this object is serialised, not typed against
+  // an interface -- an absent key simply does not appear in the JSON.
+  const deploymentId = deploymentIdentifierFrom(environment);
   const claims = encodeJson({
     iss: mobileTokenIssuer(environment),
     aud: mobileTokenAudience(environment),
@@ -243,6 +259,7 @@ export const mintMobileAccessToken = (
     fid: input.familyId,
     jti: tokenId,
     tkn: MOBILE_ACCESS_TOKEN_KIND,
+    ...(deploymentId ? { [MOBILE_ACCESS_TOKEN_DEPLOYMENT_CLAIM]: deploymentId } : {}),
     iat: issuedAt,
     nbf: issuedAt,
     exp: expiresAtSeconds,

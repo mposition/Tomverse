@@ -1271,6 +1271,15 @@ domains:
   # the sweep does not ask it to register and registering it would fail on the
   # "carries no user data in the schema" rule. It is removed by the cascade
   # from MobileTokenFamily, which is removed by the cascade from User.
+  #
+  # 2026-09-09: that table gained `mintedByDeploymentId` (A2 of the
+  # evidence-binding approval), and the judgement above is unchanged. The value
+  # is a Railway deployment identifier -- a fact about our own infrastructure,
+  # the same one /api/build-info already publishes unauthenticated -- so it
+  # neither makes the row user-linked nor changes how it is deleted. E4 of that
+  # approval asked for the column to be reflected here; this note is that
+  # reflection, because a row for the table would be rejected by the very rule
+  # the paragraph above states.
   - domain: mobileDevice
     prismaModel: MobileDevice
     userLinkageRole: subject
