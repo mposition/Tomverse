@@ -43,7 +43,11 @@ $MANAGED = @(
     "MOBILE_AUTH_VERIFY_REFRESH_TOKEN",
     "MOBILE_AUTH_VERIFY_SECRET_DIGEST",
     "MOBILE_AUTH_VERIFY_PEPPER_KID",
-    "MOBILE_AUTH_VERIFY_MODE"
+    "MOBILE_AUTH_VERIFY_MODE",
+    "MOBILE_AUTH_VERIFY_DEPLOYMENT_ID",
+    "MOBILE_AUTH_VERIFY_MINTED_BY_DEPLOYMENT_ID",
+    "MOBILE_AUTH_VERIFY_BINDING_TOLERANCE",
+    "MOBILE_AUTH_VERIFY_SUMMARY_PATH"
 )
 
 $ALLOWED_PARAMETERS = @(
@@ -56,6 +60,10 @@ $ALLOWED_PARAMETERS = @(
     "RetiredSigningKeys",
     "RetiredRefreshPeppers",
     "Mode",
+    "DeploymentId",
+    "BindingTolerance",
+    "MintedByDeploymentId",
+    "SummaryPath",
     "UsePreinjectedRings"
 )
 
@@ -73,6 +81,8 @@ $global:promptSecure = @()
 $global:npmArgs = $null
 $global:npmExit = 0
 $global:npmSawMode = $null
+$global:npmSawTolerance = $null
+$global:npmSawDeploymentId = $null
 
 function Assert-Case {
     param([string] $Name, [bool] $Ok, [string] $Detail = "")
@@ -92,6 +102,8 @@ function Read-Host {
 function npm {
     $global:npmArgs = $args -join " "
     $global:npmSawMode = $env:MOBILE_AUTH_VERIFY_MODE
+    $global:npmSawTolerance = $env:MOBILE_AUTH_VERIFY_BINDING_TOLERANCE
+    $global:npmSawDeploymentId = $env:MOBILE_AUTH_VERIFY_DEPLOYMENT_ID
     Write-Output "stub npm: $($global:npmArgs)"
     $global:LASTEXITCODE = $global:npmExit
 }
@@ -107,12 +119,20 @@ function Get-LeftoverManaged {
 }
 
 function Invoke-Wrapper {
-    param([int] $NpmExit = 0, [string] $Mode = "rotation", [switch] $Preinjected, [hashtable] $Inject)
+    param(
+        [int] $NpmExit = 0,
+        [string] $Mode = "rotation",
+        [string] $BindingTolerance = "open",
+        [switch] $Preinjected,
+        [hashtable] $Inject
+    )
 
     $global:promptCount = 0
     $global:promptSecure = @()
     $global:npmArgs = $null
     $global:npmSawMode = $null
+    $global:npmSawTolerance = $null
+    $global:npmSawDeploymentId = $null
     $global:npmExit = $NpmExit
     Clear-Managed
     if ($Inject) {
@@ -130,6 +150,9 @@ function Invoke-Wrapper {
             -SecretDigest "0123456789abcdef" `
             -PepperKid "pep-2" `
             -Mode $Mode `
+            -DeploymentId "dep-11111111-2222-3333-4444-555555555555" `
+            -MintedByDeploymentId "dep-11111111-2222-3333-4444-555555555555" `
+            -BindingTolerance $BindingTolerance `
             -UsePreinjectedRings:$Preinjected *>&1 | Out-String
     }
     catch {
@@ -143,6 +166,8 @@ function Invoke-Wrapper {
         Leftover = (Get-LeftoverManaged)
         NpmArgs  = $global:npmArgs
         SawMode  = $global:npmSawMode
+        SawTolerance = $global:npmSawTolerance
+        SawDeployment = $global:npmSawDeploymentId
         Prompts  = $global:promptCount
         Secure   = @($global:promptSecure)
     }
@@ -187,26 +212,47 @@ Assert-Case "4a. the mode reaches the verifier" ($emergency.SawMode -eq "emergen
 
 # No default. The one it had was "rotation", so an emergency run that forgot
 # the flag was told to roll back to the ring section 5.1 had just abandoned.
-$modeParameter = @($ast.ParamBlock.Parameters |
-    Where-Object { $_.Name.VariablePath.UserPath -eq "Mode" })
-# The *value*, not just the presence of the argument: `Mandatory = $false`
-# carries the same argument name and makes the parameter optional again.
-$mandatoryArguments = @($modeParameter.Attributes |
-    Where-Object { $_.TypeName.Name -eq "Parameter" } |
-    ForEach-Object { $_.NamedArguments } |
-    Where-Object { $_.ArgumentName -eq "Mandatory" })
-$modeIsMandatory = ($mandatoryArguments.Count -gt 0) -and
-    (@($mandatoryArguments | Where-Object {
-        # `[Parameter(Mandatory)]` with no value means $true; anything else has
-        # to evaluate to $true to count.
-        $_.ExpressionOmitted -or ($_.Argument.SafeGetValue() -eq $true)
-    }).Count -eq $mandatoryArguments.Count)
-$modeHasDefault = @($modeParameter | Where-Object { $null -ne $_.DefaultValue }).Count -gt 0
-Assert-Case "4b. -Mode is mandatory and has no default" `
-    ($modeIsMandatory -and (-not $modeHasDefault)) `
-    ("mandatory={0} default={1}" -f $modeIsMandatory, $modeHasDefault)
+function Test-MandatoryNoDefault {
+    param([string] $ParameterName)
+    $parameter = @($ast.ParamBlock.Parameters |
+        Where-Object { $_.Name.VariablePath.UserPath -eq $ParameterName })
+    # The *value*, not just the presence of the argument: `Mandatory = $false`
+    # carries the same argument name and makes the parameter optional again.
+    $mandatoryArguments = @($parameter.Attributes |
+        Where-Object { $_.TypeName.Name -eq "Parameter" } |
+        ForEach-Object { $_.NamedArguments } |
+        Where-Object { $_.ArgumentName -eq "Mandatory" })
+    $isMandatory = ($mandatoryArguments.Count -gt 0) -and
+        (@($mandatoryArguments | Where-Object {
+            # `[Parameter(Mandatory)]` with no value means $true; anything else
+            # has to evaluate to $true to count.
+            $_.ExpressionOmitted -or ($_.Argument.SafeGetValue() -eq $true)
+        }).Count -eq $mandatoryArguments.Count)
+    $hasDefault = @($parameter | Where-Object { $null -ne $_.DefaultValue }).Count -gt 0
+    [pscustomobject]@{
+        Ok     = ($isMandatory -and (-not $hasDefault))
+        Detail = ("mandatory={0} default={1}" -f $isMandatory, $hasDefault)
+    }
+}
+
+$modeCheck = Test-MandatoryNoDefault -ParameterName "Mode"
+Assert-Case "4b. -Mode is mandatory and has no default" $modeCheck.Ok $modeCheck.Detail
 Assert-Case "4c. preflight is an accepted mode" `
     ((Invoke-Wrapper -Mode "preflight").SawMode -eq "preflight") ""
+
+# The same rule for the E9 tolerance, and for the same reason. A default would
+# have to be `open`, which is the wrong answer on exactly the runs where Active
+# has been promoted to a generation that stamps its evidence -- there, evidence
+# with no identifier is refused, not undetermined.
+$toleranceCheck = Test-MandatoryNoDefault -ParameterName "BindingTolerance"
+Assert-Case "4d. -BindingTolerance is mandatory and has no default" `
+    $toleranceCheck.Ok $toleranceCheck.Detail
+$closed = Invoke-Wrapper -BindingTolerance "closed"
+Assert-Case "4e. the tolerance reaches the verifier" ($closed.SawTolerance -eq "closed") `
+    ("verifier saw: {0}" -f $closed.SawTolerance)
+Assert-Case "4f. the expected deployment id reaches the verifier" `
+    ($closed.SawDeployment -eq "dep-11111111-2222-3333-4444-555555555555") `
+    ("verifier saw: {0}" -f $closed.SawDeployment)
 
 $leaked = @()
 foreach ($run in @($ok, $bad, $emergency)) {

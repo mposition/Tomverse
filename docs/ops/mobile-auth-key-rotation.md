@@ -639,8 +639,16 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
      -ActiveSigningKeyId "<Active>" -ActiveRefreshPepperId "<Active>" `
      -TokenIssuer "<Active>" -TokenAudience "<Active>" `
      -RetiredSigningKeys "<Active>" -RetiredRefreshPeppers "<Active>" `
-     -SecretDigest "<행에서>" -PepperKid "<행에서>" -Mode preflight
+     -SecretDigest "<행에서>" -PepperKid "<행에서>" -Mode preflight `
+     -DeploymentId "<Active의 deployment ID>" `
+     -MintedByDeploymentId "<행의 mintedByDeploymentId, NULL이면 비웁니다>" `
+     -BindingTolerance open
    ```
+
+   **preflight의 기준값은 Active입니다** — 지금 돌고 있는 배포를 상대로 하는
+   확인이므로 `-DeploymentId`에도 Active에 적힌 deployment ID를 넣습니다.
+   `-BindingTolerance`는 Active가 결속을 싣는 세대로 승격되기 전까지 `open`이고,
+   승격된 뒤에는 `closed`입니다.
 
    **실패는 두 종류이고 하는 일이 다릅니다.** 출력의 안내가 어느 쪽인지 말해 줍니다.
 
@@ -700,6 +708,18 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
 
    **`-SummaryPath`는 다음 항목의 세 시료를 위한 것입니다.** token·digest·링·key id는
    쓰지 않습니다 — deployment id 둘, `iat`·`exp`, 판정뿐입니다.
+
+   **폴더를 먼저 만듭니다.** 없으면 script가 검증 **전에** 거절합니다 — 방금 만든
+   exchange를 회차 파일도 남기지 못하는 실행에 쓰지 않기 위해서입니다.
+
+   ```powershell
+   New-Item -ItemType Directory -Force -Path .\mobile-auth-round | Out-Null
+   ```
+
+   script는 그 경로에 **먼저 `incomplete` 표시를 써 둡니다.** 실행이 중간에 끊기면
+   앞 회차의 파일이 남아 다음 판정에 읽히는 대신 **판정기가 거절하는 파일**이
+   남습니다. 그리고 회차 파일을 요구했는데 쓰지 못하면 **그 실행은 실패**입니다 —
+   재료 판정은 그대로 출력되지만 종료 코드는 0이 아닙니다.
 
    **두 링과 두 token은 인수가 아니라 프롬프트로 들어갑니다** — refresh token은 family를
    회전시키는 bearer secret이고, 인수는 명령줄에 남습니다. 끝나면 여덟 + 다섯 개

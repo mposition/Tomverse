@@ -15,9 +15,9 @@
 // the count of vectors can be compared without a table.
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHmac, generateKeyPairSync, randomBytes, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -354,25 +354,41 @@ test("W14 and W19: the same fresh evidence passes twice, and nothing notices", (
 
 // --- the three-sample round (E5) -------------------------------------------
 
+/**
+ * A run summary shaped the way the verifier writes one.
+ *
+ * `failures` is derived rather than passed in: the round now tells a binding
+ * finding apart from a stale token by reading it, so a fixture that set it by
+ * hand would be free to describe a run that cannot happen.
+ */
 const sample = ({
   issuedAt,
   ttlSeconds = TTL_SECONDS,
-  passed = true,
   signingDeploymentId = PENDING,
-}) => ({
-  schema: "tomverse.mobile-auth-verify.v1",
-  mode: "rotation",
-  tolerance: "open",
-  expectedDeploymentId: PENDING,
-  tokenIssuedAt: issuedAt,
-  tokenExpiresAt: issuedAt + ttlSeconds,
-  signingBinding: signingDeploymentId === PENDING ? "matched" : "mismatched",
-  signingDeploymentId,
-  pepperBinding: signingDeploymentId === PENDING ? "matched" : "mismatched",
-  pepperDeploymentId: signingDeploymentId,
-  failures: [],
-  passed,
-});
+  pepperDeploymentId = undefined,
+  otherFailures = [],
+}) => {
+  const pepperId = pepperDeploymentId === undefined ? signingDeploymentId : pepperDeploymentId;
+  const failures = [...otherFailures];
+  if (signingDeploymentId !== PENDING) failures.push({ name: "signing binding", kind: "evidence" });
+  if (pepperId !== PENDING) failures.push({ name: "pepper binding", kind: "evidence" });
+  return {
+    schema: "tomverse.mobile-auth-verify.v1",
+    mode: "rotation",
+    tolerance: "open",
+    expectedDeploymentId: PENDING,
+    tokenIssuedAt: issuedAt,
+    tokenExpiresAt: issuedAt + ttlSeconds,
+    signingBinding: signingDeploymentId === PENDING ? "matched" : "mismatched",
+    signingDeploymentId,
+    pepperBinding: pepperId === PENDING ? "matched" : "mismatched",
+    pepperDeploymentId: pepperId,
+    failures,
+    passed: failures.length === 0,
+  };
+};
+
+const STALE = [{ name: "evidence is fresh", kind: "evidence" }];
 
 const threeSamples = (base, overrides = [{}, {}, {}]) =>
   overrides.map((override, index) =>
@@ -387,10 +403,10 @@ test("W15: one sample naming another deployment makes the round undetermined, wi
   const result = judgeMobileBindingRound({
     round: 1,
     judgedAtSeconds: base + 300,
-    samples: threeSamples(base, [{}, { signingDeploymentId: PREVIOUS, passed: false }, {}]),
+    samples: threeSamples(base, [{}, { signingDeploymentId: PREVIOUS }, {}]),
   });
   assert.equal(result.verdict, "undetermined");
-  assert.match(result.reasons.join(" "), /did not pass their own verification run/);
+  assert.match(result.reasons.join(" "), /signingBinding mismatched, not matched/);
   // The round ends here. Nothing in the result offers another sample, and the
   // CLI's undetermined text says so out loud.
   const cliText = readFileSync(JUDGE, "utf8");
@@ -425,7 +441,7 @@ test("W16a: a mixed state that failed one round passes the next, unchanged", () 
   const first = judgeMobileBindingRound({
     round: 1,
     judgedAtSeconds: base + 300,
-    samples: threeSamples(base, [{}, { signingDeploymentId: PREVIOUS, passed: false }, {}]),
+    samples: threeSamples(base, [{}, { signingDeploymentId: PREVIOUS }, {}]),
   });
   assert.equal(first.verdict, "undetermined");
 
@@ -466,7 +482,7 @@ test("W17: three matching samples meet the condition and claim nothing about sta
   assert.equal(result.verdict, "sample_condition_met");
   // The fourth sample the round never took. Nothing in the verdict's name or
   // in either script's text may present the round as evidence of stabilisation.
-  const fourth = sample({ issuedAt: base + 720, signingDeploymentId: PREVIOUS, passed: false });
+  const fourth = sample({ issuedAt: base + 720, signingDeploymentId: PREVIOUS });
   assert.equal(fourth.signingBinding, "mismatched");
   for (const path of [JUDGE, VERIFIER]) {
     const text = readFileSync(path, "utf8");
@@ -510,13 +526,49 @@ test("three samples all naming the same other deployment stop the procedure", ()
     round: 1,
     judgedAtSeconds: base + 300,
     samples: threeSamples(base, [
-      { signingDeploymentId: PREVIOUS, passed: false },
-      { signingDeploymentId: PREVIOUS, passed: false },
-      { signingDeploymentId: PREVIOUS, passed: false },
+      { signingDeploymentId: PREVIOUS },
+      { signingDeploymentId: PREVIOUS },
+      { signingDeploymentId: PREVIOUS },
     ]),
   });
   assert.equal(result.verdict, "halt");
   assert.match(result.reasons.join(" "), /stop rather than opening another round/);
+});
+
+test("a file the judge cannot parse has nothing of its contents printed", () => {
+  // The operator points at the wrong file -- an exported ring, a saved
+  // response. `JSON.parse` puts the offending text in its own message, so the
+  // tool that refuses the file used to print what was in it.
+  const directory = mkdtempSync(join(tmpdir(), "binding-parse-"));
+  const secret = "TEST-RING-SECRET-4f8ad2c1b9";
+  const decoy = join(directory, "not-a-summary.json");
+  try {
+    writeFileSync(decoy, `MOBILE_AUTH_SIGNING_KEYS=sign-2:${secret}\n`, "utf8");
+    const base = Math.floor(Date.now() / 1000);
+    const others = [1, 2].map((index) => {
+      const path = join(directory, `run-${index}.json`);
+      writeFileSync(
+        path,
+        JSON.stringify(sample({ issuedAt: base + index * 200 })),
+        "utf8"
+      );
+      return path;
+    });
+
+    const result = spawnSync(process.execPath, [JUDGE, "--round", "1", decoy, ...others], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1);
+    const streams = `${result.stdout}${result.stderr}`;
+    assert.equal(streams.includes(secret), false, streams);
+    assert.equal(streams.includes("MOBILE_AUTH_SIGNING_KEYS=sign-2"), false, streams);
+    assert.match(streams, /is not a readable run summary/);
+    // The path is the operator's own argument, so naming it tells them nothing
+    // they did not type.
+    assert.match(streams, /not-a-summary\.json/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("the judge reads the verifier's own run files end to end", () => {
@@ -550,6 +602,86 @@ test("the judge reads the verifier's own run files end to end", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("a round with both binding axes deleted is not judged as a pass", () => {
+  // `passed: true` is one boolean about one run, and it used to be the only
+  // thing standing between a summary with no binding at all and
+  // `sample_condition_met`.
+  const base = Math.floor(Date.now() / 1000);
+  const stripped = threeSamples(base).map((entry) => {
+    const copy = { ...entry };
+    delete copy.signingBinding;
+    delete copy.signingDeploymentId;
+    delete copy.pepperBinding;
+    delete copy.pepperDeploymentId;
+    return copy;
+  });
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: stripped,
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.match(result.reasons.join(" "), /has no signingBinding/);
+  assert.match(result.reasons.join(" "), /has no pepperDeploymentId/);
+});
+
+test("an axis that reports another deployment is not covered by the other axis", () => {
+  const base = Math.floor(Date.now() / 1000);
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    // The row is bound; the token is not. One bound half is not a bound sample.
+    samples: threeSamples(base, [{}, {}, { signingDeploymentId: PREVIOUS, pepperDeploymentId: PENDING }]),
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.match(result.reasons.join(" "), /signingBinding mismatched, not matched/);
+});
+
+test("a file that is not a run summary is refused as a whole, not field by field", () => {
+  const base = Math.floor(Date.now() / 1000);
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: [{ some: "other file" }, ...threeSamples(base).slice(1)],
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.match(result.reasons.join(" "), /is not a tomverse\.mobile-auth-verify\.v1 run summary/);
+});
+
+test("expired evidence from another deployment is undetermined, not a reason to stop", () => {
+  // Three samples that all name the previous deployment *and* were stale when
+  // they were taken. Nothing here says where traffic is going; the remedy is to
+  // collect them again. Reported as `halt` before, which is an instruction to
+  // stop a rotation on the strength of unjudgeable evidence.
+  const base = Math.floor(Date.now() / 1000);
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: threeSamples(base, [
+      { signingDeploymentId: PREVIOUS, otherFailures: STALE },
+      { signingDeploymentId: PREVIOUS, otherFailures: STALE },
+      { signingDeploymentId: PREVIOUS, otherFailures: STALE },
+    ]),
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.match(result.reasons.join(" "), /failed a check other than the binding/);
+});
+
+test("a token from one deployment beside a row from another does not stop the procedure", () => {
+  // Exactly the mixed state this round cannot resolve: the signing half names
+  // the old instance and the pepper half the new one. Deciding `halt` on the
+  // signing half alone reported that as a settled fact about where traffic goes.
+  const base = Math.floor(Date.now() / 1000);
+  const split = { signingDeploymentId: PREVIOUS, pepperDeploymentId: PENDING };
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: threeSamples(base, [split, split, split]),
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.equal(/stop rather than opening another round/.test(result.reasons.join(" ")), false);
 });
 
 test("a round file that lost a field is not judged as though it still had it", () => {
@@ -597,15 +729,64 @@ test("a written round file holds only what the judge needs", () => {
   }
 });
 
-test("an unwritable round file does not change the verdict", () => {
+test("a round file that cannot be written fails the run, before the evidence is spent", () => {
+  // Asked for an artefact and unable to produce one, the run must not exit 0:
+  // the next judgement would read whatever is at that path and the caller would
+  // have no way to know it was not this run.
   const signing = ed25519();
   const result = run({
     ...candidate({ signingPkcs8: signing.pkcs8 }),
     ...evidence({ signing }),
     MOBILE_AUTH_VERIFY_SUMMARY_PATH: join(tmpdir(), "no-such-directory-here", "run.json"),
   });
-  assert.equal(result.code, 0, result.stdout);
-  assert.match(result.stdout, /NOTE {2}could not write MOBILE_AUTH_VERIFY_SUMMARY_PATH/);
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /MOBILE_AUTH_VERIFY_SUMMARY_PATH cannot be written/);
+  // Refused before the material was compared, so the exchange is still usable.
+  assert.equal(/signing key material/.test(result.stdout), false);
+  assert.match(result.stdout, /the exchange you/);
+});
+
+test("an interrupted run leaves an unusable file rather than the previous run's", () => {
+  const signing = ed25519();
+  const directory = mkdtempSync(join(tmpdir(), "binding-stale-"));
+  const summaryPath = join(directory, "run.json");
+  try {
+    // A complete run first: this is the file a later, half-finished run must
+    // not leave sitting there.
+    const first = run({
+      ...candidate({ signingPkcs8: signing.pkcs8 }),
+      ...evidence({ signing }),
+      MOBILE_AUTH_VERIFY_SUMMARY_PATH: summaryPath,
+    });
+    assert.equal(first.code, 0, first.stdout);
+    assert.equal(JSON.parse(readFileSync(summaryPath, "utf8")).passed, true);
+
+    // Now a run that dies before it can finish -- the rings are unusable, so it
+    // exits at the configuration check, after the marker and before a verdict.
+    const second = run({
+      ...candidate({ signingPkcs8: signing.pkcs8 }),
+      ...evidence({ signing }),
+      MOBILE_AUTH_SIGNING_KEYS: "sign-2:too-short",
+      MOBILE_AUTH_VERIFY_SUMMARY_PATH: summaryPath,
+    });
+    assert.equal(second.code, 1, second.stdout);
+
+    const left = JSON.parse(readFileSync(summaryPath, "utf8"));
+    assert.equal(left.incomplete, true);
+    assert.equal(left.passed, undefined);
+
+    // And the judge refuses it rather than reading it as a sample.
+    const base = Math.floor(Date.now() / 1000);
+    const judged = judgeMobileBindingRound({
+      round: 1,
+      judgedAtSeconds: base + 300,
+      samples: [left, ...threeSamples(base).slice(1)],
+    });
+    assert.equal(judged.verdict, "undetermined");
+    assert.match(judged.reasons.join(" "), /incomplete run file/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("a deployment id is compared as written, and a pasted one is not repaired", () => {
