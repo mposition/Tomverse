@@ -26,6 +26,8 @@ import { basename, dirname, join } from "node:path";
 import {
   assessSampleAdequacy,
   AI_REVIEW_EVAL_MIN_CASES,
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS,
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE,
 } from "../lib/aiReviewEvalCore.ts";
 import {
   artifactAdmissibilityProblems,
@@ -225,6 +227,28 @@ if (!REGISTER.some((entry) => entry.status === "approved")) {
       "which is the honest state and not a failure of this check."
   );
 }
+
+// ---------------------------------------------------------------------------
+// What the numbers this gate reads actually are
+// ---------------------------------------------------------------------------
+//
+// Reported, not enforced. Calling the finding counts a keyword diagnostic does
+// not disconnect them from anything, and a label that let a reader assume it
+// had would be worse than the wording it replaced. So the connection is
+// printed where the gate runs, every time, until somebody decides what to do
+// about it. Deciding is not this script's to make: swapping in the judged
+// contract's scores, or moving a threshold to suit them, are separate choices.
+console.log("\nAI Review finding-count metrics — what the gate above reads");
+console.log(`  note ${AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE}`);
+console.log("  note still connected to the approval decision here:");
+for (const connection of AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS) {
+  console.log(`       - ${connection}`);
+}
+console.log(
+  "  note the judged contract written to replace this screen " +
+    "(docs/ops/ai-review-eval-scoring-contract.md) is NOT wired to this gate, " +
+    "and connecting it is a decision nobody has made."
+);
 
 // ---------------------------------------------------------------------------
 // Every approved entry's artifacts, read from the entry itself
