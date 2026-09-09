@@ -202,12 +202,80 @@ test("the keyword notice says what the counts cannot answer", () => {
     // in a CLI and another in a report.
     const notice = AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE;
     assert.match(notice, /Keyword diagnostic, not semantic accuracy/);
-    // The three questions the substring test cannot answer, each named.
+    // The questions the substring test cannot answer, each named.
     assert.match(notice, /which answer was accused/);
     assert.match(notice, /missing or present/);
-    assert.match(notice, /submitted as a finding/);
+    // Field scoping is REAL and meaning is not: claiming it cannot tell a
+    // finding from prose would understate it in one place and overstate it in
+    // another, so the notice has to say both halves.
+    assert.match(notice, /Only that kind's findings field is read/);
+    assert.match(notice, /a quotation and an aside are indistinguishable/);
+    // The derived rate rides on the same matching and must be named with them.
+    assert.match(notice, /false-consensus rate derived from them/);
     // And it must not claim the screen is merely imprecise in one direction.
     assert.match(notice, /wrong in both directions/);
+});
+
+test("the screen scopes by field but not by meaning", () => {
+    // Both halves measured, because the description of this screen was wrong
+    // in each direction at some point: too generous about what it separates,
+    // then too harsh.
+    const outsideTheField = scoreCase(caseWithGold(SHORT_TERMS), {
+        findings: { contradictions: [], missingPoints: [], differences: [] },
+        allText: CORRECT,
+        reviewerProse: CORRECT,
+        totalQuotes: 0,
+        matchedQuotes: 0,
+    }).byKind.missingPoints;
+    assert.equal(outsideTheField.truePositives, 0);
+
+    // The same terms inside the field, as a quotation of the answer rather
+    // than a finding about it. Indistinguishable to a substring test.
+    const quotedInsideTheField = score(
+        SHORT_TERMS,
+        'c의 원문을 인용하면 "...2주 이내..."라고 적혀 있다'
+    );
+    assert.equal(quotedInsideTheField.truePositives, 1);
+});
+
+test("false consensus rides on the same matching, and invented issues do not", () => {
+    // A reviewer that reported the planted omission in its own words is
+    // recorded as having agreed with everything; one that named the term while
+    // denying the gold is not. Neither is about what the reviewer meant.
+    // A term list that carries only one wording, so the synonym really is one
+    // the list does not have -- SHORT_TERMS lists `14일` itself.
+    const ONE_WORDING = {
+        id: "two-week-objection-deadline",
+        anyOf: ["2주"],
+        description: "c가 법정 기한을 제시하지 않는다",
+    };
+    const synonym = scoreCase(caseWithGold(ONE_WORDING), reporting(SYNONYM));
+    assert.equal(synonym.byKind.missingPoints.truePositives, 0);
+    assert.equal(synonym.falseConsensus, true);
+
+    const denial = scoreCase(caseWithGold(ONE_WORDING), reporting(OPPOSITE));
+    assert.equal(denial.byKind.missingPoints.truePositives, 1);
+    assert.equal(denial.falseConsensus, false);
+
+    // The invented-issue flag counts submissions on a no-issue case and never
+    // reads the terms, so it must not be described as keyword-derived.
+    const noIssue = {
+        ...caseWithGold(SHORT_TERMS),
+        phenomenon: "genuine_consensus",
+        gold: { missingPoints: [] },
+    };
+    const invented = scoreCase(noIssue, {
+        findings: {
+            contradictions: ["아무 근거 없는 모순 주장"],
+            missingPoints: [],
+            differences: [],
+        },
+        allText: "아무 근거 없는 모순 주장",
+        reviewerProse: "아무 근거 없는 모순 주장",
+        totalQuotes: 0,
+        matchedQuotes: 0,
+    });
+    assert.equal(invented.inventedIssue, true);
 });
 
 test("the label does not pretend the numbers were disconnected", () => {
@@ -217,6 +285,9 @@ test("the label does not pretend the numbers were disconnected", () => {
     assert.ok(AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS.length >= 3);
     const joined = AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS.join(" ");
     for (const hop of [
+        "scoreCase()",
+        "falseConsensus",
+        "falseConsensusRateWilsonUpper",
         "aggregateOutcomes()",
         "thresholdShortfalls()",
         "approvedEntryProblems()",
