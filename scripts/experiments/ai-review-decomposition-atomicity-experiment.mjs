@@ -1,21 +1,28 @@
-// The two policies the scoring contract still leaves open, computed.
+// Why claim-per-triple and atomic gold were chosen, kept runnable.
 //
-// docs/ops/ai-review-eval-scoring-contract.md §5 lists them: what counts as one
-// independent assertion when a submission names several things, and whether a
-// gold requirement may bundle more than one action. The comparison is written
-// up in .github/audits/ai-review-decomposition-atomicity-2026-09-09.md.
+// Both were ADOPTED on 2026-09-09 (mposition) and are in the contract:
+// docs/ops/ai-review-eval-scoring-contract.md, with the registration side in
+// docs/ops/ai-review-eval-runbook.md §1.3d. The comparison that chose them is
+// .github/audits/ai-review-decomposition-atomicity-2026-09-09.md, and this
+// script is how it stays checkable rather than only remembered.
 //
 //   npm run experiment:ai-review-decomposition-atomicity
 //
-// ## What this is
+// ## What this is now
 //
-// An experiment, not a scorer. No proposed rule is implemented in
-// `lib/aiReviewEvalJudgement.ts`; each option is applied by EXTRACTING THE
-// RECORD DIFFERENTLY -- which is what these policies actually govern -- and the
-// contract's own scorer produces every number.
+// Not a scorer, and no longer a comparison of open options. The alternatives
+// are expressed by EXTRACTING THE RECORD DIFFERENTLY, or by REGISTERING THE
+// GOLD DIFFERENTLY -- which is what these two policies actually govern -- and
+// the contract's own scorer produces the numbers it still can.
 //
-//   baseline     the record as a submission-unit extractor would write it
-//   experiment   the record as the proposed rule would have it extracted
+//   baseline     the record as a submission-unit extractor would write it,
+//                with the v2/v3 axes stripped: the contract before the choice
+//   experiment   the record as the adopted rule has it extracted
+//   recorded     a figure computed under an EARLIER contract version, printed
+//                with that version. Today's contract refuses the extraction it
+//                came from, so it cannot be recomputed here
+//   live         what today's contract does with that same extraction, checked
+//                on every run rather than assumed
 //   observation  a measurement over the real candidate files, not a score
 //
 // The two policies do not take the same inputs, and saying so matters.

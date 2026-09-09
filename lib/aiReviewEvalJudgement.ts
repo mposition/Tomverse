@@ -200,8 +200,14 @@ export type AiReviewJudgedClaim = {
     /** The sentence the judgement rests on, verbatim. */
     evidenceQuote: string;
     /**
-     * Required when this exact (kind, label, requirement) is not a gold item,
-     * ignored otherwise. See `JUDGED_OUTSIDE_GOLD_VERDICTS`.
+     * Required when this exact (kind, label, requirement) is NOT a gold item,
+     * and refused when it is. See `JUDGED_OUTSIDE_GOLD_VERDICTS`.
+     *
+     * It used to say "ignored otherwise", and ignored was not nothing. The C1
+     * duplicate check reads every judged field, so a verdict written onto one
+     * of two otherwise identical in-gold claims made them read as different
+     * judgements: the record was accepted and the score moved with it. A field
+     * that cannot apply may not be written.
      *
      * Not required on a claim excluded from scoring as `support`: it is not a
      * finding the reviewer put forward, so there is no question about whether
