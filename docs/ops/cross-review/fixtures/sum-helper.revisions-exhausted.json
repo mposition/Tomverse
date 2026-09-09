@@ -8,5 +8,15 @@
     { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
     { "taskId": "demo-sum-helper", "round": 1, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
     { "taskId": "demo-sum-helper", "round": 2, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" }
+  ],
+  "tests": [
+    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 40 }],
+    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 41 }],
+    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 39 }]
+  ],
+  "guards": [
+    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }],
+    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }],
+    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }]
   ]
 }

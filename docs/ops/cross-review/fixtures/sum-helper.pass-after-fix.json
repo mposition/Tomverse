@@ -55,5 +55,9 @@
   "tests": [
     [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 40 }],
     [{ "command": "node --test tests/sum.test.mjs", "passed": true, "output": "pass 1", "durationMs": 38 }]
+  ],
+  "guards": [
+    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }],
+    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 11 }]
   ]
 }

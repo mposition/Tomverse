@@ -18,9 +18,23 @@
  * Both are asked for one JSON document on stdout, in the shape the control
  * program checks (`authorOutputProblems` / `reviewVerdictProblems`). The
  * prompt says so and the parser tolerates a result printed after streamed
- * lines. The flag sets below are recorded as the intended invocation and
- * must be checked against the installed tool's `--help` before a live run;
- * `CLI_INVOCATIONS` exists so that check is a comparison against one place.
+ * lines. The flag sets below were checked on 2026-09-09 against the installed
+ * tools -- codex-cli 0.146.0 and Claude Code 2.1.261 -- and, for the event
+ * shape, against the `codex` source at tag `rust-v0.146.0`; what each check
+ * covered is written next to the invocation. `CLI_INVOCATIONS` exists so that
+ * check is a comparison against one place, and it is due again whenever
+ * either tool is upgraded.
+ *
+ * ## Why the reviewer ignores the user's configuration
+ *
+ * The sandbox bounds shell commands, not the tools a configuration adds. A
+ * `~/.codex/config.toml` may register MCP servers and plugins that execute
+ * outside the sandbox (an infrastructure CLI, a JavaScript REPL, desktop
+ * control), and `-c mcp_servers={}` merges rather than replaces, so nothing
+ * short of `--ignore-user-config` takes them away. The reviewer therefore
+ * runs with the user layer empty; what a run still needs from configuration
+ * -- the model, or the Windows sandbox backend -- is passed explicitly as an
+ * override from the allow list below and recorded with the command.
  */
 
 import {
@@ -31,6 +45,7 @@ import {
     type AuthorExecutor,
     type AuthorOutput,
     type AuthorRequest,
+    type CrossReviewRole,
     type ExecutorResult,
     type ReviewerExecutor,
     type ReviewRequest,
@@ -116,18 +131,32 @@ export type Spawner = (
 
 export type CliInvocation = {
     command: string;
-    /** Arguments before the prompt. The prompt is passed on stdin. */
+    /** Fixed arguments. Per-run configuration overrides, if any, come after them. */
     args: readonly string[];
-    /** What the invocation is for, so a reader can check it against `--help`. */
+    /**
+     * The flag that carries one `key=value` configuration override, for a
+     * tool that has one (`codex -c`). A tool without one refuses overrides.
+     */
+    configFlag?: string;
+    /** The final argument that makes the tool read its prompt from stdin, for a tool that needs one (`codex exec -`). */
+    promptArg?: string;
+    /** What the invocation is for and what was checked, so a reader can compare it with `--help`. */
     note: string;
 };
 
 /**
- * The intended invocations, one per tool and role. Recorded, not verified:
- * `codex` is not installed where this was written, and the Claude Code flags
- * were read from `claude --help` of 2.1.266. Check both before a live run.
+ * The intended invocations, one per tool and role.
+ *
+ * Checked 2026-09-09. Claude Code 2.1.261 lists every flag used here in
+ * `claude --help`; neither Claude Code invocation has been run. codex-cli
+ * 0.146.0 lists `--sandbox` on the root command and on `exec`, and `exec`
+ * documents `--json` ("Print events to stdout as JSONL"), `-` ("instructions
+ * are read from stdin"), `--ignore-user-config` and `-c`; `codex exec` sets
+ * the approval policy to `never` in its own source (`exec/src/lib.rs`, "Default
+ * to never ask for approvals in headless mode"), so a command the read-only
+ * sandbox refuses is rejected rather than escalated.
  */
-export const CLI_INVOCATIONS: Readonly<Record<"claude" | "codex", Readonly<Record<"author" | "reviewer", CliInvocation>>>> = {
+export const CLI_INVOCATIONS: Readonly<Record<"claude" | "codex", Readonly<Record<CrossReviewRole, CliInvocation>>>> = {
     claude: {
         author: {
             command: "claude",
@@ -136,24 +165,83 @@ export const CLI_INVOCATIONS: Readonly<Record<"claude" | "codex", Readonly<Recor
         },
         reviewer: {
             command: "claude",
-            args: ["--print", "--output-format", "json", "--allowedTools", "Read,Grep,Glob"],
-            note: "Claude Code non-interactive with read-only tools; no write tool is offered.",
+            args: ["--print", "--safe-mode", "--output-format", "json", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
+            note:
+                "Claude Code non-interactive with the user's, project's and local customisations off (`--safe-mode`: no " +
+                "CLAUDE.md, skills, plugins, hooks or MCP servers load, while authentication works as normal -- unlike " +
+                "`--bare`, which drops the stored login), only the read tools built in (`--tools`), pre-approved so nothing " +
+                "prompts (`--allowedTools`), and no MCP server (`--strict-mcp-config` with no `--mcp-config`). Managed policy " +
+                "hooks still apply, as the documentation says. Nothing offered can write.",
         },
     },
     codex: {
         author: {
             command: "codex",
-            args: ["--sandbox", "workspace-write", "exec", "--json", "-"],
+            args: ["--sandbox", "workspace-write", "exec", "--json"],
+            configFlag: "-c",
+            promptArg: "-",
             note:
-                "Codex non-interactive: prompt on stdin (`-`), `--json` prints JSONL events, the final " +
-                "agent_message carries the document. `--sandbox` is the root CLI's flag; unverified here.",
+                "Codex non-interactive: prompt on stdin (`-`), `--json` prints JSONL events, the final agent_message " +
+                "carries the document. Writes are confined to the working directory by the sandbox.",
         },
         reviewer: {
             command: "codex",
-            args: ["--sandbox", "read-only", "exec", "--json", "-"],
-            note: "Codex non-interactive in the read-only sandbox; it cannot write to the change.",
+            args: ["--sandbox", "read-only", "exec", "--ignore-user-config", "--json"],
+            configFlag: "-c",
+            promptArg: "-",
+            note:
+                "Codex non-interactive in the read-only sandbox with the user's config.toml ignored: no MCP server, plugin " +
+                "or hook from the user's setup, since those run outside the sandbox; the stored login is still used. " +
+                "What a run needs from configuration is passed as `-c` overrides from REVIEWER_CONFIG_OVERRIDE_KEYS.",
         },
     },
+};
+
+/**
+ * Configuration keys a reviewer run may override. Anything that would widen
+ * what the reviewer can do -- the sandbox mode, approvals, MCP servers,
+ * plugins, features, the shell environment policy -- is absent, so it cannot
+ * be passed. `windows.sandbox` is here because with the user layer ignored
+ * the Windows backend is otherwise unset, and unset means commands are
+ * rejected (`codex` refuses to run unsandboxed), not that they run free.
+ */
+export const REVIEWER_CONFIG_OVERRIDE_KEYS: readonly string[] = [
+    "model",
+    "model_reasoning_effort",
+    "windows.sandbox",
+    "windows.sandbox_private_desktop",
+];
+
+export type CliCommandLine = { ok: true; args: readonly string[] } | { ok: false; detail: string };
+
+/**
+ * The full argument list for one run: the fixed arguments, then one
+ * `configFlag key=value` per override, then the stdin marker. Overrides are
+ * refused for a tool without a config flag, when malformed, and -- when an
+ * allow list is given -- for any key outside it.
+ */
+export const cliCommandLine = (
+    invocation: CliInvocation,
+    configOverrides: readonly string[] = [],
+    allowedKeys: readonly string[] | null = null
+): CliCommandLine => {
+    if (configOverrides.length > 0 && !invocation.configFlag) {
+        return { ok: false, detail: `${invocation.command} takes no configuration override; got ${configOverrides.join(", ")}` };
+    }
+    const overrideArgs: string[] = [];
+    for (const override of configOverrides) {
+        const separator = override.indexOf("=");
+        const key = separator === -1 ? "" : override.slice(0, separator).trim();
+        if (key === "") return { ok: false, detail: `a configuration override must be key=value; got \`${override}\`` };
+        if (allowedKeys && !allowedKeys.includes(key)) {
+            return {
+                ok: false,
+                detail: `configuration override \`${key}\` is not allowed for this role; allowed: ${allowedKeys.join(", ")}`,
+            };
+        }
+        overrideArgs.push(invocation.configFlag as string, override);
+    }
+    return { ok: true, args: [...invocation.args, ...overrideArgs, ...(invocation.promptArg ? [invocation.promptArg] : [])] };
 };
 
 export type CliExecutorOptions = {
@@ -165,26 +253,35 @@ export type CliExecutorOptions = {
     /** Required for `live`; ignored -- never called -- in `dry-run`. */
     spawn?: Spawner;
     env?: Record<string, string | undefined>;
+    /** `key=value` configuration overrides, each passed with the invocation's `configFlag`. */
+    configOverrides?: readonly string[];
 };
 
-const notExecuted = <T>(mode: string, invocation: CliInvocation): ExecutorResult<T> => ({
+const notExecuted = <T>(mode: string, command: string, args: readonly string[]): ExecutorResult<T> => ({
     ok: false,
     failure: "not_executed",
-    detail: `${mode}: would run \`${[invocation.command, ...invocation.args].join(" ")}\` with the prompt on stdin`,
+    detail: `${mode}: would run \`${[command, ...args].join(" ")}\` with the prompt on stdin`,
 });
 
 const runCli = async <T>(
     options: CliExecutorOptions,
+    role: CrossReviewRole,
     prompt: string,
     problemsOf: (value: unknown) => readonly string[]
 ): Promise<ExecutorResult<T>> => {
-    if (options.mode === "dry-run") return notExecuted<T>("dry-run", options.invocation);
+    const line = cliCommandLine(
+        options.invocation,
+        options.configOverrides ?? [],
+        role === "reviewer" ? REVIEWER_CONFIG_OVERRIDE_KEYS : null
+    );
+    if (!line.ok) return { ok: false, failure: "execution_failed", detail: line.detail };
+    if (options.mode === "dry-run") return notExecuted<T>("dry-run", options.invocation.command, line.args);
     if (!options.spawn) {
         return { ok: false, failure: "execution_failed", detail: "live mode with no spawner; nothing was run" };
     }
     let result: SpawnResult;
     try {
-        result = await options.spawn(options.invocation.command, options.invocation.args, {
+        result = await options.spawn(options.invocation.command, line.args, {
             input: prompt,
             cwd: options.cwd,
             timeoutMs: options.timeoutMs,
@@ -206,11 +303,14 @@ const runCli = async <T>(
 };
 
 /**
- * Codex's `exec --json` prints one event per line and the model's final
- * message as an `agent_message` item. That text is the document asked for.
- * Read against `codex-rs/exec/src/cli.rs` (`--json`: "Print events to stdout
- * as JSONL"); the event shape is not verified against an installed binary,
- * and output that does not look like it is returned untouched.
+ * Codex's `exec --json` prints one event per line; the model's final message
+ * arrives as `{"type":"item.completed","item":{"id":…,"type":"agent_message",
+ * "text":…}}` (`codex-rs/exec/src/exec_events.rs` at tag `rust-v0.146.0`:
+ * `ThreadEvent` tagged by `type`, `ThreadItem` flattening `ThreadItemDetails`
+ * tagged by `type`, `AgentMessageItem { text }`). That text is the document
+ * asked for; the last such message wins. The older `{"msg":{"type":
+ * "agent_message","message":…}}` shape is read too. Output that is not JSONL
+ * is returned untouched for the parser to judge.
  */
 export const unwrapCodexJsonl = (stdout: string): string => {
     const lines = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -230,6 +330,78 @@ export const unwrapCodexJsonl = (stdout: string): string => {
         if (msg && msg.type === "agent_message" && typeof msg.message === "string") last = msg.message;
     }
     return last ?? stdout;
+};
+
+/** What a tool reported spending, in its own units, with the tool named. */
+export type ExecutorUsage = {
+    tool: "codex" | "claude";
+    inputTokens: number | null;
+    cachedInputTokens: number | null;
+    outputTokens: number | null;
+    reasoningOutputTokens: number | null;
+    /** Claude Code's client-side estimate, when the envelope carries one. */
+    totalCostUsd: number | null;
+    /** The tool's own usage object, verbatim. */
+    raw: unknown;
+};
+
+const numberOrNull = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+/**
+ * The usage a tool reported, read from the shape that tool prints: Codex's
+ * `turn.completed` event in its JSONL stream (the last one wins), or Claude
+ * Code's single JSON envelope (`usage`, `total_cost_usd`). Null when the
+ * output is neither, so a record never carries a usage the tool did not
+ * report.
+ */
+export const extractUsage = (stdout: string): ExecutorUsage | null => {
+    const trimmed = stdout.trim();
+    if (trimmed === "") return null;
+    try {
+        const envelope = JSON.parse(trimmed) as unknown;
+        if (typeof envelope === "object" && envelope !== null && !Array.isArray(envelope)) {
+            const record = envelope as Record<string, unknown>;
+            const usage = record.usage;
+            if (typeof usage === "object" && usage !== null) {
+                const fields = usage as Record<string, unknown>;
+                return {
+                    tool: "claude",
+                    inputTokens: numberOrNull(fields.input_tokens),
+                    cachedInputTokens: numberOrNull(fields.cache_read_input_tokens),
+                    outputTokens: numberOrNull(fields.output_tokens),
+                    reasoningOutputTokens: null,
+                    totalCostUsd: numberOrNull(record.total_cost_usd),
+                    raw: usage,
+                };
+            }
+        }
+    } catch {
+        // not a single envelope; try the event stream
+    }
+    let usage: Record<string, unknown> | null = null;
+    for (const line of trimmed.split("\n")) {
+        try {
+            const event = JSON.parse(line) as unknown;
+            if (typeof event === "object" && event !== null) {
+                const record = event as Record<string, unknown>;
+                if (record.type === "turn.completed" && typeof record.usage === "object" && record.usage !== null) {
+                    usage = record.usage as Record<string, unknown>;
+                }
+            }
+        } catch {
+            // not an event line
+        }
+    }
+    if (!usage) return null;
+    return {
+        tool: "codex",
+        inputTokens: numberOrNull(usage.input_tokens),
+        cachedInputTokens: numberOrNull(usage.cached_input_tokens),
+        outputTokens: numberOrNull(usage.output_tokens),
+        reasoningOutputTokens: numberOrNull(usage.reasoning_output_tokens),
+        totalCostUsd: null,
+        raw: usage,
+    };
 };
 
 /**
@@ -274,6 +446,9 @@ export const renderAuthorPrompt = (request: AuthorRequest): string => {
         }
         for (const run of request.feedback.failedTests) lines.push(`- FAILED \`${run.command}\`: ${run.output.trim().slice(0, 300)}`);
         for (const violation of request.feedback.guardViolations) lines.push(`- guard: ${violation}`);
+        for (const failure of request.feedback.checkFailures) {
+            if (!failure.startsWith("test failed:") && !failure.startsWith("guard:")) lines.push(`- check: ${failure}`);
+        }
     }
     lines.push("");
     lines.push("## Answer format");
@@ -300,10 +475,22 @@ export const renderAuthorPrompt = (request: AuthorRequest): string => {
 
 export const cliAuthor = (options: CliExecutorOptions): AuthorExecutor => ({
     id: options.id,
-    produce: (request) => runCli<AuthorOutput>(options, renderAuthorPrompt(request), authorOutputProblems),
+    produce: (request) => runCli<AuthorOutput>(options, "author", renderAuthorPrompt(request), authorOutputProblems),
 });
 
 export const cliReviewer = (options: CliExecutorOptions): ReviewerExecutor => ({
     id: options.id,
-    review: (request) => runCli<ReviewVerdict>(options, renderReviewPrompt(request), reviewVerdictProblems),
+    review: (request) => runCli<ReviewVerdict>(options, "reviewer", renderReviewPrompt(request), reviewVerdictProblems),
+});
+
+/**
+ * The reviewer's invocation, run on a prompt that is not a review: the
+ * environment preflight. Same command line, same override allow list, same
+ * sandbox, so what it shows about reads and writes is what a review would
+ * get.
+ */
+export const cliProbe = (options: CliExecutorOptions) => ({
+    id: options.id,
+    run: <T>(prompt: string, problemsOf: (value: unknown) => readonly string[]) =>
+        runCli<T>(options, "reviewer", prompt, problemsOf),
 });
