@@ -14,20 +14,27 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 /**
  * A parent directory the demo will create its own directory inside, so this
  * test never has to work out which directory the run owned.
  *
- * `os.tmpdir()` reads `TMPDIR`, so pointing the child at a directory this
- * test made is enough: whatever the demo leaves behind is whatever is left in
- * here under its own prefix -- `tsx` puts a cache directory here too, which
- * is not the demo's and is not what this is looking for. The name carries a
- * SPACE deliberately. The cleanup assertion used to
+ * `os.tmpdir()` reads the environment, so pointing the child at a directory
+ * this test made is enough: whatever the demo leaves behind is whatever is
+ * left in here under its own prefix -- `tsx` puts a cache directory here too,
+ * which is not the demo's and is not what this is looking for. The name
+ * carries a SPACE deliberately. The cleanup assertion used to
  * parse the path out of the output with `(\S+)`, which cut at the first
  * space -- so on a path like this one it checked that a truncated path was
  * absent, which it always was, while the real directory survived.
@@ -44,6 +51,14 @@ const withParent = (body) => {
   }
 };
 
+/**
+ * All three names, because `os.tmpdir()` does not read the same one
+ * everywhere: POSIX reads `TMPDIR`, Windows reads `TEMP` then `TMP`. Setting
+ * only `TMPDIR` left a Windows run using the system temporary directory
+ * instead, so the parent this test checks was not the parent the demo used --
+ * an empty directory, trivially passing, while the space in the path was
+ * never on trial. `underParent()` is what stops that being invisible again.
+ */
 const run = (parent, env = {}) =>
   spawnSync(
     process.execPath,
@@ -53,7 +68,10 @@ const run = (parent, env = {}) =>
       "tsx",
       "scripts/experiments/ai-review-003-revision-demo.mjs",
     ],
-    { encoding: "utf8", env: { ...process.env, TMPDIR: parent, ...env } }
+    {
+      encoding: "utf8",
+      env: { ...process.env, TMPDIR: parent, TEMP: parent, TMP: parent, ...env },
+    }
   );
 
 /**
@@ -67,6 +85,25 @@ const namedDirectory = (stdout) => {
   const match = /^작업 디렉터리: (.+)$/m.exec(stdout);
   assert.ok(match, `the run did not name its working directory:\n${stdout}`);
   return match[1].trimEnd();
+};
+
+/**
+ * The directory the run worked in, once it is established that the run worked
+ * inside the parent this test set up.
+ *
+ * Without this the parent check is only as good as the environment variable
+ * that redirected the child, and a redirection that did not take hold reads
+ * as a parent with nothing left in it. Resolved on both sides because a
+ * temporary directory is a symbolic link on some systems.
+ */
+const underParent = (stdout, parent) => {
+  const named = namedDirectory(stdout);
+  assert.equal(
+    realpathSync(dirname(named)),
+    realpathSync(parent),
+    `the run worked in ${named}, which is not inside ${parent}`
+  );
+  return named;
 };
 
 test("a failing run removes the directory it created", async (t) => {
@@ -83,7 +120,7 @@ test("a failing run removes the directory it created", async (t) => {
           [],
           `a run that threw at ${step} left its directory in ${parent}`
         );
-        assert.equal(existsSync(namedDirectory(result.stdout)), false);
+        assert.equal(existsSync(underParent(result.stdout, parent)), false);
       });
     });
   }
@@ -114,6 +151,7 @@ test("the re-scoring CLI's refusal is checked as bytes, not as one field", () =>
 
     const injected = run(parent, { AI_REVIEW_003_DEMO_RESCORE_CLI: stub });
     assert.equal(injected.status, 0, injected.stderr);
+    underParent(injected.stdout, parent);
     assert.match(
       injected.stdout,
       /artifact\.json\s+덮어써졌다/,
@@ -149,7 +187,7 @@ test("the demonstration runs, and keeps its two refusals apart", () => {
 
     // And the run left nothing behind on the path that succeeds either.
     assert.deepEqual(leftBehind(parent), []);
-    assert.equal(existsSync(namedDirectory(out)), false);
+    assert.equal(existsSync(underParent(out, parent)), false);
     assert.match(out, /후보 파일\s+변경 없음/);
   });
 });
