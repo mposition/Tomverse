@@ -2,7 +2,7 @@
 
 **Status: DRAFT — 독립 검토·사람 승인 대기. 구현 승인/착수 아님.**
 작성자: Codex. 작성일: 2026-09-09.
-Document ID: MEM-EVAL-VNEXT-OI-F2-ID-PATH-1. Revision: IP-0.
+Document ID: MEM-EVAL-VNEXT-OI-F2-ID-PATH-1. Revision: IP-1.
 
 ## 1. 목적과 현재 권한
 
@@ -286,6 +286,14 @@ idPathPolicy 추가 후 그대로 두면 새 key까지 hash해 실패하므로 *
   136469c95aeeeacdeb0069e457476a273036e5d73964f336f2fbc6f6d4dcc70f를 새 파일 hash로 주장하지 않는다.
 
 미래 idPathPolicy는 비운영 시료·기대값·IP01–IP20 추적성만 담는다.
+IP15는 idPathPolicy를 IP01–IP20 순서의 정확히 20개 row 배열로 검사한다.
+각 row의 key 집합은 id/acId/verification/expected 네 개뿐이고 모두 비어 있지 않은 primitive string이다.
+T01에 독립 고정한 기대표는 이 패키지 JSON.futureCases의 해당 네 필드 값을 그대로 전사하며,
+IP15는 각 row의 네 값을 exact equality로 대조한다. 정답을 검사 대상 fixture에서 유도하지 않는다.
+따라서 verification은 IP01–IP15에서 unit, IP16–IP20에서 external_repository_audit여야 한다.
+각 row의 acId에서 역으로 모은 case ID 목록도 이 패키지 JSON.acceptanceCriteria의 각 caseIds와
+집합·순서가 같아야 한다. IP→AC와 AC→IP 양쪽에서 누락·중복·알 수 없는 ID·잘못된 대응을 거절한다.
+IP15 자신의 expected도 실행식이 아닌 고정 문자열 데이터로 비교하며 재귀 생성·자기 hash를 만들지 않는다.
 기존 top-level kind/authorityEstablished/provenance/golden/vector/closedTypes/purposeRoles/
 acTrace/caseTrace/upstreamDisposition/upstreamCounts/proxySafety 값을 덮어쓰지 않는다.
 새 운영 wire/profile 객체나 key/signature/승인·활성 상태를 발급하지 않는다.
@@ -444,3 +452,26 @@ JSON.verification에는 위 실행 출력·기준선 대조와 수동 검증 관
 
 quality-documentation-manager의 변경 영향·원문 보존·초안/승인/효력 분리 원칙을 적용했다.
 QMS 인증이나 사람 서명/독립 검토를 대신하는 점수·자동 판정을 만들지 않는다.
+
+## 10. IP-1 — IP-F1 한정 보완 이력
+
+최초 검토 대상 IP-0은 commit 1979839dc200687336db3d72526e9a76c860be71에 그대로 보존한다.
+그 최초 독립 검토 보고서는 PASS_WITH_WARNINGS, P1 0/P2 0/P3 1이며 IP-F1은 비차단이었다.
+보고서 path:
+C:/Users/Vyper/.codex/attachments/cdc77e91-891a-4778-af66-570e4652d916/pasted-text.txt
+보고서 raw SHA-256: 5d7acbe9fb1bbb4f7cf707f20fccadf69ef4df5e2232c37f20a7469bd045ab7c
+길이 21,054 bytes, LF 163. 이 식별은 보고서 bytes 결속이지 작성자 인증을 추가 입증한 것이 아니다.
+
+2026-09-09 사용자 지시에 따라 §5의 idPathPolicy 내용 계약과 JSON.futureCases의 IP15 기대 문장을
+보완했다. 20 row의 정확한 ID 순서·네 필드 값·IP/AC 양방향 대응을 T01의 독립 기대표로 검사하도록
+명시한 변경이며, 기존 ID/path 허용집합·미래 M3·IP20 분류·다른 case의 expected는 바꾸지 않았다.
+현재 disposition은 addressed_pending_confirmation이다. 최초 보고서를 이 수정본의 확인 판정이나
+사람 승인·OI-F2 외부 closure·구현 허가로 승격하지 않는다.
+
+기존 T11 bytes 및 original14/original15 projection 기대 hash는 불변이다. 수정된 두 패키지의
+raw SHA와 후속 commit SHA까지 불변이라는 뜻은 아니다. JSON.document는 수정된 Markdown raw SHA에
+다시 결속하고, 자기/future commit hash는 넣지 않는다. 검토 SHA는 커밋 뒤 별도 인계에 고정한다.
+
+§9와 JSON.verification의 T 시점 관측은 IP-0 작성 이력으로 그대로 보존한다.
+IP-1의 전후 검사와 실제 커밋 identity는 변경분 확인 검토 인계에서 별도로 기록한다.
+남은 절차는 IP-F1 변경분 확인 검토(필요 시 최대 한 번)와 사람의 별도 승인이다.

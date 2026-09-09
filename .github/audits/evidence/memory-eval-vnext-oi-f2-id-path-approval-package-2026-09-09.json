@@ -4,7 +4,7 @@
   "packageLabel": "IP",
   "document": {
     "path": ".github/audits/memory-eval-vnext-oi-f2-id-path-approval-package-draft-2026-09-09.md",
-    "rawSha256": "946d6c290e6b025839be44dabe5cd2d868ff8a8a756b6a1bed8cc762bade3681"
+    "rawSha256": "6bda0de06ac52373009f90bc1b3d08f1802186a1d06769b2ea6295db4063d4e4"
   },
   "authority": {
     "preparationAuthorized": true,
@@ -2692,7 +2692,7 @@
       "acId": "IP-AC4",
       "verification": "unit",
       "title": "Separate inventory and exact fixture projection",
-      "expected": "\uc0c8 IP unit inventory\ub97c F/B\uc640 \ubd84\ub9ac. \uae30\uc874 15 top-level fixture \uac12/\uc21c\uc11c\uc758 JSON.stringify projection SHA \ubc0f original14/B19 hash \uc720\uc9c0; idPathPolicy \ud55c key\ub9cc \ucd94\uac00, IP16\u2013IP20\uc740 external\uc774\uba70 unit pass\ub85c \uc138\uc9c0 \uc54a\uc74c.",
+      "expected": "\uc0c8 IP unit inventory\ub97c F/B\uc640 \ubd84\ub9ac. \uae30\uc874 15 top-level fixture \uac12/\uc21c\uc11c\uc758 JSON.stringify projection SHA \ubc0f original14/B19 hash \uc720\uc9c0; idPathPolicy \ud55c key\ub9cc \ucd94\uac00, IP16\u2013IP20\uc740 external\uc774\uba70 unit pass\ub85c \uc138\uc9c0 \uc54a\uc74c. idPathPolicy\ub294 IP01\u2013IP20 \uc21c\uc11c\uc758 \uc815\ud655\ud788 20\uac1c row \ubc30\uc5f4\uc774\uba70 \uac01 row\ub294 id/acId/verification/expected \ub124 key\ub9cc, \ubaa8\ub450 \ube44\uc5b4 \uc788\uc9c0 \uc54a\uc740 primitive string. T01\uc5d0 \uc774 \ud328\ud0a4\uc9c0 futureCases\uc758 \ub124 \ud544\ub4dc \uac12\uc744 \uc804\uc0ac\ud55c \ub3c5\ub9bd \uace0\uc815 \uae30\ub300\ud45c\uc640 row\ubcc4 exact equality\ub97c \uac80\uc0ac\ud558\uace0 fixture\uc5d0\uc11c \uc815\ub2f5\uc744 \uc720\ub3c4\ud558\uc9c0 \uc54a\uc74c. IP01\u2013IP15\ub294 unit, IP16\u2013IP20\uc740 external_repository_audit. row\uc758 acId\uc5d0\uc11c \uc5ed\uc73c\ub85c \ubaa8\uc740 case ID \ubaa9\ub85d\uc744 acceptanceCriteria\uc758 \uac01 caseIds\uc640 \uc9d1\ud569\u00b7\uc21c\uc11c\uae4c\uc9c0 \uc591\ubc29\ud5a5 \ub300\uc870\ud574 \ub204\ub77d\u00b7\uc911\ubcf5\u00b7\uc54c \uc218 \uc5c6\ub294 ID\u00b7\uc798\ubabb\ub41c \ub300\uc751\uc744 \uac70\uc808. IP15 \uc790\uc2e0\uc758 expected\ub3c4 \uace0\uc815 \ubb38\uc790\uc5f4 \ub370\uc774\ud130\ub85c \ube44\uad50\ud558\uba70 \uc7ac\uadc0 \uc0dd\uc131\u00b7\uc790\uae30 hash \uc5c6\uc74c.",
       "executionStatus": "not_run_future_implementation"
     },
     {
@@ -3109,5 +3109,59 @@
     },
     "fullUnitT01LintTypecheckBuildE2eNotRun": true,
     "installationInventoryOrFullClosureNotAsserted": true
+  },
+  "revision": {
+    "id": "IP-1",
+    "revisionDate": "2026-09-09",
+    "changeScope": "IP-F1 only: idPathPolicy row content and bidirectional IP/AC trace assertions",
+    "basisReviewCommit": "1979839dc200687336db3d72526e9a76c860be71",
+    "sourcePackageFiles": [
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f2-id-path-approval-package-draft-2026-09-09.md",
+        "commit": "1979839dc200687336db3d72526e9a76c860be71",
+        "blobOid": "7193459e77c8f6ea326483f70c330941224055c5",
+        "rawSha256": "946d6c290e6b025839be44dabe5cd2d868ff8a8a756b6a1bed8cc762bade3681",
+        "bytes": 32921,
+        "lfCount": 446
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-oi-f2-id-path-approval-package-2026-09-09.json",
+        "commit": "1979839dc200687336db3d72526e9a76c860be71",
+        "blobOid": "e29976ab56d058fe318df056c2683a4ddba05fe5",
+        "rawSha256": "d82fe32f94d57c95d576a689002f9f1f00407235598699bfa2c49abdf0b86414",
+        "bytes": 133238,
+        "lfCount": 3113
+      }
+    ],
+    "initialIndependentReview": {
+      "path": "C:/Users/Vyper/.codex/attachments/cdc77e91-891a-4778-af66-570e4652d916/pasted-text.txt",
+      "rawSha256": "5d7acbe9fb1bbb4f7cf707f20fccadf69ef4df5e2232c37f20a7469bd045ab7c",
+      "bytes": 21054,
+      "lf": 163,
+      "verdict": "PASS_WITH_WARNINGS",
+      "p1": 0,
+      "p2": 0,
+      "p3": 1,
+      "blockingFindings": 0,
+      "findingIds": [
+        "IP-F1"
+      ],
+      "reportAuthorAuthenticationIndependentlyVerified": false
+    },
+    "findingDisposition": {
+      "id": "IP-F1",
+      "status": "addressed_pending_confirmation",
+      "confirmationReviewVerdict": null,
+      "humanApprovalGranted": false,
+      "oiF2ExternalClosureDeclared": false,
+      "implementationAuthorized": false
+    },
+    "changedJsonPointers": [
+      "/document/rawSha256",
+      "/futureCases/14/expected",
+      "/revision"
+    ],
+    "historicalVerificationRetainedUnchanged": true,
+    "revisionVerificationLocation": "Separate fixed-SHA confirmation-review handoff; not the historical verification object"
   }
 }
