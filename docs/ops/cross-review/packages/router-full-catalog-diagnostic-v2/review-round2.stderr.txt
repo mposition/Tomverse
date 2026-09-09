@@ -1,0 +1,214 @@
+2026-09-09T12:04:18.814948Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:05:28.862205Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:05:39.006292Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:06:07.537346Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.2 seconds
+Output:
+TAP version 13
+# Subtest: tests\\autoFallbackGate.test.mjs
+not ok 1 - tests\\autoFallbackGate.test.mjs
+  ---
+  duration_ms: 7.8313
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\autoFallbackGate.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\automaticFallbackBoundary.test.mjs
+not ok 2 - tests\\automaticFallbackBoundary.test.mjs
+  ---
+  duration_ms: 6.0519
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\automaticFallbackBoundary.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\crossReview.test.mjs
+not ok 3 - tests\\crossReview.test.mjs
+  ---
+  duration_ms: 5.4535
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\crossReview.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerCandidates.test.mjs
+not ok 4 - tests\\routerCandidates.test.mjs
+  ---
+  duration_ms: 4.7436
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerCandidates.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerDecision.test.mjs
+not ok 5 - tests\\routerDecision.test.mjs
+  ---
+  duration_ms: 4.0702
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerDecision.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerFullCatalogDiagnostic.test.mjs
+not ok 6 - tests\\routerFullCatalogDiagnostic.test.mjs
+  ---
+  duration_ms: 3.4313
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerFullCatalogDiagnostic.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerScorePolicy.test.mjs
+not ok 7 - tests\\routerScorePolicy.test.mjs
+  ---
+  duration_ms: 2.4095
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerScorePolicy.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+# Subtest: tests\\routerSelection.test.mjs
+not ok 8 - tests\\routerSelection.test.mjs
+  ---
+  duration_ms: 1.7452
+  type: 'test'
+  location: 'H:\\Project\\tomverse-router-diag-20260909\\tests\\routerSelection.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  error: 'spawn EPERM'
+  code: 'EPERM'
+  stack: |-
+    ChildProcess.spawn (node:internal/child_process:420:11)
+    spawn (node:child_process:787:9)
+    TestContext.<anonymous> (node:internal/test_runner/runner:377:19)
+    FileTest.runInAsyncScope (node:async_hooks:214:14)
+    FileTest.run (node:internal/test_runner/test:1047:25)
+    FileTest.start (node:internal/test_runner/test:944:17)
+    runTestFile (node:internal/test_runner/runner:456:32)
+    node:internal/test_runner/runner:727:25
+    node:internal/per_context/primordials:561:37
+    new Promise (<anonymous>)
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 0
+# fail 8
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 18.0699
+
+2026-09-09T12:06:07.560675Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:06:20.771910Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.2 seconds
+Output:
+C:\nvm4w\nodejs\node.exe: bad option: --test-isolation=none
+
+2026-09-09T12:06:20.794349Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:08:22.163655Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:08:30.705271Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:08:41.601201Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.3 seconds
+Output:
+file:///H:/Project/tomverse-router-diag-20260909/[eval1]:1
+import {writeRefusalEvidence,writeRefusalObservedIn,judgePreflight} from './lib/crossReviewCore.ts'; const probe='docs/ops/pkg/preflight-write-probe-unique.txt'; const stdout=JSON.stringify({type:'result',result:'no',permission_denials:[{tool_name:'Write',tool_input:{file_path:'shadow/'+probe}}]}); const evidence=writeRefusalEvidence(stdout,'',probe); const judged=judgePreflight({report:{readOutput:'abc',writeAttempted:true,writeResult:'permission denied'},expectedReadOutput:'abc',probeExists:false,writeRefusalObserved:writeRefusalObservedIn(stdout,'',probe)}); console.log(JSON.stringify({evidence,judged},null,2));
+                                                    ^^^^^^^^^^^^^^
+SyntaxError: The requested module './lib/crossReviewCore.ts' does not provide an export named 'judgePreflight'
+    at ModuleJob._instantiate (node:internal/modules/esm/module_job:226:21)
+    at async ModuleJob.run (node:internal/modules/esm/module_job:335:5)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:272:26)
+    at async ModuleLoader.executeModuleJob (node:internal/modules/esm/loader:268:20)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.22.2
+
+2026-09-09T12:08:41.624264Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:08:47.307577Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:08:56.101792Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:09:33.912135Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
+2026-09-09T12:09:45.157030Z ERROR codex_models_manager::manager: failed to renew cache TTL: missing field `base_instructions` at line 130 column 5
