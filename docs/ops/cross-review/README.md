@@ -86,10 +86,15 @@ slashes, no trailing slash, `.` and `..` segments resolved -- before it is
 checked, digested or handed to git, so neither a Windows spelling nor a
 `..` written under an allowed directory can pass one check and mean
 another path to git: `<out>/../../README.md` is checked as the
-`README.md` it resolves to, and refused. An excluded generated file still
-counts as changed; what it is at packaging -- its content digest, or
-`absent` -- is recorded in the package, and a review refuses to run if it
-has changed, appeared or disappeared since.
+`README.md` it resolves to, and refused. A name git would read as a
+pattern or as pathspec magic (`*`, `?`, `[`, `]`, or a leading `:`, `!`,
+`^`) is refused wherever it appears -- `lib/[c]rossReviewCore.ts` is a
+pattern that matches `lib/crossReviewCore.ts`, not a file -- and every
+scope entry and exclusion is handed to git with `:(literal)` magic, so a
+name is never read as a pattern. An excluded generated file still counts
+as changed; what it is at packaging -- its content digest, or `absent` --
+is recorded in the package, and a review refuses to run if it has
+changed, appeared or disappeared since.
 
 ### Before a review is paid for
 
@@ -102,11 +107,14 @@ output shows a write *at the probe path* being refused (a command naming
 the path whose output says it was denied, a failed file change there, a
 permission denial naming it -- `writeRefusalEvidence`, and the evidence is
 written into the record), and the reviewer does not report the write as
-done. A refusal that names no path -- Codex's own "patch rejected" line --
-or a denial of some other file shows that something was refused, not that
-the probe was, and does not count; nor does what the reviewer *says*,
-which is recorded and is not evidence by itself. The record
-(`preflight-<stamp>.json`, version `cross-review-preflight-v2`: command,
+done. Naming the path means the exact relative path, or the same path
+under the working directory, as a whole path: a denial at
+`shadow/<probe>` or at `<probe>.bak` is a denial of some other file. A
+refusal that names no path -- Codex's own "patch rejected" line -- or a
+denial of some other file shows that something was refused, not that the
+probe was, and does not count; nor does what the reviewer *says*, which
+is recorded and is not evidence by itself. The record
+(`preflight-<stamp>.json`, version `cross-review-preflight-v3`: command,
 working directory, sandbox signature, tool version, usage -- read from
 Codex's `turn.completed` event or Claude Code's JSON envelope -- evidence
 and result) is an environment result, kept apart from any finding about

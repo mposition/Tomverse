@@ -773,6 +773,20 @@ test("a package may exclude exactly the task's generated paths and exactly its o
   refused(["../elsewhere"], /climbs above the repository/);
   refused([`${outDir}/../../../../../../etc`], /climbs above the repository/);
   refused([".."], /climbs above the repository/);
+  // The reviewer's reproduction from round 2: a name git would read as a
+  // pattern. `lib/[c]rossReviewCore.ts` is not a file, it is a pattern that
+  // matches lib/crossReviewCore.ts -- as an exclusion it would hide that
+  // source from the diff, and as a package directory it would let the
+  // exact match pass. Both are refused, and the script hands git every
+  // path literally besides.
+  const patterned = problemsOf(["lib/[c]rossReviewCore.ts"], { generatedPaths: [], outDir: "lib/[c]rossReviewCore.ts", writableScope: ["lib/crossReviewCore.ts"] });
+  assert.equal(patterned.length, 2);
+  assert.match(patterned[0], /names the package directory with a character git reads as a pathspec pattern or magic/);
+  assert.match(patterned[1], /names an excluded path with a character git reads as a pathspec pattern or magic/);
+  for (const pattern of ["docs/ops/report/out*.md", "docs/ops/report/out?.md", "docs/ops/report/[o]ut.md", ":(exclude)docs/ops/report/out.md", ":/docs/ops/report/out.md", "!docs/ops/report/out.md", "^docs/ops/report/out.md"]) {
+    refused([pattern], /pathspec pattern or magic/);
+  }
+  ok(["docs/ops/report/out.md"], { outDir: "docs/ops/cross-review/packages/demo (1)" });
   // A task with no scope may write anywhere, so its scope is the root.
   refused(["."], /writable scope entry \./, { writableScope: [] });
   ok([outDir], { writableScope: [] });
@@ -887,8 +901,27 @@ test("the preflight asks for a read and a write, and passes only on the read the
     });
   assert.match(writeRefusalEvidence(deniedAt(probe), "", probe), /^command_execution .*Access to the path .* is denied/);
   assert.equal(writeRefusalObservedIn(deniedAt(probe), "", probe), true);
-  assert.equal(writeRefusalObservedIn(deniedAt(`H:\\Project\\repo\\${probe.replace(/\//g, "\\")}`), "", probe), true, "an absolute Windows spelling names the same probe");
   assert.equal(writeRefusalObservedIn(item("command_execution", { command: `printf probe > '${probe}'`, aggregated_output: `sh: ${probe}: Read-only file system`, exit_code: 1, status: "failed" }), "", probe), true);
+  // The reviewer's reproduction from round 2: the probe is named as a
+  // whole path, not as the tail of another one. A denial at shadow/<probe>
+  // is a denial of a different file, and so is one at <probe>.bak. An
+  // absolute spelling is the probe only under the working directory
+  // given, in either slash spelling and case.
+  const absolute = `H:\\Project\\repo\\${probe.replace(/\//g, "\\")}`;
+  const shadowDenial = JSON.stringify({ type: "result", result: "no", permission_denials: [{ tool_input: { file_path: `shadow/${probe}` } }] });
+  assert.equal(writeRefusalEvidence(shadowDenial, "", probe), null);
+  assert.equal(
+    judgePreflight({ report: { readOutput: "abc", writeAttempted: true, writeResult: "denied" }, expectedReadOutput: "abc", probeExists: false, writeRefusalObserved: writeRefusalObservedIn(shadowDenial, "", probe) }).passed,
+    false
+  );
+  assert.equal(writeRefusalObservedIn(deniedAt(`shadow/${probe}`), "", probe), false);
+  assert.equal(writeRefusalObservedIn(deniedAt(`${probe}.bak`), "", probe), false);
+  assert.equal(writeRefusalObservedIn(deniedAt(absolute), "", probe), false, "without the working directory an absolute path could be anywhere");
+  assert.equal(writeRefusalObservedIn(deniedAt(absolute), "", probe, "H:\\Project\\repo"), true);
+  assert.equal(writeRefusalObservedIn(deniedAt(absolute), "", probe, "h:/project/repo/"), true);
+  assert.equal(writeRefusalObservedIn(deniedAt(absolute), "", probe, "H:\\Project\\other"), false);
+  assert.equal(writeRefusalObservedIn(deniedAt(`H:\\Project\\repo\\shadow\\${probe.replace(/\//g, "\\")}`), "", probe, "H:\\Project\\repo"), false);
+  assert.equal(writeRefusalObservedIn(JSON.stringify({ type: "result", result: "no", permission_denials: [{ tool_input: { file_path: absolute } }] }), "", probe, "H:/Project/repo"), true, "a JSON-escaped Windows spelling under the directory");
   // The reviewer's reproduction from round 1: a denial of some other file
   // is not evidence about the probe, and the preflight fails on it.
   const other = item("command_execution", { command: "Set-Content other.txt", aggregated_output: "Access is denied", status: "failed" });
@@ -950,8 +983,8 @@ test("a review starts only on the newest preflight for its sandbox, and only whe
   const earlierRule = record("preflight-e.json", "2026-09-09T14:00:00.000Z", true, { version: "cross-review-preflight-v1" });
   const stale = preflightGate([older, newest, earlierRule], sig);
   assert.equal(stale.chosen, null);
-  assert.match(stale.problems[0], /preflight-e\.json, was judged under cross-review-preflight-v1, not the current cross-review-preflight-v2/);
-  assert.equal(PREFLIGHT_RECORD_VERSION, "cross-review-preflight-v2");
+  assert.match(stale.problems[0], /preflight-e\.json, was judged under cross-review-preflight-v1, not the current cross-review-preflight-v3/);
+  assert.equal(PREFLIGHT_RECORD_VERSION, "cross-review-preflight-v3");
 });
 
 // The script's own package and review paths, run in a repository made for
@@ -980,7 +1013,12 @@ test("the script's package and review paths hold the rules end to end: exact exc
     const git = (...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args], { cwd: repo, encoding: "utf8" }).trim();
     git("init", "-q");
     git("config", "core.autocrlf", "false");
+    // A scope entry spelt with brackets: to git that is a pattern matching
+    // src/b.txt, not the file src/[b].txt. Handed over literally it names
+    // the file and the change to it is the diff; read as a pattern the
+    // diff would have been empty and the change hidden.
     writeFileSync(join(repo, "src", "a.txt"), "a\n");
+    writeFileSync(join(repo, "src", "[b].txt"), "b\n");
     writeFileSync(join(repo, "reports", "generated.md"), "g\n");
     git("add", "-A");
     git("commit", "-q", "-m", "base");
@@ -993,11 +1031,11 @@ test("the script's package and review paths hold the rules end to end: exact exc
         requirement: "r",
         completionCriteria: ["c"],
         baseCommit: base,
-        writableScope: ["src/", "reports/", "artifacts/"],
+        writableScope: ["src/[b].txt", "reports/", "artifacts/"],
         generatedPaths: ["reports/generated.md", "reports/absent.md"],
       })
     );
-    writeFileSync(join(repo, "src", "a.txt"), "b\n");
+    writeFileSync(join(repo, "src", "[b].txt"), "b2\n");
     writeFileSync(join(repo, "reports", "generated.md"), "g2\n");
     const common = [`--task=${taskFile}`, "--out=artifacts/pkg", "--round=0"];
     const excludes = ["--diff-exclude=reports/generated.md", "--diff-exclude=reports/absent.md", "--diff-exclude=artifacts/pkg"];
@@ -1015,6 +1053,9 @@ test("the script's package and review paths hold the rules end to end: exact exc
     const underOut = pkg([...excludes, "--diff-exclude=artifacts/pkg/review-prompt.md"]);
     assert.equal(underOut.status, 1, underOut.stderr);
     assert.match(underOut.stderr, /is under the package directory artifacts\/pkg/);
+    const patterned = pkg([...excludes, "--diff-exclude=reports/[g]enerated.md"]);
+    assert.equal(patterned.status, 1, patterned.stderr);
+    assert.match(patterned.stderr, /pathspec pattern or magic/);
     assert.equal(existsSync(packageRecord), false, "nothing was packaged");
 
     // The package records what each excluded generated path is, absence included.
@@ -1024,8 +1065,9 @@ test("the script's package and review paths hold the rules end to end: exact exc
     assert.match(record.excludedDigests["reports/generated.md"], /^sha256:[0-9a-f]{64}$/);
     assert.equal(record.excludedDigests["reports/absent.md"], "absent");
     assert.deepEqual(record.diffExcluded, ["reports/generated.md", "reports/absent.md", "artifacts/pkg"]);
-    assert.match(record.diff, /src\/a\.txt/);
+    assert.match(record.diff, /^diff --git a\/src\/\[b\]\.txt b\/src\/\[b\]\.txt$/m, "the bracketed name is a name to git, not a pattern");
     assert.doesNotMatch(record.diff, /generated\.md/);
+    assert.deepEqual(record.filesChanged, ["reports/generated.md", "src/[b].txt"]);
     assert.equal(record.testResults[0].passed, true);
     assert.equal(record.guardRuns[0].passed, true);
 

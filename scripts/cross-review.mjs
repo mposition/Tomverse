@@ -53,8 +53,11 @@
 //   - a --diff-exclude path that, resolved to one spelling (`..` and `.`
 //     included), is not exactly one of the task's `generatedPaths` or exactly
 //     the package's own --out directory. A parent of the package directory, a
-//     file under it, a path above the repository and any scoped source are
-//     refused by name (lib/crossReviewCore.ts, packageExclusionProblems). An
+//     file under it, a path above the repository, any scoped source, and a
+//     name git would read as a pattern (`*` `?` `[` `]`, a leading `:` `!`
+//     `^`) are refused by name (lib/crossReviewCore.ts,
+//     packageExclusionProblems); every scope entry and exclusion is handed to
+//     git with `:(literal)` magic besides, so a name is never a pattern. An
 //     excluded generated file still counts as changed; its content digest --
 //     or its absence -- is recorded, and a review refuses to run if it
 //     changed, appeared or disappeared since packaging.
@@ -255,8 +258,13 @@ const treeChanges = (base) => {
     .map((line) => line.slice(2).trim());
   return { tracked: [...new Set(tracked)].sort(), untracked: [...new Set(untracked)].sort() };
 };
-const scopePathspec = () => (task.writableScope.length > 0 ? task.writableScope : ["."]);
-const scopedDiff = (base, excluded) => git("diff", base, "--", ...scopePathspec(), ...excluded.map((path) => `:(exclude)${path}`));
+// Every pathspec is handed to git literally: a scope entry or an exclusion
+// is a name, never a pattern, so a bracketed spelling such as
+// `[c]rossReviewCore` names a file that does not exist rather than
+// matching the one it patterns.
+const literal = (path) => `:(literal)${path}`;
+const scopePathspec = () => (task.writableScope.length > 0 ? task.writableScope : ["."]).map(literal);
+const scopedDiff = (base, excluded) => git("diff", base, "--", ...scopePathspec(), ...excluded.map((path) => `:(exclude,literal)${path}`));
 /**
  * What an excluded path is at this moment: its content digest, a digest
  * over a directory's files, or "absent". Recorded at packaging and checked
@@ -641,7 +649,7 @@ if (mode === "preflight") {
   // The tool's own output, naming the probe path, is the evidence for the
   // refusal -- not the reviewer's account of it, and not a refusal of
   // something else.
-  const evidence = writeRefusalEvidence(lastSpawn?.stdout ?? "", lastSpawn?.stderr ?? "", probePath);
+  const evidence = writeRefusalEvidence(lastSpawn?.stdout ?? "", lastSpawn?.stderr ?? "", probePath, options.cwd);
   const writeRefusalObserved = evidence !== null;
   const judged = result.ok
     ? judgePreflight({ report: result.value, expectedReadOutput: head, probeExists, writeRefusalObserved })

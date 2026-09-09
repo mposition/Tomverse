@@ -561,6 +561,16 @@ export const normalizeRepoPath = (path: string): string => {
 export const escapesRepository = (normalized: string): boolean => normalized === ".." || normalized.startsWith("../");
 
 /**
+ * Characters git reads as a pattern (`*`, `?`, `[`, `]`) or, leading, as
+ * pathspec magic (`:`, `!`, `^`). A repository path here is a literal
+ * name, and a name git would read otherwise is refused rather than
+ * escaped.
+ */
+const PATHSPEC_PATTERN = /[*?[\]]|^[:!^]/;
+const pathspecPatternProblem = (raw: string, what: string): string =>
+    `${raw} names ${what} with a character git reads as a pathspec pattern or magic (* ? [ ] or a leading : ! ^); a repository path here is a literal name`;
+
+/**
  * Why a set of `--diff-exclude` paths may not be applied to a package. The
  * allow list is exact: a path is accepted only when, in its one spelling
  * (`normalizeRepoPath`), it *is* one of the task's generated paths or *is*
@@ -573,7 +583,12 @@ export const escapesRepository = (normalized: string): boolean => normalized ===
  * declared nowhere. So `--out=. --diff-exclude=.` is refused because `.`
  * contains the scope, and `<out>/../../README.md` is refused because,
  * resolved, it is a file beside the package that nothing declared. A task
- * with an empty scope may write anywhere, so its scope is `.`.
+ * with an empty scope may write anywhere, so its scope is `.`. A name git
+ * would read as a pattern or as pathspec magic is refused wherever it
+ * appears: a scoped source spelt with brackets, `[c]rossReviewCore` for
+ * `crossReviewCore`, is not a file but a pattern that matches the real
+ * one, and as an exclusion it would hide that source, while as a package
+ * directory it would let the exact match pass.
  */
 export const packageExclusionProblems = (input: {
     excluded: readonly string[];
@@ -585,8 +600,13 @@ export const packageExclusionProblems = (input: {
     const generated = input.generatedPaths.map(normalizeRepoPath);
     const scope = (input.writableScope.length > 0 ? input.writableScope : ["."]).map(normalizeRepoPath);
     const problems: string[] = [];
+    if (PATHSPEC_PATTERN.test(out)) problems.push(pathspecPatternProblem(input.outDir, "the package directory"));
     for (const raw of input.excluded) {
         const path = normalizeRepoPath(raw);
+        if (PATHSPEC_PATTERN.test(path)) {
+            problems.push(pathspecPatternProblem(raw, "an excluded path"));
+            continue;
+        }
         if (escapesRepository(path)) {
             problems.push(`${raw} climbs above the repository; nothing outside it can be excluded`);
             continue;
@@ -682,7 +702,7 @@ export const preflightReportProblems = (value: unknown): readonly string[] => {
 };
 
 /** The rule a preflight record was judged under. A review accepts only records of the current one. */
-export const PREFLIGHT_RECORD_VERSION = "cross-review-preflight-v2";
+export const PREFLIGHT_RECORD_VERSION = "cross-review-preflight-v3";
 
 /**
  * Two steps and one JSON answer: not a review, and not to be read as one.
@@ -754,6 +774,39 @@ export const judgePreflight = (input: {
 const REFUSAL_TEXT = /rejected|refused|blocked|denied|not permitted|read-only file system|EACCES|EPERM|EROFS/i;
 
 /**
+ * The spellings under which a text can name the probe: the exact relative
+ * path, and the same path under the working directory when one is given.
+ * Lower-cased, forward slashes; nothing else -- not a path that merely
+ * ends in the probe's (`shadow/<probe>`), which is a different file.
+ */
+const probeSpellings = (probePath: string, cwd: string | undefined): readonly string[] => {
+    const relative = normalizeRepoPath(probePath);
+    if (relative === "." || escapesRepository(relative)) return [];
+    const spellings = [relative];
+    if (cwd !== undefined && cwd.trim() !== "") {
+        const root = cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+        spellings.push(`${root}/${relative}`);
+    }
+    return spellings.map((spelling) => spelling.toLowerCase());
+};
+
+/** What may continue a path on either side of a match; a match bounded by one of these is part of a longer path. */
+const PATH_CHARACTER = /[a-z0-9._~/-]/;
+
+/** Whether `text` contains `token` as a whole path, not as part of a longer one. Separators and case are normalised. */
+const namesToken = (text: string, token: string): boolean => {
+    const haystack = text.replace(/\\+/g, "/").replace(/\/{2,}/g, "/").toLowerCase();
+    for (let from = 0; ; ) {
+        const at = haystack.indexOf(token, from);
+        if (at === -1) return false;
+        const before = at === 0 ? "" : haystack[at - 1];
+        const after = haystack[at + token.length] ?? "";
+        if (!PATH_CHARACTER.test(before) && !PATH_CHARACTER.test(after)) return true;
+        from = at + 1;
+    }
+};
+
+/**
  * The tool's own evidence that a write *at the probe path* was refused, or
  * null. Codex prints one event per line: a `command_execution` item whose
  * command names the probe and whose output says the write was refused; an
@@ -763,13 +816,15 @@ const REFUSAL_TEXT = /rejected|refused|blocked|denied|not permitted|read-only fi
  * when it names the probe. A refusal that names no path -- Codex's own
  * "patch rejected" line -- or a denial of some other file or tool shows
  * that something was refused, not that the probe was, and is not evidence
- * here; nor is anything the reviewer says in an agent message.
+ * here; nor is anything the reviewer says in an agent message. Naming the
+ * probe means the exact relative path, or the same path under the working
+ * directory when one is given, as a whole path: a denial at
+ * `shadow/<probe>` or at `<probe>.bak` is a denial of some other file.
  */
-export const writeRefusalEvidence = (stdout: string, stderr: string, probePath: string): string | null => {
-    const probe = normalizeRepoPath(probePath).toLowerCase();
-    if (probe === "." || probe === "") return null;
-    const namesProbe = (text: unknown): boolean =>
-        typeof text === "string" && text.replace(/\\/g, "/").toLowerCase().includes(probe);
+export const writeRefusalEvidence = (stdout: string, stderr: string, probePath: string, cwd?: string): string | null => {
+    const spellings = probeSpellings(probePath, cwd);
+    if (spellings.length === 0) return null;
+    const namesProbe = (text: unknown): boolean => typeof text === "string" && spellings.some((spelling) => namesToken(text, spelling));
     const clip = (text: string): string => text.trim().replace(/\s+/g, " ").slice(0, 200);
     for (const line of stderr.split("\n")) {
         if (namesProbe(line) && REFUSAL_TEXT.test(line)) return `stderr: ${clip(line)}`;
@@ -804,8 +859,8 @@ export const writeRefusalEvidence = (stdout: string, stderr: string, probePath: 
 };
 
 /** Whether `writeRefusalEvidence` found any. */
-export const writeRefusalObservedIn = (stdout: string, stderr: string, probePath: string): boolean =>
-    writeRefusalEvidence(stdout, stderr, probePath) !== null;
+export const writeRefusalObservedIn = (stdout: string, stderr: string, probePath: string, cwd?: string): boolean =>
+    writeRefusalEvidence(stdout, stderr, probePath, cwd) !== null;
 
 /** What a review reads from each recorded preflight to decide whether it may start. */
 export type PreflightSummary = {
