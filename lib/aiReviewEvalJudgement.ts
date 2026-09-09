@@ -90,15 +90,21 @@ import {
  * refusals in `verifyJudgementRecord()`.
  */
 /**
- * v2 adds the claim's scoring `role` and its `sufficiency`.
+ * v2 added the claim's scoring `role` and its `sufficiency`. v3 adds the
+ * extraction rule: one claim per triple, per submitted item.
  *
- * The version moves because the RULES moved: the same record can now score
- * differently, so a v1 record read under v2 would be a number about judgements
- * nobody made under these rules. `verifyJudgementRecord()` refuses both
- * directions rather than converting -- old scores are not carried across, they
- * are re-judged or left alone.
+ * The version covers **the rules a record was made under**, not only the
+ * arithmetic. v3 changes no computation at all -- it changes how a person is
+ * required to extract -- and that is exactly why it moves: a record written
+ * submission-unit style scores one true positive where the same reviewer,
+ * extracted under v3, scores two. Reading the old record under the new rules
+ * would report a number as though a rule had been followed that nobody was
+ * following.
+ *
+ * `verifyJudgementRecord()` refuses both directions rather than converting. Old
+ * scores are not carried across: they are re-judged, or they are left alone.
  */
-export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v2";
+export const AI_REVIEW_SCORING_CONTRACT_VERSION = "ai-review-scoring-judged-v3";
 
 /** What the reviewer asserted about a requirement in one answer. */
 export const JUDGED_ASSERTIONS = ["missing", "present", "unclear"] as const;
@@ -544,6 +550,49 @@ export function verifyJudgementRecord(
                 `which is not a time`
         );
     }
+    // One claim per triple, per submitted item -- the extraction rule, checked
+    // where it is structural and nowhere else.
+    //
+    // Two claims that say the SAME thing about the same triple, out of the same
+    // submitted item, are one assertion written twice. Opposite assertions are
+    // not: they differ in `assertion` (or in speech act, role or sufficiency),
+    // and folding those was the failure that made the triple a matching key
+    // rather than a licence to merge.
+    //
+    // Refused rather than folded. Folding would quietly change a score -- a
+    // repeated false or insufficient finding costs one false positive per
+    // claim -- and a rule enforced by silently rewriting the record is a rule
+    // nobody can see was broken.
+    //
+    // This says nothing about whether two DIFFERENT submitted items repeat each
+    // other. That is the reviewer padding its own output, and `duplicates`
+    // counts it.
+    const seenJudgements = new Map<string, number>();
+    for (const [index, claim] of record.claims.entries()) {
+        const judgement = JSON.stringify([
+            claim.submittedAs,
+            claim.sourceIndex,
+            claim.targetLabel,
+            claim.requirementId,
+            claim.assertion,
+            claim.speechAct,
+            claimRole(claim),
+            claimSufficiency(claim),
+            claim.outsideGoldVerdict ?? null,
+        ]);
+        const first = seenJudgements.get(judgement);
+        if (first === undefined) {
+            seenJudgements.set(judgement, index);
+        } else {
+            problems.push(
+                `claim[${index}] repeats claim[${first}] exactly: the same judgement ` +
+                    `about ${claim.targetLabel}/${claim.requirementId} out of the same ` +
+                    `submitted item is one assertion, not two. An opposite assertion is ` +
+                    `a different claim and stays`
+            );
+        }
+    }
+
     for (const [index, claim] of record.claims.entries()) {
         const where = `claim[${index}] (${claim.targetLabel}/${claim.requirementId})`;
         if (claim.status !== "confirmed") {

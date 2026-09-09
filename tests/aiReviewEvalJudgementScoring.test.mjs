@@ -161,6 +161,10 @@ test("a quotation filed AS a finding is a wrong finding", () => {
 });
 
 test("repeating a true finding does not earn a second hit", () => {
+    // Two SUBMITTED items saying the same thing. That is the reviewer padding
+    // its own output, which is what `duplicates` is for -- and since v3 it is
+    // the only thing it counts, because two identical claims out of one item
+    // are an extraction error rather than a repetition by the reviewer.
     const outcome = score(judgedCase(), [claim(), claim({ sourceIndex: 1 })]);
     assert.deepEqual(counts(outcome), [1, 0, 0]);
     assert.equal(outcome.byKind.missingPoints.duplicates, 1);
@@ -845,4 +849,110 @@ test("a mistyped role or sufficiency is reported, not defaulted", () => {
     );
     assert.ok(problems.some((problem) => problem.includes("claims[0].role")));
     assert.ok(problems.some((problem) => problem.includes("claims[0].sufficiency")));
+});
+
+// ---------------------------------------------------------------------------
+// v3: one claim per triple, per submitted item
+//
+// Approved 2026-09-09 (mposition). The comparison is in
+// `.github/audits/ai-review-decomposition-atomicity-2026-09-09.md`. This is an
+// EXTRACTION rule, so it changes no arithmetic -- and the contract version
+// still moves, because a record written the old way scores as though the rule
+// had been followed.
+// ---------------------------------------------------------------------------
+
+test("the same judgement twice out of one submitted item is refused", () => {
+    // Not folded. Folding would quietly change a score -- a repeated false or
+    // insufficient finding costs one false positive per claim -- and a rule
+    // enforced by silently rewriting the record is one nobody can see broken.
+    const problems = verifyJudgementRecord(judgedCase(), record([claim(), claim()]));
+    assert.ok(
+        problems.some((problem) => problem.includes("repeats claim[0] exactly")),
+        JSON.stringify(problems)
+    );
+});
+
+test("an opposite assertion out of the same item is a different claim", () => {
+    // The triple is the key a claim is matched by, never a licence to merge
+    // what a submission actually asserted. This is the distinction the whole
+    // decomposition policy turns on, so it is checked directly.
+    assert.deepEqual(
+        verifyJudgementRecord(
+            judgedCase(),
+            record([claim(), claim({ assertion: "present" })])
+        ),
+        []
+    );
+});
+
+test("differing on any judged axis keeps two claims", () => {
+    // Everything a person decided about the sentence is part of "the same
+    // judgement": a mention is not a finding, supporting material is not a
+    // finding, and an insufficient finding is not a sufficient one.
+    for (const overrides of [
+        { speechAct: "mention" },
+        { role: "support" },
+        { sufficiency: "insufficient" },
+        { targetLabel: "a", outsideGoldVerdict: "false_finding" },
+    ]) {
+        assert.deepEqual(
+            verifyJudgementRecord(judgedCase(), record([claim(), claim(overrides)])),
+            [],
+            JSON.stringify(overrides)
+        );
+    }
+});
+
+test("the same judgement out of two submitted items is the reviewer's repetition", () => {
+    // Not an extraction error: the reviewer really did file it twice. It stays
+    // scoreable and lands in `duplicates`.
+    assert.deepEqual(
+        verifyJudgementRecord(judgedCase(), record([claim(), claim({ sourceIndex: 1 })])),
+        []
+    );
+});
+
+test("a v2 record is refused, not re-read under the v3 extraction rule", () => {
+    // v3 computes nothing differently. It moves because a record extracted
+    // submission-unit style would be scored as though one claim per triple had
+    // been extracted, and that number would be about a rule nobody followed.
+    const problems = verifyJudgementRecord(
+        judgedCase(),
+        record([claim()], { contractVersion: "ai-review-scoring-judged-v2" })
+    );
+    assert.ok(problems.some((problem) => problem.includes("cannot be re-read under these")));
+});
+
+test("RESIDUAL: how many ids the judge assigns outside the gold still moves the score", () => {
+    // Approved as unsolved, not as solved (2026-09-09). C1 keys a claim by the
+    // triple, and that is mechanical only AFTER the id exists: how many ids one
+    // sentence of content outside the gold becomes is still a reading, and the
+    // reading is worth one false positive.
+    //
+    // Pinned so the limit is a recorded fact rather than a remembered caveat.
+    // If a later rule narrows it, this test fails and that is the good outcome.
+    const oneId = score(judgedCase(), [
+        claim({
+            targetLabel: "a",
+            requirementId: "transport_mode",
+            evidenceQuote: "c는 이송 수단과 비용을 말하지 않는다",
+            outsideGoldVerdict: "false_finding",
+        }),
+    ]);
+    const twoIds = score(judgedCase(), [
+        claim({
+            targetLabel: "a",
+            requirementId: "transport_mode",
+            evidenceQuote: "c는 이송 수단과",
+            outsideGoldVerdict: "false_finding",
+        }),
+        claim({
+            targetLabel: "a",
+            requirementId: "evidence_preservation",
+            evidenceQuote: "비용을 말하지 않는다",
+            outsideGoldVerdict: "false_finding",
+        }),
+    ]);
+    assert.deepEqual(counts(oneId), [0, 1, 1]);
+    assert.deepEqual(counts(twoIds), [0, 1, 2]);
 });
