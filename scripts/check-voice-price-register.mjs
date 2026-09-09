@@ -17,9 +17,11 @@
 
 import { readFileSync } from "node:fs";
 
-const { auditVoicePriceRegister, VOICE_MODEL_PRICE_REGISTER } = await import(
-  "../lib/voiceInputPricing.ts"
-);
+const {
+  auditVoicePriceRegister,
+  voicePriceReverificationNotices,
+  VOICE_MODEL_PRICE_REGISTER,
+} = await import("../lib/voiceInputPricing.ts");
 
 // The models a deployment can actually reach: the compiled-in default plus
 // anything the register itself names. Reading the default from source rather
@@ -85,6 +87,22 @@ if (blocking.length > 0) {
   process.exit(1);
 }
 
+// A deadline inside its warning window is printed and does NOT fail.
+//
+// The alternative was what this repository had: nothing at all until the
+// morning the deadline passed, when `expired` turned every pull request red
+// at once. That is a correct gate arriving as an outage -- the register was
+// no less true the day before, and nobody had been told to act. The window
+// exists so the first signal is a sentence, not a locked gate.
+//
+// It stays out of `blocking` on purpose. A warning that can fail the gate is
+// a gate, and then the deadline would effectively move a month earlier
+// without anybody deciding that.
+const notices = voicePriceReverificationNotices({
+  modelIds: [...reachable],
+  now: new Date(),
+});
+
 // Reported rather than enforced: whether a price has been checked against an
 // invoice is a fact about work that needs its own approval (§6.1.2), not
 // something this check can demand.
@@ -102,5 +120,16 @@ console.log(
       : "") +
     (unobserved.length > 0
       ? `\nList price only, no invoice observed yet (docs/policy/voice-input.md §6.1.2): ${unobserved.join(", ")}.`
+      : "") +
+    (notices.length > 0
+      ? `\n\nRe-reading due soon -- a warning, not a failure. This check fails on ` +
+        `the deadline itself:\n` +
+        notices
+          .map(
+            (notice) =>
+              `  - ${notice.modelId}: ${notice.daysRemaining} day(s) left ` +
+              `(due ${notice.reverifyBy}, ${notice.owner}, ${notice.ticket})`
+          )
+          .join("\n")
       : "")
 );

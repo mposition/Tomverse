@@ -1,26 +1,44 @@
-// The two policies the scoring contract still leaves open, computed.
+// Why claim-per-triple and atomic gold were chosen, kept runnable.
 //
-// docs/ops/ai-review-eval-scoring-contract.md §5 lists them: what counts as one
-// independent assertion when a submission names several things, and whether a
-// gold requirement may bundle more than one action. The comparison is written
-// up in .github/audits/ai-review-decomposition-atomicity-2026-09-09.md.
+// Both were ADOPTED on 2026-09-09 (mposition) and are in the contract:
+// docs/ops/ai-review-eval-scoring-contract.md, with the registration side in
+// docs/ops/ai-review-eval-runbook.md §1.3d. The comparison that chose them is
+// .github/audits/ai-review-decomposition-atomicity-2026-09-09.md, and this
+// script is how it stays checkable rather than only remembered.
 //
 //   npm run experiment:ai-review-decomposition-atomicity
 //
-// ## What this is
+// ## What this is now
 //
-// An experiment, not a scorer. No proposed rule is implemented in
-// `lib/aiReviewEvalJudgement.ts`; each option is applied by EXTRACTING THE
-// RECORD DIFFERENTLY -- which is what these policies actually govern -- and the
-// contract's own scorer produces every number.
+// Not a scorer, and no longer a comparison of open options. The alternatives
+// are expressed by EXTRACTING THE RECORD DIFFERENTLY, or by REGISTERING THE
+// GOLD DIFFERENTLY -- which is what these two policies actually govern -- and
+// the contract's own scorer produces the numbers it still can.
 //
-//   baseline     the record as a submission-unit extractor would write it
-//   experiment   the record as the proposed rule would have it extracted
+//   baseline     the record as a submission-unit extractor would write it,
+//                with the v2/v3 axes stripped: the contract before the choice
+//   experiment   the record as the adopted rule has it extracted
+//   recorded     a figure computed under an EARLIER contract version, printed
+//                with that version. Today's contract refuses the extraction it
+//                came from, so it cannot be recomputed here
+//   live         what today's contract does with that same extraction, checked
+//                on every run rather than assumed
 //   observation  a measurement over the real candidate files, not a score
 //
-// Cases, gold and completeness claims come from the frozen candidate files. The
-// reviewer submissions are constructed: no reviewer wrote them, so nothing here
-// says anything about any reviewer. No provider is called and no file written.
+// The two policies do not take the same inputs, and saying so matters.
+//
+// Policy C runs on a SYNTHETIC source case: how many claims come out of one
+// submission is a structural question, and a real answer with a gold invented
+// to suit it reads as a finding somebody verified. Policy D runs on a real
+// candidate, because there the semantics are the question.
+//
+// Those candidate files are NOT frozen: `frozenAt`, `frozenBy` and
+// `frozenDigest` are all null and every case is still `candidate`. Nothing
+// here edits them.
+//
+// Every reviewer submission is constructed. No reviewer wrote them, so nothing
+// here says anything about any reviewer. No provider is called, no file
+// written.
 
 import { readFileSync } from "node:fs";
 
@@ -192,7 +210,15 @@ line(
 // C1 vs C2 on the SAME triple, three times: a true finding, a confirmed false
 // one, and one judged insufficient. Only the first goes down the duplicate
 // branch, so "C2 changes nothing but `duplicates`" is true of that row alone.
-const repeat = (label, gold, first, second) => {
+//
+// The C2 figures were computed under `ai-review-scoring-judged-v2`, before the
+// rule they argued for existed. They cannot be recomputed here: v3 refuses that
+// extraction outright, which is the decision working. So each C2 row prints the
+// recorded figure with the version it was computed under, and then the LIVE
+// result under today's contract beside it -- the refusal is checked, not
+// assumed, and no historical number is passed off as a fresh one.
+const C2_RECORDED_UNDER = "ai-review-scoring-judged-v2";
+const repeat = (label, gold, first, second, recorded) => {
     const text = "a는 X가 없습니다. 같은 이야기를 다시 적습니다.";
     const observation = obsC(text);
     console.log(`\n[3${label}]`);
@@ -202,29 +228,41 @@ const repeat = (label, gold, first, second) => {
         score(caseC(gold), observation, [first]),
         "missingPoints"
     );
-    line(
-        "C2 명제 단위 — claim 둘",
-        "experiment",
-        score(caseC(gold), observation, [first, second]),
-        "missingPoints"
+    console.log(
+        `  ${"C2 명제 단위 — claim 둘".padEnd(42)} ${`recorded`.padEnd(11)} ` +
+            `${recorded}   (${C2_RECORDED_UNDER} 에서 계산)`
+    );
+    const live = score(caseC(gold), observation, [first, second]);
+    const refused = !live.verified;
+    console.log(
+        `  ${"  같은 추출을 오늘 계약으로".padEnd(42)} ${"live".padEnd(11)} ` +
+            `${refused ? "거절 — C1 위반" : "거절되지 않음: 이 줄이 나오면 v3 규칙이 빠진 것이다"}`
     );
 };
 const withQuote = (over) => claimC({ evidenceQuote: "a는 X가 없습니다", ...over });
 const again = (over) => claimC({ evidenceQuote: "같은 이야기를 다시 적습니다", ...over });
 
 console.log("\n[3 같은 삼중항을 두 번 — 무엇을 반복했는가에 따라 다르다]");
-repeat("a 참인 발견을 반복", goldOne, withQuote({}), again({}));
+repeat(
+    "a 참인 발견을 반복",
+    goldOne,
+    withQuote({}),
+    again({}),
+    "TP 1  FN 0  FP 0  dup 1"
+);
 repeat(
     "b 확정된 허위 발견을 반복",
     goldFor(["req-gamma", "a"]),
     withQuote({ outsideGoldVerdict: "false_finding" }),
-    again({ outsideGoldVerdict: "false_finding" })
+    again({ outsideGoldVerdict: "false_finding" }),
+    "TP 0  FN 1  FP 2  dup 0"
 );
 repeat(
     "c 불충분한 발견을 반복",
     goldOne,
     withQuote({ sufficiency: "insufficient" }),
-    again({ sufficiency: "insufficient" })
+    again({ sufficiency: "insufficient" }),
+    "TP 0  FN 1  FP 2  dup 0"
 );
 
 const UNREGISTERED = "a는 delta와 epsilon에 대한 안내가 없습니다.";
