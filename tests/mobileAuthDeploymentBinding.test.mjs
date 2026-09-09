@@ -26,8 +26,10 @@ import { fileURLToPath } from "node:url";
 import {
   MOBILE_BINDING_ROUND_MIN_INTERVAL_SECONDS,
   MOBILE_BINDING_ROUND_MODEL_CAVEAT,
+  MOBILE_BINDING_OUTCOMES,
   judgeMobileBindingRound,
 } from "../scripts/mobile-auth-binding-round-core.mjs";
+import { mobileBindingVerdict } from "../lib/mobileDeploymentBinding.ts";
 
 const VERIFIER = fileURLToPath(
   new URL("../scripts/verify-mobile-auth-deployment.mjs", import.meta.url)
@@ -639,6 +641,93 @@ test("an axis that reports another deployment is not covered by the other axis",
   assert.match(result.reasons.join(" "), /signingBinding mismatched, not matched/);
 });
 
+test("a binding outcome the judge does not recognise is reported by field name only", () => {
+  // The parse error was one leak; this is the same leak one layer in. The field
+  // takes any non-empty string, and the diagnostic quoted it back.
+  const base = Math.floor(Date.now() / 1000);
+  const planted = "TEST-RING-SECRET-3ab91fe0";
+  const samples = threeSamples(base);
+  samples[1].signingBinding = planted;
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples,
+  });
+  assert.equal(result.verdict, "undetermined");
+  const said = result.reasons.join(" ");
+  assert.equal(said.includes(planted), false, said);
+  assert.match(said, /sample 2 has an unrecognised signingBinding/);
+});
+
+test("the judge's outcome list is the one the verifier writes from", () => {
+  // The judge runs on plain node and cannot import the TypeScript module the
+  // verifier uses, so the two lists are compared here rather than trusted to
+  // stay in step -- a new outcome name reaching a summary the judge would
+  // reject as unreadable is the failure this closes.
+  const produced = new Set();
+  for (const tolerance of ["open", "closed"]) {
+    for (const evidenceDeploymentId of [PENDING, PREVIOUS, null]) {
+      for (const expectedDeploymentId of [PENDING, null]) {
+        produced.add(
+          mobileBindingVerdict({ evidenceDeploymentId, expectedDeploymentId, tolerance }).outcome
+        );
+      }
+    }
+  }
+  assert.deepEqual([...produced].sort(), [...MOBILE_BINDING_OUTCOMES].sort());
+});
+
+test("a summary whose failure list contradicts its axes is not judged", () => {
+  // Both axes matched, both ids right, and the failure list naming one of them
+  // anyway. No verifier run produces that, and reading only one of the two
+  // would let an edited file pick which half is believed.
+  const base = Math.floor(Date.now() / 1000);
+  const contradictory = threeSamples(base).map((entry) => ({
+    ...entry,
+    passed: false,
+    failures: [{ name: "signing binding", kind: "evidence" }],
+  }));
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: contradictory,
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.match(result.reasons.join(" "), /matched and lists that check as failed/);
+});
+
+test("an axis that did not match but is listed nowhere is not judged either", () => {
+  const base = Math.floor(Date.now() / 1000);
+  const silent = threeSamples(base, [
+    { signingDeploymentId: PREVIOUS },
+    { signingDeploymentId: PREVIOUS },
+    { signingDeploymentId: PREVIOUS },
+  ]).map((entry) => ({ ...entry, failures: [], passed: true }));
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: silent,
+  });
+  assert.equal(result.verdict, "undetermined");
+  assert.match(result.reasons.join(" "), /did not match and lists no failure for it/);
+});
+
+test("a genuine mismatch stays consistent and still reaches its own answer", () => {
+  // The pair check must not swallow the case it sits next to: both axes saying
+  // they did not match, both listed, is exactly what the verifier writes.
+  const base = Math.floor(Date.now() / 1000);
+  const result = judgeMobileBindingRound({
+    round: 1,
+    judgedAtSeconds: base + 300,
+    samples: threeSamples(base, [
+      { signingDeploymentId: PREVIOUS },
+      { signingDeploymentId: PREVIOUS },
+      { signingDeploymentId: PREVIOUS },
+    ]),
+  });
+  assert.equal(result.verdict, "halt");
+});
+
 test("a file that is not a run summary is refused as a whole, not field by field", () => {
   const base = Math.floor(Date.now() / 1000);
   const result = judgeMobileBindingRound({
@@ -744,6 +833,44 @@ test("a round file that cannot be written fails the run, before the evidence is 
   // Refused before the material was compared, so the exchange is still usable.
   assert.equal(/signing key material/.test(result.stdout), false);
   assert.match(result.stdout, /the exchange you/);
+});
+
+test("every refusal invalidates the previous run's file, not just the late ones", () => {
+  // The marker used to be written after the arguments were validated, so a
+  // forgotten mode -- or any of the other four refusals below -- left the
+  // previous run's summary byte for byte where it was, and the next round
+  // judged it as this run's sample.
+  const signing = ed25519();
+  const directory = mkdtempSync(join(tmpdir(), "binding-early-"));
+  const summaryPath = join(directory, "run.json");
+  const good = {
+    ...candidate({ signingPkcs8: signing.pkcs8 }),
+    ...evidence({ signing }),
+    MOBILE_AUTH_VERIFY_SUMMARY_PATH: summaryPath,
+  };
+  const refusals = {
+    "the mode is missing": { MOBILE_AUTH_VERIFY_MODE: "" },
+    "the tolerance is missing": { MOBILE_AUTH_VERIFY_BINDING_TOLERANCE: "" },
+    "the age limit is not a number": { MOBILE_AUTH_VERIFY_MAX_AGE_SECONDS: "soon" },
+    "the access token is missing": { MOBILE_AUTH_VERIFY_ACCESS_TOKEN: "" },
+    "the expected deployment id is missing": { MOBILE_AUTH_VERIFY_DEPLOYMENT_ID: "" },
+  };
+
+  try {
+    for (const [name, override] of Object.entries(refusals)) {
+      const first = run(good);
+      assert.equal(first.code, 0, `${name}: ${first.stdout}`);
+      assert.equal(JSON.parse(readFileSync(summaryPath, "utf8")).passed, true, name);
+
+      const refused = run({ ...good, ...override });
+      assert.equal(refused.code, 1, `${name}: ${refused.stdout}`);
+      const left = JSON.parse(readFileSync(summaryPath, "utf8"));
+      assert.equal(left.incomplete, true, `${name}: ${JSON.stringify(left)}`);
+      assert.equal(left.passed, undefined, name);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("an interrupted run leaves an unusable file rather than the previous run's", () => {

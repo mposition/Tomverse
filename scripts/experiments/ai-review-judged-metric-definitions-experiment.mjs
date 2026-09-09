@@ -268,7 +268,7 @@ const CASES = [
     },
     {
         id: "syn-10-lone-support",
-        why: "옆에 독립 발견이 없는 단독 `support` — 계약상 채점되므로 여기서도 센다(§3.3의 경계)",
+        why: "옆에 독립 발견이 없는 단독 `support` — 제외 사유가 없어 모집단에 남고, 같은 세 조건을 충족한다",
         phenomenon: "no_issue",
         gold: {},
         goldCompleteness: {},
