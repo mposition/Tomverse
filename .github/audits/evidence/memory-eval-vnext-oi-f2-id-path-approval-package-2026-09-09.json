@@ -4,7 +4,7 @@
   "packageLabel": "IP",
   "document": {
     "path": ".github/audits/memory-eval-vnext-oi-f2-id-path-approval-package-draft-2026-09-09.md",
-    "rawSha256": "6bda0de06ac52373009f90bc1b3d08f1802186a1d06769b2ea6295db4063d4e4"
+    "rawSha256": "14e0b11f71991c30e4bde14a0b502b1b1cce678a095fbd957e4b62e3ffbce2d0"
   },
   "authority": {
     "preparationAuthorized": true,
@@ -3163,5 +3163,72 @@
     ],
     "historicalVerificationRetainedUnchanged": true,
     "revisionVerificationLocation": "Separate fixed-SHA confirmation-review handoff; not the historical verification object"
+  },
+  "correction": {
+    "id": "IP-2",
+    "correctionDate": "2026-09-09",
+    "basisReviewCommit": "896a8ad756ce2f1a5bf3dff85d238240a8e2f2b8",
+    "sourcePackageFiles": [
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f2-id-path-approval-package-draft-2026-09-09.md",
+        "commit": "896a8ad756ce2f1a5bf3dff85d238240a8e2f2b8",
+        "blobOid": "1058a125c7d4e1b35c56e4bf463f946f9cb04bf5",
+        "rawSha256": "6bda0de06ac52373009f90bc1b3d08f1802186a1d06769b2ea6295db4063d4e4",
+        "bytes": 35689,
+        "lfCount": 477
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-oi-f2-id-path-approval-package-2026-09-09.json",
+        "commit": "896a8ad756ce2f1a5bf3dff85d238240a8e2f2b8",
+        "blobOid": "2ec89f99cc631d7291b2a0e0e63714f81e65e9ee",
+        "rawSha256": "44ef01e06d0779aad77af68d4bfbe520e5d5bec8c00e0c5c05d4a6aa9b931621",
+        "bytes": 136471,
+        "lfCount": 3167
+      }
+    ],
+    "confirmationReview": {
+      "targetCommit": "896a8ad756ce2f1a5bf3dff85d238240a8e2f2b8",
+      "path": "C:/Users/Vyper/.codex/attachments/ffd6b2e9-1e21-4c19-b7a0-09e72fa74d90/pasted-text.txt",
+      "rawSha256": "4b0acdaf0a13f011cc40d80fe5f350053617b30d579e86241dd8fee32817e9f8",
+      "bytes": 16454,
+      "lf": 157,
+      "cr": 157,
+      "verdict": "CHANGES_REQUIRED",
+      "appliesTo": "IP-F1 and direct regressions only",
+      "resolvedDocumentFindingIds": [
+        "IP-F1"
+      ],
+      "remainingFindingIds": [
+        "IP-R1-F1"
+      ],
+      "remainingFindingSeverity": "P3",
+      "approvalBlocking": false,
+      "usedConfirmationRounds": 1,
+      "maximumConfirmationRounds": 1,
+      "reportAuthorAuthenticationIndependentlyVerified": false
+    },
+    "findingDisposition": {
+      "id": "IP-R1-F1",
+      "status": "author_corrected_pending_human_acceptance",
+      "normativeLocation": "Markdown section 5, line 288 in R1",
+      "before": "미래 idPathPolicy는 비운영 시료·기대값·IP01–IP20 추적성만 담는다.",
+      "after": "미래 idPathPolicy는 기대값·IP01–IP20 추적성만 담는다.",
+      "meaning": "Remove the specimen wording inconsistent with the existing closed four-string-field contract; no new policy or test values",
+      "markdownHashRebindingRequired": true,
+      "postCorrectionIndependentReviewPerformed": false,
+      "postCorrectionIndependentReviewVerdict": null,
+      "humanApprovalGranted": false,
+      "oiF2ExternalClosureDeclared": false,
+      "implementationAuthorized": false
+    },
+    "changedJsonPointers": [
+      "/document/rawSha256",
+      "/correction"
+    ],
+    "historicalRevisionAndVerificationRetainedUnchanged": true,
+    "authorityRetainedUnchanged": true,
+    "additionalConfirmationReviewPerformed": false,
+    "confirmationRoundsReset": false,
+    "correctionVerificationLocation": "Separate human-approval draft binds the actual correction commit and fresh local checks; historical verification is unchanged"
   }
 }

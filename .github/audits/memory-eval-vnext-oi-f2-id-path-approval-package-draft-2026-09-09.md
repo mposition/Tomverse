@@ -2,7 +2,7 @@
 
 **Status: DRAFT — 독립 검토·사람 승인 대기. 구현 승인/착수 아님.**
 작성자: Codex. 작성일: 2026-09-09.
-Document ID: MEM-EVAL-VNEXT-OI-F2-ID-PATH-1. Revision: IP-1.
+Document ID: MEM-EVAL-VNEXT-OI-F2-ID-PATH-1. Revision: IP-2.
 
 ## 1. 목적과 현재 권한
 
@@ -285,7 +285,7 @@ idPathPolicy 추가 후 그대로 두면 새 key까지 hash해 실패하므로 *
 - T11 전체 raw SHA는 새 key 때문에 바뀐다. 과거 raw SHA
   136469c95aeeeacdeb0069e457476a273036e5d73964f336f2fbc6f6d4dcc70f를 새 파일 hash로 주장하지 않는다.
 
-미래 idPathPolicy는 비운영 시료·기대값·IP01–IP20 추적성만 담는다.
+미래 idPathPolicy는 기대값·IP01–IP20 추적성만 담는다.
 IP15는 idPathPolicy를 IP01–IP20 순서의 정확히 20개 row 배열로 검사한다.
 각 row의 key 집합은 id/acId/verification/expected 네 개뿐이고 모두 비어 있지 않은 primitive string이다.
 T01에 독립 고정한 기대표는 이 패키지 JSON.futureCases의 해당 네 필드 값을 그대로 전사하며,
@@ -475,3 +475,43 @@ raw SHA와 후속 commit SHA까지 불변이라는 뜻은 아니다. JSON.docume
 §9와 JSON.verification의 T 시점 관측은 IP-0 작성 이력으로 그대로 보존한다.
 IP-1의 전후 검사와 실제 커밋 identity는 변경분 확인 검토 인계에서 별도로 기록한다.
 남은 절차는 IP-F1 변경분 확인 검토(필요 시 최대 한 번)와 사람의 별도 승인이다.
+
+## 11. IP-2 — IP-R1-F1 한 줄 정정과 확인 검토 처리
+
+이 절은 IP-1 commit 896a8ad756ce2f1a5bf3dff85d238240a8e2f2b8 뒤의 처리 이력이다.
+§7–§10과 JSON.revision/verification의 미검토·확인 대기·작성 권한 서술은 각 작성 시점의 이력으로
+보존한다. 현재 검토 회차와 처리 상태는 이 절 및 JSON.correction으로 구분하며,
+§1/JSON.authority의 pending/null은 사람 미승인 상태로 계속 유지한다.
+
+확인 검토 원문:
+C:/Users/Vyper/.codex/attachments/ffd6b2e9-1e21-4c19-b7a0-09e72fa74d90/pasted-text.txt
+raw SHA-256: 4b0acdaf0a13f011cc40d80fe5f350053617b30d579e86241dd8fee32817e9f8
+16,454 bytes, LF 157, CR 157. 원문은 재인코딩하거나 수정하지 않았다.
+이 hash는 보고서 bytes 식별이며 작성자 인증·암호 서명·영구 보관 증명이 아니다.
+
+보고서 판정 CHANGES_REQUIRED를 그대로 전사한다. IP-F1은 문서 내용 계약·양방향 추적 관점에서
+해소됐으나, 새 IP-R1-F1(P3, 승인 차단 아님)이 남았다. 이를 CONFIRMED로 바꾸거나
+수정 후 bytes 전체가 독립 검토를 받았다고 주장하지 않는다. 최초 검토 1회와 변경분 확인 1회가
+끝났으며 확인 검토 최대 1회는 사용했다. 추가 Claude 검토나 이전 namespace 회차 초기화는 하지 않는다.
+
+2026-09-09 사용자 지시에 따른 규범 문장 수정은 §5의 다음 한 줄뿐이다.
+
+- 이전: 미래 idPathPolicy는 비운영 시료·기대값·IP01–IP20 추적성만 담는다.
+- 정정: 미래 idPathPolicy는 기대값·IP01–IP20 추적성만 담는다.
+
+닫힌 id/acId/verification/expected 네 문자열 field 계약과 충돌하는 “비운영 시료”만 제거했다.
+row/AC 대응·시험 expected·ID/path 허용집합·미래 M3 범위는 바꾸지 않았다.
+보고서의 “JSON 수정은 필요하지 않음”은 규범 값 수정에 대해서만 수용한다.
+Markdown bytes가 바뀌므로 JSON.document.rawSha256 재결속은 필수다.
+이번 JSON semantic 변경은 /document/rawSha256와 새 /correction 두 pointer뿐이며,
+기존 /revision과 그 원본 R 결속은 역사적 이력으로 불변이다.
+
+IP-R1-F1 처리 상태는 author_corrected_pending_human_acceptance다. 한 줄 정정의 작성자 처리 기록이며
+외부 closure나 사람 수용 판정이 아니다. 기존 보고서는 R1을 검토한 것이고 최종 승인 대상은
+정정 후 별도 commit에 고정되는 두 bytes다. 두 대상의 raw SHA와 새 commit은 후속 사람 승인 초안에
+결속하며, 이 문서 안에 자기 hash/미래 commit을 만들지 않는다.
+
+정정 전후 package 검사·직접 bytes/범위 검증의 실제 관측도 후속 승인 초안에서 별도로 기록한다.
+과거 T/다른 SHA의 검증·CI를 새 commit의 검증·CI로 옮기지 않는다.
+이력 기록과 commit, 승인 초안 작성 지시는 IP-D1–IP-D5 승인이나 M3 구현 착수 지시가 아니다.
+푸시·PR·병합·CI dispatch·구현·fixture 변경·activation은 이번 정정에서 수행하지 않는다.
