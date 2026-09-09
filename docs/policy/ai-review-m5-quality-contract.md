@@ -183,6 +183,12 @@ false-consensus rate는 의미 정확도가 아닙니다.** `scoreCase()`는 gol
 `AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`가 정합니다. CLI·보고서·게이트가 모두 그
 문장 하나를 출력합니다.
 
+**전환안이 있습니다(미승인).** 이 연결을 judged-v3로 옮기는 설계는
+`.github/audits/ai-review-judged-gate-transition-2026-09-09.md`이고, 재현은
+`npm run experiment:ai-review-judged-gate-transition`입니다. **그 문서는 게이트도
+임계값도 지표 정의도 바꾸지 않았고**, `falseConsensusRate`·`inventedIssueRate`의
+정의는 열린 채로 둡니다 — TP·FP에서 임의로 유도하지 않습니다.
+
 **미해결 연결.** 이름을 바꿨다고 연결이 끊기지는 않습니다. 이 수치는 지금도
 `aggregateOutcomes()` → register 항목의 run metrics → `thresholdShortfalls()` →
 `approvedEntryProblems()`로 흘러 **승인 판정에 도달합니다.** `check:ai-review-eval`
