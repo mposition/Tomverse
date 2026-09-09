@@ -54,6 +54,7 @@ import {
   scoreCase,
   AI_REVIEW_EVAL_HARNESS_SCREENED_RULES,
   AI_REVIEW_EVAL_HUMAN_ONLY_RULES,
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE,
 } from "../lib/aiReviewEvalCore.ts";
 import {
   datasetDigest,
@@ -254,6 +255,22 @@ const estimatePlannedCost = async () => {
 const plannedCostUsd = await estimatePlannedCost();
 
 const line = (label, value) => console.log(`  ${label.padEnd(30)} ${value}`);
+
+/** The shared notice, wrapped so it reads as prose rather than one long line. */
+const wrapNotice = (notice, indent = "  ") => {
+  const words = notice.split(" ");
+  const lines = [];
+  let current = indent;
+  for (const word of words) {
+    if (current.length + word.length + 1 > 78) {
+      lines.push(current);
+      current = indent;
+    }
+    current += (current === indent ? "" : " ") + word;
+  }
+  if (current.trim()) lines.push(current);
+  return lines.join("\n");
+};
 
 console.log("AI Review evaluation run plan\n");
 line("dataset", `${dataset.version} (${dataset.purpose})`);
@@ -457,6 +474,10 @@ const point = (metric) =>
   metric.point === null
     ? "n/a (empty denominator)"
     : `${(metric.point * 100).toFixed(1)}% [${(metric.wilsonLower * 100).toFixed(1)}, ${(metric.wilsonUpper * 100).toFixed(1)}] n=${metric.denominator}`;
+// The four finding-count metrics below are the keyword screen, and the label
+// goes ABOVE them: a caveat printed after a number is read after the number is
+// believed.
+console.log(`\n  [keyword diagnostic]\n${wrapNotice(AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE)}\n`);
 line("contradiction recall", point(breakdown.aggregate.contradictionRecall));
 line("contradiction precision", point(breakdown.aggregate.contradictionPrecision));
 line("omission recall", point(breakdown.aggregate.omissionRecall));

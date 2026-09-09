@@ -653,6 +653,14 @@ npm run check:ai-review-eval -- --artifact=<경로>
 - 표본 하한 미달
 - `humanBlindReviewRef` 없음
 
+**증거로 인정되는 것과 그 숫자가 무엇을 재는지는 다른 질문입니다.** 위 목록을
+전부 통과한 artifact도 발견 개수 네 지표(contradiction·omission의
+precision·recall)는 **키워드 진단**입니다 — gold의 `anyOf` 문구가 그 종류의
+검토자 텍스트에 나왔는지만 보며, 어느 답변을 지목했는지도, 없다는 주장인지
+있다는 주장인지도, 발견으로 제출된 것인지도 말하지 못합니다. 근거와 한계는
+`docs/policy/ai-review-m5-quality-contract.md` §3.4a이고, `check:ai-review-eval`
+이 실행될 때마다 같은 문장과 **아직 남아 있는 승인 게이트 연결**을 출력합니다.
+
 ## 7a. 품질 threshold 승인 — **사람의 행위**
 
 `lib/aiReviewQualityThresholds.ts`의 `v1-draft`에 `approvedBy`와 `approvedAt`을

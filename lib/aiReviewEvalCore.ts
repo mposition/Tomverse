@@ -236,6 +236,10 @@ export const AI_REVIEW_EVAL_BLIND_SHEET_RULES: readonly AiReviewEvalZeroToleranc
  * "anywhere in the output", so a contradiction mentioned only in the
  * synthesis does not count as having been filed as a contradiction.
  *
+ * **Scoping is not meaning.** A term appearing in the right field still says
+ * nothing about which answer was accused or what was asserted about it; see
+ * `AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`.
+ *
  * `mustAlsoContain` narrows it: every listed term must appear too. It exists
  * for cases where a single token is ambiguous ("1887" alone would match a
  * reviewer merely restating dates).
@@ -247,6 +251,54 @@ export type AiReviewEvalGoldItem = {
     /** Human-readable statement of what this item is, for the blind sheet. */
     description: string;
 };
+
+/**
+ * What the four finding-count metrics are, said once so no surface can drift.
+ *
+ * `scoreCase()` decides whether a gold item was found by looking for its
+ * `anyOf` terms inside the reviewer's own text for that finding kind. That
+ * answers one question -- did this wording appear -- and it is not the question
+ * the evaluation is about. It cannot say WHICH answer the reviewer accused,
+ * whether the reviewer asserted the thing was missing or present, or whether
+ * the words were a submitted finding at all rather than a quotation.
+ *
+ * Measured on the candidate cases -- which are candidates, not a frozen set --
+ * it is wrong in BOTH directions: it reports
+ * "nowhere" for elements that are in an answer, and a short term scores a
+ * mis-accusation and a flat contradiction of the gold exactly as it scores a
+ * correct finding. That measurement is pinned in
+ * `tests/aiReviewEvalScoringContract.test.mjs`, and the contract written to
+ * replace it is `docs/ops/ai-review-eval-scoring-contract.md`.
+ *
+ * So these counts are a KEYWORD DIAGNOSTIC. Every surface that prints them
+ * prints this beside them; nothing renames the fields, because the artifacts
+ * already written are evidence and must keep verifying.
+ */
+export const AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE =
+    "Keyword diagnostic, not semantic accuracy. These counts come from matching " +
+    "each gold item's `anyOf` terms against the reviewer's own text for that " +
+    "finding kind. A match says the wording appeared. It does not say which " +
+    "answer was accused, whether the reviewer claimed the point was missing or " +
+    "present, or whether it was submitted as a finding at all -- and measured on " +
+    "the candidate cases it is wrong in both directions. Read them as a screen, " +
+    "never as a measure of review quality.";
+
+/**
+ * Where the keyword diagnostic still drives a decision.
+ *
+ * Naming a number a diagnostic does not disconnect it. These counts remain
+ * wired to the approval gate, and a label that quietly implied otherwise would
+ * be worse than the old wording -- so the connection is reported, not fixed by
+ * relabelling. Substituting the judged contract's scores here, or moving a
+ * threshold to suit them, are separate decisions nobody has made.
+ */
+export const AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS: readonly string[] = [
+    "aggregateOutcomes() turns these counts into the arm metrics stored on a " +
+        "register entry's runs",
+    "thresholdShortfalls() compares those metrics with the approved threshold " +
+        "set, so approvedEntryProblems() can pass or fail an entry on them",
+    "check:ai-review-eval runs that gate, which is what an M5 promotion reads",
+];
 
 export const AI_REVIEW_EVAL_FINDING_KINDS = [
     "contradictions",
@@ -411,10 +463,18 @@ const goldItemMatched = (item: AiReviewEvalGoldItem, haystack: string) => {
     return item.mustAlsoContain.every((term) => text.includes(normalize(term)));
 };
 
+/**
+ * Per finding kind, what the KEYWORD screen counted.
+ *
+ * "Found" here means the gold item's terms appeared in the reviewer's text for
+ * this kind -- see `AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`. The names are the
+ * ordinary ones because the artifacts already written use them and must keep
+ * verifying; what they mean is stated there rather than encoded in a rename.
+ */
 export type AiReviewFindingKindOutcome = {
-    /** Gold items this reviewer found. */
+    /** Gold items whose terms appeared in this reviewer's text for this kind. */
     truePositives: number;
-    /** Gold items it missed. */
+    /** Gold items whose terms did not appear. */
     falseNegatives: number;
     /**
      * Reported findings that matched no gold item. Counted ONLY when the

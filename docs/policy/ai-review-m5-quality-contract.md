@@ -147,6 +147,35 @@ development set으로 판정하면 프롬프트가 자기 test set에 맞춰진 
 **분모가 0이면 `null`을 보고합니다.** 0은 측정된 실패로, 반올림된 비율은 측정된
 성공으로 읽히며 둘 다 지어낸 것입니다.
 
+### 3.4a 발견 개수 네 지표는 **키워드 진단**입니다
+
+**contradiction·omission의 precision·recall은 의미 정확도가 아닙니다.**
+`scoreCase()`는 gold 항목의 `anyOf` 문구가 그 발견 종류에 해당하는 검토자 텍스트
+안에 나오는지를 볼 뿐입니다. 그것이 답하는 질문은 하나 — **그 표현이 등장했는가.**
+
+말하지 못하는 것이 셋입니다.
+
+- **어느 답변을 지목했는가** — 다른 답변을 잘못 지목해도 같은 문구를 쓰면 통과합니다.
+- **없다는 것인가 있다는 것인가** — gold와 정반대의 주장도 같은 문구를 담습니다.
+- **발견으로 제출된 것인가** — 인용이나 산문에 등장한 것과 구별하지 못합니다.
+
+후보 case로 재면 **양방향으로 틀립니다.** 답변에 있는 요소를 "어디에도 없다"고
+답한 경우가 있고, 문구를 짧게 하면 오지목과 반대 주장이 올바른 발견과 똑같이
+TP 1을 받습니다. 측정은 `tests/aiReviewEvalScoringContract.test.mjs`에 고정돼
+있습니다.
+
+**그래서 이 넷은 선별(screen)입니다.** 이름은 그대로 두는데, 이미 쓰인 artifact가
+증거이고 계속 검증되어야 하기 때문입니다 — 뜻은 이름이 아니라 이 절과
+`AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE`가 정합니다. CLI·보고서·게이트가 모두 그
+문장 하나를 출력합니다.
+
+**미해결 연결.** 이름을 바꿨다고 연결이 끊기지는 않습니다. 이 수치는 지금도
+`aggregateOutcomes()` → register 항목의 run metrics → `thresholdShortfalls()` →
+`approvedEntryProblems()`로 흘러 **승인 판정에 도달합니다.** `check:ai-review-eval`
+이 실행될 때마다 그 연결을 출력합니다. 이것을 대신할 판정 계약
+(`docs/ops/ai-review-eval-scoring-contract.md`)은 **이 게이트에 연결돼 있지 않으며,
+연결하는 것도 §6 임계값을 그에 맞춰 바꾸는 것도 아무도 결정하지 않았습니다.**
+
 ## 4. zero-tolerance 규칙
 
 한 건이라도 나오면 해당 arm과 aggregate 양쪽에서 실패합니다. 평균으로 완화하지

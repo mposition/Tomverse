@@ -30,7 +30,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { scoreCase } from "../lib/aiReviewEvalCore.ts";
+import {
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS,
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE,
+  scoreCase,
+} from "../lib/aiReviewEvalCore.ts";
 
 /** A case whose gold names one missing point, declared exhaustive. */
 const caseWithGold = (gold) => ({
@@ -186,4 +190,55 @@ test("a single-character label term is a substring of ordinary words", () => {
     1,
     "an incidental Latin c no longer satisfies the label -- rewrite this test"
   );
+});
+
+// ---------------------------------------------------------------------------
+// Naming the screen a screen, without moving anything it is wired to
+// ---------------------------------------------------------------------------
+
+test("the keyword notice says what the counts cannot answer", () => {
+    // One sentence, one place. Every surface prints this constant rather than
+    // its own paraphrase, so the four metrics cannot end up described one way
+    // in a CLI and another in a report.
+    const notice = AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE;
+    assert.match(notice, /Keyword diagnostic, not semantic accuracy/);
+    // The three questions the substring test cannot answer, each named.
+    assert.match(notice, /which answer was accused/);
+    assert.match(notice, /missing or present/);
+    assert.match(notice, /submitted as a finding/);
+    // And it must not claim the screen is merely imprecise in one direction.
+    assert.match(notice, /wrong in both directions/);
+});
+
+test("the label does not pretend the numbers were disconnected", () => {
+    // The failure this guards against is a relabelling that reads as a fix.
+    // These counts still reach the approval decision, so the connection is
+    // carried beside the label and names each hop.
+    assert.ok(AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS.length >= 3);
+    const joined = AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS.join(" ");
+    for (const hop of [
+        "aggregateOutcomes()",
+        "thresholdShortfalls()",
+        "approvedEntryProblems()",
+        "check:ai-review-eval",
+    ]) {
+        assert.ok(joined.includes(hop), hop);
+    }
+});
+
+test("naming the screen changed no count and no field", () => {
+    // Past artifacts are evidence: they carry these field names and must keep
+    // verifying. The rename that would have been tidiest is the one that would
+    // have broken them, so the outcome shape is pinned here exactly.
+    const outcome = score(SHORT_TERMS, CORRECT);
+    assert.deepEqual(Object.keys(outcome).sort(), [
+        "falseNegatives",
+        "falsePositives",
+        "precisionCounted",
+        "reported",
+        "truePositives",
+    ]);
+    // And the arithmetic is the same arithmetic: this is the row the contract
+    // test above calls a correct finding.
+    assert.equal(outcome.truePositives, 1);
 });

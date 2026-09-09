@@ -35,6 +35,8 @@ import { join, resolve } from "node:path";
 
 import {
   aggregateOutcomes,
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS,
+  AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE,
   assessSampleAdequacy,
   scoreCase,
   AI_REVIEW_EVAL_BLIND_SHEET_RULES,
@@ -618,6 +620,16 @@ console.log(
 render("Instrument scaffolding (the tools exist and are wired)", scaffolding);
 render("M5 readiness (the instrument can produce a believable number)", readiness);
 render("M5 eligible (it was pointed at production and signed)", eligibility);
+
+// The screen's own label, printed where its readiness is being judged. This
+// report decides nothing, and that is why it must not leave the reader to
+// remember what the finding counts are.
+console.log(`\n  [keyword diagnostic]`);
+console.log(`  ${AI_REVIEW_KEYWORD_DIAGNOSTIC_NOTICE}`);
+console.log("  still connected to the approval decision:");
+for (const connection of AI_REVIEW_KEYWORD_DIAGNOSTIC_GATE_CONNECTIONS) {
+  console.log(`    - ${connection}`);
+}
 
 console.log(`\nscaffolding complete: ${verdict.scaffoldingComplete ? "YES" : "NO"}`);
 console.log(`readiness complete:   ${verdict.readinessComplete ? "YES" : "NO"}`);
