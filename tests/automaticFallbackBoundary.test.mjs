@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { extname, join, relative, sep } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -176,9 +176,13 @@ test("only the surfaces that offer a choice import the fallback table", () => {
       "renders those candidates for the user to pick from",
   };
 
+  // The allowlist keys are POSIX-shaped literals, so the separator is
+  // normalised once here (the pattern tests/typographyPolicy.test.mjs uses);
+  // unnormalised, a Windows run matched no allowlist entry and failed on the
+  // platform rather than on the rule.
   const importers = [...sourceFiles("app"), ...sourceFiles("lib"), ...sourceFiles("components")]
     .filter((file) => read(file).includes("providerFallbackCandidates"))
-    .map((file) => relative(".", file));
+    .map((file) => relative(".", file).split(sep).join("/"));
 
   const unexpected = importers.filter((file) => !(file in ALLOWED));
   assert.deepEqual(
