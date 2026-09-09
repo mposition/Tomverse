@@ -18,9 +18,20 @@
 //   experiment   the record as the proposed rule would have it extracted
 //   observation  a measurement over the real candidate files, not a score
 //
-// Cases, gold and completeness claims come from the frozen candidate files. The
-// reviewer submissions are constructed: no reviewer wrote them, so nothing here
-// says anything about any reviewer. No provider is called and no file written.
+// The two policies do not take the same inputs, and saying so matters.
+//
+// Policy C runs on a SYNTHETIC source case: how many claims come out of one
+// submission is a structural question, and a real answer with a gold invented
+// to suit it reads as a finding somebody verified. Policy D runs on a real
+// candidate, because there the semantics are the question.
+//
+// Those candidate files are NOT frozen: `frozenAt`, `frozenBy` and
+// `frozenDigest` are all null and every case is still `candidate`. Nothing
+// here edits them.
+//
+// Every reviewer submission is constructed. No reviewer wrote them, so nothing
+// here says anything about any reviewer. No provider is called, no file
+// written.
 
 import { readFileSync } from "node:fs";
 
