@@ -210,3 +210,14 @@ exhausted-revisions hold, and a digest-mismatch failure.
 criteria, the digest and commit of the change reviewed, the change summary,
 the test results, the review conclusion, every finding with its location,
 severity, basis, reproduction and disposition, and the next action.
+
+## Exchanges on record
+
+- `packages/router-full-catalog-diagnostic/`: the first exchange on the
+  diagnostic change. On hold with revisions exhausted at round 2, four
+  findings open with their reproductions.
+- `packages/router-full-catalog-diagnostic-v2/`: its continuation, shown
+  those four findings. On hold with revisions exhausted at round 2, two
+  findings open; both were fixed afterwards **without an independent
+  re-review**, and the directory's README says what the records show,
+  which commits they name, and what no check here covers.
