@@ -34,6 +34,7 @@ import {
     judgementRecordShapeProblems,
     observationRefFor,
     observationShapeProblems,
+    scoreJudgedCase,
     validateJudgedCase,
     verifyJudgementRecord,
     verifyRecordAgainstObservation,
@@ -114,7 +115,17 @@ const RULES = [
 
 const recordPath = join(root, "record.json");
 
-if (!existsSync(recordPath)) {
+/**
+ * Whether this run created the skeleton.
+ *
+ * There is no `existsSync` before the write, on purpose. Checking and then
+ * writing leaves a window, and what lands in that window is somebody else's
+ * finished work: a signed record with confirmed claims was replaced by an
+ * unsigned `pending` skeleton, and the exit code was 0. The write itself is
+ * the check -- `wx` creates or fails, with nothing in between -- and an
+ * EEXIST simply means the file was already there, which is the branch below.
+ */
+const createSkeleton = () => {
     const claims = [];
     for (const [kind, items] of Object.entries(observation.findings ?? {})) {
         for (const [index, item] of (items ?? []).entries()) {
@@ -152,15 +163,26 @@ if (!existsSync(recordPath)) {
         claims,
         _rules: RULES,
     };
-    writeFileSync(recordPath, `${JSON.stringify(skeleton, null, 2)}\n`, "utf8");
+    try {
+        // `wx`: create, or fail because it is already there. Never truncate.
+        writeFileSync(recordPath, `${JSON.stringify(skeleton, null, 2)}\n`, {
+            encoding: "utf8",
+            flag: "wx",
+        });
+    } catch (error) {
+        if (error.code === "EEXIST") return false;
+        throw error;
+    }
     console.log(`\nWrote ${join(directory, "record.json")}: ${claims.length} submitted `
         + `finding(s), one pending claim each.\n`);
     console.log("Split any submission that makes more than one assertion into more claims.");
     console.log("Remove the `_submittedText` and `_rules` keys when the record is filled in.\n");
     for (const rule of RULES) console.log(`  - ${rule}`);
     console.log("\nNo provider was called.");
-    process.exit(0);
-}
+    return true;
+};
+
+if (createSkeleton()) process.exit(0);
 
 // A record already exists. Say what is still missing, and nothing else -- this
 // script never edits a judgement somebody has started.
@@ -199,12 +221,41 @@ const deeper =
         : [];
 
 const all = [...problems, ...deeper];
+
+// And the scorer's own refusals, which the record checks above do not cover:
+// a finding outside the gold with no verdict, one ruled `undetermined`, and an
+// exhaustive gold a confirmed `gold_incomplete` has disproved. Each is a
+// judgement or a gold correction somebody still has to make, and this script
+// said "Nothing is missing" about all three while the scorer refused them.
+//
+// It runs the scorer rather than restating its conditions, so the two cannot
+// drift into disagreeing about what "ready" means.
+const outcome =
+    all.length === 0
+        ? scoreJudgedCase(testCase, record, {
+              observationRef: observationRefFor(observation),
+              observation,
+          })
+        : null;
+
 console.log(`\n${join(directory, "record.json")} exists; it was not changed.\n`);
-if (all.length === 0) {
-    console.log("Nothing is missing. Score it with:");
-    console.log(`  npm run score:ai-review-judgements -- --dir ${directory}`);
-} else {
+if (all.length > 0) {
     console.log("Still to do:");
     for (const problem of all) console.log(`  - ${problem}`);
+} else if (outcome.scored === false) {
+    // Passed on to the reader as the scorer wrote it. What it asks for is not
+    // a field to fill in: it is a verdict a person owes, or a gold that has
+    // been shown to be short an item.
+    console.log("The record is complete, and the scorer still refuses it:\n");
+    console.log(`  ${outcome.reason.split("\n").join("\n  ")}`);
+    if (outcome.goldGaps) {
+        const gaps = Object.entries(outcome.goldGaps).filter(([, count]) => count > 0);
+        for (const [kind, count] of gaps) {
+            console.log(`\n  confirmed gold gap: ${kind} ${count}`);
+        }
+    }
+} else {
+    console.log("Nothing is missing. Score it with:");
+    console.log(`  npm run score:ai-review-judgements -- --dir ${directory}`);
 }
 console.log("\nNo provider was called.");
