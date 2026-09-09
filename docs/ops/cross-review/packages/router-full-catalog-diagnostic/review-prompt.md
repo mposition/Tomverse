@@ -1,0 +1,3242 @@
+# Independent review — task router-full-catalog-diagnostic-v1, round 0
+
+Review the change against the original requirement below. Read the requirement and the diff before anything else.
+Do not take the author's summary as a description of what the change does; the diff is.
+
+## Requirement (original)
+
+Build the offline foundation for improving Auto Router model selection over the whole catalogue without repeated human hand-offs. (1) A full-catalogue routing diagnostic that uses the product's own routing logic (not a copy) on the development fixture and, per request, shows every catalogue model, its candidacy and exclusion reason, the presence/source/version of per-task quality evidence, the score/band and the actual tie-break criterion, the final primary and the actually executable fallback, why each non-selected model lost, and where no evidence exists to judge. Unevaluated models are not scored 0, not promoted, and no operational score changes. (2) A minimal Claude–Codex cross-review structure: author, independent reviewer, control program; roles configurable; exchange record with task ID, original requirement and completion criteria, change digest, change summary, test results, review conclusion, per-finding location/severity/basis/reproduction, next action; reviewer reads requirement and diff before the author's self-assessment; reviewer has no write access; a new change needs a new review; max 2 fix rounds then hold; preference-only findings follow project rules; unevidenced proposals keep the current version; two AIs agreeing is not a pass without tests and guards. No model calls, no production routing/score/flag change, no push, no workflow dispatch.
+
+## Completion criteria
+
+- Every model in the catalogue appears in the diagnostic for every item; a model excluded from candidacy carries a fixed reason (tests/routerFullCatalogDiagnostic.test.mjs).
+- The diagnostic's candidate set, rejections, primary and deciding criterion equal decideRouterModel's on the same input, and the Router-vs-dispatch output cap difference is reported, not hidden.
+- The cross-review loop runs end to end on mocks: pass, request_changes then fix then approve, and revision cap reached (tests/crossReview.test.mjs).
+- Invalid JSON, missing result, timeout, execution failure and digest mismatch are named failures, never a pass.
+- In dry-run mode the command-line executors are never spawned.
+- No production routing behaviour, score, flag, pre-registration, or protection rule changes: existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified.
+
+## Change under review — digest sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932, commit 6efd3eab991c368fb56129e2d1dbbfc2b4ab56a2
+
+```diff
+diff --git a/docs/ops/cross-review/README.md b/docs/ops/cross-review/README.md
+new file mode 100644
+index 00000000..8e9442c0
+--- /dev/null
++++ b/docs/ops/cross-review/README.md
+@@ -0,0 +1,58 @@
++# Cross review: an author, an independent reviewer, and a control program
++
++Offline development tooling. It is not a product path: no user request calls
++either executor, and nothing here runs unless a person runs the script.
++
++## Roles
++
++| role | does | writes |
++|---|---|---|
++| author | produces a change for a task: diff, summary, files touched, its own assessment kept apart | inside the task's `writableScope` only |
++| reviewer | reads the original requirement and the diff first, then the tests, then the author's account; returns a verdict bound to the change's digest | nothing |
++| control program (`lib/crossReviewCore.ts`) | computes the digest itself, runs the tests, applies the handling rules, counts rounds, decides the outcome | the exchange record |
++
++Which model plays which role is configuration (`--author`, `--reviewer`;
++default Claude authors and Codex reviews). The executors are injected, so the
++same loop runs against scripted mocks and against command-line tools.
++
++## Handling rules the loop applies
++
++- An approval names the digest it reviewed; a verdict on another digest,
++  task or round fails the run. Round n's approval is never reused for n+1.
++- Two executors agreeing is not a pass: the control program's tests and guard
++  rules must also pass, or the approved change goes back to the author.
++- A finding with `basis: evidence`, or a `judgement` with a reproduction, is
++  acted on. A `preference` is settled by the project's rules. A `judgement`
++  with no reproduction keeps the current version. All are recorded.
++- After `--max-revisions` (default 2) fix rounds, an unresolved change is put
++  on hold with its findings and reproductions. It is not retried.
++- Invalid JSON, a missing result, a timeout, a failed execution and a digest
++  mismatch are each a named failure, never a pass.
++
++## Running it
++
++```
++npm run cross-review -- --task=<task.json> --mode=mock --fixture=<fixture.json> --out=<dir>
++npm run cross-review -- --task=<task.json> --mode=dry-run --out=<dir>
++npm run cross-review -- --task=<task.json> --mode=package --base=<commit> --test-command="..." --out=<dir>
++```
++
++`mock` runs the whole loop from a fixture. `dry-run` builds the command-line
++executors and proves they do not run. `package` calls no executor: it takes
++the diff against `--base`, digests it, runs the test command, and writes the
++exchange record and the reviewer prompt for a person to hand over.
++
++`--mode=live` is refused without `--i-have-authorised-live-execution`. The
++intended invocations are in `CLI_INVOCATIONS` in `lib/crossReviewExecutors.ts`
++and were not verified against an installed `codex`; check them against
++`--help` before the first live run.
++
++`fixtures/` holds a demo task and three fixtures: a fix-then-approve pass, an
++exhausted-revisions hold, and a digest-mismatch failure.
++
++## The exchange record
++
++`exchange.json` carries the task ID, the original requirement and completion
++criteria, the digest and commit of the change reviewed, the change summary,
++the test results, the review conclusion, every finding with its location,
++severity, basis, reproduction and disposition, and the next action.
+diff --git a/docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json b/docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json
+new file mode 100644
+index 00000000..85db41bc
+--- /dev/null
++++ b/docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json
+@@ -0,0 +1,8 @@
++{
++  "author": [
++    { "diff": "+v0", "summary": "attempt 0", "filesChanged": ["lib/sum.ts"], "commit": null }
++  ],
++  "reviewer": [
++    { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "sha256:not-this-change", "conclusion": "approve", "findings": [], "nextAction": "merge" }
++  ]
++}
+diff --git a/docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json b/docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json
+new file mode 100644
+index 00000000..3284d86d
+--- /dev/null
++++ b/docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json
+@@ -0,0 +1,59 @@
++{
++  "author": [
++    {
++      "diff": "--- a/lib/sum.ts\n+++ b/lib/sum.ts\n+export const sum = (numbers: number[]) => numbers.reduce((a, b) => a + b);\n",
++      "summary": "Adds sum() using reduce.",
++      "filesChanged": ["lib/sum.ts"],
++      "selfAssessment": "Straightforward; no edge cases.",
++      "commit": null
++    },
++    {
++      "diff": "--- a/lib/sum.ts\n+++ b/lib/sum.ts\n+export const sum = (numbers: number[]) => numbers.reduce((a, b) => a + b, 0);\n--- a/tests/sum.test.mjs\n+++ b/tests/sum.test.mjs\n+test(\"empty\", () => assert.equal(sum([]), 0));\n",
++      "summary": "Seeds reduce with 0 and adds the empty-array test.",
++      "filesChanged": ["lib/sum.ts", "tests/sum.test.mjs"],
++      "commit": null
++    }
++  ],
++  "reviewer": [
++    {
++      "taskId": "demo-sum-helper",
++      "round": 0,
++      "reviewedDigest": "@current",
++      "conclusion": "request_changes",
++      "findings": [
++        {
++          "location": "lib/sum.ts:1",
++          "severity": "error",
++          "basis": "evidence",
++          "claim": "reduce without a seed throws on an empty array, so sum([]) does not return 0 and the first completion criterion fails.",
++          "reproduction": "node -e '[].reduce((a,b)=>a+b)'"
++        },
++        {
++          "location": "tests/",
++          "severity": "error",
++          "basis": "evidence",
++          "claim": "No test covers the empty array; the requirement asks for one."
++        },
++        {
++          "location": "lib/sum.ts:1",
++          "severity": "nit",
++          "basis": "preference",
++          "claim": "I would name the parameter xs."
++        }
++      ],
++      "nextAction": "seed the reduce, add the test, resubmit"
++    },
++    {
++      "taskId": "demo-sum-helper",
++      "round": 1,
++      "reviewedDigest": "@current",
++      "conclusion": "approve",
++      "findings": [],
++      "nextAction": "ready to merge"
++    }
++  ],
++  "tests": [
++    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 40 }],
++    [{ "command": "node --test tests/sum.test.mjs", "passed": true, "output": "pass 1", "durationMs": 38 }]
++  ]
++}
+diff --git a/docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json b/docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json
+new file mode 100644
+index 00000000..c09bfd8d
+--- /dev/null
++++ b/docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json
+@@ -0,0 +1,12 @@
++{
++  "author": [
++    { "diff": "+v0", "summary": "attempt 0", "filesChanged": ["lib/sum.ts"], "commit": null },
++    { "diff": "+v1", "summary": "attempt 1", "filesChanged": ["lib/sum.ts"], "commit": null },
++    { "diff": "+v2", "summary": "attempt 2", "filesChanged": ["lib/sum.ts"], "commit": null }
++  ],
++  "reviewer": [
++    { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
++    { "taskId": "demo-sum-helper", "round": 1, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
++    { "taskId": "demo-sum-helper", "round": 2, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" }
++  ]
++}
+diff --git a/docs/ops/cross-review/fixtures/sum-helper.task.json b/docs/ops/cross-review/fixtures/sum-helper.task.json
+new file mode 100644
+index 00000000..a08d8ffa
+--- /dev/null
++++ b/docs/ops/cross-review/fixtures/sum-helper.task.json
+@@ -0,0 +1,11 @@
++{
++  "taskId": "demo-sum-helper",
++  "requirement": "Add a pure helper `sum(numbers)` in lib/ that returns the total of an array of numbers, with 0 for an empty array, and a test for the empty case.",
++  "completionCriteria": [
++    "sum([]) returns 0",
++    "sum([1, 2, 3]) returns 6",
++    "only files under lib/ and tests/ change"
++  ],
++  "baseCommit": "0000000000000000000000000000000000000000",
++  "writableScope": ["lib/", "tests/"]
++}
+diff --git a/docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json b/docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json
+new file mode 100644
+index 00000000..566dbf34
+--- /dev/null
++++ b/docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json
+@@ -0,0 +1,25 @@
++{
++  "taskId": "router-full-catalog-diagnostic-v1",
++  "requirement": "Build the offline foundation for improving Auto Router model selection over the whole catalogue without repeated human hand-offs. (1) A full-catalogue routing diagnostic that uses the product's own routing logic (not a copy) on the development fixture and, per request, shows every catalogue model, its candidacy and exclusion reason, the presence/source/version of per-task quality evidence, the score/band and the actual tie-break criterion, the final primary and the actually executable fallback, why each non-selected model lost, and where no evidence exists to judge. Unevaluated models are not scored 0, not promoted, and no operational score changes. (2) A minimal Claude–Codex cross-review structure: author, independent reviewer, control program; roles configurable; exchange record with task ID, original requirement and completion criteria, change digest, change summary, test results, review conclusion, per-finding location/severity/basis/reproduction, next action; reviewer reads requirement and diff before the author's self-assessment; reviewer has no write access; a new change needs a new review; max 2 fix rounds then hold; preference-only findings follow project rules; unevidenced proposals keep the current version; two AIs agreeing is not a pass without tests and guards. No model calls, no production routing/score/flag change, no push, no workflow dispatch.",
++  "completionCriteria": [
++    "Every model in the catalogue appears in the diagnostic for every item; a model excluded from candidacy carries a fixed reason (tests/routerFullCatalogDiagnostic.test.mjs).",
++    "The diagnostic's candidate set, rejections, primary and deciding criterion equal decideRouterModel's on the same input, and the Router-vs-dispatch output cap difference is reported, not hidden.",
++    "The cross-review loop runs end to end on mocks: pass, request_changes then fix then approve, and revision cap reached (tests/crossReview.test.mjs).",
++    "Invalid JSON, missing result, timeout, execution failure and digest mismatch are named failures, never a pass.",
++    "In dry-run mode the command-line executors are never spawned.",
++    "No production routing behaviour, score, flag, pre-registration, or protection rule changes: existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified."
++  ],
++  "baseCommit": "8134ce44",
++  "writableScope": [
++    "lib/routerFullCatalogDiagnostic.ts",
++    "lib/crossReviewCore.ts",
++    "lib/crossReviewExecutors.ts",
++    "scripts/report-router-full-catalog.mjs",
++    "scripts/cross-review.mjs",
++    "tests/routerFullCatalogDiagnostic.test.mjs",
++    "tests/crossReview.test.mjs",
++    "docs/ops/router-full-catalog-diagnostic/",
++    "docs/ops/cross-review/",
++    "package.json"
++  ]
++}
+diff --git a/docs/ops/router-full-catalog-diagnostic/README.md b/docs/ops/router-full-catalog-diagnostic/README.md
+new file mode 100644
+index 00000000..8b43ca76
+--- /dev/null
++++ b/docs/ops/router-full-catalog-diagnostic/README.md
+@@ -0,0 +1,43 @@
++# Full-catalogue routing diagnostic
++
++What the Router would do with every model in the catalogue, for every item in
++an evaluation set, decided offline by the product's own functions.
++
++```
++npm run report:router-full-catalog -- [--set=docs/ops/router-evaluation-set/development-v0.json] \
++  [--items=adopted|all] [--plan=Pro] [--requested-model=<id>] [--fallback-flag=off|on] \
++  [--json=<out>] [--md=<out>]
++```
++
++`lib/routerFullCatalogDiagnostic.ts` calls `decideRouterModel` for the
++decision and `filterRouterCandidates` / `selectRouterModel` again only to
++explain it; `consistency` on every item says whether the explanation agreed
++with the decision, and a disagreement is reported rather than reconciled. No
++band is moved, no interval invented, no model promoted: an unmeasured model is
++shown as unmeasured.
++
++Per item it records every model's disposition (primary, fallback candidate, or
++refused with the filter's own reason), the quality cell and whether any
++approved evidence stands behind it, the criterion each loser lost to the
++primary on, the ranked fallback candidates with the fallback gate's answer
++under the shipped flag and with the flag on, and the output cap the Router
++routed under beside the one dispatch will apply to the chosen model.
++
++## What the product has that this does not
++
++The product routes over the runtime registry's rows, with health exclusions
++and measured tie-break signals from the database, under the account's plan
++and credits, with the conversation's sticky state. This runs over the static
++catalogue in `lib/models.ts`, with no sticky state and no measured signals,
++so cost from the pricing registry decides every tie. A model an operator has
++disabled in the registry is absent from the product's candidate list and
++produces no rejection row there; here the static catalogue's disabled rows
++are refused as `disabled`. The report's `inputs` block records what was used.
++
++## Files
++
++- `development-v0.md`: the report on the 210 adopted items, plan Pro, routed
++  under `gpt-5-6-luna`'s cap, fallback flag off.
++- `development-v0.summary.json`: the same run with per-item decision,
++  rejections, caps, fallback and evidence; per-model rows are in the full
++  JSON the script writes under `artifacts/`, which is not committed.
+diff --git a/lib/crossReviewCore.ts b/lib/crossReviewCore.ts
+new file mode 100644
+index 00000000..a834ef0a
+--- /dev/null
++++ b/lib/crossReviewCore.ts
+@@ -0,0 +1,724 @@
++/**
++ * The control program for an author–reviewer exchange between two AI
++ * executors, with a fix loop and a hard iteration cap.
++ *
++ * ## Roles
++ *
++ * - The **author** produces a change for a task: a diff, a summary, the files
++ *   it touched, and -- kept apart from all of that -- its own assessment.
++ * - The **reviewer** reads the original requirement and the actual diff first,
++ *   then the test results, and only then the author's summary and
++ *   self-assessment, labelled as such. It returns a conclusion and findings,
++ *   each with a location, a severity, and the basis it rests on.
++ * - This module is the **control program**: it hands results between the two,
++ *   computes the change digest itself, runs the tests, applies the handling
++ *   rules, counts the rounds, and decides the outcome. Neither executor
++ *   decides whether the task passed.
++ *
++ * Which model plays which role is configuration (`RoleAssignment`), and the
++ * executors are injected, so the same loop runs against scripted mocks in a
++ * test and against command-line tools in a session. Nothing here spawns a
++ * process, reads a file, or reaches the network.
++ *
++ * ## Rules the loop applies, from the operating defaults
++ *
++ * - An approval is bound to a digest. The reviewer names the digest it
++ *   reviewed; if that is not the digest of the change in hand, the verdict is
++ *   not a verdict on this change and the run fails. An approval of round n is
++ *   never reused for round n+1.
++ * - Two executors agreeing is not a pass. The tests the control program ran
++ *   must pass and the guard rules must hold, or the approved change goes back
++ *   to the author (counting a round) and, if rounds are exhausted, on hold.
++ * - A finding with evidence, or a judgement with a reproduction, is
++ *   actionable: the author fixes it and the change is re-reviewed. A finding
++ *   that is only a preference is settled by the project's rules and recorded
++ *   as such. A judgement with no reproduction is insufficient evidence: the
++ *   current version stands, and the finding is recorded, never dropped.
++ * - After `maxRevisions` fix rounds an unresolved change is put on hold with
++ *   its findings and reproduction material. It is not retried.
++ * - Invalid JSON, a missing result, a timeout, an executor failure and a
++ *   digest mismatch are each a named failure. None of them is a pass.
++ *
++ * Pure apart from the injected executors, test runner and clock.
++ */
++
++export const CROSS_REVIEW_VERSION = "cross-review-v1";
++
++export type CrossReviewRole = "author" | "reviewer";
++
++/** Which executor plays which role. Swappable; the loop does not care. */
++export type RoleAssignment = {
++    author: string;
++    reviewer: string;
++};
++
++export const DEFAULT_ROLE_ASSIGNMENT: RoleAssignment = {
++    author: "claude",
++    reviewer: "codex",
++};
++
++export type CrossReviewTask = {
++    taskId: string;
++    /** The original requirement, verbatim. What the reviewer reads first. */
++    requirement: string;
++    completionCriteria: readonly string[];
++    /** The commit the change is measured against. */
++    baseCommit: string;
++    /**
++     * Paths the author may write. The reviewer writes nowhere: it is given
++     * the diff as text and returns a verdict as text, so there is nothing it
++     * could write even if it wanted to. Two executors never edit one file.
++     */
++    writableScope: readonly string[];
++};
++
++/** What an author executor returns. Its digest claim, if any, is ignored. */
++export type AuthorOutput = {
++    /** The unified diff against `baseCommit`, or the current worktree. */
++    diff: string;
++    summary: string;
++    filesChanged: readonly string[];
++    /**
++     * The author's own view of its work. Carried separately so the reviewer
++     * can be shown the requirement and the diff before it, and so a reader of
++     * the record can tell the author's claim from the reviewer's finding.
++     */
++    selfAssessment?: string;
++    /** The commit the author made, or null when the change is a worktree. */
++    commit?: string | null;
++};
++
++export type TestRun = {
++    command: string;
++    passed: boolean;
++    /** Kept short by the caller; the record is not a log. */
++    output: string;
++    durationMs: number;
++};
++
++export const FINDING_SEVERITIES = ["error", "warning", "nit"] as const;
++export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
++
++export const FINDING_BASES = [
++    /** Backed by something checkable: a failing test, a wrong output, a spec line. */
++    "evidence",
++    /** A matter of taste. Settled by the project's rules, not by argument. */
++    "preference",
++    /** An opinion about behaviour. Actionable only with a reproduction. */
++    "judgement",
++] as const;
++export type FindingBasis = (typeof FINDING_BASES)[number];
++
++export type Finding = {
++    /** `path:line`, a symbol, or a section. Never empty. */
++    location: string;
++    severity: FindingSeverity;
++    basis: FindingBasis;
++    claim: string;
++    /** How to see the problem: a command, an input and expected output. */
++    reproduction?: string;
++};
++
++export const REVIEW_CONCLUSIONS = ["approve", "request_changes", "blocked"] as const;
++export type ReviewConclusion = (typeof REVIEW_CONCLUSIONS)[number];
++
++export type ReviewVerdict = {
++    taskId: string;
++    round: number;
++    /** The digest of the change the reviewer actually read. */
++    reviewedDigest: string;
++    conclusion: ReviewConclusion;
++    findings: readonly Finding[];
++    nextAction: string;
++};
++
++/** What the reviewer is handed, in the order it is meant to read it. */
++export type ReviewRequest = {
++    task: CrossReviewTask;
++    round: number;
++    changeDigest: string;
++    commit: string | null;
++    diff: string;
++    testResults: readonly TestRun[];
++    guardViolations: readonly string[];
++    /** Last, and labelled: the author's summary and self-assessment. */
++    authorSummary: string;
++    authorSelfAssessment: string | null;
++    /** Findings from the previous round, so the reviewer can check they were addressed. */
++    previousFindings: readonly Finding[];
++};
++
++export type AuthorRequest = {
++    task: CrossReviewTask;
++    round: number;
++    /** Actionable findings and failing tests from the previous round; null on round 0. */
++    feedback: {
++        findings: readonly Finding[];
++        failedTests: readonly TestRun[];
++        guardViolations: readonly string[];
++    } | null;
++};
++
++export const EXECUTOR_FAILURES = [
++    "invalid_json",
++    "missing_result",
++    "timeout",
++    "execution_failed",
++    "schema_mismatch",
++    "not_executed",
++] as const;
++export type ExecutorFailure = (typeof EXECUTOR_FAILURES)[number];
++
++export type ExecutorResult<T> =
++    | { ok: true; value: T }
++    | { ok: false; failure: ExecutorFailure; detail: string };
++
++export type AuthorExecutor = {
++    id: string;
++    produce: (request: AuthorRequest) => Promise<ExecutorResult<AuthorOutput>>;
++};
++
++export type ReviewerExecutor = {
++    id: string;
++    review: (request: ReviewRequest) => Promise<ExecutorResult<ReviewVerdict>>;
++};
++
++export type FindingDisposition =
++    /** Sent back to the author. */
++    | "fix_requested"
++    /** A preference; the project's rules decide, and the change stands. */
++    | "resolved_by_project_rule"
++    /** A judgement with no reproduction; the current version is kept. */
++    | "insufficient_evidence_kept_current"
++    /** Rounds exhausted with this still open. */
++    | "unresolved_on_hold";
++
++export type DisposedFinding = Finding & { disposition: FindingDisposition };
++
++export type RoundRecord = {
++    round: number;
++    changeDigest: string;
++    commit: string | null;
++    filesChanged: readonly string[];
++    changeSummary: string;
++    testResults: readonly TestRun[];
++    guardViolations: readonly string[];
++    reviewConclusion: ReviewConclusion | null;
++    findings: readonly DisposedFinding[];
++    nextAction: string;
++};
++
++export const CROSS_REVIEW_STATUSES = ["passed", "on_hold", "failed"] as const;
++export type CrossReviewStatus = (typeof CROSS_REVIEW_STATUSES)[number];
++
++export type CrossReviewFailure =
++    | `author_${ExecutorFailure}`
++    | `reviewer_${ExecutorFailure}`
++    | "digest_mismatch"
++    | "task_mismatch"
++    | "round_mismatch"
++    | "scope_violation";
++
++export type HoldReason =
++    | "revisions_exhausted"
++    | "reviewer_blocked"
++    | "approved_but_checks_failed";
++
++/**
++ * The exchange record: everything either side needs, and nothing that lets
++ * one side's claim stand in for the other's finding.
++ */
++export type ExchangeRecord = {
++    version: string;
++    taskId: string;
++    requirement: string;
++    completionCriteria: readonly string[];
++    baseCommit: string;
++    roles: RoleAssignment;
++    maxRevisions: number;
++    rounds: readonly RoundRecord[];
++    /** The latest change's digest, the one any further verdict must name. */
++    changeDigest: string | null;
++    commit: string | null;
++    changeSummary: string | null;
++    testResults: readonly TestRun[];
++    reviewConclusion: ReviewConclusion | null;
++    findings: readonly DisposedFinding[];
++    nextAction: string;
++    status: CrossReviewStatus;
++    failure: CrossReviewFailure | null;
++    holdReason: HoldReason | null;
++    producedAt: string;
++};
++
++export type CrossReviewOutcome = {
++    status: CrossReviewStatus;
++    failure: CrossReviewFailure | null;
++    holdReason: HoldReason | null;
++    exchange: ExchangeRecord;
++};
++
++export type CrossReviewControl = {
++    task: CrossReviewTask;
++    roles?: RoleAssignment;
++    author: AuthorExecutor;
++    reviewer: ReviewerExecutor;
++    /** Runs the required tests against the change. The control program's, not the author's. */
++    runTests: (change: { diff: string; filesChanged: readonly string[]; commit: string | null }) => Promise<readonly TestRun[]>;
++    /** Existing protection rules. A non-empty list is a failed check. */
++    guards?: (change: { diff: string; filesChanged: readonly string[] }) => Promise<readonly string[]>;
++    /** sha256 of the diff text. Injected so a test can pin it; the control computes it, never the author. */
++    digest: (diff: string) => string;
++    /** Fix-and-re-review rounds after the first review. Default 2. */
++    maxRevisions?: number;
++    timeoutMs?: number;
++    now?: () => Date;
++};
++
++export const DEFAULT_MAX_REVISIONS = 2;
++export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
++
++const isRecord = (value: unknown): value is Record<string, unknown> =>
++    typeof value === "object" && value !== null && !Array.isArray(value);
++
++const isStringArray = (value: unknown): value is string[] =>
++    Array.isArray(value) && value.every((entry) => typeof entry === "string");
++
++/** Why a parsed object is not an `AuthorOutput`. Empty means it is one. */
++export const authorOutputProblems = (value: unknown): readonly string[] => {
++    if (!isRecord(value)) return ["not an object"];
++    const problems: string[] = [];
++    if (typeof value.diff !== "string") problems.push("diff must be a string");
++    if (typeof value.summary !== "string" || value.summary.trim() === "") problems.push("summary must be a non-empty string");
++    if (!isStringArray(value.filesChanged)) problems.push("filesChanged must be a string array");
++    if (value.selfAssessment !== undefined && typeof value.selfAssessment !== "string") {
++        problems.push("selfAssessment must be a string when present");
++    }
++    if (value.commit !== undefined && value.commit !== null && typeof value.commit !== "string") {
++        problems.push("commit must be a string or null");
++    }
++    return problems;
++};
++
++const findingProblems = (value: unknown, index: number): readonly string[] => {
++    if (!isRecord(value)) return [`findings[${index}] is not an object`];
++    const problems: string[] = [];
++    if (typeof value.location !== "string" || value.location.trim() === "") problems.push(`findings[${index}].location must be a non-empty string`);
++    if (!FINDING_SEVERITIES.includes(value.severity as FindingSeverity)) problems.push(`findings[${index}].severity must be one of ${FINDING_SEVERITIES.join("|")}`);
++    if (!FINDING_BASES.includes(value.basis as FindingBasis)) problems.push(`findings[${index}].basis must be one of ${FINDING_BASES.join("|")}`);
++    if (typeof value.claim !== "string" || value.claim.trim() === "") problems.push(`findings[${index}].claim must be a non-empty string`);
++    if (value.reproduction !== undefined && typeof value.reproduction !== "string") problems.push(`findings[${index}].reproduction must be a string when present`);
++    return problems;
++};
++
++/** Why a parsed object is not a `ReviewVerdict`. Empty means it is one. */
++export const reviewVerdictProblems = (value: unknown): readonly string[] => {
++    if (!isRecord(value)) return ["not an object"];
++    const problems: string[] = [];
++    if (typeof value.taskId !== "string") problems.push("taskId must be a string");
++    if (typeof value.round !== "number" || !Number.isInteger(value.round)) problems.push("round must be an integer");
++    if (typeof value.reviewedDigest !== "string" || value.reviewedDigest === "") problems.push("reviewedDigest must be a non-empty string");
++    if (!REVIEW_CONCLUSIONS.includes(value.conclusion as ReviewConclusion)) problems.push(`conclusion must be one of ${REVIEW_CONCLUSIONS.join("|")}`);
++    if (!Array.isArray(value.findings)) problems.push("findings must be an array");
++    else value.findings.forEach((finding, index) => problems.push(...findingProblems(finding, index)));
++    if (typeof value.nextAction !== "string") problems.push("nextAction must be a string");
++    return problems;
++};
++
++/**
++ * Parses executor output as JSON and checks it against a schema.
++ *
++ * Whole text first; then the last line, for a tool that streams events and
++ * prints its result last; then the last `{...}` block. Anything else is
++ * `invalid_json`, and a document that parses but is not the shape asked for
++ * is `schema_mismatch`. An empty output is `missing_result`.
++ */
++export const parseExecutorJson = <T>(
++    text: string,
++    problemsOf: (value: unknown) => readonly string[]
++): ExecutorResult<T> => {
++    if (typeof text !== "string" || text.trim() === "") {
++        return { ok: false, failure: "missing_result", detail: "the executor produced no output" };
++    }
++    const attempts: string[] = [text.trim()];
++    const lines = text.trim().split("\n");
++    if (lines.length > 1) attempts.push(lines[lines.length - 1].trim());
++    const lastBrace = text.lastIndexOf("}");
++    const firstBrace = text.indexOf("{");
++    if (firstBrace !== -1 && lastBrace > firstBrace) attempts.push(text.slice(firstBrace, lastBrace + 1));
++
++    let parsed: unknown = undefined;
++    let parsedAny = false;
++    for (const attempt of attempts) {
++        try {
++            parsed = JSON.parse(attempt);
++            parsedAny = true;
++            break;
++        } catch {
++            // try the next shape
++        }
++    }
++    if (!parsedAny) {
++        return { ok: false, failure: "invalid_json", detail: `no JSON document in ${text.length} byte(s) of output` };
++    }
++    const problems = problemsOf(parsed);
++    if (problems.length > 0) {
++        return { ok: false, failure: "schema_mismatch", detail: problems.join("; ") };
++    }
++    return { ok: true, value: parsed as T };
++};
++
++const withTimeout = async <T>(
++    work: Promise<ExecutorResult<T>>,
++    timeoutMs: number
++): Promise<ExecutorResult<T>> => {
++    let timer: ReturnType<typeof setTimeout> | null = null;
++    const timeout = new Promise<ExecutorResult<T>>((resolve) => {
++        timer = setTimeout(
++            () => resolve({ ok: false, failure: "timeout", detail: `no result within ${timeoutMs}ms` }),
++            timeoutMs
++        );
++    });
++    try {
++        return await Promise.race([
++            work.catch(
++                (error): ExecutorResult<T> => ({
++                    ok: false,
++                    failure: "execution_failed",
++                    detail: error instanceof Error ? error.message : String(error),
++                })
++            ),
++            timeout,
++        ]);
++    } finally {
++        if (timer) clearTimeout(timer);
++    }
++};
++
++/** A finding the author has to act on, under the operating defaults. */
++export const isActionable = (finding: Finding): boolean =>
++    finding.basis === "evidence" ||
++    (finding.basis === "judgement" && typeof finding.reproduction === "string" && finding.reproduction.trim() !== "");
++
++const dispose = (finding: Finding, disposition: FindingDisposition): DisposedFinding => ({
++    ...finding,
++    disposition,
++});
++
++const disposeFindings = (findings: readonly Finding[], canRevise: boolean): readonly DisposedFinding[] =>
++    findings.map((finding) => {
++        if (isActionable(finding)) return dispose(finding, canRevise ? "fix_requested" : "unresolved_on_hold");
++        if (finding.basis === "preference") return dispose(finding, "resolved_by_project_rule");
++        return dispose(finding, "insufficient_evidence_kept_current");
++    });
++
++const scopeViolations = (task: CrossReviewTask, filesChanged: readonly string[]): readonly string[] => {
++    if (task.writableScope.length === 0) return [];
++    return filesChanged.filter(
++        (file) => !task.writableScope.some((scope) => file === scope || file.startsWith(scope.endsWith("/") ? scope : `${scope}/`))
++    );
++};
++
++export async function runCrossReview(control: CrossReviewControl): Promise<CrossReviewOutcome> {
++    const roles = control.roles ?? DEFAULT_ROLE_ASSIGNMENT;
++    const maxRevisions = control.maxRevisions ?? DEFAULT_MAX_REVISIONS;
++    const timeoutMs = control.timeoutMs ?? DEFAULT_TIMEOUT_MS;
++    const now = control.now ?? (() => new Date());
++    const task = control.task;
++    const rounds: RoundRecord[] = [];
++
++    const finish = (
++        status: CrossReviewStatus,
++        failure: CrossReviewFailure | null,
++        holdReason: HoldReason | null,
++        nextAction: string
++    ): CrossReviewOutcome => {
++        const last = rounds[rounds.length - 1] ?? null;
++        const exchange: ExchangeRecord = {
++            version: CROSS_REVIEW_VERSION,
++            taskId: task.taskId,
++            requirement: task.requirement,
++            completionCriteria: task.completionCriteria,
++            baseCommit: task.baseCommit,
++            roles,
++            maxRevisions,
++            rounds,
++            changeDigest: last?.changeDigest ?? null,
++            commit: last?.commit ?? null,
++            changeSummary: last?.changeSummary ?? null,
++            testResults: last?.testResults ?? [],
++            reviewConclusion: last?.reviewConclusion ?? null,
++            findings: last?.findings ?? [],
++            nextAction,
++            status,
++            failure,
++            holdReason,
++            producedAt: now().toISOString(),
++        };
++        return { status, failure, holdReason, exchange };
++    };
++
++    let feedback: AuthorRequest["feedback"] = null;
++    let previousFindings: readonly Finding[] = [];
++
++    for (let round = 0; round <= maxRevisions; round += 1) {
++        const produced: ExecutorResult<AuthorOutput> = await withTimeout<AuthorOutput>(
++            control.author.produce({ task, round, feedback }),
++            timeoutMs
++        );
++        if (!produced.ok) {
++            rounds.push({
++                round,
++                changeDigest: "",
++                commit: null,
++                filesChanged: [],
++                changeSummary: "",
++                testResults: [],
++                guardViolations: [],
++                reviewConclusion: null,
++                findings: [],
++                nextAction: `author ${produced.failure}: ${produced.detail}`,
++            });
++            return finish("failed", `author_${produced.failure}`, null, "the author produced no usable change; nothing was reviewed");
++        }
++        const output: AuthorOutput = produced.value;
++        const violations = scopeViolations(task, output.filesChanged);
++        if (violations.length > 0) {
++            rounds.push({
++                round,
++                changeDigest: control.digest(output.diff),
++                commit: output.commit ?? null,
++                filesChanged: output.filesChanged,
++                changeSummary: output.summary,
++                testResults: [],
++                guardViolations: violations.map((file) => `outside writable scope: ${file}`),
++                reviewConclusion: null,
++                findings: [],
++                nextAction: "the change touched files outside the task's writable scope",
++            });
++            return finish("failed", "scope_violation", null, "the change touched files outside the task's writable scope; nothing was reviewed");
++        }
++
++        // The control program's digest, of the diff it holds. The author's
++        // own claim about its digest, if it made one, is not consulted.
++        const changeDigest = control.digest(output.diff);
++        const testResults = await control.runTests({
++            diff: output.diff,
++            filesChanged: output.filesChanged,
++            commit: output.commit ?? null,
++        });
++        const guardViolations: readonly string[] = control.guards
++            ? await control.guards({ diff: output.diff, filesChanged: output.filesChanged })
++            : [];
++        const checksPass = testResults.every((run) => run.passed) && guardViolations.length === 0;
++
++        const reviewed: ExecutorResult<ReviewVerdict> = await withTimeout<ReviewVerdict>(
++            control.reviewer.review({
++                task,
++                round,
++                changeDigest,
++                commit: output.commit ?? null,
++                diff: output.diff,
++                testResults,
++                guardViolations,
++                authorSummary: output.summary,
++                authorSelfAssessment: output.selfAssessment ?? null,
++                previousFindings,
++            }),
++            timeoutMs
++        );
++        const record: RoundRecord = {
++            round,
++            changeDigest,
++            commit: output.commit ?? null,
++            filesChanged: output.filesChanged,
++            changeSummary: output.summary,
++            testResults,
++            guardViolations,
++            reviewConclusion: null,
++            findings: [],
++            nextAction: "",
++        };
++        if (!reviewed.ok) {
++            rounds.push({ ...record, nextAction: `reviewer ${reviewed.failure}: ${reviewed.detail}` });
++            return finish("failed", `reviewer_${reviewed.failure}`, null, "the reviewer returned no usable verdict; the change is not approved");
++        }
++        const verdict = reviewed.value;
++        if (verdict.reviewedDigest !== changeDigest) {
++            rounds.push({
++                ...record,
++                reviewConclusion: verdict.conclusion,
++                nextAction: `the verdict names digest ${verdict.reviewedDigest}, the change is ${changeDigest}`,
++            });
++            return finish("failed", "digest_mismatch", null, "the verdict is about a different change; it does not apply to this one");
++        }
++        if (verdict.taskId !== task.taskId) {
++            rounds.push({ ...record, reviewConclusion: verdict.conclusion, nextAction: `the verdict names task ${verdict.taskId}` });
++            return finish("failed", "task_mismatch", null, "the verdict is about a different task");
++        }
++        if (verdict.round !== round) {
++            rounds.push({ ...record, reviewConclusion: verdict.conclusion, nextAction: `the verdict names round ${verdict.round}` });
++            return finish("failed", "round_mismatch", null, "the verdict is about a different round; an earlier approval is not reused");
++        }
++
++        const canRevise = round < maxRevisions;
++
++        if (verdict.conclusion === "blocked") {
++            rounds.push({
++                ...record,
++                reviewConclusion: "blocked",
++                findings: verdict.findings.map((finding) => dispose(finding, "unresolved_on_hold")),
++                nextAction: verdict.nextAction,
++            });
++            return finish("on_hold", null, "reviewer_blocked", verdict.nextAction || "the reviewer could not review this change; a person decides");
++        }
++
++        if (verdict.conclusion === "approve") {
++            const disposed = disposeFindings(verdict.findings, canRevise);
++            if (checksPass && !disposed.some((finding) => finding.disposition === "fix_requested")) {
++                rounds.push({ ...record, reviewConclusion: "approve", findings: disposed, nextAction: verdict.nextAction });
++                return finish("passed", null, null, verdict.nextAction || "approved on this digest with tests and guards passing");
++            }
++            // Two executors agreeing is not a pass. Failing tests or a guard
++            // violation send the change back, and count a round.
++            rounds.push({
++                ...record,
++                reviewConclusion: "approve",
++                findings: disposed,
++                nextAction: canRevise
++                    ? "approved, but a required check failed; the author fixes it and the change is re-reviewed"
++                    : "approved, but a required check failed and no revision remains",
++            });
++            if (!canRevise) {
++                return finish("on_hold", null, "approved_but_checks_failed", "approved by the reviewer, refused by the checks; a person decides");
++            }
++            feedback = {
++                findings: disposed.filter((finding) => finding.disposition === "fix_requested"),
++                failedTests: testResults.filter((run) => !run.passed),
++                guardViolations,
++            };
++            previousFindings = verdict.findings;
++            continue;
++        }
++
++        // request_changes
++        const disposed = disposeFindings(verdict.findings, canRevise);
++        const actionable = disposed.filter((finding) => finding.disposition === "fix_requested");
++        const unresolved = disposed.filter((finding) => finding.disposition === "unresolved_on_hold");
++        if (actionable.length === 0 && unresolved.length === 0 && checksPass) {
++            // Nothing the reviewer raised rests on evidence, and the checks
++            // pass: the current version stands, with every finding recorded.
++            rounds.push({
++                ...record,
++                reviewConclusion: "request_changes",
++                findings: disposed,
++                nextAction: "no finding was actionable under the operating defaults; the current version stands",
++            });
++            return finish("passed", null, null, "changes were requested on preference or unreproduced judgement only; the current version stands with the findings on record");
++        }
++        rounds.push({
++            ...record,
++            reviewConclusion: "request_changes",
++            findings: disposed,
++            nextAction: canRevise ? verdict.nextAction || "fix and re-review" : "revisions exhausted",
++        });
++        if (!canRevise) {
++            return finish("on_hold", null, "revisions_exhausted", `unresolved after ${maxRevisions} revision(s); on hold with the findings and reproductions recorded`);
++        }
++        feedback = {
++            findings: actionable,
++            failedTests: testResults.filter((run) => !run.passed),
++            guardViolations,
++        };
++        previousFindings = verdict.findings;
++    }
++
++    // Unreachable: every branch above returns before the loop ends.
++    return finish("on_hold", null, "revisions_exhausted", "the loop ended without a verdict");
++}
++
++/**
++ * The text the reviewer is given, in reading order: requirement, criteria,
++ * the diff, the tests, and only then the author's account of itself. The
++ * reviewer answers with one JSON document in the `ReviewVerdict` shape.
++ */
++export const renderReviewPrompt = (request: ReviewRequest): string => {
++    const lines: string[] = [];
++    lines.push(`# Independent review — task ${request.task.taskId}, round ${request.round}`);
++    lines.push("");
++    lines.push("Review the change against the original requirement below. Read the requirement and the diff before anything else.");
++    lines.push("Do not take the author's summary as a description of what the change does; the diff is.");
++    lines.push("");
++    lines.push("## Requirement (original)");
++    lines.push("");
++    lines.push(request.task.requirement);
++    lines.push("");
++    lines.push("## Completion criteria");
++    lines.push("");
++    for (const criterion of request.task.completionCriteria) lines.push(`- ${criterion}`);
++    lines.push("");
++    lines.push(`## Change under review — digest ${request.changeDigest}${request.commit ? `, commit ${request.commit}` : ""}`);
++    lines.push("");
++    lines.push("```diff");
++    lines.push(request.diff);
++    lines.push("```");
++    lines.push("");
++    lines.push("## Test results (run by the control program)");
++    lines.push("");
++    if (request.testResults.length === 0) lines.push("- none run");
++    for (const run of request.testResults) {
++        lines.push(`- ${run.passed ? "PASS" : "FAIL"} \`${run.command}\` (${run.durationMs}ms)`);
++        if (run.output.trim()) lines.push(`  ${run.output.trim().split("\n").join("\n  ")}`);
++    }
++    if (request.guardViolations.length > 0) {
++        lines.push("");
++        lines.push("## Guard violations");
++        lines.push("");
++        for (const violation of request.guardViolations) lines.push(`- ${violation}`);
++    }
++    if (request.previousFindings.length > 0) {
++        lines.push("");
++        lines.push("## Findings from the previous round (check each was addressed)");
++        lines.push("");
++        for (const finding of request.previousFindings) {
++            lines.push(`- [${finding.severity}/${finding.basis}] ${finding.location}: ${finding.claim}`);
++        }
++    }
++    lines.push("");
++    lines.push("## Author's account (read last; a claim, not a finding)");
++    lines.push("");
++    lines.push(`Summary: ${request.authorSummary}`);
++    if (request.authorSelfAssessment) lines.push(`Self-assessment: ${request.authorSelfAssessment}`);
++    lines.push("");
++    lines.push("## Answer format");
++    lines.push("");
++    lines.push("Reply with exactly one JSON document and nothing else:");
++    lines.push("");
++    lines.push("```json");
++    lines.push(
++        JSON.stringify(
++            {
++                taskId: request.task.taskId,
++                round: request.round,
++                reviewedDigest: request.changeDigest,
++                conclusion: "approve | request_changes | blocked",
++                findings: [
++                    {
++                        location: "path:line or symbol",
++                        severity: "error | warning | nit",
++                        basis: "evidence | preference | judgement",
++                        claim: "what is wrong, in one sentence",
++                        reproduction: "how to see it (required for a judgement to be acted on)",
++                    },
++                ],
++                nextAction: "one sentence",
++            },
++            null,
++            2
++        )
++    );
++    lines.push("```");
++    lines.push("");
++    lines.push("`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; a `judgement` without a reproduction is recorded and not acted on.");
++    return `${lines.join("\n")}\n`;
++};
+diff --git a/lib/crossReviewExecutors.ts b/lib/crossReviewExecutors.ts
+new file mode 100644
+index 00000000..bca57a3d
+--- /dev/null
++++ b/lib/crossReviewExecutors.ts
+@@ -0,0 +1,309 @@
++/**
++ * Executors for the cross-review loop: scripted mocks for tests and the
++ * offline flow, and command-line shells for Claude Code and Codex that never
++ * run a process unless a caller passes a spawner and asks for live mode.
++ *
++ * ## The boundary
++ *
++ * A command-line executor takes `spawn` as an argument. In `dry-run` mode it
++ * returns `not_executed` without touching it, and a test can hand it a
++ * spawner that throws to prove the point. There is no default spawner: an
++ * executor built without one cannot run anything, whatever mode it is in.
++ * That is the same arrangement `lib/aiReviewEvalLiveAdapter.ts` uses for the
++ * evaluation harness -- whether an invocation can spend is a question about
++ * what was passed in, not about control flow that might be mis-read.
++ *
++ * ## What the shells assume about the tools
++ *
++ * Both are asked for one JSON document on stdout, in the shape the control
++ * program checks (`authorOutputProblems` / `reviewVerdictProblems`). The
++ * prompt says so and the parser tolerates a result printed after streamed
++ * lines. The flag sets below are recorded as the intended invocation and
++ * must be checked against the installed tool's `--help` before a live run;
++ * `CLI_INVOCATIONS` exists so that check is a comparison against one place.
++ */
++
++import {
++    authorOutputProblems,
++    parseExecutorJson,
++    renderReviewPrompt,
++    reviewVerdictProblems,
++    type AuthorExecutor,
++    type AuthorOutput,
++    type AuthorRequest,
++    type ExecutorResult,
++    type ReviewerExecutor,
++    type ReviewRequest,
++    type ReviewVerdict,
++} from "@/lib/crossReviewCore";
++
++export type ExecutorMode = "mock" | "dry-run" | "live";
++
++/** One scripted answer per round. A function may inspect the request. */
++export type MockAuthorScript = readonly (
++    | ExecutorResult<AuthorOutput>
++    | ((request: AuthorRequest) => ExecutorResult<AuthorOutput>)
++)[];
++
++export type MockReviewerScript = readonly (
++    | ExecutorResult<ReviewVerdict>
++    /** `reviewedDigest: "@current"` in a scripted verdict is replaced with the request's digest. */
++    | ((request: ReviewRequest) => ExecutorResult<ReviewVerdict>)
++)[];
++
++const missing = <T>(role: string, round: number): ExecutorResult<T> => ({
++    ok: false,
++    failure: "missing_result",
++    detail: `the mock ${role} has no scripted answer for round ${round}`,
++});
++
++export const mockAuthor = (id: string, script: MockAuthorScript): AuthorExecutor & { calls: AuthorRequest[] } => {
++    const calls: AuthorRequest[] = [];
++    return {
++        id,
++        calls,
++        produce: async (request) => {
++            calls.push(request);
++            const entry = script[request.round];
++            if (entry === undefined) return missing<AuthorOutput>("author", request.round);
++            return typeof entry === "function" ? entry(request) : entry;
++        },
++    };
++};
++
++export const mockReviewer = (
++    id: string,
++    script: MockReviewerScript
++): ReviewerExecutor & { calls: ReviewRequest[] } => {
++    const calls: ReviewRequest[] = [];
++    return {
++        id,
++        calls,
++        review: async (request) => {
++            calls.push(request);
++            const entry = script[request.round];
++            if (entry === undefined) return missing<ReviewVerdict>("reviewer", request.round);
++            const result = typeof entry === "function" ? entry(request) : entry;
++            if (result.ok && result.value.reviewedDigest === "@current") {
++                return { ok: true, value: { ...result.value, reviewedDigest: request.changeDigest } };
++            }
++            return result;
++        },
++    };
++};
++
++/** A scripted reviewer answer that approves whatever it is shown, on the right digest. */
++export const approveCurrent = (taskId: string, round: number, nextAction = "merge"): ExecutorResult<ReviewVerdict> => ({
++    ok: true,
++    value: { taskId, round, reviewedDigest: "@current", conclusion: "approve", findings: [], nextAction },
++});
++
++/** What a spawner returns. Mirrors the useful part of `child_process.spawnSync`. */
++export type SpawnResult = {
++    status: number | null;
++    stdout: string;
++    stderr: string;
++    /** True when the spawner itself enforced a timeout. */
++    timedOut?: boolean;
++    error?: Error;
++};
++
++export type Spawner = (
++    command: string,
++    args: readonly string[],
++    options: { input: string; cwd: string; timeoutMs: number; env?: Record<string, string | undefined> }
++) => Promise<SpawnResult>;
++
++export type CliInvocation = {
++    command: string;
++    /** Arguments before the prompt. The prompt is passed on stdin. */
++    args: readonly string[];
++    /** What the invocation is for, so a reader can check it against `--help`. */
++    note: string;
++};
++
++/**
++ * The intended invocations, one per tool and role. Recorded, not verified:
++ * `codex` is not installed where this was written, and the Claude Code flags
++ * were read from `claude --help` of 2.1.266. Check both before a live run.
++ */
++export const CLI_INVOCATIONS: Readonly<Record<"claude" | "codex", Readonly<Record<"author" | "reviewer", CliInvocation>>>> = {
++    claude: {
++        author: {
++            command: "claude",
++            args: ["--print", "--output-format", "json", "--permission-mode", "acceptEdits"],
++            note: "Claude Code non-interactive; may edit within the task's writable scope; result JSON on stdout.",
++        },
++        reviewer: {
++            command: "claude",
++            args: ["--print", "--output-format", "json", "--allowedTools", "Read,Grep,Glob"],
++            note: "Claude Code non-interactive with read-only tools; no write tool is offered.",
++        },
++    },
++    codex: {
++        author: {
++            command: "codex",
++            args: ["--sandbox", "workspace-write", "exec", "--json", "-"],
++            note:
++                "Codex non-interactive: prompt on stdin (`-`), `--json` prints JSONL events, the final " +
++                "agent_message carries the document. `--sandbox` is the root CLI's flag; unverified here.",
++        },
++        reviewer: {
++            command: "codex",
++            args: ["--sandbox", "read-only", "exec", "--json", "-"],
++            note: "Codex non-interactive in the read-only sandbox; it cannot write to the change.",
++        },
++    },
++};
++
++export type CliExecutorOptions = {
++    id: string;
++    invocation: CliInvocation;
++    mode: Exclude<ExecutorMode, "mock">;
++    cwd: string;
++    timeoutMs: number;
++    /** Required for `live`; ignored -- never called -- in `dry-run`. */
++    spawn?: Spawner;
++    env?: Record<string, string | undefined>;
++};
++
++const notExecuted = <T>(mode: string, invocation: CliInvocation): ExecutorResult<T> => ({
++    ok: false,
++    failure: "not_executed",
++    detail: `${mode}: would run \`${[invocation.command, ...invocation.args].join(" ")}\` with the prompt on stdin`,
++});
++
++const runCli = async <T>(
++    options: CliExecutorOptions,
++    prompt: string,
++    problemsOf: (value: unknown) => readonly string[]
++): Promise<ExecutorResult<T>> => {
++    if (options.mode === "dry-run") return notExecuted<T>("dry-run", options.invocation);
++    if (!options.spawn) {
++        return { ok: false, failure: "execution_failed", detail: "live mode with no spawner; nothing was run" };
++    }
++    let result: SpawnResult;
++    try {
++        result = await options.spawn(options.invocation.command, options.invocation.args, {
++            input: prompt,
++            cwd: options.cwd,
++            timeoutMs: options.timeoutMs,
++            env: options.env,
++        });
++    } catch (error) {
++        return { ok: false, failure: "execution_failed", detail: error instanceof Error ? error.message : String(error) };
++    }
++    if (result.timedOut) return { ok: false, failure: "timeout", detail: `${options.invocation.command} exceeded ${options.timeoutMs}ms` };
++    if (result.error) return { ok: false, failure: "execution_failed", detail: result.error.message };
++    if (result.status !== 0) {
++        return {
++            ok: false,
++            failure: "execution_failed",
++            detail: `${options.invocation.command} exited ${result.status}: ${result.stderr.trim().slice(0, 400)}`,
++        };
++    }
++    return parseExecutorJson<T>(unwrapCodexJsonl(unwrapClaudeResult(result.stdout)), problemsOf);
++};
++
++/**
++ * Codex's `exec --json` prints one event per line and the model's final
++ * message as an `agent_message` item. That text is the document asked for.
++ * Read against `codex-rs/exec/src/cli.rs` (`--json`: "Print events to stdout
++ * as JSONL"); the event shape is not verified against an installed binary,
++ * and output that does not look like it is returned untouched.
++ */
++export const unwrapCodexJsonl = (stdout: string): string => {
++    const lines = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
++    if (lines.length === 0) return stdout;
++    let last: string | null = null;
++    for (const line of lines) {
++        let event: unknown;
++        try {
++            event = JSON.parse(line);
++        } catch {
++            return stdout;
++        }
++        if (typeof event !== "object" || event === null) continue;
++        const item = (event as { item?: { type?: unknown; text?: unknown } }).item;
++        if (item && item.type === "agent_message" && typeof item.text === "string") last = item.text;
++        const msg = (event as { msg?: { type?: unknown; message?: unknown } }).msg;
++        if (msg && msg.type === "agent_message" && typeof msg.message === "string") last = msg.message;
++    }
++    return last ?? stdout;
++};
++
++/**
++ * Claude Code's `--output-format json` wraps the answer in an envelope whose
++ * `result` field holds the model's text. The text is what carries the
++ * document asked for; the envelope is not it. Any other output is returned
++ * as-is for the parser to read directly.
++ */
++export const unwrapClaudeResult = (stdout: string): string => {
++    try {
++        const parsed = JSON.parse(stdout.trim()) as unknown;
++        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
++            const result = (parsed as { result?: unknown }).result;
++            if (typeof result === "string") return result;
++        }
++    } catch {
++        // not an envelope
++    }
++    return stdout;
++};
++
++export const renderAuthorPrompt = (request: AuthorRequest): string => {
++    const lines: string[] = [];
++    lines.push(`# Author — task ${request.task.taskId}, round ${request.round}`);
++    lines.push("");
++    lines.push("## Requirement");
++    lines.push("");
++    lines.push(request.task.requirement);
++    lines.push("");
++    lines.push("## Completion criteria");
++    lines.push("");
++    for (const criterion of request.task.completionCriteria) lines.push(`- ${criterion}`);
++    lines.push("");
++    lines.push(`Base commit: ${request.task.baseCommit}. You may change only: ${request.task.writableScope.join(", ") || "(unrestricted)"}.`);
++    if (request.feedback) {
++        lines.push("");
++        lines.push("## Findings to address from the previous review");
++        lines.push("");
++        for (const finding of request.feedback.findings) {
++            lines.push(`- [${finding.severity}/${finding.basis}] ${finding.location}: ${finding.claim}`);
++            if (finding.reproduction) lines.push(`  reproduction: ${finding.reproduction}`);
++        }
++        for (const run of request.feedback.failedTests) lines.push(`- FAILED \`${run.command}\`: ${run.output.trim().slice(0, 300)}`);
++        for (const violation of request.feedback.guardViolations) lines.push(`- guard: ${violation}`);
++    }
++    lines.push("");
++    lines.push("## Answer format");
++    lines.push("");
++    lines.push("When the change is made, reply with exactly one JSON document and nothing else:");
++    lines.push("");
++    lines.push("```json");
++    lines.push(
++        JSON.stringify(
++            {
++                diff: "unified diff of the change against the base commit",
++                summary: "what changed, in a few sentences",
++                filesChanged: ["path/one", "path/two"],
++                selfAssessment: "optional: your own view of the risks",
++                commit: "commit sha, or null for an uncommitted worktree",
++            },
++            null,
++            2
++        )
++    );
++    lines.push("```");
++    return `${lines.join("\n")}\n`;
++};
++
++export const cliAuthor = (options: CliExecutorOptions): AuthorExecutor => ({
++    id: options.id,
++    produce: (request) => runCli<AuthorOutput>(options, renderAuthorPrompt(request), authorOutputProblems),
++});
++
++export const cliReviewer = (options: CliExecutorOptions): ReviewerExecutor => ({
++    id: options.id,
++    review: (request) => runCli<ReviewVerdict>(options, renderReviewPrompt(request), reviewVerdictProblems),
++});
+diff --git a/lib/routerFullCatalogDiagnostic.ts b/lib/routerFullCatalogDiagnostic.ts
+new file mode 100644
+index 00000000..84949103
+--- /dev/null
++++ b/lib/routerFullCatalogDiagnostic.ts
+@@ -0,0 +1,814 @@
++/**
++ * What the Router would do with the whole catalogue, item by item, offline.
++ *
++ * ## What this is for
++ *
++ * The product's decision (`lib/routerDecision.ts`) answers "which model serves
++ * this turn". It records the eligible set, every rejection with a reason, the
++ * winner and the criterion that separated the top two. It does not say, for
++ * each model that was not chosen, why *that* model lost; it does not say
++ * whether the choice rested on any quality evidence at all; and it does not
++ * compare the output cap it routed under with the one dispatch will actually
++ * apply. Those are the questions somebody improving the Router has to ask
++ * before they can tell whether the whole catalogue is really being
++ * considered, and this module answers them.
++ *
++ * ## What this is not
++ *
++ * Not a second router. Every disposition here comes from the product's own
++ * functions, called with the product's own inputs: `decideRouterModel` makes
++ * the decision, `filterRouterCandidates` and `selectRouterModel` are called
++ * again only to *explain* it, and `consistency` records whether the
++ * explanation agrees with the decision. A disagreement is reported, never
++ * reconciled -- a diagnostic that patched over a difference between itself
++ * and the product would be describing a Router the product does not run.
++ *
++ * Not an evaluation. An unmeasured model is reported as unmeasured: its band
++ * is whatever the score policy says (neutral, today, for every cell), and
++ * nothing here moves a band, invents an interval or promotes a model. The
++ * evidence columns exist to make the absence of evidence legible, which is a
++ * different thing from filling it.
++ *
++ * ## Inputs the product has that this does not
++ *
++ * The product routes over the runtime registry's rows, with health exclusions
++ * and measured tie-break signals read from the database, under the account's
++ * plan and credits, with the conversation's sticky state. This runs over
++ * whatever catalogue the caller passes -- the static one, usually -- with no
++ * sticky state and only the signals the caller supplies. Every one of those
++ * differences is a way the product's answer can differ from this one, and
++ * `DiagnosticReport.inputs` records which values were used so a reader can
++ * tell what the answer is conditional on.
++ *
++ * Pure. No I/O, no clock unless injected, no network, no model call.
++ */
++
++import { autoFallbackScope, type FallbackScope } from "@/lib/autoFallbackGate";
++import { fitChatOutputToContextWindow } from "@/lib/chatContextWindow";
++import { toReservedInputTokens } from "@/lib/chatTokenEstimate";
++import { resolveModelPricing } from "@/lib/modelPricing";
++import type { AiModel, AiProvider, ModelTier } from "@/lib/models";
++import {
++    filterRouterCandidates,
++    type CandidateRejection,
++    type RouterCandidate,
++} from "@/lib/routerCandidates";
++import { expectedTotalCostUsdByModel } from "@/lib/routerCostSignal";
++import {
++    decideRouterModel,
++    ROUTER_VERSIONS,
++    type RouterDecision,
++    type RouterVersions,
++} from "@/lib/routerDecision";
++import {
++    getRouterScoreCell,
++    isRouterScoreSnapshotModel,
++    NEUTRAL_QUALITY_BAND,
++    rankingKindFor,
++    ROUTER_TIE_BREAK_ORDER,
++    type RouterQualityBand,
++    type RouterTieBreakCriterion,
++    type RouterTieBreakSignals,
++} from "@/lib/routerScorePolicy";
++import { selectRouterModel, type SelectionReason } from "@/lib/routerSelection";
++import { MAX_MODEL_FALLBACKS } from "@/lib/routingFallbackPolicy";
++import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
++import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
++
++/** Bump with any change to the shape of the report or how a row is derived. */
++export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v1";
++
++/** One request to diagnose. The shape `EvalSetItem` already has, and no more. */
++export type DiagnosticItem = {
++    id: string;
++    stratum?: string;
++    cell?: string;
++    prompt: string;
++    attachments?: readonly { mediaType?: string }[];
++    webSearchRequested?: boolean;
++};
++
++export type DiagnosticInput = {
++    items: readonly DiagnosticItem[];
++    /** The whole catalogue, disabled and unlisted models included. */
++    models: readonly AiModel[];
++    plan: ModelTier | "Guest";
++    /**
++     * The model whose output cap the Router routes under.
++     *
++     * The product resolves `requestOutputCapTokens` from the model the user
++     * had selected *before* Auto ran (`app/api/chat/route.ts`, the
++     * `selectAutoModel` call), and the candidate filter fits that one figure
++     * to every candidate's window. It is an input here for the same reason:
++     * the diagnostic has to route under the cap the product would, and
++     * report what changes when dispatch then budgets the chosen model under
++     * its own.
++     */
++    requestedModelId: string;
++    searchBackendReadiness: WebSearchBackendReadiness;
++    unhealthyModelIds?: readonly string[];
++    regionBlockedModelIds?: readonly string[];
++    availableCredits?: number;
++    creditsByModelId?: Readonly<Record<string, number>>;
++    signals?: RouterTieBreakSignals;
++    /**
++     * The environment the fallback gate reads its flag from. Defaults to an
++     * empty one, which is the shipped state: `AUTO_ROUTER_FALLBACK_ENABLED`
++     * unset, so no fallback executes. `fallback.scopeIfFlagOn` is computed
++     * under the flag regardless, so the report shows both what would happen
++     * today and what would happen once the flag is turned on.
++     */
++    fallbackEnvironment?: Record<string, string | undefined>;
++    /** Where the catalogue came from, for the record. */
++    catalogueSource?: string;
++    now?: () => number;
++};
++
++export type QualityEvidenceStatus =
++    /** The score policy holds no approved record for this (model, task). */
++    | "no_evidence"
++    /** An approved record moved this cell off neutral. */
++    | "approved_evidence";
++
++export type ModelDisposition = {
++    modelId: string;
++    provider: AiProvider;
++    apiModel: string;
++    enabled: boolean;
++    publiclyListed: boolean;
++    minimumPlan: AiModel["minimumPlan"];
++    contextWindowTokens: number | null;
++    /** Enrolled in `ROUTER_SCORE_SNAPSHOT`. Absence is unmeasured, not bad. */
++    inScoreSnapshot: boolean;
++    disposition: "primary" | "fallback_candidate" | "rejected";
++    /** The first hard filter it failed, or null when it was eligible. */
++    rejectionReason: CandidateRejection | null;
++    /** 1-based position in the Router's ranking; null when rejected. */
++    rank: number | null;
++    /** Output room the Router computed for it; null when rejected. */
++    routerOutputTokens: number | null;
++    quality: {
++        band: RouterQualityBand;
++        evidenceRef: string | null;
++        qualityCi95Lower: number | null;
++        status: QualityEvidenceStatus;
++    };
++    /** The cost figure the tie-break compared, from the pricing registry. */
++    expectedTotalCostUsd: number | null;
++    /**
++     * How this model compares with the primary, head to head, using the
++     * product's own comparator. Null for the primary itself and for rejected
++     * models. `wouldBeatPrimary` is true when the pairwise call picks this
++     * model over the primary -- possible only if the tie-break's epsilons
++     * make the order non-transitive, and reported rather than hidden when it
++     * happens.
++     */
++    versusPrimary: {
++        decidedBy: RouterTieBreakCriterion;
++        marginBands: number;
++        wouldBeatPrimary: boolean;
++    } | null;
++};
++
++export type CapReconciliation = {
++    /** What the Router routed every candidate under. */
++    routerRequestOutputCapTokens: number;
++    routerReservedInputTokens: number;
++    /** The primary's own figures, as dispatch will resolve them. */
++    primary: {
++        modelId: string;
++        routerOutputTokens: number;
++        dispatchRequestOutputCapTokens: number;
++        dispatchProviderMaxOutputTokens: number | null;
++        dispatchReservedInputTokens: number;
++        dispatchOutputTokens: number | null;
++        dispatchFit: "fitted" | "unbounded" | "exceeded";
++        outputCapDiffers: boolean;
++        reservedInputDiffers: boolean;
++    } | null;
++    /**
++     * What the offline reservation does not model: dispatch adds a search
++     * tool's input overhead and prices under the account's access kind.
++     * Stated so the `dispatchReservedInputTokens` figure is read as a floor.
++     */
++    notModelled: readonly string[];
++};
++
++export type ItemDiagnostic = {
++    itemId: string;
++    stratum: string | null;
++    cell: string | null;
++    profile: {
++        version: string;
++        kind: TaskKind;
++        kindConfidence: TaskProfile["kindConfidence"];
++        /** The snapshot column that actually ranked this item. */
++        rankingKind: TaskKind;
++        needsCurrentInformation: boolean;
++        hasImageInput: boolean;
++        hasDocumentInput: boolean;
++        expectedOutputLength: TaskProfile["expectedOutputLength"];
++        signals: readonly string[];
++    };
++    decision: {
++        outcome: RouterDecision["outcome"];
++        primaryModelId: string | null;
++        selectionReason: SelectionReason;
++        decidedBy: RouterTieBreakCriterion | null;
++        marginBands: number;
++        rankedModelIds: readonly string[];
++        fallbackCandidateModelIds: readonly string[];
++    };
++    /** Every model in the catalogue, in catalogue order. */
++    models: readonly ModelDisposition[];
++    fallback: {
++        /** Best first, from the Router; what §7 may try. */
++        rankedCandidateModelIds: readonly string[];
++        /** How many of those a turn may actually fall back to. */
++        maxModelFallbacks: number;
++        scopeAsDeployed: FallbackScope;
++        scopeIfFlagOn: FallbackScope;
++        /**
++         * The candidate dispatch would try first, re-fitted under its own cap
++         * the way `planAttemptExecution` will. Null when there is none.
++         */
++        firstExecutable: {
++            modelId: string;
++            dispatchFit: "fitted" | "unbounded" | "exceeded";
++            dispatchOutputTokens: number | null;
++        } | null;
++    };
++    caps: CapReconciliation;
++    evidence: {
++        rankingKind: TaskKind;
++        eligibleWithEvidence: readonly string[];
++        eligibleWithoutEvidence: readonly string[];
++        /** True when no quality evidence touched the choice. */
++        decidedWithoutQualityEvidence: boolean;
++    };
++    consistency: {
++        agreesWithProduct: boolean;
++        problems: readonly string[];
++    };
++};
++
++export type ImprovementCandidate = {
++    /** Fixed identifier, never prose derived from a prompt. */
++    kind:
++        | "context_window_undeclared"
++        | "never_eligible"
++        | "eligible_never_primary"
++        | "no_quality_evidence_for_kind"
++        | "decided_by_tie_break"
++        | "web_search_capability_gap"
++        | "output_cap_mismatch"
++        | "pairwise_inversion";
++    modelIds: readonly string[];
++    taskKinds: readonly TaskKind[];
++    itemCount: number;
++    detail: string;
++};
++
++export type DiagnosticReport = {
++    version: string;
++    routerVersions: RouterVersions;
++    inputs: {
++        catalogueSource: string;
++        catalogueModelCount: number;
++        enabledModelCount: number;
++        itemCount: number;
++        plan: ModelTier | "Guest";
++        requestedModelId: string;
++        routerRequestOutputCapTokens: number;
++        searchBackendReadiness: WebSearchBackendReadiness;
++        signalsSupplied: readonly (keyof RouterTieBreakSignals)[];
++        unhealthyModelIds: readonly string[];
++        stickyState: "none";
++        fallbackFlagAsDeployed: "on" | "off";
++    };
++    items: readonly ItemDiagnostic[];
++    summary: {
++        primaryCounts: Readonly<Record<string, number>>;
++        primaryCountsByKind: Readonly<Record<TaskKind, Readonly<Record<string, number>>>>;
++        decidedByCounts: Readonly<Record<RouterTieBreakCriterion | "none", number>>;
++        rejectionCounts: Readonly<Record<CandidateRejection, number>>;
++        /** Models never eligible on any item, with every reason they were refused for. */
++        neverEligible: readonly { modelId: string; reasons: readonly CandidateRejection[] }[];
++        eligibleNeverPrimary: readonly string[];
++        evidenceCells: { withEvidence: number; total: number };
++        outputCapMismatchItems: number;
++        consistencyProblems: number;
++        pairwiseInversions: number;
++        fallbackScopeAsDeployed: Readonly<Record<string, number>>;
++    };
++    improvementCandidates: readonly ImprovementCandidate[];
++    /** Anything that stops this report being read as the product's answer. */
++    problems: readonly string[];
++};
++
++const versionOf = (): RouterVersions => ROUTER_VERSIONS;
++
++const qualityFor = (modelId: string, kind: TaskKind) => {
++    const cell = getRouterScoreCell(modelId, kind);
++    return {
++        band: cell.qualityBand,
++        evidenceRef: cell.evidenceRef,
++        qualityCi95Lower: cell.qualityCi95Lower,
++        status: (cell.evidenceRef === null ? "no_evidence" : "approved_evidence") as QualityEvidenceStatus,
++    };
++};
++
++const sameList = (left: readonly string[], right: readonly string[]) =>
++    left.length === right.length && left.every((value, index) => value === right[index]);
++
++const diagnoseItem = (item: DiagnosticItem, input: DiagnosticInput, requestOutputCapTokens: number): ItemDiagnostic => {
++    const reservedInputTokens = Math.max(1, Math.ceil(Buffer.byteLength(item.prompt, "utf8") / 4));
++    const attachments = (item.attachments ?? []).map((attachment) => ({ mediaType: attachment.mediaType }));
++    const routerInput = {
++        text: item.prompt,
++        attachments,
++        webSearchRequested: item.webSearchRequested === true,
++        models: input.models,
++        plan: input.plan,
++        searchBackendReadiness: input.searchBackendReadiness,
++        reservedInputTokens,
++        requestOutputCapTokens,
++        unhealthyModelIds: input.unhealthyModelIds,
++        regionBlockedModelIds: input.regionBlockedModelIds,
++        availableCredits: input.availableCredits,
++        creditsByModelId: input.creditsByModelId,
++        signals: input.signals,
++        sticky: null,
++    };
++
++    // The product's decision. Everything below explains it and nothing below
++    // replaces it.
++    const decision = decideRouterModel(routerInput, input.now ?? Date.now);
++    const profile = decision.profile;
++    const rankingKind = rankingKindFor(profile);
++
++    // The explanation: the same filter and the same selector, called again
++    // with the same inputs, so per-model detail the decision does not carry
++    // (each candidate's output room, each loser's head-to-head) can be read
++    // off. `consistency` says whether they agreed.
++    const candidates = filterRouterCandidates({
++        models: input.models,
++        plan: input.plan,
++        profile,
++        searchBackendReadiness: input.searchBackendReadiness,
++        reservedInputTokens,
++        requestOutputCapTokens,
++        unhealthyModelIds: input.unhealthyModelIds,
++        regionBlockedModelIds: input.regionBlockedModelIds,
++        availableCredits: input.availableCredits,
++        creditsByModelId: input.creditsByModelId,
++    });
++    const signals: RouterTieBreakSignals = {
++        expectedTotalCostUsdByModelId: expectedTotalCostUsdByModel({
++            models: input.models,
++            reservedInputTokens,
++            requestOutputCapTokens,
++        }),
++        ...input.signals,
++    };
++    const selection = selectRouterModel({ profile, eligible: candidates.eligible, sticky: null, signals });
++
++    const problems: string[] = [];
++    const record = decision.record;
++    if (!sameList(record.eligibleModelIds, candidates.eligible.map((candidate) => candidate.modelId))) {
++        problems.push("the explanation's eligible set differs from the decision's");
++    }
++    const recordRejections = record.rejections.map((entry) => `${entry.modelId}:${entry.reason}`);
++    const explainRejections = candidates.rejected.map((entry) => `${entry.modelId}:${entry.reason}`);
++    if (!sameList(recordRejections, explainRejections)) {
++        problems.push("the explanation's rejections differ from the decision's");
++    }
++    if (selection.selectedModelId !== record.selectedModelId) {
++        problems.push(
++            `the explanation selected ${selection.selectedModelId ?? "nothing"} and the decision ${record.selectedModelId ?? "nothing"}`
++        );
++    }
++    if (selection.decidedBy !== record.selectionDecidedBy) {
++        problems.push("the explanation and the decision name different deciding criteria");
++    }
++
++    const primaryModelId = decision.outcome === "selected" ? decision.modelId : null;
++    const rankedModelIds = selection.rankedModelIds;
++    const rankOf = new Map(rankedModelIds.map((modelId, index) => [modelId, index + 1]));
++    const candidateOf = new Map(candidates.eligible.map((candidate) => [candidate.modelId, candidate]));
++    const rejectionOf = new Map(candidates.rejected.map((entry) => [entry.modelId, entry.reason]));
++    const primaryCandidate = primaryModelId ? candidateOf.get(primaryModelId) ?? null : null;
++
++    const versus = (candidate: RouterCandidate): ModelDisposition["versusPrimary"] => {
++        if (!primaryCandidate || candidate.modelId === primaryCandidate.modelId) return null;
++        const pair = selectRouterModel({
++            profile,
++            eligible: [primaryCandidate, candidate],
++            sticky: null,
++            signals,
++        });
++        return {
++            decidedBy: pair.decidedBy ?? "model_id",
++            marginBands: pair.margin,
++            wouldBeatPrimary: pair.selectedModelId === candidate.modelId,
++        };
++    };
++
++    const models: ModelDisposition[] = input.models.map((model) => {
++        const candidate = candidateOf.get(model.id) ?? null;
++        const rejection = rejectionOf.get(model.id) ?? null;
++        if (candidate === null && rejection === null) {
++            problems.push(`${model.id} is neither eligible nor rejected, so the filter did not see it`);
++        }
++        return {
++            modelId: model.id,
++            provider: model.provider,
++            apiModel: model.apiModel,
++            enabled: model.enabled,
++            publiclyListed: model.publiclyListed !== false,
++            minimumPlan: model.minimumPlan,
++            contextWindowTokens: model.contextWindowTokens ?? null,
++            inScoreSnapshot: isRouterScoreSnapshotModel(model.id),
++            disposition:
++                model.id === primaryModelId ? "primary" : candidate ? "fallback_candidate" : "rejected",
++            rejectionReason: rejection,
++            rank: rankOf.get(model.id) ?? null,
++            routerOutputTokens: candidate?.outputTokens ?? null,
++            quality: qualityFor(model.id, rankingKind),
++            expectedTotalCostUsd: signals.expectedTotalCostUsdByModelId?.[model.id] ?? null,
++            versusPrimary: candidate ? versus(candidate) : null,
++        };
++    });
++
++    // Dispatch fits the chosen model under *its own* pricing cap and the
++    // provider's verified ceiling, with the reservation the estimator makes.
++    // The Router fitted it under the requested model's cap with the raw
++    // estimate. Both figures are reported; neither is corrected.
++    const dispatchFitFor = (modelId: string) => {
++        const model = input.models.find((entry) => entry.id === modelId);
++        if (!model) return null;
++        const pricing = resolveModelPricing(model, { estimatedPromptTokens: reservedInputTokens });
++        const dispatchReservedInputTokens = toReservedInputTokens(reservedInputTokens);
++        const fit = fitChatOutputToContextWindow({
++            contextWindowTokens: model.contextWindowTokens,
++            reservedInputTokens: dispatchReservedInputTokens,
++            requestOutputCapTokens: pricing.maxOutputTokens,
++            providerMaxOutputTokens: pricing.providerMaxOutputTokens,
++        });
++        return {
++            pricing,
++            dispatchReservedInputTokens,
++            fit: fit.kind,
++            outputTokens: fit.kind === "fitted" ? fit.outputTokens : null,
++        };
++    };
++
++    const primaryDispatch = primaryModelId ? dispatchFitFor(primaryModelId) : null;
++    const caps: CapReconciliation = {
++        routerRequestOutputCapTokens: requestOutputCapTokens,
++        routerReservedInputTokens: reservedInputTokens,
++        primary:
++            primaryModelId && primaryCandidate && primaryDispatch
++                ? {
++                      modelId: primaryModelId,
++                      routerOutputTokens: primaryCandidate.outputTokens,
++                      dispatchRequestOutputCapTokens: primaryDispatch.pricing.maxOutputTokens,
++                      dispatchProviderMaxOutputTokens: primaryDispatch.pricing.providerMaxOutputTokens,
++                      dispatchReservedInputTokens: primaryDispatch.dispatchReservedInputTokens,
++                      dispatchOutputTokens: primaryDispatch.outputTokens,
++                      dispatchFit: primaryDispatch.fit,
++                      outputCapDiffers:
++                          primaryDispatch.pricing.maxOutputTokens !== requestOutputCapTokens ||
++                          primaryDispatch.outputTokens !== primaryCandidate.outputTokens,
++                      reservedInputDiffers:
++                          primaryDispatch.dispatchReservedInputTokens !== reservedInputTokens,
++                  }
++                : null,
++        notModelled: [
++            "search tool input overhead (estimateToolInputTokenOverhead)",
++            "access-kind pricing and credit reservation (createChatBudget)",
++            "runtime registry rows in place of the static catalogue",
++        ],
++    };
++
++    const fallbackCandidateModelIds =
++        decision.outcome === "selected" ? decision.fallbackCandidateModelIds : [];
++    const scopeInput = {
++        routed: decision.outcome === "selected",
++        isGuest: input.plan === "Guest",
++        toolsOffered: false,
++        nativeSearchEnabled: profile.needsCurrentInformation,
++        appManagedSearchEnabled: false,
++        deepResearch: false,
++        hasAttachments: attachments.length > 0,
++        candidateCount: fallbackCandidateModelIds.length,
++    };
++    const scopeAsDeployed = autoFallbackScope({ ...scopeInput, environment: input.fallbackEnvironment ?? {} });
++    const scopeIfFlagOn = autoFallbackScope({
++        ...scopeInput,
++        environment: { ...(input.fallbackEnvironment ?? {}), AUTO_ROUTER_FALLBACK_ENABLED: "on" },
++    });
++    const firstFallback = fallbackCandidateModelIds[0] ?? null;
++    const firstFallbackFit = firstFallback ? dispatchFitFor(firstFallback) : null;
++
++    const eligibleIds = candidates.eligible.map((candidate) => candidate.modelId);
++    const eligibleWithEvidence = eligibleIds.filter(
++        (modelId) => getRouterScoreCell(modelId, rankingKind).evidenceRef !== null
++    );
++
++    return {
++        itemId: item.id,
++        stratum: item.stratum ?? null,
++        cell: item.cell ?? null,
++        profile: {
++            version: profile.version,
++            kind: profile.kind,
++            kindConfidence: profile.kindConfidence,
++            rankingKind,
++            needsCurrentInformation: profile.needsCurrentInformation,
++            hasImageInput: profile.hasImageInput,
++            hasDocumentInput: profile.hasDocumentInput,
++            expectedOutputLength: profile.expectedOutputLength,
++            signals: profile.signals,
++        },
++        decision: {
++            outcome: decision.outcome,
++            primaryModelId,
++            selectionReason: record.selectionReason,
++            decidedBy: record.selectionDecidedBy,
++            marginBands: record.selectionMargin,
++            rankedModelIds,
++            fallbackCandidateModelIds,
++        },
++        models,
++        fallback: {
++            rankedCandidateModelIds: fallbackCandidateModelIds,
++            maxModelFallbacks: MAX_MODEL_FALLBACKS,
++            scopeAsDeployed,
++            scopeIfFlagOn,
++            firstExecutable:
++                firstFallback && firstFallbackFit
++                    ? {
++                          modelId: firstFallback,
++                          dispatchFit: firstFallbackFit.fit,
++                          dispatchOutputTokens: firstFallbackFit.outputTokens,
++                      }
++                    : null,
++        },
++        caps,
++        evidence: {
++            rankingKind,
++            eligibleWithEvidence,
++            eligibleWithoutEvidence: eligibleIds.filter((modelId) => !eligibleWithEvidence.includes(modelId)),
++            decidedWithoutQualityEvidence:
++                eligibleWithEvidence.length === 0 || record.selectionDecidedBy !== "quality_band",
++        },
++        consistency: { agreesWithProduct: problems.length === 0, problems },
++    };
++};
++
++const count = <K extends string>(keys: Iterable<K>): Record<K, number> => {
++    const counts = {} as Record<K, number>;
++    for (const key of keys) counts[key] = (counts[key] ?? 0) + 1;
++    return counts;
++};
++
++export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport => {
++    const problems: string[] = [];
++    const requestedModel = input.models.find((model) => model.id === input.requestedModelId);
++    if (!requestedModel) {
++        throw new Error(
++            `requestedModelId ${input.requestedModelId} is not in the catalogue, so there is no cap to route under.`
++        );
++    }
++    // The same resolution the chat route makes before Auto runs.
++    const requestOutputCapTokens = resolveModelPricing(requestedModel).maxOutputTokens;
++
++    const items = input.items.map((item) => diagnoseItem(item, input, requestOutputCapTokens));
++
++    const primaryIds = items.flatMap((item) => (item.decision.primaryModelId ? [item.decision.primaryModelId] : []));
++    const primaryCounts = count(primaryIds);
++    const primaryCountsByKind = {} as Record<TaskKind, Record<string, number>>;
++    for (const item of items) {
++        if (!item.decision.primaryModelId) continue;
++        const byModel = (primaryCountsByKind[item.profile.rankingKind] ??= {});
++        byModel[item.decision.primaryModelId] = (byModel[item.decision.primaryModelId] ?? 0) + 1;
++    }
++    const decidedByCounts = count(items.map((item) => item.decision.decidedBy ?? "none"));
++    const rejectionCounts = count(
++        items.flatMap((item) =>
++            item.models.flatMap((model) => (model.rejectionReason ? [model.rejectionReason] : []))
++        )
++    );
++
++    const everEligible = new Set<string>();
++    const reasonsByModel = new Map<string, Set<CandidateRejection>>();
++    for (const item of items) {
++        for (const model of item.models) {
++            if (model.rejectionReason === null) everEligible.add(model.modelId);
++            else {
++                const reasons = reasonsByModel.get(model.modelId) ?? new Set();
++                reasons.add(model.rejectionReason);
++                reasonsByModel.set(model.modelId, reasons);
++            }
++        }
++    }
++    const neverEligible = input.models
++        .filter((model) => !everEligible.has(model.id))
++        .map((model) => ({
++            modelId: model.id,
++            reasons: [...(reasonsByModel.get(model.id) ?? [])].sort(),
++        }));
++    const eligibleNeverPrimary = [...everEligible].filter((modelId) => !(modelId in primaryCounts)).sort();
++
++    const kindsSeen = [...new Set(items.map((item) => item.profile.rankingKind))].sort();
++    const evidenceTotal = input.models.filter((model) => model.enabled).length * kindsSeen.length;
++    let evidenceWith = 0;
++    for (const model of input.models) {
++        if (!model.enabled) continue;
++        for (const kind of kindsSeen) {
++            if (getRouterScoreCell(model.id, kind).evidenceRef !== null) evidenceWith += 1;
++        }
++    }
++
++    const outputCapMismatchItems = items.filter((item) => item.caps.primary?.outputCapDiffers).length;
++    const consistencyProblems = items.filter((item) => !item.consistency.agreesWithProduct).length;
++    const pairwiseInversions = items.reduce(
++        (sum, item) => sum + item.models.filter((model) => model.versusPrimary?.wouldBeatPrimary).length,
++        0
++    );
++    for (const item of items) {
++        for (const problem of item.consistency.problems) problems.push(`${item.itemId}: ${problem}`);
++    }
++    const fallbackScopeAsDeployed = count(
++        items.map((item) => (item.fallback.scopeAsDeployed.allowed ? "allowed" : item.fallback.scopeAsDeployed.reason))
++    );
++
++    const improvementCandidates: ImprovementCandidate[] = [];
++    const undeclared = input.models
++        .filter((model) => model.enabled && !model.contextWindowTokens)
++        .map((model) => model.id);
++    if (undeclared.length > 0) {
++        improvementCandidates.push({
++            kind: "context_window_undeclared",
++            modelIds: undeclared,
++            taskKinds: kindsSeen,
++            itemCount: items.length,
++            detail:
++                "enabled but declares no context window in this catalogue, so the Router refuses it on every " +
++                "item (context_window_undeclared). Declaring the window is what makes it reachable; nothing " +
++                "about its quality is known either way.",
++        });
++    }
++    const neverEligibleOther = neverEligible.filter(
++        (entry) => !undeclared.includes(entry.modelId) && input.models.find((m) => m.id === entry.modelId)?.enabled
++    );
++    if (neverEligibleOther.length > 0) {
++        improvementCandidates.push({
++            kind: "never_eligible",
++            modelIds: neverEligibleOther.map((entry) => entry.modelId),
++            taskKinds: kindsSeen,
++            itemCount: items.length,
++            detail:
++                "enabled and never eligible on any item, for: " +
++                neverEligibleOther.map((entry) => `${entry.modelId} (${entry.reasons.join(", ")})`).join("; "),
++        });
++    }
++    if (eligibleNeverPrimary.length > 0) {
++        improvementCandidates.push({
++            kind: "eligible_never_primary",
++            modelIds: eligibleNeverPrimary,
++            taskKinds: kindsSeen,
++            itemCount: items.length,
++            detail:
++                "passed every hard filter on at least one item and was never chosen. With every quality band " +
++                "neutral, the tie-break decides, and these lose it; a comparative evaluation on the kinds they " +
++                "are eligible for is what could change that, and nothing else should.",
++        });
++    }
++    for (const kind of kindsSeen) {
++        const eligibleForKind = new Set(
++            items
++                .filter((item) => item.profile.rankingKind === kind)
++                .flatMap((item) => item.evidence.eligibleWithoutEvidence)
++        );
++        if (eligibleForKind.size > 0) {
++            improvementCandidates.push({
++                kind: "no_quality_evidence_for_kind",
++                modelIds: [...eligibleForKind].sort(),
++                taskKinds: [kind],
++                itemCount: items.filter((item) => item.profile.rankingKind === kind).length,
++                detail: `eligible for ${kind} items with no approved quality evidence for that kind.`,
++            });
++        }
++        const tieBreakItems = items.filter(
++            (item) =>
++                item.profile.rankingKind === kind &&
++                item.decision.decidedBy !== null &&
++                item.decision.decidedBy !== "quality_band"
++        );
++        if (tieBreakItems.length > 0) {
++            const criteria = [...new Set(tieBreakItems.map((item) => item.decision.decidedBy))];
++            improvementCandidates.push({
++                kind: "decided_by_tie_break",
++                modelIds: [...new Set(tieBreakItems.flatMap((item) => item.decision.primaryModelId ?? []))].sort(),
++                taskKinds: [kind],
++                itemCount: tieBreakItems.length,
++                detail: `${kind}: the primary was separated from the runner-up by ${criteria.join(", ")}, not by quality.`,
++            });
++        }
++    }
++    const searchGap = new Set(
++        items.flatMap((item) =>
++            item.models
++                .filter(
++                    (model) =>
++                        model.rejectionReason === "web_search_unverified" ||
++                        model.rejectionReason === "web_search_cost_unbounded"
++                )
++                .map((model) => model.modelId)
++        )
++    );
++    if (searchGap.size > 0) {
++        improvementCandidates.push({
++            kind: "web_search_capability_gap",
++            modelIds: [...searchGap].sort(),
++            taskKinds: kindsSeen,
++            itemCount: items.filter((item) => item.profile.needsCurrentInformation).length,
++            detail:
++                "refused on current-information items because search support is unverified or its cost cannot " +
++                "be bounded. Verifying the register entry, or a backend credential, is what would admit them.",
++        });
++    }
++    if (outputCapMismatchItems > 0) {
++        improvementCandidates.push({
++            kind: "output_cap_mismatch",
++            modelIds: [
++                ...new Set(items.filter((item) => item.caps.primary?.outputCapDiffers).map((item) => item.caps.primary!.modelId)),
++            ].sort(),
++            taskKinds: kindsSeen,
++            itemCount: outputCapMismatchItems,
++            detail:
++                `the Router fitted candidates under ${input.requestedModelId}'s cap (${requestOutputCapTokens}) and ` +
++                "dispatch will budget the primary under its own. The candidate set was decided under one number and " +
++                "the answer is sized under another.",
++        });
++    }
++    if (pairwiseInversions > 0) {
++        improvementCandidates.push({
++            kind: "pairwise_inversion",
++            modelIds: [
++                ...new Set(
++                    items.flatMap((item) =>
++                        item.models.filter((model) => model.versusPrimary?.wouldBeatPrimary).map((model) => model.modelId)
++                    )
++                ),
++            ].sort(),
++            taskKinds: kindsSeen,
++            itemCount: pairwiseInversions,
++            detail:
++                "beats the primary head to head under the product's comparator but ranked below it in the sort. " +
++                "The tie-break's epsilons make the order non-transitive on these inputs.",
++        });
++    }
++
++    return {
++        version: ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION,
++        routerVersions: versionOf(),
++        inputs: {
++            catalogueSource: input.catalogueSource ?? "caller-supplied",
++            catalogueModelCount: input.models.length,
++            enabledModelCount: input.models.filter((model) => model.enabled).length,
++            itemCount: items.length,
++            plan: input.plan,
++            requestedModelId: input.requestedModelId,
++            routerRequestOutputCapTokens: requestOutputCapTokens,
++            searchBackendReadiness: input.searchBackendReadiness,
++            signalsSupplied: Object.keys(input.signals ?? {}) as (keyof RouterTieBreakSignals)[],
++            unhealthyModelIds: input.unhealthyModelIds ?? [],
++            stickyState: "none",
++            fallbackFlagAsDeployed:
++                (input.fallbackEnvironment ?? {}).AUTO_ROUTER_FALLBACK_ENABLED === "on" ? "on" : "off",
++        },
++        items,
++        summary: {
++            primaryCounts,
++            primaryCountsByKind,
++            decidedByCounts: decidedByCounts as Record<RouterTieBreakCriterion | "none", number>,
++            rejectionCounts: rejectionCounts as Record<CandidateRejection, number>,
++            neverEligible,
++            eligibleNeverPrimary,
++            evidenceCells: { withEvidence: evidenceWith, total: evidenceTotal },
++            outputCapMismatchItems,
++            consistencyProblems,
++            pairwiseInversions,
++            fallbackScopeAsDeployed,
++        },
++        improvementCandidates,
++        problems,
++    };
++};
++
++/** The tie-break order, re-exported so a report can print the policy it read. */
++export const TIE_BREAK_ORDER = ROUTER_TIE_BREAK_ORDER;
++export const NEUTRAL_BAND = NEUTRAL_QUALITY_BAND;
+diff --git a/package.json b/package.json
+index f82fc3b7..3f2caab5 100644
+--- a/package.json
++++ b/package.json
+@@ -207,7 +207,9 @@
+     "report:mobile-auth-keyring-health": "node --import tsx scripts/report-mobile-auth-keyring-health.mjs",
+     "score:ai-review-judgements": "node --conditions=react-server --import tsx scripts/score-ai-review-judgements.mjs",
+     "draft:ai-review-judgement": "node --conditions=react-server --import tsx scripts/draft-ai-review-judgement.mjs",
+-    "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs"
++    "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs",
++    "report:router-full-catalog": "node --import tsx scripts/report-router-full-catalog.mjs",
++    "cross-review": "node --import tsx scripts/cross-review.mjs"
+   },
+   "dependencies": {
+     "@ai-sdk/anthropic": "^4.0.49",
+diff --git a/scripts/cross-review.mjs b/scripts/cross-review.mjs
+new file mode 100644
+index 00000000..1cd93407
+--- /dev/null
++++ b/scripts/cross-review.mjs
+@@ -0,0 +1,253 @@
++// Runs the author–reviewer exchange for one task, or packages a change for an
++// independent reviewer to read.
++//
++// Modes:
++//   --mode=mock     scripted executors from --fixture; the whole loop, offline.
++//   --mode=dry-run  the command-line executors are built and never run; the
++//                   outcome is `failed` with `author_not_executed`, and the
++//                   record shows the exact commands that would have run.
++//   --mode=package  no executor at all: takes the diff of --base..HEAD (or
++//                   the worktree), computes the digest, runs --test-command if
++//                   given, and writes the exchange record and the reviewer
++//                   prompt for a person to hand to the reviewer. Generated
++//                   files can be left out of the diff with --diff-exclude=.
++//   --mode=live     runs the command-line executors. Refused unless
++//                   --i-have-authorised-live-execution is also given, because
++//                   a live run spends and edits.
++//
++// Usage:
++//   node --import tsx scripts/cross-review.mjs --task=<task.json> --mode=mock \
++//     --fixture=<fixture.json> --out=<dir> [--author=claude] [--reviewer=codex] \
++//     [--max-revisions=2] [--test-command="npm test -- x"]
++//
++// task.json: { taskId, requirement, completionCriteria[], baseCommit, writableScope[] }
++// fixture.json (mock): { author: AuthorOutput[] , reviewer: ReviewVerdict[] , tests?: TestRun[][] }
++//   A reviewer entry may carry reviewedDigest "@current" to mean the digest
++//   of the change it is shown; anything else is compared literally.
++//
++// Nothing here pushes, merges, or dispatches a workflow. A test command runs
++// locally, once per round, and its exit status is the test result.
++
++import { createHash } from "node:crypto";
++import { execFileSync, spawn as nodeSpawn } from "node:child_process";
++import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
++import { join } from "node:path";
++
++import {
++  DEFAULT_MAX_REVISIONS,
++  renderReviewPrompt,
++  runCrossReview,
++} from "../lib/crossReviewCore.ts";
++import {
++  CLI_INVOCATIONS,
++  cliAuthor,
++  cliReviewer,
++  mockAuthor,
++  mockReviewer,
++} from "../lib/crossReviewExecutors.ts";
++
++const args = new Map(
++  process.argv.slice(2).map((arg) => {
++    const [key, ...rest] = arg.replace(/^--/, "").split("=");
++    return [key, rest.length > 0 ? rest.join("=") : "true"];
++  })
++);
++const flag = (name, fallback) => args.get(name) ?? fallback;
++const die = (message) => {
++  console.error(message);
++  process.exit(1);
++};
++
++const mode = flag("mode", "mock");
++if (!["mock", "dry-run", "package", "live"].includes(mode)) die("--mode must be mock, dry-run, package or live.");
++const taskPath = flag("task");
++if (!taskPath) die("--task=<task.json> is required.");
++const task = JSON.parse(readFileSync(taskPath, "utf8"));
++for (const field of ["taskId", "requirement", "completionCriteria", "baseCommit", "writableScope"]) {
++  if (task[field] === undefined) die(`${taskPath} has no ${field}.`);
++}
++const outDir = flag("out", `artifacts/cross-review/${task.taskId}`);
++const maxRevisions = Number.parseInt(flag("max-revisions", String(DEFAULT_MAX_REVISIONS)), 10);
++if (!Number.isInteger(maxRevisions) || maxRevisions < 0) die("--max-revisions must be a non-negative integer.");
++const roles = { author: flag("author", "claude"), reviewer: flag("reviewer", "codex") };
++const testCommand = args.get("test-command") ?? null;
++const timeoutMs = Number.parseInt(flag("timeout-ms", String(10 * 60 * 1000)), 10);
++
++const digest = (text) => `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
++
++const runTestCommand = () => {
++  if (!testCommand) return [];
++  const startedAt = Date.now();
++  try {
++    const output = execFileSync("sh", ["-c", testCommand], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
++    return [{ command: testCommand, passed: true, output: output.trim().split("\n").slice(-5).join("\n"), durationMs: Date.now() - startedAt }];
++  } catch (error) {
++    const output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`.trim().split("\n").slice(-10).join("\n");
++    return [{ command: testCommand, passed: false, output, durationMs: Date.now() - startedAt }];
++  }
++};
++
++mkdirSync(outDir, { recursive: true });
++const write = (name, contents) => {
++  const path = join(outDir, name);
++  writeFileSync(path, contents);
++  console.error(`written ${path}`);
++};
++
++if (mode === "package") {
++  const base = flag("base", task.baseCommit);
++  // Generated files can be left out of the reviewed diff with
++  // --diff-exclude=<path> (repeatable); they still count as files changed.
++  const excluded = process.argv
++    .slice(2)
++    .filter((arg) => arg.startsWith("--diff-exclude="))
++    .map((arg) => `:(exclude)${arg.slice("--diff-exclude=".length)}`);
++  const pathspec = [...(task.writableScope.length > 0 ? task.writableScope : ["."]), ...excluded];
++  const diff = execFileSync("git", ["diff", base, "--", ...pathspec], {
++    encoding: "utf8",
++    maxBuffer: 64 * 1024 * 1024,
++  });
++  const filesChanged = execFileSync("git", ["diff", "--name-only", base, "--", ...(task.writableScope.length > 0 ? task.writableScope : ["."])], {
++    encoding: "utf8",
++  })
++    .trim()
++    .split("\n")
++    .filter(Boolean);
++  const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
++  const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim() !== "";
++  const changeDigest = digest(diff);
++  const testResults = runTestCommand();
++  const summary = flag("summary", "(no summary supplied; the diff is the record)");
++  const request = {
++    task,
++    round: 0,
++    changeDigest,
++    commit: dirty ? null : commit,
++    diff,
++    testResults,
++    guardViolations: [],
++    authorSummary: summary,
++    authorSelfAssessment: null,
++    previousFindings: [],
++  };
++  const exchange = {
++    version: "cross-review-v1",
++    taskId: task.taskId,
++    requirement: task.requirement,
++    completionCriteria: task.completionCriteria,
++    baseCommit: base,
++    roles,
++    maxRevisions,
++    rounds: [],
++    changeDigest,
++    commit: dirty ? null : commit,
++    headCommit: commit,
++    worktreeDirty: dirty,
++    changeSummary: summary,
++    filesChanged,
++    testResults,
++    reviewConclusion: null,
++    findings: [],
++    nextAction: `hand review-prompt.md to the ${roles.reviewer} reviewer; its verdict must name digest ${changeDigest}`,
++    status: "awaiting_review",
++    failure: null,
++    holdReason: null,
++    producedAt: new Date().toISOString(),
++  };
++  write("exchange.json", `${JSON.stringify(exchange, null, 2)}\n`);
++  write("review-prompt.md", renderReviewPrompt(request));
++  write("change.diff", diff);
++  console.log(`packaged ${task.taskId}: ${filesChanged.length} file(s), digest ${changeDigest}, ${testResults.length} test command(s)${testResults.every((t) => t.passed) ? "" : " (FAILING)"}`);
++  process.exit(0);
++}
++
++let author;
++let reviewer;
++if (mode === "mock") {
++  const fixturePath = flag("fixture");
++  if (!fixturePath) die("--fixture=<fixture.json> is required in mock mode.");
++  const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
++  author = mockAuthor(roles.author, (fixture.author ?? []).map((entry) => ("ok" in entry ? entry : { ok: true, value: entry })));
++  reviewer = mockReviewer(roles.reviewer, (fixture.reviewer ?? []).map((entry) => ("ok" in entry ? entry : { ok: true, value: entry })));
++  var fixtureTests = fixture.tests ?? null;
++} else {
++  if (mode === "live" && flag("i-have-authorised-live-execution", "false") !== "true") {
++    die("--mode=live runs external tools that edit and spend. Pass --i-have-authorised-live-execution to confirm.");
++  }
++  const spawner = async (command, cliArgs, options) =>
++    new Promise((resolve) => {
++      const child = nodeSpawn(command, cliArgs, { cwd: options.cwd, env: { ...process.env, ...(options.env ?? {}) } });
++      let stdout = "";
++      let stderr = "";
++      let timedOut = false;
++      const timer = setTimeout(() => {
++        timedOut = true;
++        child.kill("SIGKILL");
++      }, options.timeoutMs);
++      child.stdout.on("data", (chunk) => (stdout += chunk));
++      child.stderr.on("data", (chunk) => (stderr += chunk));
++      child.on("error", (error) => {
++        clearTimeout(timer);
++        resolve({ status: null, stdout, stderr, error });
++      });
++      child.on("close", (status) => {
++        clearTimeout(timer);
++        resolve({ status, stdout, stderr, timedOut });
++      });
++      child.stdin.end(options.input);
++    });
++  const build = (role, id) => {
++    const invocation = CLI_INVOCATIONS[id]?.[role];
++    if (!invocation) die(`no command-line invocation is recorded for ${id} as ${role}; known: ${Object.keys(CLI_INVOCATIONS).join(", ")}`);
++    return {
++      id,
++      invocation,
++      mode: mode === "live" ? "live" : "dry-run",
++      cwd: process.cwd(),
++      timeoutMs,
++      spawn: mode === "live" ? spawner : undefined,
++    };
++  };
++  author = cliAuthor(build("author", roles.author));
++  reviewer = cliReviewer(build("reviewer", roles.reviewer));
++}
++
++let round = 0;
++const outcome = await runCrossReview({
++  task,
++  roles,
++  author,
++  reviewer,
++  digest,
++  maxRevisions,
++  timeoutMs,
++  runTests: async () => {
++    const fromFixture = typeof fixtureTests !== "undefined" && fixtureTests ? fixtureTests[round] ?? [] : [];
++    round += 1;
++    return testCommand ? runTestCommand() : fromFixture;
++  },
++});
++
++write("exchange.json", `${JSON.stringify(outcome.exchange, null, 2)}\n`);
++const last = outcome.exchange.rounds[outcome.exchange.rounds.length - 1];
++if (last) {
++  write(
++    "review-prompt.md",
++    renderReviewPrompt({
++      task,
++      round: last.round,
++      changeDigest: last.changeDigest,
++      commit: last.commit,
++      diff: "(see exchange.json rounds[].changeDigest; the diff is held by the author executor)",
++      testResults: last.testResults,
++      guardViolations: last.guardViolations,
++      authorSummary: last.changeSummary,
++      authorSelfAssessment: null,
++      previousFindings: [],
++    })
++  );
++}
++console.log(
++  `${task.taskId}: ${outcome.status}${outcome.failure ? ` (${outcome.failure})` : ""}${outcome.holdReason ? ` (${outcome.holdReason})` : ""} after ${outcome.exchange.rounds.length} round(s) — ${outcome.exchange.nextAction}`
++);
++process.exit(outcome.status === "passed" ? 0 : 2);
+diff --git a/scripts/report-router-full-catalog.mjs b/scripts/report-router-full-catalog.mjs
+new file mode 100644
+index 00000000..2ea41518
+--- /dev/null
++++ b/scripts/report-router-full-catalog.mjs
+@@ -0,0 +1,219 @@
++// What the Router would do with the whole catalogue, for every item in an
++// evaluation set, decided offline.
++//
++// Reads the set, runs the product's own decision on each item over the static
++// catalogue, and prints for every model whether it was chosen, was a fallback
++// candidate, or was refused and for which fixed reason; which quality evidence
++// (if any) the choice rested on; what separated the primary from each loser;
++// and how the output cap the Router routed under compares with the one
++// dispatch will apply. Nothing is called, nothing is billed, nothing is
++// written unless --json or --md names a path.
++//
++// Usage:
++//   node --import tsx scripts/report-router-full-catalog.mjs \
++//     [--set=docs/ops/router-evaluation-set/development-v0.json] \
++//     [--items=adopted|all] [--plan=Pro] [--requested-model=<catalogue id>] \
++//     [--fallback-flag=off|on] [--json=<out.json>] [--md=<out.md>] [--quiet]
++//
++// The catalogue is lib/models.ts as committed. The product routes over the
++// runtime registry's rows instead, with health and measured signals from the
++// database, so this describes the Router as the catalogue would run it, not
++// as the deployment does today. The report's `inputs` block says so.
++
++import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
++import { dirname } from "node:path";
++
++import { AVAILABLE_MODELS } from "../lib/models.ts";
++import { diagnoseFullCatalog, TIE_BREAK_ORDER } from "../lib/routerFullCatalogDiagnostic.ts";
++import { adoptedItems } from "../lib/routerQualityEvalSet.ts";
++import { NO_WEB_SEARCH_BACKENDS } from "../lib/webSearchBackends.ts";
++
++const args = new Map(
++  process.argv.slice(2).map((arg) => {
++    const [key, ...rest] = arg.replace(/^--/, "").split("=");
++    return [key, rest.length > 0 ? rest.join("=") : "true"];
++  })
++);
++const flag = (name, fallback) => args.get(name) ?? fallback;
++const die = (message) => {
++  console.error(message);
++  process.exit(1);
++};
++
++const setPath = flag("set", "docs/ops/router-evaluation-set/development-v0.json");
++const itemScope = flag("items", "adopted");
++if (itemScope !== "adopted" && itemScope !== "all") die("--items must be adopted or all.");
++const plan = flag("plan", "Pro");
++if (!["Guest", "Free", "Pro", "Max"].includes(plan)) die("--plan must be Guest, Free, Pro or Max.");
++const fallbackFlag = flag("fallback-flag", "off");
++if (fallbackFlag !== "off" && fallbackFlag !== "on") die("--fallback-flag must be off or on.");
++const quiet = flag("quiet", "false") === "true";
++
++const set = JSON.parse(readFileSync(setPath, "utf8"));
++const items = itemScope === "adopted" ? adoptedItems(set) : set.items;
++const requestedModelId = flag("requested-model", set.baseline?.modelId);
++if (!requestedModelId) die("--requested-model is required when the set names no baseline.");
++
++const report = diagnoseFullCatalog({
++  items,
++  models: AVAILABLE_MODELS,
++  plan,
++  requestedModelId,
++  // No credential is assumed. A deployment holding one passes a different
++  // readiness and gets a different answer on current-information items.
++  searchBackendReadiness: NO_WEB_SEARCH_BACKENDS,
++  fallbackEnvironment: fallbackFlag === "on" ? { AUTO_ROUTER_FALLBACK_ENABLED: "on" } : {},
++  catalogueSource: "lib/models.ts (static catalogue, not the runtime registry)",
++});
++
++const pct = (numerator, denominator) =>
++  denominator === 0 ? "n/a" : `${((100 * numerator) / denominator).toFixed(1)}%`;
++
++const lines = [];
++const say = (line = "") => lines.push(line);
++
++say(`# Full-catalogue routing diagnostic — ${set.version} (${itemScope} items)`);
++say();
++say(`Diagnostic ${report.version}; Router ${JSON.stringify(report.routerVersions)}.`);
++say(
++  `Catalogue: ${report.inputs.catalogueModelCount} models, ${report.inputs.enabledModelCount} enabled ` +
++    `(${report.inputs.catalogueSource}). Plan ${report.inputs.plan}; routed under ${report.inputs.requestedModelId}'s ` +
++    `cap of ${report.inputs.routerRequestOutputCapTokens} output tokens; no sticky state; signals supplied: ` +
++    `${report.inputs.signalsSupplied.length === 0 ? "none (cost derived from the pricing registry)" : report.inputs.signalsSupplied.join(", ")}; ` +
++    `fallback flag ${report.inputs.fallbackFlagAsDeployed}.`
++);
++say(`Tie-break order: ${TIE_BREAK_ORDER.join(" > ")}.`);
++say();
++
++say("## Summary");
++say();
++say(`| | |`);
++say(`|---|---|`);
++say(`| items | ${report.inputs.itemCount} |`);
++say(`| items whose explanation disagrees with the product decision | ${report.summary.consistencyProblems} |`);
++say(
++  `| (model, kind) cells with approved quality evidence | ${report.summary.evidenceCells.withEvidence} of ${report.summary.evidenceCells.total} |`
++);
++say(`| items where dispatch's output cap differs from the Router's | ${report.summary.outputCapMismatchItems} |`);
++say(`| pairwise inversions against the primary | ${report.summary.pairwiseInversions} |`);
++say(`| enabled models never eligible on any item | ${report.summary.neverEligible.filter((e) => AVAILABLE_MODELS.find((m) => m.id === e.modelId)?.enabled).length} |`);
++say(`| models eligible at least once and never primary | ${report.summary.eligibleNeverPrimary.length} |`);
++say();
++
++say("### Primary by model");
++say();
++say("| model | items | share |");
++say("|---|---|---|");
++for (const [modelId, n] of Object.entries(report.summary.primaryCounts).sort((a, b) => b[1] - a[1])) {
++  say(`| ${modelId} | ${n} | ${pct(n, report.inputs.itemCount)} |`);
++}
++say();
++
++say("### Primary by ranking kind");
++say();
++say("| kind | items | primaries |");
++say("|---|---|---|");
++for (const [kind, byModel] of Object.entries(report.summary.primaryCountsByKind).sort()) {
++  const total = Object.values(byModel).reduce((sum, n) => sum + n, 0);
++  say(
++    `| ${kind} | ${total} | ${Object.entries(byModel)
++      .sort((a, b) => b[1] - a[1])
++      .map(([id, n]) => `${id} ${n}`)
++      .join(", ")} |`
++  );
++}
++say();
++
++say("### What decided the top two");
++say();
++say("| criterion | items |");
++say("|---|---|");
++for (const [criterion, n] of Object.entries(report.summary.decidedByCounts).sort((a, b) => b[1] - a[1])) {
++  say(`| ${criterion} | ${n} |`);
++}
++say();
++
++say("### Rejections, summed over items");
++say();
++say("| reason | model-items |");
++say("|---|---|");
++for (const [reason, n] of Object.entries(report.summary.rejectionCounts).sort((a, b) => b[1] - a[1])) {
++  say(`| ${reason} | ${n} |`);
++}
++say();
++
++say("### Never eligible");
++say();
++say("| model | enabled | reasons |");
++say("|---|---|---|");
++for (const entry of report.summary.neverEligible) {
++  const model = AVAILABLE_MODELS.find((m) => m.id === entry.modelId);
++  say(`| ${entry.modelId} | ${model?.enabled ? "yes" : "no"} | ${entry.reasons.join(", ")} |`);
++}
++say();
++if (report.summary.eligibleNeverPrimary.length > 0) {
++  say("### Eligible at least once, never primary");
++  say();
++  say(report.summary.eligibleNeverPrimary.map((id) => `- ${id}`).join("\n"));
++  say();
++}
++
++say("### Fallback scope as deployed");
++say();
++say("| scope | items |");
++say("|---|---|");
++for (const [scope, n] of Object.entries(report.summary.fallbackScopeAsDeployed).sort((a, b) => b[1] - a[1])) {
++  say(`| ${scope} | ${n} |`);
++}
++say();
++
++say("## Improvement and evaluation candidates");
++say();
++say("Offline work this diagnostic points at. None of it changes routing on its own.");
++say();
++for (const candidate of report.improvementCandidates) {
++  say(`- **${candidate.kind}** (${candidate.itemCount} item(s); kinds ${candidate.taskKinds.join(", ")}): ${candidate.detail}`);
++  say(`  models: ${candidate.modelIds.join(", ")}`);
++}
++say();
++
++if (report.problems.length > 0) {
++  say("## Problems");
++  say();
++  for (const problem of report.problems) say(`- ${problem}`);
++  say();
++}
++
++say("## Per item");
++say();
++say("| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | first fallback |");
++say("|---|---|---|---|---|---|---|---|---|");
++for (const item of report.items) {
++  const eligible = item.models.filter((m) => m.rejectionReason === null).length;
++  const cap = item.caps.primary
++    ? `${item.caps.primary.routerOutputTokens}→${item.caps.primary.dispatchOutputTokens ?? item.caps.primary.dispatchFit}${item.caps.primary.outputCapDiffers ? " (differs)" : ""}`
++    : "—";
++  const fallback = item.fallback.firstExecutable
++    ? `${item.fallback.firstExecutable.modelId} (${item.fallback.scopeAsDeployed.allowed ? "allowed" : item.fallback.scopeAsDeployed.reason})`
++    : "none";
++  say(
++    `| ${item.itemId} | ${item.profile.rankingKind} (${item.profile.kindConfidence}) | ${item.decision.primaryModelId ?? "—"} | ` +
++      `${item.decision.decidedBy ?? "—"} | ${item.decision.selectionReason} | ${eligible} | ${item.models.length - eligible} | ${cap} | ${fallback} |`
++  );
++}
++
++const markdown = `${lines.join("\n")}\n`;
++if (!quiet) process.stdout.write(markdown);
++
++const jsonOut = args.get("json");
++if (jsonOut) {
++  mkdirSync(dirname(jsonOut), { recursive: true });
++  writeFileSync(jsonOut, `${JSON.stringify(report, null, 2)}\n`);
++  console.error(`written ${jsonOut}`);
++}
++const mdOut = args.get("md");
++if (mdOut) {
++  mkdirSync(dirname(mdOut), { recursive: true });
++  writeFileSync(mdOut, markdown);
++  console.error(`written ${mdOut}`);
++}
+diff --git a/tests/crossReview.test.mjs b/tests/crossReview.test.mjs
+new file mode 100644
+index 00000000..dd97442f
+--- /dev/null
++++ b/tests/crossReview.test.mjs
+@@ -0,0 +1,329 @@
++import assert from "node:assert/strict";
++import { createHash } from "node:crypto";
++import test from "node:test";
++
++import {
++  CROSS_REVIEW_VERSION,
++  DEFAULT_MAX_REVISIONS,
++  authorOutputProblems,
++  isActionable,
++  parseExecutorJson,
++  renderReviewPrompt,
++  reviewVerdictProblems,
++  runCrossReview,
++} from "../lib/crossReviewCore.ts";
++import {
++  CLI_INVOCATIONS,
++  approveCurrent,
++  cliAuthor,
++  cliReviewer,
++  mockAuthor,
++  mockReviewer,
++  unwrapClaudeResult,
++} from "../lib/crossReviewExecutors.ts";
++
++/**
++ * The control program decides; the executors only answer. What these tests
++ * hold: a pass needs a verdict on the current digest *and* passing checks; a
++ * fix is re-reviewed on its new digest; the cap ends the loop on hold rather
++ * than retrying; and every way an executor can fail to answer is a named
++ * failure, never a pass. The command-line shells are proven never to run in
++ * dry-run by handing them a spawner that throws.
++ */
++
++const digest = (text) => `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
++
++const task = {
++  taskId: "T-1",
++  requirement: "Add a pure helper that sums an array.",
++  completionCriteria: ["a test covers the empty array", "no file outside lib/ and tests/ changes"],
++  baseCommit: "abc123",
++  writableScope: ["lib/", "tests/"],
++};
++
++const change = (n, overrides = {}) => ({
++  ok: true,
++  value: {
++    diff: `--- a/lib/sum.ts\n+++ b/lib/sum.ts\n+export const sum = (xs) => xs.reduce((a, b) => a + b, ${n});\n`,
++    summary: `round ${n} change`,
++    filesChanged: ["lib/sum.ts"],
++    selfAssessment: "looks fine to me",
++    commit: null,
++    ...overrides,
++  },
++});
++
++const pass = (command = "npm test") => [{ command, passed: true, output: "ok", durationMs: 1 }];
++const fail = (command = "npm test") => [{ command, passed: false, output: "1 failing", durationMs: 1 }];
++
++const finding = (overrides = {}) => ({
++  location: "lib/sum.ts:1",
++  severity: "error",
++  basis: "evidence",
++  claim: "sum([]) returns the seed, which is wrong for the empty array",
++  reproduction: "node -e 'sum([])'",
++  ...overrides,
++});
++
++const control = (overrides = {}) => ({
++  task,
++  digest,
++  runTests: async () => pass(),
++  now: () => new Date("2026-09-09T00:00:00Z"),
++  timeoutMs: 1000,
++  ...overrides,
++});
++
++test("a verdict on the current digest with passing checks is the only pass", async () => {
++  const author = mockAuthor("claude", [change(0)]);
++  const reviewer = mockReviewer("codex", [approveCurrent("T-1", 0)]);
++  const outcome = await runCrossReview(control({ author, reviewer }));
++  assert.equal(outcome.status, "passed");
++  assert.equal(outcome.failure, null);
++  assert.equal(outcome.exchange.version, CROSS_REVIEW_VERSION);
++  assert.equal(outcome.exchange.rounds.length, 1);
++  assert.equal(outcome.exchange.changeDigest, digest(change(0).value.diff));
++  assert.equal(outcome.exchange.reviewConclusion, "approve");
++  assert.deepEqual(outcome.exchange.roles, { author: "claude", reviewer: "codex" });
++  assert.equal(outcome.exchange.maxRevisions, DEFAULT_MAX_REVISIONS);
++  // The reviewer was shown the requirement and the diff, and the author's
++  // self-assessment only as a labelled claim.
++  const request = reviewer.calls[0];
++  assert.equal(request.task.requirement, task.requirement);
++  assert.equal(request.changeDigest, outcome.exchange.changeDigest);
++  const prompt = renderReviewPrompt(request);
++  assert.ok(prompt.indexOf("## Requirement (original)") < prompt.indexOf("## Change under review"));
++  assert.ok(prompt.indexOf("## Change under review") < prompt.indexOf("## Author's account"));
++  assert.ok(prompt.includes("a claim, not a finding"));
++});
++
++test("an evidenced finding sends the change back, and the fix is reviewed on its new digest", async () => {
++  const author = mockAuthor("claude", [change(0), change(1)]);
++  const reviewer = mockReviewer("codex", [
++    { ok: true, value: { taskId: "T-1", round: 0, reviewedDigest: "@current", conclusion: "request_changes", findings: [finding()], nextAction: "fix the seed" } },
++    approveCurrent("T-1", 1),
++  ]);
++  const outcome = await runCrossReview(control({ author, reviewer }));
++  assert.equal(outcome.status, "passed");
++  assert.equal(outcome.exchange.rounds.length, 2);
++  assert.equal(outcome.exchange.rounds[0].findings[0].disposition, "fix_requested");
++  assert.notEqual(outcome.exchange.rounds[0].changeDigest, outcome.exchange.rounds[1].changeDigest);
++  assert.equal(reviewer.calls[1].changeDigest, outcome.exchange.rounds[1].changeDigest);
++  assert.deepEqual(reviewer.calls[1].previousFindings, [finding()]);
++  assert.deepEqual(author.calls[1].feedback.findings.map((f) => f.location), ["lib/sum.ts:1"]);
++});
++
++test("after the revision cap the change goes on hold with its findings, and is not retried", async () => {
++  const author = mockAuthor("claude", [change(0), change(1), change(2), change(3)]);
++  const requestChanges = (round) => ({
++    ok: true,
++    value: { taskId: "T-1", round, reviewedDigest: "@current", conclusion: "request_changes", findings: [finding()], nextAction: "still wrong" },
++  });
++  const reviewer = mockReviewer("codex", [requestChanges(0), requestChanges(1), requestChanges(2), requestChanges(3)]);
++  const outcome = await runCrossReview(control({ author, reviewer, maxRevisions: 2 }));
++  assert.equal(outcome.status, "on_hold");
++  assert.equal(outcome.holdReason, "revisions_exhausted");
++  assert.equal(outcome.exchange.rounds.length, 3, "round 0 plus two revisions");
++  assert.equal(author.calls.length, 3);
++  assert.equal(outcome.exchange.findings[0].disposition, "unresolved_on_hold");
++  assert.equal(outcome.exchange.findings[0].reproduction, "node -e 'sum([])'");
++});
++
++test("two executors agreeing is not a pass while a required check fails", async () => {
++  const author = mockAuthor("claude", [change(0), change(1)]);
++  const reviewer = mockReviewer("codex", [approveCurrent("T-1", 0), approveCurrent("T-1", 1)]);
++  const outcome = await runCrossReview(control({ author, reviewer, runTests: async () => fail(), maxRevisions: 1 }));
++  assert.equal(outcome.status, "on_hold");
++  assert.equal(outcome.holdReason, "approved_but_checks_failed");
++  assert.equal(outcome.exchange.rounds.length, 2);
++  assert.equal(outcome.exchange.rounds[0].reviewConclusion, "approve");
++  assert.deepEqual(author.calls[1].feedback.failedTests.map((t) => t.command), ["npm test"]);
++});
++
++test("a guard violation is a failed check even with passing tests and an approval", async () => {
++  const author = mockAuthor("claude", [change(0), change(1)]);
++  const reviewer = mockReviewer("codex", [approveCurrent("T-1", 0), approveCurrent("T-1", 1)]);
++  const outcome = await runCrossReview(
++    control({ author, reviewer, guards: async () => ["tests/protected.test.mjs was modified"], maxRevisions: 1 })
++  );
++  assert.equal(outcome.status, "on_hold");
++  assert.equal(outcome.holdReason, "approved_but_checks_failed");
++  assert.deepEqual(author.calls[1].feedback.guardViolations, ["tests/protected.test.mjs was modified"]);
++});
++
++test("preference and unreproduced judgement never force a revision; the current version stands with them recorded", async () => {
++  const author = mockAuthor("claude", [change(0)]);
++  const reviewer = mockReviewer("codex", [
++    {
++      ok: true,
++      value: {
++        taskId: "T-1",
++        round: 0,
++        reviewedDigest: "@current",
++        conclusion: "request_changes",
++        findings: [
++          finding({ basis: "preference", severity: "nit", claim: "I would name it total", reproduction: undefined }),
++          finding({ basis: "judgement", severity: "warning", claim: "this will be slow", reproduction: undefined }),
++        ],
++        nextAction: "rename and optimise",
++      },
++    },
++  ]);
++  const outcome = await runCrossReview(control({ author, reviewer }));
++  assert.equal(outcome.status, "passed");
++  assert.equal(author.calls.length, 1);
++  assert.deepEqual(
++    outcome.exchange.findings.map((f) => f.disposition),
++    ["resolved_by_project_rule", "insufficient_evidence_kept_current"]
++  );
++  assert.equal(isActionable(finding({ basis: "judgement", reproduction: "node -e 1" })), true);
++  assert.equal(isActionable(finding({ basis: "judgement", reproduction: undefined })), false);
++});
++
++test("a verdict naming another digest, task or round does not apply", async () => {
++  for (const [patch, failure] of [
++    [{ reviewedDigest: "sha256:0000" }, "digest_mismatch"],
++    [{ taskId: "T-9" }, "task_mismatch"],
++    [{ round: 4 }, "round_mismatch"],
++  ]) {
++    const author = mockAuthor("claude", [change(0)]);
++    const reviewer = mockReviewer("codex", [
++      { ok: true, value: { ...approveCurrent("T-1", 0).value, ...patch } },
++    ]);
++    const outcome = await runCrossReview(control({ author, reviewer }));
++    assert.equal(outcome.status, "failed", failure);
++    assert.equal(outcome.failure, failure);
++  }
++});
++
++test("invalid JSON, a missing result, a timeout and an executor failure are named failures, not passes", async () => {
++  const cases = [
++    [{ ok: false, failure: "invalid_json", detail: "x" }, "reviewer_invalid_json"],
++    [{ ok: false, failure: "missing_result", detail: "x" }, "reviewer_missing_result"],
++    [{ ok: false, failure: "execution_failed", detail: "x" }, "reviewer_execution_failed"],
++  ];
++  for (const [scripted, failure] of cases) {
++    const outcome = await runCrossReview(
++      control({ author: mockAuthor("claude", [change(0)]), reviewer: mockReviewer("codex", [scripted]) })
++    );
++    assert.equal(outcome.status, "failed");
++    assert.equal(outcome.failure, failure);
++  }
++  // A reviewer that never answers is a timeout.
++  const hanging = { id: "codex", review: () => new Promise(() => {}) };
++  const timedOut = await runCrossReview(control({ author: mockAuthor("claude", [change(0)]), reviewer: hanging, timeoutMs: 20 }));
++  assert.equal(timedOut.status, "failed");
++  assert.equal(timedOut.failure, "reviewer_timeout");
++  // An author that throws is an execution failure.
++  const throwing = { id: "claude", produce: async () => { throw new Error("boom"); } };
++  const crashed = await runCrossReview(control({ author: throwing, reviewer: mockReviewer("codex", []) }));
++  assert.equal(crashed.status, "failed");
++  assert.equal(crashed.failure, "author_execution_failed");
++  // A reviewer with no scripted answer is a missing result.
++  const silent = await runCrossReview(control({ author: mockAuthor("claude", [change(0)]), reviewer: mockReviewer("codex", []) }));
++  assert.equal(silent.failure, "reviewer_missing_result");
++});
++
++test("a reviewer that is blocked puts the change on hold for a person", async () => {
++  const outcome = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [change(0)]),
++      reviewer: mockReviewer("codex", [
++        { ok: true, value: { taskId: "T-1", round: 0, reviewedDigest: "@current", conclusion: "blocked", findings: [], nextAction: "the diff does not apply to the base" } },
++      ]),
++    })
++  );
++  assert.equal(outcome.status, "on_hold");
++  assert.equal(outcome.holdReason, "reviewer_blocked");
++});
++
++test("a change outside the writable scope is refused before review", async () => {
++  const outcome = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [change(0, { filesChanged: ["lib/sum.ts", "app/api/chat/route.ts"] })]),
++      reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]),
++    })
++  );
++  assert.equal(outcome.status, "failed");
++  assert.equal(outcome.failure, "scope_violation");
++});
++
++test("the control program digests the diff itself and ignores any digest the author claims", async () => {
++  const author = mockAuthor("claude", [change(0, { changeDigest: "sha256:forged" })]);
++  const reviewer = mockReviewer("codex", [approveCurrent("T-1", 0)]);
++  const outcome = await runCrossReview(control({ author, reviewer }));
++  assert.equal(outcome.exchange.changeDigest, digest(change(0).value.diff));
++});
++
++test("executor output is parsed strictly: whole document, last line, or last block; anything else is a named failure", () => {
++  const verdict = { taskId: "T-1", round: 0, reviewedDigest: "sha256:a", conclusion: "approve", findings: [], nextAction: "ok" };
++  assert.equal(parseExecutorJson(JSON.stringify(verdict), reviewVerdictProblems).ok, true);
++  assert.equal(parseExecutorJson(`event 1\nevent 2\n${JSON.stringify(verdict)}`, reviewVerdictProblems).ok, true);
++  assert.equal(parseExecutorJson(`Here you go:\n${JSON.stringify(verdict)}\nthanks`, reviewVerdictProblems).ok, true);
++  assert.equal(parseExecutorJson("", reviewVerdictProblems).failure, "missing_result");
++  assert.equal(parseExecutorJson("not json at all", reviewVerdictProblems).failure, "invalid_json");
++  assert.equal(parseExecutorJson(JSON.stringify({ ...verdict, conclusion: "yes" }), reviewVerdictProblems).failure, "schema_mismatch");
++  assert.equal(
++    parseExecutorJson(JSON.stringify({ ...verdict, findings: [{ location: "", severity: "high", basis: "vibes", claim: "" }] }), reviewVerdictProblems).failure,
++    "schema_mismatch"
++  );
++  assert.deepEqual(authorOutputProblems({ diff: "", summary: "s", filesChanged: [] }), []);
++  assert.ok(authorOutputProblems({ diff: 1, summary: "", filesChanged: "x" }).length >= 3);
++  assert.equal(unwrapClaudeResult(JSON.stringify({ type: "result", result: JSON.stringify(verdict) })), JSON.stringify(verdict));
++  assert.equal(unwrapClaudeResult("plain"), "plain");
++});
++
++test("in dry-run the command-line executors never spawn, and the run ends as not executed", async () => {
++  const spawn = async () => {
++    throw new Error("spawn must not be called in dry-run");
++  };
++  const options = (role, id) => ({
++    id,
++    invocation: CLI_INVOCATIONS[id][role],
++    mode: "dry-run",
++    cwd: "/nowhere",
++    timeoutMs: 10,
++    spawn,
++  });
++  const outcome = await runCrossReview(
++    control({ author: cliAuthor(options("author", "claude")), reviewer: cliReviewer(options("reviewer", "codex")) })
++  );
++  assert.equal(outcome.status, "failed");
++  assert.equal(outcome.failure, "author_not_executed");
++  assert.match(outcome.exchange.rounds[0].nextAction, /dry-run: would run `claude --print/);
++  // Live mode with a spawner that fails is an execution failure, not a pass.
++  const live = await runCrossReview(
++    control({
++      author: cliAuthor({ ...options("author", "claude"), mode: "live", spawn: async () => ({ status: 1, stdout: "", stderr: "no such tool" }) }),
++      reviewer: cliReviewer(options("reviewer", "codex")),
++    })
++  );
++  assert.equal(live.failure, "author_execution_failed");
++  // Live mode with no spawner cannot run anything.
++  const noSpawn = await runCrossReview(
++    control({ author: cliAuthor({ ...options("author", "claude"), mode: "live", spawn: undefined }), reviewer: cliReviewer(options("reviewer", "codex")) })
++  );
++  assert.equal(noSpawn.failure, "author_execution_failed");
++});
++
++test("the reviewer's command-line invocation offers no write tool", () => {
++  for (const id of Object.keys(CLI_INVOCATIONS)) {
++    const args = CLI_INVOCATIONS[id].reviewer.args.join(" ");
++    assert.ok(!/Edit|Write|workspace-write|acceptEdits/.test(args), `${id} reviewer: ${args}`);
++  }
++});
++
++test("Codex JSONL output is unwrapped to its final agent message; anything else passes through", async () => {
++  const { unwrapCodexJsonl } = await import("../lib/crossReviewExecutors.ts");
++  const verdict = { taskId: "T-1", round: 0, reviewedDigest: "sha256:a", conclusion: "approve", findings: [], nextAction: "ok" };
++  const jsonl = [
++    JSON.stringify({ type: "thread.started", thread_id: "x" }),
++    JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "thinking" } }),
++    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(verdict) } }),
++    JSON.stringify({ type: "turn.completed", usage: {} }),
++  ].join("\n");
++  assert.equal(unwrapCodexJsonl(jsonl), JSON.stringify(verdict));
++  assert.equal(parseExecutorJson(unwrapCodexJsonl(jsonl), reviewVerdictProblems).ok, true);
++  assert.equal(unwrapCodexJsonl("plain text"), "plain text");
++  assert.equal(unwrapCodexJsonl(JSON.stringify(verdict)), JSON.stringify(verdict));
++});
+diff --git a/tests/routerFullCatalogDiagnostic.test.mjs b/tests/routerFullCatalogDiagnostic.test.mjs
+new file mode 100644
+index 00000000..825a5756
+--- /dev/null
++++ b/tests/routerFullCatalogDiagnostic.test.mjs
+@@ -0,0 +1,221 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++import { decideRouterModel } from "../lib/routerDecision.ts";
++import {
++  diagnoseFullCatalog,
++  ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION,
++} from "../lib/routerFullCatalogDiagnostic.ts";
++import { CANDIDATE_REJECTIONS } from "../lib/routerCandidates.ts";
++import { NEUTRAL_QUALITY_BAND, ROUTER_TIE_BREAK_ORDER } from "../lib/routerScorePolicy.ts";
++import { resolveModelPricing } from "../lib/modelPricing.ts";
++import { NO_WEB_SEARCH_BACKENDS } from "../lib/webSearchBackends.ts";
++
++/**
++ * The diagnostic is an explanation of the product's decision, not a second
++ * decision. What these tests hold is that it never disagrees with the product
++ * on the same input, that every model in the catalogue is accounted for with
++ * a fixed reason when refused, that an unmeasured model is reported as
++ * unmeasured rather than scored, and that the cap the Router routed under is
++ * reported beside the cap dispatch will apply rather than reconciled with it.
++ */
++
++const model = (id, overrides = {}) => ({
++  id,
++  name: id,
++  apiModel: id,
++  provider: "openai",
++  icon: "",
++  bestFor: "",
++  minimumPlan: "Guest",
++  usageClass: "standard",
++  enabled: true,
++  status: "available",
++  contextWindowTokens: 100_000,
++  maxOutputTokens: 4_000,
++  inputUsdPerMillionTokens: 1,
++  outputUsdPerMillionTokens: 1,
++  ...overrides,
++});
++
++const catalogue = () => [
++  model("cheap", { inputUsdPerMillionTokens: 0.1, outputUsdPerMillionTokens: 0.1 }),
++  model("mid", { maxOutputTokens: 16_000 }),
++  model("dear", { inputUsdPerMillionTokens: 10, outputUsdPerMillionTokens: 10 }),
++  model("off", { enabled: false, status: "disabled" }),
++  model("paid", { minimumPlan: "Pro" }),
++  model("nowindow", { contextWindowTokens: undefined }),
++];
++
++const items = () => [
++  { id: "i-1", cell: "en", stratum: "general_question_answering", prompt: "What is a mortgage?" },
++  { id: "i-2", cell: "en", stratum: "coding", prompt: "Fix this TypeScript function:\n```ts\nconst f = () => {}\n```" },
++];
++
++const base = (overrides = {}) => ({
++  items: items(),
++  models: catalogue(),
++  plan: "Free",
++  requestedModelId: "mid",
++  searchBackendReadiness: NO_WEB_SEARCH_BACKENDS,
++  now: () => 0,
++  ...overrides,
++});
++
++test("every catalogue model appears on every item, and a refused one carries a declared reason", () => {
++  const report = diagnoseFullCatalog(base());
++  assert.equal(report.version, ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION);
++  assert.equal(report.items.length, 2);
++  for (const item of report.items) {
++    assert.deepEqual(
++      item.models.map((row) => row.modelId),
++      catalogue().map((entry) => entry.id),
++      "catalogue order, nothing missing"
++    );
++    for (const row of item.models) {
++      if (row.disposition === "rejected") {
++        assert.ok(CANDIDATE_REJECTIONS.includes(row.rejectionReason), `${row.modelId}: ${row.rejectionReason}`);
++        assert.equal(row.rank, null);
++      } else {
++        assert.equal(row.rejectionReason, null);
++        assert.ok(row.rank >= 1);
++      }
++    }
++    const byId = Object.fromEntries(item.models.map((row) => [row.modelId, row]));
++    assert.equal(byId.off.rejectionReason, "disabled");
++    assert.equal(byId.paid.rejectionReason, "plan");
++    assert.equal(byId.nowindow.rejectionReason, "context_window_undeclared");
++  }
++  assert.deepEqual(
++    report.summary.neverEligible.map((entry) => entry.modelId).sort(),
++    ["nowindow", "off", "paid"]
++  );
++});
++
++test("the diagnostic agrees with the product's own decision on the same input", () => {
++  const report = diagnoseFullCatalog(base());
++  const cap = resolveModelPricing(catalogue()[1]).maxOutputTokens;
++  for (const [index, item] of report.items.entries()) {
++    const source = items()[index];
++    const product = decideRouterModel(
++      {
++        text: source.prompt,
++        attachments: [],
++        webSearchRequested: false,
++        models: catalogue(),
++        plan: "Free",
++        searchBackendReadiness: NO_WEB_SEARCH_BACKENDS,
++        reservedInputTokens: item.caps.routerReservedInputTokens,
++        requestOutputCapTokens: cap,
++        sticky: null,
++      },
++      () => 0
++    );
++    assert.equal(product.outcome, "selected");
++    assert.equal(item.decision.primaryModelId, product.modelId);
++    assert.deepEqual(item.decision.rankedModelIds, [product.modelId, ...product.fallbackCandidateModelIds]);
++    assert.deepEqual(item.decision.fallbackCandidateModelIds, product.fallbackCandidateModelIds);
++    assert.deepEqual(
++      item.models.filter((row) => row.rejectionReason !== null).map((row) => ({ modelId: row.modelId, reason: row.rejectionReason })),
++      product.record.rejections
++    );
++    assert.equal(item.decision.decidedBy, product.record.selectionDecidedBy);
++    assert.equal(item.consistency.agreesWithProduct, true, item.consistency.problems.join("; "));
++    assert.equal(item.caps.primary.routerOutputTokens, product.outputTokens);
++  }
++  assert.equal(report.summary.consistencyProblems, 0);
++  assert.deepEqual(report.problems, []);
++});
++
++test("the cost tie-break picks the cheapest, and every loser says which criterion it lost on", () => {
++  const report = diagnoseFullCatalog(base());
++  const item = report.items[0];
++  assert.equal(item.decision.primaryModelId, "cheap");
++  assert.equal(item.decision.decidedBy, "expected_total_cost");
++  assert.equal(item.decision.selectionReason, "fallback_order");
++  for (const row of item.models) {
++    if (row.disposition !== "fallback_candidate") continue;
++    assert.ok(ROUTER_TIE_BREAK_ORDER.includes(row.versusPrimary.decidedBy));
++    assert.equal(row.versusPrimary.wouldBeatPrimary, false);
++    assert.ok(row.expectedTotalCostUsd > item.models.find((m) => m.modelId === "cheap").expectedTotalCostUsd);
++  }
++  assert.equal(report.summary.pairwiseInversions, 0);
++});
++
++test("an unmeasured model is reported at the neutral band with no evidence, never at zero and never promoted", () => {
++  const report = diagnoseFullCatalog(base());
++  for (const item of report.items) {
++    for (const row of item.models) {
++      assert.equal(row.quality.band, NEUTRAL_QUALITY_BAND);
++      assert.equal(row.quality.evidenceRef, null);
++      assert.equal(row.quality.status, "no_evidence");
++    }
++    assert.deepEqual(item.evidence.eligibleWithEvidence, []);
++    assert.equal(item.evidence.decidedWithoutQualityEvidence, true);
++  }
++  assert.equal(report.summary.evidenceCells.withEvidence, 0);
++  assert.ok(report.improvementCandidates.some((c) => c.kind === "no_quality_evidence_for_kind"));
++  // Nothing here writes a band: the policy module is read, not edited.
++  assert.ok(!report.improvementCandidates.some((c) => c.detail.includes("promote")));
++});
++
++test("the Router's output cap and dispatch's are both reported, and a difference is named rather than hidden", () => {
++  // Routed under `mid`'s cap of 16,000; the primary `cheap` dispatches under
++  // its own 4,000. The Router fitted every candidate to 16,000 output tokens
++  // and dispatch will hand `cheap` 4,000.
++  const report = diagnoseFullCatalog(base());
++  const item = report.items[0];
++  assert.equal(report.inputs.routerRequestOutputCapTokens, 16_000);
++  assert.equal(item.caps.primary.modelId, "cheap");
++  assert.equal(item.caps.primary.routerOutputTokens, 16_000);
++  assert.equal(item.caps.primary.dispatchRequestOutputCapTokens, 4_000);
++  assert.equal(item.caps.primary.dispatchOutputTokens, 4_000);
++  assert.equal(item.caps.primary.outputCapDiffers, true);
++  assert.equal(report.summary.outputCapMismatchItems, 2);
++  assert.ok(report.improvementCandidates.some((c) => c.kind === "output_cap_mismatch"));
++
++  // Routed under the primary's own cap, the two agree and nothing is flagged.
++  const aligned = diagnoseFullCatalog(base({ requestedModelId: "cheap" }));
++  assert.equal(aligned.items[0].caps.primary.outputCapDiffers, false);
++  assert.equal(aligned.summary.outputCapMismatchItems, 0);
++});
++
++test("fallback is reported under the shipped flag and under the flag turned on, with one executable candidate", () => {
++  const report = diagnoseFullCatalog(base());
++  const item = report.items[0];
++  assert.deepEqual(item.fallback.scopeAsDeployed, { allowed: false, reason: "flag_off" });
++  assert.deepEqual(item.fallback.scopeIfFlagOn, { allowed: true });
++  assert.equal(item.fallback.maxModelFallbacks, 1);
++  assert.equal(item.fallback.firstExecutable.modelId, item.decision.fallbackCandidateModelIds[0]);
++  assert.equal(item.fallback.firstExecutable.dispatchFit, "fitted");
++  assert.equal(report.inputs.fallbackFlagAsDeployed, "off");
++
++  const on = diagnoseFullCatalog(base({ fallbackEnvironment: { AUTO_ROUTER_FALLBACK_ENABLED: "on" } }));
++  assert.deepEqual(on.items[0].fallback.scopeAsDeployed, { allowed: true });
++  assert.equal(on.inputs.fallbackFlagAsDeployed, "on");
++});
++
++test("improvement candidates name the reachability gap and the never-chosen models with fixed identifiers", () => {
++  const report = diagnoseFullCatalog(base());
++  const kinds = report.improvementCandidates.map((c) => c.kind);
++  assert.ok(kinds.includes("context_window_undeclared"));
++  assert.deepEqual(
++    report.improvementCandidates.find((c) => c.kind === "context_window_undeclared").modelIds,
++    ["nowindow"]
++  );
++  assert.ok(kinds.includes("eligible_never_primary"));
++  assert.deepEqual(report.summary.eligibleNeverPrimary, ["dear", "mid"]);
++  assert.ok(kinds.includes("decided_by_tie_break"));
++  // `paid` is never eligible on the Free plan, and is neither undeclared nor disabled.
++  assert.deepEqual(report.improvementCandidates.find((c) => c.kind === "never_eligible").modelIds, ["paid"]);
++});
++
++test("a requested model outside the catalogue is refused rather than routed under an invented cap", () => {
++  assert.throws(() => diagnoseFullCatalog(base({ requestedModelId: "ghost" })), /not in the catalogue/);
++});
++
++test("the report carries nothing derived from a prompt", () => {
++  const secret = "PROMPT-TEXT-THAT-MUST-NOT-LEAK";
++  const report = diagnoseFullCatalog(base({ items: [{ id: "i-1", prompt: `Explain ${secret} please` }] }));
++  assert.ok(!JSON.stringify(report).includes(secret));
++});
+
+```
+
+## Test results (run by the control program)
+
+- PASS `node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (pass|fail)'` (1604ms)
+  # pass 111
+  # fail 0
+
+## Author's account (read last; a claim, not a finding)
+
+Summary: Adds lib/routerFullCatalogDiagnostic.ts + scripts/report-router-full-catalog.mjs (offline full-catalogue diagnostic reusing decideRouterModel/filterRouterCandidates/selectRouterModel), lib/crossReviewCore.ts + lib/crossReviewExecutors.ts + scripts/cross-review.mjs (author/reviewer/control loop with mocks, dry-run shells, package mode), tests for both, docs and fixtures. Report on development-v0 committed under docs/ops/router-full-catalog-diagnostic/. No change to routing behaviour, scores, flags or pre-registrations.
+
+## Answer format
+
+Reply with exactly one JSON document and nothing else:
+
+```json
+{
+  "taskId": "router-full-catalog-diagnostic-v1",
+  "round": 0,
+  "reviewedDigest": "sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932",
+  "conclusion": "approve | request_changes | blocked",
+  "findings": [
+    {
+      "location": "path:line or symbol",
+      "severity": "error | warning | nit",
+      "basis": "evidence | preference | judgement",
+      "claim": "what is wrong, in one sentence",
+      "reproduction": "how to see it (required for a judgement to be acted on)"
+    }
+  ],
+  "nextAction": "one sentence"
+}
+```
+
+`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; a `judgement` without a reproduction is recorded and not acted on.
