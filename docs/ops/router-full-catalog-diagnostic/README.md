@@ -6,7 +6,16 @@ an evaluation set, decided offline by the product's own functions.
 ```
 npm run report:router-full-catalog -- [--set=docs/ops/router-evaluation-set/development-v0.json] \
   [--items=adopted|all] [--plan=Pro] [--requested-model=<id>] [--fallback-flag=off|on] \
-  [--json=<out>] [--md=<out>]
+  [--json=<out>] [--summary-json=<out>] [--md=<out>]
+```
+
+The committed files are regenerated with the defaults:
+
+```
+npm run report:router-full-catalog -- --quiet \
+  --md=docs/ops/router-full-catalog-diagnostic/development-v0.md \
+  --summary-json=docs/ops/router-full-catalog-diagnostic/development-v0.summary.json \
+  --json=artifacts/router-full-catalog/development-v0.full.json
 ```
 
 `lib/routerFullCatalogDiagnostic.ts` calls `decideRouterModel` for the
@@ -22,6 +31,40 @@ approved evidence stands behind it, the criterion each loser lost to the
 primary on, the ranked fallback candidates with the fallback gate's answer
 under the shipped flag and with the flag on, and the output cap the Router
 routed under beside the one dispatch will apply to the chosen model.
+
+Whether a turn could reach a fallback is answered in the product's own
+order (`app/api/chat/route.ts`, `attemptFallback`) with the product's own
+functions where an offline report can call them: the gate
+(`autoFallbackScope`) must allow it, `decideFallback` -- called, under the
+one failure hypothesis the fallback path exists for (`FALLBACK_FAILURE_HYPOTHESIS`:
+the primary failed at the provider before any token was shown) -- names a
+candidate, and dispatch must fit that one candidate under its own cap, since
+the product tries no other. `fallback.decision` is `decideFallback`'s answer
+as given; `fallback.firstCandidate` is that candidate as dispatch would fit
+it; `fallback.reachableAsDeployed` and `fallback.reachableIfFlagOn` are the
+three-step answer, each refusal naming the step that said no
+(`gate:<reason>`, `decision:<reason>`, `candidate_context_window_exceeded`).
+
+Three things are kept apart by name, because an offline report can answer
+only the first:
+
+- **the offline diagnosis** -- `reachableAsDeployed` / `reachableIfFlagOn`:
+  which candidate is reachable on the given inputs, with the product's own
+  gate and decision, and each refusal's reason;
+- **the conditions this report cannot verify** -- `unverifiedConditions` on
+  every reachable answer: the account's credits and the provider budget
+  (`budget_refused`), the runtime registry row (`candidate_unavailable`),
+  the primary's provider reservation (`no_provider_hold`), and the request's
+  search path (`search_path_unavailable`);
+- **the pre-dispatch check** -- what decides on a real request, in
+  `planAttemptExecution` and the route around it, against exactly those
+  conditions.
+
+So a reachable answer carries `execution: "unverified"` and is never called
+executable. `planAttemptExecution` is not called here: it builds the
+provider client and the credit budget for a real dispatch, which an offline
+report has no account, credentials or reservation for.
+`fallback.notModelled` repeats the hypothesis and the unverified list.
 
 ## What the product has that this does not
 

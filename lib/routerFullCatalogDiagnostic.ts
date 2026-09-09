@@ -71,12 +71,12 @@ import {
     type RouterTieBreakSignals,
 } from "@/lib/routerScorePolicy";
 import { selectRouterModel, type SelectionReason } from "@/lib/routerSelection";
-import { MAX_MODEL_FALLBACKS } from "@/lib/routingFallbackPolicy";
+import { decideFallback, MAX_MODEL_FALLBACKS, type FallbackDecision } from "@/lib/routingFallbackPolicy";
 import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
 import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 
 /** Bump with any change to the shape of the report or how a row is derived. */
-export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v1";
+export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v3";
 
 /** One request to diagnose. The shape `EvalSetItem` already has, and no more. */
 export type DiagnosticItem = {
@@ -129,6 +129,71 @@ export type QualityEvidenceStatus =
     | "no_evidence"
     /** An approved record moved this cell off neutral. */
     | "approved_evidence";
+
+/**
+ * The failure the fallback question is asked about. `decideFallback` decides
+ * on what happened to the primary, and offline nothing has happened, so the
+ * diagnostic asks the one question the fallback path exists for: the primary
+ * failed at the provider before any token was shown, with none of §7's
+ * excluded answers. Every other failure shape terminates by policy, and a
+ * report that picked one of those would be reporting that fallback is
+ * refused, which is true and useless.
+ */
+export const FALLBACK_FAILURE_HYPOTHESIS = {
+    outcome: "failed_pre_token",
+    failureLayer: "provider",
+    providerRefusal: null,
+    visibleTokenEmitted: false,
+    passThroughUsed: false,
+    rerouteCount: 0,
+} as const;
+
+/** `decideFallback`'s own answer under the hypothesis, recorded as given. */
+export type FallbackDecisionRecord = {
+    version: string;
+    action: FallbackDecision["action"];
+    modelId: string | null;
+    reason: string | null;
+};
+
+/**
+ * Whether a turn could reach a fallback, as far as can be decided offline,
+ * in the product's own order (`app/api/chat/route.ts`, `attemptFallback`):
+ * the gate (`autoFallbackScope`), then `decideFallback` under the stated
+ * hypothesis, then the one candidate it names fitted under dispatch's cap
+ * the way `planAttemptExecution` fits it. `refusal` names the step that
+ * said no: `gate:<reason>`, `decision:<reason>`, or
+ * `candidate_context_window_exceeded`.
+ *
+ * `planAttemptExecution` itself is not called: it builds the provider client
+ * and the credit budget for a real dispatch, which an offline report has no
+ * account, credentials or reservation for. Its refusals that depend on
+ * those, and the two runtime checks the route makes around it, are listed
+ * in `unverifiedConditions` on every reachable answer, so `reachable: true`
+ * reads as "nothing decidable offline refused it" and not as a promise.
+ */
+export type FallbackReachability =
+    | {
+          reachable: true;
+          modelId: string;
+          dispatchFit: "fitted" | "unbounded";
+          dispatchOutputTokens: number | null;
+          /**
+           * Never "executable": whether the fallback would run is decided
+           * by the pre-dispatch check on a real request, against the
+           * conditions listed below, which this report cannot see.
+           */
+          execution: "unverified";
+          unverifiedConditions: readonly string[];
+      }
+    | { reachable: false; refusal: string };
+
+export const FALLBACK_UNVERIFIED_CONDITIONS: readonly string[] = [
+    "search_path_unavailable: planAttemptExecution refuses a candidate that cannot search when the primary's turn had a search path; the request's web-search mode is not an input here",
+    "budget_refused: createChatBudget and reserveTurnSearchCost need the account's credits and the provider budget",
+    "candidate_unavailable: the runtime registry row's enabled and catalogDeleted state; this report reads the catalogue passed in",
+    "no_provider_hold: the primary's provider reservation for this turn",
+];
 
 export type ModelDisposition = {
     modelId: string;
@@ -229,14 +294,40 @@ export type ItemDiagnostic = {
         scopeAsDeployed: FallbackScope;
         scopeIfFlagOn: FallbackScope;
         /**
-         * The candidate dispatch would try first, re-fitted under its own cap
-         * the way `planAttemptExecution` will. Null when there is none.
+         * The candidate `decideFallback` would name -- the first ranked one --
+         * re-fitted under dispatch's own cap the way `planAttemptExecution`
+         * will. Null when there is none. Whether a turn could reach it is the
+         * next two fields' question, not this one's: a candidate the gate
+         * refuses, or one dispatch cannot fit, is still listed here.
          */
-        firstExecutable: {
+        firstCandidate: {
             modelId: string;
             dispatchFit: "fitted" | "unbounded" | "exceeded";
             dispatchOutputTokens: number | null;
         } | null;
+        /**
+         * `decideFallback`'s own answer, called with the product's function
+         * under `FALLBACK_FAILURE_HYPOTHESIS` and the Router's ranked
+         * candidates. The product tries the one candidate it names and no
+         * other (`MAX_MODEL_FALLBACKS`).
+         */
+        decision: FallbackDecisionRecord;
+        /**
+         * Whether a turn could reach a fallback as deployed, as far as can be
+         * decided offline: gate, decision, dispatch fit, in the product's
+         * order. A refusal at any step is the turn ending on the primary's
+         * failure, and `refusal` names the step.
+         */
+        reachableAsDeployed: FallbackReachability;
+        /** The same question with `AUTO_ROUTER_FALLBACK_ENABLED` turned on. */
+        reachableIfFlagOn: FallbackReachability;
+        /**
+         * What the product decides at runtime that this cannot: the
+         * hypothesis the decision was asked under, and the refusals only a
+         * real dispatch can raise. Stated so the two answers above are read
+         * as necessary conditions, not a promise.
+         */
+        notModelled: readonly string[];
     };
     caps: CapReconciliation;
     evidence: {
@@ -262,7 +353,8 @@ export type ImprovementCandidate = {
         | "decided_by_tie_break"
         | "web_search_capability_gap"
         | "output_cap_mismatch"
-        | "pairwise_inversion";
+        | "pairwise_inversion"
+        | "fallback_candidate_does_not_fit";
     modelIds: readonly string[];
     taskKinds: readonly TaskKind[];
     itemCount: number;
@@ -300,6 +392,10 @@ export type DiagnosticReport = {
         consistencyProblems: number;
         pairwiseInversions: number;
         fallbackScopeAsDeployed: Readonly<Record<string, number>>;
+        /** Items by `reachable` or by the refusal that stopped them, as deployed. */
+        fallbackReachableAsDeployed: Readonly<Record<string, number>>;
+        /** The same with the flag on. */
+        fallbackReachableIfFlagOn: Readonly<Record<string, number>>;
     };
     improvementCandidates: readonly ImprovementCandidate[];
     /** Anything that stops this report being read as the product's answer. */
@@ -320,6 +416,61 @@ const qualityFor = (modelId: string, kind: TaskKind) => {
 
 const sameList = (left: readonly string[], right: readonly string[]) =>
     left.length === right.length && left.every((value, index) => value === right[index]);
+
+/** `decideFallback`, asked the product's question under the stated hypothesis. */
+export const fallbackDecisionFor = (primaryModelId: string, rankedCandidateModelIds: readonly string[]): FallbackDecisionRecord => {
+    const decision = decideFallback({
+        attempt: {
+            modelId: primaryModelId,
+            outcome: FALLBACK_FAILURE_HYPOTHESIS.outcome,
+            failureLayer: FALLBACK_FAILURE_HYPOTHESIS.failureLayer,
+            providerRefusal: FALLBACK_FAILURE_HYPOTHESIS.providerRefusal,
+        },
+        run: {
+            passThroughUsed: FALLBACK_FAILURE_HYPOTHESIS.passThroughUsed,
+            rerouteCount: FALLBACK_FAILURE_HYPOTHESIS.rerouteCount,
+            visibleTokenEmitted: FALLBACK_FAILURE_HYPOTHESIS.visibleTokenEmitted,
+        },
+        nextCandidateModelIds: rankedCandidateModelIds,
+    });
+    return {
+        version: decision.version,
+        action: decision.action,
+        modelId: decision.action === "terminate" ? null : decision.modelId,
+        reason: decision.action === "terminate" ? decision.reason : null,
+    };
+};
+
+/**
+ * Whether a turn could reach a fallback, in the product's own order
+ * (`app/api/chat/route.ts`, `attemptFallback`): the gate first, then the
+ * decision, then dispatch fitting the one candidate the decision names.
+ * `candidate` is that candidate as dispatch would fit it, or null when the
+ * decision named none. The refusals only a real dispatch can raise are
+ * carried on every reachable answer.
+ */
+export const fallbackReachabilityFor = (
+    scope: FallbackScope,
+    decision: FallbackDecisionRecord,
+    candidate: ItemDiagnostic["fallback"]["firstCandidate"]
+): FallbackReachability => {
+    if (!scope.allowed) return { reachable: false, refusal: `gate:${scope.reason}` };
+    if (decision.action !== "fallback") return { reachable: false, refusal: `decision:${decision.reason ?? decision.action}` };
+    if (!candidate || candidate.modelId !== decision.modelId) {
+        return { reachable: false, refusal: `decision:${decision.modelId} is not the candidate dispatch was asked to fit` };
+    }
+    if (candidate.dispatchFit === "exceeded") {
+        return { reachable: false, refusal: "candidate_context_window_exceeded" };
+    }
+    return {
+        reachable: true,
+        modelId: candidate.modelId,
+        dispatchFit: candidate.dispatchFit,
+        dispatchOutputTokens: candidate.dispatchOutputTokens,
+        execution: "unverified",
+        unverifiedConditions: FALLBACK_UNVERIFIED_CONDITIONS,
+    };
+};
 
 const diagnoseItem = (item: DiagnosticItem, input: DiagnosticInput, requestOutputCapTokens: number): ItemDiagnostic => {
     const reservedInputTokens = Math.max(1, Math.ceil(Buffer.byteLength(item.prompt, "utf8") / 4));
@@ -508,8 +659,21 @@ const diagnoseItem = (item: DiagnosticItem, input: DiagnosticInput, requestOutpu
         ...scopeInput,
         environment: { ...(input.fallbackEnvironment ?? {}), AUTO_ROUTER_FALLBACK_ENABLED: "on" },
     });
-    const firstFallback = fallbackCandidateModelIds[0] ?? null;
+    // The product's own decision function, asked under the stated hypothesis
+    // with the Router's ranked candidates. Dispatch is then asked to fit the
+    // one candidate it names (or, when it names none, the one the Router
+    // ranked next, so the report still shows what was there).
+    const fallbackDecision = fallbackDecisionFor(primaryModelId ?? "(no primary)", fallbackCandidateModelIds);
+    const firstFallback = fallbackDecision.modelId ?? fallbackCandidateModelIds[0] ?? null;
     const firstFallbackFit = firstFallback ? dispatchFitFor(firstFallback) : null;
+    const firstCandidate =
+        firstFallback && firstFallbackFit
+            ? {
+                  modelId: firstFallback,
+                  dispatchFit: firstFallbackFit.fit,
+                  dispatchOutputTokens: firstFallbackFit.outputTokens,
+              }
+            : null;
 
     const eligibleIds = candidates.eligible.map((candidate) => candidate.modelId);
     const eligibleWithEvidence = eligibleIds.filter(
@@ -546,14 +710,14 @@ const diagnoseItem = (item: DiagnosticItem, input: DiagnosticInput, requestOutpu
             maxModelFallbacks: MAX_MODEL_FALLBACKS,
             scopeAsDeployed,
             scopeIfFlagOn,
-            firstExecutable:
-                firstFallback && firstFallbackFit
-                    ? {
-                          modelId: firstFallback,
-                          dispatchFit: firstFallbackFit.fit,
-                          dispatchOutputTokens: firstFallbackFit.outputTokens,
-                      }
-                    : null,
+            firstCandidate,
+            decision: fallbackDecision,
+            reachableAsDeployed: fallbackReachabilityFor(scopeAsDeployed, fallbackDecision, firstCandidate),
+            reachableIfFlagOn: fallbackReachabilityFor(scopeIfFlagOn, fallbackDecision, firstCandidate),
+            notModelled: [
+                `the decision is asked under one hypothesis: the primary failed ${FALLBACK_FAILURE_HYPOTHESIS.outcome} at the ${FALLBACK_FAILURE_HYPOTHESIS.failureLayer} layer with no provider refusal and no visible token; any other failure shape terminates by policy`,
+                ...FALLBACK_UNVERIFIED_CONDITIONS,
+            ],
         },
         caps,
         evidence: {
@@ -643,6 +807,9 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
     const fallbackScopeAsDeployed = count(
         items.map((item) => (item.fallback.scopeAsDeployed.allowed ? "allowed" : item.fallback.scopeAsDeployed.reason))
     );
+    const reachableKey = (answer: FallbackReachability) => (answer.reachable ? "reachable" : answer.refusal);
+    const fallbackReachableAsDeployed = count(items.map((item) => reachableKey(item.fallback.reachableAsDeployed)));
+    const fallbackReachableIfFlagOn = count(items.map((item) => reachableKey(item.fallback.reachableIfFlagOn)));
 
     const improvementCandidates: ImprovementCandidate[] = [];
     const undeclared = input.models
@@ -772,6 +939,25 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
         });
     }
 
+    const doesNotFit = items.filter(
+        (item) =>
+            !item.fallback.reachableIfFlagOn.reachable &&
+            item.fallback.reachableIfFlagOn.refusal === "candidate_context_window_exceeded"
+    );
+    if (doesNotFit.length > 0) {
+        improvementCandidates.push({
+            kind: "fallback_candidate_does_not_fit",
+            modelIds: [...new Set(doesNotFit.flatMap((item) => item.fallback.firstCandidate?.modelId ?? []))].sort(),
+            taskKinds: [...new Set(doesNotFit.map((item) => item.profile.rankingKind))].sort(),
+            itemCount: doesNotFit.length,
+            detail:
+                "named as the fallback candidate by the Router, which fitted it with the raw input estimate, and " +
+                "refused by dispatch, which reserves the widened one; with the flag on the turn would end on the " +
+                "primary's failure. The candidate list was decided under one reservation and the attempt under " +
+                "another.",
+        });
+    }
+
     return {
         version: ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION,
         routerVersions: versionOf(),
@@ -803,6 +989,8 @@ export const diagnoseFullCatalog = (input: DiagnosticInput): DiagnosticReport =>
             consistencyProblems,
             pairwiseInversions,
             fallbackScopeAsDeployed,
+            fallbackReachableAsDeployed,
+            fallbackReachableIfFlagOn,
         },
         improvementCandidates,
         problems,
