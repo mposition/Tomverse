@@ -14,6 +14,7 @@ import test from "node:test";
 
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
+    JUDGED_OUTSIDE_GOLD_VERDICTS,
     judgementRecordShapeProblems,
     scoreJudgedCase,
     validateJudgedCase,
@@ -955,4 +956,69 @@ test("RESIDUAL: how many ids the judge assigns outside the gold still moves the 
     ]);
     assert.deepEqual(counts(oneId), [0, 1, 1]);
     assert.deepEqual(counts(twoIds), [0, 1, 2]);
+});
+
+test("a verdict on a claim the gold contains is refused, not ignored", () => {
+    // The C1 duplicate check keys on every judged field, and this field's
+    // contract said "ignored" where the gold contains the triple. Ignored is
+    // not nothing: writing it onto one of two otherwise identical claims made
+    // them look like different judgements, the record was accepted, and the
+    // score moved -- `duplicates` 1 where the finding was sufficient, a second
+    // false positive where it was insufficient.
+    for (const verdict of JUDGED_OUTSIDE_GOLD_VERDICTS) {
+        const problems = verifyJudgementRecord(
+            judgedCase(),
+            record([claim({ outsideGoldVerdict: verdict })])
+        );
+        assert.ok(
+            problems.some((problem) => problem.includes("nothing reads it here")),
+            `${verdict} -> ${JSON.stringify(problems)}`
+        );
+    }
+
+    // And the evasion itself, both halves of it.
+    for (const overrides of [{}, { sufficiency: "insufficient" }]) {
+        const problems = verifyJudgementRecord(
+            judgedCase(),
+            record([
+                claim(overrides),
+                claim({ ...overrides, outsideGoldVerdict: "false_finding" }),
+            ])
+        );
+        assert.notDeepEqual(problems, [], JSON.stringify(overrides));
+    }
+});
+
+test("a real verdict outside the gold is untouched", () => {
+    // The narrow rule must not reach the case the field exists for.
+    assert.deepEqual(
+        verifyJudgementRecord(
+            judgedCase(),
+            record([claim({ targetLabel: "a", outsideGoldVerdict: "false_finding" })])
+        ),
+        []
+    );
+});
+
+test("repeating a wrong finding across two items still costs twice", () => {
+    // `duplicates` folds the REPEATED TRUE FINDING and nothing else. A false
+    // or insufficient finding filed twice is two submissions and two false
+    // positives, whichever items they came from.
+    const invented = (sourceIndex) =>
+        claim({
+            targetLabel: "a",
+            sourceIndex,
+            outsideGoldVerdict: "false_finding",
+        });
+    const twiceInvented = score(judgedCase(), [invented(0), invented(1)]);
+    assert.deepEqual(counts(twiceInvented), [0, 1, 2]);
+    assert.equal(twiceInvented.byKind.missingPoints.duplicates, 0);
+
+    const twiceVague = score(judgedCase(), [
+        claim({ sufficiency: "insufficient" }),
+        claim({ sufficiency: "insufficient", sourceIndex: 1 }),
+    ]);
+    assert.deepEqual(counts(twiceVague), [0, 1, 2]);
+    assert.equal(twiceVague.byKind.missingPoints.insufficientFindings, 2);
+    assert.equal(twiceVague.byKind.missingPoints.duplicates, 0);
 });

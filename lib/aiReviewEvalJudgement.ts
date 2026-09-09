@@ -633,6 +633,30 @@ export function verifyJudgementRecord(
                     `which is not a time`
             );
         }
+        // A verdict on a claim the gold DOES contain is not ignorable.
+        //
+        // The field's contract says "required outside the gold, ignored
+        // otherwise", and `ignored` was a hole: the C1 duplicate check keys on
+        // every judged field, so writing a verdict onto one of two otherwise
+        // identical in-gold claims made them look like different judgements.
+        // The record was accepted and the score moved -- a second true
+        // positive's worth of `duplicates` where the finding was sufficient,
+        // and a second false positive where it was insufficient.
+        //
+        // Refused rather than ignored. An opposite assertion is still a
+        // different claim, and a real verdict outside the gold is untouched:
+        // this only says a field that cannot apply may not be written.
+        if (
+            claim.outsideGoldVerdict !== undefined &&
+            claim.submittedAs !== "prose" &&
+            goldKeys[claim.submittedAs].has(claimKey(claim))
+        ) {
+            problems.push(
+                `${where} carries outsideGoldVerdict ${JSON.stringify(claim.outsideGoldVerdict)} ` +
+                    `and the gold contains that ${claim.submittedAs} item; the verdict ` +
+                    `settles findings the gold does NOT contain, and nothing reads it here`
+            );
+        }
         // Insufficiency is a judgement about a submitted finding that aims at
         // a requirement the gold contains. Anywhere else it would overlap
         // something that already has an answer -- supporting material is not
