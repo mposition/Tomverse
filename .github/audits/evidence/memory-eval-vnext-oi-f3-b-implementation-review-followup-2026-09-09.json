@@ -6,9 +6,342 @@
   "preparedBy": "Codex",
   "preparedDate": "2026-09-09",
   "preparedTimezone": "Australia/Brisbane",
+  "revision": {
+    "label": "BF-R1",
+    "status": "draft_pending_limited_confirmation_review",
+    "preparedBy": "Codex",
+    "preparedDate": "2026-09-09",
+    "basis": "fe7c4704be1bfb2165c2436ccea460bc6f7aa18f",
+    "originalFiles": [
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md",
+        "sha256": "ba6e6d443ec180a0d6ab9f5ea98e1da7ed2c83c07f98392a930acbeddc678d1a",
+        "bytes": 22868,
+        "lfCount": 345
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-oi-f3-b-implementation-review-followup-2026-09-09.json",
+        "sha256": "ddd618b7d7c12f5923e0f7dea6698243410a21d18779d0d88ccb15abd1d1dbd8",
+        "bytes": 80984,
+        "lfCount": 1537
+      }
+    ],
+    "reviewReport": {
+      "path": "C:/Users/Vyper/.codex/attachments/70c5288d-2794-44aa-8292-b54e5c958690/pasted-text.txt",
+      "sha256": "121d27e048d9237ced2c9827cdf5deefe4983d15df43293b6a65759101d98c79",
+      "bytes": 21248,
+      "lfCount": 193,
+      "crCount": 193,
+      "verdict": "PASS_WITH_WARNINGS",
+      "findingCounts": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "P3": 3
+      },
+      "attribution": "User-supplied Claude first independent review of BF only; original raw CRLF bytes preserved. Not a BF-R1 verdict, authentication or durable archive."
+    },
+    "scope": [
+      "BFR-F1",
+      "BFR-F2",
+      "BFR-F3"
+    ],
+    "changes": [
+      {
+        "id": "BFR-F1",
+        "disposition": "hashConventions metadata added; protectedFiles/sourceBindings/supportFiles values and order unchanged",
+        "externalClosure": false
+      },
+      {
+        "id": "BFR-F2",
+        "disposition": "historical noIndex command/interpretation annotated; original observations preserved; fresh checks recorded separately",
+        "externalClosure": false
+      },
+      {
+        "id": "BFR-F3",
+        "disposition": "bDeclarations renamed to fixtureProxySafetyDeclarations, unchanged value 24; not 19 T01 unit scenarios or test passes",
+        "externalClosure": false
+      }
+    ],
+    "authorization": {
+      "instruction": "네 수정안 작성하셔서 커밋 및 푸시후 SHA 고정 후 독립 검토 프롬프트 주세요.",
+      "draftRevisionCommitPushPromptRequested": true,
+      "newHumanApproval": false,
+      "approvedBy": null,
+      "approvedAt": null,
+      "biDispositionsAcceptedByHuman": false,
+      "implementationChangeRequested": false,
+      "prRequested": false,
+      "mergeRequested": false,
+      "ciDispatchRequested": false,
+      "activationAuthorized": false
+    },
+    "historicalStatePolicy": "Original BF fields outside revision preserve BF preparation history, including pending/null/false, old report and validation observations. document.rawSha256 binds the current Markdown; validation.manualAfterWriting.newFiles retains the historical BF Markdown hash. The only historical annotations are hashConventions, the fixture count key rename and noIndex command/interpretation metadata.",
+    "validation": {
+      "context": "Local Windows PowerShell, H:/Project/ai-chat-hub; seven existing npm run scripts, OS/PATH/TEMP/user-cache child allowlist and absent .os-f4-absent-env-file as described in original validation.executionContext. No production credentials, installs, protocol/T01 execution or CI dispatch.",
+      "preflight": {
+        "at": "2026-09-09T07:59:05.377Z",
+        "head": "fe7c4704be1bfb2165c2436ccea460bc6f7aa18f",
+        "trackedClean": true,
+        "indexClean": true,
+        "untrackedCount": 28,
+        "stashCount": 17,
+        "protectedFilesMatched": 78,
+        "sourceBindingsMatched": 36,
+        "runtime": {
+          "node": "v22.22.2",
+          "v8": "12.4.254.21-node.39",
+          "openssl": "3.5.5",
+          "platform": "win32",
+          "arch": "x64"
+        },
+        "hiddenLockSha256": "9cd03955eef3d97bfd1457069b27f46ec7493828591cc5487602f21f09955dd6"
+      },
+      "preparatoryReaderDiagnostic": "The first author preflight reader incorrectly required LF-only bytes for the external review report and stopped on its CRLF. The corrected reader requires strict UTF-8 but hashes the original report bytes without normalization; no file was changed. This is a reader assertion, not a package-script baseline failure.",
+      "beforeEditing": {
+        "head": "fe7c4704be1bfb2165c2436ccea460bc6f7aa18f",
+        "trackedClean": true,
+        "indexClean": true,
+        "diffCheckScope": "ordinary/staged checks inspect empty deltas in clean BF; IB..BF checks the actual original two-file addition. These are fresh observations, not retroactively attributed to BF preparation.",
+        "diffChecks": [
+          {
+            "command": "git diff --check",
+            "start": "2026-09-09T07:59:05.153Z",
+            "end": "2026-09-09T07:59:05.201Z",
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "command": "git diff --staged --check",
+            "start": "2026-09-09T07:59:05.201Z",
+            "end": "2026-09-09T07:59:05.242Z",
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "command": "git diff --check e0a8c743695fce278592c29e85d32279fa1f2b85 fe7c4704be1bfb2165c2436ccea460bc6f7aa18f",
+            "start": "2026-09-09T07:59:05.242Z",
+            "end": "2026-09-09T07:59:05.284Z",
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "noIndexReplay": {
+          "scope": "Fresh pre-edit replay on BF working bytes. exit 1 means difference from NUL for these two nonempty files; current stdout/stderr are empty and do not overwrite the historical conversion warning.",
+          "runs": [
+            {
+              "command": "git diff --no-index --check -- NUL .github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md",
+              "start": "2026-09-09T07:59:05.284Z",
+              "end": "2026-09-09T07:59:05.327Z",
+              "exit": 1,
+              "stdout": "",
+              "stderr": ""
+            },
+            {
+              "command": "git diff --no-index --check -- NUL .github/audits/evidence/memory-eval-vnext-oi-f3-b-implementation-review-followup-2026-09-09.json",
+              "start": "2026-09-09T07:59:05.327Z",
+              "end": "2026-09-09T07:59:05.377Z",
+              "exit": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ]
+        },
+        "packageScripts": [
+          {
+            "name": "check:encoding:strict",
+            "command": "npm run check:encoding:strict",
+            "start": "2026-09-09T07:59:30.067Z",
+            "end": "2026-09-09T07:59:30.997Z",
+            "exit": 0,
+            "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380"
+          },
+          {
+            "name": "check:policy-section-references",
+            "command": "npm run check:policy-section-references",
+            "start": "2026-09-09T07:59:30.998Z",
+            "end": "2026-09-09T07:59:31.744Z",
+            "exit": 0,
+            "outputSha256": "977d7445bb324592e78c28046fc18cbf6b2bd96adaa6f42daea9ad27f313ba67"
+          },
+          {
+            "name": "check:release-records",
+            "command": "npm run check:release-records",
+            "start": "2026-09-09T07:59:31.744Z",
+            "end": "2026-09-09T07:59:31.987Z",
+            "exit": 0,
+            "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565"
+          },
+          {
+            "name": "check:memory-eval-succ9",
+            "command": "npm run check:memory-eval-succ9",
+            "start": "2026-09-09T07:59:31.987Z",
+            "end": "2026-09-09T07:59:32.656Z",
+            "exit": 0,
+            "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c"
+          },
+          {
+            "name": "check:memory-extraction-eval",
+            "command": "npm run check:memory-extraction-eval",
+            "start": "2026-09-09T07:59:32.656Z",
+            "end": "2026-09-09T07:59:33.047Z",
+            "exit": 0,
+            "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b"
+          },
+          {
+            "name": "check:memory-eval-freeze",
+            "command": "npm run check:memory-eval-freeze",
+            "start": "2026-09-09T07:59:33.047Z",
+            "end": "2026-09-09T07:59:33.745Z",
+            "exit": 0,
+            "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1"
+          },
+          {
+            "name": "check:doc-references",
+            "command": "npm run check:doc-references",
+            "start": "2026-09-09T07:59:33.745Z",
+            "end": "2026-09-09T07:59:34.801Z",
+            "exit": 0,
+            "outputSha256": "bd319f6811e95143ff00576ed7b9996c71b667332b76e5149e9fe64460745ca6"
+          }
+        ]
+      },
+      "afterEditing": {
+        "observationTiming": "After the substantive BF-R1 edits, before embedding this validation block. Final bytes and staged/committed delta are checked after embedding and fixed in the external review prompt.",
+        "head": "fe7c4704be1bfb2165c2436ccea460bc6f7aa18f",
+        "trackedModifiedPaths": [
+          ".github/audits/evidence/memory-eval-vnext-oi-f3-b-implementation-review-followup-2026-09-09.json",
+          ".github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md"
+        ],
+        "indexClean": true,
+        "packageScripts": [
+          {
+            "name": "check:encoding:strict",
+            "command": "npm run check:encoding:strict",
+            "start": "2026-09-09T08:02:31.593Z",
+            "end": "2026-09-09T08:02:32.586Z",
+            "exit": 0,
+            "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380"
+          },
+          {
+            "name": "check:policy-section-references",
+            "command": "npm run check:policy-section-references",
+            "start": "2026-09-09T08:02:32.587Z",
+            "end": "2026-09-09T08:02:33.367Z",
+            "exit": 0,
+            "outputSha256": "977d7445bb324592e78c28046fc18cbf6b2bd96adaa6f42daea9ad27f313ba67"
+          },
+          {
+            "name": "check:release-records",
+            "command": "npm run check:release-records",
+            "start": "2026-09-09T08:02:33.367Z",
+            "end": "2026-09-09T08:02:33.646Z",
+            "exit": 0,
+            "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565"
+          },
+          {
+            "name": "check:memory-eval-succ9",
+            "command": "npm run check:memory-eval-succ9",
+            "start": "2026-09-09T08:02:33.646Z",
+            "end": "2026-09-09T08:02:34.418Z",
+            "exit": 0,
+            "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c"
+          },
+          {
+            "name": "check:memory-extraction-eval",
+            "command": "npm run check:memory-extraction-eval",
+            "start": "2026-09-09T08:02:34.418Z",
+            "end": "2026-09-09T08:02:34.826Z",
+            "exit": 0,
+            "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b"
+          },
+          {
+            "name": "check:memory-eval-freeze",
+            "command": "npm run check:memory-eval-freeze",
+            "start": "2026-09-09T08:02:34.826Z",
+            "end": "2026-09-09T08:02:35.569Z",
+            "exit": 0,
+            "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1"
+          },
+          {
+            "name": "check:doc-references",
+            "command": "npm run check:doc-references",
+            "start": "2026-09-09T08:02:35.569Z",
+            "end": "2026-09-09T08:02:36.687Z",
+            "exit": 0,
+            "outputSha256": "bd319f6811e95143ff00576ed7b9996c71b667332b76e5149e9fe64460745ca6"
+          }
+        ],
+        "diffCheckScope": "ordinary check covers the two modified working files at the recorded time; staged check is an empty index delta; IB..BF still checks the original committed addition, not a future BF-R1 commit.",
+        "diffChecks": [
+          {
+            "command": "git diff --check",
+            "start": "2026-09-09T08:03:22.027Z",
+            "end": "2026-09-09T08:03:22.073Z",
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "command": "git diff --staged --check",
+            "start": "2026-09-09T08:03:22.073Z",
+            "end": "2026-09-09T08:03:22.108Z",
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          {
+            "command": "git diff --check e0a8c743695fce278592c29e85d32279fa1f2b85 fe7c4704be1bfb2165c2436ccea460bc6f7aa18f",
+            "start": "2026-09-09T08:03:22.108Z",
+            "end": "2026-09-09T08:03:22.145Z",
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        ],
+        "preservationChecks": {
+          "at": "2026-09-09T08:03:22.145Z",
+          "originalMarkdownSections1Through9Unchanged": true,
+          "historicalJsonProjectionEqualAfterRemovingOnlyDeclaredAnnotations": true,
+          "historicalMarkdownHashPreserved": true,
+          "oneWayCurrentMarkdownBinding": true,
+          "jsonYamlConsistent": true,
+          "strictUtf8NoBomLfOnlyBothFiles": true,
+          "relativeLinksResolved": 4,
+          "protectedWorkingFilesMatched": 78,
+          "sourceGitBindingsMatched": 36,
+          "supportFilesGitAndWorkingMatched": 9,
+          "implementation5AndC02Unchanged": true,
+          "reviewReportRawHashUnchanged": true,
+          "untrackedStatusEntriesUnchanged": 28,
+          "stashCount": 17,
+          "fixtureProxySafetyDeclarations": 24,
+          "t01ScenarioRegistrationsStaticCount": 19,
+          "protocolExecuted": false
+        },
+        "comparison": {
+          "basis": "Fresh clean BF beforeEditing, not a checkout/re-execution of historical IB",
+          "sameScriptNames": true,
+          "sameExits": true,
+          "sameOutputSha256Count": 7,
+          "baselineFailureNames": [],
+          "afterFailureNames": [],
+          "newFailureNames": []
+        }
+      },
+      "finalBindingPolicy": "Validation results embedded here are pre-commit observations. After embedding, recheck final bytes, stage only the two files, run staged checks, then fix the committed BF-R1 SHA/raw hashes and committed delta checks in the external confirmation-review prompt. No self JSON hash or future own commit is embedded."
+    },
+    "thisRevisionIndependentlyReviewed": false,
+    "externalFindingClosureDeclared": false,
+    "implementationBytesChanged": false,
+    "fullF07DeclaredByThisRecord": false
+  },
   "document": {
     "path": ".github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md",
-    "rawSha256": "ba6e6d443ec180a0d6ab9f5ea98e1da7ed2c83c07f98392a930acbeddc678d1a",
+    "rawSha256": "2de64df845aa2893db83731ddc4279a05ce8f990bf20301fe4fa9d70fee85293",
     "binding": "One-way binding to the exact Markdown bytes; no self hash or future commit in the hashed input."
   },
   "authorization": {
@@ -291,6 +624,12 @@
   "authorObservations": {
     "at": "2026-09-09T07:22:16.214Z",
     "sourceAndWorkingHashesChecked": true,
+    "hashConventions": {
+      "annotationAddedByRevision": "BF-R1 (BFR-F1); all existing values and order are preserved",
+      "protectedFiles": "sha256 = SHA-256 of file-system raw bytes at the historical observation time. Repository-relative paths are working-tree bytes; absolute paths are local source-evidence bytes. No newline or encoding normalization.",
+      "sourceBindings": "sha256 = SHA-256 of Git blob raw bytes in IB e0a8c743695fce278592c29e85d32279fa1f2b85; expected uses the same Git-raw convention. No newline or encoding normalization.",
+      "supportFiles": "git/expectedGit use Git blob raw bytes; working/expectedWorking use file-system raw bytes. core.autocrlf=true may make these differ for the same path."
+    },
     "protectedFiles": [
       {
         "path": ".github/audits/memory-eval-vnext-s1-scoring-contract-2026-09-06.md",
@@ -1133,7 +1472,7 @@
       ],
       "originalFixtureValuesPreserved": true,
       "fixtureValueDigest": "1d286a257c44d3444de99b945a8276cd680b8b30adc41bf0fc5df32a5f4123ca",
-      "bDeclarations": 24,
+      "fixtureProxySafetyDeclarations": 24,
       "c02Unchanged": true,
       "typeScript": "6.0.3",
       "notPermanentCommittedGate": true,
@@ -1510,14 +1849,19 @@
       "indexClean": true,
       "ancestryCount": 19,
       "scriptComparison": "7/7 exit0 and identical output SHA",
+      "noIndexMetadataAddedByRevision": "BF-R1 (BFR-F2): command recovered from author execution history; exit interpretation added now. Historical at/exit/output below remain unchanged. Fresh runs are separately recorded under revision.validation.",
       "noIndex": [
         {
           "path": ".github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md",
+          "command": "git diff --no-index --check -- NUL .github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md",
+          "exitInterpretation": "Here exit 1 means a difference from the empty NUL input, not a whitespace failure. Historical output contains only an LF-to-CRLF conversion warning; ordinary/staged/commit-range --check are separately required to exit 0. Not a blanket rule accepting every exit 1.",
           "exit": 1,
           "output": "warning: in the working copy of '.github/audits/memory-eval-vnext-oi-f3-b-implementation-review-followup-draft-2026-09-09.md', LF will be replaced by CRLF the next time Git touches it\n"
         },
         {
           "path": ".github/audits/evidence/memory-eval-vnext-oi-f3-b-implementation-review-followup-2026-09-09.json",
+          "command": "git diff --no-index --check -- NUL .github/audits/evidence/memory-eval-vnext-oi-f3-b-implementation-review-followup-2026-09-09.json",
+          "exitInterpretation": "Here exit 1 means a difference from the empty NUL input, not a whitespace failure. Historical output contains only an LF-to-CRLF conversion warning; ordinary/staged/commit-range --check are separately required to exit 0. Not a blanket rule accepting every exit 1.",
           "exit": 1,
           "output": "warning: in the working copy of '.github/audits/evidence/memory-eval-vnext-oi-f3-b-implementation-review-followup-2026-09-09.json', LF will be replaced by CRLF the next time Git touches it\n"
         }

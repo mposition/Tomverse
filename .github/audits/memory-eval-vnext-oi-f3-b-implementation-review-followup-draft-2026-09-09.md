@@ -1,5 +1,12 @@
 # memory-eval vNext — IB 최초 독립 검토 후속 처리방침·계보 보완 초안
 
+**BF-R1 수정본 — BFR-F1–F3 표기 보완, 변경분 한정 확인 검토 대기.**
+§1–§9는 BF 작성 당시의 요청·상태·관측을 보존한 기록이다. 그 안의
+pending/미발행/미검토 표현을 현재 상태로 읽지 않는다. 현재 수정 범위·검토 상태는 §10에 있다.
+동반 JSON도 기존 BF 구획은 역사적 기록이며, `revision`만 이번 수정의 상태를 나타낸다.
+`document.rawSha256`은 현재 Markdown을, `validation.manualAfterWriting.newFiles`의
+Markdown hash는 수정 전 BF bytes를 식별한다. 서로 다른 시점의 대상을 결속한다.
+
 ## 1. 상태와 요청 범위
 
 **DRAFT — BI-F1–F5 처리방침 제안, 검토 결과 전사, IB의 B20 결속 및 계보 설명 보완.**
@@ -343,3 +350,64 @@ GitHub 조회는 exact IB workflow 목록과 원격 ref 읽기만이며 운영/C
 검증 완료 후 현재 지시에 따라 두 파일만 stage/commit/push하고 원 SHA를 보존한다.
 새 후속 commit에 대한 독립 검토는 이 초안 두 파일·근거 전사·처리방침·계보 보완 한정으로 요청한다.
 이 기록 자체가 구현 수정·PR/merge·activation의 시작 명령이 되지 않게 한다.
+
+## 10. BF-R1 — BFR-F1–F3 한정 표기 보완
+
+작성자 Codex, 수정일 2026-09-09. 사용자 지시는 다음과 같다.
+
+> 네 수정안 작성하셔서 커밋 및 푸시후 SHA 고정 후 독립 검토 프롬프트 주세요.
+
+이번 권한은 두 문서의 한정 수정·검증·새 commit/push·고정 SHA 검토 프롬프트 작성뿐이다.
+새 사람 승인, BI-F1–F5 처리방침의 최종 수용, 외부 closure, 구현/정적 gate 추가,
+PR/merge/CI dispatch/activation 권한은 아니다. §4 및 §8의 처리방침·잔여·금지는 그대로다.
+
+### 10.1 원본과 최초 검토 결속
+
+- 수정 basis BF: fe7c4704be1bfb2165c2436ccea460bc6f7aa18f, 유일 parent IB.
+- BF Markdown raw SHA-256: ba6e6d443ec180a0d6ab9f5ea98e1da7ed2c83c07f98392a930acbeddc678d1a.
+- BF JSON raw SHA-256: ddd618b7d7c12f5923e0f7dea6698243410a21d18779d0d88ccb15abd1d1dbd8.
+- BF 최초 독립 검토 보고서 locator:
+  C:/Users/Vyper/.codex/attachments/70c5288d-2794-44aa-8292-b54e5c958690/pasted-text.txt.
+- 보고서 raw SHA-256: 121d27e048d9237ced2c9827cdf5deefe4983d15df43293b6a65759101d98c79.
+  21,248 bytes, LF 193/CR 193. 원 CRLF bytes를 정규화하거나 수정하지 않았다.
+- 보고서 판정은 PASS_WITH_WARNINGS, P0/P1/P2 각각 0, P3 3이다.
+  BF에 대한 판정이며 아직 존재하지 않는 수정본의 확인 판정으로 승계하지 않는다.
+  locator/hash는 원문 식별이지 작성자 인증·장기 보관·사람 승인 증명이 아니다.
+
+### 10.2 지적별 변경 이력
+
+| ID | 이번 변경 | 보존하는 것 |
+|---|---|---|
+| BFR-F1 | `authorObservations.hashConventions`에 블록별 raw bytes 기준을 명시 | protectedFiles 78개 및 sourceBindings 36개의 모든 기존 값·순서, supportFiles의 git/working 구분 |
+| BFR-F2 | 과거 noIndex 항목에 명령·exit 해석을 추가하고, 이번 재실행을 `revision.validation`에 분리 기록 | 과거 시각·exit·output·작성 당시 Markdown hash를 덮어쓰지 않음 |
+| BFR-F3 | `staticB20.bDeclarations`를 `fixtureProxySafetyDeclarations`로 이름만 변경 | 값 24 유지. T11 선언 수이며 T01 신규 unit 19개 또는 실행 통과 수가 아님 |
+
+BFR-F1에서 protectedFiles는 당시 파일시스템 원 bytes(저장소 상대 경로와 로컬 절대 경로),
+sourceBindings는 당시 IB Git blob 원 bytes다. 개행·인코딩을 정규화하지 않는다.
+core.autocrlf=true 환경에서는 같은 path의 working/Git hash가 달라도 곧바로 모순은 아니다.
+hash 기준 표기와 noIndex 설명은 이번에 추가한 메타데이터이지 과거에 이미 적혀 있었다는 주장이 아니다.
+
+BFR-F2의 과거 noIndex 명령은 작성자 실행 이력에서 보완했다.
+`git diff --no-index --check -- NUL <path>`의 이 두 결과에서 exit 1은 빈 입력과
+비어 있지 않은 파일의 차이를 나타낸다. 과거 출력에는 개행 변환 경고만 있었으며 whitespace 진단은 없었다.
+모든 exit 1을 무조건 성공으로 처리한다는 규칙이 아니다. 일반/staged/commit 간 `--check`는
+별도로 exit 0을 요구한다. 이번 재실행의 stdout/stderr는 당시 경고 출력과 달라도 별개 관측으로 보존한다.
+
+### 10.3 시점별 검증과 다음 검토
+
+수정 전 HEAD=BF의 clean tracked/index 기준선과 수정 후 working 상태를 구분한다.
+일반·staged·IB..BF `--check`의 명령/시각/exit를 `revision.validation`에 기록한다.
+수정 전 일반/staged 검사는 빈 diff 검사이고, IB..BF는 실제 두 파일 추가에 대한 검사다.
+수정 후 stage 전 일반 검사는 수정 delta, staged 검사는 여전히 빈 index delta를 검사한다.
+최종 두 파일 stage 후 검사와 BF..BF-R1 commit 검사는 최종 bytes/SHA를 고정한 외부 프롬프트에 남긴다.
+아직 없는 자기 commit SHA나 JSON 자체 hash를 내부에 미리 기록하지 않는다.
+
+package script는 §9의 동일 7개만 사용하며, 현재 clean BF 기준선과 이름·exit·출력 SHA로 대조한다.
+검사 결과를 JSON에 결속한 후 최종 bytes를 다시 검사한다. 과거 BF의 `validation`은 변경하지 않고
+새 결과는 `revision.validation`에만 추가한다(과거 noIndex의 명령·설명 메타데이터 보완 제외).
+audit/reference 검사 제외 범위는 raw hash·JSON/YAML·상대 링크·정확한 두 파일 delta 대조로 보완한다.
+T01/전체 unit/lint/typecheck/build/E2E/mutant/API 검증을 재실행하거나 새 gate를 만들지 않는다.
+
+이번 확인 검토는 BFR-F1–F3 수정과 직접적인 문서 결속·권한·시점 회귀에 한정한다.
+전체 IB 최초 검토를 다시 열거나 PB R1의 소진된 회차를 초기화하지 않는다.
+세 지적의 외부 closure와 BF-R1 확인 판정은 검토자가 정하며 현재는 pending이다.
