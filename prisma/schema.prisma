@@ -1707,6 +1707,25 @@ model PerplexityAsyncJob {
   status             String    @default("submitted") // submitted | in_progress | completed | failed
   resultText         String?
   errorMessage       String?
+  /// What this job's reservation must be settled as, written in the same
+  /// transaction that finalizes the job.
+  ///
+  /// Settlement runs after that transaction commits, and has to: it charges
+  /// against the credit ledger under its own lock, and holding that lock
+  /// inside the finalize transaction would serialize every poll behind one
+  /// account. But "after" is also where a process can die, and before this
+  /// column existed there was no way back -- the poll that carried the token
+  /// counts had returned, and every later poll took the already-finalized
+  /// early return without them. The reservation then sat `reserved` until it
+  /// expired and the reconciliation sweep REFUNDED a job that really ran and
+  /// really cost money.
+  ///
+  /// So the numbers are persisted where the next poll, or the sweep, can find
+  /// them. Presence means "this job reached a terminal state and here is what
+  /// it owes"; it does NOT mean settled. Whether it settled is the
+  /// reservation's own `status`, which is the single place that fact lives --
+  /// a second flag here would be a copy free to drift from it.
+  settlementUsage    Json?
   submittedAt        DateTime  @default(now())
   lastPolledAt       DateTime?
   completedAt        DateTime?
@@ -1719,6 +1738,10 @@ model PerplexityAsyncJob {
   // mid-flight -- and without an index the sweep is a sequential scan over a
   // table that grows with every deep research request.
   @@index([updatedAt])
+  // The unsettled-settlement sweep's index. It looks for terminal jobs and
+  // then asks each one's reservation whether it is still `reserved`, so the
+  // selective half is `status` and `completedAt` orders the oldest debt first.
+  @@index([status, completedAt])
 }
 
 model AppSetting {

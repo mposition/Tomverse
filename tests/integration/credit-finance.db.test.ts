@@ -632,6 +632,11 @@ test("refunds an expired durable reservation and restores add-on credits", async
     refunded: 1,
     alreadyFinalized: 0,
     failed: 0,
+    // An ordinary stuck turn carries no deep research handoff, so the sweep
+    // refunds it exactly as it always has. The count is here rather than
+    // absent because this assertion fixes the whole shape: a new outcome the
+    // sweep can report has to be acknowledged somewhere, not appear silently.
+    settledFromHandoff: 0,
   });
   const reservation = await prisma.chatCreditReservation.findUniqueOrThrow({
     where: { id: acquired.usageReservation.reservationId },

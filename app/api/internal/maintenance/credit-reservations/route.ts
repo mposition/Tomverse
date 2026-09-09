@@ -18,6 +18,7 @@ import {
   isRetryableDatabaseError,
 } from "@/lib/databaseError";
 import { reconcileExpiredChatRequestLeases } from "@/lib/chatRequestLease";
+import { reconcileUnsettledDeepResearchSettlementsQuietly } from "@/lib/deepResearchSettlement";
 import { reconcileSourceLockedMemories } from "@/lib/externalConversationLockService";
 import { reconcileExpiredExternalImportStaging } from "@/lib/externalImportService";
 import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
@@ -86,6 +87,19 @@ export async function POST(request: Request) {
   }
   const run = await startScheduledJob("credit_reservation_reconciliation");
   try {
+    // Deliberately before the expiry reconciliation below, and it is the only
+    // step here whose order is load-bearing.
+    //
+    // Both are idempotent and both go through settleChatUsage's lock, so
+    // either order is safe. They disagree about what a stuck deep research
+    // reservation owes: this settles it at what the job actually cost at
+    // Perplexity, and the expiry sweep refunds it in full. Whichever runs
+    // first wins, so the true cost has to (issue #1285).
+    //
+    // Never throws, so it cannot turn a successful reconciliation into a
+    // failed one.
+    const deepResearchSettlements =
+      await reconcileUnsettledDeepResearchSettlementsQuietly();
     const result = await reconcileCreditReservationsWithRetry();
     const infrastructureMonitor = await monitorInfrastructureThresholdsIfDue();
     // Rides along on the only fifteen-minute schedule this deployment already
@@ -204,6 +218,7 @@ export async function POST(request: Request) {
       processedCount: result.examined,
       result: {
         ...result,
+        deepResearchSettlements,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
@@ -223,6 +238,7 @@ export async function POST(request: Request) {
       {
         success: true,
         result,
+        deepResearchSettlements,
         infrastructureMonitor,
         notificationDeliveries,
         refundRequests,
