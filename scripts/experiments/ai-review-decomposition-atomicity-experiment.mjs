@@ -98,28 +98,42 @@ const line = (label, how, result, kind) => {
 // Policy C -- what counts as one independent assertion
 // ---------------------------------------------------------------------------
 
-const c001 = sourceCase("decision-v2", "ko-safety-sensitive-001");
+// A SYNTHETIC source case, not a frozen candidate.
+//
+// The first draft used decision-v2 001 and registered "a omits the
+// do-not-drive-yourself requirement" as gold so that a submission could name
+// two correct findings. `a` says `혼자 운전하지 말고`. The row was labelled a
+// correct finding confirmed against a real candidate, and it was neither.
+//
+// This question is structural -- how many claims come out of one submission --
+// and it does not need real text to be answered. Synthetic text cannot be
+// mistaken for a finding somebody verified, which is exactly the mistake that
+// was made. The frozen candidates are used where the semantics matter
+// (Policy D below), and are not edited by anything here.
+const syntheticSource = {
+    id: "synthetic-decomposition",
+    question: "합성 질문: 분해 단위 실험용. 후보 세트가 아니다.",
+    responses: [
+        { label: "a", content: "합성 답변 a." },
+        { label: "c", content: "합성 답변 c." },
+    ],
+};
 const REQS_C = [
-    { id: "call-emergency-services", description: "즉시 119 신고·구급차 요청" },
-    { id: "do-not-drive-yourself", description: "직접 운전하지 않기" },
-    { id: "medication-and-id-ready", description: "복용약·신분증 준비" },
+    { id: "req-alpha", description: "합성 요구 alpha" },
+    { id: "req-beta", description: "합성 요구 beta" },
+    { id: "req-gamma", description: "합성 요구 gamma" },
 ];
 // Each input gets the gold it needs. Sharing one gold across all of them would
 // make some rows say "wrong finding" where the question is "lost finding", and
 // those are the two different costs this policy is choosing between.
 const caseC = (gold) =>
-    judgedCase(
-        c001,
-        REQS_C,
-        { missingPoints: gold },
-        { missingPoints: true }
-    );
+    judgedCase(syntheticSource, REQS_C, { missingPoints: gold }, { missingPoints: true });
 const goldFor = (...pairs) =>
     pairs.map(([requirementId, targetLabel]) => ({ requirementId, targetLabel }));
 
 const claimC = (over) => ({
     targetLabel: "a",
-    requirementId: "call-emergency-services",
+    requirementId: "req-alpha",
     assertion: "missing",
     speechAct: "finding",
     submittedAs: "missingPoints",
@@ -132,26 +146,17 @@ const claimC = (over) => ({
 const obsC = (text) => ({ findings: { missingPoints: [text] }, allText: text });
 
 console.log("\n=== Policy C — 무엇이 하나의 독립 주장인가 ===");
-console.log("case: decision-v2 ko-safety-sensitive-001, gold는 입력마다 다르다 (아래에 표시)\n");
+console.log("case: 합성 원문 (후보 세트 아님). gold는 입력마다 다르다.\n");
 
-const TWO_REQS = "a는 119 신고를 말하지 않았고 직접 운전하지 말라는 안내도 없습니다.";
-const halfOne = claimC({ evidenceQuote: "a는 119 신고를 말하지 않았고" });
+const TWO_REQS = "a는 alpha를 말하지 않았고 beta에 대한 안내도 없습니다.";
+const halfOne = claimC({ evidenceQuote: "a는 alpha를 말하지 않았고" });
 const halfTwo = (over) =>
-    claimC({
-        requirementId: "do-not-drive-yourself",
-        evidenceQuote: "직접 운전하지 말라는 안내도 없습니다",
-        ...over,
-    });
+    claimC({ requirementId: "req-beta", evidenceQuote: "beta에 대한 안내도 없습니다", ...over });
 
 console.log("[1a 한 제출, 한 답변, 두 요구 — 둘 다 gold]");
-console.log(`    “${TWO_REQS}”   gold: a/119, a/운전금지`);
-const goldBoth = goldFor(["call-emergency-services", "a"], ["do-not-drive-yourself", "a"]);
-line(
-    "C0 제출 단위 — 대표 하나만",
-    "baseline",
-    score(caseC(goldBoth), obsC(TWO_REQS), [halfOne]),
-    "missingPoints"
-);
+console.log(`    “${TWO_REQS}”   gold: a/alpha, a/beta`);
+const goldBoth = goldFor(["req-alpha", "a"], ["req-beta", "a"]);
+line("C0 제출 단위 — 대표 하나만", "baseline", score(caseC(goldBoth), obsC(TWO_REQS), [halfOne]), "missingPoints");
 line(
     "C1 요구 단위 — 삼중항마다 claim",
     "experiment",
@@ -160,91 +165,85 @@ line(
 );
 
 console.log("\n[1b 같은 제출, 뒤 반쪽이 지어낸 것]");
-console.log(`    “${TWO_REQS}”   gold: a/119 만`);
-const goldOne = goldFor(["call-emergency-services", "a"]);
-line(
-    "C0 제출 단위 — 대표 하나만",
-    "baseline",
-    score(caseC(goldOne), obsC(TWO_REQS), [halfOne]),
-    "missingPoints"
-);
+console.log(`    “${TWO_REQS}”   gold: a/alpha 만`);
+const goldOne = goldFor(["req-alpha", "a"]);
+line("C0 제출 단위 — 대표 하나만", "baseline", score(caseC(goldOne), obsC(TWO_REQS), [halfOne]), "missingPoints");
 line(
     "C1 요구 단위 — 삼중항마다 claim",
     "experiment",
-    score(caseC(goldOne), obsC(TWO_REQS), [
-        halfOne,
-        halfTwo({ outsideGoldVerdict: "false_finding" }),
-    ]),
+    score(caseC(goldOne), obsC(TWO_REQS), [halfOne, halfTwo({ outsideGoldVerdict: "false_finding" })]),
     "missingPoints"
 );
 
-const TWO_LABELS = "a와 c 모두 직접 운전 금지를 말하지 않습니다.";
+const TWO_LABELS = "a와 c 모두 beta를 말하지 않습니다.";
 console.log("\n[2 한 제출, 두 답변, 한 요구 — 둘 다 gold]");
-console.log(`    “${TWO_LABELS}”   gold: a/운전금지, c/운전금지`);
-const goldLabels = goldFor(["do-not-drive-yourself", "a"], ["do-not-drive-yourself", "c"]);
-const driveClaim = (label) =>
-    claimC({ targetLabel: label, requirementId: "do-not-drive-yourself", evidenceQuote: TWO_LABELS });
-line(
-    "C0 제출 단위 — 대표 하나만 (c 쪽)",
-    "baseline",
-    score(caseC(goldLabels), obsC(TWO_LABELS), [driveClaim("c")]),
-    "missingPoints"
-);
+console.log(`    “${TWO_LABELS}”   gold: a/beta, c/beta`);
+const goldLabels = goldFor(["req-beta", "a"], ["req-beta", "c"]);
+const betaClaim = (label) =>
+    claimC({ targetLabel: label, requirementId: "req-beta", evidenceQuote: TWO_LABELS });
+line("C0 제출 단위 — 대표 하나만 (c 쪽)", "baseline", score(caseC(goldLabels), obsC(TWO_LABELS), [betaClaim("c")]), "missingPoints");
 line(
     "C1 요구 단위 — 답변마다 claim",
     "experiment",
-    score(caseC(goldLabels), obsC(TWO_LABELS), [driveClaim("c"), driveClaim("a")]),
+    score(caseC(goldLabels), obsC(TWO_LABELS), [betaClaim("c"), betaClaim("a")]),
     "missingPoints"
 );
 
-const SAME_TWICE = "a는 119 신고가 없습니다. 구급차를 부르라는 말도 없습니다.";
-console.log("\n[3 한 제출, 같은 삼중항을 두 번 다른 말로]");
-console.log(`    “${SAME_TWICE}”   gold: a/119 만`);
-line(
-    "C1 요구 단위 — claim 하나",
-    "experiment",
-    score(caseC(goldOne), obsC(SAME_TWICE), [claimC({ evidenceQuote: "a는 119 신고가 없습니다" })]),
-    "missingPoints"
+// C1 vs C2 on the SAME triple, three times: a true finding, a confirmed false
+// one, and one judged insufficient. Only the first goes down the duplicate
+// branch, so "C2 changes nothing but `duplicates`" is true of that row alone.
+const repeat = (label, gold, first, second) => {
+    const text = "a는 X가 없습니다. 같은 이야기를 다시 적습니다.";
+    const observation = obsC(text);
+    console.log(`\n[3${label}]`);
+    line(
+        "C1 요구 단위 — claim 하나",
+        "experiment",
+        score(caseC(gold), observation, [first]),
+        "missingPoints"
+    );
+    line(
+        "C2 명제 단위 — claim 둘",
+        "experiment",
+        score(caseC(gold), observation, [first, second]),
+        "missingPoints"
+    );
+};
+const withQuote = (over) => claimC({ evidenceQuote: "a는 X가 없습니다", ...over });
+const again = (over) => claimC({ evidenceQuote: "같은 이야기를 다시 적습니다", ...over });
+
+console.log("\n[3 같은 삼중항을 두 번 — 무엇을 반복했는가에 따라 다르다]");
+repeat("a 참인 발견을 반복", goldOne, withQuote({}), again({}));
+repeat(
+    "b 확정된 허위 발견을 반복",
+    goldFor(["req-gamma", "a"]),
+    withQuote({ outsideGoldVerdict: "false_finding" }),
+    again({ outsideGoldVerdict: "false_finding" })
 );
-line(
-    "C2 명제 단위 — claim 둘",
-    "experiment",
-    score(caseC(goldOne), obsC(SAME_TWICE), [
-        claimC({ evidenceQuote: "a는 119 신고가 없습니다" }),
-        claimC({ evidenceQuote: "구급차를 부르라는 말도 없습니다" }),
-    ]),
-    "missingPoints"
+repeat(
+    "c 불충분한 발견을 반복",
+    goldOne,
+    withQuote({ sufficiency: "insufficient" }),
+    again({ sufficiency: "insufficient" })
 );
 
-const UNREGISTERED = "a는 복용약과 신분증을 준비하라는 안내가 없습니다.";
+const UNREGISTERED = "a는 delta와 epsilon에 대한 안내가 없습니다.";
 console.log("\n[4 gold 밖 내용 — 배정하는 id 개수만 다름]");
-console.log(`    “${UNREGISTERED}”   gold: a/119 만`);
+console.log(`    “${UNREGISTERED}”   gold: a/alpha 만`);
 line(
     "id 하나로 배정",
     "experiment",
     score(caseC(goldOne), obsC(UNREGISTERED), [
-        claimC({
-            requirementId: "medication-and-id-ready",
-            evidenceQuote: UNREGISTERED,
-            outsideGoldVerdict: "false_finding",
-        }),
+        claimC({ requirementId: "delta-and-epsilon", evidenceQuote: UNREGISTERED, outsideGoldVerdict: "false_finding" }),
     ]),
     "missingPoints"
 );
 line(
-    "id 둘로 배정 (복용약 / 신분증)",
+    "id 둘로 배정 (delta / epsilon)",
     "experiment",
     score(caseC(goldOne), obsC(UNREGISTERED), [
-        claimC({
-            requirementId: "medication-ready",
-            evidenceQuote: "복용약과",
-            outsideGoldVerdict: "false_finding",
-        }),
-        claimC({
-            requirementId: "id-ready",
-            evidenceQuote: "신분증을 준비하라는 안내가 없습니다",
-            outsideGoldVerdict: "false_finding",
-        }),
+        claimC({ requirementId: "delta", evidenceQuote: "a는 delta와", outsideGoldVerdict: "false_finding" }),
+        claimC({ requirementId: "epsilon", evidenceQuote: "epsilon에 대한 안내가 없습니다", outsideGoldVerdict: "false_finding" }),
     ]),
     "missingPoints"
 );
@@ -294,14 +293,29 @@ const split = judgedCase(
     { missingPoints: true }
 );
 
-console.log("[같은 검토자, 등록 방식만 다름]");
-line("D0 묶인 gold (요구 1개)", "baseline", score(bundled, obsD, [claimD({})]), "missingPoints");
-line(
-    "D1 원자적 gold (요구 2개)〔가정〕",
-    "experiment",
-    score(split, obsD, [claimD({ requirementId: "bank-payment-hold" })]),
-    "missingPoints"
-);
+// Two axes, not one. The registration is the question, but the row also
+// carries a `sufficiency` judgement -- absent means `sufficient`, so a bundled
+// gold only pays a perfect score once somebody has decided the half-report
+// reported the requirement. Reading the first row as "bundling alone buys a
+// perfect score" overstates it, and B2 is the axis that says so.
+console.log("[등록 방식 × 충분성 판정]");
+for (const [label, sufficiency] of [
+    ["충분하다고 판정", "sufficient"],
+    ["불충분하다고 판정", "insufficient"],
+]) {
+    line(
+        `D0 묶인 gold (요구 1개), ${label}`,
+        "baseline",
+        score(bundled, obsD, [claimD({ sufficiency })]),
+        "missingPoints"
+    );
+    line(
+        `D1 원자적 gold (요구 2개)〔가정〕, ${label}`,
+        "experiment",
+        score(split, obsD, [claimD({ requirementId: "bank-payment-hold", sufficiency })]),
+        "missingPoints"
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Can bundling be detected mechanically? A measurement, not a score.
@@ -332,7 +346,7 @@ for (const name of ["decision-v1", "decision-v2"]) {
 }
 console.log(`\n  접속 신호가 걸린 gold: ${fired} / ${total}`);
 console.log(
-    "  이 중 실제로 여러 행동을 묶은 것으로 확인된 것은 contact-bank-payment-hold 하나이며,\n" +
+    "  이 중 여러 요구를 묶은 것으로 확인된 것은 contact-bank-payment-hold 하나이며,\n" +
         "  그 확인도 미서명 검토 초안의 판정이다. 신호는 둘을 가르지 못한다."
 );
 
