@@ -181,58 +181,84 @@ const recordFor = (id, kind, text, observation) => ({
 // integrity. `verifyJudgedScoringEvidence()` returns both, and the first draft
 // consumed only `problems` -- so evidence with no external binding, which that
 // function reports as ineligible, aggregated anyway.
-const aggregateJudged = (plan, judged) => {
+const aggregateJudged = (plan, judged, runInputs) => {
     const blockers = [];
-    const byCase = new Map();
-    for (const entry of judged) {
-        const key = `${entry.caseId}::${entry.observationRef}`;
-        if (byCase.has(key)) {
-            blockers.push(`${entry.caseId}: judged twice for the same output`);
-        }
-        byCase.set(key, entry);
-    }
-    const planned = new Set(plan.map((item) => `${item.caseId}::${item.observationRef}`));
+
+    // The plan is checked before anything is read through it. A repeated row
+    // used to pull the same artifact in again -- one plan row copied a hundred
+    // times took 2/2/2 to 102/2/2 and a Wilson lower bound of 0.933 without a
+    // single new judgement. Refused rather than deduplicated: a plan that says
+    // the same case twice is not a plan somebody meant to write, and quietly
+    // fixing it hides that.
+    const planKeys = new Set();
     for (const item of plan) {
-        if (!byCase.has(`${item.caseId}::${item.observationRef}`)) {
-            blockers.push(`${item.caseId}: planned in the run and never judged`);
+        const key = `${item.caseId}::${item.observationRef}`;
+        if (planKeys.has(key)) {
+            blockers.push(`${item.caseId}: the run's plan lists this case and output twice`);
         }
+        planKeys.add(key);
     }
-    for (const entry of judged) {
-        if (!planned.has(`${entry.caseId}::${entry.observationRef}`)) {
-            blockers.push(
-                `${entry.caseId}: judged, but the run's plan has no such case and output`
-            );
-        }
+    if (plan.length === 0) {
+        blockers.push("the run planned no cases, so there is nothing to aggregate");
+    }
+    if (judged.length === 0 && plan.length > 0) {
+        blockers.push("nothing was judged in this run");
     }
 
-    const usable = [];
-    for (const item of plan) {
-        const entry = byCase.get(`${item.caseId}::${item.observationRef}`);
-        if (!entry) continue;
-        if (entry.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
-            blockers.push(
-                `${entry.caseId}: judged under ${entry.contractVersion}, this run is ` +
-                    `${AI_REVIEW_SCORING_CONTRACT_VERSION}`
-            );
-            continue;
-        }
-        // The shared checker's own verdict, both halves of it.
+    // Identity comes from the VERIFIED artifact, never from the label the
+    // caller attached to the entry. Reading the outer label meant the plan and
+    // the evidence were joined by a name: keeping the labels and swapping the
+    // inner files for another sound bundle passed, and 2/2/2 became 3/1/1.
+    //
+    // The journal and the frozen dataset are the RUN's, supplied once. Letting
+    // each entry carry its own is the same defect in another place -- every
+    // bundle would then be checked against a journal that agrees with it.
+    const verified = new Map();
+    for (const entry of judged) {
         const evidence = verifyJudgedScoringEvidence({
             testCase: entry.testCase,
             observation: entry.observation,
             record: entry.record,
             artifact: entry.artifact,
-            journal: entry.journal,
-            dataset: entry.dataset,
+            journal: runInputs.journal,
+            dataset: runInputs.dataset,
         });
         if (!evidence.eligibleForAggregation) {
             blockers.push(
-                `${entry.caseId}: ${evidence.problems[0] ?? evidence.ineligibleReasons[0]}`
+                `${entry.artifact?.caseId ?? "(id unreadable)"}: ` +
+                    `${evidence.problems[0] ?? evidence.ineligibleReasons[0]}`
             );
             continue;
         }
-        usable.push(entry.artifact.outcome);
+        const artifact = entry.artifact;
+        if (artifact.contractVersion !== AI_REVIEW_SCORING_CONTRACT_VERSION) {
+            blockers.push(
+                `${artifact.caseId}: scored under ${artifact.contractVersion}, this run is ` +
+                    `${AI_REVIEW_SCORING_CONTRACT_VERSION}`
+            );
+            continue;
+        }
+        const key = `${artifact.caseId}::${artifact.observationRef}`;
+        if (verified.has(key)) {
+            blockers.push(`${artifact.caseId}: judged twice for the same output`);
+            continue;
+        }
+        verified.set(key, artifact.outcome);
     }
+
+    for (const key of planKeys) {
+        if (!verified.has(key)) {
+            blockers.push(`${key.split("::")[0]}: planned in the run and never judged`);
+        }
+    }
+    for (const key of verified.keys()) {
+        if (!planKeys.has(key)) {
+            blockers.push(
+                `${key.split("::")[0]}: judged, but the run's plan has no such case and output`
+            );
+        }
+    }
+
     if (blockers.length > 0) return { aggregable: false, blockers };
 
     let tp = 0;
@@ -240,7 +266,9 @@ const aggregateJudged = (plan, judged) => {
     let fp = 0;
     let precisionTp = 0;
     let precisionDenominator = 0;
-    for (const outcome of usable) {
+    // Over the DISTINCT verified cases, which the two comparisons above have
+    // just shown to be exactly the planned ones.
+    for (const outcome of verified.values()) {
         const kind = outcome.byKind.missingPoints;
         tp += kind.truePositives;
         fn += kind.falseNegatives;
@@ -255,6 +283,7 @@ const aggregateJudged = (plan, judged) => {
         precisionDenominator > 0 ? wilsonInterval(precisionTp, precisionDenominator) : null;
     return {
         aggregable: true,
+        cases: verified.size,
         counts: { tp, fn, fp },
         omissionRecallWilsonLower: recall.lower,
         omissionPrecisionWilsonLower: precision ? precision.lower : null,
@@ -274,18 +303,19 @@ const buildJudged = (id, kind, text) => {
         observation,
         scoredAt: "2026-09-09T00:00:00.000Z",
     });
-    return {
-        caseId: id,
-        observationRef: record.observationRef,
-        contractVersion: record.contractVersion,
-        testCase,
-        observation,
-        record,
-        artifact,
-        journal: [{ caseId: id, observation }],
-        dataset: { cases: [sourceCase(id)] },
-    };
+    // No journal or dataset here: those are the RUN's, and an entry carrying
+    // its own would be checked against a journal that agrees with it.
+    return { caseId: id, observationRef: record.observationRef, testCase, observation, record, artifact };
 };
+
+/** The run's own journal and frozen dataset: one set, covering every case. */
+const runInputsFor = (entries) => ({
+    journal: entries.map((entry) => ({
+        caseId: entry.artifact.caseId,
+        observation: entry.observation,
+    })),
+    dataset: { cases: entries.map((entry) => sourceCase(entry.artifact.caseId)) },
+});
 
 const line = (label, value) => console.log(`  ${label.padEnd(36)} ${value}`);
 
@@ -316,7 +346,8 @@ line(
 line("omission recall (Wilson 하한)", keywordArm.omissionRecall.wilsonLower?.toFixed(3) ?? "n/a");
 line("false-consensus rate", `${keywordArm.falseConsensusRate.numerator}/${keywordArm.falseConsensusRate.denominator}`);
 
-const judged = aggregateJudged(plan, judgedEntries);
+const RUN_INPUTS = runInputsFor(judgedEntries);
+const judged = aggregateJudged(plan, judgedEntries, RUN_INPUTS);
 console.log("\n[judged-v3 경로 — 제안, 이 파일에만 있음]");
 if (!judged.aggregable) {
     line("집계 가능", "아니오");
@@ -377,28 +408,56 @@ console.log("\n=== 실행 전체 집계 조건 — 제안 ===");
 const states = [
     ["판정 누락 (기록 제거)", plan, judgedEntries.slice(1)],
     ["전부 누락", plan, []],
-    [
-        "계획에 없는 case 추가",
-        plan,
-        [...judgedEntries, buildJudged("synthetic-unplanned", "correct", REVIEWS[0][1])],
-    ],
-    [
-        "같은 출력에 판정 둘",
-        plan,
-        [...judgedEntries, judgedEntries[0]],
-    ],
+    ["빈 계획", [], []],
+    // In the run's journal and dataset, but not in the plan. Without the run
+    // inputs covering it the journal check would refuse first, and the plan
+    // comparison -- the branch this row is for -- would never run.
+    (() => {
+        const extra = buildJudged("synthetic-unplanned", "correct", REVIEWS[0][1]);
+        const entries = [...judgedEntries, extra];
+        return ["계획에 없는 case 추가", plan, entries, runInputsFor(entries)];
+    })(),
+    ["같은 출력에 판정 둘", plan, [...judgedEntries, judgedEntries[0]]],
+    // The plan's own duplication. One row copied a hundred times used to take
+    // 2/2/2 to 102/2/2 without a single new judgement.
+    ["계획 행 중복", [...plan, plan[0]], judgedEntries],
+    // The plan and the evidence joined by a label. The outer labels stay
+    // exactly as planned and the files inside come from a different sound
+    // bundle -- one not otherwise in this run, so what refuses is the identity
+    // comparison and not an incidental duplicate.
+    (() => {
+        const other = buildJudged("synthetic-swapped", "correct", REVIEWS[0][1]);
+        const entries = judgedEntries.map((entry, index) =>
+            index === 0
+                ? { ...other, caseId: entry.caseId, observationRef: entry.observationRef }
+                : entry
+        );
+        return [
+            "계획의 이름표는 그대로, 안쪽 증거만 교체",
+            plan,
+            entries,
+            runInputsFor(entries),
+        ];
+    })(),
     [
         "외부 결속 없음 (journal·dataset 미제공)",
         plan,
-        judgedEntries.map((entry, index) =>
-            index === 0 ? { ...entry, journal: undefined, dataset: undefined } : entry
-        ),
+        judgedEntries,
+        { journal: undefined, dataset: undefined },
     ],
     [
         "계약 버전 혼합",
         plan,
         judgedEntries.map((entry, index) =>
-            index === 0 ? { ...entry, contractVersion: "ai-review-scoring-judged-v2" } : entry
+            index === 0
+                ? {
+                      ...entry,
+                      artifact: {
+                          ...entry.artifact,
+                          contractVersion: "ai-review-scoring-judged-v2",
+                      },
+                  }
+                : entry
         ),
     ],
     [
@@ -424,8 +483,8 @@ const states = [
         ),
     ],
 ];
-for (const [name, runPlan, entries] of states) {
-    const result = aggregateJudged(runPlan, entries);
+for (const [name, runPlan, entries, inputs] of states) {
+    const result = aggregateJudged(runPlan, entries, inputs ?? RUN_INPUTS);
     console.log(`  ${name.padEnd(34)} 집계 ${result.aggregable ? "가능" : "불가"}`);
     if (!result.aggregable) console.log(`      ${result.blockers[0]}`);
 }
