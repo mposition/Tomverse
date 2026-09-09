@@ -33,6 +33,7 @@ import {
 } from "../../lib/aiReviewEvalCore.ts";
 import {
     AI_REVIEW_SCORING_CONTRACT_VERSION,
+    judgedScoredClaims,
     judgedSourceCaseDigest,
     observationRefFor,
     scoreJudgedCase,
@@ -205,6 +206,105 @@ const CASES = [
             },
         ],
     },
+    {
+        id: "syn-08-support-verdict",
+        why: "정상 발견 옆의 `support` claim에 false_finding — 채점에서 제외되는데 순진한 집계는 센다",
+        phenomenon: "omission",
+        gold: { missingPoints: [{ requirementId: REQ.id, targetLabel: "c" }] },
+        goldCompleteness: { missingPoints: true },
+        submissions: {
+            missingPoints: ["[SYN] c omits the two-week deadline; the fee also differs"],
+        },
+        claims: [
+            {
+                submittedAs: "missingPoints",
+                sourceIndex: 0,
+                targetLabel: "c",
+                requirementId: REQ.id,
+                assertion: "missing",
+                speechAct: "finding",
+            },
+            {
+                submittedAs: "missingPoints",
+                sourceIndex: 0,
+                targetLabel: "a",
+                requirementId: "fee-amount",
+                assertion: "missing",
+                speechAct: "finding",
+                role: "support",
+                outsideGoldVerdict: "false_finding",
+            },
+        ],
+    },
+    {
+        id: "syn-09-quotation-verdict",
+        why: "인용에 false_finding — 제출 품질 문제이지 지어낸 발견이 아닌데 순진한 집계는 센다",
+        phenomenon: "omission",
+        gold: { missingPoints: [{ requirementId: REQ.id, targetLabel: "c" }] },
+        goldCompleteness: { missingPoints: true },
+        submissions: {
+            missingPoints: ["[SYN] c omits the two-week deadline"],
+            contradictions: ['[SYN] a says "the fee is 10,000 won"'],
+        },
+        claims: [
+            {
+                submittedAs: "missingPoints",
+                sourceIndex: 0,
+                targetLabel: "c",
+                requirementId: REQ.id,
+                assertion: "missing",
+                speechAct: "finding",
+            },
+            {
+                submittedAs: "contradictions",
+                sourceIndex: 0,
+                targetLabel: "a",
+                requirementId: "fee-amount",
+                assertion: "missing",
+                speechAct: "quotation",
+                outsideGoldVerdict: "false_finding",
+            },
+        ],
+    },
+    {
+        id: "syn-10-lone-support",
+        why: "옆에 독립 발견이 없는 단독 `support` — 제외 사유가 없어 모집단에 남고, 같은 세 조건을 충족한다",
+        phenomenon: "no_issue",
+        gold: {},
+        goldCompleteness: {},
+        submissions: { contradictions: ["[SYN] a and b disagree about the fee"] },
+        claims: [
+            {
+                submittedAs: "contradictions",
+                sourceIndex: 0,
+                targetLabel: "a",
+                requirementId: "fee-amount",
+                assertion: "missing",
+                speechAct: "finding",
+                role: "support",
+                outsideGoldVerdict: "false_finding",
+            },
+        ],
+    },
+    {
+        id: "syn-11-negative-exhaustive",
+        why: "음성 case를 **exhaustive 빈 gold**로 등록하면 FP가 1이다 — FP 0의 원인은 음성 분류가 아니다",
+        phenomenon: "no_issue",
+        gold: { contradictions: [] },
+        goldCompleteness: { contradictions: true },
+        submissions: { contradictions: ["[SYN] a and b disagree about the fee"] },
+        claims: [
+            {
+                submittedAs: "contradictions",
+                sourceIndex: 0,
+                targetLabel: "a",
+                requirementId: "fee-amount",
+                assertion: "missing",
+                speechAct: "finding",
+                outsideGoldVerdict: "false_finding",
+            },
+        ],
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -301,7 +401,32 @@ const factsFor = ({ definition, testCase, record, outcome }) => {
         insufficient: sum(outcome, "insufficientFindings"),
         falsePositives: sum(outcome, "falsePositives"),
         goldGaps: sum(outcome, "goldGaps"),
-        falseFindings: claims.filter(
+        // Not `claims.filter(verdict === "false_finding")`. That reads the raw
+        // record, which still holds the two things the contract already
+        // excluded: supporting material sitting inside another finding, and a
+        // quotation filed into a findings field. Both were counted as findings
+        // the reviewer invented while the document said they were not.
+        //
+        // `judgedScoredClaims()` is the population the score itself was
+        // computed from, and the two further conditions are what "a finding
+        // the reviewer put forward and made up" means:
+        //   * `speechAct === "finding"` -- a quotation, hypothetical or
+        //     passing mention in a findings field is a submission-quality
+        //     failure, and it is already counted as a false positive.
+        //   * `status === "confirmed"` -- a pending claim is not a judgement;
+        //     a case holding one is not scored at all, so this can only
+        //     matter to a caller reading an unscored record.
+        // `outsideGoldVerdict` needs no separate outside-the-gold test:
+        // `verifyJudgementRecord()` refuses the field on a claim the gold
+        // does contain, so on a verified record its presence IS that fact.
+        falseFindings: judgedScoredClaims(record).filter(
+            (claim) =>
+                claim.speechAct === "finding" &&
+                claim.status === "confirmed" &&
+                claim.outsideGoldVerdict === "false_finding"
+        ).length,
+        /** The same count taken the naive way, to show what it lets through. */
+        falseFindingsUnfiltered: claims.filter(
             (claim) => claim.outsideGoldVerdict === "false_finding"
         ).length,
         // What the current invented-issue rule reads: how many items were
@@ -314,7 +439,7 @@ const facts = scored.map(factsFor);
 
 heading("1. 합성 case별 사실 — 어느 정의도 아직 적용하지 않았다");
 console.log(
-    "  이 일곱 건은 전부 이 파일이 쓴 것이다. 어떤 검토자에 대해서도 아무 말을 하지 않는다.\n"
+    `  이 ${CASES.length}건은 전부 이 파일이 쓴 것이다. 어떤 검토자에 대해서도 아무 말을 하지 않는다.\n`
 );
 const COLUMNS = [
     ["case", 29],
@@ -325,6 +450,7 @@ const COLUMNS = [
     ["FP", 5],
     ["gold gap", 10],
     ["false_finding", 15],
+    ["순진한 집계", 13],
     ["제출(모순)", 12],
 ];
 const SIZES = COLUMNS.map(([, size]) => size);
@@ -341,6 +467,7 @@ for (const fact of facts) {
             fact.falsePositives,
             fact.goldGaps,
             fact.falseFindings,
+            fact.falseFindingsUnfiltered,
             fact.reportedContradictions,
         ],
         SIZES
@@ -395,24 +522,40 @@ console.log(
 );
 
 heading("3. invented-issue 후보 정의");
+console.log(
+    "  **부분집합은 분자와 분모를 함께 제한한다.** 전체 분자를 음성 분모로 나누면\n" +
+        "  어느 모집단에 대한 비율도 아닌 숫자가 나온다.\n"
+);
 const inventedCandidates = [
     {
         key: "현행",
-        label: "음성 phenomenon case에서 모순을 하나라도 제출했는가 (내용을 읽지 않음)",
+        label: "음성 case에서 모순을 하나라도 제출했는가 (내용을 읽지 않음)",
         applies: (fact) => fact.negative,
         hit: (fact) => fact.reportedContradictions > 0,
     },
     {
         key: "B1",
-        label: "확정된 false_finding이 하나라도 있는 case 비율 — 음성 case만",
+        label: "확정 false_finding ≥ 1인 case 비율 — 음성 case만",
         applies: (fact) => fact.negative,
         hit: (fact) => fact.falseFindings > 0,
     },
     {
         key: "B2",
-        label: "확정된 false_finding이 하나라도 있는 case 비율 — 채점된 모든 case",
+        label: "확정 false_finding ≥ 1인 case 비율 — 채점된 모든 case (권고)",
         applies: () => true,
         hit: (fact) => fact.falseFindings > 0,
+    },
+    {
+        key: "B2음성",
+        label: "B2의 음성 부분집합 — 분자·분모 **둘 다** 음성으로 제한",
+        applies: (fact) => fact.negative,
+        hit: (fact) => fact.falseFindings > 0,
+    },
+    {
+        key: "B2순진",
+        label: "B2를 순진하게 집계 — role·speechAct를 읽지 않음 (거부 후보)",
+        applies: () => true,
+        hit: (fact) => fact.falseFindingsUnfiltered > 0,
     },
     {
         key: "B3",
@@ -424,21 +567,36 @@ const inventedCandidates = [
 for (const candidate of inventedCandidates) {
     const applicable = facts.filter(candidate.applies);
     const hits = applicable.filter(candidate.hit);
-    console.log(`  ${candidate.key.padEnd(5)} ${candidate.label}`);
+    console.log(`  ${cell(candidate.key, 9)}${candidate.label}`);
     console.log(
         `        ${asRate(hits.length, applicable.length)}   해당: ${
             hits.map((fact) => fact.id).join(", ") || "(없음)"
         }`
     );
 }
+
+// The wrong subset, computed rather than described: the recommended
+// numerator over the negative denominator. Printed because "the same
+// numerator with the negative denominator" was written into the decision
+// draft as if it were a subset, and it is not a proportion of anything.
+const negativeFacts = facts.filter((fact) => fact.negative);
+const allHits = facts.filter((fact) => fact.falseFindings > 0).length;
 console.log(
-    "\n  갈리는 자리는 셋이다.\n" +
-        "    syn-06  현행은 '지어냈다'로 세고, B1·B2·B3는 세지 않는다 — 옳은 지적이었고\n" +
+    `\n  (잘못된 부분집합) 전체 분자 ÷ 음성 분모 = ` +
+        `${asRate(allHits, negativeFacts.length)} — 이 비율의 모집단은 존재하지 않는다.`
+);
+
+console.log(
+    "\n  갈리는 자리.\n" +
+        "    syn-06  현행은 '지어냈다'로 세고, 나머지는 세지 않는다 — 옳은 지적이었고\n" +
         "            틀린 것은 case의 분류다(gold gap 1).\n" +
-        "    syn-05  B3가 0을 낸다. gold가 exhaustive가 아니면 FP가 아예 세어지지 않으므로,\n" +
-        "            **없는 것을 보고한 case가 FP 합계로는 보이지 않는다.**\n" +
-        "    syn-07  양성 case의 지어낸 발견을 B2만 센다. 현행·B1은 음성 case만 보므로\n" +
-        "            그 자리에서 일어난 같은 실패를 아예 세지 않는다."
+        "    syn-05  B3가 0을 낸다. 이 case의 gold가 exhaustive가 아니므로 FP가\n" +
+        "            세어지지 않는다 — 지어낸 발견이 FP 합계에서 사라진다.\n" +
+        "    syn-11  같은 음성 fixture를 exhaustive 빈 gold로 등록하면 FP는 1이다.\n" +
+        "            **FP 0의 원인은 음성 분류가 아니라 비완전 gold다.**\n" +
+        "    syn-07  양성 case의 지어낸 발견을 B2만 센다.\n" +
+        "    syn-08  정상 발견 옆의 `support`에 붙은 verdict를 B2순진만 센다.\n" +
+        "    syn-09  인용에 붙은 verdict를 B2순진만 센다."
 );
 
 // ---------------------------------------------------------------------------
