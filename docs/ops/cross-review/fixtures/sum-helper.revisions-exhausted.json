@@ -1,0 +1,12 @@
+{
+  "author": [
+    { "diff": "+v0", "summary": "attempt 0", "filesChanged": ["lib/sum.ts"], "commit": null },
+    { "diff": "+v1", "summary": "attempt 1", "filesChanged": ["lib/sum.ts"], "commit": null },
+    { "diff": "+v2", "summary": "attempt 2", "filesChanged": ["lib/sum.ts"], "commit": null }
+  ],
+  "reviewer": [
+    { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
+    { "taskId": "demo-sum-helper", "round": 1, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
+    { "taskId": "demo-sum-helper", "round": 2, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" }
+  ]
+}

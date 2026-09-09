@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { runInNewContext } from "node:vm";
 import * as canonical from "../lib/memoryEvalVnext/protocol/canonicalJson.ts";
 import * as wire from "../lib/memoryEvalVnext/protocol/wire.ts";
 import * as signatures from "../lib/memoryEvalVnext/protocol/signatures.ts";
@@ -465,4 +466,363 @@ scenario("F41", "case/AC trace includes external audits and preserves all upstre
   assert.equal(fixtures.upstreamDisposition.filter((x) => x.disposition === "partial_components").length, 9);
   assert.equal(fixtures.upstreamDisposition.filter((x) => x.disposition === "deferred").length, 45);
   assert.ok(fixtures.upstreamDisposition.every((x) => x.fullySatisfied === false));
+});
+
+
+// PB-R1 adds a separate B inventory; it does not reclassify F40/F42/F43/F44
+// or claim B20-B24's external audits as unit passes. Runtime/intrinsics are
+// trusted; these input-boundary tests are not a JavaScript sandbox.
+const trapNames = ["getPrototypeOf", "setPrototypeOf", "isExtensible", "preventExtensions",
+  "getOwnPropertyDescriptor", "defineProperty", "has", "get", "set", "deleteProperty",
+  "ownKeys", "apply", "construct"];
+const hookNames = ["getter", "setter", "toJSON", "Symbol.iterator", "Symbol.toPrimitive",
+  "Symbol.toStringTag", "constructor", "Symbol.species"];
+const bRegistered = new Set();
+const bCompleted = new Set();
+function bScenario(id, title, fn) {
+  assert.equal(bRegistered.has(id), false, "duplicate " + id);
+  bRegistered.add(id);
+  const declaration = fixtures.proxySafety.find((row) => row.id === id);
+  assert.ok(declaration, "missing declaration " + id);
+  assert.deepEqual(declaration.trapNames, trapNames);
+  assert.deepEqual(declaration.hookNames, hookNames);
+  assert.equal(declaration.expectedInvocationCount, 0);
+  test(id + ": " + title, async () => {
+    await fn();
+    bCompleted.add(id);
+  });
+}
+function instrumentation() {
+  const traps = Object.fromEntries(trapNames.map((name) => [name, 0]));
+  const hooks = Object.fromEntries(hookNames.map((name) => [name, 0]));
+  const handler = (throwing) => Object.fromEntries(trapNames.map((name) => [name, (...args) => {
+    traps[name]++;
+    if (throwing) throw new Error("unexpected trap " + name);
+    return Reflect[name](...args);
+  }]));
+  return {
+    traps, hooks,
+    proxy(target, mode = "forwarding") {
+      const revocable = Proxy.revocable(target, handler(mode === "throwing"));
+      if (mode === "revoked") revocable.revoke();
+      return revocable.proxy;
+    },
+    measure(fn) {
+      for (const name of trapNames) traps[name] = 0;
+      for (const name of hookNames) hooks[name] = 0;
+      // Setup/revoke is finished. Neither assertions nor formatting inspect
+      // the untrusted input; only plain result/counter data reaches assert.
+      fn();
+      for (const name of trapNames) assert.equal(traps[name], 0, "trap " + name);
+      for (const name of hookNames) assert.equal(hooks[name], 0, "hook " + name);
+    },
+  };
+}
+const proxyModes = ["forwarding", "throwing", "revoked"];
+function placements(input, path = []) {
+  const paths = [path];
+  if (input !== null && typeof input === "object") {
+    for (const [key, value] of Object.entries(input)) paths.push(...placements(value, [...path, key]));
+  }
+  return paths;
+}
+function replacePlacement(base, path, probe, mode) {
+  const output = clone(base);
+  if (path.length === 0) return probe.proxy(output, mode);
+  let parent = output;
+  for (const key of path.slice(0, -1)) parent = parent[key];
+  const key = path.at(-1), old = parent[key];
+  parent[key] = probe.proxy(old !== null && typeof old === "object" ? old : {}, mode);
+  return output;
+}
+function objectBoundary(base, call) {
+  for (const path of placements(base)) for (const mode of proxyModes) {
+    const probe = instrumentation(), input = replacePlacement(base, path, probe, mode);
+    probe.measure(() => error(call(input)));
+  }
+}
+function byteEntries(raw) {
+  const ref = { path: "fixtures/pb-public", rawSha256: sha(raw), byteLength: raw.length };
+  const git = { path: ref.path, rawSha256: ref.rawSha256, commit: "a".repeat(40) };
+  return [
+    ["copyByteInput", (input) => canonical.copyByteInput(input)],
+    ["decodeCanonical", (input) => canonical.decodeCanonical(input)],
+    ["rawSha256", (input) => canonical.rawSha256(input)],
+    ["verifyPureEd25519", (input) => signatures.verifyPureEd25519(input, publicKeyBase64, receipt.signatureBase64)],
+    ["compareBlobRef", (input) => trust.compareBlobRef(ref, input, ref)],
+    ["compareGitFileRef", (input) => trust.compareGitFileRef(git, input, git)],
+  ];
+}
+function rejectedBytes(input, probe) {
+  for (const [, call] of byteEntries(bytes("{}"))) probe.measure(() => error(call(input)));
+}
+function storageBytes(input, raw, probe) {
+  for (const [name, call] of byteEntries(raw)) {
+    const reference = call(raw);
+    probe.measure(() => assert.deepEqual(call(input), reference, name));
+  }
+}
+
+bScenario("B01", "root object/array Proxy is rejected before any forwarding/throwing trap", () => {
+  for (const target of [{}, []]) for (const mode of ["forwarding", "throwing"]) {
+    const probe = instrumentation(), input = probe.proxy(target, mode);
+    probe.measure(() => error(canonical.encodeCanonical(input)));
+  }
+});
+bScenario("B02", "callable, constructable and multiply wrapped Proxy inputs", () => {
+  for (const target of [() => 1, function Synthetic() {}, {}, []]) for (const mode of ["forwarding", "throwing"]) {
+    const probe = instrumentation(), first = probe.proxy(target, mode);
+    for (const input of [first, probe.proxy(first, mode)]) {
+      probe.measure(() => error(canonical.encodeCanonical(input)));
+    }
+  }
+});
+bScenario("B03", "revoked object/array/function Proxy has no escaping native exception", () => {
+  for (const target of [{}, [], () => 1, function Synthetic() {}]) {
+    const probe = instrumentation(), input = probe.proxy(target, "revoked");
+    probe.measure(() => error(canonical.encodeCanonical(input)));
+  }
+});
+bScenario("B04", "each nested data/array placement rejects active and revoked Proxy", () => {
+  const graph = { a: [{ b: { c: [0, 1] } }], z: true };
+  objectBoundary(graph, canonical.encodeCanonical);
+  objectBoundary(graph, (input) => canonical.domainSha256("mem-pb-test-1", input));
+  for (const mode of proxyModes) {
+    const probe = instrumentation(), input = { fn: probe.proxy(() => 1, mode) };
+    probe.measure(() => error(canonical.encodeCanonical(input)));
+  }
+});
+bScenario("B05", "an ordinary object's Proxy prototype is only compared, not explored", () => {
+  for (const mode of proxyModes) for (const base of [{ a: 1 }, [1]]) {
+    const probe = instrumentation(), prototype = probe.proxy({}, mode);
+    Object.setPrototypeOf(base, prototype);
+    probe.measure(() => error(canonical.encodeCanonical(base)));
+    probe.measure(() => error(canonical.domainSha256("mem-pb-test-1", base)));
+  }
+});
+bScenario("B06", "ordinary accessor/hook/extra/prototype/cycle rejections remain non-invoking", () => {
+  const probe = instrumentation(), h = probe.hooks;
+  const accessor = Object.defineProperty({}, "a", { enumerable: true,
+    get() { h.getter++; return 1; }, set(value) { void value; h.setter++; } });
+  const setter = Object.defineProperty({}, "a", { enumerable: true, set(value) { void value; h.setter++; } });
+  const array = [1]; Object.defineProperty(array, "0", { get() { h.getter++; return 1; } });
+  const toJSON = { toJSON() { h.toJSON++; return {}; } };
+  const iterator = { [Symbol.iterator]() { h["Symbol.iterator"]++; return [][Symbol.iterator](); } };
+  const primitive = { [Symbol.toPrimitive]() { h["Symbol.toPrimitive"]++; return "x"; } };
+  const tagged = { get [Symbol.toStringTag]() { h["Symbol.toStringTag"]++; return "Object"; } };
+  const constructor = { get constructor() { h.constructor++; return Object; } };
+  const species = { get [Symbol.species]() { h["Symbol.species"]++; return Array; } };
+  const hidden = Object.defineProperty({}, "x", { value: 1 });
+  const extra = [0]; extra.x = 1;
+  const cycle = {}; cycle.self = cycle;
+  for (const input of [accessor, setter, array, toJSON, iterator, primitive, tagged, constructor,
+    species, hidden, extra, { [Symbol("x")]: 1 }, Object.create({ a: 1 }), cycle, new Array(2)]) {
+    probe.measure(() => error(canonical.encodeCanonical(input)));
+    probe.measure(() => error(canonical.domainSha256("mem-pb-test-1", input)));
+  }
+  const shared = { a: 1 };
+  probe.measure(() => assert.equal(canonicalBytes([shared, shared]).toString(), '[{"a":1},{"a":1}]'));
+});
+bScenario("B07", "five closed wire shapes reject Proxy at every own data placement", () => {
+  for (const [kind, base] of Object.entries(examples)) objectBoundary(base, (input) => wire.checkWire(kind, input));
+});
+bScenario("B08", "every C03/C04 object argument rejects root/nested/revoked Proxy", () => {
+  const raw = bytes(fixtures.publicOpaqueBytes.registration.text), git = gitRef("D");
+  const boundaries = [
+    [payload, signatures.signatureMessage], [receipt, signatures.signatureReceiptDigest],
+    [receipt, (x) => signatures.verifySignatureReceipt(x, publicKeyBase64, payload)],
+    [payload, (x) => signatures.verifySignatureReceipt(receipt, publicKeyBase64, x)],
+    [payload, (x) => binding(x)], [anchor, (x) => binding(payload, x)],
+    [expected(), (x) => binding(payload, anchor, x)],
+    [blob, (x) => trust.compareBlobRef(x, raw, blob)], [blob, (x) => trust.compareBlobRef(blob, raw, x)],
+    [git, (x) => trust.compareGitFileRef(x, bytes(fixtures.publicOpaqueBytes.D.text), git)],
+    [git, (x) => trust.compareGitFileRef(git, bytes(fixtures.publicOpaqueBytes.D.text), x)],
+  ];
+  for (const [base, call] of boundaries) objectBoundary(base, call);
+});
+bScenario("B09", "all six bytes APIs reject direct/typed-array/Buffer/revoked Proxy", () => {
+  for (const target of [{}, [], new Uint8Array([123, 125]), bytes("{}"), () => 1]) for (const mode of proxyModes) {
+    const probe = instrumentation(), input = probe.proxy(target, mode);
+    rejectedBytes(input, probe);
+    rejectedBytes(probe.proxy(input, "forwarding"), probe);
+  }
+});
+bScenario("B10", "fake views and other storage brands cannot enter the Uint8Array boundary", () => {
+  const probe = instrumentation();
+  const fake = Object.create(Uint8Array.prototype);
+  Object.defineProperty(fake, "length", { get() { probe.hooks.getter++; return 2; } });
+  const duck = { get byteLength() { probe.hooks.getter++; return 2; },
+    [Symbol.iterator]() { probe.hooks["Symbol.iterator"]++; return [123, 125][Symbol.iterator](); } };
+  for (const input of [fake, duck, new DataView(new ArrayBuffer(2)), new ArrayBuffer(2),
+    new SharedArrayBuffer(2), new Uint8ClampedArray(2), new Int8Array(2), new Uint16Array(2),
+    new Int16Array(2), new Uint32Array(2), new Int32Array(2), new Float32Array(2),
+    new Float64Array(2), new BigInt64Array(2), new BigUint64Array(2), null, undefined, "{}", [123, 125]]) {
+    rejectedBytes(input, probe);
+  }
+});
+bScenario("B11", "attached empty/offset/Buffer and stable RAB/SAB/GSAB raw storage", () => {
+  const probe = instrumentation(), raw = bytes("{}");
+  storageBytes(new Uint8Array(0), Buffer.alloc(0), probe);
+  storageBytes(Buffer.alloc(0), Buffer.alloc(0), probe);
+  storageBytes(new Uint8Array([99, 123, 125, 99]).subarray(1, 3), raw, probe);
+  storageBytes(Buffer.from([99, 123, 125, 99]).subarray(1, 3), raw, probe);
+  const rab = new ArrayBuffer(4, { maxByteLength: 8 });
+  new Uint8Array(rab).set([99, 123, 125, 99]);
+  storageBytes(new Uint8Array(rab, 1, 2), raw, probe);
+  rab.resize(8);
+  storageBytes(new Uint8Array(rab, 1, 2), raw, probe);
+  const tracking = new ArrayBuffer(2, { maxByteLength: 8 });
+  const trackingView = new Uint8Array(tracking); trackingView.set(raw);
+  storageBytes(trackingView, raw, probe);
+  tracking.resize(3); new Uint8Array(tracking)[2] = 10;
+  storageBytes(trackingView, bytes("{}\n"), probe);
+  probe.measure(() => assert.deepEqual(canonical.decodeCanonical(trackingView, "file-with-single-lf"),
+    canonical.decodeCanonical(bytes("{}\n"), "file-with-single-lf")));
+  const sab = new SharedArrayBuffer(4); new Uint8Array(sab).set([99, 123, 125, 99]);
+  storageBytes(new Uint8Array(sab, 1, 2), raw, probe);
+  const gsab = new SharedArrayBuffer(2, { maxByteLength: 8 }), growing = new Uint8Array(gsab);
+  growing.set(raw); storageBytes(growing, raw, probe);
+  gsab.grow(3); growing[2] = 10; storageBytes(growing, bytes("{}\n"), probe);
+});
+bScenario("B12", "subclass shadow getters/constructor/species/iterator never override storage", () => {
+  const probe = instrumentation(), h = probe.hooks;
+  class PublicBytes extends Uint8Array {
+    static get [Symbol.species]() { h["Symbol.species"]++; return Uint8Array; }
+  }
+  const input = new PublicBytes([123, 125]);
+  for (const name of ["length", "byteLength", "buffer", "byteOffset"]) {
+    Object.defineProperty(input, name, { get() { h.getter++; throw new Error("shadow " + name); },
+      set(value) { void value; h.setter++; } });
+  }
+  Object.defineProperty(input, "constructor", { get() { h.constructor++; return PublicBytes; } });
+  Object.defineProperty(input, Symbol.toStringTag, { get() { h["Symbol.toStringTag"]++; return "Fake"; } });
+  Object.defineProperty(input, Symbol.toPrimitive, { value() { h["Symbol.toPrimitive"]++; return "fake"; } });
+  Object.defineProperty(input, Symbol.iterator, { value() { h["Symbol.iterator"]++; throw new Error("iterator"); } });
+  Object.defineProperty(input, "toJSON", { value() { h.toJSON++; return []; } });
+  for (const name of ["slice", "set", "subarray"]) Object.defineProperty(input, name, {
+    get() { h.getter++; throw new Error("caller method " + name); },
+  });
+  storageBytes(input, bytes("{}"), probe);
+  const plainSubclass = new PublicBytes([123, 125]);
+  storageBytes(plainSubclass, bytes("{}"), probe);
+});
+bScenario("B13", "approved cross-realm bytes and Proxy-prototype genuine views", () => {
+  const probe = instrumentation();
+  // PB-D2 permits only fixed constant cross-realm byte fixtures, not a sandbox.
+  const other = runInNewContext("new Uint8Array([123, 125])");
+  storageBytes(other, bytes("{}"), probe);
+  for (const mode of proxyModes) for (const input of [new Uint8Array([123, 125]), bytes("{}")]) {
+    Object.setPrototypeOf(input, probe.proxy(Uint8Array.prototype, mode));
+    storageBytes(input, bytes("{}"), probe);
+    probe.measure(() => error(canonical.encodeCanonical(input)));
+  }
+});
+bScenario("B14", "unused own Proxy metadata is neither traversed nor rejected on genuine bytes", () => {
+  for (const mode of proxyModes) {
+    const probe = instrumentation(), input = new Uint8Array([123, 125]);
+    input.metadata = probe.proxy({}, mode);
+    input[Symbol("metadata")] = probe.proxy({}, mode);
+    Object.defineProperty(input, "unused", { get() { probe.hooks.getter++; throw new Error("unused"); } });
+    storageBytes(input, bytes("{}"), probe);
+  }
+});
+bScenario("B15", "detached and zero-length-looking OOB views differ from attached empty", () => {
+  const probe = instrumentation();
+  for (const length of [0, 2]) {
+    const buffer = new ArrayBuffer(length), input = new Uint8Array(buffer);
+    structuredClone(buffer, { transfer: [buffer] }); // Only this test-owned buffer.
+    rejectedBytes(input, probe);
+  }
+  const rab = new ArrayBuffer(4, { maxByteLength: 8 });
+  const fixed = new Uint8Array(rab, 2, 2), tracking = new Uint8Array(rab, 2);
+  rab.resize(1); rejectedBytes(fixed, probe); rejectedBytes(tracking, probe);
+  storageBytes(new Uint8Array(0), Buffer.alloc(0), probe);
+  // A zero-length view exactly at the current boundary is still attached.
+  storageBytes(new Uint8Array(rab, 1, 0), Buffer.alloc(0), probe);
+});
+bScenario("B16", "private copies are independently owned in both mutation directions", () => {
+  const input = new Uint8Array([99, 123, 125, 99]).subarray(1, 3);
+  const copied = value(canonical.copyByteInput(input));
+  assert.notEqual(copied, input);
+  assert.notEqual(copied.buffer, input.buffer);
+  assert.deepEqual([...copied], [123, 125]);
+  input[0] = 0; assert.deepEqual([...copied], [123, 125]);
+  copied[1] = 0; assert.equal(input[1], 125);
+  const empty = new Uint8Array(0), emptyCopy = value(canonical.copyByteInput(empty));
+  assert.notEqual(emptyCopy.buffer, empty.buffer);
+});
+bScenario("B17", "invalid object/bytes take precedence over unsupported and mismatch results", () => {
+  const unsupported = { ...payload, purpose: "unknown_purpose" };
+  for (const mode of proxyModes) {
+    const probe = instrumentation(), bad = probe.proxy({}, mode);
+    for (const call of [
+      () => signatures.signatureMessage({ ...unsupported, contentDigest: bad }),
+      () => signatures.signatureReceiptDigest({ ...receipt, payload: bad }),
+      () => signatures.verifySignatureReceipt({ ...receipt, payload: unsupported }, publicKeyBase64, bad),
+      () => signatures.verifySignatureReceipt(bad, publicKeyBase64, unsupported),
+      () => signatures.verifyPureEd25519(bad, publicKeyBase64, receipt.signatureBase64),
+      () => signatures.verifyPureEd25519(bad, "malformed", "malformed"),
+      () => binding(unsupported, bad),
+      () => binding(unsupported, anchor, bad),
+      () => trust.compareBlobRef({ ...blob, rawSha256: "c".repeat(64) }, bad, blob),
+      () => trust.compareBlobRef(bad, bytes("wrong"), blob),
+      () => trust.compareBlobRef(blob, bytes("wrong"), bad),
+      () => trust.compareGitFileRef(gitRef("D"), bad, gitRef("K")),
+      () => trust.compareGitFileRef(bad, bytes("wrong"), gitRef("K")),
+      () => trust.compareGitFileRef(gitRef("D"), bytes("wrong"), bad),
+    ]) probe.measure(() => error(call()));
+  }
+  error(signatures.verifySignatureReceipt({ ...receipt, payload: unsupported }, publicKeyBase64, payload), "unsupported_subset");
+  error(trust.compareBlobRef({ ...blob, path: "other" }, bytes("wrong"), blob), "bytes_mismatch");
+});
+bScenario("B18", "scalar slots reject Proxy/boxed values without coercion or native leakage", () => {
+  const probe = instrumentation();
+  const coercion = { [Symbol.toPrimitive]() { probe.hooks["Symbol.toPrimitive"]++; return payload.purpose; } };
+  const inputs = [new String(payload.purpose), new Number(32), new Boolean(true), coercion,
+    ...proxyModes.map((mode) => probe.proxy(coercion, mode))];
+  for (const input of inputs) {
+    for (const predicate of [wire.isDigest, wire.isKeyId, wire.isAsciiId, wire.isApproverId, wire.isUtcSecond]) {
+      probe.measure(() => assert.equal(predicate(input), false));
+    }
+    probe.measure(() => assert.equal(wire.requiredRole(input), undefined));
+    for (const call of [
+      () => canonical.domainSha256(input, {}),
+      () => canonical.decodeCanonical(bytes("{}"), input),
+      () => wire.checkWire(input, payload),
+      () => wire.decodeBase64(input, 32),
+      () => wire.decodeBase64(publicKeyBase64, input),
+      () => signatures.verifyPureEd25519(Buffer.alloc(0), input, receipt.signatureBase64),
+      () => signatures.verifyPureEd25519(Buffer.alloc(0), publicKeyBase64, input),
+      () => signatures.verifySignatureReceipt(receipt, input, payload),
+      () => binding(payload, anchor, expected(), input),
+      () => trust.compareTrustPolicyDigest(input, "a".repeat(64)),
+      () => trust.compareTrustPolicyDigest("a".repeat(64), input),
+      () => trust.comparePreviousEpochDigest(input, null),
+      () => trust.comparePreviousEpochDigest(null, input),
+    ]) probe.measure(() => error(call()));
+  }
+});
+bScenario("B19", "unchanged F goldens/40 scenarios plus complete separate B declarations", () => {
+  const original = Object.fromEntries(Object.entries(fixtures).filter(([key]) => key !== "proxySafety"));
+  assert.equal(sha(JSON.stringify(original)), "1d286a257c44d3444de99b945a8276cd680b8b30adc41bf0fc5df32a5f4123ca");
+  const fExternal = ["F40", "F42", "F43", "F44"];
+  const fUnits = fixtures.caseTrace.map((row) => row.id).filter((id) => !fExternal.includes(id));
+  assert.equal(fUnits.length, 40);
+  assert.deepEqual([...registered].sort(), fUnits);
+  assert.deepEqual([...completed].sort(), fUnits);
+  const bIds = Array.from({ length: 24 }, (_, i) => "B" + String(i + 1).padStart(2, "0"));
+  assert.deepEqual(fixtures.proxySafety.map((row) => row.id), bIds);
+  for (const row of fixtures.proxySafety) {
+    assert.deepEqual(row.trapNames, trapNames);
+    assert.deepEqual(row.hookNames, hookNames);
+    assert.equal(row.expectedInvocationCount, 0);
+    assert.match(row.acId, /^AC-(?:[1-9]|1[0-2])$/);
+  }
+  assert.deepEqual([...bRegistered].sort(), bIds.slice(0, 19));
+  assert.deepEqual([...bCompleted].sort(), bIds.slice(0, 18));
+  for (const g of fixtures.goldenCanonical) {
+    assert.equal(canonicalBytes(JSON.parse(g.canonicalText)).toString("hex"), g.utf8Hex);
+    assert.equal(value(canonical.rawSha256(bytes(g.canonicalText))), g.rawSha256);
+    assert.equal(value(canonical.domainSha256(g.testDomain, JSON.parse(g.canonicalText))), g.domainSha256);
+  }
 });

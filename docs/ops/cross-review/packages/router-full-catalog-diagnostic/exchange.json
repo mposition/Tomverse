@@ -1,0 +1,59 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "router-full-catalog-diagnostic-v1",
+  "requirement": "Build the offline foundation for improving Auto Router model selection over the whole catalogue without repeated human hand-offs. (1) A full-catalogue routing diagnostic that uses the product's own routing logic (not a copy) on the development fixture and, per request, shows every catalogue model, its candidacy and exclusion reason, the presence/source/version of per-task quality evidence, the score/band and the actual tie-break criterion, the final primary and the actually executable fallback, why each non-selected model lost, and where no evidence exists to judge. Unevaluated models are not scored 0, not promoted, and no operational score changes. (2) A minimal Claude–Codex cross-review structure: author, independent reviewer, control program; roles configurable; exchange record with task ID, original requirement and completion criteria, change digest, change summary, test results, review conclusion, per-finding location/severity/basis/reproduction, next action; reviewer reads requirement and diff before the author's self-assessment; reviewer has no write access; a new change needs a new review; max 2 fix rounds then hold; preference-only findings follow project rules; unevidenced proposals keep the current version; two AIs agreeing is not a pass without tests and guards. No model calls, no production routing/score/flag change, no push, no workflow dispatch.",
+  "completionCriteria": [
+    "Every model in the catalogue appears in the diagnostic for every item; a model excluded from candidacy carries a fixed reason (tests/routerFullCatalogDiagnostic.test.mjs).",
+    "The diagnostic's candidate set, rejections, primary and deciding criterion equal decideRouterModel's on the same input, and the Router-vs-dispatch output cap difference is reported, not hidden.",
+    "The cross-review loop runs end to end on mocks: pass, request_changes then fix then approve, and revision cap reached (tests/crossReview.test.mjs).",
+    "Invalid JSON, missing result, timeout, execution failure and digest mismatch are named failures, never a pass.",
+    "In dry-run mode the command-line executors are never spawned.",
+    "No production routing behaviour, score, flag, pre-registration, or protection rule changes: existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified."
+  ],
+  "baseCommit": "origin/develop",
+  "roles": {
+    "author": "claude",
+    "reviewer": "codex"
+  },
+  "maxRevisions": 2,
+  "rounds": [],
+  "changeDigest": "sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932",
+  "commit": "6efd3eab991c368fb56129e2d1dbbfc2b4ab56a2",
+  "headCommit": "6efd3eab991c368fb56129e2d1dbbfc2b4ab56a2",
+  "worktreeDirty": false,
+  "changeSummary": "Adds lib/routerFullCatalogDiagnostic.ts + scripts/report-router-full-catalog.mjs (offline full-catalogue diagnostic reusing decideRouterModel/filterRouterCandidates/selectRouterModel), lib/crossReviewCore.ts + lib/crossReviewExecutors.ts + scripts/cross-review.mjs (author/reviewer/control loop with mocks, dry-run shells, package mode), tests for both, docs and fixtures. Report on development-v0 committed under docs/ops/router-full-catalog-diagnostic/. No change to routing behaviour, scores, flags or pre-registrations.",
+  "filesChanged": [
+    "docs/ops/cross-review/README.md",
+    "docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json",
+    "docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json",
+    "docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json",
+    "docs/ops/cross-review/fixtures/sum-helper.task.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json",
+    "docs/ops/router-full-catalog-diagnostic/README.md",
+    "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+    "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+    "lib/crossReviewCore.ts",
+    "lib/crossReviewExecutors.ts",
+    "lib/routerFullCatalogDiagnostic.ts",
+    "package.json",
+    "scripts/cross-review.mjs",
+    "scripts/report-router-full-catalog.mjs",
+    "tests/crossReview.test.mjs",
+    "tests/routerFullCatalogDiagnostic.test.mjs"
+  ],
+  "testResults": [
+    {
+      "command": "node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (pass|fail)'",
+      "passed": true,
+      "output": "# pass 111\n# fail 0",
+      "durationMs": 1604
+    }
+  ],
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand review-prompt.md to the codex reviewer; its verdict must name digest sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932",
+  "status": "awaiting_review",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-09T05:52:36.732Z"
+}

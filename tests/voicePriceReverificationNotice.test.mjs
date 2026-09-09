@@ -81,10 +81,37 @@ test("the answer does not depend on the hour the run happens at", () => {
 
 test("the last day before the deadline still warns, and the deadline itself does not", () => {
   assert.equal(noticesOn("2026-11-30")[0]?.daysRemaining, 1);
-  // On the deadline the audit is what speaks. A warning here would be
-  // describing a failure as a heads-up.
-  assert.equal(noticesOn("2026-12-01")[0]?.daysRemaining, 0);
+  // On the deadline the audit is what speaks, and only the audit. The first
+  // version of this test asserted `daysRemaining === 0` here -- under this
+  // very name -- so the assertion and the name disagreed and the name was the
+  // one telling the truth about the contract.
+  assert.deepEqual(noticesOn("2026-12-01"), []);
   assert.deepEqual(noticesOn("2026-12-02"), []);
+});
+
+test("the deadline day is the audit's alone, so the two layers never both speak", () => {
+  // The property the boundary exists for, asserted as a property rather than
+  // as a day: on every day from the deadline onward exactly one layer has
+  // something to say, and it is the blocking one.
+  for (const day of ["2026-12-01", "2026-12-02", "2026-12-31"]) {
+    const input = {
+      modelIds: ["test-transcribe"],
+      now: new Date(`${day}T09:00:00Z`),
+      register: [entry()],
+    };
+    assert.deepEqual(
+      voicePriceReverificationNotices(input),
+      [],
+      `${day}: the warning window has closed`
+    );
+    assert.equal(
+      auditVoicePriceRegister(input).filter(
+        (problem) => problem.code === "expired"
+      ).length,
+      1,
+      `${day}: and the audit is failing`
+    );
+  }
 });
 
 test("an expired deadline is the audit's, not the notice's", () => {
