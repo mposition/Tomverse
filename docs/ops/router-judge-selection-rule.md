@@ -50,6 +50,14 @@ Luna and Fable are measured against the same human labels, on the same pairs:
 `lib/routerJudgeSelection.ts` before any human label is read and covered by
 `tests/routerJudgeSelection.test.mjs`.
 
+The arithmetic that feeds them is `lib/routerJudgeComparator.ts`, run by
+`scripts/report-router-judge-comparison.mjs` (`npm run
+report:router-judge-comparison`) and covered by
+`tests/routerJudgeComparator.test.mjs`. It was frozen before the settled human
+verdicts were opened, for the same reason the thresholds were. It computes and
+hands over; it has no option that changes a threshold, because a report that
+could be re-run with a different tolerance is a report with a thumb on it.
+
 ```
 D_j = |judge baseline margin - human baseline margin|
 dD  = D_Luna - D_Fable                      pair-level bootstrap, run's own seed
