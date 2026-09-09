@@ -1,9 +1,22 @@
 # judged-v3 전환에 필요한 두 지표의 정의 — 결정안
 
-**결정안이다. 승인이 아니고, 구현도 아니다.** 이 문서는 `falseConsensusRate`와
-`inventedIssueRate`를 judged-v3 위에서 어떻게 정의할지의 선택지를 정리하고 권고를
-적는다. **임계값 숫자를 정하지 않고, 게이트에 연결하지 않으며, 코드를 바꾸지
-않았다.** 실행 단위 집계기는 정의가 승인된 다음이다.
+> **승인됨 — mposition, 2026-09-09.** §5의 권고 그대로 채택됐고, 구현은
+> `lib/aiReviewJudgedRunAggregate.ts`, 회귀는
+> `tests/aiReviewJudgedRunAggregate.test.mjs`·
+> `tests/aiReviewJudgedInventedFindings.test.mjs`, 계약 반영은
+> `docs/ops/ai-review-eval-scoring-contract.md`다.
+>
+> **승인 범위는 지표 정의와 오프라인 집계기까지다.** 계약 전체 승인, 승인 게이트
+> 전환, 임계값 승인, 후보 채택, dataset 동결, M5 승급, 추가 유료 실행은
+> 포함되지 않는다. 기존 키워드 artifact는 보존하고, 기존 점수와 임계값을 새
+> 척도로 승계하지 않는다.
+>
+> 지어낸 발견 지표의 식별자 `inventedFindingRate`는 **승인 문안에 이름이 없어
+> 구현이 고른 것**이다. 키워드 `inventedIssueRate`가 아직 승인 게이트를
+> 흐르므로 같은 이름을 쓸 수 없었고, 다른 이름을 원하시면 바꾸면 된다.
+
+아래는 승인 전 결정안 본문이며, 근거와 대안을 그대로 남긴다. **임계값 숫자를
+정하지 않고, 게이트에 연결하지 않는다.**
 
 작성 2026-09-09. 대상 commit `2562fb2`.
 `.github/audits/ai-review-judged-gate-transition-2026-09-09.md` §2.1·§2.2가 남긴
