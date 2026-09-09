@@ -260,9 +260,16 @@ if (scored.outcome.scored) {
     // problem named too vaguely rather than a problem invented -- nothing
     // measuring invention may be derived from the false-positive count.
     if (outcome.supportClaims > 0 || outcome.insufficientFindings > 0) {
+      // `(inside FP)` is only true where the gold is exhaustive. Under a
+      // non-exhaustive gold no false positive is counted at all, so the same
+      // line said an insufficient finding was inside a number it had been
+      // excluded from -- arithmetic right, sentence backwards.
+      const where = outcome.precisionCounted
+        ? "inside FP"
+        : "excluded from FP: gold not exhaustive";
       console.log(
         `  ${"".padEnd(16)} support ${outcome.supportClaims}  ` +
-          `insufficient ${outcome.insufficientFindings} (inside FP)`
+          `insufficient ${outcome.insufficientFindings} (${where})`
       );
     }
   }

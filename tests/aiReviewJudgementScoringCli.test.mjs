@@ -954,3 +954,101 @@ test("an insufficient finding is reported apart from the false positives", async
     assert.equal(outcome.insufficientFindings, 1);
     assert.match(scored.stdout, /insufficient 1 \(inside FP\)/);
 });
+
+test("creating the skeleton never overwrites a record that appeared meanwhile", async (t) => {
+    // The window this closes: `existsSync` said no, another author wrote a
+    // signed record, and the skeleton landed on top of it -- confirmed claims
+    // and a signature replaced by `pending` and empty strings, exit code 0.
+    //
+    // There is no window now, because there is no check: the write is `wx`, so
+    // it creates or it fails, and the failure is this branch. A file present
+    // at the start and a file that appears mid-run reach the same code, which
+    // is why this can be tested at all.
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase());
+    write(root, "observation.json", observation());
+
+    const signed = record(observationRefFor(observation()), [
+        claim({ confirmedBy: "somebody else" }),
+    ]);
+    write(root, "record.json", signed);
+    const before = readFileSync(join(root, "record.json"), "utf8");
+
+    const drafted = await runDraft(root);
+    assert.equal(drafted.status, 0, drafted.stderr);
+    assert.doesNotMatch(drafted.stdout, /Wrote/);
+    // Byte-for-byte: a rewrite that happened to produce equal JSON would still
+    // be a rewrite of somebody's signed work.
+    assert.equal(readFileSync(join(root, "record.json"), "utf8"), before);
+    assert.equal(read(root, "record.json").claims[0].confirmedBy, "somebody else");
+});
+
+test("the draft tool passes on the scorer's refusals instead of calling it ready", async (t) => {
+    // Three inputs where every record check passes and the scorer still
+    // refuses. Each needs a person -- a verdict, or a gold correction -- and
+    // "Nothing is missing" sent them to a command that would refuse.
+    const outside = (overrides) =>
+        claim({
+            targetLabel: "a",
+            requirementId: "evidence_preservation",
+            evidenceQuote: "c는 이의신청 기한을 제시하지 않는다",
+            ...overrides,
+        });
+    const cases = [
+        ["no verdict at all", testCase(), outside({}), /have no verdict/],
+        [
+            "ruled undetermined",
+            testCase(),
+            outside({ outsideGoldVerdict: "undetermined" }),
+            /have no verdict/,
+        ],
+        [
+            "an exhaustive gold disproved",
+            testCase(),
+            outside({ outsideGoldVerdict: "gold_incomplete" }),
+            /declared exhaustive/,
+        ],
+    ];
+
+    for (const [name, judged, extra, expected] of cases) {
+        const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+        t.after(() => rmSync(root, { recursive: true, force: true }));
+        write(root, "case.json", judged);
+        write(root, "observation.json", observation());
+        write(root, "record.json", record(observationRefFor(observation()), [claim(), extra]));
+
+        const checked = await runDraft(root);
+        assert.doesNotMatch(checked.stdout, /Nothing is missing/, name);
+        assert.match(checked.stdout, /still refuses it/, name);
+        assert.match(checked.stdout, expected, name);
+
+        // And the scorer really does refuse, so the two agree.
+        const scored = await run(root);
+        assert.equal(read(root, "artifact.json").outcome.scored, false, name);
+        assert.equal(scored.status, 0, scored.stderr);
+    }
+});
+
+test("an insufficient finding under a non-exhaustive gold is not called part of FP", async (t) => {
+    // The arithmetic was right and the sentence was backwards: with a
+    // non-exhaustive gold no false positive is counted at all, and the line
+    // still said the finding was inside one.
+    const root = mkdtempSync(join(tmpdir(), "ai-review-draft-"));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    write(root, "case.json", testCase({ goldCompleteness: { missingPoints: false } }));
+    write(root, "observation.json", observation());
+    write(
+        root,
+        "record.json",
+        record(observationRefFor(observation()), [claim({ sufficiency: "insufficient" })])
+    );
+
+    const scored = await run(root);
+    assert.equal(scored.status, 0, scored.stderr);
+    const outcome = read(root, "artifact.json").outcome.byKind.missingPoints;
+    assert.equal(outcome.falsePositives, 0);
+    assert.equal(outcome.insufficientFindings, 1);
+    assert.match(scored.stdout, /insufficient 1 \(excluded from FP: gold not exhaustive\)/);
+    assert.doesNotMatch(scored.stdout, /inside FP/);
+});
