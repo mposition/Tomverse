@@ -1,0 +1,59 @@
+{
+  "author": [
+    {
+      "diff": "--- a/lib/sum.ts\n+++ b/lib/sum.ts\n+export const sum = (numbers: number[]) => numbers.reduce((a, b) => a + b);\n",
+      "summary": "Adds sum() using reduce.",
+      "filesChanged": ["lib/sum.ts"],
+      "selfAssessment": "Straightforward; no edge cases.",
+      "commit": null
+    },
+    {
+      "diff": "--- a/lib/sum.ts\n+++ b/lib/sum.ts\n+export const sum = (numbers: number[]) => numbers.reduce((a, b) => a + b, 0);\n--- a/tests/sum.test.mjs\n+++ b/tests/sum.test.mjs\n+test(\"empty\", () => assert.equal(sum([]), 0));\n",
+      "summary": "Seeds reduce with 0 and adds the empty-array test.",
+      "filesChanged": ["lib/sum.ts", "tests/sum.test.mjs"],
+      "commit": null
+    }
+  ],
+  "reviewer": [
+    {
+      "taskId": "demo-sum-helper",
+      "round": 0,
+      "reviewedDigest": "@current",
+      "conclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/sum.ts:1",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "reduce without a seed throws on an empty array, so sum([]) does not return 0 and the first completion criterion fails.",
+          "reproduction": "node -e '[].reduce((a,b)=>a+b)'"
+        },
+        {
+          "location": "tests/",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "No test covers the empty array; the requirement asks for one."
+        },
+        {
+          "location": "lib/sum.ts:1",
+          "severity": "nit",
+          "basis": "preference",
+          "claim": "I would name the parameter xs."
+        }
+      ],
+      "nextAction": "seed the reduce, add the test, resubmit"
+    },
+    {
+      "taskId": "demo-sum-helper",
+      "round": 1,
+      "reviewedDigest": "@current",
+      "conclusion": "approve",
+      "findings": [],
+      "nextAction": "ready to merge"
+    }
+  ],
+  "tests": [
+    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 40 }],
+    [{ "command": "node --test tests/sum.test.mjs", "passed": true, "output": "pass 1", "durationMs": 38 }]
+  ]
+}

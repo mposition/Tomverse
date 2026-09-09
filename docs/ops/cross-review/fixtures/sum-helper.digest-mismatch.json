@@ -1,0 +1,8 @@
+{
+  "author": [
+    { "diff": "+v0", "summary": "attempt 0", "filesChanged": ["lib/sum.ts"], "commit": null }
+  ],
+  "reviewer": [
+    { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "sha256:not-this-change", "conclusion": "approve", "findings": [], "nextAction": "merge" }
+  ]
+}
