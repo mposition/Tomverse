@@ -456,6 +456,15 @@ const report = (mode) => {
   return 1;
 };
 
+// Before anything is validated, including the arguments.
+//
+// Every refusal below exits, and each one used to leave the *previous* run's
+// summary sitting at the requested path -- a forgotten mode, a missing token, a
+// bad age limit, and the next round judged an older run's file as this one's
+// sample. Claiming the path first makes the first thing that can go wrong the
+// one that costs the least: nothing has been read and no evidence is spent.
+prepareSummary();
+
 const mode = (process.env[MODE_ENV] ?? "").trim();
 if (!MODES.has(mode)) {
   console.log("Mobile auth deployment verification");
@@ -523,8 +532,6 @@ if (!expectedDeploymentId) {
 }
 
 summary.expectedDeploymentId = expectedDeploymentId;
-
-prepareSummary();
 
 // The candidate rings. A configuration error here is the checker's business,
 // not this script's, so it says so rather than reporting a mismatch.

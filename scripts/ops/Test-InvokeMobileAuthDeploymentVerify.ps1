@@ -287,9 +287,16 @@ Assert-Case "6b. pre-injected mode still clears the environment" `
     ($injected.Leftover.Count -eq 0) ("left: {0}" -f ($injected.Leftover -join ", "))
 
 $notInjected = Invoke-Wrapper -Preinjected
+# Whitespace-normalised before the match. The wrapper builds this line with a
+# format string, and `Out-String` wraps it at the host's width -- Windows
+# PowerShell 5.1 broke it as "Nothing `r`n injected it." while 7.x did not, so
+# the assertion failed on a run where the behaviour was right: exit 1, no
+# prompt, no verifier. What is being asserted is the sentence, not its line
+# breaks.
+$notInjectedText = ($notInjected.Output -replace "\s+", " ")
 Assert-Case "6c. a missing injection fails without prompting or verifying" `
     (($notInjected.ExitCode -ne 0) -and ($null -eq $notInjected.NpmArgs) -and
-     ($notInjected.Prompts -eq 0) -and ($notInjected.Output -match "Nothing injected it")) `
+     ($notInjected.Prompts -eq 0) -and ($notInjectedText -match "Nothing injected it")) `
     ("exit={0} prompts={1}" -f $notInjected.ExitCode, $notInjected.Prompts)
 
 $failed = @($global:results | Where-Object { -not $_.Ok })

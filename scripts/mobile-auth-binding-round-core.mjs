@@ -80,8 +80,8 @@ const SUMMARY_SCHEMA = "tomverse.mobile-auth-verify.v1";
 
 /** The two axes a round is about. Both, always -- one bound half is not a bound sample. */
 const BINDING_FIELDS = [
-  ["signingBinding", "signingDeploymentId"],
-  ["pepperBinding", "pepperDeploymentId"],
+  ["signingBinding", "signingDeploymentId", "signing binding"],
+  ["pepperBinding", "pepperDeploymentId", "pepper binding"],
 ];
 
 /**
@@ -94,7 +94,30 @@ const BINDING_FIELDS = [
  * be reached. So the round asks the narrower question instead: did anything
  * *other* than the binding fail?
  */
-const BINDING_CHECK_NAMES = new Set(["signing binding", "pepper binding"]);
+const BINDING_CHECK_NAMES = new Set(BINDING_FIELDS.map(([, , checkName]) => checkName));
+
+/**
+ * The words an axis is allowed to say.
+ *
+ * Closed, and checked before the value is ever mentioned in a diagnostic. A
+ * summary field holding something else is a file this tool cannot read, and a
+ * message that quoted it back would print whatever had been put there -- the
+ * same leak as the parse error, one layer further in. So an unrecognised value
+ * is reported by **field name only**.
+ *
+ * The list mirrors `MobileBindingOutcome` in lib/mobileDeploymentBinding.ts,
+ * which the verifier writes from. They are checked against each other in
+ * tests/mobileAuthDeploymentBinding.test.mjs rather than trusted to stay in
+ * step, because this file cannot import that one: the judge runs on plain
+ * node, without the TypeScript loader.
+ */
+export const MOBILE_BINDING_OUTCOMES = [
+  "matched",
+  "mismatched",
+  "undetermined",
+  "refused",
+  "no_expectation",
+];
 
 const nonEmptyString = (value) =>
   typeof value === "string" && value.trim() !== "" ? value : null;
@@ -162,12 +185,38 @@ const readSample = (value, index) => {
   for (const [outcomeField, idField] of BINDING_FIELDS) {
     const outcome = nonEmptyString(value[outcomeField]);
     const named = nonEmptyString(value[idField]);
-    if (!outcome) problems.push(`${at} has no ${outcomeField}`);
+    if (!outcome) {
+      problems.push(`${at} has no ${outcomeField}`);
+    } else if (!MOBILE_BINDING_OUTCOMES.includes(outcome)) {
+      // The field name, and nothing of what was in it.
+      problems.push(`${at} has an unrecognised ${outcomeField}`);
+    }
     // An axis with no identifier is an axis with nothing to compare, whatever
     // its outcome word says.
     if (!named) problems.push(`${at} has no ${idField}`);
-    bindings[outcomeField] = outcome;
+    bindings[outcomeField] = MOBILE_BINDING_OUTCOMES.includes(outcome) ? outcome : null;
     bindings[idField] = named;
+  }
+
+  // The failure list and the two axes have to describe the same run. A summary
+  // where both axes matched while the list names one of them is not a run this
+  // verifier can produce, and reading only one of the two would let a damaged
+  // or edited file choose which half is believed. Checked as a pair, in both
+  // directions, so a genuine mismatch -- both axes saying so *and* both listed
+  // -- stays consistent and still reaches its own answer.
+  if (Array.isArray(value.failures) && !value.failures.some((entry) => typeof entry?.name !== "string")) {
+    const listed = new Set(
+      value.failures.map((entry) => entry.name).filter((name) => BINDING_CHECK_NAMES.has(name))
+    );
+    for (const [outcomeField, , checkName] of BINDING_FIELDS) {
+      const matched = bindings[outcomeField] === "matched";
+      if (matched && listed.has(checkName)) {
+        problems.push(`${at} reports ${outcomeField} matched and lists that check as failed`);
+      }
+      if (bindings[outcomeField] && !matched && !listed.has(checkName)) {
+        problems.push(`${at} reports ${outcomeField} did not match and lists no failure for it`);
+      }
+    }
   }
 
   return {
@@ -338,8 +387,12 @@ export const judgeMobileBindingRound = (input) => {
   for (const sample of samples) {
     const at = `sample ${sample.index + 1}`;
     for (const [outcomeField, idField] of BINDING_FIELDS) {
-      if (sample[outcomeField] !== "matched") {
-        reasons.push(`${at} reports ${outcomeField} ${sample[outcomeField]}, not matched`);
+      const outcome = sample[outcomeField];
+      if (outcome !== "matched") {
+        // The value is quoted only because it came off the closed list above;
+        // anything else was refused as unreadable before this line is reached.
+        const said = MOBILE_BINDING_OUTCOMES.includes(outcome) ? ` ${outcome}` : "";
+        reasons.push(`${at} reports ${outcomeField}${said}, not matched`);
       }
       if (sample.expectedDeploymentId && sample[idField] !== sample.expectedDeploymentId) {
         reasons.push(`${at} names a ${idField} that is not the expected deployment`);
