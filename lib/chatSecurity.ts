@@ -6,6 +6,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { usageBucketCount } from "@/lib/chatUsageBucketCount";
 import { hashChatSubject, userChatUsageKey } from "@/lib/chatUsageKey";
+import { findDeepResearchHandoff } from "@/lib/deepResearchSettlementHandoff";
 import { isE2EDatabaseDisabled } from "@/lib/e2eTestMode";
 import {
     AVAILABLE_MODELS,
@@ -5080,15 +5081,49 @@ export const reconcileExpiredChatCreditReservations = async (
     let refunded = 0;
     let alreadyFinalized = 0;
     let failed = 0;
+    /** Expired reservations settled at a real cost instead of being refunded. */
+    let settledFromHandoff = 0;
     for (const row of rows) {
         try {
             const reservation = deserializeReservation(row.reservationPayload);
-            const result = await settleChatUsage(
-                reservation,
-                { inputTokens: 0, outputTokens: 0, outcome: "failed" },
-                { reconciled: true, reason: "reservation_expired" }
+            // A deep research job that reached a terminal state left what it
+            // owes on its own row, and an expired reservation carrying one
+            // must NOT be refunded: the work really ran at the provider and
+            // really cost money (issue #1285).
+            //
+            // Decided here rather than by running order. The deep research
+            // sweep goes first in the fifteen-minute maintenance route, but
+            // `lib/maintenance.ts` calls this function on its own and
+            // `startScheduledJob` records a run rather than holding a lock --
+            // so "the other pass gets there first" is a preference, not a
+            // mechanism. Reading the handoff from the same row this settlement
+            // is about makes the real cost win whoever reaches the lock first.
+            const handoff = await findDeepResearchHandoff(
+                reservation.reservationId
             );
-            if (result.applied && result.status === "refunded") refunded += 1;
+            const result = handoff
+                ? await settleChatUsage(
+                      reservation,
+                      {
+                          inputTokens: handoff.usage.inputTokens,
+                          outputTokens: handoff.usage.outputTokens,
+                          outcome: handoff.usage.outcome,
+                      },
+                      {
+                          reconciled: true,
+                          reason: "deep_research_settlement_recovered",
+                          providerUsageSnapshot:
+                              (handoff.usage
+                                  .providerUsageSnapshot as never) ?? null,
+                      }
+                  )
+                : await settleChatUsage(
+                      reservation,
+                      { inputTokens: 0, outputTokens: 0, outcome: "failed" },
+                      { reconciled: true, reason: "reservation_expired" }
+                  );
+            if (result.applied && handoff) settledFromHandoff += 1;
+            else if (result.applied && result.status === "refunded") refunded += 1;
             else alreadyFinalized += 1;
         } catch (error) {
             failed += 1;
@@ -5105,6 +5140,10 @@ export const reconcileExpiredChatCreditReservations = async (
         refunded,
         alreadyFinalized,
         failed,
+        // Its own count, never folded into `refunded`: these are the opposite
+        // of a refund, and a pass that recovered real charges must not read as
+        // one that gave money back.
+        settledFromHandoff,
     };
 };
 
