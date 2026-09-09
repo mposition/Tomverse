@@ -177,6 +177,7 @@ try {
     const write = (name, value) =>
         writeFileSync(join(root, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
     const read = (name) => JSON.parse(readFileSync(join(root, name), "utf8"));
+    const readBytes = (name) => readFileSync(join(root, name));
 
     const sourceCase = {
         id: working.id,
@@ -341,23 +342,34 @@ try {
         sourceCaseDigest: judgedSourceCaseDigest(movedCase),
     };
     write("case.json", movedJudgedCase);
+    // The whole file, before and after. Comparing one field said "not
+    // rewritten" for any rewrite that happened to leave that field alone: a
+    // CLI that exited 1 and replaced the counts with 999 read as untouched.
+    // What is being claimed here is that the file did not change, so the file
+    // is what gets compared.
+    const artifactBefore = readBytes("artifact.json");
     const rescore = spawnSync(
         process.execPath,
         [
             "--conditions=react-server",
             "--import",
             "tsx",
-            "scripts/score-ai-review-judgements.mjs",
+            // Test-only redirection, for the same reason as `failAt`: a CLI
+            // that writes when it should not cannot be produced by the real
+            // one. Unset -- every real run -- this is the real script.
+            process.env.AI_REVIEW_003_DEMO_RESCORE_CLI ??
+                "scripts/score-ai-review-judgements.mjs",
             "--dir",
             root,
         ],
         { encoding: "utf8", env: process.env }
     );
+    const artifactAfter = readBytes("artifact.json");
     line("CLI 종료 코드", rescore.status);
     line(
         "artifact.json",
-        read("artifact.json").outcome.scored === artifact.outcome.scored
-            ? "다시 쓰이지 않았다 — 옛 점수 그대로"
+        artifactAfter.equals(artifactBefore)
+            ? "다시 쓰이지 않았다 — 바이트 동일"
             : "덮어써졌다 (이러면 안 된다)"
     );
     console.log(
