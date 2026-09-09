@@ -590,8 +590,22 @@ readiness가 판정하는 모델과 port가 실제로 호출하는 모델이 갈
 404였습니다. 통과한 gate가 그 workflow가 돈다는 뜻이 아니었던 것입니다.
 
 그러므로 이 알림을 바꿀 때는 **`main`에도 반영**하고, `main`에서
-`workflow_dispatch`로 한 번 기동해 확인합니다. `develop`만 고치고 끝내면 검사는
-전부 초록인 채로 알림만 조용히 사라집니다.
+`workflow_dispatch`로 한 번 기동합니다. `develop`만 고치고 끝내면 검사는 전부
+초록인 채로 알림만 조용히 사라집니다.
+
+**그 한 번이 증명하는 것과 아닌 것을 나눠 적습니다.** 창 밖에서 돌린 dispatch는
+스크립트가 GitHub Issues API를 부르기 **전에** 종료하므로, 쓰기 경로를 지나지
+않습니다.
+
+| | |
+|---|---|
+| 증명됨 | workflow가 `main`에 등록됨 · checkout·Node·`npm ci`·script 실행 성공 · 보낼 것이 없어 정상 종료 |
+| 증명 안 됨 | `issues: write`의 실동작 · 코멘트 작성 · marker 중복 방지 경로 |
+
+`issues: write`는 **YAML에 선언돼 있다는 것까지만** 확인됩니다. 실제 쓰기까지
+보려면 시험용 이슈에 코멘트를 남겼다 지우는 별도 검증이 필요하고, 그것은 이
+절차와 별개의 승인 항목입니다. 기록에는 **"workflow 설치·기동 확인"**으로
+적습니다 — 그 이상으로 적으면 하지 않은 검증을 한 것으로 남깁니다.
 
 절차는 `.github/workflows/voice-price-reverification-notice.yml`,
 계산은 `lib/voiceInputPricing.ts`입니다.
