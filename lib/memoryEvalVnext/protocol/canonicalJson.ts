@@ -1,4 +1,14 @@
 import { createHash } from "node:crypto";
+import { types } from "node:util";
+
+// PB-R1: capture only the approved native predicates and typed-array intrinsics.
+// Trusted runtime/intrinsics are a precondition, not a JavaScript sandbox.
+const { isProxy, isUint8Array } = types;
+const ByteArray = Uint8Array;
+const typedArrayPrototype = Object.getPrototypeOf(ByteArray.prototype);
+const storageLength = Object.getOwnPropertyDescriptor(typedArrayPrototype, "length")!.get!;
+const storageSet = typedArrayPrototype.set;
+const applyIntrinsic = Reflect.apply;
 
 // mem-cjson-1 only. No scorer, descriptor, file access or operational authority.
 export type CanonicalValue = null | boolean | string | number | CanonicalValue[]
@@ -18,6 +28,19 @@ export function componentError(error: ComponentError): { ok: false; error: Compo
 }
 const invalid = () => componentError("invalid_input");
 
+// Read storage, never caller properties/methods. Always run set, even for zero
+// length: its genuine typed-array path rejects detached/out-of-bounds sources.
+// Concurrent storage mutation is outside the stable-input precondition.
+export function copyByteInput(input: unknown): ComponentResult<Uint8Array> {
+  try {
+    if (isProxy(input) || !isUint8Array(input)) return invalid();
+    const length = applyIntrinsic(storageLength, input, []) as number;
+    const copy = new ByteArray(length);
+    applyIntrinsic(storageSet, copy, [input, 0]);
+    return componentValue(copy);
+  } catch { return invalid(); }
+}
+
 function quote(text: string): string {
   if (!text.isWellFormed() || text.normalize("NFC") !== text) throw new Error();
   return '"' + text.replace(/["\\\u0000-\u001f]/g, (char) => {
@@ -27,6 +50,7 @@ function quote(text: string): string {
 }
 
 function serialize(input: unknown, active: Set<object>): string {
+  if (isProxy(input)) throw new Error();
   if (input === null) return "null";
   if (typeof input === "boolean") return input ? "true" : "false";
   if (typeof input === "string") return quote(input);
@@ -39,7 +63,7 @@ function serialize(input: unknown, active: Set<object>): string {
   const prototype = Object.getPrototypeOf(input);
   if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) throw new Error();
   // Inspect data descriptors, never invoke getters, toJSON or custom iterators.
-  // This is an object-data API, not a sandbox for hostile JavaScript/Proxy code.
+  // Proxy was refused before any observable operation on this input.
   const descriptors = Object.getOwnPropertyDescriptors(input);
   const keys = Reflect.ownKeys(descriptors);
   for (const key of keys) {
@@ -145,8 +169,9 @@ export function decodeCanonical(
   input: unknown, mode: "canonical" | "file-with-single-lf" = "canonical",
 ): ComponentResult<CanonicalValue> {
   try {
-    if (!(input instanceof Uint8Array) || (mode !== "canonical" && mode !== "file-with-single-lf")) return invalid();
-    let raw = Buffer.from(input);
+    const copy = copyByteInput(input);
+    if (!copy.ok || (mode !== "canonical" && mode !== "file-with-single-lf")) return invalid();
+    let raw = Buffer.from(copy.value);
     if (mode === "file-with-single-lf") {
       if (raw.at(-1) !== 10) return invalid();
       raw = raw.subarray(0, -1);
@@ -162,8 +187,9 @@ export function decodeCanonical(
 
 export function rawSha256(input: unknown): ComponentResult<string> {
   try {
-    if (!(input instanceof Uint8Array)) return invalid();
-    return componentValue(createHash("sha256").update(input).digest("hex"));
+    const copy = copyByteInput(input);
+    if (!copy.ok) return copy;
+    return componentValue(createHash("sha256").update(copy.value).digest("hex"));
   } catch { return invalid(); }
 }
 

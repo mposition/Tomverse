@@ -1,5 +1,5 @@
 import {
-  componentError, componentValue, decodeCanonical, encodeCanonical, rawSha256,
+  componentError, componentValue, copyByteInput, decodeCanonical, encodeCanonical, rawSha256,
   type ComponentResult,
 } from "./canonicalJson";
 import {
@@ -65,19 +65,23 @@ export function compareTrustBinding(
 
 export function compareBlobRef(refInput: unknown, bytes: unknown, expectedInput: unknown): ComponentResult<ComponentCheck> {
   const ref = checkWire("BlobRef", refInput), expected = checkWire("BlobRef", expectedInput);
-  const hash = rawSha256(bytes);
-  if (!ref.ok || !expected.ok || !hash.ok || !(bytes instanceof Uint8Array)) return invalid();
+  const copy = copyByteInput(bytes);
+  if (!ref.ok || !expected.ok || !copy.ok) return invalid();
+  const hash = rawSha256(copy.value);
+  if (!hash.ok) return invalid();
   // Bind bytes to the explicit expectation first; a changed ref field on its own
   // is a binding mismatch, not a misleading claim that the original bytes changed.
-  if (hash.value !== expected.value.rawSha256 || bytes.byteLength !== expected.value.byteLength) return componentError("bytes_mismatch");
+  if (hash.value !== expected.value.rawSha256 || copy.value.byteLength !== expected.value.byteLength) return componentError("bytes_mismatch");
   return ref.value.path === expected.value.path && ref.value.byteLength === expected.value.byteLength
     && ref.value.rawSha256 === expected.value.rawSha256 ? matched() : mismatch();
 }
 
 export function compareGitFileRef(refInput: unknown, bytes: unknown, expectedInput: unknown): ComponentResult<ComponentCheck> {
   const ref = checkWire("GitFileRef", refInput), expected = checkWire("GitFileRef", expectedInput);
-  const hash = rawSha256(bytes);
-  if (!ref.ok || !expected.ok || !hash.ok) return invalid();
+  const copy = copyByteInput(bytes);
+  if (!ref.ok || !expected.ok || !copy.ok) return invalid();
+  const hash = rawSha256(copy.value);
+  if (!hash.ok) return invalid();
   if (hash.value !== expected.value.rawSha256) return componentError("bytes_mismatch");
   return ref.value.commit === expected.value.commit && ref.value.path === expected.value.path
     && ref.value.rawSha256 === expected.value.rawSha256 ? matched() : mismatch();
