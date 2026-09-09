@@ -1742,6 +1742,13 @@ model PerplexityAsyncJob {
   // then asks each one's reservation whether it is still `reserved`, so the
   // selective half is `status` and `completedAt` orders the oldest debt first.
   @@index([status, completedAt])
+  // The expiry reconciliation's index. That sweep holds a reservation lock
+  // while it asks "does this reservation have a terminal job that says the
+  // work really ran", once per expired deep research reservation and up to a
+  // thousand of them a pass. Without this the question is a sequential scan
+  // over a table that grows with every deep research request -- taken while a
+  // lock is held, which is the worst place to put one.
+  @@index([reservationId])
 }
 
 model AppSetting {

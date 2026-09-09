@@ -73,6 +73,30 @@ export {
  * `reconcileExpiredChatCreditReservations` itself, which looks for this
  * handoff before it refunds anything and settles at the real cost when it
  * finds one.
+ *
+ * ## What that guarantee is, exactly
+ *
+ * Stated as a linearization point, because the looser reading is wrong and
+ * the difference is money:
+ *
+ * > If a terminal handoff exists when the resolver reads it under the lock,
+ * > the real cost is applied. A job that reaches a terminal state *after*
+ * > that read does not reverse the refund; it is reported as
+ * > `settlement_mismatch`.
+ *
+ * So this is **not** "whenever the job eventually finishes, the real cost
+ * wins". A reservation whose expiry sweep ran while the job was genuinely
+ * still in flight is refunded, and that is the expiry sweep doing its job --
+ * the thing that should have kept it alive is the poll's own heartbeat
+ * (`extendChatReservationExpiry`), not this recovery.
+ *
+ * What the fix removed is narrower and is the whole defect: a handoff that
+ * *had already been committed* being missed because the decision was made
+ * before the lock. Both sides are pinned by
+ * `tests/integration/perplexity-deep-research-route.db.test.ts` -- one test
+ * commits the handoff at the last moment before the read and asserts the real
+ * cost wins, the other lets the sweep refund a job still running and asserts
+ * the later settlement reports the mismatch rather than charging again.
  */
 
 export type DeepResearchSettlementOutcome =
@@ -210,7 +234,18 @@ export const settleDeepResearchJob = async (job: {
     if (result.applied) return { kind: "settled" };
     // The race resolving under the lock: another poller or a sweep settled
     // between the read above and this call.
-    return terminalReservationOutcome(job, parsed.data, result.status ?? null);
+    //
+    // Re-read rather than judged from `result.status`. That field is the
+    // reservation's *status* -- "settled", "refunded" -- and the question here
+    // is its *outcome*. Comparing a status against an outcome reported every
+    // ordinary race as a mismatch, which is worse than not counting them: the
+    // count exists to name reservations refunded for work that really ran, and
+    // a counter that also fires on the healthy path names nothing.
+    const afterRace = await prisma.chatCreditReservation.findUnique({
+      where: { id: job.reservationId },
+      select: { outcome: true },
+    });
+    return terminalReservationOutcome(job, parsed.data, afterRace?.outcome ?? null);
   } catch (error) {
     logSettlementEvent("deep_research_settlement_failed", {
       jobId: job.id,

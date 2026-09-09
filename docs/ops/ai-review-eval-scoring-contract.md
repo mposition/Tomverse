@@ -432,10 +432,15 @@ truthy인가는 다른 질문**이고, 뒤엣것을 앞엣것으로 읽은 것�
 
 이 둘이 정해지기 전에는 이 계약으로 **비교 점수를 만들지 않는다.**
 
-분해 단위와 부분 일치의 선택지는 실제 후보 case 위에서 계산해
-`.github/audits/ai-review-scoring-policy-options-2026-09-08.md`(3판)에 두었다.
-**그 문서는 아무것도 승인하지 않고, 거기 제안된 선택지는 어느 것도 이 파일에
-구현돼 있지 않다** — 사람이 고르면 그 결과가 여기 본문으로 올라온다.
+선택지는 실제 후보 case 위에서 계산해 두었다 — 처음 비교는
+`.github/audits/ai-review-scoring-policy-options-2026-09-08.md`(3판)이고, 남은
+둘의 결정안은 `.github/audits/ai-review-decomposition-atomicity-2026-09-09.md`,
+재현은 `npm run experiment:ai-review-decomposition-atomicity`다. **그 문서들은
+아무것도 승인하지 않고, 거기 제안된 규칙은 어느 것도 이 파일에 구현돼 있지
+않다** — 사람이 고르면 그 결과가 여기 본문으로 올라온다.
+
+**이 둘이 정해져 §5가 비더라도 계약 전체가 승인되는 것은 아니다.** 이 문서는
+여전히 미승인 설계안이고 어떤 평가에도 연결돼 있지 않다.
 
 ## 6. 구현 범위
 

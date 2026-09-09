@@ -1,0 +1,576 @@
+{
+  "adjudicationVersion": "router-human-review-adjudication-v1",
+  "populationDigest": "sha256:1defd342b573fb6692fadedafd3d79b74a8284ce7d8821239bd291ab94014d49",
+  "reviewerIds": [
+    "R-01",
+    "R-02"
+  ],
+  "adjudicatorId": "A-02",
+  "settledAt": "2026-09-09T04:39:51.712Z",
+  "settledBy": "OP-01",
+  "pairs": [
+    {
+      "pairId": "analysis-en-001",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "analysis-en-004",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "analysis-en-007",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "equivalent",
+        "A-02": "second"
+      },
+      "status": "adjudicated",
+      "verdict": "second"
+    },
+    {
+      "pairId": "analysis-en-013",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "analysis-ko-001",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "analysis-ko-007",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "analysis-ko-008",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "analysis-ko-012",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "coding-en-004",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "coding-en-005",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "coding-en-006",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "second",
+        "A-02": "first"
+      },
+      "status": "adjudicated",
+      "verdict": "first"
+    },
+    {
+      "pairId": "coding-en-007",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "first",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "coding-ko-001",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "coding-ko-007",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "coding-ko-010",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "first",
+        "A-02": "second"
+      },
+      "status": "adjudicated",
+      "verdict": "second"
+    },
+    {
+      "pairId": "coding-ko-014",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "current-en-002",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "current-en-004",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "current-en-007",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "current-en-011",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "current-ko-004",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "current-ko-006",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "current-ko-010",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "first",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "current-ko-013",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "document-en-001",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "document-en-004",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "document-en-006",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "document-en-007",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "equivalent"
+      },
+      "status": "agreed",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "document-ko-006",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "document-ko-008",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "document-ko-009",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "equivalent"
+      },
+      "status": "agreed",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "document-ko-014",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "general-en-001",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "general-en-003",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "general-en-010",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "general-en-012",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "general-ko-003",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "general-ko-009",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "general-ko-010",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "general-ko-011",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "long-en-017",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "long-en-020",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "long-en-025",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "long-en-027",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "first",
+        "A-02": "second"
+      },
+      "status": "adjudicated",
+      "verdict": "second"
+    },
+    {
+      "pairId": "long-ko-005",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "long-ko-006",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "long-ko-007",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "long-ko-011",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "translation-ko-en-004",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "translation-ko-en-006",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "translation-ko-en-008",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "equivalent"
+      },
+      "status": "agreed",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "translation-ko-en-013",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "writing-en-002",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "equivalent"
+      },
+      "status": "agreed",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "writing-en-003",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    },
+    {
+      "pairId": "writing-en-005",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "second",
+        "A-02": "equivalent"
+      },
+      "status": "adjudicated",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "writing-en-008",
+      "byReviewer": {
+        "R-01": "equivalent",
+        "R-02": "equivalent"
+      },
+      "status": "agreed",
+      "verdict": "equivalent"
+    },
+    {
+      "pairId": "writing-ko-004",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "first",
+        "A-02": "second"
+      },
+      "status": "adjudicated",
+      "verdict": "second"
+    },
+    {
+      "pairId": "writing-ko-009",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "first",
+        "A-02": "second"
+      },
+      "status": "adjudicated",
+      "verdict": "second"
+    },
+    {
+      "pairId": "writing-ko-010",
+      "byReviewer": {
+        "R-01": "first",
+        "R-02": "first"
+      },
+      "status": "agreed",
+      "verdict": "first"
+    },
+    {
+      "pairId": "writing-ko-011",
+      "byReviewer": {
+        "R-01": "second",
+        "R-02": "second"
+      },
+      "status": "agreed",
+      "verdict": "second"
+    }
+  ],
+  "counts": {
+    "agreed": 45,
+    "adjudicated": 15,
+    "needsAdjudication": 0,
+    "noConsensus": 0,
+    "incomplete": 0
+  },
+  "reviewerAgreementRate": 0.75
+}
