@@ -3627,7 +3627,7 @@ export const acquireChatAccess = async (
 
 export const settleChatUsage = async (
     reservation: ChatUsageReservation,
-    turnUsage: {
+    callerTurnUsage: {
         inputTokens?: number;
         cachedInputTokens?: number;
         /**
@@ -3697,6 +3697,39 @@ export const settleChatUsage = async (
          * not one number.
          */
         attempts?: readonly AttemptUsage[];
+        /**
+         * Decides what this reservation owes, after the lock is held.
+         *
+         * The expiry reconciliation needs it. It settles an expired
+         * reservation as a full refund unless a deep research job left a
+         * handoff saying the work really ran -- and reading that handoff
+         * before calling this function put the *decision* outside the lock
+         * that serialises the settlement. A terminal poll committing its
+         * handoff in that window produced a refund for a job that really cost
+         * money, with the poll's own settlement arriving afterwards to find a
+         * reservation already terminal (issue #1285).
+         *
+         * Called inside the transaction, after `pg_advisory_xact_lock` and
+         * after the row is confirmed still `reserved`, with that transaction's
+         * client. Returning `null` keeps the caller's `turnUsage` and
+         * `providerUsageSnapshot`; returning a value replaces both. Nothing
+         * can settle between the read and the write, because this call holds
+         * the only lock that lets anything settle.
+         *
+         * It carries the snapshot as well as the tokens because dropping it
+         * silently re-prices the turn: a recovered deep research settlement
+         * without the provider's own reported cost falls back to token
+         * pricing, which booked a 30,000 microUSD job at 8,000 the first time
+         * this code was written.
+         *
+         * It must not write, and it must not take another lock: it runs with
+         * the credit account lock and the reservation lock already held, and
+         * anything else acquired here becomes part of that order.
+         */
+        resolveTurnUsage?: (tx: Prisma.TransactionClient) => Promise<{
+            turnUsage: typeof callerTurnUsage;
+            providerUsageSnapshot?: PerplexityUsageCostSnapshot | null;
+        } | null>;
     }
 ) => {
     // Validated before it is interpreted. A malformed attempt set settles
@@ -3856,6 +3889,17 @@ export const settleChatUsage = async (
             throw new Error("Chat credit reservation idempotency key mismatch.");
         }
 
+        // Inside the lock, on purpose. See `resolveTurnUsage` above: the
+        // question "does this reservation owe a real cost or a refund" has to
+        // be answered where nothing else can settle it in between.
+        const resolved = options?.resolveTurnUsage
+            ? await options.resolveTurnUsage(tx)
+            : null;
+        const turnUsage = resolved?.turnUsage ?? callerTurnUsage;
+        const resolvedProviderUsageSnapshot = resolved
+            ? (resolved.providerUsageSnapshot ?? null)
+            : (options?.providerUsageSnapshot ?? null);
+
         const canonical = deserializeReservation(durable.reservationPayload);
         // The user's half of §7's split. With one dispatched attempt this *is*
         // the caller's `usage`; with two it is the accepted attempt's, because
@@ -3934,9 +3978,9 @@ export const settleChatUsage = async (
         });
         const providerUsageSnapshot =
             canonical.provider === "perplexity" &&
-            options?.providerUsageSnapshot?.source ===
+            resolvedProviderUsageSnapshot?.source ===
                 "perplexity_response_usage"
-                ? options.providerUsageSnapshot
+                ? resolvedProviderUsageSnapshot
                 : null;
         const baseCostBreakdown = providerUsageSnapshot
             ? {
@@ -5064,6 +5108,23 @@ export const linkChatReservationProviderRequest = async (
     return updated.count === 1;
 };
 
+/**
+ * Whether a reservation could possibly carry a deep research handoff.
+ *
+ * A cheap gate on the sweep's per-row lookup: only this usage class submits
+ * work that finishes after its request returns, so only this class can have a
+ * `PerplexityAsyncJob`. Read from the catalogue rather than a model id literal
+ * so a second deep research model does not silently fall out of the recovery.
+ *
+ * An unknown id -- a model retired since the reservation was written -- keeps
+ * the lookup rather than skipping it. The lookup is an indexed read that finds
+ * nothing; a skipped one is a refund for work that may really have run.
+ */
+const isDeepResearchReservation = (modelId: string) => {
+    const model = AVAILABLE_MODELS.find((entry) => entry.id === modelId);
+    return !model || model.usageClass === "deep-research";
+};
+
 export const reconcileExpiredChatCreditReservations = async (
     now = new Date(),
     maximum = 500
@@ -5075,6 +5136,7 @@ export const reconcileExpiredChatCreditReservations = async (
         take: limit,
         select: {
             id: true,
+            modelId: true,
             reservationPayload: true,
         },
     });
@@ -5091,37 +5153,53 @@ export const reconcileExpiredChatCreditReservations = async (
             // must NOT be refunded: the work really ran at the provider and
             // really cost money (issue #1285).
             //
-            // Decided here rather than by running order. The deep research
-            // sweep goes first in the fifteen-minute maintenance route, but
+            // The decision is made inside the settlement's own lock, not
+            // here. Reading the handoff first and passing the conclusion in
+            // left a window: a terminal poll committing its handoff between
+            // that read and the lock produced a refund for a job that really
+            // ran, and the poll's own settlement then arrived to find the
+            // reservation already terminal. Running order cannot close that --
             // `lib/maintenance.ts` calls this function on its own and
             // `startScheduledJob` records a run rather than holding a lock --
-            // so "the other pass gets there first" is a preference, not a
-            // mechanism. Reading the handoff from the same row this settlement
-            // is about makes the real cost win whoever reaches the lock first.
-            const handoff = await findDeepResearchHandoff(
-                reservation.reservationId
+            // so the read moves to where nothing can settle around it.
+            //
+            // Only deep research reservations pay for the lookup. Nothing else
+            // can have a PerplexityAsyncJob, and the sweep's page is up to a
+            // thousand rows of which almost none are this model.
+            let handoff: Awaited<
+                ReturnType<typeof findDeepResearchHandoff>
+            > = null;
+            const result = await settleChatUsage(
+                reservation,
+                { inputTokens: 0, outputTokens: 0, outcome: "failed" },
+                {
+                    reconciled: true,
+                    reason: "reservation_expired",
+                    resolveTurnUsage: isDeepResearchReservation(row.modelId)
+                        ? async (tx) => {
+                              handoff = await findDeepResearchHandoff(
+                                  reservation.reservationId,
+                                  tx
+                              );
+                              if (!handoff) return null;
+                              return {
+                                  turnUsage: {
+                                      inputTokens: handoff.usage.inputTokens,
+                                      outputTokens: handoff.usage.outputTokens,
+                                      outcome: handoff.usage.outcome,
+                                  },
+                                  // Carried, not dropped: without the
+                                  // provider's own reported cost the recovery
+                                  // prices the turn from tokens alone.
+                                  providerUsageSnapshot:
+                                      (handoff.usage
+                                          .providerUsageSnapshot as never) ??
+                                      null,
+                              };
+                          }
+                        : undefined,
+                }
             );
-            const result = handoff
-                ? await settleChatUsage(
-                      reservation,
-                      {
-                          inputTokens: handoff.usage.inputTokens,
-                          outputTokens: handoff.usage.outputTokens,
-                          outcome: handoff.usage.outcome,
-                      },
-                      {
-                          reconciled: true,
-                          reason: "deep_research_settlement_recovered",
-                          providerUsageSnapshot:
-                              (handoff.usage
-                                  .providerUsageSnapshot as never) ?? null,
-                      }
-                  )
-                : await settleChatUsage(
-                      reservation,
-                      { inputTokens: 0, outputTokens: 0, outcome: "failed" },
-                      { reconciled: true, reason: "reservation_expired" }
-                  );
             if (result.applied && handoff) settledFromHandoff += 1;
             else if (result.applied && result.status === "refunded") refunded += 1;
             else alreadyFinalized += 1;

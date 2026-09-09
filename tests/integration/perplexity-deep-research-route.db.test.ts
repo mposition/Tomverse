@@ -919,6 +919,33 @@ const interruptAfterFinalize = async (assistantMessageId: string) => {
   return reservation;
 };
 
+/**
+ * The same finalize, for the case where the reservation is deliberately
+ * already terminal -- a refund that happened before the job finished.
+ */
+const interruptAfterFinalizeAllowingTerminalReservation = async (
+  assistantMessageId: string
+) => {
+  const job = await prisma.perplexityAsyncJob.findFirstOrThrow({
+    where: { assistantMessageId },
+  });
+  await prisma.$transaction([
+    prisma.perplexityAsyncJob.update({
+      where: { id: job.id },
+      data: {
+        status: "completed",
+        resultText: "중단된 보고서",
+        completedAt: new Date(),
+        settlementUsage: COMPLETED_SETTLEMENT_USAGE,
+      },
+    }),
+    prisma.message.update({
+      where: { id: assistantMessageId },
+      data: { content: "중단된 보고서", status: "normal", pendingJobId: null },
+    }),
+  ]);
+};
+
 test("a completed poll stores exactly what a later settlement needs", async () => {
   const user = await seedProUser();
   const conversation = await seedConversation(user.id);
@@ -1207,6 +1234,150 @@ test("the expiry sweep settles an interrupted job at its real cost even when it 
   assert.equal(settled.settledCostMicroUsd, BigInt(30_000));
   assert.equal(settled.settledInputTokens, 400);
   assert.equal(settled.settledOutputTokens, 900);
+});
+
+test("the handoff read and the settlement are one serialized step", async () => {
+  // The race the first fix left open. The expiry sweep read the handoff, then
+  // called settleChatUsage, which takes the lock -- so a terminal poll
+  // committing its handoff in that window produced a full refund for a job
+  // that really ran, and the poll's own settlement arrived afterwards to find
+  // the reservation already terminal.
+  //
+  // Driven rather than argued: the resolver below is held open while the
+  // handoff is committed, which is the last possible moment before the read.
+  // It runs inside the transaction that holds the reservation lock, so this
+  // also pins the other half -- nothing else may settle while the decision is
+  // being made.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  const reservation = await onlyReservation();
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { expiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  let announceEntered: () => void = () => {};
+  const entered = new Promise<void>((resolve) => {
+    announceEntered = resolve;
+  });
+  let openGate: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    openGate = resolve;
+  });
+
+  // Exactly what reconcileExpiredChatCreditReservations passes, with a gate
+  // in front of the read.
+  const settlement = chatSecurity.settleChatUsage(
+    chatSecurity.deserializeReservation(reservation.reservationPayload),
+    { inputTokens: 0, outputTokens: 0, outcome: "failed" },
+    {
+      reconciled: true,
+      reason: "reservation_expired",
+      resolveTurnUsage: async (tx) => {
+        announceEntered();
+        await gate;
+        const handoff = await deepResearchSettlement.findDeepResearchHandoff(
+          reservation.id,
+          tx
+        );
+        if (!handoff) return null;
+        return {
+          turnUsage: {
+            inputTokens: handoff.usage.inputTokens,
+            outputTokens: handoff.usage.outputTokens,
+            outcome: handoff.usage.outcome,
+          },
+          providerUsageSnapshot:
+            (handoff.usage.providerUsageSnapshot as never) ?? null,
+        };
+      },
+    }
+  );
+
+  await entered;
+  // The lock is held. The poll's finalize lands now -- the window the old
+  // ordering lost the race in.
+  await interruptAfterFinalize(assistantMessageId);
+
+  // And a settlement racing this one cannot get in front of the decision.
+  const job = await prisma.perplexityAsyncJob.findFirstOrThrow({
+    where: { assistantMessageId },
+  });
+  let racerFinished = false;
+  const racer = deepResearchSettlement
+    .settleDeepResearchJob(job)
+    .then((outcome) => {
+      racerFinished = true;
+      return outcome;
+    });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(
+    racerFinished,
+    false,
+    "a settlement must not land while the decision that owns the lock is open"
+  );
+
+  openGate();
+  const result = await settlement;
+  const racerOutcome = await racer;
+
+  // The late handoff was seen, so the real cost won -- not the refund this
+  // call was started with.
+  assert.equal(result.applied, true);
+  const settled = await onlyReservation();
+  assert.equal(settled.status, "settled");
+  assert.equal(
+    settled.outcome,
+    "completed",
+    "a job that really ran must not end up refunded because the read was early"
+  );
+  assert.equal(
+    settled.settledCostMicroUsd,
+    BigInt(30_000),
+    "and it is priced from the provider's reported cost, not from tokens"
+  );
+  assert.equal(settled.settledInputTokens, 400);
+  assert.equal(settled.settledOutputTokens, 900);
+
+  // Exactly once: the racer found the work already done.
+  assert.deepEqual(racerOutcome, { kind: "already_settled" });
+  assert.equal(await settledReservationCount(), 1);
+});
+
+test("a resolver that finds nothing still refunds, and the racer sees the refund", async () => {
+  // The other side of the same seam. A job genuinely still in flight when the
+  // lock is taken is a refund -- that is the expiry sweep doing its job -- and
+  // the settlement that arrives later reports the disagreement rather than
+  // charging a second time.
+  const user = await seedProUser();
+  const conversation = await seedConversation(user.id);
+  submitScript = [{ json: { id: `pplx-${randomUUID()}`, status: "CREATED" } }];
+  const { assistantMessageId } = await submitDeepResearch(conversation.id);
+  const reservation = await onlyReservation();
+  await prisma.chatCreditReservation.update({
+    where: { id: reservation.id },
+    data: { expiresAt: new Date(Date.now() - 1_000) },
+  });
+
+  const result = await chatSecurity.reconcileExpiredChatCreditReservations();
+  assert.equal(result.refunded, 1);
+  assert.equal(result.settledFromHandoff, 0);
+  assert.equal((await onlyReservation()).status, "refunded");
+
+  // Now the job finishes anyway. Nothing here can undo the refund, and the
+  // mismatch is what says so.
+  await interruptAfterFinalizeAllowingTerminalReservation(assistantMessageId);
+  const job = await prisma.perplexityAsyncJob.findFirstOrThrow({
+    where: { assistantMessageId },
+  });
+  assert.deepEqual(await deepResearchSettlement.settleDeepResearchJob(job), {
+    kind: "settlement_mismatch",
+    storedOutcome: "completed",
+    reservationOutcome: "failed",
+  });
+  assert.equal((await onlyReservation()).status, "refunded");
 });
 
 test("an expired reservation with no deep research handoff is still refunded", async () => {

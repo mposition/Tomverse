@@ -87,10 +87,20 @@ export const serializeDeepResearchSettlementUsage = (
  * is nearly all of them, so the common path is one indexed lookup finding
  * nothing.
  */
+/**
+ * A Prisma client or an open transaction's client.
+ *
+ * The expiry reconciliation passes its transaction so the read happens under
+ * the reservation lock that call already holds; everything else passes
+ * nothing and gets the ordinary client.
+ */
+type JobReader = Pick<typeof prisma, "perplexityAsyncJob">;
+
 export const findDeepResearchHandoff = async (
-  reservationId: string
+  reservationId: string,
+  reader: JobReader = prisma
 ): Promise<DeepResearchHandoff | null> => {
-  const job = await prisma.perplexityAsyncJob.findFirst({
+  const job = await reader.perplexityAsyncJob.findFirst({
     where: {
       reservationId,
       status: { in: ["completed", "failed"] },
