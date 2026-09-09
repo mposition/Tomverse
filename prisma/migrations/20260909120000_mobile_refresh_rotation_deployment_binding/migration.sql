@@ -1,0 +1,11 @@
+-- A2 of the evidence-binding approval
+-- (.github/audits/2026-09-09-mobile-auth-evidence-deployment-binding-approval.md,
+-- approved 2026-09-09): record which deployment's process wrote the row, so a
+-- rotation check can tell this deployment's evidence apart from equally fresh
+-- evidence an older instance produced during a rolling deploy.
+--
+-- Nullable with no default and no backfill. Existing rows were written before
+-- the column existed and there is no value that would be true for them; a
+-- backfill would manufacture the very self-report this column is meant to
+-- carry. NULL is read as "undetermined", never as a pass.
+ALTER TABLE "MobileRefreshRotation" ADD COLUMN "mintedByDeploymentId" TEXT;

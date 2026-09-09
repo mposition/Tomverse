@@ -5,7 +5,8 @@
     "Active describes what is deployed, so its phase is always 'deployed' and it",
     "always names the deployment that carried it.",
     "Contract: docs/ops/mobile-auth-key-rotation.md section 2.2.",
-    "Checked by: npm run check:mobile-auth-store-entries"
+    "Checked by: npm run check:mobile-auth-store-entries",
+    "This entry's deploymentId is what a rotation run compares evidence against (-DeploymentId). A match there is a self-report measured against this hand-typed value, not proof of origin: section 2.2 rev.19."
   ],
   "kind": "active",
   "phase": "deployed",

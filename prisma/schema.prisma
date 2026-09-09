@@ -5026,6 +5026,24 @@ model MobileRefreshRotation {
    */
   pepperKid    String
 
+  /**
+   * The deployment identifier the process that wrote this row read out of its
+   * own environment (`RAILWAY_DEPLOYMENT_ID`).
+   * A2 of the evidence-binding approval (2026-09-09). It exists so a rotation
+   * check can tell evidence produced by the deployment under test apart from
+   * equally fresh evidence an older instance produced during a rolling deploy.
+   * It is a **self-report**: a row saying a deployment id means the writer read
+   * that value, not that the row came from that Railway deployment.
+   * Nullable, and the null means something: rows written before this column
+   * existed, and rows written where the platform set no identifier, carry
+   * nothing to compare. That is *undetermined* during the tolerance window of
+   * E9 and refused after it closes -- which is a decision the checker makes,
+   * not one this column can encode.
+   * Not user data and not user-linked: the family cascade removes it with
+   * everything else hanging off MobileTokenFamily.
+   */
+  mintedByDeploymentId String?
+
   createdAt     DateTime  @default(now())
   expiresAt     DateTime
   consumedAt    DateTime?

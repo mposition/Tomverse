@@ -512,8 +512,26 @@ token도 같은 키에 대해 똑같이 검증됩니다. 그래서 script는 `ia
 > 결속하지 않습니다.**
 >
 > 신선함이 배제하는 것은 **오래된 증거**뿐이고, 그것만으로도 지난 회전의 기록을 재사용하는
-> 경로는 막힙니다. 남은 구멍은 **15분 안에 두 배포가 겹치는 경우**이며, 지금은 절차로만
-> 좁혀집니다 — 배포 직후에 수집합니다. **진짜 결속은 §6의 미결 항목입니다.**
+> 경로는 막힙니다. 남은 구멍은 **15분 안에 두 배포가 겹치는 경우**입니다.
+
+> **rev.19 — 결속 축이 생겼습니다(2026-09-09 승인, A안).** access token이 `dep` claim을,
+> `MobileRefreshRotation`이 `mintedByDeploymentId`를 싣습니다. 둘 다 그 증거를 만든
+> 프로세스가 **자기 `RAILWAY_DEPLOYMENT_ID`에서 읽은 값**이고, verifier가 Pending(또는
+> Active)에 적힌 id와 대조합니다.
+>
+> **이 대조가 증명하는 것은 자기 신고와 손으로 적은 기대값이 같다는 것까지입니다.**
+> 그 증거가 그 Railway 배포에서 나왔다는 증명이 아닙니다. 그리고 **재사용은 여전히
+> 잡지 못합니다** — deployment id는 배포 수명 내내 같으므로 같은 배포의 낡은 증거는 이
+> 축을 그대로 통과하고, 그것을 막는 것은 계속 신선함입니다. **같은 증거를 두 번 넣는
+> 것은 어느 축도 잡지 못합니다**(E11은 방향만 승인, 기록 기반 탐지는 **미구현**).
+>
+> **식별자가 없을 때의 답은 하나가 아닙니다**(E9). Active가 결속 이전 세대인 동안은
+> **미판정**이고, 결속을 가진 세대로 승격된 뒤에는 **거절**입니다. 그래서
+> `MOBILE_AUTH_VERIFY_BINDING_TOLERANCE`에 기본값이 없습니다.
+>
+> **아직 미결**: 롤백이 새 deployment ID를 만드는지(§6의 E7 — 실측 권한 없음),
+> 비교안 `.github/audits/2026-09-09-mobile-auth-evidence-deployment-binding-approval.md` §10.3의
+> 중복 탐지 범위 넷.
 
 **이전 세대는 행동으로 확인합니다.** 은퇴한 항목은 관측 경로가 없지만, **유예 안에서는
 쓰이므로 써 보면 됩니다** — 배포 **전에** 받아 둔 access token이 배포 후에도 받아들여지면
@@ -534,6 +552,10 @@ pepper가 온전한 것입니다.
 |---|---|
 | 건네준 증거가 후보 재료로 만들어졌는가 | **예** — 위 script. **`PASS`는 딱 그것만 말합니다** |
 | 증거가 **오래되지 않았는가** | **예** — `iat`·`exp` 신선도. **"이 배포의 것"은 아닙니다**(위 정정) |
+| 증거가 **기대한 배포를 이름 대는가** | **예** — `dep` claim과 `mintedByDeploymentId`. **자기 신고**이며 손으로 적은 기대값과의 일치까지입니다 |
+| 증거가 **그 배포에서 나왔는가** | **아니오.** 자기 신고를 위조할 수 있는 것은 그 배포를 장악한 자이고, 그것을 배제한다고 적지 않습니다 |
+| 같은 증거의 **재사용·중복 제출** | **아니오** — 결속 축도 신선함 축도 잡지 못합니다. E11의 기록 기반 탐지는 미구현입니다 |
+| **배포가 안정화됐는가 / 구버전이 죽었는가** | **아니오.** 세 시료 회차(§3의 6a)도 그것을 증명하지 않습니다 |
 | 후보의 은퇴 선언이 실제 은퇴인가 | **예** — 미래 시각 은퇴는 실패입니다(§2의 규칙) |
 | 은퇴한 서명 키 · 은퇴한 pepper (유예 안) | **행동으로, 정방향만** — 새 배포가 이전 세대를 받아 주는지. **롤백 호환성은 아닙니다**(위 정정) |
 | 유예가 지난 링 항목 | **아니오.** 그리고 **런타임에서는 문제가 되지 않습니다** — 그 항목들은 이미 아무것도 검증하지 않습니다. 다음 회전에서 링을 편집할 때만 문제이고, 그때 편집의 기준은 Railway가 아니라 store입니다(계약 1·2번) |
@@ -617,8 +639,16 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
      -ActiveSigningKeyId "<Active>" -ActiveRefreshPepperId "<Active>" `
      -TokenIssuer "<Active>" -TokenAudience "<Active>" `
      -RetiredSigningKeys "<Active>" -RetiredRefreshPeppers "<Active>" `
-     -SecretDigest "<행에서>" -PepperKid "<행에서>" -Mode preflight
+     -SecretDigest "<행에서>" -PepperKid "<행에서>" -Mode preflight `
+     -DeploymentId "<Active의 deployment ID>" `
+     -MintedByDeploymentId "<행의 mintedByDeploymentId, NULL이면 비웁니다>" `
+     -BindingTolerance open
    ```
+
+   **preflight의 기준값은 Active입니다** — 지금 돌고 있는 배포를 상대로 하는
+   확인이므로 `-DeploymentId`에도 Active에 적힌 deployment ID를 넣습니다.
+   `-BindingTolerance`는 Active가 결속을 싣는 세대로 승격되기 전까지 `open`이고,
+   승격된 뒤에는 `closed`입니다.
 
    **실패는 두 종류이고 하는 일이 다릅니다.** 출력의 안내가 어느 쪽인지 말해 줍니다.
 
@@ -655,13 +685,41 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
    token·refresh token과 그때 생긴 `MobileRefreshRotation` 행의
    `secretDigest`·`pepperKid`를 모으고,
 
+   로컬 PC의 PowerShell, Tomverse clone 폴더 안. Node 22와 `npm ci`가 끝나 있어야
+   하고, 후보 링 두 개(production 자격증명)와 방금 만든 exchange가 필요합니다.
+   **읽기 전용입니다** — 배포도 승격도 하지 않습니다.
+
    ```powershell
    ./scripts/ops/Invoke-MobileAuthDeploymentVerify.ps1 `
      -ActiveSigningKeyId "<Pending>" -ActiveRefreshPepperId "<Pending>" `
      -TokenIssuer "<Pending>" -TokenAudience "<Pending>" `
      -RetiredSigningKeys "<Pending>" -RetiredRefreshPeppers "<Pending>" `
-     -SecretDigest "<행에서>" -PepperKid "<행에서>"
+     -SecretDigest "<행에서>" -PepperKid "<행에서>" -Mode rotation `
+     -DeploymentId "<Pending의 deployment ID>" `
+     -MintedByDeploymentId "<행의 mintedByDeploymentId, NULL이면 비웁니다>" `
+     -BindingTolerance open `
+     -SummaryPath ".\mobile-auth-round\run-1.json"
    ```
+
+   **`-BindingTolerance`에 기본값이 없습니다.** Active가 결속을 싣기 이전 세대이면
+   `open`(식별자 없는 증거는 **미판정**), 결속을 싣는 세대로 승격된 뒤에는 `closed`
+   (식별자 없는 증거는 **거절**)입니다. 어느 쪽인지는 store의 사실이지 이 프로세스의
+   사실이 아니므로 사람이 적습니다.
+
+   **`-SummaryPath`는 다음 항목의 세 시료를 위한 것입니다.** token·digest·링·key id는
+   쓰지 않습니다 — deployment id 둘, `iat`·`exp`, 판정뿐입니다.
+
+   **폴더를 먼저 만듭니다.** 없으면 script가 검증 **전에** 거절합니다 — 방금 만든
+   exchange를 회차 파일도 남기지 못하는 실행에 쓰지 않기 위해서입니다.
+
+   ```powershell
+   New-Item -ItemType Directory -Force -Path .\mobile-auth-round | Out-Null
+   ```
+
+   script는 그 경로에 **먼저 `incomplete` 표시를 써 둡니다.** 실행이 중간에 끊기면
+   앞 회차의 파일이 남아 다음 판정에 읽히는 대신 **판정기가 거절하는 파일**이
+   남습니다. 그리고 회차 파일을 요구했는데 쓰지 못하면 **그 실행은 실패**입니다 —
+   재료 판정은 그대로 출력되지만 종료 코드는 0이 아닙니다.
 
    **두 링과 두 token은 인수가 아니라 프롬프트로 들어갑니다** — refresh token은 family를
    회전시키는 bearer secret이고, 인수는 명령줄에 남습니다. 끝나면 여덟 + 다섯 개
@@ -674,6 +732,40 @@ node -e "const {generateKeyPairSync}=require('crypto');console.log(generateKeyPa
 
    **그리고 그 exchange 세션을 폐기합니다** — 진짜 자격증명이고 script가 대신 해 줄 수
    없습니다.
+
+6a. **세 시료로 한 회차를 판정합니다**(E5, 2026-09-09 승인). 6번을 **`iat` 기준 2분
+   이상 간격으로 세 번** 하고 — 매번 새 exchange이며 셋 다 폐기합니다 — 세 run 파일을
+   함께 판정합니다.
+
+   로컬 PC의 PowerShell, 같은 clone 폴더. **자격증명이 필요 없습니다** — 이 명령은
+   6번이 쓴 세 JSON만 읽고, 그 파일에는 token도 digest도 없습니다.
+
+   ```powershell
+   npm run judge:mobile-auth-binding-round -- --round 1 `
+     .\mobile-auth-round\run-1.json .\mobile-auth-round\run-2.json .\mobile-auth-round\run-3.json
+   ```
+
+   - **셋이 다 통과하고 다 같은 배포를 가리켜야 표본 조건 충족**입니다. 하나라도
+     다르면 **그 회차는 미판정**이고, **재시도하지 않습니다** — 통과할 때까지 다시
+     뽑는 것은 통과 조건을 다시 뽑는 것이고, 놓칠 확률을 12.5%에서 25~50%로 키웁니다
+     (독립 50:50 모형).
+   - **판정은 세 시료를 다 모은 뒤 한 번에** 하고, 그 시점에 셋이 **모두 유효**해야
+     합니다. 앞 시료의 통과를 나중에 그대로 인용하지 않습니다. 그래서 먼저 걸리는
+     값은 verifier의 900초가 아니라 **access token의 600초**입니다.
+   - **수집이 끊기면 그 회차는 미판정**입니다. 부분 표본으로 판정하지 않습니다.
+   - **셋이 모두 같은 다른 배포를 가리키면 중단**입니다. 회차를 새로 열지 말고 무엇이
+     응답하고 있는지 확인합니다.
+   - **같은 배포에 2회차 이상은 사람이 재개를 결정**하고 `--resumed-by <이름>`으로
+     기록합니다. 새 회차는 재시도의 다른 이름이고(1회차 12.5% → 2회차 23.4% → 5회차
+     48.7%), **기록은 관측이지 통제가 아니기 때문**입니다.
+   - **기록에 적는 확률에는 단서를 함께 적습니다** — 그 숫자는 *각 요청이 독립이고
+     신버전이 절반을 받는* 모형의 예시값이고, 같은 모형에서 신버전 비율이 90%면 1회차
+     72.9%입니다. **수용하는 것은 그 숫자가 아니라 분배·상관을 모르는 상태의 잔여
+     위험**입니다. 명령이 그 문장을 출력하므로 그대로 옮겨 적습니다.
+
+   **이 회차가 증명하지 않는 것**: 배포가 안정화됐다는 것, 구버전이 더 이상 응답하지
+   않는다는 것, 이 증거가 신버전에서 나왔다는 것. `신·신·신` 다음의 네 번째가 구버전일
+   수 있고 이 회차는 그것을 알지 못합니다.
 7. **이전 세대를 확인합니다**(유예 안): 4.5번에서 받아 둔 access token이 아직
    받아들여지는지, refresh token이 회전에 성공하는지.
 
@@ -1054,9 +1146,9 @@ production 활성화를 결정할 때 함께 정할 것 여섯:
    **이것으로 5번(증거 결속)이 해결되지 않습니다.** SHA와 deployment ID를 적는 것은
    *사람이 무엇을 대상으로 실행했다고 말했는지*를 남기는 일이지, 수집된 증거가 그
    배포에서 나왔다는 증명이 아닙니다.
-5. **증거를 배포에 결속하는 방법 — 비교안이 있고, 미승인입니다.** 지금 verifier는
-   증거가 **오래되지 않았다**는 것만 봅니다(§2.2의 정정). 15분 안에 두 배포가 겹치면
-   직전 배포의 증거도 통과합니다.
+5. **증거를 배포에 결속하는 방법 — 확정 범위가 승인됐고, 두 항목이 남았습니다.**
+   지금 verifier는 증거가 **오래되지 않았다**는 것만 봅니다(§2.2의 정정). 15분 안에
+   두 배포가 겹치면 직전 배포의 증거도 통과합니다.
 
    `.github/audits/2026-09-09-mobile-auth-evidence-deployment-binding-approval.md`가 후보를 나란히 놓습니다 — **A안**(배포 식별자를 token claim 또는
    `MobileRefreshRotation` 컬럼에 실어 Pending의 deployment ID와 대조)과 **B안**
@@ -1079,7 +1171,22 @@ production 활성화를 결정할 때 함께 정할 것 여섯:
    "이전 배포의 이미지와 변수를 복원"까지만 말하고 **id 발급을 말하지 않으므로**, 남은
    것은 롤백 전후의 `RAILWAY_DEPLOYMENT_ID`를 비교하는 **실측**입니다.
 
-   승인 대상 열하나와 검증 벡터 열넷은 그 문서에 있고, **승인란은 비어 있습니다.**
+   승인 대상 열하나와 검증 벡터 열넷은 그 문서에 있고, **승인란은 그 문서의 11절**입니다.
+
+   **2026-09-09 구현** — A1(`dep` claim)·A2(`mintedByDeploymentId`)와 verifier의 결속
+   축, 그리고 §3의 6a(세 시료 회차)가 들어갔습니다. §2.2의 rev.19 상자가 무엇이
+   증명되고 무엇이 안 되는지를 적습니다.
+
+   **2026-09-09 결재 결과** — E1·E2·E3·E4·E5·E6·E8·E9는 **승인**(A안, A1 token claim과
+   A2 행 컬럼을 **둘 다**), E10은 **해당 없음**(B2 미선택), E11은 **부분 승인**(배제 범위를
+   "낡은 증거 재사용"으로 한정하고 verifier는 무상태 유지 —
+   `.github/audits/2026-09-09-mobile-auth-evidence-deployment-binding-approval.md` §10.3의
+   넷이 정해질 때까지
+   **기록 기반 중복 탐지 기능의 구현은 보류**하며, **현재 검사기가 중복을 탐지한다고 적지
+   않습니다**), E7은 **미결**(롤백 후의 deployment ID는 실측 후 확정이고 **이번 승인에
+   실측 권한은 없습니다**).
+
+   **실제 롤백·vault 작업·배포·production 활성화는 이 승인에 포함되지 않습니다.**
 6. **서명 쪽이 미판정일 때의 종료 조건 — 비교안이 있고, 미승인입니다**(§3의 8번).
    지금 계약은 "미판정은 통과가 아니므로 승격하지 않는다"이고, 그러면 배포는 나갔는데
    Active가 옮겨가지 않은 상태로 사람에게 올라갑니다.
