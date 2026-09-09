@@ -76,11 +76,37 @@ export const MOBILE_BINDING_ROUND_VERDICTS = [
 
 const asInteger = (value) => (Number.isInteger(value) ? value : null);
 
+const SUMMARY_SCHEMA = "tomverse.mobile-auth-verify.v1";
+
+/** The two axes a round is about. Both, always -- one bound half is not a bound sample. */
+const BINDING_FIELDS = [
+  ["signingBinding", "signingDeploymentId"],
+  ["pepperBinding", "pepperDeploymentId"],
+];
+
+/**
+ * What the verifier calls the two binding checks.
+ *
+ * Needed because "did this sample pass" is too coarse a question for the one
+ * place it matters. A sample that names another deployment fails its own run --
+ * that is the binding axis doing its job -- and if that counted as "cannot be
+ * judged", the answer "every sample is consistently somewhere else" could never
+ * be reached. So the round asks the narrower question instead: did anything
+ * *other* than the binding fail?
+ */
+const BINDING_CHECK_NAMES = new Set(["signing binding", "pepper binding"]);
+
+const nonEmptyString = (value) =>
+  typeof value === "string" && value.trim() !== "" ? value : null;
+
 /**
  * One sample, as the verifier's own summary describes it.
  *
  * Shape-checked rather than trusted: a summary that lost a field would
- * otherwise be judged as if the field said what the judge hoped.
+ * otherwise be judged as if the field said what the judge hoped. What is
+ * checked here is only whether the file *says* the things a round is judged
+ * on -- what those things say is the caller's business, so that the order in
+ * which findings are weighed stays in one place.
  */
 const readSample = (value, index) => {
   const problems = [];
@@ -88,11 +114,62 @@ const readSample = (value, index) => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { problems: [`${at} is not an object`] };
   }
+  // The schema tag first: everything below reads named fields, and a file with
+  // none of them would otherwise be reported field by field as if it were a
+  // damaged run summary rather than a different kind of file entirely.
+  if (value.schema !== SUMMARY_SCHEMA) {
+    return { problems: [`${at} is not a ${SUMMARY_SCHEMA} run summary`] };
+  }
+  // A run that was cut short leaves this marker rather than the previous run's
+  // file, so a stale summary cannot be judged as though it described this one.
+  if (value.incomplete === true) {
+    return { problems: [`${at} is an incomplete run file; its verification did not finish`] };
+  }
+
   const issuedAt = asInteger(value.tokenIssuedAt);
   const expiresAt = asInteger(value.tokenExpiresAt);
   if (issuedAt === null) problems.push(`${at} has no integer tokenIssuedAt`);
   if (expiresAt === null) problems.push(`${at} has no integer tokenExpiresAt`);
   if (typeof value.passed !== "boolean") problems.push(`${at} has no boolean passed`);
+
+  // The failure list, which is how the round tells a binding finding apart from
+  // a stale token or wrong key material.
+  let otherFailures = null;
+  if (!Array.isArray(value.failures)) {
+    problems.push(`${at} has no failures list`);
+  } else if (value.failures.some((entry) => typeof entry?.name !== "string")) {
+    problems.push(`${at} has a failure with no name`);
+  } else {
+    otherFailures = value.failures.filter((entry) => !BINDING_CHECK_NAMES.has(entry.name)).length;
+    if (value.passed === true && value.failures.length > 0) {
+      problems.push(`${at} says it passed and lists failures`);
+    }
+    if (value.passed === false && value.failures.length === 0) {
+      problems.push(`${at} says it did not pass and lists no failure`);
+    }
+  }
+
+  const expectedDeploymentId = nonEmptyString(value.expectedDeploymentId);
+  if (!expectedDeploymentId) {
+    problems.push(`${at} names no expected deployment id`);
+  }
+
+  // The binding fields are the whole point of the round, and `passed` does not
+  // stand in for them: it is one boolean about one run, and a summary with both
+  // axes deleted used to satisfy it. Both are required to be *there*; whether
+  // they agree is judged below, where the order of findings is decided.
+  const bindings = {};
+  for (const [outcomeField, idField] of BINDING_FIELDS) {
+    const outcome = nonEmptyString(value[outcomeField]);
+    const named = nonEmptyString(value[idField]);
+    if (!outcome) problems.push(`${at} has no ${outcomeField}`);
+    // An axis with no identifier is an axis with nothing to compare, whatever
+    // its outcome word says.
+    if (!named) problems.push(`${at} has no ${idField}`);
+    bindings[outcomeField] = outcome;
+    bindings[idField] = named;
+  }
+
   return {
     problems,
     sample: {
@@ -100,12 +177,12 @@ const readSample = (value, index) => {
       issuedAt,
       expiresAt,
       passed: value.passed === true,
-      expectedDeploymentId:
-        typeof value.expectedDeploymentId === "string" ? value.expectedDeploymentId : null,
-      signingDeploymentId:
-        typeof value.signingDeploymentId === "string" ? value.signingDeploymentId : null,
-      pepperDeploymentId:
-        typeof value.pepperDeploymentId === "string" ? value.pepperDeploymentId : null,
+      otherFailures,
+      expectedDeploymentId,
+      signingBinding: bindings.signingBinding,
+      pepperBinding: bindings.pepperBinding,
+      signingDeploymentId: bindings.signingDeploymentId,
+      pepperDeploymentId: bindings.pepperDeploymentId,
     },
   };
 };
@@ -173,11 +250,24 @@ export const judgeMobileBindingRound = (input) => {
     reasons.push("the samples were not all checked against one expected deployment id");
   }
 
-  const failed = samples.filter((sample) => !sample.passed);
-  if (failed.length > 0) {
+  // Whether the round can be judged at all, gathered *before* the binding is
+  // read. A sample that expired, or whose own run did not pass, or that was
+  // taken too close to its neighbour, says nothing about which deployment is
+  // serving -- and treating it as if it did is how three expired copies of the
+  // previous deployment's evidence came back as "stop, something else is
+  // serving" rather than "collect this again".
+  // Deliberately not `passed`. A sample that names another deployment fails its
+  // own run, and counting that here would make "consistently somewhere else"
+  // unreachable -- the finding would eat the answer it exists to produce. What
+  // disqualifies a sample is a failure that is not about the binding: stale
+  // evidence, the wrong key material, a wrong `iss`. The count is reported and
+  // the names are not: they come out of the file, and this tool does not print
+  // what a file it was pointed at contains.
+  const unjudgeable = samples.filter((sample) => (sample.otherFailures ?? 0) > 0);
+  if (unjudgeable.length > 0) {
     reasons.push(
-      `${failed.length} sample(s) did not pass their own verification run: ` +
-        failed.map((sample) => `sample ${sample.index + 1}`).join(", ")
+      `${unjudgeable.length} sample(s) failed a check other than the binding ` +
+        "(freshness, key material, iss/aud) -- collect those samples again"
     );
   }
 
@@ -200,18 +290,34 @@ export const judgeMobileBindingRound = (input) => {
     }
   }
 
-  // "All three name the same other deployment" is its own answer: the traffic
-  // is going somewhere else entirely, and opening another round would only
-  // sample the same wrong thing again.
-  const observed = new Set(
-    samples.map((sample) => sample.signingDeploymentId ?? "(none)")
-  );
+  const judgeable = reasons.length === 0;
+
+  // "Every sample names the same other deployment" is its own answer: the
+  // traffic is going somewhere else entirely, and opening another round would
+  // only sample the same wrong thing again.
+  //
+  // Two conditions, both new. It is only reached when the samples were
+  // judgeable in the first place -- otherwise "undetermined" is the honest
+  // answer and re-collection the remedy. And **both axes** have to agree: the
+  // signing half alone used to decide this, so a token from the old instance
+  // beside a row from the new one was reported as a settled fact about where
+  // traffic goes, which is exactly the mixed state nothing here can resolve.
+  const uniform = (field) => {
+    const values = new Set(samples.map((sample) => sample[field]));
+    if (values.size !== 1) return null;
+    return samples[0][field];
+  };
+  const signing = uniform("signingDeploymentId");
+  const pepper = uniform("pepperDeploymentId");
+  const expectedId = samples[0].expectedDeploymentId;
   const consistentlyElsewhere =
-    observed.size === 1 &&
-    samples[0].signingDeploymentId !== null &&
+    judgeable &&
+    signing !== null &&
+    pepper !== null &&
+    signing === pepper &&
+    expectedId !== null &&
     expected.size === 1 &&
-    samples[0].expectedDeploymentId !== null &&
-    samples[0].signingDeploymentId !== samples[0].expectedDeploymentId;
+    signing !== expectedId;
 
   if (consistentlyElsewhere) {
     return {
@@ -222,6 +328,23 @@ export const judgeMobileBindingRound = (input) => {
       ],
       record: recordFor(round, resumeApprovedBy),
     };
+  }
+
+  // The binding itself, read last so that the two answers above -- "this cannot
+  // be judged" and "this is consistently somewhere else" -- are reached on
+  // their own terms. Each axis of each sample must say `matched` and must name
+  // the deployment the run was checked against; one axis never speaks for the
+  // other, and `passed` never speaks for either.
+  for (const sample of samples) {
+    const at = `sample ${sample.index + 1}`;
+    for (const [outcomeField, idField] of BINDING_FIELDS) {
+      if (sample[outcomeField] !== "matched") {
+        reasons.push(`${at} reports ${outcomeField} ${sample[outcomeField]}, not matched`);
+      }
+      if (sample.expectedDeploymentId && sample[idField] !== sample.expectedDeploymentId) {
+        reasons.push(`${at} names a ${idField} that is not the expected deployment`);
+      }
+    }
   }
 
   if (reasons.length > 0) {

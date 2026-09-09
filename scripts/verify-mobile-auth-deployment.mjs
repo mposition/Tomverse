@@ -203,17 +203,62 @@ const summary = {
   passed: false,
 };
 
-const writeSummary = () => {
-  const target = (process.env[SUMMARY_PATH_ENV] ?? "").trim();
+const summaryPath = () => (process.env[SUMMARY_PATH_ENV] ?? "").trim();
+
+/**
+ * Claims the round file before anything is verified.
+ *
+ * Two failures this closes. A run that dies part-way used to leave the
+ * *previous* run's file sitting at that path, and the round judge would read it
+ * as this run's sample. And a path that cannot be written was only discovered
+ * after the verification had been done, when the evidence was already spent.
+ *
+ * So the marker is written first. It parses, it carries the schema, and it says
+ * `incomplete`, which the judge refuses -- an interrupted run leaves something
+ * unusable rather than something stale.
+ */
+const prepareSummary = () => {
+  const target = summaryPath();
   if (!target) return;
+  try {
+    writeFileSync(
+      target,
+      `${JSON.stringify({ schema: summary.schema, incomplete: true }, null, 2)}\n`,
+      "utf8"
+    );
+  } catch {
+    // The message is dropped: it can carry the path's surroundings, and the
+    // path is the operator's own argument anyway.
+    console.log("Mobile auth deployment verification");
+    console.log(
+      `FAIL mobile auth deployment: ${SUMMARY_PATH_ENV} cannot be written.\n` +
+        "  Refused before verifying rather than after, so the exchange you\n" +
+        "  collected is not spent on a run whose round file could not be kept.\n" +
+        "  Create the directory first, or drop the variable if this run is not\n" +
+        "  part of a three-sample round."
+    );
+    process.exit(1);
+  }
+};
+
+/**
+ * Replaces the marker with what this run found.
+ *
+ * A failure here is the run's failure. The material verdict is unchanged and
+ * is still printed, but a run that was asked for a round file and did not
+ * produce one must not exit 0 -- the next judgement would then read whatever
+ * is at that path, and the caller would have no way to know.
+ */
+const writeSummary = () => {
+  const target = summaryPath();
+  if (!target) return true;
   summary.failures = failures.map(({ name, kind }) => ({ name, kind }));
   summary.passed = failures.length === 0;
   try {
     writeFileSync(target, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-  } catch (error) {
-    // Reported, never fatal: the verdict is already decided and losing the
-    // round file must not turn a pass into a failure or the other way round.
-    lines.push(`  NOTE  could not write ${SUMMARY_PATH_ENV} (${error.message})`);
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -479,6 +524,8 @@ if (!expectedDeploymentId) {
 
 summary.expectedDeploymentId = expectedDeploymentId;
 
+prepareSummary();
+
 // The candidate rings. A configuration error here is the checker's business,
 // not this script's, so it says so rather than reporting a mismatch.
 let activeSigning;
@@ -677,6 +724,21 @@ if (!refresh) {
 summary.pepperDeploymentId = normalizeDeploymentId(process.env[ROW_DEPLOYMENT_ENV]);
 summary.pepperBinding = bindingAxis("pepper binding", process.env[ROW_DEPLOYMENT_ENV]);
 
-writeSummary();
+const summaryWritten = writeSummary();
 
-process.exit(report(mode));
+const code = report(mode);
+if (!summaryWritten) {
+  // Printed after the verdict, and separately from it: what was verified is
+  // still what was verified, and this says only that the artefact the run was
+  // asked to produce is not there.
+  console.log("");
+  console.log(
+    `FAIL mobile auth deployment: the verdict above stands, but ${SUMMARY_PATH_ENV}\n` +
+      "  could not be written, so this run left no round file. Whatever is at\n" +
+      "  that path is not this run. Do not judge a round with it -- fix the path\n" +
+      "  and collect this sample again."
+  );
+  process.exit(1);
+}
+
+process.exit(code);

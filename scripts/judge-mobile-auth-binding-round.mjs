@@ -64,10 +64,19 @@ if (paths.length !== MOBILE_BINDING_ROUND_SAMPLES) {
 const samples = paths.map((path) => {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
-  } catch (error) {
-    // The path is the operator's own argument, so echoing it tells them nothing
-    // they did not type; the parse error is the file's shape, never its values.
-    fail(`could not read ${path} (${error.message})`);
+  } catch {
+    // The error is dropped, not reported. `JSON.parse` puts the offending text
+    // in its message, so a file that is not a run summary -- an exported ring,
+    // a saved response, anything an operator pointed at by mistake -- would
+    // have its contents printed by the tool that was supposed to refuse it.
+    // The path is the operator's own argument and tells them which file;
+    // nothing from inside it is echoed.
+    fail(
+      `${path} is not a readable run summary.\n` +
+        "  It must be a file written by verify:mobile-auth-deployment with\n" +
+        "  MOBILE_AUTH_VERIFY_SUMMARY_PATH set. Nothing from inside it is shown\n" +
+        "  here: a file that is not a run summary may hold anything."
+    );
     return null;
   }
 });
