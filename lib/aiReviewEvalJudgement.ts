@@ -453,6 +453,31 @@ const excludedAsSupport = (
             other.sourceIndex === claim.sourceIndex
     );
 
+/**
+ * The claims the scorer actually scores: submitted into a findings field, and
+ * not excluded as supporting material.
+ *
+ * Exported because anything counting a property of "the findings this
+ * reviewer put forward" has to read the same population the score was
+ * computed from. A caller that filters the raw `claims` array instead gets a
+ * different set -- prose claims, and explanations sitting inside another
+ * finding -- and then two numbers about the same record disagree with no way
+ * to tell which is wrong. `scoreJudgedCase()` uses this too, so there is one
+ * implementation rather than a copy.
+ *
+ * It says nothing about whether a claim is a hit, a wrong finding or
+ * anything else. That is the scorer's question, and this is only the
+ * population.
+ */
+export function judgedScoredClaims(
+    record: AiReviewJudgementRecord
+): readonly (AiReviewJudgedClaim & { submittedAs: AiReviewEvalFindingKind })[] {
+    const submitted = record.claims.filter(
+        (claim) => claim.submittedAs !== "prose"
+    ) as readonly (AiReviewJudgedClaim & { submittedAs: AiReviewEvalFindingKind })[];
+    return submitted.filter((claim) => !excludedAsSupport(record.claims, claim));
+}
+
 /** The gold's scope per kind, keyed by the whole triple. */
 const goldKeysOf = (testCase: AiReviewJudgedCase) =>
     Object.fromEntries(
@@ -747,8 +772,8 @@ export function scoreJudgedCase(
     // Everything below reads `scored`, including the unruled-verdict refusal:
     // an explanation is not a finding put forward, so there is no question
     // about whether the reviewer invented it.
-    const excluded = submitted.filter((claim) => excludedAsSupport(record.claims, claim));
-    const scored = submitted.filter((claim) => !excluded.includes(claim));
+    const scored = judgedScoredClaims(record);
+    const excluded = submitted.filter((claim) => !scored.includes(claim));
     const outsideGold = (claim: (typeof submitted)[number]) =>
         !goldKeys[claim.submittedAs].has(claimKey(claim));
 
