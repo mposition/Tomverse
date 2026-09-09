@@ -262,3 +262,37 @@ is the one step between this and an unblinded review.
 
 `npm run check:router-human-review` reads whatever is committed here on every
 PR. It passes when nothing is, and it does not decide whether a review is owed.
+
+## What the primary review found
+
+`primary-60-20260831a/` is the one canonical draw, reviewed by R-01 and R-02,
+with A-02 adjudicating the 15 pairs they split on. `settled.json` records every
+verdict by reviewer; `human-verdicts.json` is the 60 settled verdicts in arm
+terms, and the only file the comparator reads. `judges/` holds the two judges'
+verdicts on the same bundle, copied from the calibration run so the comparison
+can be re-run from this directory alone. `judge-comparison.json` is that
+re-run: `npm run report:router-judge-comparison` with seed 20260826, written by
+the frozen `lib/routerJudgeComparator.ts`.
+
+| | |
+|---|---|
+| reviewer agreement before adjudication | 45 of 60 (75%) |
+| human verdicts | baseline 39, Auto 7, equivalent 14 |
+| human baseline margin | +53.33pp |
+| Luna `D` | +3.33pp, exact agreement 78.3%, reversals 15.0% |
+| Fable `D` | +43.33pp, exact agreement 53.3%, reversals 20.0% |
+| `dD` 95% CI | [−56.67pp, −5.00pp] |
+| `selectJudge` | `undecided` |
+
+Luna is measurably closer to the humans on the margin and the interval excludes
+zero, but Luna reverses 15% of pairs against them, over the 10% rail, so the rule
+returns `undecided` rather than `preferred`. That is the rule working as
+written in `docs/ops/router-judge-selection-rule.md`: a judge is not adopted on a
+good aggregate while its pair-level reversals exceed the rail. Neither judge is
+adopted by this result and `n` is not activated.
+
+Two facts about the adjudication are recorded rather than interpreted. A-02
+sided with R-01 on all 15 disputed pairs, and so had A-01 on the same 15 before
+A-01's verdicts were set aside (see `amendments` in the pre-registration).
+R-02 gave `equivalent` on 1 of those 15 and R-01 on 9; the 15 settled as
+`equivalent` 9 times and as R-02's side 0 times.
