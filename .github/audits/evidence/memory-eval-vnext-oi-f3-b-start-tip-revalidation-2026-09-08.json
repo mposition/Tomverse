@@ -1,0 +1,3128 @@
+{
+  "schemaVersion": 1,
+  "recordKind": "oi_f3_b_actual_start_tip_revalidation",
+  "preparedDate": "2026-09-08",
+  "preparedBy": "Codex",
+  "recordStatus": "PASS_WITH_RETAINED_RESIDUALS",
+  "lastUpdatedAt": "2026-09-08 13:03:38 UTC",
+  "documentPath": ".github/audits/memory-eval-vnext-oi-f3-b-start-tip-revalidation-2026-09-08.md",
+  "hashBinding": {
+    "purpose": "Observation evidence only; not an authoritative human approval receipt or new approval SHA.",
+    "documentDoesNotApproveThisEvidence": true,
+    "approvedSourceHashesUnchanged": true
+  },
+  "authorization": {
+    "requestedScope": "Revalidate actual candidate tip CI, support9, runtime/dependencies, approved bytes and ancestry; create separate pre-start records.",
+    "newHumanApproval": false,
+    "implementationStartAuthorized": false,
+    "newBuiltinImplementationStarted": false,
+    "installationAuthorized": false,
+    "ciRerunAuthorized": false,
+    "gitPublicationAuthorized": false,
+    "activationAuthorized": false,
+    "fullF07Satisfied": false,
+    "fullPFreeze": false,
+    "independentReviewPerformed": false
+  },
+  "gates": {
+    "approvalBindingVerified": true,
+    "support9BoundToTarget": true,
+    "targetCheckoutVerified": true,
+    "dependencyVersionInventoryMatches": true,
+    "localScopedChecksPassed": true,
+    "targetCiSuccess": true,
+    "preStartRevalidationComplete": true,
+    "actualImplementationStartInstructionReceived": false,
+    "b24FullySatisfied": false,
+    "completionScope": "Bounded local/support/approval/target-CI revalidation; not full Windows runner execution, complete B24, implementation or operational approval."
+  },
+  "identity": {
+    "targetTip": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+    "targetParents": [
+      "ddc542fe9941530981ff1de8c1649c4c0d23cf5d",
+      "f925263dc6ed76dc89b8a9b048c93702f7a998c7"
+    ],
+    "repositoryBasis": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+    "decisionReceiptCommit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+    "reviewCommit": "f84036a4c86f7d3f91dcd9592f8137bb5cb16f6b",
+    "originalReviewCommit": "60486e971c94a189ab418c4743f48428a402ea52",
+    "mergeCommit": "38568f0cf8f88a6803bfedb76184232bef7312a6",
+    "initialCandidate": "f925263dc6ed76dc89b8a9b048c93702f7a998c7",
+    "startHead": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+    "startBranch": "codex/memory-eval-vnext-oi-f3-b-approval-package",
+    "checkoutModeAtValidation": "detached",
+    "newBranchCreated": true,
+    "verificationBranch": "codex/memory-eval-vnext-oi-f3-b-start-tip-revalidation",
+    "branchCreationAfterPreBranchValidation": "2026-09-08T13:02:19.655Z"
+  },
+  "candidateAdvance": {
+    "reason": "Initial candidate CI was cancelled by subsequent develop progress; new candidate rebound without rewriting old CI result.",
+    "from": "f925263dc6ed76dc89b8a9b048c93702f7a998c7",
+    "to": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+    "diff": "M\t.github/audits/2026-09-02-native-mobile-auth-n2-implementation-report.md\nM\t.github/audits/2026-09-08-mobile-auth-fingerprint-rule-approval.md\nA\tscripts/mobile-auth-fingerprint-core.mjs\nA\ttests/mobileAuthFingerprint.test.mjs",
+    "support9AndLockUnchanged": true,
+    "dependencyReinstallationPerformed": false
+  },
+  "ancestry": [
+    {
+      "commit": "6263ecdcc1e69585498c19c0a294fef5202f5218",
+      "parents": [
+        "12f83ec2c388a318fe0a79d4f76bd2c0b245dcb1",
+        "3186cd486b5a4484e539416fdc4b9ccf40cc165b"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "parents": [
+        "6263ecdcc1e69585498c19c0a294fef5202f5218"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "parents": [
+        "6c36a548abf1687d2582566f31fafa51875b77fa"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "159267a80acee97da3a297c637343ea15de725f9",
+      "parents": [
+        "75c667054dd6fd1b6adff1e813cf23e3ef43ca00"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "parents": [
+        "159267a80acee97da3a297c637343ea15de725f9"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "parents": [
+        "19ff015112e6cf908cd8dc057ca41ace8cef4e87"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "7e5491f5fa24295912d5da7a6cc5e86ddb637f43",
+      "parents": [
+        "0c6b3fec7cfb68f5a2fc4e4a492de7905b413bff"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "bd69a817006fb45ee88aa399940acec3d4e36470",
+      "parents": [
+        "7e5491f5fa24295912d5da7a6cc5e86ddb637f43"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+      "parents": [
+        "718aaf974e254e32bcb010ff2c1170a06011eed5"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "42a99c4c5721a25b13894b99533b9800f4fb437b",
+      "parents": [
+        "54ad04e29aa3390f4d342d152127e99928b4268e"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+      "parents": [
+        "d79d3c8673db4a9f5f4cd109bc99c50c21e182e3",
+        "6294d7f54f0a85480b45dfb2f54f05b8d7dfc8ef"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "60486e971c94a189ab418c4743f48428a402ea52",
+      "parents": [
+        "65b82d5670e086ca77f39050ad48e68f56433f0e"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "f84036a4c86f7d3f91dcd9592f8137bb5cb16f6b",
+      "parents": [
+        "60486e971c94a189ab418c4743f48428a402ea52"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+      "parents": [
+        "f84036a4c86f7d3f91dcd9592f8137bb5cb16f6b"
+      ],
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "38568f0cf8f88a6803bfedb76184232bef7312a6",
+      "parents": [
+        "6d9cd3a8f392d24f2818b76d0c6a857954da88f4",
+        "a5954e67b26b8bbcd13e9257faf4c34f4b0e5cf1"
+      ],
+      "ancestorOfTarget": true
+    }
+  ],
+  "sourceBindings": [
+    {
+      "path": ".github/audits/memory-eval-vnext-s1-scoring-contract-2026-09-06.md",
+      "expectedSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "4dc1ea945850b283ad9654a4bcaf8967e241e863",
+      "rawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+      "bytes": 65000,
+      "preCheckoutWorkingSha256": "20c1501999b9c86ecf079a0385766c60e079bb4ce475dd305edea80423b80a1f"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s2-purpose-contract-2026-09-06.md",
+      "expectedSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "6ab7c0813818a2575cf20915c9f42ba84b5d28e1",
+      "rawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+      "bytes": 45965,
+      "preCheckoutWorkingSha256": "216a7d77e03aaed238b4a32adf8d938b834379885e311811a059faed193c950d"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "expectedSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "bd45e60dcaa9a0c7193fda87d6022d0e429ff54c",
+      "rawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+      "bytes": 61926,
+      "preCheckoutWorkingSha256": "a89599bda0d45dbb7b721c3c279d1dedd6310081c4a98521e89336b3b7c95d28"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "expectedSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "761c5debe81e48f25870b9ea36a71c1de8165bd1",
+      "rawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+      "bytes": 76581,
+      "preCheckoutWorkingSha256": "dbd8eaa5ded61f60e0ab0015da90598270d0b7405fe864781542833a76cd0846"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-contract-decision-2026-09-05.md",
+      "expectedSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "19d49c386743265b92851cf6ca158f1c16f14ae2",
+      "rawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+      "bytes": 23526,
+      "preCheckoutWorkingSha256": "f10c6effd8556b7c51781216e9ad450b2b3badc5421c522e82e581f965646b60"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-contract-decision-approval-2026-09-06.md",
+      "expectedSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "883166bf495d0bf10bdb512beff56bda3a6dea60",
+      "rawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+      "bytes": 2792,
+      "preCheckoutWorkingSha256": "81da42c3e96365b5f9c7977a1091914495b8a9e8d4b685e5ff6af006c5e74f50"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-2026-09-07.md",
+      "expectedSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "9546274f54cab223fc1835330b86af420a7542e7",
+      "rawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+      "bytes": 9406,
+      "preCheckoutWorkingSha256": "bbe1ba6c58b5ae85b21f7d1dc0d0b05fc8b69dfe0b0e786a9f794b38f69bc86f"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-draft-2026-09-07.md",
+      "expectedSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "c926a58c1d7ec93ee03ebc7032f4d598c7e66716",
+      "rawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+      "bytes": 14881,
+      "preCheckoutWorkingSha256": "ed5a2a609960b1f81eec85fbb5facb62dd33af8677832c7d0a1566b6d27b8995"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-2026-09-07.md",
+      "expectedSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "fe2a9f6bf1cfc8cdc599a6116e0d10f6189bd4b6",
+      "rawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+      "bytes": 11833,
+      "preCheckoutWorkingSha256": "b98259b716d2966b6ed6652c9e6f1f8cd8da6148d0008ada2b8a5ea1afc1a8dd"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-draft-2026-09-07.md",
+      "expectedSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "d0046c7128a22644fa07b028b166144174f22afb",
+      "rawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+      "bytes": 20644,
+      "preCheckoutWorkingSha256": "1988d0c3837b5144e891e8e4dffe180adf6e2a29490250a083f52d5c09f07690"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-draft-2026-09-07.md",
+      "expectedSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "f88ec0794a87414a78686d432de45a78d63965da",
+      "rawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+      "bytes": 20392,
+      "preCheckoutWorkingSha256": "2442160ea990b1fec1751da1fcf9db79677dae170999323009d6596621ea77cb"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-2026-09-07.md",
+      "expectedSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "b8638d84a1a8d5ae2a31b2146c2a131719e6e3e7",
+      "rawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+      "bytes": 13677,
+      "preCheckoutWorkingSha256": "63f9eee06710baebfec5e31de6603c59b990325db8407df5206fcf7e471e1709"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "expectedSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "69aac932970fc0950cef1fedbf45bb51acab4220",
+      "rawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+      "bytes": 56169,
+      "preCheckoutWorkingSha256": "31322246dc10af77d3bc1fb7aa3bf727f8f2d8ead764235859a526ff735458c4"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-clarification-approval.json",
+      "expectedSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "f761e116ebf3ffefe7ba4beb8e6762526c20cfc9",
+      "rawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+      "bytes": 686,
+      "preCheckoutWorkingSha256": "481999248f5d87a341dc56617e5ecd7da57c8049a5967c24a68c8b8f814e8f09"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-2026-09-07.md",
+      "expectedSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "01d0bfdf242ca1488522153b0490c53236da3cd0",
+      "rawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+      "bytes": 13296,
+      "preCheckoutWorkingSha256": "e3f15dbf25b3583032ea43905be7928b9049ab86d83bf8f6187f39927a0d1574"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-request-draft-2026-09-07.md",
+      "expectedSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "2c6bfe0f61df203da552f86909337b4804805192",
+      "rawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+      "bytes": 15573,
+      "preCheckoutWorkingSha256": "873fceeeb5ac3a858341976618901ca6507a75dbd6433fdcfc8477593b15fdfe"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-recalculated-package-2026-09-07.json",
+      "expectedSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "541cc93cbe9d764fe2a1c4aa3ca2adf862c37f09",
+      "rawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+      "bytes": 206389,
+      "preCheckoutWorkingSha256": "e61e38c1825964df4bfa7b00d0f1ebbf3d441a7fcd0df0d1306f0686c5aa8f48"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-s2-activation-recalculated-approval-draft-2026-09-07.md",
+      "expectedSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "0717ceac2440bac5584368ad41c67ec767f461d9",
+      "rawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+      "bytes": 20986,
+      "preCheckoutWorkingSha256": "d90af4b2c3b3659026984adf0d893f04148528b6551db634ab76634dd0b11b93"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+      "expectedSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "0c86cb83a805f0197a1e6e75b6644823121496c6",
+      "rawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+      "bytes": 36453,
+      "preCheckoutWorkingSha256": "5aa1cebc1064a126627dd8394cc21049c6e23658a9e62858c89ea753ef3ea0bc"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-scope-evidence-2026-09-07.json",
+      "expectedSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "9d1fd1b332d6dc26e3d9cb5693fb0e479a85916f",
+      "rawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+      "bytes": 37723,
+      "preCheckoutWorkingSha256": "9e551cace97982dc3e216085e3e703940d9213cfe52fdd4fe430fcf373d021d5"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-detailed-plan-2026-09-07.md",
+      "expectedSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "51151ce4d15717a3fbea2b35639ce3784943b6f5",
+      "rawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+      "bytes": 42190,
+      "preCheckoutWorkingSha256": "47923fed9a639cd9cce9b4e3086a33160d81c204a84aaef1bd09f353b24cc065"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-next1-plan-2026-09-07.json",
+      "expectedSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "3ace168c233c54d9fe650107f8463dd7a7cb35fa",
+      "rawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+      "bytes": 75176,
+      "preCheckoutWorkingSha256": "e717b612b3627430e9acb3a8bca3e60432b4ed0d0b2678963611c15b718527d6"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-offline-subset-approval-draft-2026-09-08.md",
+      "expectedSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "853ea85ce07f69dc2c3f3b3ca08f803bcb5016f0",
+      "rawSha256": "0b8668d8bf65f139895af13c126d43b1a277d6152582ec3ce857fc763b1310df",
+      "bytes": 31978,
+      "preCheckoutWorkingSha256": "f195a78e4470a8271f7dd8929c88001793c7d3895fd22d77074b61ad6272e224"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-offline-subset-package-2026-09-08.json",
+      "expectedSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "94edbf8c43bf5f652a67831ff3413856678dcd00",
+      "rawSha256": "7ad37a223dc20eea71a20f539d7778000d1b0ada4e61e6d3d64cffe25dcf6ed2",
+      "bytes": 94616,
+      "preCheckoutWorkingSha256": "a8dccd780ccb8ae905d211e1cb09460be6d5685e39ae6f411ed9b54b09a55916"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-offline-subset-approval-2026-09-08.md",
+      "expectedSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "c29313a9dd23e27bf313c694fc24c142f02c7dc4",
+      "rawSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498",
+      "bytes": 21023,
+      "preCheckoutWorkingSha256": "44f8400b6b2338caa7443b97f7f47b72c8bb64951a9dd77078bf2b5140c8b498"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-offline-subset-review-disposition-2026-09-08.json",
+      "expectedSha256": "90e55c1f13471b5040103972d8476b8a10b51f67eaadd815a65fe42686693b11",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "e224dbada7cd75d39bfdb1e67969b2f2d76564cd",
+      "rawSha256": "90e55c1f13471b5040103972d8476b8a10b51f67eaadd815a65fe42686693b11",
+      "bytes": 173045,
+      "preCheckoutWorkingSha256": "90e55c1f13471b5040103972d8476b8a10b51f67eaadd815a65fe42686693b11"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-offline-subset-disposition-approval-2026-09-08.md",
+      "expectedSha256": "144ca91255bf45e5d924285ccb2516be63cc749bc001262245840c3e2f25cae3",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "6744c4cba00f31ea8f0242ae28257d0cfa5bc288",
+      "rawSha256": "144ca91255bf45e5d924285ccb2516be63cc749bc001262245840c3e2f25cae3",
+      "bytes": 18294,
+      "preCheckoutWorkingSha256": "144ca91255bf45e5d924285ccb2516be63cc749bc001262245840c3e2f25cae3"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-offline-subset-disposition-approval-request-draft-2026-09-08.md",
+      "expectedSha256": "f3d459e032cffc3a72de2e1af9f235f0c52b3a5155eeaf43e944fcc0b467b0c8",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "6b4922975f74b5ba06424f8d6c8f74a740c3cd67",
+      "rawSha256": "f3d459e032cffc3a72de2e1af9f235f0c52b3a5155eeaf43e944fcc0b467b0c8",
+      "bytes": 23617,
+      "preCheckoutWorkingSha256": "f3d459e032cffc3a72de2e1af9f235f0c52b3a5155eeaf43e944fcc0b467b0c8"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-offline-subset-review-disposition-draft-2026-09-08.md",
+      "expectedSha256": "aaf16425e8ff5ead15d3e25e71bce809ff15e481717a20f1ad6f08a64eab082a",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "e88187b2123e8f91b5618fa5845b9e4e2dc7b5e8",
+      "rawSha256": "aaf16425e8ff5ead15d3e25e71bce809ff15e481717a20f1ad6f08a64eab082a",
+      "bytes": 41175,
+      "preCheckoutWorkingSha256": "aaf16425e8ff5ead15d3e25e71bce809ff15e481717a20f1ad6f08a64eab082a"
+    },
+    {
+      "path": "lib/memoryEvalVnext/protocol/canonicalJson.ts",
+      "expectedSha256": "5af07e3d71ac9b0e3504f973264576aaf0934a7ffc0c15fc258adde95fbdd2a0",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "935c3a42e1ba08a3d352338d2d1f53ebe7319de2",
+      "rawSha256": "5af07e3d71ac9b0e3504f973264576aaf0934a7ffc0c15fc258adde95fbdd2a0",
+      "bytes": 7442,
+      "preCheckoutWorkingSha256": "5af07e3d71ac9b0e3504f973264576aaf0934a7ffc0c15fc258adde95fbdd2a0"
+    },
+    {
+      "path": "lib/memoryEvalVnext/protocol/wire.ts",
+      "expectedSha256": "f2cd8e85f3215a8b67ed23b515e83ea790c67486aac76eb02977cbd05079bb31",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "81e9f7c50db755d4f0bd9e863f800c4d116efeb0",
+      "rawSha256": "f2cd8e85f3215a8b67ed23b515e83ea790c67486aac76eb02977cbd05079bb31",
+      "bytes": 6602,
+      "preCheckoutWorkingSha256": "f2cd8e85f3215a8b67ed23b515e83ea790c67486aac76eb02977cbd05079bb31"
+    },
+    {
+      "path": "lib/memoryEvalVnext/protocol/signatures.ts",
+      "expectedSha256": "c9b9848004b868180b25d2615acfd7518e59bda3b440a89e49b18448648f82a9",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "c4973f9ecdef78f8ec3039b5502363bd825974d1",
+      "rawSha256": "c9b9848004b868180b25d2615acfd7518e59bda3b440a89e49b18448648f82a9",
+      "bytes": 3669,
+      "preCheckoutWorkingSha256": "c9b9848004b868180b25d2615acfd7518e59bda3b440a89e49b18448648f82a9"
+    },
+    {
+      "path": "lib/memoryEvalVnext/protocol/trust.ts",
+      "expectedSha256": "b0d3a2212370b69d1860c7b52b246f3e396cebedd8a8feeb82b553b5213ce757",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "71a307442db7529c6843ed943ebee5c9bcb55f3f",
+      "rawSha256": "b0d3a2212370b69d1860c7b52b246f3e396cebedd8a8feeb82b553b5213ce757",
+      "bytes": 5993,
+      "preCheckoutWorkingSha256": "b0d3a2212370b69d1860c7b52b246f3e396cebedd8a8feeb82b553b5213ce757"
+    },
+    {
+      "path": "tests/memoryEvalVnextWire.test.mjs",
+      "expectedSha256": "16b933bc7e23736ae400449cc037af2eec0c1372f414bc3e281618558196257e",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "642766067bf242c24dd09b123bec861805ae9c63",
+      "rawSha256": "16b933bc7e23736ae400449cc037af2eec0c1372f414bc3e281618558196257e",
+      "bytes": 30588,
+      "preCheckoutWorkingSha256": "16b933bc7e23736ae400449cc037af2eec0c1372f414bc3e281618558196257e"
+    },
+    {
+      "path": "tests/fixtures/memory-eval-vnext/wire-vectors.json",
+      "expectedSha256": "d2528196b50e64aceeaed912b5e8077a7f42069b53639148b18e9a5034321af8",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "1eface49a26dd4278e5d62adfe537699bb3d264f",
+      "rawSha256": "d2528196b50e64aceeaed912b5e8077a7f42069b53639148b18e9a5034321af8",
+      "bytes": 21701,
+      "preCheckoutWorkingSha256": "d2528196b50e64aceeaed912b5e8077a7f42069b53639148b18e9a5034321af8"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-offline-subset-approval-request-draft-2026-09-08.md",
+      "expectedSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "70614a6b26acb3f026eb25f268756924e741de30",
+      "rawSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351",
+      "bytes": 21047,
+      "preCheckoutWorkingSha256": "e9ff1e0f2d2335035588dfeeed888c5cd3729add66b79572a1a63dcd68f90351"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-oi-f3-b-approval-package-draft-2026-09-08.md",
+      "expectedSha256": "a2241c6f48dc79d43ebf159494bdeadbf06c0e86de6db05fdcff4f00a77be9a9",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "3aed9da7e263a9d5bf8dc590332f483d168f8703",
+      "rawSha256": "a2241c6f48dc79d43ebf159494bdeadbf06c0e86de6db05fdcff4f00a77be9a9",
+      "bytes": 43955,
+      "preCheckoutWorkingSha256": "a2241c6f48dc79d43ebf159494bdeadbf06c0e86de6db05fdcff4f00a77be9a9"
+    },
+    {
+      "path": ".github/audits/evidence/memory-eval-vnext-oi-f3-b-approval-package-2026-09-08.json",
+      "expectedSha256": "3e400844dbdda306b5697f40328e673f7d037a5e84cf2124b1193f301a703399",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "c0e3a663b8505fed3a57a6ad963c3de69a21e33c",
+      "rawSha256": "3e400844dbdda306b5697f40328e673f7d037a5e84cf2124b1193f301a703399",
+      "bytes": 114420,
+      "preCheckoutWorkingSha256": "3e400844dbdda306b5697f40328e673f7d037a5e84cf2124b1193f301a703399"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-oi-f3-b-approval-request-draft-2026-09-08.md",
+      "expectedSha256": "5d030bc3e9defb2e9a4c565ed4952395f25b95e2c16e39e333b4fed587e1b8a5",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "83430676eb35e3856be9f5128ce819d770d07555",
+      "rawSha256": "5d030bc3e9defb2e9a4c565ed4952395f25b95e2c16e39e333b4fed587e1b8a5",
+      "bytes": 15482,
+      "preCheckoutWorkingSha256": "5d030bc3e9defb2e9a4c565ed4952395f25b95e2c16e39e333b4fed587e1b8a5"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-oi-f3-b-approval-record-draft-2026-09-08.md",
+      "expectedSha256": "b044d0b5fcb9ef29026f10594e0281450a37490320aaa19325dbeb0f2d82f49f",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "3bbd71d3e8e8cbfe4a03e0dcce93a510f469e1dc",
+      "rawSha256": "b044d0b5fcb9ef29026f10594e0281450a37490320aaa19325dbeb0f2d82f49f",
+      "bytes": 11967,
+      "preCheckoutWorkingSha256": "b044d0b5fcb9ef29026f10594e0281450a37490320aaa19325dbeb0f2d82f49f"
+    },
+    {
+      "path": ".github/audits/memory-eval-vnext-oi-f3-b-approval-2026-09-08.md",
+      "expectedSha256": "03286ef63c1cba204254592535d1ab7fa7e2e47665fd0eee215e6e910ba0ad32",
+      "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+      "blobOid": "a085309fd0ccafdca9b054889981952657d42fcc",
+      "rawSha256": "03286ef63c1cba204254592535d1ab7fa7e2e47665fd0eee215e6e910ba0ad32",
+      "bytes": 17139,
+      "preCheckoutWorkingSha256": "03286ef63c1cba204254592535d1ab7fa7e2e47665fd0eee215e6e910ba0ad32"
+    }
+  ],
+  "upstreamOriginalSourceBindings": [
+    {
+      "commit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+      "path": ".github/audits/memory-eval-vnext-s1-scoring-contract-2026-09-06.md",
+      "rawSha256": "393497a5acbe7ee47af6947a84204eac7723fdd973bf30afad79c812da4db0e7",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "fa682cc2209fc5b0a9ebd994aa626d00997b0359",
+      "path": ".github/audits/memory-eval-vnext-s2-purpose-contract-2026-09-06.md",
+      "rawSha256": "e9a6a086be32e4d12df776015959c7c95be5185af7dc635403e8cd6689f4baa5",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+      "path": ".github/audits/memory-eval-vnext-s3-holdout-contract-2026-09-07.md",
+      "rawSha256": "66a29c01dd5e2d099817ee799afc960f090e93f900be53b546b8b73f4d3b3d05",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "4d8a7c317b570e0c30fc5a05438cb7cc78354039",
+      "path": ".github/audits/memory-eval-vnext-s4-provenance-contract-2026-09-07.md",
+      "rawSha256": "e7bc98a98a6e03b31403061312e5c6abab10e7e27456f1077d3a68362ede67bb",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "path": ".github/audits/memory-eval-vnext-contract-decision-2026-09-05.md",
+      "rawSha256": "355f8387808b8a7ea86e02ecffc4303562b5ab5c43c27fef0c2bdb2bf57e89da",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "3f14afb29eddc243640fdb0a5a4f604646ade9f0",
+      "path": ".github/audits/memory-eval-vnext-contract-decision-approval-2026-09-06.md",
+      "rawSha256": "838af4d1fee11122b5a2ec6b72d5ed905a59b2b370ec2d7b88e87bdd193291f5",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-2026-09-07.md",
+      "rawSha256": "50a2c323054c8cd2a186b9ed5d5e6d206927b8cda1be1990d0796b350388e4c2",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "52caa2cecbd32cab97736993bd57630b1e3e3bc2",
+      "path": ".github/audits/memory-eval-vnext-s1-s2-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "f28e58f68d03435d31834373eaeab2171ead71620947ed12a478b9ba8fa56b38",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-2026-09-07.md",
+      "rawSha256": "811e6a08691e3bacb3ddd9465d4bdf68a40a3b9748177c975e1852733db271cf",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "025212c4f9bd0dcb2deb4d9ade2925f3bbc6ef92",
+      "path": ".github/audits/memory-eval-vnext-s3-s4-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "fc051930ae6f3343a03f649d7733df3266d517b4a4a01090d81b459e64ac2f0f",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-draft-2026-09-07.md",
+      "rawSha256": "a08b32663acd36cdc4c7daef7c4790b0b2031939998d0b3f09f4b8f46c9cd138",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "80842e62925c05af9450e6acc6ceb70b56f67655",
+      "path": ".github/audits/memory-eval-vnext-s1-s4-contract-approval-2026-09-07.md",
+      "rawSha256": "63c829366e1315f482e7891ee8c59992215bf949eed3f1d0d34ae224f9c06c77",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "159267a80acee97da3a297c637343ea15de725f9",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-revised-draft-2026-09-07.md",
+      "rawSha256": "7ce66bb7386c5b55509b054170c1fdedc65cb505b40512823ddb282c83c3ca98",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-clarification-approval.json",
+      "rawSha256": "d572d28ec77476bf39cd16685a922aaef4ca1203e92d6da3c83fc5e81d891423",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-2026-09-07.md",
+      "rawSha256": "07216f3d4f8100bcf9693849c94cd74494974c3d045552ca97ced36ef14f9262",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "6b2465e921c6e8b99ff032a36be8ada61c0ad599",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-approval-request-draft-2026-09-07.md",
+      "rawSha256": "787ec805301528388a08a75375bbc092bf6388625b292c60bb7421ae0f05cd67",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-recalculated-package-2026-09-07.json",
+      "rawSha256": "4220454017eb8886e53d66c532d4da1a3e75d2e759036742b1c84eef1245b23f",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "a19ae39d0da61295eb17e1545c74bc5b7e702c1a",
+      "path": ".github/audits/memory-eval-vnext-s2-activation-recalculated-approval-draft-2026-09-07.md",
+      "rawSha256": "7b821fde5cefbf9f364263a99f25c11b3852f66692158326ea0955d7ecbbaae0",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "2a13acea05805f18528a205d5caeba37f0d800c9",
+      "path": ".github/audits/memory-eval-vnext-bootstrap-p-scope-draft-2026-09-07.md",
+      "rawSha256": "94c89bef7de4adeecbbea23504a1b684db2bf3384abf894ef43389e29d0ece91",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "2a13acea05805f18528a205d5caeba37f0d800c9",
+      "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-scope-evidence-2026-09-07.json",
+      "rawSha256": "cbd11a79cbc945ef556aeaadd321857dce606d3edeb4960fce2d3d865ad6f893",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+      "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-detailed-plan-2026-09-07.md",
+      "rawSha256": "ea0fc284e9c2aa2eca3a1cefc517552ae537c28aa3ec07c77990c4fd1ea153a8",
+      "ancestorOfTarget": true
+    },
+    {
+      "commit": "2b652cb9f8a729b40fe325be06503f92a62c524d",
+      "path": ".github/audits/evidence/memory-eval-vnext-bootstrap-p-next1-plan-2026-09-07.json",
+      "rawSha256": "8b7ae1357a66f569cb7b9f0caa588b1093ce4e00e5a39d777567bf44620ea8a8",
+      "ancestorOfTarget": true
+    }
+  ],
+  "receiptObservation": {
+    "recordKind": "oi_f3_b_exact_approval_receipt",
+    "recordStatus": "approved_exact_package_pending_start_gate",
+    "requestId": "oi_f3_b_exact_approval_request_2026_09_08",
+    "isAuthoritativeApprovalReceipt": true,
+    "repository": "mposition/Tomverse",
+    "reviewCommit": "f84036a4c86f7d3f91dcd9592f8137bb5cb16f6b",
+    "originalReviewCommit": "60486e971c94a189ab418c4743f48428a402ea52",
+    "repositoryBasis": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+    "directionReceiptCommit": "42a99c4c5721a25b13894b99533b9800f4fb437b",
+    "implementationReferenceCommit": "54ad04e29aa3390f4d342d152127e99928b4268e",
+    "decision": "yes",
+    "approvedBy": "mposition",
+    "approvedAt": "2026-09-08",
+    "humanApprovalResponse": "전체 승인합니다.\n승인자: mposition\n승인일: 2026-09-08\n",
+    "acceptedDecisionIds": [
+      "PB-D1",
+      "PB-D2",
+      "PB-D3",
+      "PB-D4",
+      "PB-D5"
+    ],
+    "decisionStatus": {
+      "PB-D1": "approved",
+      "PB-D2": "approved",
+      "PB-D3": "approved",
+      "PB-D4": "approved",
+      "PB-D5": "approved"
+    },
+    "requiredDecisionIds": [
+      "PB-D1",
+      "PB-D2",
+      "PB-D3",
+      "PB-D4",
+      "PB-D5"
+    ],
+    "inseparableDecisionGroup": [
+      "PB-D2",
+      "PB-D3"
+    ],
+    "inseparableGroupAccepted": true,
+    "reviewLimitsAcknowledged": true,
+    "residualsAndStartGateAccepted": true,
+    "upstreamConditionsPreservedByHuman": true,
+    "exactImplementationPackageApproved": true,
+    "limitedBuiltinAndHelperDesignApproved": true,
+    "newBuiltinUseAuthorizedNow": false,
+    "implementationStartAuthorizedNow": false,
+    "gitPublicationAuthorizedNow": false,
+    "mergeAuthorizedNow": false,
+    "activationAuthorized": false,
+    "operationalSigningAuthorized": false,
+    "paidExecutionAuthorized": false,
+    "fullF07Satisfied": false,
+    "recordCommitAtPreparation": null,
+    "approvalReceiptCommit": null,
+    "requestDocumentCommitAtPreparation": null,
+    "newDocumentsIndependentlyReviewed": false,
+    "externalConfirmationReview": {
+      "reviewCommit": "f84036a4c86f7d3f91dcd9592f8137bb5cb16f6b",
+      "reportRawSha256": "ac97a495be66615ea2ff3896d5b0dc78dca3b2c250ed97cee1073661deb84a34",
+      "verdict": "CONFIRMED",
+      "appliesTo": "R1_package_document_response_only",
+      "usedConfirmationRounds": 1,
+      "maximumConfirmationRounds": 1
+    }
+  },
+  "reviewReportBindings": [
+    {
+      "path": "C:/Users/Vyper/.codex/attachments/e7f117bd-75ae-4fcf-b48a-dfce11806a92/pasted-text.txt",
+      "rawSha256": "76989963726c2a1a0b0334269af46588fadd23cbb7a9debfaf1e384149b0b1a7",
+      "bytes": 12668
+    },
+    {
+      "path": "C:/Users/Vyper/.codex/attachments/6e1f7561-d2be-4d39-84a1-cc012340a147/pasted-text.txt",
+      "rawSha256": "ac97a495be66615ea2ff3896d5b0dc78dca3b2c250ed97cee1073661deb84a34",
+      "bytes": 7678
+    }
+  ],
+  "supportFiles": [
+    {
+      "path": "AGENTS.md",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "68196927b7cdf5b9722c34899823b7e4dd40947f",
+        "rawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad",
+        "bytes": 92621
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "68196927b7cdf5b9722c34899823b7e4dd40947f",
+        "rawSha256": "dd0d1b6da2bc8d1677b1fec691d6b6341a81c0e0a2170406fd023367e9203fad",
+        "bytes": 92621
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "f4e48afffa926681e07e93634509d75eb4abbc2fda19b6ab7a83ff57d4387dd1",
+        "bytes": 93876
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "f4e48afffa926681e07e93634509d75eb4abbc2fda19b6ab7a83ff57d4387dd1",
+        "bytes": 93876,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "package.json",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "99b3e4b78368541b46e5882731774118651b10fc",
+        "rawSha256": "9f7cd6655cce631823e7cb753a6334e2a4f3ac307f8280d7828bf2c1bddf92da",
+        "bytes": 20649
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "c8fb5d7fd0bcdcc9aecc16ef15220b8bff64d6ff",
+        "rawSha256": "c6bf5319a293933f2679fa250760ad9529c30e946e07bed6c18b366f138265d4",
+        "bytes": 21012
+      },
+      "changed": true,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "966aa5cd49ebfc13b2d034617f1e4a8289f620769179ca6db2073fac6f09a58e",
+        "bytes": 20938
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "220d57967f91519186c733a44e9edddc379017daff14536f213613eb07c8a458",
+        "bytes": 21304,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "package-lock.json",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "eb105b3cca2877a93f3f095430b118339e390b79",
+        "rawSha256": "d5b9271e5e5a7d0ab068a6c3bd821c99a4014b3915c09f367826bd348d94691c",
+        "bytes": 567724
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "eb105b3cca2877a93f3f095430b118339e390b79",
+        "rawSha256": "d5b9271e5e5a7d0ab068a6c3bd821c99a4014b3915c09f367826bd348d94691c",
+        "bytes": 567724
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "fbb286ab621b1333421d4728474867b58956538f80299bfb4a0f4a0585e86266",
+        "bytes": 583630
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "fbb286ab621b1333421d4728474867b58956538f80299bfb4a0f4a0585e86266",
+        "bytes": 583630,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "tsconfig.json",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "a21d63d1f62995aeee3d8885e720f1eb3f23ebc2",
+        "rawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959",
+        "bytes": 1446
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "a21d63d1f62995aeee3d8885e720f1eb3f23ebc2",
+        "rawSha256": "cde6f63f9bcfc446ab223e6fff385b2d586893da2d8469d454c811acb54b3959",
+        "bytes": 1446
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "a90dbaf3d7885d0e4d1db827497488e0d905cffc528d65836634b549e4c1a098",
+        "bytes": 1491
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "a90dbaf3d7885d0e4d1db827497488e0d905cffc528d65836634b549e4c1a098",
+        "bytes": 1491,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "scripts/run-unit-tests.mjs",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "0a51e254e2df67fbdc8595b9a3b5d7deac1e3291",
+        "rawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9",
+        "bytes": 3655
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "0a51e254e2df67fbdc8595b9a3b5d7deac1e3291",
+        "rawSha256": "9a9b3cee85bc012ea90d1adfc79b03e912cea0a6838c12e048ded5222ad40ac9",
+        "bytes": 3655
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "e6af763f362e6a31a838d7e5fc9a7c7d5dbbe42d8bceede1da6c9fba24986e76",
+        "bytes": 3747
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "e6af763f362e6a31a838d7e5fc9a7c7d5dbbe42d8bceede1da6c9fba24986e76",
+        "bytes": 3747,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "scripts/check-text-encoding.mjs",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "76289e5a0405c8e5f49e12073c68e7daede1f386",
+        "rawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e",
+        "bytes": 4481
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "76289e5a0405c8e5f49e12073c68e7daede1f386",
+        "rawSha256": "0decbd8e3298abd77e305b6464b3ce6298b73b97a7ece345cd34d2b6e57d6f4e",
+        "bytes": 4481
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "6f43f15a2c30afcfe9050897ca9db53b3f5e443d5d7ebf37fa7d4aa94cc8c473",
+        "bytes": 4620
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "6f43f15a2c30afcfe9050897ca9db53b3f5e443d5d7ebf37fa7d4aa94cc8c473",
+        "bytes": 4620,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "scripts/check-doc-references.mjs",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "da5398a40e0059bd4082ea7bd2caac0a62b93c5f",
+        "rawSha256": "acfb8b4a4bff6bc9d5e6b849d7e0b3de6800ad06c1e6b3e2342b9b91ea889d5f",
+        "bytes": 5869
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "da5398a40e0059bd4082ea7bd2caac0a62b93c5f",
+        "rawSha256": "acfb8b4a4bff6bc9d5e6b849d7e0b3de6800ad06c1e6b3e2342b9b91ea889d5f",
+        "bytes": 5869
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "bcae9e4e989506004d57764de2a7f725cc765bd83a64f7e9d95aa25bb1b0a35c",
+        "bytes": 6037
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "bcae9e4e989506004d57764de2a7f725cc765bd83a64f7e9d95aa25bb1b0a35c",
+        "bytes": 6037,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "scripts/check-policy-section-references.mjs",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "2d66f9c194bb79d03626db091a9c34d4ffee5a7b",
+        "rawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50",
+        "bytes": 12541
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "2d66f9c194bb79d03626db091a9c34d4ffee5a7b",
+        "rawSha256": "57a2282e5609c4017f2a6ef1ac53b0394f9d006b8f185f1706b2cb9eaa3d1b50",
+        "bytes": 12541
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "15a73f7cd7f2ed624a129c41be42406243f83e6fa6e19d5a8ca8d6a6cc946d49",
+        "bytes": 12860
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "15a73f7cd7f2ed624a129c41be42406243f83e6fa6e19d5a8ca8d6a6cc946d49",
+        "bytes": 12860,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    },
+    {
+      "path": "scripts/check-release-records.mjs",
+      "basis": {
+        "commit": "65b82d5670e086ca77f39050ad48e68f56433f0e",
+        "blobOid": "3ffb806df1d8a6057ea1db80ef692deea8765087",
+        "rawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080",
+        "bytes": 3675
+      },
+      "target": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "blobOid": "3ffb806df1d8a6057ea1db80ef692deea8765087",
+        "rawSha256": "ab99efc972ab85c02c2897f3e378a2ee19580a196647c1c5e2c61f3bdef16080",
+        "bytes": 3675
+      },
+      "changed": false,
+      "preCheckout": {
+        "commit": "11eac3f29b432ab721fe40ef6acb68918a1758d2",
+        "rawSha256": "12466afec65a4f8728ef5972f33459757e365682c065d077fb76b014020d6999",
+        "bytes": 3772
+      },
+      "working": {
+        "commit": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "rawSha256": "12466afec65a4f8728ef5972f33459757e365682c065d077fb76b014020d6999",
+        "bytes": 3772,
+        "equalsGitRaw": false,
+        "crlfNormalizedEqualsGit": true
+      }
+    }
+  ],
+  "basisToTarget": {
+    "diff": [
+      {
+        "status": "M",
+        "paths": [
+          ".github/RELEASE_CHECKLIST.md"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          ".github/audits/2026-09-02-native-mobile-auth-n2-implementation-report.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/2026-09-08-mobile-auth-fingerprint-rule-approval.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/ai-review-scoring-policy-decision-2026-09-08.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/ai-review-scoring-policy-options-2026-09-08.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/evidence/memory-eval-vnext-oi-f3-b-approval-package-2026-09-08.json"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/memory-eval-vnext-oi-f3-b-approval-2026-09-08.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/memory-eval-vnext-oi-f3-b-approval-package-draft-2026-09-08.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/memory-eval-vnext-oi-f3-b-approval-record-draft-2026-09-08.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          ".github/audits/memory-eval-vnext-oi-f3-b-approval-request-draft-2026-09-08.md"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "docs/ops/ai-review-eval-scoring-contract.md"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "docs/ops/mobile-auth-key-rotation.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "docs/ops/mobile-auth-store-entries/active.template.json"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "docs/ops/mobile-auth-store-entries/pending.template.json"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "docs/ops/voice-provider-budget-records/2026-09-08-production-4b2a0cfd66f63e8907ba35ff410655628608a176.md"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "docs/ops/voice-provider-budget-records/2026-09-08-staging-d79d3c8673db4a9f5f4cd109bc99c50c21e182e3.md"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "docs/ops/voice-provider-budget-rollout.md"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "docs/policy/voice-input.md"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "lib/aiReviewEvalJudgement.ts"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "lib/aiReviewEvidenceBundle.ts"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "package.json"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "scripts/check-mobile-auth-keyring.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "scripts/check-mobile-auth-store-entries.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "scripts/experiments/ai-review-scoring-policy-experiment.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "scripts/mobile-auth-fingerprint-core.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "scripts/mobile-auth-store-entry-core.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "scripts/score-ai-review-judgements.mjs"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "tests/aiReviewEvalJudgementScoring.test.mjs"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "tests/aiReviewEvidenceBundle.test.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "tests/aiReviewJudgementScoringCli.test.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "tests/mobileAuthFingerprint.test.mjs"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "tests/mobileAuthKeyringHealthReport.test.mjs"
+        ]
+      },
+      {
+        "status": "A",
+        "paths": [
+          "tests/mobileAuthStoreEntry.test.mjs"
+        ]
+      },
+      {
+        "status": "M",
+        "paths": [
+          "tests/stagingVerificationRecordSkeleton.test.mjs"
+        ]
+      }
+    ],
+    "changedFiles": 34,
+    "changedSupportFiles": [
+      "package.json"
+    ],
+    "scriptChanges": [
+      {
+        "name": "experiment:ai-review-scoring-policies",
+        "basis": null,
+        "target": "node --conditions=react-server --import tsx scripts/experiments/ai-review-scoring-policy-experiment.mjs"
+      },
+      {
+        "name": "check:mobile-auth-store-entries",
+        "basis": null,
+        "target": "node scripts/check-mobile-auth-store-entries.mjs"
+      },
+      {
+        "name": "score:ai-review-judgements",
+        "basis": null,
+        "target": "node --conditions=react-server --import tsx scripts/score-ai-review-judgements.mjs"
+      }
+    ],
+    "dependenciesEqual": true,
+    "devDependenciesEqual": true,
+    "overridesEqual": true,
+    "assessment": "34 upstream paths: 5 PB approval/package audit additions and 29 other already-landed paths. Existing memory protocol6 and other 30 approved source documents are unchanged. No selection of new dependency/override or modification of implementation scope.",
+    "newScriptsExecuted": false
+  },
+  "environment": {
+    "capturedAt": "2026-09-08T12:51:45.545Z",
+    "target": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+    "runtime": {
+      "node": "v22.22.2",
+      "v8": "12.4.254.21-node.39",
+      "openssl": "3.5.5",
+      "platform": "win32",
+      "arch": "x64",
+      "execPath": "C:\\nvm4w\\nodejs\\node.exe"
+    },
+    "physicalPackageCount": 924,
+    "versionMismatches": [],
+    "missingRequired": [],
+    "optionalMissingCount": 175,
+    "optionalPlatformExcluded": 164,
+    "optionalOther": [
+      {
+        "path": "node_modules/@emnapi/core",
+        "expected": "1.10.0",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@emnapi/wasi-threads",
+        "expected": "1.2.1",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@napi-rs/wasm-runtime",
+        "expected": "1.1.6",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@emnapi/core",
+        "expected": "1.11.1",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@emnapi/runtime",
+        "expected": "1.11.1",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@emnapi/wasi-threads",
+        "expected": "1.2.2",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@napi-rs/wasm-runtime",
+        "expected": "1.1.4",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/@tybys/wasm-util",
+        "expected": "0.10.2",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/tslib",
+        "expected": "2.8.1",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@tybys/wasm-util",
+        "expected": "0.10.3",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      },
+      {
+        "path": "node_modules/@unrs/resolver-binding-wasm32-wasi/node_modules/@emnapi/runtime",
+        "expected": "1.10.0",
+        "optional": true,
+        "os": null,
+        "cpu": null
+      }
+    ],
+    "hiddenLockSha256": "a18b259089f299ea80b276cb448850b22f2e9be2a5546337ae389b49bd4793bc",
+    "hiddenMismatches": [],
+    "inventorySha256": "b40c13271460a42425d3630abf9c0c444da312f1a4e89a9f2396e00737909f74",
+    "inventoryHashFormat": "SHA256(UTF8(JSON.stringify(rows))), lock iteration order; row={path,expectedVersion,actualVersion,packageJsonSha256,optional}",
+    "selectedPackages": [
+      {
+        "path": "node_modules/@emnapi/runtime",
+        "expectedVersion": "1.11.3",
+        "actualVersion": "1.11.3",
+        "packageJsonSha256": "751db16171cb4d111905122be8a4c0dc2b5c82e6ba2a590ca24fbc6cca048f93",
+        "optional": true
+      },
+      {
+        "path": "node_modules/@esbuild/win32-x64",
+        "expectedVersion": "0.28.1",
+        "actualVersion": "0.28.1",
+        "packageJsonSha256": "4a63b84fa1059fef348e29e3a39c26168213bb7f0aa1ac0174e439cc1e62a9f8",
+        "optional": true
+      },
+      {
+        "path": "node_modules/@img/sharp-wasm32",
+        "expectedVersion": "0.35.4",
+        "actualVersion": "0.35.4",
+        "packageJsonSha256": "35569bf0424d428edfe984f62b9de09d8c99341273473aa3f78db42ce87b7a4e",
+        "optional": true
+      },
+      {
+        "path": "node_modules/@prisma/client",
+        "expectedVersion": "7.10.0",
+        "actualVersion": "7.10.0",
+        "packageJsonSha256": "974ee2fedaddb6f7707ba2dc0c4d95219be80d6e952034ba9d5d10c68eddc9a7",
+        "optional": false
+      },
+      {
+        "path": "node_modules/esbuild",
+        "expectedVersion": "0.28.1",
+        "actualVersion": "0.28.1",
+        "packageJsonSha256": "d55d1d19fcc5b6079e4a71dd4111340c79c682bc36835ac7058a0c364c7db58a",
+        "optional": false
+      },
+      {
+        "path": "node_modules/mysql2",
+        "expectedVersion": "3.24.3",
+        "actualVersion": "3.24.3",
+        "packageJsonSha256": "841dceb7b008cacab20a4a03d9aecc7906bc00fb3ff1d5399149dcc94b0c975e",
+        "optional": false
+      },
+      {
+        "path": "node_modules/prisma",
+        "expectedVersion": "7.10.0",
+        "actualVersion": "7.10.0",
+        "packageJsonSha256": "e0d96b7612a7592e62b1e2ba5b40e686e96af588bf9dafe74799b99d0b31abed",
+        "optional": false
+      },
+      {
+        "path": "node_modules/sql-escaper",
+        "expectedVersion": "1.5.1",
+        "actualVersion": "1.5.1",
+        "packageJsonSha256": "a34138ba8dd5601e65bf42a3fe4d0aca3df9904c62ee6fd948d39ee1b79b00d8",
+        "optional": false
+      },
+      {
+        "path": "node_modules/tsx",
+        "expectedVersion": "4.23.13",
+        "actualVersion": "4.23.13",
+        "packageJsonSha256": "3ace2493a0acd26fc72a8433a38113ee04d5a1976910a3f40815f9e779d5c426",
+        "optional": false
+      },
+      {
+        "path": "node_modules/typescript",
+        "expectedVersion": "6.0.3",
+        "actualVersion": "6.0.3",
+        "packageJsonSha256": "9332e97c30d3e53ed54910b89207ed657fb444066484df6e5b6965bf130865e9",
+        "optional": false
+      }
+    ],
+    "nodeEngine": "22.x",
+    "npmVersion": "10.9.7",
+    "nodeExecutableSha256": "ae1a50511be58e987483fdbc12125407443926d2d394669ade2352776e920dd3",
+    "workspaceLinks": [
+      {
+        "path": "node_modules/@tomverse/chat-core",
+        "resolved": "packages/chat-core",
+        "realPath": "H:\\Project\\ai-chat-hub\\packages\\chat-core",
+        "packageVersion": "0.0.0",
+        "targetVersion": "0.0.0"
+      },
+      {
+        "path": "node_modules/@tomverse/mobile",
+        "resolved": "apps/mobile",
+        "realPath": "H:\\Project\\ai-chat-hub\\apps\\mobile",
+        "packageVersion": "0.0.0",
+        "targetVersion": "0.0.0"
+      },
+      {
+        "path": "node_modules/@tomverse/ui-tokens",
+        "resolved": "packages/ui-tokens",
+        "realPath": "H:\\Project\\ai-chat-hub\\packages\\ui-tokens",
+        "packageVersion": "0.0.0",
+        "targetVersion": "0.0.0"
+      }
+    ],
+    "countExplanation": "924 physical non-link package entries plus 3 workspace links; earlier 927 count included the links.",
+    "tarballIntegrityAuditPerformed": false,
+    "npmLs": {
+      "args": [
+        "ls",
+        "--all",
+        "--json",
+        "--offline"
+      ],
+      "start": "2026-09-08T12:53:40.521Z",
+      "end": "2026-09-08T12:53:48.533Z",
+      "exit": 0,
+      "outputSha256": "371be4a05005ebcb6f3de3629cce2fe154d0469eba06a7d281f70d419c23fd9f",
+      "summary": {
+        "error": null,
+        "problems": [
+          "extraneous: @emnapi/runtime@1.11.3 H:\\Project\\ai-chat-hub\\node_modules\\@emnapi\\runtime",
+          "extraneous: @img/sharp-wasm32@0.35.4 H:\\Project\\ai-chat-hub\\node_modules\\@img\\sharp-wasm32"
+        ],
+        "rootName": "ai-chat-hub",
+        "rootVersion": "0.1.0",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    "childEnvPolicy": {
+      "allowlist": "OS executable/user/cache/temp paths only; production DB/provider values not forwarded.",
+      "dotenvPath": "H:/Project/ai-chat-hub/.os-f4-absent-env-file",
+      "dotenvPathAbsent": true,
+      "changesAreChildOnly": true,
+      "dependencyInstallOrConfigWrite": false
+    },
+    "runtimeProbe": {
+      "args": [
+        "--conditions=react-server",
+        "--import",
+        "tsx",
+        "--input-type=module",
+        "-"
+      ],
+      "start": "2026-09-08T12:55:42.228Z",
+      "end": "2026-09-08T12:55:42.411Z",
+      "exit": 0,
+      "outputSha256": "1b3b2dc891e027778f18188ff731bb8bdb650c315fcf032a6954aec8eb946d1f",
+      "output": "{\"runtime\":{\"node\":\"v22.22.2\",\"v8\":\"12.4.254.21-node.39\",\"openssl\":\"3.5.5\",\"platform\":\"win32\",\"arch\":\"x64\"},\"execArgv\":[\"--conditions=react-server\",\"--import\",\"tsx\",\"--input-type=module\"],\"goldens\":[{\"id\":\"G01\",\"utf8Length\":17,\"rawSha256\":\"67f2fd255e411935d63adb1352ddb23efd6054c61d3131965ab2809e0c10d61f\",\"fileWithLfSha256\":\"56c2983b681f1fa15614e6d1426ddfb1600c469c6b10c804607b2f6533a51e57\",\"passed\":true},{\"id\":\"G02\",\"utf8Length\":38,\"rawSha256\":\"b102c5769b28782ff067cd00d5398bf3d646788e0ada274ba184d3a6c0987f94\",\"fileWithLfSha256\":\"e2c7afb11c04f5331d593f4c484d79c550b044cbd482cc4bb066d742e2ff5dfa\",\"passed\":true},{\"id\":\"G03\",\"utf8Length\":54,\"rawSha256\":\"2527c39823667232c24655a1a051b2bcf052991596fe398a2e5417e55ced1036\",\"fileWithLfSha256\":\"e21dc53eb696f769d8ba6d15412e62a81c2be59a24e975f75f74f31ea78b906f\",\"passed\":true},{\"id\":\"G04\",\"utf8Length\":13,\"rawSha256\":\"9cd295f267be3f6ef4bc845a31e8ef660f20fd75b97a16916fd7959c57329e0d\",\"fileWithLfSha256\":\"a824f2b1937b007d84d3ca2d8a903af07aa58dd18259397f884ebcc3637e6915\",\"passed\":true}],\"publicVector\":{\"id\":\"G05\",\"valid\":true,\"signatureMutation\":false,\"messageMutation\":false},\"scope\":\"existing public reference arithmetic and published public-key verify only; no protocol imports, no new Proxy/bytes test, no keygen/signing/private key\",\"implementationTestsExecuted\":false}\n"
+    }
+  },
+  "execution": {
+    "scripts": {
+      "check:encoding:strict": "node scripts/check-text-encoding.mjs --strict",
+      "check:policy-section-references": "node scripts/check-policy-section-references.mjs",
+      "check:release-records": "node scripts/check-release-records.mjs",
+      "check:memory-eval-succ9": "node --import tsx scripts/check-memory-eval-succ9.mjs",
+      "check:memory-extraction-eval": "node --import tsx scripts/check-memory-extraction-eval-register.mjs",
+      "check:memory-eval-freeze": "node --import tsx scripts/check-memory-eval-freeze-conditions.mjs",
+      "check:doc-references": "node scripts/check-doc-references.mjs",
+      "test:unit": "node scripts/run-unit-tests.mjs",
+      "typecheck": "next typegen && tsc --noEmit --incremental false"
+    },
+    "discovery": {
+      "serverCount": 632,
+      "clientCount": 4,
+      "server": [
+        "tests/accountDataAnonymisation.test.mjs",
+        "tests/accountDataDownloadSurface.test.mjs",
+        "tests/accountDataExport.test.mjs",
+        "tests/accountDataExportTicket.test.mjs",
+        "tests/accountLifecycleEmails.test.mjs",
+        "tests/admin-approval-core.test.ts",
+        "tests/admin-audit-integrity-core.test.ts",
+        "tests/admin-auth-core.test.ts",
+        "tests/adminApiOutcome.test.mjs",
+        "tests/adminAuditActorNotAForeignKey.test.mjs",
+        "tests/adminAuditEntryDiagnosis.test.mjs",
+        "tests/adminAuditIntegrityDiagnosis.test.mjs",
+        "tests/adminAuditIntegrityKeys.test.mjs",
+        "tests/adminE2eHarness.test.ts",
+        "tests/adminEmailDeliveryFilters.test.mjs",
+        "tests/adminInfrastructureUiStatus.test.mjs",
+        "tests/adminModelRegistryFilters.test.ts",
+        "tests/adminNavigation.test.mjs",
+        "tests/adminPlanAdjustCore.test.mjs",
+        "tests/adminReauthenticationCta.test.mjs",
+        "tests/adminReauthenticationView.test.ts",
+        "tests/adminSearchPolicy.test.ts",
+        "tests/adminSoleApprover.test.mjs",
+        "tests/adminUserSecurityCore.test.mjs",
+        "tests/adminUsersCore.test.mjs",
+        "tests/aiReviewApprovalBlock.test.mjs",
+        "tests/aiReviewBlindReviewRecord.test.mjs",
+        "tests/aiReviewDraftLedger.test.mjs",
+        "tests/aiReviewDraftLedgerCli.test.mjs",
+        "tests/aiReviewEvalBlindSheet.test.mjs",
+        "tests/aiReviewEvalCliFlow.test.mjs",
+        "tests/aiReviewEvalCore.test.mjs",
+        "tests/aiReviewEvalDraftPrompt.test.mjs",
+        "tests/aiReviewEvalJudgementScoring.test.mjs",
+        "tests/aiReviewEvalPlan.test.mjs",
+        "tests/aiReviewEvalRun.test.mjs",
+        "tests/aiReviewEvalScoringContract.test.mjs",
+        "tests/aiReviewEvidenceBundle.test.mjs",
+        "tests/aiReviewJudgementScoringCli.test.mjs",
+        "tests/aiReviewQualityThresholds.test.mjs",
+        "tests/aiReviewScorecardCore.test.mjs",
+        "tests/analyticsConsentPolicy.test.mjs",
+        "tests/answerContextDisclosure.test.mjs",
+        "tests/answerSuggestionArbitration.test.mjs",
+        "tests/anthropicCacheEfficiencyReport.test.mjs",
+        "tests/anthropicPromptCaching.test.mjs",
+        "tests/anthropicPromptCachingWiring.test.mjs",
+        "tests/apiCacheControlPolicy.test.mjs",
+        "tests/appManagedWebSearchTool.test.mjs",
+        "tests/appSettingWriters.test.mjs",
+        "tests/appToastViewportCore.test.mjs",
+        "tests/assistantKnowledgeChunking.test.mjs",
+        "tests/assistantKnowledgeCleanupDryRun.test.mjs",
+        "tests/assistantKnowledgeLimits.test.mjs",
+        "tests/assistantKnowledgeRetrievalScoring.test.mjs",
+        "tests/assistantPackageAdapter.test.mjs",
+        "tests/assistantPackageAnalytics.test.mjs",
+        "tests/assistantPackageArchive.test.mjs",
+        "tests/assistantPackageFixture.test.mjs",
+        "tests/assistantPackageImportCopy.test.mjs",
+        "tests/assistantPackageImportWizard.test.mjs",
+        "tests/assistantPackageManifest.test.mjs",
+        "tests/assistantPackageProvenance.test.mjs",
+        "tests/assistantPackageReview.test.mjs",
+        "tests/assistantPackageRoundTrip.test.mjs",
+        "tests/assistantPackageSecretScan.test.mjs",
+        "tests/assistantProfileAnalyticsPrivacy.test.mjs",
+        "tests/assistantProfileErrorCopy.test.mjs",
+        "tests/assistantProfileImportCore.test.mjs",
+        "tests/assistantProfilePrivacyCopy.test.mjs",
+        "tests/assistantProfilePrompt.test.mjs",
+        "tests/assistantProfileRemovedNotice.test.mjs",
+        "tests/assistantProfileReturn.test.mjs",
+        "tests/assistantProfileRuntime.test.mjs",
+        "tests/assistantProfileVersioning.test.mjs",
+        "tests/attachmentAuditCore.test.mjs",
+        "tests/attachmentContextPrompt.test.mjs",
+        "tests/audienceEstimateTruncation.test.mjs",
+        "tests/autoCohort.test.mjs",
+        "tests/autoDispatchPreflight.test.mjs",
+        "tests/autoDrillOverride.test.mjs",
+        "tests/autoFallbackGate.test.mjs",
+        "tests/autoModelSelection.test.mjs",
+        "tests/autoPrAutoMergeArming.test.mjs",
+        "tests/autoPrBranchPolicy.test.mjs",
+        "tests/autoProductBoundary.test.mjs",
+        "tests/autoRoutingUi.test.mjs",
+        "tests/automaticFallbackBoundary.test.mjs",
+        "tests/automaticTransitionClaim.test.mjs",
+        "tests/backMergeDeployGate.test.mjs",
+        "tests/billingLifecycleEmails.test.mjs",
+        "tests/billingPriceCatalogDefaults.test.mjs",
+        "tests/billingPriceCatalogReport.test.mjs",
+        "tests/billingPromotionAdminPolicy.test.mjs",
+        "tests/billingPromotionCore.test.mjs",
+        "tests/bodyScrollLock.test.mjs",
+        "tests/boundedResponseRelease.test.mjs",
+        "tests/browserDownload.test.mjs",
+        "tests/buildInfo.test.mjs",
+        "tests/canonicalVisualGate.test.mjs",
+        "tests/chat-credit-allocation.test.ts",
+        "tests/chatAdmissionCore.test.mjs",
+        "tests/chatArchive.test.mjs",
+        "tests/chatArchivePlan.test.mjs",
+        "tests/chatAttachmentErrorCopy.test.mjs",
+        "tests/chatAttachmentFormats.test.mjs",
+        "tests/chatAttachmentText.test.mjs",
+        "tests/chatAttachmentTokens.test.mjs",
+        "tests/chatAttachmentValidation.test.mjs",
+        "tests/chatAttemptExecution.test.mjs",
+        "tests/chatAutoScroll.test.mjs",
+        "tests/chatAvailabilityCore.test.mjs",
+        "tests/chatBudgetBreakdown.test.mjs",
+        "tests/chatBudgetInputTokens.test.mjs",
+        "tests/chatCompletionStatus.test.mjs",
+        "tests/chatConcurrencyCore.test.mjs",
+        "tests/chatContentState.test.mjs",
+        "tests/chatContextBundleCore.test.mjs",
+        "tests/chatContextWindow.test.mjs",
+        "tests/chatCostGuardrails.test.mjs",
+        "tests/chatCostSafetyCore.test.mjs",
+        "tests/chatDispatchedModelAttribution.test.mjs",
+        "tests/chatFailureLayer.test.mjs",
+        "tests/chatHelpCopy.test.mjs",
+        "tests/chatIdentityNamespace.test.mjs",
+        "tests/chatKeyboardPolicy.test.mjs",
+        "tests/chatLeaseOwnershipCore.test.mjs",
+        "tests/chatLimitDecisionCore.test.mjs",
+        "tests/chatMarkdownPlugins.test.mjs",
+        "tests/chatMemoryContextCore.test.mjs",
+        "tests/chatMessageSerialization.test.ts",
+        "tests/chatModelSummary.test.mjs",
+        "tests/chatMultiAttemptSettlement.test.mjs",
+        "tests/chatOutputCapRegistryDrift.test.mjs",
+        "tests/chatProviderHolds.test.mjs",
+        "tests/chatProviderPrompt.test.mjs",
+        "tests/chatRateLimitCore.test.mjs",
+        "tests/chatRuntimeStatus.test.mjs",
+        "tests/chatSecurityWebSearchMode.test.mjs",
+        "tests/chatStreamConsumer.test.mjs",
+        "tests/chatStreamKeepalive.test.mjs",
+        "tests/chatStreamKeepalivePlan.test.mjs",
+        "tests/chatStreamLiveness.test.mjs",
+        "tests/chatStreamRuntime.test.mjs",
+        "tests/chatSystemPromptContract.test.mjs",
+        "tests/chatTokenEstimate.test.mjs",
+        "tests/chatTurnSystemBlocks.test.mjs",
+        "tests/chatWorkspaceGuideContent.test.mjs",
+        "tests/checkRouterContextWindowDbCore.test.mjs",
+        "tests/checkoutPlanEligibilityCore.test.mjs",
+        "tests/ciPlaywrightInstall.test.mjs",
+        "tests/cloudflareR2Analytics.test.mjs",
+        "tests/comparisonReadiness.test.mjs",
+        "tests/comparisonReviewCacheCompatibility.test.mjs",
+        "tests/comparisonReviewCost.test.mjs",
+        "tests/comparisonReviewGrounding.test.mjs",
+        "tests/comparisonReviewItemFeedback.test.mjs",
+        "tests/comparisonReviewRunCore.test.mjs",
+        "tests/comparisonReviewTurnCore.test.mjs",
+        "tests/composerMenuLabelSeparation.test.mjs",
+        "tests/contextWindowImpact.test.mjs",
+        "tests/continuationEntryState.test.mjs",
+        "tests/continuationNativeShell.test.mjs",
+        "tests/continuationQuickAction.test.mjs",
+        "tests/continuationStagingFixtures.test.mjs",
+        "tests/conversationDraftStore.test.mjs",
+        "tests/conversationMemoryMode.test.mjs",
+        "tests/conversationProduct.test.mjs",
+        "tests/conversationProfileBinding.test.mjs",
+        "tests/conversationQuerySelect.test.mjs",
+        "tests/conversationTitle.test.mjs",
+        "tests/conversationWriters.test.mjs",
+        "tests/cookieAttributes.test.mjs",
+        "tests/costBucketCorrectionCore.test.ts",
+        "tests/creditLockOrder.test.mjs",
+        "tests/creditPacks.test.mjs",
+        "tests/cronAutoFixActivation.test.mjs",
+        "tests/cspReportCore.test.ts",
+        "tests/dataDomainRegistryValidator.test.mjs",
+        "tests/database-error.test.ts",
+        "tests/databaseError.test.mjs",
+        "tests/dbIntegrationCoverage.test.mjs",
+        "tests/dbIntegrationGroups.test.mjs",
+        "tests/deepResearchSuggestion.test.mjs",
+        "tests/deepResearchSuggestionCopy.test.mjs",
+        "tests/deepseekUsageAdapterCore.test.mjs",
+        "tests/defaultModelAuditCore.test.ts",
+        "tests/defaultModelEvalGateCore.test.ts",
+        "tests/defaultModelReconciliationCore.test.mjs",
+        "tests/deployedCommitDrift.test.mjs",
+        "tests/deploymentEnvironment.test.mjs",
+        "tests/directDatabaseConnectRetry.test.mjs",
+        "tests/discardResponseBody.test.mjs",
+        "tests/docReferences.test.mjs",
+        "tests/documentLanguage.test.mjs",
+        "tests/docxTemplate.test.mjs",
+        "tests/e2eTestMode.test.mjs",
+        "tests/emailAddressMasking.test.mjs",
+        "tests/emailAudienceExpansionCore.test.mjs",
+        "tests/emailBusinessIdentityReadiness.test.mjs",
+        "tests/emailCampaignAttestationCore.test.mjs",
+        "tests/emailCampaignCore.test.mjs",
+        "tests/emailCampaignRecipientCore.test.mjs",
+        "tests/emailCampaignScheduleCore.test.mjs",
+        "tests/emailConsentGate.test.mjs",
+        "tests/emailFeatureFlags.test.mjs",
+        "tests/emailFooterRenderer.test.mjs",
+        "tests/emailJurisdictionComposition.test.mjs",
+        "tests/emailJurisdictionCore.test.mjs",
+        "tests/emailJurisdictionSeed.test.mjs",
+        "tests/emailProviderPort.test.mjs",
+        "tests/emailSendRetryCore.test.mjs",
+        "tests/emailSendingDomainsCore.test.mjs",
+        "tests/emailSendingIdentityCore.test.mjs",
+        "tests/emailSnapshotCrypto.test.mjs",
+        "tests/emailSnapshotKeyring.test.mjs",
+        "tests/emailSnapshotRetention.test.mjs",
+        "tests/emailSuppressionCore.test.mjs",
+        "tests/emailUnsubscribeReadiness.test.mjs",
+        "tests/enumConstraints.test.mjs",
+        "tests/errorBoundaryProps.test.mjs",
+        "tests/errorDetailCost.test.mjs",
+        "tests/errorReportContract.test.ts",
+        "tests/errorReportRuntimeBoundary.test.mjs",
+        "tests/errorReportToken.test.ts",
+        "tests/exportConversation.test.mjs",
+        "tests/externalContinuationContracts.test.mjs",
+        "tests/externalContinuationSeed.test.mjs",
+        "tests/externalConversationLineage.test.mjs",
+        "tests/externalImportAdapters.test.mjs",
+        "tests/externalImportArchive.test.mjs",
+        "tests/externalImportDigest.test.mjs",
+        "tests/externalImportJsonStream.test.mjs",
+        "tests/externalImportLimits.test.mjs",
+        "tests/externalImportMetrics.test.mjs",
+        "tests/externalImportPipeline.test.mjs",
+        "tests/externalImportPrivacyCopy.test.mjs",
+        "tests/externalImportSelectionDigest.test.mjs",
+        "tests/externalImportUiCopy.test.mjs",
+        "tests/externalImportWizard.test.mjs",
+        "tests/externalImportZipDirectory.test.mjs",
+        "tests/failureDomain.test.mjs",
+        "tests/falImageRequest.test.mjs",
+        "tests/falPricingDrift.test.mjs",
+        "tests/fallbackPricingMetrics.test.mjs",
+        "tests/feedbackAutoFixCore.test.ts",
+        "tests/feedbackAutoFixPolicy.test.ts",
+        "tests/feedbackLifecycleCore.test.mjs",
+        "tests/feedbackLifecycleEmails.test.mjs",
+        "tests/feedbackPolicy.test.mjs",
+        "tests/foundingTesterPassCore.test.mjs",
+        "tests/geminiAdapter.test.mjs",
+        "tests/geminiHtml.test.mjs",
+        "tests/geminiTakeoutFixture.test.mjs",
+        "tests/generatedArtifactArchiveDocuments.test.mjs",
+        "tests/generatedArtifactBatchTool.test.mjs",
+        "tests/generatedArtifactCore.test.mjs",
+        "tests/generatedArtifactDocx.test.mjs",
+        "tests/generatedArtifactDocxBatch.test.mjs",
+        "tests/generatedArtifactFormats.test.mjs",
+        "tests/generatedArtifactIncompleteTurn.test.mjs",
+        "tests/generatedArtifactPdf.test.mjs",
+        "tests/generatedArtifactPptx.test.mjs",
+        "tests/generatedArtifactProgressSignal.test.mjs",
+        "tests/generatedArtifactText.test.mjs",
+        "tests/generatedArtifactToolPolicy.test.mjs",
+        "tests/generatedArtifactTurnTracker.test.mjs",
+        "tests/generatedArtifactXlsx.test.mjs",
+        "tests/gifStructure.test.mjs",
+        "tests/gitleaksAllowlist.test.mjs",
+        "tests/goLiveSecurityFixes.test.ts",
+        "tests/googleImageEvidence.test.mjs",
+        "tests/googleImageRequest.test.mjs",
+        "tests/guestAttachmentPolicy.test.mjs",
+        "tests/guestChatInitialModels.test.ts",
+        "tests/guestChatRequestCoordinator.test.ts",
+        "tests/guestDefaultModels.test.ts",
+        "tests/guestOnboardingCopy.test.mjs",
+        "tests/guestTurnstileGrant.test.ts",
+        "tests/imageAssetDownload.test.mjs",
+        "tests/imageAssetPayload.test.mjs",
+        "tests/imageCapabilityPrompt.test.mjs",
+        "tests/imageComposerRestore.test.mjs",
+        "tests/imageDimensions.test.mjs",
+        "tests/imageExecutorBudget.test.mjs",
+        "tests/imageGenerationFlagSnapshot.test.mjs",
+        "tests/imageGenerationPricing.test.mjs",
+        "tests/imageGenerationStateCore.test.mjs",
+        "tests/imageIntentAnalyticsPrivacy.test.mjs",
+        "tests/imageIntentSignals.test.mjs",
+        "tests/imageModelRegistry.test.mjs",
+        "tests/imageModelSelection.test.mjs",
+        "tests/imageProviderAdapter.test.mjs",
+        "tests/imageProviderBudget.test.mjs",
+        "tests/imageResolution.test.mjs",
+        "tests/imageSettlementCostSource.test.mjs",
+        "tests/imageTimelineMerge.test.mjs",
+        "tests/imageWorkspaceContract.test.mjs",
+        "tests/infrastructureAlertPolicy.test.mjs",
+        "tests/issueBacklog.test.mjs",
+        "tests/knowledgeSweepCadence.test.mjs",
+        "tests/koreanParticleCopy.test.mjs",
+        "tests/landingContent.test.mjs",
+        "tests/legacyOfficeText.test.mjs",
+        "tests/localeLaunchPolicy.test.mjs",
+        "tests/localeParity.test.mjs",
+        "tests/localeTranslation.test.mjs",
+        "tests/localizedCallbackUrl.test.mjs",
+        "tests/localizedHelpHref.test.mjs",
+        "tests/lockResourceType.test.mjs",
+        "tests/maintenanceStepsCore.test.mjs",
+        "tests/manifestHashKeyring.test.mjs",
+        "tests/marketingMemoryClaims.test.mjs",
+        "tests/marketingModelReferences.test.mjs",
+        "tests/marketingRoutes.test.mjs",
+        "tests/marketingSendHealth.test.mjs",
+        "tests/mediaSecurity.test.mjs",
+        "tests/memoryContextPrompt.test.mjs",
+        "tests/memoryEvalAdoptedBatchSuccession.test.mjs",
+        "tests/memoryEvalAdoptedBatches.test.mjs",
+        "tests/memoryEvalBatchRecord.test.mjs",
+        "tests/memoryEvalBlindReview.test.mjs",
+        "tests/memoryEvalBudgetBinding.test.mjs",
+        "tests/memoryEvalCandidateIsolation.test.mjs",
+        "tests/memoryEvalCanonicalisation.test.mjs",
+        "tests/memoryEvalCanonicalisationScoring.test.mjs",
+        "tests/memoryEvalCeilingOverrun.test.mjs",
+        "tests/memoryEvalCostCeilingRounding.test.mjs",
+        "tests/memoryEvalCostEstimateTarget.test.mjs",
+        "tests/memoryEvalDatasetManifests.test.mjs",
+        "tests/memoryEvalDatasetRegistry.test.mjs",
+        "tests/memoryEvalDatasetRegistrySchema3.test.mjs",
+        "tests/memoryEvalDatasetSchema.test.mjs",
+        "tests/memoryEvalDevelopmentProbe.test.mjs",
+        "tests/memoryEvalFailureDiagnosis.test.mjs",
+        "tests/memoryEvalFailureReport.test.mjs",
+        "tests/memoryEvalFailureSummary.test.mjs",
+        "tests/memoryEvalFailureSummarySchema3.test.mjs",
+        "tests/memoryEvalFreezeGate.test.mjs",
+        "tests/memoryEvalGoldNormalisationCoverage.test.mjs",
+        "tests/memoryEvalGoldReviewJudgements.test.mjs",
+        "tests/memoryEvalHarnessTarget.test.mjs",
+        "tests/memoryEvalInspectWorkflow.test.mjs",
+        "tests/memoryEvalModuleLoadOrder.test.mjs",
+        "tests/memoryEvalNearDuplicates.test.mjs",
+        "tests/memoryEvalPolarityDistance.test.mjs",
+        "tests/memoryEvalPolicyFloors.test.mjs",
+        "tests/memoryEvalProbeDetail.test.mjs",
+        "tests/memoryEvalPromptDatasetSeparation.test.mjs",
+        "tests/memoryEvalPromptRuleImplementations.test.mjs",
+        "tests/memoryEvalRegressionCorpusSeparation.test.mjs",
+        "tests/memoryEvalReplacementGolds.test.mjs",
+        "tests/memoryEvalReplacementPlan.test.mjs",
+        "tests/memoryEvalReviewSheet.test.mjs",
+        "tests/memoryEvalRunAdmissibility.test.mjs",
+        "tests/memoryEvalRunWorkflow.test.mjs",
+        "tests/memoryEvalSchema3DryRun.test.mjs",
+        "tests/memoryEvalSchemaReadiness.test.mjs",
+        "tests/memoryEvalScoringContractDigest.test.mjs",
+        "tests/memoryEvalScoringV2.test.mjs",
+        "tests/memoryEvalScoringV3.test.mjs",
+        "tests/memoryEvalSpendCeiling.test.mjs",
+        "tests/memoryEvalSucc3AdoptedBatches.test.mjs",
+        "tests/memoryEvalSucc4AdoptionRecord.test.mjs",
+        "tests/memoryEvalSucc4Assembly.test.mjs",
+        "tests/memoryEvalSucc4Dataset.test.mjs",
+        "tests/memoryEvalSucc4Manifest.test.mjs",
+        "tests/memoryEvalSucc4Review.test.mjs",
+        "tests/memoryEvalSucc4Transition.test.mjs",
+        "tests/memoryEvalSucc5.test.mjs",
+        "tests/memoryEvalSucc6.test.mjs",
+        "tests/memoryEvalSucc6FreezeDrift.test.mjs",
+        "tests/memoryEvalSucc7Adoption.test.mjs",
+        "tests/memoryEvalSucc9.test.mjs",
+        "tests/memoryEvalSuccessorAdoptedBatches.test.mjs",
+        "tests/memoryEvalSuccessorBatches.test.mjs",
+        "tests/memoryEvalUsesProductAdapter.test.mjs",
+        "tests/memoryEvalV5Budget.test.mjs",
+        "tests/memoryEvalVnextWire.test.mjs",
+        "tests/memoryExportCore.test.mjs",
+        "tests/memoryExtractionCore.test.mjs",
+        "tests/memoryExtractionEvalBoundary.test.mjs",
+        "tests/memoryExtractionEvalCore.test.mjs",
+        "tests/memoryExtractionLaunch.test.mjs",
+        "tests/memoryExtractionMetricsCore.test.mjs",
+        "tests/memoryExtractionOfflineBoundary.test.mjs",
+        "tests/memoryExtractionPipeline.test.mjs",
+        "tests/memoryExtractionPolarity.test.mjs",
+        "tests/memoryExtractionPromptExamples.test.mjs",
+        "tests/memoryExtractionPromptFingerprint.test.mjs",
+        "tests/memoryExtractionPromptRules.test.mjs",
+        "tests/memoryHealthSignals.test.mjs",
+        "tests/memoryInjectionGate.test.mjs",
+        "tests/memoryMetricsCore.test.mjs",
+        "tests/memoryPrivacyCopy.test.mjs",
+        "tests/memoryReleaseContracts.test.mjs",
+        "tests/memoryRetrievalScoring.test.mjs",
+        "tests/memoryRetrievalTerms.test.mjs",
+        "tests/memorySharingNotice.test.mjs",
+        "tests/memorySourceDeletion.test.mjs",
+        "tests/memorySourceLock.test.mjs",
+        "tests/memoryValidatorAdversarial.test.mjs",
+        "tests/memoryValidatorCore.test.mjs",
+        "tests/messageAttachmentAvailability.test.mjs",
+        "tests/messageAttachmentCore.test.mjs",
+        "tests/messageProviderContext.test.ts",
+        "tests/migrationBaseline.test.mjs",
+        "tests/mistralOcr.test.ts",
+        "tests/mobileAccessTokenCore.test.mjs",
+        "tests/mobileAccessTokenCrypto.test.mjs",
+        "tests/mobileAuthBridgeContract.test.mjs",
+        "tests/mobileAuthContract.test.mjs",
+        "tests/mobileAuthDeploymentVerify.test.mjs",
+        "tests/mobileAuthExemptPaths.test.mjs",
+        "tests/mobileAuthFingerprint.test.mjs",
+        "tests/mobileAuthKeyring.test.mjs",
+        "tests/mobileAuthKeyringCheck.test.mjs",
+        "tests/mobileAuthKeyringHealthReport.test.mjs",
+        "tests/mobileAuthStoreEntry.test.mjs",
+        "tests/mobileAuthenticatedFetch.test.mjs",
+        "tests/mobileBearerProxy.test.mjs",
+        "tests/mobileLoginGrantPkce.test.mjs",
+        "tests/mobileRefreshRotationCore.test.mjs",
+        "tests/mobileRefreshToken.test.mjs",
+        "tests/mobileRevocationFreshnessCore.test.mjs",
+        "tests/mobileSessionSnapshotCache.test.mjs",
+        "tests/modalFocusEffectDeps.test.mjs",
+        "tests/model-lifecycle-work-item-core.test.ts",
+        "tests/model-lifecycle.test.ts",
+        "tests/modelBillingProfile.test.mjs",
+        "tests/modelContextWindowEvidence.test.mjs",
+        "tests/modelFinder.test.mjs",
+        "tests/modelGenerationCompatibility.test.mjs",
+        "tests/modelHealthRollup.test.mjs",
+        "tests/modelLaunchEmail.test.mjs",
+        "tests/modelLifecycleDailyReport.test.mjs",
+        "tests/modelMaxOutputProbe.test.mjs",
+        "tests/modelOwner.test.mjs",
+        "tests/modelPickerPresentation.test.mjs",
+        "tests/modelPricing.test.mjs",
+        "tests/modelRecommendations.test.mjs",
+        "tests/modelRegistryAdminPricing.test.mjs",
+        "tests/modelRegistryLogSeverity.test.mjs",
+        "tests/modelRegistryPricingInheritance.test.ts",
+        "tests/modelRegistryProviderConnectionMigration.test.mjs",
+        "tests/modelRegistryShared.test.mjs",
+        "tests/modelRetirementAudienceCore.test.mjs",
+        "tests/modelRetirementNotice.test.mjs",
+        "tests/modelSelectionLimit.test.mjs",
+        "tests/modelSettingsSyncQueue.test.mjs",
+        "tests/modelUsageCredits.test.mjs",
+        "tests/modelWindowProbeTrial.test.mjs",
+        "tests/nativeAppCors.test.mjs",
+        "tests/nativeAppCorsProxy.test.mjs",
+        "tests/nativeBearerGate.test.mjs",
+        "tests/nativeSwcBinding.test.mjs",
+        "tests/newConversationModels.test.mjs",
+        "tests/newConversationModelsReconciliation.test.mjs",
+        "tests/notificationRetryCore.test.mjs",
+        "tests/notifyReleaseLaneFailure.test.mjs",
+        "tests/oauthLinkState.test.ts",
+        "tests/openAiPricingContract.test.ts",
+        "tests/operational-monitoring-core.test.ts",
+        "tests/operationalMonitoringCore.test.mjs",
+        "tests/operatorAlertProbeCore.test.mjs",
+        "tests/outputTokenTelemetryCore.test.ts",
+        "tests/pendingModelPricing.test.mjs",
+        "tests/perplexityDeepResearch.test.mjs",
+        "tests/perplexitySearchMetadata.test.mjs",
+        "tests/planChangeCopy.test.mjs",
+        "tests/planChangeCredits.test.mjs",
+        "tests/planChangeStateMachine.test.mjs",
+        "tests/policySectionReferences.test.mjs",
+        "tests/pricingFormat.test.mjs",
+        "tests/processingTierGuard.test.mjs",
+        "tests/productAnalyticsDatabaseConstraint.test.ts",
+        "tests/productAnalyticsDelivery.test.mjs",
+        "tests/productAnalyticsShared.test.mjs",
+        "tests/productEntryDestination.test.mjs",
+        "tests/productKeyBackfill.test.mjs",
+        "tests/productKeyReadMode.test.mjs",
+        "tests/productSurfaceRoutes.test.mjs",
+        "tests/promotionDiagnosticsCore.test.mjs",
+        "tests/promptCacheWriteReservation.test.mjs",
+        "tests/promptInjectionAudit.test.mjs",
+        "tests/provider-model-catalog-core.test.ts",
+        "tests/providerApiKeyNames.test.mjs",
+        "tests/providerBillingIntegrations.test.mjs",
+        "tests/providerCatalogCoverage.test.mjs",
+        "tests/providerCostBudget.test.mjs",
+        "tests/providerCreditAlertsCore.test.mjs",
+        "tests/providerErrorClassification.test.mjs",
+        "tests/providerFallbackCandidates.test.mjs",
+        "tests/providerHealthPolicyCore.test.ts",
+        "tests/providerProbe.test.mjs",
+        "tests/providerPublicStatusCore.test.ts",
+        "tests/providerRecoveryCore.test.ts",
+        "tests/providerUsageCost.test.mjs",
+        "tests/providerUsageSyncCore.test.mjs",
+        "tests/providerVerification.test.mjs",
+        "tests/publicModelCatalog.test.mjs",
+        "tests/publicReadRateLimit.test.mjs",
+        "tests/publicSnapshotCache.test.ts",
+        "tests/purchaseIntent.test.mjs",
+        "tests/pushScope.test.mjs",
+        "tests/r2LifecyclePolicy.test.mjs",
+        "tests/railwayRestorePreflightCore.test.mjs",
+        "tests/railwayUsageMonitorFlag.test.mjs",
+        "tests/reconciliationApprovalCore.test.ts",
+        "tests/refundSagaCore.test.mjs",
+        "tests/releaseGateCoverage.test.mjs",
+        "tests/releaseGateEvidence.test.mjs",
+        "tests/releaseRecordPolicy.test.mjs",
+        "tests/reportModelCreditWeights.test.mjs",
+        "tests/reportModelTokenLimits.test.mjs",
+        "tests/requestOrigin.test.mjs",
+        "tests/retentionPolicy.test.mjs",
+        "tests/retiredModelReferences.test.mjs",
+        "tests/retiredProductName.test.mjs",
+        "tests/robotsPolicyCore.test.mjs",
+        "tests/robotsRoute.test.mjs",
+        "tests/robotsTxtCore.test.mjs",
+        "tests/routerAnswerOutcome.test.mjs",
+        "tests/routerBundleCoverage.test.mjs",
+        "tests/routerCallLimits.test.mjs",
+        "tests/routerCandidates.test.mjs",
+        "tests/routerCostProjection.test.mjs",
+        "tests/routerDecision.test.mjs",
+        "tests/routerDecisionPreRegistration.test.mjs",
+        "tests/routerEvalDraftPrompt.test.mjs",
+        "tests/routerEvalModelAlias.test.mjs",
+        "tests/routerEvalReviewSheet.test.mjs",
+        "tests/routerEvalRunJournal.test.mjs",
+        "tests/routerFableEntry.test.mjs",
+        "tests/routerHumanReviewAdjudication.test.mjs",
+        "tests/routerHumanReviewDiagnostic.test.mjs",
+        "tests/routerHumanReviewKeyRecovery.test.mjs",
+        "tests/routerHumanReviewSample.test.mjs",
+        "tests/routerHumanReviewSheet.test.mjs",
+        "tests/routerHumanReviewSubmission.test.mjs",
+        "tests/routerJudgeCalibration.test.mjs",
+        "tests/routerJudgeCapProbe.test.mjs",
+        "tests/routerJudgeSelection.test.mjs",
+        "tests/routerQualityDecisionGate.test.mjs",
+        "tests/routerQualityEvalCore.test.mjs",
+        "tests/routerQualityEvalSet.test.mjs",
+        "tests/routerRoutingPlan.test.mjs",
+        "tests/routerScorePolicy.test.mjs",
+        "tests/routerSelection.test.mjs",
+        "tests/routerSignalCore.test.mjs",
+        "tests/routingAttemptSequence.test.mjs",
+        "tests/routingFallbackPolicy.test.mjs",
+        "tests/routingFaultInjection.test.mjs",
+        "tests/routingInstrumentationMode.test.mjs",
+        "tests/routingManifestContent.test.mjs",
+        "tests/routingRetrySignal.test.mjs",
+        "tests/routingShadow.test.mjs",
+        "tests/routingShadowReport.test.mjs",
+        "tests/routingStreamFailure.test.mjs",
+        "tests/runNextBuildCore.test.mjs",
+        "tests/scheduledJobsCore.test.mjs",
+        "tests/schemaComparisonCore.test.mjs",
+        "tests/scriptServerOnlyConditions.test.mjs",
+        "tests/searchProviderBudget.test.mjs",
+        "tests/senderRoles.test.mjs",
+        "tests/sendingIdentity.test.mjs",
+        "tests/servedProcessingTier.test.mjs",
+        "tests/settingsNavigation.test.mjs",
+        "tests/settlementLockOrder.test.mjs",
+        "tests/sharedPackages.test.mjs",
+        "tests/sharedPendingRequest.test.mjs",
+        "tests/signinConsentLocales.test.mjs",
+        "tests/slack-message-template-core.test.ts",
+        "tests/sourceGrounding.test.mjs",
+        "tests/sourceGroundingCopy.test.mjs",
+        "tests/spreadsheetDataRows.test.mjs",
+        "tests/stagingVerificationFeatures.test.mjs",
+        "tests/stagingVerificationRecordParsing.test.mjs",
+        "tests/stagingVerificationRecordSkeleton.test.mjs",
+        "tests/stagingVerificationRecords.test.mjs",
+        "tests/stampPromotionMetadataCore.test.mjs",
+        "tests/standardEmailRetryCore.test.mjs",
+        "tests/statusPageEvidence.test.mjs",
+        "tests/storageObjectErrors.test.mjs",
+        "tests/stripePromotionProvisioningCore.test.mjs",
+        "tests/stripeWebhookSyncCore.test.mjs",
+        "tests/taskProfileCore.test.mjs",
+        "tests/textEncodingCheckCore.test.mjs",
+        "tests/themeCssContract.test.mjs",
+        "tests/tokenEstimateCalibration.test.mjs",
+        "tests/tokenEstimateShadow.test.mjs",
+        "tests/tokenEstimateShadowRecorder.test.mjs",
+        "tests/typographyPolicy.test.mjs",
+        "tests/uiContractIndex.test.mjs",
+        "tests/uiTierCoverage.test.mjs",
+        "tests/unconsumedResponseBodies.test.mjs",
+        "tests/unconsumedResponseBodiesGate.test.mjs",
+        "tests/unsubscribeToken.test.mjs",
+        "tests/unsweptTables.test.mjs",
+        "tests/usageBucketRange.test.mjs",
+        "tests/user-daily-usage.test.mjs",
+        "tests/user-time-zone.test.mjs",
+        "tests/verifyFallbackDrill.test.mjs",
+        "tests/voiceCaptureAdapter.test.mjs",
+        "tests/voiceClipInspection.test.mjs",
+        "tests/voiceCreditNeutrality.test.mjs",
+        "tests/voiceInputAccess.test.mjs",
+        "tests/voiceInputPrivacy.test.mjs",
+        "tests/voiceProviderBudget.test.mjs",
+        "tests/voiceProviderBudgetEnvCheck.test.mjs",
+        "tests/voiceProviderSettlement.test.mjs",
+        "tests/voiceRecorderMachine.test.mjs",
+        "tests/voiceSessionScopes.test.mjs",
+        "tests/webSearchCapability.test.mjs",
+        "tests/webSearchCapabilityPrompt.test.mjs",
+        "tests/webSearchCitations.test.mjs",
+        "tests/webSearchComposerState.test.mjs",
+        "tests/webSearchCostRefusal.test.mjs",
+        "tests/webSearchCredits.test.mjs",
+        "tests/webSearchDispatchability.test.mjs",
+        "tests/webSearchExecutionNormalizer.test.mjs",
+        "tests/webSearchNativeCostReservation.test.mjs",
+        "tests/webSearchPath.test.mjs",
+        "tests/webSearchRetrySuggestion.test.mjs",
+        "tests/webSearchStatusBadge.test.mjs",
+        "tests/webSearchStreamTrailer.test.mjs",
+        "tests/webSearchSuggestion.test.mjs",
+        "tests/webSearchSuggestionCopy.test.mjs",
+        "tests/webSearchToggle.test.mjs",
+        "tests/webSearchToolConfig.test.mjs",
+        "tests/xaiImageRequest.test.mjs",
+        "tests/zodJitlessClient.test.mjs"
+      ],
+      "client": [
+        "tests/client/autoRoutingRender.test.tsx",
+        "tests/client/deepResearchSuggestionCard.test.tsx",
+        "tests/client/voiceInputControl.test.tsx",
+        "tests/client/webSearchSuggestionCard.test.tsx"
+      ],
+      "serverListSha256": "33b8d45ae20b1ac169b69c809dd2a3551247426742d8ecab539c7bb1beba7565",
+      "clientListSha256": "88e7df406f7efb10b2784770fbfda4252555818e796137d3ec9a99bc76d8dd40",
+      "matchesTarget": true,
+      "t01Selected": true,
+      "t11Selected": false,
+      "fullSuiteExecuted": false,
+      "argvForwardingIsFilter": false,
+      "basisServerCount": 629,
+      "basisClientCount": 4,
+      "selectedFileArgsQuotedCharacters": 39347,
+      "commandLineEstimateIsNotExecution": true
+    },
+    "implementationFullUnitSuiteRun": false,
+    "typecheckRun": false,
+    "localBuildE2ERun": false,
+    "newProxyByteCasesRun": false,
+    "protocolModulesImportedInProbe": false,
+    "cryptoKeyGenerationOrSigning": false
+  },
+  "ci": {
+    "capturedAt": "2026-09-08 13:03:38 UTC",
+    "targetRuns": [
+      {
+        "databaseId": 34228297888,
+        "event": "push",
+        "headSha": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "headBranch": "develop",
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34228297888",
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": [
+          {
+            "id": 102067884631,
+            "name": "Admin Console E2E (PostgreSQL)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Restore Next.js build cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Production build",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Restore Playwright Chromium cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install Chromium",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run the Admin Console E2E suite",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Upload failed test evidence",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Restore Playwright Chromium cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Restore Next.js build cache",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "databaseId": 34228298090,
+        "event": "push",
+        "headSha": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+        "headBranch": "develop",
+        "url": "https://github.com/mposition/Tomverse/actions/runs/34228298090",
+        "status": "completed",
+        "conclusion": "success",
+        "jobs": [
+          {
+            "id": 102068106090,
+            "name": "Credit and finance PostgreSQL scenarios (accounts)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102068106349,
+            "name": "Credit and finance PostgreSQL scenarios (finance)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102068106422,
+            "name": "Credit and finance PostgreSQL scenarios (memory)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102068106466,
+            "name": "Credit and finance PostgreSQL scenarios (assistant)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102068106482,
+            "name": "Credit and finance PostgreSQL scenarios (import)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102068106516,
+            "name": "Credit and finance PostgreSQL scenarios (routing)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102068106561,
+            "name": "Credit and finance PostgreSQL scenarios (email)",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Initialize containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Install dependencies",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Run financial DB integration tests",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Report the red lane",
+                "status": "completed",
+                "conclusion": "skipped"
+              },
+              {
+                "name": "Post Setup Node.js",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Post Checkout",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Stop containers",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          },
+          {
+            "id": 102070881125,
+            "name": "Credit and finance PostgreSQL scenarios",
+            "status": "completed",
+            "conclusion": "success",
+            "steps": [
+              {
+                "name": "Set up job",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Require every lane to have passed",
+                "status": "completed",
+                "conclusion": "success"
+              },
+              {
+                "name": "Complete job",
+                "status": "completed",
+                "conclusion": "success"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "historicalNotOverwritten": [
+      {
+        "commit": "38568f0cf8f88a6803bfedb76184232bef7312a6",
+        "runIds": [
+          34225916489,
+          34225916522
+        ],
+        "conclusion": "cancelled",
+        "creditAggregate": "failure",
+        "cause": "Annotations: higher-priority pending request for same develop concurrency group."
+      },
+      {
+        "commit": "f925263dc6ed76dc89b8a9b048c93702f7a998c7",
+        "runIds": [
+          34227916074,
+          34227916044
+        ],
+        "conclusion": "cancelled"
+      }
+    ],
+    "deploymentUserReported": true,
+    "deploymentIndependentlyVerified": false,
+    "verifiedActualSteps": [
+      "Admin Production build",
+      "Admin Run the Admin Console E2E suite",
+      "Credit accounts/finance/memory/assistant/import/routing/email: Run financial DB integration tests",
+      "Credit Require every lane to have passed"
+    ]
+  },
+  "checksBeforeWriting": [
+    {
+      "script": "check:encoding:strict",
+      "args": [
+        "run",
+        "check:encoding:strict"
+      ],
+      "start": "2026-09-08T12:53:38.540Z",
+      "end": "2026-09-08T12:53:39.847Z",
+      "exit": 0,
+      "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+      "output": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n"
+    },
+    {
+      "script": "check:policy-section-references",
+      "args": [
+        "run",
+        "check:policy-section-references"
+      ],
+      "start": "2026-09-08T12:53:38.545Z",
+      "end": "2026-09-08T12:53:39.829Z",
+      "exit": 0,
+      "outputSha256": "d8946376913edc36b8e1689a247a0d5fe8cfac046f0b8938fb7d599115a9f775",
+      "output": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4121 citation(s) against 30 policy document(s). 2471 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).\n"
+    },
+    {
+      "script": "check:release-records",
+      "args": [
+        "run",
+        "check:release-records"
+      ],
+      "start": "2026-09-08T12:53:38.550Z",
+      "end": "2026-09-08T12:53:38.924Z",
+      "exit": 0,
+      "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+      "output": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n"
+    },
+    {
+      "script": "check:memory-eval-succ9",
+      "args": [
+        "run",
+        "check:memory-eval-succ9"
+      ],
+      "start": "2026-09-08T12:53:38.562Z",
+      "end": "2026-09-08T12:53:39.468Z",
+      "exit": 0,
+      "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+      "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n"
+    },
+    {
+      "script": "check:memory-extraction-eval",
+      "args": [
+        "run",
+        "check:memory-extraction-eval"
+      ],
+      "start": "2026-09-08T12:53:38.580Z",
+      "end": "2026-09-08T12:53:39.130Z",
+      "exit": 0,
+      "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+      "output": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n"
+    },
+    {
+      "script": "check:memory-eval-freeze",
+      "args": [
+        "run",
+        "check:memory-eval-freeze"
+      ],
+      "start": "2026-09-08T12:53:38.597Z",
+      "end": "2026-09-08T12:53:39.529Z",
+      "exit": 0,
+      "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+      "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n"
+    },
+    {
+      "script": "check:doc-references",
+      "args": [
+        "run",
+        "check:doc-references"
+      ],
+      "start": "2026-09-08T12:53:38.596Z",
+      "end": "2026-09-08T12:53:40.000Z",
+      "exit": 0,
+      "outputSha256": "802e87ecace9622f4c5c8a928ce9604a192300c7a80a4dfae05db21bbd0cd62d",
+      "output": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 743 referenced path(s) across 92 instruction document(s), and 862 path(s) named by comments across 2578 source file(s), all present.\n"
+    }
+  ],
+  "checksAfterWriting": [
+    {
+      "script": "check:encoding:strict",
+      "args": [
+        "run",
+        "check:encoding:strict"
+      ],
+      "start": "2026-09-08T13:01:30.000Z",
+      "end": "2026-09-08T13:01:31.161Z",
+      "exit": 0,
+      "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380",
+      "output": "\n> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    },
+    {
+      "script": "check:policy-section-references",
+      "args": [
+        "run",
+        "check:policy-section-references"
+      ],
+      "start": "2026-09-08T13:01:29.996Z",
+      "end": "2026-09-08T13:01:30.995Z",
+      "exit": 0,
+      "outputSha256": "d8946376913edc36b8e1689a247a0d5fe8cfac046f0b8938fb7d599115a9f775",
+      "output": "\n> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4121 citation(s) against 30 policy document(s). 2471 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    },
+    {
+      "script": "check:release-records",
+      "args": [
+        "run",
+        "check:release-records"
+      ],
+      "start": "2026-09-08T13:01:30.016Z",
+      "end": "2026-09-08T13:01:30.316Z",
+      "exit": 0,
+      "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565",
+      "output": "\n> ai-chat-hub@0.1.0 check:release-records\n> node scripts/check-release-records.mjs\n\nRelease record check passed.\n  release-2026-08-15__9424a4bd.md: 851598eb, 17 ticked, 86 unticked, 6 owned in section 8\n  release-2026-08-16__d4dd0e0a.md: d4dd0e0a, 1 ticked, 117 unticked, 19 owned in section 8\n  release-deviation-2026-08-15__391c933.md: deviation, not a checklist run\n  release-deviation-2026-08-15__5528317.md: deviation, not a checklist run\n  release-deviation-2026-08-15__78af657.md: deviation, not a checklist run\n  release-deviation-2026-08-15__b0cf10e.md: deviation, not a checklist run\n  release-deviation-2026-08-19__348a3df.md: deviation, not a checklist run\n  release-verification-handoff-2026-08-15.md: handoff, not a checklist run\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    },
+    {
+      "script": "check:memory-eval-succ9",
+      "args": [
+        "run",
+        "check:memory-eval-succ9"
+      ],
+      "start": "2026-09-08T13:01:30.019Z",
+      "end": "2026-09-08T13:01:30.857Z",
+      "exit": 0,
+      "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c",
+      "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-succ9\n> node --import tsx scripts/check-memory-eval-succ9.mjs\n\n\nOK    succ-9 is the successor it says it is  — 1150 cases\nOK    the retired cases are preserved  — 5 entries\nOK    the selection golds left the decision set  — 5 retired, all preserved\nOK    assistant_only:ko subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    assistant_only:en subtype floor  — 38 subtype 3/4 of 125, floor 38 (no slack)\nOK    succ-8 is unchanged  — the retirement is a new version, not an edit\nOK    the harness target binds  — mem-eval-succ-9 against its pinned manifest\nOK    the pinned manifest matches this tree  — 82d9aa48fe96…\nOK    the approval's shape  — signed by @mposition\nOK    the approval's commit is an ancestor of HEAD  — 25b3f503ed26…\n\ntransitions: 5\nsubtypeDigest    9a4e418c7fd36a4d84b53b99ed41d731c83a5f53d93af117c4c8fd14e05d8ce6  (human_confirmed)\ndatasetDigest    626f71362046b7d88df9dbb07e2f51fa0e908c78192f74bd837fa88e9ce1d4e6\nmanifestDigest   82d9aa48fe96037b7493dae26594a73482d7ba4a915532caffc9be411085f40c\nscoringContract  mem-score-v3.5 2d4bcb696c2dd87d586ab30bb8308c567b3ef3f57b0b17f6ff99e10de0cc33d4\n\nsucc-9 structural checks all hold. frozen=true; the harness targets mem-eval-succ-9.\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    },
+    {
+      "script": "check:memory-extraction-eval",
+      "args": [
+        "run",
+        "check:memory-extraction-eval"
+      ],
+      "start": "2026-09-08T13:01:30.014Z",
+      "end": "2026-09-08T13:01:30.529Z",
+      "exit": 0,
+      "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b",
+      "output": "\n> ai-chat-hub@0.1.0 check:memory-extraction-eval\n> node --import tsx scripts/check-memory-extraction-eval-register.mjs\n\nnotice: gpt-5-4-mini::mem-extract-v4 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nnotice: gpt-5-4-mini::mem-extract-v6 is a candidate awaiting a human eval-budget approval (§12.5) — smoke mode only until it is recorded.\nMemory extraction eval register check passed: 14 pair(s), 0 approved.\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    },
+    {
+      "script": "check:memory-eval-freeze",
+      "args": [
+        "run",
+        "check:memory-eval-freeze"
+      ],
+      "start": "2026-09-08T13:01:30.038Z",
+      "end": "2026-09-08T13:01:30.897Z",
+      "exit": 0,
+      "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1",
+      "output": "\n> ai-chat-hub@0.1.0 check:memory-eval-freeze\n> node --import tsx scripts/check-memory-eval-freeze-conditions.mjs\n\nFreeze conditions for mem-eval-seed-11 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 28 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 28/28\nOK    검수자 기록  — 28/28\nOK    no scoring rule left unimplemented  — schema 1: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\nNote: mem-eval-seed-11 is schema 1. Its freeze predates the 2026-08-25 scoring amendment and is kept as a\nhistorical fact; it cannot support a decision-grade run, and the harness\nrefuses one (legacy_dataset_schema).\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-2 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 32 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 32/32\nOK    검수자 기록  — 32/32\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-3 (currently frozen)\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    no batch left unreviewed  — 0 candidate batch(es)\nOK    explicit adoption + verdicts + diversity + date on every batch  — 40 batches\nOK    draft disagreement recorded for every batch  — max 0%\nOK    findDuplicateCases()  — 0\nOK    초안 도구·모델·버전 기록  — 40/40\nOK    검수자 기록  — 40/40\nOK    no scoring rule left unimplemented  — schema 2: scored under an earlier contract, not mem-score-v3.5\n\nAll 8 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-4 (currently frozen)\ndocs/ops/memory-extraction-eval-dataset.md §7.1a successor terms: the\nbatch conditions are replaced by five, because 103 of these cases\ncome from replacement tranches and not from an adopted batch.\n\nOK    cell floors  — 1150 cases across 8 cells\nOK    findDuplicateCases()  — 0\nOK    no scoring rule left unimplemented  — mem-score-v3.5: every rule a dataset can satisfy has an implementation; awaiting a prompt: v3-unfixable-evidence-emits-nothing\nOK    every gold judged, and none judged unfixable  — 474/474 golds judged, 0 unfixable\nOK    inherited cases covered by the source's adoption records  — 1047 cases across 40 source batches\nOK    the record's tranches are exactly the replacements  — 5 tranches, 103 cases\nOK    every recorded tranche digest matches the tree  — 5/5\nOK    drafting source, reviewer, disagreement and verdicts written  — every cell filled\nOK    every tranche recorded and adopted  — 5/5 adopted\n\nAll 9 conditions hold.\n\n------------------------------------------------------------------------\n\nFreeze conditions for mem-eval-succ-5 (currently frozen)\nA contract-only successor: succ-4's cases under the corrected\ncontract. The case-level conditions are answered by succ-4's\nsection above and are not repeated here.\n\nOK    the sample is succ-4's, unchanged  — 1150 cases, digest 0a516821da60669da6763528a414d0433e11e38db8eca56c690667cc7b2a18f0\nOK    the contract did move  — mem-score-v3.3 -> mem-score-v3.4\nOK    the manifest recomputes from the tree  — manifest digest 215b679444c610928975c63b8c095f98eefb0d0bd22f28acff3255fcaf464762\nOK    a human approved it as contract-only  — @mposition on 2026-08-28, scope contract-only\n\nAll 4 conditions hold.\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    },
+    {
+      "script": "check:doc-references",
+      "args": [
+        "run",
+        "check:doc-references"
+      ],
+      "start": "2026-09-08T13:01:30.054Z",
+      "end": "2026-09-08T13:01:31.337Z",
+      "exit": 0,
+      "outputSha256": "802e87ecace9622f4c5c8a928ce9604a192300c7a80a4dfae05db21bbd0cd62d",
+      "output": "\n> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 743 referenced path(s) across 92 instruction document(s), and 862 path(s) named by comments across 2578 source file(s), all present.\n",
+      "sameExitAsBefore": true,
+      "sameOutputAsBefore": true
+    }
+  ],
+  "checkerScope": {
+    "encoding": "Working text marker check; fatal UTF-8 decoding separately.",
+    "docReferences": "Instruction documents and source comments; .github/audits excluded.",
+    "policyReferences": "Tracked corpus excluding audits; some rules compare added lines against base.",
+    "releaseRecords": "release-* registry, not this receipt or audit.",
+    "memoryChecks": "Existing dataset/register/freeze structure only; no activation authority.",
+    "manualChecksRequired": [
+      "fatal UTF-8",
+      "JSON parse",
+      "evidence raw SHA in Markdown",
+      "relative links",
+      "git diff --check",
+      "new file no-index whitespace",
+      "source/support/untracked preservation"
+    ]
+  },
+  "residuals": {
+    "oiF1": "accepted historical timing gap; closure=false",
+    "oiF2": "separate ID/path scope",
+    "oiF4": "existing Windows full-suite runner limitation retained; 632-file discovery is not full runner success, and runner unchanged/not executed.",
+    "odrF1": "external closure not declared",
+    "b01ToB23": "not_run",
+    "b24": "pre-start evidence only; separate implementation instruction still missing",
+    "upper54Ac": {
+      "partial": 9,
+      "deferred": 45,
+      "fullySatisfied": 0
+    }
+  },
+  "preservationBaseline": {
+    "untracked": [
+      {
+        "path": ".github/audits/attachment-retention-copy-legal-privacy-review-2026-08-28.md",
+        "rawSha256": "bcb69780466af1df892f6d82eec186f06836e581b259424e797b5e95274881f2"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-os-f4-reinstallation-revalidation-2026-09-08.json",
+        "rawSha256": "316d715a989fa8bb0967794e2d93f9f93ab734fc28741be5cfd9d7bd1f458a88"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-os-f4-start-tip-revalidation-2026-09-08.json",
+        "rawSha256": "ecd5efb933a3f263ace5c2fe7893e70e07e7cc581181d1ed38e6096e9c6e9178"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-s2-activation-package-2026-09-07.json",
+        "rawSha256": "06b104bf7b5ea0d7d207d55db3520d2a968a7d3a6d5bf96e8fb1e182aaa4fcc5"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "93f5477a792f07b0765a209472c7d05c8faf91776d024f00f9d58dfc1d837eee"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-bootstrap-p-next1-independent-review-prompt-2026-09-08.md",
+        "rawSha256": "6dc5824aa26e0d2661ff42b9afca5a6de2a5656338bc4b9c2ae7d49baee9abd9"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-disposition-confirmation-review-prompt-2026-09-08.md",
+        "rawSha256": "fa04d321e67ebc78a02fa0e4eb9df515d217b40900e11b54e534852100867f3b"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-disposition-independent-review-prompt-2026-09-08.md",
+        "rawSha256": "7ed8131932280fbd5962c1bc8489b02499494c1ee1d8af65afb58b305c0569e0"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-implementation-independent-review-prompt-2026-09-08.md",
+        "rawSha256": "06f66804d3e936dbe80f2a5db0c050c1fe7224b548ec2b2c0d569c79cec3ddfb"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-offline-subset-independent-review-prompt-2026-09-08.md",
+        "rawSha256": "93fd1e540841b1be671c6157e2b231d09c14ea144f830b19c4d53cc4a4b9f3b3"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f3-b-confirmation-review-prompt-draft-2026-09-08.md",
+        "rawSha256": "a44e5d8e61211460de2a7881971b426396b93051cbc9bfef90b86f0685f075f9"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f3-b-independent-review-prompt-draft-2026-09-08.md",
+        "rawSha256": "29433490041fe8a8f1a5cb1f8ffd804e96073c29e0e54e389eaf19e09cb401e5"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-os-f4-reinstallation-revalidation-2026-09-08.md",
+        "rawSha256": "89653d6e854491e082d393c01ae8cb1acfabfd56eb50d8b1c1f5c73cb8b09404"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-os-f4-start-tip-revalidation-2026-09-08.md",
+        "rawSha256": "b1a0d71cbe49ccb8f7018bb95788640388398a4a111dac2133e198844094c008"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-2026-09-06.md",
+        "rawSha256": "74b02f5035ab6766f4e93d9335c7cf7919ba19283173f9cede639c6b66a101be"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s1-s2-independent-review-prompt-2026-09-06.md",
+        "rawSha256": "fea5b992a050d1ba160a0153ea3a7a8da714e57c5193b81bd140e105c7866826"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-approval-draft-2026-09-07.md",
+        "rawSha256": "6a06a68271d827667a9d04784ea2eb74642179147bb96b107a946cfecc79a481"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-confirmation-review-prompt-2026-09-07.md",
+        "rawSha256": "bed852fa4fbdb53cd7ddce2b1d453759244fd43bb290b2cd72c2550c7ac3cbdb"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-draft-2026-09-07.md",
+        "rawSha256": "ccb1af8d606cc27fb30b1654712f9e61065b8a2d2e8123d25dd64c91f0c07f65"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s2-activation-clarification-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "7aecf2f7744840cf6161065278103ebcacabef74b808f3e0eadb1748ecaff142"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-confirmation-review-prompt-2026-09-07.md",
+        "rawSha256": "9e64bf111a1cadde38e01386738e4642d42f6a5018dfad52c5c33af5e961d238"
+      },
+      {
+        "path": ".github/audits/memory-eval-vnext-s3-s4-independent-review-prompt-2026-09-07.md",
+        "rawSha256": "7b5e62eb77fdc36a39de1e73fc88cde729090ebc2d4a3d03f26bdbce851ae77c"
+      },
+      {
+        "path": "attachment-audit.json",
+        "rawSha256": "52b9ea37d7dae4cb09931651cb9955e0447c06b25fd126b485211c7228bb93fa"
+      }
+    ],
+    "ignored": [
+      {
+        "path": "docs/ops/app-managed-web-search-staging-verification-records/2026-08-27__8fc628d63c31d4e2d1a52278263dc08bf0cc1677.md",
+        "rawSha256": "1a57bfcb5fb33f2f2b19a3dfa7eb80b1d5a05078678b869101fe343f7916a3ee"
+      },
+      {
+        "path": "docs/ops/external-conversation-continuation-staging-verification-records/2026-08-31__5e187218c536af33094154e4174a3af4267a094a.md",
+        "rawSha256": "7ff9b19e7c8b3fc92248a28b12d22c0a24e6d047e1b3a399021a045dbc4c93f9"
+      },
+      {
+        "path": "docs/ops/external-conversation-continuation-staging-verification-records/2026-08-31__f1d136dc279088fbe08b3c6704284e2f850d050e.md",
+        "rawSha256": "be151ed569f0cd374edf695febb80452537a09595f54eb4db8ea149d72d1b5ab"
+      }
+    ],
+    "claudeCodexTouched": false,
+    "originalApprovalFilesEdited": false
+  },
+  "manualVerification": {
+    "at": "2026-09-08T13:02:19.655Z",
+    "target": "15dd94f7f9e96aa815cca1034f1c1abf24d993a8",
+    "source41Preserved": true,
+    "support9WorkingPreserved": true,
+    "untracked23Ignored3Preserved": true,
+    "strictUtf8": true,
+    "jsonParse": true,
+    "whitespacePassed": true,
+    "trackedClean": true
+  },
+  "exclusions": [
+    "C01/C03/C04/T01/T11 implementation",
+    "C02 change",
+    "scorer/ledger/full P/resolver/controller",
+    "dataset/manifest/register/prompt/flags",
+    "holdout/S5",
+    "keygen/signing/operational trust",
+    "provider/DB/production calls or deployment",
+    "budget/pair/dispatch/activation",
+    "installation/lock/config changes",
+    "commit/push/PR/merge/CI rerun"
+  ],
+  "nextStep": "Separate explicit 5-file implementation start instruction. Current branch is only a validation branch at the verified T; if the actual implementation tip or installed environment changes, rebind and validate the changed portions before implementation."
+}
