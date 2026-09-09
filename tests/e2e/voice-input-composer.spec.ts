@@ -12,6 +12,7 @@ import {
   setDeterministicTheme,
   suppressTransientUi,
 } from "./support/chat-state-fixtures";
+import { VOICE_RECORDER_MIME_PREFERENCE } from "@/lib/voiceInputFormats";
 
 /**
  * Voice input in the composer: docs/policy/voice-input.md §1 and §8.3, and the
@@ -34,60 +35,206 @@ import {
  * through a `MediaStreamDestination` — so the page runs its own real
  * `MediaRecorder`, produces a real container and posts real bytes. Stubbing
  * `MediaRecorder` itself would leave the part most likely to break untested.
+ *
+ * ## Except where the engine has no recorder to be real with
+ *
+ * Playwright's WebKit build on Linux -- the engine behind the `mobile-safari`
+ * project -- answers `false` to `MediaRecorder.isTypeSupported()` for every
+ * container in `VOICE_RECORDER_MIME_PREFERENCE`. Observed rather than
+ * assumed: on 2026-09-08 the daily audit's shard 5 ran this file on that
+ * project for the first time, and every recording spec got
+ * `VOICE_UNSUPPORTED_BROWSER` where it expected the status row -- the product
+ * doing exactly what docs/policy/voice-input.md §8.6 says it must on an engine
+ * that cannot record. Real Safari records `audio/mp4`; the Linux port ships
+ * the class without the codecs, and the policy already lists Safari as the
+ * one engine this repository cannot observe (§5.2).
+ *
+ * So the recorder stays real wherever the engine has one, and only where it
+ * does not, `installFakeMicrophone` puts a stub in its place. The stub answers
+ * the same calls the adapter makes (`start`, `stop`, `state`, the three
+ * handlers) and hands back a clip sized like a recording that long. What the
+ * project then proves is everything above the recorder -- the machine, the
+ * draft, the session boundaries, the composer's geometry in WebKit's layout.
+ * What it does not prove there is the container bytes, and that is the
+ * staging checklist's job on a real Safari
+ * (docs/ops/voice-input-staging-checklist.md A-1 and B-1). Which recorder a
+ * test ran against is written on the test as a `voice-recorder` annotation,
+ * so a report never mistakes one for the other. `VOICE_E2E_STUB_RECORDER=1`
+ * forces the stub on any project, which is how the stub path is exercised on
+ * Chromium before it is trusted on WebKit.
  */
 
 const VOICE_ENDPOINT = "**/api/chat/voice-transcription";
 
-/** Replaces the microphone with a tone. Everything downstream stays real. */
-const installFakeMicrophone = async (page: Page) => {
-  await page.addInitScript(() => {
-    const state = {
-      denied: false,
-      unsupported: false,
-      /** Tracks handed out, so a spec can prove they were stopped. */
-      openTracks: 0,
-    };
-    (window as unknown as { __qaVoice: typeof state }).__qaVoice = state;
+/**
+ * Forces the stub recorder on an engine that has a real one. Verification
+ * only: a way to run the stub path where it can be watched.
+ */
+const STUB_RECORDER_FORCED = process.env.VOICE_E2E_STUB_RECORDER === "1";
 
-    const original = navigator.mediaDevices?.getUserMedia?.bind(
-      navigator.mediaDevices
-    );
-    void original;
-
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: {
-        getUserMedia: async () => {
-          if (state.denied) {
-            const error = new Error("Permission denied");
-            error.name = "NotAllowedError";
-            throw error;
-          }
-          const context = new AudioContext();
-          const oscillator = context.createOscillator();
-          oscillator.frequency.value = 440;
-          const destination = context.createMediaStreamDestination();
-          oscillator.connect(destination);
-          oscillator.start();
-          const stream = destination.stream;
-          for (const track of stream.getTracks()) {
-            state.openTracks++;
-            const stop = track.stop.bind(track);
-            track.stop = () => {
-              state.openTracks--;
-              stop();
-            };
-          }
-          return stream;
-        },
-      },
-    });
-  });
+type VoiceQaState = {
+  denied: boolean;
+  unsupported: boolean;
+  openTracks: number;
+  recorder: "native" | "stub" | "none";
 };
 
-/** Makes the browser report that it cannot record at all. */
+/**
+ * Records which recorder the page ended up with. One hook rather than a line
+ * in each opener, so a helper added later cannot forget it. A test that never
+ * installed the microphone (the flag-off spec) has nothing to record.
+ */
+test.afterEach(async ({ page }, testInfo) => {
+  const recorder = await page
+    .evaluate(
+      () =>
+        (window as unknown as { __qaVoice?: VoiceQaState }).__qaVoice?.recorder
+    )
+    .catch(() => undefined);
+  if (recorder) {
+    testInfo.annotations.push({
+      type: "voice-recorder",
+      description: recorder,
+    });
+  }
+});
+
+/**
+ * Replaces the microphone with a tone. Everything downstream stays real --
+ * except the recorder, on an engine that has none (see the file comment).
+ */
+const installFakeMicrophone = async (page: Page) => {
+  await page.addInitScript(
+    ({ preference, forceStub }) => {
+      const state: VoiceQaState = {
+        denied: false,
+        unsupported: false,
+        /** Tracks handed out, so a spec can prove they were stopped. */
+        openTracks: 0,
+        recorder: "native",
+      };
+      (window as unknown as { __qaVoice: VoiceQaState }).__qaVoice = state;
+
+      const original = navigator.mediaDevices?.getUserMedia?.bind(
+        navigator.mediaDevices
+      );
+      void original;
+
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: {
+          getUserMedia: async () => {
+            if (state.denied) {
+              const error = new Error("Permission denied");
+              error.name = "NotAllowedError";
+              throw error;
+            }
+            const context = new AudioContext();
+            const oscillator = context.createOscillator();
+            oscillator.frequency.value = 440;
+            const destination = context.createMediaStreamDestination();
+            oscillator.connect(destination);
+            oscillator.start();
+            const stream = destination.stream;
+            for (const track of stream.getTracks()) {
+              state.openTracks++;
+              const stop = track.stop.bind(track);
+              track.stop = () => {
+                state.openTracks--;
+                stop();
+              };
+            }
+            return stream;
+          },
+        },
+      });
+
+      // The recorder. Real where the engine can record one of the containers
+      // the product asks for; a stub only where it cannot. The cannot-record
+      // spec installs its own marker first and keeps the engine's honest "no
+      // recorder" answer.
+      const scope = window as unknown as {
+        MediaRecorder?: unknown;
+        __qaVoiceNoRecorder?: boolean;
+      };
+      if (scope.__qaVoiceNoRecorder) {
+        state.recorder = "none";
+        return;
+      }
+      const native = scope.MediaRecorder as
+        | { isTypeSupported?: (type: string) => boolean }
+        | undefined;
+      const isTypeSupported = native?.isTypeSupported;
+      const nativeCanRecord =
+        typeof isTypeSupported === "function" &&
+        preference.some((type) => isTypeSupported.call(native, type));
+      if (nativeCanRecord && !forceStub) return;
+
+      type Handler<T> = ((event: T) => void) | null;
+      class StubMediaRecorder {
+        static isTypeSupported(type: string) {
+          return type.split(";", 1)[0].trim() === "audio/mp4";
+        }
+        state: "inactive" | "recording" = "inactive";
+        readonly mimeType: string;
+        ondataavailable: Handler<{ data: Blob }> = null;
+        onstop: Handler<void> = null;
+        onerror: Handler<unknown> = null;
+        private startedAt = 0;
+        constructor(_stream: MediaStream, options?: { mimeType?: string }) {
+          this.mimeType = options?.mimeType ?? "audio/mp4";
+        }
+        start() {
+          if (this.state !== "inactive") {
+            throw new DOMException("already recording", "InvalidStateError");
+          }
+          this.state = "recording";
+          this.startedAt = Date.now();
+        }
+        stop() {
+          if (this.state === "inactive") {
+            throw new DOMException("not recording", "InvalidStateError");
+          }
+          this.state = "inactive";
+          // Sized like a recording that long, well past the smallest clip a
+          // spec asserts on, and delivered the way a real recorder does: the
+          // last `dataavailable` after `stop()` returns, then `onstop`.
+          const bytes = new Uint8Array(
+            4096 + Math.max(0, Date.now() - this.startedAt) * 8
+          );
+          for (let index = 0; index < bytes.length; index++) {
+            bytes[index] = (index * 31) & 0xff;
+          }
+          setTimeout(() => {
+            this.ondataavailable?.({
+              data: new Blob([bytes], { type: this.mimeType }),
+            });
+            this.onstop?.();
+          }, 0);
+        }
+      }
+      Object.defineProperty(window, "MediaRecorder", {
+        configurable: true,
+        value: StubMediaRecorder,
+      });
+      state.recorder = "stub";
+    },
+    {
+      preference: [...VOICE_RECORDER_MIME_PREFERENCE],
+      forceStub: STUB_RECORDER_FORCED,
+    }
+  );
+};
+
+/**
+ * Makes the browser report that it cannot record at all. The marker tells
+ * `installFakeMicrophone`, which runs after this, not to stand a stub in for
+ * the recorder it just removed.
+ */
 const installUnsupportedRecorder = async (page: Page) => {
   await page.addInitScript(() => {
+    const scope = window as unknown as { __qaVoiceNoRecorder: boolean };
+    scope.__qaVoiceNoRecorder = true;
     Object.defineProperty(window, "MediaRecorder", {
       configurable: true,
       value: undefined,
