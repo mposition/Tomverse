@@ -308,6 +308,104 @@ const parseDay = (value: string) => {
  * reason: the rules that refuse a bad entry can only be shown to work against
  * a bad entry, and the real register is not allowed to contain one.
  */
+/**
+ * How far ahead of a deadline the register starts saying so.
+ *
+ * Separate from `VOICE_PRICE_REVERIFY_MAX_DAYS`, which bounds how long a
+ * reading may claim to be current. This one bounds how long somebody has to
+ * act before it stops being current, and the two answer different questions.
+ */
+export const VOICE_PRICE_REVERIFY_WARNING_WINDOW_DAYS = 30;
+
+/**
+ * The days-remaining marks a notice is sent at.
+ *
+ * Descending, and read from the tight end: the mark a deadline is *at* is the
+ * smallest one it has already reached, so 14 days out is the 14-day mark and
+ * not the 30-day one it also satisfies.
+ *
+ * Missing a day therefore does not skip a notice -- every later day inside the
+ * same span resolves to the same mark, and the sender's own de-duplication
+ * decides whether it has already gone out.
+ */
+export const VOICE_PRICE_REVERIFY_NOTICE_DAYS = [30, 14, 7] as const;
+
+export type VoicePriceReverificationNotice = {
+  modelId: string;
+  owner: string;
+  ticket: string;
+  reverifyBy: string;
+  /** Whole days from today (UTC) to the deadline. */
+  daysRemaining: number;
+  /** The tightest mark in `VOICE_PRICE_REVERIFY_NOTICE_DAYS` this has reached. */
+  thresholdDays: number;
+};
+
+/**
+ * Deadlines close enough to warn about, and how close.
+ *
+ * Deliberately NOT part of `auditVoicePriceRegister`. That function answers
+ * "may this build ship", and everything it returns fails the PR gate; a
+ * warning folded into it would either fail the gate a month early or teach
+ * the gate to ignore some of its own findings. Keeping them apart makes
+ * "a warning cannot block" structural rather than a rule somebody has to
+ * remember.
+ *
+ * The deadline day and anything past it are not here. Those are the audit's
+ * `expired` problem, which blocks -- and a check that reported the same fact
+ * twice, once as a warning, would be describing a failure as a heads-up. The
+ * window is 30 days out to the day before, and stops there.
+ *
+ * Days are whole UTC days from the start of today, so a daily run sees each
+ * mark exactly once and the answer does not depend on the hour it runs at.
+ */
+export const voicePriceReverificationNotices = (input: {
+  modelIds: readonly string[];
+  now: Date;
+  register?: readonly VoiceModelPriceEntry[];
+}): VoicePriceReverificationNotice[] => {
+  const register = input.register ?? VOICE_MODEL_PRICE_REGISTER;
+  const today = Date.UTC(
+    input.now.getUTCFullYear(),
+    input.now.getUTCMonth(),
+    input.now.getUTCDate()
+  );
+  const notices: VoicePriceReverificationNotice[] = [];
+  for (const modelId of input.modelIds) {
+    const entry = register.find((candidate) => candidate.modelId === modelId);
+    if (!entry) continue;
+    const reverifyBy = parseDay(entry.reverifyBy);
+    if (reverifyBy === null) continue;
+    const daysRemaining = Math.floor((reverifyBy - today) / dayMs);
+    // The deadline day itself is the audit's, not this function's. `< 0` let
+    // it through, so on 2026-12-01 both layers would have spoken at once --
+    // `expired` failing the gate while a notice called the same fact a
+    // heads-up. The warning window ends the day before the deadline, which is
+    // what the table in docs/policy/voice-input.md §6.1.5 says it does.
+    if (daysRemaining <= 0) continue;
+    if (daysRemaining > VOICE_PRICE_REVERIFY_WARNING_WINDOW_DAYS) continue;
+    // The last match, not the first: the marks descend, and every mark wider
+    // than the deadline's distance also satisfies the comparison. Taking the
+    // first one reported 14 days out as the 30-day mark, which would have
+    // suppressed the 14- and 7-day notices entirely -- the thread already
+    // carried a 30-day marker.
+    const reached = VOICE_PRICE_REVERIFY_NOTICE_DAYS.filter(
+      (mark) => daysRemaining <= mark
+    );
+    const thresholdDays = reached.at(-1);
+    if (thresholdDays === undefined) continue;
+    notices.push({
+      modelId: entry.modelId,
+      owner: entry.owner,
+      ticket: entry.ticket,
+      reverifyBy: entry.reverifyBy,
+      daysRemaining,
+      thresholdDays,
+    });
+  }
+  return notices;
+};
+
 export const auditVoicePriceRegister = (input: {
   modelIds: readonly string[];
   now: Date;

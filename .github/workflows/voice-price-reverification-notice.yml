@@ -1,0 +1,68 @@
+name: Voice Price Re-verification Notice
+#
+# Says a voice transcription price is due for re-reading, before the deadline
+# does the saying by locking the merge gate.
+#
+# `check:voice-price-register` is a PR Fast Gate check and it fails on the
+# deadline itself. Both halves are right, and together they meant the first
+# signal anybody would get was every pull request turning red on the morning
+# of the deadline -- a correct gate arriving as an outage. The register was no
+# less true the day before; nobody had been told to act.
+#
+# So the notice is a separate scheduled workflow, not a step in the gate. A
+# deadline approaching is not something a pull request caused and not something
+# a pull request should be stopped for. It is also, on the day it matters,
+# something no pull request may be running to notice: a quiet week is exactly
+# when the deadline passes unannounced, and a check that only runs on pull
+# requests cannot speak then.
+#
+# Daily rather than hourly. The thing being watched moves once a day, and the
+# marks it fires at (30, 14, 7 days) are days.
+#
+# It can only say. It does not move a deadline, edit the register, or open an
+# issue -- the register entry already names the ticket, and moving a deadline
+# without re-reading the price is the one repair that repairs nothing.
+
+on:
+  schedule:
+    # 07:10 UTC, which is mid-afternoon in the timezone this repository is
+    # operated from -- a notice that lands while somebody is awake. Off the
+    # hour, where scheduled runs queue behind each other on shared runners.
+    - cron: "10 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # The notice is a comment on the ticket the register entry already names.
+  issues: write
+
+concurrency:
+  # Never cancel a run in progress. The notice de-duplicates by reading the
+  # thread, so a cancelled run mid-read is the one way it could post twice.
+  group: voice-price-reverification-notice
+  cancel-in-progress: false
+
+jobs:
+  notice:
+    name: Voice price re-reading deadlines
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Send any due notices
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: npm run notify:voice-price-reverification
