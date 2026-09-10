@@ -13,6 +13,8 @@ import {
   nextScheduledAt,
   parseCronSchedule,
   silenceBudgetMsFor,
+  MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY,
+  PENDING_SCHEDULED_JOB_KEYS,
 } from "../lib/scheduledJobsCore.ts";
 
 // SCHED-DRIFT-001. railway.credit-reconciliation.json moved from */5 to */15
@@ -268,4 +270,25 @@ test("daily jobs keep their own schedule", () => {
     nextScheduledAt("provider_usage_sync", now).toISOString(),
     "2026-08-02T00:30:00.000Z"
   );
+});
+
+test("a pending job key is recorded but not judged, so nothing it has not run lights a badge", () => {
+  // A job in the catalogue with no last run has an infinite `silentMs`, so it
+  // reads as delayed the day it merges -- an alert about a decision nobody
+  // has taken. Keys wait here until something actually drives them.
+  const scheduled = new Set(SCHEDULED_JOB_DEFINITIONS.map((job) => job.key));
+  for (const key of PENDING_SCHEDULED_JOB_KEYS) {
+    assert.equal(scheduled.has(key), false, key);
+  }
+  assert.equal(PENDING_SCHEDULED_JOB_KEYS.includes(MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY), true);
+
+  // And the state it would be in if it were promoted early, which is what the
+  // list exists to avoid.
+  const { delayed } = evaluateScheduledJobTiming({
+    now: new Date(),
+    maximumSilenceMs: 26 * 60 * 60 * 1_000,
+    lastRunStartedAt: null,
+    lastRunStatus: null,
+  });
+  assert.equal(delayed, true);
 });

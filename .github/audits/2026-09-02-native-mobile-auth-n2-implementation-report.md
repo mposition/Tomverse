@@ -1835,6 +1835,39 @@ refresh 축 통과입니다). 롤백의 대가는 **배포 후 발급된 세션 
 > 이 컨테이너에 `pwsh`가 없습니다(§5.6의 1번). 그 공백은 검토자가
 > `6d054a2`에서 직접 실행해 메웠습니다(§5.7 머리말).
 >
+> **rev.78 (2026-09-10).** **§6의 3번이 결재됐고**(`mposition`, 2026-09-10, S1~S8)
+> **확정된 범위를 구현했습니다.**
+>
+> **넷이 들어갔습니다.** ① `lib/mobileAuthKeyringHealth.ts` — 환경 하나를 보고서
+> 하나로 만드는 **공용 조립**입니다. CLI와 endpoint가 같은 함수를 부르고,
+> `scripts/report-mobile-auth-keyring-health.mjs`에는 **렌더링과 종료 코드만**
+> 남았습니다(판정은 원래부터 `mobile-auth-keyring-state.mjs` 하나였고, 이제 조립도
+> 하나입니다). ② `POST /api/internal/mobile-auth/keyring-health` — bearer 인증
+> (전용 secret이 있으면 그것, 없으면 기존 `MAINTENANCE_SECRET`; **새 자격증명을 만들지
+> 않았습니다**), 읽기 전용, 응답·로그·행에 **key id와 코드만**. ③ `ScheduledJobRun`
+> 기록 — **소견이 있어도 `succeeded`**, 파싱 불가만 `failed`(S5). ④ 구조화 로그
+> `mobile_auth_keyring_health` — **소견이 없어도 남깁니다**(S8).
+>
+> **S1의 네 조건을 코드에 넣었습니다.** 특히 pepper 동일성 비교는 **호출마다 만들고
+> 버리는 digest**입니다 — 기존 CLI의 module-level Map은 한 번 돌고 죽는 프로세스에서는
+> 무해했지만 오래 사는 서버에서는 요청 사이에 raw pepper가 남습니다.
+>
+> **아직 켜지지 않았고, 그것이 의도입니다.** `SCHEDULED_JOB_DEFINITIONS` 등록과
+> `railway.*.json`은 **넣지 않았습니다** — S2의 정확한 UTC 시각이 미확정이고 S6의
+> 공용 조회 보완이 선결이기 때문입니다. job key는 새 `PENDING_SCHEDULED_JOB_KEYS`에
+> 있어 **행은 쌓이고 지연 판정은 꺼져 있습니다.** 카탈로그에 먼저 넣으면 마지막 실행이
+> 없어 `silentMs`가 무한이 되고 **아무도 정하지 않은 결정에 대해 `delayedJobs` 배지가
+> 켜집니다**. `undeclared` 등급(S7)·U3 보관 수단(S4)도 **미결이며 임의로 정하지
+> 않았습니다.**
+>
+> **검증**: 새 모듈 테스트 12건(`tests/mobileAuthKeyringHealthCheck.test.mjs` — 재료
+> 비노출, 회출 간 pepper 비잔류, 같은 링·다른 시각의 두 답, 파싱 불가 throw), route
+> contract 8건(`tests/server-contract/mobile-auth-keyring-health-route.test.ts` — 인증,
+> 소견 있는 성공, 파싱 불가 실패, 응답·로그·행의 재료 비노출), 기존 CLI 18건 그대로,
+> `tests/scheduledJobsCore.test.mjs` 15건(pending key가 카탈로그에 없다는 것과 먼저
+> 넣었을 때의 상태를 함께 고정). **실제 스케줄러 등록·서비스 생성·자격증명 생성·
+> vault·배포·production 활성화·N1b는 없습니다.**
+>
 > **rev.77 (2026-09-10).** **상시 점검 초안 보완 네 건**(rev.3). 값 확정·구현·
 > production 접근 없음.
 >
