@@ -10,7 +10,7 @@
 
 - **기록일(UTC)**: 2026-09-10
 - **상태**: **코드 병합·고지 문구 승인 완료 — staging 미관측**
-- **갱신(UTC)**: 2026-09-10 — §8이 법인명 대조와 문구 승인 둘을 기록합니다
+- **갱신(UTC)**: 2026-09-10 — §8이 법인명 대조와 문구 승인을, §9가 staging deploy SHA 관측을 기록합니다
 
 ---
 
@@ -142,7 +142,7 @@ OpenAI의 서비스·제3자 보호에 합리적으로 필요한 경우 연장.*
 
 1. 미국 endpoint 고정 코드 병합 — **완료** (PR #1331, develop `6019e07a`, 2026-09-10)
 2. 개인정보처리방침 국외이전 필수 항목 승인 — **완료 (2026-09-10, §8-2)**
-3. 그 코드가 포함된 staging 전체 deploy SHA — **미관측**
+3. 그 코드가 포함된 staging 전체 deploy SHA — **완료 (2026-09-10, §9-1: `6019e07afd598a1431862ec925189a04544e9c94`)**
 4. 그 deploy에서 실제 Voice 요청 성공 — **미관측**
 5. 요청이 미국 endpoint를 썼다는 코드·테스트·운영 증거 — **코드·테스트는 있음,
    운영 증거 미관측(§4)**
@@ -159,7 +159,7 @@ OpenAI의 서비스·제3자 보호에 합리적으로 필요한 경우 연장.*
 
 1. 결정·위험 수용 기록 참조 (이 디렉터리의 2026-09-10 기록 넷)
 2. 승인된 개인정보처리방침 revision — **`6019e07afd598a1431862ec925189a04544e9c94`** (§8-2)
-3. staging **전체 40자리** deploy SHA
+3. staging **전체 40자리** deploy SHA — **`6019e07afd598a1431862ec925189a04544e9c94`** (§9-1)
 4. 관측 시각(UTC)
 5. 실제 사용된 endpoint·region 증거
 6. Voice 요청 결과
@@ -233,6 +233,88 @@ OpenAI의 서비스·제3자 보호에 합리적으로 필요한 경우 연장.*
 여섯 조건 중 1·2가 충족됐고 **3·4·5·6이 남았습니다**(§7). 남은 넷은 전부 같은
 것을 기다립니다 — **이 코드가 실제로 도는 환경에서의 관측**. 코드가 보장하는
 것은 "요청이 미국 endpoint로 간다"이고, "실제로 갔다"는 아직 **미관측**입니다.
+
+## 9. staging deploy SHA 관측 (2026-09-10)
+
+§7의 3번 조건입니다. **merge SHA가 아니라 staging이 실제로 서비스 중인 SHA**를
+요구하므로, 병합 사실만으로는 채울 수 없는 칸이었습니다.
+
+### 9-1. 관측값
+
+| 항목 | 값 |
+|---|---|
+| environment | `staging` |
+| **deploy SHA (40자)** | `6019e07afd598a1431862ec925189a04544e9c94` |
+| deploymentId | `f5f3547a-1c97-4aaa-baa7-1dcf1ad828ca` |
+| deploymentStartedAt | 2026-09-10T09:19:45.967Z |
+| builtAt | 2026-09-10T09:32:33.603Z |
+| deployedAt | 2026-09-10T09:35:31.215Z |
+| deploymentStatus | `success` |
+
+**staging의 여섯 서비스가 모두 같은 commit, 같은 배포 배치입니다** — `Tomverse`,
+`Provider Probe`, `Provider Usage Sync`, `Provider Model Catalog`,
+`Maintenance Cron`, `Credit Reconciliation`. 전부 `createdAt`
+2026-09-10T09:19:45.967Z이고 control plane이 여섯 다 `live`로 보고합니다. 조건이
+"**전체** deploy SHA"를 말하므로 한 서비스만 보고 채우지 않았습니다.
+
+### 9-2. 무엇을 근거로 말하는가 — 그리고 무엇을 말하지 않는가
+
+두 곳에서 읽었습니다.
+
+1. **Railway control plane** — 환경 조회에서 `Tomverse` 서비스가 `live`이고 그
+   `latestDeployment`가 `f5f3547a…`, 그 배포의 `meta.commitHash`가 위 SHA.
+2. **실행 중인 앱 자신** — `GET /api/build-info`(공개 endpoint, STG-F010)가 같은
+   SHA와 같은 deploymentId를 반환.
+
+**둘은 완전히 독립적이지 않습니다.** `/api/build-info`의 `commitSha`는 Railway가
+프로세스에 주입한 `RAILWAY_GIT_COMMIT_SHA`(없으면 빌드 시점에 구워진 fallback)이지
+**실행 중인 번들의 해시가 아닙니다.** 그래서 이 관측이 증명하는 것은 "Railway가
+이 SHA로 배포했다고 말하고, 그 배포로 뜬 프로세스도 같은 SHA를 말한다"까지입니다.
+
+다만 그 둘이 **어긋나면 드러납니다.** `lib/buildInfo.ts`의 timeline 조회는
+Railway가 보고한 commit과 프로세스의 commit이 다르면 타임스탬프를 전부 `null`로
+돌려보냅니다("a wrong timestamp is worse than none"). 위 응답이 실제 타임스탬프를
+담고 있으므로 **그 대조를 통과했습니다.**
+
+`builtAt` 09:32:33.603Z는 #1331 병합(09:19:44Z) **이후**입니다. 배포가 병합 전
+번들을 재사용한 것이 아니라는 뜻입니다.
+
+**배포된 번들이 §11.3.0의 코드를 담고 있음을 런타임 동작으로 확인하지는
+못했습니다.** staging의 두 도메인이 이 컨테이너의 egress에서 막혀
+있습니다(`staging.tomverse.app`은 Cloudflare Access 로그인으로 302 후 CONNECT
+403, `tomverse-staging.up.railway.app`은 CONNECT 403). `/api/build-info`만
+Access 우회 대상이라 읽혔습니다. 개인정보처리방침 페이지의 국외이전 8항목이
+렌더링되는지 확인했다면 번들 내용에 대한 독립 증거가 됐겠지만, **하지 못했으므로
+미관측으로 남깁니다.**
+
+### 9-3. 조건 4·5가 가능한 상태인지
+
+**환경 자체는 준비돼 있습니다.** staging `Tomverse` 서비스의 변수 이름만 조회한
+결과(값은 읽지 않았고 출력하지 않습니다):
+
+- `VOICE_TRANSCRIPTION_API_KEY` — **있음**
+- `VOICE_PROVIDER_SECONDS_PER_DAY`·`_PER_MONTH` — **있음** (B-4, 2026-09-08 서명)
+- `VOICE_INPUT_KILL_SWITCH` — **없음**. kill switch가 걸려 있지 않으므로 저장된
+  flag가 그대로 효력을 가집니다.
+- `VOICE_INPUT_REQUESTS_PER_DAY`·`_PER_MINUTE`·`VOICE_INPUT_SECONDS_PER_DAY` —
+  없음. **차단 요인이 아닙니다** — `lib/voiceInputGuardrails.ts`의
+  `VOICE_GUARDRAIL_DEFAULTS`가 적용됩니다.
+- `VOICE_TRANSCRIPTION_MODEL` — 없음. `gpt-4o-mini-transcribe`가 적용됩니다.
+
+**변수가 있다는 것은 설정됐다는 뜻이지 그 경로로 트래픽이 갔다는 뜻이 아닙니다.**
+값은 `valuesRedacted`로 가려져 있어 이 관측은 이름의 존재까지입니다. 조건 4·5는
+여전히 실제 요청으로만 생깁니다.
+
+### 9-4. 조건 현황
+
+| # | 조건 | 상태 |
+|---|---|---|
+| 1 | 미국 endpoint 고정 코드 병합 | **완료** — PR #1331, `6019e07a` |
+| 2 | 국외이전 고지 항목 승인 | **완료** — §8-2 |
+| 3 | staging 전체 deploy SHA | **완료** — §9-1 |
+| 4 | 그 deploy에서 Voice 요청 성공 | 미관측 |
+| 5 | 미국 endpoint를 썼다는 운영 증거 | 미관측 |
+| 6 | 사람의 B-5 판정·서명 | 미완 |
 
 ---
 
