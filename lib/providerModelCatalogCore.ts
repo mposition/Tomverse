@@ -115,6 +115,9 @@ const record = (value: unknown): Record<string, unknown> | null =>
 const lifecycleFromRecord = (item: Record<string, unknown>) => {
   if (item.archived === true) return "archived";
   if (item.deprecated === true) return "deprecated";
+  if (number(item.shutdown_date) !== null || text(item.shutdown_date)) {
+    return "shutdown_scheduled";
+  }
   const value = text(item.stage) || text(item.lifecycle) || text(item.status);
   if (!value) return null;
   const normalized = value.toLowerCase();
@@ -200,6 +203,7 @@ const observationFromItem = (
   const metadata = {
     created: number(item.created),
     createdAt: text(item.created_at),
+    shutdownDate: number(item.shutdown_date) ?? text(item.shutdown_date),
     ownedBy: text(item.owned_by),
     contextLength: number(item.context_length) || number(item.max_context_length),
     inputTokenLimit: number(item.inputTokenLimit) || number(item.max_input_tokens),
