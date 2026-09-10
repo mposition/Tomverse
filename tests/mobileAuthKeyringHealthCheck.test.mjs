@@ -17,6 +17,7 @@ import {
   MOBILE_AUTH_KEYRING_OPTIONAL_ENV,
   MOBILE_AUTH_KEYRING_REQUIRED_ENV,
   mobileAuthKeyringHealthReport,
+  mobileAuthPepperIdentity,
   mobileKeyringFindingText,
 } from "../lib/mobileAuthKeyringHealth.ts";
 
@@ -131,18 +132,76 @@ test("no key material reaches the report, from any ring, in any state", () => {
   }
 });
 
-test("peppers are not kept between reports", () => {
-  // A module-level identity map would answer the second call with the first
-  // call's peppers still in it. S1's second condition: the map is built per
-  // report and dropped with it.
+test("the pepper comparator answers with a digest, so nothing keyed by material is needed", () => {
+  // This is the property, and the earlier version of this test was not it.
+  // Duplicate detection is done with a `seen` map built per call, so a
+  // comparator that kept raw peppers in a module-level map produced exactly
+  // the same findings -- the assertion passed while two peppers sat in
+  // process memory. What separates the two implementations is the value the
+  // comparator returns: the old one returned the secret itself as the map
+  // key, this one returns a hash of it.
+  const identity = mobileAuthPepperIdentity();
+  const value = identity(PEPPER_1);
+  assert.notEqual(value, PEPPER_1);
+  assert.equal(value.includes(PEPPER_1), false);
+  assert.match(value, /^[0-9a-f]{64}$/);
+
+  // Equal material still compares equal, or duplicate detection would stop
+  // working -- which is what makes the digest a substitute and not a change.
+  assert.equal(identity(PEPPER_1), identity(PEPPER_1));
+  assert.notEqual(identity(PEPPER_1), identity(PEPPER_2));
+
+  // A fresh comparator per report, and each one stateless: a second factory
+  // agrees with the first without either having been told.
+  const second = mobileAuthPepperIdentity();
+  assert.notEqual(second, identity);
+  assert.equal(second(PEPPER_1), identity(PEPPER_1));
+});
+
+test("duplicate peppers are still found, report after report", () => {
   const first = configured({
     MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1},pep-9:${PEPPER_1}`,
   });
   assert.equal(codes(report(first)).includes("duplicate_material"), true);
 
-  // Same material, but only one id this time: nothing may remember the first.
   const second = configured({ MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEPPER_1}` });
   assert.equal(codes(report(second)).includes("duplicate_material"), false);
+});
+
+test("a ring pasted into the active-id variable is not echoed back", () => {
+  // `normalizeMobileKeyId` only trims, and `KEY_ID_PATTERN` accepts what a
+  // base64url pepper looks like, so the active-id variable's contents used to
+  // arrive as a `keyId` in the report. Reproduced 2026-09-10.
+  const environment = configured({
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: `pep-2:${PEPPER_2}`,
+  });
+  const result = report(environment);
+  const finding = result.rings
+    .flatMap((ring) => ring.findings)
+    .find((entry) => entry.code === "active_key_not_in_ring");
+  assert.ok(finding);
+  assert.equal(finding.keyId, undefined);
+  assert.equal(finding.unverifiedReference, true);
+  assert.equal(JSON.stringify(result).includes(PEPPER_2), false);
+  // The operator still learns which variable to look at.
+  assert.match(result.attention.join(" "), /active id is not in the ring/);
+});
+
+test("a retirement naming something the ring does not hold is counted, not quoted", () => {
+  const environment = configured({
+    MOBILE_AUTH_RETIRED_REFRESH_PEPPERS: `${PEPPER_1}@${isoAgo(60)}`,
+  });
+  const result = report(environment);
+  assert.equal(JSON.stringify(result).includes(PEPPER_1), false);
+  const pepperRing = result.rings.find((ring) =>
+    ring.variable === "MOBILE_AUTH_REFRESH_PEPPERS"
+  );
+  assert.equal(pepperRing.retirementsNamingNothing, 1);
+  const finding = result.rings
+    .flatMap((ring) => ring.findings)
+    .find((entry) => entry.code === "retirement_names_nothing");
+  assert.equal(finding.keyId, undefined);
+  assert.equal(finding.unverifiedReference, true);
 });
 
 test("a partial configuration is a finding, not silence", () => {

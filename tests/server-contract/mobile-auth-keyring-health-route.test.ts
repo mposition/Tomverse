@@ -216,6 +216,43 @@ test("no key material reaches the response, the log, or the run row", async () =
   );
 });
 
+test("a ring pasted into the active-id variable reaches neither response, log nor row", async () => {
+  // The allowlist limits field names; it cannot judge a value. What the
+  // active-id variable holds is dropped upstream, where the ring is known.
+  const { response, body, logged } = await call({
+    ...HEALTHY,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: `pep-2:${PEPPER}`,
+  });
+  assert.equal(response.status, 200);
+  const emitted = `${JSON.stringify(body)}\n${logged}\n${JSON.stringify(runs)}`;
+  assert.equal(emitted.includes(PEPPER), false);
+  const finding = body.findings.find(
+    (entry: { code: string }) => entry.code === "active_key_not_in_ring"
+  );
+  assert.ok(finding);
+  assert.equal(finding.keyId, undefined);
+  assert.equal(finding.unverifiedReference, true);
+});
+
+test("a parse failure records a fixed sentence, never the parser's message", async () => {
+  // `parseRing` quotes what it found in the id position, and material pasted
+  // there is exactly what makes an id unusable. A known error class does not
+  // make its message safe.
+  const { response, body, logged } = await call({
+    ...HEALTHY,
+    MOBILE_AUTH_REFRESH_PEPPERS: `${PEPPER}!:${PEPPER}`,
+  });
+  assert.equal(response.status, 500);
+  assert.equal(body.error, "KeyringUnreadable");
+  assert.equal(runs.failed.length, 1);
+
+  const recorded = runs.failed[0]?.error as Error;
+  assert.equal(recorded.name, "MobileAuthKeyringError");
+  assert.equal(recorded.message.includes(PEPPER), false);
+  assert.match(recorded.message, /the message is not recorded/);
+  assert.equal(`${JSON.stringify(body)}\n${logged}`.includes(PEPPER), false);
+});
+
 test("the check leaves the keyring exactly as it found it", async () => {
   const before = { ...HEALTHY };
   await call(HEALTHY);
