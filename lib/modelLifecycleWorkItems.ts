@@ -2,6 +2,7 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 
+import { listImageModels } from "@/lib/imageModelRegistry";
 import { prisma } from "@/lib/prisma";
 import {
     OPEN_WORK_ITEM_STATUSES,
@@ -18,6 +19,7 @@ import {
     assessModelLifecycleItem,
     candidateFamilyIdentity,
     type ModelAvailability,
+    type ModelProductSurface,
     type ModelReviewKind,
     type ModelReviewPriority,
 } from "@/lib/modelLifecycleTriage";
@@ -63,7 +65,10 @@ export async function recordDiscoveredWorkItems(input: {
 
     const fresh = newCandidatesForQueue({
         observed: input.observed,
-        catalogueApiModels: catalogue.map((row) => row.apiModel),
+        catalogueApiModels: [
+            ...catalogue.map((row) => row.apiModel),
+            ...listImageModels().map((model) => model.apiModelId),
+        ],
         queuedApiModels: queued.map((row) => row.apiModel),
     });
 
@@ -505,6 +510,7 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     familySize: number;
     reviewPriority: ModelReviewPriority;
     reviewKind: ModelReviewKind;
+    product: ModelProductSurface;
     analysisKo: string;
 };
 
@@ -600,9 +606,12 @@ export async function listModelDiscoveryQueue(options?: {
             entry,
         ])
     );
-    const servedFamilies = new Set(
-        registry.map((entry) => candidateFamilyIdentity(entry.apiModel))
-    );
+    const servedFamilies = new Set([
+        ...registry.map((entry) => candidateFamilyIdentity(entry.apiModel)),
+        ...listImageModels().map((model) =>
+            candidateFamilyIdentity(model.apiModelId)
+        ),
+    ]);
     const familyCounts = new Map<string, number>();
     for (const row of rows) {
         const family = candidateFamilyIdentity(row.apiModel);
@@ -662,6 +671,7 @@ export async function listModelDiscoveryQueue(options?: {
             familySize: familyCounts.get(familyKey) ?? 1,
             reviewPriority: assessment.priority,
             reviewKind: assessment.kind,
+            product: assessment.product,
             analysisKo: assessment.analysisKo,
         };
     });

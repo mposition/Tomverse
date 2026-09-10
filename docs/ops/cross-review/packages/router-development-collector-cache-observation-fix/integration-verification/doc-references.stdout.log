@@ -1,0 +1,5 @@
+
+> ai-chat-hub@0.1.0 check:doc-references
+> node scripts/check-doc-references.mjs
+
+Document reference check passed: 768 referenced path(s) across 92 instruction document(s), and 893 path(s) named by comments across 2635 source file(s), all present.

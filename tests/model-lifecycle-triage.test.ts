@@ -4,7 +4,10 @@ import {
   assessModelLifecycleItem,
   candidateFamilyIdentity,
   candidateRepresentativeRank,
+  isImageGenerationModel,
+  isSearchSpecializedModel,
   isSpecializedNonChatModel,
+  modelProductSurface,
   shouldQueueModelCandidate,
 } from "../lib/modelLifecycleTriage.ts";
 
@@ -31,9 +34,19 @@ test("a stable id wins over aliases and snapshots as family representative", () 
   );
 });
 
-test("non-chat OpenAI product ids are observed but do not enter review", () => {
+test("image generation models enter Studio review while unsupported products do not", () => {
   for (const apiModel of [
     "gpt-image-1",
+    "dall-e-3",
+    "gemini-3.1-flash-image",
+    "grok-imagine-image-quality-20260403",
+    "fal-ai/nano-banana-2",
+  ]) {
+    assert.equal(isImageGenerationModel(apiModel), true, apiModel);
+    assert.equal(modelProductSurface(apiModel), "image_generation", apiModel);
+    assert.equal(shouldQueueModelCandidate(apiModel), true, apiModel);
+  }
+  for (const apiModel of [
     "gpt-4o-audio-preview",
     "gpt-realtime",
     "gpt-5-search-api",
@@ -55,8 +68,70 @@ test("a current unserved general chat model is recommended with Korean rationale
   });
   assert.equal(assessment.priority, "recommended");
   assert.equal(assessment.kind, "general_chat");
+  assert.equal(assessment.product, "chat");
   assert.match(assessment.analysisKo, /최신 모델 API/);
   assert.match(assessment.analysisKo, /편입 가치/);
+});
+
+test("a current unserved image model is recommended for Image Studio review", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gpt-image-3",
+    providers: ["openai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+  });
+  assert.equal(assessment.priority, "recommended");
+  assert.equal(assessment.kind, "image_generation");
+  assert.equal(assessment.product, "image_generation");
+  assert.match(assessment.analysisKo, /이미지 생성 후보/);
+  assert.match(assessment.analysisKo, /품질·편집·해상도·속도/);
+  assert.match(assessment.analysisKo, /최악 비용/);
+});
+
+test("an image family already in Tomverse is a profile update, not a duplicate", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gpt-image-2",
+    providers: ["openai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: true,
+  });
+  assert.equal(assessment.priority, "no_action");
+  assert.equal(assessment.kind, "image_generation");
+  assert.match(assessment.analysisKo, /이미지 생성 원장/);
+});
+
+test("a new Google chat model carries the Brave app-managed search requirement", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gemini-3.8-flash",
+    providers: ["google"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+  });
+  assert.equal(assessment.product, "chat");
+  assert.match(assessment.analysisKo, /Brave app-managed/);
+  assert.match(assessment.analysisKo, /function tool/);
+});
+
+test("a search-only id is not confused with the Google Brave model path", () => {
+  assert.equal(isSearchSpecializedModel("gpt-5-search-api"), true);
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gpt-5-search-api",
+    providers: ["openai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+  });
+  assert.equal(assessment.priority, "no_action");
+  assert.equal(assessment.product, "unsupported");
+  assert.match(assessment.analysisKo, /일반 Gemini 모델/);
+  assert.match(assessment.analysisKo, /Brave API/);
 });
 
 test("stale, lifecycle-marked and already-served additions are no-action suggestions", () => {
