@@ -170,6 +170,7 @@ test.describe("billing journeys", () => {
     //      by coincidence.
     await page.goto("/admin/users");
     await expect(page.getByRole("button", { name: /^Free access/ })).toBeVisible();
+    const freeBefore = await database.user.count({ where: { plan: "Free" } });
 
     const PADDING_ACCOUNTS = 7;
     await database.user.createMany({
@@ -193,7 +194,7 @@ test.describe("billing journeys", () => {
 
     // The refund really did move its customer to Free, on top of the padding.
     const freeAfter = await database.user.count({ where: { plan: "Free" } });
-    expect(freeAfter).toBe(PADDING_ACCOUNTS + 10);
+    expect(freeAfter).toBe(freeBefore + PADDING_ACCOUNTS + 1);
 
     await page.goto("/admin/users");
     await expect(
