@@ -6,7 +6,7 @@
   "preparedBy": "Codex",
   "document": {
     "path": ".github/audits/memory-eval-vnext-oi-f2-start-tip-revalidation-2026-09-10.md",
-    "rawSha256": "247ef2de6ae9a87f1fd24e00e07efde401f012746004702431de5d6fb2f566b1"
+    "rawSha256": "12a2206ec4393b93f1ef96e6199179a11adcd9da56eadfe3a809fd2acc691238"
   },
   "hashBinding": "document.rawSha256 binds final Markdown raw bytes only; JSON/self/approval hashes are distinct; no future recordCommit invented",
   "request": "1번 실제 착수 기준 재검증 작업 해주세요",
@@ -13582,5 +13582,77 @@
     "private keys/keygen/signing/provider/DB/Railway/production access",
     "dataset/manifest/register/S2 activation/holdout/S5/v9/pair/budget/dispatch/release gate/memory flags",
     "commit/push/PR/merge/CI dispatch/new human approval or independent review"
-  ]
+  ],
+  "postReviewClarification": {
+    "recordedDate": "2026-09-10",
+    "recordedBy": "Codex",
+    "kind": "isv_f1_temporal_label_clarification",
+    "scope": "Post-publication/review history only; existing fields except document.rawSha256 remain the V preparation snapshot.",
+    "userInstruction": "네 그렇게 해주세요",
+    "instructionMeaning": "Clarify preparation/publication timing, rebind the Markdown hash, record disposition, and verify; no new approval, implementation, or Git publication instruction.",
+    "reviewedCommit": "1d21c9392b19d403d83dfb71a0c391cd329ee553",
+    "actualStartTip": "89288a8671ef25c30084b71f8a9266a3ae9f5475",
+    "reviewedSourceFiles": [
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f2-start-tip-revalidation-2026-09-10.md",
+        "blobOid": "79fa508de1ed616915b7b0d3ea5eeeade4251c7e",
+        "rawSha256": "247ef2de6ae9a87f1fd24e00e07efde401f012746004702431de5d6fb2f566b1",
+        "bytes": 22301,
+        "lfCount": 327
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-oi-f2-start-tip-revalidation-2026-09-10.json",
+        "blobOid": "527d2af46aac4f355e31077f08f4eaf82cc32362",
+        "rawSha256": "ce5703ec44071632f86118e046bb96b23d01cfea99ef3fdd7d34c027f2a977f2",
+        "bytes": 540281,
+        "lfCount": 13586
+      }
+    ],
+    "publicationHistory": {
+      "publishedCommit": "1d21c9392b19d403d83dfb71a0c391cd329ee553",
+      "branch": "codex/memory-eval-vnext-oi-f2-start-tip-revalidation",
+      "commitAndPushCompletedAfterPreparation": true,
+      "authorization": "Separate user instruction before this clarification; does not rewrite historical preparation authority."
+    },
+    "independentReview": {
+      "reviewer": "Claude",
+      "verdict": "PASS_WITH_WARNINGS",
+      "observationStartedAt": "2026-09-10T00:50:21Z",
+      "observationEndedAt": "2026-09-10T01:00:28Z",
+      "source": {
+        "kind": "user_provided_external_attachment",
+        "path": "C:/Users/Vyper/.codex/attachments/22814575-b673-47d1-a893-f4772c22e643/pasted-text.txt",
+        "rawSha256": "ccd5d36e03afc23446acf6aa33e5f6b81f0ede19c01de4102e6d2bd1ebc739c6",
+        "bytes": 17907,
+        "committedInRepository": false
+      },
+      "targetMeaning": "V original blobs only; not an independent verdict on this correction.",
+      "blockingFindingCount": 0
+    },
+    "finding": {
+      "id": "ISV-F1",
+      "priority": "P3",
+      "blocksLimitedGate": false,
+      "disposition": "accept_with_modification",
+      "concern": "The original Markdown section 1 branch/publication denial needed an explicit preparation-time label.",
+      "action": "Add a preparation-time note and section 10, rebind document.rawSha256, and add this separate history block.",
+      "hashCorrection": "Text additions change Markdown raw bytes and require JSON.document.rawSha256 rebinding; the resulting JSON raw hash also changes.",
+      "implementationStatus": "author_applied_documentation_clarification",
+      "independentlyConfirmedAfterCorrection": false
+    },
+    "authorityEffect": {
+      "existingPreparationGatesAndAuthorityUnchanged": true,
+      "approvalDocumentsUnchanged": true,
+      "newHumanApproval": false,
+      "implementationStartAuthorized": false,
+      "implementationStarted": false,
+      "ip19ExternalAuditCompleted": false,
+      "activationAuthorized": false,
+      "existingIpReviewHistoryAndConfirmationLimitUnchanged": true
+    },
+    "correctionCommit": null,
+    "correctionCommitMeaning": "No correction commit exists at preparation; a future commit identity must be supplied separately.",
+    "correctionIndependentlyReviewed": false,
+    "freshEnvironmentOrCiRevalidationPerformed": false
+  }
 }

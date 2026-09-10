@@ -1,5 +1,7 @@
 # memory-eval vNext — OI-F2 실제 착수 tip 사전 재검증
 
+**시점 주석:** §1–§9와 JSON의 기존 관측 구획은 2026-09-10 V 발행 전 준비 시점의 기록이며, 이후 별도 지시에 따른 branch 생성·commit/push·독립 검토와 이번 표기 보완은 §10 및 JSON.postReviewClarification에 분리해 기록한다.
+
 ## 1. 판정과 효력
 
 **PASS_WITH_RETAINED_RESIDUALS — 고정 tip의 한정 착수 사전 재검증 완료. 구현 착수 아님.**
@@ -325,3 +327,39 @@ T11 tests/fixtures/memory-eval-vnext/wire-vectors.json의 승인된 범위뿐이
 운영 key/signature/genesis/root/journal/checkpoint/backup/attestation,
 dataset/manifest/register·S2 purpose/activation·holdout 작성/seal/open·S5/v9 prompt·pair,
 예산/dispatch/provider·DB/Railway/production/배포·release gate·두 memory flag에 쓰지 않았다.
+
+## 10. V 독립 검토 후 ISV-F1 표기 보완 이력
+
+2026-09-10, Codex. 사용자의 “네 그렇게 해주세요”는 시점 문구·SHA 재결속·처리 이력의
+한정 보완 지시다. 새 정책 승인, 구현 착수, 추가 독립 검토 또는 commit/push 권한으로 확대하지 않는다.
+
+- 원 검토 대상 V: 1d21c9392b19d403d83dfb71a0c391cd329ee553.
+- V의 parent/검증 기준 T: 89288a8671ef25c30084b71f8a9266a3ae9f5475.
+- 준비 뒤 별도 지시로 codex/memory-eval-vnext-oi-f2-start-tip-revalidation branch에
+  원본 두 파일을 V로 commit/push했다. 그 발행 이력은 준비 관측의 false/null을 변경하지 않는다.
+- 사용자가 전달한 Claude 최초 독립 검토의 관측 구간: 2026-09-10T00:50:21Z–01:00:28Z.
+- 그 보고서의 판정: PASS_WITH_WARNINGS. 대상은 V 원본 두 파일이며 이번 수정본이 아니다.
+- 외부 첨부 보고서 raw SHA-256: ccd5d36e03afc23446acf6aa33e5f6b81f0ede19c01de4102e6d2bd1ebc739c6.
+  이는 전달된 pasted-text.txt 전체 17,907 bytes의 hash이고 이 문서·JSON·승인 receipt의 hash가 아니다.
+  보고서 전문은 저장소에 새로 복사하지 않았으며 외부 출처와 V 원본 hash는 JSON의 후속 구획에 결속한다.
+
+| 항목 | 처리 |
+|---|---|
+| finding | ISV-F1, P3, 한정 gate 비차단 |
+| 지적 | 원 V §1의 branch·commit/push 부정 진술에서 준비 시점과 이후 발행 시점을 명확히 분리할 것 |
+| disposition | Accept with modification — 시점 표기 권고를 수용하고, bytes 변경에 필요한 hash 재결속을 함께 수행 |
+| 변경 | 문서 상단 시점 주석, 이 처리 이력, JSON.document.rawSha256 재결속 및 JSON.postReviewClarification 추가 |
+| 처리 상태 | 작성자가 표기 보완을 반영함. 수정본에 대한 독립 확인 완료나 새 PASS를 선언하지 않음 |
+
+보고서의 “해시·판정·구획 변경은 필요하지 않습니다” 중 hash 불변은 적용하지 않는다.
+한 줄이라도 추가하면 Markdown raw SHA가 달라지므로 JSON.document.rawSha256을 새 Markdown에
+재결속한다. 그 JSON bytes의 SHA도 달라진다. 기존 판정·gate·측정값·승인 원문은 바꾸지 않는다.
+
+§1–§9 원문은 시점 주석 외에 변경하지 않았고, JSON은 document.rawSha256과 새 후속 구획 외
+기존 값을 보존했다. V commit/blob은 그대로이며 이번 수정으로 과거 검토 대상이 바뀌지 않는다.
+상단 작성자 판정 PASS_WITH_RETAINED_RESIDUALS와 Claude의 V 판정 PASS_WITH_WARNINGS는
+서로 다른 시점·역할의 판단이다. 기존 independentReviewPerformed=false 등은 준비 관측으로 남긴다.
+
+기존 IP R1 CHANGES_REQUIRED·R2 추가 독립 확인 없음·확인 회차 1/1과 모든 수용 잔여를 유지한다.
+이번 수정본의 추가 독립 검토는 수행하지 않았다. 환경·CI를 다른 tip으로 재검증한 기록도 아니며,
+T와 당시 설치 관측을 최신 develop나 미래 M3/IP01–IP20/IP19/activation의 증거로 확대하지 않는다.
