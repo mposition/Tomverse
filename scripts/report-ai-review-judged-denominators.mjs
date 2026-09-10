@@ -7,12 +7,13 @@
 //
 // ## Why this exists as a separate command
 //
-// §3.6 fixes the order: the thresholds are chosen from sample composition and
-// the error level that is acceptable, then the run happens. Sample composition
-// is a fact about the frozen set; a reviewer's score is not. The trouble is
-// that `report:ai-review-judged-run` prints both, so running it before the
-// numbers are signed shows exactly what §3.6 forbids -- and no reordering of
-// its output fixes that, because the scores are what it exists to report.
+// The transition decision cited above fixes the order: the thresholds are
+// chosen from sample composition and the error level that is acceptable, then
+// the run happens. Sample composition is a fact about the frozen set; a
+// reviewer's score is not. The trouble is that
+// `report:ai-review-judged-run` prints both, so running it before the numbers
+// are signed shows exactly what that rule forbids -- and no reordering of its
+// output fixes that, because the scores are what it exists to report.
 //
 // So this command reads **only** the frozen set and, optionally, the judged
 // cases' gold. It never reads a reviewer's output, a judgement record or a
@@ -115,7 +116,8 @@ if (problems.length > 0) {
 // one case's contribution KNOWN, and a case without one stays unknown.
 //
 // `case.json` is gold and registration. It holds no reviewer output, no
-// judgement and no score, which is why reading it does not break §3.6.
+// judgement and no score, which is why reading it does not break the
+// pre-commitment rule.
 //
 // **But "it parsed" is not "it is about this case".** Reading only the id and
 // the gold's length accepted a file written under an old contract, a file
@@ -407,10 +409,12 @@ console.log(
         "  어떤 상한도 만족시키지 못한다 — 품질이 아니라 구성의 문제다.\n" +
         "\n  그리고 이 표는 **통과 가능성**이고 판정 예산이 아니다. 판정해야 하는 case\n" +
         "  수는 표본 하한과 '계획 전체' 조건이 정하며, 상한 선택과 무관하다.\n" +
-        "  근거: 결정안 §3.3."
+        '  근거: 전환 결정안의 "통과 가능성이고 판정 예산이 아니다" 절.'
 );
 
 console.log(
     "\nNo reviewer output, judgement record or score was read, and nothing was\n" +
-        "written. Choosing the ceilings is a person's decision: 결정안 §3.6."
+        "written. Choosing the ceilings is a person's decision, fixed in advance from\n" +
+        "the sample and the error level that is acceptable -- never from a score that\n" +
+        "has already been observed."
 );
