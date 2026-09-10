@@ -157,7 +157,8 @@ MP4는 `mvhd.duration = 0`을 쓰고 길이를 fragment에 맡길 자격이 있�
 오는 것**뿐입니다 — 그 브라우저가 여기 없기 때문입니다.
 
 결과가 `unknown`이면 그것은 실패가 아니라 **정책 §5.2가 이미 예상한 결과**이고,
-그때는 서버 로그의 `durationSource: "unknown"` 비율을 §7 예산과 함께 다시
+그때는 서버 로그의 `durationSource: "unknown"` 비율을
+docs/policy/voice-input.md §7 예산과 함께 다시
 봅니다.
 
 ### B-2. Firefox의 컨테이너 협상
