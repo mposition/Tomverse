@@ -1,7 +1,7 @@
 // The pre-threshold path: denominators with no score in them.
 //
-// §3.6 of the transition decision fixes the order -- thresholds chosen from
-// sample composition, then the run. `report:ai-review-judged-run` cannot serve
+// .github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md §3.6
+// fixes the order -- thresholds chosen from sample composition, then the run. `report:ai-review-judged-run` cannot serve
 // that order, because printing the scores is what it is for. This command is
 // the other half, and the requirement that matters about it is negative: it
 // must not be able to read a reviewer's output, a judgement record or a score.
