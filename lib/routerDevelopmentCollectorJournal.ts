@@ -182,10 +182,11 @@ export async function collectDevelopment(input: CollectionRunInput & { adapter: 
   });
 }
 function collectionReport(manifest: CollectionManifest, state: ReturnType<typeof replayCollectionJournal>, stopReason: string | null) {
+  const selected = new Set(manifest.selectedRowIds);
   return { schemaVersion: COLLECTION_VERSION, purpose: "development-only", manifestDigest: manifest.manifestDigest, stopReason,
     committedReservationMicroUsd: state.totalReservedMicroUsd, reservationPolicy: "never_released_not_actual_spend", actualInvoiceMicroUsd: null,
     dispatchIntents: state.attempts.size, terminalRecords: [...state.attempts.values()].filter((attempt) => attempt.terminal).length,
-    unknownRows: state.unknownRows, rows: manifest.plan.rows.map((row) => ({ rowId: row.rowId,
+    unknownRows: state.unknownRows, rows: manifest.plan.rows.map((row) => ({ rowId: row.rowId, selected: selected.has(row.rowId),
       outcome: !row.benchmarkEligibility.eligible ? "refused" : state.attempts.get(row.rowId)?.terminal?.outcome.status ?? (state.attempts.has(row.rowId) ? "unknown_after_dispatch" : "not_run"),
       refusalReasons: row.benchmarkEligibility.reasons })) };
 }

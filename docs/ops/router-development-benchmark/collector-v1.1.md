@@ -61,6 +61,13 @@ The two v1 diagnostics remain distinct:
   admission or evidence that credentials, quota, region, provider health,
   model availability, or current runtime registry permit a call.
 
+Each run-report row carries `selected: boolean`, derived from the frozen
+manifest's `selectedRowIds`. Read it alongside the existing `outcome`:
+`selected: true` with `not_run` means selected but unattempted;
+`selected: false` with `not_run` means eligible but never selected. This does
+not change outcome labels, population or coverage denominators, or scoring.
+Selection and attempt counts are not model-quality evidence.
+
 Only the case's model input is sent for generation. Gold answers, grading
 rules, verdicts, and other models' answers are not prompt inputs. Correctness
 is checked later by the existing deterministic grader; this is not an LLM
