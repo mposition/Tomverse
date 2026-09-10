@@ -126,6 +126,8 @@ export type AdminE2EIdentityKey =
   | AdminE2ERole
   /** A second `owner`, so two-person approval can be completed end to end. */
   | "approver"
+  /** Dedicated to revocation tests so the server snapshot cache cannot leak into another spec. */
+  | "revoked"
   /** Signed in, but not an administrator. */
   | "member";
 
@@ -158,6 +160,7 @@ export const ADMIN_E2E_IDENTITIES: Record<
   support: identity("support", "E2E Support", "support"),
   ops: identity("ops", "E2E Ops", "ops"),
   readonly: identity("readonly", "E2E Read Only", "readonly"),
+  revoked: identity("revoked", "E2E Revoked Session", null),
   member: identity("member", "E2E Member", null),
 };
 
