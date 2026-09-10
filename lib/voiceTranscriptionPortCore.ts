@@ -187,41 +187,46 @@ export const resolveVoiceTranscriptionModel = (
 export const VOICE_TRANSCRIPTION_TIMEOUT_MS = 30_000;
 
 /**
- * The region Voice transcription is pinned to, and the host that pins it.
+ * The routing the provider is asked for, and the host that fixes it.
  *
  * Contract: docs/policy/voice-input.md §11.3.
  *
- * **Not a default, and not configurable.** Korean privacy law requires an
- * overseas-transfer notice to name the country the data goes to, and a notice
- * cannot name one while the request goes wherever the provider's global
- * routing sends it. So the country is chosen here, in code, and the notice can
- * be written against something that is true by construction rather than by
- * convention.
- *
- * That is why there is no environment variable. An operator who could point
- * this at another host could invalidate a published legal notice without
- * touching the notice, and nothing in the deployment would say so. The one
+ * **Not a default, and not configurable.** The reason survives the change of
+ * value below: what a privacy notice can say about where a recording goes is
+ * only as stable as the thing that decides it. An operator able to point this
+ * at another host could invalidate a published legal notice without touching
+ * the notice, and nothing in the deployment would say so. So the destination
+ * is chosen here, in code, and the notice is written against it. The one
  * remaining way to change the host is `OpenAiTranscriptionConfig.baseUrl`,
  * which exists for tests and which the production binding never reads from
  * configuration -- see the comment there.
  *
- * Established from the provider's data-controls guide (read 2026-09-10):
- * `/v1/audio/transcriptions` supports regional *processing* in the United
- * States and Europe (EEA + Switzerland); the US region requires neither
- * Modified Abuse Monitoring nor Zero Data Retention; both models this product
- * calls are on the supported list; and a regional host may be used per request
- * with a key from a Global-geography project, so this needs no new project or
- * key.
+ * **This was `https://us.api.openai.com` between 2026-09-10 and 2026-09-10,
+ * and the provider refused it.** The pin was made so a Korean
+ * overseas-transfer notice could name the country. Every request to the
+ * regional host came back `401 incorrect_hostname` -- *"Attempted to access
+ * resource with incorrect regional hostname. Please make your request to
+ * api.openai.com"* -- for both the dedicated Voice key and the shared key, on
+ * `/v1/models` and on this endpoint alike, whether or not audio was attached.
  *
- * **It covers Customer Content, not everything.** The same guide states that
- * data residency "does not apply to system data, which may be processed and
- * stored outside the selected region". Nothing here may be described as "all
- * data is processed in the US".
+ * The provider's guide does say a regional host may be used per request with a
+ * key from a Global-geography project, and the Voice project's `residency` is
+ * `GLOBAL`. The unstated precondition is that the *organization* be
+ * provisioned for data residency at all, which this one is not; the guide
+ * points that at its sales team. Data residency is also explicitly not decided
+ * by where the caller runs, so moving this deployment would not have changed
+ * the answer.
+ *
+ * The observation, what it ruled out one candidate at a time, and the three
+ * courses it left open are in
+ * `docs/ops/voice-provider-data-controls-records/2026-09-10-us-regional-endpoint.md`
+ * §10. Restoring the regional host is not a code decision on its own: it needs
+ * the provider to enable data residency first, and the notice moves with it.
  */
-export const VOICE_TRANSCRIPTION_PROVIDER_REGION = "us";
+export const VOICE_TRANSCRIPTION_PROVIDER_REGION = "global";
 
-/** The regional host every Voice transcription is sent to. See above. */
-export const VOICE_TRANSCRIPTION_OPENAI_BASE_URL = "https://us.api.openai.com";
+/** The host every Voice transcription is sent to. See above. */
+export const VOICE_TRANSCRIPTION_OPENAI_BASE_URL = "https://api.openai.com";
 
 /**
  * Joins the host and the path without producing `//v1`.
