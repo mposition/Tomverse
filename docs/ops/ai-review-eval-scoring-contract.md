@@ -624,8 +624,11 @@ judged 지표가 게이트에 닿으려면 arm별 수치가 있어야 한다.
 **임계값을 고르기 전에 쓰는 것은 `npm run report:ai-review-judged-denominators`다.**
 동결된 set(과 선택적으로 판정 case의 gold)에서 **분모만** 내며, 검토자 출력·판정
 기록·점수를 **읽을 수단이 없다**(`tests/aiReviewJudgedDenominators.test.mjs`가
-정적으로 고정). 미보고율 분모는 판정 case를 주지 않으면 **상한**이고 출력이 그렇게
-밝힌다 — 판정 gold는 dataset의 키워드 gold와 별도로 작성되기 때문이다.
+정적으로 고정). 미보고율 분모는 **검증된 판정 case만 세고 나머지는 구간을 넓힌다**
+— dataset의 키워드 gold는 판정 gold를 묶지 않으므로(비어 있어도 판정 gold가 항목을
+가질 수 있다) 대신 쓸 수 없다. 허용 실패 수도 구간으로 낸다. 판정 case는
+shape·등록·계약 버전·원문 digest·label을 통과해야 세어지고, id 중복은 거절이며,
+하나라도 걸리면 분모를 내지 않는다.
 
 **게이트는 여전히 연결되지 않았다.** 전환 범위는 2026-09-10에 승인됐지만
 aggregate 상한 두 값과 arm 숫자 두 개는 승인되지 않았고, 값이 없으면 새 threshold
