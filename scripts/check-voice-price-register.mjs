@@ -59,8 +59,9 @@ const problems = auditVoicePriceRegister({
 // default. Failing every entry would mean the register could only ever hold
 // models somebody had already paid to verify -- and then the honest record
 // that `gpt-4o-transcribe`'s cost is *unknown* could not be written down at
-// all, which is how a register ends up holding the published text rate
-// instead (docs/policy/voice-input.md §6.1.3-5). Choosing that model is a
+// all, which is how a register ends up holding the published price instead --
+// which on both models so far has been 2.4x under what the invoice says
+// (docs/policy/voice-input.md §6.1.3-5). Choosing that model is a
 // decision with its own approval; this line is not the thing that gates it.
 const blocking = problems.filter(
   (problem) =>
