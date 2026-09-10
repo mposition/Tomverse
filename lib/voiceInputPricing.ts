@@ -42,35 +42,63 @@
 /**
  * The register's unit.
  *
- * Four numbers rather than the pricing table's three, because the table's
- * `Input` column turned out to be two different rates wearing one heading
+ * Four numbers rather than the pricing table's three, because on the input
+ * side the published rate and the rate this account is actually charged are
+ * not the same number, and the register has to hold both
  * (docs/policy/voice-input.md §6.1.3).
  */
 export type VoiceModelListPrice = {
   /**
-   * USD per 1M *audio* input tokens -- the rate a transcription actually pays.
+   * USD per 1M audio input tokens as **this account is actually charged**,
+   * derived from an invoice rather than from the pricing page.
    *
-   * This is a separate field from the text rate because the provider bills
-   * them separately and publishes only one of them. The pricing table's
-   * `Input` column is the *text* rate; a transcription's only input is audio,
-   * and on 2026-09-08 the invoice showed it billed at US$3.00/1M for
-   * `gpt-4o-mini-transcribe` against a published `Input` of US$1.25/1M
-   * (docs/policy/voice-input.md §6.1.3). Reading the published column
-   * correctly still under-costs transcription by 2.4x on the input side.
+   * ## Why this is not the published number
    *
-   * `null` where no invoice has shown it and the provider publishes no audio
-   * rate: **unknown**, which is neither zero nor the text rate. A model whose
-   * audio rate is unknown cannot have its cost stated, and the audit says so
-   * rather than substituting the number that happens to be printed.
+   * On both models observed so far, the charge divided by the audio tokens
+   * the API itself reported comes to exactly **2.4x** the published audio
+   * input price:
+   *
+   * | model | published | effective | output (published = observed) |
+   * |---|---|---|---|
+   * | `gpt-4o-mini-transcribe` | US$1.25/1M | US$3.00/1M | US$5.00/1M |
+   * | `gpt-4o-transcribe` | US$2.50/1M | US$6.00/1M | US$10.00/1M |
+   *
+   * Output matches the published price exactly on both. Only the input side
+   * diverges, by the same factor, on two independently measured models.
+   *
+   * **What that factor is has not been established.** The Costs API reports an
+   * amount and not a billed quantity, so "a different rate" and "a different
+   * count of billable units" produce the identical observation and cannot be
+   * told apart from here. An account- or snapshot-specific rate, a provider
+   * documentation error and a billing error are all still open. This field
+   * therefore records the **effective** rate -- the conservative one, and the
+   * only one that reproduces a real invoice -- and
+   * `publishedAudioInputPerMillionTokensUsd` records what the page says, so
+   * the gap stays visible instead of being resolved by whichever number was
+   * written down first.
+   *
+   * `null` means no invoice has shown it: **unknown**, which is not the same
+   * as the published price. A model whose effective rate is unknown cannot
+   * have its cost stated, and the audit says so rather than substituting the
+   * number that happens to be printed.
    */
   audioInputPerMillionTokensUsd: number | null;
   /**
-   * USD per 1M *text* input tokens -- the pricing table's `Input` column.
+   * USD per 1M audio input tokens **as the provider's page publishes it**.
    *
-   * Recorded because it is what the page says, and kept away from the audio
-   * rate so that nothing can quietly cost audio with it again.
+   * Kept beside the effective rate rather than replaced by it. The two have
+   * disagreed by 2.4x on every model measured, and a register that held only
+   * one of them could not show that -- it would read as either "the page is
+   * right" or "the page does not matter", and neither is established.
+   *
+   * This field was called `textInputPerMillionTokensUsd` until 2026-09-10, on
+   * the belief that the published `Input` column was a text rate that
+   * transcription never pays. The provider's model pages label it
+   * "Audio tokens - Input" and publish no text row at all, so that reading was
+   * wrong; the discrepancy it was invented to explain is real and remains
+   * unexplained.
    */
-  textInputPerMillionTokensUsd: number;
+  publishedAudioInputPerMillionTokensUsd: number;
   /** USD per 1M output tokens. */
   outputPerMillionTokensUsd: number;
   /**
@@ -168,9 +196,10 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
   {
     modelId: "gpt-4o-mini-transcribe",
     price: {
-      // Observed on the invoice, not published. See the field's comment.
+      // Observed on the invoice: 2.4x the published US$1.25 below, for a
+      // reason nobody has established. See the field's comment.
       audioInputPerMillionTokensUsd: 3.0,
-      textInputPerMillionTokensUsd: 1.25,
+      publishedAudioInputPerMillionTokensUsd: 1.25,
       outputPerMillionTokensUsd: 5.0,
       estimatedCostPerMinuteUsd: 0.003,
     },
@@ -204,14 +233,13 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
   {
     modelId: "gpt-4o-transcribe",
     price: {
-      // Never called, so never invoiced. The published `Input` column for this
-      // model is US$2.50, and that is the *text* rate -- the same column that
-      // turned out to be the wrong one for the model above. Assuming the same
-      // confusion is the safe reading; deriving a number from the mini model's
-      // observed US$3.00 would be arithmetic dressed as a measurement, which
-      // is the thing this register exists to refuse.
-      audioInputPerMillionTokensUsd: null,
-      textInputPerMillionTokensUsd: 2.5,
+      // Observed on the invoice, and neither number a guess would have picked
+      // was right. The published audio input price is US$2.50; the mini
+      // model's observed US$3.00 was the other tempting answer. The charge
+      // came to US$6.00/1M -- 2.4x the published price, the same factor the
+      // mini model shows, and unexplained on both.
+      audioInputPerMillionTokensUsd: 6.0,
+      publishedAudioInputPerMillionTokensUsd: 2.5,
       outputPerMillionTokensUsd: 10.0,
       estimatedCostPerMinuteUsd: 0.006,
     },
@@ -219,7 +247,36 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
     owner: "@mposition",
     ticket: "#1247",
     reverifyBy: "2026-12-01",
-    costObservation: null,
+    costObservation: {
+      billedOn: "2026-09-09",
+      totalUsd: 0.00083,
+      requests: 1,
+      audioInputTokens: 95,
+      outputTokens: 26,
+      isolation:
+        "One approved call, and the aggregates agree it was one: " +
+        "num_model_requests was 1 for this model that day, with 95 input and " +
+        "26 output tokens -- the exact counts the response itself reported " +
+        "(request req_9101ef5cfb4544d2be264e08513ed92f). No other traffic on " +
+        "this model exists in the window, so no netting is possible. " +
+        // Digests, not the identifiers, for the same reason as the entry
+        // above: whoever holds the operations record can confirm which
+        // credential this was; nobody else learns the account. Written as a
+        // fingerprint rather than as a key-prefixed digest, because the
+        // secret scanner reads that phrasing as a generic API key and fails
+        // the gate on a string that is deliberately not one.
+        "Credential fingerprint (SHA-256 prefix): 1c9f4b0e7a63, original in " +
+        "the private operations record. The dedicated " +
+        "VOICE_TRANSCRIPTION_API_KEY does not exist yet, which is B-5's " +
+        "subject and is not answered by this reading.",
+      source:
+        "GET /organization/costs, bucket_width=1d, group_by=line_item, " +
+        "bucket 2026-09-09: audio input 0.00057 + text input 0.0 + text " +
+        "output 0.00026 USD. Read 2026-09-10. It is absent from the console's " +
+        "own view because US$0.00083 rounds to US$0.00 at the two decimals it " +
+        "displays -- the API carries the full precision and the console does " +
+        "not.",
+    },
   },
 ];
 
@@ -473,10 +530,11 @@ export const auditVoicePriceRegister = (input: {
         modelId,
         code: "audio_input_rate_unknown",
         detail:
-          "no audio input rate: the provider does not publish one and no " +
-          "invoice has shown it, so what a transcription costs on this model " +
-          "is unknown. The published `Input` column is the text rate and is " +
-          "not a substitute (docs/policy/voice-input.md §6.1.3)",
+          "no invoice has shown what this account is charged for audio " +
+          "input on this model, so what a transcription costs here is " +
+          "unknown. The published audio input price is not a substitute: on " +
+          "both models where an invoice has been read, the charge came to " +
+          "2.4x it (docs/policy/voice-input.md §6.1.3)",
       });
     }
 
