@@ -595,6 +595,72 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
 **분모 0은 0%가 아니다.** `rate`·`wilsonLower`·`wilsonUpper`가 `null`이고
 `insufficientEvidence`가 그 사실을 문장으로 들고 다닌다.
 
+#### arm 단위 집계 (2026-09-10 승인)
+
+게이트는 언어 격차 규칙과 과제 arm shortfall 규칙을 **읽는 모든 지표에** 적용하므로,
+judged 지표가 게이트에 닿으려면 arm별 수치가 있어야 한다.
+`aggregateJudgedRun()`이 `byLanguage`·`byTaskType`를 낸다.
+
+- **arm은 자기 case로 계산한다.** aggregate를 arm 비중으로 나누면 어느 모집단에
+  대한 비율도 아닌 숫자가 나온다 — 음성 부분집합에서 이미 한 번 고친 실수다.
+  run과 arm이 **같은 함수**(`metricsOver()`)를 쓰므로 서로 다른 규칙으로 계산될 수
+  없다.
+- **arm·phenomenon 모두 판정 case에 없다.** 동결 dataset에서 읽으며,
+  `datasetProblems()`가 언어·과제 어휘를 이미 검사했다. 둘 중 하나라도 없는 case는
+  blocker다.
+- **case가 없는 arm은 생략한다.** 0의 행으로 적지 않는다 — 없는 arm과 아무것도
+  재지 못한 arm은 다른 사실이고, 어느 쪽인지 말하는 것은 게이트의 arm 적용 범위
+  규칙이다. arm 안에서 분모가 0이면 그 arm의 해당 지표가
+  `insufficientEvidence`다.
+- **격차도 shortfall도 계산하지 않는다.** `maxLanguageArmGap`·
+  `maxTaskTypeArmShortfall`은 **승인되지 않은 숫자**이고, 승인되지 않은 비교를
+  실제 수치 옆에 출력하면 판정처럼 읽힌다. 비교는 게이트의 일이다.
+
+**게이트는 여전히 연결되지 않았다.** 전환 범위는 2026-09-10에 승인됐지만
+aggregate 상한 두 값과 arm 숫자 두 개는 승인되지 않았고, 값이 없으면 새 threshold
+집합을 만들 수 없다. 근거와 선택 자료는
+`.github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md`.
+
+#### 저장된 실행을 읽는 호출자
+
+`npm run report:ai-review-judged-run`
+(`scripts/report-ai-review-judged-run.mjs`). **보고 전용이다** — 어느 입력 파일도
+쓰지 않고, 승인·승급 판정을 내리지 않으며, 집계 가능 여부와 무관하게 종료 코드 0이다.
+거절은 그 실행에 대한 참인 진술이고 build 실패가 아니다.
+
+```
+npm run report:ai-review-judged-run -- \
+  --run=<실행 artifact .json> --journal=<실행 journal .jsonl> \
+  --dataset=<동결된 평가 set .json> --judgements=<case별 bundle 디렉터리>
+```
+
+`--judgements`는 `score:ai-review-judgements`가 쓰는 것과 같은 배치다 —
+`<caseId>/{case,observation,record,artifact}.json`.
+
+**두 입력은 출처가 계약이다.**
+
+- **`manifest.datasetDigest`는 실행 artifact의 `summary.datasetDigest`에서만
+  읽는다.** 건네받은 dataset으로 계산하면 **실패할 수 없는 비교**가 되고, 출력은
+  정상 실행과 똑같이 보인다. 입력으로 재현할 수 없는 조건이므로
+  `tests/aiReviewJudgedRunReportCli.test.mjs`가 **정적으로** 고정한다 — CLI는
+  `datasetDigest()`를 부를 수단 자체를 갖지 않는다.
+- **계획은 판정이 존재하는 항목에서 역으로 만들지 않는다.** 동결 set이 어떤 case가
+  있었는지, 실행의 journal이 각 case가 어떤 출력을 냈는지, 실행이 기록한
+  `plannedCases`·`completedCases`가 그 둘과 맞는지를 함께 본다. 기록이 설명하지
+  못하는 것은 **거절**이다 — bundle을 지우면 실행이 줄어드는 것이 아니라 막힌다.
+- **대조는 양방향이다.** set을 돌며 journal을 찾기만 하면, set에 없는 case의 journal
+  항목은 **아무 데서도 눈에 띄지 않는다** — 그냥 빠지고 남은 둘이 1/2로 집계됐다.
+  자리를 댈 수 없는 출력을 들고 있는 기록은 이것이 읽을 수 있는 기록이 아니다.
+- **`completedCases`는 journal 행 수가 아니다.** 실행기는 실패한 호출도 journal에
+  적고(`observation` 없이), 출력을 낸 항목만 완료 수에 센다. 행 수와 비교하면
+  **공급자 실패 1건이 있는 정상 실행을 "기록이 자기모순"으로 보고**하게 되는데,
+  틀린 판정이고 운영자를 엉뚱한 파일로 보낸다. 실패 항목은 **"그 case가 출력을 내지
+  못했으므로 계획을 완성할 수 없다"**는 별개 사유로 보고하고, `completedCases`와
+  `plannedCases`가 다르면 그 자체로 **전체 계획을 재지 못한 실행**이다.
+
+중도 중단된 실행이 이 규칙이 지키는 경우다. 남은 판정들이 전부 온전해도 그 실행은
+온전하지 않으며, 집계하면 **부분 실행이 완전한 실행으로 보고된다.**
+
 ### 아직 정해지지 않은 것
 
 - **gold 밖 requirement id의 배정 개수.** 위 C1의 마지막 항목이다. 같은 문장에
@@ -618,8 +684,14 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
 - `lib/aiReviewJudgedRunAggregate.ts` — 실행 단위 집계기(2026-09-09 승인).
   순수 함수이며 파일도 DB도 provider도 읽지 않는다. **승인 게이트에 연결돼 있지
   않다.**
+- `scripts/report-ai-review-judged-run.mjs` — 저장된 실행 기록을 읽어 위 집계기를
+  부르는 보고 전용 CLI. 쓰기도 게이트도 아니다.
 - `tests/aiReviewJudgedRunAggregate.test.mjs`,
-  `tests/aiReviewJudgedInventedFindings.test.mjs` — 위 규칙을 요구로 표현.
+  `tests/aiReviewJudgedInventedFindings.test.mjs`,
+  `tests/aiReviewJudgedRunReportCli.test.mjs` — 위 규칙을 요구로 표현. 마지막 것은
+  **파일을 통해** 확인한다(정상 왕복, 판정 누락, 중도 중단, 기록 자기 불일치,
+  **journal에 기록된 공급자 실패**, **계획 밖 journal 항목**, manifest 누락,
+  재동결본 교체, bundle 파일 누락, 입력 바이트 무변경, 분모 0).
 
 **v2에서 더한 것**(2026-09-08 승인, 위 절)
 

@@ -386,6 +386,102 @@ test("expired evidence holds the promotion instead of ordering a rollback", () =
   }
 });
 
+// --- the hold, and the rollback the hold cannot finish ----------------------
+//
+// Vectors X8b, X8c, X13 and X13a of the undetermined-signing-half packet
+// (.github/audits/2026-09-09-mobile-auth-undetermined-signing-half-approval.md,
+// G1-G11 approved 2026-09-10). They live here rather than beside that
+// packet's rule tests because what they establish is **this script's
+// response**, and only calling it establishes that.
+
+/** The deployment Active names during a hold: the one that was running before. */
+const HELD_ACTIVE_DEPLOYMENT = "dep-99999999-aaaa-bbbb-cccc-dddddddddddd";
+
+test("X8b: during a hold the verifier refuses a recovery rather than ordering one", () => {
+  // A hold is `Active != Railway` by definition, and three unconditional
+  // sentences in this repository say to restore Railway from Active in that
+  // state. This is the check those sentences would be read beside: Active's
+  // values, evidence from the deployment now running. The binding axis is
+  // reached first and the answer is to collect it again.
+  const signing = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
+    MOBILE_AUTH_VERIFY_DEPLOYMENT_ID: HELD_ACTIVE_DEPLOYMENT,
+    ...evidence({ signing, pepper: PEPPER_INTENDED }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /FAIL {2}signing binding/);
+  assert.match(result.stdout, /Nothing was decided about the deployment/);
+  assert.equal(/Do NOT deploy/.test(result.stdout), false, result.stdout);
+  assert.equal(/Restore Railway/.test(result.stdout), false, result.stdout);
+});
+
+test("X8c: the recovery advice appears only once Active already names the new deployment", () => {
+  // Which is not a hold. It is a store that has been half promoted, and it
+  // needs its own answer rather than being reached by accident.
+  const evidenceKey = ed25519();
+  const candidateKey = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: candidateKey.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
+    ...evidence({ signing: evidenceKey, pepper: PEPPER_INTENDED }),
+  });
+  assert.equal(result.code, 1, result.stdout);
+  assert.match(result.stdout, /OK {4}signing binding/);
+  assert.match(result.stdout, /FAIL {2}signing key material/);
+  assert.match(result.stdout, /Do NOT deploy/);
+});
+
+test("X13: after a rollback that issues a new id, only the id the evidence names re-checks", () => {
+  // F2's completion condition is this re-check passing, and the re-check takes
+  // the Active entry's deployment id as its expectation. Under this
+  // assumption two of the three values cannot pass -- which is why E7 blocks
+  // the completion rather than leaving a blank cell.
+  const signing = ed25519();
+  const rolledBackTo = DEPLOYMENT;
+  const cases = {
+    "left empty": "",
+    "the previous id": HELD_ACTIVE_DEPLOYMENT,
+    "the id the evidence names": rolledBackTo,
+  };
+  const outcomes = {};
+  for (const [name, expected] of Object.entries(cases)) {
+    const result = run({
+      ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
+      MOBILE_AUTH_VERIFY_DEPLOYMENT_ID: expected,
+      ...evidence({ signing, pepper: PEPPER_INTENDED, dep: rolledBackTo }),
+    });
+    outcomes[name] = {
+      code: result.code,
+      materialChecked: /signing key material/.test(result.stdout),
+      stdout: result.stdout,
+    };
+  }
+  assert.equal(outcomes["left empty"].code, 1);
+  // Refused before the material is looked at, so the run says nothing at all.
+  assert.equal(outcomes["left empty"].materialChecked, false, outcomes["left empty"].stdout);
+  assert.match(outcomes["left empty"].stdout, /is not a usable deployment id/);
+
+  assert.equal(outcomes["the previous id"].code, 1);
+  assert.match(outcomes["the previous id"].stdout, /OK {4}signing key material/);
+  assert.match(outcomes["the previous id"].stdout, /FAIL {2}signing binding/);
+
+  assert.equal(outcomes["the id the evidence names"].code, 0, outcomes["the id the evidence names"].stdout);
+});
+
+test("X13a: after a rollback that reuses the id, the previous id re-checks cleanly", () => {
+  // The opposite assumption, and it reverses the middle row above. E7 being
+  // unmeasured means nobody knows which of the two happened -- not that the
+  // previous id is wrong.
+  const signing = ed25519();
+  const result = run({
+    ...candidate({ signingPkcs8: signing.pkcs8, pepper: PEPPER_INTENDED, mode: "preflight" }),
+    MOBILE_AUTH_VERIFY_DEPLOYMENT_ID: HELD_ACTIVE_DEPLOYMENT,
+    ...evidence({ signing, pepper: PEPPER_INTENDED, dep: HELD_ACTIVE_DEPLOYMENT }),
+  });
+  assert.equal(result.code, 0, result.stdout);
+  assert.match(result.stdout, /OK {4}signing binding/);
+});
+
 test("a mismatch found in stale evidence is not blamed on the deployment", () => {
   // The ordinary case, and the one the first version of this rule got wrong:
   // evidence minted by the previous key, days old, compared against the new
