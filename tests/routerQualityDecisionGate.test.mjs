@@ -175,6 +175,19 @@ test("promoting a reserve item into the sample is drift", () => {
     assert.match(freezeDrift(promoted) ?? "", /has changed since it was frozen/);
 });
 
+// The same defect the AI Review eval's copy of `freezeDrift()` had: a
+// non-empty string read as a freeze record while pinning the sample to no
+// moment. `decisionRunRefusals()` compares `Date.parse(preRegisteredAt)` with
+// `Date.parse(frozenAt)`, and `NaN > NaN` is false -- so the ordering check
+// passed on a set frozen at nothing.
+test("a freeze time that is not a time pins the sample to nothing", () => {
+    const dated = set();
+    assert.equal(freezeDrift(dated), null);
+    const undated = { ...dated, frozenAt: "not-a-date" };
+    assert.match(freezeDrift(undated) ?? "", /"not-a-date", which is not a time/);
+    assert.doesNotMatch(freezeDrift(undated) ?? "", /has changed since it was frozen/);
+});
+
 test("the digest survives a malformed attachment rather than throwing", () => {
     const malformed = set();
     malformed.items = [{ ...malformed.items[0], attachments: "image/png" }, ...malformed.items.slice(1)];

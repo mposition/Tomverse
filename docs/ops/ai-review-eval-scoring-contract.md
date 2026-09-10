@@ -553,7 +553,9 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
 6. **실행의 dataset을 통째로 먼저 받아들인다.** `datasetProblems()`와
    `freezeDrift()` — 평가 set 자신의 검사기 — 를 실행 단위로 한 번 돌리고,
    걸리면 **case를 하나도 읽기 전에** 거절한다.
-7. **phenomenon은 판정 case에 없다.** 위에서 받아들인 dataset에서 읽는다.
+7. **그리고 그것이 이 실행의 dataset인지 확인한다.** 실행이 기록한
+   `manifest.datasetDigest`를 입력으로 받아 지금 건네진 set의 digest와 대조한다.
+8. **phenomenon은 판정 case에 없다.** 위에서 받아들인 dataset에서 읽는다.
 
 **6번이 없으면 "frozen dataset"은 주석의 단어일 뿐이다.** 세 가지가 그 틈으로
 지나갔다.
@@ -569,6 +571,22 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
   문제를 반환한 뒤 집계기가 같은 배열을 다시 읽다가 예외로 죽었다. (검증기
   자신도 그 지점에서 죽었다 — `datasetProblems()`와 `adoptionProblems()` 양쪽에
   guard가 필요했다.)
+
+**7번이 없으면 6번은 자기 일관성만 본다.** 편집한 파일을 **다시 동결**하면
+`freezeDrift()`가 할 말이 없어지므로, 다른 유효한 동결본으로 바꿔 넣어도 옛 실행
+증거가 통과했다 — 계획·journal·판정 기록·artifact를 하나도 건드리지 않고 미보고율이
+1/2에서 0/1로 움직였다. **그래서 기대값은 실행이 적어 둔 것에서 와야 하고, 집계
+시점의 dataset으로 다시 채우면 같은 구멍이다.** `manifest.datasetDigest`는 필수이며
+없으면 blocker다 — 선택이면 검사가 opt-in이 되고 구멍이 남는다.
+
+**`frozenAt`도 시각이어야 한다.** `isNonEmptyString`만 보면 `"not-a-date"`가
+"동결 기록이 있다"를 만족시키면서 내용을 아무 시점에도 묶지 않고, 동결 시각을
+비교하는 쪽은 `NaN`을 받아 조용히 아무것도 비교하지 않는다
+(`Date.parse(preRegisteredAt) > Date.parse(frozenAt)` 같은 비교는 **false**가 된다).
+`lib/aiReviewEvalRun.ts`와 `lib/routerQualityEvalSet.ts`의 `freezeDrift()`가 같은
+결함을 들고 있었고 둘 다 고쳤다. 회귀는 **날짜만 틀리고 지문은 정상인 경우**로
+고정한다 — 둘을 동시에 깨뜨리면 지문 거절만으로 통과하고, 날짜 검사는 검사되지
+않는다.
 
 **여기서 정하지 않은 것: decision set이어야 하는가.** `decisionDatasetProblems()`는
 `purpose: "decision"`을 추가로 요구한다. 판정 실행을 development set에서 집계해도

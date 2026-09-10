@@ -147,6 +147,32 @@ test("freeze drift names what changed rather than returning a boolean", () => {
   assert.match(freezeDrift(drifted), /has changed since it was frozen/);
 });
 
+test("a freeze time that is not a time pins the contents to nothing", () => {
+  // `frozenAt: "not-a-date"` satisfied "there is a freeze record" while
+  // pinning the contents to no moment at all, and the digest half of the
+  // check still passed -- so a caller that broke both at once was reported on
+  // the digest and never learned the date was meaningless.
+  const dataset = JSON.parse(
+    readFileSync("docs/ops/ai-review-evaluation-set/development-v0.json", "utf8")
+  );
+  const frozen = {
+    ...dataset,
+    frozenAt: "2026-09-09T00:00:00.000Z",
+    frozenBy: "TEST",
+    frozenDigest: datasetDigest(dataset),
+  };
+  assert.equal(freezeDrift(frozen), null);
+  assert.match(
+    freezeDrift({ ...frozen, frozenAt: "not-a-date" }),
+    /"not-a-date", which is not a time/
+  );
+  // And it is the date being caught, not the digest.
+  assert.doesNotMatch(
+    freezeDrift({ ...frozen, frozenAt: "not-a-date" }),
+    /has changed since it was frozen/
+  );
+});
+
 test("gold with no stated completeness is a defect, not a default", () => {
   const problems = datasetProblems({
     version: "v",

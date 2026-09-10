@@ -341,6 +341,16 @@ export const freezeDrift = (dataset: AiReviewEvalDataset): string | null => {
     if (!(isNonEmptyString(dataset.frozenAt) && isNonEmptyString(dataset.frozenBy))) {
         return "the dataset carries no freeze record, so there is no moment its contents are pinned to";
     }
+    // A moment, not a non-empty string. `frozenAt: "not-a-date"` satisfied
+    // "there is a freeze record" while pinning the contents to nothing, and a
+    // caller comparing freeze times -- which is the whole point of recording
+    // one -- would get `NaN` from it and silently compare nothing.
+    if (!Number.isFinite(Date.parse(dataset.frozenAt))) {
+        return (
+            `the freeze record says the dataset was frozen at ` +
+            `${JSON.stringify(dataset.frozenAt)}, which is not a time`
+        );
+    }
     if (!isNonEmptyString(dataset.frozenDigest)) {
         return (
             `the freeze record (${dataset.frozenAt}, ${dataset.frozenBy}) carries no digest, ` +
