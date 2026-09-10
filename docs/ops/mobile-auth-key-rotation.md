@@ -1240,8 +1240,21 @@ production 활성화를 결정할 때 함께 정할 것 여섯:
 
    **아직 정해지지 않은 것**: 실행 주기, 결과를 누가 보는지, 얼마나 보관하는지. 아래는
    **제안일 뿐이며 승인된 값이 아닙니다** — 하루 1회, `mposition` 단독, 90일(=
-   `MOBILE_AUTH_EVENT_RETENTION_DAYS`와 같은 값). 이 script는 **스케줄러에 자기를 등록하지
-   않고, 아무것도 보내지 않고, 키를 지우거나 회전시키지 않습니다.**
+   `MOBILE_AUTH_EVENT_RETENTION_DAYS`와 **나란히 놓은** 값이며 유도된 값이 아닙니다). 이
+   script는 **스케줄러에 자기를 등록하지 않고, 아무것도 보내지 않고, 키를 지우거나
+   회전시키지 않습니다.**
+
+   > **그리고 그 셋보다 먼저 정할 것이 있습니다 — 어디서 도는가.** 점검이 보려는 것은
+   > *지금 살아 있는* 링인데, 이 script는 `--import tsx`로 돌고 `.ts`를 import 하며
+   > **배포되는 script들은 전부 순수 `.mjs`입니다**(§2의 rev.5 정정). 저장소가 있는
+   > 곳에서 값을 손으로 넣어 돌리면 검증 대상이 *설정하려는 값*이어서 §2.1과 같아지고,
+   > 링을 CI secret으로 복사하면 **production 재료의 두 번째 사본**이 생깁니다.
+   >
+   > 승인용 초안이 네 후보와 각각의 대가, 그리고 **실패 시 처리·침묵 탐지·기록 위치**
+   > 까지 함께 놓습니다 —
+   > `.github/audits/2026-09-10-mobile-auth-keyring-standing-check-approval.md`.
+   > **값은 그 문서의 승인란(같은 문서의 마지막 절)에서 정해지며 지금은 비어
+   > 있습니다.**
 4. **실행 기록 — 체계는 있습니다.**
    `mobile-auth-key-rotation-checklist.md`가 항목을,
    `mobile-auth-key-rotation-verification-records/`가 실행 1회당 파일 하나를 담습니다.
