@@ -1,0 +1,43 @@
+
+> ai-chat-hub@0.1.0 check:router-quality-eval
+> node --import tsx scripts/check-router-quality-eval.mjs
+
+Router quality evaluation — ROUTE-01 evidence check
+
+Evaluation sets
+  ok   docs\ops\router-evaluation-set\development-v0.json (development)
+
+       cell fill against frozen cellTargets
+         general_question_answering/ko                14 adopted    2 candidate  of 14  full
+         general_question_answering/en                14 adopted    2 candidate  of 14  full
+         writing_and_rewriting/ko                     14 adopted    2 candidate  of 14  full
+         writing_and_rewriting/en                     14 adopted    2 candidate  of 14  full
+         coding/ko                                    14 adopted    2 candidate  of 14  full
+         coding/en                                    14 adopted    2 candidate  of 14  full
+         analysis_and_reasoning/ko                    14 adopted    2 candidate  of 14  full
+         analysis_and_reasoning/en                    14 adopted    2 candidate  of 14  full
+         translation_cross_language/ko-en             14 adopted    2 candidate  of 14  full
+         current_information/ko                       14 adopted    1 candidate  of 14  full
+         current_information/en                       14 adopted    1 candidate  of 14  full
+         document_and_attachment/ko                   14 adopted    1 candidate  of 14  full
+         document_and_attachment/en                   14 adopted    1 candidate  of 14  full
+         long_context_conversation/ko                 14 adopted    1 candidate  of 14  full
+         long_context_conversation/en                 14 adopted    1 candidate  of 14  full
+         total                                       210 adopted of 210  [pilotReady]
+
+       baseline gpt-5-6-luna, pre-registered 2026-08-26 by mposition, catalogue 1e5d6058762d9d43cfb14297d2d85da5799907d9
+       frozen 2026-08-26T08:22:51Z by mposition, sample digest verified
+       judge gpt-5-6-luna, pre-registered 2026-08-26 by mposition
+       seed 20260826, pre-registered 2026-08-26 by mposition
+
+       24 drafted item(s) have no reconstructable drafter (provider "unrecorded"): gen-ko-001, gen-ko-002, gen-en-001, gen-en-002, …
+         Not a failure — a truthful record of a real gap. docs/ops/tomverse-chat-router-evaluation-set.md §8 makes the drafter a
+         confound the reviewer weighs, so an item that cannot name one is weaker
+         evidence and a reviewer may reject it on that ground alone.
+
+Run reports
+  none supplied. Pass --report=<path> to validate one.
+  No decision-grade run exists in this repository, so ROUTE-01 has no evidence
+  and remains pending regardless of what the shadow numbers show.
+
+No problems found in what was checked.

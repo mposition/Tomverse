@@ -1,0 +1,6 @@
+
+> ai-chat-hub@0.1.0 check:router-context-window
+> node --import tsx scripts/check-router-context-window.mjs
+
+catalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).
+OK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.

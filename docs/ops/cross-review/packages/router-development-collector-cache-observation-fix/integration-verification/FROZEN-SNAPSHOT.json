@@ -1,0 +1,221 @@
+{
+  "at": "2026-09-10T07:04:33.557Z",
+  "head": "f301f2d8365ae094a764477a9fea56a2de1d08ab",
+  "reviewed": "34a179fd1986afbb2909cc38b0fa988814e5aa0e",
+  "upstream": "ea9c802d4c96cb0e320e9681bd7476495840a314",
+  "clean": true,
+  "scope": [
+    "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+    "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+    "lib/routerDevelopmentCollectorProvider.ts",
+    "tests/routerDevelopmentCollectorProvider.test.mjs"
+  ],
+  "source": [
+    {
+      "path": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+      "bytes": 7173,
+      "sha256": "172a198df752603c7e7c7ce5653ecda425b36ab3c89dca3aa2645156c4e5e931"
+    },
+    {
+      "path": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+      "bytes": 6925,
+      "sha256": "65996c4f525e89c28ce4bdd1183319d9f35853dc7741916a525c710387714004"
+    },
+    {
+      "path": "lib/routerDevelopmentCollectorProvider.ts",
+      "bytes": 13201,
+      "sha256": "d4b3cdd679835166d723bad804ee20fe92c82436d31584596c1c3eb3c8539ab8"
+    },
+    {
+      "path": "tests/routerDevelopmentCollectorProvider.test.mjs",
+      "bytes": 12273,
+      "sha256": "a826ed2d471420cc153a9bdd2c5ac78ff561b42d7e610ee97ee404dd480ef27d"
+    }
+  ],
+  "reviewFiles": [
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/change-round0.diff",
+      "bytes": 18196,
+      "sha256": "eed64ad80aac2977a59b50570d2d8245b2251262328e9c4bac5f53199e07a33e"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/change-round1.diff",
+      "bytes": 19726,
+      "sha256": "0a9537d609e5ec898abe89eb90ba1c6231f75b7d5003b3bc06d15546eba15eba"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/change-round2.diff",
+      "bytes": 20274,
+      "sha256": "ba44bb1c84ef0f9c95d04ae947a5991f79f18a14b10664022c156d94a51108cf"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/change.diff",
+      "bytes": 20274,
+      "sha256": "ba44bb1c84ef0f9c95d04ae947a5991f79f18a14b10664022c156d94a51108cf"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/collector-tests.supplemental.raw.tap",
+      "bytes": 18540,
+      "sha256": "22e5c2f2ac23a9abd05e0f0472616b2d9345529793467c4c628302bf6405d622"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/exchange.json",
+      "bytes": 49730,
+      "sha256": "925da5551fce1e08129533a85819d7fd6d171d40af6add34faf238b734241ab6"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/failed-attempt-1/review-round0.events.jsonl",
+      "bytes": 6432,
+      "sha256": "b5ec83814f3a1370f7849260cad774320fedad1481c6482cfb03eeb4ee6d3aac"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/failed-attempt-1/review-round0.failure.json",
+      "bytes": 1821,
+      "sha256": "63f1e725907419915f812b57ee77c5b6db95c76c5e90e2d9b6e80ebbe44a6c50"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/package-round0.json",
+      "bytes": 24733,
+      "sha256": "b3fc60ffba3934000ec6e7f5b6a8ee51eb2296799b8ba7dbd8407020c954972e"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/package-round1.json",
+      "bytes": 34124,
+      "sha256": "97f96c1d98bc86b91b44a58934e6db386df7a7d18ec1b297e5469c6229d992f1"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/package-round2.json",
+      "bytes": 34681,
+      "sha256": "eafab3402fe037f934c4e5eddece4b308b2a28265e992044ab9132ec8109f66e"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/README.supplemental.md",
+      "bytes": 6241,
+      "sha256": "20e4a350408fb9dd02c14f9522808c8934ce2310386b497aaeb1238e38dc239d"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/review-prompt.md",
+      "bytes": 37154,
+      "sha256": "d2e7a44abbed32db487d88422db0035fb15e98c2644e76aed2d1806d16825973"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/review-round0.events.jsonl",
+      "bytes": 6505,
+      "sha256": "4d647bb06dd2d8d834663d913755974b5ee8ce03791cd2dfccf57d16e9f9df81"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/review-round0.failure.json",
+      "bytes": 1821,
+      "sha256": "63f1e725907419915f812b57ee77c5b6db95c76c5e90e2d9b6e80ebbe44a6c50"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/review-round1.events.jsonl",
+      "bytes": 3601,
+      "sha256": "3dcc93aeaefc3c58965663f468158ce795f39e539e45804c4f4af8e5778e8634"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/review-round2.events.jsonl",
+      "bytes": 2567,
+      "sha256": "f5ee9814fca408df1a50d7578ef2de3ab019a2c6ecbdb3569afdc7c271e9376f"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round0-aliases/change.diff",
+      "bytes": 18196,
+      "sha256": "eed64ad80aac2977a59b50570d2d8245b2251262328e9c4bac5f53199e07a33e"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round0-aliases/exchange.json",
+      "bytes": 25477,
+      "sha256": "46250faa7ee2f630966084c8421d69683e1e3a2e441ff148c3c4a6e026a36e8a"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round0-aliases/review-prompt.md",
+      "bytes": 29482,
+      "sha256": "fe11c810167edbaacd60e259c2ee93cf7587b7f455d18150f4368daabaf3934f"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-aliases/change.diff",
+      "bytes": 19726,
+      "sha256": "0a9537d609e5ec898abe89eb90ba1c6231f75b7d5003b3bc06d15546eba15eba"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-aliases/exchange.json",
+      "bytes": 40024,
+      "sha256": "0bf71d3bfd5e9c27ce541d0d25a322c56c06770e3a9e4ceb5d0f65f19c829033"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-aliases/review-prompt.md",
+      "bytes": 37474,
+      "sha256": "bacf602caafdcd5981b070b890d4f9ed3c43c535955079cd596d27afce30c522"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-command-plan.json",
+      "bytes": 5153,
+      "sha256": "9d19aa80e5219d054a8c87e1e30402616db0743c1d3abe763a028767072e1b36"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-local-collector.raw.tap",
+      "bytes": 18544,
+      "sha256": "0cd210102192163356c70cfa01a664ef6f9746ea760cd57a569a147c4ea4b848"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-local-npm-collector.stdout.log",
+      "bytes": 8192,
+      "sha256": "7961168737ac416028262f056c602f89f93b263407b5b16d53f0e854605608fa"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-local-wiring.raw.tap",
+      "bytes": 331,
+      "sha256": "5fe5c0bca37b80b224ec1316ec89ad8863b7a2cc9bc9b13cedd9823bc174c5ab"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-collector.raw.tap",
+      "bytes": 18537,
+      "sha256": "d10245344c9268da784094d62eff81d1b7acfaed48551b04d640ff3ae0212c6b"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-wiring.raw.tap",
+      "bytes": 331,
+      "sha256": "acd32a0277813ec91cc32a2915f15b3aaf230c432e720ef45dca012592b09d26"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round2-command-plan.json",
+      "bytes": 5153,
+      "sha256": "7e7c6e2c8c9a91c4214afb1bf837223817b34ae2de83d393deef6a8b5bb0aeb4"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap",
+      "bytes": 18536,
+      "sha256": "27472f20a77936874f303d71648a6e2e491e7da419900084ddedaac33d230b1a"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-wiring.raw.tap",
+      "bytes": 331,
+      "sha256": "1b4d306b8e1384750cf7db4633a4d5a51332e4f580160fb35457c011a55a83cc"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/verdict-round0.json",
+      "bytes": 6533,
+      "sha256": "4a6e99deba2fe4ec6dc0ff56ed9d202afc382031ce14735cc56815352d2aa460"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/verdict-round1.json",
+      "bytes": 3675,
+      "sha256": "b833c3524a85237cab221dd69e02c155ba1c7c7282855270bebd4e3b7add4846"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/verdict-round2.json",
+      "bytes": 2658,
+      "sha256": "d33233a35a8557aaa3c5db29ff34b731d0edcf8096d5e3e6d63ceb7482f0646d"
+    },
+    {
+      "path": "artifacts/cross-review/router-development-collector-cache-observation-fix/wiring-target.supplemental.raw.tap",
+      "bytes": 331,
+      "sha256": "9effab684ecd221bcf7423e92b96188a005aec80970f103ae0fab1edacd6565c"
+    }
+  ],
+  "reviewFileCount": 36,
+  "reviewedSourceExact": true,
+  "indexExact": true,
+  "upstreamDiffExact4": true
+}
