@@ -284,8 +284,18 @@ test("the fixture database URL is validated fail-closed", () => {
   assert.throws(
     () =>
       assertIsolatedAdminE2EDatabase(shared, { DATABASE_URL: shared }),
-    /must not be the same connection string/,
+    /must not target the same PostgreSQL database/,
     "the application's own database must never be the fixture database"
+  );
+
+  assert.throws(
+    () =>
+      assertIsolatedAdminE2EDatabase(
+        `${shared}?schema=tomverse_admin_e2e_test`,
+        { DIRECT_DATABASE_URL: `${shared}?sslmode=verify-full` }
+      ),
+    /must not target the same PostgreSQL database/,
+    "adding a test schema to an application database must not bypass the physical target check"
   );
 
   // A properly isolated URL is accepted.

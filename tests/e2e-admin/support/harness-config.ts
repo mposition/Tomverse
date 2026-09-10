@@ -1,7 +1,9 @@
+import { isSamePostgresDatabaseTarget } from "../../../lib/postgresConnectionConfigCore.mjs";
+
 /**
  * The Admin Console E2E harness, described in one place.
  *
- * This module deliberately imports nothing: `playwright.admin.config.ts`, the
+ * This module imports only the pure PostgreSQL connection safety helper. The
  * `scripts/run-admin-e2e.mjs` runner, the Playwright fixtures and the
  * `tests/adminE2eHarness.test.ts` safety contract all read the same values from
  * here, and the safety contract has to be able to import it under plain `tsx`.
@@ -250,9 +252,12 @@ export const assertIsolatedAdminE2EDatabase = (
     );
   }
   for (const key of ["DATABASE_URL", "DIRECT_URL", "DIRECT_DATABASE_URL"]) {
-    if (env[key]?.trim() && env[key]!.trim() === raw.trim()) {
+    if (
+      env[key]?.trim() &&
+      isSamePostgresDatabaseTarget(raw, env[key]!.trim())
+    ) {
       throw new AdminE2EConfigurationError(
-        `ADMIN_E2E_DATABASE_URL must not be the same connection string as ${key}: the harness truncates every table.`
+        `ADMIN_E2E_DATABASE_URL must not target the same PostgreSQL database as ${key}, even with different credentials or schema parameters: the harness truncates every table.`
       );
     }
   }

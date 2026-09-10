@@ -5,6 +5,7 @@ import {
   DB_INTEGRATION_GROUPS,
   dbIntegrationGroupOf,
 } from "./db-integration-groups.mjs";
+import { isSamePostgresDatabaseTarget } from "../lib/postgresConnectionConfigCore.mjs";
 
 const fail = (message) => {
   console.error(`DB integration test safety check failed: ${message}`);
@@ -35,18 +36,23 @@ if (
 const databaseName = decodeURIComponent(testDatabaseUrl.pathname.replace(/^\//, ""));
 const schemaName = testDatabaseUrl.searchParams.get("schema") || "";
 const isolationMarker = `${databaseName}_${schemaName}`;
-if (!/(?:^|[_-])(?:test|testing|ci)(?:[_-]|$)/i.test(isolationMarker)) {
+if (!/(?:^|[_-])(?:test|testing|ci|e2e)(?:[_-]|$)/i.test(isolationMarker)) {
   fail(
     "the database name or schema must contain a separate test marker such as tomverse_test."
   );
 }
 
-for (const configuredUrl of [
-  process.env.DATABASE_URL,
-  process.env.DIRECT_DATABASE_URL,
+for (const [name, configuredUrl] of [
+  ["DATABASE_URL", process.env.DATABASE_URL],
+  ["DIRECT_DATABASE_URL", process.env.DIRECT_DATABASE_URL],
 ]) {
-  if (configuredUrl?.trim() === rawTestDatabaseUrl) {
-    fail("TEST_DATABASE_URL must not be identical to the configured application database URL.");
+  if (
+    configuredUrl?.trim() &&
+    isSamePostgresDatabaseTarget(rawTestDatabaseUrl, configuredUrl.trim())
+  ) {
+    fail(
+      `TEST_DATABASE_URL must not target the same PostgreSQL database as ${name}, even with different credentials or schema parameters.`
+    );
   }
 }
 
