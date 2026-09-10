@@ -622,6 +622,15 @@ npm run report:ai-review-judged-run -- \
   있었는지, 실행의 journal이 각 case가 어떤 출력을 냈는지, 실행이 기록한
   `plannedCases`·`completedCases`가 그 둘과 맞는지를 함께 본다. 기록이 설명하지
   못하는 것은 **거절**이다 — bundle을 지우면 실행이 줄어드는 것이 아니라 막힌다.
+- **대조는 양방향이다.** set을 돌며 journal을 찾기만 하면, set에 없는 case의 journal
+  항목은 **아무 데서도 눈에 띄지 않는다** — 그냥 빠지고 남은 둘이 1/2로 집계됐다.
+  자리를 댈 수 없는 출력을 들고 있는 기록은 이것이 읽을 수 있는 기록이 아니다.
+- **`completedCases`는 journal 행 수가 아니다.** 실행기는 실패한 호출도 journal에
+  적고(`observation` 없이), 출력을 낸 항목만 완료 수에 센다. 행 수와 비교하면
+  **공급자 실패 1건이 있는 정상 실행을 "기록이 자기모순"으로 보고**하게 되는데,
+  틀린 판정이고 운영자를 엉뚱한 파일로 보낸다. 실패 항목은 **"그 case가 출력을 내지
+  못했으므로 계획을 완성할 수 없다"**는 별개 사유로 보고하고, `completedCases`와
+  `plannedCases`가 다르면 그 자체로 **전체 계획을 재지 못한 실행**이다.
 
 중도 중단된 실행이 이 규칙이 지키는 경우다. 남은 판정들이 전부 온전해도 그 실행은
 온전하지 않으며, 집계하면 **부분 실행이 완전한 실행으로 보고된다.**
@@ -655,7 +664,8 @@ npm run report:ai-review-judged-run -- \
   `tests/aiReviewJudgedInventedFindings.test.mjs`,
   `tests/aiReviewJudgedRunReportCli.test.mjs` — 위 규칙을 요구로 표현. 마지막 것은
   **파일을 통해** 확인한다(정상 왕복, 판정 누락, 중도 중단, 기록 자기 불일치,
-  manifest 누락, 재동결본 교체, bundle 파일 누락, 입력 바이트 무변경, 분모 0).
+  **journal에 기록된 공급자 실패**, **계획 밖 journal 항목**, manifest 누락,
+  재동결본 교체, bundle 파일 누락, 입력 바이트 무변경, 분모 0).
 
 **v2에서 더한 것**(2026-09-08 승인, 위 절)
 

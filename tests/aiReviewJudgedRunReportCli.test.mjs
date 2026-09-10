@@ -321,8 +321,10 @@ test("a case the run never finished cannot be completed from its record", () => 
       assert.equal(result.status, 0, result.stderr);
       assert.match(
         result.stdout,
-        /t2: planned in the run and its journal holds no output/
+        /t2: planned in the run and its journal holds no entry/
       );
+      // And the run's own counts say it stopped short, in their own words.
+      assert.match(result.stdout, /completed 1 of 2 planned case\(s\)/);
       assert.doesNotMatch(result.stdout, /missedEveryPlantedIssueRate\s+\d/);
     }
   );
@@ -333,8 +335,69 @@ test("a run record that disagrees with its own journal is refused", () => {
   withRun(built, { summary: { completedCases: 7 } }, (root) => {
     const result = report(root);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /recorded 7 completed case\(s\) and its journal holds 1/);
+    assert.match(
+      result.stdout,
+      /recorded 7 completed case\(s\) and its journal holds 1 output\(s\)/
+    );
   });
+});
+
+test("a journalled provider failure is an incomplete run, not a broken record", () => {
+  // What an ordinary run with one failed call leaves behind: the entry is in
+  // the journal with no `observation`, and `completedCases` counts only the
+  // outputs. Comparing the count against the journal's line count called that
+  // record self-contradictory -- wrong, and it told the operator to go and look
+  // at the wrong thing.
+  const built = [buildCase({ id: "u2" }), buildCase({ id: "u3", reports: false })];
+  withRun(
+    built,
+    {
+      journal: [
+        built[0].journalEntry,
+        { caseId: "u3", failure: "provider_error", costUsd: 0, observation: null },
+      ],
+      summary: { completedCases: 1 },
+    },
+    (root) => {
+      const result = report(root);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(
+        result.stdout,
+        /u3: the run's journal records a failed call \(provider_error\), so this case produced no output/
+      );
+      assert.doesNotMatch(result.stdout, /the record disagrees with itself/);
+      assert.match(result.stdout, /completed 1 of 2 planned case\(s\)/);
+      assert.doesNotMatch(result.stdout, /missedEveryPlantedIssueRate\s+\d/);
+    }
+  );
+});
+
+test("a journal output for a case the frozen set does not hold is refused", () => {
+  // The reverse direction. Walking the set and looking each case up in the
+  // journal left this entry with nowhere to be noticed: it was dropped, and
+  // the remaining two cases aggregated to 1/2 as though the record described
+  // only them.
+  const built = [buildCase({ id: "u4" }), buildCase({ id: "u5", reports: false })];
+  const stranger = buildCase({ id: "u9" });
+  withRun(
+    built,
+    {
+      journal: [...built.map((item) => item.journalEntry), stranger.journalEntry],
+      summary: { completedCases: 3 },
+      // Only the two planned bundles exist, so nothing else would object.
+      bundles: built,
+    },
+    (root) => {
+      const result = report(root);
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(
+        result.stdout,
+        /holds an output for u9, which this frozen set does not hold/
+      );
+      assert.doesNotMatch(result.stdout, /missedEveryPlantedIssueRate\s+\d/);
+      assert.doesNotMatch(result.stdout, /=== aggregated ===/);
+    }
+  );
 });
 
 test("a run that recorded no dataset digest is bound to no set", () => {

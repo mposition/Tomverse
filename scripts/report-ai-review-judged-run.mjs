@@ -135,6 +135,20 @@ if (typeof manifest.datasetDigest !== "string" || manifest.datasetDigest === "")
  * out. The run that stopped early is the case this protects: its judgements
  * may all be sound, and aggregating them would report a partial run as a
  * whole one.
+ *
+ * **Both directions.** Walking the frozen set and looking each case up in the
+ * journal leaves a journal entry for a case the set does not hold with nowhere
+ * to be noticed: it was dropped, and the remaining two cases aggregated to
+ * 1/2. A record holding an output nobody can place is not a record this can
+ * read.
+ *
+ * **And `completedCases` is not the journal's line count.** The runner journals
+ * a failed call too -- the entry is there with no `observation` -- and counts
+ * only the entries that produced an output. Comparing against the line count
+ * reported an ordinary run with one provider failure as a record contradicting
+ * itself, which is both wrong and the wrong thing to tell the operator: the
+ * failure is real, it means that case produced no output, and that is why the
+ * plan cannot be completed.
  */
 const planned = Array.isArray(dataset?.cases)
   ? dataset.cases.filter((item) => typeof item?.id === "string").map((item) => item.id)
@@ -150,13 +164,50 @@ if (typeof run?.summary?.plannedCases !== "number") {
       `${planned.length}; the plan cannot be reconstructed from a set the run did not measure`
   );
 }
+const plannedIds = new Set(planned);
+
+// The journal, against the plan. Without this an entry for a case the frozen
+// set does not hold was simply never looked at.
+for (const [index, entry] of journal.entries()) {
+  const caseId = entry?.caseId;
+  if (typeof caseId !== "string") {
+    blockers.push(`the run's journal line ${index + 1} names no caseId`);
+  } else if (!plannedIds.has(caseId)) {
+    blockers.push(
+      `the run's journal holds an output for ${caseId}, which this frozen set does not ` +
+        `hold; the record describes a run this plan cannot account for`
+    );
+  }
+}
+
+// `completedCases` the way the runner counts it: journal entries that name a
+// case in the set AND carry an output. A failed call is journalled with no
+// `observation` and counted as a provider failure, not as a completed case.
+const completedInJournal = journal.filter(
+  (entry) => plannedIds.has(entry?.caseId) && entry?.observation
+).length;
 if (typeof run?.summary?.completedCases !== "number") {
   blockers.push("the run artifact records no summary.completedCases");
-} else if (run.summary.completedCases !== journal.length) {
-  blockers.push(
-    `the run recorded ${run.summary.completedCases} completed case(s) and its journal holds ` +
-      `${journal.length}; the record disagrees with itself`
-  );
+} else {
+  if (run.summary.completedCases !== completedInJournal) {
+    blockers.push(
+      `the run recorded ${run.summary.completedCases} completed case(s) and its journal ` +
+        `holds ${completedInJournal} output(s) for cases in this set; the record ` +
+        `disagrees with itself`
+    );
+  }
+  // A run that completed fewer cases than it planned did not measure the whole
+  // plan, whatever the reason -- a cost ceiling, five failures in a row, or a
+  // provider error on one case.
+  if (
+    typeof run?.summary?.plannedCases === "number" &&
+    run.summary.completedCases !== run.summary.plannedCases
+  ) {
+    blockers.push(
+      `the run completed ${run.summary.completedCases} of ${run.summary.plannedCases} ` +
+        `planned case(s), so it did not measure the whole plan`
+    );
+  }
 }
 
 const plan = [];
@@ -164,15 +215,26 @@ for (const caseId of planned) {
   const entries = journal.filter((entry) => entry?.caseId === caseId);
   if (entries.length === 0) {
     blockers.push(
-      `${caseId}: planned in the run and its journal holds no output, so the plan ` +
+      `${caseId}: planned in the run and its journal holds no entry, so the plan ` +
         `cannot be completed from what the run recorded`
     );
     continue;
   }
   if (entries.length > 1) {
     blockers.push(
-      `${caseId}: the run's journal holds ${entries.length} outputs, so which one the ` +
+      `${caseId}: the run's journal holds ${entries.length} entries, so which output the ` +
         `plan names is ambiguous`
+    );
+    continue;
+  }
+  // A journalled failure. The record is correct and the run is incomplete --
+  // two different things, and saying the record contradicts itself says
+  // neither.
+  if (!entries[0].observation) {
+    blockers.push(
+      `${caseId}: the run's journal records a failed call` +
+        `${entries[0].failure ? ` (${entries[0].failure})` : ""}, so this case produced no ` +
+        `output and the plan cannot be completed`
     );
     continue;
   }
