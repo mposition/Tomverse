@@ -19,9 +19,26 @@ const securityHeaders = [
     value: "strict-origin-when-cross-origin",
   },
   {
+    // `microphone=(self)` restores the feature's own default allowlist for this
+    // origin, rather than granting anything new. The empty list that was here
+    // before disables the feature for *every* origin including this one, which
+    // is stricter than "off by default" -- `getUserMedia` rejects with
+    // `NotAllowedError` before any permission prompt, so neither a user
+    // granting microphone access nor `feature.voiceInputEnabled` could reach
+    // the recorder. Voice input (docs/policy/voice-input.md §8) needs the
+    // document's own origin allowed, and nothing more: no `*`, no third-party
+    // origin, and every other feature here stays disabled.
+    //
+    // The permissions-policy integration in the Media Capture and Streams
+    // specification is what makes an empty list decisive rather than advisory:
+    // https://www.w3.org/TR/mediacapture-streams/#permissions-policy-integration
+    //
+    // Verified against a real document response and a real `getUserMedia` in
+    // tests/e2e/microphone-permissions-policy.spec.ts, which does not replace
+    // the device API -- replacing it is exactly how this went unnoticed.
     key: "Permissions-Policy",
     value:
-      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()",
+      "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), browsing-topics=()",
   },
   {
     key: "X-Frame-Options",
