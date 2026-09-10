@@ -11,6 +11,19 @@
 
 ---
 
+## 0. 표기 하나 — 외부 계약 조항에 `§`를 쓰지 않습니다
+
+아래 계약 조항은 **제5.3조**, **제1.1조**처럼 적습니다. 절 기호로 적으면
+`check:policy-section-references`가 그것을 `docs/policy/voice-input.md`의 절로
+해석합니다. 이 초안이 실제로 그렇게 썼고 결과는 둘로 갈렸습니다 — Privacy 조항의
+번호는 그 문서에 같은 번호의 절이 **있어서** 조용히 통과했고(내용은 클라이언트
+제한에 관한 것으로, 계약과 아무 관계가 없습니다), Data Processor 조항의 번호는
+없어서 시끄럽게 실패했습니다.
+
+**조용히 통과한 쪽이 더 나쁜 상태였습니다.** 검사기는 해석에 성공했으니 통과시켰고,
+그 인용을 따라간 사람만 엉뚱한 곳에 도착합니다. 그래서 외부 계약은 이 저장소의
+절 문법을 아예 쓰지 않습니다.
+
 ## 1. 이 저장소는 원문을 읽지 못합니다
 
 `openai.com/policies/data-processing-addendum/`와
@@ -38,13 +51,13 @@
 
 1. Services Agreement는 **OpenAI API를 사용하는 기업·개발자에게 적용**된다고
    명시합니다.
-2. **§5.3 Privacy**: *"OpenAI and Customer will comply with the DPA, which is
+2. **제5.3조 Privacy**: *"OpenAI and Customer will comply with the DPA, which is
    incorporated by this reference into the Agreement."*
 3. DPA 서문도 해당 DPA가 Services Agreement를 **보충하며 그 계약에 편입**된다고
    명시합니다.
 4. DPA 서문이 밝히는 동의 방식: 온라인 "I agree" 동의, Order Form 수락,
    **Services 이용**.
-5. **DPA §1.1**: OpenAI가 Customer Data를 고객을 대신해 처리하는 경우 OpenAI가
+5. **DPA 제1.1조**: OpenAI가 Customer Data를 고객을 대신해 처리하는 경우 OpenAI가
    **Data Processor** 역할을 하며 그 처리를 DPA가 규율합니다.
 6. 공개된 표준 계약에는 DPA 적용의 선행 조건으로 **별도 project 생성, 신규 API
    key 발급, ZDR 자격 심사·승인, 별도 DPA 신청 절차** 중 어느 것도 없습니다.
@@ -55,7 +68,7 @@ Tomverse 운영 주체가 **별도 협상 계약·reseller 계약·상충하는 
 표준 온라인 Services Agreement에 따라 OpenAI API를 직접 이용하며, 그 계정의 계약
 당사자로서 동의할 권한이 있다는 전제에서:
 
-- 개인정보 처리에 관한 **DPA는 §5.3의 참조를 통해 Agreement에 편입**됩니다.
+- 개인정보 처리에 관한 **DPA는 제5.3조의 참조를 통해 Agreement에 편입**됩니다.
 - **신규 project·API key 생성은 DPA 편입 요건이 아닙니다.**
 - **ZDR은 DPA와 별개**의 선택적·승인형 데이터 보존 제어입니다.
 - 따라서 **ZDR 미승인이나 전용 project/key 미생성만으로 "DPA가 적용되지

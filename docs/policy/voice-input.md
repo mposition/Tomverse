@@ -1288,7 +1288,7 @@ provider 실패는 **코드와 HTTP status로만** 보고합니다. 일부 provi
 함께 답니다.
 
 **DPA 편입도 같은 날 확인됐습니다**(`docs/ops/voice-provider-data-controls-records/2026-09-10-dpa-incorporation.md`).
-Services Agreement §5.3이 *"OpenAI and Customer will comply with the DPA, which
+Services Agreement 제5.3조가 *"OpenAI and Customer will comply with the DPA, which
 is incorporated by this reference into the Agreement."*라고 적고, DPA 서문이
 Services 이용을 동의 방식의 하나로 명시합니다. **별도 project·key·ZDR 승인·DPA
 신청은 모두 편입 요건이 아닙니다.**
@@ -1306,10 +1306,21 @@ Order Form·reseller 계약이 없다**는 전제 위에서만 성립하므로, 
 Voice key인지는 확인되지 않았고, **B-6의 유료 검증 뒤 Costs에 Voice 프로젝트
 line item이 나타나는지가 그것을 판별합니다.**
 
-**남은 둘은 저장소가 답할 수 없습니다**: **처리 지역**(법무 — DPA 편입과 별개
-질문이고 개인정보처리방침 고지를 포함합니다), 그리고 §11.3.2-1의 `None` 대
-30일(공급자 — 이제 차단이 아니라 출시 후 추적 항목). ZDR 자격·승인은 영업 쪽에
-열려 있으나 더 이상 차단이 아닙니다.
+**처리 지역도 결정됐습니다**(`docs/ops/voice-provider-data-controls-records/2026-09-10-processing-region-decision.md`):
+**OpenAI Global API를 통한 국외 처리를 허용하고, 한국 내 처리 보장은 제공하지
+않습니다.** 근거는 ZDR 결정과 같은 둘이며, **그 둘 중 어느 것도 "어디서
+처리되는가"를 말하지 않습니다** — 둘 다 보존에 관한 사실입니다. 그러므로 이것은
+**국외 처리가 일어나더라도 보존이 최소화된다**는 근거 위의 허용이지, 처리 위치를
+확인한 기록이 아닙니다.
+
+**고지는 이미 되어 있습니다.** `privacyPolicy.voiceInput`의 7개 locale 전부가
+외부 제공업체와 다른 나라에서 처리될 수 있음을 적고 있으며, 2026-09-10에 각
+언어의 실제 문구를 읽어 확인했습니다. 이 결정에 따른 저장소 변경은 없습니다.
+
+**남은 것은 서명뿐입니다.** 위험 수용(ZDR), 계약 전제 확인(DPA), 처리 지역 —
+셋 다 사람이 채웁니다. §11.3.2-1의 `None` 대 30일은 공급자 답변 대기이나 이제
+차단이 아니라 출시 후 추적 항목이고, ZDR 자격·승인도 영업 쪽에 열려 있으나
+차단이 아닙니다.
 
 **전용 프로젝트·key 분리는 그 넷 중 어느 것도 대신하지 않습니다.** §11.3.1이
 적은 대로 그것은 요구사항이 아니라 우리 쪽 정책 선택이며, 하더라도 B-5는
@@ -1374,7 +1385,7 @@ moderation을 하지 않습니다(`lib/voiceTranscript.ts`). 이 텍스트는 �
 | B-2 | 실패 시 과금 처리 (§6.1-2) | **해결 (2026-09-02)** — 사용자 과금 없음 |
 | B-3 | provider 원가 검증 계층 (§6.1-3) | **해결 (2026-09-09)** — **두 모델 모두** 실제 청구 관측·대조 완료(§6.1.3, §6.1.6, #1247). 보류 모델 없음 |
 | B-4 | audio provider usage 예산 (§6.1-4) | **해결 (2026-09-08, 양쪽 환경 서명됨)** — staging 1,800/27,000, production 3,600/54,000 (A안). 기록: `docs/ops/voice-provider-budget-records/` |
-| B-5 | provider 데이터 보존 (§11.3) | **차단** — 계정 관측·ZDR 필수조건 결정·DPA 편입 확인 완료(2026-09-10, §11.3.2). 남은 것: **처리 지역 판정**과 **서명**(위험 수용, 계약 전제 확인) |
+| B-5 | provider 데이터 보존 (§11.3) | **차단** — 판정은 전부 끝났습니다(2026-09-10, §11.3.2: 계정 관측·ZDR 필수조건·DPA 편입·처리 지역). 남은 것은 **서명 셋**뿐입니다 |
 | B-6 | 실기기 검증 (§15) | **차단** — `docs/ops/voice-input-staging-checklist.md` 서명 |
 
 B-1~B-4는 **§6이 열려 있다는 하나의 사실**의 네 얼굴이었고, 2026-09-02에 하나의
@@ -1391,9 +1402,9 @@ B-5는 공급자와 법무의 답을 기다리고(§11.3.2), B-6은 실기기와
 
 **B-5에서 저장소가 할 수 있는 부분은 끝났습니다.** 2026-09-10에 계정 설정을
 읽었고, 읽히는 것과 읽히지 않는 것이 각각 무엇인지 기록에 남아 있습니다
-(`docs/ops/voice-provider-data-controls-records/`). 같은 날 ZDR 필수조건 여부가
-결정되고 DPA 편입이 확인됐으며 전용 project·key가 만들어졌습니다. 남은 것은
-**처리 지역 판정과 서명** 둘이고, 어느 것도 이 저장소에서 관측되지 않습니다.
+(`docs/ops/voice-provider-data-controls-records/`). 같은 날 ZDR 필수조건, DPA
+편입, 처리 지역이 모두 결정되고 전용 project·key가 만들어졌습니다. **남은 것은
+서명뿐이고, 서명은 이 저장소가 대신 쓸 수 없습니다.**
 
 **ZDR 미승인은 더 이상 차단 사유가 아니지만, B-5는 아직 차단입니다.** 둘을
 같은 것으로 읽으면 서명 없이 production을 여는 길이 생깁니다.
