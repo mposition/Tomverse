@@ -55,7 +55,10 @@ const render = (report) => {
           : key.state === "retirement_in_future"
             ? ` (${new Date(key.retiredAtMs).toISOString()})`
             : "";
-      console.log(`    ${key.keyId}  ${key.state}${detail}`);
+      // A null id is one that is itself key material; the assembly withheld
+      // it and the finding list says so.
+      const label = key.keyId ?? "(id withheld: it is key material)";
+      console.log(`    ${label}  ${key.state}${detail}`);
     }
     if (ring.retirementsNamingNothing > 0) {
       // The ids are not printed: a retirement line's left half is whatever

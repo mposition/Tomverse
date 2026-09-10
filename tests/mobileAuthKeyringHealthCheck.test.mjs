@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
@@ -132,14 +133,10 @@ test("no key material reaches the report, from any ring, in any state", () => {
   }
 });
 
-test("the pepper comparator answers with a digest, so nothing keyed by material is needed", () => {
-  // This is the property, and the earlier version of this test was not it.
-  // Duplicate detection is done with a `seen` map built per call, so a
-  // comparator that kept raw peppers in a module-level map produced exactly
-  // the same findings -- the assertion passed while two peppers sat in
-  // process memory. What separates the two implementations is the value the
-  // comparator returns: the old one returned the secret itself as the map
-  // key, this one returns a hash of it.
+test("the pepper comparator answers with a digest, not with the material", () => {
+  // One of the two halves. The old implementation used the secret itself as
+  // the map key and handed it back, so this catches a restoration of that --
+  // and only that. What it cannot see is below.
   const identity = mobileAuthPepperIdentity();
   const value = identity(PEPPER_1);
   assert.notEqual(value, PEPPER_1);
@@ -151,11 +148,51 @@ test("the pepper comparator answers with a digest, so nothing keyed by material 
   assert.equal(identity(PEPPER_1), identity(PEPPER_1));
   assert.notEqual(identity(PEPPER_1), identity(PEPPER_2));
 
-  // A fresh comparator per report, and each one stateless: a second factory
-  // agrees with the first without either having been told.
   const second = mobileAuthPepperIdentity();
   assert.notEqual(second, identity);
   assert.equal(second(PEPPER_1), identity(PEPPER_1));
+});
+
+test("the comparator keeps no store, and this is read from the source because behaviour cannot show it", () => {
+  // The other half, and it is deliberately not a behavioural test.
+  //
+  // A comparator holding `Map<raw pepper, digest>` returns the right digest,
+  // can be handed out by a fresh factory, and satisfies every assertion in
+  // the test above while two peppers sit in process memory for the life of
+  // the process. Nothing an observer can call distinguishes it: retention is
+  // invisible from outside, and a garbage-collection probe would be a test of
+  // the collector.
+  //
+  // So the property is read where it is decided. The comparator must be one
+  // expression that computes a digest, and this module must declare no
+  // module-scope collection for anything to be kept in.
+  const source = readFileSync(
+    new URL("../lib/mobileAuthKeyringHealth.ts", import.meta.url),
+    "utf8"
+  );
+
+  const factory = source.match(
+    /export const mobileAuthPepperIdentity = [\s\S]*?;\n/
+  )?.[0];
+  assert.ok(factory, "the comparator was renamed; this test has to be rewritten");
+  assert.equal(/\bnew (Map|Set|WeakMap|WeakSet)\b/.test(factory), false, factory);
+  assert.equal(/\.(set|push|add)\(/.test(factory), false, factory);
+
+  // Module scope: no keyed store may live here at all, and a set may only be
+  // a literal of constants. `UNVERIFIED_REFERENCE_CODES` is such a set -- it
+  // holds finding codes written in this file and is never added to -- while
+  // the retention this test exists for is a map from material to something,
+  // which this forbids outright. The per-report set of ring material is built
+  // inside the report function and dropped with it.
+  for (const line of source.split("\n")) {
+    if (!/^(const|let|var|export const) /.test(line)) continue;
+    if (/new (Map|WeakMap|WeakSet)\b/.test(line)) {
+      assert.fail(`module-scope keyed store: ${line.trim()}`);
+    }
+    if (/new Set\b/.test(line) && !/new Set\(\[/.test(line)) {
+      assert.fail(`module-scope set built from something other than a literal: ${line.trim()}`);
+    }
+  }
 });
 
 test("duplicate peppers are still found, report after report", () => {
@@ -202,6 +239,67 @@ test("a retirement naming something the ring does not hold is counted, not quote
     .find((entry) => entry.code === "retirement_names_nothing");
   assert.equal(finding.keyId, undefined);
   assert.equal(finding.unverifiedReference, true);
+});
+
+test("an id that is itself a key in the ring is withheld, and the condition is reported", () => {
+  // `p:<P>,<P>:<Q>` -- the active pepper `<P>` is also the id of the second
+  // entry. Reproduced 2026-09-10, and the reason the old justification was
+  // wrong: only the *active* signing id becomes a token's `kid`, and a
+  // refresh token is `recordId.secret`, so this id appears in nothing the
+  // deployment issues.
+  const environment = configured({
+    MOBILE_AUTH_REFRESH_PEPPERS: `p:${PEPPER_1},${PEPPER_1}:${PEPPER_2}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "p",
+  });
+  const result = report(environment);
+  const serialised = JSON.stringify(result);
+  assert.equal(serialised.includes(PEPPER_1), false, serialised);
+  assert.equal(serialised.includes(PEPPER_2), false, serialised);
+
+  // Withheld in both places an id is printed: the finding and the key list.
+  const undeclared = result.rings
+    .flatMap((ring) => ring.findings)
+    .find((finding) => finding.code === "undeclared");
+  assert.ok(undeclared);
+  assert.equal(undeclared.keyId, undefined);
+  assert.equal(undeclared.idMatchesMaterial, true);
+  const pepperRing = result.rings.find(
+    (ring) => ring.variable === "MOBILE_AUTH_REFRESH_PEPPERS"
+  );
+  assert.equal(pepperRing.keys.some((key) => key.keyId === null), true);
+
+  // And the operator is told, because being shown it is the one way they
+  // cannot be told.
+  assert.equal(codes(result).includes("key_id_matches_material"), true);
+  assert.match(result.attention.join(" "), /pasted into an id position/);
+});
+
+test("a withheld id never renders as the word undefined", () => {
+  // Every sentence that would quote an id goes through one helper;
+  // interpolating directly printed `"undefined"` and read as a key by that
+  // name.
+  // A pepper rather than a signing key: base64 PKCS#8 carries `/` and `+`,
+  // which `KEY_ID_PATTERN` refuses outright, so a signing key cannot reach
+  // the id position at all. A base64url pepper can.
+  const environment = configured({
+    MOBILE_AUTH_REFRESH_PEPPERS: `p:${PEPPER_1},${PEPPER_1}:${PEPPER_2}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "p",
+  });
+  const rendered = report(environment).attention.join(" ");
+  assert.equal(/undefined/.test(rendered), false, rendered);
+  assert.match(rendered, /an id that is not shown/);
+});
+
+test("an id matching material in the *other* ring is withheld too", () => {
+  // The rings are parsed independently, and a pepper is base64url, so a
+  // pepper can sit in a signing ring's id position.
+  const environment = configured({
+    MOBILE_AUTH_SIGNING_KEYS: `sign-2:${SIGN_2},${PEPPER_2}:${SIGN_1}`,
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-2:${PEPPER_2}`,
+  });
+  const result = report(environment);
+  assert.equal(JSON.stringify(result).includes(PEPPER_2), false);
+  assert.equal(codes(result).includes("key_id_matches_material"), true);
 });
 
 test("a partial configuration is a finding, not silence", () => {
