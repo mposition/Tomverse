@@ -60,6 +60,13 @@ const NON_SECRETS = [
   // time a profile is added.
   '        apiModelId: "claude-haiku-4-5-20251001",',
   '        apiModelId: "qwen3.7-plus",',
+  // Digest citations in the voice pricing observation records. The first is
+  // the line that has been in lib/voiceInputPricing.ts since the register was
+  // written; the second is the one that failed PR #1309, identical in shape
+  // and reported only because its twelve hex characters happen to be twelve
+  // distinct ones. Both are pinned so the pair cannot drift apart again.
+  '        "Key sha256:67ad26189fa0, project sha256:35539b590847 (originals in " +',
+  '        "Key sha256:1c9f4b0e7a63 (original in the private operations record); " +',
 ];
 
 // Credential-shaped canaries. None of these is a real secret, but each is
@@ -79,6 +86,25 @@ const CANARIES = [
   credentialLine("ANTHROPIC_API_KEY", "sk", "-", "ant", "-", "api03", "-", "AbCdEf0123456789"),
   credentialLine("NEXTAUTH_SECRET_KEY", "8f14e45fceea167a", "5a36dedd4bea2543"),
   credentialLine("TURNSTILE_SECRET_KEY", "0x4AAAAAAA", "BkMYinukE8nzY", "-UnexpectedSecret"),
+  // The digest rule's anchor is the `sha256:` label, and these prove the value
+  // class alone never carries it. Both are lowercase hex of exactly the length
+  // the rule admits after that label -- 32 and 64 characters -- so if the rule
+  // were ever loosened to match bare hex, a real key in the commonest shape a
+  // hex secret takes would be scanned and then silently dropped.
+  credentialLine(
+    "SESSION_SIGNING_KEY",
+    "9f2b71c4",
+    "e05a38d6",
+    "b1e47a90",
+    "c3d52f86"
+  ),
+  credentialLine(
+    "WEBHOOK_SIGNING_KEY",
+    "4d1a7e93b60c58f2",
+    "0e9c3a76d425b8f1",
+    "7b52ce80a94d613f",
+    "c806af25e71b9d34"
+  ),
 ];
 
 test("the allowlist still suppresses the non-secret constants it exists for", () => {
