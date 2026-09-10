@@ -269,7 +269,12 @@ test("the request carries the audio, the model and nothing that identifies a use
     }
   );
 
-  assert.equal(captured.url, "https://api.openai.com/v1/audio/transcriptions");
+  // The regional host, not the global one: Voice is pinned to the United
+  // States because a Korean overseas-transfer notice has to name a country
+  // (docs/policy/voice-input.md §11.3). `tests/voiceRegionalEndpoint.test.mjs`
+  // is where that pin is defended; this line keeps this test honest about what
+  // the request actually is.
+  assert.equal(captured.url, "https://us.api.openai.com/v1/audio/transcriptions");
   const form = captured.init.body;
   assert.deepEqual(
     [...form.keys()].sort(),

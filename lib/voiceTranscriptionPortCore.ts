@@ -186,12 +186,69 @@ export const resolveVoiceTranscriptionModel = (
 /** Beyond this the user has been staring at a spinner too long anyway. */
 export const VOICE_TRANSCRIPTION_TIMEOUT_MS = 30_000;
 
+/**
+ * The region Voice transcription is pinned to, and the host that pins it.
+ *
+ * Contract: docs/policy/voice-input.md §11.3.
+ *
+ * **Not a default, and not configurable.** Korean privacy law requires an
+ * overseas-transfer notice to name the country the data goes to, and a notice
+ * cannot name one while the request goes wherever the provider's global
+ * routing sends it. So the country is chosen here, in code, and the notice can
+ * be written against something that is true by construction rather than by
+ * convention.
+ *
+ * That is why there is no environment variable. An operator who could point
+ * this at another host could invalidate a published legal notice without
+ * touching the notice, and nothing in the deployment would say so. The one
+ * remaining way to change the host is `OpenAiTranscriptionConfig.baseUrl`,
+ * which exists for tests and which the production binding never reads from
+ * configuration -- see the comment there.
+ *
+ * Established from the provider's data-controls guide (read 2026-09-10):
+ * `/v1/audio/transcriptions` supports regional *processing* in the United
+ * States and Europe (EEA + Switzerland); the US region requires neither
+ * Modified Abuse Monitoring nor Zero Data Retention; both models this product
+ * calls are on the supported list; and a regional host may be used per request
+ * with a key from a Global-geography project, so this needs no new project or
+ * key.
+ *
+ * **It covers Customer Content, not everything.** The same guide states that
+ * data residency "does not apply to system data, which may be processed and
+ * stored outside the selected region". Nothing here may be described as "all
+ * data is processed in the US".
+ */
+export const VOICE_TRANSCRIPTION_PROVIDER_REGION = "us";
+
+/** The regional host every Voice transcription is sent to. See above. */
+export const VOICE_TRANSCRIPTION_OPENAI_BASE_URL = "https://us.api.openai.com";
+
+/**
+ * Joins the host and the path without producing `//v1`.
+ *
+ * Trivial, and separate because the alternative is a template literal at the
+ * call site that is correct only while the constant happens to have no
+ * trailing slash. A test injecting `https://example.test/` should reach
+ * `https://example.test/v1/audio/transcriptions`, not a doubled separator that
+ * some servers route and others reject.
+ */
+export const voiceTranscriptionEndpoint = (baseUrl: string): string =>
+  `${baseUrl.replace(/\/+$/, "")}/v1/audio/transcriptions`;
+
 export type OpenAiTranscriptionConfig = {
   apiKey: string;
   model: string;
   /** Injected so a test drives this without a network. */
   fetchImpl: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Test-only override of the pinned regional host.
+   *
+   * Omitted, the request goes to `VOICE_TRANSCRIPTION_OPENAI_BASE_URL`. There
+   * is deliberately no global-endpoint fallback: the previous default was
+   * `https://api.openai.com`, and leaving it in place would mean any caller
+   * that forgot this field silently sent audio out of the pinned region.
+   */
   baseUrl?: string;
 };
 
@@ -299,7 +356,9 @@ export const transcribeWithOpenAi = async (
   let response: Response;
   try {
     response = await config.fetchImpl(
-      `${config.baseUrl ?? "https://api.openai.com"}/v1/audio/transcriptions`,
+      voiceTranscriptionEndpoint(
+        config.baseUrl ?? VOICE_TRANSCRIPTION_OPENAI_BASE_URL
+      ),
       {
         method: "POST",
         headers: { Authorization: `Bearer ${config.apiKey}` },
