@@ -1,0 +1,223 @@
+{
+  "schemaVersion": "router-development-corpus-v1",
+  "corpusId": "tomverse-router-development-v1",
+  "purpose": "development-only",
+  "cases": [
+    {
+      "id": "dev-en-extract-01",
+      "language": "en",
+      "task": "structured-extraction",
+      "prompt": "Use only these synthetic dispatch records. Do not search, use attachments, execute code, or infer unstated facts. Records in source order: shipment S-41, destination North Dock, status dispatched, fragile yes, labels [glass, blue]; shipment S-42, destination South Dock, status dispatched, fragile no, labels [paper]; shipment S-43, destination North Dock, status queued, fragile no, labels [steel]. Select the dispatched shipment for North Dock. Return exactly one JSON object, with no code fences or commentary, containing exactly shipmentId (string), destination (string), fragile (boolean: yes means true, no means false), labels (array of strings in the selected record's source order). Copy string values exactly. Do not add keys or facts.",
+      "expected": { "shipmentId": "S-41", "destination": "North Dock", "fragile": true, "labels": ["glass", "blue"] },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-extract-02",
+      "language": "en",
+      "task": "structured-extraction",
+      "prompt": "Use only this synthetic equipment register. Do not search, use attachments, execute code, or infer unstated facts. Record: asset LAMP-7; current yes; location building Annex, room B2; rechargeable no; accessories [stand, shade]; custodian is not recorded. A historical record for LAMP-7 has current no, room A1 and custodian Team Gray. Extract only the current record. Return exactly one JSON object, with no code fences or commentary, and exactly these keys: assetId (string), location (object with exactly building and room, both strings), rechargeable (boolean, yes=true and no=false), accessories (array of strings in source order), custodian (string if recorded in the current record, otherwise null). Copy strings exactly and do not add keys or facts.",
+      "expected": { "assetId": "LAMP-7", "location": { "building": "Annex", "room": "B2" }, "rechargeable": false, "accessories": ["stand", "shade"], "custodian": null },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-extract-03",
+      "language": "en",
+      "task": "structured-extraction",
+      "prompt": "Use only these synthetic room cards. Do not search, use attachments, execute code, or infer unstated facts. In source order: Cedar, available no, stepFree yes, seats 12, equipment [screen]; Elm, available yes, stepFree yes, seats 8, equipment [whiteboard, speaker]; Ash, available yes, stepFree no, seats 20, equipment [screen, microphone]. Select the room marked both available yes and stepFree yes. Return exactly one JSON object without code fences or commentary, with exactly room (string), access (object with exactly available and stepFree, both booleans using yes=true/no=false), seats (integer), equipment (array of strings preserving the selected card's order). Copy strings exactly and add no keys or facts.",
+      "expected": { "room": "Elm", "access": { "available": true, "stepFree": true }, "seats": 8, "equipment": ["whiteboard", "speaker"] },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-extract-04",
+      "language": "en",
+      "task": "structured-extraction",
+      "prompt": "Use only this synthetic ticket log. Do not search, use attachments, execute code, or infer unstated facts. Ticket T-18 has events in authoritative oldest-to-newest order: opened with queue Intake; assigned with queue Repairs; paused with queue Parts. The final event explicitly gives status paused, queue Parts, awaitingExternal yes; it has no resolution text. Separate ticket T-19 is resolved with resolution Replaced seal. Extract T-18 from its final event only. Return exactly one JSON object without code fences or commentary, with exactly ticketId (string), status (string), queue (string), awaitingExternal (boolean using yes=true/no=false), resolution (string when present on T-18's final event, otherwise null). Preserve string spelling and add no keys or facts.",
+      "expected": { "ticketId": "T-18", "status": "paused", "queue": "Parts", "awaitingExternal": true, "resolution": null },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-extract-05",
+      "language": "en",
+      "task": "structured-extraction",
+      "prompt": "Use only this synthetic menu; dietary labels are explicit data and must not be inferred from names. Do not search, use attachments, or execute code. Items in source order: Zest bowl, vegan yes, available yes; Almond tart, vegan yes, available no; Bean soup, vegan yes, available yes; Garden pie, vegan no, available yes. Menu title is Noon List. The service note is exactly \"Collect  at hatch\" (two spaces between Collect and at). Select only items marked vegan yes and available yes. Return exactly one JSON object without code fences or commentary, with exactly menu (string), eligibleItems (array of item-name strings in source order), serviceNote (string copied exactly, including its two spaces). Add no keys or unstated facts.",
+      "expected": { "menu": "Noon List", "eligibleItems": ["Zest bowl", "Bean soup"], "serviceNote": "Collect  at hatch" },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-extract-06",
+      "language": "en",
+      "task": "structured-extraction",
+      "prompt": "Use only this synthetic publication register. Do not search, use attachments, execute code, or infer unstated facts. Document MAP-3 has version v1 marked current no, draft yes, tags [temporary], reviewer Unit Amber. Its version v2 is marked current yes, draft no, tags explicitly empty, title River Paths, and no reviewer is recorded. Return the current version as exactly one JSON object without code fences or commentary. Use exactly documentId (string), version (string), title (string), draft (boolean using yes=true/no=false), tags (array of strings in listed order; explicitly empty means []), reviewer (string when recorded on this version, otherwise null). Copy strings exactly and add no keys or facts.",
+      "expected": { "documentId": "MAP-3", "version": "v2", "title": "River Paths", "draft": false, "tags": [], "reviewer": null },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-extract-01",
+      "language": "ko",
+      "task": "structured-extraction",
+      "prompt": "다음은 가상의 도서 안내입니다. 제공한 정보만 사용하고 검색, 첨부파일, 코드 실행, 명시되지 않은 사실 추론을 하지 마세요. 목록 순서: 자료 D-8, 제목 빛의 지도, 구분 대출용, 대출가능 예, 서가 동관/3번, 주제 [관측, 기록]; 자료 D-9, 제목 빛의 지도, 구분 참고용, 대출가능 아니오, 서가 서관/1번, 주제 [역사]. 제목이 빛의 지도이며 구분이 대출용인 자료를 고르세요. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 키는 정확히 id(문자열), title(문자열), loanable(예=true, 아니오=false인 불리언), shelf(wing과 slot만 있는 객체이며 둘 다 문자열), topics(주제 문자열 배열, 원문 순서 유지)입니다. 문자열을 그대로 옮기고 추가 키나 사실을 넣지 마세요.",
+      "expected": { "id": "D-8", "title": "빛의 지도", "loanable": true, "shelf": { "wing": "동관", "slot": "3번" }, "topics": ["관측", "기록"] },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-extract-02",
+      "language": "ko",
+      "task": "structured-extraction",
+      "prompt": "다음 가상 공방 시간표에 적힌 정보만 사용하세요. 검색, 첨부파일, 코드 실행 및 외부 달력 지식은 사용하지 마세요. 시간표 이름은 작은 공방입니다. 목록 순서: 유리 새, 요일구분 주말, 신청상태 열림, 재료제공 예; 종이 집, 요일구분 평일, 신청상태 열림, 재료제공 예; 실 매듭, 요일구분 주말, 신청상태 닫힘, 재료제공 아니오; 나무 배, 요일구분 주말, 신청상태 열림, 재료제공 아니오. 주말이면서 신청상태가 열림인 수업만 고르세요. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 키는 정확히 timetable(문자열), classes(객체 배열)이며 각 수업 객체에는 name(문자열), materialsIncluded(예=true, 아니오=false인 불리언)만 넣으세요. 배열은 목록 순서를 유지하고 문자열은 그대로 복사하세요. 추가 키나 명시되지 않은 사실은 넣지 마세요.",
+      "expected": { "timetable": "작은 공방", "classes": [{ "name": "유리 새", "materialsIncluded": true }, { "name": "나무 배", "materialsIncluded": false }] },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-extract-03",
+      "language": "ko",
+      "task": "structured-extraction",
+      "prompt": "가상의 기기 인수 기록입니다. 제공한 정보만 사용하고 검색, 첨부파일, 코드 실행, 추측을 하지 마세요. 기기 G-4의 기록은 상태 인수완료, 본체 색상 은색, 전원 충전식, 봉인 아니오, 구성품 [본체, 받침대, 안내지]이며 보관함 번호는 기록되지 않았습니다. 기기 G-5는 상태 인수예정, 본체 색상 검정, 전원 건전지식, 봉인 예, 보관함 번호 함-2입니다. 인수완료인 기기 정보를 추출하세요. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하고 정확히 deviceId(문자열), body(color와 power만 있는 객체, 둘 다 문자열), sealed(예=true, 아니오=false인 불리언), components(문자열 배열, 원문 순서), locker(해당 기기에 기록이 있으면 문자열, 없으면 null)를 넣으세요. 추가 키나 사실을 넣지 마세요.",
+      "expected": { "deviceId": "G-4", "body": { "color": "은색", "power": "충전식" }, "sealed": false, "components": ["본체", "받침대", "안내지"], "locker": null },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-extract-04",
+      "language": "ko",
+      "task": "structured-extraction",
+      "prompt": "다음은 가상의 방송 편성표이며 제공된 정보만 사용하세요. 검색, 첨부파일, 코드 실행, 명시되지 않은 사실 추론은 금지합니다. 채널 이름은 파도입니다. 원문 순서: 저녁 창, 편성종류 본방송, 확정 예, 시각 18:40; 새벽 길, 편성종류 재방송, 확정 예, 시각 05:10; 낮은 숲, 편성종류 본방송, 확정 아니오, 시각 12:20; 아침 돌, 편성종류 본방송, 확정 예, 시각 07:30. 본방송이며 확정 예인 항목만 추출하세요. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 키는 channel(문자열), programmes(객체 배열)만 사용하고, 각 항목에는 title과 time이라는 문자열 키만 넣으세요. 시간순으로 정렬하지 말고 원문 순서를 유지하며 문자열을 그대로 옮기세요. 추가 키나 사실은 넣지 마세요.",
+      "expected": { "channel": "파도", "programmes": [{ "title": "저녁 창", "time": "18:40" }, { "title": "아침 돌", "time": "07:30" }] },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-extract-05",
+      "language": "ko",
+      "task": "structured-extraction",
+      "prompt": "가상의 보관함 표찰 두 개입니다. 제공한 정보만 사용하고 검색, 첨부파일, 코드 실행 및 추측을 하지 마세요. 표찰: 함 R-2, 내용물 모형 조각, 봉인 예, 주의문구 \"위  아래\"(위와 아래 사이 공백 두 칸), 점검일 미기록. 다른 표찰: 함 R-3, 내용물 빈 상자, 봉인 아니오, 주의문구 없음, 점검일 2026-02-11. R-2 표찰만 추출하여 코드 블록이나 설명 없이 JSON 객체 하나를 반환하세요. 정확한 키는 binId(문자열), contents(문자열), sealed(예=true, 아니오=false인 불리언), label(문자열, 두 칸 공백까지 그대로), inspectionDate(해당 표찰에 날짜가 기록되었으면 문자열, 미기록이면 null)입니다. 추가 키나 사실은 넣지 마세요.",
+      "expected": { "binId": "R-2", "contents": "모형 조각", "sealed": true, "label": "위  아래", "inspectionDate": null },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-extract-06",
+      "language": "ko",
+      "task": "structured-extraction",
+      "prompt": "가상의 행사 공지판입니다. 제공한 정보만 사용하고 검색, 첨부파일, 코드 실행, 외부 날짜 지식이나 추측을 사용하지 마세요. 공지 N-6 초안: 발행 아니오, 행사명 작은 전시, 장소 남쪽 홀, 신청필수 예, 준비물 [초대장]. 공지 N-6 확정본: 발행 예, 행사명 작은 전시, 장소 북쪽 홀, 신청필수 아니오, 준비물은 명시적으로 빈 목록, 종료일은 미기록. 발행된 확정본만 추출하세요. 코드 블록이나 설명 없이 JSON 객체 하나를 반환하고 noticeId, event, venue는 문자열, registrationRequired는 예=true/아니오=false인 불리언, bring은 원문 순서의 문자열 배열(빈 목록은 []), endDate는 날짜 문자열 또는 미기록이면 null로 작성하세요. 이 여섯 키만 사용하며 추가 사실은 넣지 마세요.",
+      "expected": { "noticeId": "N-6", "event": "작은 전시", "venue": "북쪽 홀", "registrationRequired": false, "bring": [], "endDate": null },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-calc-01",
+      "language": "en",
+      "task": "grounded-calculation",
+      "prompt": "Use only these synthetic stock facts and rules. Do not search, use attachments, execute code, or add unstated facts. There were 18 usable units at opening. Seven usable units arrived. Nine units were shipped, then two of the remaining units were marked damaged and became unusable. No other movement occurred. Define removedFromUsable as shipped plus damaged units; define available as opening plus arrivals minus removedFromUsable. Return exactly one JSON object without code fences or commentary, containing exactly available (integer) and removedFromUsable (integer). Add no other keys.",
+      "expected": { "available": 14, "removedFromUsable": 11 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-calc-02",
+      "language": "en",
+      "task": "grounded-calculation",
+      "prompt": "Use only these synthetic orders and rules. Do not search, use attachments, execute code, or infer extra charges. Include an order only if paid=yes and cancelled=no. Amount is quantity multiplied by unitTokens; there are no other charges. In source order: O-7 paid=yes cancelled=no quantity=4 unitTokens=8; O-2 paid=no cancelled=no quantity=10 unitTokens=9; O-9 paid=yes cancelled=yes quantity=2 unitTokens=6; O-4 paid=yes cancelled=no quantity=3 unitTokens=5. Return exactly one JSON object without code fences or commentary, with exactly includedIds (array of strings in source order), orderCount (integer), totalTokens (integer). Add no keys or unstated facts.",
+      "expected": { "includedIds": ["O-7", "O-4"], "orderCount": 2, "totalTokens": 47 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-calc-03",
+      "language": "en",
+      "task": "grounded-calculation",
+      "prompt": "Use only this synthetic inspection tally. Do not search, use attachments, execute code, or infer any facts. Exactly 40 tiles were inspected; exactly 15 were marked and every other tile was unmarked. A percentage is count divided by all 40 inspected tiles multiplied by 100. Return exactly one JSON object without code fences or commentary, with exactly unmarkedCount (integer), markedPercent (number), unmarkedPercent (number). Use exact finite numbers, not fractions or strings, and do not round. Add no other keys.",
+      "expected": { "unmarkedCount": 25, "markedPercent": 37.5, "unmarkedPercent": 62.5 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-calc-04",
+      "language": "en",
+      "task": "grounded-calculation",
+      "prompt": "Use only these synthetic material measurements and the supplied conversion: 1 kilogram = 1000 grams. Do not search, use attachments, execute code, or infer packaging weight. Three portions weigh 2 kilograms, 350 grams, and 0.75 kilograms. They are combined; exactly 600 grams are then used, with no other loss. Return exactly one JSON object without code fences or commentary, with exactly combinedGrams (integer), remainingGrams (integer), remainingKilograms (number). Use exact finite numbers with no rounding, no unit suffixes, and no extra keys or facts.",
+      "expected": { "combinedGrams": 3100, "remainingGrams": 2500, "remainingKilograms": 2.5 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-calc-05",
+      "language": "en",
+      "task": "grounded-calculation",
+      "prompt": "Use only this synthetic work log and supplied rules. Do not search, use attachments, execute code, or use external calendar facts. Work starts at 09:10 and ends at 10:05 on the same fictional day; no day boundary is crossed. Convert HH:MM to minutes as HH multiplied by 60 plus MM. Elapsed minutes are end minus start; active minutes subtract a 10-minute break from elapsed minutes; active hours are active minutes divided by 60. Return exactly one JSON object without code fences or commentary, with exactly elapsedMinutes (integer), activeMinutes (integer), activeHours (number). Use exact finite values without rounding and add no keys or unstated facts.",
+      "expected": { "elapsedMinutes": 55, "activeMinutes": 45, "activeHours": 0.75 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-en-calc-06",
+      "language": "en",
+      "task": "grounded-calculation",
+      "prompt": "Use only these synthetic queue rows. Do not search, use attachments, execute code, or infer today's date. All dates are fixed-width YYYY-MM-DD; compare their strings lexicographically, so equal counts as on the cutoff. Include only status=open rows with dueDate at or before cutoff 2026-04-10. In source order: J-4 dueDate=2026-04-09 status=open units=3; J-1 dueDate=2026-04-10 status=closed units=9; J-8 dueDate=2026-04-10 status=open units=4; J-2 dueDate=2026-04-11 status=open units=8. Return exactly one JSON object without code fences or commentary, with exactly dueIds (array of strings in source order), dueCount (integer), dueUnits (integer sum of included units). Add no keys or unstated facts.",
+      "expected": { "dueIds": ["J-4", "J-8"], "dueCount": 2, "dueUnits": 7 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-calc-01",
+      "language": "ko",
+      "task": "grounded-calculation",
+      "prompt": "다음 가상의 포장 기록과 규칙만 사용하세요. 검색, 첨부파일, 코드 실행, 명시되지 않은 사실 추론은 하지 마세요. 완성 상자 4개에 모형이 각각 6개씩 들어 있습니다. 이 모형 중 불량 3개를 꺼내 제외했고, 별도로 있던 정상 모형 5개를 추가했습니다. 그 밖의 모형이나 변화는 없습니다. 처음 포장된 수는 상자 수 곱하기 상자당 모형 수이고, 배송 가능한 수는 처음 포장된 수에서 불량을 빼고 별도 정상 모형을 더한 값입니다. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 키는 initiallyPacked(정수), shippable(정수)만 사용하고 추가 사실은 넣지 마세요.",
+      "expected": { "initiallyPacked": 24, "shippable": 26 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-calc-02",
+      "language": "ko",
+      "task": "grounded-calculation",
+      "prompt": "가상의 체험장 방문 기록입니다. 제공된 숫자와 규칙만 사용하고 검색, 첨부파일, 코드 실행, 외부 요금 정보나 추측을 사용하지 마세요. 서로 겹치지 않는 세 방문 그룹: 어린이 7명은 1명당 3토큰, 성인 5명은 1명당 8토큰, 면제 방문자 2명은 1명당 0토큰입니다. 전체 방문자는 세 그룹 인원의 합, 유료 방문자는 토큰 요금이 0보다 큰 그룹 인원의 합, 총 토큰은 각 그룹 인원 곱하기 요금의 합입니다. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 정확한 키는 visitorCount(정수), payingCount(정수), totalTokens(정수)이며 추가 키나 사실은 넣지 마세요.",
+      "expected": { "visitorCount": 14, "payingCount": 12, "totalTokens": 61 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-calc-03",
+      "language": "ko",
+      "task": "grounded-calculation",
+      "prompt": "다음 가상 교환소 계산 규칙만 사용하세요. 검색, 첨부파일, 코드 실행이나 실제 결제 정책 추론은 하지 마세요. 물품 가격은 12000포인트이고 물품 가격에만 12.5% 할인을 적용합니다. 할인액은 가격 곱하기 12.5 나누기 100입니다. 할인 뒤에 할인 대상이 아닌 포장비 500포인트를 한 번 더합니다. 다른 비용은 없습니다. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하고 정확히 discountPoints(정수 할인액), discountedItemPoints(정수 물품 할인가), payablePoints(정수 최종 합계)를 넣으세요. 반올림이나 단위 문자열, 추가 키나 사실은 넣지 마세요.",
+      "expected": { "discountPoints": 1500, "discountedItemPoints": 10500, "payablePoints": 11000 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-calc-04",
+      "language": "ko",
+      "task": "grounded-calculation",
+      "prompt": "가상의 리본 길이 기록과 변환 규칙만 사용하세요. 검색, 첨부파일, 코드 실행, 외부 지식이나 손실량 추측은 하지 마세요. 1미터=100센티미터, 10밀리미터=1센티미터입니다. 리본 세 조각의 길이는 1.2미터, 85센티미터, 350밀리미터입니다. 이어 붙일 때 손실은 없고, 합친 뒤 40센티미터를 잘라 사용합니다. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 키는 combinedCentimeters(정수 합친 길이), remainingCentimeters(정수 남은 길이), remainingMeters(숫자 남은 미터 값)만 사용하세요. 정확한 값을 쓰고 반올림, 단위 문자열, 추가 키나 사실은 넣지 마세요.",
+      "expected": { "combinedCentimeters": 240, "remainingCentimeters": 200, "remainingMeters": 2 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-calc-05",
+      "language": "ko",
+      "task": "grounded-calculation",
+      "prompt": "다음 가상 입장 스캔 기록과 규칙만 사용하세요. 검색, 첨부파일, 코드 실행, 명시되지 않은 사실 추론은 하지 마세요. 기록 순서: 표 Q-3 승인, 표 Q-1 거절, 표 Q-3 승인, 표 Q-7 승인, 표 Q-1 승인, 표 Q-7 거절. 승인 기록만 대상으로 표 ID가 같으면 한 장으로 셉니다. ID 배열은 처음 승인된 순서이며 거절된 시점은 이 순서에 영향을 주지 않습니다. 거절 횟수는 중복 제거 없이 모든 거절 기록 수입니다. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 정확한 키는 admittedIds(문자열 배열), uniqueAdmissions(정수 승인된 서로 다른 표 수), duplicateApprovals(정수 승인 기록 수에서 서로 다른 승인 표 수를 뺀 값), rejectedScans(정수 거절 횟수)입니다. 추가 키나 사실은 넣지 마세요.",
+      "expected": { "admittedIds": ["Q-3", "Q-7", "Q-1"], "uniqueAdmissions": 3, "duplicateApprovals": 1, "rejectedScans": 2 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    },
+    {
+      "id": "dev-ko-calc-06",
+      "language": "ko",
+      "task": "grounded-calculation",
+      "prompt": "다음 가상의 보관 기간 표와 비교 규칙만 사용하세요. 검색, 첨부파일, 코드 실행, 오늘 날짜나 실제 달력 지식은 사용하지 마세요. 날짜는 모두 고정 길이 YYYY-MM-DD 문자열이며 문자열 사전순으로 비교합니다. 시작일 2026-06-03과 종료일 2026-06-08을 모두 포함하는 구간에 수령일이 있고 반품이 아니오인 항목만 합산합니다. 원문 순서: 묶음 B-6 수령일 2026-06-08 반품 아니오 수량 5; 묶음 B-2 수령일 2026-06-02 반품 아니오 수량 9; 묶음 B-9 수령일 2026-06-03 반품 아니오 수량 2; 묶음 B-4 수령일 2026-06-05 반품 예 수량 8; 묶음 B-1 수령일 2026-06-09 반품 아니오 수량 4. 코드 블록이나 설명 없이 JSON 객체 하나만 반환하세요. 키는 includedIds(문자열 배열, 날짜순이 아닌 원문 순서), includedCount(정수), totalUnits(정수 포함 수량 합계)만 사용하고 추가 사실은 넣지 마세요.",
+      "expected": { "includedIds": ["B-6", "B-9"], "includedCount": 2, "totalUnits": 7 },
+      "grading": { "kind": "exact-json", "arrayOrder": "ordered", "stringNormalization": "none" },
+      "requirements": { "needsSearch": false, "attachments": [], "tools": [] }
+    }
+  ]
+}
