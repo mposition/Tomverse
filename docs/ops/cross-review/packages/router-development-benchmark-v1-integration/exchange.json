@@ -1,0 +1,217 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "router-development-benchmark-v1-integration",
+  "requirement": "Independently review the integration of offline Router development benchmark v1 with develop at commit 5b7352564f507a722fbb1e3395b368ba5eae4299. This is a new integration snapshot, not a continuation of, or a reused approval from, the passed router-development-benchmark-v1 exchange. Preserve reviewed source commit 138bd4c60bd0534dbf131df5f7868fe9d1f623f4 and approval-record commit 0e853fd9ecebb0808dacefc6816a0d1f25148783 as ancestors. The original source digest sha256:c5eae232832ac9cea55452bcd0425da493f7c65dd444f26a66fc3e0c21e9a345 names only that original snapshot; the control program must compute and bind a new integration digest. Review the complete 20-file v1 addition against the integration base, including the original task and every original review record, plus this new task and its authorization receipt. writableScope names what must be visible in the reviewed diff; it does not grant permission to edit the protected original task or review records. Keep those 11 files byte-for-byte identical to 0e853fd9ecebb0808dacefc6816a0d1f25148783. Preserve the original 24-case, 42-model development-only benchmark contract: deterministic exact-JSON semantic grading, complete refusal/missing/failure accounting, prompt-only model input without gold metadata, original product Router diagnostics separate from fixture-based static admission, and model-specific cap/pricing provenance without runtime or quality claims. Only package.json changes among the original 10 reviewed source files: combine both parents' script entries exactly, adding develop's two unrelated AI Review report commands without changing dependency or other package fields. Do not implement a provider collector, live benchmark mode, LLM judge, coding executor, production Router/policy change, quality promotion or production approval. The independent reviewer is read-only. This preparation does not start it: after successful verification and a separate orchestrator go, the limited user authorization in router-development-benchmark-v1-integration.authorization.md permits the existing Claude reviewer with --skip-preflight. Failed package checks remain blocking. Do not modify the cross-review control program or original exchange to accommodate this integration.",
+  "completionCriteria": [
+    "The merge preserves both the reviewed source and approval-record commits as ancestors and includes exact develop base 5b7352564f507a722fbb1e3395b368ba5eae4299. No unrelated manual merge resolution, source revision or production change is introduced.",
+    "An explicit byte-preservation guard compares docs/ops/cross-review/packages/router-development-benchmark-v1.task.json and every tracked file under docs/ops/cross-review/packages/router-development-benchmark-v1/ against commit 0e853fd9ecebb0808dacefc6816a0d1f25148783. All 11 are identical, including the passed exchange, original null-preflight interactive verdict, raw supplied evidence, package and generated prompt/diffs. Historical approvals and instructions remain historical.",
+    "Among the original task's 10 source paths, only package.json differs from reviewed source commit 138bd4c60bd0534dbf131df5f7868fe9d1f623f4. Its scripts are the exact union of both merge parents, with shared keys having identical values. Dependencies, devDependencies, overrides, all other non-script package fields and package-lock.json remain unchanged.",
+    "npm run test:router-development-benchmark passes at least 95 offline tests; targeted related Router regression tests, with their exact commands and actual counts recorded, official npm run typecheck, lint, encoding, document-reference, policy-section-reference and router-quality-evaluation guards pass. Results are actual recorded executions, not inferred from existing green records. No benchmark/provider call is made.",
+    "The integrated benchmark retains exactly 24 synthetic cases (six per Korean/English by extraction/calculation cell), a complete 42-by-24 manifest with known refusals, strict exact-JSON semantic-value checks and precision/duplicate/blank rejection, complete missing/failure denominators, and prompt-only model input without gold fields. Existing product diagnostics and static benchmark admission remain distinct; no production-quality conclusion is introduced.",
+    "The integration package uses this exact base and every listed source/record path without hiding the original review records. generatedPaths is empty and only the distinct docs/ops/cross-review/packages/router-development-benchmark-v1-integration output directory may be excluded. A clean named integration commit is packaged only after verification and orchestrator approval. The existing control program, scope enforcement and original exchange are unchanged.",
+    "author=codex and reviewer=claude are set by the existing package/review flags. Claude uses the existing no-shell, no-write Read/Grep/Glob invocation with safe-mode and strict MCP configuration, no model override, and stored claude.ai login; ANTHROPIC_API_KEY is removed only from the review child environment, with no API-key fallback or parent/persistent environment change.",
+    "The user's exact reply and limited --skip-preflight authorization are preserved in the separate receipt. No preflight pass is invented, --review-despite-check-failures is prohibited, tests and CI remain required, and the new exchange remains awaiting_review until an actual digest-bound verdict exists. At most two fix rounds are allowed by the existing MAX_REVISIONS cap; a passed or exhausted exchange is not reopened.",
+    "The original shared-node-budget observation remains a non-blocking follow-up, not an integration code change. Commit, reviewer invocation, push and PR merge each wait for the orchestrator's applicable go. No main merge, production deployment, paid benchmark collection, provider API billing, model-winner claim, quality-band promotion or release authorization is implied."
+  ],
+  "baseCommit": "5b7352564f507a722fbb1e3395b368ba5eae4299",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:1f74cb072d9dda87bb80211aabfa8521d8f2f20e822aa882ebe5868f0f290c51",
+      "commit": "4d08d80a71e71148b2fc22c77102d79cbc916630",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-benchmark-v1-integration.authorization.md",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1-integration.task.json",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1.task.json",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/README.md",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/change.diff",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/exchange.json",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/external-review/reviewnotesrouterdevelopmentbenchmarkv1round0.md",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/external-review/verdictround0.candidaterecord.json",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/external-review/verdictrouterdevelopmentbenchmarkv1round0.json",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/package-round0.json",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/router-development-benchmark-v1/verdict-round0.json",
+        "docs/ops/router-development-benchmark/README.md",
+        "docs/ops/router-development-benchmark/development-v1.json",
+        "lib/routerDevelopmentBenchmark.ts",
+        "lib/routerDevelopmentBenchmarkPlan.ts",
+        "package.json",
+        "scripts/router-development-benchmark.mjs",
+        "tests/routerDevelopmentBenchmark.test.mjs",
+        "tests/routerDevelopmentBenchmarkCli.test.mjs",
+        "tests/routerDevelopmentBenchmarkCorpus.test.mjs"
+      ],
+      "changeSummary": "Integrate reviewed offline Router benchmark v1 with develop 5b735256, preserving original evidence byte-for-byte and combining only the parent package scripts. This is a new digest-bound integration review, not reuse of the historical interactive approval. No provider execution or production change.",
+      "testResults": [
+        {
+          "command": "node -e 'const cp=require(\"node:child_process\");const assert=require(\"node:assert/strict\");const runs=[{\"command\":\"npm run test:router-development-benchmark\",\"expected\":95},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"expected\":181}];const observed=[];for(const item of runs){const output=cp.execFileSync(\"sh\",[\"-c\",item.command],{encoding:\"utf8\",maxBuffer:64*1024*1024});process.stdout.write(output);const counts=Object.fromEntries([...output.matchAll(/ℹ (tests|pass|fail|cancelled|skipped|todo) (\\d+)/g)].map(m=>[m[1],Number(m[2])]));assert.equal(counts.tests,item.expected);assert.equal(counts.pass,item.expected);for(const key of [\"fail\",\"cancelled\",\"skipped\"])assert.equal(counts[key],0);observed.push({command:item.command,...counts});}for(const entry of observed)console.log(\"Observed offline test result: \"+JSON.stringify(entry));'",
+          "passed": true,
+          "output": "ℹ skipped 0\nℹ todo 0\nℹ duration_ms 2861.7821\nObserved offline test result: {\"command\":\"npm run test:router-development-benchmark\",\"tests\":95,\"pass\":95,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"tests\":181,\"pass\":181,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}",
+          "durationMs": 12598
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35811
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentBenchmark.ts lib/routerDevelopmentBenchmarkPlan.ts scripts/router-development-benchmark.mjs tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint lib/routerDevelopmentBenchmark.ts lib/routerDevelopmentBenchmarkPlan.ts scripts/router-development-benchmark.mjs tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
+          "durationMs": 2593
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1142
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 761 referenced path(s) across 92 instruction document(s), and 880 path(s) named by comments across 2615 source file(s), all present.",
+          "durationMs": 1291
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4128 citation(s) against 30 policy document(s). 2478 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).",
+          "durationMs": 983
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 694
+        },
+        {
+          "rule": "node -e 'const assert=require(\"node:assert/strict\");const fs=require(\"node:fs\");const cp=require(\"node:child_process\");const record=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\";const folder=\"docs/ops/cross-review/packages/router-development-benchmark-v1/\";const originalTask=\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\";const git=args=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const list=args=>git(args).toString(\"utf8\").trim().split(/\\r?\\n/).filter(Boolean);const packageFiles=list([\"ls-tree\",\"-r\",\"--name-only\",record,\"--\",folder]);assert.deepEqual(list([\"ls-files\",\"--\",folder]),packageFiles);const protectedFiles=[originalTask,...packageFiles];assert.equal(protectedFiles.length,11);for(const path of protectedFiles){const original=git([\"show\",record+\":\"+path]);assert.ok(fs.readFileSync(path).equals(original),\"working bytes changed: \"+path);assert.ok(git([\"show\",\":\"+path]).equals(original),\"index bytes changed: \"+path);}const sources=JSON.parse(git([\"show\",record+\":\"+originalTask]).toString(\"utf8\")).writableScope;assert.equal(sources.length,10);for(const path of sources.filter(p=>p!==\"package.json\")){const original=git([\"show\",\"138bd4c60bd0534dbf131df5f7868fe9d1f623f4:\"+path]);assert.ok(fs.readFileSync(path).equals(original),\"source bytes changed: \"+path);assert.ok(git([\"show\",\":\"+path]).equals(original),\"source index changed: \"+path);}console.log(\"Original 11 task/package files: working and index bytes preserved.\");console.log(\"Reviewed source scope: 9 non-package files byte-identical; package.json checked by exact-union guard.\");'",
+          "passed": true,
+          "detail": "Original 11 task/package files: working and index bytes preserved.\nReviewed source scope: 9 non-package files byte-identical; package.json checked by exact-union guard.",
+          "durationMs": 709
+        },
+        {
+          "rule": "node -e 'const assert=require(\"node:assert/strict\");const fs=require(\"node:fs\");const cp=require(\"node:child_process\");const ours=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\",theirs=\"5b7352564f507a722fbb1e3395b368ba5eae4299\";const git=args=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const read=ref=>JSON.parse(git([\"show\",ref+\":package.json\"]).toString(\"utf8\"));const left=read(ours),right=read(theirs),actual=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"));for(const key of Object.keys(left.scripts)){if(Object.hasOwn(right.scripts,key))assert.equal(left.scripts[key],right.scripts[key],\"parent script conflict: \"+key);}const withoutScripts=value=>Object.fromEntries(Object.entries(value).filter(([key])=>key!==\"scripts\"));assert.deepEqual(withoutScripts(left),withoutScripts(right));const expected={...right,scripts:{...right.scripts,...left.scripts}};assert.deepEqual(actual,expected);assert.deepEqual(read(\"\"),expected);const lock=fs.readFileSync(\"package-lock.json\");assert.ok(lock.equals(git([\"show\",ours+\":package-lock.json\"])));assert.ok(lock.equals(git([\"show\",theirs+\":package-lock.json\"])));assert.ok(lock.equals(git([\"show\",\":package-lock.json\"])));console.log(\"Package equals exact parent script union; non-script fields and lock bytes unchanged.\");'",
+          "passed": true,
+          "detail": "Package equals exact parent script union; non-script fields and lock bytes unchanged.",
+          "durationMs": 167
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Approved for this digest (commit 4d08d80a) only: the reviewed diff against develop 5b735256 touches exactly the 22 declared paths with no production Router/policy, control-program or original-exchange change, package.json adds only the two benchmark scripts at a +2 line offset consistent with develop's two AI Review script lines (all referenced script files exist) while dependencies/lock are untouched, the integrated tree still holds 42 catalogue models in lib/models.ts and 24 corpus cases with six per language/task cell all declaring exact-json grading and no search/attachment/tool, the scoring core keeps prompt-only modelInputForCase, duplicate-key/precision rejection, not_run and null-correctness accounting and zero provider calls, the CLI has only dry-run/score with no live path, the original v1 exchange remains passed/approve under its own digest c5eae232 with null command/preflight/usage, and the new exchange is awaiting_review with reviewConclusion null, generatedPaths empty, lineage empty and only its own output directory excluded; two non-blocking observations, not findings: I am read-only with no shell, so the parent-tree package.json union, package-lock bytes, the 11-file byte preservation against 0e853fd9 and the ancestry of 138bd4c6/0e853fd9 rest on the recorded guard executions rather than my own recomputation, and the byte-protected docs/ops/router-development-benchmark/README.md records its 360 planned / 648 refused / 80 mismatch profiler snapshot against the older base 89288a86, which may no longer hold on develop's catalogue and remains a follow-up candidate rather than an edit permitted by this task."
+    }
+  ],
+  "changeDigest": "sha256:1f74cb072d9dda87bb80211aabfa8521d8f2f20e822aa882ebe5868f0f290c51",
+  "commit": "4d08d80a71e71148b2fc22c77102d79cbc916630",
+  "changeSummary": "Integrate reviewed offline Router benchmark v1 with develop 5b735256, preserving original evidence byte-for-byte and combining only the parent package scripts. This is a new digest-bound integration review, not reuse of the historical interactive approval. No provider execution or production change.",
+  "testResults": [
+    {
+      "command": "node -e 'const cp=require(\"node:child_process\");const assert=require(\"node:assert/strict\");const runs=[{\"command\":\"npm run test:router-development-benchmark\",\"expected\":95},{\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"expected\":181}];const observed=[];for(const item of runs){const output=cp.execFileSync(\"sh\",[\"-c\",item.command],{encoding:\"utf8\",maxBuffer:64*1024*1024});process.stdout.write(output);const counts=Object.fromEntries([...output.matchAll(/ℹ (tests|pass|fail|cancelled|skipped|todo) (\\d+)/g)].map(m=>[m[1],Number(m[2])]));assert.equal(counts.tests,item.expected);assert.equal(counts.pass,item.expected);for(const key of [\"fail\",\"cancelled\",\"skipped\"])assert.equal(counts[key],0);observed.push({command:item.command,...counts});}for(const entry of observed)console.log(\"Observed offline test result: \"+JSON.stringify(entry));'",
+      "passed": true,
+      "output": "ℹ skipped 0\nℹ todo 0\nℹ duration_ms 2861.7821\nObserved offline test result: {\"command\":\"npm run test:router-development-benchmark\",\"tests\":95,\"pass\":95,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}\nObserved offline test result: {\"command\":\"node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs\",\"tests\":181,\"pass\":181,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}",
+      "durationMs": 12598
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 35811
+    },
+    {
+      "rule": "npm run lint -- lib/routerDevelopmentBenchmark.ts lib/routerDevelopmentBenchmarkPlan.ts scripts/router-development-benchmark.mjs tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 lint\n> eslint lib/routerDevelopmentBenchmark.ts lib/routerDevelopmentBenchmarkPlan.ts scripts/router-development-benchmark.mjs tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
+      "durationMs": 2593
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1142
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 761 referenced path(s) across 92 instruction document(s), and 880 path(s) named by comments across 2615 source file(s), all present.",
+      "durationMs": 1291
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4128 citation(s) against 30 policy document(s). 2478 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).",
+      "durationMs": 983
+    },
+    {
+      "rule": "npm run check:router-quality-eval",
+      "passed": true,
+      "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+      "durationMs": 694
+    },
+    {
+      "rule": "node -e 'const assert=require(\"node:assert/strict\");const fs=require(\"node:fs\");const cp=require(\"node:child_process\");const record=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\";const folder=\"docs/ops/cross-review/packages/router-development-benchmark-v1/\";const originalTask=\"docs/ops/cross-review/packages/router-development-benchmark-v1.task.json\";const git=args=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const list=args=>git(args).toString(\"utf8\").trim().split(/\\r?\\n/).filter(Boolean);const packageFiles=list([\"ls-tree\",\"-r\",\"--name-only\",record,\"--\",folder]);assert.deepEqual(list([\"ls-files\",\"--\",folder]),packageFiles);const protectedFiles=[originalTask,...packageFiles];assert.equal(protectedFiles.length,11);for(const path of protectedFiles){const original=git([\"show\",record+\":\"+path]);assert.ok(fs.readFileSync(path).equals(original),\"working bytes changed: \"+path);assert.ok(git([\"show\",\":\"+path]).equals(original),\"index bytes changed: \"+path);}const sources=JSON.parse(git([\"show\",record+\":\"+originalTask]).toString(\"utf8\")).writableScope;assert.equal(sources.length,10);for(const path of sources.filter(p=>p!==\"package.json\")){const original=git([\"show\",\"138bd4c60bd0534dbf131df5f7868fe9d1f623f4:\"+path]);assert.ok(fs.readFileSync(path).equals(original),\"source bytes changed: \"+path);assert.ok(git([\"show\",\":\"+path]).equals(original),\"source index changed: \"+path);}console.log(\"Original 11 task/package files: working and index bytes preserved.\");console.log(\"Reviewed source scope: 9 non-package files byte-identical; package.json checked by exact-union guard.\");'",
+      "passed": true,
+      "detail": "Original 11 task/package files: working and index bytes preserved.\nReviewed source scope: 9 non-package files byte-identical; package.json checked by exact-union guard.",
+      "durationMs": 709
+    },
+    {
+      "rule": "node -e 'const assert=require(\"node:assert/strict\");const fs=require(\"node:fs\");const cp=require(\"node:child_process\");const ours=\"0e853fd9ecebb0808dacefc6816a0d1f25148783\",theirs=\"5b7352564f507a722fbb1e3395b368ba5eae4299\";const git=args=>cp.execFileSync(\"git\",args,{maxBuffer:64*1024*1024});const read=ref=>JSON.parse(git([\"show\",ref+\":package.json\"]).toString(\"utf8\"));const left=read(ours),right=read(theirs),actual=JSON.parse(fs.readFileSync(\"package.json\",\"utf8\"));for(const key of Object.keys(left.scripts)){if(Object.hasOwn(right.scripts,key))assert.equal(left.scripts[key],right.scripts[key],\"parent script conflict: \"+key);}const withoutScripts=value=>Object.fromEntries(Object.entries(value).filter(([key])=>key!==\"scripts\"));assert.deepEqual(withoutScripts(left),withoutScripts(right));const expected={...right,scripts:{...right.scripts,...left.scripts}};assert.deepEqual(actual,expected);assert.deepEqual(read(\"\"),expected);const lock=fs.readFileSync(\"package-lock.json\");assert.ok(lock.equals(git([\"show\",ours+\":package-lock.json\"])));assert.ok(lock.equals(git([\"show\",theirs+\":package-lock.json\"])));assert.ok(lock.equals(git([\"show\",\":package-lock.json\"])));console.log(\"Package equals exact parent script union; non-script fields and lock bytes unchanged.\");'",
+      "passed": true,
+      "detail": "Package equals exact parent script union; non-script fields and lock bytes unchanged.",
+      "durationMs": 167
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Approved for this digest (commit 4d08d80a) only: the reviewed diff against develop 5b735256 touches exactly the 22 declared paths with no production Router/policy, control-program or original-exchange change, package.json adds only the two benchmark scripts at a +2 line offset consistent with develop's two AI Review script lines (all referenced script files exist) while dependencies/lock are untouched, the integrated tree still holds 42 catalogue models in lib/models.ts and 24 corpus cases with six per language/task cell all declaring exact-json grading and no search/attachment/tool, the scoring core keeps prompt-only modelInputForCase, duplicate-key/precision rejection, not_run and null-correctness accounting and zero provider calls, the CLI has only dry-run/score with no live path, the original v1 exchange remains passed/approve under its own digest c5eae232 with null command/preflight/usage, and the new exchange is awaiting_review with reviewConclusion null, generatedPaths empty, lineage empty and only its own output directory excluded; two non-blocking observations, not findings: I am read-only with no shell, so the parent-tree package.json union, package-lock bytes, the 11-file byte preservation against 0e853fd9 and the ancestry of 138bd4c6/0e853fd9 rest on the recorded guard executions rather than my own recomputation, and the byte-protected docs/ops/router-development-benchmark/README.md records its 360 planned / 648 refused / 80 mismatch profiler snapshot against the older base 89288a86, which may no longer hold on develop's catalogue and remains a follow-up candidate rather than an edit permitted by this task.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-10T02:09:23.950Z",
+  "packagedRounds": 1,
+  "concludedAtRound": 0,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "4d08d80a71e71148b2fc22c77102d79cbc916630",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/router-development-benchmark-v1-integration.authorization.md",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1-integration.task.json",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1.task.json",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/README.md",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/change.diff",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/exchange.json",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/external-review/reviewnotesrouterdevelopmentbenchmarkv1round0.md",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/external-review/verdictround0.candidaterecord.json",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/external-review/verdictrouterdevelopmentbenchmarkv1round0.json",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/package-round0.json",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/review-prompt.md",
+    "docs/ops/cross-review/packages/router-development-benchmark-v1/verdict-round0.json",
+    "docs/ops/router-development-benchmark/README.md",
+    "docs/ops/router-development-benchmark/development-v1.json",
+    "lib/routerDevelopmentBenchmark.ts",
+    "lib/routerDevelopmentBenchmarkPlan.ts",
+    "package.json",
+    "scripts/router-development-benchmark.mjs",
+    "tests/routerDevelopmentBenchmark.test.mjs",
+    "tests/routerDevelopmentBenchmarkCli.test.mjs",
+    "tests/routerDevelopmentBenchmarkCorpus.test.mjs"
+  ]
+}
