@@ -1805,5 +1805,127 @@
       ],
       "expectedInvocationCount": 0
     }
+  ],
+  "idPathPolicy": [
+    {
+      "id": "IP01",
+      "acId": "IP-AC1",
+      "verification": "unit",
+      "expected": "primitive isAsciiId에 U+0000..U+007F 각각 및 prefix/middle/suffix 위치를 넣고 U+0021..U+007E만 true; 빈 문자열/boxed/non-string은 false, coercion 0회."
+    },
+    {
+      "id": "IP02",
+      "acId": "IP-AC1",
+      "verification": "unit",
+      "expected": "SignaturePayload purpose/signerId/trustEpoch 각 field 독립 변형. C0 32개·space·DEL·non-ASCII·NFD·surrogate를 모두 invalid_input, 새 허용 ASCII는 shape ok."
+    },
+    {
+      "id": "IP03",
+      "acId": "IP-AC1",
+      "verification": "unit",
+      "expected": "SignatureReceipt.payload의 세 ID field에 IP02와 같은 negative/positive 범위를 적용; nested shape bypass 없음."
+    },
+    {
+      "id": "IP04",
+      "acId": "IP-AC1",
+      "verification": "unit",
+      "expected": "TrustAnchor signerId/trustEpoch 독립 변형, invalid_input과 새 허용값 구조 통과. keyId/roles schema는 기존 그대로."
+    },
+    {
+      "id": "IP05",
+      "acId": "IP-AC1",
+      "verification": "unit",
+      "expected": "C04 BindingExpectation의 purpose/signerId/trustEpoch만 독립 변형해 다른 값은 정상이어도 새 금지 입력은 invalid_input. payload/anchor/expected 모두 같은 금지 signer/epoch여도 invalid_input."
+    },
+    {
+      "id": "IP06",
+      "acId": "IP-AC3",
+      "verification": "unit",
+      "expected": "signatureMessage/signatureReceiptDigest/verifySignatureReceipt의 receipt 및 expectedPayload ID 오류가 invalid_input으로 전파. 구조 실패를 unsupported_subset/signature_mismatch보다 우선, 새 key/signing API 추가 없음."
+    },
+    {
+      "id": "IP07",
+      "acId": "IP-AC3",
+      "verification": "unit",
+      "expected": "@importer와 !~ 및 ASCII punctuation은 opaque ID로 수용. C02의 approval-purpose shape와 C04 ApproverId 추가 제약을 구별; 신규 approver @user는 C04에서 invalid_input. 미지원 정상 purpose는 C03/C04 unsupported_subset."
+    },
+    {
+      "id": "IP08",
+      "acId": "IP-AC3",
+      "verification": "unit",
+      "expected": "허용 signer/epoch의 case-only 차이는 binding_mismatch. 금지 whitespace를 trim/normalize/alias로 성공시키지 않음. 서로 다른 정상 path 및 raw bytes 불일치의 기존 error 우선순위를 보존."
+    },
+    {
+      "id": "IP09",
+      "acId": "IP-AC2",
+      "verification": "unit",
+      "expected": "BlobRef.path/GitFileRef.path/TrustAnchor.registrationReceipt.path 각각 C0 32개·DEL을 segment의 시작/중간/끝에 삽입해 invalid_input. byteLength/hash는 정상으로 고정."
+    },
+    {
+      "id": "IP10",
+      "acId": "IP-AC2",
+      "verification": "unit",
+      "expected": "NFC 한글/é/astral scalar·space 포함·선행/후행 space·space-only segment 및 원 문자 exact 보존. IP-D2가 명시적으로 유지하는 C1/U+2028/U+2029/format scalar 사례도 구조상 수용하되 운영 권한 없음."
+    },
+    {
+      "id": "IP11",
+      "acId": "IP-AC2",
+      "verification": "unit",
+      "expected": "NFD/unpaired surrogate/non-string/boxed string은 invalid_input. 입력을 NFC로 고치거나 Unicode를 ASCII로 바꾸지 않음. typed-array/raw bytes를 checkWire object 입력으로 혼동하지 않음."
+    },
+    {
+      "id": "IP12",
+      "acId": "IP-AC2",
+      "verification": "unit",
+      "expected": "빈 path/segment, leading/trailing slash, backslash, drive prefix, dot/dotdot segment 거절. ..x, percent-encoded 점, nested colon, CON, trailing-dot은 lexical layer에서 기존과 동일; fs/URL decoding/OS alias 처리 없음."
+    },
+    {
+      "id": "IP13",
+      "acId": "IP-AC3",
+      "verification": "unit",
+      "expected": "compareBlobRef/compareGitFileRef에서 actual와 expected의 path를 각각 독립 변형; 금지 path와 wrong bytes 동시 입력은 invalid_input. compareTrustBinding의 anchor.registrationReceipt.path에도 같은 구조 거절."
+    },
+    {
+      "id": "IP14",
+      "acId": "IP-AC4",
+      "verification": "unit",
+      "expected": "C01은 일반 CJSON string의 C0/DEL과 raw source bytes를 계속 원 규약대로 처리; ASCII object key 범위 불변. 기존 B Proxy/hook·bytes copy 경계, 모든 정상 golden/error 우선순위 보존."
+    },
+    {
+      "id": "IP15",
+      "acId": "IP-AC4",
+      "verification": "unit",
+      "expected": "새 IP unit inventory를 F/B와 분리. 기존 15 top-level fixture 값/순서의 JSON.stringify projection SHA 및 original14/B19 hash 유지; idPathPolicy 한 key만 추가, IP16–IP20은 external이며 unit pass로 세지 않음. idPathPolicy는 IP01–IP20 순서의 정확히 20개 row 배열이며 각 row는 id/acId/verification/expected 네 key만, 모두 비어 있지 않은 primitive string. T01에 이 패키지 futureCases의 네 필드 값을 전사한 독립 고정 기대표와 row별 exact equality를 검사하고 fixture에서 정답을 유도하지 않음. IP01–IP15는 unit, IP16–IP20은 external_repository_audit. row의 acId에서 역으로 모은 case ID 목록을 acceptanceCriteria의 각 caseIds와 집합·순서까지 양방향 대조해 누락·중복·알 수 없는 ID·잘못된 대응을 거절. IP15 자신의 expected도 고정 문자열 데이터로 비교하며 재귀 생성·자기 hash 없음."
+    },
+    {
+      "id": "IP16",
+      "acId": "IP-AC5",
+      "verification": "external_repository_audit",
+      "expected": "새 implementation commit은 C02/T01/T11 M3만, hidden helper/import/builtin/package/config/runner/static gate 추가 0; C01/C03/C04 exact blob 보존."
+    },
+    {
+      "id": "IP17",
+      "acId": "IP-AC5",
+      "verification": "external_repository_audit",
+      "expected": "정책 패키지 두 raw SHA/reviewCommit와 별도 receipt, 원 SHA develop inclusion 및 현재 별도 착수 지시를 대조. Q/S1/S3/D/PB/IB/BF/receipt bytes와 과거 판정 무변경."
+    },
+    {
+      "id": "IP18",
+      "acId": "IP-AC4",
+      "verification": "external_repository_audit",
+      "expected": "새 IP01–IP15와 모든 기존 F/B unit 실제 실행·누락/중복/skip 0. exact field matrix/긍정·음성 집합 대조, baseline 실패가 있으면 같은 이름·원인 대조. B20–B24 및 F 외부 감사 분류 유지."
+    },
+    {
+      "id": "IP19",
+      "acId": "IP-AC5",
+      "verification": "external_repository_audit",
+      "expected": "실제 착수 tip support9 Git/working hash, runtime/lock/설치, branch/ancestry/CI·검사 조건을 별도 사전 기록. 이번 문서 준비 관측을 미래 착수 검증이나 전체 dependency closure로 대용하지 않음."
+    },
+    {
+      "id": "IP20",
+      "acId": "IP-AC5",
+      "verification": "external_repository_audit",
+      "expected": "S2 activation, full P/scorer/holdout/운영 key/provider/flags가 없고 상위54 AC partial9/deferred45/full0 및 잔여를 보존. 정책/시험통과는 외부 OI-F2 closure의 대용 아님."
+    }
   ]
 }
