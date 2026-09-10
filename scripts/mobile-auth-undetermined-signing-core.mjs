@@ -106,6 +106,7 @@ export const classifyUndeterminedSigning = (input) => {
   const accessAxis = input?.previousAccessAxis;
   const graceRemaining = input?.graceWindowRemainingSeconds;
   const graceAtRejection = input?.graceRemainingAtRejectionSeconds;
+  const sampleValidAtRejection = input?.sampleValidAtRejection;
 
   const reason = (roundCase, why, extra = {}) => ({ case: roundCase, why, ...extra });
 
@@ -145,28 +146,45 @@ export const classifyUndeterminedSigning = (input) => {
    * about one instant with a measurement from another.
    */
   if (accessAxis === "rejected") {
+    /**
+     * Two observations, both required, and neither inferred from the other.
+     * A refusal is a deployment defect only if, at that instant, the sample
+     * was still one the deployment owed an answer to (`exp` not past, plus
+     * the runtime's skew) **and** the key that signed it was still inside its
+     * grace window. Either one missing and the round is not classified: this
+     * module cannot see the sample, so an unasked question would otherwise be
+     * answered "yes" by default, and the default is a rollback.
+     */
+    const missing = [];
+    if (typeof sampleValidAtRejection !== "boolean") {
+      missing.push("whether the sample itself was still valid at that instant");
+    }
     if (!isInteger(graceAtRejection)) {
+      missing.push("how much of the previous signing key's grace window was left at that instant");
+    }
+    if (missing.length > 0) {
       return reason(
         "insufficient_observation",
-        "the access sample was rejected, but the grace window at that instant was not recorded, and that is what tells a defect from the intended refusal",
+        `the access sample was rejected, but ${missing.join(" and ")} was not recorded, and that is what tells a defect from a refusal that says nothing`,
         {
-          answer:
-            "record how much of the previous signing key's grace window was left at the instant of the rejection, then classify again",
+          answer: "record it at the instant of the rejection, then classify again",
+          missingObservations: missing,
           rollback: false,
         }
       );
     }
-    if (graceAtRejection > 0) {
+    if (sampleValidAtRejection && graceAtRejection > 0) {
       return reason(
         "case_2",
-        "the previous access token was rejected while its signing key was still inside its grace window -- that is a deployment defect, not case 1",
+        "the previous access token was still valid and its signing key was still inside its grace window, and it was rejected anyway -- that is a deployment defect, not case 1",
         { answer: "roll back", rollback: true, graceWindowClosedAtRejection: false }
       );
     }
-    // Closed at the instant of the refusal: refusing was the intended
-    // behaviour. It is still not an answer to case 1's question -- nobody
-    // presented the sample while it counted -- so the round falls through to
-    // case 1 below, where G7 names the unknown.
+    // Either the sample had stopped being valid, or the window had closed.
+    // Both are refusals that say nothing about the deployment -- the first is
+    // the same observation as an expired sample, the second is the contract
+    // working -- so the round falls through to case 1 below, where G7 names
+    // the unknown.
   }
   if (accessAxis === "rejected_while_valid") {
     return reason(
@@ -197,16 +215,20 @@ export const classifyUndeterminedSigning = (input) => {
 
   // Case 1. G7 decides what to call it once the grace window has closed.
   //
-  // A rejection reaches here only through the closed branch above, so its
-  // window is closed by construction; the sample-expired path reads the
-  // recorded window instead.
+  // A rejection reaches here two ways. Past the grace, the window is closed
+  // by construction. With an invalid sample, it is not -- the window may well
+  // still be open, and the recorded value decides, exactly as it does for an
+  // expired sample.
+  const rejectedPastGrace = accessAxis === "rejected" && graceAtRejection <= 0;
   const graceClosed =
-    accessAxis === "rejected" || (isInteger(graceRemaining) && graceRemaining <= 0);
+    rejectedPastGrace || (isInteger(graceRemaining) && graceRemaining <= 0);
   return reason(
     "case_1",
-    accessAxis === "rejected"
+    rejectedPastGrace
       ? "item 6 passed, the refresh axis passed, and the access sample was refused after its signing key's grace window had already closed -- the intended behaviour, and not an answer"
-      : "item 6 passed, the refresh axis passed, and the access sample expired before it could be used",
+      : accessAxis === "rejected"
+        ? "item 6 passed, the refresh axis passed, and the access sample was no longer valid when it was refused -- the refusal is about the sample, not the deployment"
+        : "item 6 passed, the refresh axis passed, and the access sample expired before it could be used",
     {
       rollback: false,
       /**

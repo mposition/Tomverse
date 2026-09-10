@@ -474,6 +474,24 @@ test("W16b: a sample that has expired by judgement time does not carry its earli
   assert.equal(samples[0].tokenExpiresAt - samples[0].tokenIssuedAt, TTL_SECONDS);
 });
 
+test("W16c: the round rejects at `exp` itself -- the runtime's 60s skew is not evidence", () => {
+  // Two different checks, two different boundaries, and the looser one is not
+  // the one that judges evidence. The runtime tolerates `exp + 60s` of clock
+  // skew, so the same token is still accepted by a deployment 630s after
+  // issuance; the round refuses it at 600s exactly. A sample the runtime
+  // would still answer is not thereby a sample this round may judge.
+  const base = Math.floor(Date.now() / 1000);
+  const samples = threeSamples(base);
+  const at = (judgedAtSeconds) =>
+    judgeMobileBindingRound({ round: 1, judgedAtSeconds, samples }).verdict;
+
+  // The first sample expires first; the third is issued two intervals later.
+  assert.equal(samples[0].tokenExpiresAt, base + TTL_SECONDS);
+  assert.equal(at(base + TTL_SECONDS - 1), "sample_condition_met");
+  assert.equal(at(base + TTL_SECONDS), "undetermined");
+  assert.equal(at(base + TTL_SECONDS + 30), "undetermined");
+});
+
 test("W17: three matching samples meet the condition and claim nothing about stability", () => {
   const base = Math.floor(Date.now() / 1000);
   const result = judgeMobileBindingRound({
