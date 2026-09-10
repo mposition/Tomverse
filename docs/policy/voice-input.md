@@ -438,12 +438,25 @@ recorder의 비트레이트는 32 kbps로 **고정**합니다. 브라우저에 �
 "페이지가 맞다" 또는 "페이지는 무의미하다" 중 하나로 읽히는데, **둘 다
 확립되지 않았습니다.**
 
-**과금 수량은 관측마다 기록합니다.** `VoiceCostObservation.billedAudioInputQuantity`·
-`billedOutputQuantity`·`billedQuantityUnit`이고, `auditVoicePriceRegister`는
-**응답 token이 아니라 과금 수량으로** 대조합니다. 둘이 어긋나는 관측이 나오면
-`billing_basis_diverged`로 보고합니다 — 그때는 숫자보다 **이름이 먼저** 틀린
-것이고(더 이상 "응답 토큰당"이 아니므로), 단위가 `tokens`가 아니면
+**과금 수량은 관측마다, line item마다 기록합니다.**
+`VoiceCostObservation.billedAudioInputQuantity`·`billedOutputQuantity`와
+단위 `billedAudioInputQuantityUnit`·`billedOutputQuantityUnit`입니다.
+**단위를 하나로 들지 않는 이유는 공급자가 line item별로 보고하기 때문입니다** —
+필드 하나면 input 쪽에서 읽은 것을 output 쪽에 대해서도 단언하게 되고, 그것이
+이 register가 만들지 않기로 한 종류의 주장입니다. 두 관측 모두 양쪽이 `tokens`
+이므로 기록된 사실은 달라지지 않습니다.
+
+`auditVoicePriceRegister`는 **응답 token이 아니라 과금 수량으로** 대조하고,
+**input·output 양쪽 모두** 검사합니다. 어느 한쪽이라도 어긋나면
+`billing_basis_diverged`이고 — 그때는 숫자보다 **이름이 먼저** 틀린 것입니다
+(더 이상 "응답 토큰당"이 아니므로) — 단위가 `tokens`가 아니면
 `billed_unit_is_not_tokens`로 거절합니다. 환산을 지어내지 않습니다.
+
+**한쪽만 검사하면 통과합니다.** 산술은 과금 수량으로 대조하므로 output 수량이
+어긋난 관측도 **정의상 맞아떨어집니다** — 합이 닫힌다는 것은 두 기준이
+일치한다는 증거가 아닙니다. input만 보던 판정이 실제로 그런 관측을 통과시켰고,
+`outputPerMillionTokensUsd`는 반박할 것이 없는 채로 "응답 토큰당"을 계속
+주장했을 것입니다.
 
 **이것이 `costObservation`이 존재하는 이유입니다.** 공표값만 읽었다면 input 원가를
 2.4배 낮게 잡고도 register는 검증된 것처럼 보였을 것입니다. 청구서가 그것을

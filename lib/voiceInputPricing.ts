@@ -201,11 +201,21 @@ export type VoiceCostObservation = {
   /** The quantity billed on the output line, same bucket. */
   billedOutputQuantity: number;
   /**
-   * `quantity_unit` as the provider reported it, `tokens` on both lines so
-   * far. A per-million-token rate cannot be reconciled against any other
-   * unit, and the audit refuses rather than guessing a conversion.
+   * `quantity_unit` as the provider reported it, per line item.
+   *
+   * Two fields rather than one because the provider reports it per line item
+   * -- a single field would assert about the output line something only the
+   * input line was read for, which is the shape of claim this register exists
+   * to avoid making. Both are `tokens` on both observations so far, so the
+   * split changes no recorded fact; it stops one reading from standing in for
+   * a measurement nobody took.
+   *
+   * A per-million-token rate cannot be reconciled against any other unit, and
+   * the audit refuses rather than guessing a conversion.
    */
-  billedQuantityUnit: string;
+  billedAudioInputQuantityUnit: string;
+  /** `quantity_unit` on the output line. See the field above. */
+  billedOutputQuantityUnit: string;
   /**
    * How the charge was separated from the account's other traffic.
    *
@@ -253,7 +263,8 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
       outputTokens: 112,
       billedAudioInputQuantity: 352,
       billedOutputQuantity: 112,
-      billedQuantityUnit: "tokens",
+      billedAudioInputQuantityUnit: "tokens",
+      billedOutputQuantityUnit: "tokens",
       isolation:
         "num_model_requests was 3 for this model that day -- exactly the three " +
         "calls -- and the aggregate token counts equal the per-request counts " +
@@ -300,7 +311,8 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
       outputTokens: 26,
       billedAudioInputQuantity: 95,
       billedOutputQuantity: 26,
-      billedQuantityUnit: "tokens",
+      billedAudioInputQuantityUnit: "tokens",
+      billedOutputQuantityUnit: "tokens",
       isolation:
         "One approved call, and the aggregates agree it was one: " +
         "num_model_requests was 1 for this model that day, with 95 input and " +
@@ -607,17 +619,31 @@ export const auditVoicePriceRegister = (input: {
             "an invoice is recorded but no audio input rate is, so the charge " +
             "cannot be attributed to any rate at all",
         });
-      } else if (observation.billedQuantityUnit !== "tokens") {
+      } else if (
+        observation.billedAudioInputQuantityUnit !== "tokens" ||
+        observation.billedOutputQuantityUnit !== "tokens"
+      ) {
         // A per-million-token rate has nothing to say about a charge billed
         // in seconds or characters. Converting here would invent the very
-        // relationship the register exists to record having measured.
+        // relationship the register exists to record having measured. Both
+        // lines are checked because the provider reports the unit per line
+        // item: an output line billed in seconds is as unreconcilable as an
+        // input line, and checking one would let the other through.
+        const offending = [
+          observation.billedAudioInputQuantityUnit !== "tokens"
+            ? `audio input in \`${observation.billedAudioInputQuantityUnit}\``
+            : null,
+          observation.billedOutputQuantityUnit !== "tokens"
+            ? `output in \`${observation.billedOutputQuantityUnit}\``
+            : null,
+        ].filter((line) => line !== null);
         problems.push({
           modelId,
           code: "billed_unit_is_not_tokens",
           detail:
-            `the charge was billed in \`${observation.billedQuantityUnit}\`, ` +
-            "which a per-million-token rate cannot be reconciled against; " +
-            "the rate fields have to be renamed for the unit actually billed",
+            `the charge was billed ${offending.join(" and ")}, which a ` +
+            "per-million-token rate cannot be reconciled against; the rate " +
+            "fields have to be renamed for the unit actually billed",
         });
       } else {
         // Reconcile against what the provider billed for, not against what
@@ -653,18 +679,31 @@ export const auditVoicePriceRegister = (input: {
         // meaningful while the provider bills the same count. When it stops,
         // the name is wrong before the number is, and saying so is the point
         // of recording the billed quantity at all.
-        if (
+        //
+        // Both sides are checked. Checking only the input line would pass an
+        // observation whose output quantity diverged while its arithmetic
+        // still closed -- the charge reconciles against the billed quantity
+        // by construction, so a closing sum is no evidence the two bases
+        // agree, and `outputPerMillionTokensUsd` would go on claiming to be
+        // per response token with nothing left to contradict it.
+        const divergences = [
           observation.billedAudioInputQuantity !== observation.audioInputTokens
-        ) {
+            ? `${observation.audioInputTokens} audio input tokens but the ` +
+              `provider billed for ${observation.billedAudioInputQuantity}`
+            : null,
+          observation.billedOutputQuantity !== observation.outputTokens
+            ? `${observation.outputTokens} output tokens but the provider ` +
+              `billed for ${observation.billedOutputQuantity}`
+            : null,
+        ].filter((line) => line !== null);
+        if (divergences.length > 0) {
           problems.push({
             modelId,
             code: "billing_basis_diverged",
             detail:
-              `the responses reported ${observation.audioInputTokens} audio ` +
-              `input tokens but the provider billed for ` +
-              `${observation.billedAudioInputQuantity}, so ` +
-              "`audioInputPerMillionTokensUsd` is no longer a rate per " +
-              "response token and has to be renamed for the unit it is per " +
+              `the responses reported ${divergences.join(", and ")}, so the ` +
+              "rate fields are no longer rates per response token and have " +
+              "to be renamed for the unit they are per " +
               "(docs/policy/voice-input.md §6.1.3)",
           });
         }
