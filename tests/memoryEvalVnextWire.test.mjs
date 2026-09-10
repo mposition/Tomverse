@@ -803,7 +803,7 @@ bScenario("B18", "scalar slots reject Proxy/boxed values without coercion or nat
   }
 });
 bScenario("B19", "unchanged F goldens/40 scenarios plus complete separate B declarations", () => {
-  const original = Object.fromEntries(Object.entries(fixtures).filter(([key]) => key !== "proxySafety"));
+  const original = Object.fromEntries(Object.entries(fixtures).filter(([key]) => key !== "proxySafety" && key !== "idPathPolicy"));
   assert.equal(sha(JSON.stringify(original)), "1d286a257c44d3444de99b945a8276cd680b8b30adc41bf0fc5df32a5f4123ca");
   const fExternal = ["F40", "F42", "F43", "F44"];
   const fUnits = fixtures.caseTrace.map((row) => row.id).filter((id) => !fExternal.includes(id));
@@ -824,5 +824,453 @@ bScenario("B19", "unchanged F goldens/40 scenarios plus complete separate B decl
     assert.equal(canonicalBytes(JSON.parse(g.canonicalText)).toString("hex"), g.utf8Hex);
     assert.equal(value(canonical.rawSha256(bytes(g.canonicalText))), g.rawSha256);
     assert.equal(value(canonical.domainSha256(g.testDomain, JSON.parse(g.canonicalText))), g.domainSha256);
+  }
+});
+
+
+// IP-D1-D5 were approved separately. This literal expectation table is transcribed
+// from R2 (13a6b088...), not derived from the fixture under test. External rows
+// are declarations only; no unit test can issue their repository-audit verdicts.
+const ipExpected = [
+  {
+    "id": "IP01",
+    "acId": "IP-AC1",
+    "verification": "unit",
+    "expected": "primitive isAsciiId에 U+0000..U+007F 각각 및 prefix/middle/suffix 위치를 넣고 U+0021..U+007E만 true; 빈 문자열/boxed/non-string은 false, coercion 0회."
+  },
+  {
+    "id": "IP02",
+    "acId": "IP-AC1",
+    "verification": "unit",
+    "expected": "SignaturePayload purpose/signerId/trustEpoch 각 field 독립 변형. C0 32개·space·DEL·non-ASCII·NFD·surrogate를 모두 invalid_input, 새 허용 ASCII는 shape ok."
+  },
+  {
+    "id": "IP03",
+    "acId": "IP-AC1",
+    "verification": "unit",
+    "expected": "SignatureReceipt.payload의 세 ID field에 IP02와 같은 negative/positive 범위를 적용; nested shape bypass 없음."
+  },
+  {
+    "id": "IP04",
+    "acId": "IP-AC1",
+    "verification": "unit",
+    "expected": "TrustAnchor signerId/trustEpoch 독립 변형, invalid_input과 새 허용값 구조 통과. keyId/roles schema는 기존 그대로."
+  },
+  {
+    "id": "IP05",
+    "acId": "IP-AC1",
+    "verification": "unit",
+    "expected": "C04 BindingExpectation의 purpose/signerId/trustEpoch만 독립 변형해 다른 값은 정상이어도 새 금지 입력은 invalid_input. payload/anchor/expected 모두 같은 금지 signer/epoch여도 invalid_input."
+  },
+  {
+    "id": "IP06",
+    "acId": "IP-AC3",
+    "verification": "unit",
+    "expected": "signatureMessage/signatureReceiptDigest/verifySignatureReceipt의 receipt 및 expectedPayload ID 오류가 invalid_input으로 전파. 구조 실패를 unsupported_subset/signature_mismatch보다 우선, 새 key/signing API 추가 없음."
+  },
+  {
+    "id": "IP07",
+    "acId": "IP-AC3",
+    "verification": "unit",
+    "expected": "@importer와 !~ 및 ASCII punctuation은 opaque ID로 수용. C02의 approval-purpose shape와 C04 ApproverId 추가 제약을 구별; 신규 approver @user는 C04에서 invalid_input. 미지원 정상 purpose는 C03/C04 unsupported_subset."
+  },
+  {
+    "id": "IP08",
+    "acId": "IP-AC3",
+    "verification": "unit",
+    "expected": "허용 signer/epoch의 case-only 차이는 binding_mismatch. 금지 whitespace를 trim/normalize/alias로 성공시키지 않음. 서로 다른 정상 path 및 raw bytes 불일치의 기존 error 우선순위를 보존."
+  },
+  {
+    "id": "IP09",
+    "acId": "IP-AC2",
+    "verification": "unit",
+    "expected": "BlobRef.path/GitFileRef.path/TrustAnchor.registrationReceipt.path 각각 C0 32개·DEL을 segment의 시작/중간/끝에 삽입해 invalid_input. byteLength/hash는 정상으로 고정."
+  },
+  {
+    "id": "IP10",
+    "acId": "IP-AC2",
+    "verification": "unit",
+    "expected": "NFC 한글/é/astral scalar·space 포함·선행/후행 space·space-only segment 및 원 문자 exact 보존. IP-D2가 명시적으로 유지하는 C1/U+2028/U+2029/format scalar 사례도 구조상 수용하되 운영 권한 없음."
+  },
+  {
+    "id": "IP11",
+    "acId": "IP-AC2",
+    "verification": "unit",
+    "expected": "NFD/unpaired surrogate/non-string/boxed string은 invalid_input. 입력을 NFC로 고치거나 Unicode를 ASCII로 바꾸지 않음. typed-array/raw bytes를 checkWire object 입력으로 혼동하지 않음."
+  },
+  {
+    "id": "IP12",
+    "acId": "IP-AC2",
+    "verification": "unit",
+    "expected": "빈 path/segment, leading/trailing slash, backslash, drive prefix, dot/dotdot segment 거절. ..x, percent-encoded 점, nested colon, CON, trailing-dot은 lexical layer에서 기존과 동일; fs/URL decoding/OS alias 처리 없음."
+  },
+  {
+    "id": "IP13",
+    "acId": "IP-AC3",
+    "verification": "unit",
+    "expected": "compareBlobRef/compareGitFileRef에서 actual와 expected의 path를 각각 독립 변형; 금지 path와 wrong bytes 동시 입력은 invalid_input. compareTrustBinding의 anchor.registrationReceipt.path에도 같은 구조 거절."
+  },
+  {
+    "id": "IP14",
+    "acId": "IP-AC4",
+    "verification": "unit",
+    "expected": "C01은 일반 CJSON string의 C0/DEL과 raw source bytes를 계속 원 규약대로 처리; ASCII object key 범위 불변. 기존 B Proxy/hook·bytes copy 경계, 모든 정상 golden/error 우선순위 보존."
+  },
+  {
+    "id": "IP15",
+    "acId": "IP-AC4",
+    "verification": "unit",
+    "expected": "새 IP unit inventory를 F/B와 분리. 기존 15 top-level fixture 값/순서의 JSON.stringify projection SHA 및 original14/B19 hash 유지; idPathPolicy 한 key만 추가, IP16–IP20은 external이며 unit pass로 세지 않음. idPathPolicy는 IP01–IP20 순서의 정확히 20개 row 배열이며 각 row는 id/acId/verification/expected 네 key만, 모두 비어 있지 않은 primitive string. T01에 이 패키지 futureCases의 네 필드 값을 전사한 독립 고정 기대표와 row별 exact equality를 검사하고 fixture에서 정답을 유도하지 않음. IP01–IP15는 unit, IP16–IP20은 external_repository_audit. row의 acId에서 역으로 모은 case ID 목록을 acceptanceCriteria의 각 caseIds와 집합·순서까지 양방향 대조해 누락·중복·알 수 없는 ID·잘못된 대응을 거절. IP15 자신의 expected도 고정 문자열 데이터로 비교하며 재귀 생성·자기 hash 없음."
+  },
+  {
+    "id": "IP16",
+    "acId": "IP-AC5",
+    "verification": "external_repository_audit",
+    "expected": "새 implementation commit은 C02/T01/T11 M3만, hidden helper/import/builtin/package/config/runner/static gate 추가 0; C01/C03/C04 exact blob 보존."
+  },
+  {
+    "id": "IP17",
+    "acId": "IP-AC5",
+    "verification": "external_repository_audit",
+    "expected": "정책 패키지 두 raw SHA/reviewCommit와 별도 receipt, 원 SHA develop inclusion 및 현재 별도 착수 지시를 대조. Q/S1/S3/D/PB/IB/BF/receipt bytes와 과거 판정 무변경."
+  },
+  {
+    "id": "IP18",
+    "acId": "IP-AC4",
+    "verification": "external_repository_audit",
+    "expected": "새 IP01–IP15와 모든 기존 F/B unit 실제 실행·누락/중복/skip 0. exact field matrix/긍정·음성 집합 대조, baseline 실패가 있으면 같은 이름·원인 대조. B20–B24 및 F 외부 감사 분류 유지."
+  },
+  {
+    "id": "IP19",
+    "acId": "IP-AC5",
+    "verification": "external_repository_audit",
+    "expected": "실제 착수 tip support9 Git/working hash, runtime/lock/설치, branch/ancestry/CI·검사 조건을 별도 사전 기록. 이번 문서 준비 관측을 미래 착수 검증이나 전체 dependency closure로 대용하지 않음."
+  },
+  {
+    "id": "IP20",
+    "acId": "IP-AC5",
+    "verification": "external_repository_audit",
+    "expected": "S2 activation, full P/scorer/holdout/운영 key/provider/flags가 없고 상위54 AC partial9/deferred45/full0 및 잔여를 보존. 정책/시험통과는 외부 OI-F2 closure의 대용 아님."
+  }
+];
+const ipAcceptance = [
+  {
+    "id": "IP-AC1",
+    "caseIds": [
+      "IP01",
+      "IP02",
+      "IP03",
+      "IP04",
+      "IP05"
+    ]
+  },
+  {
+    "id": "IP-AC2",
+    "caseIds": [
+      "IP09",
+      "IP10",
+      "IP11",
+      "IP12"
+    ]
+  },
+  {
+    "id": "IP-AC3",
+    "caseIds": [
+      "IP06",
+      "IP07",
+      "IP08",
+      "IP13"
+    ]
+  },
+  {
+    "id": "IP-AC4",
+    "caseIds": [
+      "IP14",
+      "IP15",
+      "IP18"
+    ]
+  },
+  {
+    "id": "IP-AC5",
+    "caseIds": [
+      "IP16",
+      "IP17",
+      "IP19",
+      "IP20"
+    ]
+  }
+];
+const ipRegistered = new Set();
+const ipCompleted = new Set();
+function ipScenario(id, title, fn) {
+  assert.equal(ipRegistered.has(id), false, "duplicate " + id);
+  ipRegistered.add(id);
+  test(id + ": " + title, async () => {
+    await fn();
+    ipCompleted.add(id);
+  });
+}
+const ipControls = [...Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)), "\x7f"];
+const ipBadIdChars = [...ipControls, " ", "é", "한", "😀", "e\u0301", "\ud800", "\udfff", "\u2028", "\u2029"];
+const ipPositions = (char) => [char, char + "ab", "a" + char + "b", "ab" + char];
+const ipGoodIdChars = Array.from({ length: 94 }, (_, i) => String.fromCharCode(i + 33));
+const ipWrongStrings = ["", null, undefined, 1, true, {}, [], new String("valid")];
+function ipIdFields(base, fields, check) {
+  for (const field of fields) {
+    for (const char of ipBadIdChars) for (const text of ipPositions(char)) {
+      error(check({ ...base, [field]: text }));
+    }
+    for (const input of ipWrongStrings) error(check({ ...base, [field]: input }));
+    for (const char of ipGoodIdChars) for (const text of ipPositions(char)) {
+      const input = { ...base, [field]: text };
+      assert.deepEqual(value(check(input)), input);
+    }
+  }
+}
+function ipPathLeaves(path) {
+  return [
+    ["BlobRef", { ...blob, path }],
+    ["GitFileRef", { ...gitRef("D"), path }],
+    ["TrustAnchor", { ...anchor, registrationReceipt: { ...blob, path } }],
+  ];
+}
+function ipPathShapes(path, accepted) {
+  for (const [kind, input] of ipPathLeaves(path)) {
+    if (accepted) assert.deepEqual(value(wire.checkWire(kind, input)), input);
+    else error(wire.checkWire(kind, input));
+  }
+}
+
+ipScenario("IP01", "ID alphabet is exhaustive", () => {
+  for (let code = 0; code < 128; code++) for (const input of ipPositions(String.fromCharCode(code))) {
+    assert.equal(wire.isAsciiId(input), code >= 33 && code <= 126, "ASCII " + code);
+  }
+  for (const char of ipBadIdChars) for (const input of ipPositions(char)) assert.equal(wire.isAsciiId(input), false);
+  for (const input of ipWrongStrings) assert.equal(wire.isAsciiId(input), false);
+  const probe = instrumentation();
+  const coercion = { [Symbol.toPrimitive]() { probe.hooks["Symbol.toPrimitive"]++; return "valid"; } };
+  for (const input of [coercion, ...proxyModes.map((mode) => probe.proxy(coercion, mode))]) {
+    probe.measure(() => assert.equal(wire.isAsciiId(input), false));
+  }
+});
+ipScenario("IP02", "Payload ID field coverage", () => {
+  ipIdFields(payload, ["purpose", "signerId", "trustEpoch"], (input) => wire.checkWire("SignaturePayload", input));
+});
+ipScenario("IP03", "Receipt nested payload coverage", () => {
+  ipIdFields(payload, ["purpose", "signerId", "trustEpoch"], (input) => {
+    const result = wire.checkWire("SignatureReceipt", { ...receipt, payload: input });
+    return result.ok ? { ...result, value: result.value.payload } : result;
+  });
+});
+ipScenario("IP04", "Anchor ID field coverage", () => {
+  ipIdFields(anchor, ["signerId", "trustEpoch"], (input) => wire.checkWire("TrustAnchor", input));
+  assert.deepEqual(value(wire.checkWire("TrustAnchor", anchor)).roles, ["approver", "importer"]);
+  for (const keyId of ["", "A".repeat(32), "a".repeat(31)]) error(wire.checkWire("TrustAnchor", { ...anchor, keyId }));
+  error(wire.checkWire("TrustAnchor", { ...anchor, roles: ["unknown"] }));
+});
+ipScenario("IP05", "Expectation has no legacy bypass", () => {
+  for (const field of ["purpose", "signerId", "trustEpoch"]) {
+    for (const input of [...ipBadIdChars.flatMap(ipPositions), ...ipWrongStrings]) {
+      error(binding(payload, anchor, { ...expected(), [field]: input }));
+    }
+  }
+  // Use importer purpose so the stricter approver grammar cannot mask a missing
+  // opaque-ID check when all three local comparison values are equally invalid.
+  for (const field of ["signerId", "trustEpoch"]) for (const input of ipBadIdChars.flatMap(ipPositions)) {
+    const p = { ...payload, purpose: "s2_source_evidence", [field]: input };
+    const a = { ...anchor, [field]: input };
+    error(binding(p, a, expected(p, a)));
+  }
+});
+ipScenario("IP06", "Signature entry-point propagation", () => {
+  for (const field of ["purpose", "signerId", "trustEpoch"]) for (const input of ipBadIdChars.flatMap(ipPositions)) {
+    const p = { ...payload, [field]: input }, r = { ...receipt, payload: p };
+    error(signatures.signatureMessage(p));
+    error(signatures.signatureReceiptDigest(r));
+    error(signatures.verifySignatureReceipt(r, publicKeyBase64, payload));
+    error(signatures.verifySignatureReceipt(receipt, publicKeyBase64, p));
+    const unsupported = { ...payload, purpose: "unknown_purpose" };
+    error(signatures.verifySignatureReceipt(r, publicKeyBase64, unsupported));
+    error(signatures.verifySignatureReceipt({ ...receipt, payload: unsupported }, publicKeyBase64, p));
+  }
+  const bad = { ...payload, purpose: "unknown_purpose", trustEpoch: "bad\n" };
+  error(signatures.signatureMessage(bad));
+  error(signatures.signatureReceiptDigest({ ...receipt, payload: bad }));
+});
+ipScenario("IP07", "Role-specific and unsupported boundaries", () => {
+  for (const signerId of ["@importer", "!~", ipGoodIdChars.join("")]) {
+    const p = { ...payload, purpose: "s2_source_evidence", signerId };
+    const a = { ...anchor, signerId };
+    assert.deepEqual(value(wire.checkWire("SignaturePayload", p)), p);
+    match(binding(p, a, expected(p, a)));
+  }
+  for (const signerId of ["@user", "!~"]) {
+    const p = { ...payload, signerId }, a = { ...anchor, signerId };
+    value(wire.checkWire("SignaturePayload", p));
+    error(binding(p, a, expected(p, a)));
+  }
+  for (const purpose of ["unknown_purpose", "!~", "@importer"]) {
+    const p = { ...payload, purpose };
+    value(wire.checkWire("SignaturePayload", p));
+    error(signatures.signatureMessage(p), "unsupported_subset");
+    error(signatures.signatureReceiptDigest({ ...receipt, payload: p }), "unsupported_subset");
+    error(signatures.verifySignatureReceipt({ ...receipt, payload: p }, publicKeyBase64, p), "unsupported_subset");
+    error(binding(p, anchor, expected(p)), "unsupported_subset");
+  }
+  for (const { purpose, role } of fixtures.purposeRoles) {
+    const p = { ...payload, purpose }, a = { ...anchor, roles: [role] };
+    match(binding(p, a, expected(p, a)));
+  }
+});
+ipScenario("IP08", "Exact equality and no repair", () => {
+  const p = { ...payload, purpose: "s2_source_evidence", signerId: "@Importer", trustEpoch: "Epoch-A" };
+  const a = { ...anchor, signerId: p.signerId, trustEpoch: p.trustEpoch };
+  match(binding(p, a, expected(p, a)));
+  for (const [field, other] of [["signerId", "@importer"], ["trustEpoch", "epoch-A"]]) {
+    error(binding({ ...p, [field]: other }, a, expected(p, a)), "binding_mismatch");
+    error(binding(p, { ...a, [field]: other }, expected(p, a)), "binding_mismatch");
+    error(binding(p, a, { ...expected(p, a), [field]: other }), "binding_mismatch");
+  }
+  error(binding(p, a, { ...expected(p, a), signerId: "Importer" }), "binding_mismatch");
+  for (const char of [" ", "\t", "\n", "\r", "\u00a0", "e\u0301"]) {
+    for (const text of ipPositions(char)) error(binding(p, a, { ...expected(p, a), signerId: text }));
+  }
+  for (const [ref, raw, compare] of [
+    [blob, bytes(fixtures.publicOpaqueBytes.registration.text), trust.compareBlobRef],
+    [gitRef("D"), bytes(fixtures.publicOpaqueBytes.D.text), trust.compareGitFileRef],
+  ]) {
+    for (const path of ["Fixtures/other", " " + ref.path, ref.path + " "]) {
+      error(compare({ ...ref, path }, raw, ref), "binding_mismatch");
+      error(compare({ ...ref, path }, bytes("wrong"), ref), "bytes_mismatch");
+    }
+  }
+});
+ipScenario("IP09", "Path controls at all leaf locations", () => {
+  for (const char of ipControls) for (const segment of ipPositions(char)) {
+    ipPathShapes("dir/" + segment + "/leaf", false);
+  }
+});
+ipScenario("IP10", "NFC Unicode and spaces remain allowed", () => {
+  for (const path of ["한글/증거 파일.json", "é/한.txt", "😀/자료", " leading/file", "dir/trailing ",
+    "dir/ /leaf", " ", ...Array.from({ length: 32 }, (_, i) => "a/" + String.fromCharCode(128 + i) + "/b"),
+    "a/\u2028/b", "a/\u2029/b", "a/\u200b/b", "a/\u202e/b", "a/\u2066/b", "a/\ufeff/b"]) {
+    ipPathShapes(path, true);
+  }
+});
+ipScenario("IP11", "Path canonical precondition and type", () => {
+  for (const path of ["e\u0301/a", "a/\ud800", "\udfff/a", null, undefined, 1, false, {}, [],
+    new String("a/b"), new Uint8Array([97]), bytes("a/b")]) ipPathShapes(path, false);
+  for (const kind of ["BlobRef", "GitFileRef", "TrustAnchor"]) {
+    const input = examples[kind];
+    for (const raw of [canonicalBytes(input), new Uint8Array(canonicalBytes(input))]) {
+      error(wire.checkWire(kind, raw));
+    }
+    assert.deepEqual(value(wire.checkWire(kind, input)), input);
+  }
+});
+ipScenario("IP12", "Relative syntax is unchanged", () => {
+  for (const path of ["", "/", "/a", "a/", "a//b", "//server/share", "a\\b", "\\\\server\\share",
+    "C:a", "c:/a", ".", "..", "./a", "../a", "a/./b", "a/../b"]) ipPathShapes(path, false);
+  for (const path of ["a/..x", "a/%2e%2e/b", "dir/C:a", "CON", "a/trailing.", "a/%00/b", "dir/a:b"]) {
+    ipPathShapes(path, true);
+  }
+});
+ipScenario("IP13", "Ref and expectation propagation", () => {
+  for (const char of ipControls) for (const segment of ipPositions(char)) {
+    const path = "dir/" + segment + "/leaf";
+    for (const [ref, raw, compare] of [
+      [blob, bytes(fixtures.publicOpaqueBytes.registration.text), trust.compareBlobRef],
+      [gitRef("D"), bytes(fixtures.publicOpaqueBytes.D.text), trust.compareGitFileRef],
+    ]) {
+      const bad = { ...ref, path };
+      for (const actualBytes of [raw, bytes("wrong")]) {
+        error(compare(bad, actualBytes, ref));
+        error(compare(ref, actualBytes, bad));
+      }
+    }
+    const badAnchor = { ...anchor, registrationReceipt: { ...blob, path } };
+    error(binding(payload, badAnchor, expected()));
+    const unsupported = { ...payload, purpose: "unknown_purpose" };
+    error(binding(unsupported, badAnchor, expected(unsupported)));
+  }
+});
+ipScenario("IP14", "Canonical and Proxy guarantees are not narrowed", () => {
+  for (let code = 0; code < 128; code++) {
+    const char = String.fromCharCode(code);
+    const quoted = code < 32 ? '"\\u' + code.toString(16).padStart(4, "0") + '"' : JSON.stringify(char);
+    assert.equal(canonicalBytes(char).toString(), quoted);
+    const object = { [char]: char };
+    assert.equal(canonicalBytes(object).toString(), "{" + quoted + ":" + quoted + "}");
+    assert.deepEqual(value(canonical.decodeCanonical(canonicalBytes(object))), object);
+  }
+  const raw = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
+  assert.equal(value(canonical.rawSha256(raw)), sha(raw));
+  assert.deepEqual(Buffer.from(value(canonical.copyByteInput(raw))), raw);
+  assert.deepEqual([...completed], [...registered]);
+  assert.equal(completed.size, 40);
+  assert.deepEqual([...bCompleted], [...bRegistered]);
+  assert.equal(bCompleted.size, 19);
+  for (const g of fixtures.goldenCanonical) {
+    const input = JSON.parse(g.canonicalText);
+    assert.equal(canonicalBytes(input).toString("hex"), g.utf8Hex);
+    assert.equal(value(canonical.domainSha256(g.testDomain, input)), g.domainSha256);
+  }
+  for (const mode of proxyModes) {
+    const probe = instrumentation(), input = probe.proxy({ ...payload }, mode);
+    probe.measure(() => error(wire.checkWire("SignaturePayload", input)));
+  }
+});
+function checkIpInventory(rows) {
+  assert.equal(Array.isArray(rows), true);
+  assert.equal(rows.length, 20);
+  assert.deepEqual(rows.map((row) => row.id), ipExpected.map((row) => row.id));
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index];
+    assert.deepEqual(Object.keys(row).sort(), ["acId", "expected", "id", "verification"]);
+    for (const field of ["id", "acId", "verification", "expected"]) {
+      assert.equal(typeof row[field], "string");
+      assert.notEqual(row[field].length, 0);
+      assert.equal(row[field], ipExpected[index][field]);
+    }
+  }
+  for (const { id, caseIds } of ipAcceptance) {
+    const reverse = rows.filter((row) => row.acId === id).map((row) => row.id);
+    assert.deepEqual(reverse, caseIds);
+    assert.equal(new Set(reverse).size, caseIds.length);
+    for (const caseId of caseIds) assert.equal(rows.find((row) => row.id === caseId)?.acId, id);
+  }
+}
+ipScenario("IP15", "Separate inventory and exact fixture projection", () => {
+  const originalKeys = ["kind","authorityEstablished","provenance","goldenCanonical","publicEd25519","publicNonPureEd25519","publicOpaqueBytes","closedTypes","purposeRoles","acTrace","caseTrace","externalVerificationNote","upstreamDisposition","upstreamCounts","proxySafety"];
+  assert.deepEqual(Object.keys(fixtures), [...originalKeys, "idPathPolicy"]);
+  const original15 = Object.fromEntries(Object.entries(fixtures).filter(([key]) => key !== "idPathPolicy"));
+  assert.equal(sha(JSON.stringify(original15)), "e59c8ef30d4dae1430e113392d63924e9d2a77cd764edd8297e59ed2d987e652");
+  const original14 = Object.fromEntries(Object.entries(fixtures).filter(([key]) => key !== "proxySafety" && key !== "idPathPolicy"));
+  assert.equal(sha(JSON.stringify(original14)), "1d286a257c44d3444de99b945a8276cd680b8b30adc41bf0fc5df32a5f4123ca");
+  checkIpInventory(fixtures.idPathPolicy);
+  const ids = Array.from({ length: 20 }, (_, i) => "IP" + String(i + 1).padStart(2, "0"));
+  assert.deepEqual([...ipRegistered], ids.slice(0, 15));
+  assert.deepEqual([...ipCompleted], ids.slice(0, 14));
+  assert.deepEqual(fixtures.idPathPolicy.filter((row) => row.verification === "unit").map((row) => row.id), ids.slice(0, 15));
+  assert.deepEqual(fixtures.idPathPolicy.filter((row) => row.verification === "external_repository_audit").map((row) => row.id), ids.slice(15));
+  // Reject missing/duplicate/unknown/reordered declarations and every altered
+  // four-field value, including IP15's own literal expected text.
+  for (const mutate of [
+    (rows) => rows.pop(),
+    (rows) => rows.push(clone(rows[0])),
+    (rows) => { rows[1] = clone(rows[0]); },
+    (rows) => { rows.reverse(); },
+    (rows) => { rows[0].id = "IP99"; },
+    (rows) => { rows[0].extra = "forbidden"; },
+    (rows) => { delete rows[0].expected; },
+    (rows) => { rows[0].expected = new String(rows[0].expected); },
+  ]) {
+    const rows = clone(fixtures.idPathPolicy); mutate(rows);
+    assert.throws(() => checkIpInventory(rows));
+  }
+  for (let index = 0; index < 20; index++) for (const field of ["id", "acId", "verification", "expected"]) {
+    const rows = clone(fixtures.idPathPolicy);
+    rows[index][field] += "-changed";
+    assert.throws(() => checkIpInventory(rows));
   }
 });
