@@ -618,7 +618,8 @@ judged 지표가 게이트에 닿으려면 arm별 수치가 있어야 한다.
 
 **이 보고는 점수를 포함한다.** `npm run report:ai-review-judged-run`은 aggregate
 지표와 arm별 비율·Wilson 구간을 함께 내므로, **임계값을 고르기 전에 실행하면 안
-된다** — 결정안 §3.6이 관측된 성능에 맞춘 임계값을 금지하고, 이 출력이 바로 그
+된다** — 결정안 `.github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md` §3.6이
+관측된 성능에 맞춘 임계값을 금지하고, 이 출력이 바로 그
 성능이다.
 
 **임계값을 고르기 전에 쓰는 것은 `npm run report:ai-review-judged-denominators`다.**

@@ -7,11 +7,13 @@
 //
 // ## Why this exists as a separate command
 //
-// §3.6 fixes the order: the thresholds are chosen from sample composition and
+// .github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md §3.6
+// fixes the order: the thresholds are chosen from sample composition and
 // the error level that is acceptable, then the run happens. Sample composition
 // is a fact about the frozen set; a reviewer's score is not. The trouble is
 // that `report:ai-review-judged-run` prints both, so running it before the
-// numbers are signed shows exactly what §3.6 forbids -- and no reordering of
+// numbers are signed shows exactly what that section forbids -- and no
+// reordering of
 // its output fixes that, because the scores are what it exists to report.
 //
 // So this command reads **only** the frozen set and, optionally, the judged
@@ -110,7 +112,8 @@ if (problems.length > 0) {
 // files it can only be bounded, not known.
 //
 // `case.json` is gold and registration. It holds no reviewer output, no
-// judgement and no score, which is why reading it does not break §3.6.
+// judgement and no score, which is why reading it does not break
+// .github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md §3.6.
 // ---------------------------------------------------------------------------
 
 const casesPath = argValue("cases");
@@ -285,5 +288,6 @@ console.log(
 
 console.log(
     "\nNo reviewer output, judgement record or score was read, and nothing was\n" +
-        "written. Choosing the ceilings is a person's decision: 결정안 §3.6."
+        "written. Choosing the ceilings is a person's decision: " +
+        ".github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md §3.6."
 );
