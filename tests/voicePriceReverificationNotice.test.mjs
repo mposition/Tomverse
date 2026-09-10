@@ -21,7 +21,7 @@ const entry = (overrides = {}) => ({
   modelId: "test-transcribe",
   price: {
     audioInputPerMillionTokensUsd: 3,
-    textInputPerMillionTokensUsd: 1.25,
+    publishedAudioInputPerMillionTokensUsd: 1.25,
     outputPerMillionTokensUsd: 5,
     estimatedCostPerMinuteUsd: 0.003,
   },
