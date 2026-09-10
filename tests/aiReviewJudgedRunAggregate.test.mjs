@@ -22,7 +22,7 @@ import {
   judgedSourceCaseDigest,
   observationRefFor,
 } from "../lib/aiReviewEvalJudgement.ts";
-import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
+import { datasetDigest, freezeDrift } from "../lib/aiReviewEvalRun.ts";
 import { aggregateJudgedRun } from "../lib/aiReviewJudgedRunAggregate.ts";
 
 const SIGNER = "TEST (not a person)";
@@ -160,6 +160,18 @@ const found = (id, over = {}) =>
 /** The reviewer says nothing at all. */
 const silent = (id, over = {}) => buildCase({ id, ...over });
 
+/**
+ * The digest a run of these cases would have recorded.
+ *
+ * Taken from the cases the fixture built, NOT from whatever dataset a test
+ * then hands over -- deriving it from the dataset under test would write a
+ * comparison that cannot fail, which is the defect the manifest exists to
+ * close.
+ */
+const manifestFor = (built) => ({
+  datasetDigest: datasetDigest({ cases: built.map((item) => item.datasetCase) }),
+});
+
 const run = (built, over = {}) => {
   const plan = over.plan ?? built.map((item) => item.plan);
   const entries = over.entries ?? built.map((item) => item.entry);
@@ -170,6 +182,7 @@ const run = (built, over = {}) => {
       journal: over.journal ?? built.map((item) => item.journal),
       dataset: over.dataset ?? frozenDataset(built.map((item) => item.datasetCase)),
     },
+    manifest: over.manifest ?? manifestFor(built),
   });
 };
 
@@ -190,6 +203,7 @@ test("a run is refused before any number exists", async (t) => {
       plan: [],
       entries: [],
       runInputs: { journal: [], dataset: frozenDataset([]) },
+      manifest: { datasetDigest: datasetDigest({ cases: [] }) },
     });
     assert.equal(empty.aggregable, false);
     assert.match(empty.blockers.join("\n"), /planned no cases/);
@@ -236,7 +250,10 @@ test("a run is refused before any number exists", async (t) => {
         response.label === "c" ? { ...response, content: "moved" } : response
       ),
     };
-    const result = run(built, { dataset: frozenDataset([moved]) });
+    const result = run(built, {
+      dataset: frozenDataset([moved]),
+      manifest: { datasetDigest: datasetDigest({ cases: [moved] }) },
+    });
     assert.equal(result.aggregable, false);
     assert.match(result.blockers.join("\n"), /d1: /);
   });
@@ -247,6 +264,7 @@ test("a run is refused before any number exists", async (t) => {
       plan: built.map((item) => item.plan),
       entries: built.map((item) => item.entry),
       runInputs: { journal: undefined, dataset: undefined },
+      manifest: manifestFor(built),
     });
     assert.equal(result.aggregable, false);
     assert.match(result.blockers.join("\n"), /the run's dataset: the dataset file is not an object/);
@@ -260,6 +278,7 @@ test("a run is refused before any number exists", async (t) => {
         journal: undefined,
         dataset: frozenDataset(built.map((item) => item.datasetCase)),
       },
+      manifest: manifestFor(built),
     });
     assert.equal(noJournal.aggregable, false);
     assert.match(noJournal.blockers.join("\n"), /checked against each other and against no run/);
@@ -269,12 +288,17 @@ test("a run is refused before any number exists", async (t) => {
     const built = [found("f1")];
     const nameless = { ...built[0].datasetCase };
     delete nameless.phenomenon;
-    const missing = run(built, { dataset: frozenDataset([nameless]) });
+    const missing = run(built, {
+      dataset: frozenDataset([nameless]),
+      manifest: { datasetDigest: datasetDigest({ cases: [nameless] }) },
+    });
     assert.equal(missing.aggregable, false);
     assert.match(missing.blockers.join("\n"), /phenomenon undefined is not supported/);
 
+    const wrongCases = [{ ...built[0].datasetCase, phenomenon: "vibes" }];
     const wrong = run(built, {
-      dataset: frozenDataset([{ ...built[0].datasetCase, phenomenon: "vibes" }]),
+      dataset: frozenDataset(wrongCases),
+      manifest: { datasetDigest: datasetDigest({ cases: wrongCases }) },
     });
     assert.equal(wrong.aggregable, false);
     assert.match(wrong.blockers.join("\n"), /phenomenon vibes is not supported/);
@@ -317,15 +341,67 @@ test("the run's dataset is admitted before anything reads through it", async (t)
     assert.equal(unfrozen.aggregable, false);
     assert.match(unfrozen.blockers.join("\n"), /carries no freeze record/);
 
-    const bogus = run(built, {
-      dataset: {
-        ...frozenDataset(cases),
-        frozenAt: "not-a-date",
-        frozenDigest: "sha256:wrong",
-      },
+    // One thing wrong at a time. Breaking the date AND the digest together
+    // passed on the digest alone, so a freeze time of "not-a-date" went
+    // unnoticed: the test could not tell which check had caught it.
+    const wrongDigest = run(built, {
+      dataset: { ...frozenDataset(cases), frozenDigest: "sha256:wrong" },
     });
-    assert.equal(bogus.aggregable, false);
-    assert.match(bogus.blockers.join("\n"), /has changed since it was frozen/);
+    assert.equal(wrongDigest.aggregable, false);
+    assert.match(wrongDigest.blockers.join("\n"), /has changed since it was frozen/);
+
+    const wrongDate = run(built, {
+      // The digest is correct. Only the moment the contents are pinned to is
+      // not a moment.
+      dataset: { ...frozenDataset(cases), frozenAt: "not-a-date" },
+    });
+    assert.equal(wrongDate.aggregable, false);
+    assert.match(wrongDate.blockers.join("\n"), /"not-a-date", which is not a time/);
+    assert.doesNotMatch(wrongDate.blockers.join("\n"), /has changed since it was frozen/);
+  });
+
+  await t.test("another frozen set is not this run's frozen set", () => {
+    // Everything the run produced is untouched: the plan, the journal, the
+    // judgements and the artifacts. Only the dataset is swapped -- for one
+    // that is internally consistent, correctly re-frozen, and different.
+    const built = [found("i7"), silent("i8")];
+    const clean = run(built);
+    assert.equal(clean.aggregable, true);
+    assert.equal(clean.metrics.missedEveryPlantedIssueRate.numerator, 1);
+    assert.equal(clean.metrics.missedEveryPlantedIssueRate.denominator, 2);
+
+    const edited = built.map((item) =>
+      item.datasetCase.id === "i8"
+        ? { ...item.datasetCase, phenomenon: "no_issue" }
+        : item.datasetCase
+    );
+    const refrozen = {
+      version: "test-v1",
+      schemaVersion: 1,
+      purpose: "decision",
+      frozenAt: AT,
+      frozenBy: "TEST",
+      // Re-frozen, so the file agrees with its own record and `freezeDrift()`
+      // has nothing to say.
+      frozenDigest: datasetDigest({ cases: edited }),
+      cases: edited,
+    };
+    assert.equal(freezeDrift(refrozen), null);
+
+    // The run's own manifest is what refuses it. Without this the swap
+    // aggregated, and the failing case left the denominator: 1/2 became 0/1.
+    const result = run(built, { dataset: refrozen });
+    assert.equal(result.aggregable, false);
+    assert.match(result.blockers.join("\n"), /another frozen set is not this one/);
+  });
+
+  await t.test("a run that recorded no dataset digest is not bound to one", () => {
+    const built = [found("i9")];
+    for (const manifest of [{}, { datasetDigest: "" }]) {
+      const result = run(built, { manifest });
+      assert.equal(result.aggregable, false);
+      assert.match(result.blockers.join("\n"), /recorded no dataset digest/);
+    }
   });
 
   await t.test("a phenomenon edited to another legal value is drift, not a rate", () => {

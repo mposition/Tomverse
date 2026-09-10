@@ -35,6 +35,14 @@
  * `freezeDrift()`, the same checks the evaluation set's own validator runs,
  * and refuses before a single case is read out of the array.
  *
+ * **And it has to be THIS run's dataset.** A set can be perfectly consistent
+ * with its own freeze record and still be a different frozen set from the one
+ * the run measured: re-freeze the edited file and the internal check has
+ * nothing to complain about. So the digest the RUN recorded is an input --
+ * `manifest.datasetDigest` -- and it is compared against the dataset handed
+ * over now. It must come from what the run wrote down; refilling it from the
+ * dataset in hand is the same hole with an extra step.
+ *
  * Nothing here calls a provider, reads the network, or writes a file.
  */
 
@@ -52,7 +60,7 @@ import {
     type AiReviewJudgedScoringArtifact,
     type AiReviewJudgementRecord,
 } from "@/lib/aiReviewEvalJudgement";
-import { datasetProblems, freezeDrift } from "@/lib/aiReviewEvalRun";
+import { datasetDigest, datasetProblems, freezeDrift } from "@/lib/aiReviewEvalRun";
 import { wilsonInterval } from "@/lib/memoryExtractionEvalCore";
 
 /** One row of what the run set out to measure. */
@@ -78,6 +86,23 @@ export type AiReviewJudgedRunEntry = {
 export type AiReviewJudgedRunInputs = {
     journal: unknown;
     dataset: unknown;
+};
+
+/**
+ * What the run recorded about itself, when it ran.
+ *
+ * `datasetDigest` is the evaluation set's digest as the run wrote it down.
+ * Not a convenience and not optional: without it the freeze check only asks
+ * whether the file agrees with its own record, which any re-frozen edit also
+ * satisfies. Swapping in another valid frozen set moved a case out of a
+ * denominator and aggregated, with the plan, journal, judgements and
+ * artifacts all untouched.
+ *
+ * **Never derive it from the dataset being checked.** A caller that computes
+ * this from the file in hand has written a comparison that cannot fail.
+ */
+export type AiReviewJudgedRunManifest = {
+    datasetDigest: string;
 };
 
 /**
@@ -218,9 +243,11 @@ export function aggregateJudgedRun(input: {
     plan: readonly AiReviewJudgedRunPlanItem[];
     entries: readonly AiReviewJudgedRunEntry[];
     runInputs: AiReviewJudgedRunInputs;
+    /** What the run recorded when it ran. See `AiReviewJudgedRunManifest`. */
+    manifest: AiReviewJudgedRunManifest;
 }): AiReviewJudgedRunAggregate {
     const blockers: string[] = [];
-    const { plan, entries, runInputs } = input;
+    const { plan, entries, runInputs, manifest } = input;
 
     // 1. The plan itself.
     //
@@ -245,8 +272,8 @@ export function aggregateJudgedRun(input: {
         blockers.push("the run planned cases and nothing in it was judged");
     }
 
-    // 2. The run's dataset, admitted as a whole and before anything reads
-    // through it.
+    // 2. The run's dataset: admitted as a whole, bound to the run that
+    // measured it, and before anything reads through it.
     //
     // Three failures lived in the gap between "the shared check verified this
     // case" and "the aggregator read the dataset again":
@@ -263,6 +290,9 @@ export function aggregateJudgedRun(input: {
     //     question and the answers, by design.
     //   * A `null` in `cases` made this file throw while walking an array the
     //     shared check had already rejected.
+    //   * And a set consistent with its own freeze record still was not
+    //     necessarily this run's: re-freezing an edited file passed. The
+    //     digest the run recorded is what decides that, and it is an input.
     //
     // `datasetProblems()` is the evaluation set's own validator: structure,
     // duplicate ids, and the phenomenon vocabulary among much else. Using it
@@ -280,6 +310,24 @@ export function aggregateJudgedRun(input: {
     if (datasetIssues.length === 0) {
         const drift = freezeDrift(runInputs.dataset as Parameters<typeof freezeDrift>[0]);
         if (drift) blockers.push(`the run's dataset: ${drift}`);
+        // Internal consistency is not identity. The check above asks whether
+        // the file matches its own freeze record; this asks whether it is the
+        // file the run measured. Re-freezing an edited set satisfies the first
+        // and fails this one, which is the difference that matters.
+        const current = datasetDigest(
+            runInputs.dataset as Parameters<typeof datasetDigest>[0]
+        );
+        if (typeof manifest?.datasetDigest !== "string" || manifest.datasetDigest === "") {
+            blockers.push(
+                "the run recorded no dataset digest, so nothing says which frozen set " +
+                    "these judgements were made on"
+            );
+        } else if (manifest.datasetDigest !== current) {
+            blockers.push(
+                `the run was measured on dataset ${manifest.datasetDigest} and the set ` +
+                    `supplied here is ${current}; another frozen set is not this one`
+            );
+        }
     }
     // Return here rather than carrying on. Everything below reads the dataset
     // -- the shared evidence check is handed it, and the phenomenon map walks
