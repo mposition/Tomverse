@@ -21,8 +21,6 @@ import { cookies } from "next/headers";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "@/lib/auth";
 import {
   getPublicAppSettings,
   isImageGenerationEnabled,
@@ -84,10 +82,12 @@ export async function ReviewWorkspaceShell({
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
     imageGenerationEnabled = await isImageGenerationEnabled();
-    if (await isVoiceInputEnabled()) {
-      const session = await getServerSession(authOptions);
-      voiceInputEnabled = Boolean(session?.user?.id);
-    }
+    // Guests included since 2026-09-10 (docs/policy/voice-input.md §4), so the
+    // flag and the kill switch are the whole answer and the session is not
+    // consulted. The microphone is offered to whoever the endpoint would
+    // serve -- a composer that offered it to a caller the route refuses is the
+    // mismatch this prop exists to prevent.
+    voiceInputEnabled = await isVoiceInputEnabled();
   } catch (error) {
     // A settings read failure must not change what the guest sees: the
     // compiled-in default resolves to the same brand trio, so the count and

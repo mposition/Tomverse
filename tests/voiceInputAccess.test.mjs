@@ -91,20 +91,44 @@ test("an unavailable feature refuses before the audience is considered", () => {
   );
 });
 
-test("guests are refused, and every signed-in plan is admitted", () => {
-  // docs/policy/voice-input.md §4: the MVP is signed-in only because there is
-  // no settled price for an audio second and a guest has no account to draw
-  // one from. Plan is deliberately not a gate — voice input replaces typing,
-  // it does not buy a better answer.
+test("guests are admitted, and so is every plan", () => {
+  // docs/policy/voice-input.md §4, revised 2026-09-10. The MVP was signed-in
+  // only because transcription is a paid third-party call and a guest has no
+  // account to attribute it to. Guests are now admitted on the same limits;
+  // what keeps the exposure finite is the provider-wide seconds budget, not
+  // the subject budget, because a cleared cookie is a new subject.
+  //
+  // Plan was never a gate and still is not: voice input replaces typing, it
+  // does not buy a better answer.
   assert.equal(
     voiceInputRefusal({ available: true, isSignedIn: false }),
-    "authentication_required"
+    null,
+    "a guest is admitted"
+  );
+  assert.equal(
+    voiceInputRefusal({ available: true }),
+    null,
+    "sign-in is not consulted at all, so omitting it admits too"
   );
   for (const tier of ["Guest", "Free", "Pro", "Max"]) {
+    for (const isSignedIn of [true, false]) {
+      assert.equal(
+        voiceInputRefusal({ available: true, isSignedIn, tier }),
+        null,
+        `${tier} must not be gated by plan or by sign-in`
+      );
+    }
+  }
+});
+
+test("an unavailable feature is refused whoever asks", () => {
+  // The one refusal left. It has to outrank the guest admission above:
+  // otherwise the kill switch would stop hiding the microphone from the very
+  // callers who have no account to be told about it.
+  for (const isSignedIn of [true, false]) {
     assert.equal(
-      voiceInputRefusal({ available: true, isSignedIn: true, tier }),
-      null,
-      `${tier} is signed in and must not be gated by plan`
+      voiceInputRefusal({ available: false, isSignedIn }),
+      "feature_unavailable"
     );
   }
 });
