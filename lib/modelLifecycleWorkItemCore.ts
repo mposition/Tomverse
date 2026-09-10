@@ -22,6 +22,12 @@
  * somebody read that morning's message.
  */
 
+import {
+    candidateFamilyIdentity,
+    candidateRepresentativeRank,
+    modelIdentityWithoutVendor,
+} from "@/lib/modelLifecycleTriage";
+
 /** What we intend to do about a model. */
 export const WORK_ITEM_ACTIONS = [
     "add",
@@ -226,8 +232,7 @@ export const workItemTimestampField = (
  * to send a request, so a false merge costs a candidate row rather than money.
  */
 export const candidateIdentity = (apiModel: string) => {
-    const withoutVendor = apiModel.slice(apiModel.lastIndexOf("/") + 1);
-    return withoutVendor.trim().toLowerCase();
+    return modelIdentityWithoutVendor(apiModel);
 };
 
 /**
@@ -308,17 +313,26 @@ export const newCandidatesForQueue = (input: {
     queuedApiModels: readonly string[];
 }) => {
     const known = new Set(
-        [...input.catalogueApiModels, ...input.queuedApiModels].map(candidateIdentity)
+        [...input.catalogueApiModels, ...input.queuedApiModels].map(
+            candidateFamilyIdentity
+        )
     );
     const fresh: Array<ModelObservation & { observedVia: ObservedVia }> = [];
     const byIdentity = new Map<string, (typeof fresh)[number]>();
     for (const observation of input.observed) {
-        const identity = candidateIdentity(observation.apiModel);
+        const identity = candidateFamilyIdentity(observation.apiModel);
         const already = byIdentity.get(identity);
         if (already) {
             // Two providers listing the same new model on the same day is one
             // candidate. It is also two facts, and both are kept.
             already.observedVia = mergeObservedVia(already.observedVia, [observation]).merged;
+            if (
+                candidateRepresentativeRank(observation.apiModel) <
+                candidateRepresentativeRank(already.apiModel)
+            ) {
+                already.provider = observation.provider;
+                already.apiModel = observation.apiModel;
+            }
             continue;
         }
         if (known.has(identity)) continue;
@@ -347,7 +361,7 @@ export const observationsForExistingItems = (input: {
     const queued = new Set(input.queuedIdentities);
     const byIdentity = new Map<string, ObservedVia>();
     for (const observation of input.observed) {
-        const identity = candidateIdentity(observation.apiModel);
+        const identity = candidateFamilyIdentity(observation.apiModel);
         if (!queued.has(identity)) continue;
         const existing = byIdentity.get(identity);
         if (existing) byIdentity.set(identity, mergeObservedVia(existing, [observation]).merged);

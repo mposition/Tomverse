@@ -9,7 +9,10 @@ import {
   resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
 import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
-import { candidateIdentity } from "@/lib/modelLifecycleWorkItemCore";
+import {
+  candidateFamilyIdentity,
+  shouldQueueModelCandidate,
+} from "@/lib/modelLifecycleTriage";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   catalogNextCursor,
@@ -255,7 +258,7 @@ const runProviderCheck = async (
         where: { catalogDeleted: false },
         select: { apiModel: true },
       })
-    ).map((model) => candidateIdentity(model.apiModel))
+    ).map((model) => candidateFamilyIdentity(model.apiModel))
   );
   const observedById = new Map(observations.map((item) => [item.id, item]));
   const existingEntries = await prisma.providerModelCatalogEntry.findMany({
@@ -280,7 +283,8 @@ const runProviderCheck = async (
       if (model) mapped.push(model.id);
       else if (
         !observation.lifecycle &&
-        !catalogueIdentities.has(candidateIdentity(observation.id))
+        shouldQueueModelCandidate(observation.id) &&
+        !catalogueIdentities.has(candidateFamilyIdentity(observation.id))
       ) {
         candidates.push(observation.id);
         if (!existingByApiModel.has(observation.id)) newCandidates.push(observation.id);

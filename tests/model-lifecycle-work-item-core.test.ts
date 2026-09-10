@@ -14,6 +14,7 @@ import {
   workItemTransitionRefusal,
   type WorkItemStatus,
 } from "../lib/modelLifecycleWorkItemCore.ts";
+import { candidateFamilyIdentity } from "../lib/modelLifecycleTriage.ts";
 
 const move = (
   from: WorkItemStatus,
@@ -219,6 +220,36 @@ test("two providers listing the same new model on one day is one candidate", () 
   assert.equal(fresh.length, 1);
   assert.equal(fresh[0].provider, "zhipu");
   assert.equal(fresh[0].apiModel, "glm-5.3");
+});
+
+test("a stable model, its dated snapshots and latest alias create one candidate", () => {
+  const fresh = newCandidatesForQueue({
+    observed: [
+      { provider: "openai", apiModel: "gpt-4o-2024-08-06" },
+      { provider: "openai", apiModel: "gpt-4o-latest" },
+      { provider: "openai", apiModel: "gpt-4o" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+  });
+  assert.equal(fresh.length, 1);
+  assert.equal(fresh[0].apiModel, "gpt-4o");
+  assert.equal(fresh[0].observedVia.length, 3);
+  assert.equal(candidateFamilyIdentity("gpt-4o-2024-08-06"), "gpt-4o");
+});
+
+test("a registered stable family prevents snapshot and alias review rows", () => {
+  assert.deepEqual(
+    newCandidatesForQueue({
+      observed: [
+        { provider: "openai", apiModel: "gpt-4o-2024-08-06" },
+        { provider: "openai", apiModel: "gpt-4o-latest" },
+      ],
+      catalogueApiModels: ["gpt-4o"],
+      queuedApiModels: [],
+    }),
+    []
+  );
 });
 
 test("a model queued yesterday is not queued again under another provider", () => {
