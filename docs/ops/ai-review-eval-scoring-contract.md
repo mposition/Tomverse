@@ -616,6 +616,21 @@ judged 지표가 게이트에 닿으려면 arm별 수치가 있어야 한다.
   `maxTaskTypeArmShortfall`은 **승인되지 않은 숫자**이고, 승인되지 않은 비교를
   실제 수치 옆에 출력하면 판정처럼 읽힌다. 비교는 게이트의 일이다.
 
+**이 보고는 점수를 포함한다.** `npm run report:ai-review-judged-run`은 aggregate
+지표와 arm별 비율·Wilson 구간을 함께 내므로, **임계값을 고르기 전에 실행하면 안
+된다** —
+`.github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md` §3.6이
+관측된 성능에 맞춘 임계값을 금지하고, 이 출력이 바로 그 성능이다.
+
+**임계값을 고르기 전에 쓰는 것은 `npm run report:ai-review-judged-denominators`다.**
+동결된 set(과 선택적으로 판정 case의 gold)에서 **분모만** 내며, 검토자 출력·판정
+기록·점수를 **읽을 수단이 없다**(`tests/aiReviewJudgedDenominators.test.mjs`가
+정적으로 고정). 미보고율 분모는 **검증된 판정 case만 세고 나머지는 구간을 넓힌다**
+— dataset의 키워드 gold는 판정 gold를 묶지 않으므로(비어 있어도 판정 gold가 항목을
+가질 수 있다) 대신 쓸 수 없다. 허용 실패 수도 구간으로 낸다. 판정 case는
+shape·등록·계약 버전·원문 digest·label을 통과해야 세어지고, id 중복은 거절이며,
+하나라도 걸리면 분모를 내지 않는다.
+
 **게이트는 여전히 연결되지 않았다.** 전환 범위는 2026-09-10에 승인됐지만
 aggregate 상한 두 값과 arm 숫자 두 개는 승인되지 않았고, 값이 없으면 새 threshold
 집합을 만들 수 없다. 근거와 선택 자료는
