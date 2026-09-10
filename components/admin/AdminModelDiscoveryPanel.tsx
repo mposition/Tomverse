@@ -12,6 +12,7 @@ type ReviewPriority =
   | "low"
   | "no_action";
 type Availability = "current" | "stale" | "unknown";
+type ModelProduct = "chat" | "image_generation" | "unsupported";
 
 export type ModelWorkItemRow = {
   id: string;
@@ -32,6 +33,7 @@ export type ModelWorkItemRow = {
   familySize: number;
   reviewPriority: ReviewPriority;
   reviewKind: string;
+  product: ModelProduct;
   analysisKo: string;
 };
 
@@ -47,6 +49,7 @@ type ModelFamilyGroup = {
   representative: ModelWorkItemRow;
   providers: string[];
   priority: ReviewPriority;
+  product: ModelProduct;
 };
 
 const PAGE_SIZE = 50;
@@ -72,6 +75,12 @@ const AVAILABILITY_LABELS: Record<Availability, string> = {
   current: "최신 API 확인",
   stale: "최신 API 미확인",
   unknown: "확인 불가",
+};
+
+const PRODUCT_LABELS: Record<ModelProduct, string> = {
+  chat: "Chat",
+  image_generation: "이미지 생성",
+  unsupported: "미지원 제품",
 };
 
 const ageDays = (firstSeenAt: string) => {
@@ -141,6 +150,7 @@ const buildGroups = (rows: readonly ModelWorkItemRow[]): ModelFamilyGroup[] => {
         )
       ).sort(),
       priority: representative.reviewPriority,
+      product: representative.product,
     };
   }).sort(
     (a, b) =>
@@ -170,6 +180,7 @@ export function AdminModelDiscoveryPanel() {
     "recommended"
   );
   const [availability, setAvailability] = useState<Availability | "all">("all");
+  const [product, setProduct] = useState<ModelProduct | "all">("all");
   const [status, setStatus] = useState("all");
   const [bulkNote, setBulkNote] = useState("");
   const [page, setPage] = useState(1);
@@ -221,6 +232,7 @@ export function AdminModelDiscoveryPanel() {
     const term = search.trim().toLowerCase();
     return groups.filter((group) => {
       if (priority !== "all" && group.priority !== priority) return false;
+      if (product !== "all" && group.product !== product) return false;
       if (provider !== "all" && !group.providers.includes(provider)) return false;
       if (
         availability !== "all" &&
@@ -244,7 +256,7 @@ export function AdminModelDiscoveryPanel() {
         ].some((value) => value.toLowerCase().includes(term))
       );
     });
-  }, [availability, groups, priority, provider, search, status]);
+  }, [availability, groups, priority, product, provider, search, status]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -363,7 +375,8 @@ export function AdminModelDiscoveryPanel() {
       </header>
 
       <p className="mb-4 text-xs leading-relaxed text-zinc-500">
-        공급자의 최신 모델 API 증거와 Tomverse 편입 가치를 분리해 보여줍니다.
+        공급자의 최신 모델 API 증거와 Tomverse 제품별 편입 가치를 분리해 보여줍니다.
+        이미지 모델은 Studio 후보로, Google 채팅 모델은 Brave 웹검색 경로까지 검토합니다.
         날짜별 버전과 별칭은 한 패밀리로 묶이며, 추천은 자동 결정이 아닙니다.
       </p>
 
@@ -392,7 +405,7 @@ export function AdminModelDiscoveryPanel() {
         </p>
       ) : (
         <>
-          <div className="mb-3 grid gap-2 md:grid-cols-5">
+          <div className="mb-3 grid gap-2 md:grid-cols-6">
             <input
               type="search"
               value={search}
@@ -418,6 +431,20 @@ export function AdminModelDiscoveryPanel() {
                 <option key={value} value={value}>
                   {PRIORITY_LABELS[value]} ({priorityCounts.get(value) ?? 0})
                 </option>
+              ))}
+            </select>
+            <select
+              value={product}
+              onChange={(event) => {
+                setProduct(event.target.value as ModelProduct | "all");
+                setPage(1);
+              }}
+              aria-label="Filter by Tomverse product"
+              className={selectClass}
+            >
+              <option value="all">모든 제품</option>
+              {(Object.keys(PRODUCT_LABELS) as ModelProduct[]).map((value) => (
+                <option key={value} value={value}>{PRODUCT_LABELS[value]}</option>
               ))}
             </select>
             <select
@@ -567,6 +594,20 @@ export function AdminModelDiscoveryPanel() {
                           <span className={`rounded border px-1.5 py-0.5 text-[10px] ${availabilityClass(row.availability)}`}>
                             {AVAILABILITY_LABELS[row.availability]}
                           </span>
+                          <span
+                            className={
+                              row.product === "image_generation"
+                                ? "rounded border border-accent-image-500/30 bg-accent-image-500/10 px-1.5 py-0.5 text-[10px] text-accent-image-200"
+                                : "rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300"
+                            }
+                          >
+                            {PRODUCT_LABELS[row.product]}
+                          </span>
+                          {row.product === "chat" && group.providers.includes("google") ? (
+                            <span className="rounded border border-accent-web-search-500/30 bg-accent-web-search-500/10 px-1.5 py-0.5 text-[10px] text-accent-web-search-200">
+                              Brave 웹검색 검토
+                            </span>
+                          ) : null}
                         </div>
                         <span className="text-[11px] text-zinc-400">
                           {group.providers.join(", ") || row.provider}
