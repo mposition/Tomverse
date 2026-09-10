@@ -1,6 +1,4 @@
-# Independent review — task router-full-catalog-diagnostic-v1, round 0
-
-Historical source clarification: the embedded diff's fallback citation refers to docs/policy/tomverse-chat-routing.md §7. The embedded diff and its recorded digest are unchanged; this package does not cover subsequent changes.
+# Independent review — task router-full-catalog-diagnostic-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -18,15 +16,15 @@ Build the offline foundation for improving Auto Router model selection over the 
 - In dry-run mode the command-line executors are never spawned.
 - No production routing behaviour, score, flag, pre-registration, or protection rule changes: existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified.
 
-## Change under review — digest sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932, commit 6efd3eab991c368fb56129e2d1dbbfc2b4ab56a2
+## Change under review — digest sha256:6500e0e274e884de9ea1d720c7488387bea96e6764ce088016dd0946cb01073a, commit 7d61d2b2afe2bb5601ce79d0eb77a6959bdfe2a5
 
 ```diff
 diff --git a/docs/ops/cross-review/README.md b/docs/ops/cross-review/README.md
 new file mode 100644
-index 00000000..8e9442c0
+index 00000000..f455c9b8
 --- /dev/null
 +++ b/docs/ops/cross-review/README.md
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,137 @@
 +# Cross review: an author, an independent reviewer, and a control program
 +
 +Offline development tooling. It is not a product path: no user request calls
@@ -48,13 +46,28 @@ index 00000000..8e9442c0
 +
 +- An approval names the digest it reviewed; a verdict on another digest,
 +  task or round fails the run. Round n's approval is never reused for n+1.
-+- Two executors agreeing is not a pass: the control program's tests and guard
-+  rules must also pass, or the approved change goes back to the author.
-+- A finding with `basis: evidence`, or a `judgement` with a reproduction, is
-+  acted on. A `preference` is settled by the project's rules. A `judgement`
-+  with no reproduction keeps the current version. All are recorded.
-+- After `--max-revisions` (default 2) fix rounds, an unresolved change is put
-+  on hold with its findings and reproductions. It is not retried.
++- Two executors agreeing is not a pass: the control program's own checks
++  must pass as well -- at least one test run and every run passed, at least
++  one guard rule run and every rule passed. Nothing run is a failed check
++  (an empty test list is not a passing one, and neither is an empty guard
++  list), and so is a diff that names a file the author did not report. A
++  failed check sends the approved change back to the author.
++- An actionable finding is never passed over: with a revision left it goes
++  back to the author, and in the last round it puts the change on hold even
++  under an approval.
++- The cap is fixed at two fix rounds (`MAX_REVISIONS`). `--max-revisions`
++  may lower it for a run and cannot raise it.
++- The scope check reads the diff as well as the author's file list: a file
++  the diff touches outside `writableScope` is refused before review,
++  whatever was reported. `package` mode reads the whole working tree for
++  the same question, so nothing hides behind the scoped diff.
++- A finding is acted on only with a reproduction, whatever its basis:
++  `evidence` names something checkable and the reproduction is how to check
++  it; a `judgement` likewise. A `preference` is settled by the project's
++  rules. A finding with no reproduction keeps the current version. All are
++  recorded, none dropped.
++- After the fix rounds are spent, an unresolved change is put on hold with
++  its findings and reproductions. It is not retried.
 +- Invalid JSON, a missing result, a timeout, a failed execution and a digest
 +  mismatch are each a named failure, never a pass.
 +
@@ -63,18 +76,82 @@ index 00000000..8e9442c0
 +```
 +npm run cross-review -- --task=<task.json> --mode=mock --fixture=<fixture.json> --out=<dir>
 +npm run cross-review -- --task=<task.json> --mode=dry-run --out=<dir>
-+npm run cross-review -- --task=<task.json> --mode=package --base=<commit> --test-command="..." --out=<dir>
++npm run cross-review -- --task=<task.json> --mode=package --test-command="..." --diff-exclude=<generated> --out=<dir>
++npm run cross-review -- --task=<task.json> --mode=review --out=<dir> [--i-have-authorised-live-execution]
 +```
 +
 +`mock` runs the whole loop from a fixture. `dry-run` builds the command-line
 +executors and proves they do not run. `package` calls no executor: it takes
-+the diff against `--base`, digests it, runs the test command, and writes the
-+exchange record and the reviewer prompt for a person to hand over.
++the diff against the task's base commit (or `--base`), digests it, runs the
++test command and every `--guard-command`, and writes the round's package and
++the reviewer prompt. `review` runs only the reviewer on a packaged round,
++writes `verdict-round<N>.json` next to it, and rewrites `exchange.json` as
++the control program's replay of every round so far
++(`replayExchange` in `lib/crossReviewCore.ts`); without
++`--i-have-authorised-live-execution` it shows the exact command and runs
++nothing. `--mode=live` runs both executors in the loop and is refused without
++the same flag.
 +
-+`--mode=live` is refused without `--i-have-authorised-live-execution`. The
-+intended invocations are in `CLI_INVOCATIONS` in `lib/crossReviewExecutors.ts`
-+and were not verified against an installed `codex`; check them against
-+`--help` before the first live run.
++The checks are the control program's, so they are named on the command line:
++`--test-command` is the test run (its exit status decides) and
++`--guard-command` (repeatable) is a guard rule, run once per round and
++recorded with its result (a non-zero exit is a failed rule). In `live` mode
++the diff of record is the working tree's diff against the base after the
++author ran -- what the author returned is kept only as its claim -- and one
++guard rule always checks that the tree holds nothing that diff cannot show.
++
++What a package may leave out of the reviewed diff is fixed before the
++exchange: `--diff-exclude` accepts only the task's `generatedPaths` and the
++package's own `--out` directory. An excluded file still counts as changed,
++its content digest is recorded in the package, and a review refuses to run
++if it has changed since.
++
++The person-driven loop is `package` → `review` → (fix) → `package --round=1`
++→ `review` …, and `exchange.json` carries `awaiting_review` or
++`awaiting_revision` between steps and the control program's own `passed`,
++`on_hold` or `failed` once it has decided. The script refuses what would make
++the record untrustworthy: a change outside the scope anywhere in the tree or
++an untracked file the diff would not show; a package or review of round N
++unless the replay of rounds 0..N-1 is `awaiting_revision` (after `passed`,
++`on_hold` or `failed` the exchange has concluded, and a further change is a
++new task or a new `--out`); a second verdict on a reviewed round; and a
++review of a package the working tree does not match, where matching means
++the tree's diff against the base, scoped and excluded as the package was,
++digests to the package's digest.
++
++### The reviewer's invocation
++
++`CLI_INVOCATIONS` in `lib/crossReviewExecutors.ts` records the intended
++invocations. They were checked on 2026-09-09 against codex-cli 0.146.0 and
++Claude Code 2.1.261 (`--help` of both; the `codex` source at tag
++`rust-v0.146.0` for the JSONL event shape, the headless approval policy and
++the config layers). What the check changed:
++
++- The Codex reviewer runs `codex --sandbox read-only exec --ignore-user-config
++  --json -`. The sandbox bounds shell commands only; MCP servers, plugins and
++  hooks from `~/.codex/config.toml` run outside it, and `-c mcp_servers={}`
++  merges rather than replaces, so the user layer is left out altogether. The
++  stored login is still used. `codex exec` sets the approval policy to
++  `never`, so a command the sandbox refuses is rejected, not escalated.
++- What a run still needs from configuration is passed with
++  `--codex-config=key=value` (repeatable) and recorded with the verdict. A
++  reviewer accepts only `REVIEWER_CONFIG_OVERRIDE_KEYS` -- the model, its
++  reasoning effort, and the Windows sandbox backend -- so an override cannot
++  widen what it may do. Give values without quotes (`model=gpt-5.6-sol`).
++- On Windows, with the user layer ignored, `windows.sandbox` is unset, and
++  unset resolves to no backend, under which `codex` rejects every command
++  rather than running unsandboxed. Pass `--codex-config=windows.sandbox=elevated`
++  (or `unelevated`) to keep the sandbox the machine already has set up.
++- `--codex-auth=login` (the default) drops `OPENAI_API_KEY` and
++  `CODEX_API_KEY` from the child environment so the run uses the stored
++  login; `env` keeps them.
++- The Claude Code reviewer runs `claude --print --output-format json --tools
++  Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config`: only the
++  read tools are built in, nothing prompts, and no MCP server is loaded. It
++  has not been run.
++
++Neither author invocation has been run. The check is due again whenever
++either tool is upgraded.
 +
 +`fixtures/` holds a demo task and three fixtures: a fix-then-approve pass, an
 +exhausted-revisions hold, and a digest-mismatch failure.
@@ -87,24 +164,30 @@ index 00000000..8e9442c0
 +severity, basis, reproduction and disposition, and the next action.
 diff --git a/docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json b/docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json
 new file mode 100644
-index 00000000..85db41bc
+index 00000000..b99ffb60
 --- /dev/null
 +++ b/docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json
-@@ -0,0 +1,8 @@
+@@ -0,0 +1,14 @@
 +{
 +  "author": [
 +    { "diff": "+v0", "summary": "attempt 0", "filesChanged": ["lib/sum.ts"], "commit": null }
 +  ],
 +  "reviewer": [
 +    { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "sha256:not-this-change", "conclusion": "approve", "findings": [], "nextAction": "merge" }
++  ],
++  "tests": [
++    [{ "command": "node --test tests/sum.test.mjs", "passed": true, "output": "pass 1", "durationMs": 38 }]
++  ],
++  "guards": [
++    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }]
 +  ]
 +}
 diff --git a/docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json b/docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json
 new file mode 100644
-index 00000000..3284d86d
+index 00000000..084a26ca
 --- /dev/null
 +++ b/docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json
-@@ -0,0 +1,59 @@
+@@ -0,0 +1,63 @@
 +{
 +  "author": [
 +    {
@@ -162,14 +245,18 @@ index 00000000..3284d86d
 +  "tests": [
 +    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 40 }],
 +    [{ "command": "node --test tests/sum.test.mjs", "passed": true, "output": "pass 1", "durationMs": 38 }]
++  ],
++  "guards": [
++    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }],
++    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 11 }]
 +  ]
 +}
 diff --git a/docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json b/docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json
 new file mode 100644
-index 00000000..c09bfd8d
+index 00000000..9a1484a2
 --- /dev/null
 +++ b/docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json
-@@ -0,0 +1,12 @@
+@@ -0,0 +1,22 @@
 +{
 +  "author": [
 +    { "diff": "+v0", "summary": "attempt 0", "filesChanged": ["lib/sum.ts"], "commit": null },
@@ -180,6 +267,16 @@ index 00000000..c09bfd8d
 +    { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
 +    { "taskId": "demo-sum-helper", "round": 1, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" },
 +    { "taskId": "demo-sum-helper", "round": 2, "reviewedDigest": "@current", "conclusion": "request_changes", "findings": [{ "location": "lib/sum.ts:1", "severity": "error", "basis": "evidence", "claim": "sum([]) still throws", "reproduction": "node -e '[].reduce((a,b)=>a+b)'" }], "nextAction": "fix" }
++  ],
++  "tests": [
++    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 40 }],
++    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 41 }],
++    [{ "command": "node --test tests/sum.test.mjs", "passed": false, "output": "TypeError: Reduce of empty array with no initial value", "durationMs": 39 }]
++  ],
++  "guards": [
++    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }],
++    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }],
++    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }]
 +  ]
 +}
 diff --git a/docs/ops/cross-review/fixtures/sum-helper.task.json b/docs/ops/cross-review/fixtures/sum-helper.task.json
@@ -201,10 +298,10 @@ index 00000000..a08d8ffa
 +}
 diff --git a/docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json b/docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json
 new file mode 100644
-index 00000000..566dbf34
+index 00000000..30ff533f
 --- /dev/null
 +++ b/docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,29 @@
 +{
 +  "taskId": "router-full-catalog-diagnostic-v1",
 +  "requirement": "Build the offline foundation for improving Auto Router model selection over the whole catalogue without repeated human hand-offs. (1) A full-catalogue routing diagnostic that uses the product's own routing logic (not a copy) on the development fixture and, per request, shows every catalogue model, its candidacy and exclusion reason, the presence/source/version of per-task quality evidence, the score/band and the actual tie-break criterion, the final primary and the actually executable fallback, why each non-selected model lost, and where no evidence exists to judge. Unevaluated models are not scored 0, not promoted, and no operational score changes. (2) A minimal Claude–Codex cross-review structure: author, independent reviewer, control program; roles configurable; exchange record with task ID, original requirement and completion criteria, change digest, change summary, test results, review conclusion, per-finding location/severity/basis/reproduction, next action; reviewer reads requirement and diff before the author's self-assessment; reviewer has no write access; a new change needs a new review; max 2 fix rounds then hold; preference-only findings follow project rules; unevidenced proposals keep the current version; two AIs agreeing is not a pass without tests and guards. No model calls, no production routing/score/flag change, no push, no workflow dispatch.",
@@ -228,14 +325,18 @@ index 00000000..566dbf34
 +    "docs/ops/router-full-catalog-diagnostic/",
 +    "docs/ops/cross-review/",
 +    "package.json"
++  ],
++  "generatedPaths": [
++    "docs/ops/router-full-catalog-diagnostic/development-v0.md",
++    "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json"
 +  ]
 +}
 diff --git a/docs/ops/router-full-catalog-diagnostic/README.md b/docs/ops/router-full-catalog-diagnostic/README.md
 new file mode 100644
-index 00000000..8b43ca76
+index 00000000..d2e61f36
 --- /dev/null
 +++ b/docs/ops/router-full-catalog-diagnostic/README.md
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,74 @@
 +# Full-catalogue routing diagnostic
 +
 +What the Router would do with every model in the catalogue, for every item in
@@ -244,7 +345,16 @@ index 00000000..8b43ca76
 +```
 +npm run report:router-full-catalog -- [--set=docs/ops/router-evaluation-set/development-v0.json] \
 +  [--items=adopted|all] [--plan=Pro] [--requested-model=<id>] [--fallback-flag=off|on] \
-+  [--json=<out>] [--md=<out>]
++  [--json=<out>] [--summary-json=<out>] [--md=<out>]
++```
++
++The committed files are regenerated with the defaults:
++
++```
++npm run report:router-full-catalog -- --quiet \
++  --md=docs/ops/router-full-catalog-diagnostic/development-v0.md \
++  --summary-json=docs/ops/router-full-catalog-diagnostic/development-v0.summary.json \
++  --json=artifacts/router-full-catalog/development-v0.full.json
 +```
 +
 +`lib/routerFullCatalogDiagnostic.ts` calls `decideRouterModel` for the
@@ -260,6 +370,28 @@ index 00000000..8b43ca76
 +primary on, the ranked fallback candidates with the fallback gate's answer
 +under the shipped flag and with the flag on, and the output cap the Router
 +routed under beside the one dispatch will apply to the chosen model.
++
++Whether a turn could reach a fallback is answered in the product's own
++order (`app/api/chat/route.ts`, `attemptFallback`) with the product's own
++functions where an offline report can call them: the gate
++(`autoFallbackScope`) must allow it, `decideFallback` -- called, under the
++one failure hypothesis the fallback path exists for (`FALLBACK_FAILURE_HYPOTHESIS`:
++the primary failed at the provider before any token was shown) -- names a
++candidate, and dispatch must fit that one candidate under its own cap, since
++the product tries no other. `fallback.decision` is `decideFallback`'s answer
++as given; `fallback.firstCandidate` is that candidate as dispatch would fit
++it; `fallback.reachableAsDeployed` and `fallback.reachableIfFlagOn` are the
++three-step answer, each refusal naming the step that said no
++(`gate:<reason>`, `decision:<reason>`, `candidate_context_window_exceeded`).
++
++`planAttemptExecution` is not called: it builds the provider client and the
++credit budget for a real dispatch, which an offline report has no account,
++credentials or reservation for. Its refusals that depend on those, and the
++two runtime checks the route makes around it, are carried on every
++reachable answer as `undecidedOffline` (`search_path_unavailable`,
++`budget_refused`, `candidate_unavailable`, `no_provider_hold`), so
++`reachable: true` reads as "nothing decidable offline refused it" and not
++as a promise. `fallback.notModelled` repeats the hypothesis and that list.
 +
 +## What the product has that this does not
 +
@@ -281,10 +413,10 @@ index 00000000..8b43ca76
 +  JSON the script writes under `artifacts/`, which is not committed.
 diff --git a/lib/crossReviewCore.ts b/lib/crossReviewCore.ts
 new file mode 100644
-index 00000000..a834ef0a
+index 00000000..a3da4f56
 --- /dev/null
 +++ b/lib/crossReviewCore.ts
-@@ -0,0 +1,724 @@
+@@ -0,0 +1,996 @@
 +/**
 + * The control program for an author–reviewer exchange between two AI
 + * executors, with a fix loop and a hard iteration cap.
@@ -298,9 +430,9 @@ index 00000000..a834ef0a
 + *   self-assessment, labelled as such. It returns a conclusion and findings,
 + *   each with a location, a severity, and the basis it rests on.
 + * - This module is the **control program**: it hands results between the two,
-+ *   computes the change digest itself, runs the tests, applies the handling
-+ *   rules, counts the rounds, and decides the outcome. Neither executor
-+ *   decides whether the task passed.
++ *   computes the change digest itself, runs the tests and the guards, applies
++ *   the handling rules, counts the rounds, and decides the outcome. Neither
++ *   executor decides whether the task passed.
 + *
 + * Which model plays which role is configuration (`RoleAssignment`), and the
 + * executors are injected, so the same loop runs against scripted mocks in a
@@ -313,20 +445,32 @@ index 00000000..a834ef0a
 + *   reviewed; if that is not the digest of the change in hand, the verdict is
 + *   not a verdict on this change and the run fails. An approval of round n is
 + *   never reused for round n+1.
-+ * - Two executors agreeing is not a pass. The tests the control program ran
-+ *   must pass and the guard rules must hold, or the approved change goes back
-+ *   to the author (counting a round) and, if rounds are exhausted, on hold.
-+ * - A finding with evidence, or a judgement with a reproduction, is
-+ *   actionable: the author fixes it and the change is re-reviewed. A finding
-+ *   that is only a preference is settled by the project's rules and recorded
-+ *   as such. A judgement with no reproduction is insufficient evidence: the
-+ *   current version stands, and the finding is recorded, never dropped.
-+ * - After `maxRevisions` fix rounds an unresolved change is put on hold with
-+ *   its findings and reproduction material. It is not retried.
++ * - Two executors agreeing is not a pass. The control program's own checks
++ *   must pass as well: at least one test run and every run passed, at least
++ *   one guard rule run and every rule passed. Nothing run is a failed check
++ *   -- an empty test list is not a passing one, and neither is an empty
++ *   guard list -- and so is a diff that names a file the author did not
++ *   report. A failed check sends the approved change back to the author
++ *   (counting a round) and, if rounds are exhausted, on hold.
++ * - A finding is acted on only with a reproduction, whatever its basis:
++ *   `evidence` names something checkable and the reproduction is how to
++ *   check it, and a `judgement` is an opinion that a reproduction turns into
++ *   something checkable. A `preference` is settled by the project's rules
++ *   and recorded as such. A finding with no reproduction is insufficient
++ *   evidence: the current version stands, and the finding is recorded, never
++ *   dropped.
++ * - An actionable finding is never passed over. With a revision left it goes
++ *   back to the author; in the last round it puts the change on hold, even
++ *   under an approval -- a reviewer that approves while naming a reproducible
++ *   error has named an error, not waived it.
++ * - The cap is fixed: `MAX_REVISIONS` (2) fix rounds after the first review,
++ *   and then an unresolved change is put on hold with its findings and
++ *   reproduction material. A caller may lower the cap for a run; it cannot
++ *   raise it.
 + * - Invalid JSON, a missing result, a timeout, an executor failure and a
 + *   digest mismatch are each a named failure. None of them is a pass.
 + *
-+ * Pure apart from the injected executors, test runner and clock.
++ * Pure apart from the injected executors, test runner, guards and clock.
 + */
 +
 +export const CROSS_REVIEW_VERSION = "cross-review-v1";
@@ -357,6 +501,13 @@ index 00000000..a834ef0a
 +     * could write even if it wanted to. Two executors never edit one file.
 +     */
 +    writableScope: readonly string[];
++    /**
++     * Generated files inside the scope that a package may leave out of the
++     * reviewed diff, named here before the exchange so an author cannot
++     * decide later what the reviewer does not see. Each is still counted as
++     * changed, and its content is digested into the package.
++     */
++    generatedPaths?: readonly string[];
 +};
 +
 +/** What an author executor returns. Its digest claim, if any, is ignored. */
@@ -383,11 +534,20 @@ index 00000000..a834ef0a
 +    durationMs: number;
 +};
 +
++/** One guard rule, run once, with what it found. */
++export type GuardRun = {
++    rule: string;
++    passed: boolean;
++    /** What the rule reported. Short; the record is not a log. */
++    detail: string;
++    durationMs?: number;
++};
++
 +export const FINDING_SEVERITIES = ["error", "warning", "nit"] as const;
 +export type FindingSeverity = (typeof FINDING_SEVERITIES)[number];
 +
 +export const FINDING_BASES = [
-+    /** Backed by something checkable: a failing test, a wrong output, a spec line. */
++    /** Backed by something checkable: a failing test, a wrong output, a spec line. The reproduction is how to check it. */
 +    "evidence",
 +    /** A matter of taste. Settled by the project's rules, not by argument. */
 +    "preference",
@@ -402,7 +562,7 @@ index 00000000..a834ef0a
 +    severity: FindingSeverity;
 +    basis: FindingBasis;
 +    claim: string;
-+    /** How to see the problem: a command, an input and expected output. */
++    /** How to see the problem: a command, an input and expected output. Required for the finding to be acted on. */
 +    reproduction?: string;
 +};
 +
@@ -427,6 +587,8 @@ index 00000000..a834ef0a
 +    commit: string | null;
 +    diff: string;
 +    testResults: readonly TestRun[];
++    guardRuns: readonly GuardRun[];
++    /** Failed guard rules and consistency failures, as text. */
 +    guardViolations: readonly string[];
 +    /** Last, and labelled: the author's summary and self-assessment. */
 +    authorSummary: string;
@@ -438,11 +600,13 @@ index 00000000..a834ef0a
 +export type AuthorRequest = {
 +    task: CrossReviewTask;
 +    round: number;
-+    /** Actionable findings and failing tests from the previous round; null on round 0. */
++    /** Actionable findings and failed checks from the previous round; null on round 0. */
 +    feedback: {
 +        findings: readonly Finding[];
 +        failedTests: readonly TestRun[];
 +        guardViolations: readonly string[];
++        /** Every reason the checks did not pass, including "no test was run". */
++        checkFailures: readonly string[];
 +    } | null;
 +};
 +
@@ -475,7 +639,7 @@ index 00000000..a834ef0a
 +    | "fix_requested"
 +    /** A preference; the project's rules decide, and the change stands. */
 +    | "resolved_by_project_rule"
-+    /** A judgement with no reproduction; the current version is kept. */
++    /** No reproduction, whatever the basis; the current version is kept. */
 +    | "insufficient_evidence_kept_current"
 +    /** Rounds exhausted with this still open. */
 +    | "unresolved_on_hold";
@@ -489,7 +653,10 @@ index 00000000..a834ef0a
 +    filesChanged: readonly string[];
 +    changeSummary: string;
 +    testResults: readonly TestRun[];
++    guardRuns: readonly GuardRun[];
 +    guardViolations: readonly string[];
++    /** Why the control program's checks did not pass; empty when they did. */
++    checkFailures: readonly string[];
 +    reviewConclusion: ReviewConclusion | null;
 +    findings: readonly DisposedFinding[];
 +    nextAction: string;
@@ -529,6 +696,9 @@ index 00000000..a834ef0a
 +    commit: string | null;
 +    changeSummary: string | null;
 +    testResults: readonly TestRun[];
++    guardRuns: readonly GuardRun[];
++    guardViolations: readonly string[];
++    checkFailures: readonly string[];
 +    reviewConclusion: ReviewConclusion | null;
 +    findings: readonly DisposedFinding[];
 +    nextAction: string;
@@ -552,18 +722,33 @@ index 00000000..a834ef0a
 +    reviewer: ReviewerExecutor;
 +    /** Runs the required tests against the change. The control program's, not the author's. */
 +    runTests: (change: { diff: string; filesChanged: readonly string[]; commit: string | null }) => Promise<readonly TestRun[]>;
-+    /** Existing protection rules. A non-empty list is a failed check. */
-+    guards?: (change: { diff: string; filesChanged: readonly string[] }) => Promise<readonly string[]>;
++    /**
++     * Runs the existing protection rules against the change and reports each
++     * with its result. A failed rule is a failed check; so is an empty list,
++     * since a guard that was not run has protected nothing.
++     */
++    guards: (change: { diff: string; filesChanged: readonly string[] }) => Promise<readonly GuardRun[]>;
 +    /** sha256 of the diff text. Injected so a test can pin it; the control computes it, never the author. */
 +    digest: (diff: string) => string;
-+    /** Fix-and-re-review rounds after the first review. Default 2. */
++    /** Fix-and-re-review rounds after the first review. At most `MAX_REVISIONS`; a caller may only lower it. */
 +    maxRevisions?: number;
 +    timeoutMs?: number;
 +    now?: () => Date;
 +};
 +
-+export const DEFAULT_MAX_REVISIONS = 2;
++/** The operating default's cap on fix rounds. Fixed; a run may go lower, never higher. */
++export const MAX_REVISIONS = 2;
++export const DEFAULT_MAX_REVISIONS = MAX_REVISIONS;
 +export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
++
++/** The cap a run may use, or a thrown error: raising the cap is not a run option. */
++export const resolveMaxRevisions = (requested: number | undefined): number => {
++    if (requested === undefined) return MAX_REVISIONS;
++    if (!Number.isInteger(requested) || requested < 0 || requested > MAX_REVISIONS) {
++        throw new RangeError(`maxRevisions must be an integer from 0 to ${MAX_REVISIONS}; got ${requested}`);
++    }
++    return requested;
++};
 +
 +const isRecord = (value: unknown): value is Record<string, unknown> =>
 +    typeof value === "object" && value !== null && !Array.isArray(value);
@@ -682,10 +867,16 @@ index 00000000..a834ef0a
 +    }
 +};
 +
-+/** A finding the author has to act on, under the operating defaults. */
++const hasReproduction = (finding: Finding): boolean =>
++    typeof finding.reproduction === "string" && finding.reproduction.trim() !== "";
++
++/**
++ * A finding the author has to act on, under the operating defaults: one
++ * that comes with a reproduction. The basis says what kind of thing the
++ * reproduction shows; it does not stand in for one.
++ */
 +export const isActionable = (finding: Finding): boolean =>
-+    finding.basis === "evidence" ||
-+    (finding.basis === "judgement" && typeof finding.reproduction === "string" && finding.reproduction.trim() !== "");
++    (finding.basis === "evidence" || finding.basis === "judgement") && hasReproduction(finding);
 +
 +const dispose = (finding: Finding, disposition: FindingDisposition): DisposedFinding => ({
 +    ...finding,
@@ -699,16 +890,54 @@ index 00000000..a834ef0a
 +        return dispose(finding, "insufficient_evidence_kept_current");
 +    });
 +
-+const scopeViolations = (task: CrossReviewTask, filesChanged: readonly string[]): readonly string[] => {
-+    if (task.writableScope.length === 0) return [];
-+    return filesChanged.filter(
-+        (file) => !task.writableScope.some((scope) => file === scope || file.startsWith(scope.endsWith("/") ? scope : `${scope}/`))
-+    );
++/** Findings that stop a pass: sent back, or left open with no revision to send them to. */
++const blocking = (disposed: readonly DisposedFinding[]): readonly DisposedFinding[] =>
++    disposed.filter((finding) => finding.disposition === "fix_requested" || finding.disposition === "unresolved_on_hold");
++
++/**
++ * The files a unified diff names: `diff --git` headers, and `+++` / `---`
++ * pairs for a diff without them. What the author *says* it changed is
++ * checked against this, so a file left out of `filesChanged` is still seen.
++ */
++export const filesNamedByDiff = (diff: string): readonly string[] => {
++    const named = new Set<string>();
++    let pendingOld: string | null = null;
++    for (const line of diff.split("\n")) {
++        const header = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
++        if (header) {
++            named.add(header[2]);
++            pendingOld = null;
++            continue;
++        }
++        const removed = /^--- a\/(.+)$/.exec(line);
++        if (removed) {
++            pendingOld = removed[1];
++            continue;
++        }
++        const added = /^\+\+\+ b\/(.+)$/.exec(line);
++        if (added) {
++            named.add(added[1]);
++            pendingOld = null;
++            continue;
++        }
++        if (line.startsWith("+++ /dev/null") && pendingOld) {
++            named.add(pendingOld);
++            pendingOld = null;
++        }
++    }
++    return [...named];
 +};
++
++const inScope = (task: CrossReviewTask, file: string): boolean =>
++    task.writableScope.length === 0 ||
++    task.writableScope.some((scope) => file === scope || file.startsWith(scope.endsWith("/") ? scope : `${scope}/`));
++
++const scopeViolations = (task: CrossReviewTask, files: readonly string[]): readonly string[] =>
++    files.filter((file) => !inScope(task, file));
 +
 +export async function runCrossReview(control: CrossReviewControl): Promise<CrossReviewOutcome> {
 +    const roles = control.roles ?? DEFAULT_ROLE_ASSIGNMENT;
-+    const maxRevisions = control.maxRevisions ?? DEFAULT_MAX_REVISIONS;
++    const maxRevisions = resolveMaxRevisions(control.maxRevisions);
 +    const timeoutMs = control.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 +    const now = control.now ?? (() => new Date());
 +    const task = control.task;
@@ -734,6 +963,9 @@ index 00000000..a834ef0a
 +            commit: last?.commit ?? null,
 +            changeSummary: last?.changeSummary ?? null,
 +            testResults: last?.testResults ?? [],
++            guardRuns: last?.guardRuns ?? [],
++            guardViolations: last?.guardViolations ?? [],
++            checkFailures: last?.checkFailures ?? [],
 +            reviewConclusion: last?.reviewConclusion ?? null,
 +            findings: last?.findings ?? [],
 +            nextAction,
@@ -761,7 +993,9 @@ index 00000000..a834ef0a
 +                filesChanged: [],
 +                changeSummary: "",
 +                testResults: [],
++                guardRuns: [],
 +                guardViolations: [],
++                checkFailures: [],
 +                reviewConclusion: null,
 +                findings: [],
 +                nextAction: `author ${produced.failure}: ${produced.detail}`,
@@ -769,7 +1003,11 @@ index 00000000..a834ef0a
 +            return finish("failed", `author_${produced.failure}`, null, "the author produced no usable change; nothing was reviewed");
 +        }
 +        const output: AuthorOutput = produced.value;
-+        const violations = scopeViolations(task, output.filesChanged);
++        // The scope check reads the diff as well as the author's list: a
++        // file the diff touches is a file changed, whatever was reported.
++        const named = filesNamedByDiff(output.diff);
++        const touched = [...new Set([...output.filesChanged, ...named])];
++        const violations = scopeViolations(task, touched);
 +        if (violations.length > 0) {
 +            rounds.push({
 +                round,
@@ -778,7 +1016,9 @@ index 00000000..a834ef0a
 +                filesChanged: output.filesChanged,
 +                changeSummary: output.summary,
 +                testResults: [],
++                guardRuns: [],
 +                guardViolations: violations.map((file) => `outside writable scope: ${file}`),
++                checkFailures: violations.map((file) => `outside writable scope: ${file}`),
 +                reviewConclusion: null,
 +                findings: [],
 +                nextAction: "the change touched files outside the task's writable scope",
@@ -794,10 +1034,20 @@ index 00000000..a834ef0a
 +            filesChanged: output.filesChanged,
 +            commit: output.commit ?? null,
 +        });
-+        const guardViolations: readonly string[] = control.guards
-+            ? await control.guards({ diff: output.diff, filesChanged: output.filesChanged })
-+            : [];
-+        const checksPass = testResults.every((run) => run.passed) && guardViolations.length === 0;
++        const guardRuns: readonly GuardRun[] =
++            typeof control.guards === "function" ? await control.guards({ diff: output.diff, filesChanged: output.filesChanged }) : [];
++        const unreported = named.filter((file) => !output.filesChanged.includes(file));
++        const guardViolations: readonly string[] = [
++            ...guardRuns.filter((run) => !run.passed).map((run) => `${run.rule}: ${run.detail}`),
++            ...unreported.map((file) => `the diff names ${file}, which filesChanged does not`),
++        ];
++        const checkFailures: string[] = [];
++        if (testResults.length === 0) checkFailures.push("no test was run");
++        for (const run of testResults) if (!run.passed) checkFailures.push(`test failed: ${run.command}`);
++        if (guardRuns.length === 0) checkFailures.push("no guard was run");
++        for (const run of guardRuns) if (!run.passed) checkFailures.push(`guard failed: ${run.rule}`);
++        for (const file of unreported) checkFailures.push(`the diff names ${file}, which filesChanged does not`);
++        const checksPass = checkFailures.length === 0;
 +
 +        const reviewed: ExecutorResult<ReviewVerdict> = await withTimeout<ReviewVerdict>(
 +            control.reviewer.review({
@@ -807,6 +1057,7 @@ index 00000000..a834ef0a
 +                commit: output.commit ?? null,
 +                diff: output.diff,
 +                testResults,
++                guardRuns,
 +                guardViolations,
 +                authorSummary: output.summary,
 +                authorSelfAssessment: output.selfAssessment ?? null,
@@ -821,7 +1072,9 @@ index 00000000..a834ef0a
 +            filesChanged: output.filesChanged,
 +            changeSummary: output.summary,
 +            testResults,
++            guardRuns,
 +            guardViolations,
++            checkFailures,
 +            reviewConclusion: null,
 +            findings: [],
 +            nextAction: "",
@@ -862,27 +1115,41 @@ index 00000000..a834ef0a
 +
 +        if (verdict.conclusion === "approve") {
 +            const disposed = disposeFindings(verdict.findings, canRevise);
-+            if (checksPass && !disposed.some((finding) => finding.disposition === "fix_requested")) {
++            const open = blocking(disposed);
++            if (checksPass && open.length === 0) {
 +                rounds.push({ ...record, reviewConclusion: "approve", findings: disposed, nextAction: verdict.nextAction });
 +                return finish("passed", null, null, verdict.nextAction || "approved on this digest with tests and guards passing");
 +            }
-+            // Two executors agreeing is not a pass. Failing tests or a guard
-+            // violation send the change back, and count a round.
++            // Two executors agreeing is not a pass. Failing checks, or a
++            // reproducible finding named alongside the approval, send the
++            // change back and count a round.
++            const why = [
++                ...checkFailures,
++                ...open.map((finding) => `open finding: ${finding.location}`),
++            ].join("; ");
 +            rounds.push({
 +                ...record,
 +                reviewConclusion: "approve",
 +                findings: disposed,
 +                nextAction: canRevise
-+                    ? "approved, but a required check failed; the author fixes it and the change is re-reviewed"
-+                    : "approved, but a required check failed and no revision remains",
++                    ? `approved, but a required check failed or a finding is open (${why}); the author fixes it and the change is re-reviewed`
++                    : `approved, but a required check failed or a finding is open (${why}) and no revision remains`,
 +            });
 +            if (!canRevise) {
-+                return finish("on_hold", null, "approved_but_checks_failed", "approved by the reviewer, refused by the checks; a person decides");
++                return finish(
++                    "on_hold",
++                    null,
++                    open.length > 0 ? "revisions_exhausted" : "approved_but_checks_failed",
++                    open.length > 0
++                        ? `approved by the reviewer with ${open.length} reproducible finding(s) still open after ${maxRevisions} revision(s); a person decides`
++                        : "approved by the reviewer, refused by the checks; a person decides"
++                );
 +            }
 +            feedback = {
 +                findings: disposed.filter((finding) => finding.disposition === "fix_requested"),
 +                failedTests: testResults.filter((run) => !run.passed),
 +                guardViolations,
++                checkFailures,
 +            };
 +            previousFindings = verdict.findings;
 +            continue;
@@ -893,15 +1160,15 @@ index 00000000..a834ef0a
 +        const actionable = disposed.filter((finding) => finding.disposition === "fix_requested");
 +        const unresolved = disposed.filter((finding) => finding.disposition === "unresolved_on_hold");
 +        if (actionable.length === 0 && unresolved.length === 0 && checksPass) {
-+            // Nothing the reviewer raised rests on evidence, and the checks
-+            // pass: the current version stands, with every finding recorded.
++            // Nothing the reviewer raised comes with a reproduction, and the
++            // checks pass: the current version stands, with every finding recorded.
 +            rounds.push({
 +                ...record,
 +                reviewConclusion: "request_changes",
 +                findings: disposed,
 +                nextAction: "no finding was actionable under the operating defaults; the current version stands",
 +            });
-+            return finish("passed", null, null, "changes were requested on preference or unreproduced judgement only; the current version stands with the findings on record");
++            return finish("passed", null, null, "changes were requested on preference or unreproduced findings only; the current version stands with the findings on record");
 +        }
 +        rounds.push({
 +            ...record,
@@ -916,6 +1183,7 @@ index 00000000..a834ef0a
 +            findings: actionable,
 +            failedTests: testResults.filter((run) => !run.passed),
 +            guardViolations,
++            checkFailures,
 +        };
 +        previousFindings = verdict.findings;
 +    }
@@ -924,10 +1192,136 @@ index 00000000..a834ef0a
 +    return finish("on_hold", null, "revisions_exhausted", "the loop ended without a verdict");
 +}
 +
++// ---------------------------------------------------------------------------
++// A person-driven exchange: packaged rounds and their verdicts, replayed.
++
++/** One round as a person packaged it and, once it exists, the verdict on it. */
++export type PackagedRound = {
++    round: number;
++    diff: string;
++    summary: string;
++    filesChanged: readonly string[];
++    commit: string | null;
++    testResults: readonly TestRun[];
++    /** Every guard rule the packager ran, with its result. */
++    guardRuns: readonly GuardRun[];
++    verdict: ReviewVerdict | null;
++};
++
++export type ReplayStatus = CrossReviewStatus | "awaiting_review" | "awaiting_revision";
++
++export type ReplayedExchange = Omit<ExchangeRecord, "status"> & {
++    status: ReplayStatus;
++    packagedRounds: number;
++    /**
++     * The round at which the control program reached passed, on_hold or
++     * failed, or null while it is still waiting on a verdict or a revision.
++     * A package after this round is not part of the exchange.
++     */
++    concludedAtRound: number | null;
++};
++
++/**
++ * Runs the packaged rounds through `runCrossReview` exactly as a live loop
++ * would have, with the packages standing in for the author and the verdicts
++ * for the reviewer, and reads off where it stopped. The two waiting states
++ * are where the stand-ins had nothing to say -- a package with no verdict
++ * yet, or a verdict the control program answered by asking for a revision
++ * nobody has made -- and everything else is the control program's own
++ * outcome. Nothing is decided here that `runCrossReview` did not decide.
++ */
++export async function replayExchange(input: {
++    task: CrossReviewTask;
++    roles?: RoleAssignment;
++    maxRevisions?: number;
++    digest: (diff: string) => string;
++    rounds: readonly PackagedRound[];
++    now?: () => Date;
++}): Promise<ReplayedExchange> {
++    const roles = input.roles ?? DEFAULT_ROLE_ASSIGNMENT;
++    const rounds = input.rounds;
++    if (rounds.length === 0) throw new Error("nothing to replay: no round is packaged");
++    rounds.forEach((entry, index) => {
++        if (entry.round !== index) throw new Error(`packaged rounds must be contiguous from 0; found round ${entry.round} at position ${index}`);
++    });
++    let current = -1;
++    const author: AuthorExecutor = {
++        id: roles.author,
++        produce: async ({ round }) => {
++            const entry = rounds[round];
++            if (!entry) return { ok: false, failure: "missing_result", detail: `no package for round ${round}` };
++            return { ok: true, value: { diff: entry.diff, summary: entry.summary, filesChanged: entry.filesChanged, commit: entry.commit } };
++        },
++    };
++    const reviewer: ReviewerExecutor = {
++        id: roles.reviewer,
++        review: async ({ round }) => {
++            const verdict = rounds[round]?.verdict ?? null;
++            if (!verdict) return { ok: false, failure: "missing_result", detail: `no verdict for round ${round}` };
++            return { ok: true, value: verdict };
++        },
++    };
++    const outcome = await runCrossReview({
++        task: input.task,
++        roles,
++        author,
++        reviewer,
++        digest: input.digest,
++        maxRevisions: input.maxRevisions,
++        now: input.now,
++        runTests: async () => {
++            current += 1;
++            return rounds[current]?.testResults ?? [];
++        },
++        guards: async () => rounds[current]?.guardRuns ?? [],
++    });
++    const consumed = outcome.exchange.rounds.length;
++    const base: ReplayedExchange = {
++        ...outcome.exchange,
++        packagedRounds: rounds.length,
++        concludedAtRound: consumed - 1,
++    };
++    if (outcome.failure === "reviewer_missing_result" && consumed === rounds.length) {
++        const latest = rounds[rounds.length - 1];
++        const open: RoundRecord = { ...outcome.exchange.rounds[consumed - 1], nextAction: "awaiting the reviewer's verdict" };
++        return {
++            ...base,
++            rounds: [...outcome.exchange.rounds.slice(0, -1), open],
++            status: "awaiting_review",
++            failure: null,
++            concludedAtRound: null,
++            nextAction: `hand the review prompt (round ${latest.round}) to the ${roles.reviewer} reviewer; its verdict must name digest ${open.changeDigest}`,
++        };
++    }
++    if (outcome.failure === "author_missing_result" && consumed === rounds.length + 1) {
++        // The control program asked for the next revision; nobody has made it.
++        const reviewed = outcome.exchange.rounds[consumed - 2];
++        return {
++            ...base,
++            rounds: outcome.exchange.rounds.slice(0, -1),
++            changeDigest: reviewed.changeDigest,
++            commit: reviewed.commit,
++            changeSummary: reviewed.changeSummary,
++            testResults: reviewed.testResults,
++            guardRuns: reviewed.guardRuns,
++            guardViolations: reviewed.guardViolations,
++            checkFailures: reviewed.checkFailures,
++            reviewConclusion: reviewed.reviewConclusion,
++            findings: reviewed.findings,
++            status: "awaiting_revision",
++            failure: null,
++            concludedAtRound: null,
++            nextAction: `${reviewed.nextAction}; package round ${consumed - 1} once the change is revised`,
++        };
++    }
++    return base;
++}
++
 +/**
 + * The text the reviewer is given, in reading order: requirement, criteria,
-+ * the diff, the tests, and only then the author's account of itself. The
-+ * reviewer answers with one JSON document in the `ReviewVerdict` shape.
++ * the diff, the tests and guards, and only then the author's account of
++ * itself. The reviewer answers with one JSON document in the `ReviewVerdict`
++ * shape.
 + */
 +export const renderReviewPrompt = (request: ReviewRequest): string => {
 +    const lines: string[] = [];
@@ -956,6 +1350,14 @@ index 00000000..a834ef0a
 +    for (const run of request.testResults) {
 +        lines.push(`- ${run.passed ? "PASS" : "FAIL"} \`${run.command}\` (${run.durationMs}ms)`);
 +        if (run.output.trim()) lines.push(`  ${run.output.trim().split("\n").join("\n  ")}`);
++    }
++    lines.push("");
++    lines.push("## Guard results (run by the control program)");
++    lines.push("");
++    if (request.guardRuns.length === 0) lines.push("- none run");
++    for (const run of request.guardRuns) {
++        lines.push(`- ${run.passed ? "PASS" : "FAIL"} \`${run.rule}\`${run.durationMs !== undefined ? ` (${run.durationMs}ms)` : ""}`);
++        if (run.detail.trim()) lines.push(`  ${run.detail.trim().split("\n").join("\n  ")}`);
 +    }
 +    if (request.guardViolations.length > 0) {
 +        lines.push("");
@@ -995,7 +1397,7 @@ index 00000000..a834ef0a
 +                        severity: "error | warning | nit",
 +                        basis: "evidence | preference | judgement",
 +                        claim: "what is wrong, in one sentence",
-+                        reproduction: "how to see it (required for a judgement to be acted on)",
++                        reproduction: "how to see it: a command, or an input and its expected output (required for the finding to be acted on)",
 +                    },
 +                ],
 +                nextAction: "one sentence",
@@ -1006,15 +1408,17 @@ index 00000000..a834ef0a
 +    );
 +    lines.push("```");
 +    lines.push("");
-+    lines.push("`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; a `judgement` without a reproduction is recorded and not acted on.");
++    lines.push(
++        "`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; any other finding is acted on only with a reproduction, and without one it is recorded and the current version stands."
++    );
 +    return `${lines.join("\n")}\n`;
 +};
 diff --git a/lib/crossReviewExecutors.ts b/lib/crossReviewExecutors.ts
 new file mode 100644
-index 00000000..bca57a3d
+index 00000000..f0bf80d5
 --- /dev/null
 +++ b/lib/crossReviewExecutors.ts
-@@ -0,0 +1,309 @@
+@@ -0,0 +1,409 @@
 +/**
 + * Executors for the cross-review loop: scripted mocks for tests and the
 + * offline flow, and command-line shells for Claude Code and Codex that never
@@ -1035,9 +1439,23 @@ index 00000000..bca57a3d
 + * Both are asked for one JSON document on stdout, in the shape the control
 + * program checks (`authorOutputProblems` / `reviewVerdictProblems`). The
 + * prompt says so and the parser tolerates a result printed after streamed
-+ * lines. The flag sets below are recorded as the intended invocation and
-+ * must be checked against the installed tool's `--help` before a live run;
-+ * `CLI_INVOCATIONS` exists so that check is a comparison against one place.
++ * lines. The flag sets below were checked on 2026-09-09 against the installed
++ * tools -- codex-cli 0.146.0 and Claude Code 2.1.261 -- and, for the event
++ * shape, against the `codex` source at tag `rust-v0.146.0`; what each check
++ * covered is written next to the invocation. `CLI_INVOCATIONS` exists so that
++ * check is a comparison against one place, and it is due again whenever
++ * either tool is upgraded.
++ *
++ * ## Why the reviewer ignores the user's configuration
++ *
++ * The sandbox bounds shell commands, not the tools a configuration adds. A
++ * `~/.codex/config.toml` may register MCP servers and plugins that execute
++ * outside the sandbox (an infrastructure CLI, a JavaScript REPL, desktop
++ * control), and `-c mcp_servers={}` merges rather than replaces, so nothing
++ * short of `--ignore-user-config` takes them away. The reviewer therefore
++ * runs with the user layer empty; what a run still needs from configuration
++ * -- the model, or the Windows sandbox backend -- is passed explicitly as an
++ * override from the allow list below and recorded with the command.
 + */
 +
 +import {
@@ -1048,6 +1466,7 @@ index 00000000..bca57a3d
 +    type AuthorExecutor,
 +    type AuthorOutput,
 +    type AuthorRequest,
++    type CrossReviewRole,
 +    type ExecutorResult,
 +    type ReviewerExecutor,
 +    type ReviewRequest,
@@ -1133,18 +1552,32 @@ index 00000000..bca57a3d
 +
 +export type CliInvocation = {
 +    command: string;
-+    /** Arguments before the prompt. The prompt is passed on stdin. */
++    /** Fixed arguments. Per-run configuration overrides, if any, come after them. */
 +    args: readonly string[];
-+    /** What the invocation is for, so a reader can check it against `--help`. */
++    /**
++     * The flag that carries one `key=value` configuration override, for a
++     * tool that has one (`codex -c`). A tool without one refuses overrides.
++     */
++    configFlag?: string;
++    /** The final argument that makes the tool read its prompt from stdin, for a tool that needs one (`codex exec -`). */
++    promptArg?: string;
++    /** What the invocation is for and what was checked, so a reader can compare it with `--help`. */
 +    note: string;
 +};
 +
 +/**
-+ * The intended invocations, one per tool and role. Recorded, not verified:
-+ * `codex` is not installed where this was written, and the Claude Code flags
-+ * were read from `claude --help` of 2.1.266. Check both before a live run.
++ * The intended invocations, one per tool and role.
++ *
++ * Checked 2026-09-09. Claude Code 2.1.261 lists every flag used here in
++ * `claude --help`; neither Claude Code invocation has been run. codex-cli
++ * 0.146.0 lists `--sandbox` on the root command and on `exec`, and `exec`
++ * documents `--json` ("Print events to stdout as JSONL"), `-` ("instructions
++ * are read from stdin"), `--ignore-user-config` and `-c`; `codex exec` sets
++ * the approval policy to `never` in its own source (`exec/src/lib.rs`, "Default
++ * to never ask for approvals in headless mode"), so a command the read-only
++ * sandbox refuses is rejected rather than escalated.
 + */
-+export const CLI_INVOCATIONS: Readonly<Record<"claude" | "codex", Readonly<Record<"author" | "reviewer", CliInvocation>>>> = {
++export const CLI_INVOCATIONS: Readonly<Record<"claude" | "codex", Readonly<Record<CrossReviewRole, CliInvocation>>>> = {
 +    claude: {
 +        author: {
 +            command: "claude",
@@ -1153,24 +1586,80 @@ index 00000000..bca57a3d
 +        },
 +        reviewer: {
 +            command: "claude",
-+            args: ["--print", "--output-format", "json", "--allowedTools", "Read,Grep,Glob"],
-+            note: "Claude Code non-interactive with read-only tools; no write tool is offered.",
++            args: ["--print", "--output-format", "json", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", "--strict-mcp-config"],
++            note:
++                "Claude Code non-interactive with only the read tools built in (`--tools`), pre-approved so nothing prompts " +
++                "(`--allowedTools`), and no MCP server (`--strict-mcp-config` with no `--mcp-config`). Nothing offered can write.",
 +        },
 +    },
 +    codex: {
 +        author: {
 +            command: "codex",
-+            args: ["--sandbox", "workspace-write", "exec", "--json", "-"],
++            args: ["--sandbox", "workspace-write", "exec", "--json"],
++            configFlag: "-c",
++            promptArg: "-",
 +            note:
-+                "Codex non-interactive: prompt on stdin (`-`), `--json` prints JSONL events, the final " +
-+                "agent_message carries the document. `--sandbox` is the root CLI's flag; unverified here.",
++                "Codex non-interactive: prompt on stdin (`-`), `--json` prints JSONL events, the final agent_message " +
++                "carries the document. Writes are confined to the working directory by the sandbox.",
 +        },
 +        reviewer: {
 +            command: "codex",
-+            args: ["--sandbox", "read-only", "exec", "--json", "-"],
-+            note: "Codex non-interactive in the read-only sandbox; it cannot write to the change.",
++            args: ["--sandbox", "read-only", "exec", "--ignore-user-config", "--json"],
++            configFlag: "-c",
++            promptArg: "-",
++            note:
++                "Codex non-interactive in the read-only sandbox with the user's config.toml ignored: no MCP server, plugin " +
++                "or hook from the user's setup, since those run outside the sandbox; the stored login is still used. " +
++                "What a run needs from configuration is passed as `-c` overrides from REVIEWER_CONFIG_OVERRIDE_KEYS.",
 +        },
 +    },
++};
++
++/**
++ * Configuration keys a reviewer run may override. Anything that would widen
++ * what the reviewer can do -- the sandbox mode, approvals, MCP servers,
++ * plugins, features, the shell environment policy -- is absent, so it cannot
++ * be passed. `windows.sandbox` is here because with the user layer ignored
++ * the Windows backend is otherwise unset, and unset means commands are
++ * rejected (`codex` refuses to run unsandboxed), not that they run free.
++ */
++export const REVIEWER_CONFIG_OVERRIDE_KEYS: readonly string[] = [
++    "model",
++    "model_reasoning_effort",
++    "windows.sandbox",
++    "windows.sandbox_private_desktop",
++];
++
++export type CliCommandLine = { ok: true; args: readonly string[] } | { ok: false; detail: string };
++
++/**
++ * The full argument list for one run: the fixed arguments, then one
++ * `configFlag key=value` per override, then the stdin marker. Overrides are
++ * refused for a tool without a config flag, when malformed, and -- when an
++ * allow list is given -- for any key outside it.
++ */
++export const cliCommandLine = (
++    invocation: CliInvocation,
++    configOverrides: readonly string[] = [],
++    allowedKeys: readonly string[] | null = null
++): CliCommandLine => {
++    if (configOverrides.length > 0 && !invocation.configFlag) {
++        return { ok: false, detail: `${invocation.command} takes no configuration override; got ${configOverrides.join(", ")}` };
++    }
++    const overrideArgs: string[] = [];
++    for (const override of configOverrides) {
++        const separator = override.indexOf("=");
++        const key = separator === -1 ? "" : override.slice(0, separator).trim();
++        if (key === "") return { ok: false, detail: `a configuration override must be key=value; got \`${override}\`` };
++        if (allowedKeys && !allowedKeys.includes(key)) {
++            return {
++                ok: false,
++                detail: `configuration override \`${key}\` is not allowed for this role; allowed: ${allowedKeys.join(", ")}`,
++            };
++        }
++        overrideArgs.push(invocation.configFlag as string, override);
++    }
++    return { ok: true, args: [...invocation.args, ...overrideArgs, ...(invocation.promptArg ? [invocation.promptArg] : [])] };
 +};
 +
 +export type CliExecutorOptions = {
@@ -1182,26 +1671,35 @@ index 00000000..bca57a3d
 +    /** Required for `live`; ignored -- never called -- in `dry-run`. */
 +    spawn?: Spawner;
 +    env?: Record<string, string | undefined>;
++    /** `key=value` configuration overrides, each passed with the invocation's `configFlag`. */
++    configOverrides?: readonly string[];
 +};
 +
-+const notExecuted = <T>(mode: string, invocation: CliInvocation): ExecutorResult<T> => ({
++const notExecuted = <T>(mode: string, command: string, args: readonly string[]): ExecutorResult<T> => ({
 +    ok: false,
 +    failure: "not_executed",
-+    detail: `${mode}: would run \`${[invocation.command, ...invocation.args].join(" ")}\` with the prompt on stdin`,
++    detail: `${mode}: would run \`${[command, ...args].join(" ")}\` with the prompt on stdin`,
 +});
 +
 +const runCli = async <T>(
 +    options: CliExecutorOptions,
++    role: CrossReviewRole,
 +    prompt: string,
 +    problemsOf: (value: unknown) => readonly string[]
 +): Promise<ExecutorResult<T>> => {
-+    if (options.mode === "dry-run") return notExecuted<T>("dry-run", options.invocation);
++    const line = cliCommandLine(
++        options.invocation,
++        options.configOverrides ?? [],
++        role === "reviewer" ? REVIEWER_CONFIG_OVERRIDE_KEYS : null
++    );
++    if (!line.ok) return { ok: false, failure: "execution_failed", detail: line.detail };
++    if (options.mode === "dry-run") return notExecuted<T>("dry-run", options.invocation.command, line.args);
 +    if (!options.spawn) {
 +        return { ok: false, failure: "execution_failed", detail: "live mode with no spawner; nothing was run" };
 +    }
 +    let result: SpawnResult;
 +    try {
-+        result = await options.spawn(options.invocation.command, options.invocation.args, {
++        result = await options.spawn(options.invocation.command, line.args, {
 +            input: prompt,
 +            cwd: options.cwd,
 +            timeoutMs: options.timeoutMs,
@@ -1223,11 +1721,14 @@ index 00000000..bca57a3d
 +};
 +
 +/**
-+ * Codex's `exec --json` prints one event per line and the model's final
-+ * message as an `agent_message` item. That text is the document asked for.
-+ * Read against `codex-rs/exec/src/cli.rs` (`--json`: "Print events to stdout
-+ * as JSONL"); the event shape is not verified against an installed binary,
-+ * and output that does not look like it is returned untouched.
++ * Codex's `exec --json` prints one event per line; the model's final message
++ * arrives as `{"type":"item.completed","item":{"id":…,"type":"agent_message",
++ * "text":…}}` (`codex-rs/exec/src/exec_events.rs` at tag `rust-v0.146.0`:
++ * `ThreadEvent` tagged by `type`, `ThreadItem` flattening `ThreadItemDetails`
++ * tagged by `type`, `AgentMessageItem { text }`). That text is the document
++ * asked for; the last such message wins. The older `{"msg":{"type":
++ * "agent_message","message":…}}` shape is read too. Output that is not JSONL
++ * is returned untouched for the parser to judge.
 + */
 +export const unwrapCodexJsonl = (stdout: string): string => {
 +    const lines = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -1291,6 +1792,9 @@ index 00000000..bca57a3d
 +        }
 +        for (const run of request.feedback.failedTests) lines.push(`- FAILED \`${run.command}\`: ${run.output.trim().slice(0, 300)}`);
 +        for (const violation of request.feedback.guardViolations) lines.push(`- guard: ${violation}`);
++        for (const failure of request.feedback.checkFailures) {
++            if (!failure.startsWith("test failed:") && !failure.startsWith("guard:")) lines.push(`- check: ${failure}`);
++        }
 +    }
 +    lines.push("");
 +    lines.push("## Answer format");
@@ -1317,19 +1821,19 @@ index 00000000..bca57a3d
 +
 +export const cliAuthor = (options: CliExecutorOptions): AuthorExecutor => ({
 +    id: options.id,
-+    produce: (request) => runCli<AuthorOutput>(options, renderAuthorPrompt(request), authorOutputProblems),
++    produce: (request) => runCli<AuthorOutput>(options, "author", renderAuthorPrompt(request), authorOutputProblems),
 +});
 +
 +export const cliReviewer = (options: CliExecutorOptions): ReviewerExecutor => ({
 +    id: options.id,
-+    review: (request) => runCli<ReviewVerdict>(options, renderReviewPrompt(request), reviewVerdictProblems),
++    review: (request) => runCli<ReviewVerdict>(options, "reviewer", renderReviewPrompt(request), reviewVerdictProblems),
 +});
 diff --git a/lib/routerFullCatalogDiagnostic.ts b/lib/routerFullCatalogDiagnostic.ts
 new file mode 100644
-index 00000000..84949103
+index 00000000..218bae11
 --- /dev/null
 +++ b/lib/routerFullCatalogDiagnostic.ts
-@@ -0,0 +1,814 @@
+@@ -0,0 +1,995 @@
 +/**
 + * What the Router would do with the whole catalogue, item by item, offline.
 + *
@@ -1403,12 +1907,12 @@ index 00000000..84949103
 +    type RouterTieBreakSignals,
 +} from "@/lib/routerScorePolicy";
 +import { selectRouterModel, type SelectionReason } from "@/lib/routerSelection";
-+import { MAX_MODEL_FALLBACKS } from "@/lib/routingFallbackPolicy";
++import { decideFallback, MAX_MODEL_FALLBACKS, type FallbackDecision } from "@/lib/routingFallbackPolicy";
 +import type { TaskKind, TaskProfile } from "@/lib/taskProfileCore";
 +import type { WebSearchBackendReadiness } from "@/lib/webSearchBackends";
 +
 +/** Bump with any change to the shape of the report or how a row is derived. */
-+export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v1";
++export const ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION = "router-full-catalog-diagnostic-v2";
 +
 +/** One request to diagnose. The shape `EvalSetItem` already has, and no more. */
 +export type DiagnosticItem = {
@@ -1461,6 +1965,65 @@ index 00000000..84949103
 +    | "no_evidence"
 +    /** An approved record moved this cell off neutral. */
 +    | "approved_evidence";
++
++/**
++ * The failure the fallback question is asked about. `decideFallback` decides
++ * on what happened to the primary, and offline nothing has happened, so the
++ * diagnostic asks the one question the fallback path exists for: the primary
++ * failed at the provider before any token was shown, with none of §7's
++ * excluded answers. Every other failure shape terminates by policy, and a
++ * report that picked one of those would be reporting that fallback is
++ * refused, which is true and useless.
++ */
++export const FALLBACK_FAILURE_HYPOTHESIS = {
++    outcome: "failed_pre_token",
++    failureLayer: "provider",
++    providerRefusal: null,
++    visibleTokenEmitted: false,
++    passThroughUsed: false,
++    rerouteCount: 0,
++} as const;
++
++/** `decideFallback`'s own answer under the hypothesis, recorded as given. */
++export type FallbackDecisionRecord = {
++    version: string;
++    action: FallbackDecision["action"];
++    modelId: string | null;
++    reason: string | null;
++};
++
++/**
++ * Whether a turn could reach a fallback, as far as can be decided offline,
++ * in the product's own order (`app/api/chat/route.ts`, `attemptFallback`):
++ * the gate (`autoFallbackScope`), then `decideFallback` under the stated
++ * hypothesis, then the one candidate it names fitted under dispatch's cap
++ * the way `planAttemptExecution` fits it. `refusal` names the step that
++ * said no: `gate:<reason>`, `decision:<reason>`, or
++ * `candidate_context_window_exceeded`.
++ *
++ * `planAttemptExecution` itself is not called: it builds the provider client
++ * and the credit budget for a real dispatch, which an offline report has no
++ * account, credentials or reservation for. Its refusals that depend on
++ * those, and the two runtime checks the route makes around it, are listed
++ * in `undecidedOffline` on every reachable answer, so `reachable: true`
++ * reads as "nothing decidable offline refused it" and not as a promise.
++ */
++export type FallbackReachability =
++    | {
++          reachable: true;
++          modelId: string;
++          dispatchFit: "fitted" | "unbounded";
++          dispatchOutputTokens: number | null;
++          undecidedOffline: readonly string[];
++      }
++    | { reachable: false; refusal: string };
++
++export const FALLBACK_UNDECIDED_OFFLINE: readonly string[] = [
++    "search_path_unavailable: planAttemptExecution refuses a candidate that cannot search when the primary's turn had a search path; the request's web-search mode is not an input here",
++    "budget_refused: createChatBudget and reserveTurnSearchCost need the account's credits and the provider budget",
++    "candidate_unavailable: the runtime registry row's enabled and catalogDeleted state; this report reads the catalogue passed in",
++    "no_provider_hold: the primary's provider reservation for this turn",
++];
 +
 +export type ModelDisposition = {
 +    modelId: string;
@@ -1561,14 +2124,40 @@ index 00000000..84949103
 +        scopeAsDeployed: FallbackScope;
 +        scopeIfFlagOn: FallbackScope;
 +        /**
-+         * The candidate dispatch would try first, re-fitted under its own cap
-+         * the way `planAttemptExecution` will. Null when there is none.
++         * The candidate `decideFallback` would name -- the first ranked one --
++         * re-fitted under dispatch's own cap the way `planAttemptExecution`
++         * will. Null when there is none. Whether a turn could reach it is the
++         * next two fields' question, not this one's: a candidate the gate
++         * refuses, or one dispatch cannot fit, is still listed here.
 +         */
-+        firstExecutable: {
++        firstCandidate: {
 +            modelId: string;
 +            dispatchFit: "fitted" | "unbounded" | "exceeded";
 +            dispatchOutputTokens: number | null;
 +        } | null;
++        /**
++         * `decideFallback`'s own answer, called with the product's function
++         * under `FALLBACK_FAILURE_HYPOTHESIS` and the Router's ranked
++         * candidates. The product tries the one candidate it names and no
++         * other (`MAX_MODEL_FALLBACKS`).
++         */
++        decision: FallbackDecisionRecord;
++        /**
++         * Whether a turn could reach a fallback as deployed, as far as can be
++         * decided offline: gate, decision, dispatch fit, in the product's
++         * order. A refusal at any step is the turn ending on the primary's
++         * failure, and `refusal` names the step.
++         */
++        reachableAsDeployed: FallbackReachability;
++        /** The same question with `AUTO_ROUTER_FALLBACK_ENABLED` turned on. */
++        reachableIfFlagOn: FallbackReachability;
++        /**
++         * What the product decides at runtime that this cannot: the
++         * hypothesis the decision was asked under, and the refusals only a
++         * real dispatch can raise. Stated so the two answers above are read
++         * as necessary conditions, not a promise.
++         */
++        notModelled: readonly string[];
 +    };
 +    caps: CapReconciliation;
 +    evidence: {
@@ -1594,7 +2183,8 @@ index 00000000..84949103
 +        | "decided_by_tie_break"
 +        | "web_search_capability_gap"
 +        | "output_cap_mismatch"
-+        | "pairwise_inversion";
++        | "pairwise_inversion"
++        | "fallback_candidate_does_not_fit";
 +    modelIds: readonly string[];
 +    taskKinds: readonly TaskKind[];
 +    itemCount: number;
@@ -1632,6 +2222,10 @@ index 00000000..84949103
 +        consistencyProblems: number;
 +        pairwiseInversions: number;
 +        fallbackScopeAsDeployed: Readonly<Record<string, number>>;
++        /** Items by `reachable` or by the refusal that stopped them, as deployed. */
++        fallbackReachableAsDeployed: Readonly<Record<string, number>>;
++        /** The same with the flag on. */
++        fallbackReachableIfFlagOn: Readonly<Record<string, number>>;
 +    };
 +    improvementCandidates: readonly ImprovementCandidate[];
 +    /** Anything that stops this report being read as the product's answer. */
@@ -1652,6 +2246,60 @@ index 00000000..84949103
 +
 +const sameList = (left: readonly string[], right: readonly string[]) =>
 +    left.length === right.length && left.every((value, index) => value === right[index]);
++
++/** `decideFallback`, asked the product's question under the stated hypothesis. */
++export const fallbackDecisionFor = (primaryModelId: string, rankedCandidateModelIds: readonly string[]): FallbackDecisionRecord => {
++    const decision = decideFallback({
++        attempt: {
++            modelId: primaryModelId,
++            outcome: FALLBACK_FAILURE_HYPOTHESIS.outcome,
++            failureLayer: FALLBACK_FAILURE_HYPOTHESIS.failureLayer,
++            providerRefusal: FALLBACK_FAILURE_HYPOTHESIS.providerRefusal,
++        },
++        run: {
++            passThroughUsed: FALLBACK_FAILURE_HYPOTHESIS.passThroughUsed,
++            rerouteCount: FALLBACK_FAILURE_HYPOTHESIS.rerouteCount,
++            visibleTokenEmitted: FALLBACK_FAILURE_HYPOTHESIS.visibleTokenEmitted,
++        },
++        nextCandidateModelIds: rankedCandidateModelIds,
++    });
++    return {
++        version: decision.version,
++        action: decision.action,
++        modelId: decision.action === "terminate" ? null : decision.modelId,
++        reason: decision.action === "terminate" ? decision.reason : null,
++    };
++};
++
++/**
++ * Whether a turn could reach a fallback, in the product's own order
++ * (`app/api/chat/route.ts`, `attemptFallback`): the gate first, then the
++ * decision, then dispatch fitting the one candidate the decision names.
++ * `candidate` is that candidate as dispatch would fit it, or null when the
++ * decision named none. The refusals only a real dispatch can raise are
++ * carried on every reachable answer.
++ */
++export const fallbackReachabilityFor = (
++    scope: FallbackScope,
++    decision: FallbackDecisionRecord,
++    candidate: ItemDiagnostic["fallback"]["firstCandidate"]
++): FallbackReachability => {
++    if (!scope.allowed) return { reachable: false, refusal: `gate:${scope.reason}` };
++    if (decision.action !== "fallback") return { reachable: false, refusal: `decision:${decision.reason ?? decision.action}` };
++    if (!candidate || candidate.modelId !== decision.modelId) {
++        return { reachable: false, refusal: `decision:${decision.modelId} is not the candidate dispatch was asked to fit` };
++    }
++    if (candidate.dispatchFit === "exceeded") {
++        return { reachable: false, refusal: "candidate_context_window_exceeded" };
++    }
++    return {
++        reachable: true,
++        modelId: candidate.modelId,
++        dispatchFit: candidate.dispatchFit,
++        dispatchOutputTokens: candidate.dispatchOutputTokens,
++        undecidedOffline: FALLBACK_UNDECIDED_OFFLINE,
++    };
++};
 +
 +const diagnoseItem = (item: DiagnosticItem, input: DiagnosticInput, requestOutputCapTokens: number): ItemDiagnostic => {
 +    const reservedInputTokens = Math.max(1, Math.ceil(Buffer.byteLength(item.prompt, "utf8") / 4));
@@ -1840,8 +2488,21 @@ index 00000000..84949103
 +        ...scopeInput,
 +        environment: { ...(input.fallbackEnvironment ?? {}), AUTO_ROUTER_FALLBACK_ENABLED: "on" },
 +    });
-+    const firstFallback = fallbackCandidateModelIds[0] ?? null;
++    // The product's own decision function, asked under the stated hypothesis
++    // with the Router's ranked candidates. Dispatch is then asked to fit the
++    // one candidate it names (or, when it names none, the one the Router
++    // ranked next, so the report still shows what was there).
++    const fallbackDecision = fallbackDecisionFor(primaryModelId ?? "(no primary)", fallbackCandidateModelIds);
++    const firstFallback = fallbackDecision.modelId ?? fallbackCandidateModelIds[0] ?? null;
 +    const firstFallbackFit = firstFallback ? dispatchFitFor(firstFallback) : null;
++    const firstCandidate =
++        firstFallback && firstFallbackFit
++            ? {
++                  modelId: firstFallback,
++                  dispatchFit: firstFallbackFit.fit,
++                  dispatchOutputTokens: firstFallbackFit.outputTokens,
++              }
++            : null;
 +
 +    const eligibleIds = candidates.eligible.map((candidate) => candidate.modelId);
 +    const eligibleWithEvidence = eligibleIds.filter(
@@ -1878,14 +2539,14 @@ index 00000000..84949103
 +            maxModelFallbacks: MAX_MODEL_FALLBACKS,
 +            scopeAsDeployed,
 +            scopeIfFlagOn,
-+            firstExecutable:
-+                firstFallback && firstFallbackFit
-+                    ? {
-+                          modelId: firstFallback,
-+                          dispatchFit: firstFallbackFit.fit,
-+                          dispatchOutputTokens: firstFallbackFit.outputTokens,
-+                      }
-+                    : null,
++            firstCandidate,
++            decision: fallbackDecision,
++            reachableAsDeployed: fallbackReachabilityFor(scopeAsDeployed, fallbackDecision, firstCandidate),
++            reachableIfFlagOn: fallbackReachabilityFor(scopeIfFlagOn, fallbackDecision, firstCandidate),
++            notModelled: [
++                `the decision is asked under one hypothesis: the primary failed ${FALLBACK_FAILURE_HYPOTHESIS.outcome} at the ${FALLBACK_FAILURE_HYPOTHESIS.failureLayer} layer with no provider refusal and no visible token; any other failure shape terminates by policy`,
++                ...FALLBACK_UNDECIDED_OFFLINE,
++            ],
 +        },
 +        caps,
 +        evidence: {
@@ -1975,6 +2636,9 @@ index 00000000..84949103
 +    const fallbackScopeAsDeployed = count(
 +        items.map((item) => (item.fallback.scopeAsDeployed.allowed ? "allowed" : item.fallback.scopeAsDeployed.reason))
 +    );
++    const reachableKey = (answer: FallbackReachability) => (answer.reachable ? "reachable" : answer.refusal);
++    const fallbackReachableAsDeployed = count(items.map((item) => reachableKey(item.fallback.reachableAsDeployed)));
++    const fallbackReachableIfFlagOn = count(items.map((item) => reachableKey(item.fallback.reachableIfFlagOn)));
 +
 +    const improvementCandidates: ImprovementCandidate[] = [];
 +    const undeclared = input.models
@@ -2104,6 +2768,25 @@ index 00000000..84949103
 +        });
 +    }
 +
++    const doesNotFit = items.filter(
++        (item) =>
++            !item.fallback.reachableIfFlagOn.reachable &&
++            item.fallback.reachableIfFlagOn.refusal === "candidate_context_window_exceeded"
++    );
++    if (doesNotFit.length > 0) {
++        improvementCandidates.push({
++            kind: "fallback_candidate_does_not_fit",
++            modelIds: [...new Set(doesNotFit.flatMap((item) => item.fallback.firstCandidate?.modelId ?? []))].sort(),
++            taskKinds: [...new Set(doesNotFit.map((item) => item.profile.rankingKind))].sort(),
++            itemCount: doesNotFit.length,
++            detail:
++                "named as the fallback candidate by the Router, which fitted it with the raw input estimate, and " +
++                "refused by dispatch, which reserves the widened one; with the flag on the turn would end on the " +
++                "primary's failure. The candidate list was decided under one reservation and the attempt under " +
++                "another.",
++        });
++    }
++
 +    return {
 +        version: ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION,
 +        routerVersions: versionOf(),
@@ -2135,6 +2818,8 @@ index 00000000..84949103
 +            consistencyProblems,
 +            pairwiseInversions,
 +            fallbackScopeAsDeployed,
++            fallbackReachableAsDeployed,
++            fallbackReachableIfFlagOn,
 +        },
 +        improvementCandidates,
 +        problems,
@@ -2161,98 +2846,235 @@ index f82fc3b7..3f2caab5 100644
      "@ai-sdk/anthropic": "^4.0.49",
 diff --git a/scripts/cross-review.mjs b/scripts/cross-review.mjs
 new file mode 100644
-index 00000000..1cd93407
+index 00000000..602e73d9
 --- /dev/null
 +++ b/scripts/cross-review.mjs
-@@ -0,0 +1,253 @@
-+// Runs the author–reviewer exchange for one task, or packages a change for an
-+// independent reviewer to read.
+@@ -0,0 +1,668 @@
++// Runs the author–reviewer exchange for one task, packages a change for an
++// independent reviewer to read, or runs only the reviewer on such a package.
 +//
 +// Modes:
 +//   --mode=mock     scripted executors from --fixture; the whole loop, offline.
 +//   --mode=dry-run  the command-line executors are built and never run; the
 +//                   outcome is `failed` with `author_not_executed`, and the
 +//                   record shows the exact commands that would have run.
-+//   --mode=package  no executor at all: takes the diff of --base..HEAD (or
-+//                   the worktree), computes the digest, runs --test-command if
-+//                   given, and writes the exchange record and the reviewer
-+//                   prompt for a person to hand to the reviewer. Generated
-+//                   files can be left out of the diff with --diff-exclude=.
-+//   --mode=live     runs the command-line executors. Refused unless
-+//                   --i-have-authorised-live-execution is also given, because
-+//                   a live run spends and edits.
++//   --mode=package  no executor at all: takes the diff of the task's base
++//                   commit (or --base) against HEAD or the worktree as round
++//                   --round (default: the next round), computes the digest,
++//                   runs --test-command and every --guard-command, and writes
++//                   the package for that round plus the reviewer prompt.
++//   --mode=review   runs only the reviewer, on the package of --round
++//                   (default: the latest packaged round). The prompt is rebuilt
++//                   from the stored package, the verdict is written as
++//                   verdict-round<N>.json, and exchange.json becomes the
++//                   control program's replay of every round so far. Refused
++//                   unless --i-have-authorised-live-execution is given; without
++//                   it the reviewer is built in dry-run and the exact command
++//                   is shown.
++//   --mode=live     runs both command-line executors in the loop. Refused
++//                   unless --i-have-authorised-live-execution is also given,
++//                   because a live run spends and edits. The diff of record is
++//                   the working tree's diff against the base after the author
++//                   ran -- not the diff the author returned, which is recorded
++//                   only as its claim -- so the digest, the scope check and
++//                   the reviewer all read the change that exists.
++//
++// What the package refuses, so a record can be trusted:
++//   - a change outside the task's writableScope anywhere in the tree -- a
++//     tracked file changed against the base, or an untracked file -- not just
++//     in the scoped diff. The diff is scoped so a reviewer reads the change;
++//     the scope check is not, so nothing hides behind the scoping.
++//   - an untracked file the diff would not show, unless it lies under a
++//     --diff-exclude path (a declared generated file; the package's own
++//     outputs are such files).
++//   - a --diff-exclude path that is not one of the task's `generatedPaths`
++//     or the package's own --out directory. What the reviewer does not see is
++//     fixed before the exchange, not chosen by the author at packaging time;
++//     an excluded file still counts as changed, and its content digest is
++//     recorded in the package and checked again at review time.
++//   - round N > 0 unless the control program's replay of rounds 0..N-1 is
++//     `awaiting_revision`. After `passed`, `on_hold` or `failed` the exchange
++//     has concluded; a further change is a new task or a new --out.
++//   - a second verdict on a round that has one. A new digest needs a new
++//     package and a new review.
++//   - a review of a package the working tree does not match: the tree's diff
++//     against the base, scoped and excluded as the package was, must digest
++//     to the package's digest, and every excluded file must still digest to
++//     what the package recorded.
++//
++// Codex executors:
++//   --codex-config=<key=value>  repeatable; passed as `-c key=value`. A
++//                   reviewer accepts only REVIEWER_CONFIG_OVERRIDE_KEYS. Give
++//                   the value without quotes (`model=gpt-5.6-sol`): codex keeps
++//                   a value that is not TOML as a literal string, and the
++//                   Windows spawner refuses quotes.
++//   --codex-auth=login|env      default `login`: OPENAI_API_KEY and
++//                   CODEX_API_KEY are dropped from the child environment so
++//                   codex uses its stored login; `env` leaves them in place.
++//
++// Checks the control program applies (lib/crossReviewCore.ts): a pass needs at
++// least one passing test run and at least one guard rule run with every rule
++// passing. Nothing run is a failed check.
++//   --test-command=<sh>   the test run, once per round; exit status decides.
++//   --guard-command=<sh>  repeatable; each is a guard rule, recorded with its
++//                         result; a non-zero exit is a failed rule.
++// In live mode a guard rule also compares the working tree with what the
++// author reported (an untracked file the diff cannot show fails it).
++//
++// --max-revisions may lower the fixed cap (MAX_REVISIONS, 2) for a run and
++// cannot raise it.
 +//
 +// Usage:
 +//   node --import tsx scripts/cross-review.mjs --task=<task.json> --mode=mock \
 +//     --fixture=<fixture.json> --out=<dir> [--author=claude] [--reviewer=codex] \
-+//     [--max-revisions=2] [--test-command="npm test -- x"]
++//     [--max-revisions=2] [--test-command="npm test -- x"] [--timeout-ms=600000]
 +//
-+// task.json: { taskId, requirement, completionCriteria[], baseCommit, writableScope[] }
-+// fixture.json (mock): { author: AuthorOutput[] , reviewer: ReviewVerdict[] , tests?: TestRun[][] }
++// task.json: { taskId, requirement, completionCriteria[], baseCommit, writableScope[], generatedPaths?[] }
++// fixture.json (mock): { author: AuthorOutput[], reviewer: ReviewVerdict[], tests?: TestRun[][], guards?: GuardRun[][] }
 +//   A reviewer entry may carry reviewedDigest "@current" to mean the digest
 +//   of the change it is shown; anything else is compared literally.
 +//
-+// Nothing here pushes, merges, or dispatches a workflow. A test command runs
-+// locally, once per round, and its exit status is the test result.
++// Package layout under --out:
++//   package-round<N>.json     the change of round N: digest, commit, summary,
++//                             files, test and guard results, the whole-tree
++//                             file list the scope check read, the excluded
++//                             paths with their content digests, and the diff
++//                             itself (kept inside JSON so line-ending
++//                             conversion on checkout cannot alter what is
++//                             digested)
++//   change-round<N>.diff      the same diff, for a person
++//   verdict-round<N>.json     the reviewer's verdict on round N, with the exact
++//                             command that produced it
++//   review-round<N>.events.jsonl  the reviewer's raw output
++//   review-prompt.md, change.diff  the latest round, for a person
++//   exchange.json             the record: the control program's replay
++//
++// exchange.json carries the control program's statuses -- passed, on_hold,
++// failed -- and two that only a person-driven exchange has: awaiting_review
++// (a package with no verdict yet) and awaiting_revision (actionable findings
++// or failed checks, and a revision remains). Both are read off where the
++// replay through runCrossReview stopped (lib/crossReviewCore.ts,
++// replayExchange), never decided here.
++//
++// Nothing here pushes, merges, or dispatches a workflow.
 +
 +import { createHash } from "node:crypto";
 +import { execFileSync, spawn as nodeSpawn } from "node:child_process";
-+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
++import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 +import { join } from "node:path";
 +
 +import {
-+  DEFAULT_MAX_REVISIONS,
++  MAX_REVISIONS,
 +  renderReviewPrompt,
++  replayExchange,
++  resolveMaxRevisions,
 +  runCrossReview,
 +} from "../lib/crossReviewCore.ts";
 +import {
 +  CLI_INVOCATIONS,
++  REVIEWER_CONFIG_OVERRIDE_KEYS,
 +  cliAuthor,
++  cliCommandLine,
 +  cliReviewer,
 +  mockAuthor,
 +  mockReviewer,
 +} from "../lib/crossReviewExecutors.ts";
 +
++const argv = process.argv.slice(2);
 +const args = new Map(
-+  process.argv.slice(2).map((arg) => {
++  argv.map((arg) => {
 +    const [key, ...rest] = arg.replace(/^--/, "").split("=");
 +    return [key, rest.length > 0 ? rest.join("=") : "true"];
 +  })
 +);
 +const flag = (name, fallback) => args.get(name) ?? fallback;
++const repeated = (name) => argv.filter((arg) => arg.startsWith(`--${name}=`)).map((arg) => arg.slice(name.length + 3));
 +const die = (message) => {
 +  console.error(message);
 +  process.exit(1);
 +};
 +
 +const mode = flag("mode", "mock");
-+if (!["mock", "dry-run", "package", "live"].includes(mode)) die("--mode must be mock, dry-run, package or live.");
++if (!["mock", "dry-run", "package", "review", "live"].includes(mode)) die("--mode must be mock, dry-run, package, review or live.");
 +const taskPath = flag("task");
 +if (!taskPath) die("--task=<task.json> is required.");
 +const task = JSON.parse(readFileSync(taskPath, "utf8"));
 +for (const field of ["taskId", "requirement", "completionCriteria", "baseCommit", "writableScope"]) {
 +  if (task[field] === undefined) die(`${taskPath} has no ${field}.`);
 +}
++const generatedPaths = task.generatedPaths ?? [];
 +const outDir = flag("out", `artifacts/cross-review/${task.taskId}`);
-+const maxRevisions = Number.parseInt(flag("max-revisions", String(DEFAULT_MAX_REVISIONS)), 10);
-+if (!Number.isInteger(maxRevisions) || maxRevisions < 0) die("--max-revisions must be a non-negative integer.");
++let maxRevisions;
++try {
++  maxRevisions = resolveMaxRevisions(args.has("max-revisions") ? Number(flag("max-revisions")) : undefined);
++} catch (error) {
++  die(`--max-revisions: ${error.message} (the cap is fixed at ${MAX_REVISIONS}; a run may only lower it).`);
++}
 +const roles = { author: flag("author", "claude"), reviewer: flag("reviewer", "codex") };
 +const testCommand = args.get("test-command") ?? null;
++const guardCommands = repeated("guard-command");
 +const timeoutMs = Number.parseInt(flag("timeout-ms", String(10 * 60 * 1000)), 10);
++if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) die("--timeout-ms must be a positive integer.");
++const authorised = flag("i-have-authorised-live-execution", "false") === "true";
++const codexConfig = repeated("codex-config");
++const codexAuth = flag("codex-auth", "login");
++if (!["login", "env"].includes(codexAuth)) die("--codex-auth must be login or env.");
++// Node drops an environment entry whose value is undefined, so these remove
++// the keys from the child rather than setting them to a string.
++const codexEnv = codexAuth === "login" ? { OPENAI_API_KEY: undefined, CODEX_API_KEY: undefined } : undefined;
 +
 +const digest = (text) => `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
++const digestFile = (path) => `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 +
-+const runTestCommand = () => {
-+  if (!testCommand) return [];
++// ---------------------------------------------------------------------------
++// Commands the control program runs: the test command and the guard commands.
++
++const runCommand = (command) => {
 +  const startedAt = Date.now();
 +  try {
-+    const output = execFileSync("sh", ["-c", testCommand], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-+    return [{ command: testCommand, passed: true, output: output.trim().split("\n").slice(-5).join("\n"), durationMs: Date.now() - startedAt }];
++    const output = execFileSync("sh", ["-c", command], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
++    return { passed: true, output: output.trim().split("\n").slice(-5).join("\n"), durationMs: Date.now() - startedAt };
 +  } catch (error) {
 +    const output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`.trim().split("\n").slice(-10).join("\n");
-+    return [{ command: testCommand, passed: false, output, durationMs: Date.now() - startedAt }];
++    return { passed: false, output, durationMs: Date.now() - startedAt };
 +  }
 +};
++const runTestCommand = () => (testCommand ? [{ command: testCommand, ...runCommand(testCommand) }] : []);
++/** Every --guard-command, run once, as the guard runs the control program records. */
++const runGuardCommands = () =>
++  guardCommands.map((command) => {
++    const run = runCommand(command);
++    return { rule: command, passed: run.passed, detail: run.output.slice(-400), durationMs: run.durationMs };
++  });
++
++// ---------------------------------------------------------------------------
++// The working tree, as git sees it. The scope check reads all of it.
++
++const git = (...gitArgs) => execFileSync("git", gitArgs, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
++const gitLines = (...gitArgs) =>
++  git(...gitArgs)
++    .split("\n")
++    .map((line) => line.trim())
++    .filter(Boolean);
++const under = (file, path) => file === path || file.startsWith(path.endsWith("/") ? path : `${path}/`);
++const inScope = (file) => task.writableScope.length === 0 || task.writableScope.some((scope) => under(file, scope));
++/** Tracked files changed against the base (index and worktree), and every untracked file. */
++const treeChanges = (base) => {
++  const tracked = gitLines("diff", "--name-only", base);
++  const untracked = gitLines("status", "--porcelain", "--untracked-files=all")
++    .filter((line) => line.startsWith("??"))
++    .map((line) => line.slice(2).trim());
++  return { tracked: [...new Set(tracked)].sort(), untracked: [...new Set(untracked)].sort() };
++};
++const scopePathspec = () => (task.writableScope.length > 0 ? task.writableScope : ["."]);
++const scopedDiff = (base, excluded) => git("diff", base, "--", ...scopePathspec(), ...excluded.map((path) => `:(exclude)${path}`));
++/** Content digests of the excluded files that exist, so an exclusion cannot hide a later change. */
++const excludedDigests = (excluded) =>
++  Object.fromEntries(
++    excluded
++      .filter((path) => existsSync(path) && statSync(path).isFile())
++      .map((path) => [path, digestFile(path)])
++  );
 +
 +mkdirSync(outDir, { recursive: true });
 +const write = (name, contents) => {
@@ -2260,126 +3082,402 @@ index 00000000..1cd93407
 +  writeFileSync(path, contents);
 +  console.error(`written ${path}`);
 +};
++const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 +
-+if (mode === "package") {
-+  const base = flag("base", task.baseCommit);
-+  // Generated files can be left out of the reviewed diff with
-+  // --diff-exclude=<path> (repeatable); they still count as files changed.
-+  const excluded = process.argv
-+    .slice(2)
-+    .filter((arg) => arg.startsWith("--diff-exclude="))
-+    .map((arg) => `:(exclude)${arg.slice("--diff-exclude=".length)}`);
-+  const pathspec = [...(task.writableScope.length > 0 ? task.writableScope : ["."]), ...excluded];
-+  const diff = execFileSync("git", ["diff", base, "--", ...pathspec], {
-+    encoding: "utf8",
-+    maxBuffer: 64 * 1024 * 1024,
-+  });
-+  const filesChanged = execFileSync("git", ["diff", "--name-only", base, "--", ...(task.writableScope.length > 0 ? task.writableScope : ["."])], {
-+    encoding: "utf8",
-+  })
-+    .trim()
-+    .split("\n")
-+    .filter(Boolean);
-+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-+  const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim() !== "";
-+  const changeDigest = digest(diff);
-+  const testResults = runTestCommand();
-+  const summary = flag("summary", "(no summary supplied; the diff is the record)");
-+  const request = {
++// ---------------------------------------------------------------------------
++// The package of a round, and the control program's reading of the rounds.
++
++const packageFile = (round) => join(outDir, `package-round${round}.json`);
++const verdictFile = (round) => join(outDir, `verdict-round${round}.json`);
++const packagedRounds = () =>
++  (existsSync(outDir) ? readdirSync(outDir) : [])
++    .map((name) => /^package-round(\d+)\.json$/.exec(name))
++    .filter(Boolean)
++    .map((match) => Number(match[1]))
++    .sort((a, b) => a - b);
++
++const loadRound = (round) => {
++  if (!existsSync(packageFile(round))) die(`no package for round ${round} under ${outDir}.`);
++  const pkg = readJson(packageFile(round));
++  if (typeof pkg.diff !== "string") die(`${packageFile(round)} carries no diff.`);
++  if (digest(pkg.diff) !== pkg.changeDigest) die(`${packageFile(round)}: the diff no longer digests to ${pkg.changeDigest}; the package was altered.`);
++  if (pkg.taskId !== task.taskId) die(`${packageFile(round)} is for task ${pkg.taskId}, not ${task.taskId}.`);
++  const verdict = existsSync(verdictFile(round)) ? readJson(verdictFile(round)).verdict : null;
++  return { round, pkg, verdict };
++};
++
++const loadRounds = (upTo) => {
++  const rounds = [];
++  for (let round = 0; round <= upTo; round += 1) {
++    rounds.push(loadRound(round));
++    if (round < upTo && !rounds[round].verdict) die(`round ${round} has no verdict, so round ${upTo} cannot exist yet.`);
++  }
++  return rounds;
++};
++
++const replay = async (rounds) => {
++  const latest = rounds[rounds.length - 1];
++  const exchange = await replayExchange({
 +    task,
-+    round: 0,
-+    changeDigest,
-+    commit: dirty ? null : commit,
-+    diff,
-+    testResults,
-+    guardViolations: [],
-+    authorSummary: summary,
-+    authorSelfAssessment: null,
-+    previousFindings: [],
-+  };
-+  const exchange = {
-+    version: "cross-review-v1",
-+    taskId: task.taskId,
-+    requirement: task.requirement,
-+    completionCriteria: task.completionCriteria,
-+    baseCommit: base,
 +    roles,
 +    maxRevisions,
-+    rounds: [],
++    digest,
++    rounds: rounds.map((entry) => ({
++      round: entry.round,
++      diff: entry.pkg.diff,
++      summary: entry.pkg.changeSummary,
++      filesChanged: entry.pkg.filesChanged,
++      commit: entry.pkg.commit,
++      testResults: entry.pkg.testResults,
++      guardRuns: entry.pkg.guardRuns ?? [],
++      verdict: entry.verdict,
++    })),
++  });
++  if (exchange.concludedAtRound !== null && exchange.concludedAtRound < rounds.length - 1) {
++    console.error(`note: the control program concluded at round ${exchange.concludedAtRound}; packages after it are not part of the record.`);
++  }
++  return {
++    ...exchange,
++    headCommit: latest.pkg.headCommit,
++    worktreeDirty: latest.pkg.worktreeDirty,
++    filesChanged: latest.pkg.filesChanged,
++  };
++};
++
++/** Why round N cannot be packaged or reviewed now, or null when it can. */
++const refusalToContinue = (state, nextRound) => {
++  if (state.status === "awaiting_revision") return null;
++  if (state.status === "awaiting_review") return `round ${nextRound - 1} awaits its verdict; review it before round ${nextRound}.`;
++  return `the exchange concluded as ${state.status}${state.holdReason ? ` (${state.holdReason})` : ""}${state.failure ? ` (${state.failure})` : ""} at round ${state.concludedAtRound}; a further change is a new task or a new --out.`;
++};
++
++// ---------------------------------------------------------------------------
++// The spawner for live runs, and the command-line executors.
++
++const SAFE_ARG = /^[A-Za-z0-9_.,=:@+\/-]+$/;
++const killTree = (child) => {
++  if (process.platform === "win32") {
++    nodeSpawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
++  } else {
++    child.kill("SIGKILL");
++  }
++};
++let lastSpawn = null;
++const spawner = async (command, cliArgs, options) =>
++  new Promise((resolve) => {
++    // On Windows the tools are npm `.cmd` shims, which Node refuses to spawn
++    // without a shell; a shell gets an argument list it cannot mangle, or
++    // nothing at all.
++    const shell = process.platform === "win32";
++    const unsafe = shell ? cliArgs.filter((arg) => !SAFE_ARG.test(arg)) : [];
++    if (unsafe.length > 0) {
++      resolve({ status: null, stdout: "", stderr: "", error: new Error(`refusing to pass through a shell: ${unsafe.join(" ")}`) });
++      return;
++    }
++    const child = nodeSpawn(command, cliArgs, { cwd: options.cwd, env: { ...process.env, ...(options.env ?? {}) }, shell, windowsHide: true });
++    let stdout = "";
++    let stderr = "";
++    let timedOut = false;
++    const timer = setTimeout(() => {
++      timedOut = true;
++      killTree(child);
++    }, options.timeoutMs);
++    child.stdout.on("data", (chunk) => (stdout += chunk));
++    child.stderr.on("data", (chunk) => (stderr += chunk));
++    child.on("error", (error) => {
++      clearTimeout(timer);
++      lastSpawn = { command, args: cliArgs, stdout, stderr, status: null, timedOut, error: error.message };
++      resolve({ status: null, stdout, stderr, error });
++    });
++    child.on("close", (status) => {
++      clearTimeout(timer);
++      lastSpawn = { command, args: cliArgs, stdout, stderr, status, timedOut, error: null };
++      resolve({ status, stdout, stderr, timedOut });
++    });
++    child.stdin.on("error", () => {
++      // the child closed stdin early; its exit status says what happened
++    });
++    child.stdin.end(options.input);
++  });
++
++const buildCli = (role, id, executorMode) => {
++  const invocation = CLI_INVOCATIONS[id]?.[role];
++  if (!invocation) die(`no command-line invocation is recorded for ${id} as ${role}; known: ${Object.keys(CLI_INVOCATIONS).join(", ")}`);
++  const codex = id === "codex";
++  return {
++    id,
++    invocation,
++    mode: executorMode,
++    cwd: process.cwd(),
++    timeoutMs,
++    spawn: executorMode === "live" ? spawner : undefined,
++    configOverrides: codex ? codexConfig : undefined,
++    env: codex ? codexEnv : undefined,
++  };
++};
++
++/**
++ * In live mode the author changes the tree; the tree is the change. The
++ * diff of record is git's, over the whole tree, so the digest binds what
++ * exists and an out-of-scope edit surfaces as a scope violation. What the
++ * author returned is kept as its claim, next to its self-assessment.
++ */
++const treeBackedAuthor = (executor) => ({
++  id: executor.id,
++  produce: async (request) => {
++    const produced = await executor.produce(request);
++    if (!produced.ok) return produced;
++    const tree = treeChanges(task.baseCommit);
++    const diff = git("diff", task.baseCommit);
++    const claimed = produced.value;
++    const claim = `author-claimed diff digest ${digest(claimed.diff)} over ${claimed.filesChanged.length} file(s); the tree's diff digests to ${digest(diff)}${
++      digest(claimed.diff) === digest(diff) ? " (identical)" : " (DIFFERS)"
++    }`;
++    return {
++      ok: true,
++      value: {
++        diff,
++        summary: claimed.summary,
++        filesChanged: [...tree.tracked, ...tree.untracked],
++        selfAssessment: claimed.selfAssessment ? `${claimed.selfAssessment}\n${claim}` : claim,
++        commit: claimed.commit ?? null,
++      },
++    };
++  },
++});
++
++// ---------------------------------------------------------------------------
++// package: the change of one round, for a reviewer to read.
++
++if (mode === "package") {
++  const packaged = packagedRounds();
++  const round = Number.parseInt(flag("round", String(packaged.length)), 10);
++  if (!Number.isInteger(round) || round < 0) die("--round must be a non-negative integer.");
++  if (existsSync(packageFile(round)) && existsSync(verdictFile(round))) {
++    die(`round ${round} is packaged and reviewed; a revised change is round ${round + 1}.`);
++  }
++  let previous = [];
++  if (round > 0) {
++    previous = loadRounds(round - 1);
++    if (!previous[round - 1].verdict) die(`round ${round - 1} has no verdict yet; review it before packaging round ${round}.`);
++    const refusal = refusalToContinue(await replay(previous), round);
++    if (refusal) die(`refusing to package round ${round}: ${refusal}`);
++  }
++  const base = flag("base", task.baseCommit);
++
++  // What the reviewer does not see was fixed before the exchange: only the
++  // task's generated paths and this package's own outputs may be excluded.
++  const diffExcluded = repeated("diff-exclude");
++  const undeclared = diffExcluded.filter((path) => !generatedPaths.includes(path) && !under(outDir.replace(/\\/g, "/"), path) && !under(path, outDir.replace(/\\/g, "/")));
++  if (undeclared.length > 0) {
++    die(`refusing to package: --diff-exclude names ${undeclared.join(", ")}, which the task's generatedPaths does not declare and which is not the package directory.`);
++  }
++  const isExcluded = (file) => diffExcluded.some((path) => under(file, path));
++
++  // The whole tree, not the scoped diff, decides whether the change stayed
++  // inside the scope. An untracked file the diff would not show is refused
++  // too, unless it lies under a --diff-exclude path.
++  const tree = treeChanges(base);
++  const outside = [...tree.tracked, ...tree.untracked].filter((file) => !inScope(file));
++  if (outside.length > 0) die(`refusing to package: changed outside the writable scope: ${outside.join(", ")}`);
++  const unseen = tree.untracked.filter((file) => !isExcluded(file));
++  if (unseen.length > 0) {
++    die(`refusing to package: untracked file(s) the diff would not show: ${unseen.join(", ")}. Add them, remove them, or declare them with --diff-exclude.`);
++  }
++
++  const diff = scopedDiff(base, diffExcluded);
++  const filesChanged = gitLines("diff", "--name-only", base, "--", ...scopePathspec());
++  const commit = git("rev-parse", "HEAD").trim();
++  const dirty = git("status", "--porcelain").trim() !== "";
++  const changeDigest = digest(diff);
++  const testResults = runTestCommand();
++  const guardRuns = runGuardCommands();
++  const guardViolations = guardRuns.filter((run) => !run.passed).map((run) => `${run.rule}: ${run.detail}`);
++  const summary = flag("summary", "(no summary supplied; the diff is the record)");
++  const pkg = {
++    version: "cross-review-package-v3",
++    taskId: task.taskId,
++    round,
++    baseCommit: base,
 +    changeDigest,
 +    commit: dirty ? null : commit,
 +    headCommit: commit,
 +    worktreeDirty: dirty,
 +    changeSummary: summary,
 +    filesChanged,
++    treeFilesChanged: tree.tracked,
++    diffExcluded,
++    excludedDigests: excludedDigests(diffExcluded.filter((path) => generatedPaths.includes(path))),
 +    testResults,
-+    reviewConclusion: null,
-+    findings: [],
-+    nextAction: `hand review-prompt.md to the ${roles.reviewer} reviewer; its verdict must name digest ${changeDigest}`,
-+    status: "awaiting_review",
-+    failure: null,
-+    holdReason: null,
++    guardCommands,
++    guardRuns,
 +    producedAt: new Date().toISOString(),
++    diff,
 +  };
-+  write("exchange.json", `${JSON.stringify(exchange, null, 2)}\n`);
-+  write("review-prompt.md", renderReviewPrompt(request));
++  write(`package-round${round}.json`, `${JSON.stringify(pkg, null, 2)}\n`);
++  write(`change-round${round}.diff`, diff);
 +  write("change.diff", diff);
-+  console.log(`packaged ${task.taskId}: ${filesChanged.length} file(s), digest ${changeDigest}, ${testResults.length} test command(s)${testResults.every((t) => t.passed) ? "" : " (FAILING)"}`);
++  write(
++    "review-prompt.md",
++    renderReviewPrompt({
++      task,
++      round,
++      changeDigest,
++      commit: pkg.commit,
++      diff,
++      testResults,
++      guardRuns,
++      guardViolations,
++      authorSummary: summary,
++      authorSelfAssessment: null,
++      previousFindings: round > 0 ? previous[round - 1].verdict.findings : [],
++    })
++  );
++  const exchange = await replay([...previous, { round, pkg, verdict: null }]);
++  write("exchange.json", `${JSON.stringify(exchange, null, 2)}\n`);
++  const checks = [...testResults, ...guardRuns];
++  console.log(
++    `packaged ${task.taskId} round ${round}: ${filesChanged.length} file(s), digest ${changeDigest}, ${testResults.length} test command(s), ${guardRuns.length} guard rule(s)${checks.every((t) => t.passed) && checks.length > 0 ? "" : " (CHECKS NOT PASSING)"} — ${exchange.status}`
++  );
 +  process.exit(0);
 +}
 +
++// ---------------------------------------------------------------------------
++// review: only the reviewer, on a packaged round.
++
++if (mode === "review") {
++  const packaged = packagedRounds();
++  if (packaged.length === 0) die(`nothing is packaged under ${outDir}; run --mode=package first.`);
++  const round = Number.parseInt(flag("round", String(packaged[packaged.length - 1])), 10);
++  if (!Number.isInteger(round) || round < 0) die("--round must be a non-negative integer.");
++  const rounds = loadRounds(round);
++  const current = rounds[round];
++  if (current.verdict) die(`${verdictFile(round)} already exists; a new review needs a new package with a new digest.`);
++  if (round > 0) {
++    const refusal = refusalToContinue(await replay(rounds.slice(0, round)), round);
++    if (refusal) die(`refusing to review round ${round}: ${refusal}`);
++  }
++  // The reviewer reads the tree it is run in and is told which change it is
++  // reading. The two have to be the same change: the tree's diff against
++  // the base, scoped and excluded exactly as the package was, must digest to
++  // what the package says, and every excluded file must still be what the
++  // package recorded. (HEAD is not the test -- committing the package files
++  // moves HEAD without changing the change.)
++  const liveDiff = scopedDiff(current.pkg.baseCommit, current.pkg.diffExcluded ?? []);
++  if (digest(liveDiff) !== current.pkg.changeDigest) {
++    die(
++      `the working tree is not the packaged change: its diff against ${current.pkg.baseCommit} digests to ${digest(liveDiff)}, ` +
++        `the package to ${current.pkg.changeDigest}. Check out the packaged change, or package again.`
++    );
++  }
++  for (const [path, recorded] of Object.entries(current.pkg.excludedDigests ?? {})) {
++    const now = existsSync(path) ? digestFile(path) : "(missing)";
++    if (now !== recorded) die(`the excluded file ${path} is not what the package recorded (${now} vs ${recorded}). Package again.`);
++  }
++  const request = {
++    task,
++    round,
++    changeDigest: current.pkg.changeDigest,
++    commit: current.pkg.commit,
++    diff: current.pkg.diff,
++    testResults: current.pkg.testResults,
++    guardRuns: current.pkg.guardRuns ?? [],
++    guardViolations: (current.pkg.guardRuns ?? []).filter((run) => !run.passed).map((run) => `${run.rule}: ${run.detail}`),
++    authorSummary: current.pkg.changeSummary,
++    authorSelfAssessment: null,
++    previousFindings: round > 0 ? rounds[round - 1].verdict.findings : [],
++  };
++  write("review-prompt.md", renderReviewPrompt(request));
++  const options = buildCli("reviewer", roles.reviewer, authorised ? "live" : "dry-run");
++  const line = cliCommandLine(options.invocation, options.configOverrides ?? [], REVIEWER_CONFIG_OVERRIDE_KEYS);
++  if (!line.ok) die(line.detail);
++  console.error(`reviewer command: ${[options.invocation.command, ...line.args].join(" ")} (prompt on stdin, cwd ${options.cwd}, timeout ${timeoutMs}ms, codex auth: ${codexAuth})`);
++  const startedAt = new Date();
++  const result = await cliReviewer(options).review(request);
++  const durationMs = Date.now() - startedAt.getTime();
++  if (lastSpawn) {
++    if (lastSpawn.stdout) write(`review-round${round}.events.jsonl`, lastSpawn.stdout);
++    if (lastSpawn.stderr) write(`review-round${round}.stderr.txt`, lastSpawn.stderr);
++  }
++  if (!result.ok) {
++    if (authorised) {
++      write(
++        `review-round${round}.failure.json`,
++        `${JSON.stringify({ round, reviewer: roles.reviewer, command: [options.invocation.command, ...line.args], startedAt: startedAt.toISOString(), durationMs, failure: result.failure, detail: result.detail }, null, 2)}\n`
++      );
++    }
++    console.log(`${task.taskId} round ${round}: reviewer ${result.failure} — ${result.detail}`);
++    process.exit(2);
++  }
++  write(
++    `verdict-round${round}.json`,
++    `${JSON.stringify(
++      {
++        version: "cross-review-verdict-v1",
++        taskId: task.taskId,
++        round,
++        reviewer: roles.reviewer,
++        command: [options.invocation.command, ...line.args],
++        startedAt: startedAt.toISOString(),
++        durationMs,
++        receivedAt: new Date().toISOString(),
++        verdict: result.value,
++      },
++      null,
++      2
++    )}\n`
++  );
++  current.verdict = result.value;
++  const exchange = await replay(rounds);
++  write("exchange.json", `${JSON.stringify(exchange, null, 2)}\n`);
++  console.log(
++    `${task.taskId} round ${round}: ${result.value.conclusion} with ${result.value.findings.length} finding(s) — ${exchange.status}${exchange.holdReason ? ` (${exchange.holdReason})` : ""}: ${exchange.nextAction}`
++  );
++  process.exit(exchange.status === "passed" ? 0 : 2);
++}
++
++// ---------------------------------------------------------------------------
++// mock, dry-run, live: the whole loop.
++
 +let author;
 +let reviewer;
++let fixtureTests = null;
++let fixtureGuards = null;
++let current = -1;
++let guards;
 +if (mode === "mock") {
 +  const fixturePath = flag("fixture");
 +  if (!fixturePath) die("--fixture=<fixture.json> is required in mock mode.");
 +  const fixture = JSON.parse(readFileSync(fixturePath, "utf8"));
 +  author = mockAuthor(roles.author, (fixture.author ?? []).map((entry) => ("ok" in entry ? entry : { ok: true, value: entry })));
 +  reviewer = mockReviewer(roles.reviewer, (fixture.reviewer ?? []).map((entry) => ("ok" in entry ? entry : { ok: true, value: entry })));
-+  var fixtureTests = fixture.tests ?? null;
++  fixtureTests = fixture.tests ?? null;
++  fixtureGuards = fixture.guards ?? null;
++  guards = async () => [...(fixtureGuards ? fixtureGuards[current] ?? [] : []), ...runGuardCommands()];
 +} else {
-+  if (mode === "live" && flag("i-have-authorised-live-execution", "false") !== "true") {
++  if (mode === "live" && !authorised) {
 +    die("--mode=live runs external tools that edit and spend. Pass --i-have-authorised-live-execution to confirm.");
 +  }
-+  const spawner = async (command, cliArgs, options) =>
-+    new Promise((resolve) => {
-+      const child = nodeSpawn(command, cliArgs, { cwd: options.cwd, env: { ...process.env, ...(options.env ?? {}) } });
-+      let stdout = "";
-+      let stderr = "";
-+      let timedOut = false;
-+      const timer = setTimeout(() => {
-+        timedOut = true;
-+        child.kill("SIGKILL");
-+      }, options.timeoutMs);
-+      child.stdout.on("data", (chunk) => (stdout += chunk));
-+      child.stderr.on("data", (chunk) => (stderr += chunk));
-+      child.on("error", (error) => {
-+        clearTimeout(timer);
-+        resolve({ status: null, stdout, stderr, error });
-+      });
-+      child.on("close", (status) => {
-+        clearTimeout(timer);
-+        resolve({ status, stdout, stderr, timedOut });
-+      });
-+      child.stdin.end(options.input);
-+    });
-+  const build = (role, id) => {
-+    const invocation = CLI_INVOCATIONS[id]?.[role];
-+    if (!invocation) die(`no command-line invocation is recorded for ${id} as ${role}; known: ${Object.keys(CLI_INVOCATIONS).join(", ")}`);
-+    return {
-+      id,
-+      invocation,
-+      mode: mode === "live" ? "live" : "dry-run",
-+      cwd: process.cwd(),
-+      timeoutMs,
-+      spawn: mode === "live" ? spawner : undefined,
++  const executorMode = mode === "live" ? "live" : "dry-run";
++  const cliAuthorExecutor = cliAuthor(buildCli("author", roles.author, executorMode));
++  author = mode === "live" ? treeBackedAuthor(cliAuthorExecutor) : cliAuthorExecutor;
++  reviewer = cliReviewer(buildCli("reviewer", roles.reviewer, executorMode));
++  // One guard rule the loop always runs in live mode: the tree the author
++  // left behind holds nothing the diff of record cannot show.
++  guards = async () => {
++    const tree = treeChanges(task.baseCommit);
++    // An untracked file is never in a git diff, so the diff of record cannot
++    // show it whatever the author reported.
++    const unseen = tree.untracked;
++    const treeRule = {
++      rule: "the working tree holds nothing the diff cannot show",
++      passed: unseen.length === 0,
++      detail: unseen.length === 0 ? `${tree.tracked.length} tracked change(s), no untracked file` : `untracked: ${unseen.join(", ")}`,
 +    };
++    return [treeRule, ...runGuardCommands()];
 +  };
-+  author = cliAuthor(build("author", roles.author));
-+  reviewer = cliReviewer(build("reviewer", roles.reviewer));
 +}
 +
-+let round = 0;
 +const outcome = await runCrossReview({
 +  task,
 +  roles,
@@ -2389,10 +3487,11 @@ index 00000000..1cd93407
 +  maxRevisions,
 +  timeoutMs,
 +  runTests: async () => {
-+    const fromFixture = typeof fixtureTests !== "undefined" && fixtureTests ? fixtureTests[round] ?? [] : [];
-+    round += 1;
++    current += 1;
++    const fromFixture = fixtureTests ? fixtureTests[current] ?? [] : [];
 +    return testCommand ? runTestCommand() : fromFixture;
 +  },
++  guards,
 +});
 +
 +write("exchange.json", `${JSON.stringify(outcome.exchange, null, 2)}\n`);
@@ -2407,6 +3506,7 @@ index 00000000..1cd93407
 +      commit: last.commit,
 +      diff: "(see exchange.json rounds[].changeDigest; the diff is held by the author executor)",
 +      testResults: last.testResults,
++      guardRuns: last.guardRuns,
 +      guardViolations: last.guardViolations,
 +      authorSummary: last.changeSummary,
 +      authorSelfAssessment: null,
@@ -2420,10 +3520,10 @@ index 00000000..1cd93407
 +process.exit(outcome.status === "passed" ? 0 : 2);
 diff --git a/scripts/report-router-full-catalog.mjs b/scripts/report-router-full-catalog.mjs
 new file mode 100644
-index 00000000..2ea41518
+index 00000000..a377efc7
 --- /dev/null
 +++ b/scripts/report-router-full-catalog.mjs
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,271 @@
 +// What the Router would do with the whole catalogue, for every item in an
 +// evaluation set, decided offline.
 +//
@@ -2439,7 +3539,7 @@ index 00000000..2ea41518
 +//   node --import tsx scripts/report-router-full-catalog.mjs \
 +//     [--set=docs/ops/router-evaluation-set/development-v0.json] \
 +//     [--items=adopted|all] [--plan=Pro] [--requested-model=<catalogue id>] \
-+//     [--fallback-flag=off|on] [--json=<out.json>] [--md=<out.md>] [--quiet]
++//     [--fallback-flag=off|on] [--json=<out.json>] [--summary-json=<out.json>] [--md=<out.md>] [--quiet]
 +//
 +// The catalogue is lib/models.ts as committed. The product routes over the
 +// runtime registry's rows instead, with health and measured signals from the
@@ -2593,6 +3693,23 @@ index 00000000..2ea41518
 +}
 +say();
 +
++say("### Fallback reachable, as far as can be decided offline");
++say();
++say(
++  "Reachable means the gate allows a fallback, decideFallback (the product's function, under the stated failure hypothesis) names a candidate, and dispatch fits that candidate under its own reservation; the product tries that one candidate and no other. A refusal names the step that said no. What only a real dispatch can refuse (search path, budget, registry row, provider hold) is listed per item as undecided and is not folded into these counts."
++);
++say();
++say("| as deployed | items | | with the flag on | items |");
++say("|---|---|---|---|---|");
++const asDeployed = Object.entries(report.summary.fallbackReachableAsDeployed).sort((a, b) => b[1] - a[1]);
++const withFlag = Object.entries(report.summary.fallbackReachableIfFlagOn).sort((a, b) => b[1] - a[1]);
++for (let i = 0; i < Math.max(asDeployed.length, withFlag.length); i += 1) {
++  const left = asDeployed[i] ? `${asDeployed[i][0]} | ${asDeployed[i][1]}` : " | ";
++  const right = withFlag[i] ? `${withFlag[i][0]} | ${withFlag[i][1]}` : " | ";
++  say(`| ${left} | | ${right} |`);
++}
++say();
++
 +say("## Improvement and evaluation candidates");
 +say();
 +say("Offline work this diagnostic points at. None of it changes routing on its own.");
@@ -2612,19 +3729,21 @@ index 00000000..2ea41518
 +
 +say("## Per item");
 +say();
-+say("| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | first fallback |");
-+say("|---|---|---|---|---|---|---|---|---|");
++say("| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | fallback candidate | reachable as deployed | reachable with flag on |");
++say("|---|---|---|---|---|---|---|---|---|---|---|");
++const executable = (answer) => (answer.reachable ? `${answer.modelId} (${answer.dispatchFit})` : answer.refusal);
 +for (const item of report.items) {
 +  const eligible = item.models.filter((m) => m.rejectionReason === null).length;
 +  const cap = item.caps.primary
 +    ? `${item.caps.primary.routerOutputTokens}→${item.caps.primary.dispatchOutputTokens ?? item.caps.primary.dispatchFit}${item.caps.primary.outputCapDiffers ? " (differs)" : ""}`
 +    : "—";
-+  const fallback = item.fallback.firstExecutable
-+    ? `${item.fallback.firstExecutable.modelId} (${item.fallback.scopeAsDeployed.allowed ? "allowed" : item.fallback.scopeAsDeployed.reason})`
++  const candidate = item.fallback.firstCandidate
++    ? `${item.fallback.firstCandidate.modelId} (${item.fallback.firstCandidate.dispatchFit})`
 +    : "none";
 +  say(
 +    `| ${item.itemId} | ${item.profile.rankingKind} (${item.profile.kindConfidence}) | ${item.decision.primaryModelId ?? "—"} | ` +
-+      `${item.decision.decidedBy ?? "—"} | ${item.decision.selectionReason} | ${eligible} | ${item.models.length - eligible} | ${cap} | ${fallback} |`
++      `${item.decision.decidedBy ?? "—"} | ${item.decision.selectionReason} | ${eligible} | ${item.models.length - eligible} | ${cap} | ${candidate} | ` +
++      `${executable(item.fallback.reachableAsDeployed)} | ${executable(item.fallback.reachableIfFlagOn)} |`
 +  );
 +}
 +
@@ -2637,6 +3756,39 @@ index 00000000..2ea41518
 +  writeFileSync(jsonOut, `${JSON.stringify(report, null, 2)}\n`);
 +  console.error(`written ${jsonOut}`);
 +}
++// The committed per-item summary: the full report without the per-model rows,
++// each item's rejections folded to `{ modelId: reason }`, and the fallback
++// block without the identical `notModelled` list. Everything else is the
++// report as computed, so the two files cannot disagree.
++const summaryOut = args.get("summary-json");
++if (summaryOut) {
++  const summary = {
++    ...report,
++    items: report.items.map(({ models, fallback, ...item }) => ({
++      ...item,
++      rejections: Object.fromEntries(models.filter((m) => m.rejectionReason !== null).map((m) => [m.modelId, m.rejectionReason])),
++      fallback: {
++        maxModelFallbacks: fallback.maxModelFallbacks,
++        scopeAsDeployed: fallback.scopeAsDeployed,
++        scopeIfFlagOn: fallback.scopeIfFlagOn,
++        decision: fallback.decision,
++        firstCandidate: fallback.firstCandidate,
++        reachableAsDeployed: fallback.reachableAsDeployed.reachable
++          ? { ...fallback.reachableAsDeployed, undecidedOffline: "see the full report" }
++          : fallback.reachableAsDeployed,
++        reachableIfFlagOn: fallback.reachableIfFlagOn.reachable
++          ? { ...fallback.reachableIfFlagOn, undecidedOffline: "see the full report" }
++          : fallback.reachableIfFlagOn,
++      },
++    })),
++    note:
++      `Per-item model rows are in the full report (${jsonOut ?? "the --json output"}, regenerated by npm run report:router-full-catalog -- --json=...); ` +
++      "this file keeps the decision, rejections, caps, fallback and evidence per item. fallback.notModelled is the same for every item and is in the full report.",
++  };
++  mkdirSync(dirname(summaryOut), { recursive: true });
++  writeFileSync(summaryOut, `${JSON.stringify(summary, null, 2)}\n`);
++  console.error(`written ${summaryOut}`);
++}
 +const mdOut = args.get("md");
 +if (mdOut) {
 +  mkdirSync(dirname(mdOut), { recursive: true });
@@ -2645,10 +3797,10 @@ index 00000000..2ea41518
 +}
 diff --git a/tests/crossReview.test.mjs b/tests/crossReview.test.mjs
 new file mode 100644
-index 00000000..dd97442f
+index 00000000..79b53f3a
 --- /dev/null
 +++ b/tests/crossReview.test.mjs
-@@ -0,0 +1,329 @@
+@@ -0,0 +1,653 @@
 +import assert from "node:assert/strict";
 +import { createHash } from "node:crypto";
 +import test from "node:test";
@@ -2656,17 +3808,23 @@ index 00000000..dd97442f
 +import {
 +  CROSS_REVIEW_VERSION,
 +  DEFAULT_MAX_REVISIONS,
++  MAX_REVISIONS,
 +  authorOutputProblems,
++  filesNamedByDiff,
 +  isActionable,
 +  parseExecutorJson,
 +  renderReviewPrompt,
++  replayExchange,
++  resolveMaxRevisions,
 +  reviewVerdictProblems,
 +  runCrossReview,
 +} from "../lib/crossReviewCore.ts";
 +import {
 +  CLI_INVOCATIONS,
++  REVIEWER_CONFIG_OVERRIDE_KEYS,
 +  approveCurrent,
 +  cliAuthor,
++  cliCommandLine,
 +  cliReviewer,
 +  mockAuthor,
 +  mockReviewer,
@@ -2706,6 +3864,8 @@ index 00000000..dd97442f
 +
 +const pass = (command = "npm test") => [{ command, passed: true, output: "ok", durationMs: 1 }];
 +const fail = (command = "npm test") => [{ command, passed: false, output: "1 failing", durationMs: 1 }];
++const guardPass = (rule = "npm run lint") => [{ rule, passed: true, detail: "no problems", durationMs: 1 }];
++const guardFail = (rule = "protected files", detail = "tests/protected.test.mjs was modified") => [{ rule, passed: false, detail, durationMs: 1 }];
 +
 +const finding = (overrides = {}) => ({
 +  location: "lib/sum.ts:1",
@@ -2720,6 +3880,7 @@ index 00000000..dd97442f
 +  task,
 +  digest,
 +  runTests: async () => pass(),
++  guards: async () => guardPass(),
 +  now: () => new Date("2026-09-09T00:00:00Z"),
 +  timeoutMs: 1000,
 +  ...overrides,
@@ -2795,14 +3956,15 @@ index 00000000..dd97442f
 +  const author = mockAuthor("claude", [change(0), change(1)]);
 +  const reviewer = mockReviewer("codex", [approveCurrent("T-1", 0), approveCurrent("T-1", 1)]);
 +  const outcome = await runCrossReview(
-+    control({ author, reviewer, guards: async () => ["tests/protected.test.mjs was modified"], maxRevisions: 1 })
++    control({ author, reviewer, guards: async () => guardFail(), maxRevisions: 1 })
 +  );
 +  assert.equal(outcome.status, "on_hold");
 +  assert.equal(outcome.holdReason, "approved_but_checks_failed");
-+  assert.deepEqual(author.calls[1].feedback.guardViolations, ["tests/protected.test.mjs was modified"]);
++  assert.deepEqual(author.calls[1].feedback.guardViolations, ["protected files: tests/protected.test.mjs was modified"]);
++  assert.deepEqual(author.calls[1].feedback.checkFailures, ["guard failed: protected files"]);
 +});
 +
-+test("preference and unreproduced judgement never force a revision; the current version stands with them recorded", async () => {
++test("a finding without a reproduction never forces a revision, whatever its basis; the current version stands with it recorded", async () => {
 +  const author = mockAuthor("claude", [change(0)]);
 +  const reviewer = mockReviewer("codex", [
 +    {
@@ -2815,6 +3977,10 @@ index 00000000..dd97442f
 +        findings: [
 +          finding({ basis: "preference", severity: "nit", claim: "I would name it total", reproduction: undefined }),
 +          finding({ basis: "judgement", severity: "warning", claim: "this will be slow", reproduction: undefined }),
++          // "evidence" is a label; without the reproduction that would let
++          // anyone check it, it is a claim like any other.
++          finding({ basis: "evidence", severity: "error", claim: "this is wrong, trust me", reproduction: undefined }),
++          finding({ basis: "evidence", severity: "error", claim: "this is wrong, trust me", reproduction: "   " }),
 +        ],
 +        nextAction: "rename and optimise",
 +      },
@@ -2825,10 +3991,17 @@ index 00000000..dd97442f
 +  assert.equal(author.calls.length, 1);
 +  assert.deepEqual(
 +    outcome.exchange.findings.map((f) => f.disposition),
-+    ["resolved_by_project_rule", "insufficient_evidence_kept_current"]
++    ["resolved_by_project_rule", "insufficient_evidence_kept_current", "insufficient_evidence_kept_current", "insufficient_evidence_kept_current"]
 +  );
 +  assert.equal(isActionable(finding({ basis: "judgement", reproduction: "node -e 1" })), true);
 +  assert.equal(isActionable(finding({ basis: "judgement", reproduction: undefined })), false);
++  assert.equal(isActionable(finding({ basis: "evidence", reproduction: "node -e 1" })), true);
++  assert.equal(isActionable(finding({ basis: "evidence", reproduction: undefined })), false);
++  assert.equal(isActionable(finding({ basis: "preference", reproduction: "node -e 1" })), false);
++  // The schema still admits the finding -- a verdict is not thrown away for
++  // a missing field -- and the prompt says what the field is for.
++  assert.equal(reviewVerdictProblems({ taskId: "T-1", round: 0, reviewedDigest: "d", conclusion: "approve", findings: [finding({ basis: "evidence", reproduction: undefined })], nextAction: "" }).length, 0);
++  assert.match(renderReviewPrompt({ task, round: 0, changeDigest: "d", commit: null, diff: "", testResults: [], guardRuns: [], guardViolations: [], authorSummary: "s", authorSelfAssessment: null, previousFindings: [] }), /acted on only with a reproduction/);
 +});
 +
 +test("a verdict naming another digest, task or round does not apply", async () => {
@@ -2957,44 +4130,351 @@ index 00000000..dd97442f
 +  assert.equal(noSpawn.failure, "author_execution_failed");
 +});
 +
-+test("the reviewer's command-line invocation offers no write tool", () => {
++test("the reviewer's command-line invocation offers no write tool and nothing from the user's configuration", () => {
 +  for (const id of Object.keys(CLI_INVOCATIONS)) {
 +    const args = CLI_INVOCATIONS[id].reviewer.args.join(" ");
-+    assert.ok(!/Edit|Write|workspace-write|acceptEdits/.test(args), `${id} reviewer: ${args}`);
++    assert.ok(!/Edit|Write|workspace-write|acceptEdits|danger-full-access|bypass/.test(args), `${id} reviewer: ${args}`);
 +  }
++  // codex-cli 0.146.0: the sandbox flag, headless `exec`, and the user layer of
++  // config.toml -- where MCP servers, plugins and hooks come from -- left out.
++  const codex = CLI_INVOCATIONS.codex.reviewer;
++  assert.deepEqual(codex.args.slice(0, 3), ["--sandbox", "read-only", "exec"]);
++  assert.ok(codex.args.includes("--ignore-user-config"));
++  assert.ok(codex.args.includes("--json"));
++  assert.equal(codex.promptArg, "-");
++  assert.equal(codex.configFlag, "-c");
++  // Claude Code 2.1.261: only the read tools are built in, they are pre-approved,
++  // and no MCP server is loaded.
++  const claude = CLI_INVOCATIONS.claude.reviewer;
++  const toolsAt = claude.args.indexOf("--tools");
++  assert.ok(toolsAt !== -1);
++  assert.deepEqual(claude.args[toolsAt + 1].split(","), ["Read", "Grep", "Glob"]);
++  assert.ok(claude.args.includes("--strict-mcp-config"));
++  assert.equal(claude.configFlag, undefined);
++  // The author keeps its write scope; that is its job.
++  assert.ok(CLI_INVOCATIONS.codex.author.args.includes("workspace-write"));
++});
++
++test("a reviewer run may only override the keys on the allow list, and overrides go before the stdin marker", async () => {
++  const codex = CLI_INVOCATIONS.codex.reviewer;
++  const allowed = cliCommandLine(codex, ['model="m"', 'windows.sandbox="elevated"'], REVIEWER_CONFIG_OVERRIDE_KEYS);
++  assert.equal(allowed.ok, true);
++  assert.deepEqual(allowed.args.slice(-5), ["-c", 'model="m"', "-c", 'windows.sandbox="elevated"', "-"]);
++  assert.deepEqual(cliCommandLine(codex).args, [...codex.args, "-"]);
++  for (const widening of ['sandbox_mode="danger-full-access"', 'approval_policy="never"', "mcp_servers.x.command=\"y\"", "features.hooks=true", "plugins.x.enabled=true"]) {
++    const refused = cliCommandLine(codex, [widening], REVIEWER_CONFIG_OVERRIDE_KEYS);
++    assert.equal(refused.ok, false, widening);
++    assert.match(refused.detail, /not allowed/);
++  }
++  assert.equal(cliCommandLine(codex, ["nonsense"], REVIEWER_CONFIG_OVERRIDE_KEYS).ok, false);
++  // A tool without a config flag refuses overrides outright.
++  assert.equal(cliCommandLine(CLI_INVOCATIONS.claude.reviewer, ['model="m"']).ok, false);
++  for (const key of REVIEWER_CONFIG_OVERRIDE_KEYS) {
++    assert.ok(!/sandbox_mode|approval|mcp|plugin|feature|shell_environment/.test(key), key);
++  }
++
++  // Through the executor: a widening override is refused before anything runs,
++  // in dry-run and in live mode alike; an allowed one reaches the spawner in order.
++  const request = { task, round: 0, changeDigest: "sha256:a", commit: null, diff: "", testResults: [], guardRuns: [], guardViolations: [], authorSummary: "s", authorSelfAssessment: null, previousFindings: [] };
++  const base = { id: "codex", invocation: codex, cwd: "/nowhere", timeoutMs: 10 };
++  const throwing = async () => {
++    throw new Error("spawn must not be called");
++  };
++  const refusedDry = await cliReviewer({ ...base, mode: "dry-run", spawn: throwing, configOverrides: ['sandbox_mode="danger-full-access"'] }).review(request);
++  assert.equal(refusedDry.failure, "execution_failed");
++  const refusedLive = await cliReviewer({ ...base, mode: "live", spawn: throwing, configOverrides: ['sandbox_mode="danger-full-access"'] }).review(request);
++  assert.equal(refusedLive.failure, "execution_failed");
++  const dry = await cliReviewer({ ...base, mode: "dry-run", spawn: throwing, configOverrides: ['model="m"'] }).review(request);
++  assert.equal(dry.failure, "not_executed");
++  assert.match(dry.detail, /codex --sandbox read-only exec --ignore-user-config --json -c model="m" -/);
++  const seen = [];
++  const verdict = { taskId: "T-1", round: 0, reviewedDigest: "sha256:a", conclusion: "approve", findings: [], nextAction: "ok" };
++  const live = await cliReviewer({
++    ...base,
++    mode: "live",
++    configOverrides: ['model="m"'],
++    env: { OPENAI_API_KEY: undefined },
++    spawn: async (command, args, options) => {
++      seen.push({ command, args, env: options.env });
++      return { status: 0, stdout: JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "agent_message", text: JSON.stringify(verdict) } }), stderr: "" };
++    },
++  }).review(request);
++  assert.equal(live.ok, true);
++  assert.equal(seen[0].command, "codex");
++  assert.deepEqual(seen[0].args, [...codex.args, "-c", 'model="m"', "-"]);
++  assert.deepEqual(seen[0].env, { OPENAI_API_KEY: undefined });
 +});
 +
 +test("Codex JSONL output is unwrapped to its final agent message; anything else passes through", async () => {
 +  const { unwrapCodexJsonl } = await import("../lib/crossReviewExecutors.ts");
 +  const verdict = { taskId: "T-1", round: 0, reviewedDigest: "sha256:a", conclusion: "approve", findings: [], nextAction: "ok" };
++  // The shape `codex exec --json` prints at rust-v0.146.0 (exec_events.rs):
++  // events tagged by `type`, items tagged by `type` with an `id`, and the
++  // agent's message in `text`.
 +  const jsonl = [
-+    JSON.stringify({ type: "thread.started", thread_id: "x" }),
-+    JSON.stringify({ type: "item.completed", item: { type: "reasoning", text: "thinking" } }),
-+    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(verdict) } }),
-+    JSON.stringify({ type: "turn.completed", usage: {} }),
++    JSON.stringify({ type: "thread.started", thread_id: "0199c3b2-1f2e-7d5a-9b1c-3f4e5d6a7b8c" }),
++    JSON.stringify({ type: "turn.started" }),
++    JSON.stringify({ type: "item.started", item: { id: "item_0", type: "command_execution", command: "git status", aggregated_output: "", status: "in_progress" } }),
++    JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "command_execution", command: "git status", aggregated_output: "clean", exit_code: 0, status: "completed" } }),
++    JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "reasoning", text: "thinking" } }),
++    JSON.stringify({ type: "item.completed", item: { id: "item_2", type: "agent_message", text: "draft" } }),
++    JSON.stringify({ type: "item.completed", item: { id: "item_3", type: "agent_message", text: JSON.stringify(verdict) } }),
++    JSON.stringify({ type: "turn.completed", usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } }),
 +  ].join("\n");
 +  assert.equal(unwrapCodexJsonl(jsonl), JSON.stringify(verdict));
 +  assert.equal(parseExecutorJson(unwrapCodexJsonl(jsonl), reviewVerdictProblems).ok, true);
++  // The older core-protocol shape.
++  const legacy = [JSON.stringify({ id: "1", msg: { type: "agent_message", message: JSON.stringify(verdict) } }), JSON.stringify({ id: "2", msg: { type: "task_complete" } })].join("\n");
++  assert.equal(unwrapCodexJsonl(legacy), JSON.stringify(verdict));
++  // A failed turn has no agent message: the output passes through and is a named failure downstream.
++  const failed = [JSON.stringify({ type: "thread.started", thread_id: "x" }), JSON.stringify({ type: "turn.failed", error: { message: "rate limited" } })].join("\n");
++  assert.equal(unwrapCodexJsonl(failed), failed);
++  assert.equal(parseExecutorJson(unwrapCodexJsonl(failed), reviewVerdictProblems).failure, "schema_mismatch");
 +  assert.equal(unwrapCodexJsonl("plain text"), "plain text");
 +  assert.equal(unwrapCodexJsonl(JSON.stringify(verdict)), JSON.stringify(verdict));
 +});
++
++test("nothing run is a failed check: no test, or no guard, and an approval is not a pass", async () => {
++  // No test was run: an empty list is not a passing one.
++  const noTests = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [change(0)]),
++      reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]),
++      runTests: async () => [],
++    })
++  );
++  assert.notEqual(noTests.status, "passed");
++  assert.deepEqual(noTests.exchange.rounds[0].checkFailures, ["no test was run"]);
++  assert.match(noTests.exchange.rounds[0].nextAction, /no test was run/);
++  // No guard was run: a guards function that ran nothing is the same as none
++  // at all. What counts is a rule that ran and is on record.
++  for (const guards of [undefined, async () => []]) {
++    const noGuards = await runCrossReview(
++      control({
++        author: mockAuthor("claude", [change(0)]),
++        reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]),
++        guards,
++      })
++    );
++    assert.notEqual(noGuards.status, "passed");
++    assert.deepEqual(noGuards.exchange.rounds[0].checkFailures, ["no guard was run"]);
++    assert.deepEqual(noGuards.exchange.rounds[0].guardRuns, []);
++  }
++  // A guard that ran and failed is recorded as such, and the reviewer sees the run.
++  const failedGuard = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [change(0)]),
++      reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]),
++      guards: async () => [...guardPass(), ...guardFail("npm run check:x", "1 problem")],
++    })
++  );
++  assert.notEqual(failedGuard.status, "passed");
++  assert.deepEqual(failedGuard.exchange.rounds[0].checkFailures, ["guard failed: npm run check:x"]);
++  assert.deepEqual(failedGuard.exchange.rounds[0].guardViolations, ["npm run check:x: 1 problem"]);
++  assert.equal(failedGuard.exchange.rounds[0].guardRuns.length, 2);
++  // The author hears every reason in its feedback, not just failed tests.
++  const author = mockAuthor("claude", [change(0), change(1)]);
++  const fed = await runCrossReview(
++    control({ author, reviewer: mockReviewer("codex", [approveCurrent("T-1", 0), approveCurrent("T-1", 1)]), runTests: async () => [] })
++  );
++  assert.notEqual(fed.status, "passed");
++  assert.deepEqual(author.calls[1].feedback.checkFailures, ["no test was run"]);
++  // With one passing test and a guard consulted, the same approval passes.
++  const ok = await runCrossReview(
++    control({ author: mockAuthor("claude", [change(0)]), reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]) })
++  );
++  assert.equal(ok.status, "passed");
++  assert.deepEqual(ok.exchange.checkFailures, []);
++});
++
++test("the diff is read for the files it names: an unreported file is a failed check, an out-of-scope one is refused before review", async () => {
++  const twoFiles =
++    "diff --git a/lib/sum.ts b/lib/sum.ts\n--- a/lib/sum.ts\n+++ b/lib/sum.ts\n+1\n" +
++    "diff --git a/lib/other.ts b/lib/other.ts\n--- a/lib/other.ts\n+++ b/lib/other.ts\n+2\n";
++  assert.deepEqual(filesNamedByDiff(twoFiles), ["lib/sum.ts", "lib/other.ts"]);
++  assert.deepEqual(filesNamedByDiff("--- a/x.ts\n+++ b/x.ts\n+1\n--- a/gone.ts\n+++ /dev/null\n-1\n"), ["x.ts", "gone.ts"]);
++  assert.deepEqual(filesNamedByDiff(""), []);
++  // Reported one file, changed two: the second is a guard violation and the
++  // approval does not pass.
++  const underReported = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [change(0, { diff: twoFiles, filesChanged: ["lib/sum.ts"] })]),
++      reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]),
++    })
++  );
++  assert.notEqual(underReported.status, "passed");
++  assert.deepEqual(underReported.exchange.rounds[0].guardViolations, ["the diff names lib/other.ts, which filesChanged does not"]);
++  // Reported nothing outside the scope, but the diff touches app/: refused.
++  const outOfScope = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [
++        change(0, { diff: "diff --git a/app/route.ts b/app/route.ts\n--- a/app/route.ts\n+++ b/app/route.ts\n+1\n", filesChanged: ["lib/sum.ts"] }),
++      ]),
++      reviewer: mockReviewer("codex", [approveCurrent("T-1", 0)]),
++    })
++  );
++  assert.equal(outOfScope.status, "failed");
++  assert.equal(outOfScope.failure, "scope_violation");
++  assert.deepEqual(outOfScope.exchange.rounds[0].guardViolations, ["outside writable scope: app/route.ts"]);
++});
++
++test("a person-driven exchange replays through the control program: waiting states are where a stand-in had nothing to say, and a concluded exchange takes no further round", async () => {
++  const packaged = (round, verdict = null, overrides = {}) => ({
++    round,
++    diff: change(round).value.diff,
++    summary: `round ${round}`,
++    filesChanged: ["lib/sum.ts"],
++    commit: null,
++    testResults: pass(),
++    guardRuns: guardPass(),
++    verdict,
++    ...overrides,
++  });
++  const verdictOn = (round, conclusion, findings = []) => ({
++    taskId: "T-1",
++    round,
++    reviewedDigest: digest(change(round).value.diff),
++    conclusion,
++    findings,
++    nextAction: "next",
++  });
++  const replay = (rounds) => replayExchange({ task, digest, rounds, now: () => new Date("2026-09-09T00:00:00Z") });
++
++  // A package with no verdict yet.
++  const waiting = await replay([packaged(0)]);
++  assert.equal(waiting.status, "awaiting_review");
++  assert.equal(waiting.failure, null);
++  assert.equal(waiting.concludedAtRound, null);
++  assert.equal(waiting.packagedRounds, 1);
++  assert.match(waiting.nextAction, new RegExp(digest(change(0).value.diff)));
++  assert.equal(waiting.rounds[0].nextAction, "awaiting the reviewer's verdict");
++
++  // A verdict with an actionable finding: the control program asked for a
++  // revision nobody has made.
++  const revising = await replay([packaged(0, verdictOn(0, "request_changes", [finding()]))]);
++  assert.equal(revising.status, "awaiting_revision");
++  assert.equal(revising.rounds.length, 1);
++  assert.equal(revising.findings[0].disposition, "fix_requested");
++  assert.match(revising.nextAction, /package round 1/);
++
++  // The revision, packaged and approved with passing checks: passed, and
++  // concluded at round 1.
++  const done = await replay([packaged(0, verdictOn(0, "request_changes", [finding()])), packaged(1, verdictOn(1, "approve"))]);
++  assert.equal(done.status, "passed");
++  assert.equal(done.concludedAtRound, 1);
++
++  // A package after the conclusion is not part of the exchange.
++  const extra = await replay([packaged(0, verdictOn(0, "approve"))]);
++  assert.equal(extra.status, "passed");
++  assert.equal(extra.concludedAtRound, 0);
++  const afterPass = await replay([packaged(0, verdictOn(0, "approve")), packaged(1)]);
++  assert.equal(afterPass.status, "passed");
++  assert.equal(afterPass.concludedAtRound, 0);
++  assert.equal(afterPass.rounds.length, 1);
++
++  // An approval with failing checks in the last allowed round: on hold, not awaiting.
++  const held = await replay([
++    packaged(0, verdictOn(0, "request_changes", [finding()])),
++    packaged(1, verdictOn(1, "request_changes", [finding()])),
++    packaged(2, verdictOn(2, "approve"), { testResults: fail() }),
++  ]);
++  assert.equal(held.status, "on_hold");
++  assert.equal(held.holdReason, "approved_but_checks_failed");
++  assert.equal(held.concludedAtRound, 2);
++
++  // A verdict on the wrong digest is the control program's own failure.
++  const wrong = await replay([packaged(0, { ...verdictOn(0, "approve"), reviewedDigest: "sha256:other" })]);
++  assert.equal(wrong.status, "failed");
++  assert.equal(wrong.failure, "digest_mismatch");
++  assert.equal(wrong.concludedAtRound, 0);
++
++  // Rounds must be contiguous from 0.
++  await assert.rejects(() => replay([packaged(1)]), /contiguous/);
++  await assert.rejects(() => replay([]), /nothing to replay/);
++});
++
++test("a reproducible finding named alongside an approval is never passed over: fixed with a revision left, on hold without one", async () => {
++  // Last allowed round (cap 0): approve, checks pass, one finding with a
++  // reproduction. Not a pass -- the reviewer named an error, and nothing can
++  // fix it now.
++  const approveWithFinding = (round) => ({
++    ok: true,
++    value: { taskId: "T-1", round, reviewedDigest: "@current", conclusion: "approve", findings: [finding()], nextAction: "merge anyway" },
++  });
++  const held = await runCrossReview(control({ author: mockAuthor("claude", [change(0)]), reviewer: mockReviewer("codex", [approveWithFinding(0)]), maxRevisions: 0 }));
++  assert.equal(held.status, "on_hold");
++  assert.equal(held.holdReason, "revisions_exhausted");
++  assert.deepEqual(held.exchange.findings.map((f) => f.disposition), ["unresolved_on_hold"]);
++  assert.match(held.exchange.rounds[0].nextAction, /open finding/);
++  // With a revision left the same approval sends the finding back, and the
++  // fix is reviewed on its own digest.
++  const author = mockAuthor("claude", [change(0), change(1)]);
++  const fixed = await runCrossReview(
++    control({ author, reviewer: mockReviewer("codex", [approveWithFinding(0), approveCurrent("T-1", 1)]), maxRevisions: 1 })
++  );
++  assert.equal(fixed.status, "passed");
++  assert.equal(author.calls.length, 2);
++  assert.deepEqual(author.calls[1].feedback.findings.map((f) => f.disposition), ["fix_requested"]);
++  // An approval with a preference-only finding in the last round still passes.
++  const preference = await runCrossReview(
++    control({
++      author: mockAuthor("claude", [change(0)]),
++      reviewer: mockReviewer("codex", [
++        { ok: true, value: { taskId: "T-1", round: 0, reviewedDigest: "@current", conclusion: "approve", findings: [finding({ basis: "preference", reproduction: undefined })], nextAction: "ok" } },
++      ]),
++      maxRevisions: 0,
++    })
++  );
++  assert.equal(preference.status, "passed");
++});
++
++test("the revision cap is fixed at two: a run may lower it and cannot raise it", async () => {
++  assert.equal(MAX_REVISIONS, 2);
++  assert.equal(DEFAULT_MAX_REVISIONS, MAX_REVISIONS);
++  assert.equal(resolveMaxRevisions(undefined), 2);
++  assert.equal(resolveMaxRevisions(0), 0);
++  assert.equal(resolveMaxRevisions(2), 2);
++  for (const bad of [3, 10, -1, 1.5, Number.NaN]) assert.throws(() => resolveMaxRevisions(bad), RangeError);
++  const requestChanges = (round) => ({
++    ok: true,
++    value: { taskId: "T-1", round, reviewedDigest: "@current", conclusion: "request_changes", findings: [finding()], nextAction: "fix" },
++  });
++  const author = mockAuthor("claude", [change(0), change(1), change(2), change(3)]);
++  await assert.rejects(
++    () => runCrossReview(control({ author, reviewer: mockReviewer("codex", [0, 1, 2, 3].map(requestChanges)), maxRevisions: 3 })),
++    RangeError
++  );
++  assert.equal(author.calls.length, 0, "nothing ran under a cap above the fixed one");
++  const capped = await runCrossReview(control({ author, reviewer: mockReviewer("codex", [0, 1, 2, 3].map(requestChanges)) }));
++  assert.equal(capped.status, "on_hold");
++  assert.equal(capped.holdReason, "revisions_exhausted");
++  assert.equal(author.calls.length, 3, "the first review and two fix rounds, and no more");
++  await assert.rejects(
++    () => replayExchange({ task, digest, maxRevisions: 3, rounds: [{ round: 0, diff: "d", summary: "s", filesChanged: ["lib/sum.ts"], commit: null, testResults: pass(), guardRuns: guardPass(), verdict: null }] }),
++    RangeError
++  );
++});
 diff --git a/tests/routerFullCatalogDiagnostic.test.mjs b/tests/routerFullCatalogDiagnostic.test.mjs
 new file mode 100644
-index 00000000..825a5756
+index 00000000..b9793be2
 --- /dev/null
 +++ b/tests/routerFullCatalogDiagnostic.test.mjs
-@@ -0,0 +1,221 @@
+@@ -0,0 +1,292 @@
 +import assert from "node:assert/strict";
 +import test from "node:test";
 +
 +import { decideRouterModel } from "../lib/routerDecision.ts";
 +import {
 +  diagnoseFullCatalog,
++  FALLBACK_UNDECIDED_OFFLINE,
++  fallbackReachabilityFor,
 +  ROUTER_FULL_CATALOG_DIAGNOSTIC_VERSION,
 +} from "../lib/routerFullCatalogDiagnostic.ts";
++import { decideFallback } from "../lib/routingFallbackPolicy.ts";
 +import { CANDIDATE_REJECTIONS } from "../lib/routerCandidates.ts";
 +import { NEUTRAL_QUALITY_BAND, ROUTER_TIE_BREAK_ORDER } from "../lib/routerScorePolicy.ts";
 +import { resolveModelPricing } from "../lib/modelPricing.ts";
++import { toReservedInputTokens } from "../lib/chatTokenEstimate.ts";
 +import { NO_WEB_SEARCH_BACKENDS } from "../lib/webSearchBackends.ts";
 +
 +/**
@@ -3166,19 +4646,86 @@ index 00000000..825a5756
 +  assert.equal(aligned.summary.outputCapMismatchItems, 0);
 +});
 +
-+test("fallback is reported under the shipped flag and under the flag turned on, with one executable candidate", () => {
++test("fallback is reachable only when the gate, the product's own decision and dispatch all say yes; as deployed the gate says no", () => {
 +  const report = diagnoseFullCatalog(base());
 +  const item = report.items[0];
 +  assert.deepEqual(item.fallback.scopeAsDeployed, { allowed: false, reason: "flag_off" });
 +  assert.deepEqual(item.fallback.scopeIfFlagOn, { allowed: true });
 +  assert.equal(item.fallback.maxModelFallbacks, 1);
-+  assert.equal(item.fallback.firstExecutable.modelId, item.decision.fallbackCandidateModelIds[0]);
-+  assert.equal(item.fallback.firstExecutable.dispatchFit, "fitted");
++  const first = item.decision.fallbackCandidateModelIds[0];
++  assert.ok(first, "the catalogue leaves a candidate behind the primary");
++  // decideFallback -- the product's function, asked under the stated
++  // hypothesis -- names the Router's next candidate, and is recorded as it
++  // answered, version included.
++  const policyVersion = decideFallback({
++    attempt: { modelId: "x", outcome: "failed_pre_token", failureLayer: "provider", providerRefusal: null },
++    run: { passThroughUsed: false, rerouteCount: 0, visibleTokenEmitted: false },
++    nextCandidateModelIds: [],
++  }).version;
++  assert.deepEqual(item.fallback.decision, { version: policyVersion, action: "fallback", modelId: first, reason: null });
++  // The candidate is listed as what it is: named by the decision, re-fitted
++  // by dispatch. That is not the same as reachable.
++  assert.equal(item.fallback.firstCandidate.modelId, first);
++  assert.equal(item.fallback.firstCandidate.dispatchFit, "fitted");
++  assert.deepEqual(item.fallback.reachableAsDeployed, { reachable: false, refusal: "gate:flag_off" });
++  assert.equal(item.fallback.reachableIfFlagOn.reachable, true);
++  assert.equal(item.fallback.reachableIfFlagOn.modelId, first);
++  // A reachable answer carries what only a real dispatch could still refuse.
++  assert.deepEqual(item.fallback.reachableIfFlagOn.undecidedOffline, FALLBACK_UNDECIDED_OFFLINE);
++  assert.ok(FALLBACK_UNDECIDED_OFFLINE.some((line) => line.startsWith("search_path_unavailable")));
++  assert.ok(FALLBACK_UNDECIDED_OFFLINE.some((line) => line.startsWith("budget_refused")));
++  assert.ok(FALLBACK_UNDECIDED_OFFLINE.some((line) => line.startsWith("candidate_unavailable")));
++  assert.ok(FALLBACK_UNDECIDED_OFFLINE.some((line) => line.startsWith("no_provider_hold")));
++  assert.ok(item.fallback.notModelled.length > FALLBACK_UNDECIDED_OFFLINE.length);
 +  assert.equal(report.inputs.fallbackFlagAsDeployed, "off");
++  assert.equal(report.summary.fallbackReachableAsDeployed["gate:flag_off"], 2);
++  assert.equal(report.summary.fallbackReachableIfFlagOn.reachable, 2);
 +
 +  const on = diagnoseFullCatalog(base({ fallbackEnvironment: { AUTO_ROUTER_FALLBACK_ENABLED: "on" } }));
 +  assert.deepEqual(on.items[0].fallback.scopeAsDeployed, { allowed: true });
++  assert.equal(on.items[0].fallback.reachableAsDeployed.reachable, true);
 +  assert.equal(on.inputs.fallbackFlagAsDeployed, "on");
++
++  // With nothing ranked behind the primary the decision itself terminates,
++  // and that is what is reported: no candidate is invented.
++  const lone = diagnoseFullCatalog(base({ models: [model("cheap")], requestedModelId: "cheap", fallbackEnvironment: { AUTO_ROUTER_FALLBACK_ENABLED: "on" } }));
++  assert.equal(lone.items[0].decision.primaryModelId, "cheap");
++  assert.deepEqual(lone.items[0].fallback.decision, { version: policyVersion, action: "terminate", modelId: null, reason: "no_candidate" });
++  assert.equal(lone.items[0].fallback.firstCandidate, null);
++  // The gate is asked first and refuses on the same fact, so the refusal
++  // names the gate; the decision's own answer is still on record above.
++  assert.deepEqual(lone.items[0].fallback.reachableAsDeployed, { reachable: false, refusal: "gate:no_candidate" });
++
++  // The three steps, each answered by the product's order: the gate, then the
++  // decision naming a candidate, then dispatch fitting it. A candidate that
++  // dispatch cannot fit (planAttemptExecution's context_window_exceeded) is
++  // named by the Router and refused at the attempt, and no other is tried.
++  //
++  // Under the active estimator calibration the diagnostic's dispatch
++  // reservation equals the Router's raw estimate (`toReservedInputTokens` of
++  // a bare number is identity), so the Router refuses such a model before it
++  // is ever a candidate; the product reaches the case through attachment and
++  // tool overhead, which the diagnostic lists as not modelled. The branch is
++  // held here on the helper itself.
++  const prompt = items()[0].prompt;
++  const routerReserved = Math.max(1, Math.ceil(Buffer.byteLength(prompt, "utf8") / 4));
++  assert.equal(toReservedInputTokens(routerReserved), routerReserved);
++  const named = { version: "v", action: "fallback", modelId: "mid", reason: null };
++  const terminated = { version: "v", action: "terminate", modelId: null, reason: "visible_token_emitted" };
++  const fitted = { modelId: "mid", dispatchFit: "fitted", dispatchOutputTokens: 4_000 };
++  const exceeded = { modelId: "mid", dispatchFit: "exceeded", dispatchOutputTokens: null };
++  assert.deepEqual(fallbackReachabilityFor({ allowed: false, reason: "flag_off" }, named, fitted), { reachable: false, refusal: "gate:flag_off" });
++  assert.deepEqual(fallbackReachabilityFor({ allowed: false, reason: "tools_offered" }, named, exceeded), { reachable: false, refusal: "gate:tools_offered" });
++  assert.deepEqual(fallbackReachabilityFor({ allowed: true }, terminated, fitted), { reachable: false, refusal: "decision:visible_token_emitted" });
++  assert.deepEqual(fallbackReachabilityFor({ allowed: true }, named, null), { reachable: false, refusal: "decision:mid is not the candidate dispatch was asked to fit" });
++  assert.deepEqual(fallbackReachabilityFor({ allowed: true }, named, exceeded), { reachable: false, refusal: "candidate_context_window_exceeded" });
++  assert.deepEqual(fallbackReachabilityFor({ allowed: true }, named, fitted), { reachable: true, ...fitted, undecidedOffline: FALLBACK_UNDECIDED_OFFLINE });
++  assert.deepEqual(fallbackReachabilityFor({ allowed: true }, named, { ...fitted, dispatchFit: "unbounded" }), {
++    reachable: true,
++    ...fitted,
++    dispatchFit: "unbounded",
++    undecidedOffline: FALLBACK_UNDECIDED_OFFLINE,
++  });
 +});
 +
 +test("improvement candidates name the reachability gap and the never-chosen models with fixed identifiers", () => {
@@ -3210,13 +4757,42 @@ index 00000000..825a5756
 
 ## Test results (run by the control program)
 
-- PASS `node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (pass|fail)'` (1604ms)
-  # pass 111
-  # fail 0
+- FAIL `set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'` (613ms)
+  # tests 117
+  # pass 116
+  # fail 1
+
+## Guard results (run by the control program)
+
+- PASS `npm run check:doc-references` (6229ms)
+  > ai-chat-hub@0.1.0 check:doc-references
+  > node scripts/check-doc-references.mjs
+  
+  Document reference check passed: 751 referenced path(s) across 92 instruction document(s), and 868 path(s) named by comments across 2592 source file(s), all present.
+- PASS `npm run check:release-gate-coverage` (594ms)
+  > ai-chat-hub@0.1.0 check:release-gate-coverage
+  > node scripts/check-release-gate-coverage.mjs
+  
+  Release gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.
+- PASS `npm run security:regression` (659ms)
+  > ai-chat-hub@0.1.0 security:regression
+  > node scripts/security-regression-check.mjs
+  
+  Security regression checks passed (188 checks).
+
+## Findings from the previous round (check each was addressed)
+
+- [error/evidence] lib/crossReviewCore.ts:runCrossReview approve branch: 마지막 허용 round에서 재현 가능한 finding은 unresolved_on_hold로 분류되지만 pass 조건은 fix_requested만 검사하므로, 해결되지 않은 finding을 기록한 채 status가 passed가 됩니다.
+- [error/evidence] lib/crossReviewCore.ts:runCrossReview loop bound; scripts/cross-review.mjs:max-revisions: 요구사항의 최대 2회 fix round가 상한이 아니라 임의로 높일 수 있는 옵션으로 구현되어 revision cap을 우회할 수 있습니다.
+- [error/evidence] lib/crossReviewCore.ts:runCrossReview guardsConsulted; scripts/cross-review.mjs:mock/package guard setup: guard 실행 여부를 실제 guard 수나 실행 기록이 아니라 함수 존재 여부로 판정하므로, guard가 하나도 실행되지 않은 정상 CLI 경로도 검사를 통과합니다.
+- [error/evidence] scripts/cross-review.mjs:live-mode guards; lib/crossReviewCore.ts:changeDigest: live 모드는 실제 working-tree diff의 내용과 author가 반환한 diff를 비교하지 않고 파일명만 비교하므로, reviewer가 읽지 않은 실제 변경을 다른 digest로 승인할 수 있습니다.
+- [error/evidence] scripts/cross-review.mjs:package/review diffExcluded handling: --diff-exclude가 생성물로 제한되지 않아 임의의 scoped 소스 변경을 diff와 digest에서 제외할 수 있고, review 단계도 같은 제외를 적용하므로 새 변경에 새 review가 필요하다는 규칙을 우회합니다.
+- [error/evidence] lib/routerFullCatalogDiagnostic.ts:dispatchFitFor and fallback construction: executableAsDeployed와 executableIfFlagOn은 실제 decideFallback 및 planAttemptExecution을 호출하지 않고 첫 후보와 context-window fit만 재구현하므로, search_path_unavailable, budget_refused, candidate_unavailable 또는 no_provider_hold인 fallback도 executable: true로 보고될 수 있습니다.
+- [error/evidence] control-program test and guard results: 제출된 필수 검증은 115개 중 2개가 실패했고 security:regression guard도 실패했으므로, 기존 Router 테스트 통과와 tests-and-guards 통과 완료 조건이 충족되지 않았습니다.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Adds lib/routerFullCatalogDiagnostic.ts + scripts/report-router-full-catalog.mjs (offline full-catalogue diagnostic reusing decideRouterModel/filterRouterCandidates/selectRouterModel), lib/crossReviewCore.ts + lib/crossReviewExecutors.ts + scripts/cross-review.mjs (author/reviewer/control loop with mocks, dry-run shells, package mode), tests for both, docs and fixtures. Report on development-v0 committed under docs/ops/router-full-catalog-diagnostic/. No change to routing behaviour, scores, flags or pre-registrations.
+Summary: Round 2 (the last revision allowed) answers the seven round-1 findings; commit after 4b21ad92 on top of the earlier rounds. (1) An actionable finding is never passed over: fix_requested or unresolved_on_hold blocks a pass, so an approval carrying a reproducible finding in the last round goes on hold (revisions_exhausted) instead of passed. (2) The cap is fixed: MAX_REVISIONS is 2, resolveMaxRevisions refuses anything above it, --max-revisions may only lower it, and replayExchange is bound the same way. (3) A guard is a rule that ran: guards return GuardRun records, a pass needs at least one run and every run passing, an empty list is the failed check no guard was run, the reviewer prompt lists guard results beside test results, and --guard-command runs are those records. (4) In live mode the diff of record is the working tree diff against the base over the whole tree (treeBackedAuthor); the diff the author returned is kept only as its claim next to its self-assessment, and one guard rule always checks the tree holds nothing the diff cannot show. (5) --diff-exclude accepts only the task generatedPaths (now declared: the two generated report files) and the package directory; an excluded file still counts as changed, its content digest is recorded in the package (excludedDigests) and a review refuses to run if it changed since packaging. (6) The fallback decision is the product decideFallback, called under the one failure hypothesis the fallback path exists for (FALLBACK_FAILURE_HYPOTHESIS) and recorded as it answered with its version; the answer is reachable rather than executable and every reachable answer carries the refusals only a real dispatch can raise (search_path_unavailable, budget_refused, candidate_unavailable, no_provider_hold) as undecidedOffline. planAttemptExecution is not called because it builds the provider client and the credit budget, which an offline report has no account, credentials or reservation for; the report and README say so and the committed report is regenerated (with the flag on: 165 reachable, 45 refused by the gate for web search). (7) Checks on this checkout: the worktree is now checked out with LF like CI, under which the security:regression guard and the routerScorePolicy import walk pass; the automaticFallbackBoundary import walk still fails here on path separators, is outside the writable scope and passes on Linux; the package records what ran.
 
 ## Answer format
 
@@ -3225,8 +4801,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "router-full-catalog-diagnostic-v1",
-  "round": 0,
-  "reviewedDigest": "sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932",
+  "round": 2,
+  "reviewedDigest": "sha256:6500e0e274e884de9ea1d720c7488387bea96e6764ce088016dd0946cb01073a",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
@@ -3234,11 +4810,11 @@ Reply with exactly one JSON document and nothing else:
       "severity": "error | warning | nit",
       "basis": "evidence | preference | judgement",
       "claim": "what is wrong, in one sentence",
-      "reproduction": "how to see it (required for a judgement to be acted on)"
+      "reproduction": "how to see it: a command, or an input and its expected output (required for the finding to be acted on)"
     }
   ],
   "nextAction": "one sentence"
 }
 ```
 
-`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; a `judgement` without a reproduction is recorded and not acted on.
+`reviewedDigest` must be the digest above, verbatim. A finding with basis `preference` is settled by the project's rules; any other finding is acted on only with a reproduction, and without one it is recorded and the current version stands.

@@ -21,5 +21,9 @@
     "docs/ops/router-full-catalog-diagnostic/",
     "docs/ops/cross-review/",
     "package.json"
+  ],
+  "generatedPaths": [
+    "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+    "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json"
   ]
 }

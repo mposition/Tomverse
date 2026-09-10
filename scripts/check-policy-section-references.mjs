@@ -41,6 +41,8 @@
 //     change a file the database has already checksummed.
 //   * `.github/audits/**` and the remediation reports — past records. They say
 //     what was believed at the time, which is their whole value.
+//   * `docs/ops/cross-review/packages/**` — the records of author–reviewer
+//     exchanges: diffs, prompts and verdicts captured verbatim. Same class.
 //   * Anything citing a standard rather than a policy: `RFC 9111 §5.2.2.5` is
 //     a real reference to a document this check does not own. A line naming a
 //     non-policy `.md` file is skipped for the same reason.
@@ -65,6 +67,11 @@ const EXCLUDED_PREFIXES = [
   "prisma/migrations/",
   // Past records, preserved as written.
   ".github/audits/",
+  // Cross-review exchange records: packaged diffs, reviewer prompts and
+  // verdicts captured verbatim (scripts/cross-review.mjs). A citation inside
+  // one is what the reviewed tree said at the time, not a reference the
+  // record makes, and a record is not edited to satisfy a later rule.
+  "docs/ops/cross-review/packages/",
 ];
 
 const EXCLUDED_FILES = new Set([

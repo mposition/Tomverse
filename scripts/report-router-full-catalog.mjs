@@ -13,7 +13,7 @@
 //   node --import tsx scripts/report-router-full-catalog.mjs \
 //     [--set=docs/ops/router-evaluation-set/development-v0.json] \
 //     [--items=adopted|all] [--plan=Pro] [--requested-model=<catalogue id>] \
-//     [--fallback-flag=off|on] [--json=<out.json>] [--md=<out.md>] [--quiet]
+//     [--fallback-flag=off|on] [--json=<out.json>] [--summary-json=<out.json>] [--md=<out.md>] [--quiet]
 //
 // The catalogue is lib/models.ts as committed. The product routes over the
 // runtime registry's rows instead, with health and measured signals from the
@@ -167,6 +167,23 @@ for (const [scope, n] of Object.entries(report.summary.fallbackScopeAsDeployed).
 }
 say();
 
+say("### Fallback reachable, as far as can be decided offline");
+say();
+say(
+  "Reachable means the gate allows a fallback, decideFallback (the product's function, under the stated failure hypothesis) names a candidate, and dispatch fits that candidate under its own reservation; the product tries that one candidate and no other. A refusal names the step that said no. What only a real dispatch can refuse (search path, budget, registry row, provider hold) is listed per item as undecided and is not folded into these counts."
+);
+say();
+say("| as deployed | items | | with the flag on | items |");
+say("|---|---|---|---|---|");
+const asDeployed = Object.entries(report.summary.fallbackReachableAsDeployed).sort((a, b) => b[1] - a[1]);
+const withFlag = Object.entries(report.summary.fallbackReachableIfFlagOn).sort((a, b) => b[1] - a[1]);
+for (let i = 0; i < Math.max(asDeployed.length, withFlag.length); i += 1) {
+  const left = asDeployed[i] ? `${asDeployed[i][0]} | ${asDeployed[i][1]}` : " | ";
+  const right = withFlag[i] ? `${withFlag[i][0]} | ${withFlag[i][1]}` : " | ";
+  say(`| ${left} | | ${right} |`);
+}
+say();
+
 say("## Improvement and evaluation candidates");
 say();
 say("Offline work this diagnostic points at. None of it changes routing on its own.");
@@ -186,19 +203,21 @@ if (report.problems.length > 0) {
 
 say("## Per item");
 say();
-say("| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | first fallback |");
-say("|---|---|---|---|---|---|---|---|---|");
+say("| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | fallback candidate | reachable as deployed | reachable with flag on |");
+say("|---|---|---|---|---|---|---|---|---|---|---|");
+const executable = (answer) => (answer.reachable ? `${answer.modelId} (${answer.dispatchFit})` : answer.refusal);
 for (const item of report.items) {
   const eligible = item.models.filter((m) => m.rejectionReason === null).length;
   const cap = item.caps.primary
     ? `${item.caps.primary.routerOutputTokens}→${item.caps.primary.dispatchOutputTokens ?? item.caps.primary.dispatchFit}${item.caps.primary.outputCapDiffers ? " (differs)" : ""}`
     : "—";
-  const fallback = item.fallback.firstExecutable
-    ? `${item.fallback.firstExecutable.modelId} (${item.fallback.scopeAsDeployed.allowed ? "allowed" : item.fallback.scopeAsDeployed.reason})`
+  const candidate = item.fallback.firstCandidate
+    ? `${item.fallback.firstCandidate.modelId} (${item.fallback.firstCandidate.dispatchFit})`
     : "none";
   say(
     `| ${item.itemId} | ${item.profile.rankingKind} (${item.profile.kindConfidence}) | ${item.decision.primaryModelId ?? "—"} | ` +
-      `${item.decision.decidedBy ?? "—"} | ${item.decision.selectionReason} | ${eligible} | ${item.models.length - eligible} | ${cap} | ${fallback} |`
+      `${item.decision.decidedBy ?? "—"} | ${item.decision.selectionReason} | ${eligible} | ${item.models.length - eligible} | ${cap} | ${candidate} | ` +
+      `${executable(item.fallback.reachableAsDeployed)} | ${executable(item.fallback.reachableIfFlagOn)} |`
   );
 }
 
@@ -210,6 +229,39 @@ if (jsonOut) {
   mkdirSync(dirname(jsonOut), { recursive: true });
   writeFileSync(jsonOut, `${JSON.stringify(report, null, 2)}\n`);
   console.error(`written ${jsonOut}`);
+}
+// The committed per-item summary: the full report without the per-model rows,
+// each item's rejections folded to `{ modelId: reason }`, and the fallback
+// block without the identical `notModelled` list. Everything else is the
+// report as computed, so the two files cannot disagree.
+const summaryOut = args.get("summary-json");
+if (summaryOut) {
+  const summary = {
+    ...report,
+    items: report.items.map(({ models, fallback, ...item }) => ({
+      ...item,
+      rejections: Object.fromEntries(models.filter((m) => m.rejectionReason !== null).map((m) => [m.modelId, m.rejectionReason])),
+      fallback: {
+        maxModelFallbacks: fallback.maxModelFallbacks,
+        scopeAsDeployed: fallback.scopeAsDeployed,
+        scopeIfFlagOn: fallback.scopeIfFlagOn,
+        decision: fallback.decision,
+        firstCandidate: fallback.firstCandidate,
+        reachableAsDeployed: fallback.reachableAsDeployed.reachable
+          ? { ...fallback.reachableAsDeployed, unverifiedConditions: "see the full report" }
+          : fallback.reachableAsDeployed,
+        reachableIfFlagOn: fallback.reachableIfFlagOn.reachable
+          ? { ...fallback.reachableIfFlagOn, unverifiedConditions: "see the full report" }
+          : fallback.reachableIfFlagOn,
+      },
+    })),
+    note:
+      `Per-item model rows are in the full report (${jsonOut ?? "the --json output"}, regenerated by npm run report:router-full-catalog -- --json=...); ` +
+      "this file keeps the decision, rejections, caps, fallback and evidence per item. fallback.notModelled is the same for every item and is in the full report.",
+  };
+  mkdirSync(dirname(summaryOut), { recursive: true });
+  writeFileSync(summaryOut, `${JSON.stringify(summary, null, 2)}\n`);
+  console.error(`written ${summaryOut}`);
 }
 const mdOut = args.get("md");
 if (mdOut) {
