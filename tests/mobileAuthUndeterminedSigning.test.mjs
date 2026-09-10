@@ -12,7 +12,14 @@
 //
 //   X2 · X3 · X3a · X8b · X8c · X12 · X13 · X13a  tests/mobileAuthDeploymentVerify.test.mjs
 //                                                 and tests/mobileAuthDeploymentBinding.test.mjs
+//   X10 · X10a                                    tests/mobileAuthRollbackMaterial.test.mjs
 //   X10b · X10c                                   tests/mobileAuthenticatedFetch.test.mjs
+//
+// One rule below rests on a number this file cannot observe: the previous
+// signing key's grace window is exclusive, so +899s verifies and +900s does
+// not. That boundary is held against the real keyring in
+// tests/mobileAuthRollbackMaterial.test.mjs; here it is only the rule that a
+// refusal after it closed is not a rollback reason.
 //
 // Handing this module a hoped-for input and getting the hoped-for answer
 // proves the rule was written down correctly. It proves nothing about a
@@ -22,6 +29,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MOBILE_ACCESS_AXIS_OBSERVATIONS,
   MOBILE_F3_REQUIREMENTS,
   MOBILE_HOLD_DEADLINE_SECONDS,
   MOBILE_MISSING_ANSWER_KINDS,
@@ -81,12 +89,83 @@ test("X3a: unjudgeable evidence is case 2', which is neither this branch nor a d
   assert.match(verdict.answer, /collect the evidence again/);
 });
 
-test("X2: a still-valid previous token that was rejected is a defect, not case 1", () => {
+test("X2: a previous token rejected inside its grace window is a defect, not case 1", () => {
   const verdict = classifyUndeterminedSigning(
-    caseOne({ previousAccessAxis: "rejected_while_valid" })
+    caseOne({ previousAccessAxis: "rejected", graceRemainingAtRejectionSeconds: 1 })
   );
   assert.equal(verdict.case, "case_2");
   assert.equal(verdict.rollback, true);
+  assert.equal(verdict.graceWindowClosedAtRejection, false);
+});
+
+test("X2a: a rejection after the window closed is the contract working, and never a rollback", () => {
+  // Reproduced against the real mint and verify path on 2026-09-10: the
+  // previous signing key verifies at +899s and answers `unknown_kid` at
+  // +900s. Ordering a rollback for the second would undo a correct
+  // deployment. It is still not an answer -- the sample was never presented
+  // while it counted -- so G7 names the unknown instead.
+  for (const remaining of [0, -1, -600]) {
+    const verdict = classifyUndeterminedSigning(
+      caseOne({
+        previousAccessAxis: "rejected",
+        graceRemainingAtRejectionSeconds: remaining,
+      })
+    );
+    assert.equal(verdict.case, "case_1", String(remaining));
+    assert.equal(verdict.rollback, false, String(remaining));
+    assert.equal(verdict.previousGenerationQuestion, "not_applicable", String(remaining));
+    assert.equal(verdict.recordedAsPass, false, String(remaining));
+  }
+});
+
+test("X2b: the boundary is read at the instant of the rejection, not at judgement", () => {
+  // The two windows are different measurements. A round judged long after the
+  // window closed can still hold a rejection from inside it, and that
+  // rejection is the defect.
+  const verdict = classifyUndeterminedSigning(
+    caseOne({
+      previousAccessAxis: "rejected",
+      graceRemainingAtRejectionSeconds: 1,
+      graceWindowRemainingSeconds: -3600,
+    })
+  );
+  assert.equal(verdict.case, "case_2");
+  assert.equal(verdict.rollback, true);
+});
+
+test("the access axis reports observations, and every one of them is handled", () => {
+  // The list is the interface. `rejected` is on it and `rejected_while_valid`
+  // is not, because the second is a verdict wearing an observation's clothes.
+  assert.deepEqual(MOBILE_ACCESS_AXIS_OBSERVATIONS, [
+    "accepted",
+    "rejected",
+    "sample_expired",
+  ]);
+  for (const axis of MOBILE_ACCESS_AXIS_OBSERVATIONS) {
+    const verdict = classifyUndeterminedSigning(
+      caseOne({ previousAccessAxis: axis, graceRemainingAtRejectionSeconds: 1 })
+    );
+    assert.notEqual(verdict.case, "insufficient_observation", axis);
+    assert.equal(MOBILE_SIGNING_ROUND_CASES.includes(verdict.case), true, axis);
+  }
+});
+
+test("X2c: a rejection with no grace state recorded is not classified either way", () => {
+  const verdict = classifyUndeterminedSigning(caseOne({ previousAccessAxis: "rejected" }));
+  assert.equal(verdict.case, "insufficient_observation");
+  assert.equal(verdict.rollback, false);
+  assert.match(verdict.answer, /grace window/);
+});
+
+test("X2d: an axis reported as `rejected_while_valid` is refused, because the name is a verdict", () => {
+  // The old spelling decided the outcome from the caller's label. It is not
+  // silently reinterpreted: an observation and a verdict are asked for
+  // separately.
+  const verdict = classifyUndeterminedSigning(
+    caseOne({ previousAccessAxis: "rejected_while_valid", graceRemainingAtRejectionSeconds: 1 })
+  );
+  assert.equal(verdict.case, "insufficient_observation");
+  assert.equal(verdict.rollback, false);
 });
 
 test("X6: an undetermined refresh axis puts the round outside this branch", () => {
@@ -114,12 +193,15 @@ test("a previous generation that was accepted leaves nothing undetermined", () =
   assert.equal(verdict.case, "not_this_branch");
 });
 
-test("every classification names one of the four cases", () => {
+test("every classification names one of the listed cases", () => {
   const inputs = [
     caseOne(),
     caseOne({ materialCheck: "mismatch_confirmed" }),
     caseOne({ materialCheck: "evidence_unjudgeable" }),
     caseOne({ materialCheck: "something else" }),
+    caseOne({ previousAccessAxis: "rejected", graceRemainingAtRejectionSeconds: 1 }),
+    caseOne({ previousAccessAxis: "rejected", graceRemainingAtRejectionSeconds: 0 }),
+    caseOne({ previousAccessAxis: "rejected" }),
     caseOne({ previousAccessAxis: "rejected_while_valid" }),
     caseOne({ previousAccessAxis: "accepted" }),
     caseOne({ previousAccessAxis: "who knows" }),
@@ -254,34 +336,64 @@ test("an unusable instant is reported as unknown rather than computed around", (
 
 // --- G9's fourth value: no exception in section 4 ---------------------------
 
+/** Section 4's completion condition, entirely satisfied. */
+const f2Complete = (overrides = {}) => ({
+  expectedDeploymentIdConfirmed: true,
+  rollbackCompletedAtSeconds: 1_000,
+  preflightRecheck: "passed",
+  preflightRecheckAtSeconds: 1_001,
+  ...overrides,
+});
+
 test("F2 is unconfirmed while the expected deployment id is unconfirmed, even if the re-check passed", () => {
   // A rollback that reuses the id would pass the re-check without anyone
   // having confirmed which case they were in. Passing unconfirmed is not
   // confirmation.
-  const status = f2CompletionStatus({
-    expectedDeploymentIdConfirmed: false,
-    preflightRecheck: "passed",
-  });
+  const status = f2CompletionStatus(f2Complete({ expectedDeploymentIdConfirmed: false }));
   assert.equal(status.status, "unconfirmed");
   assert.equal(status.exceptionOpened, false);
   assert.match(status.why, /not confirmed \(E7\)/);
 });
 
-test("F2 completes only when a confirmed expectation and a passing re-check meet", () => {
-  assert.equal(
-    f2CompletionStatus({ expectedDeploymentIdConfirmed: true, preflightRecheck: "passed" }).status,
-    "complete"
-  );
+test("F2 completes on section 4's two things, and on nothing less", () => {
+  assert.equal(f2CompletionStatus(f2Complete()).status, "complete");
   for (const recheck of ["failed", "not_run", undefined]) {
-    const status = f2CompletionStatus({ expectedDeploymentIdConfirmed: true, preflightRecheck: recheck });
+    const status = f2CompletionStatus(f2Complete({ preflightRecheck: recheck }));
     assert.equal(status.status, "unconfirmed", String(recheck));
     assert.equal(status.exceptionOpened, false, String(recheck));
   }
 });
 
+test("F2 without an observed rollback is unconfirmed, however well the re-check went", () => {
+  // Section 4 completes F2 on the rollback finishing *and* the re-check
+  // passing. Two answers that never mention the rollback cannot establish the
+  // first of those.
+  const status = f2CompletionStatus(f2Complete({ rollbackCompletedAtSeconds: undefined }));
+  assert.equal(status.status, "unconfirmed");
+  assert.equal(status.rollbackObserved, false);
+  assert.match(status.why, /no completed rollback was observed/);
+});
+
+test("a re-check that did not run after the rollback does not complete F2", () => {
+  // Same second included: a check that cannot be shown to have run after the
+  // rollback says nothing about the rolled-back deployment.
+  for (const at of [999, 1_000]) {
+    const status = f2CompletionStatus(f2Complete({ preflightRecheckAtSeconds: at }));
+    assert.equal(status.status, "unconfirmed", String(at));
+    assert.match(status.why, /after the rollback/);
+  }
+  assert.equal(f2CompletionStatus(f2Complete({ preflightRecheckAtSeconds: 1_001 })).status, "complete");
+  const undated = f2CompletionStatus(f2Complete({ preflightRecheckAtSeconds: undefined }));
+  assert.equal(undated.status, "unconfirmed");
+  assert.match(undated.why, /no instant for it/);
+});
+
 test("a rollback that ran is reported as having run, and separately from completion", () => {
-  const status = f2CompletionStatus({ expectedDeploymentIdConfirmed: false, preflightRecheck: "not_run" });
+  const status = f2CompletionStatus(
+    f2Complete({ expectedDeploymentIdConfirmed: false, preflightRecheck: "not_run" })
+  );
   assert.equal(status.rollbackMayHaveRun, true);
+  assert.equal(status.rollbackObserved, true);
   assert.equal(status.status, "unconfirmed");
   assert.equal(MOBILE_MISSING_ANSWER_KINDS.includes("unconfirmed"), true);
 });

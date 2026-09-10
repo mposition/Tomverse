@@ -138,17 +138,47 @@ test("outside production the same typo is reported but still runs", () => {
 // ---------------------------------------------------------------------------
 
 test("every model the deployment can reach has a recorded price", () => {
-  const problems = auditVoicePriceRegister({
-    modelIds: ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"],
-    now: new Date("2026-09-02T00:00:00Z"),
-  });
+  // Both entries are now observed: gpt-4o-transcribe was verified on
+  // 2026-09-09 (docs/policy/voice-input.md §6.1.6). Until then this asserted
+  // the single gap, which was the register reporting a hole rather than
+  // papering over it.
+  assert.deepEqual(
+    auditVoicePriceRegister({
+      modelIds: ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"],
+      now: new Date("2026-09-09T00:00:00Z"),
+    }),
+    []
+  );
+});
 
-  // One gap, and it is the register reporting it rather than papering over
-  // it: gpt-4o-transcribe has never been invoiced and the provider publishes
-  // no audio rate for it (docs/policy/voice-input.md §6.1.3-5).
+test("an entry whose audio rate is unknown is still reported as unknown", () => {
+  // The rule the test above used to carry. It moves to an injected register
+  // rather than disappearing: the shipped entries filling their gaps must not
+  // take the check for gaps down with them, or the next unverified model is
+  // added to a register that no longer refuses one.
+  const problems = auditVoicePriceRegister({
+    modelIds: ["some-future-transcribe"],
+    now: new Date("2026-09-09T00:00:00Z"),
+    register: [
+      {
+        modelId: "some-future-transcribe",
+        price: {
+          audioInputPerMillionTokensUsd: null,
+          publishedAudioInputPerMillionTokensUsd: 1.0,
+          outputPerMillionTokensUsd: 2.0,
+          estimatedCostPerMinuteUsd: 0.001,
+        },
+        verifiedAt: "2026-09-02",
+        owner: "@mposition",
+        ticket: "#1247",
+        reverifyBy: "2026-11-01",
+        costObservation: null,
+      },
+    ],
+  });
   assert.deepEqual(
     problems.map((problem) => [problem.modelId, problem.code]),
-    [["gpt-4o-transcribe", "audio_input_rate_unknown"]]
+    [["some-future-transcribe", "audio_input_rate_unknown"]]
   );
 });
 
@@ -223,11 +253,15 @@ test("an observed cost carries the invoice it was read from", () => {
     "an aggregate charge is only evidence if it says how it was isolated"
   );
 
-  assert.equal(
-    byId["gpt-4o-transcribe"].costObservation,
-    null,
-    "gpt-4o-transcribe has never been called; it cannot have been invoiced"
-  );
+  // Both entries now carry one. gpt-4o-transcribe was the held case until
+  // 2026-09-09; what makes its observation evidence rather than a number is
+  // the same thing that makes the other's -- the recorded rates reproduce the
+  // billed amount exactly, which `auditVoicePriceRegister` re-checks above.
+  const second = byId["gpt-4o-transcribe"].costObservation;
+  assert.notEqual(second, null, "gpt-4o-transcribe records no invoice");
+  assert.ok(second.totalUsd > 0);
+  assert.ok(second.requests > 0);
+  assert.ok(second.isolation.trim() && second.source.trim());
 });
 
 test("an observation names no raw account identifier", () => {
@@ -270,17 +304,88 @@ test("the observed charge reproduces the recorded rates exactly", () => {
   );
 });
 
-test("the audio rate is not the published text rate", () => {
-  // The specific defect §6.1.3 found: the pricing table's `Input` column is
-  // the text rate, and costing transcription with it understates the input
-  // side by 2.4x. A future edit that collapses the two fields back into one
-  // has to fail here.
+test("the effective audio rate is not the published one", () => {
+  // Costing transcription from the published price understates the input side
+  // by 2.4x, on every model measured. Why it does is not established
+  // (docs/policy/voice-input.md §6.1.3) -- what is established is that the two
+  // numbers differ, so a future edit collapsing them into one field has to
+  // fail here.
   const entry = VOICE_MODEL_PRICE_REGISTER.find(
     (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
   );
 
-  assert.equal(entry.price.textInputPerMillionTokensUsd, 1.25);
+  assert.equal(entry.price.publishedAudioInputPerMillionTokensUsd, 1.25);
   assert.equal(entry.price.audioInputPerMillionTokensUsd, 3.0);
+  assert.notEqual(
+    entry.price.audioInputPerMillionTokensUsd,
+    entry.price.publishedAudioInputPerMillionTokensUsd,
+    "if these ever agree, the discrepancy this register records has closed " +
+      "and §6.1.3 needs re-reading rather than this assertion relaxing"
+  );
+});
+
+test("the effective rate is what reproduces the invoice, on both models", () => {
+  // The register's central arithmetic, asserted directly rather than only
+  // through the audit: the recorded rates have to reproduce a real charge.
+  const byId = Object.fromEntries(
+    VOICE_MODEL_PRICE_REGISTER.map((entry) => [entry.modelId, entry])
+  );
+  for (const modelId of ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]) {
+    const { price, costObservation: seen } = byId[modelId];
+    const implied =
+      (seen.audioInputTokens * price.audioInputPerMillionTokensUsd) / 1e6 +
+      (seen.outputTokens * price.outputPerMillionTokensUsd) / 1e6;
+    assert.ok(
+      Math.abs(implied - seen.totalUsd) < 5e-7,
+      `${modelId}: recorded rates imply ${implied}, invoice says ${seen.totalUsd}`
+    );
+  }
+});
+
+test("the published audio price would not reproduce either invoice", () => {
+  // Why the register cannot simply hold the page's number. Stated as
+  // arithmetic so that anyone tempted to collapse the two fields has to
+  // delete a failing test to do it.
+  const byId = Object.fromEntries(
+    VOICE_MODEL_PRICE_REGISTER.map((entry) => [entry.modelId, entry])
+  );
+  for (const modelId of ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]) {
+    const { price, costObservation: seen } = byId[modelId];
+    const atPublished =
+      (seen.audioInputTokens * price.publishedAudioInputPerMillionTokensUsd) /
+        1e6 +
+      (seen.outputTokens * price.outputPerMillionTokensUsd) / 1e6;
+    assert.ok(
+      atPublished < seen.totalUsd,
+      `${modelId}: the published price must under-state the real charge`
+    );
+  }
+});
+
+test("the discrepancy is on the input side only", () => {
+  // Output matched the published price exactly on both models. Recorded
+  // because it bounds what any future explanation has to account for: not
+  // "this account is billed differently" in general, but the input side
+  // specifically.
+  const byId = Object.fromEntries(
+    VOICE_MODEL_PRICE_REGISTER.map((entry) => [entry.modelId, entry])
+  );
+  for (const [modelId, publishedOutput] of [
+    ["gpt-4o-mini-transcribe", 5.0],
+    ["gpt-4o-transcribe", 10.0],
+  ]) {
+    const { price, costObservation: seen } = byId[modelId];
+    assert.equal(price.outputPerMillionTokensUsd, publishedOutput);
+    // The audio half is what the whole invoice minus the output half leaves.
+    const audioHalf =
+      seen.totalUsd - (seen.outputTokens * publishedOutput) / 1e6;
+    const effective = (audioHalf / seen.audioInputTokens) * 1e6;
+    assert.ok(
+      Math.abs(effective / price.publishedAudioInputPerMillionTokensUsd - 2.4) <
+        1e-9,
+      `${modelId}: effective/published came to ${effective / price.publishedAudioInputPerMillionTokensUsd}, not 2.4`
+    );
+  }
 });
 
 test("a rate the invoice does not support is refused", () => {
@@ -294,7 +399,7 @@ test("a rate the invoice does not support is refused", () => {
       ),
       price: {
         audioInputPerMillionTokensUsd: 1.25,
-        textInputPerMillionTokensUsd: 1.25,
+        publishedAudioInputPerMillionTokensUsd: 1.25,
         outputPerMillionTokensUsd: 5.0,
         estimatedCostPerMinuteUsd: 0.003,
       },
@@ -318,7 +423,7 @@ test("an invoice recorded against no audio rate at all is refused", () => {
       ),
       price: {
         audioInputPerMillionTokensUsd: null,
-        textInputPerMillionTokensUsd: 1.25,
+        publishedAudioInputPerMillionTokensUsd: 1.25,
         outputPerMillionTokensUsd: 5.0,
         estimatedCostPerMinuteUsd: 0.003,
       },
@@ -382,12 +487,47 @@ test("the default model may be called", () => {
 });
 
 test("a model with no known audio rate is refused", () => {
-  // The concrete case this rule exists for: an operator setting
-  // VOICE_TRANSCRIPTION_MODEL to the entry that has never been invoiced.
+  // The rule, driven by an injected entry. It used to point at
+  // gpt-4o-transcribe, which was the register's one unverified model; that
+  // entry was observed on 2026-09-09 (§6.1.6), and a rule that can only be
+  // demonstrated against the shipped register stops being demonstrable the
+  // moment the register is complete.
   assert.equal(
-    voiceModelPriceRefusal({ modelId: "gpt-4o-transcribe" })?.code,
+    voiceModelPriceRefusal({
+      modelId: "some-future-transcribe",
+      register: [
+        {
+          modelId: "some-future-transcribe",
+          price: {
+            audioInputPerMillionTokensUsd: null,
+            publishedAudioInputPerMillionTokensUsd: 1.0,
+            outputPerMillionTokensUsd: 2.0,
+            estimatedCostPerMinuteUsd: 0.001,
+          },
+          verifiedAt: "2026-09-02",
+          owner: "@mposition",
+          ticket: "#1247",
+          reverifyBy: "2026-11-01",
+          costObservation: null,
+        },
+      ],
+    })?.code,
     "audio_input_rate_unknown"
   );
+});
+
+test("both shipped models are now accepted by the readiness refusal", () => {
+  // The behavioural consequence of §6.1.6, stated rather than left implicit:
+  // a deployment that selects gpt-4o-transcribe is no longer refused, because
+  // its cost is known. That is not advice to select it -- the default remains
+  // gpt-4o-mini-transcribe and this model bills twice as much per audio token.
+  for (const modelId of ["gpt-4o-mini-transcribe", "gpt-4o-transcribe"]) {
+    assert.equal(
+      voiceModelPriceRefusal({ modelId }),
+      null,
+      `${modelId} should have a known cost`
+    );
+  }
 });
 
 test("an unrecognised model string is refused, not shrugged at", () => {
