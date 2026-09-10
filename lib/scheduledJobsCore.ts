@@ -252,6 +252,38 @@ export const SCHEDULED_JOB_DEFINITIONS = [
 
 export type ScheduledJobKey = (typeof SCHEDULED_JOB_DEFINITIONS)[number]["key"];
 
+/**
+ * Job keys whose runs are recorded but which nothing drives yet.
+ *
+ * A key here writes `ScheduledJobRun` rows like any other job and is **not**
+ * in the catalogue above, so the dashboard neither lists it nor judges its
+ * timing. That is the point: a job registered in the catalogue before anything
+ * schedules it has no last run, `silentMs` is infinite, and it lights the
+ * `delayedJobs` badge on the day it is merged -- an alert about a decision
+ * nobody has taken.
+ *
+ * Moving a key out of this list and into the catalogue is what turns the delay
+ * judgement on, and it needs the two things that gate it:
+ *
+ *   * `mobile_auth_keyring_health` -- the exact UTC run time (S2 of
+ *     `.github/audits/2026-09-10-mobile-auth-keyring-standing-check-approval.md`
+ *     defers it to scheduler registration) and the per-job last-run query
+ *     that S6 makes a precondition. `getScheduledJobsDashboard()` reads the
+ *     newest 150 rows across every job, so a daily job's row falls out of
+ *     that window within hours and reads as delayed having run perfectly.
+ *
+ * The rows written meanwhile are not wasted: they are the history the delay
+ * judgement reads on the day it is switched on.
+ */
+export const MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY = "mobile_auth_keyring_health" as const;
+
+export const PENDING_SCHEDULED_JOB_KEYS = [MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY] as const;
+
+export type PendingScheduledJobKey = (typeof PENDING_SCHEDULED_JOB_KEYS)[number];
+
+/** Anything a run may be recorded under: scheduled today, or awaiting a schedule. */
+export type RecordableScheduledJobKey = ScheduledJobKey | PendingScheduledJobKey;
+
 export const scheduledJobDefinition = (key: ScheduledJobKey) => {
   const definition = SCHEDULED_JOB_DEFINITIONS.find((job) => job.key === key);
   if (!definition) throw new Error(`Unknown scheduled job: ${key}`);
