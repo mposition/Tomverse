@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "recordKind": "oi_f4_windows_unit_runner_approval_package_draft_evidence",
-  "recordStatus": "pending_independent_review_and_human_approval",
+  "recordStatus": "revised_pending_human_approval",
   "proposalVersion": "oi-f4-runner-1",
   "document": {
     "path": ".github/audits/memory-eval-vnext-oi-f4-runner-approval-package-draft-2026-09-10.md",
-    "rawSha256": "7bdc313a124faec6daad5b030faf75f7adb79f1c7cb679f255edb303051f890b",
+    "rawSha256": "420f8876d9e6e472345ff5a953ea446db16a862b48b28242fa460de14ac80381",
     "hashMethod": "SHA-256 over raw UTF-8 file bytes; no normalization",
     "authority": "normative proposal only; not an approval receipt"
   },
@@ -325,7 +325,7 @@
       },
       {
         "id": "WR13",
-        "expected": "error+status0, ENAMETOOLONG/ENOENT/EACCES, signal/null/누락/비정수/범위 밖/throw: fail-closed·남은 실행 0·retry 0",
+        "expected": "error+status0, ENAMETOOLONG/ENOENT/EACCES, signal/null/누락/비정수/범위 밖/throw: fail-closed·남은 실행 0·retry 0; 범위 밖 status의 현행 pass-through와 제안의 중단·최초 nonzero 보존/없으면 1 차이를 고정",
         "decisionId": "WR-D3",
         "kind": "focused_future_regression",
         "executionStatus": "not_run",
@@ -2461,6 +2461,235 @@
       }
     ],
     "observationScope": "Package-script run timestamps remain those of postCreationChecks. Final raw binding/case checks are repeated after results are embedded; no evidence self hash is stored."
+  },
+  "revisionReviewDisposition": {
+    "revision": "WR-1",
+    "revisionDate": "2026-09-10",
+    "changeKind": "nonblocking_explanation_and_future_test_wording",
+    "sourceReviewedCommit": "3fb5ac9554ecbe8c3c52a7da0f9bf1739030e7a9",
+    "sourceReviewedFiles": [
+      {
+        "path": ".github/audits/memory-eval-vnext-oi-f4-runner-approval-package-draft-2026-09-10.md",
+        "rawSha256": "7bdc313a124faec6daad5b030faf75f7adb79f1c7cb679f255edb303051f890b"
+      },
+      {
+        "path": ".github/audits/evidence/memory-eval-vnext-oi-f4-runner-approval-package-2026-09-10.json",
+        "rawSha256": "686ad8eda4ba266be3e9ebf8f78a17da3a838cdfb740411b70f99c4b1a2c26e5"
+      }
+    ],
+    "report": {
+      "path": "C:/Users/Vyper/.codex/attachments/b937844e-b232-4b75-a44b-69c1bd47bb16/pasted-text.txt",
+      "rawSha256": "d0ea75c475e42e9ca41434547731b9a4a9e1a0e0fa31ab8b7160e16d9f7418a8",
+      "bytes": 23214,
+      "lfCount": 191,
+      "kind": "user_supplied_external_review_report",
+      "reportedReviewer": "Claude",
+      "reportedVerdict": "PASS_WITH_WARNINGS",
+      "verdictAppliesOnlyToCommit": "3fb5ac9554ecbe8c3c52a7da0f9bf1739030e7a9",
+      "reportedBlockingFindings": 0,
+      "reportedWarningIds": [
+        "WR-F1"
+      ],
+      "locatorIsNotGitOrPermanentArchive": true,
+      "hashIsNotCryptographicAuthorAuthentication": true
+    },
+    "finding": {
+      "id": "WR-F1",
+      "priority": "P3",
+      "blocking": false,
+      "authorDisposition": "author_addressed_pending_human_acceptance",
+      "externalClosureDeclared": false,
+      "changes": [
+        "Explain current non-null status pass-through versus proposed out-of-range infrastructure stop and first-nonzero-or-1 exit.",
+        "Explain POSIX low-eight-bit portability motivation and that already-truncated status 0 cannot be reconstructed.",
+        "Bind the existing behavior difference to WR13 without changing execution policy, budget, scope, or case count."
+      ]
+    },
+    "additionalIndependentReview": {
+      "performed": false,
+      "verdict": null,
+      "confirmationRoundsUsed": 0,
+      "firstReviewRoundsUsed": 1,
+      "authorRecommendation": "Do not repeat the full review for this nonblocking explanation-only revision. Human acceptance must explicitly acknowledge the revision and absence of additional independent review; a scoped confirmation can be requested.",
+      "humanAcceptedAbsenceOfAdditionalReview": false
+    },
+    "revisionCommit": null,
+    "approvalTargetKind": "exact_working_file_bytes_not_yet_committed",
+    "existingObservationSectionsApplyTo": "Historical R preparation only; not WR-1 validation.",
+    "beforeRevisionChecks": {
+      "at": "2026-09-10T05:47:15.223Z",
+      "runs": [
+        {
+          "name": "check:encoding:strict",
+          "exit": 0,
+          "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380"
+        },
+        {
+          "name": "check:policy-section-references",
+          "exit": 0,
+          "outputSha256": "10d32893aa320f1486d353d438877ba14f400e89a5def1ad1a2201606321b700"
+        },
+        {
+          "name": "check:release-records",
+          "exit": 0,
+          "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565"
+        },
+        {
+          "name": "check:memory-eval-succ9",
+          "exit": 0,
+          "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c"
+        },
+        {
+          "name": "check:memory-extraction-eval",
+          "exit": 0,
+          "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b"
+        },
+        {
+          "name": "check:memory-eval-freeze",
+          "exit": 0,
+          "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1"
+        },
+        {
+          "name": "check:doc-references",
+          "exit": 0,
+          "outputSha256": "35fbd9630118e20e05b94a41c0a5aad3431cf5fd1e0ce5767366287a94656052"
+        },
+        {
+          "name": "test:unit",
+          "exit": 1,
+          "outputSha256": "30da9d3e251bc45dce4be788c62aaa860e4b1dd33ff5ce02a6de6df08f323e15"
+        }
+      ],
+      "nativeSpawn": {
+        "start": "2026-09-10T05:47:15.222Z",
+        "end": "2026-09-10T05:47:15.225Z",
+        "status": null,
+        "signal": null,
+        "error": "ENAMETOOLONG",
+        "stdoutBytes": 0,
+        "stderrBytes": 0,
+        "naiveQuotedUtf16UnitsIncludingNul": 40662
+      }
+    },
+    "directValidation": {
+      "status": "completed_for_revision_documents_only",
+      "at": "2026-09-10T05:49:53.105Z",
+      "markdown": {
+        "path": ".github/audits/memory-eval-vnext-oi-f4-runner-approval-package-draft-2026-09-10.md",
+        "rawSha256": "420f8876d9e6e472345ff5a953ea446db16a862b48b28242fa460de14ac80381",
+        "bytes": 31888,
+        "lfCount": 399
+      },
+      "onlyAllowedJsonDelta": true,
+      "executionPolicyBudgetAndThreeFileScopeUnchanged": true,
+      "historicalObservationSectionsUnchanged": true,
+      "testsAndDecisionMapping": true,
+      "authorityStillPending": true,
+      "additionalIndependentReviewNotInvented": true,
+      "protected65Unchanged": true,
+      "originalRObjectsPreserved": true,
+      "strictUtf8AndWhitespace": true,
+      "relativeLinksExist": true,
+      "reportRawHashMatches": true,
+      "packageChecks": {
+        "at": "2026-09-10T05:49:53.105Z",
+        "runs": [
+          {
+            "name": "check:encoding:strict",
+            "exit": 0,
+            "outputSha256": "7d5195263cb38b5aa0de4bf8e0ead06774933b4e124616518883574554bcd380"
+          },
+          {
+            "name": "check:policy-section-references",
+            "exit": 0,
+            "outputSha256": "10d32893aa320f1486d353d438877ba14f400e89a5def1ad1a2201606321b700"
+          },
+          {
+            "name": "check:release-records",
+            "exit": 0,
+            "outputSha256": "5d216eabba9f6eb6762717a31e2bc3c26172d530ed554ab099a9c21a537f3565"
+          },
+          {
+            "name": "check:memory-eval-succ9",
+            "exit": 0,
+            "outputSha256": "f792af65d17e277fecceedf03b5eaba6484180748d3013de077a027a005e194c"
+          },
+          {
+            "name": "check:memory-extraction-eval",
+            "exit": 0,
+            "outputSha256": "575a56bac68f5e261286b5e00894451bd0fb1b7b5cead22e49d8d8f28315629b"
+          },
+          {
+            "name": "check:memory-eval-freeze",
+            "exit": 0,
+            "outputSha256": "8318af98d6c2a2ce9ca9f2d7c0d9b4acc70cc97ee7555b8dc026a4fb5b10cca1"
+          },
+          {
+            "name": "check:doc-references",
+            "exit": 0,
+            "outputSha256": "35fbd9630118e20e05b94a41c0a5aad3431cf5fd1e0ce5767366287a94656052"
+          },
+          {
+            "name": "test:unit",
+            "exit": 1,
+            "outputSha256": "30da9d3e251bc45dce4be788c62aaa860e4b1dd33ff5ce02a6de6df08f323e15"
+          }
+        ],
+        "nativeSpawn": {
+          "start": "2026-09-10T05:49:53.104Z",
+          "end": "2026-09-10T05:49:53.107Z",
+          "status": null,
+          "signal": null,
+          "error": "ENAMETOOLONG",
+          "stdoutBytes": 0,
+          "stderrBytes": 0,
+          "naiveQuotedUtf16UnitsIncludingNul": 40662
+        }
+      },
+      "comparisonByName": [
+        {
+          "name": "check:encoding:strict",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "check:policy-section-references",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "check:release-records",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "check:memory-eval-succ9",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "check:memory-extraction-eval",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "check:memory-eval-freeze",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "check:doc-references",
+          "sameExitAndOutputAsCleanR": true
+        },
+        {
+          "name": "test:unit",
+          "sameExitAndOutputAsCleanR": true
+        }
+      ],
+      "futureTestsRun": false,
+      "newCheckFailures": [],
+      "fullUnitPassed": false,
+      "bindingNote": "No JSON self hash; final format and binding are rechecked after recording these results. The separate approval request binds the final JSON raw bytes."
+    },
+    "technicalBasis": {
+      "nodeDocs": "https://nodejs.org/docs/latest-v22.x/api/process.json",
+      "posixDocs": "https://pubs.opengroup.org/onlinepubs/9699919799/functions/wait.html",
+      "scope": "Documentation and arithmetic only; no POSIX execution or Windows crash probe performed."
+    }
   },
   "nextSequence": [
     "Publish only on a new user request and fix exact reviewCommit.",

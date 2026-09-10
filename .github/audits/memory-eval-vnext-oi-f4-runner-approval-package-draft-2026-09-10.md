@@ -1,8 +1,8 @@
 # memory-eval vNext — OI-F4 Windows unit runner 별도 승인 패키지 초안
 
-**Status: DRAFT — 독립 검토·사람 승인 대기. runner 구현 또는 착수 승인이 아니다.**
+**Status: DRAFT — WR-F1 설명 보완·사람 승인 대기. 수정본의 추가 독립 검토는 없으며 구현 또는 착수 승인이 아니다.**
 작성자: Codex. 작성일: 2026-09-10.
-Document ID: MEM-EVAL-VNEXT-OI-F4-RUNNER-1. Revision: WR-0.
+Document ID: MEM-EVAL-VNEXT-OI-F4-RUNNER-1. Revision: WR-1.
 
 ## 1. 목적·현재 권한·결속 방식
 
@@ -20,7 +20,7 @@ OI-F4 처리방침은 별도 runner 범위로 보류했으며, runner·package·
 
 ~~~yaml
 recordKind: oi_f4_windows_unit_runner_approval_package_draft
-recordStatus: pending_independent_review_and_human_approval
+recordStatus: revised_pending_human_approval
 packageLabel: WR
 proposalVersion: oi-f4-runner-1
 repository: mposition/Tomverse
@@ -203,6 +203,16 @@ batch마다 번호·집계가 다시 시작될 수 있어 하나의 전역 TAP/s
 
 비정상 값은 성공으로 간주하지 않으며 error와 status 0이 함께 있어도 비정상이 우선한다.
 통상 1–255 실패 코드는 보존하고 그 밖의 비정상 status는 1로 정규화한다.
+이는 기존 runner의 모든 exit 동작을 그대로 보존하는 것은 아니다. 현행 server의
+result.status ?? 1 및 clientResult.status ?? 1은 null/undefined가 아닌 status를 범위 검사 없이
+process.exit에 전달한다. 제안은 정상 성공 status 0을 제외한 범위 밖 값을 인프라 실패로 분류해 남은 batch/lane을
+중단하고, 최종 exit는 앞서 기록한 최초 nonzero가 있으면 그 값을 유지하고 없으면 1로 정한다.
+정상 실패 코드 보존과 달리 이 비정상 경로는 의도된 동작 변경이며 WR-D3 승인 대상이다.
+POSIX wait/waitpid는 정상 종료 status의 하위 8비트를 반환하므로 256이 부모에서 0으로 보일 수 있다.
+따라서 범위 밖 값을 다시 전달하지 않고 휴대 가능한 nonzero로 제한하는 방어적 처리다.
+[POSIX.1-2017 wait의 종료 status 정의](https://pubs.opengroup.org/onlinepubs/9699919799/functions/wait.html)
+다만 이미 OS 경계에서 잘려 spawnSync가 status 0을 반환한 원래 값을 복원한다는 보장은 아니다.
+이번 보완은 기존 표의 값·분류·최초 nonzero 우선순위를 바꾸지 않고 현행과의 차이·이유를 밝힌다.
 여러 실패를 합산하여 0으로 wrap시키거나 마지막 성공으로 덮어쓰지 않는다.
 ENAMETOOLONG/ENOENT/EACCES, signal, throw 뒤에 자동 재시도하지 않는다.
 중단으로 남은 batch와 server 실패로 건너뛴 client는 **미실행**이며 통과 수에 더하지 않는다.
@@ -270,7 +280,7 @@ WR18–WR20은 실제 환경·기존 회귀·범위 확인이다. false pass/누
 | WR10 | server 전부 성공 뒤에만 client, client 0개면 추가 spawn 없음; 겹쳐 실행하지 않음 |
 | WR11 | 첫/중간/마지막 server batch의 일반 실패마다 뒤 server는 모두 실행, client는 미실행 |
 | WR12 | 서로 다른 nonzero 뒤 성공 및 client 내부 실패: 최초 nonzero 유지, exit 0으로 덮이지 않음 |
-| WR13 | error+status0, ENAMETOOLONG/ENOENT/EACCES, signal/null/누락/비정수/범위 밖/throw: fail-closed·남은 실행 0·retry 0 |
+| WR13 | error+status0, ENAMETOOLONG/ENOENT/EACCES, signal/null/누락/비정수/범위 밖/throw: fail-closed·남은 실행 0·retry 0; 범위 밖 status의 현행 pass-through와 제안의 중단·최초 nonzero 보존/없으면 1 차이를 고정 |
 | WR14 | 제출/미제출 수·인프라 중단과 시험 실패를 구분; child 출력에 “pass”가 있어도 실패를 성공으로 바꾸지 않음 |
 | WR15 | 소유한 합성 CLI fixture에서 실제 discovery·tsx loader·server/client 조건 및 성공 exit 관측 |
 | WR16 | 실제 CLI의 의도된 실패·이후 server marker·미실행 client marker, 비밀 없는 fixture·안전 정리·재귀 실행 없음 |
@@ -368,3 +378,22 @@ tracked/index clean, 신규 파일 두 개 외 기존 untracked 정규 파일 ha
 덮어쓰기/복구하지 않았고 config 보존 PASS라고 기록하지 않는다.
 HEAD·branch·tracked/index·보호 파일 65개·기존 untracked·stash·hidden lock·env 메타데이터가
 그대로임을 별도로 확인해 문서만 계속 작성했다. commit/push 전 config를 다시 관측해야 한다.
+
+## 12. WR-1 처리 이력과 검토 한계 — 2026-09-10
+
+원본 R=3fb5ac9554ecbe8c3c52a7da0f9bf1739030e7a9의 두 blob은 Git 이력에 그대로 보존한다.
+R의 최초 독립 검토는 PASS_WITH_WARNINGS, 승인 차단 0건, P3 WR-F1 한 건이었다.
+보고서 raw SHA-256은 d0ea75c475e42e9ca41434547731b9a4a9e1a0e0fa31ab8b7160e16d9f7418a8이다.
+그 판정은 R에만 귀속한다. WR-1은 §6의 현행/제안 차이·이유 설명과 WR13의 대응 문구를
+보완하고 JSON의 Markdown hash를 재결속한 수정본이며, 값·16,000 budget·3파일 범위는 불변이다.
+
+처리 상태는 작성자의 author_addressed_pending_human_acceptance다. 수정본의 추가 독립 검토나
+CONFIRMED·외부 finding closure를 발급하지 않았다. 최초 검토 1회, 변경분 확인 검토 0회다.
+비차단 설명 보완이므로 전체 재검토를 반복하지 않고, 사람이 수정 차이와 추가 독립 검토 부재를
+함께 수용하도록 요청한다. 별도 요청이 있으면 WR-F1 변경분 확인 검토만 할 수 있다.
+이 권고는 승인 자체가 아니며 사람 판정은 여전히 pending이다. 새 정책·값·범위 변경이 필요하면
+이 한정 보완에 섞지 않고 별도 지시·검토 대상으로 분리한다.
+
+JSON의 baseline·provenance·documentationValidation은 R 작성 당시 관측으로 보존하며,
+WR-1의 처리와 직접 검증은 revisionReviewDisposition에서 구분한다. 미래 WR01–WR20은 여전히
+not_run이고 구현·커밋·푸시·PR·운영 활성화를 이번 수정 지시에서 시작하지 않는다.
