@@ -56,28 +56,49 @@ using the existing ignore rule, `generatedPaths: []` and zero diff exclusions.
 - Commit, packaging, actual review, push and merge each await separate go.
   No result or future CI success is manufactured by this permission.
 
-## Evidence at preparation time, not a new test run
+## Historical round-0 evidence, not current-round certification
 
-The author-supplied summary at
-`C:/Users/Vyper/AppData/Local/Temp/router-collector-google-cache-null-fix-20260910-d60aae3e917147f3908bb4a2383fa2d0/VERIFICATION-SUMMARY.json`
-is a transcription of observed tool output, **not a full raw log**. Its
-sibling `source.patch` records the two-file +33/-1 implementation. Codex
-read the summary and directly checked the current diff and these file hashes:
+These observations concern the original two-file +33/-1 implementation at
+`dcabb4e3e130781de5819d2639ea4ab0e7f0df0f`, not a later revision. The original
+receipt and its initial hash table remain in that Git commit and the immutable
+round-0 diff. The fixed source is addressable with
+`git show dcabb4e3e130781de5819d2639ea4ab0e7f0df0f:lib/routerDevelopmentCollectorProvider.ts`
+and the same command for `tests/routerDevelopmentCollectorProvider.test.mjs`.
+No unavailable public URL or machine-local temp file is required to understand
+the observations below. Publication of that ancestry remains a later step.
 
-| File | SHA-256 |
-| --- | --- |
-| `lib/routerDevelopmentCollectorProvider.ts` | `d4b3cdd679835166d723bad804ee20fe92c82436d31584596c1c3eb3c8539ab8` |
-| `tests/routerDevelopmentCollectorProvider.test.mjs` | `ec3501b010870efe3343f91dca0b10b3e2e693557560699ad2229f5d954c6444` |
+The original author summary transcribed tool observations rather than saving
+full raw logs: collector 80/80, official typecheck, two-file lint and diff check
+passed; full local wiring changed from 10/12 to 11/12 but **still exited 1**.
+The cache-harvest CI regression passed, while the pre-existing Windows
+path-separator failure remained. Those are historical author reports, not
+new tests or independent Claude observations.
 
-The supplied results report collector 80/80, official typecheck, two-file
-lint and diff check passing. Full local wiring changed from 10/12 to 11/12
-but **still exited 1**: the new cache-harvest CI regression passes while the
-pre-existing Windows path-separator check still fails. Targeting the exact
-CI regression must disclose deselected tests and cannot be called a full
-wiring pass. No local full-unit pass has been observed. The reported Linux
-CI run at source 886 had 8,436 tests: 8,434 pass, one fail and one skip.
-Fresh Linux CI on the actual published fix head remains mandatory before
-merge; these records and the earlier review cannot substitute for it.
+The actual round-0 controller package, produced at
+`2026-09-10T05:42:02.317Z`, records one successful collector command and 11
+successful guards at that source. Its change digest is
+`sha256:eed64ad80aac2977a59b50570d2d8245b2251262328e9c4bac5f53199e07a33e`;
+the records are `package-round0.json` and `change-round0.diff` in the existing
+task output directory named above. Its five-line excerpts omit pass totals.
+Subsequent native raw TAP logs at the same source recorded 80/80 and the exact
+named CI target 1/1, zero fail/skip/cancel/todo; the other 11 wiring tests were
+not executed. They are separately labelled `collector-tests.supplemental.raw.tap`
+and `wiring-target.supplemental.raw.tap`, not replacement package output.
+Generated local records still need their later authorized durable archive;
+this receipt does not claim they are already available in a fresh clone.
+
+Codex also compared working and committed bytes directly at the fixed source.
+Claude's Read/Grep/Glob-only review could not independently compute hashes.
+Do not treat either a duplicated hash table or this receipt as current-file
+authentication: each later package must bind its own actual source/diff digest
+and record genuine checks. Editing this evidence section creates no new user
+permission and certifies no later test result or reviewer verdict.
+
+Targeting one CI regression is not a full-wiring-suite pass. No local full-unit
+pass has been observed. The reported Linux CI run at source 886 had 8,436
+tests: 8,434 pass, one fail and one skip. Fresh full Linux CI on the actual
+published fix head remains mandatory before merge; historical records and
+the earlier review cannot substitute for it.
 
 The fix makes the existing Google cache-write **unknown/null** explicit and
 tests that non-allowlisted raw/SDK fields cannot fill writes, uncached input

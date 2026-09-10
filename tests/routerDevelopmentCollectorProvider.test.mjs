@@ -70,7 +70,7 @@ test("Google cached reads leave writes, uncached input, and cost unknown despite
   assert.ok(googleModel);
   const body = {
     usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 2, thoughtsTokenCount: 0, cachedContentTokenCount: 3 },
-    // Adversarial non-allowlisted keys, not claims about Google's response schema.
+    // The adversarial keys supplied here are not Google usage-counter allowlist fields.
     usage: { input_tokens: 8, input_tokens_details: { cached_tokens: 3, cache_write_tokens: 5 } },
     candidates: [{ finishReason: "STOP" }],
   };
@@ -90,6 +90,8 @@ test("Google cached reads leave writes, uncached input, and cost unknown despite
   assert.equal(observation.cacheReadTokens, 3);
   assert.equal(observation.cacheWriteTokens, null);
   assert.equal(observation.noCacheInputTokens, null);
+  assert.equal(observation.servedProcessingTier, null);
+  assert.equal(observation.unsupportedBilling, false);
   const pricedCall = { pricing: { tiers: [{ maxPromptTokens: null, inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 1,
     cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 1.25 }] } };
   assert.equal(estimateCollectionUsageCost(observation, pricedCall), null);
