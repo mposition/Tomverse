@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { resolvePostgresConnectionConfig } from "../../../lib/postgresConnectionConfigCore.mjs";
 import { staticModelRegistrySeedRows } from "../../../lib/modelRegistryShared";
 import { userChatUsageKey } from "../../../lib/chatUsageKey";
 import {
@@ -55,12 +56,26 @@ const DAY = 24 * HOUR;
 
 let client: PrismaClient | null = null;
 let pool: Pool | null = null;
+let fixtureSchema = "public";
 
 export const adminFixtureDatabase = () => {
   if (!client) {
     const connectionString = resolveAdminE2EDatabaseUrl();
-    pool = new Pool({ connectionString });
-    client = new PrismaClient({ adapter: new PrismaPg(pool) });
+    const config = resolvePostgresConnectionConfig(connectionString, {
+      label: "ADMIN_E2E_DATABASE_URL",
+      requireTestMarker: true,
+    });
+    fixtureSchema = config.schema || "public";
+    pool = new Pool({
+      connectionString: config.connectionString,
+      options: config.poolOptions,
+    });
+    client = new PrismaClient({
+      adapter: new PrismaPg(
+        pool,
+        config.schema ? { schema: config.schema } : undefined
+      ),
+    });
   }
   return client;
 };
@@ -70,6 +85,7 @@ export const disconnectAdminFixtureDatabase = async () => {
   await pool?.end();
   client = null;
   pool = null;
+  fixtureSchema = "public";
 };
 
 /**
@@ -84,14 +100,20 @@ export const resetAdminDatabase = async () => {
   const prisma = adminFixtureDatabase();
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`
     SELECT tablename FROM pg_tables
-    WHERE schemaname = 'public' AND tablename <> '_prisma_migrations'
+    WHERE schemaname = ${fixtureSchema} AND tablename <> '_prisma_migrations'
   `;
   if (tables.length === 0) {
     throw new Error(
       "The admin E2E database has no tables. Run `npm run test:e2e:admin`, which pushes the Prisma schema before starting Playwright."
     );
   }
-  const list = tables.map((row) => `"public"."${row.tablename}"`).join(", ");
+  const quoteIdentifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
+  const list = tables
+    .map(
+      (row) =>
+        `${quoteIdentifier(fixtureSchema)}.${quoteIdentifier(row.tablename)}`
+    )
+    .join(", ");
   await prisma.$executeRawUnsafe(
     `TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`
   );
