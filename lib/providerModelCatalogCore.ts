@@ -1,7 +1,9 @@
 import type { AiProvider } from "@/lib/models";
 import {
   isImageGenerationModel,
+  isPrereleaseModel,
   modelProductSurface,
+  shouldQueueModelCandidate,
 } from "@/lib/modelLifecycleTriage";
 import {
   PROVIDER_API_CONFIGURATION,
@@ -98,6 +100,7 @@ export type ProviderCatalogObservation = {
   id: string;
   displayName: string | null;
   lifecycle: string | null;
+  prerelease: boolean;
   available: boolean;
   metadata: Record<string, string | number | boolean | null>;
 };
@@ -177,6 +180,14 @@ export const isReviewableProviderModelId = (
   modelId: string
 ) => isLikelyChatModelId(provider, modelId) || isImageGenerationModel(modelId);
 
+/** Whether an observation belongs in the human model review queue. */
+export const shouldQueueProviderCatalogObservation = (
+  observation: ProviderCatalogObservation
+) =>
+  observation.lifecycle === null &&
+  !observation.prerelease &&
+  shouldQueueModelCandidate(observation.id);
+
 const observationFromItem = (
   provider: AiProvider,
   item: Record<string, unknown>
@@ -214,6 +225,9 @@ const observationFromItem = (
   if (!isReviewableProviderModelId(provider, id)) return null;
 
   const lifecycle = lifecycleFromRecord(item);
+  const releaseStage =
+    text(item.stage) || text(item.lifecycle) || text(item.status);
+  const prerelease = isPrereleaseModel(id, releaseStage);
   const metadata = {
     created: number(item.created),
     createdAt: text(item.created_at),
@@ -229,6 +243,8 @@ const observationFromItem = (
     thinking:
       boolean(item.thinking) ??
       boolean(record(record(item.capabilities)?.thinking)?.supported),
+    releaseStage,
+    prerelease,
     product: modelProductSurface(id),
   };
 
@@ -236,6 +252,7 @@ const observationFromItem = (
     id,
     displayName: text(item.displayName) || text(item.display_name),
     lifecycle,
+    prerelease,
     available: lifecycle === null,
     metadata,
   };
@@ -310,7 +327,14 @@ export function parseProviderCatalogModels(
             {
               ...observation,
               id: alias,
-              metadata: { ...observation.metadata, aliasOf: observation.id },
+              prerelease:
+                observation.prerelease || isPrereleaseModel(alias),
+              metadata: {
+                ...observation.metadata,
+                aliasOf: observation.id,
+                prerelease:
+                  observation.prerelease || isPrereleaseModel(alias),
+              },
             },
           ];
         })

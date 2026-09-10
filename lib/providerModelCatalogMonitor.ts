@@ -12,7 +12,6 @@ import {
 import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
 import {
   candidateFamilyIdentity,
-  shouldQueueModelCandidate,
 } from "@/lib/modelLifecycleTriage";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -22,6 +21,7 @@ import {
   providerCatalogHttpFailure,
   providerCatalogUrl,
   PROVIDER_CATALOG_KEY_REJECTED,
+  shouldQueueProviderCatalogObservation,
   type ProviderCatalogObservation,
 } from "@/lib/providerModelCatalogCore";
 
@@ -50,6 +50,8 @@ export type ProviderModelCatalogResult = {
    * discovered, not reported, and nothing says so (.github/audits/model-lifecycle-email-2026-08-22.md §6 candidate 10).
    */
   heuristicallyExcluded: string[];
+  /** Present in the provider catalogue but omitted from human review by policy. */
+  prereleaseExcluded: string[];
   /** The page budget ran out with more pages to read. */
   truncated: boolean;
   errorCode?: string;
@@ -222,6 +224,7 @@ const runProviderCheck = async (
       missing: [],
       lifecycleWarnings: [],
       heuristicallyExcluded: [],
+      prereleaseExcluded: [],
       truncated: false,
       errorCode: safe.code,
       errorDetail: safe.detail,
@@ -273,19 +276,24 @@ const runProviderCheck = async (
   const newCandidates: string[] = [];
   const lifecycleWarnings: ProviderModelCatalogResult["lifecycleWarnings"] = [];
   const missing: ProviderModelCatalogResult["missing"] = [];
+  const prereleaseExcluded = observations
+    .filter((observation) => observation.prerelease)
+    .map((observation) => observation.id)
+    .sort();
 
   await prisma.$transaction(async (tx) => {
     for (const observation of observations) {
       const model = registryByApiModel.get(observation.id);
       const status = observation.lifecycle
         ? "lifecycle_warning"
+        : observation.prerelease
+          ? "prerelease"
         : model
           ? "available"
           : "candidate";
       if (model) mapped.push(model.id);
       else if (
-        !observation.lifecycle &&
-        shouldQueueModelCandidate(observation.id) &&
+        shouldQueueProviderCatalogObservation(observation) &&
         !catalogueIdentities.has(candidateFamilyIdentity(observation.id))
       ) {
         candidates.push(observation.id);
@@ -409,6 +417,7 @@ const runProviderCheck = async (
     missing,
     lifecycleWarnings,
     heuristicallyExcluded: scan.heuristicallyExcluded,
+    prereleaseExcluded,
     truncated: scan.truncated,
   };
 };
@@ -446,6 +455,7 @@ export async function checkProviderModelCatalogs(now = new Date()) {
           missing: [],
           lifecycleWarnings: [],
           heuristicallyExcluded: [],
+          prereleaseExcluded: [],
           truncated: false,
           errorCode: safe.code,
           errorDetail: safe.detail,
