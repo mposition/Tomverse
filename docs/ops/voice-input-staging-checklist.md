@@ -1,12 +1,19 @@
 # 음성 입력 staging 검증 체크리스트
 
 `docs/policy/voice-input.md` §15가 요구하는 검증입니다. **이 체크리스트의 실행과
-서명은 production에서 `feature.voiceInputEnabled`를 켜기 위한 전제 조건 중
-하나**이고(§14의 B-6), 남은 다른 차단 사유는 이 문서로 해소되지 않습니다.
-B-1~B-4는 닫혔고(§14), **B-5(provider 데이터 보존)만 이 문서 밖에 남아
-있습니다.**
+서명은 production에서 `feature.voiceInputEnabled`를 켜기 위한 전제 조건**이고
+(§14의 B-6), **이제 마지막 차단 사유입니다** — B-1~B-4에 이어 B-5도 2026-09-10에
+통과로 서명돼 닫혔습니다
+(`docs/ops/voice-provider-data-controls-records/2026-09-10-us-regional-endpoint.md`
+§14).
 
-- **template revision**: `2026-09-10a`
+**B-5가 닫혔다는 것이 그 잔여 위험이 사라졌다는 뜻은 아닙니다.** 같은 기록 §14의
+7-1~7-5는 수용된 채로 열려 있고, 그중 **7-1(수령 법인 `OpenAI OpCo, LLC`의 소재
+국가가 계약 원문과 미대조)** 은 사용자에게 보이는 국외이전 고지 문장이 서 있는
+근거입니다. **이 체크리스트의 서명 전에 다시 볼 항목**이며, 아래 사전 조건에
+넣었습니다.
+
+- **template revision**: `2026-09-10b`
 
 ## 이 문서는 template입니다
 
@@ -60,6 +67,9 @@ AGENTS.md의 "사람에게 남기는 것은 사람만 할 수 있는 것뿐입�
 하나라도 어긋나면 검증이 아니라 **다른 것을 측정**하게 됩니다.
 
 - [ ] staging이 서비스 중인 전체 40자리 deploy SHA를 확보했고 기록에 적었다
+- [ ] B-5 기록(`docs/ops/voice-provider-data-controls-records/2026-09-10-us-regional-endpoint.md`
+      §14)의 잔여 위험 7-1~7-5를 읽었고, 특히 7-1(수령 법인 소재 국가 미대조)이
+      이 회차 시점에도 그대로인지 확인했다
 - [ ] `AppSetting["feature.voiceInputEnabled"] = "true"`
 - [ ] `VOICE_INPUT_KILL_SWITCH`가 **없거나 비어 있다**
 - [ ] `VOICE_TRANSCRIPTION_API_KEY` 또는 `OPENAI_API_KEY`가 설정돼 있다
@@ -326,12 +336,18 @@ session을 유지하므로 `sessionUserId`가 비지 않습니다. 즉 `voiceIde
 
 ---
 
-## 이 문서가 통과해도 production은 열리지 않습니다
+## 이 문서가 통과하면 production 차단 사유가 없습니다
 
-`docs/policy/voice-input.md` §14의 **B-5가 남습니다** — provider 데이터 보존
-(계정 설정·ZDR·DPA). 그것은 검증이 아니라 **결정**이고, 이 체크리스트로는
-해소되지 않습니다.
+**이 체크리스트는 마지막 하나입니다.** §14의 B-1~B-5가 모두 닫혔습니다: 가격과
+실패 시 과금은 2026-09-02, provider 원가 검증 계층은 두 모델 모두 관측돼
+2026-09-09, audio provider 예산은 양쪽 환경 서명까지 2026-09-08, provider 데이터
+보존은 2026-09-10에 통과 서명.
 
-B-1~B-4는 닫혔습니다: 가격과 실패 시 과금은 2026-09-02, provider 원가 검증
-계층은 두 모델 모두 관측돼 2026-09-09, audio provider 예산은 양쪽 환경 서명까지
-2026-09-08.
+**그래서 이 서명은 이전 회차들과 무게가 다릅니다.** 앞선 회차에는 뒤에 또 다른
+차단 사유가 있었고, 이 회차에는 없습니다. 여기서 통과가 나오면
+`feature.voiceInputEnabled`를 production에서 켜는 결정만 남습니다.
+
+**B-5의 잔여 위험을 여기서 한 번 더 봅니다.** 특히 7-1 — 지금 고지는 사용자에게
+"이전 국가: 미국"이라고 말하고 있고, 그 근거인 수령 법인의 소재 국가는 계약
+원문과 대조되지 않았습니다. B-5는 그것을 알고 통과했지만, **production 공개는
+staging보다 그 문장이 닿는 범위가 넓습니다.**
