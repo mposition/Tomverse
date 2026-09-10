@@ -218,6 +218,7 @@
     "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs",
     "report:router-full-catalog": "node --import tsx scripts/report-router-full-catalog.mjs",
     "benchmark:router": "node --import tsx scripts/router-development-benchmark.mjs",
+    "benchmark:router:replay": "node --import tsx scripts/router-development-replay.mjs",
     "benchmark:router:collect": "node --conditions=react-server --import tsx scripts/router-development-collect.mjs",
     "test:router-development-collector": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs",
     "test:router-development-benchmark": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
