@@ -1,16 +1,21 @@
-// Voice transcription is pinned to the United States, and stays pinned.
+// Voice transcription goes to one host, chosen in code, and stays there.
 //
 // Contract: docs/policy/voice-input.md §11.3.
 //
-// The reason these are fail-closed rather than a single happy-path assertion:
-// the region is not a performance choice, it is the country named in an
-// overseas-transfer notice under Korean privacy law. A change that quietly
-// restored global routing would not break a feature — it would make a
-// published legal statement false, and nothing else in the system would
-// notice.
+// These were written for a pin to `us.api.openai.com` and now hold the global
+// host instead, because the provider refused the regional one for this
+// organization (§10 of the 2026-09-10 record). **The property under test did
+// not change with the value.** What a privacy notice can say about where a
+// recording goes is only as stable as the thing that decides it, so the
+// destination must come from code and nothing in a deployment may move it.
 //
-// So each test below fails if the *previous* behaviour comes back, not merely
-// if the new one is absent.
+// That is why these are fail-closed rather than one happy-path assertion. A
+// change that let the environment pick the host would not break a feature —
+// it would make a published legal statement unverifiable, and nothing else in
+// the system would notice.
+//
+// So each test fails if the property is lost, not merely if today's value is
+// absent.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -33,7 +38,10 @@ const withoutComments = (source) =>
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, (match, lead) => lead);
 
-const US_ENDPOINT = "https://us.api.openai.com/v1/audio/transcriptions";
+const GLOBAL_ENDPOINT = "https://api.openai.com/v1/audio/transcriptions";
+
+/** Any `xx.api.openai.com`. The provider documents ten of them. */
+const REGIONAL_HOST = /https:\/\/[a-z]{2}\.api\.openai\.com/;
 
 /** Every Voice module that could originate or configure the provider call. */
 const VOICE_RUNTIME_SOURCES = [
@@ -67,40 +75,56 @@ const runTranscription = async (config = {}) => {
   return captured;
 };
 
-test("a transcription with no injected host goes to the US endpoint", async () => {
-  // The one that fails if the global default returns. It asserts the whole
-  // URL rather than a substring: a base of `https://api.openai.com` with the
-  // right path would pass a looser check and be the exact regression.
+test("a transcription with no injected host goes to the global endpoint", async () => {
+  // The whole URL, not a substring. A base that merely *contains*
+  // `api.openai.com` — every regional host does — would pass a looser check
+  // while sending the request somewhere the notice does not describe.
   const captured = await runTranscription();
-  assert.equal(captured.url, US_ENDPOINT);
+  assert.equal(captured.url, GLOBAL_ENDPOINT);
 });
 
-test("the pinned host and region come from one place", () => {
-  assert.equal(VOICE_TRANSCRIPTION_OPENAI_BASE_URL, "https://us.api.openai.com");
-  assert.equal(VOICE_TRANSCRIPTION_PROVIDER_REGION, "us");
-  // The region identifier is the host's own subdomain rather than a second
-  // string that agrees with it today. Two independent literals is how a record
-  // comes to say "us" about a request that went somewhere else.
+test("the host and the region identifier cannot disagree", () => {
+  assert.equal(VOICE_TRANSCRIPTION_OPENAI_BASE_URL, "https://api.openai.com");
+  assert.equal(VOICE_TRANSCRIPTION_PROVIDER_REGION, "global");
+  // The two are checked against each other, not just against their literals.
+  // Two independent strings is how a record comes to say one thing about a
+  // request that went somewhere else — which is the failure this file exists
+  // for, and it does not care which direction the drift runs.
+  const host = VOICE_TRANSCRIPTION_OPENAI_BASE_URL;
+  const isRegional = REGIONAL_HOST.test(host);
   assert.equal(
-    new URL(VOICE_TRANSCRIPTION_OPENAI_BASE_URL).hostname.split(".")[0],
-    VOICE_TRANSCRIPTION_PROVIDER_REGION
+    isRegional,
+    VOICE_TRANSCRIPTION_PROVIDER_REGION !== "global",
+    "a regional host must carry a region identifier, and a global host must not"
   );
+  if (isRegional) {
+    assert.equal(
+      new URL(host).hostname.split(".")[0],
+      VOICE_TRANSCRIPTION_PROVIDER_REGION
+    );
+  }
 });
 
-test("no Voice runtime source can still reach the global endpoint", () => {
+test("no Voice runtime source hard-codes a regional host", () => {
+  // Inverted when the pin was lifted, and worth keeping in the new direction:
+  // a stray `us.`/`eu.` literal would send some requests to a host the notice
+  // does not describe, and — as the provider proved — one that refuses this
+  // organization outright. Comments are stripped first, because the doc
+  // comment on the constant quotes the regional host to explain why it is
+  // gone.
   const offenders = [];
   for (const path of VOICE_RUNTIME_SOURCES) {
     const source = withoutComments(read(path));
-    if (source.includes("https://api.openai.com")) offenders.push(path);
+    if (REGIONAL_HOST.test(source)) offenders.push(path);
   }
   assert.deepEqual(
     offenders,
     [],
-    "a global-endpoint literal in Voice runtime code is a path out of the pinned region"
+    "a regional-host literal in Voice runtime code bypasses the single constant"
   );
 });
 
-test("the production binding names the pinned host itself", () => {
+test("the production binding names the host constant itself", () => {
   const source = withoutComments(read("lib/voiceTranscriptionPort.ts"));
   assert.match(
     source,
@@ -112,8 +136,9 @@ test("the production binding names the pinned host itself", () => {
 test("no environment variable can move the endpoint", () => {
   // Not a scan for one variable name -- a scan for the *shape*. `VOICE_X_URL`,
   // `VOICE_REGION`, a base URL read from `env` at all: any of them would make
-  // the country a deployment setting, and the notice would then describe a
-  // configuration rather than the code.
+  // the destination a deployment setting, and the notice would then describe a
+  // configuration rather than the code. This is the test that outlived the
+  // pin: it is what lets the notice be checked by reading one line.
   const offenders = [];
   for (const path of VOICE_RUNTIME_SOURCES) {
     const source = withoutComments(read(path));
@@ -129,7 +154,7 @@ test("no environment variable can move the endpoint", () => {
   assert.deepEqual(
     offenders,
     [],
-    "the pinned region must not be selectable from the environment"
+    "the destination must not be selectable from the environment"
   );
 });
 
@@ -149,14 +174,14 @@ test("joining a host that ends in a slash does not double the separator", () => 
   );
   assert.equal(
     voiceTranscriptionEndpoint(VOICE_TRANSCRIPTION_OPENAI_BASE_URL),
-    US_ENDPOINT
+    GLOBAL_ENDPOINT
   );
 });
 
-test("pinning the region changed nothing about the multipart surface", async () => {
-  // The regional host is a different origin, and a different origin is exactly
-  // when somebody adds a header or a field "for routing". The parts are the
-  // same four, and the only header is the bearer.
+test("moving the host changed nothing about the multipart surface", async () => {
+  // Changing origin is exactly when somebody adds a header or a field "for
+  // routing" -- in either direction. The parts are the same, and the only
+  // header is the bearer.
   const captured = await runTranscription();
   const form = captured.init.body;
   assert.deepEqual([...form.keys()].sort(), ["file", "model", "response_format"]);
@@ -167,10 +192,11 @@ test("pinning the region changed nothing about the multipart surface", async () 
   assert.ok(![...withLanguage.init.body.keys()].includes("region"));
 });
 
-test("other OpenAI callers are untouched by the Voice pin", () => {
-  // The decision is Voice-only. Chat and image adapters keep whatever host
-  // they had, and a sweep that moved them would have changed products nobody
-  // made a data-residency decision about.
+test("other OpenAI callers were never moved by the Voice decision", () => {
+  // The decision was Voice-only in both directions. Chat and image adapters
+  // keep whatever host they had; a sweep that pinned them, or that later
+  // unpinned something it had pinned, would have changed products nobody made
+  // a data-residency decision about.
   const others = [
     "lib/imageProviderAdapter.ts",
     "lib/modelRegistryShared.ts",
@@ -178,8 +204,8 @@ test("other OpenAI callers are untouched by the Voice pin", () => {
   for (const path of others) {
     const source = read(path);
     assert.ok(
-      !source.includes("us.api.openai.com"),
-      `${path} must not have been swept into the Voice region pin`
+      !REGIONAL_HOST.test(source),
+      `${path} must not have been swept into a Voice region decision`
     );
   }
 });
