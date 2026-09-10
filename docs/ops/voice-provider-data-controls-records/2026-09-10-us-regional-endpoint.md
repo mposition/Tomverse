@@ -1,0 +1,905 @@
+# B-5 결정·구현 기록 — Voice 전사를 미국 지역 endpoint로 고정 (2026-09-10)
+
+`docs/policy/voice-input.md` §11.3.0의 근거 기록입니다. 같은 날의 처리 지역
+결정(`2026-09-10-processing-region-decision.md`)이 **"지역 제한을 적용하지
+않는다"**였고, 이 기록은 그것을 뒤집는 것이 아니라 **이전 국가를 고지에 적을 수
+있게 특정**합니다.
+
+**이 초안은 에이전트가 썼습니다.** 절마다 출처를 밝혔고, **판정과 서명은 사람이
+채웁니다.**
+
+- **기록일(UTC)**: 2026-09-10
+- **상태**: **B-5 통과 — 2026-09-10 서명 완료(§14). 잔여 위험 7-1~7-5는 수용된 상태로 열려 있습니다**
+- **갱신(UTC)**: 2026-09-10 — §8이 법인명 대조와 문구 승인을, §9가 staging deploy SHA 관측을 기록합니다
+
+---
+
+## 1. 공식 문서에서 확인된 사실
+
+출처: `https://developers.openai.com/api/docs/guides/your-data`, **2026-09-10
+읽음.** 이 저장소에서 직접 열렸습니다(`openai.com/policies/*`와 달리 403이
+아닙니다).
+
+| 확인 항목 | 문서가 말한 것 |
+|---|---|
+| `/v1/audio/transcriptions` regional storage | "All listed regions" |
+| 같은 endpoint regional **processing** | "United States, Europe (EEA + Switzerland)" |
+| 미국의 MAM·ZDR 필수 여부 | **"No"** |
+| Global 프로젝트 key로 지역 host 사용 | *"As an alternative to creating a region-specific project, you can select regional processing for an individual request by using the prefixed domain with an API key from a project having Global geography."* |
+| 지원 모델 | `tts-1, whisper-1, gpt-4o-tts, gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-transcribe` — **이 제품의 두 모델 모두 포함** |
+| 적용 범위 | *"Data residency does not apply to system data, which may be processed and stored outside the selected region."* |
+| 가격 | *"Data residency endpoints are charged a 10% uplift for models released on or after March 5, 2026, that are eligible for data residency."* |
+
+**마지막 줄은 이 작업의 브리프가 예상하지 않은 사실입니다.** 지역 endpoint에는
+가격 할증이 **조건부로** 있습니다. §5에서 다룹니다.
+
+## 2. 제품 소유자의 결정
+
+- **ZDR은 Production Voice의 필수조건이 아닙니다** — 2026-09-10 서명
+  (`2026-09-10-zdr-precondition-decision.md`). **이 기록은 그 결정을 유지합니다.**
+  미국 지역이 MAM·ZDR을 요구하지 않으므로 둘은 충돌하지 않습니다.
+- **처리 지역은 미국으로 특정합니다.** 목적은 개인정보보호법 제28조의8이 요구하는
+  **이전 국가**를 고지에 적을 수 있게 하는 것입니다.
+
+## 3. 코드가 보장하는 것
+
+| 보장 | 어디서 |
+|---|---|
+| 모든 Voice 전사가 `https://us.api.openai.com/v1/audio/transcriptions`로 나감 | `VOICE_TRANSCRIPTION_OPENAI_BASE_URL` 상수 + production binding이 명시 전달 |
+| global endpoint로 돌아가는 **런타임 경로 없음** | 옛 `?? "https://api.openai.com"` 기본값 제거. Voice runtime source에 그 문자열이 없음(주석 제외) |
+| **환경변수로 바꿀 수 없음** | `_URL`·`_HOST`·`REGION`·`GEOGRAPHY`·`ENDPOINT` 꼴 env 접근을 Voice runtime에서 금지하는 검사 |
+| test injection은 명시 주입에서만 | `baseUrl`은 optional이고 생략 시 상수 |
+| `//v1` 결합 사고 없음 | `voiceTranscriptionEndpoint()`가 후행 slash 제거 |
+| multipart 표면 불변 | `file`·`model`·`response_format`(+선택 `language`), header는 `Authorization` 하나 |
+| Chat·Image 등 미변경 | 다른 adapter에 `us.api.openai.com`이 없음을 단언 |
+
+**되돌리면 실제로 실패합니다.** 옛 global 기본값을 복원하고 돌리니 9건 중 **3건이
+red**였고(요청 URL, runtime source 스캔, binding 명시), 복원하니 다시 9건 green
+입니다. 이름만 늘린 테스트가 아닙니다.
+
+**key 계약은 바꾸지 않았습니다.** `VOICE_TRANSCRIPTION_API_KEY` → 공용 key
+fallback 그대로입니다. §1이 인용한 대로 Global 프로젝트 key로 지역 host를 부를 수
+있으므로, 새 프로젝트·key를 이 코드 변경의 전제로 만들지 않았습니다.
+
+## 4. staging에서 아직 관측하지 않은 것
+
+- **실제 요청이 미국 endpoint에 닿는다는 wire 증거.** 코드와 테스트가 보장하는
+  것은 **요청이 그 URL로 만들어진다**는 것입니다. 그 host가 응답하고 이 key가
+  거기서 유효하다는 것은 **실제 호출로만** 확인됩니다.
+- **지역 식별자를 로그에 넣지 않은 이유가 여기 있습니다.** host가 상수이므로
+  그 상수에서 유도한 로그 필드는 언제나 `"us"`만 내고, 요청이 어디에 닿았는지는
+  말하지 못합니다. 장식이 아니라 증거가 되려면 응답 쪽 사실이어야 하는데 그런
+  필드가 없습니다. **대체 증거는 B-6의 실제 호출 성공**이며, 실패하면
+  `provider_rejected_credentials`나 `provider_unreachable`로 드러납니다.
+
+## 5. 가격 — 다시 관측해야 하는가
+
+**기존 `costObservation` 둘은 global endpoint에서 얻은 값이며 덮어쓰지
+않았습니다.** 지역 endpoint의 요율이 같다고 추정하지도 않았습니다.
+
+문서의 할증 규칙은 **2026-03-05 이후 출시 모델**에만 적용됩니다. 이 제품의 두
+모델은 `GET /v1/models`의 `created`가 **2025-03-15**로, 컷오프 이전입니다.
+2026-09-02 청구의 line item 이름도 `gpt-4o-mini-transcribe-2025-12-15`로 컷오프
+이전 snapshot입니다.
+
+**그러나 이것은 확정이 아닙니다.** `AGENTS.md`가 `GET /v1/models`를 가격 출처로
+쓰지 말라고 못 박고 있고, 모델 객체의 `created`가 문서가 말하는 "released"와
+같은 날짜라는 보장도 없습니다. **정황은 할증 없음을 가리키지만, 문서만으로
+확정할 수 없습니다.**
+
+**제안**: B-6의 첫 승인된 실제 전사 호출을 **지역 확인과 비용 관측에 함께**
+씁니다. 그 호출은 이미 승인·예산 안에 있고, 다음 날 Costs를 읽으면 지역
+endpoint의 실제 요율이 나옵니다 — 별도 유료 호출이 필요하지 않습니다. 요율이
+기존 관측과 다르면 **3회차 `costObservation`**으로 추가하고 기존 둘은 그대로
+둡니다(global 시점의 사실이므로).
+
+**이 작업에서 유료 호출은 하지 않았습니다.**
+
+## 6. 개인정보처리방침 — 사람의 승인이 필요한 문구
+
+제28조의8 제2항 항목을 현재 `privacyPolicy.voiceInput`과 대조했습니다.
+
+| # | 항목 | 현재 | 이번에 확정 가능 |
+|---|---|---|---|
+| 1 | 이전되는 개인정보 | 있음(녹음) | — |
+| 2 | **이전 국가** | 없음 | **미국** |
+| 3 | **이전 시점·방법** | 없음 | 사용자가 녹음을 끝내고 전사를 요청할 때, 암호화된 HTTPS API 전송 |
+| 4 | **이전받는 법인의 정확한 명칭·연락처** | 없음 | **불가 — blocker** |
+| 5 | 이용 목적 | 있음 | 음성을 텍스트로 변환 |
+| 6 | **보유·이용 기간** | 없음(위탁자 것만) | **보수적 문구만 제안** |
+| 7 | **거부 방법·절차** | 없음 | 마이크 권한을 허용하지 않거나 Voice를 쓰지 않고 텍스트 입력 사용 |
+| 8 | **거부 효과** | 없음 | Voice 전사 불가, 텍스트 대화는 계속 가능 |
+
+**두 blocker는 2026-09-10에 운영자가 해소했고, 여덟 항목을 7개 locale 전부에
+넣었습니다.** `privacyPolicy.voiceInputTransfer1`–`8`과 제목 key이며,
+`PrivacyPolicy.tsx`가 Voice 섹션 아래에 목록으로 렌더링합니다 — 한 문단에 여덟
+답을 밀어 넣으면 어느 것도 찾을 수 없어 감사되지 않기 때문입니다.
+
+**4번 — 법인명과 연락처: `OpenAI OpCo, LLC` / `privacy@openai.com`.** 이 초안이
+쓰였을 때 이 줄은 운영자가 제시했고 **이 저장소가 대조하지 않은** 값이었습니다 —
+계약 원문이 egress 프록시에서 403이기 때문입니다(`2026-09-10-dpa-incorporation.md`
+§1). 이 값은 사용자에게 보이는 법정 고지이므로 계약서 표기와 다르면 고지가
+틀립니다. 그래서 "문구 승인 시 계약 원문과 대조해야 하는 첫 번째 줄"로 적어
+두었습니다.
+
+**2026-09-10에 운영자가 계약 원문과 대조해 확인했습니다(§8-1).** 저장소의
+접근 제약은 그대로이며, 대조한 주체는 저장소가 아니라 사람입니다.
+
+**6번 — 보유·이용 기간: 원칙적으로 최대 30일(악용 모니터링), 법령상 의무나
+OpenAI의 서비스·제3자 보호에 합리적으로 필요한 경우 연장.** 이것이 §11.3.2-1의
+`None` 대 30일 긴장을 **보수적으로 정리한 것**임을 적어 둡니다 — endpoint 표가
+틀렸다고 선언한 것이 아니라, **고지에서는 더 긴 쪽을 적기로 한 선택**입니다.
+사용자에게 실제보다 짧게 말하는 위험을 피하는 방향이고, 공급자 답변이 오면
+줄이는 것은 안전하지만 늘리는 것은 그렇지 않습니다.
+
+**"미국에서만 모든 데이터가 처리된다"고 쓰지 않았습니다.** 고지는 **녹음과 그
+전사 결과**가 미국으로 이전된다고 적으며, §1이 인용한 system data 예외를 이
+문장이 넘어서지 않습니다.
+
+## 7. B-5를 해결로 표시하지 않았습니다
+
+코드가 병합돼도 B-5는 열려 있습니다. 완료 조건은 최소한 이 여섯입니다.
+
+1. 미국 endpoint 고정 코드 병합 — **완료** (PR #1331, develop `6019e07a`, 2026-09-10)
+2. 개인정보처리방침 국외이전 필수 항목 승인 — **완료 (2026-09-10, §8-2)**
+3. 그 코드가 포함된 staging 전체 deploy SHA — **완료 (2026-09-10, §9-1: `6019e07afd598a1431862ec925189a04544e9c94`)**
+4. 그 deploy에서 실제 Voice 요청 성공 — **미관측**
+5. 요청이 미국 endpoint를 썼다는 코드·테스트·운영 증거 — **코드·테스트는 있음,
+   운영 증거 미관측(§4)**
+6. 사람의 B-5 판정과 서명 — **미완**
+
+**B-6 체크리스트의 template revision은 올리지 않았습니다.** 참조할 B-5 결정
+기록이 아직 서명되지 않았고, 존재하지 않는 기록을 미리 가리키지 않습니다.
+
+### B-5 최종 서명 기록이 담아야 하는 것
+
+**빈 서식 파일을 미리 만들지 않았습니다.** 관측이 없는 서식은 나중에 지어낸
+관측으로 채워질 자리이고, 이 저장소는 그것을 금지합니다. 대신 요구 항목만 여기
+적어 둡니다 — 관측이 생기는 시점에 이 목록으로 기록을 씁니다.
+
+1. 결정·위험 수용 기록 참조 (이 디렉터리의 2026-09-10 기록 넷)
+2. 승인된 개인정보처리방침 revision — **`6019e07afd598a1431862ec925189a04544e9c94`** (§8-2)
+3. staging **전체 40자리** deploy SHA — **Voice 요청을 관측한 그 시점의 값**을 적습니다(§9-4). §9-1의 `6019e07a…`는 US endpoint 코드를 담은 첫 staging 배포이지 관측 시점의 SHA가 아닙니다
+4. 관측 시각(UTC)
+5. 실제 사용된 endpoint·region 증거
+6. Voice 요청 결과
+7. 잔여 위험
+8. **통과 / 조건부 / 실패** 판정
+9. 서명자와 날짜
+
+**3번과 5번이 이 기록이 채울 수 없는 둘입니다.** deploy SHA는 merge SHA가
+아니라 **staging이 실제로 서비스 중인 SHA**이고(B-6 체크리스트 사전 조건과 같은
+값), endpoint 증거는 §4가 적은 대로 실제 호출로만 생깁니다.
+
+**5번을 무엇으로 채울 수 있는지 미리 정해 둡니다** — 성공한 요청 자체(실패하면
+`provider_rejected_credentials`나 `provider_unreachable`로 드러납니다), 그 요청의
+정제된 `x-request-id`, 그리고 다음 날 Costs에서 해당 프로젝트 line item.
+**로그의 지역 필드는 증거가 아닙니다**(§4).
+
+## 8. 2026-09-10 운영자 확인 둘
+
+§6이 열어 둔 두 항목입니다. **아래 두 문장은 운영자가 이 세션에서 말한 것을 옮긴
+것이고, 에이전트가 대조하거나 판단한 것이 아닙니다.**
+
+### 8-1. 계약 원문상 정식 상대방
+
+> "OpenAI OpCo, LLC가 계약 원문상 정식 상대방이 맞습니다."
+
+- **확인 대상**: 국외이전 고지 4번 항목의 이전받는 자 명칭
+- **값**: `OpenAI OpCo, LLC`
+- **대조한 주체**: 운영자 (계약 원문)
+- **일자(UTC)**: 2026-09-10
+
+**저장소의 제약은 바뀌지 않았습니다.** `openai.com/policies/…`는 이 컨테이너에서
+여전히 403이고(`2026-09-10-dpa-incorporation.md` §1), 이 확인은 사람이 원문을 열어
+대조한 결과입니다. 등기 접미사(`Pty Ltd` 등)나 등록번호가 계약서에 함께 적혀
+있다면 그것까지 고지에 넣을지는 별개 판단이며, 지금 고지에 적힌 것은 위 명칭
+하나입니다.
+
+**연락처 `privacy@openai.com`은 이 확인에 포함되지 않습니다.** 운영자가 확인한
+것은 명칭이고, 연락처는 §6에서 함께 제시된 값입니다. 둘을 하나의 확인으로
+합치면 확인되지 않은 쪽이 확인된 것처럼 보입니다.
+
+### 8-2. 국외이전 고지 문구 승인
+
+> "승인합니다"
+
+- **승인 대상**: 개인정보보호법 제28조의8 제2항 여덟 항목의 고지 문구
+- **승인자**: 운영자 (Privacy Owner)
+- **일자(UTC)**: 2026-09-10
+
+**승인된 revision을 SHA로 고정합니다.** "승인된 문구"가 나중에 어느 문장이었는지
+말할 수 없으면, 문구가 바뀌어도 승인이 따라 움직인 것처럼 보입니다.
+
+| 대상 | 값 |
+|---|---|
+| develop merge commit | `6019e07afd598a1431862ec925189a04544e9c94` |
+| PR | #1331 |
+| `locales/en.ts` blob | `9795307b54321c9bec88c7020f34476c42d6f531` |
+| `locales/ko.ts` blob | `bc61bba4b50066c29e5d941fd5a31627368d7de0` |
+| `components/legal/PrivacyPolicy.tsx` blob | `386e77e2c8f14ad6cab214fe0583845480826da6` |
+
+7개 locale 전부가 같은 commit에 있고, 위 표는 그중 셋을 대표로 적습니다 —
+`voiceInputTransferTitle`과 `voiceInputTransfer1`–`8`이 locale마다 존재한다는 것은
+`check:locale-translation`이 강제합니다.
+
+**이 문구가 바뀌면 승인은 따라오지 않습니다.** 위 blob 중 하나라도 달라지는 변경은
+다시 승인 대상입니다. 특히 §6이 적은 두 값 — 이전 국가(미국)와 보유 기간(최대
+30일, 연장 가능) — 은 각각 §11.3.0의 코드 고정과 공급자 문서에 매여 있으므로,
+그쪽이 움직이면 문구가 먼저 틀립니다.
+
+### 8-3. 이 둘이 B-5를 닫지 않습니다
+
+여섯 조건 중 1·2가 충족됐고 **3·4·5·6이 남았습니다**(§7). 남은 넷은 전부 같은
+것을 기다립니다 — **이 코드가 실제로 도는 환경에서의 관측**. 코드가 보장하는
+것은 "요청이 미국 endpoint로 간다"이고, "실제로 갔다"는 아직 **미관측**입니다.
+
+## 9. staging deploy SHA 관측 (2026-09-10)
+
+§7의 3번 조건입니다. **merge SHA가 아니라 staging이 실제로 서비스 중인 SHA**를
+요구하므로, 병합 사실만으로는 채울 수 없는 칸이었습니다.
+
+### 9-1. 관측값
+
+| 항목 | 값 |
+|---|---|
+| environment | `staging` |
+| **deploy SHA (40자)** | `6019e07afd598a1431862ec925189a04544e9c94` |
+| deploymentId | `f5f3547a-1c97-4aaa-baa7-1dcf1ad828ca` |
+| deploymentStartedAt | 2026-09-10T09:19:45.967Z |
+| builtAt | 2026-09-10T09:32:33.603Z |
+| deployedAt | 2026-09-10T09:35:31.215Z |
+| deploymentStatus | `success` |
+
+**staging의 여섯 서비스가 모두 같은 commit, 같은 배포 배치입니다** — `Tomverse`,
+`Provider Probe`, `Provider Usage Sync`, `Provider Model Catalog`,
+`Maintenance Cron`, `Credit Reconciliation`. 전부 `createdAt`
+2026-09-10T09:19:45.967Z이고 control plane이 여섯 다 `live`로 보고합니다. 조건이
+"**전체** deploy SHA"를 말하므로 한 서비스만 보고 채우지 않았습니다.
+
+### 9-2. 무엇을 근거로 말하는가 — 그리고 무엇을 말하지 않는가
+
+두 곳에서 읽었습니다.
+
+1. **Railway control plane** — 환경 조회에서 `Tomverse` 서비스가 `live`이고 그
+   `latestDeployment`가 `f5f3547a…`, 그 배포의 `meta.commitHash`가 위 SHA.
+2. **실행 중인 앱 자신** — `GET /api/build-info`(공개 endpoint, STG-F010)가 같은
+   SHA와 같은 deploymentId를 반환.
+
+**둘은 완전히 독립적이지 않습니다.** `/api/build-info`의 `commitSha`는 Railway가
+프로세스에 주입한 `RAILWAY_GIT_COMMIT_SHA`(없으면 빌드 시점에 구워진 fallback)이지
+**실행 중인 번들의 해시가 아닙니다.** 그래서 이 관측이 증명하는 것은 "Railway가
+이 SHA로 배포했다고 말하고, 그 배포로 뜬 프로세스도 같은 SHA를 말한다"까지입니다.
+
+다만 그 둘이 **어긋나면 드러납니다.** `lib/buildInfo.ts`의 timeline 조회는
+Railway가 보고한 commit과 프로세스의 commit이 다르면 타임스탬프를 전부 `null`로
+돌려보냅니다("a wrong timestamp is worse than none"). 위 응답이 실제 타임스탬프를
+담고 있으므로 **그 대조를 통과했습니다.**
+
+`builtAt` 09:32:33.603Z는 #1331 병합(09:19:44Z) **이후**입니다. 배포가 병합 전
+번들을 재사용한 것이 아니라는 뜻입니다.
+
+**배포된 번들이 §11.3.0의 코드를 담고 있음을 런타임 동작으로 확인하지는
+못했습니다.** staging의 두 도메인이 이 컨테이너의 egress에서 막혀
+있습니다(`staging.tomverse.app`은 Cloudflare Access 로그인으로 302 후 CONNECT
+403, `tomverse-staging.up.railway.app`은 CONNECT 403). `/api/build-info`만
+Access 우회 대상이라 읽혔습니다. 개인정보처리방침 페이지의 국외이전 8항목이
+렌더링되는지 확인했다면 번들 내용에 대한 독립 증거가 됐겠지만, **하지 못했으므로
+미관측으로 남깁니다.**
+
+### 9-3. 조건 4·5가 가능한 상태인지
+
+**환경 자체는 준비돼 있습니다.** staging `Tomverse` 서비스의 변수 이름만 조회한
+결과(값은 읽지 않았고 출력하지 않습니다):
+
+- `VOICE_TRANSCRIPTION_API_KEY` — **있음**
+- `VOICE_PROVIDER_SECONDS_PER_DAY`·`_PER_MONTH` — **있음** (B-4, 2026-09-08 서명)
+- `VOICE_INPUT_KILL_SWITCH` — **없음**. kill switch가 걸려 있지 않으므로 저장된
+  flag가 그대로 효력을 가집니다.
+- `VOICE_INPUT_REQUESTS_PER_DAY`·`_PER_MINUTE`·`VOICE_INPUT_SECONDS_PER_DAY` —
+  없음. **차단 요인이 아닙니다** — `lib/voiceInputGuardrails.ts`의
+  `VOICE_GUARDRAIL_DEFAULTS`가 적용됩니다.
+- `VOICE_TRANSCRIPTION_MODEL` — 없음. `gpt-4o-mini-transcribe`가 적용됩니다.
+
+**변수가 있다는 것은 설정됐다는 뜻이지 그 경로로 트래픽이 갔다는 뜻이 아닙니다.**
+값은 `valuesRedacted`로 가려져 있어 이 관측은 이름의 존재까지입니다. 조건 4·5는
+여전히 실제 요청으로만 생깁니다.
+
+### 9-4. 이 SHA는 고정된 값이 아닙니다 — staging은 develop을 따라갑니다
+
+**§9-1은 한 시점의 스냅숏이지 staging의 성질이 아닙니다.** staging의 여섯 서비스가
+전부 `develop` 브랜치를 source로 잡고 있으므로, develop에 무엇이 병합되든 staging이
+재배포되고 그때 이 SHA가 바뀝니다.
+
+**이 기록 자신이 그것을 일으켰습니다.** §9-1을 관측한 것은 2026-09-10 09:35~09:39Z
+사이이고, 09:39:12Z에 PR #1332(§8을 담은 기록 PR)가 병합되자 같은 초에 staging
+배포 `1a0f0f73`이 `07f9cdfe327597bfc342e6e93b2b93aa9f5b233c`로 시작됐습니다.
+**문서만 바꾸는 PR도 staging SHA를 움직입니다.**
+
+그래서 두 가지를 구분합니다.
+
+- **조건 3이 묻는 것**은 "US endpoint 코드를 담은 staging 배포가 실제로 있었는가"
+  이고, §9-1이 그것을 채웁니다. `6019e07a`가 그 코드를 담은 첫 staging 배포입니다.
+- **최종 서명이 적어야 하는 것**은 **Voice 요청을 실제로 관측한 그 순간의 SHA**
+  입니다. 그 시점의 staging이 `6019e07a`가 아닐 가능성이 높고, 그것은 문제가 아니라
+  정상입니다 — `6019e07a`의 후손인 한 US endpoint 고정은 계속 들어 있습니다.
+
+**따라서 조건 4·5를 관측할 때 `GET /api/build-info`를 다시 읽고 그때의 SHA를
+기록합니다.** §9-1의 값을 옮겨 적지 않습니다. 옮겨 적으면 "이 SHA에서 요청이
+성공했다"는 문장이 관측이 아니라 추정이 됩니다.
+
+`6019e07a`의 후손인지 확인하는 방법은 `git merge-base --is-ancestor
+6019e07afd598a1431862ec925189a04544e9c94 <관측된 SHA>`이며, 이것이 US endpoint
+코드가 그 배포에 들어 있음을 보이는 **저장소 쪽 근거**입니다. 런타임 근거는
+아닙니다.
+
+### 9-5. 조건 현황
+
+| # | 조건 | 상태 |
+|---|---|---|
+| 1 | 미국 endpoint 고정 코드 병합 | **완료** — PR #1331, `6019e07a` |
+| 2 | 국외이전 고지 항목 승인 | **완료** — §8-2 |
+| 3 | staging 전체 deploy SHA | **완료** — §9-1 |
+| 4 | 그 deploy에서 Voice 요청 성공 | **실패** — 401 `incorrect_hostname` (§10) |
+| 5 | 미국 endpoint를 썼다는 운영 증거 | **불가** — endpoint가 조직을 거절 (§10) |
+| 6 | 사람의 B-5 판정·서명 | 미완 |
+
+**4번은 이제 미관측이 아니라 실패입니다.** 관측은 있었고 결과가 부정이었습니다.
+5번은 4번이 성공해야 생기므로, 갈래(§10-6)가 정해지기 전에는 채울 수 없습니다.
+
+## 10. 관측이 §1의 전제를 뒤집었습니다 (2026-09-10)
+
+**staging에서 실제 Voice 요청이 실패했고, 원인은 이 변경 자체입니다.**
+
+### 10-1. 무엇이 일어났는가
+
+flag를 켠 뒤 첫 두 요청(09:41:45Z, 09:42:09Z)이 모두 실패했습니다.
+
+```
+event: voice_transcription   keySource: "dedicated"
+outcome: "provider_failed"   providerFailure: "provider_rejected_credentials"
+providerStatus: 401
+mediaType: "audio/webm"      durationSource: "ebml"
+durationSeconds: 4.201 / 2.640
+reservedSeconds: 5 / 3       releasedSeconds: 5 / 3
+settlementBasis: "not_billed"
+```
+
+**앞단은 전부 정상이었습니다** — 녹음, 업로드, 컨테이너 파싱, 길이 측정까지.
+실패 지점은 provider 인증 경계 하나이고, **비용은 0**입니다(예약 초 전액 환급).
+
+### 10-2. 공급자가 무엇이라고 답했는가
+
+로컬에서 두 key × 두 host × 두 endpoint를 확인했습니다(무과금, `/v1/models`와
+파일 없는 `/v1/audio/transcriptions` POST).
+
+| key | host | endpoint | HTTP |
+|---|---|---|---|
+| Voice | `api.openai.com` | `/v1/models` | 200 |
+| Voice | `us.api.openai.com` | `/v1/models` | **401** |
+| Shared | `api.openai.com` | `/v1/models` | 200 |
+| Shared | `us.api.openai.com` | `/v1/models` | **401** |
+| Voice | `api.openai.com` | `/v1/audio/transcriptions` | **400** (`file` 누락) |
+| Voice | `us.api.openai.com` | `/v1/audio/transcriptions` | **401** |
+| Shared | `api.openai.com` | `/v1/audio/transcriptions` | **400** (`file` 누락) |
+| Shared | `us.api.openai.com` | `/v1/audio/transcriptions` | **401** |
+
+US host의 401 네 건이 모두 같은 본문입니다.
+
+> `error.code`: `incorrect_hostname`
+> `error.type`: `invalid_request_error`
+> `error.message`: *"Attempted to access resource with incorrect regional
+> hostname. Please make your request to api.openai.com"*
+
+**Global host의 400이 인증 통과 신호입니다** — 파일이 없다는 불평이므로 key는
+받아들여졌습니다. 즉 두 key 모두 유효하고, US host만 거절합니다.
+
+### 10-3. 무엇이 배제됐는가
+
+- **key 값 문제 아님.** 두 key 모두 Global에서 인증됩니다. `Voice Key`의
+  `last_used_at`이 실패한 첫 요청 시각(09:41:45Z)과 초 단위로 일치하므로 OpenAI가
+  key를 인식했습니다.
+- **Voice 프로젝트 고유 문제 아님.** 공유 key도 똑같이 401입니다.
+- **모델 권한 문제 아님.** `Tomverse Voice`의 rate limit 목록에
+  `gpt-4o-mini-transcribe`·`gpt-4o-transcribe`가 Default project와 동일하게
+  있습니다.
+- **프로젝트 residency 설정 문제 아님.** organization API가
+  `Tomverse Voice`(`proj_4mXSWZBc963pWet12A7ovvNE`)의 `residency`를 **`GLOBAL`**
+  로 보고합니다 — §1이 인용한 문장이 요구하는 바로 그 상태입니다.
+- **오디오 문제 아님.** 파일을 보내지 않은 요청도 같은 401입니다.
+
+### 10-4. 그래서 §1의 어느 줄이 틀렸는가
+
+**인용 자체는 정확합니다.** 공식 문서는 지금도 이렇게 적습니다.
+
+> *"As an alternative to creating a region-specific project, you can select
+> regional processing for an individual request by using the prefixed domain
+> with an API key from a project having Global geography."*
+
+**틀린 것은 그 인용에서 제가 끌어낸 추론입니다.** §1은 이 문장을 근거로 "새
+프로젝트도 새 key도 이 변경의 전제가 아니다"라고 적었고, 그것을 **전제가 하나도
+없다**는 뜻으로 썼습니다. 실제로는 문서에 적히지 않은 전제가 하나 더
+있었습니다 — **조직 자체가 data residency를 쓸 수 있는 상태여야 합니다.**
+`incorrect_hostname`은 프로젝트가 아니라 그 상태에 대한 답입니다.
+
+**이것은 문서가 거짓말했다는 주장이 아닙니다.** 문서는 data residency 안내
+문서이고, 그 기능을 쓸 수 있는 조직을 전제하고 씁니다. 제가 그 전제를 읽지 않고
+"프로젝트 geography만 맞으면 된다"로 좁혀 적었습니다. **검색 요약이 아니라 원문을
+읽었는데도 틀렸다는 점을 적어 둡니다** — 원문을 읽는 것이 전제까지 읽는 것을
+보장하지 않습니다.
+
+### 10-5. 지금 무엇이 참인가
+
+- **Voice는 이 고정이 있는 한 동작하지 않습니다.** 코드에 env override가 없으므로
+  운영자가 우회할 수단도 설계상 없습니다.
+- **고지 문구와 코드 고정은 함께 움직입니다**(§8-2, §11.4). 고정을 풀면 고지가
+  먼저 틀립니다 — 미국을 이름 댈 근거가 사라집니다.
+- **오디오 바이트가 미국 edge에 도달했는지는 미관측입니다.** 401이 요청 본문
+  전송 전에 왔는지 후에 왔는지 이 저장소는 알 수 없습니다. **"아무 데이터도 나가지
+  않았다"고 적지 않습니다.**
+- 비용은 0입니다. 두 건 모두 `not_billed`이고 예약 초가 환급됐습니다.
+
+### 10-6. 결정이 필요합니다 — 이 기록은 고르지 않습니다
+
+세 갈래이고, 셋 다 사람의 결정입니다.
+
+| 갈래 | Voice 동작 | 고지 | 대가 |
+|---|---|---|---|
+| **가.** OpenAI에 data residency 활성화 문의, 고정 유지 | 계속 불가 | 그대로 유효 | 일정이 공급자에게 달림 |
+| **나.** 고정을 풀어 Global로 되돌림 | 즉시 복구 | **다시 씀** — 미국을 이름 댈 수 없음 | 2026-09-10 서명이 임의 국가 기재를 금지했으므로 별도 법률 검토 필요 |
+| **다.** 고정 유지 + Voice 비활성 유지 | 불가 | 그대로 유효 | 현상 유지. B-5·B-6이 계속 열림 |
+
+**가**를 고르면 문의에 실을 것은 이 절의 표와 `incorrect_hostname` 원문입니다.
+**나**를 고르면 `2026-09-10-processing-region-decision.md`의 "Global — 지역 제한
+없음"으로 돌아가는 것이고, 국외이전 고지 2번 항목(이전 국가)을 어떻게 적을지가
+그 결정에 딸려 옵니다.
+
+**staging의 flag는 켜져 있고 Voice는 실패합니다.** 되돌리는 것은
+`feature.voiceInputEnabled`를 `'false'`로 바꾸거나 `VOICE_INPUT_KILL_SWITCH`를
+설정하는 것이며, 둘 다 되돌릴 수 있는 조작입니다.
+
+### 10-7. 배제된 조치 하나 — 인프라 지역 변경
+
+**Tomverse의 배포 지역(Railway)을 미국으로 옮겨도 이 401은 바뀌지 않습니다.**
+같은 공식 문서가 명시합니다.
+
+> *"Data residency does not apply to: (1) any transmission or storage of
+> Customer Content outside of the selected region caused by the location of an
+> End User or Customer's infrastructure when accessing the services."*
+
+즉 판정 기준은 **요청이 어디서 출발하는가**가 아니라 **key가 속한 조직이
+프로비저닝돼 있는가**입니다. 관측도 이와 일치합니다 — Railway
+`asia-southeast1-eqsg3a` 컨테이너와 운영자 로컬 PC라는 서로 다른 두 위치에서
+동일한 `incorrect_hostname`이 나왔습니다.
+
+**그리고 대가가 있습니다.** staging은 단일 지역 1 replica이고 multi-region은 상위
+플랜입니다. 지역을 옮기면 한국·호주 사용자 지연과 DB 왕복이 모두 늘어나며,
+Voice 오류는 그대로입니다. **이 시도를 하지 않는 것이 이 절의 목적입니다.**
+
+### 10-8. 갈래를 고르기 전에 볼 화면 하나
+
+문서가 자격 취득 경로를 이렇게 적습니다.
+
+> *"To configure data residency for regional storage, select the appropriate
+> region from the dropdown when creating a new project."*
+> *"Contact our sales team to see if you're eligible for using data residency
+> controls."*
+
+**OpenAI 대시보드의 새 프로젝트 생성 화면에 region 드롭다운이 있는지, 거기에
+United States가 있는지**가 §10-6의 갈래 **가**의 비용을 정합니다.
+
+- 드롭다운에 United States가 있으면 조직은 이미 자격이 있고, US residency
+  프로젝트를 만들어 그 key로 재시험하면 됩니다.
+- 없으면 sales 문의가 유일한 경로이고, 실을 근거는 §10-2의 표와
+  `incorrect_hostname` 원문입니다.
+
+**`Tomverse Voice`가 `GLOBAL`로 만들어진 이유는 미관측입니다** — 드롭다운이
+없었는지, 있었는데 고르지 않았는지 이 저장소는 알 수 없습니다.
+
+## 11. 갈래 **나** 선택 — Global 복귀와 고지 재작성 (2026-09-10)
+
+운영자가 §10-6의 **나**를 선택했습니다. 고정을 풀어 Global로 돌아가고, 고지를
+다시 씁니다.
+
+### 11-1. 코드
+
+`VOICE_TRANSCRIPTION_OPENAI_BASE_URL`이 `https://api.openai.com`으로,
+`VOICE_TRANSCRIPTION_PROVIDER_REGION`이 `"global"`로 돌아갔습니다.
+
+**되돌리지 않은 것은 구조입니다.** 상수는 상수로 남고 환경변수 경로는 여전히
+없습니다 — 그 이유는 애초에 미국이 아니었기 때문입니다. **고지가 목적지에 대해
+말할 수 있는 것은 목적지를 정하는 것이 얼마나 안정적인가까지입니다.** 운영자가
+host를 옮길 수 있으면 고지를 건드리지 않고 고지를 거짓으로 만들 수 있습니다.
+
+`tests/voiceRegionalEndpoint.test.mjs`의 9개는 지우지 않고 방향을 뒤집었습니다.
+전체 URL 단언은 그대로이고(지역 host는 모두 `api.openai.com`을 **포함**하므로
+부분 문자열 검사는 통과시킵니다), global 리터럴 금지가 지역 리터럴 금지로
+바뀌었으며, host와 지역 식별자를 **서로** 대조합니다. env 검사는 손대지
+않았습니다 — 고정보다 오래 남는 검사입니다. 두 변이를 모두 돌려 확인했습니다:
+지역 host 복귀는 4개, env 유래 host는 1개가 red입니다.
+
+### 11-2. 고지 — 운영자가 지시한 방향
+
+두 문자열만 바뀌었습니다. 나머지 여섯 항목(이전 정보·시점과 방법·이전받는 자·
+목적·보유기간·거부 방법과 효과)은 라우팅과 무관해 그대로입니다.
+
+- **이전 국가**: 미국 — **이전받는 법인 `OpenAI OpCo, LLC`의 소재 국가**입니다.
+  근거가 endpoint에서 **이전받는 자**로 바뀌었습니다.
+- **처리 지역**: 같은 항목 안에서, OpenAI의 Global API를 쓰므로 기술적 처리가 그
+  국가로 한정되지 않으며 OpenAI의 글로벌 인프라와 하위처리자 환경에서 처리될 수
+  있음을 함께 적습니다.
+
+7개 locale 전부에 적용했습니다. **항목을 아홉으로 늘리지 않았습니다** — 처리
+지역은 제28조의8 제2항 2호와 같은 항목이므로 그 안에 넣습니다.
+
+### 11-3. §8-2의 승인은 이 변경에 따라오지 않습니다
+
+§8-2가 승인을 문장이 아니라 **SHA에 고정**했고 *"이 문구가 바뀌면 승인은
+따라오지 않습니다"*라고 적었습니다. 위 두 문자열이 바뀌었으므로 **2026-09-10의
+문구 승인은 이 판본을 덮지 않습니다.** 조건 2는 다시 열립니다.
+
+### 11-4. 가장 안전한 상태 표기 (운영자 지시, 2026-09-10)
+
+| 항목 | 상태 |
+|---|---|
+| 수령 법인 소재 국가 | **미국 — 계약 원문 대조 필요** |
+| 기술적 처리 지역 | **Global, 특정 국가로 제한되지 않음** |
+| 하위처리 국가 목록 | **공급자 자료·법률 검토 대기** |
+
+**첫 줄의 구분을 흐리지 않습니다.** §8-1에서 운영자가 계약 원문과 대조한 것은
+**명칭** `OpenAI OpCo, LLC`이고, **그 법인의 소재 국가는 대조되지 않았습니다.**
+지금 고지에 적힌 "미국"은 그 미대조 사실 위에 서 있으며, 운영자가 그렇게
+지시하면서 동시에 대조 필요를 명시했습니다.
+
+**둘째 문장이 충분한지는 법률 판단입니다.** 구체적 국가를 열거하지 않으므로
+제28조의8 제2항 2호를 충족하는지 승인이 필요하고, 운영자가 이를 명시했습니다.
+**이 기록은 그것을 판정하지 않습니다.**
+
+### 11-5. staging flag
+
+**켠 채로 둡니다**(운영자 결정, 2026-09-10). 이 코드가 배포되면 전사가 다시
+동작합니다. **고지의 법률 승인 전에 실제 전송이 일어나는 상태**이며, 그 선택은
+기록돼 있습니다.
+
+### 11-6. 조건 현황 (갱신)
+
+| # | 조건 | 상태 |
+|---|---|---|
+| 1 | endpoint 결정 코드 병합 | **완료** — Global 복귀(§11-1), push 대기 |
+| 2 | 국외이전 고지 항목 승인 | **다시 열림** — 새 문구는 미승인(§11-3) |
+| 3 | staging 전체 deploy SHA | 재관측 필요 — §9-4대로 관측 시점의 값을 씁니다 |
+| 4 | 그 deploy에서 Voice 요청 성공 | 미관측 — 이전 관측은 실패(§10) |
+| 5 | 실제 목적지에 대한 운영 증거 | 미관측 |
+| 6 | 사람의 B-5 판정·서명 | 미완 |
+
+**미국 지역 endpoint는 더 이상 조건이 아닙니다.** 5번이 묻는 것은 이제 "요청이
+`api.openai.com`에 닿아 성공했는가"입니다.
+
+## 12. 첫 성공 관측 (2026-09-10 11:06:54Z)
+
+**Global 복귀가 배포된 뒤 첫 Voice 요청이 성공했습니다.** 이 절이 조건 3·4를
+채우고, 5에 대해 무엇이 증명되고 무엇이 안 되는지를 적습니다.
+
+### 12-1. 배포 — 조건 3
+
+관측 시점에 `GET /api/build-info`를 다시 읽었습니다. §9-4가 요구한 대로
+`6019e07a`도 merge SHA도 옮겨 적지 않았습니다.
+
+| 항목 | 값 |
+|---|---|
+| **deploy SHA (40자)** | `e8613a554bfbb22676a1be6552932954d79a88c8` |
+| deploymentId | `16562bd4-672d-4654-b2d7-7d2188cecf2b` |
+| deploymentStartedAt | 2026-09-10T10:51:22.934Z |
+| builtAt | 2026-09-10T11:02:15.369Z |
+| deployedAt | 2026-09-10T11:04:37.796Z |
+| deploymentStatus | `success` |
+
+`builtAt`가 PR #1333 병합(10:51:22Z) 이후이므로 옛 번들 재사용이 아닙니다. 이
+SHA는 `e2b10115`(Global 복귀)를 포함합니다.
+
+**오늘 하루 staging SHA는 다섯 번 움직였습니다** — `5ad71623` → `6019e07a` →
+`07f9cdfe` → `bb7f8872` → `e8613a55`. 그중 셋을 이 디렉터리의 기록 PR이
+움직였습니다. §9-4가 경고한 그대로입니다.
+
+### 12-2. 요청 — 조건 4
+
+**HTTP 로그** (proxy):
+
+```
+POST /api/chat/voice-transcription   200   3252ms   2026-09-10T11:06:48.044Z
+```
+
+**구조화 이벤트** (11:06:54.671Z):
+
+```
+event: voice_transcription   keySource: "dedicated"   outcome: "succeeded"
+mediaType: "audio/webm"      durationSource: "ebml"   durationSeconds: 2.765226…
+reservedSeconds: 3           releasedSeconds: 0
+usageKind: "tokens"          settlementBasis: "measured_clip"
+```
+
+- **`outcome: "succeeded"`** — 이 기능의 첫 성공 전사입니다.
+- **`keySource: "dedicated"`** — `VOICE_TRANSCRIPTION_API_KEY`(Voice 전용 key)를
+  썼습니다. 공유 key로 우회하지 않았습니다.
+- **`settlementBasis: "measured_clip"`**, `releasedSeconds: 0` — 예약한 3초가
+  전액 정산됐습니다. §7.2의 순서에서 `measured_clip`은 **공급자가 초를 보고하지
+  않았다**는 뜻입니다. 가장 강한 근거(공급자 보고 초)가 아니라 두 번째 근거로
+  정산됐습니다.
+- **비용이 더 이상 0이 아닙니다.** 앞선 두 401은 `not_billed`로 전액
+  환급됐지만 이 건은 정산됐습니다.
+- **로그에 내용이 없습니다.** transcript도 파일명도 host도 없습니다 —
+  `tests/voiceInputPrivacy.test.mjs`가 강제하는 표면이 성공 경로에서 처음으로
+  지켜진 것을 확인했습니다.
+
+### 12-3. 목적지 — 조건 5는 무엇으로 채워지는가
+
+**구조화 로그에는 host 필드가 없습니다.** §11.3.0이 의도적으로 넣지 않았습니다 —
+env override 없는 상수에서 유도한 필드는 상수를 되풀이할 뿐입니다. 그래서 목적지에
+대한 근거는 두 가지를 합친 것입니다.
+
+1. **배포된 코드.** `e8613a55`가 담은 상수는 `https://api.openai.com`이고,
+   `tests/voiceRegionalEndpoint.test.mjs`가 요청 URL **전체**를 단언하며 환경변수
+   경로가 없음을 각각 검사합니다.
+2. **성공 자체가 지역 host를 배제합니다.** §10-2가 보인 대로
+   `us.api.openai.com`은 이 조직을 **무조건** 거절합니다 — 두 key, 두 endpoint,
+   오디오 유무와 무관하게 4/4가 `401 incorrect_hostname`이었습니다. 그러므로
+   **200은 그 host에서 나올 수 없습니다.**
+
+**이 둘이 증명하지 못하는 것도 적습니다.** 위 근거는 "지역 host가 아니었다"와
+"코드가 global host를 가리킨다"까지이고, **wire 위의 hostname을 직접 관측한 것은
+아닙니다.** 이 저장소는 그 관측을 할 위치에 있지 않습니다.
+
+**독립 증거로 남은 것 하나**: 다음 날 Costs에 `Tomverse Voice` 프로젝트의 line
+item이 나타나는지. 그것이 공급자 쪽 장부에서 이 호출을 확인하는 경로입니다.
+
+### 12-4. 공급자 쪽 `last_used_at`이 따라오지 않았습니다
+
+관측 직후 `GET /v1/organization/projects/{voice}/api_keys`를 읽었습니다.
+`Voice Key`의 `last_used_at`은 여전히 **`2026-09-10T09:41:45Z`** — 성공한
+11:06:54Z가 아니라 **실패했던 첫 401의 시각**입니다.
+
+**이 필드는 실시간이 아닙니다.** 09:42:15Z의 두 번째 401도 반영하지 않았으므로,
+갱신이 지연되거나 성기다고 보는 것이 자연스럽습니다. 다만 **그렇게 단정하지
+않고 관측한 그대로 적습니다.**
+
+**§10-3의 논거는 그대로 유효합니다.** 거기서 쓴 것은 09:41:45Z가 첫 요청과 초
+단위로 일치한다는 사실이고, 프로젝트 생성(06:16:52Z)과 key 생성(06:17:55Z) 이후
+그 시각까지 어떤 요청도 없었으므로 그 일치는 여전히 그 요청을 가리킵니다.
+**바뀐 것은 이 필드를 "최신 사용 시각"으로 읽으면 안 된다는 것**이고, 앞으로
+이 필드로 무엇을 확인할 때 그 지연을 계산에 넣어야 합니다.
+
+### 12-5. 조건 현황
+
+| # | 조건 | 상태 |
+|---|---|---|
+| 1 | endpoint 결정 코드 병합 | **완료** — PR #1333, `e8613a55` |
+| 2 | 국외이전 고지 항목 승인 | **미완** — 새 문구는 법률 승인 대기(§11-3) |
+| 3 | staging 전체 deploy SHA | **완료** — `e8613a55…`(§12-1) |
+| 4 | 그 deploy에서 Voice 요청 성공 | **완료** — 11:06:54Z(§12-2) |
+| 5 | 실제 목적지에 대한 운영 증거 | **부분** — 지역 host 배제됨, wire hostname 미관측(§12-3) |
+| 6 | 사람의 B-5 판정·서명 | 미완 |
+
+**남은 것은 2와 6이고, 5는 사람이 어디까지를 증거로 볼지 정하는 항목입니다.**
+2는 법률 승인 + 수령 법인 소재 국가의 계약 원문 대조입니다(§11-4).
+
+### 12-6. 이 파일 이름에 대하여
+
+파일명이 `us-regional-endpoint`이지만 §11 이후 내용은 그 고정의 **철회**와 그
+뒤의 관측입니다. 이름을 바꾸지 않았습니다 — 이 디렉터리의 다른 기록과
+`docs/policy/voice-input.md`가 이 경로를 가리키고 있고, 경로를 바꾸면 그 참조들이
+가리키는 곳이 사라집니다. **이 파일은 US 고정의 시작부터 철회, 그리고 그 결과까지
+한 줄기로 담습니다.**
+
+## 13. 2026-09-10 운영자 승인 둘 — 조건 2와 조건 5
+
+§8과 같은 규율로 적습니다. **아래는 운영자가 이 세션에서 말한 것을 옮긴 것이고,
+에이전트가 판단한 것이 아닙니다.**
+
+### 13-1. 조건 2 — 새 고지 문구 승인
+
+> "2번 새 법률 문구 승인합니다."
+
+- **승인 대상**: Global 복귀에 맞춰 다시 쓴 국외이전 고지 문구(§11-2)
+- **승인자**: 운영자 (Privacy Owner)
+- **일자(UTC)**: 2026-09-10
+
+**승인된 revision을 SHA로 고정합니다.** §8-2의 승인이 문구 변경과 함께 무효가
+됐던 것이 바로 이 고정 덕분에 드러났고, 같은 이유로 이번에도 고정합니다.
+
+| 대상 | 값 |
+|---|---|
+| develop merge commit | `e8613a554bfbb22676a1be6552932954d79a88c8` |
+| PR | #1333 |
+| `locales/en.ts` | `b232da640ecc287d1388bff4f639578fe9cdfb30` |
+| `locales/ko.ts` | `0beb18904a917139376e47286f806dee18ca5b95` |
+| `locales/zh.ts` | `4bebbd2ea8be709e69ab0d9b71ec7e90c1225dfa` |
+| `locales/de.ts` | `8bca7e1e9d62660577c64aafb5f4db1d599534b0` |
+| `locales/es.ts` | `b5317a0bd94cb917df0874b5b0b1897489b10cc0` |
+| `locales/fr.ts` | `a828eaed7468a78a82851d8ccbe174bbd07018bc` |
+| `locales/pt.ts` | `f9fda88cc33ff0bb29c9cb59a53599399acc06e9` |
+| `components/legal/PrivacyPolicy.tsx` | `386e77e2c8f14ad6cab214fe0583845480826da6` |
+
+이번에는 7개 locale을 전부 적었습니다. §8-2는 셋만 대표로 적었는데, 그 뒤
+실제로 문구가 바뀌면서 **어느 파일이 승인 대상이었는지**가 문제가 됐기
+때문입니다. **이 중 하나라도 달라지는 변경은 다시 승인 대상입니다.**
+
+**수령 법인의 소재 국가는 이 승인에 포함되지 않습니다.** §11-4가 "계약 원문 대조
+필요"로 적어 둔 항목이고, 운영자가 승인한 것은 **문구**입니다. 이 구분을 흐리면
+대조되지 않은 사실이 승인된 것처럼 보입니다. 열린 항목으로 §13-3에 남깁니다.
+
+### 13-2. 조건 5 — 목적지 운영 증거 승인
+
+> "5번도 승인합니다."
+
+- **승인자**: 운영자 (Privacy Owner)
+- **일자(UTC)**: 2026-09-10
+
+**무엇이 승인됐는지 그대로 적습니다.** §12-3이 서술한 증거 집합입니다.
+
+1. 배포된 `e8613a55`의 host 상수가 `https://api.openai.com`이고, env override
+   경로가 없으며, 테스트가 요청 URL **전체**를 단언한다는 것.
+2. `us.api.openai.com`이 이 조직을 **무조건** 거절한다는 것 — 두 key, 두
+   endpoint, 오디오 유무 무관 4/4가 `401 incorrect_hostname`. 그러므로 11:06:54Z의
+   성공이 그 host에서 나올 수 없다는 것.
+
+**승인되지 않은 것은 그대로 남습니다.** 위 둘은 "지역 host가 아니었다"와 "코드가
+global host를 가리킨다"를 말하며, **wire 위의 hostname을 직접 관측한 것이
+아닙니다.** 운영자의 승인은 **이 증거로 충분하다는 판정**이지, 관측이 하나 더
+생겼다는 뜻이 아닙니다. §12-3의 문장은 정정하지 않고 그대로 둡니다.
+
+**다음 날 Costs의 `Tomverse Voice` line item은 여전히 유효한 보강 증거이지만
+더 이상 차단 조건이 아닙니다.** 확인하면 이 절에 덧붙입니다.
+
+### 13-3. 승인 뒤에도 열려 있는 것
+
+| 항목 | 상태 | 근거 |
+|---|---|---|
+| 수령 법인 `OpenAI OpCo, LLC`의 **소재 국가** | **계약 원문 대조 필요** | §11-4. §8-1에서 대조된 것은 **명칭**입니다 |
+| 하위처리 국가 목록 | 공급자 자료·법률 검토 대기 | §11-4 |
+| wire hostname 직접 관측 | 미관측 (차단 아님) | §12-3, §13-2 |
+
+**첫 줄이 최종 서명이 다뤄야 할 항목입니다.** 지금 고지가 사용자에게 "이전 국가:
+미국"이라고 말하고 있고, 그 근거인 소재 국가는 아직 계약 원문과 대조되지
+않았습니다.
+
+### 13-4. 조건 현황
+
+| # | 조건 | 상태 |
+|---|---|---|
+| 1 | endpoint 결정 코드 병합 | **완료** — PR #1333, `e8613a55` |
+| 2 | 국외이전 고지 항목 승인 | **완료** — 2026-09-10 (§13-1) |
+| 3 | staging 전체 deploy SHA | **완료** — `e8613a55…` (§12-1) |
+| 4 | 그 deploy에서 Voice 요청 성공 | **완료** — 11:06:54Z (§12-2) |
+| 5 | 실제 목적지에 대한 운영 증거 | **완료** — 2026-09-10 승인 (§13-2) |
+| 6 | 사람의 B-5 판정·서명 | **완료** — 통과, 2026-09-10 (§14) |
+
+**여섯 조건이 모두 충족됐습니다.** 최종 서명 기록은 §14이며, §7이 요구한 아홉
+항목을 모두 담고 있습니다.
+
+---
+
+## 14. B-5 최종 판정과 서명 (조건 6)
+
+**1~7번은 에이전트가 관측값을 옮겨 쓴 초안이고, 8번 판정과 9번 서명은 사람이
+2026-09-10에 직접 준 문구입니다.** §7이 요구한 아홉 항목의 순서를 따릅니다.
+
+### 1. 결정·위험 수용 기록 참조
+
+같은 디렉터리의 2026-09-10 기록 여섯 건입니다.
+
+- `2026-09-10-account-observation.md` — 계정 설정 관측
+- `2026-09-10-zdr-precondition-decision.md` — ZDR 필수조건 결정
+- `2026-09-10-voice-project-and-key-separation.md` — 전용 project·key 분리
+- `2026-09-10-dpa-incorporation.md` — DPA 편입 근거와 서명 셋
+- `2026-09-10-processing-region-decision.md` — 처리 지역 결정(Global)
+- `2026-09-10-us-regional-endpoint.md` — 이 문서. US 고정의 시작·철회·복귀와
+  이후 관측 전부
+
+### 2. 승인된 개인정보처리방침 revision
+
+`e8613a554bfbb22676a1be6552932954d79a88c8` (PR #1333).
+
+2026-09-10에 승인됐고, 8개 파일의 blob hash로 고정돼 있습니다(§13-1). **이전
+승인(§8-2)은 US 고정 철회와 함께 무효가 됐으며, 위 값이 유효한 승인 대상입니다.**
+
+### 3. staging 전체 40자리 deploy SHA
+
+`e8613a554bfbb22676a1be6552932954d79a88c8`
+
+관측 시점에 `GET /api/build-info`로 다시 읽은 값입니다(§12-1). merge SHA를 옮겨
+적은 것이 아닙니다. deploymentId `16562bd4-672d-4654-b2d7-7d2188cecf2b`,
+deployedAt 2026-09-10T11:04:37.796Z, status `success`.
+
+### 4. 관측 시각(UTC)
+
+- HTTP 요청: **2026-09-10T11:06:48.044Z** (`POST /api/chat/voice-transcription`, 200, 3252ms)
+- 구조화 이벤트: **2026-09-10T11:06:54.671Z**
+
+### 5. 실제 사용된 endpoint·region 증거
+
+**endpoint: `https://api.openai.com` (Global). region 제한 없음.**
+
+근거는 둘이고, 2026-09-10에 운영자가 이 집합을 충분한 것으로 승인했습니다(§13-2).
+
+1. 배포된 `e8613a55`의 host 상수가 `https://api.openai.com`이며 env override
+   경로가 없고, `tests/voiceRegionalEndpoint.test.mjs`가 요청 URL 전체를
+   단언합니다.
+2. `us.api.openai.com`은 이 조직을 무조건 거절합니다 — 두 key, 두 endpoint,
+   오디오 유무 무관 4/4가 `401 incorrect_hostname`(§10-2). 따라서 성공한 요청이
+   그 host에서 나올 수 없습니다.
+
+**wire 위의 hostname을 직접 관측한 것은 아닙니다**(§12-3). 승인은 이 증거로
+충분하다는 판정이지 관측이 하나 더 생겼다는 뜻이 아닙니다.
+
+### 6. Voice 요청 결과
+
+**성공.**
+
+```
+event: voice_transcription   keySource: "dedicated"   outcome: "succeeded"
+mediaType: "audio/webm"      durationSource: "ebml"   durationSeconds: 2.765226…
+reservedSeconds: 3           releasedSeconds: 0
+usageKind: "tokens"          settlementBasis: "measured_clip"
+```
+
+- 전용 key(`VOICE_TRANSCRIPTION_API_KEY`)를 사용했습니다.
+- 예약 3초가 전액 정산됐습니다. `measured_clip`은 §7.2의 순서에서 **공급자가 초를
+  보고하지 않았다**는 뜻이며, 가장 강한 근거가 아니라 두 번째입니다.
+- 로그에 transcript·파일명·host가 없습니다. `tests/voiceInputPrivacy.test.mjs`가
+  강제하는 표면이 성공 경로에서 지켜졌습니다.
+
+### 7. 잔여 위험
+
+**7-1. 수령 법인의 소재 국가가 계약 원문과 대조되지 않았습니다.** 고지가
+사용자에게 "이전 국가: 미국"이라고 말하고 있고 그 근거는 `OpenAI OpCo, LLC`의
+소재지입니다. §8-1에서 계약 원문과 대조된 것은 **명칭**뿐입니다(§13-3).
+**이것이 남은 항목 중 사용자에게 보이는 문장에 직접 걸리는 유일한 것입니다.**
+
+**7-2. 하위처리 국가 목록이 없습니다.** 공급자가 GLOBAL 프로젝트의 처리 국가를
+공표하지 않으므로(§11-2), 고지는 "특정 국가로 한정되지 않는다"까지만 말합니다.
+그 서술이 개인정보보호법 제28조의8 제2항 2호를 충족하는지는 §13-1의 승인이
+답한 것으로 처리됩니다.
+
+**7-3. wire hostname 미관측.** §13-2에서 차단 사유가 아닌 것으로 판정됐습니다.
+보강 증거로 다음 날 Costs의 `Tomverse Voice` line item이 남아 있습니다.
+
+**7-4. 공급자 `last_used_at`이 지연됩니다.** 성공한 11:06:54Z가 아니라 실패했던
+09:41:45Z를 가리킵니다(§12-4). 이 필드를 "최신 사용 시각"으로 읽는 절차가
+있다면 고쳐야 합니다.
+
+**7-5. US 지역 처리는 이 조직에서 사용할 수 없습니다.** 필요해지면 공급자에
+data residency 활성화를 문의하는 것이 경로이며, 그 전에 볼 화면은 §10-8에
+적혀 있습니다.
+
+### 8. 판정
+
+- **판정**: **통과**
+
+> **서명 이후 추가 (2026-09-10).** 아래 7번의 잔여 위험 중 **7-1(수령 법인의
+> 소재 국가 미대조)이 해소됐습니다** — 운영자가 공식 Services Agreement와 DPA
+> 원문을 대조해 `OpenAI OpCo, LLC`의 주소가 San Francisco, California, United
+> States임을 확인했습니다. 기록:
+> `2026-09-10-recipient-domicile-verification.md`.
+>
+> **7번의 본문은 고치지 않습니다.** 그것은 서명 시점의 사실이고, 서명된 기록을
+> 나중에 손봐 더 좋아 보이게 만드는 것이 이 저장소가 막는 일입니다. **7-2~7-5는
+> 그대로 열려 있습니다.**
+
+**통과는 §7의 잔여 위험이 사라졌다는 뜻이 아니라 수용됐다는 뜻입니다.** 7-1~7-5는
+적힌 그대로 열려 있으며, 특히 **7-1(수령 법인 `OpenAI OpCo, LLC`의 소재 국가가
+계약 원문과 대조되지 않음)** 은 사용자에게 보이는 고지 문장이 서 있는 근거입니다.
+그 사실을 알고 내린 판정이며, 나중에 이 절을 읽는 사람이 "통과했으니 대조도
+끝났다"로 읽지 않도록 여기에 적습니다.
+
+초안은 이 자리에 `근거` 칸을 두었으나 §7의 아홉 항목에 없는 항목이었고,
+판정문에 포함되지 않았으므로 비워 두는 대신 삭제했습니다. **지어내지
+않았습니다.**
+
+### 9. 서명자와 날짜
+
+- **서명**: Tommy Han
+- **직책**: Privacy Owner
+- **일자(UTC)**: 2026-09-10
+
+**B-5는 이 서명으로 닫힙니다.** 남은 production 차단 사유는 B-6(실기기 검증)
+하나입니다.

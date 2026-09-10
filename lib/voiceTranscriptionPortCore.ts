@@ -186,12 +186,74 @@ export const resolveVoiceTranscriptionModel = (
 /** Beyond this the user has been staring at a spinner too long anyway. */
 export const VOICE_TRANSCRIPTION_TIMEOUT_MS = 30_000;
 
+/**
+ * The routing the provider is asked for, and the host that fixes it.
+ *
+ * Contract: docs/policy/voice-input.md §11.3.
+ *
+ * **Not a default, and not configurable.** The reason survives the change of
+ * value below: what a privacy notice can say about where a recording goes is
+ * only as stable as the thing that decides it. An operator able to point this
+ * at another host could invalidate a published legal notice without touching
+ * the notice, and nothing in the deployment would say so. So the destination
+ * is chosen here, in code, and the notice is written against it. The one
+ * remaining way to change the host is `OpenAiTranscriptionConfig.baseUrl`,
+ * which exists for tests and which the production binding never reads from
+ * configuration -- see the comment there.
+ *
+ * **This was `https://us.api.openai.com` between 2026-09-10 and 2026-09-10,
+ * and the provider refused it.** The pin was made so a Korean
+ * overseas-transfer notice could name the country. Every request to the
+ * regional host came back `401 incorrect_hostname` -- *"Attempted to access
+ * resource with incorrect regional hostname. Please make your request to
+ * api.openai.com"* -- for both the dedicated Voice key and the shared key, on
+ * `/v1/models` and on this endpoint alike, whether or not audio was attached.
+ *
+ * The provider's guide does say a regional host may be used per request with a
+ * key from a Global-geography project, and the Voice project's `residency` is
+ * `GLOBAL`. The unstated precondition is that the *organization* be
+ * provisioned for data residency at all, which this one is not; the guide
+ * points that at its sales team. Data residency is also explicitly not decided
+ * by where the caller runs, so moving this deployment would not have changed
+ * the answer.
+ *
+ * The observation, what it ruled out one candidate at a time, and the three
+ * courses it left open are in
+ * `docs/ops/voice-provider-data-controls-records/2026-09-10-us-regional-endpoint.md`
+ * §10. Restoring the regional host is not a code decision on its own: it needs
+ * the provider to enable data residency first, and the notice moves with it.
+ */
+export const VOICE_TRANSCRIPTION_PROVIDER_REGION = "global";
+
+/** The host every Voice transcription is sent to. See above. */
+export const VOICE_TRANSCRIPTION_OPENAI_BASE_URL = "https://api.openai.com";
+
+/**
+ * Joins the host and the path without producing `//v1`.
+ *
+ * Trivial, and separate because the alternative is a template literal at the
+ * call site that is correct only while the constant happens to have no
+ * trailing slash. A test injecting `https://example.test/` should reach
+ * `https://example.test/v1/audio/transcriptions`, not a doubled separator that
+ * some servers route and others reject.
+ */
+export const voiceTranscriptionEndpoint = (baseUrl: string): string =>
+  `${baseUrl.replace(/\/+$/, "")}/v1/audio/transcriptions`;
+
 export type OpenAiTranscriptionConfig = {
   apiKey: string;
   model: string;
   /** Injected so a test drives this without a network. */
   fetchImpl: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Test-only override of the pinned regional host.
+   *
+   * Omitted, the request goes to `VOICE_TRANSCRIPTION_OPENAI_BASE_URL`. There
+   * is deliberately no global-endpoint fallback: the previous default was
+   * `https://api.openai.com`, and leaving it in place would mean any caller
+   * that forgot this field silently sent audio out of the pinned region.
+   */
   baseUrl?: string;
 };
 
@@ -299,7 +361,9 @@ export const transcribeWithOpenAi = async (
   let response: Response;
   try {
     response = await config.fetchImpl(
-      `${config.baseUrl ?? "https://api.openai.com"}/v1/audio/transcriptions`,
+      voiceTranscriptionEndpoint(
+        config.baseUrl ?? VOICE_TRANSCRIPTION_OPENAI_BASE_URL
+      ),
       {
         method: "POST",
         headers: { Authorization: `Bearer ${config.apiKey}` },

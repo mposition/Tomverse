@@ -69,6 +69,12 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/app-managed-web-search-staging-checklist.md",
         records: "docs/ops/app-managed-web-search-staging-verification-records",
     },
+    {
+        key: "voice-input",
+        label: "voice input real-device verification (B-6)",
+        checklist: "docs/ops/voice-input-staging-checklist.md",
+        records: "docs/ops/voice-input-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {
