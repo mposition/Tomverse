@@ -42,13 +42,19 @@ export type VoiceBudgetReservation = {
 };
 
 export const reserveVoiceBudgets = async (input: {
-  userId: string;
+  /** `identifyChatCaller`'s `subjectKey`: a user or a guest. */
+  subjectKey: string;
   seconds: number;
 }): Promise<VoiceBudgetReservation> => {
   // The subject's budget first: refusing one person for their own use is the
   // more specific answer, and it does not consume the shared budget to say so.
+  //
+  // The order matters more since guests were admitted (2026-09-10). A cleared
+  // cookie is a new subject, so the subject budget cannot bound the day on its
+  // own; the provider reservation below is what does, and it is reserved for
+  // every caller alike.
   const subject = await reserveVoiceSeconds({
-    userId: input.userId,
+    subjectKey: input.subjectKey,
     seconds: input.seconds,
   });
   try {

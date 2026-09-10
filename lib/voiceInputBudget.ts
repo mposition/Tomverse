@@ -79,9 +79,9 @@ const secret = () => {
  * key is: the table is keyed by something that must not be a user identifier
  * anybody reading a row can reverse.
  */
-const bucketKey = (userId: string) =>
+const bucketKey = (subjectKey: string) =>
   `voice:${createHash("sha256")
-    .update(`voice-seconds:${userId}:${secret()}`)
+    .update(`voice-seconds:${subjectKey}:${secret()}`)
     .digest("hex")}`;
 
 /** `voice-*`, never `cost-*` or `op-cost-*`. See the header. */
@@ -140,21 +140,33 @@ export const voiceReservationSeconds = (
  * — and must never reach another request's booking.
  */
 export type VoiceSecondsReservation = {
-  userId: string;
+  /** The subject the seconds were booked against. See `reserveVoiceSeconds`. */
+  subjectKey: string;
   reservedSeconds: number;
   periodStart: Date;
   settled: boolean;
 };
 
 export const reserveVoiceSeconds = async (input: {
-  userId: string;
+  /**
+   * Whoever this budget is being spent by -- `identifyChatCaller`'s
+   * `subjectKey`, which is `user:<hash>` for a signed-in caller and
+   * `guest:<hash>` for one holding a signed guest cookie.
+   *
+   * It was `userId` while voice input was signed-in only. Guests were admitted
+   * on 2026-09-10 (docs/policy/voice-input.md §4) and the bucket needed no
+   * schema change to carry them: `bucketKey` hashes whatever string it is
+   * given, and `ChatUsageBucket` has no foreign key to a user. What the wider
+   * name records is that a subject here is not necessarily an account.
+   */
+  subjectKey: string;
   seconds: number;
   env?: Record<string, string | undefined>;
 }): Promise<VoiceSecondsReservation> => {
   const { limits } = resolveVoiceGuardrails(input.env ?? process.env);
   const now = new Date();
   const seconds = Math.max(1, Math.ceil(input.seconds));
-  const key = bucketKey(input.userId);
+  const key = bucketKey(input.subjectKey);
   const start = dayStart(now);
   const limit = limits.secondsPerDay;
 
@@ -191,7 +203,7 @@ export const reserveVoiceSeconds = async (input: {
   }
 
   return {
-    userId: input.userId,
+    subjectKey: input.subjectKey,
     reservedSeconds: seconds,
     periodStart: start,
     settled: false,
@@ -227,7 +239,7 @@ export const settleVoiceSeconds = async (input: {
   });
   if (release === 0) return { releasedSeconds: 0 };
 
-  const key = bucketKey(reservation.userId);
+  const key = bucketKey(reservation.subjectKey);
   await prisma.$executeRaw`
     UPDATE "ChatUsageBucket"
     SET "count" = GREATEST("count" - ${release}, 0), "updatedAt" = NOW()
