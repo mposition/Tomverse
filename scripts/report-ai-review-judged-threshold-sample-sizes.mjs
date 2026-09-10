@@ -136,19 +136,29 @@ for (const cases of SAMPLES) {
 
 // ---------------------------------------------------------------------------
 
-heading("3. 이 표본이 무엇을 뜻하는가 — 판정은 사람이 한다");
+heading("3. 위 두 표는 통과 가능성이고, 판정 예산이 아니다");
 console.log(
-    `  키워드 경로의 표본 하한은 합계 ${AI_REVIEW_EVAL_MIN_CASES.aggregate}건,\n` +
-        `  언어별 ${AI_REVIEW_EVAL_MIN_CASES.perLanguage}건,\n` +
-        `  언어×과제 cell별 ${AI_REVIEW_EVAL_MIN_CASES.perLanguageTaskTypeCell}건이다\n` +
-        "  (`AI_REVIEW_EVAL_MIN_CASES`).\n" +
+    "  위 수를 전체 판정 예산으로 읽으면 안 된다. 예컨대 0.10의 35건은 **한 실행의\n" +
+        "  한 지표가 무실패로 그 상한을 만족할 수 있는 최소 분모**이고, 승인에 필요한\n" +
+        "  판정량이 아니다.\n" +
         "\n" +
-        "  **judged 경로에서 그 숫자는 사람이 읽어야 하는 case 수다.** 키워드 경로는\n" +
-        "  용어 목록이 세므로 표본을 늘리는 비용이 provider 호출비뿐이지만, judged\n" +
-        "  경로의 1건은 제출된 발견마다 claim을 쓰고 서명하는 사람의 일이다.\n" +
+        "  전체 판정량은 기존 조건이 정하며 **임계값과 무관하다.**\n" +
+        `    - 실행당 합계 ${AI_REVIEW_EVAL_MIN_CASES.aggregate}건 ` +
+        `(언어별 ${AI_REVIEW_EVAL_MIN_CASES.perLanguage}, ` +
+        `언어×과제 cell별 ${AI_REVIEW_EVAL_MIN_CASES.perLanguageTaskTypeCell})\n` +
+        "    - 계획 전체가 판정되어야 집계 가능 (누락은 거절)\n" +
+        "    - reviewer pair마다 독립 실행 2회 (서로 다른 run ordinal)\n" +
+        `\n  그래서 최소 규모라도 pair당 ${AI_REVIEW_EVAL_MIN_CASES.aggregate * 2}건의 ` +
+        "case별 출력 판정이 필요하다.\n" +
+        `  고유 문제가 ${AI_REVIEW_EVAL_MIN_CASES.aggregate * 2}개라는 뜻은 아니다 — ` +
+        `같은 ${AI_REVIEW_EVAL_MIN_CASES.aggregate}건의\n  출력을 두 실행에 대해 각각 판정한다.\n` +
         "\n" +
-        "  그래서 임계값 선택은 품질 기준 선택이면서 **판정 예산 선택**이다. 위 두 표가\n" +
-        "  그 환율이고, 어느 칸을 고를지는 사람이 정한다."
+        "  **임계값을 완화해도 이 작업량은 줄지 않는다.** 임계값이 바꾸는 것은 판정을\n" +
+        "  마친 실행이 통과하는지이고, 판정해야 하는 case 수는 표본 하한과 '계획 전체'\n" +
+        "  조건이 정한다.\n" +
+        "\n" +
+        "  그 위에서, judged 1건은 제출된 발견마다 claim을 쓰고 서명하는 **사람의 일**\n" +
+        "  이다. 키워드 경로에서 표본을 늘리는 비용은 provider 호출비뿐이다."
 );
 
 const sizes3 = [12, 16, 22];
@@ -170,13 +180,22 @@ for (const ceiling of CEILINGS) {
 console.log(
     "\n  **두 지표는 분모가 다르다.** `missedEveryPlantedIssueRate`의 분모는 심은\n" +
         "  항목이 있는 비음성 case이고, `inventedFindingRate`의 분모는 채점된 모든\n" +
-        "  case다. 같은 실행에서 앞의 분모는 뒤의 분모보다 작으므로, 같은 임계값이라도\n" +
-        "  **앞쪽이 먼저 표본 부족에 걸린다.**\n" +
+        "  case다. 앞의 분모는 뒤의 분모보다 **작거나 같으므로**(모두 심은 항목 있는\n" +
+        "  비음성 case이면 같다), 같은 임계값이라도 **앞쪽이 먼저 표본 부족에 걸릴 수\n" +
+        "  있다** — 반드시 그렇다는 것은 아니다.\n" +
         "\n" +
         "  그리고 `inventedFindingRateNegativeSubset`의 분모는 음성 phenomenon case\n" +
         "  뿐이다. `decision-v2`에는 그것이 **0건**이므로, 그 부분집합에 임계값을 걸면\n" +
         "  오늘의 후보 set으로는 **어떤 실행도 통과하지 못한다** — 품질이 아니라 구성의\n" +
         "  문제이고, set을 고치는 것은 별개 결정이다."
+);
+
+console.log(
+    "\n  **그리고 고를 숫자는 aggregate 상한 둘만이 아니다.** 같은 두 지표에\n" +
+        "  `maxLanguageArmGap`(초안 0.05)과 `maxTaskTypeArmShortfall`(초안 0.10)이\n" +
+        "  함께 걸린다 — 과제 arm의 상한은 `aggregate + 0.10`이므로 aggregate를 0.10으로\n" +
+        "  고르면 과제 arm은 0.20이 된다. 그 둘도 서명되지 않은 초안값이고, 새 척도에\n" +
+        "  그대로 쓸지는 별개 결정이다."
 );
 
 console.log(
