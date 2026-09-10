@@ -118,7 +118,8 @@ committed Replay code with the following flags. This is a recovery procedure
 for this LF pilot, not permission to convert an originally CRLF observation.
 It leaves the existing checkout, Git configuration, and observation files
 unchanged; it creates a detached worktree and Git worktree registration.
-The LF checkout still needs dependencies installed with its unchanged lockfile.
+The LF checkout still needs `npm ci` with its unchanged lockfile, as described
+below; do not substitute `npm install`.
 Do not rewrite existing files, disable source checks, or regenerate old manifests.
 
 Run on the local Windows PC in PowerShell, inside the committed Replay clone;
@@ -131,6 +132,20 @@ if (Test-Path -LiteralPath $replayLfCheckout) { throw 'Choose a new empty worktr
 $replayCodeCommit = (git rev-parse HEAD).Trim()
 git -c core.autocrlf=false -c core.eol=lf worktree add --detach $replayLfCheckout $replayCodeCommit
 ```
+
+For dependency setup only: on the local Windows PC in PowerShell, inside the
+new disposable byte-preserving checkout above, with Node 22, npm, and the
+committed `package.json` and `package-lock.json` present, run `npm ci`.
+No provider credentials are required. This setup is not an offline Replay run:
+it may download packages and execute install scripts, and it replaces that
+checkout's existing `node_modules`. Do not run it against the working checkout's
+shared dependency junction. The [official npm ci documentation](https://github.com/npm/cli/blob/latest/docs/lib/content/commands/npm-ci.md)
+specifies that a lockfile is required, a manifest/lock mismatch fails, and npm
+does not write package manifests or lockfiles. Do not fix a setup failure by
+rewriting historical source or lockfile bytes. Installed project dependencies
+are in the disposable checkout and can be discarded with that checkout after
+confirming there is no work to retain; npm may also use its normal cache/log
+locations.
 
 Run the Replay command from that new checkout after installing its matching
 dependencies, keeping the original `--observation-source-ref` and immutable
@@ -178,6 +193,9 @@ for further paid collection. Verification and actual independent review are
 recorded separately against their exact source and diff digest. Earlier
 benchmark, collector, or launcher approvals and review-preflight/on-hold
 exceptions do not approve this Replay change.
+The [bounded review follow-up](review-followup-20260910.md) records the later
+user-approved documentation correction and acceptance of the LF checkout
+limitation; it does not reopen the terminal exchange or authorize deployment.
 
 Implementation references: [comparison core](../../../lib/routerDevelopmentReplay.ts),
 [source compatibility](../../../lib/routerDevelopmentReplaySource.ts), and
