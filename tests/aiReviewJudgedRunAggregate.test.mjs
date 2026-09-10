@@ -22,6 +22,7 @@ import {
   judgedSourceCaseDigest,
   observationRefFor,
 } from "../lib/aiReviewEvalJudgement.ts";
+import { datasetDigest } from "../lib/aiReviewEvalRun.ts";
 import { aggregateJudgedRun } from "../lib/aiReviewJudgedRunAggregate.ts";
 
 const SIGNER = "TEST (not a person)";
@@ -104,9 +105,46 @@ const buildCase = ({
     entry: { testCase, observation, record, artifact },
     plan: { caseId: id, observationRef: record.observationRef },
     journal: { caseId: id, observation },
-    datasetCase: { ...sourceCase, phenomenon },
+    // A real evaluation-set case, not the two fields this file happens to
+    // read. The aggregator admits the run's dataset with the set's own
+    // validator, so a fixture that skips the rest is not a dataset.
+    datasetCase: {
+      id,
+      language: "ko",
+      taskType: "safety_sensitive",
+      phenomenon,
+      mode: "balanced",
+      question: sourceCase.question,
+      responses: sourceCase.responses.map((response) => ({
+        ...response,
+        modelId: "test",
+        provider: "test",
+      })),
+      gold: { missingPoints: [{ id: REQ, anyOf: ["deadline"], description: "the deadline" }] },
+      goldCompleteness: { missingPoints: true },
+      status: "adopted",
+      adoptedBy: "TEST",
+      adoptedAt: AT,
+    },
   };
 };
+
+/**
+ * A frozen decision set holding exactly these cases.
+ *
+ * The freeze record is computed rather than typed, because the aggregator
+ * recomputes it: a fixture carrying a stale digest would be refused, which is
+ * the behaviour being relied on everywhere else in this file.
+ */
+const frozenDataset = (cases) => ({
+  version: "test-v1",
+  schemaVersion: 1,
+  purpose: "decision",
+  frozenAt: AT,
+  frozenBy: "TEST",
+  frozenDigest: datasetDigest({ cases }),
+  cases,
+});
 
 /** The reviewer names the planted requirement. */
 const found = (id, over = {}) =>
@@ -130,7 +168,7 @@ const run = (built, over = {}) => {
     entries,
     runInputs: {
       journal: over.journal ?? built.map((item) => item.journal),
-      dataset: over.dataset ?? { cases: built.map((item) => item.datasetCase) },
+      dataset: over.dataset ?? frozenDataset(built.map((item) => item.datasetCase)),
     },
   });
 };
@@ -151,7 +189,7 @@ test("a run is refused before any number exists", async (t) => {
     const empty = aggregateJudgedRun({
       plan: [],
       entries: [],
-      runInputs: { journal: [], dataset: { cases: [] } },
+      runInputs: { journal: [], dataset: frozenDataset([]) },
     });
     assert.equal(empty.aggregable, false);
     assert.match(empty.blockers.join("\n"), /planned no cases/);
@@ -198,7 +236,7 @@ test("a run is refused before any number exists", async (t) => {
         response.label === "c" ? { ...response, content: "moved" } : response
       ),
     };
-    const result = run(built, { dataset: { cases: [moved] } });
+    const result = run(built, { dataset: frozenDataset([moved]) });
     assert.equal(result.aggregable, false);
     assert.match(result.blockers.join("\n"), /d1: /);
   });
@@ -211,22 +249,107 @@ test("a run is refused before any number exists", async (t) => {
       runInputs: { journal: undefined, dataset: undefined },
     });
     assert.equal(result.aggregable, false);
-    assert.match(result.blockers.join("\n"), /checked against each other and against no run/);
+    assert.match(result.blockers.join("\n"), /the run's dataset: the dataset file is not an object/);
+
+    // And a dataset that is present but not bound to the run is still not a
+    // run: the per-case check says so in its own words.
+    const noJournal = aggregateJudgedRun({
+      plan: built.map((item) => item.plan),
+      entries: built.map((item) => item.entry),
+      runInputs: {
+        journal: undefined,
+        dataset: frozenDataset(built.map((item) => item.datasetCase)),
+      },
+    });
+    assert.equal(noJournal.aggregable, false);
+    assert.match(noJournal.blockers.join("\n"), /checked against each other and against no run/);
   });
 
-  await t.test("a case with no known phenomenon blocks both denominators", () => {
+  await t.test("a case with no usable phenomenon never reaches a denominator", () => {
     const built = [found("f1")];
     const nameless = { ...built[0].datasetCase };
     delete nameless.phenomenon;
-    const missing = run(built, { dataset: { cases: [nameless] } });
+    const missing = run(built, { dataset: frozenDataset([nameless]) });
     assert.equal(missing.aggregable, false);
-    assert.match(missing.blockers.join("\n"), /does not give this case a known phenomenon/);
+    assert.match(missing.blockers.join("\n"), /phenomenon undefined is not supported/);
 
     const wrong = run(built, {
-      dataset: { cases: [{ ...built[0].datasetCase, phenomenon: "vibes" }] },
+      dataset: frozenDataset([{ ...built[0].datasetCase, phenomenon: "vibes" }]),
     });
     assert.equal(wrong.aggregable, false);
-    assert.match(wrong.blockers.join("\n"), /known phenomenon/);
+    assert.match(wrong.blockers.join("\n"), /phenomenon vibes is not supported/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The run's dataset, admitted as a whole
+//
+// Each of these produced a number before the dataset was admitted: the
+// aggregate read the dataset a second time, on its own terms, and the second
+// reading did not agree with the first.
+// ---------------------------------------------------------------------------
+
+test("the run's dataset is admitted before anything reads through it", async (t) => {
+  await t.test("a repeated case id is refused, and does not move a denominator", () => {
+    const built = [found("i1"), silent("i2")];
+    const cases = built.map((item) => item.datasetCase);
+    const clean = run(built);
+    assert.equal(clean.aggregable, true);
+    assert.equal(clean.metrics.missedEveryPlantedIssueRate.denominator, 2);
+
+    // A second row for `i2`, appended. The shared check reads the FIRST row
+    // with an id and this file used to build its map from the LAST, so this
+    // moved `i2` out of the denominator while every judgement stayed valid.
+    const shadowed = [...cases, { ...cases[1], question: "different", phenomenon: "no_issue" }];
+    const result = run(built, {
+      dataset: { ...frozenDataset(shadowed), frozenDigest: datasetDigest({ cases: shadowed }) },
+    });
+    assert.equal(result.aggregable, false);
+    assert.match(result.blockers.join("\n"), /i2: duplicate id/);
+  });
+
+  await t.test("an unfrozen set is not a frozen set", () => {
+    const built = [found("i3")];
+    const cases = built.map((item) => item.datasetCase);
+    const unfrozen = run(built, {
+      dataset: { version: "test-v1", schemaVersion: 1, purpose: "decision", cases },
+    });
+    assert.equal(unfrozen.aggregable, false);
+    assert.match(unfrozen.blockers.join("\n"), /carries no freeze record/);
+
+    const bogus = run(built, {
+      dataset: {
+        ...frozenDataset(cases),
+        frozenAt: "not-a-date",
+        frozenDigest: "sha256:wrong",
+      },
+    });
+    assert.equal(bogus.aggregable, false);
+    assert.match(bogus.blockers.join("\n"), /has changed since it was frozen/);
+  });
+
+  await t.test("a phenomenon edited to another legal value is drift, not a rate", () => {
+    // `sourceCaseDigest` covers the question and the answers by design, so it
+    // cannot see this -- and the phenomenon is what decides two denominators.
+    // The run's own freeze digest is what catches it.
+    const built = [found("i4"), silent("i5")];
+    const cases = built.map((item) => item.datasetCase);
+    const edited = cases.map((item) => ({ ...item, phenomenon: "no_issue" }));
+    const result = run(built, {
+      dataset: { ...frozenDataset(cases), cases: edited },
+    });
+    assert.equal(result.aggregable, false);
+    assert.match(result.blockers.join("\n"), /has changed since it was frozen/);
+  });
+
+  await t.test("a malformed case is reported, not thrown", () => {
+    const built = [found("i6")];
+    const cases = [...built.map((item) => item.datasetCase), null];
+    const result = run(built, {
+      dataset: { ...frozenDataset(cases.slice(0, 1)), cases },
+    });
+    assert.equal(result.aggregable, false);
+    assert.match(result.blockers.join("\n"), /case\[1\]: not an object/);
   });
 });
 

@@ -174,6 +174,26 @@ test("gold with no stated completeness is a defect, not a default", () => {
   );
 });
 
+test("a malformed case is reported by the validator, not thrown at the caller", () => {
+  // `cases: [null]` reached `.id` and threw, so a broken file stopped the
+  // validator instead of being reported by it -- and every caller inherited
+  // the crash rather than the list of problems it exists to return. Two loops
+  // walk this array, and both had to be guarded: the second one carried the
+  // throw past the first fix.
+  const problems = datasetProblems({
+    version: "v",
+    schemaVersion: 1,
+    purpose: "decision",
+    cases: [null, "a string", ["an array"]],
+  });
+  for (const index of [0, 1, 2]) {
+    assert.ok(
+      problems.some((problem) => problem.includes(`case[${index}]: not an object`)),
+      `case[${index}] was not reported: ${problems.join(" | ")}`
+    );
+  }
+});
+
 test("a prompt_injection case without markers cannot detect compliance and is refused", () => {
   const problems = datasetProblems({
     version: "v",

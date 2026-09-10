@@ -26,6 +26,15 @@
  * artifact states them, so keeping an entry's outer label while swapping the
  * files inside it does not pass.
  *
+ * **The run's dataset is admitted once, before anything reads through it.**
+ * Saying "the frozen dataset" is not checking one. `verifyJudgedScoringEvidence()`
+ * binds each case's question and answers, and deliberately nothing else -- so
+ * the metadata that decides a case's DENOMINATOR was bound to nothing at all,
+ * and a repeated id, a missing freeze record, or a phenomenon edited to
+ * another valid value all passed. Admission runs `datasetProblems()` and
+ * `freezeDrift()`, the same checks the evaluation set's own validator runs,
+ * and refuses before a single case is read out of the array.
+ *
  * Nothing here calls a provider, reads the network, or writes a file.
  */
 
@@ -43,6 +52,7 @@ import {
     type AiReviewJudgedScoringArtifact,
     type AiReviewJudgementRecord,
 } from "@/lib/aiReviewEvalJudgement";
+import { datasetProblems, freezeDrift } from "@/lib/aiReviewEvalRun";
 import { wilsonInterval } from "@/lib/memoryExtractionEvalCore";
 
 /** One row of what the run set out to measure. */
@@ -235,7 +245,49 @@ export function aggregateJudgedRun(input: {
         blockers.push("the run planned cases and nothing in it was judged");
     }
 
-    // 2. Every entry, through the shared verification path.
+    // 2. The run's dataset, admitted as a whole and before anything reads
+    // through it.
+    //
+    // Three failures lived in the gap between "the shared check verified this
+    // case" and "the aggregator read the dataset again":
+    //
+    //   * The shared check reads the FIRST case with a given id; this file
+    //     built its phenomenon map by iterating, so the LAST one won. A
+    //     duplicate id appended to the end silently moved a case out of a
+    //     denominator while every judgement and artifact stayed valid.
+    //   * "Frozen" was a word in a comment. A set with no freeze record, or
+    //     one whose recorded digest did not match its contents, aggregated.
+    //     `datasetDigest()` covers `phenomenon`, so binding the run to it is
+    //     also what catches a phenomenon edited to another legal value --
+    //     which `sourceCaseDigest` cannot see, and should not: it covers the
+    //     question and the answers, by design.
+    //   * A `null` in `cases` made this file throw while walking an array the
+    //     shared check had already rejected.
+    //
+    // `datasetProblems()` is the evaluation set's own validator: structure,
+    // duplicate ids, and the phenomenon vocabulary among much else. Using it
+    // rather than a private check here is the point -- what a dataset is gets
+    // decided once.
+    //
+    // What is NOT decided here: whether the set must be a decision set.
+    // `decisionDatasetProblems()` also requires `purpose: "decision"`, and
+    // whether a judged run may be aggregated on a development set is a
+    // separate question nobody has answered.
+    const datasetIssues = datasetProblems(runInputs.dataset);
+    for (const problem of datasetIssues) {
+        blockers.push(`the run's dataset: ${problem}`);
+    }
+    if (datasetIssues.length === 0) {
+        const drift = freezeDrift(runInputs.dataset as Parameters<typeof freezeDrift>[0]);
+        if (drift) blockers.push(`the run's dataset: ${drift}`);
+    }
+    // Return here rather than carrying on. Everything below reads the dataset
+    // -- the shared evidence check is handed it, and the phenomenon map walks
+    // it -- and reading an array that has just been declared malformed is how
+    // a refusal became a crash.
+    if (blockers.length > 0) return { aggregable: false, blockers };
+
+    // 3. Every entry, through the shared verification path.
     const verified = new Map<
         string,
         { artifact: AiReviewJudgedScoringArtifact; record: AiReviewJudgementRecord }
@@ -276,7 +328,7 @@ export function aggregateJudgedRun(input: {
         });
     }
 
-    // 3. Both directions. Planned and never judged, judged and never planned.
+    // 4. Both directions. Planned and never judged, judged and never planned.
     for (const key of planKeys) {
         if (!verified.has(key)) {
             blockers.push(`${key.split("::")[0]}: planned in the run and never judged`);
@@ -290,21 +342,21 @@ export function aggregateJudgedRun(input: {
         }
     }
 
-    // 4. The phenomenon of each case, which decides two denominators and is
+    // 5. The phenomenon of each case, which decides two denominators and is
     // not in the judged case at all.
     //
-    // Read from the frozen dataset, which the evidence check has already bound
-    // each case to. A case whose phenomenon is missing or unrecognised is a
-    // blocker rather than a default: guessing puts a case in or out of a
-    // denominator, and either guess is a silent change to a rate.
-    const datasetCases = (runInputs.dataset as { cases?: readonly unknown[] } | null)?.cases;
+    // Read from the admitted dataset above: its structure, its unique ids and
+    // its phenomenon vocabulary have all been checked, so `find()` here reads
+    // the same single row the shared evidence check read. The remaining
+    // guard is for a case the run judged that the set does not hold at all --
+    // which the evidence check also refuses, and which is stated rather than
+    // defaulted, because guessing puts a case in or out of a denominator.
+    const datasetCases = (runInputs.dataset as { cases: readonly { id: string; phenomenon?: unknown }[] })
+        .cases;
     const phenomenonOf = new Map<string, AiReviewEvalPhenomenon>();
-    if (Array.isArray(datasetCases)) {
-        for (const item of datasetCases) {
-            const row = item as { id?: unknown; phenomenon?: unknown };
-            if (typeof row.id !== "string") continue;
-            if (isPhenomenon(row.phenomenon)) phenomenonOf.set(row.id, row.phenomenon);
-        }
+    for (const row of datasetCases) {
+        if (phenomenonOf.has(row.id)) continue;
+        if (isPhenomenon(row.phenomenon)) phenomenonOf.set(row.id, row.phenomenon);
     }
     for (const { artifact } of verified.values()) {
         if (!phenomenonOf.has(artifact.caseId)) {
@@ -317,8 +369,8 @@ export function aggregateJudgedRun(input: {
 
     if (blockers.length > 0) return { aggregable: false, blockers };
 
-    // 5. Only now, over the distinct verified cases, which steps 1-3 have shown
-    // to be exactly the planned ones.
+    // 6. Only now, over the distinct verified cases, which steps 1-4 have
+    // shown to be exactly the planned ones.
     let missedNumerator = 0;
     let missedDenominator = 0;
     let missedAimedAt = 0;
