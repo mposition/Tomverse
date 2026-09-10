@@ -1,5 +1,9 @@
 import type { AiProvider } from "@/lib/models";
 import {
+  isImageGenerationModel,
+  modelProductSurface,
+} from "@/lib/modelLifecycleTriage";
+import {
   PROVIDER_API_CONFIGURATION,
   PROVIDER_API_KEY_ENV_NAMES,
 } from "@/lib/modelRegistryShared";
@@ -115,6 +119,9 @@ const record = (value: unknown): Record<string, unknown> | null =>
 const lifecycleFromRecord = (item: Record<string, unknown>) => {
   if (item.archived === true) return "archived";
   if (item.deprecated === true) return "deprecated";
+  if (number(item.shutdown_date) !== null || text(item.shutdown_date)) {
+    return "shutdown_scheduled";
+  }
   const value = text(item.stage) || text(item.lifecycle) || text(item.status);
   if (!value) return null;
   const normalized = value.toLowerCase();
@@ -145,8 +152,11 @@ export const chatModelExclusion = (
   modelId: string
 ): ChatModelExclusion | null => {
   const id = modelId.toLowerCase();
+  if (isImageGenerationModel(id)) {
+    return "non_chat_kind";
+  }
   if (
-    /(embedding|embed-|moderation|whisper|transcri|speech|tts|dall-e|image-gen|imagen|veo|rerank|guard|safeguard)/.test(
+    /(embedding|embed-|moderation|whisper|transcri|speech|tts|veo|rerank|guard|safeguard)/.test(
       id
     )
   ) {
@@ -160,6 +170,12 @@ export const chatModelExclusion = (
 
 export const isLikelyChatModelId = (provider: AiProvider, modelId: string) =>
   chatModelExclusion(provider, modelId) === null;
+
+/** Products Tomverse can currently route into a model-backed workspace. */
+export const isReviewableProviderModelId = (
+  provider: AiProvider,
+  modelId: string
+) => isLikelyChatModelId(provider, modelId) || isImageGenerationModel(modelId);
 
 const observationFromItem = (
   provider: AiProvider,
@@ -177,6 +193,7 @@ const observationFromItem = (
         : [];
     if (
       methods.length > 0 &&
+      !isImageGenerationModel(id) &&
       !methods.some(
         (method) =>
           typeof method === "string" && method.toLowerCase() === "generatecontent"
@@ -194,12 +211,13 @@ const observationFromItem = (
   ) {
     return null;
   }
-  if (!isLikelyChatModelId(provider, id)) return null;
+  if (!isReviewableProviderModelId(provider, id)) return null;
 
   const lifecycle = lifecycleFromRecord(item);
   const metadata = {
     created: number(item.created),
     createdAt: text(item.created_at),
+    shutdownDate: number(item.shutdown_date) ?? text(item.shutdown_date),
     ownedBy: text(item.owned_by),
     contextLength: number(item.context_length) || number(item.max_context_length),
     inputTokenLimit: number(item.inputTokenLimit) || number(item.max_input_tokens),
@@ -211,6 +229,7 @@ const observationFromItem = (
     thinking:
       boolean(item.thinking) ??
       boolean(record(record(item.capabilities)?.thinking)?.supported),
+    product: modelProductSurface(id),
   };
 
   return {
@@ -282,7 +301,7 @@ export function parseProviderCatalogModels(
             alias === observation.id ||
             alias.length > 240 ||
             !/^[a-zA-Z0-9._:/-]+$/.test(alias) ||
-            !isLikelyChatModelId(provider, alias)
+            !isReviewableProviderModelId(provider, alias)
           ) {
             noteExclusion(alias);
             return [];

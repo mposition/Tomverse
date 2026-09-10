@@ -1,0 +1,490 @@
+TAP version 13
+# Subtest: full 42x24 manifest stays within existing JSON byte and node limits
+ok 1 - full 42x24 manifest stays within existing JSON byte and node limits
+  ---
+  duration_ms: 103.8844
+  type: 'test'
+  ...
+# Subtest: a new catalogue context window cannot silently admit an unparsed provider family
+ok 2 - a new catalogue context window cannot silently admit an unparsed provider family
+  ---
+  duration_ms: 128.72
+  type: 'test'
+  ...
+# Subtest: unavailable unsupported-provider observations remain held and block resume and export
+ok 3 - unavailable unsupported-provider observations remain held and block resume and export
+  ---
+  duration_ms: 249.5464
+  type: 'test'
+  ...
+# Subtest: permanent reservations stop a selected population explicitly and completed rows never rerun
+ok 4 - permanent reservations stop a selected population explicitly and completed rows never rerun
+  ---
+  duration_ms: 249.2752
+  type: 'test'
+  ...
+# Subtest: confirmed blank and invalid JSON answers remain returned records for the frozen grader
+ok 5 - confirmed blank and invalid JSON answers remain returned records for the frozen grader
+  ---
+  duration_ms: 152.2403
+  type: 'test'
+  ...
+# Subtest: unsupported billing on any terminal stops later rows and resume and refuses the whole export
+ok 6 - unsupported billing on any terminal stops later rows and resume and refuses the whole export
+  ---
+  duration_ms: 250.1634
+  type: 'test'
+  ...
+# Subtest: known output_total breach stops with null cost and preserves the complete terminal evidence
+ok 7 - known output_total breach stops with null cost and preserves the complete terminal evidence
+  ---
+  duration_ms: 239.314
+  type: 'test'
+  ...
+# Subtest: known input_total breach stops with null cost and preserves the complete terminal evidence
+ok 8 - known input_total breach stops with null cost and preserves the complete terminal evidence
+  ---
+  duration_ms: 244.5711
+  type: 'test'
+  ...
+# Subtest: known input_partition_lower_bound breach stops with null cost and preserves the complete terminal evidence
+ok 9 - known input_partition_lower_bound breach stops with null cost and preserves the complete terminal evidence
+  ---
+  duration_ms: 242.3392
+  type: 'test'
+  ...
+# Subtest: known reasoning_lower_bound breach stops with null cost and preserves the complete terminal evidence
+ok 10 - known reasoning_lower_bound breach stops with null cost and preserves the complete terminal evidence
+  ---
+  duration_ms: 246.4938
+  type: 'test'
+  ...
+# Subtest: known safe_integer_cost_overflow breach stops with null cost and preserves the complete terminal evidence
+ok 11 - known safe_integer_cost_overflow breach stops with null cost and preserves the complete terminal evidence
+  ---
+  duration_ms: 246.6346
+  type: 'test'
+  ...
+# Subtest: known partition and reasoning values exactly at the bound do not invent missing totals or stop
+ok 12 - known partition and reasoning values exactly at the bound do not invent missing totals or stop
+  ---
+  duration_ms: 150.4641
+  type: 'test'
+  ...
+# Subtest: adversarial harness blocks accidental fetch and socket traffic
+ok 13 - adversarial harness blocks accidental fetch and socket traffic
+  ---
+  duration_ms: 1.5208
+  type: 'test'
+  ...
+# Subtest: microUSD arithmetic rounds decimal and exponent rates upward without float truncation
+ok 14 - microUSD arithmetic rounds decimal and exponent rates upward without float truncation
+  ---
+  duration_ms: 0.2554
+  type: 'test'
+  ...
+# Subtest: reservation covers independently rounded no-cache/read/write/output categories
+ok 15 - reservation covers independently rounded no-cache/read/write/output categories
+  ---
+  duration_ms: 0.301
+  type: 'test'
+  ...
+# Subtest: reservation dominates every small disjoint input-category partition across all tiers
+ok 16 - reservation dominates every small disjoint input-category partition across all tiers
+  ---
+  duration_ms: 0.9992
+  type: 'test'
+  ...
+# Subtest: reservation uses the highest input, cache-write and output rates across tiers
+ok 17 - reservation uses the highest input, cache-write and output rates across tiers
+  ---
+  duration_ms: 0.1332
+  type: 'test'
+  ...
+# Subtest: unknown, fractional, negative and unsafe token bounds cannot become zero-cost admission
+ok 18 - unknown, fractional, negative and unsafe token bounds cannot become zero-cost admission
+  ---
+  duration_ms: 0.385
+  type: 'test'
+  ...
+# Subtest: cost overflow and invalid rates fail rather than losing microUSD precision
+ok 19 - cost overflow and invalid rates fail rather than losing microUSD precision
+  ---
+  duration_ms: 0.2632
+  type: 'test'
+  ...
+# Subtest: invalid individual tier rates cannot be hidden by a higher valid tier
+ok 20 - invalid individual tier rates cannot be hidden by a higher valid tier
+  ---
+  duration_ms: 0.1777
+  type: 'test'
+  ...
+# Subtest: unobserved usage remains null rather than an inferred free call
+ok 21 - unobserved usage remains null rather than an inferred free call
+  ---
+  duration_ms: 0.334
+  type: 'test'
+  ...
+# Subtest: complete oversized response preserves bare-hex digest through validator and JSON roundtrip
+ok 22 - complete oversized response preserves bare-hex digest through validator and JSON roundtrip
+  ---
+  duration_ms: 2.8492
+  type: 'test'
+  ...
+# Subtest: answer storage boundary uses UTF-8 bytes and never silently truncates
+ok 23 - answer storage boundary uses UTF-8 bytes and never silently truncates
+  ---
+  duration_ms: 3.4755
+  type: 'test'
+  ...
+# Subtest: partial response cannot claim a full omitted answer digest or complete byte count
+ok 24 - partial response cannot claim a full omitted answer digest or complete byte count
+  ---
+  duration_ms: 0.2539
+  type: 'test'
+  ...
+# Subtest: outcome validation preserves missing observations and rejects invalid numeric observations
+ok 25 - outcome validation preserves missing observations and rejects invalid numeric observations
+  ---
+  duration_ms: 1.0959
+  type: 'test'
+  ...
+# Subtest: failed and timeout outcomes cannot carry a successful answer
+ok 26 - failed and timeout outcomes cannot carry a successful answer
+  ---
+  duration_ms: 0.2128
+  type: 'test'
+  ...
+# Subtest: manifest selection leaves the full 24 by catalogue matrix and refused rows intact
+ok 27 - manifest selection leaves the full 24 by catalogue matrix and refused rows intact
+  ---
+  duration_ms: 0.268
+  type: 'test'
+  ...
+# Subtest: rehashed manifest edits cannot change frozen reservations, settings, or full row coverage
+ok 28 - rehashed manifest edits cannot change frozen reservations, settings, or full row coverage
+  ---
+  duration_ms: 669.9466
+  type: 'test'
+  ...
+# Subtest: synthetic approval is bound to exact manifest, acknowledgement order, and actor
+ok 29 - synthetic approval is bound to exact manifest, acknowledgement order, and actor
+  ---
+  duration_ms: 0.576
+  type: 'test'
+  ...
+# Subtest: approval cannot become an unbounded or path-traversing identity
+ok 30 - approval cannot become an unbounded or path-traversing identity
+  ---
+  duration_ms: 0.6395
+  type: 'test'
+  ...
+# Subtest: expired or future synthetic approval cannot authorize dispatch
+ok 31 - expired or future synthetic approval cannot authorize dispatch
+  ---
+  duration_ms: 0.2653
+  type: 'test'
+  ...
+# Subtest: partial writes loop to completion and flush before returning
+ok 32 - partial writes loop to completion and flush before returning
+  ---
+  duration_ms: 8.7429
+  type: 'test'
+  ...
+# Subtest: registration followed by missing ledger fails closed without a replacement budget
+ok 33 - registration followed by missing ledger fails closed without a replacement budget
+  ---
+  duration_ms: 200.2046
+  type: 'test'
+  ...
+# Subtest: intent journal fsync failure happens before dispatch and cannot be resumed as fresh
+ok 34 - intent journal fsync failure happens before dispatch and cannot be resumed as fresh
+  ---
+  duration_ms: 213.6261
+  type: 'test'
+  ...
+# Subtest: intent witness fsync failure still cannot precede a provider call
+ok 35 - intent witness fsync failure still cannot precede a provider call
+  ---
+  duration_ms: 201.7052
+  type: 'test'
+  ...
+# Subtest: interruption at intent_durable holds reservation, prevents redispatch, and refuses export
+ok 36 - interruption at intent_durable holds reservation, prevents redispatch, and refuses export
+  ---
+  duration_ms: 205.3769
+  type: 'test'
+  ...
+# Subtest: interruption at response_received holds reservation, prevents redispatch, and refuses export
+ok 37 - interruption at response_received holds reservation, prevents redispatch, and refuses export
+  ---
+  duration_ms: 205.964
+  type: 'test'
+  ...
+# Subtest: same approval ID cannot reset spending through another path or enlarged manifest
+ok 38 - same approval ID cannot reset spending through another path or enlarged manifest
+  ---
+  duration_ms: 373.0749
+  type: 'test'
+  ...
+# Subtest: two writers sharing one approval cannot both dispatch while the lock is held
+ok 39 - two writers sharing one approval cannot both dispatch while the lock is held
+  ---
+  duration_ms: 245.2041
+  type: 'test'
+  ...
+# Subtest: terminal fsync failure cannot be exported as a witnessed successful completion
+ok 40 - terminal fsync failure cannot be exported as a witnessed successful completion
+  ---
+  duration_ms: 203.8446
+  type: 'test'
+  ...
+# Subtest: a valid older ledger prefix cannot erase witnessed dispatch history
+ok 41 - a valid older ledger prefix cannot erase witnessed dispatch history
+  ---
+  duration_ms: 246.7953
+  type: 'test'
+  ...
+# Subtest: journal parser rejects truncation, duplicated terminals, and rehashed identity mutations
+ok 42 - journal parser rejects truncation, duplicated terminals, and rehashed identity mutations
+  ---
+  duration_ms: 2.7049
+  type: 'test'
+  ...
+# Subtest: current-snapshot guard executes again before a later dispatch after clock advancement
+ok 43 - current-snapshot guard executes again before a later dispatch after clock advancement
+  ---
+  duration_ms: 105.2728
+  type: 'test'
+  ...
+# Subtest: time spent durably recording intent cannot extend approval past its expiry
+ok 44 - time spent durably recording intent cannot extend approval past its expiry
+  ---
+  duration_ms: 143.9102
+  type: 'test'
+  ...
+# Subtest: a price revision crossed during intent persistence is checked before dispatch
+ok 45 - a price revision crossed during intent persistence is checked before dispatch
+  ---
+  duration_ms: 138.2596
+  type: 'test'
+  ...
+# Subtest: collector adapter request contains only prompt and frozen call settings, never gold
+ok 46 - collector adapter request contains only prompt and frozen call settings, never gold
+  ---
+  duration_ms: 146.0409
+  type: 'test'
+  ...
+# Subtest: v1 export refuses unknown without discarding the attempted row
+ok 47 - v1 export refuses unknown without discarding the attempted row
+  ---
+  duration_ms: 148.1476
+  type: 'test'
+  ...
+# Subtest: v1 export refuses storage_omitted without discarding the attempted row
+ok 48 - v1 export refuses storage_omitted without discarding the attempted row
+  ---
+  duration_ms: 148.3803
+  type: 'test'
+  ...
+# Subtest: v1 export refuses v1_answer_oversized without discarding the attempted row
+ok 49 - v1 export refuses v1_answer_oversized without discarding the attempted row
+  ---
+  duration_ms: 151.6976
+  type: 'test'
+  ...
+# Subtest: export preserves blank and failed rows in the original eligible denominator
+ok 50 - export preserves blank and failed rows in the original eligible denominator
+  ---
+  duration_ms: 113.5486
+  type: 'test'
+  ...
+# Subtest: controlled timeout terminal is exported as timeout without releasing its reservation
+ok 51 - controlled timeout terminal is exported as timeout without releasing its reservation
+  ---
+  duration_ms: 149.7827
+  type: 'test'
+  ...
+# Subtest: durable timeout stops later rows and resume while remaining exportable as timeout
+ok 52 - durable timeout stops later rows and resume while remaining exportable as timeout
+  ---
+  duration_ms: 215.2354
+  type: 'test'
+  ...
+# Subtest: whole-document v1 export limit refuses rather than dropping large valid rows
+ok 53 - whole-document v1 export limit refuses rather than dropping large valid rows
+  ---
+  duration_ms: 688.0719
+  type: 'test'
+  ...
+# Subtest: real child abrupt exit at intent_durable leaves an unknown intent and an unreclaimed lock
+ok 54 - real child abrupt exit at intent_durable leaves an unknown intent and an unreclaimed lock
+  ---
+  duration_ms: 517.951
+  type: 'test'
+  ...
+# Subtest: real child abrupt exit at response_received leaves an unknown intent and an unreclaimed lock
+ok 55 - real child abrupt exit at response_received leaves an unknown intent and an unreclaimed lock
+  ---
+  duration_ms: 509.4666
+  type: 'test'
+  ...
+# Subtest: separate child writers cannot double-spend a shared approval journal
+ok 56 - separate child writers cannot double-spend a shared approval journal
+  ---
+  duration_ms: 781.3921
+  type: 'test'
+  ...
+# Subtest: SDK options force retry zero, one prompt, frozen output cap, and raw-body opt-in
+ok 57 - SDK options force retry zero, one prompt, frozen output cap, and raw-body opt-in
+  ---
+  duration_ms: 1.0404
+  type: 'test'
+  ...
+# Subtest: retryable SDK provider error dispatches exactly once with the real SDK and a mock model
+ok 58 - retryable SDK provider error dispatches exactly once with the real SDK and a mock model
+  ---
+  duration_ms: 146.2163
+  type: 'test'
+  ...
+# Subtest: SDK settings drift refuses before model construction or generation
+ok 59 - SDK settings drift refuses before model construction or generation
+  ---
+  duration_ms: 0.2327
+  type: 'test'
+  ...
+# Subtest: multi-step and tool-bearing replies remain unsupported even with an answer
+ok 60 - multi-step and tool-bearing replies remain unsupported even with an answer
+  ---
+  duration_ms: 0.3463
+  type: 'test'
+  ...
+# Subtest: provider raw usage allowlist distinguishes missing, invalid, and observed zero
+ok 61 - provider raw usage allowlist distinguishes missing, invalid, and observed zero
+  ---
+  duration_ms: 0.3882
+  type: 'test'
+  ...
+# Subtest: provider failures do not persist secrets, request bodies, reasoning, or raw errors
+ok 62 - provider failures do not persist secrets, request bodies, reasoning, or raw errors
+  ---
+  duration_ms: 0.2464
+  type: 'test'
+  ...
+# Subtest: default preview is a network-free full census and never an approval
+ok 63 - default preview is a network-free full census and never an approval
+  ---
+  duration_ms: 557.0567
+  type: 'test'
+  ...
+# Subtest: explicit proposal binds all source/settings/rates/limits without approving spend
+ok 64 - explicit proposal binds all source/settings/rates/limits without approving spend
+  ---
+  duration_ms: 883.3075
+  type: 'test'
+  ...
+# Subtest: missing human approval/live flag, unknown or duplicate flags fail without any calls
+ok 65 - missing human approval/live flag, unknown or duplicate flags fail without any calls
+  ---
+  duration_ms: 4253.8618
+  type: 'test'
+  ...
+# Subtest: malformed manifest cannot request arbitrary source-file hashing
+ok 66 - malformed manifest cannot request arbitrary source-file hashing
+  ---
+  duration_ms: 837.0294
+  type: 'test'
+  ...
+# Subtest: case-insensitive pricing overrides are rejected and help is inert
+ok 67 - case-insensitive pricing overrides are rejected and help is inert
+  ---
+  duration_ms: 509.6364
+  type: 'test'
+  ...
+# Subtest: basename preserves Windows and POSIX root filenames without filesystem access
+ok 68 - basename preserves Windows and POSIX root filenames without filesystem access
+  ---
+  duration_ms: 0.2913
+  type: 'test'
+  ...
+# Subtest: the actual CLI checks and writes one root target while all writes are redirected to a temp fixture
+ok 69 - the actual CLI checks and writes one root target while all writes are redirected to a temp fixture
+  ---
+  duration_ms: 535.2532
+  type: 'test'
+  ...
+# Subtest: a dot-dot-prefixed child of a temporary common directory is refused while a real outside path is allowed
+ok 70 - a dot-dot-prefixed child of a temporary common directory is refused while a real outside path is allowed
+  ---
+  duration_ms: 758.7913
+  type: 'test'
+  ...
+# Subtest: actual SDK7 mock proves request boundary, body opt-in, one step, and no normalized evidence
+ok 71 - actual SDK7 mock proves request boundary, body opt-in, one step, and no normalized evidence
+  ---
+  duration_ms: 24.9872
+  type: 'test'
+  ...
+# Subtest: actual SDK7 retryable 429 invokes a mock once
+ok 72 - actual SDK7 retryable 429 invokes a mock once
+  ---
+  duration_ms: 1.1143
+  type: 'test'
+  ...
+# Subtest: actual SDK7 retryable 503 invokes a mock once
+ok 73 - actual SDK7 retryable 503 invokes a mock once
+  ---
+  duration_ms: 2.1419
+  type: 'test'
+  ...
+# Subtest: raw usage preserves missing versus explicit zero across five adapter families
+ok 74 - raw usage preserves missing versus explicit zero across five adapter families
+  ---
+  duration_ms: 0.5088
+  type: 'test'
+  ...
+# Subtest: Google cached reads leave writes, uncached input, and cost unknown despite extra raw and normalized values
+ok 75 - Google cached reads leave writes, uncached input, and cost unknown despite extra raw and normalized values
+  ---
+  duration_ms: 1.2953
+  type: 'test'
+  ...
+# Subtest: metadata failures, invalid counters, and oversize do not invent evidence
+ok 76 - metadata failures, invalid counters, and oversize do not invent evidence
+  ---
+  duration_ms: 1.676
+  type: 'test'
+  ...
+# Subtest: served-tier mismatch is observed read-only and the guard still blocks new outbound selectors
+ok 77 - served-tier mismatch is observed read-only and the guard still blocks new outbound selectors
+  ---
+  duration_ms: 0.373
+  type: 'test'
+  ...
+# Subtest: non-standard tier on a provider HTTP error remains unsupported rather than ordinary failed
+ok 78 - non-standard tier on a provider HTTP error remains unsupported rather than ordinary failed
+  ---
+  duration_ms: 0.3413
+  type: 'test'
+  ...
+# Subtest: unknown provider metadata is explicitly unsupported without inventing observations
+ok 79 - unknown provider metadata is explicitly unsupported without inventing observations
+  ---
+  duration_ms: 2.124
+  type: 'test'
+  ...
+# Subtest: an unsupported provider is refused before settings, model creation, generate, or SDK entry
+ok 80 - an unsupported provider is refused before settings, model creation, generate, or SDK entry
+  ---
+  duration_ms: 0.6099
+  type: 'test'
+  ...
+1..80
+# tests 80
+# suites 0
+# pass 80
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 19200.5752

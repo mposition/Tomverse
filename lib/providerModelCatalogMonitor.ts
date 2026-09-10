@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma } from "@prisma/client";
 import type { AiProvider } from "@/lib/models";
+import { listImageModels } from "@/lib/imageModelRegistry";
 import { prisma } from "@/lib/prisma";
 import {
   AI_PROVIDERS,
@@ -9,7 +10,10 @@ import {
   resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
 import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
-import { candidateIdentity } from "@/lib/modelLifecycleWorkItemCore";
+import {
+  candidateFamilyIdentity,
+  shouldQueueModelCandidate,
+} from "@/lib/modelLifecycleTriage";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   catalogNextCursor,
@@ -250,12 +254,13 @@ const runProviderCheck = async (
   // The observation rows below stay per provider. They are facts. Collapsing
   // belongs to the layer that decides, not the layer that records.
   const catalogueIdentities = new Set(
-    (
-      await prisma.modelRegistryEntry.findMany({
+    [
+      ...(await prisma.modelRegistryEntry.findMany({
         where: { catalogDeleted: false },
         select: { apiModel: true },
-      })
-    ).map((model) => candidateIdentity(model.apiModel))
+      })),
+      ...listImageModels().map((model) => ({ apiModel: model.apiModelId })),
+    ].map((model) => candidateFamilyIdentity(model.apiModel))
   );
   const observedById = new Map(observations.map((item) => [item.id, item]));
   const existingEntries = await prisma.providerModelCatalogEntry.findMany({
@@ -280,7 +285,8 @@ const runProviderCheck = async (
       if (model) mapped.push(model.id);
       else if (
         !observation.lifecycle &&
-        !catalogueIdentities.has(candidateIdentity(observation.id))
+        shouldQueueModelCandidate(observation.id) &&
+        !catalogueIdentities.has(candidateFamilyIdentity(observation.id))
       ) {
         candidates.push(observation.id);
         if (!existingByApiModel.has(observation.id)) newCandidates.push(observation.id);

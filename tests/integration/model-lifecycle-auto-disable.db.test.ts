@@ -5,8 +5,11 @@ import { after, beforeEach, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
 import {
+  listModelDiscoveryQueue,
   listLifecycleReportWorkItems,
   recordDiscoveredWorkItems,
+  transitionWorkItem,
+  transitionWorkItems,
 } from "@/lib/modelLifecycleWorkItems";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 
@@ -32,6 +35,7 @@ const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "ModelLifecycleWorkItemEvent", "ModelLifecycleWorkItem",
+      "ProviderModelCatalogEntry", "ProviderModelCatalogRun",
       "ModelRegistryEntry", "Conversation", "UserSettings", "User"
     RESTART IDENTITY CASCADE
   `);
@@ -334,6 +338,20 @@ test("a model the catalogue already serves opens nothing, whichever provider lis
   assert.equal(await prisma.modelLifecycleWorkItem.count(), 0);
 });
 
+test("the image registry prevents duplicates but a new image model opens review", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [
+      { provider: "openai", apiModel: "gpt-image-2" },
+      { provider: "openai", apiModel: "gpt-image-3" },
+    ],
+  });
+
+  const items = await prisma.modelLifecycleWorkItem.findMany({
+    select: { apiModel: true },
+  });
+  assert.deepEqual(items, [{ apiModel: "gpt-image-3" }]);
+});
+
 test("a provider losing its whole lineup is held, and opens nothing", async () => {
   const first = await seedModel("llama-4-scout-17b");
   const second = await seedModel("llama-3-3-70b");
@@ -354,6 +372,120 @@ test("a provider losing its whole lineup is held, and opens nothing", async () =
   // Nothing was disabled, so nothing is owed an answer about a disable. The
   // hold has its own incident.
   assert.equal(await prisma.modelLifecycleWorkItem.count(), 0);
+});
+
+test("bulk triage moves every item and records one event per item", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [
+      { provider: "openai", apiModel: "gpt-bulk-a" },
+      { provider: "openai", apiModel: "gpt-bulk-b" },
+    ],
+  });
+  const items = await prisma.modelLifecycleWorkItem.findMany({
+    orderBy: { apiModel: "asc" },
+    select: { id: true },
+  });
+
+  const result = await transitionWorkItems({
+    workItemIds: items.map((item) => item.id),
+    to: "awaiting_decision",
+    actorEmail: "operator@tomverse.app",
+    note: "Reviewed as one provider batch.",
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    status: "awaiting_decision",
+    updated: 2,
+  });
+  assert.deepEqual(
+    await prisma.modelLifecycleWorkItem.findMany({
+      orderBy: { apiModel: "asc" },
+      select: { status: true },
+    }),
+    [{ status: "awaiting_decision" }, { status: "awaiting_decision" }]
+  );
+  const events = await prisma.modelLifecycleWorkItemEvent.findMany({
+    where: { actorEmail: "operator@tomverse.app" },
+    orderBy: { workItemId: "asc" },
+  });
+  assert.equal(events.length, 2);
+  assert.ok(events.every((event) => event.note === "Reviewed as one provider batch."));
+});
+
+test("one invalid bulk transition leaves every other item unchanged", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [
+      { provider: "openai", apiModel: "gpt-bulk-a" },
+      { provider: "openai", apiModel: "gpt-bulk-b" },
+    ],
+  });
+  const items = await prisma.modelLifecycleWorkItem.findMany({
+    orderBy: { apiModel: "asc" },
+    select: { id: true },
+  });
+  await transitionWorkItem({
+    workItemId: items[0].id,
+    to: "awaiting_decision",
+    actorEmail: "operator@tomverse.app",
+  });
+  const eventCountBefore = await prisma.modelLifecycleWorkItemEvent.count();
+
+  const result = await transitionWorkItems({
+    workItemIds: items.map((item) => item.id),
+    to: "awaiting_decision",
+    actorEmail: "operator@tomverse.app",
+    note: "This batch must be refused.",
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) assert.fail("bulk transition unexpectedly succeeded");
+  assert.equal(result.refusal.code, "not_allowed");
+  assert.deepEqual(
+    await prisma.modelLifecycleWorkItem.findMany({
+      orderBy: { apiModel: "asc" },
+      select: { status: true },
+    }),
+    [{ status: "awaiting_decision" }, { status: "discovered" }]
+  );
+  assert.equal(
+    await prisma.modelLifecycleWorkItemEvent.count(),
+    eventCountBefore,
+    "the refused batch wrote no events"
+  );
+});
+
+test("the discovery queue distinguishes current provider evidence", async () => {
+  const startedAt = new Date("2026-09-10T00:00:00Z");
+  await prisma.providerModelCatalogRun.create({
+    data: {
+      provider: "openai",
+      status: "checked",
+      startedAt,
+      completedAt: new Date("2026-09-10T00:00:05Z"),
+    },
+  });
+  await prisma.providerModelCatalogEntry.create({
+    data: {
+      provider: "openai",
+      apiModel: "gpt-queue-current",
+      status: "candidate",
+      firstSeenAt: startedAt,
+      lastSeenAt: startedAt,
+      lastCheckedAt: startedAt,
+    },
+  });
+  await recordDiscoveredWorkItems({
+    observed: [{ provider: "openai", apiModel: "gpt-queue-current" }],
+    now: startedAt,
+  });
+
+  const queue = await listModelDiscoveryQueue();
+  assert.equal(queue.total, 1);
+  assert.equal(queue.truncated, false);
+  assert.equal(queue.items[0].availability, "current");
+  assert.equal(queue.items[0].reviewPriority, "recommended");
+  assert.match(queue.items[0].analysisKo, /편입 가치/);
 });
 
 // ML-13: the report reads the sightings back, and falls back honestly when an

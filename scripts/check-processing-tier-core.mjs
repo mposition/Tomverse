@@ -113,6 +113,15 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
  */
 export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
   {
+    file: "lib/routerDevelopmentCollectorProvider.ts",
+    sendsATier: false,
+    reason:
+      "Reads only the returned body to flag a served tier outside the frozen Standard-price assumption. The development collector sets no outbound price selector; this exact observation line is pinned, not the whole file.",
+    mentions: [
+      "observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);",
+    ],
+  },
+  {
     file: "scripts/check-openai-model-access.mjs",
     sendsATier: false,
     reason:
