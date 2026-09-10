@@ -1216,8 +1216,41 @@ provider 실패는 **코드와 HTTP status로만** 보고합니다. 일부 provi
 
 ### 11.3 어디로 가는가
 
-오디오는 transcription provider(현재 **OpenAI**)로 갑니다. 그쪽 약관에 따라 다른
-국가에서 처리될 수 있습니다.
+오디오는 transcription provider(현재 **OpenAI**)의 **미국 지역 endpoint**로
+갑니다 — `https://us.api.openai.com/v1/audio/transcriptions`.
+
+#### 11.3.0 미국 고정 (2026-09-10)
+
+**국가는 설정이 아니라 코드입니다.** `lib/voiceTranscriptionPortCore.ts`의
+`VOICE_TRANSCRIPTION_OPENAI_BASE_URL`이 host를, 같은 파일의
+`VOICE_TRANSCRIPTION_PROVIDER_REGION`이 지역 식별자를 들고 있으며, production
+binding이 그 상수를 명시적으로 넘깁니다. **환경변수로 바꿀 수 없습니다.**
+
+그 이유는 성능이나 지연이 아닙니다. **개인정보보호법의 국외이전 고지는 이전
+국가를 이름 대야 하는데**, 공급자의 global routing이 정하는 목적지를 고지가
+이름 댈 수 없습니다. 그래서 국가를 코드에서 정하고, 고지는 관행이 아니라
+구조로 참인 것을 적습니다. 환경변수를 두면 운영자가 고지를 건드리지 않고
+고지를 거짓으로 만들 수 있고, 배포 어디에도 그 사실이 남지 않습니다.
+
+공급자 data-controls 문서에서 확인한 것(2026-09-10 읽음):
+`/v1/audio/transcriptions`는 미국과 유럽(EEA+스위스)에서 regional **processing**을
+지원하고, **미국은 MAM·ZDR을 요구하지 않으며**, 이 제품이 부르는 두 모델이 지원
+목록에 있고, **Global geography 프로젝트의 key로 요청별 regional host 사용이
+가능**합니다. 그래서 새 프로젝트도 새 key도 이 변경의 전제가 아닙니다.
+
+**Customer Content만 덮습니다.** 같은 문서가 *"Data residency does not apply to
+system data, which may be processed and stored outside the selected region"*
+라고 적습니다. **"모든 데이터가 미국에서 처리된다"고 쓰지 않습니다** — 사용자
+기기, Tomverse 인프라, 제3자 서비스에서 발생하는 전송도 이 계약 밖입니다.
+
+**지역 식별자를 로그에 넣지 않았습니다.** host가 env override 없는 상수이므로
+런타임 변이가 없고, 그 상수에서 유도한 필드는 언제나 `"us"`만 냅니다 — 소스가
+이미 말하는 것을 되풀이할 뿐 요청이 실제로 어디에 닿았는지 증명하지 못합니다
+(§11.2의 필드 목록은 테스트로 강제되는 영구 표면이라 장식 하나에도 비용이
+있습니다). 증거는 `tests/voiceRegionalEndpoint.test.mjs`가 실제 요청 URL 전체를
+단언하고, global fallback과 환경변수 경로가 남아 있지 않음을 각각 잡는 것이며,
+셋 다 옛 기본값으로 되돌리면 red가 됩니다. **wire 목적지에 대한 운영 증거는
+B-6의 실제 호출 성공뿐입니다.**
 
 **미결정**: OpenAI 계정의 audio 데이터 보존 설정, zero-data-retention 적용
 여부, 별도 계정/조직/DPA 분리 여부. `VOICE_TRANSCRIPTION_API_KEY`를 별도로 둔
@@ -1404,7 +1437,7 @@ moderation을 하지 않습니다(`lib/voiceTranscript.ts`). 이 텍스트는 �
 | B-2 | 실패 시 과금 처리 (§6.1-2) | **해결 (2026-09-02)** — 사용자 과금 없음 |
 | B-3 | provider 원가 검증 계층 (§6.1-3) | **해결 (2026-09-09)** — **두 모델 모두** 실제 청구 관측·대조 완료(§6.1.3, §6.1.6, #1247). 보류 모델 없음 |
 | B-4 | audio provider usage 예산 (§6.1-4) | **해결 (2026-09-08, 양쪽 환경 서명됨)** — staging 1,800/27,000, production 3,600/54,000 (A안). 기록: `docs/ops/voice-provider-budget-records/` |
-| B-5 | provider 데이터 보존 (§11.3) | **차단** — 판정과 서명 셋 모두 완료(2026-09-10, §11.3.2). 남은 것 하나: **국외이전 고지 5개 항목 미완** |
+| B-5 | provider 데이터 보존 (§11.3) | **차단** — 판정과 서명 셋 완료(2026-09-10, §11.3.2), Voice 전사는 미국 지역 endpoint로 고정됨(§11.3.0). 남은 것: **국외이전 고지 5개 항목**, staging deploy에서의 실제 요청 관측, 사람의 최종 판정·서명 |
 | B-6 | 실기기 검증 (§15) | **차단** — `docs/ops/voice-input-staging-checklist.md` 서명 |
 
 B-1~B-4는 **§6이 열려 있다는 하나의 사실**의 네 얼굴이었고, 2026-09-02에 하나의
