@@ -27,8 +27,9 @@
 // with a `draftSuggestionKey` for de-duplicating its nudge. Both belonged to
 // the composer's "auto" mode -- offer a search before running one -- and went
 // with it when web search became a switch: the switch is the consent, so there
-// is nothing left to offer mid-draft. Neither of the two above changed, which
-// is the point: what routing reads is the same algorithm it read before.
+// is nothing left to offer mid-draft. The Router-side contextual reading below
+// is versioned with the task profile; the model finder's recommendation regex
+// remains unchanged because that questionnaire is a different consumer.
 import { RESEARCH_PATTERN } from "@/lib/modelFinder";
 
 const RECENCY_KEYWORDS = [
@@ -45,6 +46,58 @@ const RECENCY_KEYWORDS = [
 // matched separately so it never fires alone on something like "iPhone 15".
 const RECENT_YEAR_PATTERN = /\b20(2[4-9]|3[0-9])\b/;
 
+const PROVIDED_RECORD_CONTEXT =
+  /\b(?:synthetic|provided|supplied|given|following)\s+(?:[\w-]+\s+){0,3}(?:records?|register|rows?|cards?|data|table)\b|\b(?:records?|rows?|data|table)\s+(?:below|above)\b|(?:제공된|주어진|아래|다음)\s*(?:기록|자료|표|데이터|목록)/i;
+const EXTERNAL_REQUEST_CONTEXT =
+  /\b(?:online|web(?:site)?|internet|official|external|search|look\s+up|check|verify)\b|검색|인터넷|공식|외부|조회/i;
+
+/**
+ * Remove only incidental cue spans, never an entire "closed book" turn.
+ * Matching source order is not asking for sources; a marked current field is
+ * not asking what is current outside the supplied records. A separate request
+ * for sources or fresh facts must remain visible even in the same sentence.
+ * Spaces preserve offsets and the original recency length/year thresholds.
+ */
+const withoutIncidentalSearchCues = (text: string): string => {
+  const blank = (match: string) => " ".repeat(match.length);
+  const reading = text
+    .replace(/\bsource(?:['’]s)?[\s-]+(?:order(?:ing)?|sequence)\b/gi, blank)
+    .replace(/\b(?:order|sequence)\s+(?:in|of)\s+(?:the\s+)?(?:original\s+)?source\b/gi, blank)
+    .replace(/\bcurrent(?=["'`]?\s*(?:[:=]\s*["'`]?\s*)?(?:yes|no|true|false)\b)/gi, blank)
+    .replace(/현재(?=\s*(?:여부|표시)?\s*[:=]\s*(?:예|아니오|참|거짓))/g, blank);
+
+  const providedRecords = PROVIDED_RECORD_CONTEXT.test(text);
+
+  // Negation stays within its clause. In particular, "but" starts a fresh
+  // reading; it cannot hide an affirmative request following the prohibition.
+  return reading.split(/([.!?;\n]|\b(?:but|however|instead)\b|하지만|그러나|대신)/i)
+    .map((clause) => {
+      // A data-reading verb is not enough when its clause also asks to go
+      // outside the supplied records. Prefer retaining an ambiguous web cue.
+      // Only a clause-leading imperative can inherit the provided records as
+      // its subject. "For another application, return the current version"
+      // and an explicit "version of/for ..." introduce a separate subject.
+      if (providedRecords && !EXTERNAL_REQUEST_CONTEXT.test(clause)) {
+        clause = clause
+          .replace(/^\s*(?:please\s+)?(?:extract|return|copy|select|choose|read)\s+(?:(?:only|just)\s+)?(?:the\s+)?current\s+(?:record|version|row|entry)\b(?!\s+(?:of|for)\b)|\b(?:recorded|listed|shown|stored)\s+(?:in|on)\s+(?:the\s+)?current\s+(?:record|version|row|entry)\b(?!\s+(?:of|for)\b)/gi,
+            (match) => match.replace(/\bcurrent\b/gi, blank))
+          .replace(/^\s*현재\s*(?:기록|버전|행|항목)(?:만|을|를)?\s*(?:추출|반환|복사|선택)|현재\s*(?:기록|버전|행|항목)에\s*(?:있는|기록된|표시된)/g,
+            (match) => match.replace(/현재/g, blank));
+      }
+      // Require a directly forbidden verb, or the final verb of an explicit
+      // comma-separated prohibition list. "Do not forget to use today" is
+      // affirmative, as is a Korean date clause followed by an unrelated ban.
+      // At most four preceding items, each with at most 80 trailing characters:
+      // scanning an unbounded suffix for every "do not" is quadratic on long
+      // text without commas. Longer/ambiguous lists retain their recency cue.
+      return clause.replace(/\b(?:do\s+not|don['’]t|never)\s+(?:(?:(?:search|use|read|open|execute|consult|infer|assume)\b[^,.!?;\n]{0,80},\s*){1,4}(?:and|or)\s+)?(?:use|infer|assume|consult)\s+today(?:['’]s)?(?:\s+date)?\b/gi,
+        (match) => match.replace(/\btoday\b/gi, blank))
+      .replace(/오늘\s*(?:의\s*)?(?:날짜|기준|시점)(?:(?:나|와|과|및)\s*(?:실제\s*)?(?:달력|날짜)(?:\s*지식)?)?(?:은|는|을|를|도)?\s*(?:사용|쓰|추론|가정|참고)(?:하)?지\s*(?:마|말)/g,
+        (match) => match.replace(/오늘/g, blank));
+    })
+    .join("");
+};
+
 /**
  * The person asked for sources, citations, research or a web search.
  *
@@ -54,7 +107,7 @@ const RECENT_YEAR_PATTERN = /\b20(2[4-9]|3[0-9])\b/;
  * request as no request is a safety hole rather than a quiet UI.
  */
 export const hasExplicitSourceOrSearchIntent = (text: string): boolean =>
-  RESEARCH_PATTERN.test(text.trim());
+  RESEARCH_PATTERN.test(withoutIncidentalSearchCues(text.trim()));
 
 /**
  * Softer wording that only *suggests* the answer needs to be fresh.
@@ -67,11 +120,12 @@ export const hasExplicitSourceOrSearchIntent = (text: string): boolean =>
 export const suggestsRecentInformationNeeded = (text: string): boolean => {
   const normalized = text.trim().toLowerCase();
   if (normalized.length < 4) return false;
+  const reading = withoutIncidentalSearchCues(normalized);
 
   const hasKeyword = RECENCY_KEYWORDS.some((keyword) =>
-    normalized.includes(keyword.toLowerCase())
+    reading.includes(keyword.toLowerCase())
   );
   if (hasKeyword) return true;
 
-  return RECENT_YEAR_PATTERN.test(normalized) && normalized.length <= 200;
+  return RECENT_YEAR_PATTERN.test(reading) && normalized.length <= 200;
 };

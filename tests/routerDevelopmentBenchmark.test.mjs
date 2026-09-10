@@ -111,12 +111,22 @@ test("plan is deterministic, binds exact corpus, and exports only prompt as mode
 });
 
 test("fixture requirements govern benchmark admission while original search-inference refusals remain visible", () => {
-  const full = buildDevelopmentPlan({ ...input, models: AVAILABLE_MODELS });
+  // The unchanged closed-book corpus no longer needs an accidental keyword
+  // mismatch. Create that disagreement deliberately in a test-local clone.
+  const requestedSearch = structuredClone(corpus);
+  requestedSearch.cases[0].prompt += " Also cite external sources for this claim.";
+  const full = buildDevelopmentPlan({ ...input, corpus: requestedSearch, models: AVAILABLE_MODELS });
   const disagreements = full.rows.filter((row) => row.router.needsCurrentInformation && !row.router.eligible && row.benchmarkEligibility.eligible);
   assert.ok(disagreements.length > 0);
   assert.ok(disagreements.every((row) => row.benchmarkEligibility.basis === "declared_fixture_requirements_not_router_inference"));
   assert.ok(full.summary.routerInferenceMismatchCases.length > 0);
   assert.ok(full.byCase.every((item) => item.plannedCalls > 0));
+});
+
+test("the unchanged closed-book corpus has no inferred current-information cases", () => {
+  const full = buildDevelopmentPlan({ ...input, models: AVAILABLE_MODELS });
+  assert.equal(full.summary.routerInferenceMismatchCases.length, 0);
+  assert.ok(full.rows.every((row) => !row.router.needsCurrentInformation));
 });
 
 test("per-model answer cap preserves product provenance and original router fit separately", () => {
