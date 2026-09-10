@@ -131,8 +131,10 @@ export const classifyUndeterminedSigning = (input) => {
    * A refusal is not yet a finding. `MOBILE_PREVIOUS_SIGNING_KEY_SECONDS` is
    * 900 and the keyring's window is exclusive, so the previous key verifies at
    * +899s and answers `unknown_kid` at +900s -- reproduced against the real
-   * mint and verify path on 2026-09-10. The second of those is the contract
-   * doing what it says. Ordering a rollback for it would undo a correct
+   * mint and verify path on 2026-09-10, **for a sample whose own `exp` (plus
+   * skew) outlives the window**; a shorter-lived one is `expired` first, and
+   * which refusal comes back is not predictable from the two lengths. The
+   * refusal past the window is the contract doing what it says. Ordering a rollback for it would undo a correct
    * deployment, and an earlier version of this function did exactly that
    * because the input was named `rejected_while_valid`: the caller's label
    * decided the verdict.
