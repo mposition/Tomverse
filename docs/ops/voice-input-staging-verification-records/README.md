@@ -51,7 +51,7 @@ YYYY-MM-DD__<40자리 deploy SHA>.md
 
 **첫째, D 구획은 사람이 할 일이 없습니다.** 체크리스트는 로그를 "꺼내 주기만
 합니다"라고 적었지만, 에이전트가 Railway에서 직접 읽을 수 있습니다. 실행 시각만
-알려 주면 `event: "voice_transcription"` 라인을 꺼내 §11.2의 필드 목록과
+알려 주면 `event: "voice_transcription"` 라인을 꺼내 `docs/policy/voice-input.md` §11.2의 필드 목록과
 대조합니다.
 
 **둘째, C 구획은 말한 문장과 나온 문장을 둘 다 적습니다.** "잘 나왔다"는 관측이

@@ -93,7 +93,7 @@ digest:
 |---|---|
 | 실행 구간 (UTC) | |
 | 관측된 `voice_transcription` 라인 수 | |
-| 필드가 §11.2 목록뿐인가 | |
+| 필드가 `docs/policy/voice-input.md` §11.2 목록뿐인가 | |
 | transcript·오디오·파일명의 흔적이 있는가 | |
 | `keySource` | |
 | `outcome` 분포 | |
