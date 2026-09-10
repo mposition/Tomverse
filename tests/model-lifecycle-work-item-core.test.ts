@@ -283,6 +283,24 @@ test("genuinely new first-party models still come through", () => {
   assert.deepEqual(fresh.map((entry) => entry.observedVia.length), [1, 1, 1]);
 });
 
+test("every queue producer rejects prerelease observations before family grouping", () => {
+  const fresh = newCandidatesForQueue({
+    observed: [
+      { provider: "openai", apiModel: "gpt-5.7-preview" },
+      { provider: "google", apiModel: "gemini-4-beta" },
+      { provider: "xai", apiModel: "grok-5-experimental" },
+      { provider: "openai", apiModel: "gpt-5.7" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+  });
+
+  assert.deepEqual(
+    fresh.map((candidate) => candidate.apiModel),
+    ["gpt-5.7"]
+  );
+});
+
 // ML-12: one model, several providers.
 //
 // `glm-5.3` arrived three times over three days -- as `glm-5.3` from Zhipu,

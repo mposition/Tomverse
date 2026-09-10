@@ -323,6 +323,11 @@ const reportPayload = (input: {
                 .slice(0, 6)
                 .join(", ")}${result.heuristicallyExcluded.length > 6 ? ` (+${result.heuristicallyExcluded.length - 6} more)` : ""}`
             : null,
+          result.prereleaseExcluded.length
+            ? `excluded from review as prerelease: ${result.prereleaseExcluded
+                .slice(0, 6)
+                .join(", ")}${result.prereleaseExcluded.length > 6 ? ` (+${result.prereleaseExcluded.length - 6} more)` : ""}`
+            : null,
         ]
           .filter(Boolean)
           .join(" · ") || null,

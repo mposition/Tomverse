@@ -26,6 +26,7 @@ import {
     candidateFamilyIdentity,
     candidateRepresentativeRank,
     modelIdentityWithoutVendor,
+    shouldQueueModelCandidate,
 } from "@/lib/modelLifecycleTriage";
 
 /** What we intend to do about a model. */
@@ -320,6 +321,11 @@ export const newCandidatesForQueue = (input: {
     const fresh: Array<ModelObservation & { observedVia: ObservedVia }> = [];
     const byIdentity = new Map<string, (typeof fresh)[number]>();
     for (const observation of input.observed) {
+        // Callers normally pass the monitor's already-filtered candidate set,
+        // but the historical backfill reads observation rows directly. Keep
+        // the eligibility policy here too so neither path can queue preview,
+        // beta, experimental or otherwise unsupported models.
+        if (!shouldQueueModelCandidate(observation.apiModel)) continue;
         const identity = candidateFamilyIdentity(observation.apiModel);
         const already = byIdentity.get(identity);
         if (already) {
