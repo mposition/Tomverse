@@ -334,6 +334,32 @@ line("inventedFindingRate", rate(result.metrics.inventedFindingRate));
 line("  ... negative subset", rate(result.metrics.inventedFindingRateNegativeSubset));
 line("  ... findings, not cases", result.metrics.inventedFindingCount);
 
+// Per arm, because the gate's language-gap and task-type rules read every
+// metric per arm. No gap and no shortfall is computed here: those numbers are
+// not approved, and an unapproved comparison printed beside real ones reads as
+// a verdict.
+const armSection = (title, arms) => {
+  heading(title);
+  if (arms.length === 0) {
+    console.log("  (none — this run holds no case in any arm of this kind)");
+    return;
+  }
+  for (const arm of arms) {
+    console.log(`  ${arm.arm}  (${arm.cases} case(s))`);
+    line("  missedEveryPlantedIssueRate", rate(arm.metrics.missedEveryPlantedIssueRate));
+    line("    ... aimed and vague", arm.metrics.missedEveryPlantedIssueAimedAt);
+    line("  inventedFindingRate", rate(arm.metrics.inventedFindingRate));
+    line("    ... negative subset", rate(arm.metrics.inventedFindingRateNegativeSubset));
+    line("    ... findings, not cases", arm.metrics.inventedFindingCount);
+  }
+};
+armSection("by language", result.byLanguage);
+armSection("by task type", result.byTaskType);
+console.log(
+  "\n  Arms are computed over their own cases, not split out of the aggregate. No\n" +
+    "  gap or shortfall is applied: those thresholds are not approved."
+);
+
 console.log(
   "\nReport only. These metrics are not wired to any approval gate, no threshold\n" +
     "is applied here, and nothing was written. `check:ai-review-eval` still reads\n" +

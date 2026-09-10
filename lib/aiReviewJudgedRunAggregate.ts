@@ -48,8 +48,10 @@
 
 import {
     AI_REVIEW_EVAL_FINDING_KINDS,
+    AI_REVIEW_EVAL_LANGUAGES,
     AI_REVIEW_EVAL_NEGATIVE_PHENOMENA,
     AI_REVIEW_EVAL_PHENOMENA,
+    AI_REVIEW_EVAL_TASK_TYPES,
     type AiReviewEvalFindingKind,
     type AiReviewEvalPhenomenon,
 } from "@/lib/aiReviewEvalCore";
@@ -157,6 +159,25 @@ export type AiReviewJudgedRunMetrics = {
     inventedFindingCount: number;
 };
 
+/**
+ * One arm's own metrics, computed over that arm's cases.
+ *
+ * **Computed, not split.** Every rate here has its own numerator and its own
+ * denominator, taken from this arm's cases only. Dividing an aggregate by an
+ * arm's share would give a number that is not a proportion of anything, which
+ * is the same mistake the negative-phenomenon subset made before it was fixed.
+ *
+ * An arm appears here when the run holds at least one case in it. Which arms an
+ * approval REQUIRES, how many cases each needs, and how far they may differ are
+ * the gate's questions, and none of those numbers is approved -- so nothing
+ * here applies a gap, a shortfall or a floor.
+ */
+export type AiReviewJudgedArmBreakdown = {
+    arm: string;
+    cases: number;
+    metrics: AiReviewJudgedRunMetrics;
+};
+
 export type AiReviewJudgedRunAggregate =
     | {
           aggregable: false;
@@ -168,6 +189,15 @@ export type AiReviewJudgedRunAggregate =
           contractVersion: string;
           cases: number;
           metrics: AiReviewJudgedRunMetrics;
+          /**
+           * Per arm, in the vocabulary's own order, for the arms this run
+           * holds. The gate reads both; `thresholdShortfalls()` applies the
+           * language-gap rule to every metric and the task-type shortfall rule
+           * to every metric, so a judged metric reaching the gate needs these
+           * to exist at all.
+           */
+          byLanguage: readonly AiReviewJudgedArmBreakdown[];
+          byTaskType: readonly AiReviewJudgedArmBreakdown[];
       };
 
 const rateOf = (numerator: number, denominator: number): AiReviewJudgedRunRate => {
@@ -399,12 +429,27 @@ export function aggregateJudgedRun(input: {
     // guard is for a case the run judged that the set does not hold at all --
     // which the evidence check also refuses, and which is stated rather than
     // defaulted, because guessing puts a case in or out of a denominator.
-    const datasetCases = (runInputs.dataset as { cases: readonly { id: string; phenomenon?: unknown }[] })
-        .cases;
+    const datasetCases = (
+        runInputs.dataset as {
+            cases: readonly {
+                id: string;
+                phenomenon?: unknown;
+                language?: unknown;
+                taskType?: unknown;
+            }[];
+        }
+    ).cases;
     const phenomenonOf = new Map<string, AiReviewEvalPhenomenon>();
+    // The arms, from the same admitted rows and for the same reason: a case's
+    // language and task type are not in the judged case either, and
+    // `datasetProblems()` has already checked both against their vocabularies.
+    const armsOf = new Map<string, { language: string; taskType: string }>();
     for (const row of datasetCases) {
         if (phenomenonOf.has(row.id)) continue;
         if (isPhenomenon(row.phenomenon)) phenomenonOf.set(row.id, row.phenomenon);
+        if (typeof row.language === "string" && typeof row.taskType === "string") {
+            armsOf.set(row.id, { language: row.language, taskType: row.taskType });
+        }
     }
     for (const { artifact } of verified.values()) {
         if (!phenomenonOf.has(artifact.caseId)) {
@@ -413,12 +458,85 @@ export function aggregateJudgedRun(input: {
                     `phenomenon, so whether it belongs in either denominator is unknown`
             );
         }
+        if (!armsOf.has(artifact.caseId)) {
+            blockers.push(
+                `${artifact.caseId}: the frozen dataset does not give this case a language ` +
+                    `and a task type, so it belongs to no arm`
+            );
+        }
     }
 
     if (blockers.length > 0) return { aggregable: false, blockers };
 
     // 6. Only now, over the distinct verified cases, which steps 1-4 have
     // shown to be exactly the planned ones.
+    //
+    // One pass collects what each case contributes; the metric function below
+    // is then applied to the whole run and to each arm separately. Arms are
+    // computed rather than derived from the aggregate, so every denominator is
+    // its own arm's count.
+    const scoredCases: {
+        negative: boolean;
+        planted: number;
+        truePositives: number;
+        insufficient: number;
+        inventedFindings: number;
+        language: string;
+        taskType: string;
+    }[] = [];
+
+    for (const { artifact, record } of verified.values()) {
+        const outcome = artifact.outcome;
+        // Eligibility has already refused an unscored artifact; this keeps the
+        // types honest rather than re-deciding.
+        if (!outcome.scored) continue;
+        const phenomenon = phenomenonOf.get(artifact.caseId) as AiReviewEvalPhenomenon;
+        const arms = armsOf.get(artifact.caseId) as { language: string; taskType: string };
+        const total = (field: keyof (typeof outcome.byKind)[AiReviewEvalFindingKind]) =>
+            AI_REVIEW_EVAL_FINDING_KINDS.reduce(
+                (sum, kind) => sum + (outcome.byKind[kind][field] as number),
+                0
+            );
+        scoredCases.push({
+            negative: AI_REVIEW_EVAL_NEGATIVE_PHENOMENA.includes(phenomenon),
+            planted: total("truePositives") + total("falseNegatives"),
+            truePositives: total("truePositives"),
+            insufficient: total("insufficientFindings"),
+            inventedFindings: judgedInventedFindings(record).length,
+            language: arms.language,
+            taskType: arms.taskType,
+        });
+    }
+
+    return {
+        aggregable: true,
+        contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
+        cases: verified.size,
+        metrics: metricsOver(scoredCases),
+        byLanguage: armBreakdowns(scoredCases, AI_REVIEW_EVAL_LANGUAGES, "language"),
+        byTaskType: armBreakdowns(scoredCases, AI_REVIEW_EVAL_TASK_TYPES, "taskType"),
+    };
+}
+
+/** What one scored case contributes to the two metrics. */
+type JudgedScoredCase = {
+    negative: boolean;
+    planted: number;
+    truePositives: number;
+    insufficient: number;
+    inventedFindings: number;
+    language: string;
+    taskType: string;
+};
+
+/**
+ * The two approved metrics over a set of scored cases.
+ *
+ * One function for the run and for every arm, so an arm cannot be computed by a
+ * rule the aggregate does not use. A zero denominator returns the insufficient
+ * -evidence form here as everywhere: an arm nothing measures does not read 0%.
+ */
+const metricsOver = (cases: readonly JudgedScoredCase[]): AiReviewJudgedRunMetrics => {
     let missedNumerator = 0;
     let missedDenominator = 0;
     let missedAimedAt = 0;
@@ -427,45 +545,21 @@ export function aggregateJudgedRun(input: {
     let inventedNegativeCases = 0;
     let inventedNegativeDenominator = 0;
 
-    for (const { artifact, record } of verified.values()) {
-        const outcome = artifact.outcome;
-        // Eligibility has already refused an unscored artifact; this keeps the
-        // types honest rather than re-deciding.
-        if (!outcome.scored) continue;
-        const phenomenon = phenomenonOf.get(artifact.caseId) as AiReviewEvalPhenomenon;
-        const negative = AI_REVIEW_EVAL_NEGATIVE_PHENOMENA.includes(phenomenon);
-
-        const truePositives = AI_REVIEW_EVAL_FINDING_KINDS.reduce(
-            (total, kind) => total + outcome.byKind[kind].truePositives,
-            0
-        );
-        const planted = AI_REVIEW_EVAL_FINDING_KINDS.reduce(
-            (total, kind) =>
-                total + outcome.byKind[kind].truePositives + outcome.byKind[kind].falseNegatives,
-            0
-        );
-        const insufficient = AI_REVIEW_EVAL_FINDING_KINDS.reduce(
-            (total, kind) => total + outcome.byKind[kind].insufficientFindings,
-            0
-        );
-
-        if (!negative && planted > 0) {
+    for (const item of cases) {
+        if (!item.negative && item.planted > 0) {
             missedDenominator += 1;
-            if (truePositives === 0) {
+            if (item.truePositives === 0) {
                 missedNumerator += 1;
-                if (insufficient > 0) missedAimedAt += 1;
+                if (item.insufficient > 0) missedAimedAt += 1;
             }
         }
-
-        const invented = judgedInventedFindings(record);
-        inventedFindingCount += invented.length;
-        // Every scored case is in this denominator, and a case counts once
-        // however many findings it invented: three branches of one
-        // misreading and three separate inventions are different facts, and
-        // summing findings makes the first look like the second.
-        const inventedHere = invented.length > 0 ? 1 : 0;
+        inventedFindingCount += item.inventedFindings;
+        // A case counts once however many findings it invented: three branches
+        // of one misreading and three separate inventions are different facts,
+        // and summing findings makes the first look like the second.
+        const inventedHere = item.inventedFindings > 0 ? 1 : 0;
         inventedCases += inventedHere;
-        if (negative) {
+        if (item.negative) {
             // Restricted on BOTH sides. The whole numerator over this
             // denominator is a proportion of nothing.
             inventedNegativeDenominator += 1;
@@ -474,18 +568,34 @@ export function aggregateJudgedRun(input: {
     }
 
     return {
-        aggregable: true,
-        contractVersion: AI_REVIEW_SCORING_CONTRACT_VERSION,
-        cases: verified.size,
-        metrics: {
-            missedEveryPlantedIssueRate: rateOf(missedNumerator, missedDenominator),
-            missedEveryPlantedIssueAimedAt: missedAimedAt,
-            inventedFindingRate: rateOf(inventedCases, verified.size),
-            inventedFindingRateNegativeSubset: rateOf(
-                inventedNegativeCases,
-                inventedNegativeDenominator
-            ),
-            inventedFindingCount,
-        },
+        missedEveryPlantedIssueRate: rateOf(missedNumerator, missedDenominator),
+        missedEveryPlantedIssueAimedAt: missedAimedAt,
+        inventedFindingRate: rateOf(inventedCases, cases.length),
+        inventedFindingRateNegativeSubset: rateOf(
+            inventedNegativeCases,
+            inventedNegativeDenominator
+        ),
+        inventedFindingCount,
     };
-}
+};
+
+/**
+ * One breakdown per arm the run holds, in the vocabulary's order.
+ *
+ * An arm with no cases is omitted rather than reported as a row of zeroes: a
+ * missing arm and an arm that measured nothing are different facts, and the
+ * gate's arm-coverage rule is what has to tell an approval which it is.
+ */
+const armBreakdowns = (
+    cases: readonly JudgedScoredCase[],
+    vocabulary: readonly string[],
+    key: "language" | "taskType"
+): readonly AiReviewJudgedArmBreakdown[] =>
+    vocabulary
+        .map((arm) => ({ arm, cases: cases.filter((item) => item[key] === arm) }))
+        .filter((entry) => entry.cases.length > 0)
+        .map((entry) => ({
+            arm: entry.arm,
+            cases: entry.cases.length,
+            metrics: metricsOver(entry.cases),
+        }));

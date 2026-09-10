@@ -165,6 +165,7 @@
     "report:unread-body-connection-cost": "node scripts/report-unread-body-connection-cost.mjs",
     "report:unswept-tables": "node scripts/report-unswept-tables.mjs",
     "report:ai-review-judged-threshold-sample-sizes": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-threshold-sample-sizes.mjs",
+    "report:ai-review-judged-denominators": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-denominators.mjs",
     "report:ai-review-judged-run": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-run.mjs",
     "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
@@ -216,6 +217,8 @@
     "notify:voice-price-reverification": "node --import tsx scripts/notify-voice-price-reverification.mjs",
     "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs",
     "report:router-full-catalog": "node --import tsx scripts/report-router-full-catalog.mjs",
+    "benchmark:router": "node --import tsx scripts/router-development-benchmark.mjs",
+    "test:router-development-benchmark": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
     "cross-review": "node --import tsx scripts/cross-review.mjs"
   },
   "dependencies": {

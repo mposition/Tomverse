@@ -595,6 +595,43 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
 **분모 0은 0%가 아니다.** `rate`·`wilsonLower`·`wilsonUpper`가 `null`이고
 `insufficientEvidence`가 그 사실을 문장으로 들고 다닌다.
 
+#### arm 단위 집계 (2026-09-10 승인)
+
+게이트는 언어 격차 규칙과 과제 arm shortfall 규칙을 **읽는 모든 지표에** 적용하므로,
+judged 지표가 게이트에 닿으려면 arm별 수치가 있어야 한다.
+`aggregateJudgedRun()`이 `byLanguage`·`byTaskType`를 낸다.
+
+- **arm은 자기 case로 계산한다.** aggregate를 arm 비중으로 나누면 어느 모집단에
+  대한 비율도 아닌 숫자가 나온다 — 음성 부분집합에서 이미 한 번 고친 실수다.
+  run과 arm이 **같은 함수**(`metricsOver()`)를 쓰므로 서로 다른 규칙으로 계산될 수
+  없다.
+- **arm·phenomenon 모두 판정 case에 없다.** 동결 dataset에서 읽으며,
+  `datasetProblems()`가 언어·과제 어휘를 이미 검사했다. 둘 중 하나라도 없는 case는
+  blocker다.
+- **case가 없는 arm은 생략한다.** 0의 행으로 적지 않는다 — 없는 arm과 아무것도
+  재지 못한 arm은 다른 사실이고, 어느 쪽인지 말하는 것은 게이트의 arm 적용 범위
+  규칙이다. arm 안에서 분모가 0이면 그 arm의 해당 지표가
+  `insufficientEvidence`다.
+- **격차도 shortfall도 계산하지 않는다.** `maxLanguageArmGap`·
+  `maxTaskTypeArmShortfall`은 **승인되지 않은 숫자**이고, 승인되지 않은 비교를
+  실제 수치 옆에 출력하면 판정처럼 읽힌다. 비교는 게이트의 일이다.
+
+**이 보고는 점수를 포함한다.** `npm run report:ai-review-judged-run`은 aggregate
+지표와 arm별 비율·Wilson 구간을 함께 내므로, **임계값을 고르기 전에 실행하면 안
+된다** — 결정안 §3.6이 관측된 성능에 맞춘 임계값을 금지하고, 이 출력이 바로 그
+성능이다.
+
+**임계값을 고르기 전에 쓰는 것은 `npm run report:ai-review-judged-denominators`다.**
+동결된 set(과 선택적으로 판정 case의 gold)에서 **분모만** 내며, 검토자 출력·판정
+기록·점수를 **읽을 수단이 없다**(`tests/aiReviewJudgedDenominators.test.mjs`가
+정적으로 고정). 미보고율 분모는 판정 case를 주지 않으면 **상한**이고 출력이 그렇게
+밝힌다 — 판정 gold는 dataset의 키워드 gold와 별도로 작성되기 때문이다.
+
+**게이트는 여전히 연결되지 않았다.** 전환 범위는 2026-09-10에 승인됐지만
+aggregate 상한 두 값과 arm 숫자 두 개는 승인되지 않았고, 값이 없으면 새 threshold
+집합을 만들 수 없다. 근거와 선택 자료는
+`.github/audits/ai-review-judged-gate-transition-decision-2026-09-10.md`.
+
 #### 저장된 실행을 읽는 호출자
 
 `npm run report:ai-review-judged-run`
