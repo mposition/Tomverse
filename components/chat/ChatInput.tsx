@@ -3530,27 +3530,6 @@ export function ChatInput({
               <Plus className="h-5 w-5" />
             )}
           </button>
-          {/*
-            The microphone sits with the other 44px controls in the actions
-            row, never beside the textarea. The row already wraps and the model
-            button already truncates, so one more fixed-width control here
-            cannot push Send outside the composer at 320px or at 200% zoom --
-            which the composer contract's geometry specs measure rather than
-            assume.
-          */}
-          {voiceInputEnabled && (
-            <VoiceInputButton
-              state={voice.state}
-              copy={voiceCopy}
-              isMobileShell={isMobileShell}
-              // The composer's own disabled state, not the voice machine's:
-              // recording into a locked or sending composer would produce a
-              // transcript with nowhere to go.
-              disabled={isDisabled}
-              onStart={voice.start}
-              onStop={voice.stop}
-            />
-          )}
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
@@ -3638,6 +3617,41 @@ export function ChatInput({
                 <span className="text-amber-600 dark:text-amber-400">{inputCreditMultiplier}×</span>
               )}
             </button>
+          )}
+          {/*
+            The microphone is the control immediately left of Send.
+
+            It used to sit at the far left, beside the tools "+" button, which
+            grouped it with *adding things to the message* -- attachments,
+            tools, the model. Speaking is not that: it is one of the two ways
+            to put words in this box, and every other product a user arrives
+            here from (the phone keyboard's own dictation included) puts it
+            where the send action is. Being consistent with that is worth more
+            than being consistent with our own earlier grouping.
+
+            The row's invariants are unchanged and are still measured rather
+            than assumed: it wraps, the model button truncates, and the
+            composer contract's geometry specs check at 320/360/390/430 that
+            the microphone never overlaps the textarea and that Send stays
+            inside the composer. `tests/e2e/voice-input-composer.spec.ts` also
+            pins the ordering itself, so this placement is a decision the
+            suite holds rather than an accident of source order.
+
+            Placed before the send/stop branch so it is the neighbour of
+            whichever of the two is rendered.
+          */}
+          {voiceInputEnabled && (
+            <VoiceInputButton
+              state={voice.state}
+              copy={voiceCopy}
+              isMobileShell={isMobileShell}
+              // The composer's own disabled state, not the voice machine's:
+              // recording into a locked or sending composer would produce a
+              // transcript with nowhere to go.
+              disabled={isDisabled}
+              onStart={voice.start}
+              onStop={voice.stop}
+            />
           )}
           {isSending ? (
             <button
