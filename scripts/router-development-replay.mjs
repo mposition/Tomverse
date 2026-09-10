@@ -42,6 +42,7 @@ function main() {
     console.log("Offline DEVELOPMENT selection replay; no provider calls or credentials.\n" +
       "npm run benchmark:router:replay -- --manifest=PATH --answers=PATH --candidate=PATH --observation-source-ref=FULL_40_HEX_SHA [--output=NEW_PATH]\n" +
       "The source ref is a separately chosen trusted original commit. Imported manifests cannot choose source paths.\n" +
+      "Source and corpus checkout bytes must match original Git blobs. EOL-only drift is refused; use a new byte-preserving checkout (the recorded pilot source uses LF).\n" +
       "Output defaults to stdout; existing files are refused. Benchmark selection comparison and product compatibility are separate; incomplete whole-population deltas remain null.");
     return;
   }

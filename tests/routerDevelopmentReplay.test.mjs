@@ -189,6 +189,19 @@ test("source compatibility permits only the exact additive replay npm script", (
   assert.throws(() => validateReplaySourceFiles({ observationSourceRef: "HEAD", anchored, current: anchored }), /full_sha/);
 });
 
+test("source EOL-only drift is diagnosed but never normalized into accepted evidence", () => {
+  const anchored = Object.fromEntries([...REPLAY_COLLECTOR_SOURCE_PATHS, REPLAY_CORPUS_PATH].map((path) => [path, path === "package.json" ? '{\n"scripts":{}\n}\n' : "original\nsource bytes\n"]));
+  for (const path of ["lib/models.ts", REPLAY_CORPUS_PATH]) {
+    const current = { ...anchored, [path]: anchored[path].replaceAll("\n", "\r\n") };
+    assert.throws(() => validateReplaySourceFiles({ observationSourceRef: "a".repeat(40), anchored, current }), /replay_source_eol_mismatch_requires_byte_preserving_checkout/);
+    current[path] += "semantic difference";
+    assert.throws(() => validateReplaySourceFiles({ observationSourceRef: "a".repeat(40), anchored, current }), /replay_runtime_source_drift/);
+  }
+  const packageEol = { ...anchored, "package.json": anchored["package.json"].replaceAll("\n", "\r\n") };
+  const accepted = validateReplaySourceFiles({ observationSourceRef: "a".repeat(40), anchored, current: packageEol });
+  assert.equal(accepted.benchmark.files["package.json"], benchmarkDigest(anchored["package.json"]));
+});
+
 test("report omits prompt, answers and gold and is deterministic", () => {
   const result = replayDevelopment(fixture);
   assert.deepEqual(replayDevelopment(fixture), result);

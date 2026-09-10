@@ -47,7 +47,11 @@ export function validateReplaySourceFiles(input: {
     const original = input.anchored[path];
     const current = input.current[path];
     if (typeof original !== "string" || typeof current !== "string") throw new Error("replay_source_file_missing");
-    if (original !== current && (path !== "package.json" || !replayPackageCompatible(original, current))) throw new Error("replay_runtime_source_drift");
+    if (original !== current && (path !== "package.json" || !replayPackageCompatible(original, current))) {
+      // Normalization only explains a refusal. It never makes different source bytes acceptable.
+      if (original.replaceAll("\r\n", "\n") === current.replaceAll("\r\n", "\n")) throw new Error("replay_source_eol_mismatch_requires_byte_preserving_checkout");
+      throw new Error("replay_runtime_source_drift");
+    }
   }
   const snapshot = (paths: readonly string[]): DevelopmentSource => ({
     commit: input.observationSourceRef, dirty: false,

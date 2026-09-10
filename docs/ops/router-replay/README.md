@@ -31,6 +31,13 @@ is limited to removing the exact added `benchmark:router:replay` script and
 then comparing the entire remaining package object. It does not permit other
 scripts, dependencies, configuration, or pricing changes.
 
+The source and corpus checkout must preserve the original Git blob bytes.
+A clean Git status alone is insufficient: Git can check out LF blobs as CRLF
+without reporting a modification. Replay refuses that transformation with
+`replay_source_eol_mismatch_requires_byte_preserving_checkout`; it does not
+normalize source text or change historical hashes. The existing semantic
+`package.json` comparison is the sole exception, including JSON line endings.
+
 Reports keep `observationSource` separate from `replaySource`. The first binds
 the historical collection; the second identifies the new comparison code.
 Candidate policy identity and content are separate from both. Source hashes
@@ -103,6 +110,35 @@ latency, end-to-end product latency, or an invoice. Reports omit prompt,
 answer, and expected-answer text.
 
 ## Offline operating interface
+
+The pilot's original source at `e9ba719e1941302efe626be6987f953e40de608d`
+was verified to use LF in all 38 fixed source/corpus files. If a Windows
+checkout has transformed those bytes, create a separate checkout of the
+committed Replay code with the following flags. This is a recovery procedure
+for this LF pilot, not permission to convert an originally CRLF observation.
+It leaves the existing checkout, Git configuration, and observation files
+unchanged; it creates a detached worktree and Git worktree registration.
+The LF checkout still needs dependencies installed with its unchanged lockfile.
+Do not rewrite existing files, disable source checks, or regenerate old manifests.
+
+Run on the local Windows PC in PowerShell, inside the committed Replay clone;
+Git must be installed. No provider credentials or network are needed. The new
+path must not exist, and the variables below live only in this PowerShell window.
+
+```powershell
+$replayLfCheckout = 'H:/Project/tomverse-router-replay-lf'
+if (Test-Path -LiteralPath $replayLfCheckout) { throw 'Choose a new empty worktree path.' }
+$replayCodeCommit = (git rev-parse HEAD).Trim()
+git -c core.autocrlf=false -c core.eol=lf worktree add --detach $replayLfCheckout $replayCodeCommit
+```
+
+Run the Replay command from that new checkout after installing its matching
+dependencies, keeping the original `--observation-source-ref` and immutable
+input paths. Use that checkout's candidate-file path and a new output path.
+When finished, remove only this disposable worktree with `git worktree remove`
+after confirming it has no work or reports to retain; never reset the original
+checkout. The CLI regression suite verifies these flags in a separate temporary
+Git repository, without committing or changing the developer's working tree.
 
 Use the local Replay checkout with its matching installed dependencies and
 the original observation commit available in Git. No provider credentials,
