@@ -2,8 +2,10 @@
 
 `docs/policy/voice-input.md` §15가 요구하는 검증입니다. **이 체크리스트의 실행과
 서명은 production에서 `feature.voiceInputEnabled`를 켜기 위한 전제 조건**이고
-(§14의 B-6), **이제 마지막 차단 사유입니다** — B-1~B-4에 이어 B-5도 2026-09-10에
-통과로 서명돼 닫혔습니다
+(§14의 B-6), **2026-09-10에 통과로 서명돼 닫혔습니다** — B-1~B-5도 같은 날까지
+모두 닫혔습니다. 첫 회차 기록은
+`voice-input-staging-verification-records/2026-09-10__e8613a55….md`이며,
+최소 경로로 실행돼 비차단 구획은 `미기록`입니다
 (`docs/ops/voice-provider-data-controls-records/2026-09-10-us-regional-endpoint.md`
 §14).
 
