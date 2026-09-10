@@ -28,8 +28,9 @@ export interface ComponentCheck {
 
 export const isDigest = (input: unknown): input is string => typeof input === "string" && /^[0-9a-f]{64}$/.test(input);
 export const isKeyId = (input: unknown): input is string => typeof input === "string" && /^[0-9a-f]{32}$/.test(input);
-// Opaque ASCII identity, not an issuance, ordering or case-folding policy.
-export const isAsciiId = (input: unknown): input is string => typeof input === "string" && /^[\x00-\x7f]+$/.test(input);
+// IP-D1: nonempty U+0021..U+007E only, without trimming or identity repair.
+export const isAsciiId = (input: unknown): input is string => typeof input === "string"
+  && input.length > 0 && !/[^\x21-\x7e]/.test(input);
 export const isApproverId = (input: unknown): input is string => typeof input === "string" && /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(input);
 
 export function isUtcSecond(input: unknown): input is string {
@@ -44,7 +45,8 @@ export function isUtcSecond(input: unknown): input is string {
 }
 
 function isRelativePath(input: unknown): input is string {
-  return typeof input === "string" && input.length > 0 && !/[\\\u0000]/.test(input)
+  // IP-D2: retain NFC Unicode/spaces; canonical validation runs before shape checks.
+  return typeof input === "string" && input.length > 0 && !/[\\\u0000-\u001f\u007f]/.test(input)
     && !/^[A-Za-z]:/.test(input)
     && input.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 }

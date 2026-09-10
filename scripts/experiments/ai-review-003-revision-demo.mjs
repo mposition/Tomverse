@@ -92,6 +92,10 @@ const EDITS = [
 ];
 
 heading("1. 작업 사본 — 원본은 열어서 읽기만 한다");
+console.log(
+    "  **이 수정은 2026-09-10에 후보 파일에 실제로 적용됐다.** 그래서 아래 편집은\n" +
+        "  대개 '불필요'로 나온다 — 그것이 정상이고, 이 시범이 이끌어 낸 결과다.\n"
+);
 const working = {
     ...original,
     responses: original.responses.map((response) => ({ ...response })),
@@ -99,13 +103,29 @@ const working = {
         "지급명령 이의신청 기한(송달일부터 2주)이 a·b에는 명시되어 있고 c에는 없다. " +
         "c의 이의신청·자료 준비·집행 위험 설명 자체는 정확하므로 다른 오류를 gold에 더하지 않았다.",
 };
+// The edit may already be in the candidate -- it was applied on 2026-09-10 --
+// and that is the expected state, not a failure. Throwing on a missing target
+// made this file break the moment the revision it demonstrates actually
+// landed, which is the one outcome it was written to lead to. What must still
+// fail is a candidate that matches NEITHER form: then the demonstration is
+// about text that is not there.
 for (const [label, from, to] of EDITS) {
     const response = working.responses.find((item) => item.label === label);
-    if (!response.content.includes(from)) {
-        throw new Error(`[${label}] edit target is not in the source text`);
+    // The edited form is tested FIRST, because `to` CONTAINS `from` here: the
+    // edit inserts a clause in front of a sentence it keeps. Asking about
+    // `from` first therefore matched the already-edited text and inserted the
+    // clause a second time.
+    if (response.content.includes(to)) {
+        line(`[${label}] 편집`, "불필요 — 후보에 이미 적용돼 있다");
+    } else if (response.content.includes(from)) {
+        response.content = response.content.replace(from, to);
+        line(`[${label}] 편집`, `“${from.slice(0, 22)}…” → 기한 문구 삽입`);
+    } else {
+        throw new Error(
+            `[${label}] the candidate matches neither the text this demonstration ` +
+                `edits nor the edited form, so it is about text that is not there`
+        );
     }
-    response.content = response.content.replace(from, to);
-    line(`[${label}] 편집`, `“${from.slice(0, 22)}…” → 기한 문구 삽입`);
 }
 line("[c] 편집", "없음 — 배정된 답변이므로 그대로 둔다");
 line("notes", "원문과 일치하도록 다시 씀");

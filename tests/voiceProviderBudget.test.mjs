@@ -304,6 +304,160 @@ test("the observed charge reproduces the recorded rates exactly", () => {
   );
 });
 
+test("the provider billed the same count the response reported", () => {
+  // The one fact that makes a rate "per million tokens" mean anything. An
+  // amount alone cannot separate "2.4x the price" from "2.4x the units": 228
+  // units at the published US$2.50/1M reaches the same US$0.00057 as 95 at
+  // US$6.00/1M. The Costs API's `quantity` settles it, and it is recorded so
+  // the question is not re-argued from the amount
+  // (docs/policy/voice-input.md §6.1.3).
+  for (const entry of VOICE_MODEL_PRICE_REGISTER) {
+    const seen = entry.costObservation;
+    if (!seen) continue;
+
+    assert.equal(
+      seen.billedAudioInputQuantityUnit,
+      "tokens",
+      `${entry.modelId} billed audio input in ${seen.billedAudioInputQuantityUnit}, which a per-million-token rate is not per`
+    );
+    assert.equal(
+      seen.billedOutputQuantityUnit,
+      "tokens",
+      `${entry.modelId} billed output in ${seen.billedOutputQuantityUnit}, which a per-million-token rate is not per`
+    );
+    assert.equal(
+      seen.billedAudioInputQuantity,
+      seen.audioInputTokens,
+      `${entry.modelId}: the response reported ${seen.audioInputTokens} audio tokens and the provider billed for ${seen.billedAudioInputQuantity}`
+    );
+    assert.equal(seen.billedOutputQuantity, seen.outputTokens);
+  }
+});
+
+test("the reconciliation uses the billed quantity, not the reported one", () => {
+  // A charge is a rate times a quantity. Reconciling against the response's
+  // own token count would make the audit agree with itself whenever the
+  // provider counts differently -- exactly the case the audit exists to
+  // notice. This fixture's arithmetic closes only if the billed quantity is
+  // the one used.
+  const base = VOICE_MODEL_PRICE_REGISTER.find(
+    (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+  );
+  const diverged = [
+    {
+      ...base,
+      costObservation: {
+        ...base.costObservation,
+        billedAudioInputQuantity: 704,
+        totalUsd: 0.002672,
+      },
+    },
+  ];
+
+  const problems = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+    register: diverged,
+  });
+
+  assert.deepEqual(
+    problems.map((problem) => problem.code),
+    ["billing_basis_diverged"]
+  );
+  assert.match(problems[0].detail, /no longer rates per response token/);
+  assert.match(problems[0].detail, /352 audio input tokens/);
+});
+
+test("a charge billed in some other unit is refused, not converted", () => {
+  // Seconds against a per-million-token rate is not an arithmetic problem to
+  // solve; it means the rate fields are named for a unit the provider is not
+  // billing, and inventing the conversion is how a made-up ratio becomes the
+  // register's answer.
+  const base = VOICE_MODEL_PRICE_REGISTER.find(
+    (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+  );
+  const inSeconds = [
+    {
+      ...base,
+      costObservation: {
+        ...base.costObservation,
+        billedAudioInputQuantityUnit: "seconds",
+      },
+    },
+  ];
+
+  const problems = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+    register: inSeconds,
+  });
+
+  assert.deepEqual(
+    problems.map((problem) => problem.code),
+    ["billed_unit_is_not_tokens"]
+  );
+  assert.match(problems[0].detail, /audio input in `seconds`/);
+});
+
+test("the output line is checked too, on both unit and quantity", () => {
+  // Both halves of this were once checked on the input line alone, and an
+  // observation that diverged only on output went through. The arithmetic is
+  // no help there: it reconciles against the billed quantity by construction,
+  // so a sum that closes says nothing about whether the two bases agree.
+  // `outputPerMillionTokensUsd` would have gone on claiming to be a rate per
+  // response token with nothing left to contradict it.
+  const base = VOICE_MODEL_PRICE_REGISTER.find(
+    (candidate) => candidate.modelId === "gpt-4o-mini-transcribe"
+  );
+
+  const outputQuantityDiverged = [
+    {
+      ...base,
+      costObservation: {
+        ...base.costObservation,
+        // Billed for twice the output the response reported, and charged for
+        // it: 352 x $3.00/1M + 224 x $5.00/1M.
+        billedOutputQuantity: 224,
+        totalUsd: 0.002176,
+      },
+    },
+  ];
+
+  const byQuantity = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+    register: outputQuantityDiverged,
+  });
+
+  assert.deepEqual(
+    byQuantity.map((problem) => problem.code),
+    ["billing_basis_diverged"]
+  );
+  assert.match(byQuantity[0].detail, /112 output tokens/);
+
+  const outputUnitDiverged = [
+    {
+      ...base,
+      costObservation: {
+        ...base.costObservation,
+        billedOutputQuantityUnit: "characters",
+      },
+    },
+  ];
+
+  const byUnit = auditVoicePriceRegister({
+    modelIds: ["gpt-4o-mini-transcribe"],
+    now: new Date("2026-09-02T00:00:00Z"),
+    register: outputUnitDiverged,
+  });
+
+  assert.deepEqual(
+    byUnit.map((problem) => problem.code),
+    ["billed_unit_is_not_tokens"]
+  );
+  assert.match(byUnit[0].detail, /output in `characters`/);
+});
+
 test("the effective audio rate is not the published one", () => {
   // Costing transcription from the published price understates the input side
   // by 2.4x, on every model measured. Why it does is not established

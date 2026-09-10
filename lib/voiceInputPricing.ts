@@ -66,16 +66,28 @@ export type VoiceModelListPrice = {
    * Output matches the published price exactly on both. Only the input side
    * diverges, by the same factor, on two independently measured models.
    *
-   * **What that factor is has not been established.** The Costs API reports an
-   * amount and not a billed quantity, so "a different rate" and "a different
-   * count of billable units" produce the identical observation and cannot be
-   * told apart from here. An account- or snapshot-specific rate, a provider
-   * documentation error and a billing error are all still open. This field
-   * therefore records the **effective** rate -- the conservative one, and the
-   * only one that reproduces a real invoice -- and
-   * `publishedAudioInputPerMillionTokensUsd` records what the page says, so
-   * the gap stays visible instead of being resolved by whichever number was
-   * written down first.
+   * ## It is a price difference, not a counting difference
+   *
+   * The obvious alternative was that the provider bills a different number of
+   * units than the response reports -- 228 units at the published US$2.50/1M
+   * reaches the same US$0.00057 as 95 at US$6.00/1M, and nothing about the
+   * amount alone separates those. The Costs API answers it directly: with
+   * `group_by=line_item` each result carries `quantity` and `quantity_unit`,
+   * and on both observations the billed quantity is **exactly the token count
+   * the response reported**, in `tokens` (95 and 352). Recorded per
+   * observation as `billedAudioInputQuantity`, so the question does not have
+   * to be re-argued from the amount.
+   *
+   * So the same unit is billed at 2.4x the published price. **Why is still
+   * unestablished** -- an account- or snapshot-specific rate, a provider
+   * documentation error and a billing error all remain open, and one of the
+   * two line items even names a dated snapshot
+   * (`gpt-4o-mini-transcribe-2025-12-15`) where the other names the bare
+   * model. This field therefore records the rate this account is charged --
+   * the conservative one, and the only one that reproduces a real invoice --
+   * and `publishedAudioInputPerMillionTokensUsd` records what the page says,
+   * so the gap stays visible instead of being resolved by whichever number
+   * was written down first.
    *
    * `null` means no invoice has shown it: **unknown**, which is not the same
    * as the published price. A model whose effective rate is unknown cannot
@@ -95,8 +107,8 @@ export type VoiceModelListPrice = {
    * the belief that the published `Input` column was a text rate that
    * transcription never pays. The provider's model pages label it
    * "Audio tokens - Input" and publish no text row at all, so that reading was
-   * wrong; the discrepancy it was invented to explain is real and remains
-   * unexplained.
+   * wrong; the discrepancy it was invented to explain is real, is a price
+   * difference on an identically counted unit, and remains unexplained.
    */
   publishedAudioInputPerMillionTokensUsd: number;
   /** USD per 1M output tokens. */
@@ -171,6 +183,40 @@ export type VoiceCostObservation = {
   /** Output tokens those requests reported. */
   outputTokens: number;
   /**
+   * The quantity the provider actually billed on the audio input line, and
+   * the unit it billed in, from the same bucket as `totalUsd`.
+   *
+   * Recorded because what the response reports and what the invoice charges
+   * for are different facts, and an amount alone cannot tell them apart: a
+   * charge is a rate times a quantity, so half the equation is missing until
+   * the quantity is written down. Both readings so far agree with the
+   * response exactly, which is what makes "US$6.00 per million *tokens*" a
+   * statement about a rate rather than about a counting convention. If a
+   * future reading disagrees, `audioInputPerMillionTokensUsd` stops meaning
+   * per response token and has to be renamed for the unit it is really per;
+   * `auditVoicePriceRegister` reports the divergence rather than absorbing
+   * it.
+   */
+  billedAudioInputQuantity: number;
+  /** The quantity billed on the output line, same bucket. */
+  billedOutputQuantity: number;
+  /**
+   * `quantity_unit` as the provider reported it, per line item.
+   *
+   * Two fields rather than one because the provider reports it per line item
+   * -- a single field would assert about the output line something only the
+   * input line was read for, which is the shape of claim this register exists
+   * to avoid making. Both are `tokens` on both observations so far, so the
+   * split changes no recorded fact; it stops one reading from standing in for
+   * a measurement nobody took.
+   *
+   * A per-million-token rate cannot be reconciled against any other unit, and
+   * the audit refuses rather than guessing a conversion.
+   */
+  billedAudioInputQuantityUnit: string;
+  /** `quantity_unit` on the output line. See the field above. */
+  billedOutputQuantityUnit: string;
+  /**
    * How the charge was separated from the account's other traffic.
    *
    * Prose, because the reader has to judge it: an aggregate compared against
@@ -196,8 +242,10 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
   {
     modelId: "gpt-4o-mini-transcribe",
     price: {
-      // Observed on the invoice: 2.4x the published US$1.25 below, for a
-      // reason nobody has established. See the field's comment.
+      // What the invoice charges per audio token: 2.4x the published
+      // US$1.25 below, on a quantity the provider counted exactly as the
+      // response did. A price difference, for a reason nobody has
+      // established. See the field's comment.
       audioInputPerMillionTokensUsd: 3.0,
       publishedAudioInputPerMillionTokensUsd: 1.25,
       outputPerMillionTokensUsd: 5.0,
@@ -213,6 +261,10 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
       requests: 3,
       audioInputTokens: 352,
       outputTokens: 112,
+      billedAudioInputQuantity: 352,
+      billedOutputQuantity: 112,
+      billedAudioInputQuantityUnit: "tokens",
+      billedOutputQuantityUnit: "tokens",
       isolation:
         "num_model_requests was 3 for this model that day -- exactly the three " +
         "calls -- and the aggregate token counts equal the per-request counts " +
@@ -227,17 +279,21 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
       source:
         "GET /organization/costs, bucket_width=1d, group_by=line_item, " +
         "bucket 2026-09-02: audio input 0.001056 + text input 0.0 + text " +
-        "output 0.00056 USD. Read 2026-09-08.",
+        "output 0.00056 USD, with quantity 352 / 0 / 112 and quantity_unit " +
+        "`tokens` on all three lines. Read 2026-09-08; quantities re-read " +
+        "2026-09-10 from the same bucket, no new request.",
     },
   },
   {
     modelId: "gpt-4o-transcribe",
     price: {
-      // Observed on the invoice, and neither number a guess would have picked
-      // was right. The published audio input price is US$2.50; the mini
-      // model's observed US$3.00 was the other tempting answer. The charge
-      // came to US$6.00/1M -- 2.4x the published price, the same factor the
-      // mini model shows, and unexplained on both.
+      // What the invoice charges per audio token, and neither number a guess
+      // would have picked was right. The published audio input price is
+      // US$2.50; the mini model's observed US$3.00 was the other tempting
+      // answer. The charge came to US$6.00/1M over 95 billed tokens -- the
+      // same 95 the response reported, so 2.4x the published price on an
+      // identically counted unit, the same factor the mini model shows, and
+      // unexplained on both.
       audioInputPerMillionTokensUsd: 6.0,
       publishedAudioInputPerMillionTokensUsd: 2.5,
       outputPerMillionTokensUsd: 10.0,
@@ -253,6 +309,10 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
       requests: 1,
       audioInputTokens: 95,
       outputTokens: 26,
+      billedAudioInputQuantity: 95,
+      billedOutputQuantity: 26,
+      billedAudioInputQuantityUnit: "tokens",
+      billedOutputQuantityUnit: "tokens",
       isolation:
         "One approved call, and the aggregates agree it was one: " +
         "num_model_requests was 1 for this model that day, with 95 input and " +
@@ -272,7 +332,8 @@ export const VOICE_MODEL_PRICE_REGISTER: readonly VoiceModelPriceEntry[] = [
       source:
         "GET /organization/costs, bucket_width=1d, group_by=line_item, " +
         "bucket 2026-09-09: audio input 0.00057 + text input 0.0 + text " +
-        "output 0.00026 USD. Read 2026-09-10. It is absent from the console's " +
+        "output 0.00026 USD, with quantity 95 / 0 / 26 and quantity_unit " +
+        "`tokens` on all three lines. Read 2026-09-10. It is absent from the console's " +
         "own view because US$0.00083 rounds to US$0.00 at the two decimals it " +
         "displays -- the API carries the full precision and the console does " +
         "not.",
@@ -346,7 +407,13 @@ export type VoicePriceRegisterProblem = {
     | "owner_missing"
     | "ticket_missing"
     | "audio_input_rate_unknown"
-    | "observation_does_not_reconcile";
+    | "observation_does_not_reconcile"
+    // The provider billed a unit the recorded rates are not per. Both say the
+    // register's *names* are wrong, which is why they are not folded into
+    // `observation_does_not_reconcile` -- that code means the arithmetic does
+    // not close, and here it may close perfectly while meaning something else.
+    | "billed_unit_is_not_tokens"
+    | "billing_basis_diverged";
   detail: string;
 };
 
@@ -552,10 +619,43 @@ export const auditVoicePriceRegister = (input: {
             "an invoice is recorded but no audio input rate is, so the charge " +
             "cannot be attributed to any rate at all",
         });
+      } else if (
+        observation.billedAudioInputQuantityUnit !== "tokens" ||
+        observation.billedOutputQuantityUnit !== "tokens"
+      ) {
+        // A per-million-token rate has nothing to say about a charge billed
+        // in seconds or characters. Converting here would invent the very
+        // relationship the register exists to record having measured. Both
+        // lines are checked because the provider reports the unit per line
+        // item: an output line billed in seconds is as unreconcilable as an
+        // input line, and checking one would let the other through.
+        const offending = [
+          observation.billedAudioInputQuantityUnit !== "tokens"
+            ? `audio input in \`${observation.billedAudioInputQuantityUnit}\``
+            : null,
+          observation.billedOutputQuantityUnit !== "tokens"
+            ? `output in \`${observation.billedOutputQuantityUnit}\``
+            : null,
+        ].filter((line) => line !== null);
+        problems.push({
+          modelId,
+          code: "billed_unit_is_not_tokens",
+          detail:
+            `the charge was billed ${offending.join(" and ")}, which a ` +
+            "per-million-token rate cannot be reconciled against; the rate " +
+            "fields have to be renamed for the unit actually billed",
+        });
       } else {
+        // Reconcile against what the provider billed for, not against what
+        // the response said it used. They have been equal on every reading
+        // so far, and that equality is the reason these rates can be stated
+        // per token at all -- but it is an observation, so the arithmetic
+        // uses the billed quantity and the divergence is reported below
+        // rather than being hidden by using the response count for both.
         const implied =
-          (observation.audioInputTokens * audioRate) / 1_000_000 +
-          (observation.outputTokens * entry.price.outputPerMillionTokensUsd) /
+          (observation.billedAudioInputQuantity * audioRate) / 1_000_000 +
+          (observation.billedOutputQuantity *
+            entry.price.outputPerMillionTokensUsd) /
             1_000_000;
         // Half a micro-dollar. The recorded rates must reproduce the observed
         // charge, not merely land near it -- these are exact token counts
@@ -567,10 +667,44 @@ export const auditVoicePriceRegister = (input: {
             code: "observation_does_not_reconcile",
             detail:
               `the recorded rates imply US$${implied.toFixed(6)} for ` +
-              `${observation.audioInputTokens} audio input and ` +
-              `${observation.outputTokens} output tokens, but the observation ` +
-              `records a charge of US$${observation.totalUsd.toFixed(6)} on ` +
-              `${observation.billedOn}`,
+              `${observation.billedAudioInputQuantity} billed audio input and ` +
+              `${observation.billedOutputQuantity} billed output tokens, but ` +
+              `the observation records a charge of ` +
+              `US$${observation.totalUsd.toFixed(6)} on ${observation.billedOn}`,
+          });
+        }
+
+        // The rate fields are named "per million tokens" and the register
+        // quotes them against token counts taken from responses. That is only
+        // meaningful while the provider bills the same count. When it stops,
+        // the name is wrong before the number is, and saying so is the point
+        // of recording the billed quantity at all.
+        //
+        // Both sides are checked. Checking only the input line would pass an
+        // observation whose output quantity diverged while its arithmetic
+        // still closed -- the charge reconciles against the billed quantity
+        // by construction, so a closing sum is no evidence the two bases
+        // agree, and `outputPerMillionTokensUsd` would go on claiming to be
+        // per response token with nothing left to contradict it.
+        const divergences = [
+          observation.billedAudioInputQuantity !== observation.audioInputTokens
+            ? `${observation.audioInputTokens} audio input tokens but the ` +
+              `provider billed for ${observation.billedAudioInputQuantity}`
+            : null,
+          observation.billedOutputQuantity !== observation.outputTokens
+            ? `${observation.outputTokens} output tokens but the provider ` +
+              `billed for ${observation.billedOutputQuantity}`
+            : null,
+        ].filter((line) => line !== null);
+        if (divergences.length > 0) {
+          problems.push({
+            modelId,
+            code: "billing_basis_diverged",
+            detail:
+              `the responses reported ${divergences.join(", and ")}, so the ` +
+              "rate fields are no longer rates per response token and have " +
+              "to be renamed for the unit they are per " +
+              "(docs/policy/voice-input.md §6.1.3)",
           });
         }
       }
