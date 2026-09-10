@@ -87,6 +87,7 @@ const scan = (
     missing,
     lifecycleWarnings: [],
     heuristicallyExcluded: [],
+    prereleaseExcluded: [],
     truncated: false,
   },
 ];
