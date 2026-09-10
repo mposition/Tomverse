@@ -52,15 +52,22 @@ const authorized = (request: Request) => {
 /**
  * What leaves this process, per S1's first condition.
  *
- * Key **ids** and the codes, never material. The findings the shared module
- * produces already carry only ids, and this restates the allowlist rather than
- * spreading the finding object: a field added upstream would otherwise start
- * appearing in a response and a log by doing nothing.
+ * Codes, declared key ids, and instants. This restates the allowlist rather
+ * than spreading the finding object: a field added upstream would otherwise
+ * start appearing in a response and a log by doing nothing.
+ *
+ * **The allowlist is field names, and that is not by itself enough.** A value
+ * under an allowed name can still be material -- an operator who pastes a ring
+ * into the active-id variable makes `keyId` a pepper. That is dropped upstream,
+ * in `withoutUnverifiedReferences`, because only the assembly knows which ids
+ * the ring confirmed; the CLI needs the same protection and would not get it
+ * from here.
  */
 const publicFinding = (finding: MobileKeyringFinding) => ({
   code: finding.code,
   ...(finding.keyId === undefined ? {} : { keyId: finding.keyId }),
   ...(finding.otherKeyId === undefined ? {} : { otherKeyId: finding.otherKeyId }),
+  ...(finding.unverifiedReference ? { unverifiedReference: true } : {}),
   ...(finding.retiredAtMs === undefined
     ? {}
     : { retiredAt: new Date(finding.retiredAtMs).toISOString() }),
@@ -116,16 +123,25 @@ export async function POST(request: Request) {
     // S5's fourth branch: the rings do not parse, so every line the report
     // could produce would describe something other than what is configured.
     // None of it is shown, and this one *is* a failed run.
-    // The keyring's own errors name variables and key ids and never quote
-    // material (`parseRing`, `parseRetirements`), so they are safe to keep.
-    // Anything else is recorded by name only: an error this route has never
-    // seen is not the place to find out what it puts in its message.
-    const recorded =
-      error instanceof MobileAuthKeyringError
-        ? error
-        : Object.assign(new Error("the keyring could not be read"), {
-            name: error instanceof Error ? error.name : "UnknownError",
-          });
+    //
+    // **A fixed sentence, never the parser's.** An earlier version kept the
+    // message of a `MobileAuthKeyringError` on the grounds that the class was
+    // known -- but `parseRing` quotes the text it found in the *id* position
+    // (`"..." is not a usable ... key id`), and material pasted there is
+    // exactly what makes an id unusable. A known error class does not make its
+    // message safe, so the row gets a code and the variable is left to the
+    // operator's own environment.
+    const recorded = Object.assign(
+      new Error("the mobile auth rings could not be parsed; the message is not recorded"),
+      {
+        name:
+          error instanceof MobileAuthKeyringError
+            ? "MobileAuthKeyringError"
+            : error instanceof Error
+              ? error.name
+              : "UnknownError",
+      }
+    );
     await failScheduledJob({ runId: run?.id, error: recorded });
     console.error(
       JSON.stringify({

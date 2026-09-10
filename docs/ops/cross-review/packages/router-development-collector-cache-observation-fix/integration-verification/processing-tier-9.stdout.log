@@ -1,0 +1,17 @@
+✔ a file that is not allowlisted at all fails (1.0093ms)
+✔ an allowlisted file that gains an unpinned line fails (0.1421ms)
+✔ an exemption that outlives its file fails rather than warning (0.131ms)
+✔ a pin whose line is gone fails, so the list cannot rot in place (0.2374ms)
+✔ re-indenting a pinned line is not a change (0.6117ms)
+✔ sendsATier: true is an error even for an allowlisted file (0.1245ms)
+✔ the live allowlist is clean, line for line (71.2071ms)
+✔ app/api/chat/route.ts holds no exemption of any kind (0.145ms)
+✔ every entry pins at least one line (0.3381ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 273.6807

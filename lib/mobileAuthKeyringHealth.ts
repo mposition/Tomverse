@@ -101,6 +101,12 @@ export type MobileKeyringFinding = {
   keyId?: string;
   otherKeyId?: string;
   retiredAtMs?: number;
+  /**
+   * The finding names something the configuration referred to but the ring
+   * does not contain, so its value was **not** reported. See
+   * `withoutUnverifiedReferences`.
+   */
+  unverifiedReference?: boolean;
 };
 
 /** One ring entry, exactly as the shared judgement module describes it. */
@@ -120,7 +126,11 @@ export type MobileKeyringHealthReport = {
     variable: string;
     graceSeconds: number;
     keys: MobileRingKeyState[];
-    retirementsNamingNothing: string[];
+    /**
+     * How many retirement lines name an id the ring does not hold. A count
+     * rather than the ids: what a retirement line names is unverified text.
+     */
+    retirementsNamingNothing: number;
     findings: MobileKeyringFinding[];
   }[];
   /** Every finding, already worded, one line each. */
@@ -178,9 +188,47 @@ const signingIdentity = (base64Pkcs8: string) => {
  * pepper the process has ever seen for the life of the process. This one is
  * created for a report and dropped with it. S1's second condition, approved
  * 2026-09-10.
+ *
+ * Exported so a test can hold the property rather than a symptom: a
+ * comparator that kept a map keyed by the material would return the secret
+ * itself as the identity, and asserting the returned value is a digest
+ * catches that where a duplicate-detection assertion cannot -- the `seen` map
+ * that detection uses is per call either way.
  */
-const pepperIdentity = () => (secret: string) =>
+export const mobileAuthPepperIdentity = () => (secret: string) =>
   createHash("sha256").update(`mobile-auth-pepper ${secret}`, "utf8").digest("hex");
+
+/**
+ * The codes whose `keyId` is text the configuration supplied and the ring did
+ * not confirm.
+ *
+ * `active_key_not_in_ring` echoes whatever the active-id variable held, and
+ * `retirement_names_nothing` echoes the left half of a retirement line. Both
+ * are read before anything checks them against the ring -- `normalizeMobileKeyId`
+ * only trims, and `KEY_ID_PATTERN` accepts 64 characters of `[A-Za-z0-9._-]`,
+ * which a base64url pepper satisfies. So a ring pasted into the active-id
+ * variable came back as a `keyId` in the response, the log and the run row.
+ *
+ * The value is dropped and the variable is named instead: an operator needs to
+ * know *which* variable refers to nothing, and the value is the one thing that
+ * cannot be shown.
+ *
+ * **What this does not cover, said plainly.** Material pasted into the *id*
+ * half of a ring entry becomes a declared id, and declared ids are quoted --
+ * they are also the `kid` of every token the deployment issues, so the system
+ * publishes them either way. Bounding the unverified references is what is
+ * possible here; making an id unrecognisable as material is not.
+ */
+const UNVERIFIED_REFERENCE_CODES = new Set([
+  "active_key_not_in_ring",
+  "retirement_names_nothing",
+]);
+
+/** Drops the value of any reference the ring did not confirm. */
+const withoutUnverifiedReferences = (finding: MobileKeyringFinding): MobileKeyringFinding =>
+  UNVERIFIED_REFERENCE_CODES.has(finding.code)
+    ? { code: finding.code, unverifiedReference: true }
+    : finding;
 
 /**
  * One sentence per finding code. Exhaustive on purpose: a code with no entry
@@ -188,8 +236,9 @@ const pepperIdentity = () => (secret: string) =>
  */
 const FINDING_TEXT: Record<string, (finding: MobileKeyringFinding) => string> = {
   no_active_key_named: () => "no active key is named.",
-  active_key_not_in_ring: ({ keyId }) =>
-    `the active id "${keyId}" is not in the ring, so nothing can be minted.`,
+  // No value: what the active-id variable holds is unverified text.
+  active_key_not_in_ring: () =>
+    "the active id is not in the ring, so nothing can be minted. The value is not shown -- read the active-id variable.",
   active_key_also_retired: ({ keyId }) =>
     `"${keyId}" is the active key and is also retired, so minting is refused now rather than when the retirement instant arrives.`,
   active_key_cannot_sign: ({ keyId }) =>
@@ -200,8 +249,8 @@ const FINDING_TEXT: Record<string, (finding: MobileKeyringFinding) => string> = 
     `"${keyId}" is retired at ${new Date(retiredAtMs ?? 0).toISOString()}, which has not arrived, so it verifies nothing.`,
   grace_over: ({ keyId }) =>
     `"${keyId}" has spent its window and verifies nothing. Removing it and its retirement line together is tidy, and optional.`,
-  retirement_names_nothing: ({ keyId }) =>
-    `a retirement names "${keyId}", which is not in the ring.`,
+  retirement_names_nothing: () =>
+    "a retirement names an id that is not in the ring. The value is not shown -- read the retirement variable.",
   duplicate_material: ({ keyId, otherKeyId }) =>
     `"${keyId}" and "${otherKeyId}" are different ids holding the same material. Renaming a key is not rotating it.`,
 };
@@ -247,7 +296,7 @@ export const mobileAuthKeyringHealthReport = (
     };
   }
 
-  const identityForPeppers = pepperIdentity();
+  const identityForPeppers = mobileAuthPepperIdentity();
   const inputs: {
     variable: string;
     graceSeconds: number;
@@ -290,10 +339,11 @@ export const mobileAuthKeyringHealthReport = (
       graceSeconds: entry.graceSeconds,
       nowMs,
     });
+    // Counted, not listed: see `withoutUnverifiedReferences`.
     const retirementsNamingNothing = unmatchedRetirements({
       ring: entry.ring,
       rawRetirements: entry.raw,
-    });
+    }).length;
     // Wording, not judgement: which findings exist is decided once, in the
     // shared module, and said in two places with two consequences.
     const findings = ringFindings({
@@ -305,7 +355,7 @@ export const mobileAuthKeyringHealthReport = (
       nowMs,
       signsAndVerifies: entry.signsAndVerifies,
       materialIdentity: entry.materialIdentity,
-    });
+    }).map(withoutUnverifiedReferences);
     for (const finding of findings) {
       attention.push(`${entry.variable}: ${mobileKeyringFindingText(finding)}`);
     }

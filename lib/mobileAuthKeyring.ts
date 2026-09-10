@@ -227,11 +227,18 @@ const parseRetirements = (
       // ring is already unusable, so a retirement naming it protects nothing
       // and endangers nothing; a total outage is a total outage. The typo is
       // still worth knowing about, which is what the log is for.
+      // The id is **not** quoted, and that is a change from the first version
+      // of this line. What sits in the id position of a retirement is whatever
+      // the variable held: `KEY_ID_PATTERN` accepts 64 characters of
+      // `[A-Za-z0-9._-]`, which a base64url pepper satisfies, so a ring pasted
+      // into the wrong variable was printed to the log by the code that
+      // refused it. The variable names are enough to find the line.
       reportOnce(
-        `${variable} retires "${keyId}", which is not in ${ringVariable}. ` +
+        `${variable} retires an id that is not in ${ringVariable}. ` +
           "Ignoring the line, and that key -- if it is in the ring under its " +
           "real id -- verifies nothing, because a ring key that is neither " +
-          "active nor explicitly retired is not usable. Check for a mistyped id."
+          "active nor explicitly retired is not usable. Check for a mistyped " +
+          "id, and check that no key material was pasted into the id position."
       );
       continue;
     }

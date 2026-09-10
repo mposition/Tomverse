@@ -1,0 +1,2463 @@
+diff --git a/docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md b/docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md
+new file mode 100644
+index 00000000..1001e659
+--- /dev/null
++++ b/docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md
+@@ -0,0 +1,98 @@
++# Limited Claude review authorization - Router collector v1.1
++
++Recorded by Codex at `2026-09-10 02:57:55 UTC`. This is the receipt preparation time only,
++not an independently observed timestamp of either user message, an integration,
++a provider call or a reviewer execution.
++
++## User responses and their limited meaning
++
++The user's automatic-sequence instruction in the current conversation was:
++
++> 네 권장 순서로 자동으로 진행해주세요. 단, 독립 검토 필요시 미리 꼭 알려주세요.
++
++The user's exact response to the subsequent limited review-preflight question was:
++
++> 네 승인합니다
++
++The immediately preceding question, summarized rather than quoted, requested
++permission to use `--skip-preflight` only for the independent Claude reviews
++of Router benchmark v1 integration and the subsequent v1.1 development work,
++while retaining read-only review and required tests/CI. This receipt carries
++that existing permission forward to the new collector task; it does not ask
++for or invent broader permission.
++
++The earlier receipt is preserved at archived commit
++`c76fc59c778f5ad5839229ff46cf27a9e97b4823`:
++[the immutable v1 integration/v1.1 authorization](https://github.com/mposition/Tomverse/blob/c76fc59c778f5ad5839229ff46cf27a9e97b4823/docs/ops/cross-review/packages/router-development-benchmark-v1-integration.authorization.md).
++Its scope was read from that committed file, not inferred from a passed
++exchange or a null preflight field. The original receipt and review records
++are not copied, rewritten, reopened or used as this feature's verdict.
++
++## Task binding and preparation status
++
++This receipt belongs only to
++[router-development-collector-v1-1](router-development-collector-v1-1.task.json),
++a new feature task with no `supersedes`, base
++`88dc1d6bfd6cbac983d6d0c2609b7eb37df08910` and exactly 13 review-scope paths.
++The scope comprises the 11 implementation/documentation paths plus this
++receipt and its task declaration. These two records are instructions and
++authorization provenance, not implementation or test evidence.
++
++This receipt records limited authorization at creation time; it does not
++certify completion of integration, packaging or reviewer execution. The
++actual integration evidence belongs in the separate integration records,
++and the control program records the package, checks, reviewed commit,
++full digest and reviewer result. No earlier digest or approval substitutes
++for that task-specific evidence. This receipt is not a live status report.
++
++The existing v1 source and original 11 task/review records remain protected.
++The original record baseline is
++`0e853fd9ecebb0808dacefc6816a0d1f25148783`. Their prior approvals name their
++own snapshots and do not approve collector v1.1 or authorize paid collection.
++
++## Conditions that remain in force
++
++- Announce the independent review before it runs. Actual reviewer execution
++  still requires successful checks and a separate explicit orchestrator go.
++  The automatic-sequence instruction does not waive this checkpoint.
++- Use the unchanged control program with author Codex and reviewer Claude.
++  Its intended read-only invocation is
++  `claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config`,
++  with the prompt on stdin and no model override. No author executor, shell,
++  write tool or expanded MCP access is authorized.
++- `--skip-preflight` is permitted only for this announced v1.1 review under
++  the existing limited authorization. Record it as a skip, not as a passed
++  preflight or evidence that a write attempt was refused. All original
++  interactive-review null command/preflight/usage fields remain unchanged.
++- `--review-despite-check-failures` is prohibited. Required tests, guards and
++  CI remain mandatory. A failed check is investigated, fixed and reverified,
++  not overridden or relabeled by this receipt.
++- Remove `ANTHROPIC_API_KEY` case-insensitively from a copy of the review
++  child's environment only, retaining the stored `claude.ai` login/config.
++  Do not change parent or persistent environment, switch to `--bare`, or
++  fall back to API-key billing. Before an authorized actual invocation,
++  verify login through sanitized read-only authentication status; this
++  receipt is not that observation and contains no credentials.
++- Only the exact new output directory
++  `docs/ops/cross-review/packages/router-development-collector-v1-1` may be
++  excluded during packaging. `generatedPaths` is empty. Every one of the
++  13 scoped paths remains visible in the reviewed diff; the original passed
++  exchange and control program remain unchanged.
++- At most two fix rounds are permitted under the existing control-program
++  cap. This new feature task is not a mechanism to reset an exhausted review
++  or reopen a passed exchange. Keep the eventual exchange
++  `awaiting_review` until an actual verdict exists on its exact new digest.
++- This permission is not an authenticated signature, human source-code
++  inspection, sandbox-test result, reviewer verdict, model-quality result
++  or production approval. Internal Codex reproductions and mock/offline test
++  observations must remain distinct from actual Claude observations.
++- No paid benchmark collection/provider call for benchmark answers,
++  API-billing fallback, main merge,
++  production deployment, production Router/pricing/registry/credit change,
++  model-winner claim, quality-band promotion or adoption is authorized.
++  A future paid collection needs its own numeric budget, selected rows,
++  digest, expiry and accepted assumptions; review permission does not supply
++  any of those.
++- Source commit, normal integration, package creation, reviewer invocation,
++  push and merge each retain their applicable verification and separate
++  orchestrator go. Authoring these two records performs none of them.
+diff --git a/docs/ops/cross-review/packages/router-development-collector-v1-1.task.json b/docs/ops/cross-review/packages/router-development-collector-v1-1.task.json
+new file mode 100644
+index 00000000..c16fbef0
+--- /dev/null
++++ b/docs/ops/cross-review/packages/router-development-collector-v1-1.task.json
+@@ -0,0 +1,39 @@
++{
++  "taskId": "router-development-collector-v1-1",
++  "requirement": "Build and independently review a standalone, operator-funded DEVELOPMENT-only collector for the existing Router development benchmark v1. This is a new feature task, not a continuation of a passed exchange or reuse of an earlier Claude verdict. Preserve the existing synthetic 24-case corpus, exact-JSON grader, offline benchmark CLI, original 11 task/review records, and all production Router, pricing, runtime registry, credit, product-client and cross-review-controller behavior. Retain the full catalogue-by-case population with refusals and not-run rows; only prompt text is model input. Default preview is a credential-free proposal/census and never an approval. Only explicit execute plus --live may call a provider after a separate human approval binds the exact manifest digest, selected rows, every numeric budget/call/time limit, expiry and assumption. This implementation/review task performs no paid benchmark calls. Freeze source, context, model/API identity, pricing and product generation settings; reject dirty or drifting execution and recheck before each dispatch and after durable intent with a fresh deadline. Use conditional catalogue-context/output-cap and maximum-current-tier integer-microUSD reservations, never presented as verified provider context, actual invoice cost or a guaranteed billed ceiling. Retain every dispatched reservation permanently, nullable observations/cost, and durable intent-to-terminal lineage. Stop on known raw-token bound violations even when cost is unknown, known unsupported served tier/billing including HTTP errors, and observed frozen-rate cost above reservation. The canonical Git-common-dir registration/witness/ledger and exclusive lock must fail closed on crash-unknown, missing/truncated/rolled-back state and stale locks, with no retry or fallback. Reuse existing product model/settings helpers with maxRetries=0 and no tools or outbound tier selector; retain only allowlisted provider-origin observations, never SDK-invented usage/identity, raw reasoning, bodies, headers or error secrets. Preserve the explicit distinction between 1 MiB post-reception answer storage, 64 KiB v1 answer export and 16 MiB v1 document limits, without claiming a hard network-ingress or memory cap. Preserve blank/wrong/failure/missing denominators. Durable timeout stops run/resume but exports as v1 timeout; crash-unknown, unsupported and bound-violating records block the whole export. Measure the eventual clean reviewed snapshot against develop commit 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910, after the authorized normal integration and successful verification. That integration, packaging and independent review are not completed by this task declaration. Set author=codex and reviewer=claude through the existing control-program flags. The limited user permission in router-development-collector-v1-1.authorization.md permits --skip-preflight only for the announced v1.1 independent review after a separate orchestrator go; no failed-check override, model override, API-billing fallback, benchmark execution, main merge, production deployment, model-winner claim or adoption is authorized.",
++  "completionCriteria": [
++    "The clean integration snapshot includes exact base 88dc1d6bfd6cbac983d6d0c2609b7eb37df08910 through a normal merge preserving the reviewed v1 history. Record actual integration commits, parents and verification outcomes separately; this declaration does not certify their completion. A freshly computed digest covers exactly the 13 listed source/specification/receipt paths. This task and its authorization receipt are review instructions/provenance, not implementation evidence.",
++    "The original docs/ops/cross-review/packages/router-development-benchmark-v1.task.json and all 10 original files under docs/ops/cross-review/packages/router-development-benchmark-v1/ remain byte-identical to 0e853fd9ecebb0808dacefc6816a0d1f25148783. The existing 24-case corpus, v1 README/grader/planner/offline CLI/tests, production Router/client/pricing/registry/credits, package-lock.json, and cross-review controller/executors remain unchanged. Review scope does not grant authority over these protected files or reuse their passed approvals.",
++    "package.json preserves every non-script field and existing script while adding only benchmark:router:collect and test:router-development-collector. Integration uses the exact union of the two parents' scripts with no conflicting shared value. scripts/check-processing-tier-core.mjs adds only the exact collector response-observation pin with sendsATier:false; its guard regex/functions and every existing allowlist entry are preserved. This is not permission to send an outbound processing tier or relax a guard.",
++    "Preview/help and export do not invoke provider clients; no-budget preview retains the full v1 plan and null collectionManifest/approval. Full manifest selection retains the original 42-by-24 snapshot population (1,008 rows, including its 360 static-eligible and 648 refused rows) without relabeling 15 static-eligible models as account-access or health verified. Selected, refused, unattempted, attempted and acquired/exportable rows remain distinguishable. Only row.input.prompt is sent, without gold, case/grading metadata or other model answers.",
++    "Execute requires --mode=execute, --live, a separately supplied approved record and an exact manifest/digest match. Bind all selected rows, numeric total/per-request microUSD limits, maximum calls, request/run timeouts, expiry, acknowledgements, clean source files/commit, model/API identity, context assumption, price revision/tiers and generation settings. No defaults or automatic approvals authorize spend; no execution-time overrides reprice or retarget a saved manifest. Current source/pricing/settings and fresh time are checked before each request and again after durable intent. Runtime credentials, account access, provider health, shared product budgets and invoice settlement remain unverified.",
++    "Reservation arithmetic uses positive safe-integer limits, nonnegative validated tier rates, maximum current input/cache-write/output tier rates, upward integer-microUSD rounding including input-partition rounding allowance, and overflow rejection. The catalogue context input bound and output-cap assumption are explicitly conditional, not verified tokenization, provider-enforced billing ceilings or invoices. Reservations are never released after dispatch, including failure, timeout or unknown outcomes; unknown observations and cost stay null instead of zero.",
++    "Known input totals or known disjoint input-partition lower bounds above the frozen context assumption, and known output or reasoning tokens above the frozen output cap, independently stop with observed_token_bound_exceeded even when other usage or cost is null. Preserve the existing answer, raw allowlisted observations and committed reservation before any overflowing cost calculation; do not fill missing observed totals. Known unsupported billing/served tier, including an HTTP-error response or a mislabeled terminal status, and estimated token-cost-over-reservation also stop later dispatch/resume and block the entire export. These are assumption/measurement failures, not authenticated invoice overrun claims or authority to increase caps.",
++    "Use the canonical Git common directory shared by this clone's worktrees, a fixed approval-ID registration, append-only hash-chained journal, separate per-event sequence/digest witness, and an exclusive wx lock. Complete partial writes and file fsync for intent and witness before dispatch. Detect duplicate/orphan events, missing registration/ledger, truncation, witness rollback mismatch, and crash-unknown without resetting history or budget. Never automatically delete stale locks, retry attempted rows, fallback to another model, or claim exactly-once provider execution, central-clone protection or power-loss guarantees.",
++    "A durable SDK deadline timeout is retained as a known local terminal and stops the run and resume with request_timeout, without returning reservation or asserting provider cancellation/zero billing. Export alone may accept this stop reason and an expired historically valid approval, emitting a v1 timeout row. Crash-unknown, incomplete returned answers, unsupported billing/steps, token-bound breaches and storage/export oversize block the whole export rather than dropping attempted rows or scoring them as wrong answers.",
++    "The provider adapter reuses getActiveAiModel/getModelGenerationSettings and the frozen model-specific output cap, with maxRetries:0, one prompt, a deadline abort signal, no tools/search/coding executor, no fallback and no outbound tier selector. SDK responseBody opt-in is transient in memory for an exact provider-field allowlist; no raw body, reasoning, headers, error text or secrets persist. Missing normalized/synthetic SDK usage and identity are not promoted to provider observations. servedProcessingTier stays nullable; auto/missing is not invented standard processing, and known non-standard/default tiers are unsupported.",
++    "Post-reception answer storage is limited to 1,048,576 UTF-8 bytes with full-byte-count/digest preservation on omission; the existing v1 answer/document limits remain 65,536 and 16,777,216 bytes. State clearly that these limits do not bound network ingress or SDK memory. Export maintains journal-bound self-reported provenance, null providerCostUsd, existing prompt/call digests and the full v1 plan denominator. Blank, invalid/wrong JSON, complete provider failure and durable timeout remain visible to the frozen scorer; missing or unsupported data cannot inflate correctness.",
++    "Actual offline runs pass at least 72 collector tests and 95 original benchmark tests using npm run test:router-development-collector and npm run test:router-development-benchmark, the targeted 181-test Router regression set, and all 9 tests in tests/processingTierGuard.test.mjs, with zero failures and skips. Record exact commands and actual counts, not an inferred total or prior result. The Router set comprises routerFullCatalogDiagnostic, routerCandidates, routerDecision, routerSelection, routerCallLimits, chatContextWindow, taskProfileCore, routerScorePolicy, routerCostProjection, routerSignalCore, routerQualityEvalSet and routerQualityDecisionGate test files. Use the existing react-server/tsx/serial test invocation. No test invokes a paid provider.",
++    "Official npm run typecheck, lint for every changed source/test/guard script, check:encoding, check:doc-references, check:policy-section-references, check:model-pricing, check:router-quality-eval, check:router-context-window and check:context-window-register pass. Explicit byte/semantic checks verify original records and v1 files, package non-script fields/lock, exact parent-script union and preservation of old processing-tier allowlist data and guard behavior. Record each genuine execution separately from the author's claims and the later control-program checks; do not reinterpret failures or skip mandatory checks.",
++    "Package only after verification, the authorized normal integration and a separate orchestrator go, using a new clean named commit and the existing control program with --author=codex --reviewer=claude. generatedPaths is empty. Only the exact new output directory docs/ops/cross-review/packages/router-development-collector-v1-1 may be excluded; no source, prior record, parent directory or nested file exclusion is allowed. No package/reviewer verdict is created by authoring this task. The eventual exchange remains awaiting_review until an actual verdict bound to its full newly computed digest exists.",
++    "Before actual independent review, announce its necessity and obtain the orchestrator's explicit go. Keep the existing Claude Read,Grep,Glob-only safe-mode/strict-MCP invocation, no shell/write tools or model override. Remove ANTHROPIC_API_KEY case-insensitively only from the review child environment while preserving stored claude.ai login; do not mutate parent/persistent environment, switch to bare mode or fall back to API billing. Preserve the exact limited user permission in the separate receipt; --skip-preflight is a recorded skip, never a passed preflight, and --review-despite-check-failures is prohibited. At most two fix rounds are allowed, with no supersedes or reopening of an earlier passed exchange.",
++    "Documentation distinguishes operator-funded development collection from production dispatch, synthetic agent-authored fixtures from human-adopted decision evidence, static catalogue admission from runtime readiness, conditional reservation from actual invoices, and internal mock tests from independent Claude/provider observations. There are zero actual provider calls to collect benchmark answers in this task; the separately authorized read-only Claude code review is not a benchmark collection run. No main merge, production deployment, pricing/registry/credit policy change, model winner, quality-band promotion or adoption is authorized. Future commit/package/review/push/merge steps each remain subject to their applicable separate go."
++  ],
++  "baseCommit": "88dc1d6bfd6cbac983d6d0c2609b7eb37df08910",
++  "writableScope": [
++    "docs/ops/cross-review/packages/router-development-collector-v1-1.authorization.md",
++    "docs/ops/cross-review/packages/router-development-collector-v1-1.task.json",
++    "docs/ops/router-development-benchmark/collector-v1.1.md",
++    "lib/routerDevelopmentCollector.ts",
++    "lib/routerDevelopmentCollectorJournal.ts",
++    "lib/routerDevelopmentCollectorProvider.ts",
++    "package.json",
++    "scripts/check-processing-tier-core.mjs",
++    "scripts/router-development-collect.mjs",
++    "tests/routerDevelopmentCollector.test.mjs",
++    "tests/routerDevelopmentCollectorAdversarial.test.mjs",
++    "tests/routerDevelopmentCollectorCli.test.mjs",
++    "tests/routerDevelopmentCollectorProvider.test.mjs"
++  ],
++  "generatedPaths": []
++}
+diff --git a/docs/ops/router-development-benchmark/collector-v1.1.md b/docs/ops/router-development-benchmark/collector-v1.1.md
+new file mode 100644
+index 00000000..e3902dda
+--- /dev/null
++++ b/docs/ops/router-development-benchmark/collector-v1.1.md
+@@ -0,0 +1,440 @@
++# Router development benchmark collector v1.1
++
++This collector is a development-only acquisition companion to the
++[offline v1 benchmark](README.md). It is not production Router dispatch,
++an account-access probe, a model-health check, a pricing-policy change, or
++permission to spend. The synthetic corpus remains a DEVELOPMENT FIXTURE /
++CANDIDATE set, not human-adopted `ROUTE-01` evidence.
++
++Implementation: [manifest and approval core](../../../lib/routerDevelopmentCollector.ts),
++[journal and export](../../../lib/routerDevelopmentCollectorJournal.ts),
++[provider adapter](../../../lib/routerDevelopmentCollectorProvider.ts), and
++[CLI](../../../scripts/router-development-collect.mjs).
++
++## Status and authorization boundary
++
++No paid benchmark run is performed as part of this implementation. Independent
++Claude review of v1.1 has not yet run. Earlier v1 and integration approvals
++apply to their recorded source snapshots and digests, not this collector.
++There is no quality-band promotion, production adoption, release-registry
++change, main-branch integration, or production deployment in this work.
++
++A preview is a proposal, not an approval. Any real collection needs a separate
++authorization binding the exact manifest digest, selected rows, numeric
++per-request and total budgets, call count, time limits, and expiry. An agent
++must not choose numbers and present them as the user's approved budget.
++Authorization for independent code review, including a review-preflight
++exception, does not authorize benchmark provider calls.
++
++The local collector's admission rules do not replace the product's entitlement,
++operational guardrail, concurrency, or provider-budget layers. Those separate
++contracts remain in [the credit and cost policy](../../policy/credit-and-cost-limits.md)
++and [the concurrency policy](../../policy/chat-concurrency-and-identity.md).
++No credit ledger, production reservation, price registry, or runtime model
++registry is changed by this development workflow.
++
++## Population, selection, and coverage
++
++The v1 corpus has 24 synthetic cases: 12 Korean and 12 English, with 12
++structured extraction and 12 source-grounded calculation tasks. Their prompts
++contain the facts needed to answer; they need no search, attachments, or code
++execution. The existing exact-answer grader, gold data, and v1 result contract
++are not redefined by the collector.
++
++Keep the full catalogue-by-case plan, including refused rows, alongside any
++selected collection subset. In the original documented v1 static snapshot,
++42 models times 24 cases yielded 1,008 population rows: 360 statically eligible
++rows (15 models per case) and 648 refusals. These are snapshot observations,
++not guaranteed totals for future catalogues or accounts. Selecting a few rows
++does not turn them into the whole benchmark, or remove the other rows from
++coverage reporting.
++
++The two v1 diagnostics remain distinct:
++
++- `row.router` preserves the product Router's inferred profile, eligibility,
++  cap, rank, and selection diagnostics.
++- `row.benchmarkEligibility` is static admission for validated fixture
++  requirements and model-specific product caps. It is not production dispatch
++  admission or evidence that credentials, quota, region, provider health,
++  model availability, or current runtime registry permit a call.
++
++Only the case's model input is sent for generation. Gold answers, grading
++rules, verdicts, and other models' answers are not prompt inputs. Correctness
++is checked later by the existing deterministic grader; this is not an LLM
++judge or a coding executor.
++
++Partial collection remains partial evidence. Preserve refusals, selected and
++unselected rows, attempts, transport outcomes, missing results, and export
++omissions separately. An unknown or oversize acquisition is not proof of a
++wrong model answer and must not be converted into one to obtain a score.
++The v1 scorer's existing coverage and complete-group denominator rules still
++apply to exported results. No model winner or quality-band claim follows
++from a preview, a successful API request, or a partial score.
++
++## Conditional reservation is not a bill
++
++The collector's conservative reservation uses catalogue context capacity and
++the highest rates across the current pricing revision's tiers, subject to the approved
++assumptions. This differs from the v1 prompt-token planning estimate. Neither
++figure verifies provider tokenization, actual model context capacity, account
++access, processing tier, additional fees, or the eventual invoice.
++
++The word "reservation" describes a local admission/accounting allocation,
++not a provider-enforced spending ceiling or a product credit reservation.
++Even a calculation using the largest current listed tier is conditional on
++the catalogue and pricing assumptions being correct. Request output limits
++and cancellation signals are not proof of a billed-cost maximum.
++
++Keep these quantities separate: reserved conditional budget, observed token
++usage, token-price estimates derived from that usage, and provider-billed
++cost. Missing usage and cost remain `null`; unknown is not zero. Partial known
++usage must not make an incomplete total look fully measured. Aborted,
++interrupted, or unconfirmed requests can have incurred charges even when no
++answer is available locally. Their reservation is not automatically returned
++to a spendable pool.
++
++The product policy explicitly separates catalogue pricing from account
++visibility and records an unresolved actual-processing-tier gap. See
++[credit and cost policy, pricing registry and reservation sections](../../policy/credit-and-cost-limits.md).
++This development collector does not close that gap by relabeling assumptions
++as verified prices or actual billing.
++
++`totalReservedMicroUsd` is the reservation required by all selected calls.
++`completionPossibleWithinLimits` reports whether those calls all fit the
++proposed per-request, total, and call-count limits; `false` does not make the
++proposal an approval or silently shrink its population. An approved partial
++budget can execute a prefix of sorted `selectedRowIds` and stop with
++`budget_stopped`. No skipped row is removed from the report.
++
++The run report uses `committedReservationMicroUsd`,
++`reservationPolicy: "never_released_not_actual_spend"`, and
++`actualInvoiceMicroUsd: null`. Per-terminal
++`tokenUsageAtFrozenRatesMicroUsd` is a conditional token-cost estimate, not
++actual spend. It is `null` unless the needed input partitions, output usage,
++and applicable cache-write rates are known and consistent. Money limits use
++positive safe-integer micro-USD: 1,000,000 micro-USD equals US$1. The reservation
++also includes two micro-USD of input-partition rounding allowance.
++
++## Durable request and interruption boundary
++
++The acquisition contract is intent before dispatch, followed by a terminal
++record for the same request. Persisting an intent is not evidence that a
++provider received it; an intent with no confirmed terminal record is also not
++evidence that nothing happened.
++
++An interrupted or unknown request stays on hold. Do not reissue its row just
++because the process exited, the client timed out, or a lock looks old. There
++is no exactly-once guarantee at the provider boundary, and local cancellation
++does not verify provider-side cancellation or billing. Do not automatically
++delete a waiting lock, fabricate a terminal record, refund the reservation,
++or copy a manifest into a new location to bypass duplicate protection.
++Resolve uncertain calls through a separately authorized reconciliation; this
++document does not authorize manual lock or journal surgery.
++
++The journal is shared by worktrees of the same Git repository, under
++`git-common-dir/router-development-collector-v1.1/`. Each `approvalId` has a
++registration witness (`.registration.jsonl`), append-only event ledger
++(`.jsonl`), and exclusive active lock (`.lock`). These are local operational
++artifacts outside the worktree, not tracked benchmark source files. The
++registration binds the approval and manifest and records each ledger event's
++sequence and digest. Event hashes, ordering, duplicates, missing terminal
++records, and a ledger rolled back behind its registration witness are checked
++on replay. Writes loop over partial writes and call file `fsync` before
++dispatch. This is not a central ledger, a power-loss guarantee, or protection
++against an administrator deleting both files or using a separate clone.
++
++The lock is removed by the running process on ordinary exit from its locked
++operation. An already-existing lock is refused without age-based recovery.
++After a normal restart, completed or attempted rows are not called again; only
++unattempted rows can continue if the journal is unambiguous and time/budget
++remain. The run deadline starts at the first journal header's `startedAt`, not
++each restart. All dispatch intents continue to count against the budget.
++
++`unknown`, `timeout`, `measurement_unsupported`, an intent without a terminal,
++or an observed token-cost estimate over its reservation stops further calls.
++Missing usage alone remains nullable metadata, not a fabricated transport
++failure. The report retains every original plan row as a refusal, `not_run`,
++or its acquisition outcome.
++
++Known raw-token violations are checked independently of whether a complete
++cost estimate is available. An observed input total, or the lower bound formed
++by known disjoint input partitions, above the frozen catalogue-context
++assumption stops further dispatch and resume. The same applies to observed
++output or reasoning tokens above the frozen output cap. Unknown partitions
++remain `null`; using known parts to detect a lower-bound violation does not
++fill in an observed total. Such a breach also blocks export. It is evidence
++that a reservation assumption failed, not proof of an actual invoice overrun
++or permission to raise the cap, refund the reservation, or retry the row.
++The exact stop reason is `observed_token_bound_exceeded`. The terminal retains
++the existing answer and raw allowlisted observations, keeps the reservation,
++and records its token-cost estimate as `null`; even a very large valid token
++count cannot overflow cost arithmetic before that evidence is recorded.
++
++A durably recorded SDK deadline timeout is different from a crash with no
++terminal. It is a known client execution outcome and can be exported as v1
++`timeout`; it is not confirmation of provider cancellation or zero billing.
++Its reservation stays committed and its row cannot retry. The run and any
++resume stop with `request_timeout`; remaining unattempted rows do not continue
++under that approval. Export allows this specific stop reason while still
++refusing crash-unknown and unsupported measurements.
++`completeResponse: false` describes the missing complete HTTP response, not
++the absence of a durable local terminal record.
++
++## Data retention and byte limits
++
++The implementation reuses the existing product client rather than introducing
++a new network transport. Consequently there is no hard network-ingress or
++in-memory response byte cap. Response-size checks after SDK completion can
++limit what is persisted, but cannot undo bytes already received or allocated.
++The v1 export/grader input limit is a separate boundary, not a transport
++limit. An answer can be collected yet not be exportable to v1.
++
++Current limits are 1,048,576 UTF-8 bytes for persisted answer text, 7,340,032
++bytes per journal event, and 536,870,912 bytes for the journal. Above the answer
++storage limit, text is omitted but its byte count and SHA-256 digest remain;
++the outcome is `measurement_unsupported`, not a wrong answer. v1 accepts at
++most 65,536 answer bytes and a 16,777,216-byte results document. A stored answer
++between the two answer limits therefore still blocks v1 export.
++
++Do not persist raw reasoning, request/response bodies, HTTP headers, provider
++error payloads, credentials, or environment dumps. Retain only the defined
++answer and allowlisted acquisition metadata. Safe diagnostic codes are not
++the provider's raw error text. The adapter explicitly requests SDK 7 response
++bodies in memory to inspect provider-origin usage/identity fields, then
++retains only the allowlisted observation, not the body. It does not substitute
++SDK-normalized usage or generated IDs for missing provider observations.
++Request bodies are not opted into SDK result metadata. None of this is a
++network or memory sandbox.
++
++`servedProcessingTier` records an allowlisted provider response field or
++`null`. A reported non-standard/default tier such as priority, flex, or batch
++marks billing unsupported and stops acquisition. A reported `auto` stays
++`auto`; missing stays `null`. Neither is filled in as verified standard
++processing, and neither authenticates the eventual invoice. Reading this
++field does not send a processing-tier selector or alter the product policy.
++
++The adapter reuses `getActiveAiModel` and `getModelGenerationSettings`, checks
++the generation settings against the manifest, supplies only the prompt and
++model-specific output cap, disables retries with `maxRetries: 0`, and passes
++the remaining request/run deadline as an abort signal. There are no search
++tools, tool executors, fallbacks, or explicit processing-tier overrides.
++Additional or unmeasurable paid steps are unsupported, not silently accepted
++as one measured answer. Provider client imports are deferred until dispatch.
++
++## Manifest and approval records
++
++The schema version is `router-development-collector-v1.1`. A manifest stays
++`status: "proposal"`; approving it does not rewrite that file. Its digest
++binds the complete v1 `plan`, `collectorSource`, `selectedRowIds`, per-call
++`pricing`/`reserve`/`settings`, `limits`, `assumptions`, and summary fields.
++Source, catalogue, pricing, input, and generation-setting drift cannot be
++accepted by editing a saved digest. Execution rejects dirty source snapshots.
++
++`limits` contains exactly `maxTotalMicroUsd`, `maxRequestMicroUsd`, `maxCalls`,
++`requestTimeoutMs`, `runTimeoutMs`, and `expiresAt`. The first five are positive
++safe integers. `maxRequestMicroUsd` cannot exceed `maxTotalMicroUsd`;
++`maxCalls` is at most 1,008, request timeout at most 3,600,000 milliseconds, and
++run timeout at most 86,400,000 milliseconds. These validation maxima are not
++recommended or already-approved budget values.
++
++The separate approval contains exactly `schemaVersion`, `status`,
++`approvalId`, `manifestDigest`, `approvedBy`, `approvedAt`, `expiresAt`, and
++`acknowledgements`. Required status is `approved`. The ID is 1-64 lowercase
++letters/digits/hyphens, starting with a letter or digit. The manifest digest
++must match exactly; expiry must equal the manifest's expiry. Approval must be
++no earlier than manifest creation, not in the future, and before expiry. Copy the exact
++`assumptions` array into `acknowledgements` only after the responsible person
++has actually accepted those assumptions; do not synthesize their identity,
++time, or consent. File/schema validation is not signature authentication.
++The CLI does not generate an approval.
++
++## Export and scoring boundary
++
++Export replays the same registered journal under a lock and validates its
++approval binding. An expired approval may be used for exporting existing
++records, never for new execution; its original identity and time checks still
++apply. Crash-unknown, unsupported, incomplete returned answers, or oversized
++attempted rows block the whole export. Export does not drop those rows to
++improve a score. The explicit exception is a durably recorded deadline timeout:
++it exports as a timeout outcome with null answer, not as a wrong answer or an
++invented complete response.
++
++Eligible returned answers become v1 `succeeded` rows, including blank or wrong
++answers that the existing grader must judge. Complete provider HTTP failures
++become v1 `failed` rows, with safe failure codes. `providerCostUsd` remains
++`null`, not the reservation or frozen-rate estimate. Exported origin is
++`externally-saved` with a journal-bound, self-reported provenance statement;
++neither local hashes nor provider-response labels authenticate provider
++billing. Unattempted rows are absent from the results file but remain in the
++full plan and the scorer's missing-row/coverage accounting.
++
++## Operating interface
++
++Run these on the operator's local Windows PC in PowerShell, at the repository
++root shown below. Prerequisites are Git, Node.js 22, and dependencies installed
++with this checkout's lockfile using the repository setup workflow. The npm
++script supplies the `react-server` condition and TypeScript loader. Do not
++run this from a production container or substitute production credentials.
++
++Help, preview, export, and the offline tests need no provider credentials.
++Only explicitly approved execution needs credentials for its selected
++providers, inherited from the process environment through
++[`resolveProviderApiKey`](../../../lib/modelRegistryShared.ts). The CLI does
++not load a dotenv file. Use the existing approved secret-loading process;
++never paste keys into command lines, manifests, approvals, journals, or this
++document. Product `CHAT_MODEL_*` price/cache-price/output/reservation overrides
++are rejected, including differently cased environment-variable names.
++
++| Mode | Provider calls | Filesystem effects |
++| --- | --- | --- |
++| `--help` alone | None | Prints help; no collector state or output file. |
++| `preview` (default) | None | Reads local snapshots; prints JSON, or creates the requested new output file. No registration, ledger, or lock. |
++| `execute` with approval and `--live` | Possible, after admission | Creates/extends registration and ledger in Git common-dir; holds the approval lock; prints a report or creates the requested output file. |
++| `export` | None | Reads registered records under a temporary lock; can create the state directory while checking; prints v1 results or creates the requested output file. |
++
++All value flags use `--key=value`. Duplicate/unknown flags and mode-incompatible
++flags fail. `--help` must stand alone; `--live` is required only for `execute`
++and forbidden elsewhere. `--output` never overwrites, requires an existing
++parent directory, and cannot point inside Git common-dir. Default output is
++stdout. Relative input/output paths resolve from the current shell directory;
++source paths are fixed to the checkout containing the CLI.
++
++### 1. Inspect the complete population without authorization or calls
++
++```powershell
++Set-Location -LiteralPath 'H:/Project/tomverse-router-collector-v1-1-20260910'
++npm run benchmark:router:collect -- --help
++npm run benchmark:router:collect -- --mode=preview --plan=Pro
++```
++
++The no-budget preview returns the full v1 plan, `collectionManifest: null`,
++`approval: null`, required proposal flags, and assumptions. It does not select
++rows or create an executable manifest. `--plan` accepts `Guest`, `Free`, `Pro`,
++or `Max` (default `Pro`); `--requested-model` optionally selects the existing
++product diagnostic's requested-model ID. These two flags are preview-only,
++not execution overrides. A dirty snapshot is inspectable but not executable.
++
++### 2. Prepare a proposal, then obtain separate approval
++
++First finish validation and review, commit the intended source, and create
++the proposal from that clean snapshot. Later source commits also change its
++binding; do not use a draft-tree proposal as final execution authorization.
++Inspect the full plan and choose exact eligible `rowId` values. The following
++prompts collect proposal values; they do not record human spending approval.
++Choose a new task-specific artifact directory and do not reuse filenames.
++
++```powershell
++$collectorArtifacts = 'H:/Project/router-collector-v1-1-local-artifacts'
++New-Item -ItemType Directory -Path $collectorArtifacts
++$collectorRows = Read-Host 'Exact comma-separated eligible rowIds for the proposal'
++$collectorTotal = Read-Host 'Proposed total limit in integer micro-USD'
++$collectorRequest = Read-Host 'Proposed per-request limit in integer micro-USD'
++$collectorCalls = Read-Host 'Proposed maximum call count'
++$collectorRequestMs = Read-Host 'Proposed request timeout in milliseconds'
++$collectorRunMs = Read-Host 'Proposed total run timeout in milliseconds'
++$collectorExpiry = Read-Host 'Proposed expiry as a UTC ISO timestamp'
++$collectorProposalArgs = @(
++  '--mode=preview'
++  '--plan=Pro'
++  "--rows=$collectorRows"
++  "--max-total-microusd=$collectorTotal"
++  "--max-request-microusd=$collectorRequest"
++  "--max-calls=$collectorCalls"
++  "--request-timeout-ms=$collectorRequestMs"
++  "--run-timeout-ms=$collectorRunMs"
++  "--expires-at=$collectorExpiry"
++  "--output=$collectorArtifacts/manifest.json"
++)
++npm run benchmark:router:collect -- @collectorProposalArgs
++```
++
++All seven row/limit/expiry proposal flags must be present together. Inspect
++the written manifest, its full digest, source and catalogue bindings, selected
++rows, reservation amount, assumptions, and `completionPossibleWithinLimits`.
++Have the responsible person separately approve those exact values and supply
++the approval record described above as `approval.json` in the artifact
++directory. No approval JSON is generated by these examples. The approval
++file is evidence of an authorization decision, not a way to manufacture one.
++
++### 3. Execute only after the separate live-run authorization
++
++This is a future authorized operating command, **not an instruction to run it
++as part of implementing or reviewing v1.1**. It can incur provider charges and
++write durable local operational state. Both files must already exist, source
++must still match, credentials must be loaded safely, and approval must still
++be valid. Do not add plan/model/budget overrides or retry flags.
++
++```powershell
++npm run benchmark:router:collect -- --mode=execute "--manifest=$collectorArtifacts/manifest.json" "--approval=$collectorArtifacts/approval.json" --live "--output=$collectorArtifacts/run.json"
++```
++
++Inspect `stopReason`, `dispatchIntents`, `terminalRecords`, `unknownRows`, the
++full row dispositions, committed reservation, and the reported state location.
++A saved report is not the ledger. If output writing fails after calls, charges
++and durable intents do not disappear. Investigate the existing journal rather
++than creating a new approval ID or clearing state to repeat calls. A later
++legitimate resume must use the same manifest and approval and a new report
++filename; it cannot retry an already attempted row or bypass a hold/deadline.
++
++### 4. Export existing unambiguous records; score separately
++
++This command makes no provider calls. It still acquires the shared local lock
++and creates a new results file. It does not repair uncertain records or grant
++additional execution time.
++
++```powershell
++npm run benchmark:router:collect -- --mode=export "--manifest=$collectorArtifacts/manifest.json" "--approval=$collectorArtifacts/approval.json" "--output=$collectorArtifacts/answers.json"
++```
++
++Use the existing v1 scoring workflow with the exact embedded `manifest.plan`
++saved as its separate plan artifact and these exported answers. The collector
++manifest wrapper itself is not a v1 plan file. Do not regenerate a fresh plan
++with a new timestamp or edit its digest to make saved answers match. The
++[v1 scoring instructions](README.md) specify `--plan-file` and `--answers`.
++
++## Offline verification and observed status
++
++The local help command and a no-budget preview were observed to exit 0 on
++2026-09-10 while this implementation was still a dirty development tree.
++That preview reported 1,008 catalogue rows, 360 planned calls, 648 refusals,
++and null manifest/approval. It was stdout-only: no provider request, paid
++answer, approval, or collector run was created. This is a development smoke
++observation, not evidence for a final committed execution manifest.
++
++The following package scripts are offline verification commands. Tests use
++mock/injected providers and temporary local files, not paid model calls.
++Run from the same local repository root; no credentials are needed.
++
++```powershell
++npm run test:router-development-collector
++npm run test:router-development-benchmark
++npm run check:encoding
++npm run check:doc-references
++npm run check:policy-section-references
++```
++
++Record the exact source commit, commands, actual results, and remaining gaps
++when verification finishes. Listing these commands does not assert that this
++document's author ran the suites or that independent Claude review passed.
++
++## Evidence and references
++
++- [v1 benchmark scope, plan, result and scoring contract](README.md).
++- [Router evaluation procedure, sections 6-9](../tomverse-chat-router-evaluation-set.md):
++  checkable correctness, development/decision separation, candidate sourcing,
++  and evidence requirements.
++- [Product client](../../../lib/activeAiModel.ts) and
++  [generation compatibility](../../../lib/modelGenerationCompatibility.ts):
++  existing client and provider-specific settings, not a new dispatch policy.
++- [AI SDK request settings](https://ai-sdk.dev/docs/ai-sdk-core/settings):
++  `maxRetries: 0` disables retries; abort and timeout controls are client request
++  controls. They do not certify that a provider stopped billing.
++- [AI SDK generateText reference](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text):
++  token usage fields may be undefined.
++- [AI SDK 7 migration guide](https://ai-sdk.dev/docs/migration-guides/migration-guide-7-0):
++  request and response bodies are excluded from results by default.
++- [npm run documentation](https://docs.npmjs.com/cli/commands/npm-run):
++  `--` separates npm arguments from the package script's arguments.
++
++Official SDK documentation was checked through Context7 on 2026-09-10.
++Documentation lookup and offline tests are not provider model invocations.
+diff --git a/lib/routerDevelopmentCollector.ts b/lib/routerDevelopmentCollector.ts
+new file mode 100644
+index 00000000..cc1bf441
+--- /dev/null
++++ b/lib/routerDevelopmentCollector.ts
+@@ -0,0 +1,163 @@
++/** Development-only contracts. No provider, filesystem, credentials or product-account admission. */
++import { getModelGenerationSettings } from "./modelGenerationCompatibility";
++import { getModelPricingProfile, resolveModelPricing, type ModelPriceTier } from "./modelPricing";
++import type { AiModel } from "./models";
++import { benchmarkDigest, canonicalBenchmarkJson, isBenchmarkInstant, strictBenchmarkObject } from "./routerDevelopmentBenchmark";
++import type { DevelopmentPlan, DevelopmentSource } from "./routerDevelopmentBenchmarkPlan";
++
++export const COLLECTION_VERSION = "router-development-collector-v1.1";
++export const COLLECTION_LIMITS = { answerStorageBytes: 1_048_576, journalBytes: 512 * 1_048_576, eventBytes: 7 * 1_048_576 } as const;
++export const COLLECTION_ASSUMPTIONS = [
++  "operator-funded-development-only; not product-account execution",
++  "conditional catalogue context input bound; not verified provider tokenization",
++  "direct configured standard catalogue rates; actual processing and invoice unknown",
++  "no tools/search/additional paid steps; product output cap assumed to include reasoning",
++  "unpriced or unobserved cache writes and additional charges leave cost unknown",
++  "runtime registry/health/access and shared product provider budgets are not verified or applied",
++  "no network ingress hard byte or memory cap; storage limits apply after SDK reception",
++  "all dispatched reservations remain held; no automatic retries or fallback",
++  "local git-common-dir journal is not a central ledger against deletion or separate clones",
++] as const;
++export type CollectionLimits = {
++  maxTotalMicroUsd: number; maxRequestMicroUsd: number; maxCalls: number;
++  requestTimeoutMs: number; runTimeoutMs: number; expiresAt: string;
++};
++export function collectionFail(code: string): never { throw new Error(`collector_${code}`); }
++export function collectionInteger(value: unknown, code: string, minimum = 0): number {
++  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum) collectionFail(code);
++  return value as number;
++}
++export function collectionId(value: unknown): string {
++  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(value)) collectionFail("approval_id");
++  return value as string;
++}
++export const collectionHash = (value: unknown) => benchmarkDigest(canonicalBenchmarkJson(value));
++export function validateCollectionLimits(value: unknown): CollectionLimits {
++  const obj = strictBenchmarkObject(value, ["maxTotalMicroUsd", "maxRequestMicroUsd", "maxCalls", "requestTimeoutMs", "runTimeoutMs", "expiresAt"], "collection_limits");
++  for (const key of ["maxTotalMicroUsd", "maxRequestMicroUsd", "maxCalls", "requestTimeoutMs", "runTimeoutMs"]) collectionInteger(obj[key], `limit_${key}`, 1);
++  if ((obj.maxCalls as number) > 1008 || (obj.requestTimeoutMs as number) > 3_600_000 || (obj.runTimeoutMs as number) > 86_400_000 || (obj.maxRequestMicroUsd as number) > (obj.maxTotalMicroUsd as number) || !isBenchmarkInstant(obj.expiresAt)) collectionFail("limits_range");
++  return value as CollectionLimits;
++}
++
++/** MTok USD * tokens is microUSD. Decimal arithmetic avoids downward float rounding. */
++export function ceilTokenMicroUsd(tokens: number, rate: number): number {
++  collectionInteger(tokens, "token_count");
++  if (!Number.isFinite(rate) || rate < 0) collectionFail("rate");
++  const [mantissa, exponent = "0"] = String(rate).toLowerCase().split("e");
++  const [whole, fraction = ""] = mantissa.split(".");
++  const power = Number(exponent) - fraction.length;
++  const numerator = BigInt(whole + fraction) * BigInt(tokens) * (power >= 0 ? BigInt(10) ** BigInt(power) : BigInt(1));
++  const denominator = power < 0 ? BigInt(10) ** BigInt(-power) : BigInt(1);
++  const result = Number((numerator + denominator - BigInt(1)) / denominator);
++  return collectionInteger(result, "cost_overflow");
++}
++export function sumCollectionMoney(values: readonly number[]): number {
++  return collectionInteger(Number(values.reduce((sum, value) => sum + BigInt(collectionInteger(value, "money")), BigInt(0))), "cost_overflow");
++}
++export function reserveCollectionCost(contextTokens: number, outputTokens: number, tiers: readonly ModelPriceTier[]) {
++  collectionInteger(contextTokens, "context_unknown", 1);
++  collectionInteger(outputTokens, "output_cap", 1);
++  if (!tiers.length) collectionFail("price_tiers_missing");
++  for (const [index, tier] of tiers.entries()) {
++    if (tier.maxPromptTokens === null ? index !== tiers.length - 1 : !Number.isSafeInteger(tier.maxPromptTokens) || tier.maxPromptTokens < 0 || index > 0 && (tiers[index - 1].maxPromptTokens === null || tier.maxPromptTokens <= tiers[index - 1].maxPromptTokens!)) collectionFail("price_tier_boundary");
++    for (const rate of [tier.inputUsdPerMillionTokens, tier.outputUsdPerMillionTokens, tier.cachedInputPriceMultiplier, ...(tier.cacheWriteUsdPerMillionTokens === undefined ? [] : [tier.cacheWriteUsdPerMillionTokens])]) if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0) collectionFail("rate");
++  }
++  const maxInputRate = Math.max(...tiers.flatMap((tier) => [tier.inputUsdPerMillionTokens, tier.inputUsdPerMillionTokens * tier.cachedInputPriceMultiplier, ...(tier.cacheWriteUsdPerMillionTokens === undefined ? [] : [tier.cacheWriteUsdPerMillionTokens])]));
++  const maxOutputRate = Math.max(...tiers.map((tier) => tier.outputUsdPerMillionTokens));
++  return { contextInputBoundAssumption: contextTokens, outputCapTokens: outputTokens, maxInputRate, maxOutputRate,
++    // Settlement rounds three input partitions separately; their extra ceil is at most two.
++    partitionRoundingAllowanceMicroUsd: 2,
++    reservedMicroUsd: sumCollectionMoney([ceilTokenMicroUsd(contextTokens, maxInputRate), ceilTokenMicroUsd(outputTokens, maxOutputRate), 2]) };
++}
++export function collectionPricing(model: AiModel, at: number) {
++  const resolved = resolveModelPricing(model, { at });
++  const profile = getModelPricingProfile(model.id);
++  if (!profile || resolved.isFallbackPricing || resolved.apiModelId !== model.apiModel || resolved.routing !== "direct_provider_api" || resolved.processingTier !== "standard" || resolved.reasoningTokenBilling !== "billed_as_output") collectionFail("pricing_unsupported");
++  const revision = profile.priceSchedule?.find((candidate) => candidate.pricingVersion === resolved.pricingVersion);
++  const tiers = revision?.tiers ?? profile.tiers;
++  return { pricingVersion: resolved.pricingVersion, priceSource: resolved.priceSource, effectiveDate: resolved.effectiveDate,
++    costSource: resolved.costSource, routing: resolved.routing, processingTier: resolved.processingTier,
++    reasoningTokenBilling: resolved.reasoningTokenBilling,
++    tiers: tiers.map((tier) => ({ ...tier, cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? null })) };
++}
++export function buildCollectionManifest(input: {
++  plan: DevelopmentPlan; models: readonly AiModel[]; collectorSource: DevelopmentSource;
++  selectedRowIds: readonly string[]; limits: CollectionLimits;
++}) {
++  const limits = validateCollectionLimits(input.limits);
++  if (!Array.isArray(input.selectedRowIds) || !input.selectedRowIds.length || new Set(input.selectedRowIds).size !== input.selectedRowIds.length || input.selectedRowIds.length > 1008) collectionFail("selected_rows");
++  if (Date.parse(limits.expiresAt) <= Date.parse(input.plan.createdAt)) collectionFail("expiry");
++  const selectedRowIds = [...input.selectedRowIds].sort();
++  const calls = selectedRowIds.map((rowId) => {
++    const row = input.plan.rows.find((candidate) => candidate.rowId === rowId);
++    if (!row?.benchmarkEligibility.eligible || !row.callConfig.proposedMaxOutputTokens) collectionFail("row_refused_or_unknown");
++    const model = input.models.find((candidate) => candidate.id === row!.modelId);
++    if (!model || model.apiModel !== row!.apiModel || model.provider !== row!.provider) collectionFail("model_identity");
++    const pricing = collectionPricing(model!, Date.parse(input.plan.createdAt));
++    const reserve = reserveCollectionCost(model!.contextWindowTokens!, row!.callConfig.proposedMaxOutputTokens!, pricing.tiers.map((tier) => ({ ...tier, cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? undefined })));
++    return { rowId, pricing, reserve, settings: getModelGenerationSettings(model!) };
++  });
++  const totalReservedMicroUsd = sumCollectionMoney(calls.map((call) => call.reserve.reservedMicroUsd));
++  const body = { schemaVersion: COLLECTION_VERSION, purpose: "development-only" as const, status: "proposal" as const,
++    plan: input.plan, collectorSource: input.collectorSource, selectedRowIds, calls, limits,
++    assumptions: [...COLLECTION_ASSUMPTIONS], totalReservedMicroUsd,
++    completionPossibleWithinLimits: totalReservedMicroUsd <= limits.maxTotalMicroUsd && calls.length <= limits.maxCalls && calls.every((call) => call.reserve.reservedMicroUsd <= limits.maxRequestMicroUsd) };
++  return { ...body, manifestDigest: collectionHash(body) };
++}
++export type CollectionManifest = ReturnType<typeof buildCollectionManifest>;
++export type CollectionApproval = {
++  schemaVersion: typeof COLLECTION_VERSION; status: "approved"; approvalId: string; manifestDigest: string;
++  approvedBy: string; approvedAt: string; expiresAt: string; acknowledgements: string[];
++};
++export function validateCollectionManifest(value: unknown, input: Omit<Parameters<typeof buildCollectionManifest>[0], "selectedRowIds" | "limits">): CollectionManifest {
++  const obj = strictBenchmarkObject(value, ["schemaVersion", "purpose", "status", "plan", "collectorSource", "selectedRowIds", "calls", "limits", "assumptions", "totalReservedMicroUsd", "completionPossibleWithinLimits", "manifestDigest"], "collection_manifest");
++  const expected = buildCollectionManifest({ ...input, selectedRowIds: obj.selectedRowIds as string[], limits: validateCollectionLimits(obj.limits) });
++  if (canonicalBenchmarkJson(value) !== canonicalBenchmarkJson(expected)) collectionFail("manifest_snapshot_mismatch");
++  return expected;
++}
++export function validateCollectionApproval(value: unknown, manifest: CollectionManifest, now: number, allowExpired = false): CollectionApproval {
++  const obj = strictBenchmarkObject(value, ["schemaVersion", "status", "approvalId", "manifestDigest", "approvedBy", "approvedAt", "expiresAt", "acknowledgements"], "collection_approval");
++  collectionId(obj.approvalId);
++  if (obj.schemaVersion !== COLLECTION_VERSION || obj.status !== "approved" || obj.manifestDigest !== manifest.manifestDigest || typeof obj.approvedBy !== "string" || !obj.approvedBy.trim() || obj.approvedBy.length > 200 || !isBenchmarkInstant(obj.approvedAt) || obj.expiresAt !== manifest.limits.expiresAt || canonicalBenchmarkJson(obj.acknowledgements) !== canonicalBenchmarkJson(COLLECTION_ASSUMPTIONS)) collectionFail("approval_binding");
++  if (Date.parse(obj.approvedAt as string) < Date.parse(manifest.plan.createdAt) || Date.parse(obj.approvedAt as string) > now || Date.parse(obj.approvedAt as string) >= Date.parse(obj.expiresAt as string) || (!allowExpired && now >= Date.parse(obj.expiresAt as string))) collectionFail("approval_time");
++  return value as CollectionApproval;
++}
++
++export type CollectionObservation = {
++  source: "provider_body_allowlist" | "unavailable"; providerResponseId: string | null; providerReportedModel: string | null;
++  inputTokens: number | null; outputTokens: number | null; noCacheInputTokens: number | null;
++  cacheReadTokens: number | null; cacheWriteTokens: number | null; reasoningTokens: number | null;
++  rawFinishReason: string | null; finish: "stop" | "length" | "blocked" | "unknown";
++  servedProcessingTier: string | null; unsupportedBilling: boolean;
++};
++export type CollectionOutcome = {
++  status: "returned" | "failed" | "timeout" | "unknown" | "measurement_unsupported";
++  answerText: string | null; answerBytes: number | null; answerDigest: string | null;
++  textOmitted: boolean; completeResponse: boolean; failureCode: string | null;
++  latencyMs: number | null; observation: CollectionObservation;
++};
++export const emptyCollectionObservation = (): CollectionObservation => ({ source: "unavailable", providerResponseId: null, providerReportedModel: null, inputTokens: null, outputTokens: null, noCacheInputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, rawFinishReason: null, finish: "unknown", servedProcessingTier: null, unsupportedBilling: false });
++export function validateCollectionOutcome(value: unknown): CollectionOutcome {
++  const obj = strictBenchmarkObject(value, ["status", "answerText", "answerBytes", "answerDigest", "textOmitted", "completeResponse", "failureCode", "latencyMs", "observation"], "collection_outcome");
++  if (!["returned", "failed", "timeout", "unknown", "measurement_unsupported"].includes(obj.status as string) || typeof obj.textOmitted !== "boolean" || typeof obj.completeResponse !== "boolean") collectionFail("outcome_status");
++  if (obj.failureCode !== null && (typeof obj.failureCode !== "string" || !/^[a-z0-9_]{1,100}$/.test(obj.failureCode))) collectionFail("failure_code");
++  for (const key of ["answerBytes", "latencyMs"]) if (obj[key] !== null) collectionInteger(obj[key], `outcome_${key}`);
++  if (typeof obj.answerText === "string") {
++    if (Buffer.byteLength(obj.answerText) > COLLECTION_LIMITS.answerStorageBytes || obj.answerBytes !== Buffer.byteLength(obj.answerText) || obj.answerDigest !== benchmarkDigest(obj.answerText) || obj.textOmitted || !obj.completeResponse) collectionFail("answer_integrity");
++  } else if (obj.answerText !== null || (obj.answerBytes !== null && (!obj.textOmitted || !obj.completeResponse || (obj.answerBytes as number) <= COLLECTION_LIMITS.answerStorageBytes || typeof obj.answerDigest !== "string" || !/^[a-f0-9]{64}$/.test(obj.answerDigest))) || (obj.answerBytes === null && obj.answerDigest !== null)) collectionFail("answer_omission");
++  if (obj.status === "returned" && (typeof obj.answerText !== "string" || obj.failureCode !== null)) collectionFail("returned_answer_missing");
++  if ((obj.status === "failed" || obj.status === "timeout") && (obj.answerText !== null || obj.answerBytes !== null || obj.failureCode === null)) collectionFail("failure_answer");
++  const observation = strictBenchmarkObject(obj.observation, Object.keys(emptyCollectionObservation()), "collection_observation");
++  if (!["provider_body_allowlist", "unavailable"].includes(observation.source as string) || !["stop", "length", "blocked", "unknown"].includes(observation.finish as string) || typeof observation.unsupportedBilling !== "boolean") collectionFail("observation_status");
++  for (const key of ["inputTokens", "outputTokens", "noCacheInputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"]) if (observation[key] !== null) collectionInteger(observation[key], `observation_${key}`);
++  for (const key of ["providerResponseId", "providerReportedModel", "rawFinishReason", "servedProcessingTier"]) if (observation[key] !== null && (typeof observation[key] !== "string" || !(observation[key] as string).length || (observation[key] as string).length > 256)) collectionFail("observation_string");
++  if (observation.source === "unavailable" && canonicalBenchmarkJson(observation) !== canonicalBenchmarkJson(emptyCollectionObservation())) collectionFail("unavailable_observation_has_metrics");
++  return value as CollectionOutcome;
++}
++export function estimateCollectionUsageCost(observation: CollectionObservation, call: CollectionManifest["calls"][number]): number | null {
++  const { inputTokens, outputTokens, noCacheInputTokens, cacheReadTokens, cacheWriteTokens } = observation;
++  if (observation.unsupportedBilling || inputTokens === null || outputTokens === null || noCacheInputTokens === null || cacheReadTokens === null || cacheWriteTokens === null || noCacheInputTokens + cacheReadTokens + cacheWriteTokens !== inputTokens) return null;
++  const tier = call.pricing.tiers.find((entry) => entry.maxPromptTokens === null || inputTokens <= entry.maxPromptTokens);
++  if (!tier || (cacheWriteTokens > 0 && tier.cacheWriteUsdPerMillionTokens === null)) return null;
++  return sumCollectionMoney([ceilTokenMicroUsd(noCacheInputTokens, tier.inputUsdPerMillionTokens), ceilTokenMicroUsd(cacheReadTokens, tier.inputUsdPerMillionTokens * tier.cachedInputPriceMultiplier), ceilTokenMicroUsd(cacheWriteTokens, tier.cacheWriteUsdPerMillionTokens ?? tier.inputUsdPerMillionTokens), ceilTokenMicroUsd(outputTokens, tier.outputUsdPerMillionTokens)]);
++}
+diff --git a/lib/routerDevelopmentCollectorJournal.ts b/lib/routerDevelopmentCollectorJournal.ts
+new file mode 100644
+index 00000000..a465ca0d
+--- /dev/null
++++ b/lib/routerDevelopmentCollectorJournal.ts
+@@ -0,0 +1,213 @@
++/** Node-only local journal. File fsync is not a power-loss or malicious-admin guarantee. */
++import * as fs from "node:fs";
++import { resolve } from "node:path";
++import { AVAILABLE_MODELS } from "./models";
++import { canonicalBenchmarkJson, DEVELOPMENT_LIMITS, DEVELOPMENT_RESULTS_VERSION, isBenchmarkInstant, parseBenchmarkJson, strictBenchmarkObject, validateDevelopmentResults, type DevelopmentResults } from "./routerDevelopmentBenchmark";
++import { COLLECTION_LIMITS, COLLECTION_VERSION, collectionFail, collectionHash, collectionId, estimateCollectionUsageCost, sumCollectionMoney, validateCollectionApproval, validateCollectionManifest, validateCollectionOutcome, type CollectionApproval, type CollectionManifest, type CollectionOutcome } from "./routerDevelopmentCollector";
++
++export type CollectionRequest = { modelId: string; prompt: string; maxOutputTokens: number; settings: CollectionManifest["calls"][number]["settings"]; signal: AbortSignal };
++export type CollectionAdapter = (request: CollectionRequest) => Promise<CollectionOutcome>;
++export type CollectionIO = Pick<typeof fs, "openSync" | "closeSync" | "readSync" | "writeSync" | "fsyncSync" | "fstatSync" | "existsSync" | "mkdirSync" | "unlinkSync" | "lstatSync">;
++export const collectorPaths = (commonDir: string, approvalId: string) => {
++  const root = resolve(commonDir, "router-development-collector-v1.1");
++  const id = collectionId(approvalId);
++  return { root, registration: resolve(root, `${id}.registration.jsonl`), ledger: resolve(root, `${id}.jsonl`), lock: resolve(root, `${id}.lock`) };
++};
++export function readCollectionText(path: string, maximum: number, io: CollectionIO = fs): string {
++  if (io.lstatSync(path).isSymbolicLink()) collectionFail("symlink");
++  const fd = io.openSync(path, "r");
++  try {
++    const stat = io.fstatSync(fd);
++    if (!stat.isFile() || stat.size > maximum) collectionFail("file_size_or_type");
++    const buffer = Buffer.alloc(stat.size + 1);
++    let offset = 0;
++    while (offset < buffer.length) {
++      const count = io.readSync(fd, buffer, offset, buffer.length - offset, null);
++      if (!count) break;
++      offset += count;
++    }
++    if (offset !== stat.size) collectionFail("file_changed_during_read");
++    return new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, offset));
++  } finally { io.closeSync(fd); }
++}
++/** Node fs.writeSync may write only part of the buffer; fsync must precede dispatch. */
++export function writeCollectionDurably(path: string, text: string, flag: "wx" | "a", io: CollectionIO = fs): void {
++  const fd = io.openSync(path, flag, 0o600);
++  try {
++    const data = Buffer.from(text);
++    let offset = 0;
++    while (offset < data.length) {
++      const count = io.writeSync(fd, data, offset, data.length - offset, null);
++      if (!Number.isSafeInteger(count) || count <= 0 || count > data.length - offset) collectionFail("short_write");
++      offset += count;
++    }
++    io.fsyncSync(fd);
++  } finally { io.closeSync(fd); }
++}
++type Header = { kind: "header"; approvalDigest: string; manifestDigest: string; startedAt: string };
++type Intent = { kind: "intent"; rowId: string; at: string; reservedMicroUsd: number };
++type Terminal = { kind: "terminal"; rowId: string; at: string; outcome: CollectionOutcome; tokenUsageAtFrozenRatesMicroUsd: number | null };
++type Event = Header | Intent | Terminal;
++type Envelope = { seq: number; previousDigest: string | null; event: Event; entryDigest: string };
++function observedTokenBoundExceeded(observation: CollectionOutcome["observation"], call: CollectionManifest["calls"][number]): boolean {
++  const { contextInputBoundAssumption: inputBound, outputCapTokens: outputBound } = call.reserve;
++  // Known disjoint partitions form only a lower bound. Never persist an inferred
++  // total or replace a missing observation with zero. BigInt avoids sum overflow.
++  const knownInputLowerBound = [observation.noCacheInputTokens, observation.cacheReadTokens, observation.cacheWriteTokens]
++    .reduce((total, value) => value === null ? total : total + BigInt(value), BigInt(0));
++  return (observation.inputTokens !== null && observation.inputTokens > inputBound)
++    || knownInputLowerBound > BigInt(inputBound)
++    || (observation.outputTokens !== null && observation.outputTokens > outputBound)
++    || (observation.reasoningTokens !== null && observation.reasoningTokens > outputBound);
++}
++function terminalUsageEstimate(outcome: CollectionOutcome, call: CollectionManifest["calls"][number]): number | null {
++  // A disproved token-bound assumption must preserve the response even if its
++  // huge counters would overflow cost arithmetic. This is not an invoice claim.
++  return observedTokenBoundExceeded(outcome.observation, call) ? null : estimateCollectionUsageCost(outcome.observation, call);
++}
++function jsonLines(text: string) {
++  if (!text || !text.endsWith("\n")) collectionFail("journal_truncated");
++  const lines = text.slice(0, -1).split("\n");
++  if (lines.some((line) => !line)) collectionFail("journal_blank_line");
++  return lines.map((line) => parseBenchmarkJson(line, COLLECTION_LIMITS.eventBytes));
++}
++export function replayCollectionJournal(text: string, manifest: CollectionManifest, approval: CollectionApproval) {
++  const entries: Envelope[] = [];
++  const attempts = new Map<string, { intent: Intent; terminal: Terminal | null }>();
++  let startedAt = "";
++  for (const [seq, value] of jsonLines(text).entries()) {
++    const obj = strictBenchmarkObject(value, ["seq", "previousDigest", "event", "entryDigest"], "journal_entry");
++    const previousDigest = entries.at(-1)?.entryDigest ?? null;
++    if (obj.seq !== seq || obj.previousDigest !== previousDigest || obj.entryDigest !== collectionHash({ seq, previousDigest, event: obj.event })) collectionFail("journal_chain");
++    const kind = (obj.event as { kind?: string })?.kind;
++    if (seq === 0) {
++      const event = strictBenchmarkObject(obj.event, ["kind", "approvalDigest", "manifestDigest", "startedAt"], "journal_header");
++      if (kind !== "header" || event.approvalDigest !== collectionHash(approval) || event.manifestDigest !== manifest.manifestDigest || !isBenchmarkInstant(event.startedAt)) collectionFail("journal_identity");
++      startedAt = event.startedAt as string;
++    } else {
++      const event = strictBenchmarkObject(obj.event, kind === "intent" ? ["kind", "rowId", "at", "reservedMicroUsd"] : ["kind", "rowId", "at", "outcome", "tokenUsageAtFrozenRatesMicroUsd"], "journal_event");
++      const call = manifest.calls.find((candidate) => candidate.rowId === event.rowId);
++      if (!call || !isBenchmarkInstant(event.at) || Date.parse(event.at as string) < Date.parse(startedAt)) collectionFail("journal_row_or_time");
++      if (kind === "intent") {
++        if (attempts.has(call.rowId) || event.reservedMicroUsd !== call.reserve.reservedMicroUsd || call.reserve.reservedMicroUsd > manifest.limits.maxRequestMicroUsd || Date.parse(event.at as string) >= Math.min(Date.parse(approval.expiresAt), Date.parse(startedAt) + manifest.limits.runTimeoutMs)) collectionFail("duplicate_or_forged_intent");
++        attempts.set(call.rowId, { intent: event as Intent, terminal: null });
++      } else if (kind === "terminal") {
++        const attempt = attempts.get(call.rowId);
++        if (!attempt || attempt.terminal || Date.parse(event.at as string) < Date.parse(attempt.intent.at)) collectionFail("duplicate_or_orphan_terminal");
++        const outcome = validateCollectionOutcome(event.outcome);
++        if (event.tokenUsageAtFrozenRatesMicroUsd !== terminalUsageEstimate(outcome, call)) collectionFail("journal_cost_forged");
++        attempt.terminal = event as Terminal;
++      } else collectionFail("journal_kind");
++    }
++    entries.push(value as unknown as Envelope);
++  }
++  const totalReservedMicroUsd = sumCollectionMoney([...attempts.values()].map((attempt) => attempt.intent.reservedMicroUsd));
++  if (totalReservedMicroUsd > manifest.limits.maxTotalMicroUsd || attempts.size > manifest.limits.maxCalls) collectionFail("journal_overbudget");
++  const unknownRows = [...attempts].filter(([, attempt]) => !attempt.terminal).map(([rowId]) => rowId);
++  const tokenBoundExceeded = [...attempts].some(([rowId, attempt]) => attempt.terminal && observedTokenBoundExceeded(attempt.terminal.outcome.observation, manifest.calls.find((call) => call.rowId === rowId)!));
++  const overrun = [...attempts.values()].some((attempt) => attempt.terminal?.tokenUsageAtFrozenRatesMicroUsd !== null && (attempt.terminal?.tokenUsageAtFrozenRatesMicroUsd ?? 0) > attempt.intent.reservedMicroUsd);
++  const unsupported = [...attempts.values()].some((attempt) => attempt.terminal && (["unknown", "measurement_unsupported"].includes(attempt.terminal.outcome.status) || attempt.terminal.outcome.observation.unsupportedBilling));
++  const timeout = [...attempts.values()].some((attempt) => attempt.terminal?.outcome.status === "timeout");
++  return { entries, attempts, startedAt, totalReservedMicroUsd, unknownRows, stopReason: tokenBoundExceeded ? "observed_token_bound_exceeded" : overrun ? "observed_reservation_overrun" : unknownRows.length ? "unknown_after_dispatch" : unsupported ? "measurement_or_execution_unknown" : timeout ? "request_timeout" : null };
++}
++type CollectionRunInput = { manifest: CollectionManifest; approval: CollectionApproval; commonDir: string; now?: () => number; io?: CollectionIO };
++function withLock<T>(input: CollectionRunInput, fn: (io: CollectionIO, paths: ReturnType<typeof collectorPaths>) => Promise<T>): Promise<T> {
++  const io = input.io ?? fs;
++  const paths = collectorPaths(input.commonDir, input.approval.approvalId);
++  io.mkdirSync(paths.root, { recursive: true });
++  if (io.lstatSync(paths.root).isSymbolicLink()) collectionFail("symlink");
++  let fd: number;
++  try { fd = io.openSync(paths.lock, "wx", 0o600); } catch { collectionFail("lock_unavailable_no_stale_recovery"); }
++  return fn(io, paths).finally(() => { io.closeSync(fd); io.unlinkSync(paths.lock); });
++}
++function readRegistered(input: CollectionRunInput, io: CollectionIO, paths: ReturnType<typeof collectorPaths>) {
++  if (!io.existsSync(paths.registration) || !io.existsSync(paths.ledger)) collectionFail("registered_ledger_missing");
++  const registration = jsonLines(readCollectionText(paths.registration, COLLECTION_LIMITS.eventBytes, io));
++  const expected = { schemaVersion: COLLECTION_VERSION, approvalId: input.approval.approvalId, approvalDigest: collectionHash(input.approval), manifestDigest: input.manifest.manifestDigest };
++  if (canonicalBenchmarkJson(registration[0]) !== canonicalBenchmarkJson(expected)) collectionFail("registration_identity");
++  const replay = replayCollectionJournal(readCollectionText(paths.ledger, COLLECTION_LIMITS.journalBytes, io), input.manifest, input.approval);
++  // A separate fsynced witness detects a ledger replaced by an older valid prefix.
++  if (registration.length !== replay.entries.length + 1 || replay.entries.some((entry, index) => canonicalBenchmarkJson(registration[index + 1]) !== canonicalBenchmarkJson({ seq: index, entryDigest: entry.entryDigest }))) collectionFail("journal_witness_mismatch");
++  return replay;
++}
++function appendEvent(event: Event, entries: Envelope[], io: CollectionIO, paths: ReturnType<typeof collectorPaths>) {
++  const body = { seq: entries.length, previousDigest: entries.at(-1)?.entryDigest ?? null, event };
++  const entry = { ...body, entryDigest: collectionHash(body) };
++  const line = `${canonicalBenchmarkJson(entry)}\n`;
++  if (Buffer.byteLength(line) > COLLECTION_LIMITS.eventBytes) collectionFail("event_byte_limit");
++  if (io.existsSync(paths.ledger) && io.lstatSync(paths.ledger).size + Buffer.byteLength(line) > COLLECTION_LIMITS.journalBytes) collectionFail("journal_byte_limit");
++  writeCollectionDurably(paths.ledger, line, entries.length ? "a" : "wx", io);
++  writeCollectionDurably(paths.registration, `${canonicalBenchmarkJson({ seq: entry.seq, entryDigest: entry.entryDigest })}\n`, "a", io);
++  entries.push(entry);
++}
++export async function collectDevelopment(input: CollectionRunInput & { adapter: CollectionAdapter; assertCurrent: () => void; onCheckpoint?: (point: "intent_durable" | "response_received" | "terminal_durable") => void }) {
++  const now = input.now ?? Date.now;
++  validateCollectionApproval(input.approval, input.manifest, now());
++  validateCollectionManifest(input.manifest, { plan: input.manifest.plan, models: AVAILABLE_MODELS, collectorSource: input.manifest.collectorSource });
++  if (input.manifest.plan.source.dirty || input.manifest.collectorSource.dirty) collectionFail("dirty_source_execution");
++  return withLock(input, async (io, paths) => {
++    input.assertCurrent();
++    if (!io.existsSync(paths.registration)) {
++      if (io.existsSync(paths.ledger)) collectionFail("unregistered_ledger");
++      writeCollectionDurably(paths.registration, `${canonicalBenchmarkJson({ schemaVersion: COLLECTION_VERSION, approvalId: input.approval.approvalId, approvalDigest: collectionHash(input.approval), manifestDigest: input.manifest.manifestDigest })}\n`, "wx", io);
++      appendEvent({ kind: "header", approvalDigest: collectionHash(input.approval), manifestDigest: input.manifest.manifestDigest, startedAt: new Date(now()).toISOString() }, [], io, paths);
++    }
++    let state = readRegistered(input, io, paths);
++    let stopReason = state.stopReason;
++    for (const call of input.manifest.calls) {
++      if (stopReason) break;
++      if (state.attempts.has(call.rowId)) continue;
++      const remainingMs = Math.min(Date.parse(state.startedAt) + input.manifest.limits.runTimeoutMs, Date.parse(input.approval.expiresAt)) - now();
++      if (remainingMs <= 0) { stopReason = "deadline_stopped"; break; }
++      if (state.attempts.size >= input.manifest.limits.maxCalls || call.reserve.reservedMicroUsd > input.manifest.limits.maxRequestMicroUsd || state.totalReservedMicroUsd > input.manifest.limits.maxTotalMicroUsd - call.reserve.reservedMicroUsd) { stopReason = "budget_stopped"; break; }
++      input.assertCurrent();
++      validateCollectionApproval(input.approval, input.manifest, now());
++      if (now() >= Date.parse(state.startedAt) + input.manifest.limits.runTimeoutMs) { stopReason = "deadline_stopped"; break; }
++      const row = input.manifest.plan.rows.find((candidate) => candidate.rowId === call.rowId)!;
++      appendEvent({ kind: "intent", rowId: row.rowId, at: new Date(now()).toISOString(), reservedMicroUsd: call.reserve.reservedMicroUsd }, state.entries, io, paths);
++      input.onCheckpoint?.("intent_durable");
++      input.assertCurrent();
++      const dispatchRemainingMs = Math.min(Date.parse(state.startedAt) + input.manifest.limits.runTimeoutMs, Date.parse(input.approval.expiresAt)) - now();
++      if (dispatchRemainingMs <= 0) { state = readRegistered(input, io, paths); stopReason = "deadline_before_dispatch"; break; }
++      const signal = AbortSignal.timeout(Math.max(1, Math.min(input.manifest.limits.requestTimeoutMs, dispatchRemainingMs)));
++      // Adapter errors propagate: the durable intent remains unknown and cannot retry.
++      const outcome = validateCollectionOutcome(await input.adapter({ modelId: row.modelId, prompt: row.input.prompt, maxOutputTokens: row.callConfig.proposedMaxOutputTokens!, settings: call.settings, signal }));
++      input.onCheckpoint?.("response_received");
++      appendEvent({ kind: "terminal", rowId: row.rowId, at: new Date(now()).toISOString(), outcome, tokenUsageAtFrozenRatesMicroUsd: terminalUsageEstimate(outcome, call) }, state.entries, io, paths);
++      input.onCheckpoint?.("terminal_durable");
++      state = readRegistered(input, io, paths);
++      stopReason = state.stopReason;
++    }
++    return collectionReport(input.manifest, state, stopReason);
++  });
++}
++function collectionReport(manifest: CollectionManifest, state: ReturnType<typeof replayCollectionJournal>, stopReason: string | null) {
++  return { schemaVersion: COLLECTION_VERSION, purpose: "development-only", manifestDigest: manifest.manifestDigest, stopReason,
++    committedReservationMicroUsd: state.totalReservedMicroUsd, reservationPolicy: "never_released_not_actual_spend", actualInvoiceMicroUsd: null,
++    dispatchIntents: state.attempts.size, terminalRecords: [...state.attempts.values()].filter((attempt) => attempt.terminal).length,
++    unknownRows: state.unknownRows, rows: manifest.plan.rows.map((row) => ({ rowId: row.rowId,
++      outcome: !row.benchmarkEligibility.eligible ? "refused" : state.attempts.get(row.rowId)?.terminal?.outcome.status ?? (state.attempts.has(row.rowId) ? "unknown_after_dispatch" : "not_run"),
++      refusalReasons: row.benchmarkEligibility.reasons })) };
++}
++export async function exportDevelopmentCollection(input: CollectionRunInput): Promise<DevelopmentResults> {
++  validateCollectionApproval(input.approval, input.manifest, (input.now ?? Date.now)(), true);
++  return withLock(input, async (io, paths) => {
++    const state = readRegistered(input, io, paths);
++    if (state.stopReason && state.stopReason !== "request_timeout") collectionFail("export_uncertain_or_unsupported");
++    const rows = [...state.attempts].map(([rowId, attempt]) => {
++      const terminal = attempt.terminal!;
++      const outcome = terminal.outcome;
++      if (outcome.status === "returned" && !outcome.completeResponse || (outcome.answerBytes ?? 0) > DEVELOPMENT_LIMITS.answerBytes || outcome.textOmitted || !["returned", "failed", "timeout"].includes(outcome.status)) collectionFail("export_uncertain_or_unsupported");
++      const row = input.manifest.plan.rows.find((candidate) => candidate.rowId === rowId)!;
++      return { rowId, caseId: row.caseId, modelId: row.modelId, provider: row.provider, apiModel: row.apiModel, promptDigest: row.promptDigest, callConfigDigest: row.callConfigDigest,
++        status: outcome.status === "returned" ? "succeeded" as const : outcome.status === "timeout" ? "timeout" as const : "failed" as const,
++        answerText: outcome.answerText, answerDigest: outcome.answerDigest, failureCode: outcome.failureCode, recordedAt: terminal.at,
++        providerResponseId: outcome.observation.providerResponseId, modelVersion: outcome.observation.providerReportedModel,
++        metrics: { inputTokens: outcome.observation.inputTokens, outputTokens: outcome.observation.outputTokens, latencyMs: outcome.latencyMs, providerCostUsd: null } };
++    });
++    const results: DevelopmentResults = { schemaVersion: DEVELOPMENT_RESULTS_VERSION, purpose: "development-only", corpusDigest: input.manifest.plan.corpusDigest, planDigest: input.manifest.plan.planDigest,
++      origin: { kind: "externally-saved", description: `Local operator collector ${COLLECTION_VERSION}; journal-bound self-reported evidence, not provider-authenticated or invoice evidence. Manifest ${input.manifest.manifestDigest}.` }, rows };
++    if (Buffer.byteLength(JSON.stringify(results)) > DEVELOPMENT_LIMITS.documentBytes) collectionFail("export_document_limit");
++    return validateDevelopmentResults(results, input.manifest.plan);
++  });
++}
+diff --git a/lib/routerDevelopmentCollectorProvider.ts b/lib/routerDevelopmentCollectorProvider.ts
+new file mode 100644
+index 00000000..2d3b3534
+--- /dev/null
++++ b/lib/routerDevelopmentCollectorProvider.ts
+@@ -0,0 +1,156 @@
++/** Thin opt-in adapter. Imports provider clients only when an admitted call reaches this function. */
++import { AVAILABLE_MODELS } from "./models";
++import { benchmarkDigest, canonicalBenchmarkJson } from "./routerDevelopmentBenchmark";
++import { COLLECTION_LIMITS, emptyCollectionObservation, collectionFail, validateCollectionOutcome, type CollectionObservation, type CollectionOutcome } from "./routerDevelopmentCollector";
++import type { CollectionRequest } from "./routerDevelopmentCollectorJournal";
++
++const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
++const count = (value: unknown): number | null => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
++const label = (value: unknown): string | null => typeof value === "string" && value.length > 0 && value.length <= 256 ? value : null;
++const sum = (...values: (number | null)[]) => values.every((value) => value !== null) ? count(values.reduce<number>((total, value) => total + value!, 0)) : null;
++const difference = (total: number | null, ...parts: (number | null)[]) => total !== null && parts.every((value) => value !== null) ? count(total - parts.reduce<number>((amount, value) => amount + value!, 0)) : null;
++const hasItems = (value: unknown) => Array.isArray(value) && value.length > 0;
++function finish(raw: string | null): CollectionObservation["finish"] {
++  if (raw && ["stop", "end_turn", "stop_sequence", "STOP", "completed"].includes(raw)) return "stop";
++  if (raw && ["length", "max_tokens", "max_output_tokens", "MAX_TOKENS"].includes(raw)) return "length";
++  if (raw && ["content_filter", "SAFETY", "BLOCKLIST", "PROHIBITED_CONTENT", "RECITATION", "refusal"].includes(raw)) return "blocked";
++  return "unknown";
++}
++/** Only provider-body fields count as observations. No SDK normalized usage/id fallback. */
++export function observeCollectionBody(provider: string, body: unknown): CollectionObservation {
++  const observation = emptyCollectionObservation();
++  try {
++    const root = record(body);
++    if (!body || !Object.keys(root).length) return observation;
++    const usage = record(root.usage);
++    const choices = Array.isArray(root.choices) ? root.choices : [];
++    const choice = record(choices[0]);
++    const message = record(choice.message);
++    if (provider === "openai") {
++      observation.providerResponseId = label(root.id);
++      observation.providerReportedModel = label(root.model);
++      observation.inputTokens = count(usage.input_tokens);
++      observation.outputTokens = count(usage.output_tokens);
++      const input = record(usage.input_tokens_details);
++      const output = record(usage.output_tokens_details);
++      observation.cacheReadTokens = count(input.cached_tokens);
++      observation.cacheWriteTokens = count(input.cache_write_tokens);
++      observation.reasoningTokens = count(output.reasoning_tokens);
++      observation.noCacheInputTokens = difference(observation.inputTokens, observation.cacheReadTokens, observation.cacheWriteTokens);
++      observation.rawFinishReason = label(record(root.incomplete_details).reason);
++      observation.finish = finish(observation.rawFinishReason ?? (root.status === "completed" ? "completed" : null));
++      observation.unsupportedBilling = hasItems(root.output) && (root.output as unknown[]).some((part) => !["message", "reasoning"].includes(String(record(part).type)));
++      if ([input.orchestration_input_tokens, input.orchestration_input_cached_tokens, output.orchestration_output_tokens].some((value) => value !== undefined && value !== null && value !== 0)) observation.unsupportedBilling = true;
++    } else if (["deepseek", "xai", "mistral", "moonshot"].includes(provider)) {
++      observation.providerResponseId = label(root.id);
++      observation.providerReportedModel = label(root.model);
++      observation.inputTokens = count(usage.prompt_tokens);
++      observation.outputTokens = count(usage.completion_tokens);
++      const input = record(usage.prompt_tokens_details);
++      const output = record(usage.completion_tokens_details);
++      // DeepSeek's product transport synthesizes input.cached_tokens. Use its retained original.
++      observation.cacheReadTokens = provider === "deepseek" ? count(usage.prompt_cache_hit_tokens) : provider === "moonshot" && usage.cached_tokens !== undefined ? count(usage.cached_tokens) : count(input.cached_tokens);
++      observation.cacheWriteTokens = count(input.cache_write_tokens);
++      observation.reasoningTokens = count(output.reasoning_tokens);
++      observation.noCacheInputTokens = difference(observation.inputTokens, observation.cacheReadTokens, observation.cacheWriteTokens);
++      observation.rawFinishReason = label(choice.finish_reason);
++      observation.finish = finish(observation.rawFinishReason);
++      observation.unsupportedBilling = choices.length > 1 || hasItems(message.tool_calls) || message.function_call != null;
++    } else if (provider === "anthropic" || provider === "minimax") {
++      observation.providerResponseId = label(root.id);
++      observation.providerReportedModel = label(root.model);
++      observation.noCacheInputTokens = count(usage.input_tokens);
++      observation.cacheReadTokens = count(usage.cache_read_input_tokens);
++      observation.cacheWriteTokens = count(usage.cache_creation_input_tokens);
++      observation.inputTokens = sum(observation.noCacheInputTokens, observation.cacheReadTokens, observation.cacheWriteTokens);
++      observation.outputTokens = count(usage.output_tokens);
++      observation.reasoningTokens = count(record(usage.output_tokens_details).thinking_tokens);
++      observation.rawFinishReason = label(root.stop_reason);
++      observation.finish = finish(observation.rawFinishReason);
++      observation.unsupportedBilling = hasItems(usage.iterations) || (Array.isArray(root.content) && root.content.some((part) => !["text", "thinking", "redacted_thinking"].includes(String(record(part).type))));
++    } else if (provider === "google") {
++      const googleUsage = record(root.usageMetadata);
++      const candidates = Array.isArray(root.candidates) ? root.candidates : [];
++      const candidate = record(candidates[0]);
++      observation.providerResponseId = label(root.responseId);
++      observation.providerReportedModel = label(root.modelVersion);
++      observation.inputTokens = count(googleUsage.promptTokenCount);
++      observation.reasoningTokens = count(googleUsage.thoughtsTokenCount);
++      // Missing thoughts are unknown, not zero; SDK-normalized output is not evidence.
++      observation.outputTokens = sum(count(googleUsage.candidatesTokenCount), observation.reasoningTokens);
++      observation.cacheReadTokens = count(googleUsage.cachedContentTokenCount);
++      observation.rawFinishReason = label(candidate.finishReason) ?? label(record(root.promptFeedback).blockReason);
++      observation.finish = finish(observation.rawFinishReason);
++      observation.unsupportedBilling = candidates.length > 1 || googleUsage.toolUsePromptTokenCount != null && googleUsage.toolUsePromptTokenCount !== 0 || candidate.groundingMetadata != null || hasItems(record(candidate.content).parts) && (record(candidate.content).parts as unknown[]).some((part) => record(part).functionCall != null);
++    } else return observation;
++    observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);
++    if (observation.servedProcessingTier !== null && !["default", "standard", "auto"].includes(observation.servedProcessingTier.toLowerCase())) observation.unsupportedBilling = true;
++    observation.source = "provider_body_allowlist";
++    return observation;
++  } catch {
++    // Metadata extraction must not discard an answer or an already committed reservation.
++    return emptyCollectionObservation();
++  }
++}
++export function collectionReturnedOutcome(provider: string, body: unknown, text: unknown, latencyMs: number): CollectionOutcome {
++  const observation = observeCollectionBody(provider, body);
++  if (typeof text !== "string") return { status: "measurement_unsupported", answerText: null, answerBytes: null, answerDigest: null, textOmitted: false, completeResponse: false, failureCode: "answer_unavailable", latencyMs, observation };
++  const bytes = Buffer.byteLength(text);
++  const omitted = bytes > COLLECTION_LIMITS.answerStorageBytes;
++  return validateCollectionOutcome({ status: omitted || observation.unsupportedBilling ? "measurement_unsupported" : "returned",
++    answerText: omitted ? null : text, answerBytes: bytes, answerDigest: benchmarkDigest(text), textOmitted: omitted,
++    completeResponse: true, failureCode: omitted ? "answer_storage_limit" : observation.unsupportedBilling ? "provider_billing_unsupported" : null, latencyMs, observation });
++}
++export type CollectionSdkDependencies = {
++  generate: (options: Record<string, unknown>) => Promise<unknown>;
++  getModel: (model: (typeof AVAILABLE_MODELS)[number]) => unknown;
++  getSettings: (model: (typeof AVAILABLE_MODELS)[number]) => unknown;
++  now?: () => number;
++};
++/** Test seam uses ai/test MockLanguageModelV4; production dependencies are never caller CLI input. */
++export function createCollectionSdkAdapter(dependencies: CollectionSdkDependencies) {
++  return async (request: CollectionRequest): Promise<CollectionOutcome> => {
++    const model = AVAILABLE_MODELS.find((candidate) => candidate.id === request.modelId);
++    if (!model) collectionFail("provider_model_unknown");
++    const settings = dependencies.getSettings(model!);
++    if (canonicalBenchmarkJson(settings) !== canonicalBenchmarkJson(request.settings)) collectionFail("provider_settings_drift");
++    const now = dependencies.now ?? Date.now;
++    const start = now();
++    try {
++      // SDK 7: responseBody is opt-in; maxRetries defaults to 2 unless explicitly disabled.
++      // https://github.com/vercel/ai/blob/main/content/docs/08-migration-guides/23-migration-guide-7-0.mdx
++      const result = record(await dependencies.generate({ model: dependencies.getModel(model!), ...request.settings,
++        prompt: request.prompt, maxOutputTokens: request.maxOutputTokens, maxRetries: 0,
++        abortSignal: request.signal, include: { responseBody: true } }));
++      const step = record(result.finalStep);
++      const observation = collectionReturnedOutcome(model!.provider, record(step.response).body, result.text, Math.max(0, Math.round(now() - start)));
++      if (!Array.isArray(result.steps) || result.steps.length !== 1) return { ...observation, status: "measurement_unsupported", failureCode: "multiple_or_missing_steps" };
++      return observation;
++    } catch (error) {
++      const elapsed = Math.max(0, Math.round(now() - start));
++      let body: unknown;
++      let statusCode: number | null = null;
++      try {
++        const value = record(error);
++        statusCode = count(value.statusCode);
++        if (typeof value.responseBody === "string" && Buffer.byteLength(value.responseBody) <= COLLECTION_LIMITS.eventBytes) {
++          // Transient parsing only. No raw error/body/request/header is retained.
++          try { body = JSON.parse(value.responseBody); } catch { /* Unknown metadata stays null. */ }
++        } else if (value.responseBody && typeof value.responseBody === "object") body = value.responseBody;
++      } catch { /* Errors may carry throwing getters. */ }
++      const timedOut = request.signal.aborted;
++      const observation = observeCollectionBody(model!.provider, body);
++      return { status: observation.unsupportedBilling ? "measurement_unsupported" : timedOut ? "timeout" : statusCode !== null ? "failed" : "unknown", answerText: null, answerBytes: null,
++        answerDigest: null, textOmitted: false, completeResponse: !timedOut && statusCode !== null,
++        failureCode: observation.unsupportedBilling ? "provider_billing_unsupported" : timedOut ? "deadline_abort_billing_unknown" : statusCode !== null ? "provider_http_error" : "provider_outcome_unknown",
++        latencyMs: elapsed, observation };
++    }
++  };
++}
++export async function collectFromProvider(request: CollectionRequest): Promise<CollectionOutcome> {
++  const [{ generateText }, { getActiveAiModel }, { getModelGenerationSettings }] = await Promise.all([
++    import("ai"), import("./activeAiModel"), import("./modelGenerationCompatibility"),
++  ]);
++  const adapter = createCollectionSdkAdapter({ generate: (options) => generateText(options as Parameters<typeof generateText>[0]), getModel: getActiveAiModel, getSettings: getModelGenerationSettings });
++  return adapter(request);
++}
+diff --git a/package.json b/package.json
+index ca21bf15..db1b1584 100644
+--- a/package.json
++++ b/package.json
+@@ -218,6 +218,8 @@
+     "report:router-judge-comparison": "node --import tsx scripts/report-router-judge-comparison.mjs",
+     "report:router-full-catalog": "node --import tsx scripts/report-router-full-catalog.mjs",
+     "benchmark:router": "node --import tsx scripts/router-development-benchmark.mjs",
++    "benchmark:router:collect": "node --conditions=react-server --import tsx scripts/router-development-collect.mjs",
++    "test:router-development-collector": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs",
+     "test:router-development-benchmark": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
+     "cross-review": "node --import tsx scripts/cross-review.mjs"
+   },
+diff --git a/scripts/check-processing-tier-core.mjs b/scripts/check-processing-tier-core.mjs
+index f36c8f52..abaee128 100644
+--- a/scripts/check-processing-tier-core.mjs
++++ b/scripts/check-processing-tier-core.mjs
+@@ -112,6 +112,15 @@ export function auditProcessingTierMentions({ matchedLines, allowlist }) {
+  * }[]}
+  */
+ export const PROCESSING_TIER_REQUEST_ALLOWLIST = [
++  {
++    file: "lib/routerDevelopmentCollectorProvider.ts",
++    sendsATier: false,
++    reason:
++      "Reads only the returned body to flag a served tier outside the frozen Standard-price assumption. The development collector sets no outbound price selector; this exact observation line is pinned, not the whole file.",
++    mentions: [
++      "observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);",
++    ],
++  },
+   {
+     file: "scripts/check-openai-model-access.mjs",
+     sendsATier: false,
+diff --git a/scripts/router-development-collect.mjs b/scripts/router-development-collect.mjs
+new file mode 100644
+index 00000000..4b28472f
+--- /dev/null
++++ b/scripts/router-development-collect.mjs
+@@ -0,0 +1,117 @@
++// Operator-funded DEVELOPMENT collector. Preview/export never import provider clients.
++import { execFileSync } from "node:child_process";
++import { realpathSync, readFileSync, existsSync } from "node:fs";
++import { dirname, resolve, relative, isAbsolute } from "node:path";
++import { fileURLToPath } from "node:url";
++import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
++import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
++import { benchmarkDigest, canonicalBenchmarkJson, DEVELOPMENT_LIMITS, parseBenchmarkJson, parseDevelopmentCorpus, strictBenchmarkObject } from "../lib/routerDevelopmentBenchmark.ts";
++import { buildDevelopmentPlan, validateDevelopmentPlan } from "../lib/routerDevelopmentBenchmarkPlan.ts";
++import { buildCollectionManifest, collectionPricing, COLLECTION_ASSUMPTIONS, collectionHash, validateCollectionApproval, validateCollectionManifest } from "../lib/routerDevelopmentCollector.ts";
++import { collectDevelopment, collectorPaths, exportDevelopmentCollection, readCollectionText, writeCollectionDurably } from "../lib/routerDevelopmentCollectorJournal.ts";
++
++const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
++// Trusted, fixed paths, never paths taken from an untrusted manifest. The v1 list stays byte-compatible.
++const benchmarkSources = [
++  "scripts/router-development-benchmark.mjs", "lib/routerDevelopmentBenchmark.ts", "lib/routerDevelopmentBenchmarkPlan.ts",
++  "lib/models.ts", "lib/modelPricing.ts", "lib/routerCallLimits.ts", "lib/routerFullCatalogDiagnostic.ts",
++  "lib/routerCandidates.ts", "lib/routerDecision.ts", "lib/routerSelection.ts", "lib/routerScorePolicy.ts",
++  "lib/routerCostSignal.ts", "lib/chatContextWindow.ts", "lib/chatTokenEstimate.ts", "lib/taskProfileCore.ts",
++  "lib/webSearchCapability.ts", "lib/webSearchBackends.ts", "lib/webSearchSuggestion.ts", "lib/modelFinder.ts", "lib/autoFallbackGate.ts", "lib/routingFallbackPolicy.ts",
++  "package.json", "package-lock.json", "tsconfig.json",
++].sort();
++const collectorSources = [...benchmarkSources,
++  "scripts/router-development-collect.mjs", "lib/routerDevelopmentCollector.ts", "lib/routerDevelopmentCollectorJournal.ts", "lib/routerDevelopmentCollectorProvider.ts",
++  "lib/activeAiModel.ts", "lib/modelRegistryShared.ts", "lib/modelGenerationCompatibility.ts", "lib/anthropicPromptCaching.ts",
++  "lib/deepseekUsageAdapter.ts", "lib/deepseekUsageAdapterCore.ts", "lib/perplexityUsageCapture.ts", "lib/perplexityUsageCore.ts",
++  "scripts/check-processing-tier-core.mjs",
++].sort();
++const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
++function snapshot(paths) {
++  return { commit: git(["rev-parse", "HEAD"]), dirty: Boolean(git(["status", "--porcelain", "--", ...paths])),
++    files: Object.fromEntries(paths.map((path) => [path, benchmarkDigest(readFileSync(resolve(root, path), "utf8"))])) };
++}
++function readJson(path, maximum = DEVELOPMENT_LIMITS.documentBytes) { return parseBenchmarkJson(readCollectionText(resolve(path), maximum), maximum); }
++function inputs() {
++  if (Object.keys(process.env).some((key) => /^CHAT_MODEL_.*_(INPUT_USD_PER_MILLION|OUTPUT_USD_PER_MILLION|CACHED_INPUT_PRICE_MULTIPLIER|MAX_OUTPUT_TOKENS|RESERVATION_OUTPUT_TOKENS)$/i.test(key))) throw new Error("collector_pricing_environment_overrides");
++  const corpus = parseDevelopmentCorpus(readCollectionText(resolve(root, "docs/ops/router-development-benchmark/development-v1.json"), DEVELOPMENT_LIMITS.corpusBytes));
++  return { corpus, models: AVAILABLE_MODELS, source: snapshot(benchmarkSources) };
++}
++const help = "Development-only; actual provider calls require a separate human budget approval. No production account credits or shared provider budgets are used.\n" +
++  "npm run benchmark:router:collect -- [--mode=preview] [--plan=Pro] [--requested-model=ID] [--output=NEW_PATH]\n" +
++  "Proposal: add --rows=ROW_ID,ROW_ID --max-total-microusd=N --max-request-microusd=N --max-calls=N --request-timeout-ms=N --run-timeout-ms=N --expires-at=UTC_INSTANT\n" +
++  "Execute: --mode=execute --manifest=PATH --approval=PATH --live [--output=NEW_PATH]\n" +
++  "Export: --mode=export --manifest=PATH --approval=PATH [--output=NEW_PATH]\n" +
++  "No budget defaults or automatic approvals. Fixed state is in git common-dir/router-development-collector-v1.1, shared across this clone's worktrees. Reservations never release; they are not actual spend. No hard network ingress byte/memory cap. Stale locks require operator investigation, never automatic deletion.";
++async function main() {
++  const options = new Map();
++  const valueFlags = ["mode", "plan", "requested-model", "rows", "max-total-microusd", "max-request-microusd", "max-calls", "request-timeout-ms", "run-timeout-ms", "expires-at", "manifest", "approval", "output"];
++  for (const arg of process.argv.slice(2)) {
++    const match = /^--([a-z-]+)(?:=(.*))?$/.exec(arg);
++    if (!match || ![...valueFlags, "live", "help"].includes(match[1])) throw new Error("collector_unknown_argument");
++    if (options.has(match[1])) throw new Error("collector_duplicate_argument");
++    if (valueFlags.includes(match[1]) ? !match[2] : match[2] !== undefined) throw new Error("collector_argument_value");
++    options.set(match[1], match[2] ?? true);
++  }
++  if (options.has("help")) { if (options.size !== 1) throw new Error("collector_help_alone"); console.log(help); return; }
++  const mode = options.get("mode") ?? "preview";
++  if (!["preview", "execute", "export"].includes(mode)) throw new Error("collector_unknown_mode");
++  const proposalFlags = ["rows", "max-total-microusd", "max-request-microusd", "max-calls", "request-timeout-ms", "run-timeout-ms", "expires-at"];
++  if (mode === "preview" && ["manifest", "approval", "live"].some((key) => options.has(key))) throw new Error("collector_execution_flags_in_preview");
++  if (mode !== "preview" && (!options.has("manifest") || !options.has("approval") || [...proposalFlags, "plan", "requested-model"].some((key) => options.has(key)))) throw new Error("collector_manifest_approval_required_no_overrides");
++  if ((mode === "execute") !== options.has("live")) throw new Error("collector_live_flag_required_execute_only");
++  const commonDir = realpathSync(resolve(root, git(["rev-parse", "--git-common-dir"])));
++  const outputPath = options.has("output") ? resolve(options.get("output")) : null;
++  if (outputPath) {
++    const outputParent = realpathSync(dirname(outputPath));
++    const path = resolve(outputParent, outputPath.slice(dirname(outputPath).length + 1));
++    const insideCommon = relative(commonDir, path);
++    if (!insideCommon || (!insideCommon.startsWith("..") && !isAbsolute(insideCommon)) || existsSync(path)) throw new Error("collector_output_existing_or_state_path");
++  }
++  const common = inputs();
++  let result;
++  if (mode === "preview") {
++    const plan = buildDevelopmentPlan({ ...common, createdAt: new Date().toISOString(), plan: options.get("plan") ?? "Pro", requestedModelId: options.get("requested-model") ?? DEFAULT_MODEL_ID });
++    if (proposalFlags.some((key) => options.has(key))) {
++      if (!proposalFlags.every((key) => options.has(key))) throw new Error("collector_explicit_limits_and_rows_required");
++      const integer = (key) => { const value = options.get(key); if (!/^[1-9]\d*$/.test(value)) throw new Error("collector_integer_argument"); return Number(value); };
++      result = buildCollectionManifest({ plan, models: AVAILABLE_MODELS, collectorSource: snapshot(collectorSources), selectedRowIds: options.get("rows").split(","), limits: {
++        maxTotalMicroUsd: integer("max-total-microusd"), maxRequestMicroUsd: integer("max-request-microusd"), maxCalls: integer("max-calls"), requestTimeoutMs: integer("request-timeout-ms"), runTimeoutMs: integer("run-timeout-ms"), expiresAt: options.get("expires-at"),
++      } });
++    } else result = { purpose: "development-only", mode, plan, collectionManifest: null, approval: null, requiredProposalFlags: proposalFlags, assumptions: COLLECTION_ASSUMPTIONS };
++  } else {
++    const raw = readJson(options.get("manifest"));
++    strictBenchmarkObject(raw, ["schemaVersion", "purpose", "status", "plan", "collectorSource", "selectedRowIds", "calls", "limits", "assumptions", "totalReservedMicroUsd", "completionPossibleWithinLimits", "manifestDigest"], "collection_manifest");
++    const plan = validateDevelopmentPlan(raw.plan, common);
++    const collectorSource = snapshot(collectorSources);
++    const manifest = validateCollectionManifest(raw, { plan, models: AVAILABLE_MODELS, collectorSource });
++    const approval = validateCollectionApproval(readJson(options.get("approval")), manifest, Date.now(), mode === "export");
++    const run = { manifest, approval, commonDir };
++    if (mode === "export") result = await exportDevelopmentCollection(run);
++    else {
++      const assertCurrent = () => {
++        // Every request checks current source and active price revision. Never silently re-price.
++        if (collectionHash(snapshot(benchmarkSources)) !== collectionHash(plan.source) || collectionHash(snapshot(collectorSources)) !== collectionHash(collectorSource)) throw new Error("collector_source_drift");
++        const instant = Date.now();
++        for (const call of manifest.calls) {
++          const row = plan.rows.find((entry) => entry.rowId === call.rowId);
++          const model = AVAILABLE_MODELS.find((entry) => entry.id === row.modelId);
++          if (collectionHash(collectionPricing(model, instant)) !== collectionHash(call.pricing) || canonicalBenchmarkJson(getModelGenerationSettings(model)) !== canonicalBenchmarkJson(call.settings)) throw new Error("collector_pricing_or_settings_drift");
++        }
++      };
++      result = await collectDevelopment({ ...run, assertCurrent, adapter: async (request) => {
++        const { collectFromProvider } = await import("../lib/routerDevelopmentCollectorProvider.ts");
++        return collectFromProvider(request);
++      } });
++      result.stateLocation = collectorPaths(commonDir, approval.approvalId).root;
++    }
++  }
++  const serialized = `${canonicalBenchmarkJson(result)}\n`;
++  if (outputPath) { writeCollectionDurably(outputPath, serialized, "wx"); console.log(JSON.stringify({ mode, output: outputPath })); }
++  else process.stdout.write(serialized);
++}
++try { await main(); }
++catch (error) {
++  const code = error instanceof Error && /^collector_[a-zA-Z0-9_]+$/.test(error.message) ? error.message : "collector_input_output_or_snapshot_error";
++  console.error(code); process.exitCode = 1;
++}
+diff --git a/tests/routerDevelopmentCollector.test.mjs b/tests/routerDevelopmentCollector.test.mjs
+new file mode 100644
+index 00000000..61bf2920
+--- /dev/null
++++ b/tests/routerDevelopmentCollector.test.mjs
+@@ -0,0 +1,142 @@
++import assert from "node:assert/strict";
++import { readFileSync, mkdtempSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { basename, dirname, join, resolve } from "node:path";
++import test, { after } from "node:test";
++import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
++import { parseDevelopmentCorpus, canonicalBenchmarkJson, scoreDevelopmentResults } from "../lib/routerDevelopmentBenchmark.ts";
++import { buildDevelopmentPlan } from "../lib/routerDevelopmentBenchmarkPlan.ts";
++import { buildCollectionManifest, COLLECTION_ASSUMPTIONS, COLLECTION_VERSION, emptyCollectionObservation, validateCollectionApproval } from "../lib/routerDevelopmentCollector.ts";
++import { collectDevelopment, collectorPaths, exportDevelopmentCollection, replayCollectionJournal } from "../lib/routerDevelopmentCollectorJournal.ts";
++import { collectionReturnedOutcome } from "../lib/routerDevelopmentCollectorProvider.ts";
++
++const temporary = mkdtempSync(join(tmpdir(), "collector-core-test-"));
++after(() => { const target = resolve(temporary); assert.equal(dirname(target), resolve(tmpdir())); assert.ok(basename(target).startsWith("collector-core-test-")); rmSync(target, { recursive: true }); });
++const corpus = parseDevelopmentCorpus(readFileSync(new URL("../docs/ops/router-development-benchmark/development-v1.json", import.meta.url), "utf8"));
++const at = "2026-09-10T00:00:00.000Z";
++const now = () => Date.parse(at);
++const source = { commit: "a".repeat(40), dirty: false, files: { "synthetic-test": "b".repeat(64) } };
++const plan = buildDevelopmentPlan({ corpus, models: AVAILABLE_MODELS, source, createdAt: at, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID });
++const eligible = plan.rows.filter((row) => row.benchmarkEligibility.eligible);
++const limits = { maxTotalMicroUsd: 1_000_000_000, maxRequestMicroUsd: 1_000_000_000, maxCalls: 1008, requestTimeoutMs: 1000, runTimeoutMs: 60000, expiresAt: "2026-09-10T01:00:00.000Z" };
++const manifestFor = (rows, overrides = {}) => buildCollectionManifest({ plan, models: AVAILABLE_MODELS, collectorSource: source, selectedRowIds: rows.map((row) => row.rowId), limits: { ...limits, ...overrides } });
++const approvalFor = (manifest, approvalId) => ({ schemaVersion: COLLECTION_VERSION, status: "approved", approvalId, manifestDigest: manifest.manifestDigest, approvedBy: "SYNTHETIC TEST; NOT HUMAN AUTHORIZATION", approvedAt: at, expiresAt: manifest.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS] });
++
++test("full 42x24 manifest stays within existing JSON byte and node limits", () => {
++  const manifest = manifestFor(eligible, { maxTotalMicroUsd: 1_000_000_000_000, maxRequestMicroUsd: 1_000_000_000_000 });
++  const text = canonicalBenchmarkJson(manifest);
++  assert.ok(Buffer.byteLength(text) < 16_777_216);
++  assert.equal(manifest.plan.rows.length, 1008);
++  assert.equal(manifest.calls.length, 360);
++  assert.equal(manifest.plan.summary.refusedRows, 648);
++  assert.equal(manifest.status, "proposal");
++  assert.equal(manifest.completionPossibleWithinLimits, true);
++  assert.throws(() => validateCollectionApproval(manifest, manifest, now()));
++});
++
++test("permanent reservations stop a selected population explicitly and completed rows never rerun", async () => {
++  const manifest = manifestFor(eligible.slice(0, 2), { maxCalls: 1 });
++  assert.equal(manifest.completionPossibleWithinLimits, false);
++  const approval = approvalFor(manifest, "core-budget-stop");
++  const requests = [];
++  const adapter = async (request) => { requests.push(request); return collectionReturnedOutcome("openai", {}, "{}", 5); };
++  const input = { manifest, approval, commonDir: temporary, now, assertCurrent() {}, adapter };
++  const report = await collectDevelopment(input);
++  assert.equal(report.stopReason, "budget_stopped");
++  assert.equal(report.dispatchIntents, 1);
++  assert.equal(report.terminalRecords, 1);
++  assert.equal(report.actualInvoiceMicroUsd, null);
++  assert.equal(report.rows.length, 1008);
++  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
++  assert.deepEqual(Object.keys(requests[0]).sort(), ["modelId", "prompt", "maxOutputTokens", "settings", "signal"].sort());
++  assert.equal(requests[0].prompt, plan.rows.find((row) => row.rowId === manifest.calls[0].rowId).input.prompt);
++  assert.equal((await collectDevelopment(input)).committedReservationMicroUsd, report.committedReservationMicroUsd);
++  assert.equal(requests.length, 1);
++  const results = await exportDevelopmentCollection(input);
++  assert.equal(results.rows[0].metrics.providerCostUsd, null);
++  const score = scoreDevelopmentResults(corpus, plan, results);
++  assert.equal(score.summary.notRun, 359);
++  assert.equal(score.summary.correctnessRate, null);
++});
++
++test("confirmed blank and invalid JSON answers remain returned records for the frozen grader", async () => {
++  const manifest = manifestFor(eligible.slice(0, 2));
++  const approval = approvalFor(manifest, "core-blank-invalid");
++  let calls = 0;
++  const input = { manifest, approval, commonDir: temporary, now, assertCurrent() {}, adapter: async () => collectionReturnedOutcome("openai", {}, calls++ ? "not json" : "  ", 1) };
++  await collectDevelopment(input);
++  const score = scoreDevelopmentResults(corpus, plan, await exportDevelopmentCollection(input));
++  assert.equal(score.summary.blank, 1);
++  assert.equal(score.summary.invalidJson, 1);
++  assert.equal(score.summary.submitted, 2);
++  assert.equal(score.summary.notRun, 358);
++});
++
++test("unsupported billing on any terminal stops later rows and resume and refuses the whole export", async () => {
++  const manifest = manifestFor(eligible.slice(0, 2));
++  const approval = approvalFor(manifest, "core-error-tier-stop");
++  let calls = 0;
++  const input = { manifest, approval, commonDir: temporary, now, assertCurrent() {}, adapter: async () => {
++    calls++;
++    // Replay defends the observation even if an adapter incorrectly labels it ordinary failed.
++    return { status: "failed", answerText: null, answerBytes: null, answerDigest: null, textOmitted: false, completeResponse: true,
++      failureCode: "provider_http_error", latencyMs: 1, observation: { ...emptyCollectionObservation(), source: "provider_body_allowlist", servedProcessingTier: "priority", unsupportedBilling: true } };
++  } };
++  const report = await collectDevelopment(input);
++  assert.equal(report.stopReason, "measurement_or_execution_unknown");
++  assert.equal(calls, 1);
++  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
++  await collectDevelopment(input);
++  assert.equal(calls, 1);
++  await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
++});
++
++for (const [name, counters] of [
++  ["output_total", (inputBound, outputBound) => ({ outputTokens: outputBound + 1 })],
++  ["input_total", (inputBound) => ({ inputTokens: inputBound + 1 })],
++  ["input_partition_lower_bound", (inputBound) => ({ noCacheInputTokens: inputBound, cacheReadTokens: 1 })],
++  ["reasoning_lower_bound", (inputBound, outputBound) => ({ reasoningTokens: outputBound + 1 })],
++  ["safe_integer_cost_overflow", () => ({ inputTokens: Number.MAX_SAFE_INTEGER, noCacheInputTokens: Number.MAX_SAFE_INTEGER, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: Number.MAX_SAFE_INTEGER })],
++]) test(`known ${name} breach stops with null cost and preserves the complete terminal evidence`, async () => {
++  const manifest = manifestFor(eligible.filter((row) => row.modelId === DEFAULT_MODEL_ID).slice(0, 2));
++  const approval = approvalFor(manifest, `core-bound-${name.replaceAll("_", "-")}`);
++  const first = manifest.calls[0];
++  const observation = { ...emptyCollectionObservation(), source: "provider_body_allowlist", ...counters(first.reserve.contextInputBoundAssumption, first.reserve.outputCapTokens) };
++  const returned = { ...collectionReturnedOutcome("openai", {}, '{"preserve":"complete answer"}', 1), observation };
++  let calls = 0;
++  const input = { manifest, approval, commonDir: temporary, now, assertCurrent() {}, adapter: async () => { calls++; return returned; } };
++  const report = await collectDevelopment(input);
++  assert.equal(report.stopReason, "observed_token_bound_exceeded");
++  assert.equal(calls, 1);
++  assert.equal(report.dispatchIntents, 1);
++  assert.equal(report.terminalRecords, 1);
++  assert.equal(report.committedReservationMicroUsd, first.reserve.reservedMicroUsd);
++  assert.equal(report.actualInvoiceMicroUsd, null);
++  assert.equal(report.rows.length, 1008);
++  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
++  const state = replayCollectionJournal(readFileSync(collectorPaths(temporary, approval.approvalId).ledger, "utf8"), manifest, approval);
++  const terminal = state.attempts.get(first.rowId).terminal;
++  assert.equal(terminal.tokenUsageAtFrozenRatesMicroUsd, null);
++  assert.deepEqual(terminal.outcome, returned);
++  assert.equal(terminal.outcome.observation.cacheWriteTokens, observation.cacheWriteTokens);
++  assert.equal((await collectDevelopment(input)).stopReason, "observed_token_bound_exceeded");
++  assert.equal(calls, 1);
++  await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
++});
++
++test("known partition and reasoning values exactly at the bound do not invent missing totals or stop", async () => {
++  const manifest = manifestFor(eligible.filter((row) => row.modelId === DEFAULT_MODEL_ID).slice(0, 2));
++  const approval = approvalFor(manifest, "core-bound-equality");
++  const reserve = manifest.calls[0].reserve;
++  const observation = { ...emptyCollectionObservation(), source: "provider_body_allowlist", noCacheInputTokens: reserve.contextInputBoundAssumption - 1, cacheReadTokens: 1, reasoningTokens: reserve.outputCapTokens };
++  let calls = 0;
++  const input = { manifest, approval, commonDir: temporary, now, assertCurrent() {}, adapter: async () => { calls++; return { ...collectionReturnedOutcome("openai", {}, "{}", 1), observation }; } };
++  assert.equal((await collectDevelopment(input)).stopReason, null);
++  assert.equal(calls, 2);
++  const state = replayCollectionJournal(readFileSync(collectorPaths(temporary, approval.approvalId).ledger, "utf8"), manifest, approval);
++  for (const attempt of state.attempts.values()) {
++    assert.equal(attempt.terminal.outcome.observation.inputTokens, null);
++    assert.equal(attempt.terminal.outcome.observation.outputTokens, null);
++    assert.equal(attempt.terminal.tokenUsageAtFrozenRatesMicroUsd, null);
++  }
++});
+diff --git a/tests/routerDevelopmentCollectorAdversarial.test.mjs b/tests/routerDevelopmentCollectorAdversarial.test.mjs
+new file mode 100644
+index 00000000..40f52389
+--- /dev/null
++++ b/tests/routerDevelopmentCollectorAdversarial.test.mjs
+@@ -0,0 +1,820 @@
++import assert from "node:assert/strict";
++import * as fs from "node:fs";
++import { readFileSync } from "node:fs";
++import { spawn } from "node:child_process";
++import { once } from "node:events";
++import { tmpdir } from "node:os";
++import { basename, dirname, join, resolve } from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++import http from "node:http";
++import https from "node:https";
++import net from "node:net";
++import tls from "node:tls";
++import dgram from "node:dgram";
++import { syncBuiltinESMExports } from "node:module";
++import test, { after } from "node:test";
++
++// Synthetic adversarial fixtures only. No object below authorizes a paid run.
++// Keep the existing offline CLI test's transport trap active before app imports.
++// Reference: tests/routerDevelopmentBenchmarkCli.test.mjs:18.
++const restored = [];
++for (const [target, key] of [
++  [globalThis, "fetch"], [http, "request"], [http, "get"],
++  [https, "request"], [https, "get"], [net, "connect"],
++  [net, "createConnection"], [net.Socket.prototype, "connect"],
++  [tls, "connect"], [dgram, "createSocket"],
++]) {
++  restored.push([target, key, target[key]]);
++  target[key] = () => { throw new Error("ADVERSARIAL_TEST_NETWORK_FORBIDDEN"); };
++}
++syncBuiltinESMExports();
++after(() => {
++  for (const [target, key, original] of restored) target[key] = original;
++  syncBuiltinESMExports();
++});
++
++const {
++  COLLECTION_ASSUMPTIONS, COLLECTION_LIMITS, COLLECTION_VERSION,
++  buildCollectionManifest, ceilTokenMicroUsd, collectionHash,
++  emptyCollectionObservation, estimateCollectionUsageCost, reserveCollectionCost,
++  sumCollectionMoney, validateCollectionApproval, validateCollectionLimits,
++  validateCollectionManifest, validateCollectionOutcome,
++} = await import("../lib/routerDevelopmentCollector.ts");
++const {
++  benchmarkDigest, canonicalBenchmarkJson, DEVELOPMENT_LIMITS, parseDevelopmentCorpus,
++  scoreDevelopmentResults,
++} = await import("../lib/routerDevelopmentBenchmark.ts");
++const { buildDevelopmentPlan } = await import("../lib/routerDevelopmentBenchmarkPlan.ts");
++const { AVAILABLE_MODELS, DEFAULT_MODEL_ID } = await import("../lib/models.ts");
++const {
++  collectDevelopment, collectorPaths, exportDevelopmentCollection,
++  replayCollectionJournal, writeCollectionDurably,
++} = await import("../lib/routerDevelopmentCollectorJournal.ts");
++const {
++  collectionReturnedOutcome, createCollectionSdkAdapter, observeCollectionBody,
++} = await import("../lib/routerDevelopmentCollectorProvider.ts");
++
++const corpus = parseDevelopmentCorpus(readFileSync(new URL("../docs/ops/router-development-benchmark/development-v1.json", import.meta.url), "utf8"));
++const source = { commit: "a".repeat(40), dirty: false, files: { "synthetic-test-only": "b".repeat(64) } };
++const instant = "2026-09-10T00:00:00.000Z";
++const plan = buildDevelopmentPlan({ corpus, models: AVAILABLE_MODELS, source, requestedModelId: DEFAULT_MODEL_ID, plan: "Pro", createdAt: instant });
++const eligible = plan.rows.filter((row) => row.benchmarkEligibility.eligible);
++const limits = {
++  maxTotalMicroUsd: 1_000_000_000, maxRequestMicroUsd: 1_000_000_000,
++  maxCalls: 1008, requestTimeoutMs: 1000, runTimeoutMs: 60_000,
++  expiresAt: "2026-09-10T00:01:00.000Z",
++};
++const manifestInput = { plan, models: AVAILABLE_MODELS, collectorSource: source };
++const manifest = buildCollectionManifest({ ...manifestInput, selectedRowIds: eligible.slice(0, 2).map((row) => row.rowId), limits });
++const syntheticApproval = (target = manifest) => ({
++  schemaVersion: COLLECTION_VERSION, status: "approved", approvalId: "synthetic-test-no-paid-authority",
++  manifestDigest: target.manifestDigest, approvedBy: "SYNTHETIC TEST FIXTURE; NOT AN OPERATOR APPROVAL",
++  approvedAt: instant, expiresAt: target.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS],
++});
++const tier = (overrides = {}) => ({ maxPromptTokens: null, inputUsdPerMillionTokens: 0.1, outputUsdPerMillionTokens: 0.1, cachedInputPriceMultiplier: 1, cacheWriteUsdPerMillionTokens: 0.1, ...overrides });
++const observed = (overrides = {}) => ({ ...emptyCollectionObservation(), source: "provider_body_allowlist", inputTokens: 3, noCacheInputTokens: 1, cacheReadTokens: 1, cacheWriteTokens: 1, outputTokens: 1, ...overrides });
++const pricedCall = (tiers = [tier()]) => ({ pricing: { tiers } });
++const returned = (answerText = "{}", overrides = {}) => ({
++  status: "returned", answerText, answerBytes: Buffer.byteLength(answerText), answerDigest: benchmarkDigest(answerText),
++  textOmitted: false, completeResponse: true, failureCode: null, latencyMs: null,
++  observation: emptyCollectionObservation(), ...overrides,
++});
++
++test("adversarial harness blocks accidental fetch and socket traffic", () => {
++  assert.throws(() => fetch("https://example.invalid"), /ADVERSARIAL_TEST_NETWORK_FORBIDDEN/);
++  assert.throws(() => net.connect(443, "example.invalid"), /ADVERSARIAL_TEST_NETWORK_FORBIDDEN/);
++});
++
++test("microUSD arithmetic rounds decimal and exponent rates upward without float truncation", () => {
++  for (const [tokens, rate, expected] of [
++    [3, 0.1, 1], [10, 0.1, 1], [11, 0.1, 2], [1, 1.2, 2],
++    [1_000_001, 1e-6, 2], [9, 1e-7, 1], [0, 100, 0],
++    [1, 1.7999999999999998, 2],
++  ]) assert.equal(ceilTokenMicroUsd(tokens, rate), expected, `${tokens} tokens at ${rate}`);
++});
++
++test("reservation covers independently rounded no-cache/read/write/output categories", () => {
++  // Four independently billed categories each round ceil(1 * 0.1) to one microUSD.
++  // Rounding the combined input only once yields two microUSD and is insufficient.
++  const measured = estimateCollectionUsageCost(observed(), pricedCall());
++  assert.equal(measured, 4);
++  assert.ok(reserveCollectionCost(3, 1, [tier()]).reservedMicroUsd >= measured,
++    "reservation must cover 4 microUSD, not just ceil(3 * 0.1) + ceil(1 * 0.1)");
++});
++
++test("reservation dominates every small disjoint input-category partition across all tiers", () => {
++  const tiers = [tier({ maxPromptTokens: 5 }), tier({ inputUsdPerMillionTokens: 0.25, cachedInputPriceMultiplier: 0.5, cacheWriteUsdPerMillionTokens: 0.75, outputUsdPerMillionTokens: 0.5 })];
++  for (let context = 1; context <= 8; context += 1) {
++    for (let output = 1; output <= 3; output += 1) {
++      const reserved = reserveCollectionCost(context, output, tiers).reservedMicroUsd;
++      for (const price of tiers) {
++        for (let uncached = 0; uncached <= context; uncached += 1) {
++          for (let cached = 0; cached <= context - uncached; cached += 1) {
++            const writes = context - uncached - cached;
++            const independent = Math.ceil(uncached * price.inputUsdPerMillionTokens)
++              + Math.ceil(cached * price.inputUsdPerMillionTokens * price.cachedInputPriceMultiplier)
++              + Math.ceil(writes * price.cacheWriteUsdPerMillionTokens)
++              + Math.ceil(output * price.outputUsdPerMillionTokens);
++            assert.ok(reserved >= independent, JSON.stringify({ context, output, uncached, cached, writes, reserved, independent }));
++          }
++        }
++      }
++    }
++  }
++});
++
++test("reservation uses the highest input, cache-write and output rates across tiers", () => {
++  const reserved = reserveCollectionCost(10, 2, [
++    tier({ maxPromptTokens: 5, inputUsdPerMillionTokens: 3, cachedInputPriceMultiplier: 2, outputUsdPerMillionTokens: 9 }),
++    tier({ inputUsdPerMillionTokens: 1, cacheWriteUsdPerMillionTokens: 8, outputUsdPerMillionTokens: 4 }),
++  ]);
++  assert.equal(reserved.maxInputRate, 8);
++  assert.equal(reserved.maxOutputRate, 9);
++  assert.ok(reserved.reservedMicroUsd >= 98);
++});
++
++test("unknown, fractional, negative and unsafe token bounds cannot become zero-cost admission", () => {
++  for (const value of [undefined, null, NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
++    assert.throws(() => ceilTokenMicroUsd(value, 1), /collector_token_count/);
++    assert.throws(() => reserveCollectionCost(value, 1, [tier()]), /collector_context_unknown/);
++    assert.throws(() => reserveCollectionCost(1, value, [tier()]), /collector_output_cap/);
++  }
++  assert.throws(() => reserveCollectionCost(0, 1, [tier()]), /collector_context_unknown/);
++  assert.throws(() => reserveCollectionCost(1, 0, [tier()]), /collector_output_cap/);
++  assert.throws(() => reserveCollectionCost(1, 1, []), /collector_price_tiers_missing/);
++});
++
++test("cost overflow and invalid rates fail rather than losing microUSD precision", () => {
++  assert.throws(() => ceilTokenMicroUsd(Number.MAX_SAFE_INTEGER, 2), /collector_cost_overflow/);
++  assert.throws(() => sumCollectionMoney([Number.MAX_SAFE_INTEGER, 1]), /collector_cost_overflow/);
++  for (const value of [-1, 0.5, null, undefined, NaN, Infinity]) assert.throws(() => sumCollectionMoney([1, value]), /collector_money/);
++  for (const value of [undefined, NaN, Infinity, -0.1]) assert.throws(() => ceilTokenMicroUsd(1, value), /collector_rate/);
++});
++
++test("invalid individual tier rates cannot be hidden by a higher valid tier", () => {
++  for (const field of ["inputUsdPerMillionTokens", "outputUsdPerMillionTokens", "cacheWriteUsdPerMillionTokens", "cachedInputPriceMultiplier"]) {
++    assert.throws(() => reserveCollectionCost(3, 1, [tier({ maxPromptTokens: 2 }), tier({ [field]: -0.1 })]), /collector_rate/, field);
++  }
++});
++
++test("unobserved usage remains null rather than an inferred free call", () => {
++  const empty = emptyCollectionObservation();
++  assert.equal(estimateCollectionUsageCost(empty, pricedCall()), null);
++  for (const key of ["inputTokens", "outputTokens", "noCacheInputTokens", "cacheReadTokens", "cacheWriteTokens"]) {
++    assert.equal(estimateCollectionUsageCost(observed({ [key]: null }), pricedCall()), null, key);
++  }
++  assert.equal(estimateCollectionUsageCost(observed({ unsupportedBilling: true }), pricedCall()), null);
++  assert.equal(estimateCollectionUsageCost(observed({ inputTokens: 4 }), pricedCall()), null);
++  assert.equal(estimateCollectionUsageCost(observed(), pricedCall([tier({ cacheWriteUsdPerMillionTokens: null })])), null);
++  assert.equal(estimateCollectionUsageCost(observed({ inputTokens: 0, outputTokens: 0, noCacheInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }), pricedCall()), 0,
++    "an explicitly observed zero is distinct from unavailable usage");
++});
++
++test("complete oversized response preserves bare-hex digest through validator and JSON roundtrip", () => {
++  const fullText = "한".repeat(Math.floor(COLLECTION_LIMITS.answerStorageBytes / 3) + 1);
++  const outcome = returned("", {
++    status: "measurement_unsupported", answerText: null, answerBytes: Buffer.byteLength(fullText),
++    answerDigest: benchmarkDigest(fullText), textOmitted: true, failureCode: "answer_storage_limit",
++  });
++  assert.match(outcome.answerDigest, /^[a-f0-9]{64}$/);
++  assert.ok(outcome.answerBytes > COLLECTION_LIMITS.answerStorageBytes);
++  assert.deepEqual(validateCollectionOutcome(JSON.parse(canonicalBenchmarkJson(outcome))), outcome);
++  assert.throws(() => validateCollectionOutcome({ ...outcome, answerDigest: `sha256:${outcome.answerDigest}` }), /collector_answer_omission/);
++});
++
++test("answer storage boundary uses UTF-8 bytes and never silently truncates", () => {
++  const exact = "é".repeat(COLLECTION_LIMITS.answerStorageBytes / 2);
++  assert.equal(validateCollectionOutcome(returned(exact)).answerBytes, COLLECTION_LIMITS.answerStorageBytes);
++  assert.throws(() => validateCollectionOutcome(returned(`${exact}é`)), /collector_answer_integrity/);
++  assert.throws(() => validateCollectionOutcome(returned("한", { answerBytes: 1 })), /collector_answer_integrity/);
++  assert.throws(() => validateCollectionOutcome(returned("{}", { answerDigest: benchmarkDigest("[]") })), /collector_answer_integrity/);
++});
++
++test("partial response cannot claim a full omitted answer digest or complete byte count", () => {
++  const unknown = returned("", { status: "unknown", answerText: null, answerBytes: null, answerDigest: null, completeResponse: false, failureCode: "connection_lost" });
++  assert.deepEqual(validateCollectionOutcome(unknown), unknown);
++  assert.throws(() => validateCollectionOutcome({ ...unknown, answerDigest: benchmarkDigest("partial") }), /collector_answer_omission/);
++  assert.throws(() => validateCollectionOutcome({ ...unknown, answerBytes: COLLECTION_LIMITS.answerStorageBytes + 1, answerDigest: benchmarkDigest("partial"), textOmitted: true }), /collector_answer_omission/);
++  assert.throws(() => validateCollectionOutcome({ ...unknown, status: "returned", failureCode: null }), /collector_returned_answer_missing/);
++});
++
++test("outcome validation preserves missing observations and rejects invalid numeric observations", () => {
++  const outcome = validateCollectionOutcome(returned());
++  assert.deepEqual(outcome.observation, emptyCollectionObservation());
++  assert.equal(outcome.latencyMs, null);
++  for (const key of ["inputTokens", "outputTokens", "noCacheInputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"]) {
++    for (const value of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity]) {
++      assert.throws(() => validateCollectionOutcome(returned("{}", { observation: observed({ [key]: value }) })), new RegExp(`collector_observation_${key}`));
++    }
++  }
++  const missing = returned(); delete missing.observation.inputTokens;
++  assert.throws(() => validateCollectionOutcome(missing), /unexpected_or_missing/);
++});
++
++test("failed and timeout outcomes cannot carry a successful answer", () => {
++  for (const status of ["failed", "timeout"]) {
++    assert.throws(() => validateCollectionOutcome(returned("{}", { status, failureCode: "request_failed" })), /collector_failure_answer/);
++  }
++  assert.throws(() => validateCollectionOutcome(returned("{}", { failureCode: "ignored_failure" })), /collector_returned_answer_missing/);
++});
++
++test("manifest selection leaves the full 24 by catalogue matrix and refused rows intact", () => {
++  assert.equal(manifest.plan.rows.length, corpus.cases.length * AVAILABLE_MODELS.length);
++  assert.equal(manifest.selectedRowIds.length, 2);
++  assert.equal(manifest.plan.rows.filter((row) => !row.benchmarkEligibility.eligible).length, plan.rows.filter((row) => !row.benchmarkEligibility.eligible).length);
++  const refused = plan.rows.find((row) => !row.benchmarkEligibility.eligible);
++  assert.throws(() => buildCollectionManifest({ ...manifestInput, limits, selectedRowIds: [refused.rowId] }), /collector_row_refused_or_unknown/);
++});
++
++test("rehashed manifest edits cannot change frozen reservations, settings, or full row coverage", () => {
++  assert.deepEqual(validateCollectionManifest(manifest, manifestInput), manifest);
++  for (const mutate of [
++    (value) => { value.calls[0].reserve.reservedMicroUsd = 0; },
++    (value) => { value.calls[0].settings = { temperature: 99 }; },
++    (value) => { value.plan.rows.pop(); },
++    (value) => { value.collectorSource.commit = "f".repeat(40); },
++  ]) {
++    const altered = structuredClone(manifest); mutate(altered);
++    const { manifestDigest: ignored, ...body } = altered; void ignored;
++    altered.manifestDigest = collectionHash(body);
++    assert.throws(() => validateCollectionManifest(altered, manifestInput), /collector_manifest_snapshot_mismatch/);
++  }
++});
++
++test("synthetic approval is bound to exact manifest, acknowledgement order, and actor", () => {
++  const approval = syntheticApproval();
++  assert.deepEqual(validateCollectionApproval(approval, manifest, Date.parse(instant)), approval);
++  for (const mutation of [
++    { status: "proposal" }, { manifestDigest: "f".repeat(64) }, { approvedBy: " " },
++    { expiresAt: "2026-09-10T00:02:00.000Z" },
++    { acknowledgements: [...COLLECTION_ASSUMPTIONS].reverse() },
++    { acknowledgements: COLLECTION_ASSUMPTIONS.slice(1) },
++  ]) assert.throws(() => validateCollectionApproval({ ...approval, ...mutation }, manifest, Date.parse(instant)), /collector_approval_binding/);
++  assert.throws(() => validateCollectionApproval({ ...approval, maxTotalMicroUsd: 99 }, manifest, Date.parse(instant)), /unexpected_or_missing/);
++});
++
++test("approval cannot become an unbounded or path-traversing identity", () => {
++  for (const approvalId of ["../reset", "x/y", "x\\y", "", "UPPER", "x".repeat(65)]) {
++    assert.throws(() => validateCollectionApproval({ ...syntheticApproval(), approvalId }, manifest, Date.parse(instant)), /collector_approval_id/);
++  }
++  for (const key of ["maxTotalMicroUsd", "maxRequestMicroUsd", "maxCalls", "requestTimeoutMs", "runTimeoutMs"]) {
++    for (const value of [0, -1, null, NaN, Infinity, 0.5, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => validateCollectionLimits({ ...limits, [key]: value }), new RegExp(`collector_limit_${key}`));
++  }
++});
++
++test("expired or future synthetic approval cannot authorize dispatch", () => {
++  const approval = syntheticApproval();
++  assert.throws(() => validateCollectionApproval(approval, manifest, Date.parse(limits.expiresAt)), /collector_approval_time/);
++  assert.throws(() => validateCollectionApproval({ ...approval, approvedAt: "2026-09-10T00:00:01.000Z" }, manifest, Date.parse(instant)), /collector_approval_time/);
++  assert.throws(() => validateCollectionApproval({ ...approval, approvedAt: "2026-09-09T23:59:59.000Z" }, manifest, Date.parse(instant)), /collector_approval_time/);
++  assert.deepEqual(validateCollectionApproval(approval, manifest, Date.parse(limits.expiresAt), true), approval,
++    "historical export validation may accept expiry without reauthorizing collection");
++});
++
++const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
++function localFixture(t, target = manifest) {
++  const directory = fs.mkdtempSync(join(tmpdir(), "router-collector-adversarial-fixture-"));
++  t.after(() => {
++    const safe = resolve(directory);
++    assert.equal(dirname(safe), resolve(tmpdir()));
++    assert.ok(basename(safe).startsWith("router-collector-adversarial-fixture-"));
++    fs.rmSync(safe, { recursive: true, force: true });
++  });
++  const approval = syntheticApproval(target);
++  const input = { manifest: target, approval, commonDir: directory, now: () => Date.parse(instant), assertCurrent: () => {} };
++  const paths = collectorPaths(directory, approval.approvalId);
++  return { directory, input, paths, state: () => replayCollectionJournal(readFileSync(paths.ledger, "utf8"), target, approval) };
++}
++const oneRowManifest = () => buildCollectionManifest({ ...manifestInput, limits, selectedRowIds: [eligible[0].rowId] });
++function trackedIO(hooks = {}) {
++  const opened = new Map();
++  return {
++    ...fs,
++    openSync(path, ...args) { const fd = fs.openSync(path, ...args); opened.set(fd, String(path)); return fd; },
++    closeSync(fd) { opened.delete(fd); return fs.closeSync(fd); },
++    writeSync(fd, ...args) { return hooks.write ? hooks.write(opened.get(fd), fd, ...args) : fs.writeSync(fd, ...args); },
++    fsyncSync(fd) { return hooks.flush ? hooks.flush(opened.get(fd), fd) : fs.fsyncSync(fd); },
++  };
++}
++function encodeEvents(events) {
++  let previousDigest = null;
++  return events.map((event, seq) => {
++    const body = { seq, previousDigest, event };
++    const entryDigest = collectionHash(body);
++    previousDigest = entryDigest;
++    return canonicalBenchmarkJson({ ...body, entryDigest });
++  }).join("\n") + "\n";
++}
++const historyEvents = (target = manifest) => [
++  { kind: "header", approvalDigest: collectionHash(syntheticApproval(target)), manifestDigest: target.manifestDigest, startedAt: instant },
++  { kind: "intent", rowId: target.calls[0].rowId, at: instant, reservedMicroUsd: target.calls[0].reserve.reservedMicroUsd },
++  { kind: "terminal", rowId: target.calls[0].rowId, at: instant, outcome: returned(), tokenUsageAtFrozenRatesMicroUsd: null },
++];
++
++test("partial writes loop to completion and flush before returning", (t) => {
++  const fix = localFixture(t);
++  const path = join(fix.directory, "synthetic-short-write.jsonl");
++  const order = [];
++  const io = trackedIO({
++    write(file, fd, buffer, offset, length, position) { order.push("write"); return fs.writeSync(fd, buffer, offset, Math.min(3, length), position); },
++    flush(file, fd) { order.push("flush"); fs.fsyncSync(fd); },
++  });
++  writeCollectionDurably(path, "한글 synthetic fixture\n", "wx", io);
++  assert.equal(readFileSync(path, "utf8"), "한글 synthetic fixture\n");
++  assert.ok(order.filter((event) => event === "write").length > 1);
++  assert.equal(order.at(-1), "flush");
++  assert.equal(order.filter((event) => event === "flush").length, 1);
++});
++
++test("registration followed by missing ledger fails closed without a replacement budget", async (t) => {
++  const fix = localFixture(t);
++  let dispatches = 0;
++  let failHeader = true;
++  const io = trackedIO({ write(path, fd, ...args) {
++    if (path === fix.paths.ledger && failHeader) { failHeader = false; throw new Error("synthetic_header_write_failure"); }
++    return fs.writeSync(fd, ...args);
++  } });
++  await assert.rejects(collectDevelopment({ ...fix.input, io, adapter: async () => { dispatches += 1; return returned(); } }), /synthetic_header_write_failure/);
++  assert.ok(fs.existsSync(fix.paths.registration));
++  if (fs.existsSync(fix.paths.ledger)) fs.unlinkSync(fix.paths.ledger); // Simulate lost local state, only inside this test's temp directory.
++  const before = readFileSync(fix.paths.registration);
++  await assert.rejects(collectDevelopment({ ...fix.input, adapter: async () => { dispatches += 1; return returned(); } }), /collector_registered_ledger_missing/);
++  assert.equal(dispatches, 0);
++  assert.equal(fs.existsSync(fix.paths.ledger), false);
++  assert.deepEqual(readFileSync(fix.paths.registration), before);
++});
++
++test("intent journal fsync failure happens before dispatch and cannot be resumed as fresh", async (t) => {
++  const fix = localFixture(t);
++  let dispatches = 0;
++  let ledgerFlushes = 0;
++  const io = trackedIO({ flush(path, fd) {
++    if (path === fix.paths.ledger && ++ledgerFlushes === 2) throw new Error("synthetic_intent_fsync_failure");
++    fs.fsyncSync(fd);
++  } });
++  const adapter = async () => { dispatches += 1; return returned(); };
++  await assert.rejects(collectDevelopment({ ...fix.input, io, adapter }), /synthetic_intent_fsync_failure/);
++  assert.equal(dispatches, 0);
++  assert.equal(fix.state().unknownRows.length, 1);
++  assert.ok(fix.state().totalReservedMicroUsd > 0);
++  await assert.rejects(collectDevelopment({ ...fix.input, adapter }), /collector_journal_witness_mismatch/);
++  assert.equal(dispatches, 0);
++});
++
++test("intent witness fsync failure still cannot precede a provider call", async (t) => {
++  const fix = localFixture(t);
++  let registrationFlushes = 0;
++  let dispatches = 0;
++  const io = trackedIO({ flush(path, fd) {
++    if (path === fix.paths.registration && ++registrationFlushes === 3) throw new Error("synthetic_witness_fsync_failure");
++    fs.fsyncSync(fd);
++  } });
++  await assert.rejects(collectDevelopment({ ...fix.input, io, adapter: async () => { dispatches += 1; return returned(); } }), /synthetic_witness_fsync_failure/);
++  assert.equal(dispatches, 0);
++  const resumed = await collectDevelopment({ ...fix.input, adapter: async () => { dispatches += 1; return returned(); } });
++  assert.equal(resumed.stopReason, "unknown_after_dispatch");
++  assert.equal(resumed.dispatchIntents, 1);
++  assert.equal(dispatches, 0);
++});
++
++for (const point of ["intent_durable", "response_received"]) {
++  test(`interruption at ${point} holds reservation, prevents redispatch, and refuses export`, async (t) => {
++    const fix = localFixture(t);
++    let dispatches = 0;
++    const adapter = async () => { dispatches += 1; return returned(); };
++    await assert.rejects(collectDevelopment({ ...fix.input, adapter, onCheckpoint(checkpoint) { if (checkpoint === point) throw new Error("synthetic_checkpoint_interruption"); } }), /synthetic_checkpoint_interruption/);
++    const before = fix.state();
++    assert.equal(before.attempts.size, 1);
++    assert.equal(before.unknownRows.length, 1);
++    assert.equal([...before.attempts.values()][0].terminal, null);
++    const resumed = await collectDevelopment({ ...fix.input, adapter });
++    assert.equal(dispatches, point === "intent_durable" ? 0 : 1);
++    assert.equal(resumed.stopReason, "unknown_after_dispatch");
++    assert.equal(resumed.committedReservationMicroUsd, before.totalReservedMicroUsd);
++    assert.equal(resumed.actualInvoiceMicroUsd, null);
++    assert.equal(resumed.rows.find((row) => row.rowId === before.unknownRows[0]).outcome, "unknown_after_dispatch");
++    await assert.rejects(exportDevelopmentCollection(fix.input), /collector_export_uncertain_or_unsupported/);
++  });
++}
++
++test("same approval ID cannot reset spending through another path or enlarged manifest", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  let dispatches = 0;
++  const adapter = async () => { dispatches += 1; return returned(); };
++  const first = await collectDevelopment({ ...fix.input, adapter });
++  const second = await collectDevelopment({ ...fix.input, commonDir: resolve(fix.directory, "unused-output", ".."), adapter });
++  assert.equal(dispatches, 1);
++  assert.equal(second.committedReservationMicroUsd, first.committedReservationMicroUsd);
++  const changed = buildCollectionManifest({ ...manifestInput, selectedRowIds: [eligible[0].rowId], limits: { ...limits, maxTotalMicroUsd: limits.maxTotalMicroUsd + 1 } });
++  await assert.rejects(collectDevelopment({ ...fix.input, manifest: changed, approval: syntheticApproval(changed), adapter }), /collector_registration_identity/);
++  assert.equal(dispatches, 1);
++});
++
++test("two writers sharing one approval cannot both dispatch while the lock is held", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  let entered;
++  const inAdapter = new Promise((resolveEntered) => { entered = resolveEntered; });
++  let release;
++  const held = new Promise((resolveHeld) => { release = resolveHeld; });
++  let dispatches = 0;
++  const first = collectDevelopment({ ...fix.input, adapter: async () => { dispatches += 1; entered(); await held; return returned(); } });
++  await inAdapter;
++  try {
++    await assert.rejects(collectDevelopment({ ...fix.input, adapter: async () => { dispatches += 1; return returned(); } }), /collector_lock_unavailable_no_stale_recovery/);
++    assert.equal(dispatches, 1);
++  } finally { release(); await first; }
++  assert.equal(fix.state().attempts.size, 1);
++  assert.equal(fix.state().totalReservedMicroUsd, fix.input.manifest.calls[0].reserve.reservedMicroUsd);
++});
++
++test("terminal fsync failure cannot be exported as a witnessed successful completion", async (t) => {
++  const fix = localFixture(t);
++  let flushes = 0;
++  let dispatches = 0;
++  const io = trackedIO({ flush(path, fd) {
++    if (path === fix.paths.ledger && ++flushes === 3) throw new Error("synthetic_terminal_fsync_failure");
++    fs.fsyncSync(fd);
++  } });
++  const adapter = async () => { dispatches += 1; return returned(); };
++  await assert.rejects(collectDevelopment({ ...fix.input, adapter, io }), /synthetic_terminal_fsync_failure/);
++  await assert.rejects(exportDevelopmentCollection(fix.input), /collector_journal_witness_mismatch/);
++  await assert.rejects(collectDevelopment({ ...fix.input, adapter }), /collector_journal_witness_mismatch/);
++  assert.equal(dispatches, 1);
++});
++
++test("a valid older ledger prefix cannot erase witnessed dispatch history", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  await collectDevelopment({ ...fix.input, adapter: async () => returned() });
++  const header = readFileSync(fix.paths.ledger, "utf8").split("\n")[0] + "\n";
++  fs.writeFileSync(fix.paths.ledger, header);
++  let dispatches = 0;
++  await assert.rejects(collectDevelopment({ ...fix.input, adapter: async () => { dispatches += 1; return returned(); } }), /collector_journal_witness_mismatch/);
++  await assert.rejects(exportDevelopmentCollection(fix.input), /collector_journal_witness_mismatch/);
++  assert.equal(dispatches, 0);
++});
++
++test("journal parser rejects truncation, duplicated terminals, and rehashed identity mutations", () => {
++  const events = historyEvents();
++  const text = encodeEvents(events);
++  assert.equal(replayCollectionJournal(text, manifest, syntheticApproval()).attempts.size, 1);
++  assert.throws(() => replayCollectionJournal(text.slice(0, -1), manifest, syntheticApproval()), /collector_journal_truncated/);
++  assert.throws(() => replayCollectionJournal(text + "\n", manifest, syntheticApproval()), /collector_journal_blank_line/);
++  assert.throws(() => replayCollectionJournal(encodeEvents([...events, events[2]]), manifest, syntheticApproval()), /collector_duplicate_or_orphan_terminal/);
++  assert.throws(() => replayCollectionJournal(encodeEvents([events[0], events[2]]), manifest, syntheticApproval()), /collector_duplicate_or_orphan_terminal/);
++  assert.throws(() => replayCollectionJournal(encodeEvents([events[0], events[1], events[1]]), manifest, syntheticApproval()), /collector_duplicate_or_forged_intent/);
++  for (const field of ["approvalDigest", "manifestDigest"]) {
++    assert.throws(() => replayCollectionJournal(encodeEvents([{ ...events[0], [field]: "f".repeat(64) }, ...events.slice(1)]), manifest, syntheticApproval()), /collector_journal_identity/);
++  }
++  assert.throws(() => replayCollectionJournal(encodeEvents([events[0], { ...events[1], reservedMicroUsd: 0 }]), manifest, syntheticApproval()), /collector_duplicate_or_forged_intent/);
++  assert.throws(() => replayCollectionJournal(encodeEvents([events[0], events[1], { ...events[2], tokenUsageAtFrozenRatesMicroUsd: 0 }]), manifest, syntheticApproval()), /collector_journal_cost_forged/);
++});
++
++test("current-snapshot guard executes again before a later dispatch after clock advancement", async (t) => {
++  const fix = localFixture(t);
++  let dispatches = 0;
++  let now = Date.parse(instant);
++  const frozenRevisionEnd = now + 1;
++  const assertions = [];
++  await assert.rejects(collectDevelopment({ ...fix.input, now: () => now, assertCurrent() {
++    assertions.push(now);
++    if (now >= frozenRevisionEnd) throw new Error("synthetic_known_price_revision_boundary");
++  }, adapter: async () => { dispatches += 1; now += 2; return returned(); } }), /synthetic_known_price_revision_boundary/);
++  assert.equal(dispatches, 1);
++  assert.deepEqual(assertions, [Date.parse(instant), Date.parse(instant), Date.parse(instant), now],
++    "entry, pre-intent, post-intent, then next-row pre-intent must all assert the current snapshot");
++  assert.equal(fix.state().attempts.size, 1);
++  // This is the journal injection contract, not evidence that the CLI pricing guard is correct.
++});
++
++test("time spent durably recording intent cannot extend approval past its expiry", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  let now = Date.parse(instant);
++  let dispatches = 0;
++  let result;
++  let failure;
++  try {
++    result = await collectDevelopment({ ...fix.input, now: () => now,
++      onCheckpoint(point) { if (point === "intent_durable") now = Date.parse(limits.expiresAt); },
++      adapter: async () => { dispatches += 1; return returned(); },
++    });
++  } catch (error) { failure = error; }
++  assert.equal(dispatches, 0, "a stale pre-fsync remainingMs must never authorize a post-expiry dispatch");
++  assert.equal(fix.state().attempts.size, 1);
++  assert.equal(fix.state().unknownRows.length, 1);
++  assert.ok(fix.state().totalReservedMicroUsd > 0);
++  if (failure) assert.match(failure.message, /^collector_/);
++  else assert.ok(result.stopReason, "durable but undispatched intent needs an explicit stopped/unknown state");
++});
++
++test("a price revision crossed during intent persistence is checked before dispatch", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  let now = Date.parse(instant);
++  const revisionBoundary = now + 1;
++  let dispatches = 0;
++  const result = collectDevelopment({ ...fix.input, now: () => now,
++    assertCurrent() { if (now >= revisionBoundary) throw new Error("synthetic_price_revision_during_fsync"); },
++    onCheckpoint(point) { if (point === "intent_durable") now += 2; },
++    adapter: async () => { dispatches += 1; return returned(); },
++  });
++  await assert.rejects(result, /synthetic_price_revision_during_fsync/);
++  assert.equal(dispatches, 0);
++  assert.equal(fix.state().unknownRows.length, 1);
++});
++
++test("collector adapter request contains only prompt and frozen call settings, never gold", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  await collectDevelopment({ ...fix.input, adapter: async (request) => {
++    assert.deepEqual(Object.keys(request).sort(), ["maxOutputTokens", "modelId", "prompt", "settings", "signal"]);
++    const row = fix.input.manifest.plan.rows.find((candidate) => candidate.rowId === fix.input.manifest.calls[0].rowId);
++    assert.equal(request.prompt, corpus.cases.find((item) => item.id === row.caseId).prompt);
++    assert.equal(request.maxOutputTokens, row.callConfig.proposedMaxOutputTokens);
++    assert.deepEqual(request.settings, fix.input.manifest.calls[0].settings);
++    for (const key of ["expected", "grading", "corpus", "caseId", "rowId", "approval", "manifest"]) assert.equal(Object.hasOwn(request, key), false);
++    return returned();
++  } });
++});
++
++for (const kind of ["unknown", "storage_omitted", "v1_answer_oversized"]) {
++  test(`v1 export refuses ${kind} without discarding the attempted row`, async (t) => {
++    const fix = localFixture(t, oneRowManifest());
++    const outcome = kind === "unknown"
++      ? returned("", { status: "unknown", answerText: null, answerBytes: null, answerDigest: null, completeResponse: false, failureCode: "transport_lost" })
++      : collectionReturnedOutcome("openai", null, "x".repeat(kind === "storage_omitted" ? COLLECTION_LIMITS.answerStorageBytes + 1 : DEVELOPMENT_LIMITS.answerBytes + 1), 1);
++    const report = await collectDevelopment({ ...fix.input, adapter: async () => outcome });
++    assert.equal(report.dispatchIntents, 1);
++    assert.equal(report.rows.length, plan.rows.length);
++    assert.notEqual(report.rows.find((row) => row.rowId === fix.input.manifest.calls[0].rowId).outcome, "not_run");
++    assert.ok(report.committedReservationMicroUsd > 0);
++    assert.equal(report.actualInvoiceMicroUsd, null);
++    await assert.rejects(exportDevelopmentCollection(fix.input), /collector_export_uncertain_or_unsupported/);
++  });
++}
++
++test("export preserves blank and failed rows in the original eligible denominator", async (t) => {
++  const fix = localFixture(t);
++  let calls = 0;
++  await collectDevelopment({ ...fix.input, adapter: async () => ++calls === 1 ? returned("") : returned("", { status: "failed", answerText: null, answerBytes: null, answerDigest: null, failureCode: "provider_http_error" }) });
++  const results = await exportDevelopmentCollection(fix.input);
++  const score = scoreDevelopmentResults(corpus, plan, results);
++  assert.equal(results.rows.length, 2);
++  assert.equal(score.summary.planned, eligible.length);
++  assert.equal(score.summary.blank, 1);
++  assert.equal(score.summary.failed, 1);
++  assert.equal(score.summary.notRun, eligible.length - 2);
++  assert.equal(score.summary.correctnessRate, null);
++  assert.equal(score.reportedMetrics.providerCostUsd.total, null);
++  for (const row of results.rows) assert.equal(row.metrics.providerCostUsd, null);
++});
++
++test("controlled timeout terminal is exported as timeout without releasing its reservation", async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  const outcome = returned("", { status: "timeout", answerText: null, answerBytes: null, answerDigest: null, completeResponse: false, failureCode: "deadline_abort_billing_unknown" });
++  const report = await collectDevelopment({ ...fix.input, adapter: async () => outcome });
++  const results = await exportDevelopmentCollection(fix.input);
++  assert.equal(results.rows.length, 1);
++  assert.equal(results.rows[0].status, "timeout");
++  assert.equal(results.rows[0].metrics.providerCostUsd, null);
++  assert.equal(scoreDevelopmentResults(corpus, plan, results).summary.timeout, 1);
++  assert.equal(scoreDevelopmentResults(corpus, plan, results).summary.planned, eligible.length);
++  assert.ok(report.committedReservationMicroUsd > 0);
++  assert.equal(report.actualInvoiceMicroUsd, null);
++});
++
++test("durable timeout stops later rows and resume while remaining exportable as timeout", async (t) => {
++  const fix = localFixture(t);
++  let calls = 0;
++  const adapter = async () => {
++    calls += 1;
++    return returned("", { status: "timeout", answerText: null, answerBytes: null, answerDigest: null, completeResponse: false, failureCode: "deadline_abort_billing_unknown" });
++  };
++  const first = await collectDevelopment({ ...fix.input, adapter });
++  assert.equal(calls, 1, "a controlled timeout must stop subsequent selected rows");
++  assert.ok(first.stopReason);
++  assert.equal(first.dispatchIntents, 1);
++  const resumed = await collectDevelopment({ ...fix.input, adapter });
++  assert.equal(calls, 1, "resume must not continue past a durable timeout");
++  assert.equal(resumed.committedReservationMicroUsd, first.committedReservationMicroUsd);
++  const results = await exportDevelopmentCollection(fix.input);
++  assert.equal(results.rows.length, 1);
++  assert.equal(results.rows[0].status, "timeout");
++  const score = scoreDevelopmentResults(corpus, plan, results);
++  assert.equal(score.summary.timeout, 1);
++  assert.equal(score.summary.notRun, eligible.length - 1);
++  assert.equal(score.summary.planned, eligible.length);
++});
++
++test("whole-document v1 export limit refuses rather than dropping large valid rows", async (t) => {
++  const target = buildCollectionManifest({ ...manifestInput, selectedRowIds: eligible.map((row) => row.rowId), limits: { ...limits, maxTotalMicroUsd: 1_000_000_000_000 } });
++  const fix = localFixture(t, target);
++  const events = [historyEvents(target)[0]];
++  const answer = returned("x".repeat(DEVELOPMENT_LIMITS.answerBytes));
++  for (const call of target.calls) {
++    events.push({ kind: "intent", rowId: call.rowId, at: instant, reservedMicroUsd: call.reserve.reservedMicroUsd });
++    events.push({ kind: "terminal", rowId: call.rowId, at: instant, outcome: answer, tokenUsageAtFrozenRatesMicroUsd: null });
++  }
++  const journal = encodeEvents(events);
++  const entries = journal.trimEnd().split("\n").map((line) => JSON.parse(line));
++  fs.mkdirSync(fix.paths.root);
++  fs.writeFileSync(fix.paths.ledger, journal);
++  const registration = { schemaVersion: COLLECTION_VERSION, approvalId: fix.input.approval.approvalId, approvalDigest: collectionHash(fix.input.approval), manifestDigest: target.manifestDigest };
++  fs.writeFileSync(fix.paths.registration, [registration, ...entries.map(({ seq, entryDigest }) => ({ seq, entryDigest }))].map((entry) => canonicalBenchmarkJson(entry)).join("\n") + "\n");
++  assert.ok(Buffer.byteLength(journal) > DEVELOPMENT_LIMITS.documentBytes);
++  await assert.rejects(exportDevelopmentCollection(fix.input), /collector_export_document_limit/);
++  assert.equal(fix.state().attempts.size, eligible.length);
++});
++
++// A temporary child imports production journal code, but only a local fake adapter.
++// Reference: tests/aiReviewDraftLedgerCli.test.mjs:258 (abrupt exit), :315 (race).
++function childHarness(fix, mode) {
++  const fixturePath = join(fix.directory, "synthetic-fixture-not-an-approval.json");
++  const helperPath = join(fix.directory, "synthetic-child.mjs");
++  const tracePath = join(fix.directory, "fake-dispatches.jsonl");
++  if (!fs.existsSync(fixturePath)) fs.writeFileSync(fixturePath, JSON.stringify({ manifest: fix.input.manifest, approval: fix.input.approval, commonDir: fix.directory, instant, tracePath }));
++  if (!fs.existsSync(helperPath)) fs.writeFileSync(helperPath, `
++import fs from 'node:fs';
++import http from 'node:http'; import https from 'node:https'; import net from 'node:net';
++import tls from 'node:tls'; import dgram from 'node:dgram'; import { syncBuiltinESMExports } from 'node:module';
++const refused=()=>{throw new Error('ADVERSARIAL_CHILD_NETWORK_FORBIDDEN');};
++globalThis.fetch=refused; http.request=refused; http.get=refused; https.request=refused; https.get=refused;
++net.connect=refused; net.createConnection=refused; net.Socket.prototype.connect=refused; tls.connect=refused; dgram.createSocket=refused; syncBuiltinESMExports();
++const {collectDevelopment}=await import(${JSON.stringify(pathToFileURL(join(root, "lib/routerDevelopmentCollectorJournal.ts")).href)});
++const {emptyCollectionObservation}=await import(${JSON.stringify(pathToFileURL(join(root, "lib/routerDevelopmentCollector.ts")).href)});
++const {benchmarkDigest}=await import(${JSON.stringify(pathToFileURL(join(root, "lib/routerDevelopmentBenchmark.ts")).href)});
++const fixture=JSON.parse(fs.readFileSync(process.argv[2],'utf8')); const mode=process.argv[3];
++try {
++  const report=await collectDevelopment({...fixture, now:()=>Date.parse(fixture.instant), assertCurrent:()=>{},
++    onCheckpoint(point){if(mode===point) process.exit(73);},
++    adapter:async()=>{
++      fs.appendFileSync(fixture.tracePath,JSON.stringify({synthetic:true})+'\\n');
++      if(mode==='hold'){await new Promise(resolve=>{process.once('message',resolve); process.send({kind:'entered'});});}
++      return {status:'returned',answerText:'{}',answerBytes:2,answerDigest:benchmarkDigest('{}'),textOmitted:false,completeResponse:true,failureCode:null,latencyMs:null,observation:emptyCollectionObservation()};
++    }});
++  process.send({kind:'done',dispatchIntents:report.dispatchIntents}); process.disconnect();
++} catch(error) {process.send({kind:'error',message:error.message}); process.disconnect(); process.exitCode=2;}
++`);
++  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(path|systemroot|windir|comspec|temp|tmp|pathext)$/i.test(key)));
++  const child = spawn(process.execPath, ["--conditions=react-server", "--import", "tsx", helperPath, fixturePath, mode], {
++    cwd: root, env: environment, stdio: ["ignore", "pipe", "pipe", "ipc"], windowsHide: true,
++  });
++  const messages = [];
++  let stderr = "";
++  child.on("message", (message) => messages.push(message));
++  child.stderr.on("data", (chunk) => { stderr += chunk; });
++  child.stdout.resume();
++  const timer = setTimeout(() => child.kill("SIGKILL"), 15_000);
++  const closed = new Promise((resolveClosed, rejectClosed) => {
++    child.once("error", rejectClosed);
++    child.once("close", (code, signal) => { clearTimeout(timer); resolveClosed({ code, signal, messages, stderr }); });
++  });
++  return { child, closed, tracePath };
++}
++
++for (const point of ["intent_durable", "response_received"]) {
++  test(`real child abrupt exit at ${point} leaves an unknown intent and an unreclaimed lock`, { timeout: 20_000 }, async (t) => {
++    const fix = localFixture(t, oneRowManifest());
++    const child = childHarness(fix, point);
++    const result = await child.closed;
++    assert.equal(result.code, 73, result.stderr);
++    assert.equal(result.signal, null);
++    assert.ok(fs.existsSync(fix.paths.lock));
++    const state = fix.state();
++    assert.equal(state.attempts.size, 1);
++    assert.equal(state.unknownRows.length, 1);
++    assert.ok(state.totalReservedMicroUsd > 0);
++    const calls = fs.existsSync(child.tracePath) ? readFileSync(child.tracePath, "utf8").trimEnd().split("\n").length : 0;
++    assert.equal(calls, point === "intent_durable" ? 0 : 1);
++    await assert.rejects(collectDevelopment({ ...fix.input, adapter: async () => assert.fail("stale-lock redispatch") }), /collector_lock_unavailable_no_stale_recovery/);
++    await assert.rejects(exportDevelopmentCollection(fix.input), /collector_lock_unavailable_no_stale_recovery/);
++  });
++}
++
++test("separate child writers cannot double-spend a shared approval journal", { timeout: 25_000 }, async (t) => {
++  const fix = localFixture(t, oneRowManifest());
++  const first = childHarness(fix, "hold");
++  let second;
++  try {
++    const [message] = await once(first.child, "message");
++    assert.equal(message.kind, "entered");
++    second = childHarness(fix, "complete");
++    const blocked = await second.closed;
++    assert.equal(blocked.code, 2, blocked.stderr);
++    assert.match(blocked.messages.find((entry) => entry.kind === "error")?.message ?? "", /collector_lock_unavailable_no_stale_recovery/);
++    first.child.send({ kind: "release" });
++    const completed = await first.closed;
++    assert.equal(completed.code, 0, completed.stderr);
++    assert.equal(readFileSync(first.tracePath, "utf8").trimEnd().split("\n").length, 1);
++    assert.equal(fix.state().attempts.size, 1);
++    assert.equal(fix.state().totalReservedMicroUsd, fix.input.manifest.calls[0].reserve.reservedMicroUsd);
++  } finally {
++    for (const processState of [first, second].filter(Boolean)) {
++      if (processState.child.exitCode === null && processState.child.signalCode === null) processState.child.kill("SIGKILL");
++      await processState.closed;
++    }
++  }
++});
++
++function sdkRequest() {
++  const call = manifest.calls[0];
++  const row = plan.rows.find((candidate) => candidate.rowId === call.rowId);
++  return { modelId: row.modelId, prompt: row.input.prompt, settings: call.settings, maxOutputTokens: row.callConfig.proposedMaxOutputTokens, signal: new AbortController().signal };
++}
++
++test("SDK options force retry zero, one prompt, frozen output cap, and raw-body opt-in", async () => {
++  const request = sdkRequest();
++  let calls = 0;
++  const fakeModel = { syntheticModel: true };
++  const adapter = createCollectionSdkAdapter({ getModel: () => fakeModel, getSettings: () => request.settings, now: () => 0,
++    generate: async (options) => {
++      calls += 1;
++      assert.deepEqual(Object.keys(options).sort(), [...new Set(["model", ...Object.keys(request.settings), "prompt", "maxOutputTokens", "maxRetries", "abortSignal", "include"])].sort());
++      assert.equal(options.model, fakeModel);
++      assert.equal(options.prompt, request.prompt);
++      assert.equal(options.maxRetries, 0);
++      assert.equal(options.maxOutputTokens, request.maxOutputTokens);
++      assert.equal(options.abortSignal, request.signal);
++      assert.deepEqual(options.include, { responseBody: true });
++      return { text: "{}", steps: [{}], finalStep: { response: {} }, usage: { inputTokens: 0, outputTokens: 0 }, response: { id: "sdk-invented-id", modelId: "sdk-default-model" } };
++    },
++  });
++  const outcome = await adapter(request);
++  assert.equal(calls, 1);
++  assert.deepEqual(outcome.observation, emptyCollectionObservation(), "SDK normalized zeros and synthesized IDs are not raw observations");
++});
++
++test("retryable SDK provider error dispatches exactly once with the real SDK and a mock model", async () => {
++  // Installed SDK's public mock seam; no provider transport is constructed.
++  // Reference: node_modules/ai/src/test/mock-language-model-v4.ts:20.
++  const { generateText, APICallError } = await import("ai");
++  const { MockLanguageModelV4 } = await import("ai/test");
++  const model = new MockLanguageModelV4({ doGenerate: async () => {
++    throw new APICallError({ message: "synthetic retryable failure", url: "https://example.invalid", requestBodyValues: {}, statusCode: 503, responseBody: "{}", isRetryable: true });
++  } });
++  const request = sdkRequest();
++  const adapter = createCollectionSdkAdapter({ generate: generateText, getModel: () => model, getSettings: () => request.settings, now: () => 0 });
++  const outcome = await adapter(request);
++  assert.equal(model.doGenerateCalls.length, 1);
++  assert.equal(model.doStreamCalls.length, 0);
++  assert.equal(outcome.status, "failed");
++  assert.equal(outcome.failureCode, "provider_http_error");
++  assert.equal(outcome.observation.inputTokens, null);
++});
++
++test("SDK settings drift refuses before model construction or generation", async () => {
++  const request = sdkRequest();
++  let calls = 0;
++  const adapter = createCollectionSdkAdapter({ getSettings: () => ({ temperature: 99 }),
++    getModel: () => { calls += 1; return {}; }, generate: async () => { calls += 1; return {}; },
++  });
++  await assert.rejects(adapter(request), /collector_provider_settings_drift/);
++  assert.equal(calls, 0);
++});
++
++test("multi-step and tool-bearing replies remain unsupported even with an answer", async () => {
++  const request = sdkRequest();
++  const adapter = createCollectionSdkAdapter({ getModel: () => ({}), getSettings: () => request.settings,
++    generate: async () => ({ text: "{}", finalStep: { response: {} }, steps: [{}, {}] }), now: () => 0,
++  });
++  const multi = await adapter(request);
++  assert.equal(multi.status, "measurement_unsupported");
++  assert.equal(multi.answerText, "{}");
++  assert.equal(multi.failureCode, "multiple_or_missing_steps");
++  const tools = collectionReturnedOutcome("openai", { status: "completed", output: [{ type: "web_search_call" }] }, "{}", 0);
++  assert.equal(tools.status, "measurement_unsupported");
++  assert.equal(tools.observation.unsupportedBilling, true);
++});
++
++test("provider raw usage allowlist distinguishes missing, invalid, and observed zero", () => {
++  const bodies = [
++    ["openai", { usage: { input_tokens: 0, output_tokens: 0 }, status: "completed" }],
++    ["xai", { usage: { prompt_tokens: 0, completion_tokens: 0 }, choices: [{ finish_reason: "stop" }] }],
++    ["anthropic", { usage: { input_tokens: 0, output_tokens: 0 }, stop_reason: "end_turn" }],
++    ["google", { usageMetadata: { promptTokenCount: 0, candidatesTokenCount: 0 }, candidates: [{ finishReason: "STOP" }] }],
++  ];
++  for (const [provider, body] of bodies) {
++    const observation = observeCollectionBody(provider, body);
++    assert.equal(observation.providerResponseId, null);
++    assert.equal(observation.providerReportedModel, null);
++    assert.equal(observation.cacheWriteTokens, null);
++    assert.equal(observation.reasoningTokens, null);
++    assert.equal(estimateCollectionUsageCost(observation, pricedCall()), null);
++  }
++  assert.equal(observeCollectionBody("google", bodies[3][1]).outputTokens, null, "missing thoughts do not imply zero reasoning");
++  for (const input_tokens of [-1, 0.5, "0", Number.MAX_SAFE_INTEGER + 1, NaN]) {
++    assert.equal(observeCollectionBody("openai", { usage: { input_tokens } }).inputTokens, null);
++  }
++  const deepseek = observeCollectionBody("deepseek", { usage: { prompt_tokens: 10, prompt_tokens_details: { cached_tokens: 8 } } });
++  assert.equal(deepseek.cacheReadTokens, null, "a product-synthesized field is not DeepSeek original wire evidence");
++});
++
++test("provider failures do not persist secrets, request bodies, reasoning, or raw errors", async () => {
++  const request = sdkRequest();
++  const secret = "SYNTHETIC_SECRET_MUST_NOT_PERSIST";
++  const adapter = createCollectionSdkAdapter({ getModel: () => ({}), getSettings: () => request.settings, now: () => 0,
++    generate: async () => { throw Object.assign(new Error(secret), { statusCode: 403, requestBodyValues: { prompt: secret }, responseHeaders: { authorization: secret }, responseBody: JSON.stringify({ id: "safe-provider-id", private_reasoning: secret, error: { message: secret } }) }); },
++  });
++  const outcome = await adapter(request);
++  assert.equal(outcome.status, "failed");
++  assert.equal(outcome.failureCode, "provider_http_error");
++  assert.equal(JSON.stringify(outcome).includes(secret), false);
++  assert.equal(outcome.observation.inputTokens, null);
++});
+diff --git a/tests/routerDevelopmentCollectorCli.test.mjs b/tests/routerDevelopmentCollectorCli.test.mjs
+new file mode 100644
+index 00000000..8e1e7d29
+--- /dev/null
++++ b/tests/routerDevelopmentCollectorCli.test.mjs
+@@ -0,0 +1,73 @@
++import assert from "node:assert/strict";
++import { spawnSync } from "node:child_process";
++import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { basename, dirname, join, resolve } from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++import test, { after } from "node:test";
++
++const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
++const temporary = mkdtempSync(join(tmpdir(), "collector-cli-test-"));
++after(() => { const path = resolve(temporary); assert.equal(dirname(path), resolve(tmpdir())); assert.ok(basename(path).startsWith("collector-cli-test-")); rmSync(path, { recursive: true }); });
++const trap = join(temporary, "no-network.mjs");
++writeFileSync(trap, `import http from 'node:http'; import https from 'node:https'; import net from 'node:net'; import tls from 'node:tls'; import dgram from 'node:dgram'; import {syncBuiltinESMExports} from 'node:module';
++const blocked=()=>{throw new Error('COLLECTOR_TEST_NETWORK_FORBIDDEN');}; globalThis.fetch=blocked; http.request=blocked; http.get=blocked; https.request=blocked; https.get=blocked; net.connect=blocked; net.createConnection=blocked; net.Socket.prototype.connect=blocked; tls.connect=blocked; dgram.createSocket=blocked; syncBuiltinESMExports();`);
++const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CHAT_MODEL_|.*API_KEY$)/i.test(key)));
++const run = (args, env = {}) => spawnSync(process.execPath, ["--conditions=react-server", "--import", "tsx", "--import", pathToFileURL(trap).href, "scripts/router-development-collect.mjs", ...args], { cwd: root, encoding: "utf8", maxBuffer: 20 * 1024 * 1024, env: { ...environment, ...env } });
++let preview;
++let proposal;
++const proposalPath = join(temporary, "proposal.json");
++
++test("default preview is a network-free full census and never an approval", () => {
++  const result = run([]);
++  assert.equal(result.status, 0, result.stderr);
++  preview = JSON.parse(result.stdout);
++  assert.equal(preview.plan.rows.length, 1008);
++  assert.equal(preview.plan.summary.plannedCalls, 360);
++  assert.equal(preview.approval, null);
++  assert.equal(preview.collectionManifest, null);
++});
++test("explicit proposal binds all source/settings/rates/limits without approving spend", () => {
++  const selected = preview.plan.rows.find((row) => row.benchmarkEligibility.eligible);
++  const fixtureExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
++  const result = run([`--rows=${selected.rowId}`, "--max-total-microusd=1", "--max-request-microusd=1", "--max-calls=1", "--request-timeout-ms=1000", "--run-timeout-ms=5000", `--expires-at=${fixtureExpiry}`, `--output=${proposalPath}`]);
++  assert.equal(result.status, 0, result.stderr);
++  proposal = JSON.parse(readFileSync(proposalPath, "utf8"));
++  assert.equal(proposal.status, "proposal");
++  assert.equal(proposal.completionPossibleWithinLimits, false);
++  assert.equal(proposal.plan.rows.length, 1008);
++  assert.equal(proposal.calls.length, 1);
++  assert.ok(proposal.totalReservedMicroUsd > 1);
++  assert.ok(proposal.collectorSource.files["lib/activeAiModel.ts"]);
++  assert.ok(proposal.collectorSource.files["package-lock.json"]);
++  assert.equal(proposal.calls[0].reserve.outputCapTokens, selected.callConfig.proposedMaxOutputTokens);
++  const before = readFileSync(proposalPath, "utf8");
++  assert.equal(run([`--output=${proposalPath}`]).status, 1);
++  assert.equal(readFileSync(proposalPath, "utf8"), before);
++});
++test("missing human approval/live flag, unknown or duplicate flags fail without any calls", () => {
++  for (const args of [["--live"], ["--mode=execute"], ["--mode=execute", "--live"], ["--mode=export", "--live"], ["--mode=live"], ["--ledger=x"], ["--run-id=x"], ["--mode=preview", "--mode=execute"], ["--max-total-microusd=1"], ["--rows=x"], ["--help", "--live"], ["--live=true"]]) {
++    const result = run(args);
++    assert.equal(result.status, 1, JSON.stringify(args));
++    assert.ok(!result.stderr.includes("COLLECTOR_TEST_NETWORK_FORBIDDEN"));
++  }
++  const approvalPath = join(temporary, "not-an-approval.json");
++  writeFileSync(approvalPath, JSON.stringify(proposal));
++  assert.equal(run(["--mode=execute", "--live", `--manifest=${proposalPath}`, `--approval=${approvalPath}`]).status, 1);
++});
++test("malformed manifest cannot request arbitrary source-file hashing", () => {
++  const manifestPath = join(temporary, "forged.json");
++  const secret = join(temporary, "should-never-be-printed.txt");
++  writeFileSync(secret, "NOT_A_REAL_SECRET_BUT_MUST_NOT_APPEAR");
++  const forged = structuredClone(proposal);
++  forged.collectorSource.files = { [secret]: "a".repeat(64) };
++  writeFileSync(manifestPath, JSON.stringify(forged));
++  const result = run(["--mode=execute", "--live", `--manifest=${manifestPath}`, `--approval=${proposalPath}`]);
++  assert.equal(result.status, 1);
++  assert.ok(!result.stderr.includes("NOT_A_REAL_SECRET"));
++  assert.ok(!result.stdout.includes("NOT_A_REAL_SECRET"));
++});
++test("case-insensitive pricing overrides are rejected and help is inert", () => {
++  assert.equal(run([], { chat_model_gpt_5_6_luna_input_usd_per_million: "123" }).status, 1);
++  assert.equal(run(["--help"]).status, 0);
++});
+diff --git a/tests/routerDevelopmentCollectorProvider.test.mjs b/tests/routerDevelopmentCollectorProvider.test.mjs
+new file mode 100644
+index 00000000..b6980294
+--- /dev/null
++++ b/tests/routerDevelopmentCollectorProvider.test.mjs
+@@ -0,0 +1,103 @@
++import assert from "node:assert/strict";
++import test, { after } from "node:test";
++import { generateText, APICallError } from "ai";
++import { MockLanguageModelV4 } from "ai/test";
++import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
++import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
++import { createCollectionSdkAdapter, observeCollectionBody, collectionReturnedOutcome } from "../lib/routerDevelopmentCollectorProvider.ts";
++import { COLLECTION_LIMITS, validateCollectionOutcome } from "../lib/routerDevelopmentCollector.ts";
++import { auditProcessingTierMentions, PROCESSING_TIER_REQUEST_ALLOWLIST } from "../scripts/check-processing-tier-core.mjs";
++
++const originalFetch = globalThis.fetch;
++globalThis.fetch = () => { throw new Error("PROVIDER_TEST_NETWORK_FORBIDDEN"); };
++after(() => { globalThis.fetch = originalFetch; });
++const model = AVAILABLE_MODELS.find((entry) => entry.id === DEFAULT_MODEL_ID);
++const request = () => ({ modelId: model.id, prompt: "Return the supplied fixture JSON only.", maxOutputTokens: 128000, settings: getModelGenerationSettings(model), signal: new AbortController().signal });
++const sdkUsage = { inputTokens: { total: 0, noCache: 0, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 0, text: 0, reasoning: 0 } };
++
++test("actual SDK7 mock proves request boundary, body opt-in, one step, and no normalized evidence", async () => {
++  const mock = new MockLanguageModelV4({ doGenerate: { content: [{ type: "text", text: "{}" }, { type: "reasoning", text: "MUST_NOT_BE_RECORDED" }], usage: sdkUsage, finishReason: { unified: "stop", raw: undefined }, response: { body: {} }, warnings: [] } });
++  let options;
++  const adapter = createCollectionSdkAdapter({ generate: (value) => { options = value; return generateText(value); }, getModel: () => mock, getSettings: getModelGenerationSettings });
++  const outcome = await adapter(request());
++  assert.equal(mock.doGenerateCalls.length, 1);
++  assert.equal(options.maxRetries, 0);
++  assert.deepEqual(options.include, { responseBody: true });
++  for (const key of ["tools", "repairText", "expected", "caseId", "grading", "stopWhen", "fallback"]) assert.ok(!(key in options));
++  assert.equal(outcome.answerText, "{}");
++  assert.equal(outcome.observation.inputTokens, null);
++  assert.equal(outcome.observation.outputTokens, null);
++  assert.equal(outcome.observation.providerResponseId, null);
++  assert.equal(outcome.observation.providerReportedModel, null);
++  assert.ok(!JSON.stringify(outcome).includes("MUST_NOT_BE_RECORDED"));
++});
++for (const statusCode of [429, 503]) test(`actual SDK7 retryable ${statusCode} invokes a mock once`, async () => {
++  const mock = new MockLanguageModelV4({ doGenerate: async () => { throw new APICallError({ message: "SENSITIVE_ERROR_DO_NOT_STORE", url: "https://example.invalid", requestBodyValues: { secret: "NEVER" }, statusCode, isRetryable: true, responseBody: "{}" }); } });
++  const adapter = createCollectionSdkAdapter({ generate: generateText, getModel: () => mock, getSettings: getModelGenerationSettings });
++  const outcome = await adapter(request());
++  assert.equal(mock.doGenerateCalls.length, 1);
++  assert.equal(outcome.status, "failed");
++  assert.equal(outcome.failureCode, "provider_http_error");
++  assert.ok(!JSON.stringify(outcome).includes("SENSITIVE"));
++  assert.ok(!JSON.stringify(outcome).includes("NEVER"));
++});
++
++test("raw usage preserves missing versus explicit zero across five adapter families", () => {
++  const examples = [
++    ["openai", { id: "r", model: "reported", status: "completed", usage: { input_tokens: 3, output_tokens: 2, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } } }],
++    ["xai", { id: "r", model: "reported", choices: [{ finish_reason: "stop", message: {} }], usage: { prompt_tokens: 3, completion_tokens: 2, prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } } }],
++    ["anthropic", { id: "r", model: "reported", stop_reason: "end_turn", usage: { input_tokens: 3, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } }],
++    ["google", { responseId: "r", modelVersion: "reported", candidates: [{ finishReason: "STOP" }], usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, thoughtsTokenCount: 0 } }],
++    ["moonshot", { id: "r", model: "reported", choices: [{ finish_reason: "stop", message: {} }], usage: { prompt_tokens: 3, completion_tokens: 2, cached_tokens: 0, prompt_tokens_details: { cache_write_tokens: 0 } } }],
++  ];
++  for (const [provider, body] of examples) {
++    const observation = observeCollectionBody(provider, body);
++    assert.equal(observation.inputTokens, 3, provider);
++    assert.equal(observation.outputTokens, 2, provider);
++    assert.equal(observation.providerResponseId, "r", provider);
++    assert.equal(observation.providerReportedModel, "reported", provider);
++    assert.equal(observation.finish, "stop", provider);
++    assert.equal(observeCollectionBody(provider, {}).outputTokens, null);
++  }
++  assert.equal(observeCollectionBody("google", { usageMetadata: { candidatesTokenCount: 5 } }).outputTokens, null);
++  assert.equal(observeCollectionBody("anthropic", { usage: { input_tokens: 5, cache_read_input_tokens: 0 } }).inputTokens, null);
++  assert.equal(observeCollectionBody("deepseek", { usage: { prompt_tokens: 5, prompt_tokens_details: { cached_tokens: 5 } } }).cacheReadTokens, null);
++  assert.equal(observeCollectionBody("deepseek", { usage: { prompt_cache_hit_tokens: 2, prompt_tokens_details: { cached_tokens: 5 } } }).cacheReadTokens, 2);
++});
++
++test("metadata failures, invalid counters, and oversize do not invent evidence", () => {
++  for (const number of [-1, Infinity, NaN, 1.5, "2", Number.MAX_SAFE_INTEGER + 1]) assert.equal(observeCollectionBody("openai", { usage: { input_tokens: number } }).inputTokens, null);
++  const throwing = Object.defineProperty({}, "usage", { get() { throw new Error("SECRET"); }, enumerable: true });
++  assert.equal(observeCollectionBody("openai", throwing).source, "unavailable");
++  const text = "x".repeat(COLLECTION_LIMITS.answerStorageBytes + 1);
++  const outcome = collectionReturnedOutcome("openai", {}, text, 1);
++  assert.equal(outcome.status, "measurement_unsupported");
++  assert.equal(outcome.answerBytes, Buffer.byteLength(text));
++  assert.equal(outcome.answerText, null);
++  assert.equal(outcome.textOmitted, true);
++  assert.doesNotThrow(() => validateCollectionOutcome(outcome));
++});
++
++test("served-tier mismatch is observed read-only and the guard still blocks new outbound selectors", () => {
++  const entry = PROCESSING_TIER_REQUEST_ALLOWLIST.find((item) => item.file === "lib/routerDevelopmentCollectorProvider.ts");
++  assert.equal(entry.sendsATier, false);
++  const lines = entry.mentions.map((text) => ({ file: entry.file, text }));
++  assert.deepEqual(auditProcessingTierMentions({ matchedLines: lines, allowlist: [entry] }).errors, []);
++  assert.ok(auditProcessingTierMentions({ matchedLines: [...lines, { file: entry.file, text: 'service_tier: "priority",' }], allowlist: [entry] }).errors.length);
++  const observation = observeCollectionBody("openai", { service_tier: "priority", usage: { input_tokens: 1, output_tokens: 1 } });
++  assert.equal(observation.servedProcessingTier, "priority");
++  assert.equal(observation.unsupportedBilling, true);
++  assert.equal(observeCollectionBody("openai", {}).servedProcessingTier, null);
++});
++
++test("non-standard tier on a provider HTTP error remains unsupported rather than ordinary failed", async () => {
++  const adapter = createCollectionSdkAdapter({ getModel: () => ({}), getSettings: getModelGenerationSettings,
++    generate: async () => { throw new APICallError({ message: "synthetic", url: "https://example.invalid", requestBodyValues: {}, statusCode: 503,
++      responseBody: JSON.stringify({ service_tier: "priority", usage: { input_tokens: 1, output_tokens: 1 } }) }); } });
++  const outcome = await adapter(request());
++  assert.equal(outcome.status, "measurement_unsupported");
++  assert.equal(outcome.failureCode, "provider_billing_unsupported");
++  assert.equal(outcome.observation.servedProcessingTier, "priority");
++  assert.equal(outcome.observation.unsupportedBilling, true);
++  assert.doesNotThrow(() => validateCollectionOutcome(outcome));
++});
