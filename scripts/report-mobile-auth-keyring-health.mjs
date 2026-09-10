@@ -57,8 +57,12 @@ const render = (report) => {
             : "";
       console.log(`    ${key.keyId}  ${key.state}${detail}`);
     }
-    for (const keyId of ring.retirementsNamingNothing) {
-      console.log(`    (retirement names "${keyId}", which is not in the ring)`);
+    if (ring.retirementsNamingNothing > 0) {
+      // The ids are not printed: a retirement line's left half is whatever
+      // the variable held, and this report is pasted into tickets.
+      console.log(
+        `    (${ring.retirementsNamingNothing} retirement line(s) name an id that is not in the ring)`
+      );
     }
   }
   console.log("");
@@ -75,14 +79,20 @@ const render = (report) => {
 let report;
 try {
   report = mobileAuthKeyringHealthReport();
-} catch (error) {
+} catch {
   // The one non-zero exit. A ring that will not parse means every line this
   // report could print is about something other than what is deployed.
-  // The keyring's errors name variables and key ids and never quote material
-  // (`parseRing`, `parseRetirements`), so the message is safe to print here.
-  const reason = error instanceof Error ? error.message : "unknown";
+  //
+  // The error is not even bound, let alone printed. `parseRing` quotes the text it found in the
+  // *id* position, and material pasted there is exactly what makes an id
+  // unusable -- so the one line that would explain the failure is the one
+  // that may hold a pepper. The operator has the variables; this says which
+  // question to ask of them.
   console.error(
-    `FAIL mobile auth keyring health: the rings do not parse (${reason}).\n` +
+    "FAIL mobile auth keyring health: the rings do not parse.\n" +
+      "  The parser's message is not shown: it quotes what it found in the key-id\n" +
+      "  position, which is where pasted material ends up. Check that every entry\n" +
+      '  is "keyId:secret" and every retirement is "keyId@<ISO 8601 instant>".\n' +
       "  Nothing below would describe what is running. Fix the configuration, or\n" +
       "  read docs/ops/mobile-auth-key-rotation.md."
   );

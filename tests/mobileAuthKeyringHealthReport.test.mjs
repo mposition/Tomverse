@@ -157,11 +157,15 @@ test("a retirement dated in the future is reported as verifying nothing", () => 
 });
 
 test("a retirement naming nothing is reported without taking the report down", () => {
+  // Counted rather than quoted since 2026-09-10: what sits in the id position
+  // of a retirement is whatever the variable held, and a pepper pasted there
+  // satisfies `KEY_ID_PATTERN`.
   const json = asJson({
     ...configured,
     MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-typo@${isoAgo(60)}`,
   });
-  assert.deepEqual(json.rings[0].retirementsNamingNothing, ["sign-typo"]);
+  assert.equal(json.rings[0].retirementsNamingNothing, 1);
+  assert.equal(JSON.stringify(json).includes("sign-typo"), false);
   assert.match(json.attention.join("\n"), /not in the ring/);
 });
 
@@ -197,7 +201,7 @@ const CONTRADICTIONS = [
   {
     name: "an active id that names nothing",
     variables: () => ({ ...configured, MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-9" }),
-    attention: /active id "sign-9" is not in the ring/,
+    attention: /active id is not in the ring/,
   },
   {
     name: "an active key that cannot sign",
@@ -231,12 +235,12 @@ const CONTRADICTIONS = [
     // the runtime read the same environment as unconfigured and answered 503.
     name: "a signing ring that parses to nothing",
     variables: () => ({ ...configured, MOBILE_AUTH_SIGNING_KEYS: ",,," }),
-    attention: /active id "sign-2" is not in the ring/,
+    attention: /active id is not in the ring/,
   },
   {
     name: "a pepper ring that parses to nothing",
     variables: () => ({ ...configured, MOBILE_AUTH_REFRESH_PEPPERS: ",,," }),
-    attention: /active id "pep-2" is not in the ring/,
+    attention: /active id is not in the ring/,
   },
   {
     name: "the active key also carrying a retirement",
