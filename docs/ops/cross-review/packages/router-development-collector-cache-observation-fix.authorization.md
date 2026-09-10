@@ -67,6 +67,15 @@ and the same command for `tests/routerDevelopmentCollectorProvider.test.mjs`.
 No unavailable public URL or machine-local temp file is required to understand
 the observations below. Publication of that ancestry remains a later step.
 
+At the reviewed round-1 source `ff0600e1858130988ea7820611736ec0dba5ed59`,
+the implementation diff against the same base is provider +2/-0 and test
++33/-1, totaling +35/-1 across those two files, distinct from the initial
+dcabb4e3 +33/-1 above. The two additional lines assert
+`servedProcessingTier === null` and `unsupportedBilling === false`.
+The fixture comment replaces wording within the existing added block and
+adds no net line. This patch-size observation grants no new permission and
+certifies no later checks or review outcome.
+
 The original author summary transcribed tool observations rather than saving
 full raw logs: collector 80/80, official typecheck, two-file lint and diff check
 passed; full local wiring changed from 10/12 to 11/12 but **still exited 1**.
