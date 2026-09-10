@@ -4,6 +4,7 @@ import { resolveProviderApiKey } from "@/lib/modelRegistryShared";
 import {
   resolveVoiceTranscriptionModel,
   transcribeWithOpenAi,
+  VOICE_TRANSCRIPTION_OPENAI_BASE_URL,
   type VoiceTranscriptionPort,
   type VoiceTranscriptionRequest,
   type VoiceTranscriptionResult,
@@ -35,6 +36,12 @@ import {
  * environment already holding a chat key does not need a second one to try the
  * feature.
  *
+ * The key is unchanged by the regional pin. The provider's data-controls
+ * guide allows a regional host to be used per request with a key from a
+ * Global-geography project, so pinning the region needed no new project and no
+ * new key — and making one a precondition would have coupled a legal decision
+ * to an account migration.
+ *
  * The fallback goes through `resolveProviderApiKey` rather than naming
  * `OPENAI_API_KEY` here. A second inline list of provider key names is exactly
  * how three modules came to disagree about Google's, and
@@ -64,6 +71,13 @@ export class OpenAiVoiceTranscriptionProvider implements VoiceTranscriptionPort 
       apiKey,
       model: resolveVoiceTranscriptionModel(process.env),
       fetchImpl: fetch,
+      // Named here as well as defaulted in the core. The default alone would
+      // be enough for the request to be correct; passing it makes the binding
+      // *say* which region it sends audio to, so the file a reader opens to
+      // answer "where does the audio go" answers it. `process.env` is not
+      // consulted for this and must not be: the region backs a published legal
+      // notice (docs/policy/voice-input.md §11.3).
+      baseUrl: VOICE_TRANSCRIPTION_OPENAI_BASE_URL,
     });
   }
 }
