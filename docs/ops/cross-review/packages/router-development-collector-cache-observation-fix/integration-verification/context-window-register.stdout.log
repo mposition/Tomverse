@@ -1,0 +1,5 @@
+
+> ai-chat-hub@0.1.0 check:context-window-register
+> node --import tsx scripts/check-context-window-register.mjs
+
+OK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).

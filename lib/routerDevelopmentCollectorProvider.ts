@@ -80,6 +80,8 @@ export function observeCollectionBody(provider: string, body: unknown): Collecti
       // Missing thoughts are unknown, not zero; SDK-normalized output is not evidence.
       observation.outputTokens = sum(count(googleUsage.candidatesTokenCount), observation.reasoningTokens);
       observation.cacheReadTokens = count(googleUsage.cachedContentTokenCount);
+      // This allowlist has no Google cache-write observation; unknown is not zero.
+      observation.cacheWriteTokens = null;
       observation.rawFinishReason = label(candidate.finishReason) ?? label(record(root.promptFeedback).blockReason);
       observation.finish = finish(observation.rawFinishReason);
       observation.unsupportedBilling = candidates.length > 1 || googleUsage.toolUsePromptTokenCount != null && googleUsage.toolUsePromptTokenCount !== 0 || candidate.groundingMetadata != null || hasItems(record(candidate.content).parts) && (record(candidate.content).parts as unknown[]).some((part) => record(part).functionCall != null);

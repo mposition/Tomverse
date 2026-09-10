@@ -5,7 +5,7 @@ import { MockLanguageModelV4 } from "ai/test";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
 import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
 import { collectFromProvider, createCollectionSdkAdapter, observeCollectionBody, collectionReturnedOutcome } from "../lib/routerDevelopmentCollectorProvider.ts";
-import { COLLECTION_LIMITS, emptyCollectionObservation, validateCollectionOutcome } from "../lib/routerDevelopmentCollector.ts";
+import { COLLECTION_LIMITS, emptyCollectionObservation, estimateCollectionUsageCost, validateCollectionOutcome } from "../lib/routerDevelopmentCollector.ts";
 import { auditProcessingTierMentions, PROCESSING_TIER_REQUEST_ALLOWLIST } from "../scripts/check-processing-tier-core.mjs";
 
 const originalFetch = globalThis.fetch;
@@ -63,6 +63,38 @@ test("raw usage preserves missing versus explicit zero across five adapter famil
   assert.equal(observeCollectionBody("anthropic", { usage: { input_tokens: 5, cache_read_input_tokens: 0 } }).inputTokens, null);
   assert.equal(observeCollectionBody("deepseek", { usage: { prompt_tokens: 5, prompt_tokens_details: { cached_tokens: 5 } } }).cacheReadTokens, null);
   assert.equal(observeCollectionBody("deepseek", { usage: { prompt_cache_hit_tokens: 2, prompt_tokens_details: { cached_tokens: 5 } } }).cacheReadTokens, 2);
+});
+
+test("Google cached reads leave writes, uncached input, and cost unknown despite extra raw and normalized values", async () => {
+  const googleModel = AVAILABLE_MODELS.find((entry) => entry.provider === "google");
+  assert.ok(googleModel);
+  const body = {
+    usageMetadata: { promptTokenCount: 8, candidatesTokenCount: 2, thoughtsTokenCount: 0, cachedContentTokenCount: 3 },
+    // The adversarial keys supplied here are not Google usage-counter allowlist fields.
+    usage: { input_tokens: 8, input_tokens_details: { cached_tokens: 3, cache_write_tokens: 5 } },
+    candidates: [{ finishReason: "STOP" }],
+  };
+  const normalizedUsage = { inputTokens: { total: 8, noCache: 0, cacheRead: 3, cacheWrite: 5 }, outputTokens: { total: 2, text: 2, reasoning: 0 } };
+  const mock = new MockLanguageModelV4({ doGenerate: { content: [{ type: "text", text: "{}" }], usage: normalizedUsage,
+    finishReason: { unified: "stop", raw: "STOP" }, response: { body }, warnings: [] } });
+  const adapter = createCollectionSdkAdapter({ generate: generateText, getModel: () => mock, getSettings: getModelGenerationSettings });
+  const outcome = await adapter({ ...request(), modelId: googleModel.id, settings: getModelGenerationSettings(googleModel), maxOutputTokens: 128 });
+  assert.equal(mock.doGenerateCalls.length, 1);
+  assert.equal(outcome.status, "returned");
+  assert.equal(outcome.answerText, "{}");
+  assert.deepEqual(outcome.observation, observeCollectionBody("google", body));
+  const observation = outcome.observation;
+  assert.equal(observation.source, "provider_body_allowlist");
+  assert.equal(observation.inputTokens, 8);
+  assert.equal(observation.outputTokens, 2);
+  assert.equal(observation.cacheReadTokens, 3);
+  assert.equal(observation.cacheWriteTokens, null);
+  assert.equal(observation.noCacheInputTokens, null);
+  assert.equal(observation.servedProcessingTier, null);
+  assert.equal(observation.unsupportedBilling, false);
+  const pricedCall = { pricing: { tiers: [{ maxPromptTokens: null, inputUsdPerMillionTokens: 1, outputUsdPerMillionTokens: 1,
+    cachedInputPriceMultiplier: 0.1, cacheWriteUsdPerMillionTokens: 1.25 }] } };
+  assert.equal(estimateCollectionUsageCost(observation, pricedCall), null);
 });
 
 test("metadata failures, invalid counters, and oversize do not invent evidence", () => {

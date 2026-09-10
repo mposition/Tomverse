@@ -1,0 +1,498 @@
+{
+  "version": "offline-integration-verification-summary-v1",
+  "completedAt": "2026-09-10T07:09:36.542Z",
+  "worktree": "H:\\Project\\tomverse-router-collector-v1-1-20260910",
+  "head": "f301f2d8365ae094a764477a9fea56a2de1d08ab",
+  "parents": [
+    "34a179fd1986afbb2909cc38b0fa988814e5aa0e",
+    "ea9c802d4c96cb0e320e9681bd7476495840a314"
+  ],
+  "branch": "codex/router-collector-cache-observation-fix",
+  "baseForIntegrationDiff": "ea9c802d4c96cb0e320e9681bd7476495840a314",
+  "reviewedSource": "34a179fd1986afbb2909cc38b0fa988814e5aa0e",
+  "clean": true,
+  "checks": [
+    {
+      "name": "collector-80",
+      "command": "npm run test:router-development-collector",
+      "expected": 80,
+      "startedAt": "2026-09-10T07:04:57.0406264Z",
+      "finishedAt": "2026-09-10T07:05:22.0360347Z",
+      "exitCode": 0,
+      "counts": {
+        "tests": 80,
+        "pass": 80,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/collector-80.stdout.log",
+          "bytes": 8288,
+          "sha256": "9fe29c5efd39e293856bd40b67a958f29b48d1ac0bf6943d16e957efee060cbd"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/collector-80.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "benchmark-95",
+      "command": "npm run test:router-development-benchmark",
+      "expected": 95,
+      "startedAt": "2026-09-10T07:05:54.6486249Z",
+      "finishedAt": "2026-09-10T07:06:05.2111920Z",
+      "exitCode": 0,
+      "counts": {
+        "tests": 95,
+        "pass": 95,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/benchmark-95.stdout.log",
+          "bytes": 11090,
+          "sha256": "6b8834d8ad80e345e8266b1bcf50fb2ee9cd46c0308ae0b550834a1b8cd0c8e2"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/benchmark-95.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "related-router-181",
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerFullCatalogDiagnostic.test.mjs tests/routerCandidates.test.mjs tests/routerDecision.test.mjs tests/routerSelection.test.mjs tests/routerCallLimits.test.mjs tests/chatContextWindow.test.mjs tests/taskProfileCore.test.mjs tests/routerScorePolicy.test.mjs tests/routerCostProjection.test.mjs tests/routerSignalCore.test.mjs tests/routerQualityEvalSet.test.mjs tests/routerQualityDecisionGate.test.mjs",
+      "expected": 181,
+      "startedAt": "2026-09-10T07:06:05.2186048Z",
+      "finishedAt": "2026-09-10T07:06:08.3696693Z",
+      "exitCode": 0,
+      "counts": {
+        "tests": 181,
+        "pass": 181,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/related-router-181.stdout.log",
+          "bytes": 13045,
+          "sha256": "a8e17d452fdcd5faabf30049cd679be8813f2f194f9f4c788ed4c53f4a12414c"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/related-router-181.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "processing-tier-9",
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/processingTierGuard.test.mjs",
+      "expected": 9,
+      "startedAt": "2026-09-10T07:06:08.3705557Z",
+      "finishedAt": "2026-09-10T07:06:08.6883226Z",
+      "exitCode": 0,
+      "counts": {
+        "tests": 9,
+        "pass": 9,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/processing-tier-9.stdout.log",
+          "bytes": 703,
+          "sha256": "5236fbb34353b705e364a245f7518769e9e37ff2ffff98c82d3425eb5ab97fed"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/processing-tier-9.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "exact-wiring-target-1",
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=tap '--test-name-pattern=^every place that harvests cacheReadTokens harvests cacheWriteTokens too$' tests/anthropicPromptCachingWiring.test.mjs",
+      "expected": 1,
+      "startedAt": "2026-09-10T07:06:08.6887352Z",
+      "finishedAt": "2026-09-10T07:06:11.2552125Z",
+      "exitCode": 0,
+      "counts": {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/exact-wiring-target-1.stdout.log",
+          "bytes": 331,
+          "sha256": "579d5599fbcd45109b7c1ac6b755b6ef71530e172ac655db8c7487b31b687ca2"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/exact-wiring-target-1.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "namedTarget": "every place that harvests cacheReadTokens harvests cacheWriteTokens too",
+      "intentionallyDeselected": 11
+    },
+    {
+      "name": "upstream-gitleaks-voice",
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/gitleaksAllowlist.test.mjs tests/voiceProviderBudget.test.mjs",
+      "startedAt": "2026-09-10T07:06:11.2556007Z",
+      "finishedAt": "2026-09-10T07:06:11.7459099Z",
+      "exitCode": 0,
+      "counts": {
+        "tests": 46,
+        "pass": 46,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/upstream-gitleaks-voice.stdout.log",
+          "bytes": 3243,
+          "sha256": "c453bd6191d4e650254208ec70be936e19fc2bba72240e14f1e05676d60a732f"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/upstream-gitleaks-voice.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "official-typecheck",
+      "command": "npm run typecheck",
+      "startedAt": "2026-09-10T07:04:57.0405984Z",
+      "finishedAt": "2026-09-10T07:05:42.3854204Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/official-typecheck.stdout.log",
+          "bytes": 148,
+          "sha256": "b408378cc735119d04b3321c1dc0b9a74511e6a7d3fbe909861cd4a879e4b16f"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/official-typecheck.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "scoped-lint-2",
+      "command": "npm run lint -- lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+      "startedAt": "2026-09-10T07:06:11.7463598Z",
+      "finishedAt": "2026-09-10T07:06:14.1981366Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/scoped-lint-2.stdout.log",
+          "bytes": 132,
+          "sha256": "499280bc91c453a77cd369a5b13f264bce2df7ee2a62da0d4fe893d116acca4b"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/scoped-lint-2.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "encoding",
+      "command": "npm run check:encoding",
+      "startedAt": "2026-09-10T07:06:14.1986652Z",
+      "finishedAt": "2026-09-10T07:06:15.3221243Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/encoding.stdout.log",
+          "bytes": 136,
+          "sha256": "f014b25d643999efd13582526445118dbf469fba9d5df09df1468267d09820ce"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/encoding.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "doc-references",
+      "command": "npm run check:doc-references",
+      "startedAt": "2026-09-10T07:06:15.3226579Z",
+      "finishedAt": "2026-09-10T07:06:16.4859086Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/doc-references.stdout.log",
+          "bytes": 254,
+          "sha256": "5b873fb208ff3b5d0ac55eb44c8039e8ab15a5596e09c37ae028ad4cac888ad1"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/doc-references.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "policy-section-references",
+      "command": "npm run check:policy-section-references -- --since ea9c802d4c96cb0e320e9681bd7476495840a314",
+      "startedAt": "2026-09-10T07:06:16.4862620Z",
+      "finishedAt": "2026-09-10T07:06:17.5450093Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/policy-section-references.stdout.log",
+          "bytes": 418,
+          "sha256": "367b9328f4116088f404cc857433754adc9a7f8fe2219db86d25c07b245da7fb"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/policy-section-references.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "model-pricing",
+      "command": "npm run check:model-pricing",
+      "startedAt": "2026-09-10T07:06:17.5455295Z",
+      "finishedAt": "2026-09-10T07:06:18.1714525Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/model-pricing.stdout.log",
+          "bytes": 266,
+          "sha256": "68760ad0629e2457eec28a91c9a98e7f07495b27b6987317418e7aebadd12942"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/model-pricing.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "router-quality-eval",
+      "command": "npm run check:router-quality-eval",
+      "startedAt": "2026-09-10T07:06:18.1720104Z",
+      "finishedAt": "2026-09-10T07:06:18.7483521Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/router-quality-eval.stdout.log",
+          "bytes": 2810,
+          "sha256": "b109625addca4b694a0e2f0aee23ba2be0d467a603e232584ec3a3a7d175c7a3"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/router-quality-eval.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "router-context-window",
+      "command": "npm run check:router-context-window",
+      "startedAt": "2026-09-10T07:06:18.7493774Z",
+      "finishedAt": "2026-09-10T07:06:19.8651732Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/router-context-window.stdout.log",
+          "bytes": 335,
+          "sha256": "a8bcb98839e92ae4f04406429e1c49faf71b0b1f5369586e383c6cc191cc0664"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/router-context-window.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "context-window-register",
+      "command": "npm run check:context-window-register",
+      "startedAt": "2026-09-10T07:06:19.8769238Z",
+      "finishedAt": "2026-09-10T07:06:22.4056268Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/context-window-register.stdout.log",
+          "bytes": 304,
+          "sha256": "738330a9da89b4188db11d141ec5965e5fce151baa77bff984cf3a2287fd3008"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/context-window-register.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "diff-since-upstream",
+      "command": "git diff --check ea9c802d4c96cb0e320e9681bd7476495840a314 HEAD",
+      "startedAt": "2026-09-10T07:06:22.4059381Z",
+      "finishedAt": "2026-09-10T07:06:22.4363151Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/diff-since-upstream.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/diff-since-upstream.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    },
+    {
+      "name": "working-diff-check",
+      "command": "git diff --check",
+      "startedAt": "2026-09-10T07:06:22.4367212Z",
+      "finishedAt": "2026-09-10T07:06:22.4713870Z",
+      "exitCode": 0,
+      "counts": null,
+      "logs": [
+        {
+          "stream": "stdout",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/working-diff-check.stdout.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "stream": "stderr",
+          "path": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/working-diff-check.stderr.log",
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "commands": 17,
+    "commandsExitZero": 17,
+    "coreRegressionTests": 365,
+    "exactWiringTargetTests": 1,
+    "additionalGitleaksVoiceTests": 46,
+    "allExecutedTests": 412,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "preservation": {
+    "frozenSnapshot": "C:/Users/Vyper/AppData/Local/Temp/router-cache-fix-integrated-f301f2d8-34ae97256a784ac784e3b8397e9a4de2/FROZEN-SNAPSHOT.json",
+    "frozenSnapshotSha256": "32dd361d9a9e2410eb368a537a916691449af2b37bc6cb2081a4e5bf3320b17a",
+    "headParentsAndCleanUnchanged": true,
+    "scope4ExactAgainstFixedUpstream": true,
+    "reviewedSource4WorkingIndexCommitByteIdentical": true,
+    "reviewRecords36PathAndHashUnchanged": true,
+    "passedReviewStateUnchanged": true
+  },
+  "source": [
+    {
+      "path": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+      "bytes": 7173,
+      "sha256": "172a198df752603c7e7c7ce5653ecda425b36ab3c89dca3aa2645156c4e5e931"
+    },
+    {
+      "path": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+      "bytes": 6925,
+      "sha256": "65996c4f525e89c28ce4bdd1183319d9f35853dc7741916a525c710387714004"
+    },
+    {
+      "path": "lib/routerDevelopmentCollectorProvider.ts",
+      "bytes": 13201,
+      "sha256": "d4b3cdd679835166d723bad804ee20fe92c82436d31584596c1c3eb3c8539ab8"
+    },
+    {
+      "path": "tests/routerDevelopmentCollectorProvider.test.mjs",
+      "bytes": 12273,
+      "sha256": "a826ed2d471420cc153a9bdd2c5ac78ff561b42d7e610ee97ee404dd480ef27d"
+    }
+  ],
+  "summaryAuditCorrection": {
+    "failedAttempts": 2,
+    "classification": "Read-only audit harness construction SyntaxErrors: replacement-string interpolation inserted a duplicated suffix at the dollar-apostrophe sequence in the exact test-name command.",
+    "resolution": "Reconstructed the inline audit with literal concatenation; unchanged test commands/logs and no test rerun.",
+    "originalToolOutputs": [
+      "summary-audit-attempt1.tool-output.txt",
+      "summary-audit-attempt2.tool-output.txt"
+    ]
+  },
+  "limitations": [
+    "Local offline tests only; no new provider, collector or reviewer call was initiated.",
+    "The wiring filter executed one named test; 11 intentionally deselected cases were not run. This is not a full Windows wiring-suite pass.",
+    "Full Linux CI on the subsequently published integrated head remains separately mandatory and was not observed here.",
+    "Historical packages/review records were not rewritten; broader author-reported dependency/archive merge proofs remain separate from this four-source/36-review-file preservation audit."
+  ],
+  "exit": 0
+}

@@ -1,0 +1,65 @@
+{
+  "round": 0,
+  "reviewer": "claude",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-router-collector-v1-1-20260910 shell:default)"
+  ],
+  "startedAt": "2026-09-10T05:50:04.474Z",
+  "durationMs": 200324,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 24,
+    "cachedInputTokens": 399950,
+    "outputTokens": 14062,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.041239,
+    "raw": {
+      "input_tokens": 24,
+      "cache_creation_input_tokens": 48051,
+      "cache_read_input_tokens": 399950,
+      "output_tokens": 14062,
+      "output_tokens_details": {
+        "thinking_tokens": 9806
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 48051,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4331,
+          "cache_read_input_tokens": 45943,
+          "cache_creation_input_tokens": 4908,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4908
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "failure": "invalid_json",
+  "detail": "no JSON document in 4251 byte(s) of output"
+}
