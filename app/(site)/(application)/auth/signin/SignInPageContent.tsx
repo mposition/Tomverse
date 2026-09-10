@@ -18,6 +18,7 @@ import {
     markSignupStarted,
     trackProductEvent,
 } from "@/lib/productAnalyticsClient";
+import { hasAuthenticatedSessionUser } from "@/lib/sessionIdentity";
 
 const PROVIDER_ERROR_KEYS: Record<string, string> = {
     OAuthAccountNotLinked: "auth.errorAccountNotLinked",
@@ -67,7 +68,7 @@ const emailLoginErrorMessage = (
 function SignInButtons() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { status } = useSession();
+    const { data: session, status } = useSession();
     const { t, lang } = useLanguage();
     const callbackUrl = withChatLanguage(searchParams.get("callbackUrl"), lang);
     // Both administrator windows land here: an expired console session and an
@@ -96,11 +97,13 @@ function SignInButtons() {
     const emailInputRef = useRef<HTMLInputElement | null>(null);
     const codeInputRef = useRef<HTMLInputElement | null>(null);
 
+    const hasAuthenticatedUser = hasAuthenticatedSessionUser(session);
+
     useEffect(() => {
-        if (status === "authenticated") {
+        if (hasAuthenticatedUser) {
             router.replace(callbackUrl);
         }
-    }, [callbackUrl, router, status]);
+    }, [callbackUrl, hasAuthenticatedUser, router]);
 
     const [step, setStep] = useState<"email" | "code">("email");
     const [email, setEmail] = useState("");
@@ -258,7 +261,7 @@ function SignInButtons() {
             ? t("auth.emailLoginRateLimitedMinute").replace("{seconds}", String(retryCountdown))
             : formError;
 
-    if (status === "authenticated" || status === "loading") {
+    if (hasAuthenticatedUser || status === "loading") {
         return (
             <div className="mt-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
                 {t("auth.loading")}
