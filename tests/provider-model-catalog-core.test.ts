@@ -122,6 +122,20 @@ test("marks explicit legacy and archived lifecycle states unavailable", () => {
   );
 });
 
+test("treats an OpenAI shutdown date as lifecycle evidence", () => {
+  const [model] = parseProviderCatalogResponse("openai", {
+    data: [
+      {
+        id: "gpt-4-historical",
+        shutdown_date: 1_788_134_400,
+      },
+    ],
+  });
+  assert.equal(model.lifecycle, "shutdown_scheduled");
+  assert.equal(model.available, false);
+  assert.equal(model.metadata.shutdownDate, 1_788_134_400);
+});
+
 test("supports provider pagination cursors without accepting arbitrary values", () => {
   assert.equal(catalogNextCursor("google", { nextPageToken: "page-2" }), "page-2");
   assert.equal(

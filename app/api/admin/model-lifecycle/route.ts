@@ -7,6 +7,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
+import { prisma } from "@/lib/prisma";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
@@ -17,8 +18,10 @@ import {
   WORK_ITEM_STATUSES,
 } from "@/lib/modelLifecycleWorkItemCore";
 import {
-  listOpenWorkItems,
+  MAX_BULK_WORK_ITEM_TRANSITIONS,
+  listModelDiscoveryQueue,
   transitionWorkItem,
+  transitionWorkItems,
 } from "@/lib/modelLifecycleWorkItems";
 
 /**
@@ -42,17 +45,34 @@ import {
  * registry write that follows keeps its own guards.
  */
 
-const transitionSchema = z.object({
-  workItemId: z.string().trim().min(1).max(60),
+const transitionFields = {
   to: z.enum(WORK_ITEM_STATUSES),
-  note: z.string().trim().max(1_000).optional(),
   decision: z
     .object({
       decision: z.enum(WORK_ITEM_DECISIONS),
       reason: z.string().trim().min(1).max(1_000),
     })
     .optional(),
+} as const;
+
+const singleTransitionSchema = z.object({
+  workItemId: z.string().trim().min(1).max(60),
+  ...transitionFields,
+  note: z.string().trim().max(1_000).optional(),
 });
+
+const bulkTransitionSchema = z.object({
+  workItemIds: z
+    .array(z.string().trim().min(1).max(60))
+    .min(1)
+    .max(MAX_BULK_WORK_ITEM_TRANSITIONS),
+  ...transitionFields,
+  // One shared reason keeps bulk review auditable without asking the operator
+  // to type the same explanation once per row.
+  note: z.string().trim().min(1).max(1_000),
+});
+
+const transitionSchema = z.union([bulkTransitionSchema, singleTransitionSchema]);
 
 export async function GET(req: Request) {
   try {
@@ -66,9 +86,10 @@ export async function GET(req: Request) {
       day: 500,
     });
 
-    const items = await listOpenWorkItems({ limit: 200 });
+    const queue = await listModelDiscoveryQueue({ limit: 1_000 });
     return NextResponse.json({
-      items: items.map((item) => ({
+      ...queue,
+      items: queue.items.map((item) => ({
         ...item,
         dueAt: item.dueAt?.toISOString() ?? null,
         firstSeenAt: item.firstSeenAt.toISOString(),
@@ -101,7 +122,7 @@ export async function PATCH(req: Request) {
       { minute: 20, day: 300 }
     );
 
-    const parsed = await readLimitedJson(req, 8 * 1024, transitionSchema);
+    const parsed = await readLimitedJson(req, 64 * 1024, transitionSchema);
 
     const actorEmail = session.user.email;
     if (!actorEmail) {
@@ -110,12 +131,55 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "ACTOR_REQUIRED" }, { status: 400 });
     }
 
-    const result = await transitionWorkItem({
-      workItemId: parsed.workItemId,
-      to: parsed.to,
-      actorEmail,
-      note: parsed.note,
-      decision: parsed.decision,
+    const isBulk = "workItemIds" in parsed;
+    const workItemIds = isBulk ? parsed.workItemIds : [parsed.workItemId];
+    const result = await prisma.$transaction(async (tx) => {
+      const transition = isBulk
+        ? await transitionWorkItems(
+            {
+              workItemIds,
+              to: parsed.to,
+              actorEmail,
+              note: parsed.note,
+              decision: parsed.decision,
+            },
+            { tx }
+          )
+        : await transitionWorkItem(
+            {
+              workItemId: parsed.workItemId,
+              to: parsed.to,
+              actorEmail,
+              note: parsed.note,
+              decision: parsed.decision,
+            },
+            { tx }
+          );
+
+      if (!transition.ok) return transition;
+
+      await writeAdminAuditLog({
+        session,
+        request: req,
+        action: isBulk
+          ? "model_lifecycle.bulk_transition"
+          : "model_lifecycle.transition",
+        targetType: isBulk
+          ? "ModelLifecycleWorkItemBatch"
+          : "ModelLifecycleWorkItem",
+        targetId: isBulk ? null : workItemIds[0],
+        summary: isBulk
+          ? `${workItemIds.length} model lifecycle items moved to ${parsed.to}`
+          : `Model lifecycle item moved to ${parsed.to}`,
+        metadata: {
+          to: parsed.to,
+          count: workItemIds.length,
+          workItemIds,
+          ...(parsed.decision ? { decision: parsed.decision.decision } : {}),
+        },
+        tx,
+      });
+      return transition;
     });
 
     if (!result.ok) {
@@ -125,19 +189,10 @@ export async function PATCH(req: Request) {
       );
     }
 
-    await writeAdminAuditLog({
-      session,
-      action: "model_lifecycle.transition",
-      targetType: "ModelLifecycleWorkItem",
-      targetId: parsed.workItemId,
-      summary: `Model lifecycle item moved to ${parsed.to}`,
-      metadata: {
-        to: parsed.to,
-        ...(parsed.decision ? { decision: parsed.decision.decision } : {}),
-      },
+    return NextResponse.json({
+      status: result.status,
+      updated: "updated" in result ? result.updated : 1,
     });
-
-    return NextResponse.json({ status: result.status });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
