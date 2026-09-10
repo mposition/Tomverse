@@ -253,6 +253,30 @@ test("a parse failure records a fixed sentence, never the parser's message", asy
   assert.equal(`${JSON.stringify(body)}\n${logged}`.includes(PEPPER), false);
 });
 
+test("an id that is itself a key in the ring reaches neither response, log nor row", async () => {
+  // `p:<P>,<P>:<Q>` -- the active pepper is also the second entry's id. Not
+  // covered by the earlier justification that declared ids are published as
+  // a token's `kid`: only the active *signing* id becomes one, and a refresh
+  // token is `recordId.secret`.
+  const OTHER = "q".repeat(48);
+  const { response, body, logged } = await call({
+    ...HEALTHY,
+    MOBILE_AUTH_REFRESH_PEPPERS: `p:${PEPPER},${PEPPER}:${OTHER}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "p",
+  });
+  assert.equal(response.status, 200);
+  const emitted = `${JSON.stringify(body)}\n${logged}\n${JSON.stringify(runs)}`;
+  assert.equal(emitted.includes(PEPPER), false);
+  assert.equal(emitted.includes(OTHER), false);
+  assert.equal(/undefined/.test(emitted), false);
+  assert.equal(
+    body.findings.some(
+      (finding: { code: string }) => finding.code === "key_id_matches_material"
+    ),
+    true
+  );
+});
+
 test("the check leaves the keyring exactly as it found it", async () => {
   const before = { ...HEALTHY };
   await call(HEALTHY);

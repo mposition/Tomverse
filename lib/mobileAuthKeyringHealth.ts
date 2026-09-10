@@ -107,11 +107,17 @@ export type MobileKeyringFinding = {
    * `withoutUnverifiedReferences`.
    */
   unverifiedReference?: boolean;
+  /**
+   * The id this finding is about is byte-for-byte a secret in one of the
+   * rings, so it was **not** reported. See `redactIdsMatchingMaterial`.
+   */
+  idMatchesMaterial?: boolean;
 };
 
 /** One ring entry, exactly as the shared judgement module describes it. */
 export type MobileRingKeyState = {
-  keyId: string;
+  /** Null when the id is itself key material -- see `redactIdsMatchingMaterial`. */
+  keyId: string | null;
   state: string;
   alsoRetired: boolean;
   retiredAtMs: number | null;
@@ -231,28 +237,76 @@ const withoutUnverifiedReferences = (finding: MobileKeyringFinding): MobileKeyri
     : finding;
 
 /**
+ * A declared id is not safe merely because the ring declared it.
+ *
+ * An earlier version of this file said quoting declared ids was harmless
+ * because they are the `kid` of every issued token. **That was wrong.** Only
+ * the *active* signing id becomes a `kid`, and a refresh token is
+ * `recordId.secret` -- so an id belonging to an inactive entry appears in no
+ * token at all. A ring written as `p:<P>,<P>:<Q>` puts the active pepper `<P>`
+ * in the id position of the second entry, and `<P>` was reported as an
+ * `undeclared` key id in the response, the log and the row while appearing in
+ * nothing the deployment issued. Reproduced 2026-09-10.
+ *
+ * So an id that is byte-for-byte a secret in either ring is withheld, and the
+ * condition is reported as a finding of its own -- the operator has to know
+ * the configuration is like this, and cannot be told by being shown it.
+ */
+const KEY_ID_MATCHES_MATERIAL = "key_id_matches_material";
+
+const redactIdsMatchingMaterial = (
+  finding: MobileKeyringFinding,
+  material: ReadonlySet<string>
+): MobileKeyringFinding => {
+  const hides =
+    (finding.keyId !== undefined && material.has(finding.keyId)) ||
+    (finding.otherKeyId !== undefined && material.has(finding.otherKeyId));
+  if (!hides) return finding;
+  const redacted: MobileKeyringFinding = { ...finding, idMatchesMaterial: true };
+  if (redacted.keyId !== undefined && material.has(redacted.keyId)) delete redacted.keyId;
+  if (redacted.otherKeyId !== undefined && material.has(redacted.otherKeyId)) {
+    delete redacted.otherKeyId;
+  }
+  return redacted;
+};
+
+/**
  * One sentence per finding code. Exhaustive on purpose: a code with no entry
  * here would be dropped silently.
  */
+/**
+ * How an id is named in prose, or how its absence is.
+ *
+ * Withheld ids are the norm rather than the exception here -- two of the
+ * redaction rules above can remove one -- so every sentence that would have
+ * quoted an id goes through this instead of interpolating it. An earlier
+ * version interpolated directly and printed `"undefined"` the moment a
+ * redaction fired, which reads as a key called "undefined".
+ */
+const named = (keyId: string | undefined) =>
+  keyId === undefined ? "an id that is not shown (it is key material)" : `"${keyId}"`;
+
 const FINDING_TEXT: Record<string, (finding: MobileKeyringFinding) => string> = {
   no_active_key_named: () => "no active key is named.",
   // No value: what the active-id variable holds is unverified text.
   active_key_not_in_ring: () =>
     "the active id is not in the ring, so nothing can be minted. The value is not shown -- read the active-id variable.",
   active_key_also_retired: ({ keyId }) =>
-    `"${keyId}" is the active key and is also retired, so minting is refused now rather than when the retirement instant arrives.`,
+    `${named(keyId)} is the active key and is also retired, so minting is refused now rather than when the retirement instant arrives.`,
   active_key_cannot_sign: ({ keyId }) =>
-    `the active key "${keyId}" cannot sign. Every mobile auth request answers 503.`,
+    `the active key ${named(keyId)} cannot sign. Every mobile auth request answers 503.`,
   undeclared: ({ keyId }) =>
-    `"${keyId}" is neither active nor retired, so it verifies nothing.`,
+    `${named(keyId)} is neither active nor retired, so it verifies nothing.`,
   retirement_in_future: ({ keyId, retiredAtMs }) =>
-    `"${keyId}" is retired at ${new Date(retiredAtMs ?? 0).toISOString()}, which has not arrived, so it verifies nothing.`,
+    `${named(keyId)} is retired at ${new Date(retiredAtMs ?? 0).toISOString()}, which has not arrived, so it verifies nothing.`,
   grace_over: ({ keyId }) =>
-    `"${keyId}" has spent its window and verifies nothing. Removing it and its retirement line together is tidy, and optional.`,
+    `${named(keyId)} has spent its window and verifies nothing. Removing it and its retirement line together is tidy, and optional.`,
   retirement_names_nothing: () =>
     "a retirement names an id that is not in the ring. The value is not shown -- read the retirement variable.",
   duplicate_material: ({ keyId, otherKeyId }) =>
-    `"${keyId}" and "${otherKeyId}" are different ids holding the same material. Renaming a key is not rotating it.`,
+    `${named(keyId)} and ${named(otherKeyId)} are different ids holding the same material. Renaming a key is not rotating it.`,
+  [KEY_ID_MATCHES_MATERIAL]: () =>
+    "an entry's id is byte-for-byte a key in one of the rings, so the id is not shown. Key material was pasted into an id position -- rewrite the entry, and treat that material as disclosed to whoever can read the variable.",
 };
 
 /** The wording for one finding, or a last-resort line naming the code. */
@@ -330,6 +384,12 @@ export const mobileAuthKeyringHealthReport = (
     },
   ];
 
+  // Every secret both rings hold, so an id can be checked against all of them
+  // -- a signing id may be a pepper, and the rings are parsed independently.
+  const material: ReadonlySet<string> = new Set(
+    inputs.flatMap((entry) => [...entry.ring.values()])
+  );
+
   const attention: string[] = [];
   const rings = inputs.map((entry) => {
     const keys = classifyRing({
@@ -355,14 +415,26 @@ export const mobileAuthKeyringHealthReport = (
       nowMs,
       signsAndVerifies: entry.signsAndVerifies,
       materialIdentity: entry.materialIdentity,
-    }).map(withoutUnverifiedReferences);
+    })
+      .map(withoutUnverifiedReferences)
+      .map((finding) => redactIdsMatchingMaterial(finding, material));
+
+    // Same rule for the per-key listing: it names every id in the ring, and
+    // the finding list is not the only place an id is printed.
+    const safeKeys = keys.map((key) =>
+      key.keyId !== null && material.has(key.keyId) ? { ...key, keyId: null } : key
+    );
+    if (safeKeys.some((key) => key.keyId === null)) {
+      findings.push({ code: KEY_ID_MATCHES_MATERIAL, idMatchesMaterial: true });
+    }
+
     for (const finding of findings) {
       attention.push(`${entry.variable}: ${mobileKeyringFindingText(finding)}`);
     }
     return {
       variable: entry.variable,
       graceSeconds: entry.graceSeconds,
-      keys,
+      keys: safeKeys,
       retirementsNamingNothing,
       findings,
     };
