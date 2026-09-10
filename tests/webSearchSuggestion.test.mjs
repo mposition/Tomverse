@@ -4,6 +4,7 @@ import {
   hasExplicitSourceOrSearchIntent,
   suggestsRecentInformationNeeded,
 } from "../lib/webSearchSuggestion.ts";
+import { classifyWebSearchTopic } from "../lib/webSearchRetrySuggestion.ts";
 
 // The composer's mid-draft nudge is gone -- web search is a switch, so there
 // is no "ask me first" state left for a nudge to turn on. What routing reads
@@ -141,4 +142,63 @@ test("negation lists have bounded item spans and counts, and long repeated input
   const repeated = "Do not use placeholders ".repeat(20_000);
   assert.equal(suggestsRecentInformationNeeded(repeated), false);
   assert.equal(suggestsRecentInformationNeeded(`${repeated}. Use today's date.`), true);
+});
+
+test("boolean-adjacent prose retains freshness even beside independently supplied records", () => {
+  for (const text of [
+    "What is the current true cost of this plan?",
+    "What is my current no-claims discount?",
+    "What is the current false alarm rate?",
+    "What is the current yes-or-no policy?",
+    "Use the supplied records for extraction. What is the current true cost of this plan?",
+    "Given records: current yes. What is my current no-claims discount?",
+    "Given records: current true costs need checking.",
+    "Given records: current=true-cost estimates need checking.",
+    "현재: 참고자료가 어떤 상태인가요?",
+    "현재: 예외 규정은 무엇인가요?",
+  ]) assert.equal(suggestsRecentInformationNeeded(text), true, text);
+});
+
+test("explicit current fields and locally marked boolean values still describe data", () => {
+  for (const text of [
+    "Supplied records: current yes; prior current no. Extract the current record.",
+    "A synthetic register has a record marked current no, and another marked current yes.",
+    "A historical record in the supplied register has current no, label A.",
+    'Given data: {"current": "true", "label": "A"}.',
+    "Record: current=false; label=A.",
+    "The record is marked current no.",
+    "주어진 기록: 현재 여부: 예. 현재 버전만 선택하세요.",
+    "현재 표시=거짓.",
+    '현재: "참"; 기록 A.',
+    "현재: 아니오.",
+  ]) assert.equal(suggestsRecentInformationNeeded(text), false, text);
+});
+
+test("source-order masks use horizontal separators and never join separate lines", () => {
+  for (const separator of ["\n", "\r\n"]) {
+    for (const text of [
+      `Include the source${separator}Order the rows by date`,
+      `Include the source-${separator}Order the rows by date`,
+      `Order in${separator}The source must be included`,
+      `Use the order${separator}of the source`,
+    ]) assert.equal(hasExplicitSourceOrSearchIntent(text), true, text);
+  }
+  for (const text of ["Keep source\torder.", "Keep source-order.", "Use the order\tin the original\tsource."]) {
+    assert.equal(hasExplicitSourceOrSearchIntent(text), false, text);
+  }
+});
+
+test("the retry topic consumer distinguishes incidental data from genuine search and freshness", () => {
+  for (const text of ["Keep the rows in source order.", "Supplied records: current yes; prior current no.", "Do not use today's date.", "주어진 기록: 현재 여부: 예. 현재 버전만 선택하세요.", '현재: "참"; 기록 A.']) {
+    assert.deepEqual(classifyWebSearchTopic({ text }), { suggested: false, signals: [], refusal: "no_recency_signal" }, text);
+  }
+  for (const text of ["What is the current true cost of this plan?", "What is my current no-claims discount?", "오늘 서울 날씨 알려줘", "현재: 참고자료가 어떤 상태인가요?"]) {
+    assert.deepEqual(classifyWebSearchTopic({ text }), { suggested: true, signals: ["recency"], refusal: null }, text);
+  }
+  assert.deepEqual(classifyWebSearchTopic({ text: "현재: 예외 규정은 무엇인가요?" }), {
+    suggested: true, signals: ["recency", "live_lookup"], refusal: null,
+  });
+  for (const text of ["Cite sources for this claim.", "Preserve source order; also cite external sources.", "Include the source\nOrder the rows by date", "Order in\r\nThe source must be included"]) {
+    assert.deepEqual(classifyWebSearchTopic({ text }), { suggested: true, signals: ["explicit_search_request", "recency"], refusal: null }, text);
+  }
 });

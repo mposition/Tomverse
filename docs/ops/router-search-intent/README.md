@@ -1,7 +1,8 @@
 # Router search-intent v1
 
-This development change corrects identified incidental source/search-intent and
-recency cues in the deterministic task profiler. It is not a new model ranker,
+This development change addresses identified incidental source/search-intent and
+recency cues shared by the deterministic task profiler and the web-search retry
+topic classifier. It is not a new model ranker,
 a quality-score adjustment or evidence of a better production Router. The full
 model catalogue and the Router's hard capability filters are unchanged; the
 profile values supplied to those filters can change.
@@ -13,9 +14,13 @@ The two public predicates in `lib/webSearchSuggestion.ts` keep their interface.
 They replace only these incidental cue spans with equal-length spaces before
 applying the existing research/recency rules:
 
-- Source-order/sequence wording, such as `source order` or `order in the source`.
+- Source-order/sequence wording, such as `source order` or `order in the source`,
+  with horizontal separators only; a line break remains a boundary.
 - Marked `current` boolean fields, including quoted JSON-style keys and the
-  explicitly supported Korean marker forms.
+  explicitly supported Korean marker forms. English uses assignment syntax,
+  `marked`/`flagged`, or supported local fields in supplied-record contexts.
+  English and Korean values must end at a field separator or the input end;
+  truth-like prefixes in prose are retained.
 - `current` record/version/row/entry reads in recognized supplied-record
   contexts. An inherited subject requires a clause-leading reading imperative;
   explicit `of`/`for` subjects and prefixed requests are retained. The matching
@@ -42,20 +47,37 @@ The profile evaluates source intent before inferred freshness. Suppressing a
 source cue can expose the recency predicate; the regressions therefore inspect
 the combined profile and independent affirmative cues, not just each predicate.
 
-## Offline evidence and its limits
+`hasExplicitSourceOrSearchIntent` also feeds `classifyWebSearchTopic` in
+`lib/webSearchRetrySuggestion.ts`, which separately reads the task profile.
+For `Keep the rows in source order.`, the deliberate downstream change is from
+a suggested search with `explicit_search_request` and `recency` signals to
+`suggested: false`, `refusal: no_recency_signal`. The classifier still has its
+own minimum-length, writing/translation and live-lookup rules; this is not a
+claim that every retry suggestion is unchanged or that search is globally
+disabled. Consumer-level assertions and the existing retry-suggestion test
+suite are included in the revision 1 checks below; that classifier's source
+file itself is unchanged.
+
+## Round 0 offline evidence and its limits
 
 The independently executed comparison used base commit
 `7fb3315fea786bb5313c0cf32191c6ef75118f57` and the changed runtime bytes below.
-The candidate was still a worktree change when measured; its metadata's HEAD
-alone is not its source identity. The eventual package records the committed
-reviewed change separately.
+That candidate was still a worktree change when first measured; its metadata's
+HEAD alone is not its source identity. These bytes were later committed as
+`1e3231ee6f74dfddad9330cb2be29b9d10c56a8c` and packaged for round 0. The numbers
+in this section are historical evidence for that candidate, not a fresh result
+for its subsequent revision or a claim that Claude approved it.
+
+The earlier [dated v2 profiler-disagreement diagnosis](../router-development-benchmark/README.md#known-profiler-disagreement-preserved-for-diagnosis)
+is the historical baseline for this comparison; its original table remains
+unchanged rather than being rewritten as a v3 observation.
 
 | Runtime file | Candidate SHA-256 |
 | --- | --- |
 | `lib/webSearchSuggestion.ts` | `67547e0be1575ba08a4c0ced3e6988d6c47f3aa72de791ebfd5cb2ec34a5c3d7` |
 | `lib/taskProfileCore.ts` | `905f57b37fc7d3002462dee24c6912488c0a704daec26e3a3fc3569dc2d34c0c` |
 
-| Static diagnostic | Base v2 | Candidate v3 |
+| Static diagnostic | Base v2 | Round 0 candidate v3 |
 | --- | --- | --- |
 | Original synthetic cases | 24 | 24 |
 | Catalogue models / case-model rows | 42 / 1,008 | 42 / 1,008 |
@@ -72,7 +94,7 @@ not evidence that DeepSeek gives better answers.
 
 These mismatches are relative to the fixed corpus's declared closed-book
 requirements, not human traffic labels or measured answer quality. The separate
-12-file native regression run passed **225/225** tests, with zero failures,
+12-file round 0 native regression run passed **225/225** tests, with zero failures,
 skips or TODOs. This is a focused run, not a full repository unit-suite claim.
 The instrumented diagnostic and regression processes reported zero network
 attempts; that observation is not an OS-level network-isolation guarantee.
@@ -107,6 +129,31 @@ Sixteen additional mixed-boundary probes matched their stated expectations.
 Some were shared with the author during development; they are regression
 evidence, not a blind holdout or a representative accuracy estimate.
 
+## Revision 1 verification
+
+The final pre-commit revision was measured separately under
+`revision1-final`, with helper SHA-256
+`416b7bf8aaecf76b2396a08b79761620e56bd2db3bdb56e77b12aef351050fdc`.
+The `taskProfileCore.ts` hash is unchanged from the table above. Its metadata
+honestly records dirty HEAD `1e3231ee`; the changed bytes, not that HEAD alone,
+identify this measurement. The fresh 13-file native run passed **260/260**,
+with no failures, cancellations, skips or TODOs. The 27 targeted/mixed
+boundaries and 12 direct retry-classifier comparisons also matched their
+expectations, including the Korean `참고자료`/`예외규정` prefix regressions and
+a complete-boolean control. These are development regressions, not holdout
+quality evidence.
+
+The full 24-case/42-model comparison retained the round 0 diagnostic counts:
+8 to 0 search mismatches, 80 to 0 eligibility discrepancies, and 360 eligible /
+648 refused benchmark rows. Six kinds and eight selections changed versus v2;
+non-Router row fields, corpus and catalogue still compared equal. The same three
+limitations in the 17-prompt diagnostic remain. The instrumented runs observed
+zero network attempts. `final-independent-verification-revision1-final.json`
+and the separate `revision1-final.*` metadata, plan, profile and native logs
+retain the fresh evidence; earlier results were not overwritten. Preservation
+checks retained the original 71 files and 67 subsequent evidence pins. None of
+these checks substitutes for the pending Claude review of the revised digest.
+
 ## Historical observations are not reinterpreted
 
 The existing corpus, answers, grader and historical scores are not rewritten.
@@ -124,7 +171,7 @@ current code; its strict expected selections, counts and injected latency totals
 therefore follow v3. Those synthetic numbers do not replace the historical
 60-call report or establish a measured latency improvement. The fixture
 generator, Replay core and source validators remain unchanged.
-The final preservation check matched all 17 original observation/journal files,
+The round 0 preservation check matched all 17 original observation/journal files,
 27 active terminal-review files and their 27 archived copies by size and SHA-256.
 
 ## Review record
@@ -136,7 +183,23 @@ remains unchanged. An actual read-only Claude review must name this task's own
 source diff digest; a prior approval or preflight exception cannot substitute
 for it.
 
-The independent Claude review is pending. The offline results above are not an
-approval, and this README does not claim that a reviewer examined these bytes.
-The actual package, reviewer verdict and controller outcome must be retained
-against their own digest before this task is reported as independently reviewed.
+The actual read-only Claude round 0 review returned `request_changes` for commit
+`1e3231ee6f74dfddad9330cb2be29b9d10c56a8c`, digest
+`sha256:2a7a05cd409bf25c0c8ea5e036a125fbb4d05781ee9d602802309c0c811d4696`.
+The recorded controller outcome is `awaiting_revision`, not approval. Its
+package, raw response, verdict and exchange remain under
+`artifacts/cross-review/router-search-intent-v1`; the original round 0 records
+are not rewritten as a review of later source bytes.
+
+Independent offline reproduction confirmed two regressions in that candidate:
+bare `current true` / `current no-claims` prose lost its recency cue, and a
+source request followed by `Order` on the next line lost its source cue.
+`claude-round0-independent-reproduction.json` in the external evidence directory
+records both, as well as the second consumer's source-order behavior. Revision 1
+narrows those spans and verifies the restored cues; it also closes the same
+boolean-prefix boundary in Korean. Consumer assertions and the retry suite
+cover finding 3, and the historical backlink addresses finding 4. These are
+the author's corrective dispositions, not a changed round 0 verdict or an
+independent acceptance. The fresh Claude review remains pending; neither the
+round 0's 225 tests nor revision 1's 260 tests is its substitute. No finding is
+waived here.

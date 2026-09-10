@@ -60,13 +60,25 @@ const EXTERNAL_REQUEST_CONTEXT =
  */
 const withoutIncidentalSearchCues = (text: string): string => {
   const blank = (match: string) => " ".repeat(match.length);
-  const reading = text
-    .replace(/\bsource(?:['’]s)?[\s-]+(?:order(?:ing)?|sequence)\b/gi, blank)
-    .replace(/\b(?:order|sequence)\s+(?:in|of)\s+(?:the\s+)?(?:original\s+)?source\b/gi, blank)
-    .replace(/\bcurrent(?=["'`]?\s*(?:[:=]\s*["'`]?\s*)?(?:yes|no|true|false)\b)/gi, blank)
-    .replace(/현재(?=\s*(?:여부|표시)?\s*[:=]\s*(?:예|아니오|참|거짓))/g, blank);
-
+  const blankCurrent = (match: string) => match.replace(/\bcurrent\b/gi, blank);
   const providedRecords = PROVIDED_RECORD_CONTEXT.test(text);
+  let reading = text
+    .replace(/\bsource(?:['’]s)?[ \t-]+(?:order(?:ing)?|sequence)\b/gi, blank)
+    .replace(/\b(?:order|sequence)[ \t]+(?:in|of)[ \t]+(?:the[ \t]+)?(?:original[ \t]+)?source\b/gi, blank)
+    // A complete boolean value must end at a field boundary, not the start
+    // of prose such as "true cost" or a hyphenated word such as "no-claims".
+    .replace(/\bcurrent(?=["'`]?[ \t]*[:=][ \t]*["'`]?(?:yes|no|true|false)["'`]?[ \t]*(?:[,;.:}\]\r\n]|$))/gi, blank)
+    .replace(/\b(?:marked|flagged)[ \t]+current(?=[ \t]+["'`]?(?:yes|no|true|false)["'`]?[ \t]*(?:[,;.:}\]\r\n]|$))/gi, blankCurrent)
+    .replace(/현재(?=[ \t]*(?:여부|표시)?[ \t]*[:=][ \t]*["'`]?(?:예|아니오|참|거짓)["'`]?[ \t]*(?:[,;.:}\]\r\n]|$))/g, blank);
+
+  if (providedRecords) {
+    // Bare values additionally require local field syntax or the record's
+    // "has current no" predicate. A provided table elsewhere in the turn
+    // never licenses removing "current true cost" from a separate question.
+    reading = reading
+      .replace(/(?:^|[{:;,\r\n])[ \t]*(?:(?:prior|previous|historical)[ \t]+)?["'`]?current(?=["'`]?[ \t]+["'`]?(?:yes|no|true|false)["'`]?[ \t]*(?:[,;.:}\]\r\n]|$))/gi, blankCurrent)
+      .replace(/\bhas[ \t]+current(?=[ \t]+["'`]?(?:yes|no|true|false)["'`]?[ \t]*(?:[,;.:}\]\r\n]|$))/gi, blankCurrent);
+  }
 
   // Negation stays within its clause. In particular, "but" starts a fresh
   // reading; it cannot hide an affirmative request following the prohibition.

@@ -317,3 +317,26 @@ test("contextual search reading keeps coding and attachment precedence intact", 
     assert.equal(requested.kind, "documents");
     assert.equal(requested.needsCurrentInformation, true);
 });
+
+test("ordinary boolean-adjacent freshness and separate-line sources keep the full profile search boundary", () => {
+    for (const text of [
+        "What is the current true cost of this plan?",
+        "What is my current no-claims discount?",
+        "Use the supplied records for extraction. What is the current true cost of this plan?",
+        "Given records: current yes. What is my current no-claims discount?",
+        "현재: 참고자료가 어떤 상태인가요?",
+        "현재: 예외 규정은 무엇인가요?",
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.equal(built.kind, "general", text);
+        assert.ok(built.signals.includes("search:recency-heuristic"), text);
+    }
+    for (const text of ["Include the source\nOrder the rows by date", "Order in\r\nThe source must be included"]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.equal(built.kind, "research", text);
+        assert.ok(built.signals.includes("search:source-intent"), text);
+        assert.ok(built.signals.includes("research:vocabulary"), text);
+    }
+});
