@@ -65,7 +65,30 @@ export const MOBILE_SIGNING_ROUND_CASES = [
   "case_2_prime",
   /** None of the three: this round is not in this branch at all. */
   "not_this_branch",
+  /**
+   * Not one of section 1's three, and not a fourth case either: the round was
+   * handed an observation that does not decide between them, so it is not
+   * classified. A rejection with no record of the grace state at that instant
+   * is the one that gets here -- see `classifyUndeterminedSigning`.
+   */
+  "insufficient_observation",
 ];
+
+/**
+ * What item 7's access axis observed, as an observation.
+ *
+ *   accepted        the previous generation's token was accepted
+ *   rejected        it was refused -- and that is all this says
+ *   sample_expired  its `exp` passed before it could be presented
+ *
+ * `rejected` used to be spelled `rejected_while_valid`, and the name was the
+ * defect: it carried the verdict "the key should have been accepted" inside
+ * the input, so the classifier ordered a rollback for a refusal that was the
+ * contract working. Whether the key was still inside its grace window at that
+ * instant is a **separate observation** (`graceRemainingAtRejectionSeconds`),
+ * and it is what decides between a defect and the intended state.
+ */
+export const MOBILE_ACCESS_AXIS_OBSERVATIONS = ["accepted", "rejected", "sample_expired"];
 
 const isInteger = (value) => Number.isInteger(value);
 
@@ -82,6 +105,7 @@ export const classifyUndeterminedSigning = (input) => {
   const refreshAxis = input?.previousRefreshAxis;
   const accessAxis = input?.previousAccessAxis;
   const graceRemaining = input?.graceWindowRemainingSeconds;
+  const graceAtRejection = input?.graceRemainingAtRejectionSeconds;
 
   const reason = (roundCase, why, extra = {}) => ({ case: roundCase, why, ...extra });
 
@@ -103,11 +127,54 @@ export const classifyUndeterminedSigning = (input) => {
     return reason("not_this_branch", "item 6 did not report one of passed, mismatch_confirmed or evidence_unjudgeable");
   }
 
+  /**
+   * A refusal is not yet a finding. `MOBILE_PREVIOUS_SIGNING_KEY_SECONDS` is
+   * 900 and the keyring's window is exclusive, so the previous key verifies at
+   * +899s and answers `unknown_kid` at +900s -- reproduced against the real
+   * mint and verify path on 2026-09-10. The second of those is the contract
+   * doing what it says. Ordering a rollback for it would undo a correct
+   * deployment, and an earlier version of this function did exactly that
+   * because the input was named `rejected_while_valid`: the caller's label
+   * decided the verdict.
+   *
+   * So the grace state at the instant of the refusal is read first, and it is
+   * a distinct observation from `graceWindowRemainingSeconds`, which is the
+   * window at the time of judgement. Collapsing them would answer a question
+   * about one instant with a measurement from another.
+   */
+  if (accessAxis === "rejected") {
+    if (!isInteger(graceAtRejection)) {
+      return reason(
+        "insufficient_observation",
+        "the access sample was rejected, but the grace window at that instant was not recorded, and that is what tells a defect from the intended refusal",
+        {
+          answer:
+            "record how much of the previous signing key's grace window was left at the instant of the rejection, then classify again",
+          rollback: false,
+        }
+      );
+    }
+    if (graceAtRejection > 0) {
+      return reason(
+        "case_2",
+        "the previous access token was rejected while its signing key was still inside its grace window -- that is a deployment defect, not case 1",
+        { answer: "roll back", rollback: true, graceWindowClosedAtRejection: false }
+      );
+    }
+    // Closed at the instant of the refusal: refusing was the intended
+    // behaviour. It is still not an answer to case 1's question -- nobody
+    // presented the sample while it counted -- so the round falls through to
+    // case 1 below, where G7 names the unknown.
+  }
   if (accessAxis === "rejected_while_valid") {
     return reason(
-      "case_2",
-      "a still-valid previous access token was rejected -- that is a deployment defect, not case 1",
-      { answer: "roll back", rollback: true }
+      "insufficient_observation",
+      'the access axis was reported as "rejected_while_valid", which states a verdict rather than an observation',
+      {
+        answer:
+          'report "rejected" and, separately, the grace window remaining at the instant of the rejection',
+        rollback: false,
+      }
     );
   }
   if (refreshAxis !== "passed") {
@@ -119,15 +186,25 @@ export const classifyUndeterminedSigning = (input) => {
   if (accessAxis === "accepted") {
     return reason("not_this_branch", "the previous generation was accepted; nothing is undetermined");
   }
-  if (accessAxis !== "sample_expired") {
-    return reason("not_this_branch", "item 7's access axis did not report one of accepted, rejected_while_valid or sample_expired");
+  if (accessAxis !== "sample_expired" && accessAxis !== "rejected") {
+    return reason(
+      "not_this_branch",
+      "item 7's access axis did not report one of accepted, rejected or sample_expired"
+    );
   }
 
   // Case 1. G7 decides what to call it once the grace window has closed.
-  const graceClosed = isInteger(graceRemaining) && graceRemaining <= 0;
+  //
+  // A rejection reaches here only through the closed branch above, so its
+  // window is closed by construction; the sample-expired path reads the
+  // recorded window instead.
+  const graceClosed =
+    accessAxis === "rejected" || (isInteger(graceRemaining) && graceRemaining <= 0);
   return reason(
     "case_1",
-    "item 6 passed, the refresh axis passed, and the access sample expired before it could be used",
+    accessAxis === "rejected"
+      ? "item 6 passed, the refresh axis passed, and the access sample was refused after its signing key's grace window had already closed -- the intended behaviour, and not an answer"
+      : "item 6 passed, the refresh axis passed, and the access sample expired before it could be used",
     {
       rollback: false,
       /**
@@ -249,37 +326,72 @@ export const holdStatus = (input) => {
  * G9's fourth value: no exception is opened in section 4's completion
  * condition.
  *
- * F2 completes when the preflight re-check passes, and that re-check compares
- * against the deployment id written on Active. While E7 is unmeasured that id
- * is not confirmed, so the result cannot be trusted even if the check passes
- * -- a rollback that reuses the id would pass it without anyone having
- * confirmed which case they were in.
+ * Section 4 makes F2 complete on **two** things -- the rollback finished, and
+ * the preflight re-check passed afterwards -- and this returns `complete` only
+ * when both were observed in that order. An earlier version asked two
+ * questions and neither of them was the rollback: a case where nobody had
+ * rolled anything back, and a re-check that ran before the rollback did,
+ * both came back `complete`.
  *
- * So this returns `unconfirmed`, never `complete`, until both are true. That
- * is the decided behaviour, not a limitation of the module.
+ * The instants are required rather than inferred. "It was done and then it was
+ * checked" is an ordering claim, and without two timestamps there is nothing
+ * to order -- an operator who re-ran the preflight, then rolled back, then
+ * reported both would otherwise be told the rollback is complete.
+ *
+ * E7 gates all of it. The re-check compares against the deployment id written
+ * on Active, and while E7 is unmeasured that id is not confirmed, so a pass
+ * cannot be trusted even when everything else is in order -- a rollback that
+ * reuses the id would pass it without anyone having confirmed which case they
+ * were in. So this returns `unconfirmed`, never `complete`, until all of them
+ * hold. That is the decided behaviour, not a limitation of the module.
  */
 export const f2CompletionStatus = (input) => {
   const idConfirmed = input?.expectedDeploymentIdConfirmed === true;
   const recheck = input?.preflightRecheck;
+  const rollbackCompletedAt = input?.rollbackCompletedAtSeconds;
+  const recheckAt = input?.preflightRecheckAtSeconds;
+
+  /** Never omitted: an F2 that is not complete has to say what is still missing. */
+  const unconfirmed = (why, extra = {}) => ({
+    status: "unconfirmed",
+    why,
+    rollbackObserved: isInteger(rollbackCompletedAt),
+    rollbackMayHaveRun: true,
+    exceptionOpened: false,
+    ...extra,
+  });
 
   if (!idConfirmed) {
-    return {
-      status: "unconfirmed",
-      why: "the deployment id the re-check expects is not confirmed (E7), so its result cannot be trusted",
-      rollbackMayHaveRun: true,
-      exceptionOpened: false,
-    };
+    return unconfirmed(
+      "the deployment id the re-check expects is not confirmed (E7), so its result cannot be trusted"
+    );
   }
-  if (recheck === "passed") {
-    return { status: "complete", why: "the preflight re-check passed against a confirmed expectation" };
+  if (!isInteger(rollbackCompletedAt)) {
+    return unconfirmed(
+      "no completed rollback was observed, and section 4 completes F2 on the rollback finishing and the re-check passing after it"
+    );
   }
-  return {
-    status: "unconfirmed",
-    why:
+  if (recheck !== "passed") {
+    return unconfirmed(
       recheck === "failed"
         ? "the preflight re-check did not pass"
-        : "the preflight re-check has not been run",
-    rollbackMayHaveRun: true,
+        : "the preflight re-check has not been run"
+    );
+  }
+  if (!isInteger(recheckAt)) {
+    return unconfirmed(
+      "the re-check passed, but there is no instant for it, so it cannot be shown to have run after the rollback"
+    );
+  }
+  if (recheckAt <= rollbackCompletedAt) {
+    return unconfirmed(
+      "the re-check that passed did not run after the rollback completed, so it says nothing about the rolled-back deployment"
+    );
+  }
+  return {
+    status: "complete",
+    why: "the rollback completed, and a later preflight re-check passed against a confirmed expectation",
+    rollbackObserved: true,
     exceptionOpened: false,
   };
 };
