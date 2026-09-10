@@ -1,0 +1,6 @@
+
+> ai-chat-hub@0.1.0 check:model-pricing
+> node --import tsx scripts/check-model-pricing.mjs
+
+
+Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.

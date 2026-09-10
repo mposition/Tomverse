@@ -1,0 +1,444 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "router-development-collector-cache-observation-fix",
+  "requirement": "Review the minimal collector CI follow-up discovered on PR #1319 at source 886ea27f852a7d00c6cccbba26ec0002f2086d16: explicitly retain cacheWriteTokens=null next to the Google cache-read observation and add an offline mock regression proving non-allowlisted raw fields and SDK-normalized fields cannot fill unknown writes, uncached input or estimated cost. This preserves the existing unknown/null behavior; it is not evidence of historical paid underbilling and does not add a provider observation. Implementation is limited to the two provider source/test files; this task and its receipt are review instructions and authorization provenance only. Use a new digest-bound Codex-author/Claude-reviewer exchange for this newly discovered CI issue, with at most two fix rounds and no supersedes. Keep the completed collector review and all original records unchanged. The user's fresh limited permission allows --skip-preflight only for the announced read-only review of this fix, not failed-test/CI overrides, API-billing fallback or paid benchmark execution. Authoring these records performs no commit, package, review, push or merge.",
+  "completionCriteria": [
+    "The eventual clean review commit differs from exact base 886ea27f852a7d00c6cccbba26ec0002f2086d16 only in the four listed paths. The initial implementation patch is two files, +33/-1: an explicit Google cacheWriteTokens=null assignment/comment and one provider mock regression plus its import. Do not broaden the runtime fix, replace null with zero, infer no-cache usage, change raw allowlists, or change model caps/settings/pricing. Any requested revision stays within this bounded purpose and is separately verified.",
+    "The regression observes cachedContentTokenCount from the existing Google raw-body allowlist while preserving cacheWriteTokens=null, noCacheInputTokens=null and estimateCollectionUsageCost=null despite adversarial non-allowlisted raw fields and SDK-normalized nonzero cache-write fields. It uses MockLanguageModelV4 without credentials or network and verifies one mock generation. No production provider call, additional raw-body persistence or synthetic provider usage is introduced.",
+    "Run the entire collector suite with npm run test:router-development-collector and record the actual result (currently 80 tests), with zero failures/skips. Also run the exact CI regression named 'every place that harvests cacheReadTokens harvests cacheWriteTokens too' in tests/anthropicPromptCachingWiring.test.mjs through the existing react-server/tsx serial Node test invocation. Assert that this exact named case actually executed and passed (one executed target, one pass, zero failures); exit 0 with zero matched tests is not a pass. Report intentionally deselected tests separately; filtering is not a full-wiring-suite pass. Preserve the reported whole-wiring local result of 11/12, exit 1, and its pre-existing Windows path-separator failure, which was also present before this patch. Do not edit the scanner, test runner or workflow or use --review-despite-check-failures. The Linux full CI suite must pass on the actual subsequently published head before merge; a local full-unit run has not been completed and cannot be claimed from targeted checks.",
+    "Official npm run typecheck, lint of both changed implementation/test files, check:encoding, check:doc-references, check:policy-section-references, check:model-pricing, check:router-quality-eval, check:router-context-window and check:context-window-register pass with actual commands/results recorded. Verify the four-path diff and handwritten whitespace, and preserve all other source and historical-record bytes. Supplied author summaries are not raw logs or independently rerun checks; package-stage test and guard results must come from genuine executions without failure overrides.",
+    "Preserve the original collector task/receipt, its canonical 28-file archive and active 21-file passed exchange, the original v1 records, corpus/grader/planner, reservation/journal/export behavior, product client and policy, pricing/registry/credits, caps/settings, package/lock, processing-tier guard, cross-review controller and workflows. The previous passed review remains concluded on its own digest; it does not approve this patch and is not reopened or reset. The source-886 60-call pilot proposal remains a historical unapproved draft and must be regenerated after final source/merge before any separate numerical human execution approval.",
+    "Only after separate orchestrator go, package round 0 using the unchanged control program, author codex, reviewer claude, exact base and full four-path diff, with output artifacts/cross-review/router-development-collector-cache-observation-fix. generatedPaths is empty and no --diff-exclude arguments are permitted. Use the existing ignored artifacts location without changing ignore/scope/controller rules. Record a newly computed source digest and actual checks; packaging is not a reviewer verdict. Do not move or overwrite earlier exchanges.",
+    "Announce independent review before invocation and wait for its separate go. Retain the existing Claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config configuration, with no shell/write tools, model override or expanded MCP access. In the review child environment only, remove every case spelling of ANTHROPIC_API_KEY, retain stored claude.ai login, and allow Git/bin on the existing PATH solely for shell availability. Observe sanitized login status before invocation; no login means stop, not API fallback. Keep parent/persistent environment unchanged. Record --skip-preflight as a skip, never a passed preflight. At most two fix rounds apply; unresolved actionable findings at the cap mean on_hold, not a new exchange or revision-cap override.",
+    "This task/receipt does not certify tests, a package, an independent verdict, a new CI pass, a push or a merge. Keep the author-reported pre-patch local wiring result 10/12 and post-patch 11/12 distinct from the Linux CI result at source 886 (8,436 tests: 8,434 pass, one fail, one skip) and from future actual checks. Commit, package, reviewer invocation, push and merge each require their separate applicable go. No paid collector/provider run, API-billing switch, main merge, deployment, model ranking or quality promotion is authorized."
+  ],
+  "baseCommit": "886ea27f852a7d00c6cccbba26ec0002f2086d16",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:eed64ad80aac2977a59b50570d2d8245b2251262328e9c4bac5f53199e07a33e",
+      "commit": "dcabb4e3e130781de5819d2639ea4ab0e7f0df0f",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+        "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+        "lib/routerDevelopmentCollectorProvider.ts",
+        "tests/routerDevelopmentCollectorProvider.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "npm run test:router-development-collector",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 19733.2081",
+          "durationMs": 20257
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=tap '--test-name-pattern=^every place that harvests cacheReadTokens harvests cacheWriteTokens too$' tests/anthropicPromptCachingWiring.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2479.8182",
+          "durationMs": 2555
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 34089
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+          "durationMs": 2493
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1162
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 767 referenced path(s) across 92 instruction document(s), and 892 path(s) named by comments across 2632 source file(s), all present.",
+          "durationMs": 1236
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4136 citation(s) against 30 policy document(s). 2485 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 230 predate this change).",
+          "durationMs": 994
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 709
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 657
+        },
+        {
+          "rule": "npm run check:router-context-window",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+          "durationMs": 630
+        },
+        {
+          "rule": "npm run check:context-window-register",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+          "durationMs": 692
+        },
+        {
+          "rule": "git diff --check 886ea27f852a7d00c6cccbba26ec0002f2086d16 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 47
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/routerDevelopmentCollectorProvider.test.mjs:71-76 (fixture `body.usage`)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The fixture's `usage` object is described as wholly non-allowlisted, but lib/routerDevelopmentCollectorProvider.ts:89 reads `usage.service_tier` for every provider including google, so one key of that object is a live input path the test never pins.",
+          "reproduction": "Add `service_tier: \"priority\"` to the fixture's `usage` object and re-run the test: `observeCollectionBody(\"google\", body).servedProcessingTier` becomes \"priority\", `unsupportedBilling` becomes true and `outcome.status` flips from \"returned\" to \"measurement_unsupported\", failing the existing assertion at line 83. Adding `assert.equal(observation.servedProcessingTier, null)` next to the existing null assertions would pin the one raw key the google branch actually consumes; cacheWriteTokens/noCacheInputTokens/cost coverage is already correct without it.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:70-76 (SHA-256 table)",
+          "severity": "warning",
+          "basis": "judgement",
+          "claim": "The receipt hardcodes SHA-256 hashes for the two implementation files, which a Read/Grep/Glob-only reviewer cannot verify and which go silently stale if either file is edited in a fix round.",
+          "reproduction": "Run `certutil -hashfile lib/routerDevelopmentCollectorProvider.ts SHA256` and `certutil -hashfile tests/routerDevelopmentCollectorProvider.test.mjs SHA256` at commit dcabb4e3 and compare with the two table values; then note that any round-1 revision to either file invalidates the table unless the receipt is updated in the same commit. If a fix round occurs, refresh the table (or drop it in favour of the packaged change digest, which the control program recomputes).",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:64-67",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The cited evidence location is a machine-local Windows temp directory, so the durable record points at a path that is unresolvable from a fresh clone or another machine.",
+          "reproduction": "Clone the repository elsewhere and attempt to open `C:/Users/Vyper/AppData/Local/Temp/router-collector-google-cache-null-fix-.../VERIFICATION-SUMMARY.json`; it does not exist. The document already labels it a transcription rather than a raw log, so the record stands as written, but the path carries no re-verifiable evidence.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "control-program test results — `npm run test:router-development-collector`",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The recorded excerpt shows fail 0 / cancelled 0 / skipped 0 / todo 0 but omits the `pass` total, so the criterion's expected count of 80 is not visible in the run record itself.",
+          "reproduction": "Re-run `npm run test:router-development-collector` and capture the `pass` line alongside the fail/skip lines. Static count of the four suites (tests/routerDevelopmentCollector*.test.mjs) is 70 top-level `test(` sites plus loop- and sub-tests, which is consistent with 80 but does not substitute for the reported number.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/routerDevelopmentCollectorProvider.test.mjs:71-76 (fixture `body.usage`); open finding: docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:70-76 (SHA-256 table); open finding: docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:64-67; open finding: control-program test results — `npm run test:router-development-collector`); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:0a9537d609e5ec898abe89eb90ba1c6231f75b7d5003b3bc06d15546eba15eba",
+      "commit": "ff0600e1858130988ea7820611736ec0dba5ed59",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+        "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+        "lib/routerDevelopmentCollectorProvider.ts",
+        "tests/routerDevelopmentCollectorProvider.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --input-type=module -e 'import {spawnSync,execFileSync} from \"node:child_process\"; import fs from \"node:fs\"; import assert from \"node:assert/strict\"; import {createHash} from \"node:crypto\"; const log=\"artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-collector.raw.tap\",expected=80; assert.equal(fs.existsSync(log),false,\"raw log already exists; refusing overwrite\"); const sourceCommit=execFileSync(\"git\",[\"rev-parse\",\"HEAD\"],{encoding:\"utf8\"}).trim(); assert.equal(execFileSync(\"git\",[\"status\",\"--porcelain\"],{encoding:\"utf8\"}).trim(),\"\",\"package checks require clean source\"); const run=spawnSync(process.execPath,[\"--conditions=react-server\",\"--import\",\"tsx\",\"--test\",\"--test-concurrency=1\",\"--test-reporter=spec\",\"--test-reporter=tap\",\"--test-reporter-destination=stdout\",\"--test-reporter-destination=artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-collector.raw.tap\",\"tests/routerDevelopmentCollector.test.mjs\",\"tests/routerDevelopmentCollectorProvider.test.mjs\",\"tests/routerDevelopmentCollectorCli.test.mjs\",\"tests/routerDevelopmentCollectorAdversarial.test.mjs\"],{stdio:\"inherit\"}); if(run.error||run.signal||run.status!==0)process.exit(run.status||1); const bytes=fs.readFileSync(log),raw=bytes.toString(\"utf8\"); const matches=[...raw.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\\d+)\\r?$/gm)]; assert.equal(matches.length,6,\"missing or repeated TAP totals\"); const counts=Object.fromEntries(matches.map(m=>[m[1],Number(m[2])])); assert.deepEqual(counts,{tests:expected,pass:expected,fail:0,cancelled:0,skipped:0,todo:0}); assert.equal((raw.match(/^ok \\d+ - /gm)||[]).length,expected); assert.equal(/^not ok /m.test(raw),false); console.log(JSON.stringify({offlineTestLog:{suite:\"collector\",sourceCommit,rawLog:log,rawBytes:bytes.length,rawSha256:createHash(\"sha256\").update(bytes).digest(\"hex\")}})); const lastLine=JSON.stringify({observedOfflineTests:{suite:\"collector\",...counts}}); assert.ok(lastLine.length<400,\"summary must fit the existing guard detail limit\"); console.log(lastLine);'",
+          "passed": true,
+          "output": "ℹ skipped 0\nℹ todo 0\nℹ duration_ms 19749.0758\n{\"offlineTestLog\":{\"suite\":\"collector\",\"sourceCommit\":\"ff0600e1858130988ea7820611736ec0dba5ed59\",\"rawLog\":\"artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-collector.raw.tap\",\"rawBytes\":18537,\"rawSha256\":\"d10245344c9268da784094d62eff81d1b7acfaed48551b04d640ff3ae0212c6b\"}}\n{\"observedOfflineTests\":{\"suite\":\"collector\",\"tests\":80,\"pass\":80,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}}",
+          "durationMs": 19918
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --input-type=module -e 'import {spawnSync,execFileSync} from \"node:child_process\"; import fs from \"node:fs\"; import assert from \"node:assert/strict\"; import {createHash} from \"node:crypto\"; const log=\"artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-wiring.raw.tap\",expected=1; assert.equal(fs.existsSync(log),false,\"raw log already exists; refusing overwrite\"); const sourceCommit=execFileSync(\"git\",[\"rev-parse\",\"HEAD\"],{encoding:\"utf8\"}).trim(); assert.equal(execFileSync(\"git\",[\"status\",\"--porcelain\"],{encoding:\"utf8\"}).trim(),\"\",\"package checks require clean source\"); const run=spawnSync(process.execPath,[\"--conditions=react-server\",\"--import\",\"tsx\",\"--test\",\"--test-concurrency=1\",\"--test-reporter=tap\",\"--test-reporter=tap\",\"--test-reporter-destination=stdout\",\"--test-reporter-destination=artifacts/cross-review/router-development-collector-cache-observation-fix/round1-package-wiring.raw.tap\",\"--test-name-pattern=^every place that harvests cacheReadTokens harvests cacheWriteTokens too$\",\"tests/anthropicPromptCachingWiring.test.mjs\"],{stdio:\"inherit\"}); if(run.error||run.signal||run.status!==0)process.exit(run.status||1); const bytes=fs.readFileSync(log),raw=bytes.toString(\"utf8\"); const matches=[...raw.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\\d+)\\r?$/gm)]; assert.equal(matches.length,6,\"missing or repeated TAP totals\"); const counts=Object.fromEntries(matches.map(m=>[m[1],Number(m[2])])); assert.deepEqual(counts,{tests:expected,pass:expected,fail:0,cancelled:0,skipped:0,todo:0}); assert.equal((raw.match(/^ok \\d+ - /gm)||[]).length,expected); assert.equal(/^not ok /m.test(raw),false); assert.equal((raw.match(/^ok 1 - every place that harvests cacheReadTokens harvests cacheWriteTokens too\\r?$/gm)||[]).length,1,\"named target must execute and pass\"); const declared=[...fs.readFileSync(\"tests/anthropicPromptCachingWiring.test.mjs\",\"utf8\").matchAll(/^test\\(\"([^\"]+)\"/gm)].map(m=>m[1]); assert.equal(declared.length,12); assert.equal(declared.filter(t=>t===\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\").length,1); console.log(JSON.stringify({offlineTestLog:{suite:\"wiring\",sourceCommit,rawLog:log,rawBytes:bytes.length,rawSha256:createHash(\"sha256\").update(bytes).digest(\"hex\")}})); const lastLine=JSON.stringify({observedOfflineTests:{suite:\"wiring\",...counts,namedTarget:\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\",intentionallyDeselected:11}}); assert.ok(lastLine.length<400,\"summary must fit the existing guard detail limit\"); console.log(lastLine);'",
+          "passed": true,
+          "detail": "outer-development-collector-cache-observation-fix/round1-package-wiring.raw.tap\",\"rawBytes\":331,\"rawSha256\":\"acd32a0277813ec91cc32a2915f15b3aaf230c432e720ef45dca012592b09d26\"}}\n{\"observedOfflineTests\":{\"suite\":\"wiring\",\"tests\":1,\"pass\":1,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0,\"namedTarget\":\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\",\"intentionallyDeselected\":11}}",
+          "durationMs": 2695
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 33771
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+          "durationMs": 2485
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1269
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 767 referenced path(s) across 92 instruction document(s), and 892 path(s) named by comments across 2632 source file(s), all present.",
+          "durationMs": 1260
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4136 citation(s) against 30 policy document(s). 2485 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 230 predate this change).",
+          "durationMs": 925
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 676
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 629
+        },
+        {
+          "rule": "npm run check:router-context-window",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+          "durationMs": 609
+        },
+        {
+          "rule": "npm run check:context-window-register",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+          "durationMs": 671
+        },
+        {
+          "rule": "git diff --check 886ea27f852a7d00c6cccbba26ec0002f2086d16 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 40
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:61",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The receipt records only the historical `+33/-1` size of the dcabb4e3 patch and never states the current revision's size, so the durable record leaves the reviewed implementation diff (+35/-1 across the two files) unstated next to a criterion that names +33/-1.",
+          "reproduction": "Count added/removed implementation lines in artifacts/cross-review/router-development-collector-cache-observation-fix/change-round1.diff lines 142-204: lib +2/-0, test +33/-1, i.e. +35/-1 total, versus the receipt's only recorded figure `+33/-1` at line 61 and the criterion text in router-development-collector-cache-observation-fix.task.json. Adding one sentence naming the round-1 size (and that the two extra lines are the fixture comment and the servedProcessingTier assertion) closes it; no code change is implied.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md:61); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:ba44bb1c84ef0f9c95d04ae947a5991f79f18a14b10664022c156d94a51108cf",
+      "commit": "34a179fd1986afbb2909cc38b0fa988814e5aa0e",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+        "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+        "lib/routerDevelopmentCollectorProvider.ts",
+        "tests/routerDevelopmentCollectorProvider.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --input-type=module -e 'import {spawnSync,execFileSync} from \"node:child_process\"; import fs from \"node:fs\"; import assert from \"node:assert/strict\"; import {createHash} from \"node:crypto\"; const log=\"artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap\",expected=80; assert.equal(fs.existsSync(log),false,\"raw log already exists; refusing overwrite\"); const sourceCommit=execFileSync(\"git\",[\"rev-parse\",\"HEAD\"],{encoding:\"utf8\"}).trim(); assert.equal(execFileSync(\"git\",[\"status\",\"--porcelain\"],{encoding:\"utf8\"}).trim(),\"\",\"package checks require clean source\"); const run=spawnSync(process.execPath,[\"--conditions=react-server\",\"--import\",\"tsx\",\"--test\",\"--test-concurrency=1\",\"--test-reporter=spec\",\"--test-reporter=tap\",\"--test-reporter-destination=stdout\",\"--test-reporter-destination=artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap\",\"tests/routerDevelopmentCollector.test.mjs\",\"tests/routerDevelopmentCollectorProvider.test.mjs\",\"tests/routerDevelopmentCollectorCli.test.mjs\",\"tests/routerDevelopmentCollectorAdversarial.test.mjs\"],{stdio:\"inherit\"}); if(run.error||run.signal||run.status!==0)process.exit(run.status||1); const bytes=fs.readFileSync(log),raw=bytes.toString(\"utf8\"); const matches=[...raw.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\\d+)\\r?$/gm)]; assert.equal(matches.length,6,\"missing or repeated TAP totals\"); const counts=Object.fromEntries(matches.map(m=>[m[1],Number(m[2])])); assert.deepEqual(counts,{tests:expected,pass:expected,fail:0,cancelled:0,skipped:0,todo:0}); assert.equal((raw.match(/^ok \\d+ - /gm)||[]).length,expected); assert.equal(/^not ok /m.test(raw),false); console.log(JSON.stringify({offlineTestLog:{suite:\"collector\",sourceCommit,rawLog:log,rawBytes:bytes.length,rawSha256:createHash(\"sha256\").update(bytes).digest(\"hex\")}})); const lastLine=JSON.stringify({observedOfflineTests:{suite:\"collector\",...counts}}); assert.ok(lastLine.length<400,\"summary must fit the existing guard detail limit\"); console.log(lastLine);'",
+          "passed": true,
+          "output": "ℹ skipped 0\nℹ todo 0\nℹ duration_ms 19200.5752\n{\"offlineTestLog\":{\"suite\":\"collector\",\"sourceCommit\":\"34a179fd1986afbb2909cc38b0fa988814e5aa0e\",\"rawLog\":\"artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap\",\"rawBytes\":18536,\"rawSha256\":\"27472f20a77936874f303d71648a6e2e491e7da419900084ddedaac33d230b1a\"}}\n{\"observedOfflineTests\":{\"suite\":\"collector\",\"tests\":80,\"pass\":80,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}}",
+          "durationMs": 19357
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --input-type=module -e 'import {spawnSync,execFileSync} from \"node:child_process\"; import fs from \"node:fs\"; import assert from \"node:assert/strict\"; import {createHash} from \"node:crypto\"; const log=\"artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-wiring.raw.tap\",expected=1; assert.equal(fs.existsSync(log),false,\"raw log already exists; refusing overwrite\"); const sourceCommit=execFileSync(\"git\",[\"rev-parse\",\"HEAD\"],{encoding:\"utf8\"}).trim(); assert.equal(execFileSync(\"git\",[\"status\",\"--porcelain\"],{encoding:\"utf8\"}).trim(),\"\",\"package checks require clean source\"); const run=spawnSync(process.execPath,[\"--conditions=react-server\",\"--import\",\"tsx\",\"--test\",\"--test-concurrency=1\",\"--test-reporter=tap\",\"--test-reporter=tap\",\"--test-reporter-destination=stdout\",\"--test-reporter-destination=artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-wiring.raw.tap\",\"--test-name-pattern=^every place that harvests cacheReadTokens harvests cacheWriteTokens too$\",\"tests/anthropicPromptCachingWiring.test.mjs\"],{stdio:\"inherit\"}); if(run.error||run.signal||run.status!==0)process.exit(run.status||1); const bytes=fs.readFileSync(log),raw=bytes.toString(\"utf8\"); const matches=[...raw.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\\d+)\\r?$/gm)]; assert.equal(matches.length,6,\"missing or repeated TAP totals\"); const counts=Object.fromEntries(matches.map(m=>[m[1],Number(m[2])])); assert.deepEqual(counts,{tests:expected,pass:expected,fail:0,cancelled:0,skipped:0,todo:0}); assert.equal((raw.match(/^ok \\d+ - /gm)||[]).length,expected); assert.equal(/^not ok /m.test(raw),false); assert.equal((raw.match(/^ok 1 - every place that harvests cacheReadTokens harvests cacheWriteTokens too\\r?$/gm)||[]).length,1,\"named target must execute and pass\"); const declared=[...fs.readFileSync(\"tests/anthropicPromptCachingWiring.test.mjs\",\"utf8\").matchAll(/^test\\(\"([^\"]+)\"/gm)].map(m=>m[1]); assert.equal(declared.length,12); assert.equal(declared.filter(t=>t===\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\").length,1); console.log(JSON.stringify({offlineTestLog:{suite:\"wiring\",sourceCommit,rawLog:log,rawBytes:bytes.length,rawSha256:createHash(\"sha256\").update(bytes).digest(\"hex\")}})); const lastLine=JSON.stringify({observedOfflineTests:{suite:\"wiring\",...counts,namedTarget:\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\",intentionallyDeselected:11}}); assert.ok(lastLine.length<400,\"summary must fit the existing guard detail limit\"); console.log(lastLine);'",
+          "passed": true,
+          "detail": "outer-development-collector-cache-observation-fix/round2-package-wiring.raw.tap\",\"rawBytes\":331,\"rawSha256\":\"1b4d306b8e1384750cf7db4633a4d5a51332e4f580160fb35457c011a55a83cc\"}}\n{\"observedOfflineTests\":{\"suite\":\"wiring\",\"tests\":1,\"pass\":1,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0,\"namedTarget\":\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\",\"intentionallyDeselected\":11}}",
+          "durationMs": 2627
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 34376
+        },
+        {
+          "rule": "npm run lint -- lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+          "durationMs": 2418
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1150
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 767 referenced path(s) across 92 instruction document(s), and 892 path(s) named by comments across 2632 source file(s), all present.",
+          "durationMs": 1273
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4136 citation(s) against 30 policy document(s). 2485 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 230 predate this change).",
+          "durationMs": 954
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 688
+        },
+        {
+          "rule": "npm run check:router-quality-eval",
+          "passed": true,
+          "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+          "durationMs": 637
+        },
+        {
+          "rule": "npm run check:router-context-window",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+          "durationMs": 649
+        },
+        {
+          "rule": "npm run check:context-window-register",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+          "durationMs": 687
+        },
+        {
+          "rule": "git diff --check 886ea27f852a7d00c6cccbba26ec0002f2086d16 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 39
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "No blocking findings; the four-path change may proceed to its separately authorized commit/package steps, with the Linux full CI suite still required on the actually published head before any merge."
+    }
+  ],
+  "changeDigest": "sha256:ba44bb1c84ef0f9c95d04ae947a5991f79f18a14b10664022c156d94a51108cf",
+  "commit": "34a179fd1986afbb2909cc38b0fa988814e5aa0e",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --input-type=module -e 'import {spawnSync,execFileSync} from \"node:child_process\"; import fs from \"node:fs\"; import assert from \"node:assert/strict\"; import {createHash} from \"node:crypto\"; const log=\"artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap\",expected=80; assert.equal(fs.existsSync(log),false,\"raw log already exists; refusing overwrite\"); const sourceCommit=execFileSync(\"git\",[\"rev-parse\",\"HEAD\"],{encoding:\"utf8\"}).trim(); assert.equal(execFileSync(\"git\",[\"status\",\"--porcelain\"],{encoding:\"utf8\"}).trim(),\"\",\"package checks require clean source\"); const run=spawnSync(process.execPath,[\"--conditions=react-server\",\"--import\",\"tsx\",\"--test\",\"--test-concurrency=1\",\"--test-reporter=spec\",\"--test-reporter=tap\",\"--test-reporter-destination=stdout\",\"--test-reporter-destination=artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap\",\"tests/routerDevelopmentCollector.test.mjs\",\"tests/routerDevelopmentCollectorProvider.test.mjs\",\"tests/routerDevelopmentCollectorCli.test.mjs\",\"tests/routerDevelopmentCollectorAdversarial.test.mjs\"],{stdio:\"inherit\"}); if(run.error||run.signal||run.status!==0)process.exit(run.status||1); const bytes=fs.readFileSync(log),raw=bytes.toString(\"utf8\"); const matches=[...raw.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\\d+)\\r?$/gm)]; assert.equal(matches.length,6,\"missing or repeated TAP totals\"); const counts=Object.fromEntries(matches.map(m=>[m[1],Number(m[2])])); assert.deepEqual(counts,{tests:expected,pass:expected,fail:0,cancelled:0,skipped:0,todo:0}); assert.equal((raw.match(/^ok \\d+ - /gm)||[]).length,expected); assert.equal(/^not ok /m.test(raw),false); console.log(JSON.stringify({offlineTestLog:{suite:\"collector\",sourceCommit,rawLog:log,rawBytes:bytes.length,rawSha256:createHash(\"sha256\").update(bytes).digest(\"hex\")}})); const lastLine=JSON.stringify({observedOfflineTests:{suite:\"collector\",...counts}}); assert.ok(lastLine.length<400,\"summary must fit the existing guard detail limit\"); console.log(lastLine);'",
+      "passed": true,
+      "output": "ℹ skipped 0\nℹ todo 0\nℹ duration_ms 19200.5752\n{\"offlineTestLog\":{\"suite\":\"collector\",\"sourceCommit\":\"34a179fd1986afbb2909cc38b0fa988814e5aa0e\",\"rawLog\":\"artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-collector.raw.tap\",\"rawBytes\":18536,\"rawSha256\":\"27472f20a77936874f303d71648a6e2e491e7da419900084ddedaac33d230b1a\"}}\n{\"observedOfflineTests\":{\"suite\":\"collector\",\"tests\":80,\"pass\":80,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0}}",
+      "durationMs": 19357
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "node --input-type=module -e 'import {spawnSync,execFileSync} from \"node:child_process\"; import fs from \"node:fs\"; import assert from \"node:assert/strict\"; import {createHash} from \"node:crypto\"; const log=\"artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-wiring.raw.tap\",expected=1; assert.equal(fs.existsSync(log),false,\"raw log already exists; refusing overwrite\"); const sourceCommit=execFileSync(\"git\",[\"rev-parse\",\"HEAD\"],{encoding:\"utf8\"}).trim(); assert.equal(execFileSync(\"git\",[\"status\",\"--porcelain\"],{encoding:\"utf8\"}).trim(),\"\",\"package checks require clean source\"); const run=spawnSync(process.execPath,[\"--conditions=react-server\",\"--import\",\"tsx\",\"--test\",\"--test-concurrency=1\",\"--test-reporter=tap\",\"--test-reporter=tap\",\"--test-reporter-destination=stdout\",\"--test-reporter-destination=artifacts/cross-review/router-development-collector-cache-observation-fix/round2-package-wiring.raw.tap\",\"--test-name-pattern=^every place that harvests cacheReadTokens harvests cacheWriteTokens too$\",\"tests/anthropicPromptCachingWiring.test.mjs\"],{stdio:\"inherit\"}); if(run.error||run.signal||run.status!==0)process.exit(run.status||1); const bytes=fs.readFileSync(log),raw=bytes.toString(\"utf8\"); const matches=[...raw.matchAll(/^# (tests|pass|fail|cancelled|skipped|todo) (\\d+)\\r?$/gm)]; assert.equal(matches.length,6,\"missing or repeated TAP totals\"); const counts=Object.fromEntries(matches.map(m=>[m[1],Number(m[2])])); assert.deepEqual(counts,{tests:expected,pass:expected,fail:0,cancelled:0,skipped:0,todo:0}); assert.equal((raw.match(/^ok \\d+ - /gm)||[]).length,expected); assert.equal(/^not ok /m.test(raw),false); assert.equal((raw.match(/^ok 1 - every place that harvests cacheReadTokens harvests cacheWriteTokens too\\r?$/gm)||[]).length,1,\"named target must execute and pass\"); const declared=[...fs.readFileSync(\"tests/anthropicPromptCachingWiring.test.mjs\",\"utf8\").matchAll(/^test\\(\"([^\"]+)\"/gm)].map(m=>m[1]); assert.equal(declared.length,12); assert.equal(declared.filter(t=>t===\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\").length,1); console.log(JSON.stringify({offlineTestLog:{suite:\"wiring\",sourceCommit,rawLog:log,rawBytes:bytes.length,rawSha256:createHash(\"sha256\").update(bytes).digest(\"hex\")}})); const lastLine=JSON.stringify({observedOfflineTests:{suite:\"wiring\",...counts,namedTarget:\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\",intentionallyDeselected:11}}); assert.ok(lastLine.length<400,\"summary must fit the existing guard detail limit\"); console.log(lastLine);'",
+      "passed": true,
+      "detail": "outer-development-collector-cache-observation-fix/round2-package-wiring.raw.tap\",\"rawBytes\":331,\"rawSha256\":\"1b4d306b8e1384750cf7db4633a4d5a51332e4f580160fb35457c011a55a83cc\"}}\n{\"observedOfflineTests\":{\"suite\":\"wiring\",\"tests\":1,\"pass\":1,\"fail\":0,\"cancelled\":0,\"skipped\":0,\"todo\":0,\"namedTarget\":\"every place that harvests cacheReadTokens harvests cacheWriteTokens too\",\"intentionallyDeselected\":11}}",
+      "durationMs": 2627
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 34376
+    },
+    {
+      "rule": "npm run lint -- lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 lint\n> eslint lib/routerDevelopmentCollectorProvider.ts tests/routerDevelopmentCollectorProvider.test.mjs",
+      "durationMs": 2418
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1150
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 767 referenced path(s) across 92 instruction document(s), and 892 path(s) named by comments across 2632 source file(s), all present.",
+      "durationMs": 1273
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4136 citation(s) against 30 policy document(s). 2485 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 230 predate this change).",
+      "durationMs": 954
+    },
+    {
+      "rule": "npm run check:model-pricing",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+      "durationMs": 688
+    },
+    {
+      "rule": "npm run check:router-quality-eval",
+      "passed": true,
+      "detail": "  none supplied. Pass --report=<path> to validate one.\n  No decision-grade run exists in this repository, so ROUTE-01 has no evidence\n  and remains pending regardless of what the shadow numbers show.\n\nNo problems found in what was checked.",
+      "durationMs": 637
+    },
+    {
+      "rule": "npm run check:router-context-window",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:router-context-window\n> node --import tsx scripts/check-router-context-window.mjs\n\ncatalogue: 31 enabled models, 16 without a declared context window (16 accepted as the current baseline).\nOK: no new undeclared models. 16 remain in the baseline and must be resolved before ESTIMATE-03 can be approved.",
+      "durationMs": 649
+    },
+    {
+      "rule": "npm run check:context-window-register",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:context-window-register\n> node --import tsx scripts/check-context-window-register.mjs\n\nOK docs/policy/tomverse-chat-context-window-register.yaml: 31 enabled models, 4 verified, 27 unverified (14 of those already declare a window in the catalogue with no recorded source).",
+      "durationMs": 687
+    },
+    {
+      "rule": "git diff --check 886ea27f852a7d00c6cccbba26ec0002f2086d16 HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 39
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "No blocking findings; the four-path change may proceed to its separately authorized commit/package steps, with the Linux full CI suite still required on the actually published head before any merge.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-10T06:55:32.767Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "34a179fd1986afbb2909cc38b0fa988814e5aa0e",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.authorization.md",
+    "docs/ops/cross-review/packages/router-development-collector-cache-observation-fix.task.json",
+    "lib/routerDevelopmentCollectorProvider.ts",
+    "tests/routerDevelopmentCollectorProvider.test.mjs"
+  ]
+}

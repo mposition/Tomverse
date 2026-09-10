@@ -6,7 +6,7 @@ title = "Tomverse gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "Known false positives: public model identifiers and non-secret config keys, not credentials. All real API keys in this codebase are loaded from environment variables (see lib/*.ts), never hardcoded."
+description = "Known false positives: public model identifiers, non-secret config keys, and SHA-256 digests cited in operations records -- not credentials. All real API keys in this codebase are loaded from environment variables (see lib/*.ts), never hardcoded."
 regexTarget = "line"
 regexes = [
   # e.g. lib/models.ts, components/chat/*.tsx: apiModel: "claude-haiku-4-5-20251001"
@@ -39,4 +39,31 @@ regexes = [
   '''[A-Za-z_]*_KEY\s*=\s*"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)+"''',
   # e.g. lib/appSettings.ts: GUEST_DEFAULT_MODEL_KEY = "guestDefaultModelId"
   '''[A-Za-z_]*_KEY\s*=\s*"[a-z]+(?:[A-Z][a-z0-9]*)+"''',
+  # A truncated SHA-256 digest cited in an operations record, not a credential.
+  #
+  # e.g. lib/voiceInputPricing.ts: "Key sha256:<digest>, project sha256:<digest>"
+  # e.g. docs/policy/voice-input.md: the same citation in the policy text
+  #
+  # These records name which API key an observed provider charge was billed to
+  # by its digest *precisely so the key itself never appears*. The shape exists
+  # to avoid writing a secret, so reporting it as one inverts its purpose.
+  #
+  # The anchor is the `sha256:` label rather than the value class: a token
+  # announced as a digest is not a credential, and nothing this repo assigns to
+  # a `*_KEY` constant carries that prefix. Lowercase hex only, and at least the
+  # 12 characters these records truncate to. The canaries in
+  # tests/gitleaksAllowlist.test.mjs pin that a bare lowercase-hex secret --
+  # which is what a 32- or 64-character key looks like -- is still reported
+  # without that label.
+  #
+  # Without a rule for the class, it fails one value at a time on entropy
+  # alone. `generic-api-key` reports above 3.5, and a 12-character hex digest
+  # falls either side of that line depending only on how many of its characters
+  # repeat: the two digests already recorded score 3.25 and 2.86 and were never
+  # reported, while the third -- twelve distinct characters, so exactly
+  # log2(12) = 3.584963 -- failed PR #1309 on 2026-09-10. Nothing about the
+  # first two made them safer. That is the `mistral-medium-3-5` scar above
+  # repeating: pin the shape, not the value, or the next digest fails the same
+  # way and gets its own line here.
+  '''sha256:[0-9a-f]{12,64}\b''',
 ]
