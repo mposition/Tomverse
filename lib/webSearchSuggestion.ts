@@ -52,19 +52,27 @@ const EXTERNAL_REQUEST_CONTEXT =
   /\b(?:online|web(?:site)?|internet|official|external|search|look\s+up|check|verify)\b|검색|인터넷|공식|외부|조회/i;
 
 /**
- * Remove only incidental cue spans, never an entire "closed book" turn.
- * Matching source order is not asking for sources; a marked current field is
- * not asking what is current outside the supplied records. A separate request
- * for sources or fresh facts must remain visible even in the same sentence.
- * Spaces preserve offsets and the original recency length/year thresholds.
+ * Remove only incidental source-order spans, never an entire "closed book"
+ * turn. Matching source order is not asking for sources; a separate source
+ * request must remain visible even in the same sentence. Spaces preserve offsets.
  */
-const withoutIncidentalSearchCues = (text: string): string => {
+const withoutIncidentalSourceCues = (text: string): string => {
+  const blank = (match: string) => " ".repeat(match.length);
+  // Spaces/tabs or one adjacent compound hyphen, never a clause-separating
+  // dash, repeated hyphens, or a line break between "source" and "order".
+  return text
+    .replace(/\bsource(?:['’]s)?(?:[ \t]+|-)(?:order(?:ing)?|sequence)\b/gi, blank)
+    .replace(/\b(?:order|sequence)[ \t]+(?:in|of)[ \t]+(?:the[ \t]+)?(?:original[ \t]+)?source\b/gi, blank);
+};
+
+// Marked current fields, provided-record readings and directly forbidden
+// date cues are recency concerns, independent of the source-only pass above.
+// No turn text is cached or shared across calls; original length thresholds stay.
+const withoutIncidentalRecencyCues = (text: string): string => {
   const blank = (match: string) => " ".repeat(match.length);
   const blankCurrent = (match: string) => match.replace(/\bcurrent\b/gi, blank);
   const providedRecords = PROVIDED_RECORD_CONTEXT.test(text);
   let reading = text
-    .replace(/\bsource(?:['’]s)?[ \t-]+(?:order(?:ing)?|sequence)\b/gi, blank)
-    .replace(/\b(?:order|sequence)[ \t]+(?:in|of)[ \t]+(?:the[ \t]+)?(?:original[ \t]+)?source\b/gi, blank)
     // A complete boolean value must end at a field boundary, not the start
     // of prose such as "true cost" or a hyphenated word such as "no-claims".
     .replace(/\bcurrent(?=["'`]?[ \t]*[:=][ \t]*["'`]?(?:yes|no|true|false)["'`]?[ \t]*(?:[,;.:}\]\r\n]|$))/gi, blank)
@@ -119,7 +127,7 @@ const withoutIncidentalSearchCues = (text: string): string => {
  * request as no request is a safety hole rather than a quiet UI.
  */
 export const hasExplicitSourceOrSearchIntent = (text: string): boolean =>
-  RESEARCH_PATTERN.test(withoutIncidentalSearchCues(text.trim()));
+  RESEARCH_PATTERN.test(withoutIncidentalSourceCues(text.trim()));
 
 /**
  * Softer wording that only *suggests* the answer needs to be fresh.
@@ -132,7 +140,7 @@ export const hasExplicitSourceOrSearchIntent = (text: string): boolean =>
 export const suggestsRecentInformationNeeded = (text: string): boolean => {
   const normalized = text.trim().toLowerCase();
   if (normalized.length < 4) return false;
-  const reading = withoutIncidentalSearchCues(normalized);
+  const reading = withoutIncidentalRecencyCues(normalized);
 
   const hasKeyword = RECENCY_KEYWORDS.some((keyword) =>
     reading.includes(keyword.toLowerCase())

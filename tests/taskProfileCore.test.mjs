@@ -332,7 +332,7 @@ test("ordinary boolean-adjacent freshness and separate-line sources keep the ful
         assert.equal(built.kind, "general", text);
         assert.ok(built.signals.includes("search:recency-heuristic"), text);
     }
-    for (const text of ["Include the source\nOrder the rows by date", "Order in\r\nThe source must be included"]) {
+    for (const text of ["Include the source\nOrder the rows by date", "Order in\r\nThe source must be included", "Include the source - order the rows by date", "Include the source--order the rows by date"]) {
         const built = profile(text);
         assert.equal(built.needsCurrentInformation, true, text);
         assert.equal(built.kind, "research", text);

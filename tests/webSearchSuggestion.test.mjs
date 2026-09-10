@@ -5,6 +5,7 @@ import {
   suggestsRecentInformationNeeded,
 } from "../lib/webSearchSuggestion.ts";
 import { classifyWebSearchTopic } from "../lib/webSearchRetrySuggestion.ts";
+import { classifyDeepResearchTopic } from "../lib/deepResearchSuggestion.ts";
 
 // The composer's mid-draft nudge is gone -- web search is a switch, so there
 // is no "ask me first" state left for a nudge to turn on. What routing reads
@@ -174,8 +175,8 @@ test("explicit current fields and locally marked boolean values still describe d
   ]) assert.equal(suggestsRecentInformationNeeded(text), false, text);
 });
 
-test("source-order masks use horizontal separators and never join separate lines", () => {
-  for (const separator of ["\n", "\r\n"]) {
+test("source-order masks keep clause dashes and separate lines visible", () => {
+  for (const separator of [" - ", "--", " -- ", "- ", " -", "\t-\t", " \t-\t ", "\n", "\r\n"]) {
     for (const text of [
       `Include the source${separator}Order the rows by date`,
       `Include the source-${separator}Order the rows by date`,
@@ -183,9 +184,43 @@ test("source-order masks use horizontal separators and never join separate lines
       `Use the order${separator}of the source`,
     ]) assert.equal(hasExplicitSourceOrSearchIntent(text), true, text);
   }
-  for (const text of ["Keep source\torder.", "Keep source-order.", "Use the order\tin the original\tsource."]) {
+  for (const text of ["Keep source order.", "Keep source\torder.", "Keep source-order.", "Use the order\tin the original\tsource."]) {
     assert.equal(hasExplicitSourceOrSearchIntent(text), false, text);
   }
+});
+
+test("the deep research topic consumer refuses incidental cues without a depth signal", () => {
+  for (const text of [
+    "Keep the names in source order.",
+    "Keep the names in source-order.",
+    "Given records: current yes. Extract the current record.",
+    "Do not use today's date.",
+  ]) {
+    assert.deepEqual(classifyDeepResearchTopic({ text }), { suggested: false, signals: [], refusal: "no_depth_signal" }, text);
+  }
+  assert.deepEqual(classifyDeepResearchTopic({ text: "What is today's weather forecast?" }), {
+    suggested: false, signals: ["recency"], refusal: "no_depth_signal",
+  });
+});
+
+test("the deep research topic consumer retains explicit, fresh, depth and mixed requests", () => {
+  for (const text of [
+    "Research the claim and cite sources.",
+    "Preserve source order; also cite external sources.",
+    "Given records: current yes. Research the claim and cite sources.",
+    "Include the source - order the rows by date",
+    "Include the source--order the rows by date",
+    "Include the source\nOrder the rows by date",
+    "Order in\r\nThe source must be included",
+  ]) {
+    assert.deepEqual(classifyDeepResearchTopic({ text }), { suggested: true, signals: ["explicit_research_request", "recency"], refusal: null }, text);
+  }
+  for (const text of ["Explain the latest findings in detail.", "Keep the names in source order. Explain the latest findings in detail."]) {
+    assert.deepEqual(classifyDeepResearchTopic({ text }), { suggested: true, signals: ["recency"], refusal: null }, text);
+  }
+  assert.deepEqual(classifyDeepResearchTopic({ text: "Explain market size and outlook." }), {
+    suggested: true, signals: ["domain_depth"], refusal: null,
+  });
 });
 
 test("the retry topic consumer distinguishes incidental data from genuine search and freshness", () => {

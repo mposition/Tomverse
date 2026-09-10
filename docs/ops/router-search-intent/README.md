@@ -1,8 +1,8 @@
 # Router search-intent v1
 
 This development change addresses identified incidental source/search-intent and
-recency cues shared by the deterministic task profiler and the web-search retry
-topic classifier. It is not a new model ranker,
+recency cues used by the deterministic task profiler, web-search retry topic
+classifier and DeepResearch topic classifier. It is not a new model ranker,
 a quality-score adjustment or evidence of a better production Router. The full
 model catalogue and the Router's hard capability filters are unchanged; the
 profile values supplied to those filters can change.
@@ -11,11 +11,14 @@ profile values supplied to those filters can change.
 
 `TASK_PROFILE_VERSION` changes from `task-profile-v2` to `task-profile-v3`.
 The two public predicates in `lib/webSearchSuggestion.ts` keep their interface.
-They replace only these incidental cue spans with equal-length spaces before
-applying the existing research/recency rules:
+Separate source-only and recency-only passes replace the relevant incidental
+cue spans with equal-length spaces before applying the existing rules. Neither
+pass caches turn text. The split avoids applying the other vocabulary's masks;
+no runtime performance or cost improvement has been measured.
 
-- Source-order/sequence wording, such as `source order` or `order in the source`,
-  with horizontal separators only; a line break remains a boundary.
+- Source-order/sequence wording, such as `source order` or `order in the source`.
+  The forward form accepts spaces/tabs or one directly attached compound hyphen
+  (`source-order`); a spaced dash, repeated hyphens or line break remains a boundary.
 - Marked `current` boolean fields, including quoted JSON-style keys and the
   explicitly supported Korean marker forms. English uses assignment syntax,
   `marked`/`flagged`, or supported local fields in supplied-record contexts.
@@ -57,6 +60,16 @@ claim that every retry suggestion is unchanged or that search is globally
 disabled. Consumer-level assertions and the existing retry-suggestion test
 suite are included in the revision 1 checks below; that classifier's source
 file itself is unchanged.
+
+`classifyDeepResearchTopic` in `lib/deepResearchSuggestion.ts` is another live
+consumer of the profile's `research:vocabulary` and freshness signals. For
+`Keep the names in source order.`, its deliberate change is from an
+`explicit_research_request` suggestion to `no_depth_signal`. Its own depth and
+refusal rules remain unchanged: a recency cue alone is not a depth request.
+The existing dedicated DeepResearch and `answerSuggestionArbitration` suites
+are included in revision 2. They exercise the real classifiers and derive
+functions, including offer priority; both consumer modules, the arbitration
+module and their existing test files are unchanged.
 
 ## Round 0 offline evidence and its limits
 
@@ -129,7 +142,7 @@ Sixteen additional mixed-boundary probes matched their stated expectations.
 Some were shared with the author during development; they are regression
 evidence, not a blind holdout or a representative accuracy estimate.
 
-## Revision 1 verification
+## Revision 1 verification (historical candidate)
 
 The final pre-commit revision was measured separately under
 `revision1-final`, with helper SHA-256
@@ -151,8 +164,34 @@ limitations in the 17-prompt diagnostic remain. The instrumented runs observed
 zero network attempts. `final-independent-verification-revision1-final.json`
 and the separate `revision1-final.*` metadata, plan, profile and native logs
 retain the fresh evidence; earlier results were not overwritten. Preservation
-checks retained the original 71 files and 67 subsequent evidence pins. None of
-these checks substitutes for the pending Claude review of the revised digest.
+checks retained the original 71 files and 67 subsequent evidence pins. These
+checks are not approval; the actual round 1 review is recorded below.
+
+## Revision 2 verification
+
+The separate `revision2-final` observation binds helper SHA-256
+`eed056e52ca68814ddb3b41bf178ec386a00c724ec418fd8084662974f2b15eb`;
+the profiler hash and `task-profile-v3` remain unchanged. Its pre-commit
+metadata records dirty HEAD `c5c82f5f`, not an invented revision commit. The
+fresh 15-file run passed **303/303** tests, with zero failures, cancellations,
+skips or TODOs. The external `run-regressions-revision2.mjs` runner adds the
+unchanged `tests/deepResearchSuggestion.test.mjs` and
+`tests/answerSuggestionArbitration.test.mjs` to the prior 13-file set.
+The 33 targeted/mixed boundaries, 17 retry comparisons and
+7 DeepResearch comparisons matched their expectations. The earlier 41
+helper/profile outputs and 27 mixed profile/retry outputs also compared equal
+after the pass split. This is development regression evidence, not a holdout
+or a measured performance improvement.
+
+The complete 24-case/42-model comparison still has 8 to 0 search mismatches,
+80 to 0 eligibility discrepancies, and 360 eligible / 648 refused rows; the
+six kind changes, eight selected-model changes and three known diagnostic
+limitations remain the same. Instrumented runs reported zero network attempts.
+`final-independent-verification-revision2-final.json` and the separate
+`revision2-final.*` outputs retain commands, hashes and native results. The
+original 71 files and 113 subsequent preservation pins were checked without
+overwriting earlier evidence. The revised bytes still require the final
+independent Claude review.
 
 ## Historical observations are not reinterpreted
 
@@ -186,10 +225,10 @@ for it.
 The actual read-only Claude round 0 review returned `request_changes` for commit
 `1e3231ee6f74dfddad9330cb2be29b9d10c56a8c`, digest
 `sha256:2a7a05cd409bf25c0c8ea5e036a125fbb4d05781ee9d602802309c0c811d4696`.
-The recorded controller outcome is `awaiting_revision`, not approval. Its
-package, raw response, verdict and exchange remain under
-`artifacts/cross-review/router-search-intent-v1`; the original round 0 records
-are not rewritten as a review of later source bytes.
+The recorded controller outcome was `awaiting_revision`, not approval. Its
+dedicated package, raw response and verdict remain under
+`artifacts/cross-review/router-search-intent-v1`; shared-file snapshots are
+retained separately rather than rewritten as a review of later source bytes.
 
 Independent offline reproduction confirmed two regressions in that candidate:
 bare `current true` / `current no-claims` prose lost its recency cue, and a
@@ -198,8 +237,24 @@ source request followed by `Order` on the next line lost its source cue.
 records both, as well as the second consumer's source-order behavior. Revision 1
 narrows those spans and verifies the restored cues; it also closes the same
 boolean-prefix boundary in Korean. Consumer assertions and the retry suite
-cover finding 3, and the historical backlink addresses finding 4. These are
-the author's corrective dispositions, not a changed round 0 verdict or an
-independent acceptance. The fresh Claude review remains pending; neither the
-round 0's 225 tests nor revision 1's 260 tests is its substitute. No finding is
-waived here.
+cover finding 3, and the historical backlink addresses finding 4. Those were
+the author's corrective dispositions, not a changed round 0 verdict.
+
+The actual Claude round 1 review returned `request_changes` with three findings
+for commit `c5c82f5ff33fb2eeffb9a12f30c352f688c68bbf`, digest
+`sha256:24dcf88c08206a2c1d44686f7d20fd31b73ae8746e229bbc1bedb2edd2c9ebf9`.
+Independent reproduction confirmed the spaced-dash boundary regression and
+the DeepResearch decision change. One review claim needs qualification:
+DeepResearch was not wholly unexecuted, because the existing retry weather
+test already calls its classifier. The missing coverage was its dedicated
+suite and the new source-order boundaries, alongside the missing scope
+documentation. The original verdict remains intact with that independent
+qualification recorded, not silently edited.
+
+Revision 2 addresses the dash boundary, adds the dedicated consumer coverage
+and documentation, and separates the two masking passes. These are corrective
+dispositions, not independent acceptance. The last allowed Claude round 2
+review is pending; none of the 225-, 260- or 303-test runs substitutes for it.
+Round 0 and 1 shared-file snapshots remain in the external
+`round0-before-revision1-c5c82f5f` and `round1-before-revision2-c5c82f5f`
+directories. No finding is waived here.
