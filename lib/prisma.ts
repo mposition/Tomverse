@@ -2,6 +2,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { resolvePostgresConnectionConfig } from '@/lib/postgresConnectionConfigCore.mjs';
 
 const globalForPrisma = global as unknown as { prisma: PrismaClient };
 const validLogLevels = new Set(["query", "info", "warn", "error"]);
@@ -10,31 +11,23 @@ const prismaLogLevels = (process.env.PRISMA_CLIENT_LOG || "")
     .map((level) => level.trim())
     .filter((level): level is Prisma.LogLevel => validLogLevels.has(level));
 
-const normalizePostgresConnectionString = (value: string | undefined) => {
-    if (!value) return value;
-    try {
-        const url = new URL(value);
-        const sslMode = url.searchParams.get("sslmode");
-        if (
-            (sslMode === "prefer" ||
-                sslMode === "require" ||
-                sslMode === "verify-ca") &&
-            !url.searchParams.has("uselibpqcompat")
-        ) {
-            url.searchParams.set("uselibpqcompat", "true");
-            return url.toString();
-        }
-    } catch {
-        return value;
+const postgresConfig = resolvePostgresConnectionConfig(
+    process.env.DATABASE_URL,
+    {
+        requireTestMarker:
+            process.env.NODE_ENV === "test" && Boolean(process.env.DATABASE_URL),
     }
-    return value;
-};
+);
 
 const pool = new Pool({
-    connectionString: normalizePostgresConnectionString(process.env.DATABASE_URL),
+    connectionString: postgresConfig.connectionString,
+    options: postgresConfig.poolOptions,
 });
 
-const adapter = new PrismaPg(pool);
+const adapter = new PrismaPg(
+    pool,
+    postgresConfig.schema ? { schema: postgresConfig.schema } : undefined
+);
 
 export const prisma =
     globalForPrisma.prisma ||
