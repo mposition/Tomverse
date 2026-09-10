@@ -7,6 +7,9 @@ import type { DevelopmentPlan, DevelopmentSource } from "./routerDevelopmentBenc
 
 export const COLLECTION_VERSION = "router-development-collector-v1.1";
 export const COLLECTION_LIMITS = { answerStorageBytes: 1_048_576, journalBytes: 512 * 1_048_576, eventBytes: 7 * 1_048_576 } as const;
+/** Exact body parsers implemented by the development adapter, not catalogue or account admission. */
+export const COLLECTION_SUPPORTED_PROVIDERS = ["openai", "deepseek", "xai", "mistral", "moonshot", "anthropic", "minimax", "google"] as const;
+export const isCollectionProviderSupported = (provider: string): boolean => (COLLECTION_SUPPORTED_PROVIDERS as readonly string[]).includes(provider);
 export const COLLECTION_ASSUMPTIONS = [
   "operator-funded-development-only; not product-account execution",
   "conditional catalogue context input bound; not verified provider tokenization",
@@ -93,6 +96,7 @@ export function buildCollectionManifest(input: {
     if (!row?.benchmarkEligibility.eligible || !row.callConfig.proposedMaxOutputTokens) collectionFail("row_refused_or_unknown");
     const model = input.models.find((candidate) => candidate.id === row!.modelId);
     if (!model || model.apiModel !== row!.apiModel || model.provider !== row!.provider) collectionFail("model_identity");
+    if (!isCollectionProviderSupported(model!.provider)) collectionFail("provider_family_unsupported");
     const pricing = collectionPricing(model!, Date.parse(input.plan.createdAt));
     const reserve = reserveCollectionCost(model!.contextWindowTokens!, row!.callConfig.proposedMaxOutputTokens!, pricing.tiers.map((tier) => ({ ...tier, cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? undefined })));
     return { rowId, pricing, reserve, settings: getModelGenerationSettings(model!) };
@@ -151,7 +155,8 @@ export function validateCollectionOutcome(value: unknown): CollectionOutcome {
   if (!["provider_body_allowlist", "unavailable"].includes(observation.source as string) || !["stop", "length", "blocked", "unknown"].includes(observation.finish as string) || typeof observation.unsupportedBilling !== "boolean") collectionFail("observation_status");
   for (const key of ["inputTokens", "outputTokens", "noCacheInputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"]) if (observation[key] !== null) collectionInteger(observation[key], `observation_${key}`);
   for (const key of ["providerResponseId", "providerReportedModel", "rawFinishReason", "servedProcessingTier"]) if (observation[key] !== null && (typeof observation[key] !== "string" || !(observation[key] as string).length || (observation[key] as string).length > 256)) collectionFail("observation_string");
-  if (observation.source === "unavailable" && canonicalBenchmarkJson(observation) !== canonicalBenchmarkJson(emptyCollectionObservation())) collectionFail("unavailable_observation_has_metrics");
+  // An unsupported parser is known locally even when every provider observation is unavailable.
+  if (observation.source === "unavailable" && canonicalBenchmarkJson(observation) !== canonicalBenchmarkJson({ ...emptyCollectionObservation(), unsupportedBilling: observation.unsupportedBilling })) collectionFail("unavailable_observation_has_metrics");
   return value as CollectionOutcome;
 }
 export function estimateCollectionUsageCost(observation: CollectionObservation, call: CollectionManifest["calls"][number]): number | null {

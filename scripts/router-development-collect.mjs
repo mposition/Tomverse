@@ -1,7 +1,7 @@
 // Operator-funded DEVELOPMENT collector. Preview/export never import provider clients.
 import { execFileSync } from "node:child_process";
 import { realpathSync, readFileSync, existsSync } from "node:fs";
-import { dirname, resolve, relative, isAbsolute } from "node:path";
+import { basename, dirname, resolve, relative, isAbsolute, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
 import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
@@ -61,12 +61,13 @@ async function main() {
   if (mode !== "preview" && (!options.has("manifest") || !options.has("approval") || [...proposalFlags, "plan", "requested-model"].some((key) => options.has(key)))) throw new Error("collector_manifest_approval_required_no_overrides");
   if ((mode === "execute") !== options.has("live")) throw new Error("collector_live_flag_required_execute_only");
   const commonDir = realpathSync(resolve(root, git(["rev-parse", "--git-common-dir"])));
-  const outputPath = options.has("output") ? resolve(options.get("output")) : null;
+  let outputPath = options.has("output") ? resolve(options.get("output")) : null;
   if (outputPath) {
     const outputParent = realpathSync(dirname(outputPath));
-    const path = resolve(outputParent, outputPath.slice(dirname(outputPath).length + 1));
-    const insideCommon = relative(commonDir, path);
-    if (!insideCommon || (!insideCommon.startsWith("..") && !isAbsolute(insideCommon)) || existsSync(path)) throw new Error("collector_output_existing_or_state_path");
+    outputPath = resolve(outputParent, basename(outputPath));
+    const insideCommon = relative(commonDir, outputPath);
+    const outsideCommon = insideCommon === ".." || insideCommon.startsWith(`..${sep}`) || isAbsolute(insideCommon);
+    if (!outsideCommon || existsSync(outputPath)) throw new Error("collector_output_existing_or_state_path");
   }
   const common = inputs();
   let result;

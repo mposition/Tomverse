@@ -4,8 +4,8 @@ import { generateText, APICallError } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
 import { getModelGenerationSettings } from "../lib/modelGenerationCompatibility.ts";
-import { createCollectionSdkAdapter, observeCollectionBody, collectionReturnedOutcome } from "../lib/routerDevelopmentCollectorProvider.ts";
-import { COLLECTION_LIMITS, validateCollectionOutcome } from "../lib/routerDevelopmentCollector.ts";
+import { collectFromProvider, createCollectionSdkAdapter, observeCollectionBody, collectionReturnedOutcome } from "../lib/routerDevelopmentCollectorProvider.ts";
+import { COLLECTION_LIMITS, emptyCollectionObservation, validateCollectionOutcome } from "../lib/routerDevelopmentCollector.ts";
 import { auditProcessingTierMentions, PROCESSING_TIER_REQUEST_ALLOWLIST } from "../scripts/check-processing-tier-core.mjs";
 
 const originalFetch = globalThis.fetch;
@@ -100,4 +100,33 @@ test("non-standard tier on a provider HTTP error remains unsupported rather than
   assert.equal(outcome.observation.servedProcessingTier, "priority");
   assert.equal(outcome.observation.unsupportedBilling, true);
   assert.doesNotThrow(() => validateCollectionOutcome(outcome));
+});
+
+test("unknown provider metadata is explicitly unsupported without inventing observations", () => {
+  for (const provider of ["qwen", "groq", "zhipu", "perplexity", "unknown"]) {
+    for (const body of [undefined, {}, { id: "not-an-observation", service_tier: "priority", usage: { prompt_tokens: 1, completion_tokens: 1 } }]) {
+      const observation = observeCollectionBody(provider, body);
+      assert.deepEqual(observation, { ...emptyCollectionObservation(), unsupportedBilling: true });
+      const outcome = collectionReturnedOutcome(provider, body, "{}", 1);
+      assert.equal(outcome.status, "measurement_unsupported");
+      assert.equal(outcome.failureCode, "provider_family_unsupported");
+      assert.doesNotThrow(() => validateCollectionOutcome(outcome));
+      assert.throws(() => validateCollectionOutcome({ ...outcome, observation: { ...observation, inputTokens: 0 } }), /collector_unavailable_observation_has_metrics/);
+    }
+  }
+});
+
+test("an unsupported provider is refused before settings, model creation, generate, or SDK entry", async () => {
+  const unsupported = AVAILABLE_MODELS.find((entry) => entry.provider === "qwen");
+  assert.ok(unsupported);
+  const calls = [];
+  const adapter = createCollectionSdkAdapter({
+    getModel: () => { calls.push("getModel"); return {}; },
+    getSettings: () => { calls.push("getSettings"); return {}; },
+    generate: async () => { calls.push("generate"); return {}; },
+  });
+  const input = { ...request(), modelId: unsupported.id, settings: {} };
+  await assert.rejects(adapter(input), /collector_provider_family_unsupported/);
+  await assert.rejects(collectFromProvider(input), /collector_provider_family_unsupported/);
+  assert.deepEqual(calls, []);
 });

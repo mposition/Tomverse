@@ -13,9 +13,12 @@ Implementation: [manifest and approval core](../../../lib/routerDevelopmentColle
 
 ## Status and authorization boundary
 
-No paid benchmark run is performed as part of this implementation. Independent
-Claude review of v1.1 has not yet run. Earlier v1 and integration approvals
-apply to their recorded source snapshots and digests, not this collector.
+No paid benchmark run is performed as part of this implementation. At source
+`40ce5fc2179f040d3d8bf4a3e4c147f33af93133` preparation, independent Claude review
+of v1.1 had not yet run. This is historical preparation status, not the current
+exchange verdict; later review results and revision status belong to the
+control-program records. Earlier v1 and integration approvals apply to their
+recorded source snapshots and digests, not this collector.
 There is no quality-band promotion, production adoption, release-registry
 change, main-branch integration, or production deployment in this work.
 
@@ -206,6 +209,27 @@ SDK-normalized usage or generated IDs for missing provider observations.
 Request bodies are not opted into SDK result metadata. None of this is a
 network or memory sandbox.
 
+Provider-body measurement supports only the eight provider identifiers in
+`COLLECTION_SUPPORTED_PROVIDERS`, grouped by the implemented response parser:
+
+- `openai`: Responses-style body.
+- `deepseek`, `xai`, `mistral`, `moonshot`: Chat Completions-style body.
+- `anthropic`, `minimax`: Messages-style body.
+- `google`: `usageMetadata` and candidate fields.
+
+This is parser coverage, not approval of every API or model offered by those
+providers. `groq`, `qwen`, `zhipu`, `perplexity`, and any other unlisted provider
+are explicitly refused with `collector_provider_family_unsupported` during
+selected-manifest construction, before pricing, and at dispatch before SDK
+imports or model/settings/generation calls. Adding a catalogue context window
+does not grant measurement support. The full v1 population remains intact;
+this extra collector gate does not rewrite static eligibility or remove rows.
+An unsupported provider's observation retains `source: "unavailable"`, null
+metrics/tier and `unsupportedBilling: true`. For otherwise valid, storable
+returned text, the outcome is `measurement_unsupported` with
+`provider_family_unsupported`, not a successful measurement with invented zero
+usage. Such a terminal blocks the whole export.
+
 `servedProcessingTier` records an allowlisted provider response field or
 `null`. A reported non-standard/default tier such as priority, flex, or batch
 marks billing unsupported and stops acquisition. A reported `auto` stays
@@ -296,8 +320,13 @@ All value flags use `--key=value`. Duplicate/unknown flags and mode-incompatible
 flags fail. `--help` must stand alone; `--live` is required only for `execute`
 and forbidden elsewhere. `--output` never overwrites, requires an existing
 parent directory, and cannot point inside Git common-dir. Default output is
-stdout. Relative input/output paths resolve from the current shell directory;
-source paths are fixed to the checkout containing the CLI.
+stdout. Relative input/output paths resolve from the collector process's
+working directory. For the documented `npm run benchmark:router:collect --`
+invocation, npm runs the script from the package root, even when invoked from
+a checkout subdirectory. A direct Node invocation instead uses that process's
+working directory, normally the invoking shell's directory. The collector does
+not use npm's `INIT_CWD`; source paths remain fixed to the checkout containing
+the CLI. The examples below use absolute paths to avoid this distinction.
 
 ### 1. Inspect the complete population without authorization or calls
 

@@ -6,7 +6,7 @@ import test, { after } from "node:test";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
 import { parseDevelopmentCorpus, canonicalBenchmarkJson, scoreDevelopmentResults } from "../lib/routerDevelopmentBenchmark.ts";
 import { buildDevelopmentPlan } from "../lib/routerDevelopmentBenchmarkPlan.ts";
-import { buildCollectionManifest, COLLECTION_ASSUMPTIONS, COLLECTION_VERSION, emptyCollectionObservation, validateCollectionApproval } from "../lib/routerDevelopmentCollector.ts";
+import { buildCollectionManifest, COLLECTION_ASSUMPTIONS, COLLECTION_SUPPORTED_PROVIDERS, COLLECTION_VERSION, emptyCollectionObservation, isCollectionProviderSupported, validateCollectionApproval } from "../lib/routerDevelopmentCollector.ts";
 import { collectDevelopment, collectorPaths, exportDevelopmentCollection, replayCollectionJournal } from "../lib/routerDevelopmentCollectorJournal.ts";
 import { collectionReturnedOutcome } from "../lib/routerDevelopmentCollectorProvider.ts";
 
@@ -32,6 +32,41 @@ test("full 42x24 manifest stays within existing JSON byte and node limits", () =
   assert.equal(manifest.status, "proposal");
   assert.equal(manifest.completionPossibleWithinLimits, true);
   assert.throws(() => validateCollectionApproval(manifest, manifest, now()));
+  assert.equal(new Set(eligible.map((row) => row.modelId)).size, 15);
+  assert.ok(eligible.every((row) => isCollectionProviderSupported(row.provider)));
+});
+
+test("a new catalogue context window cannot silently admit an unparsed provider family", () => {
+  assert.deepEqual(COLLECTION_SUPPORTED_PROVIDERS, ["openai", "deepseek", "xai", "mistral", "moonshot", "anthropic", "minimax", "google"]);
+  for (const provider of ["qwen", "groq", "zhipu", "perplexity", "OpenAI", "openai ", "unknown", ""]) assert.equal(isCollectionProviderSupported(provider), false);
+  // Only this in-memory fixture gains a context window; the real catalogue and plan remain unchanged.
+  const models = AVAILABLE_MODELS.map((model) => model.id === "qwen3.7-max" ? { ...model, contextWindowTokens: 1_000_000 } : model);
+  const futurePlan = buildDevelopmentPlan({ corpus, models, source, createdAt: at, plan: "Pro", requestedModelId: DEFAULT_MODEL_ID });
+  const selected = futurePlan.rows.find((row) => row.modelId === "qwen3.7-max" && row.benchmarkEligibility.eligible);
+  assert.ok(selected, "the fixture must pass the original static benchmark admission");
+  assert.equal(futurePlan.rows.length, 1008);
+  assert.throws(() => buildCollectionManifest({ plan: futurePlan, models, collectorSource: source, selectedRowIds: [selected.rowId], limits }), /collector_provider_family_unsupported/);
+  assert.equal(plan.rows.filter((row) => row.benchmarkEligibility.eligible).length, 360);
+  assert.equal(plan.rows.filter((row) => !row.benchmarkEligibility.eligible).length, 648);
+});
+
+test("unavailable unsupported-provider observations remain held and block resume and export", async () => {
+  const manifest = manifestFor(eligible.slice(0, 2));
+  const approval = approvalFor(manifest, "core-unsupported-provider");
+  let calls = 0;
+  const input = { manifest, approval, commonDir: temporary, now, assertCurrent() {}, adapter: async () => {
+    calls++;
+    return collectionReturnedOutcome("qwen", {}, "{}", 1);
+  } };
+  const report = await collectDevelopment(input);
+  assert.equal(report.stopReason, "measurement_or_execution_unknown");
+  assert.equal(report.terminalRecords, 1);
+  assert.equal(report.committedReservationMicroUsd, manifest.calls[0].reserve.reservedMicroUsd);
+  assert.equal(report.rows.length, 1008);
+  assert.equal(report.rows.filter((row) => row.outcome === "not_run").length, 359);
+  await collectDevelopment(input);
+  assert.equal(calls, 1);
+  await assert.rejects(exportDevelopmentCollection(input), /collector_export_uncertain_or_unsupported/);
 });
 
 test("permanent reservations stop a selected population explicitly and completed rows never rerun", async () => {

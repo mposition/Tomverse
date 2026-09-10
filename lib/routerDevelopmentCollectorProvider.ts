@@ -1,7 +1,7 @@
 /** Thin opt-in adapter. Imports provider clients only when an admitted call reaches this function. */
 import { AVAILABLE_MODELS } from "./models";
 import { benchmarkDigest, canonicalBenchmarkJson } from "./routerDevelopmentBenchmark";
-import { COLLECTION_LIMITS, emptyCollectionObservation, collectionFail, validateCollectionOutcome, type CollectionObservation, type CollectionOutcome } from "./routerDevelopmentCollector";
+import { COLLECTION_LIMITS, emptyCollectionObservation, collectionFail, isCollectionProviderSupported, validateCollectionOutcome, type CollectionObservation, type CollectionOutcome } from "./routerDevelopmentCollector";
 import type { CollectionRequest } from "./routerDevelopmentCollectorJournal";
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -19,6 +19,7 @@ function finish(raw: string | null): CollectionObservation["finish"] {
 /** Only provider-body fields count as observations. No SDK normalized usage/id fallback. */
 export function observeCollectionBody(provider: string, body: unknown): CollectionObservation {
   const observation = emptyCollectionObservation();
+  if (!isCollectionProviderSupported(provider)) return { ...observation, unsupportedBilling: true };
   try {
     const root = record(body);
     if (!body || !Object.keys(root).length) return observation;
@@ -82,7 +83,7 @@ export function observeCollectionBody(provider: string, body: unknown): Collecti
       observation.rawFinishReason = label(candidate.finishReason) ?? label(record(root.promptFeedback).blockReason);
       observation.finish = finish(observation.rawFinishReason);
       observation.unsupportedBilling = candidates.length > 1 || googleUsage.toolUsePromptTokenCount != null && googleUsage.toolUsePromptTokenCount !== 0 || candidate.groundingMetadata != null || hasItems(record(candidate.content).parts) && (record(candidate.content).parts as unknown[]).some((part) => record(part).functionCall != null);
-    } else return observation;
+    } else return { ...observation, unsupportedBilling: true };
     observation.servedProcessingTier = label(root.service_tier ?? usage.service_tier ?? record(root.usageMetadata).serviceTier);
     if (observation.servedProcessingTier !== null && !["default", "standard", "auto"].includes(observation.servedProcessingTier.toLowerCase())) observation.unsupportedBilling = true;
     observation.source = "provider_body_allowlist";
@@ -99,7 +100,7 @@ export function collectionReturnedOutcome(provider: string, body: unknown, text:
   const omitted = bytes > COLLECTION_LIMITS.answerStorageBytes;
   return validateCollectionOutcome({ status: omitted || observation.unsupportedBilling ? "measurement_unsupported" : "returned",
     answerText: omitted ? null : text, answerBytes: bytes, answerDigest: benchmarkDigest(text), textOmitted: omitted,
-    completeResponse: true, failureCode: omitted ? "answer_storage_limit" : observation.unsupportedBilling ? "provider_billing_unsupported" : null, latencyMs, observation });
+    completeResponse: true, failureCode: omitted ? "answer_storage_limit" : !isCollectionProviderSupported(provider) ? "provider_family_unsupported" : observation.unsupportedBilling ? "provider_billing_unsupported" : null, latencyMs, observation });
 }
 export type CollectionSdkDependencies = {
   generate: (options: Record<string, unknown>) => Promise<unknown>;
@@ -107,11 +108,16 @@ export type CollectionSdkDependencies = {
   getSettings: (model: (typeof AVAILABLE_MODELS)[number]) => unknown;
   now?: () => number;
 };
+function supportedCollectionModel(modelId: string) {
+  const model = AVAILABLE_MODELS.find((candidate) => candidate.id === modelId);
+  if (!model) collectionFail("provider_model_unknown");
+  if (!isCollectionProviderSupported(model!.provider)) collectionFail("provider_family_unsupported");
+  return model!;
+}
 /** Test seam uses ai/test MockLanguageModelV4; production dependencies are never caller CLI input. */
 export function createCollectionSdkAdapter(dependencies: CollectionSdkDependencies) {
   return async (request: CollectionRequest): Promise<CollectionOutcome> => {
-    const model = AVAILABLE_MODELS.find((candidate) => candidate.id === request.modelId);
-    if (!model) collectionFail("provider_model_unknown");
+    const model = supportedCollectionModel(request.modelId);
     const settings = dependencies.getSettings(model!);
     if (canonicalBenchmarkJson(settings) !== canonicalBenchmarkJson(request.settings)) collectionFail("provider_settings_drift");
     const now = dependencies.now ?? Date.now;
@@ -148,6 +154,7 @@ export function createCollectionSdkAdapter(dependencies: CollectionSdkDependenci
   };
 }
 export async function collectFromProvider(request: CollectionRequest): Promise<CollectionOutcome> {
+  supportedCollectionModel(request.modelId);
   const [{ generateText }, { getActiveAiModel }, { getModelGenerationSettings }] = await Promise.all([
     import("ai"), import("./activeAiModel"), import("./modelGenerationCompatibility"),
   ]);
