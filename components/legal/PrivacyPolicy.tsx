@@ -8,6 +8,27 @@ import {
     MarketingHeader,
 } from "@/components/marketing/MarketingChrome";
 
+/**
+ * The eight things Korea's PIPA art. 28-8(2) requires an overseas-transfer
+ * notice to state, each on its own line.
+ *
+ * Rendered as a list rather than folded into the Voice paragraph because the
+ * question a reader or a regulator asks is item-by-item — which country, who
+ * receives it, how to refuse — and a prose sentence long enough to carry all
+ * eight answers none of them where they can be found
+ * (docs/policy/voice-input.md §11.4).
+ */
+const VOICE_TRANSFER_ITEMS = [
+    "voiceInputTransfer1",
+    "voiceInputTransfer2",
+    "voiceInputTransfer3",
+    "voiceInputTransfer4",
+    "voiceInputTransfer5",
+    "voiceInputTransfer6",
+    "voiceInputTransfer7",
+    "voiceInputTransfer8",
+] as const;
+
 const sections = [
     ["collectedTitle", "collected", UserRound],
     ["purposeTitle", "purpose", Database],
@@ -62,9 +83,23 @@ export function PrivacyPolicy() {
                                 <Icon className="h-4 w-4 text-blue-500" />
                                 {t(`privacyPolicy.${titleKey}`)}
                             </h2>
-                            <p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
-                                {t(`privacyPolicy.${bodyKey}`)}
-                            </p>
+                            <div className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+                                <p>{t(`privacyPolicy.${bodyKey}`)}</p>
+                                {bodyKey === "voiceInput" && (
+                                    <>
+                                        <h3 className="mt-5 font-semibold text-zinc-900 dark:text-zinc-100">
+                                            {t("privacyPolicy.voiceInputTransferTitle")}
+                                        </h3>
+                                        <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                                            {VOICE_TRANSFER_ITEMS.map((itemKey) => (
+                                                <li key={itemKey}>
+                                                    {t(`privacyPolicy.${itemKey}`)}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
+                                )}
+                            </div>
                         </section>
                     ))}
                 </div>
