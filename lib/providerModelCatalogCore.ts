@@ -1,5 +1,9 @@
 import type { AiProvider } from "@/lib/models";
 import {
+  isImageGenerationModel,
+  modelProductSurface,
+} from "@/lib/modelLifecycleTriage";
+import {
   PROVIDER_API_CONFIGURATION,
   PROVIDER_API_KEY_ENV_NAMES,
 } from "@/lib/modelRegistryShared";
@@ -148,8 +152,11 @@ export const chatModelExclusion = (
   modelId: string
 ): ChatModelExclusion | null => {
   const id = modelId.toLowerCase();
+  if (isImageGenerationModel(id)) {
+    return "non_chat_kind";
+  }
   if (
-    /(embedding|embed-|moderation|whisper|transcri|speech|tts|dall-e|image-gen|imagen|veo|rerank|guard|safeguard)/.test(
+    /(embedding|embed-|moderation|whisper|transcri|speech|tts|veo|rerank|guard|safeguard)/.test(
       id
     )
   ) {
@@ -163,6 +170,12 @@ export const chatModelExclusion = (
 
 export const isLikelyChatModelId = (provider: AiProvider, modelId: string) =>
   chatModelExclusion(provider, modelId) === null;
+
+/** Products Tomverse can currently route into a model-backed workspace. */
+export const isReviewableProviderModelId = (
+  provider: AiProvider,
+  modelId: string
+) => isLikelyChatModelId(provider, modelId) || isImageGenerationModel(modelId);
 
 const observationFromItem = (
   provider: AiProvider,
@@ -180,6 +193,7 @@ const observationFromItem = (
         : [];
     if (
       methods.length > 0 &&
+      !isImageGenerationModel(id) &&
       !methods.some(
         (method) =>
           typeof method === "string" && method.toLowerCase() === "generatecontent"
@@ -197,7 +211,7 @@ const observationFromItem = (
   ) {
     return null;
   }
-  if (!isLikelyChatModelId(provider, id)) return null;
+  if (!isReviewableProviderModelId(provider, id)) return null;
 
   const lifecycle = lifecycleFromRecord(item);
   const metadata = {
@@ -215,6 +229,7 @@ const observationFromItem = (
     thinking:
       boolean(item.thinking) ??
       boolean(record(record(item.capabilities)?.thinking)?.supported),
+    product: modelProductSurface(id),
   };
 
   return {
@@ -286,7 +301,7 @@ export function parseProviderCatalogModels(
             alias === observation.id ||
             alias.length > 240 ||
             !/^[a-zA-Z0-9._:/-]+$/.test(alias) ||
-            !isLikelyChatModelId(provider, alias)
+            !isReviewableProviderModelId(provider, alias)
           ) {
             noteExclusion(alias);
             return [];
