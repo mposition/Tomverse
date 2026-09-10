@@ -1839,23 +1839,23 @@ index 00000000..759a6ac3
 - PASS `npm run check:encoding` (1171ms)
   > ai-chat-hub@0.1.0 check:encoding
   > node scripts/check-text-encoding.mjs
-
+  
   Text encoding check passed. No mojibake markers found.
 - PASS `npm run check:doc-references` (1255ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
-
+  
   Document reference check passed: 759 referenced path(s) across 92 instruction document(s), and 878 path(s) named by comments across 2612 source file(s), all present.
 - PASS `npm run check:policy-section-references` (951ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
-
+  
   Policy section reference check passed: 4128 citation(s) against 30 policy document(s). 2478 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1421 and 229 predate this change).
 - PASS `npm run check:router-quality-eval` (668ms)
   none supplied. Pass --report=<path> to validate one.
     No decision-grade run exists in this repository, so ROUTE-01 has no evidence
     and remains pending regardless of what the shadow numbers show.
-
+  
   No problems found in what was checked.
 
 ## Author's account (read last; a claim, not a finding)

@@ -20,6 +20,9 @@ package의 출력은 기존 도구가 보존하는 마지막 몇 줄이며, 검�
 테스트를 실행했다는 뜻은 아닙니다. `checkFailures`는 빈 배열,
 `reviewConclusion`은 null입니다.
 
+검토 prompt의 guard 출력에 있는 공백만의 네 줄은 `renderReviewPrompt`의
+원본 바이트를 보존한 것이며, 통과한 소스 코드 diff 검사와 별개입니다.
+
 Claude/Codex author·reviewer 실행기와 `preflight`, `review`, `live` 모드는
 실행하지 않았습니다. `--skip-preflight`나 실패 검사 override를 승인하거나
 사용하지 않았습니다. Claude CLI 검토를 시작할 권한 및 필요한 override는
