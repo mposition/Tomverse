@@ -92,6 +92,15 @@ export const datasetProblems = (value: unknown): readonly string[] => {
         const label = isNonEmptyString((raw as AiReviewEvalCase)?.id)
             ? (raw as AiReviewEvalCase).id
             : `case[${index}]`;
+        // The entry itself, before any field of it is read. `cases: [null]`
+        // reached `.id` and threw, so a malformed file stopped the validator
+        // rather than being reported by it -- and every caller downstream
+        // inherited the crash. Same defect the judged dataset's shape check
+        // already fixed for `responses: [null]`; this is the outer array.
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+            problems.push(`${label}: not an object`);
+            continue;
+        }
         const testCase = raw as Partial<AiReviewEvalCase>;
         if (!isNonEmptyString(testCase.id)) {
             problems.push(`${label}: no id`);
@@ -255,7 +264,14 @@ export const adoptionProblems = (value: unknown): readonly string[] => {
     const dataset = value as Partial<AiReviewEvalDataset>;
     if (dataset?.purpose !== "decision" || !Array.isArray(dataset.cases)) return [];
     const problems: string[] = [];
-    for (const raw of dataset.cases) {
+    for (const [index, raw] of dataset.cases.entries()) {
+        // Reported by `datasetProblems()`, and skipped here rather than read:
+        // this walked the same array and reached `.status` on a `null` entry,
+        // so the crash survived the guard put on the loop above it.
+        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+            problems.push(`case[${index}]: not an object`);
+            continue;
+        }
         const testCase = raw as Partial<AiReviewEvalCase>;
         const label = isNonEmptyString(testCase.id) ? testCase.id : "a case";
         if (testCase.status !== "adopted") {
@@ -324,6 +340,16 @@ export const isUnfrozenDraft = (value: unknown): boolean => {
 export const freezeDrift = (dataset: AiReviewEvalDataset): string | null => {
     if (!(isNonEmptyString(dataset.frozenAt) && isNonEmptyString(dataset.frozenBy))) {
         return "the dataset carries no freeze record, so there is no moment its contents are pinned to";
+    }
+    // A moment, not a non-empty string. `frozenAt: "not-a-date"` satisfied
+    // "there is a freeze record" while pinning the contents to nothing, and a
+    // caller comparing freeze times -- which is the whole point of recording
+    // one -- would get `NaN` from it and silently compare nothing.
+    if (!Number.isFinite(Date.parse(dataset.frozenAt))) {
+        return (
+            `the freeze record says the dataset was frozen at ` +
+            `${JSON.stringify(dataset.frozenAt)}, which is not a time`
+        );
     }
     if (!isNonEmptyString(dataset.frozenDigest)) {
         return (

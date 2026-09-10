@@ -164,6 +164,8 @@
     "report:unconsumed-response-bodies": "node scripts/report-unconsumed-response-bodies.mjs",
     "report:unread-body-connection-cost": "node scripts/report-unread-body-connection-cost.mjs",
     "report:unswept-tables": "node scripts/report-unswept-tables.mjs",
+    "report:ai-review-judged-threshold-sample-sizes": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-threshold-sample-sizes.mjs",
+    "report:ai-review-judged-run": "node --conditions=react-server --import tsx scripts/report-ai-review-judged-run.mjs",
     "report:release-gate-evidence": "node scripts/report-release-gate-evidence.mjs",
     "drill:railway-restore-preflight": "node scripts/railway-restore-preflight.mjs",
     "drill:railway-restore-verify": "node scripts/railway-restore-verify.mjs",

@@ -550,11 +550,90 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
    붙인 label로 잇지 않는다.
 5. 계획과 증거를 **양방향으로** 대조한다 — 계획됐는데 판정되지 않은 것, 판정됐는데
    계획에 없는 것 둘 다 blocker다.
-6. **phenomenon은 판정 case에 없다.** frozen dataset에서 읽으며, 없거나 알 수 없는
-   값이면 blocker다 — 추측은 case를 분모에 넣거나 빼는 조용한 변경이다.
+6. **실행의 dataset을 통째로 먼저 받아들인다.** `datasetProblems()`와
+   `freezeDrift()` — 평가 set 자신의 검사기 — 를 실행 단위로 한 번 돌리고,
+   걸리면 **case를 하나도 읽기 전에** 거절한다.
+7. **그리고 그것이 이 실행의 dataset인지 확인한다.** 실행이 기록한
+   `manifest.datasetDigest`를 입력으로 받아 지금 건네진 set의 digest와 대조한다.
+8. **phenomenon은 판정 case에 없다.** 위에서 받아들인 dataset에서 읽는다.
+
+**6번이 없으면 "frozen dataset"은 주석의 단어일 뿐이다.** 세 가지가 그 틈으로
+지나갔다.
+
+- **id 중복.** 공유 검증기는 같은 id의 **첫** 항목을 읽고, 집계기는 순회하며
+  **마지막** 항목으로 덮어썼다. 끝에 같은 id의 행을 하나 붙이면 판정도 artifact도
+  그대로인 채 case가 분모에서 빠졌다.
+- **동결 미확인.** 동결 기록이 없는 set, `frozenDigest`가 내용과 어긋나는 set이
+  모두 집계됐다. **`datasetDigest()`는 `phenomenon`을 덮으므로**, 실행을 그 지문에
+  결속하는 것이 phenomenon을 다른 유효값으로 바꾼 편집을 잡는 방법이기도 하다 —
+  `sourceCaseDigest`는 질문과 답변만 덮으며, 그것은 의도된 범위다.
+- **거절된 배열의 재순회.** `cases`에 `null`이 하나 있으면 공유 검증기가 이미
+  문제를 반환한 뒤 집계기가 같은 배열을 다시 읽다가 예외로 죽었다. (검증기
+  자신도 그 지점에서 죽었다 — `datasetProblems()`와 `adoptionProblems()` 양쪽에
+  guard가 필요했다.)
+
+**7번이 없으면 6번은 자기 일관성만 본다.** 편집한 파일을 **다시 동결**하면
+`freezeDrift()`가 할 말이 없어지므로, 다른 유효한 동결본으로 바꿔 넣어도 옛 실행
+증거가 통과했다 — 계획·journal·판정 기록·artifact를 하나도 건드리지 않고 미보고율이
+1/2에서 0/1로 움직였다. **그래서 기대값은 실행이 적어 둔 것에서 와야 하고, 집계
+시점의 dataset으로 다시 채우면 같은 구멍이다.** `manifest.datasetDigest`는 필수이며
+없으면 blocker다 — 선택이면 검사가 opt-in이 되고 구멍이 남는다.
+
+**`frozenAt`도 시각이어야 한다.** `isNonEmptyString`만 보면 `"not-a-date"`가
+"동결 기록이 있다"를 만족시키면서 내용을 아무 시점에도 묶지 않고, 동결 시각을
+비교하는 쪽은 `NaN`을 받아 조용히 아무것도 비교하지 않는다
+(`Date.parse(preRegisteredAt) > Date.parse(frozenAt)` 같은 비교는 **false**가 된다).
+`lib/aiReviewEvalRun.ts`와 `lib/routerQualityEvalSet.ts`의 `freezeDrift()`가 같은
+결함을 들고 있었고 둘 다 고쳤다. 회귀는 **날짜만 틀리고 지문은 정상인 경우**로
+고정한다 — 둘을 동시에 깨뜨리면 지문 거절만으로 통과하고, 날짜 검사는 검사되지
+않는다.
+
+**여기서 정하지 않은 것: decision set이어야 하는가.** `decisionDatasetProblems()`는
+`purpose: "decision"`을 추가로 요구한다. 판정 실행을 development set에서 집계해도
+되는지는 아무도 답하지 않았으므로 요구하지 않는다.
 
 **분모 0은 0%가 아니다.** `rate`·`wilsonLower`·`wilsonUpper`가 `null`이고
 `insufficientEvidence`가 그 사실을 문장으로 들고 다닌다.
+
+#### 저장된 실행을 읽는 호출자
+
+`npm run report:ai-review-judged-run`
+(`scripts/report-ai-review-judged-run.mjs`). **보고 전용이다** — 어느 입력 파일도
+쓰지 않고, 승인·승급 판정을 내리지 않으며, 집계 가능 여부와 무관하게 종료 코드 0이다.
+거절은 그 실행에 대한 참인 진술이고 build 실패가 아니다.
+
+```
+npm run report:ai-review-judged-run -- \
+  --run=<실행 artifact .json> --journal=<실행 journal .jsonl> \
+  --dataset=<동결된 평가 set .json> --judgements=<case별 bundle 디렉터리>
+```
+
+`--judgements`는 `score:ai-review-judgements`가 쓰는 것과 같은 배치다 —
+`<caseId>/{case,observation,record,artifact}.json`.
+
+**두 입력은 출처가 계약이다.**
+
+- **`manifest.datasetDigest`는 실행 artifact의 `summary.datasetDigest`에서만
+  읽는다.** 건네받은 dataset으로 계산하면 **실패할 수 없는 비교**가 되고, 출력은
+  정상 실행과 똑같이 보인다. 입력으로 재현할 수 없는 조건이므로
+  `tests/aiReviewJudgedRunReportCli.test.mjs`가 **정적으로** 고정한다 — CLI는
+  `datasetDigest()`를 부를 수단 자체를 갖지 않는다.
+- **계획은 판정이 존재하는 항목에서 역으로 만들지 않는다.** 동결 set이 어떤 case가
+  있었는지, 실행의 journal이 각 case가 어떤 출력을 냈는지, 실행이 기록한
+  `plannedCases`·`completedCases`가 그 둘과 맞는지를 함께 본다. 기록이 설명하지
+  못하는 것은 **거절**이다 — bundle을 지우면 실행이 줄어드는 것이 아니라 막힌다.
+- **대조는 양방향이다.** set을 돌며 journal을 찾기만 하면, set에 없는 case의 journal
+  항목은 **아무 데서도 눈에 띄지 않는다** — 그냥 빠지고 남은 둘이 1/2로 집계됐다.
+  자리를 댈 수 없는 출력을 들고 있는 기록은 이것이 읽을 수 있는 기록이 아니다.
+- **`completedCases`는 journal 행 수가 아니다.** 실행기는 실패한 호출도 journal에
+  적고(`observation` 없이), 출력을 낸 항목만 완료 수에 센다. 행 수와 비교하면
+  **공급자 실패 1건이 있는 정상 실행을 "기록이 자기모순"으로 보고**하게 되는데,
+  틀린 판정이고 운영자를 엉뚱한 파일로 보낸다. 실패 항목은 **"그 case가 출력을 내지
+  못했으므로 계획을 완성할 수 없다"**는 별개 사유로 보고하고, `completedCases`와
+  `plannedCases`가 다르면 그 자체로 **전체 계획을 재지 못한 실행**이다.
+
+중도 중단된 실행이 이 규칙이 지키는 경우다. 남은 판정들이 전부 온전해도 그 실행은
+온전하지 않으며, 집계하면 **부분 실행이 완전한 실행으로 보고된다.**
 
 ### 아직 정해지지 않은 것
 
@@ -579,8 +658,14 @@ claim에 요구되므로 인용 claim에도 붙고, 제외된 `support` claim에
 - `lib/aiReviewJudgedRunAggregate.ts` — 실행 단위 집계기(2026-09-09 승인).
   순수 함수이며 파일도 DB도 provider도 읽지 않는다. **승인 게이트에 연결돼 있지
   않다.**
+- `scripts/report-ai-review-judged-run.mjs` — 저장된 실행 기록을 읽어 위 집계기를
+  부르는 보고 전용 CLI. 쓰기도 게이트도 아니다.
 - `tests/aiReviewJudgedRunAggregate.test.mjs`,
-  `tests/aiReviewJudgedInventedFindings.test.mjs` — 위 규칙을 요구로 표현.
+  `tests/aiReviewJudgedInventedFindings.test.mjs`,
+  `tests/aiReviewJudgedRunReportCli.test.mjs` — 위 규칙을 요구로 표현. 마지막 것은
+  **파일을 통해** 확인한다(정상 왕복, 판정 누락, 중도 중단, 기록 자기 불일치,
+  **journal에 기록된 공급자 실패**, **계획 밖 journal 항목**, manifest 누락,
+  재동결본 교체, bundle 파일 누락, 입력 바이트 무변경, 분모 0).
 
 **v2에서 더한 것**(2026-09-08 승인, 위 절)
 

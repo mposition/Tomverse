@@ -524,6 +524,17 @@ export const freezeDrift = (set: EvalSet): string | null => {
   if (!(isNonEmptyString(set.frozenAt) && isNonEmptyString(set.frozenBy))) {
     return "the set carries no freeze record, so there is no moment its contents are pinned to";
   }
+  // A moment, not a non-empty string. The same defect as the AI Review eval's
+  // copy of this function, fixed the same way: `frozenAt: "not-a-date"` read
+  // as a freeze record while pinning the contents to nothing, and
+  // `Date.parse(baseline.preRegisteredAt) > Date.parse(candidate.frozenAt)`
+  // above compares `NaN` -- which is false, so the ordering check passes.
+  if (!Number.isFinite(Date.parse(set.frozenAt))) {
+    return (
+      `the freeze record says the set was frozen at ${JSON.stringify(set.frozenAt)}, ` +
+      `which is not a time`
+    );
+  }
   if (!isNonEmptyString(set.frozenDigest)) {
     return (
       `the freeze record (${set.frozenAt}, ${set.frozenBy}) carries no digest, so nothing ` +
