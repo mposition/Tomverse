@@ -9,7 +9,7 @@
 채웁니다.**
 
 - **기록일(UTC)**: 2026-09-10
-- **상태**: **코드 병합·고지 문구 승인 완료 — staging 미관측**
+- **상태**: **차단 — staging 관측에서 US endpoint가 `incorrect_hostname` 401로 거절(§10). 이 고정이 있는 한 Voice가 동작하지 않으며, 갈래 선택은 사람의 결정입니다**
 - **갱신(UTC)**: 2026-09-10 — §8이 법인명 대조와 문구 승인을, §9가 staging deploy SHA 관측을 기록합니다
 
 ---
@@ -340,9 +340,123 @@ Access 우회 대상이라 읽혔습니다. 개인정보처리방침 페이지�
 | 1 | 미국 endpoint 고정 코드 병합 | **완료** — PR #1331, `6019e07a` |
 | 2 | 국외이전 고지 항목 승인 | **완료** — §8-2 |
 | 3 | staging 전체 deploy SHA | **완료** — §9-1 |
-| 4 | 그 deploy에서 Voice 요청 성공 | 미관측 |
-| 5 | 미국 endpoint를 썼다는 운영 증거 | 미관측 |
+| 4 | 그 deploy에서 Voice 요청 성공 | **실패** — 401 `incorrect_hostname` (§10) |
+| 5 | 미국 endpoint를 썼다는 운영 증거 | **불가** — endpoint가 조직을 거절 (§10) |
 | 6 | 사람의 B-5 판정·서명 | 미완 |
+
+**4번은 이제 미관측이 아니라 실패입니다.** 관측은 있었고 결과가 부정이었습니다.
+5번은 4번이 성공해야 생기므로, 갈래(§10-6)가 정해지기 전에는 채울 수 없습니다.
+
+## 10. 관측이 §1의 전제를 뒤집었습니다 (2026-09-10)
+
+**staging에서 실제 Voice 요청이 실패했고, 원인은 이 변경 자체입니다.**
+
+### 10-1. 무엇이 일어났는가
+
+flag를 켠 뒤 첫 두 요청(09:41:45Z, 09:42:09Z)이 모두 실패했습니다.
+
+```
+event: voice_transcription   keySource: "dedicated"
+outcome: "provider_failed"   providerFailure: "provider_rejected_credentials"
+providerStatus: 401
+mediaType: "audio/webm"      durationSource: "ebml"
+durationSeconds: 4.201 / 2.640
+reservedSeconds: 5 / 3       releasedSeconds: 5 / 3
+settlementBasis: "not_billed"
+```
+
+**앞단은 전부 정상이었습니다** — 녹음, 업로드, 컨테이너 파싱, 길이 측정까지.
+실패 지점은 provider 인증 경계 하나이고, **비용은 0**입니다(예약 초 전액 환급).
+
+### 10-2. 공급자가 무엇이라고 답했는가
+
+로컬에서 두 key × 두 host × 두 endpoint를 확인했습니다(무과금, `/v1/models`와
+파일 없는 `/v1/audio/transcriptions` POST).
+
+| key | host | endpoint | HTTP |
+|---|---|---|---|
+| Voice | `api.openai.com` | `/v1/models` | 200 |
+| Voice | `us.api.openai.com` | `/v1/models` | **401** |
+| Shared | `api.openai.com` | `/v1/models` | 200 |
+| Shared | `us.api.openai.com` | `/v1/models` | **401** |
+| Voice | `api.openai.com` | `/v1/audio/transcriptions` | **400** (`file` 누락) |
+| Voice | `us.api.openai.com` | `/v1/audio/transcriptions` | **401** |
+| Shared | `api.openai.com` | `/v1/audio/transcriptions` | **400** (`file` 누락) |
+| Shared | `us.api.openai.com` | `/v1/audio/transcriptions` | **401** |
+
+US host의 401 네 건이 모두 같은 본문입니다.
+
+> `error.code`: `incorrect_hostname`
+> `error.type`: `invalid_request_error`
+> `error.message`: *"Attempted to access resource with incorrect regional
+> hostname. Please make your request to api.openai.com"*
+
+**Global host의 400이 인증 통과 신호입니다** — 파일이 없다는 불평이므로 key는
+받아들여졌습니다. 즉 두 key 모두 유효하고, US host만 거절합니다.
+
+### 10-3. 무엇이 배제됐는가
+
+- **key 값 문제 아님.** 두 key 모두 Global에서 인증됩니다. `Voice Key`의
+  `last_used_at`이 실패한 첫 요청 시각(09:41:45Z)과 초 단위로 일치하므로 OpenAI가
+  key를 인식했습니다.
+- **Voice 프로젝트 고유 문제 아님.** 공유 key도 똑같이 401입니다.
+- **모델 권한 문제 아님.** `Tomverse Voice`의 rate limit 목록에
+  `gpt-4o-mini-transcribe`·`gpt-4o-transcribe`가 Default project와 동일하게
+  있습니다.
+- **프로젝트 residency 설정 문제 아님.** organization API가
+  `Tomverse Voice`(`proj_4mXSWZBc963pWet12A7ovvNE`)의 `residency`를 **`GLOBAL`**
+  로 보고합니다 — §1이 인용한 문장이 요구하는 바로 그 상태입니다.
+- **오디오 문제 아님.** 파일을 보내지 않은 요청도 같은 401입니다.
+
+### 10-4. 그래서 §1의 어느 줄이 틀렸는가
+
+**인용 자체는 정확합니다.** 공식 문서는 지금도 이렇게 적습니다.
+
+> *"As an alternative to creating a region-specific project, you can select
+> regional processing for an individual request by using the prefixed domain
+> with an API key from a project having Global geography."*
+
+**틀린 것은 그 인용에서 제가 끌어낸 추론입니다.** §1은 이 문장을 근거로 "새
+프로젝트도 새 key도 이 변경의 전제가 아니다"라고 적었고, 그것을 **전제가 하나도
+없다**는 뜻으로 썼습니다. 실제로는 문서에 적히지 않은 전제가 하나 더
+있었습니다 — **조직 자체가 data residency를 쓸 수 있는 상태여야 합니다.**
+`incorrect_hostname`은 프로젝트가 아니라 그 상태에 대한 답입니다.
+
+**이것은 문서가 거짓말했다는 주장이 아닙니다.** 문서는 data residency 안내
+문서이고, 그 기능을 쓸 수 있는 조직을 전제하고 씁니다. 제가 그 전제를 읽지 않고
+"프로젝트 geography만 맞으면 된다"로 좁혀 적었습니다. **검색 요약이 아니라 원문을
+읽었는데도 틀렸다는 점을 적어 둡니다** — 원문을 읽는 것이 전제까지 읽는 것을
+보장하지 않습니다.
+
+### 10-5. 지금 무엇이 참인가
+
+- **Voice는 이 고정이 있는 한 동작하지 않습니다.** 코드에 env override가 없으므로
+  운영자가 우회할 수단도 설계상 없습니다.
+- **고지 문구와 코드 고정은 함께 움직입니다**(§8-2, §11.4). 고정을 풀면 고지가
+  먼저 틀립니다 — 미국을 이름 댈 근거가 사라집니다.
+- **오디오 바이트가 미국 edge에 도달했는지는 미관측입니다.** 401이 요청 본문
+  전송 전에 왔는지 후에 왔는지 이 저장소는 알 수 없습니다. **"아무 데이터도 나가지
+  않았다"고 적지 않습니다.**
+- 비용은 0입니다. 두 건 모두 `not_billed`이고 예약 초가 환급됐습니다.
+
+### 10-6. 결정이 필요합니다 — 이 기록은 고르지 않습니다
+
+세 갈래이고, 셋 다 사람의 결정입니다.
+
+| 갈래 | Voice 동작 | 고지 | 대가 |
+|---|---|---|---|
+| **가.** OpenAI에 data residency 활성화 문의, 고정 유지 | 계속 불가 | 그대로 유효 | 일정이 공급자에게 달림 |
+| **나.** 고정을 풀어 Global로 되돌림 | 즉시 복구 | **다시 씀** — 미국을 이름 댈 수 없음 | 2026-09-10 서명이 임의 국가 기재를 금지했으므로 별도 법률 검토 필요 |
+| **다.** 고정 유지 + Voice 비활성 유지 | 불가 | 그대로 유효 | 현상 유지. B-5·B-6이 계속 열림 |
+
+**가**를 고르면 문의에 실을 것은 이 절의 표와 `incorrect_hostname` 원문입니다.
+**나**를 고르면 `2026-09-10-processing-region-decision.md`의 "Global — 지역 제한
+없음"으로 돌아가는 것이고, 국외이전 고지 2번 항목(이전 국가)을 어떻게 적을지가
+그 결정에 딸려 옵니다.
+
+**staging의 flag는 켜져 있고 Voice는 실패합니다.** 되돌리는 것은
+`feature.voiceInputEnabled`를 `'false'`로 바꾸거나 `VOICE_INPUT_KILL_SWITCH`를
+설정하는 것이며, 둘 다 되돌릴 수 있는 조작입니다.
 
 ---
 
