@@ -181,6 +181,17 @@ const recordFor = (id, kind, text, observation) => ({
 // integrity. `verifyJudgedScoringEvidence()` returns both, and the first draft
 // consumed only `problems` -- so evidence with no external binding, which that
 // function reports as ineligible, aggregated anyway.
+/**
+ * The draft that preceded `lib/aiReviewJudgedRunAggregate.ts`.
+ *
+ * Its admission rules -- plan first, identity from the verified artifact, both
+ * directions reconciled, run-level journal and dataset -- were approved on
+ * 2026-09-09 and now have a shared implementation with its own regressions.
+ * **Use that one.** This copy is kept only because it is the reproduction the
+ * transition document cites, and it computes recall and precision, which the
+ * approved aggregator deliberately does not: substituting those metrics is
+ * part of the gate transition, and the gate transition is not approved.
+ */
 const aggregateJudged = (plan, judged, runInputs) => {
     const blockers = [];
 

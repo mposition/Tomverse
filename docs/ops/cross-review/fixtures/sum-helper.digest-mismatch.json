@@ -4,5 +4,11 @@
   ],
   "reviewer": [
     { "taskId": "demo-sum-helper", "round": 0, "reviewedDigest": "sha256:not-this-change", "conclusion": "approve", "findings": [], "nextAction": "merge" }
+  ],
+  "tests": [
+    [{ "command": "node --test tests/sum.test.mjs", "passed": true, "output": "pass 1", "durationMs": 38 }]
+  ],
+  "guards": [
+    [{ "rule": "npm run lint -- lib/sum.ts", "passed": true, "detail": "no problems", "durationMs": 12 }]
   ]
 }

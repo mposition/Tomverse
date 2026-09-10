@@ -10,18 +10,421 @@
     "In dry-run mode the command-line executors are never spawned.",
     "No production routing behaviour, score, flag, pre-registration, or protection rule changes: existing router tests pass unchanged and no file under app/ or lib/router{Candidates,Selection,ScorePolicy,Decision}.ts is modified."
   ],
-  "baseCommit": "origin/develop",
+  "baseCommit": "8134ce44",
   "roles": {
     "author": "claude",
     "reviewer": "codex"
   },
   "maxRevisions": 2,
-  "rounds": [],
-  "changeDigest": "sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932",
-  "commit": "6efd3eab991c368fb56129e2d1dbbfc2b4ab56a2",
-  "headCommit": "6efd3eab991c368fb56129e2d1dbbfc2b4ab56a2",
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:0c4fdd7886cbf2b3a13012b3aa292a548041526ecf076f813c7b1050160649b2",
+      "commit": "f2d97890549c6c2ec4552eac9a8b5b6bba878a59",
+      "filesChanged": [
+        "docs/ops/cross-review/README.md",
+        "docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json",
+        "docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json",
+        "docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json",
+        "docs/ops/cross-review/fixtures/sum-helper.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/exchange.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-prompt.md",
+        "docs/ops/router-full-catalog-diagnostic/README.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+        "lib/crossReviewCore.ts",
+        "lib/crossReviewExecutors.ts",
+        "lib/routerFullCatalogDiagnostic.ts",
+        "package.json",
+        "scripts/cross-review.mjs",
+        "scripts/report-router-full-catalog.mjs",
+        "tests/crossReview.test.mjs",
+        "tests/routerFullCatalogDiagnostic.test.mjs"
+      ],
+      "changeSummary": "Foundation of commit 6efd3eab (offline full-catalogue Router diagnostic reusing decideRouterModel, filterRouterCandidates and selectRouterModel; author/reviewer/control cross-review loop with mocks, dry-run shells and package mode; tests, docs, fixtures) plus commit f2d97890, which checked the command-line executors against the installed tools: the reviewer ignores the user config layer and accepts only allow-listed -c overrides, the JSONL shape is pinned against the codex source at rust-v0.146.0, the script gains a review-only mode whose exchange record is the control program replay, and the Windows spawner goes through a shell with an argument allow list. No change to routing behaviour, scores, flags or pre-registrations. Test result on this Windows checkout: 110 pass, 2 fail. The two failures (automaticFallbackBoundary: only the surfaces that offer a choice import the fallback table; routerScorePolicy: the selection path imports nothing that touches the outside world) are path-separator failures of the import-walk harness that fail identically at the base commit on this machine and pass on Linux CI; no test was excluded or weakened.",
+      "testResults": [
+        {
+          "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+          "passed": false,
+          "output": "# tests 112\n# pass 110\n# fail 2",
+          "durationMs": 630
+        }
+      ],
+      "guardRuns": [],
+      "guardViolations": [],
+      "checkFailures": [
+        "test failed: set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+        "no guard was run"
+      ],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/crossReviewCore.ts:runCrossReview checksPass; scripts/cross-review.mjs:replay",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "빈 testResults는 every() 때문에 통과하고 guards도 선택 사항이어서, 테스트와 guard가 전혀 실행되지 않아도 reviewer 승인만으로 status가 passed가 됩니다.",
+          "reproduction": "runCrossReview에 runTests: async () => [], guards 생략, 현재 digest를 승인하는 reviewer를 전달하면 outcome.status가 passed입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:runCrossReview scopeViolations; scripts/cross-review.mjs:package mode",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "live 모드는 author가 보고한 diff와 filesChanged만 신뢰하고 package 모드는 git diff를 writableScope로 미리 제한하므로, 범위 밖의 실제 변경이 review·digest·scope 검사에서 모두 숨겨질 수 있습니다.",
+          "reproduction": "임시 저장소에서 허용된 파일과 app/api/chat/route.ts를 함께 변경한 뒤 writableScope가 허용 파일만 포함하는 task를 package하면 package-round0.json의 diff와 filesChanged에는 app 변경이 없고 해당 부분은 digest에도 포함되지 않습니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:package/review state transitions and replay",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "이전 round에 verdict가 존재하는지만 확인하므로 passed 또는 on_hold 이후에도 다음 package와 review를 만들 수 있고, replay는 이를 무시한 채 이전 digest의 passed 상태를 유지하여 새 변경 재검토와 revision cap을 모두 무력화합니다.",
+          "reproduction": "round 0을 passing tests와 approve verdict로 완료한 뒤 round 1을 package하면 package-round1.json과 review prompt가 생성되지만 exchange.json은 round 0 digest에 대한 passed로 남으며, maxRevisions까지 request_changes를 만든 뒤에도 같은 방식으로 추가 round를 package할 수 있습니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/routerFullCatalogDiagnostic.ts:diagnoseItem fallback.firstExecutable",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "firstExecutable은 fallback gate가 flag_off로 거부하거나 dispatchFit이 exceeded인 경우에도 첫 후보가 존재하기만 하면 채워지므로 실제로 실행 가능한 fallback을 나타내지 않습니다.",
+          "reproduction": "현재 tests/routerFullCatalogDiagnostic.test.mjs의 기본 입력 자체가 scopeAsDeployed.allowed === false와 firstExecutable.modelId의 비-null 값을 동시에 단언하며, context window를 router 예약량과 dispatch 예약량 사이로 설정하면 dispatchFit === exceeded인 객체도 firstExecutable로 반환됩니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:findingProblems and isActionable",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "basis가 evidence인 finding은 reproduction 없이도 schema를 통과하고 자동으로 actionable이 되어, 필수 exchange 필드를 누락하면서 검증되지 않은 제안이 revision을 강제할 수 있습니다.",
+          "reproduction": "reproduction을 생략한 { location: \"x\", severity: \"error\", basis: \"evidence\", claim: \"change it\" }를 포함한 verdict는 reviewVerdictProblems에서 유효하고 isActionable은 true를 반환합니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "control-program test run",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "제공된 필수 테스트 실행은 112개 중 2개가 실패했으므로 기존 Router 테스트가 통과한다는 완료 조건과 tests-and-guards 통과 조건이 현재 증명되지 않았습니다.",
+          "reproduction": "제공된 control-program 테스트 명령을 동일 환경에서 재실행하면 # tests 112, # pass 110, # fail 2가 보고됩니다.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "실제 checkout 전체에 digest·scope·guard를 결속하고 무검사 통과와 종료 후 추가 round를 차단한 뒤, fallback 실행 가능성과 finding reproduction 계약을 수정하고 전체 필수 테스트가 통과하는 새 digest를 제출하세요."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:8b50f682bd7d19b9507deaeaa7396e1237592c2c3f2ea917ef63fa727960018c",
+      "commit": "4b21ad92e4bc17d50682979c96919d5f13544949",
+      "filesChanged": [
+        "docs/ops/cross-review/README.md",
+        "docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json",
+        "docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json",
+        "docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json",
+        "docs/ops/cross-review/fixtures/sum-helper.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change-round0.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/exchange.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/package-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-prompt.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round0.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/verdict-round0.json",
+        "docs/ops/router-full-catalog-diagnostic/README.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+        "lib/crossReviewCore.ts",
+        "lib/crossReviewExecutors.ts",
+        "lib/routerFullCatalogDiagnostic.ts",
+        "package.json",
+        "scripts/cross-review.mjs",
+        "scripts/report-router-full-catalog.mjs",
+        "tests/crossReview.test.mjs",
+        "tests/routerFullCatalogDiagnostic.test.mjs"
+      ],
+      "changeSummary": "Round 1 answers the six round-0 findings (commits fa87612d and the follow-up on top of f2d97890 and 6efd3eab). (1) A pass now needs at least one passing test run and the guards consulted with nothing to report; guards is a required control field and every check failure is recorded per round and fed back to the author. (2) The scope check reads the files the diff names (filesNamedByDiff), an unreported file is a guard violation, and package mode reads the whole working tree (tracked changes against the base and untracked files) and refuses to package a change outside the scope or an untracked file the diff would not show unless it lies under a declared --diff-exclude path; live mode guards compare the tree with what the author reported. (3) The replay lives in the control program (replayExchange) and reports where it concluded; the script refuses to package or review round N unless the replay of rounds 0..N-1 is awaiting_revision, refuses a second verdict on a round, and refuses a review when the tree diff against the base does not digest to the package. (4) The diagnostic reports fallback.firstCandidate (what firstExecutable was) and fallback.executableAsDeployed / executableIfFlagOn answered in the product order gate, decision, dispatch fit, each refusal naming the step; on development-v0 the flag off refuses all 210 items and with it on 165 are executable and 45 are refused by the gate for web search. Under the active estimator calibration the dispatch reservation equals the Router estimate for a bare number, so the exceeded branch is held on the exported helper fallbackExecutableFor rather than reached through the catalogue; the report is v2 and regenerated, the summary now by --summary-json. (5) A finding is acted on only with a reproduction whatever its basis; evidence without one keeps the current version and is recorded. (6) The test run on this Windows checkout is still 113 pass / 2 fail: the two failing tests (automaticFallbackBoundary and routerScorePolicy import walks) fail identically at the base commit on this machine, pass on Linux, and are outside the writable scope, so they are unchanged; the security:regression guard also fails here only because its needle contains a literal LF and the checkout is CRLF (the file is identical to the base). Both are recorded as they are.",
+      "testResults": [
+        {
+          "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+          "passed": false,
+          "output": "# tests 115\n# pass 113\n# fail 2",
+          "durationMs": 623
+        }
+      ],
+      "guardRuns": [
+        {
+          "command": "npm run check:doc-references",
+          "passed": true,
+          "output": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 868 path(s) named by comments across 2592 source file(s), all present.",
+          "durationMs": 1440
+        },
+        {
+          "command": "npm run check:release-gate-coverage",
+          "passed": true,
+          "output": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 632
+        },
+        {
+          "command": "npm run security:regression",
+          "passed": false,
+          "output": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\n\nSecurity regression checks failed:\n- A plan-change quote states what happens to this month's credits (lib/planChangeService.ts)",
+          "durationMs": 688
+        }
+      ],
+      "guardViolations": [
+        "undefined: undefined"
+      ],
+      "checkFailures": [
+        "test failed: set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+        "guard failed: undefined"
+      ],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/crossReviewCore.ts:runCrossReview approve branch",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "마지막 허용 round에서 재현 가능한 finding은 unresolved_on_hold로 분류되지만 pass 조건은 fix_requested만 검사하므로, 해결되지 않은 finding을 기록한 채 status가 passed가 됩니다.",
+          "reproduction": "maxRevisions: 0, 통과하는 tests/guards, conclusion: approve, basis: evidence와 비어 있지 않은 reproduction을 가진 finding으로 runCrossReview를 실행하면 현재 결과는 status === \"passed\"이면서 finding.disposition === \"unresolved_on_hold\"입니다. 기대 결과는 on_hold입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:runCrossReview loop bound; scripts/cross-review.mjs:max-revisions",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "요구사항의 최대 2회 fix round가 상한이 아니라 임의로 높일 수 있는 옵션으로 구현되어 revision cap을 우회할 수 있습니다.",
+          "reproduction": "runCrossReview에 maxRevisions: 3과 연속된 네 개의 author/request_changes 응답을 주면 round 0 뒤에 fix round가 세 번 실행됩니다. CLI도 --max-revisions=3을 받아들이며, 요구된 최대치는 총 3개 round(초기 1개와 fix 2개)입니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/crossReviewCore.ts:runCrossReview guardsConsulted; scripts/cross-review.mjs:mock/package guard setup",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "guard 실행 여부를 실제 guard 수나 실행 기록이 아니라 함수 존재 여부로 판정하므로, guard가 하나도 실행되지 않은 정상 CLI 경로도 검사를 통과합니다.",
+          "reproduction": "로컬 PC의 PowerShell, 저장소 clone 폴더 안에서 Node 22와 npm ci 완료 후 자격증명 없이 `npm run cross-review -- --task=docs/ops/cross-review/fixtures/sum-helper.task.json --mode=mock --fixture=docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json --out=artifacts/cross-review/no-guards`를 --guard-command 없이 실행합니다. fixture에도 guards가 없지만 마지막 round는 passed가 됩니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:live-mode guards; lib/crossReviewCore.ts:changeDigest",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "live 모드는 실제 working-tree diff의 내용과 author가 반환한 diff를 비교하지 않고 파일명만 비교하므로, reviewer가 읽지 않은 실제 변경을 다른 digest로 승인할 수 있습니다.",
+          "reproduction": "live executor 대역이 실제로 lib/sum.ts를 내용 B로 변경하면서 AuthorOutput.diff에는 같은 파일명의 내용 A를 반환하고 filesChanged에 lib/sum.ts를 포함하게 합니다. 테스트와 guard command를 통과시키고 reviewer가 A를 승인하면 treeChanges의 파일명 검사는 통과하며 exchange digest는 A에 묶인 채 status가 passed가 됩니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/cross-review.mjs:package/review diffExcluded handling",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "--diff-exclude가 생성물로 제한되지 않아 임의의 scoped 소스 변경을 diff와 digest에서 제외할 수 있고, review 단계도 같은 제외를 적용하므로 새 변경에 새 review가 필요하다는 규칙을 우회합니다.",
+          "reproduction": "lib/crossReviewCore.ts를 변경한 뒤 package mode에 --diff-exclude=lib/crossReviewCore.ts를 전달합니다. package의 filesChanged에는 파일이 있지만 diff와 changeDigest에는 내용이 없으며, review 단계의 liveDiff도 같은 pathspec을 제외하므로 그 파일을 다시 변경해도 digest 검사가 이를 감지하지 못합니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/routerFullCatalogDiagnostic.ts:dispatchFitFor and fallback construction",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "executableAsDeployed와 executableIfFlagOn은 실제 decideFallback 및 planAttemptExecution을 호출하지 않고 첫 후보와 context-window fit만 재구현하므로, search_path_unavailable, budget_refused, candidate_unavailable 또는 no_provider_hold인 fallback도 executable: true로 보고될 수 있습니다.",
+          "reproduction": "`rg -n \"decideFallback|planAttemptExecution|fitChatOutputToContextWindow\" lib/routerFullCatalogDiagnostic.ts`로 확인하면 실제 두 실행 함수를 호출하지 않고 fitChatOutputToContextWindow만 호출합니다. 동일한 진단 입력에 대해 provider hold가 있는 런타임과 없는 런타임은 같은 executable: true를 내지만, 후자는 제품 실행 경로에서 no_provider_hold로 거부됩니다.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "control-program test and guard results",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "제출된 필수 검증은 115개 중 2개가 실패했고 security:regression guard도 실패했으므로, 기존 Router 테스트 통과와 tests-and-guards 통과 완료 조건이 충족되지 않았습니다.",
+          "reproduction": "제공된 control-program 명령을 같은 checkout에서 다시 실행하면 `# tests 115`, `# pass 113`, `# fail 2`가 나오며, 저장소 clone 폴더의 PowerShell에서 자격증명 없이 읽기 전용 검증인 `npm run security:regression`을 실행하면 plan-change quote 검사가 비정상 종료합니다.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "마지막 round의 unresolved finding 처리, 고정 revision 상한, 실제 guard 증명, 실제 diff-digest 결속, diff-exclude 제한, 제품 fallback 실행 함수 재사용을 수정하고 필수 테스트와 guard가 모두 통과한 새 digest를 round 2로 제출하세요."
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:6500e0e274e884de9ea1d720c7488387bea96e6764ce088016dd0946cb01073a",
+      "commit": "7d61d2b2afe2bb5601ce79d0eb77a6959bdfe2a5",
+      "filesChanged": [
+        "docs/ops/cross-review/README.md",
+        "docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json",
+        "docs/ops/cross-review/fixtures/sum-helper.pass-after-fix.json",
+        "docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json",
+        "docs/ops/cross-review/fixtures/sum-helper.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change-round0.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change-round1.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change.diff",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/exchange.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/package-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/package-round1.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-prompt.md",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round0.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round1.stderr.txt",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/verdict-round0.json",
+        "docs/ops/cross-review/packages/router-full-catalog-diagnostic/verdict-round1.json",
+        "docs/ops/router-full-catalog-diagnostic/README.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.md",
+        "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
+        "lib/crossReviewCore.ts",
+        "lib/crossReviewExecutors.ts",
+        "lib/routerFullCatalogDiagnostic.ts",
+        "package.json",
+        "scripts/cross-review.mjs",
+        "scripts/report-router-full-catalog.mjs",
+        "tests/crossReview.test.mjs",
+        "tests/routerFullCatalogDiagnostic.test.mjs"
+      ],
+      "changeSummary": "Round 2 (the last revision allowed) answers the seven round-1 findings; commit after 4b21ad92 on top of the earlier rounds. (1) An actionable finding is never passed over: fix_requested or unresolved_on_hold blocks a pass, so an approval carrying a reproducible finding in the last round goes on hold (revisions_exhausted) instead of passed. (2) The cap is fixed: MAX_REVISIONS is 2, resolveMaxRevisions refuses anything above it, --max-revisions may only lower it, and replayExchange is bound the same way. (3) A guard is a rule that ran: guards return GuardRun records, a pass needs at least one run and every run passing, an empty list is the failed check no guard was run, the reviewer prompt lists guard results beside test results, and --guard-command runs are those records. (4) In live mode the diff of record is the working tree diff against the base over the whole tree (treeBackedAuthor); the diff the author returned is kept only as its claim next to its self-assessment, and one guard rule always checks the tree holds nothing the diff cannot show. (5) --diff-exclude accepts only the task generatedPaths (now declared: the two generated report files) and the package directory; an excluded file still counts as changed, its content digest is recorded in the package (excludedDigests) and a review refuses to run if it changed since packaging. (6) The fallback decision is the product decideFallback, called under the one failure hypothesis the fallback path exists for (FALLBACK_FAILURE_HYPOTHESIS) and recorded as it answered with its version; the answer is reachable rather than executable and every reachable answer carries the refusals only a real dispatch can raise (search_path_unavailable, budget_refused, candidate_unavailable, no_provider_hold) as undecidedOffline. planAttemptExecution is not called because it builds the provider client and the credit budget, which an offline report has no account, credentials or reservation for; the report and README say so and the committed report is regenerated (with the flag on: 165 reachable, 45 refused by the gate for web search). (7) Checks on this checkout: the worktree is now checked out with LF like CI, under which the security:regression guard and the routerScorePolicy import walk pass; the automaticFallbackBoundary import walk still fails here on path separators, is outside the writable scope and passes on Linux; the package records what ran.",
+      "testResults": [
+        {
+          "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+          "passed": false,
+          "output": "# tests 117\n# pass 116\n# fail 1",
+          "durationMs": 613
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 868 path(s) named by comments across 2592 source file(s), all present.",
+          "durationMs": 6229
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 594
+        },
+        {
+          "rule": "npm run security:regression",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (188 checks).",
+          "durationMs": 659
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [
+        "test failed: set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'"
+      ],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/routerFullCatalogDiagnostic.ts:FALLBACK_UNDECIDED_OFFLINE, fallbackReachabilityFor",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "reachable=true인 결과도 budget_refused, candidate_unavailable, no_provider_hold 등을 미판정 상태로 남기므로, 요구된 'actually executable fallback'을 보고하지 않고 이름만 reachable로 바꿨습니다.",
+          "reproduction": "저장소 루트에서 `npm run report:router-full-catalog -- --fallback-flag=on --json=artifacts/router-full-catalog/repro.json`을 실행하고 reachableIfFlagOn.reachable=true인 항목을 확인하면, 같은 결과의 undecidedOffline에 실제 실행을 막을 수 있는 네 조건이 그대로 남아 있습니다.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "scripts/cross-review.mjs:diffExcluded validation and excludedDigests",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "--out의 상위 경로도 --diff-exclude로 허용하면서 그 경로를 digest하지 않아, 패키지 디렉터리를 scoped 소스 아래에 두면 변경을 review diff와 digest에서 계속 숨길 수 있습니다.",
+          "reproduction": "현재 task로 `--out=docs/ops/cross-review/repro --diff-exclude=docs/ops/cross-review`를 사용해 package를 만들면 검사가 허용합니다. 이후 docs/ops/cross-review/README.md를 다시 변경해도 review 단계의 scopedDiff가 같은 디렉터리를 제외하고 excludedDigests도 비어 있어 package digest가 변하지 않습니다.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "lib/crossReviewExecutors.ts:CLI_INVOCATIONS.claude.reviewer",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "Claude reviewer는 user/project/local 설정을 그대로 로드하므로, Read 전용 도구 목록과 strict MCP 설정에도 불구하고 전체 사용자 권한으로 실행되는 설정 hook이 작업공간에 쓸 수 있어 reviewer의 무쓰기 조건이 보장되지 않습니다.",
+          "reproduction": "CLI args에 `--setting-sources`가 없는 것을 확인한 뒤 Read 또는 SessionStart에 파일 생성 command hook을 설정하고 reviewer를 실행하면 파일이 생성됩니다. 공식 [CLI reference](https://code.claude.com/docs/en/cli-usage)는 setting source 기본 로딩을 제어하는 별도 옵션을 문서화하고, [hooks reference](https://code.claude.com/docs/en/hooks)는 command hook이 전체 사용자 권한으로 실행된다고 명시합니다.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "Test results (run by the control program)",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "필수 Router 회귀 테스트 묶음이 117개 중 1개 실패한 상태이므로 기존 Router 테스트 통과 및 tests-and-guards 통과 완료 조건이 충족되지 않았습니다.",
+          "reproduction": "저장소 루트에서 제출된 control-program test command를 grep 없이 실행하면 실패한 테스트의 상세 내용과 함께 `# tests 117`, `# pass 116`, `# fail 1`이 재현됩니다.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "revisions exhausted"
+    }
+  ],
+  "changeDigest": "sha256:6500e0e274e884de9ea1d720c7488387bea96e6764ce088016dd0946cb01073a",
+  "commit": "7d61d2b2afe2bb5601ce79d0eb77a6959bdfe2a5",
+  "changeSummary": "Round 2 (the last revision allowed) answers the seven round-1 findings; commit after 4b21ad92 on top of the earlier rounds. (1) An actionable finding is never passed over: fix_requested or unresolved_on_hold blocks a pass, so an approval carrying a reproducible finding in the last round goes on hold (revisions_exhausted) instead of passed. (2) The cap is fixed: MAX_REVISIONS is 2, resolveMaxRevisions refuses anything above it, --max-revisions may only lower it, and replayExchange is bound the same way. (3) A guard is a rule that ran: guards return GuardRun records, a pass needs at least one run and every run passing, an empty list is the failed check no guard was run, the reviewer prompt lists guard results beside test results, and --guard-command runs are those records. (4) In live mode the diff of record is the working tree diff against the base over the whole tree (treeBackedAuthor); the diff the author returned is kept only as its claim next to its self-assessment, and one guard rule always checks the tree holds nothing the diff cannot show. (5) --diff-exclude accepts only the task generatedPaths (now declared: the two generated report files) and the package directory; an excluded file still counts as changed, its content digest is recorded in the package (excludedDigests) and a review refuses to run if it changed since packaging. (6) The fallback decision is the product decideFallback, called under the one failure hypothesis the fallback path exists for (FALLBACK_FAILURE_HYPOTHESIS) and recorded as it answered with its version; the answer is reachable rather than executable and every reachable answer carries the refusals only a real dispatch can raise (search_path_unavailable, budget_refused, candidate_unavailable, no_provider_hold) as undecidedOffline. planAttemptExecution is not called because it builds the provider client and the credit budget, which an offline report has no account, credentials or reservation for; the report and README say so and the committed report is regenerated (with the flag on: 165 reachable, 45 refused by the gate for web search). (7) Checks on this checkout: the worktree is now checked out with LF like CI, under which the security:regression guard and the routerScorePolicy import walk pass; the automaticFallbackBoundary import walk still fails here on path separators, is outside the writable scope and passes on Linux; the package records what ran.",
+  "testResults": [
+    {
+      "command": "set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'",
+      "passed": false,
+      "output": "# tests 117\n# pass 116\n# fail 1",
+      "durationMs": 613
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 751 referenced path(s) across 92 instruction document(s), and 868 path(s) named by comments across 2592 source file(s), all present.",
+      "durationMs": 6229
+    },
+    {
+      "rule": "npm run check:release-gate-coverage",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 51 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+      "durationMs": 594
+    },
+    {
+      "rule": "npm run security:regression",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 security:regression\n> node scripts/security-regression-check.mjs\n\nSecurity regression checks passed (188 checks).",
+      "durationMs": 659
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [
+    "test failed: set -o pipefail; node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (tests|pass|fail)'"
+  ],
+  "reviewConclusion": "request_changes",
+  "findings": [
+    {
+      "location": "lib/routerFullCatalogDiagnostic.ts:FALLBACK_UNDECIDED_OFFLINE, fallbackReachabilityFor",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "reachable=true인 결과도 budget_refused, candidate_unavailable, no_provider_hold 등을 미판정 상태로 남기므로, 요구된 'actually executable fallback'을 보고하지 않고 이름만 reachable로 바꿨습니다.",
+      "reproduction": "저장소 루트에서 `npm run report:router-full-catalog -- --fallback-flag=on --json=artifacts/router-full-catalog/repro.json`을 실행하고 reachableIfFlagOn.reachable=true인 항목을 확인하면, 같은 결과의 undecidedOffline에 실제 실행을 막을 수 있는 네 조건이 그대로 남아 있습니다.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "scripts/cross-review.mjs:diffExcluded validation and excludedDigests",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "--out의 상위 경로도 --diff-exclude로 허용하면서 그 경로를 digest하지 않아, 패키지 디렉터리를 scoped 소스 아래에 두면 변경을 review diff와 digest에서 계속 숨길 수 있습니다.",
+      "reproduction": "현재 task로 `--out=docs/ops/cross-review/repro --diff-exclude=docs/ops/cross-review`를 사용해 package를 만들면 검사가 허용합니다. 이후 docs/ops/cross-review/README.md를 다시 변경해도 review 단계의 scopedDiff가 같은 디렉터리를 제외하고 excludedDigests도 비어 있어 package digest가 변하지 않습니다.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "lib/crossReviewExecutors.ts:CLI_INVOCATIONS.claude.reviewer",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "Claude reviewer는 user/project/local 설정을 그대로 로드하므로, Read 전용 도구 목록과 strict MCP 설정에도 불구하고 전체 사용자 권한으로 실행되는 설정 hook이 작업공간에 쓸 수 있어 reviewer의 무쓰기 조건이 보장되지 않습니다.",
+      "reproduction": "CLI args에 `--setting-sources`가 없는 것을 확인한 뒤 Read 또는 SessionStart에 파일 생성 command hook을 설정하고 reviewer를 실행하면 파일이 생성됩니다. 공식 [CLI reference](https://code.claude.com/docs/en/cli-usage)는 setting source 기본 로딩을 제어하는 별도 옵션을 문서화하고, [hooks reference](https://code.claude.com/docs/en/hooks)는 command hook이 전체 사용자 권한으로 실행된다고 명시합니다.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "Test results (run by the control program)",
+      "severity": "error",
+      "basis": "evidence",
+      "claim": "필수 Router 회귀 테스트 묶음이 117개 중 1개 실패한 상태이므로 기존 Router 테스트 통과 및 tests-and-guards 통과 완료 조건이 충족되지 않았습니다.",
+      "reproduction": "저장소 루트에서 제출된 control-program test command를 grep 없이 실행하면 실패한 테스트의 상세 내용과 함께 `# tests 117`, `# pass 116`, `# fail 1`이 재현됩니다.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "unresolved after 2 revision(s); on hold with the findings and reproductions recorded",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-09T08:24:06.722Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "headCommit": "7d61d2b2afe2bb5601ce79d0eb77a6959bdfe2a5",
   "worktreeDirty": false,
-  "changeSummary": "Adds lib/routerFullCatalogDiagnostic.ts + scripts/report-router-full-catalog.mjs (offline full-catalogue diagnostic reusing decideRouterModel/filterRouterCandidates/selectRouterModel), lib/crossReviewCore.ts + lib/crossReviewExecutors.ts + scripts/cross-review.mjs (author/reviewer/control loop with mocks, dry-run shells, package mode), tests for both, docs and fixtures. Report on development-v0 committed under docs/ops/router-full-catalog-diagnostic/. No change to routing behaviour, scores, flags or pre-registrations.",
   "filesChanged": [
     "docs/ops/cross-review/README.md",
     "docs/ops/cross-review/fixtures/sum-helper.digest-mismatch.json",
@@ -29,6 +432,19 @@
     "docs/ops/cross-review/fixtures/sum-helper.revisions-exhausted.json",
     "docs/ops/cross-review/fixtures/sum-helper.task.json",
     "docs/ops/cross-review/packages/router-full-catalog-diagnostic.task.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change-round0.diff",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change-round1.diff",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/change.diff",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/exchange.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/package-round0.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/package-round1.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-prompt.md",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round0.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round1.events.jsonl",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/review-round1.stderr.txt",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/verdict-round0.json",
+    "docs/ops/cross-review/packages/router-full-catalog-diagnostic/verdict-round1.json",
     "docs/ops/router-full-catalog-diagnostic/README.md",
     "docs/ops/router-full-catalog-diagnostic/development-v0.md",
     "docs/ops/router-full-catalog-diagnostic/development-v0.summary.json",
@@ -40,20 +456,5 @@
     "scripts/report-router-full-catalog.mjs",
     "tests/crossReview.test.mjs",
     "tests/routerFullCatalogDiagnostic.test.mjs"
-  ],
-  "testResults": [
-    {
-      "command": "node --import tsx --test tests/routerFullCatalogDiagnostic.test.mjs tests/crossReview.test.mjs tests/routerDecision.test.mjs tests/routerCandidates.test.mjs tests/routerSelection.test.mjs tests/routerScorePolicy.test.mjs tests/autoFallbackGate.test.mjs tests/automaticFallbackBoundary.test.mjs 2>&1 | grep -E '^# (pass|fail)'",
-      "passed": true,
-      "output": "# pass 111\n# fail 0",
-      "durationMs": 1604
-    }
-  ],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand review-prompt.md to the codex reviewer; its verdict must name digest sha256:c4c9caaf7b5e848409befb3e283c5cf32660c366728d15f17bbd6ba0dadbd932",
-  "status": "awaiting_review",
-  "failure": null,
-  "holdReason": null,
-  "producedAt": "2026-09-09T05:52:36.732Z"
+  ]
 }

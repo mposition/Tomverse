@@ -1,6 +1,6 @@
 # Full-catalogue routing diagnostic — router-eval-development-v0 (adopted items)
 
-Diagnostic router-full-catalog-diagnostic-v1; Router {"decision":"router-decision-v1","taskProfile":"task-profile-v2","candidates":"router-candidates-v1","selection":"router-selection-v2","scorePolicy":"router-score-policy-v2"}.
+Diagnostic router-full-catalog-diagnostic-v3; Router {"decision":"router-decision-v1","taskProfile":"task-profile-v2","candidates":"router-candidates-v1","selection":"router-selection-v2","scorePolicy":"router-score-policy-v2"}.
 Catalogue: 42 models, 31 enabled (lib/models.ts (static catalogue, not the runtime registry)). Plan Pro; routed under gpt-5-6-luna's cap of 128000 output tokens; no sticky state; signals supplied: none (cost derived from the pricing registry); fallback flag off.
 Tie-break order: quality_band > health_degraded > expected_total_cost > recent_success_rate > ttft_p95 > model_id.
 
@@ -104,6 +104,15 @@ Tie-break order: quality_band > health_degraded > expected_total_cost > recent_s
 |---|---|
 | flag_off | 210 |
 
+### Fallback reachable, as far as can be decided offline
+
+Reachable means the gate allows a fallback, decideFallback (the product's function, under the stated failure hypothesis) names a candidate, and dispatch fits that candidate under its own reservation; the product tries that one candidate and no other. A refusal names the step that said no. What only a real dispatch can refuse (search path, budget, registry row, provider hold) is listed per item as undecided and is not folded into these counts.
+
+| as deployed | items | | with the flag on | items |
+|---|---|---|---|---|
+| gate:flag_off | 210 | | reachable | 165 |
+|  |  | | gate:web_search | 45 |
+
 ## Improvement and evaluation candidates
 
 Offline work this diagnostic points at. None of it changes routing on its own.
@@ -143,215 +152,215 @@ Offline work this diagnostic points at. None of it changes routing on its own.
 
 ## Per item
 
-| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | first fallback |
-|---|---|---|---|---|---|---|---|---|
-| general-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| general-en-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-001 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-004 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| writing-ko-005 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-009 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-012 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| writing-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-002 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-003 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-005 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-006 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| coding-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-009 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-011 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-013 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-en-014 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-010 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-012 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| analysis-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-en-002 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-003 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-en-005 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-en-007 | research (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-en-009 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-011 | documents (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-en-013 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-014 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-en-015 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| document-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-003 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| document-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-012 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-013 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-016 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-017 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-018 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-019 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-020 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-021 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-022 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-023 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-en-024 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-025 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-026 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-027 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-en-028 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-en-029 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-001 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-002 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-003 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-004 | multilingual (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| translation-ko-en-005 | multilingual (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| translation-ko-en-006 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-007 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-008 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-009 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-010 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-011 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-012 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-013 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| translation-ko-en-014 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-001 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-002 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| writing-en-003 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-004 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| writing-en-005 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-006 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-007 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-011 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| writing-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-013 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| writing-en-014 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-006 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| analysis-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-010 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-011 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-013 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| analysis-en-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-003 | documents (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| document-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-010 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-012 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| document-en-013 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| document-en-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-ko-002 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-ko-004 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-005 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-006 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-007 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-008 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-009 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-011 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-012 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| current-ko-014 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| current-ko-015 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| coding-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-002 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-008 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| coding-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-012 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| coding-ko-013 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| coding-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-002 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-006 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-008 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-ko-009 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-ko-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-ko-011 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (flag_off) |
-| long-ko-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
-| long-ko-015 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (flag_off) |
+| item | kind (conf) | primary | decided by | reason | eligible | rejected | router→dispatch output cap | fallback candidate | reachable as deployed | reachable with flag on |
+|---|---|---|---|---|---|---|---|---|---|---|
+| general-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| general-en-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-001 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-004 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| writing-ko-005 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-009 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-012 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| writing-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-002 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-003 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-005 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-006 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| coding-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-009 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-011 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-013 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-en-014 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-010 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-012 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| analysis-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-en-002 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-003 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-en-005 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-en-007 | research (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-en-009 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-011 | documents (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-en-013 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-014 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-en-015 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| document-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-003 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| document-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-012 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-013 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-016 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-017 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-018 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-019 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-020 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-021 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-022 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-023 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-en-024 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-025 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-026 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-027 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-en-028 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-en-029 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-001 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-002 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-003 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-004 | multilingual (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| translation-ko-en-005 | multilingual (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| translation-ko-en-006 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-007 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-008 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-009 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-010 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-011 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-012 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-013 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| translation-ko-en-014 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-001 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-002 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| writing-en-003 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-004 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| writing-en-005 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-006 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-007 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-010 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-011 | writing (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| writing-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-013 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| writing-en-014 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-006 | coding (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| analysis-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-010 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-011 | documents (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-013 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| analysis-en-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-002 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-003 | documents (weak) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| document-en-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-008 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-010 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-012 | multilingual (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| document-en-013 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| document-en-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-ko-002 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-ko-004 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-005 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-006 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-007 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-008 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-009 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-011 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-012 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| current-ko-014 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| current-ko-015 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| coding-ko-001 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-002 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-006 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-008 | writing (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-009 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| coding-ko-011 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-012 | coding (weak) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| coding-ko-013 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| coding-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-002 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-ko-003 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-004 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-005 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-006 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-ko-007 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-008 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-ko-009 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-ko-010 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-ko-011 | general (none) | gpt-5-6-luna | expected_total_cost | fallback_order | 5 | 37 | 128000→128000 | gpt-5-6-terra (fitted) | gate:flag_off | gate:web_search |
+| long-ko-012 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-013 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-014 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
+| long-ko-015 | general (none) | deepseek-v4-flash | expected_total_cost | fallback_order | 15 | 27 | 128000→384000 (differs) | deepseek-v4-pro (fitted) | gate:flag_off | deepseek-v4-pro (fitted) |
