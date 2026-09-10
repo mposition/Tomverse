@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
+import { identifyChatCaller } from "@/lib/chatSecurity";
 
 import { authOptions } from "@/lib/auth";
 import {
@@ -62,11 +63,18 @@ import { normalizeVoiceTranscript } from "@/lib/voiceTranscript";
  * (docs/policy/voice-input.md §11.2). `tests/voiceInputPrivacy.test.mjs`
  * reads this file and fails if that changes.
  *
- * ## Signed-in only
+ * ## Who may reach it
  *
- * docs/policy/voice-input.md §4, decided in `lib/voiceInputAccess.ts`. A guest
- * reaching this endpoint gets 401 with its own code, so the composer can offer
- * the one action that changes the answer rather than a generic failure.
+ * docs/policy/voice-input.md §4, decided in `lib/voiceInputAccess.ts`. Guests
+ * included since 2026-09-10, on the same limits as an account. The subject a
+ * request is booked against is `identifyChatCaller`'s `subjectKey`, so a guest
+ * spends a guest's budget rather than a shared one, and the signed guest
+ * cookie is issued on the way out of every exit path -- a refusal included,
+ * because a refused guest is exactly the caller whose next attempt has to land
+ * on the same subject.
+ *
+ * `VOICE_AUTHENTICATION_REQUIRED` remains for the condition it always named
+ * and no longer overlaps with: no resolvable subject at all.
  */
 
 const jsonError = (code: string, status: number, retryAfter?: number) =>
@@ -180,6 +188,22 @@ const report = (fields: {
 
 export async function POST(request: Request) {
   let reservation: VoiceBudgetReservation | null = null;
+  /*
+    The guest cookie this request minted, if it minted one.
+
+    Declared out here rather than beside the subject because the `catch` below
+    answers too, and a refusal that drops the cookie is the worst version of
+    this bug: a guest refused by the rate limit would be issued a *new* id on
+    every attempt, so the very limit that refused them could never accumulate
+    and would never refuse them again. `withGuestCookie` is applied to every
+    exit, including the ones reached by throwing.
+  */
+  let guestSetCookie: string | undefined;
+  const withGuestCookie = (response: Response) => {
+    if (!guestSetCookie) return response;
+    response.headers.append("Set-Cookie", guestSetCookie);
+    return response;
+  };
   try {
     // Order matters and is the fail-closed one: the feature flag is consulted
     // before the session, so a request to a disabled feature never touches the
@@ -190,18 +214,52 @@ export async function POST(request: Request) {
       return jsonError("VOICE_INPUT_DISABLED", 503);
     }
 
+    /*
+      Who is spending, rather than who is signed in.
+
+      Guests were admitted on 2026-09-10 (docs/policy/voice-input.md §4), so the
+      subject is `identifyChatCaller`'s `subjectKey`: `user:<hash>` when a
+      session resolves, `guest:<hash>` from the signed guest cookie otherwise.
+      One name for both keeps the rate limit and the seconds budget counting the
+      same thing they always did.
+
+      `VOICE_AUTHENTICATION_REQUIRED` survives for the case it always described
+      and no longer overlaps with: no resolvable subject at all. A guest without
+      a cookie is issued one here, so in practice this refuses only a caller
+      whose cookie could not be created.
+    */
     const session = await getServerSession(authOptions);
-    const userId = session?.user?.id;
-    if (!userId) {
+    const access = identifyChatCaller(request, session?.user?.id ?? null);
+
+    /*
+      Every answer from here on carries the guest cookie, when one was just
+      minted.
+
+      Without it a guest is a new subject on every request: `identifyChatCaller`
+      would mint another id, the rate limit and the seconds budget would each
+      count to one, and the per-subject limits this feature was opened under
+      would bound nothing at all. The provider budget would still hold, so the
+      symptom would not be an unbounded bill -- it would be silence, with two
+      limits that never fire and no sign that they are not working.
+
+      A caller who already has the cookie gets no header: `setCookie` is only
+      set when the id was created in this request.
+    */
+    guestSetCookie = access.setCookie;
+    if (!access.subjectKey) {
       report({ outcome: "refused_unauthenticated" });
-      return jsonError("VOICE_AUTHENTICATION_REQUIRED", 401);
+      return withGuestCookie(jsonError("VOICE_AUTHENTICATION_REQUIRED", 401));
     }
 
     const { limits } = resolveVoiceGuardrails(process.env);
     // Request *count* is ordinary abuse protection and shares the mechanism
     // every other endpoint uses. The seconds budget below is the cost
     // guardrail and deliberately does not (docs/policy/voice-input.md §7).
-    await consumeApiRateLimit(request, userId, "voice-transcription", {
+    //
+    // The same numbers for a guest as for an account, by the 2026-09-10
+    // decision. A cleared cookie is a new subject, so what actually bounds the
+    // day is the provider budget in `reserveVoiceBudgets`, not this.
+    await consumeApiRateLimit(request, access.subjectKey, "voice-transcription", {
       minute: limits.requestsPerMinute,
       day: limits.requestsPerDay,
     });
@@ -212,13 +270,15 @@ export async function POST(request: Request) {
       .toLowerCase();
     if (!voiceClipFormatFor(declaredMediaType)) {
       report({ outcome: "refused_unsupported_type" });
-      return jsonError("VOICE_CLIP_UNSUPPORTED_TYPE", 415);
+      return withGuestCookie(jsonError("VOICE_CLIP_UNSUPPORTED_TYPE", 415));
     }
 
     const body = await readBoundedBody(request);
     if (!body.ok) {
       report({ outcome: "refused_body", providerFailure: body.code });
-      return jsonError(body.code, body.code === "VOICE_CLIP_TOO_LARGE" ? 413 : 400);
+      return withGuestCookie(
+        jsonError(body.code, body.code === "VOICE_CLIP_TOO_LARGE" ? 413 : 400)
+      );
     }
 
     // The declaration only had to agree with the bytes; the bytes decide.
@@ -228,7 +288,7 @@ export async function POST(request: Request) {
     });
     if (!inspection.ok) {
       report({ outcome: "refused_container", providerFailure: inspection.code });
-      return jsonError(inspection.code, 400);
+      return withGuestCookie(jsonError(inspection.code, 400));
     }
 
     if (
@@ -241,13 +301,16 @@ export async function POST(request: Request) {
         durationSource: inspection.durationSource,
         durationSeconds: inspection.durationSeconds,
       });
-      return jsonError("VOICE_CLIP_TOO_LONG", 413);
+      return withGuestCookie(jsonError("VOICE_CLIP_TOO_LONG", 413));
     }
 
     // Reserved before the provider call, on the honest basis: the container's
     // own length when it declared one, the per-clip ceiling when it did not.
     const reservedSeconds = voiceReservationSeconds(inspection.durationSeconds);
-    reservation = await reserveVoiceBudgets({ userId, seconds: reservedSeconds });
+    reservation = await reserveVoiceBudgets({
+      subjectKey: access.subjectKey,
+      seconds: reservedSeconds,
+    });
 
     const result = await voiceTranscriptionProvider().transcribe({
       audio: body.bytes,
@@ -295,9 +358,11 @@ export async function POST(request: Request) {
         providerStatus: result.status,
       });
       reservation = null;
-      return jsonError(
-        PROVIDER_FAILURE_CODES[result.code] || "VOICE_TRANSCRIPTION_FAILED",
-        result.code === "provider_rejected_audio" ? 422 : 502
+      return withGuestCookie(
+        jsonError(
+          PROVIDER_FAILURE_CODES[result.code] || "VOICE_TRANSCRIPTION_FAILED",
+          result.code === "provider_rejected_audio" ? 422 : 502
+        )
       );
     }
 
@@ -347,7 +412,7 @@ export async function POST(request: Request) {
         reservedSeconds,
         ...usageFields,
       });
-      return jsonError("VOICE_TRANSCRIPT_EMPTY", 422);
+      return withGuestCookie(jsonError("VOICE_TRANSCRIPT_EMPTY", 422));
     }
 
     report({
@@ -359,9 +424,8 @@ export async function POST(request: Request) {
       ...usageFields,
     });
 
-    return Response.json(
-      { transcript },
-      { headers: { "Cache-Control": "no-store" } }
+    return withGuestCookie(
+      Response.json({ transcript }, { headers: { "Cache-Control": "no-store" } })
     );
   } catch (error) {
     if (reservation) {
@@ -378,12 +442,14 @@ export async function POST(request: Request) {
     }
     if (error instanceof VoiceBudgetError) {
       report({ outcome: "refused_budget" });
-      return jsonError(error.code, error.status, error.retryAfter);
+      return withGuestCookie(
+        jsonError(error.code, error.status, error.retryAfter)
+      );
     }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) {
       report({ outcome: "refused_rate_limit" });
-      return securityResponse;
+      return withGuestCookie(securityResponse);
     }
     // The error is reported by *name* only. A transcription failure's message
     // can carry the request that caused it, and the request is the audio.
@@ -391,6 +457,6 @@ export async function POST(request: Request) {
       outcome: "failed",
       providerFailure: error instanceof Error ? error.name : "UnknownError",
     });
-    return jsonError("VOICE_TRANSCRIPTION_FAILED", 500);
+    return withGuestCookie(jsonError("VOICE_TRANSCRIPTION_FAILED", 500));
   }
 }

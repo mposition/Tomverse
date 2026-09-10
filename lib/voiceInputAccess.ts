@@ -86,37 +86,39 @@ export const voiceInputAvailable = (input: {
 /**
  * Why a caller may not use voice input, or `null` when they may.
  *
- * ## Signed-in only, and the reason recorded rather than assumed
+ * ## Guests are admitted (2026-09-10), and the earlier reasoning is kept
  *
- * docs/policy/voice-input.md §4. Guests may attach files, so "guests are
- * anonymous" is not on its own an argument against offering them a
- * microphone — and the protections that make guest attachments safe were
- * examined rather than waved at:
+ * docs/policy/voice-input.md §4. The MVP was signed-in only, and the argument
+ * for it was not "guests are anonymous". Guests may already attach files, and
+ * the protections that make that safe were examined: a signed guest cookie
+ * identifies the subject (`access.subjectKey`), Turnstile gates the upload,
+ * and per-minute, per-day and daily-byte budgets bound how much a guest can
+ * push into object storage.
  *
- *   * a signed guest cookie identifies the subject (`access.subjectKey`),
- *   * Turnstile gates the upload,
- *   * per-minute, per-day and daily-byte budgets bound how much a guest can
- *     push into object storage.
+ * The objection was that every one of those bounds *storage*, which this
+ * product knows how to price, while transcription is a paid per-second call to
+ * a third party. A guest has no credit account to attribute that to, so
+ * admitting guests meant serving a provider call against a cookie.
  *
- * Every one of those bounds *storage*, and storage is a cost this product
- * already knows how to price. Transcription is not storage: it is a paid
- * per-second call to a third party, and this repository has no settled answer
- * for what an audio second costs a user (docs/policy/voice-input.md §6). A
- * guest has no credit account and no plan to draw that from, so admitting
- * guests would mean serving an unpriced provider call against a cookie.
+ * **The product owner decided on 2026-09-10 to admit guests on the same limits
+ * as a signed-in caller.** What makes the exposure finite is not the subject
+ * budget — a cookie can be cleared, and a new one is a new subject — but the
+ * provider-wide budget beneath it: `reserveVoiceBudgets` reserves against
+ * `VOICE_PROVIDER_SECONDS_PER_DAY`/`_PER_MONTH` as well, so the day's total
+ * seconds are capped however many subjects appear.
  *
- * So the MVP is signed-in only, and this function is where that decision is
- * written down instead of being inferred from an `isGuestMode` check at a
- * render site. When §6 is settled, guests become a policy change here rather
- * than an edit spread across the composer and the route.
+ * **What that leaves is a denial-of-budget risk rather than an unbounded
+ * bill**, and it is written here because it is the part the change does not
+ * solve: a script cycling cookies can spend the day's provider budget and
+ * leave real callers refused. Turnstile is the protection that would answer
+ * it, and guest voice does not have it yet (§4).
  *
- * ## Plan is deliberately not a gate
+ * ## Neither plan nor sign-in is a gate
  *
- * Every signed-in plan may use it, including Free. Voice input replaces typing;
- * it does not buy a better answer, and gating it by tier would be pricing a
- * accessibility affordance. That is a product decision recorded in §4, not an
- * oversight — which is why `tier` is accepted and explicitly unused rather
- * than absent from the signature.
+ * `tier` and `isSignedIn` are both accepted and deliberately not consulted.
+ * Voice input replaces typing; it does not buy a better answer. Keeping the
+ * fields in the signature is how each decision stays visible at the place it
+ * is made, rather than becoming an absence nobody can date.
  */
 export type VoiceInputRefusal =
   | "feature_unavailable"
@@ -124,11 +126,17 @@ export type VoiceInputRefusal =
 
 export const voiceInputRefusal = (input: {
   available: boolean;
-  isSignedIn: boolean;
+  /**
+   * Accepted, and deliberately not consulted since 2026-09-10. See above.
+   *
+   * `authentication_required` stays in `VoiceInputRefusal` because the route
+   * still answers it when the feature is reached without any resolvable
+   * subject at all -- a different condition from "this caller is a guest".
+   */
+  isSignedIn?: boolean;
   /** Accepted, and deliberately not consulted. See above. */
   tier?: ModelTier | null;
 }): VoiceInputRefusal | null => {
   if (!input.available) return "feature_unavailable";
-  if (!input.isSignedIn) return "authentication_required";
   return null;
 };

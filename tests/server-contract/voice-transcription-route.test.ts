@@ -49,7 +49,8 @@ type World = {
   userId: string | null;
   rateLimitScopes: string[];
   rateLimitShouldFail: boolean;
-  reserved: Array<{ userId: string; seconds: number }>;
+  /** Who the seconds were booked against: `user:<hash>` or `guest:<hash>`. */
+  reserved: Array<{ subjectKey: string; seconds: number }>;
   /** Every settlement, with the basis the route chose for it. */
   settled: Array<{ reservedSeconds: number; basis: string; released: number }>;
   budgetShouldRefuse: boolean;
@@ -164,7 +165,7 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
     mock.module(mod("lib/voiceInputBudget.ts"), {
       namedExports: {
         ...realBudget,
-        reserveVoiceSeconds: async (input: { userId: string; seconds: number }) => {
+        reserveVoiceSeconds: async (input: { subjectKey: string; seconds: number }) => {
           if (world.budgetShouldRefuse) {
             const { VoiceBudgetError } = realBudget as {
               VoiceBudgetError: new (
@@ -183,7 +184,7 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
           }
           world.reserved.push(input);
           return {
-            userId: input.userId,
+            subjectKey: input.subjectKey,
             reservedSeconds: input.seconds,
             periodStart: new Date("2026-08-31T00:00:00.000Z"),
             settled: false,
@@ -320,15 +321,81 @@ test("a disabled feature refuses before the session or the body is touched", asy
   );
 });
 
-test("a guest is refused with its own code, not a generic failure", async () => {
+test("a guest is served, and booked against a guest subject", async () => {
+  // The reversal of 2026-09-10 (docs/policy/voice-input.md §4). This test used
+  // to fix the opposite behaviour -- 401 VOICE_AUTHENTICATION_REQUIRED -- and
+  // it is rewritten rather than deleted so the line that changed is the line
+  // that is read in review.
   reset();
   world.userId = null;
   const response = await post(WEBM_2500MS);
 
-  assert.equal(response.status, 401);
-  assert.equal((await response.json()).code, "VOICE_AUTHENTICATION_REQUIRED");
-  assert.deepEqual(world.providerCalls, []);
-  assert.deepEqual(world.reserved, []);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { transcript: "hello there" });
+  assert.equal(world.providerCalls.length, 1);
+  assert.equal(world.reserved.length, 1);
+  assert.ok(
+    world.reserved[0].subjectKey.startsWith("guest:"),
+    "a guest's seconds are booked against the guest subject, not a shared one"
+  );
+});
+
+test("a guest without a cookie is issued one, and a returning guest is not", async () => {
+  /*
+    The part that makes the per-subject limits mean anything.
+
+    Without the `Set-Cookie`, `identifyChatCaller` mints a fresh id on every
+    request: the rate limit and the seconds budget would each count to one
+    forever, and the two limits guest voice was opened under would bound
+    nothing. The failure would not look like an unbounded bill -- the provider
+    budget still holds -- it would look like silence.
+  */
+  reset();
+  world.userId = null;
+  const first = await post(WEBM_2500MS);
+  const setCookie = first.headers.get("Set-Cookie");
+  assert.ok(setCookie, "a guest with no cookie must be given one");
+  assert.ok(setCookie.startsWith("tomverse_guest="));
+  assert.ok(setCookie.includes("HttpOnly"), "the guest id is not readable by script");
+
+  const cookie = setCookie.split(";", 1)[0];
+  const second = await post(WEBM_2500MS, "audio/webm", { cookie });
+  assert.equal(
+    second.headers.get("Set-Cookie"),
+    null,
+    "a returning guest keeps the id it already has"
+  );
+  assert.equal(
+    world.reserved[1].subjectKey,
+    world.reserved[0].subjectKey,
+    "both requests spend the same guest's budget"
+  );
+});
+
+test("a refusal reached before the subject resolves carries no cookie", async () => {
+  // The flag is consulted first, deliberately: a disabled feature must not
+  // touch the session store. That also means it answers before any guest id
+  // exists, so a 503 hands out nothing.
+  reset();
+  world.userId = null;
+  world.enabled = false;
+  const response = await post(WEBM_2500MS);
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("Set-Cookie"), null);
+});
+
+test("a guest's refusal still carries the cookie it was just issued", async () => {
+  // Otherwise the very requests a guest is most likely to repeat -- a clip
+  // that was too short, a browser whose container the table does not carry --
+  // would each mint a new subject, and the limits would never accumulate.
+  reset();
+  world.userId = null;
+  const response = await post(WEBM_400MS, "audio/webm");
+
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, "VOICE_CLIP_EMPTY");
+  assert.ok(response.headers.get("Set-Cookie"));
 });
 
 // ---------------------------------------------------------------------------
@@ -449,7 +516,12 @@ test("provider-reported seconds settle the reservation", async () => {
   await post(WEBM_2500MS, "audio/webm");
 
   // The container declared about 2.4s, rounded up to 3 for the reservation.
-  assert.deepEqual(world.reserved, [{ userId: "user_voice_contract", seconds: 3 }]);
+  assert.equal(world.reserved.length, 1);
+  assert.equal(world.reserved[0].seconds, 3);
+  assert.ok(
+    world.reserved[0].subjectKey.startsWith("user:"),
+    "a signed-in caller is booked against the user subject"
+  );
   assert.deepEqual(world.settled, [
     { reservedSeconds: 3, basis: "provider_seconds", released: 0 },
   ]);
@@ -583,6 +655,33 @@ test("the rate limiter is consumed under the voice scope, not a chat one", async
   reset();
   await post(WEBM_2500MS, "audio/webm");
   assert.deepEqual(world.rateLimitScopes, ["voice-transcription"]);
+});
+
+test("a rate-limited guest still gets the cookie, and a refused budget too", async () => {
+  /*
+    The two refusals that are thrown rather than returned, and the ones a guest
+    is most likely to hit twice in a row.
+
+    Dropping the cookie here is worse than dropping it anywhere else: the
+    caller would be a new subject on the next attempt, so the limit that just
+    refused them would start again from zero and never refuse them again. Both
+    paths leave through `catch`, which is why the cookie carrier is declared
+    outside the `try`.
+  */
+  reset();
+  world.userId = null;
+  world.rateLimitShouldFail = true;
+  const limited = await post(WEBM_2500MS, "audio/webm");
+  assert.equal(limited.status, 429);
+  assert.ok(limited.headers.get("Set-Cookie"), "a rate-limited guest keeps its id");
+
+  reset();
+  world.userId = null;
+  world.budgetShouldRefuse = true;
+  const overBudget = await post(WEBM_2500MS, "audio/webm");
+  assert.equal(overBudget.status, 429);
+  assert.equal((await overBudget.json()).code, "VOICE_OPERATIONAL_LIMIT_REACHED");
+  assert.ok(overBudget.headers.get("Set-Cookie"), "an over-budget guest keeps its id");
 });
 
 test("a rate-limited caller is refused before the provider", async () => {
