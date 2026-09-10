@@ -1,6 +1,17 @@
 # judged-v3 게이트 전환 — 승인 가능한 결정안
 
-**승인 대기 문서다. 코드를 연결하지 않았고, 임계값을 정하지 않았다.** 이 문서는
+> **전환 범위와 arm 집계 구현이 승인되었습니다 — mposition, 2026-09-10.**
+> 승인된 것은 **T1 · T2 · T5 · T6 · T7 · T8**과 §3.6의 사전 확정 조건이다.
+> **숫자는 승인되지 않았다** — T3a(aggregate 상한 둘) · T3b(`maxLanguageArmGap`) ·
+> T3c(`maxTaskTypeArmShortfall`) · T4(음성 부분집합)는 별도로 정한다.
+>
+> **승인 직후 착수한 것: arm 단위 judged 집계(T7).**
+> `lib/aiReviewJudgedRunAggregate.ts`가 `byLanguage`·`byTaskType`를 내고,
+> `npm run report:ai-review-judged-run`이 그것을 출력한다. **게이트 연결은 하지
+> 않았다** — T2의 새 threshold 집합은 T3a의 값이 있어야 만들 수 있고, 그 값은 이
+> 승인에 없다. 그래서 `check:ai-review-eval`은 **지금도 키워드 수치를 읽는다.**
+
+**코드는 게이트에 연결되지 않았고, 임계값은 정해지지 않았다.** 이 문서는
 `.github/audits/ai-review-judged-gate-transition-2026-09-09.md`(설계)와
 2026-09-09에 승인된 두 지표 정의 위에, **사람이 서명할 수 있는 형태로** 전환 범위·
 임계값 선택 자료·전환 중 동작을 정리한다.
@@ -65,9 +76,13 @@ arm별로 읽어야 한다** — §2가 그것이 없다고 적는다.
 
 **이 셋이 없으면 전환은 승인돼도 실행되지 않는다.** 승인 항목이 아니라 작업 항목이다.
 
-1. **arm 단위 judged 집계.** `aggregateJudgedRun()`은 aggregate만 낸다
-   (`byLanguage`·`byTaskType` 없음). 게이트의 언어 격차·과제 arm 규칙이 7·8번을
-   읽으려면 arm별 분모·분자가 필요하고, 그것은 구현 작업이다.
+1. ~~**arm 단위 judged 집계.**~~ **완료**(2026-09-10). `aggregateJudgedRun()`이
+   `byLanguage`·`byTaskType`를 낸다. **arm은 자기 case로 계산하며 aggregate를
+   나눠 쓰지 않는다** — 나누면 어느 모집단에 대한 비율도 아닌 숫자가 된다.
+   case가 없는 arm은 0의 행이 아니라 **생략**한다(없는 arm과 아무것도 재지 못한
+   arm은 다른 사실이고, 그 구분은 게이트의 arm 적용 범위 규칙이 할 일이다).
+   **격차·shortfall은 계산하지 않는다** — 그 숫자가 승인되지 않았고, 승인되지 않은
+   비교를 실제 수치 옆에 출력하면 판정처럼 읽힌다.
 2. **judged 증거의 표본.** §3의 표가 말하는 수는 **사람이 판정한 case 수**다.
 3. **음성 phenomenon case.** `inventedFindingRateNegativeSubset`에 임계값을 걸 경우
    `decision-v2`에는 해당 case가 **0건**이므로 어떤 실행도 통과할 수 없다. 부분집합에

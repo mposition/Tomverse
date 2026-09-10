@@ -37,6 +37,8 @@ const REQ = "deadline";
  */
 const buildCase = ({
   id,
+  language = "ko",
+  taskType = "safety_sensitive",
   phenomenon = "omission",
   gold = { missingPoints: [{ requirementId: REQ, targetLabel: "c" }] },
   goldCompleteness = { missingPoints: true },
@@ -110,8 +112,8 @@ const buildCase = ({
     // validator, so a fixture that skips the rest is not a dataset.
     datasetCase: {
       id,
-      language: "ko",
-      taskType: "safety_sensitive",
+      language,
+      taskType,
       phenomenon,
       mode: "balanced",
       question: sourceCase.question,
@@ -635,5 +637,114 @@ test("inventedFindingRate counts cases carrying a finding judged invented", asyn
     assert.equal(subset.denominator, 0);
     assert.equal(subset.rate, null);
     assert.match(subset.insufficientEvidence, /denominator is zero/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Arms
+//
+// The gate applies the language-gap rule and the task-type shortfall rule to
+// every metric it reads, so a judged metric reaching the gate needs per-arm
+// numbers to exist. These cover the part that can go wrong silently: an arm
+// computed by dividing the aggregate rather than over its own cases.
+// ---------------------------------------------------------------------------
+
+test("arms are computed over their own cases, not split out of the aggregate", async (t) => {
+  await t.test("each arm carries its own numerator and denominator", () => {
+    // ko: one found, one silent -> 1/2. en: one found -> 0/1.
+    const built = [
+      found("j1", { language: "ko" }),
+      silent("j2", { language: "ko" }),
+      found("j3", { language: "en" }),
+    ];
+    const result = run(built);
+    assert.equal(result.aggregable, true, JSON.stringify(result.blockers));
+    assert.equal(result.metrics.missedEveryPlantedIssueRate.numerator, 1);
+    assert.equal(result.metrics.missedEveryPlantedIssueRate.denominator, 3);
+
+    const byArm = new Map(result.byLanguage.map((arm) => [arm.arm, arm]));
+    assert.deepEqual([...byArm.keys()], ["ko", "en"]);
+    assert.equal(byArm.get("ko").cases, 2);
+    assert.equal(byArm.get("ko").metrics.missedEveryPlantedIssueRate.numerator, 1);
+    assert.equal(byArm.get("ko").metrics.missedEveryPlantedIssueRate.denominator, 2);
+    assert.equal(byArm.get("en").cases, 1);
+    assert.equal(byArm.get("en").metrics.missedEveryPlantedIssueRate.numerator, 0);
+    assert.equal(byArm.get("en").metrics.missedEveryPlantedIssueRate.denominator, 1);
+    // Splitting the aggregate would have given ko 2/3 of 1 and en 1/3 of 1.
+    // Every arm denominator sums to the aggregate's only because every case
+    // here is in the denominator; the numbers above are each arm's own.
+  });
+
+  await t.test("an arm with no measurable case reads insufficient evidence", () => {
+    // The English arm holds one negative case, so it has cases but nothing in
+    // the missed-everything denominator.
+    const built = [
+      found("j4", { language: "ko" }),
+      silent("j5", {
+        language: "en",
+        phenomenon: "no_issue",
+        gold: {},
+        goldCompleteness: {},
+      }),
+    ];
+    const result = run(built);
+    assert.equal(result.aggregable, true, JSON.stringify(result.blockers));
+    const english = result.byLanguage.find((arm) => arm.arm === "en");
+    assert.equal(english.cases, 1);
+    const metric = english.metrics.missedEveryPlantedIssueRate;
+    assert.equal(metric.denominator, 0);
+    assert.equal(metric.rate, null);
+    assert.match(metric.insufficientEvidence, /denominator is zero/);
+    // And that arm DOES have a negative subset, where the aggregate's is 1/1.
+    assert.equal(english.metrics.inventedFindingRateNegativeSubset.denominator, 1);
+  });
+
+  await t.test("an arm the run holds no case in is omitted, not zeroed", () => {
+    const built = [found("j6", { taskType: "planning_decision" })];
+    const result = run(built);
+    assert.equal(result.aggregable, true, JSON.stringify(result.blockers));
+    assert.deepEqual(
+      result.byTaskType.map((arm) => arm.arm),
+      ["planning_decision"]
+    );
+    assert.deepEqual(result.byLanguage.map((arm) => arm.arm), ["ko"]);
+  });
+
+  await t.test("task-type arms are reported in the vocabulary's order", () => {
+    const built = [
+      found("j7", { taskType: "business_writing" }),
+      found("j8", { taskType: "factual_current_information" }),
+    ];
+    const result = run(built);
+    assert.equal(result.aggregable, true, JSON.stringify(result.blockers));
+    // `factual_current_information` comes first in AI_REVIEW_EVAL_TASK_TYPES,
+    // whatever order the cases arrived in.
+    assert.deepEqual(
+      result.byTaskType.map((arm) => arm.arm),
+      ["factual_current_information", "business_writing"]
+    );
+  });
+
+  await t.test("nothing here applies a gap or a shortfall", () => {
+    // Two arms as far apart as the fixture can make them. No threshold is
+    // approved, so the aggregator reports and does not judge.
+    const built = [
+      found("j9", { language: "ko" }),
+      silent("j10", { language: "en" }),
+    ];
+    const result = run(built);
+    assert.equal(result.aggregable, true, JSON.stringify(result.blockers));
+    assert.equal(
+      result.byLanguage.find((arm) => arm.arm === "ko").metrics
+        .missedEveryPlantedIssueRate.rate,
+      0
+    );
+    assert.equal(
+      result.byLanguage.find((arm) => arm.arm === "en").metrics
+        .missedEveryPlantedIssueRate.rate,
+      1
+    );
+    assert.ok(!("gap" in result), "the aggregator must not compute an arm gap");
+    assert.ok(!("shortfalls" in result));
   });
 });

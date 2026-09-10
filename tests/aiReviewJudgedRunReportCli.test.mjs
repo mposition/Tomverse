@@ -43,7 +43,14 @@ const REQ = "deadline";
  * `reports` false means the reviewer said nothing, which is what makes a case
  * land in the missed-everything numerator.
  */
-const buildCase = ({ id, reports = true, phenomenon = "omission", invents = false }) => {
+const buildCase = ({
+  id,
+  reports = true,
+  phenomenon = "omission",
+  invents = false,
+  language = "ko",
+  taskType = "safety_sensitive",
+}) => {
   const responses = [
     { label: "a", modelId: "test", provider: "test", content: `answer a of ${id}` },
     { label: "b", modelId: "test", provider: "test", content: `answer b of ${id}` },
@@ -131,8 +138,8 @@ const buildCase = ({ id, reports = true, phenomenon = "omission", invents = fals
     journalEntry: { caseId: id, failure: null, costUsd: 0, observation },
     datasetCase: {
       id,
-      language: "ko",
-      taskType: "safety_sensitive",
+      language,
+      taskType,
       phenomenon,
       mode: "balanced",
       question,
@@ -294,6 +301,36 @@ test("a stored run reads back to the same numbers the core produces", () => {
     // Report only: nothing written, no gate.
     assert.deepEqual(fingerprint(root), before);
     assert.match(out, /not wired to any approval gate/);
+  });
+});
+
+test("the report prints each arm's own numbers", () => {
+  // The gate reads every metric per arm, so the report has to show them. ko
+  // holds a found case and a silent one; en holds a found case only.
+  const built = [
+    buildCase({ id: "a1", language: "ko" }),
+    buildCase({ id: "a2", language: "ko", reports: false }),
+    buildCase({ id: "a3", language: "en", taskType: "planning_decision" }),
+  ];
+  withRun(built, {}, (root) => {
+    const result = report(root);
+    assert.equal(result.status, 0, result.stderr);
+    const out = result.stdout;
+
+    const section = (title, next) =>
+      new RegExp(`=== ${title} ===([\\s\\S]*?)(?:=== ${next} ===|$)`).exec(out)?.[1] ?? "";
+    const byLanguage = section("by language", "by task type");
+    assert.match(byLanguage, /^ {2}ko {2}\(2 case\(s\)\)$/m);
+    assert.match(byLanguage, /ko {2}\(2 case\(s\)\)[\s\S]*?1\/2 = 0\.500/);
+    assert.match(byLanguage, /^ {2}en {2}\(1 case\(s\)\)$/m);
+    assert.match(byLanguage, /en {2}\(1 case\(s\)\)[\s\S]*?0\/1 = 0\.000/);
+
+    const byTaskType = section("by task type", "$NOTHING");
+    assert.match(byTaskType, /planning_decision {2}\(1 case\(s\)\)/);
+    assert.match(byTaskType, /safety_sensitive {2}\(2 case\(s\)\)/);
+
+    // And it says it is not applying the unapproved arm thresholds.
+    assert.match(out, /No\n {2}gap or shortfall is applied: those thresholds are not approved\./);
   });
 });
 
