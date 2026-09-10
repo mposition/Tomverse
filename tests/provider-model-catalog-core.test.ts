@@ -4,6 +4,7 @@ import {
   AUTO_DISABLE_REASON,
   catalogNextCursor,
   isLikelyChatModelId,
+  isReviewableProviderModelId,
   missingConfirmationRuns,
   parseProviderCatalogResponse,
   planCatalogReconciliation,
@@ -17,17 +18,25 @@ import {
   PROVIDER_API_KEY_ENV_NAMES,
 } from "../lib/modelRegistryShared.ts";
 
-test("parses OpenAI-compatible model lists and excludes non-chat products", () => {
+test("parses chat and image generation models but excludes unsupported products", () => {
   assert.deepEqual(
     parseProviderCatalogResponse("openai", {
       data: [
         { id: "gpt-5.5", owned_by: "openai" },
+        { id: "gpt-image-2", owned_by: "openai" },
+        { id: "dall-e-3", owned_by: "openai" },
         { id: "text-embedding-4-large", owned_by: "openai" },
         { id: "whisper-2", owned_by: "openai" },
       ],
     }).map((model) => model.id),
-    ["gpt-5.5"]
+    ["gpt-5.5", "gpt-image-2", "dall-e-3"]
   );
+});
+
+test("classifies image generation separately from chat eligibility", () => {
+  assert.equal(isLikelyChatModelId("openai", "gpt-image-2"), false);
+  assert.equal(isReviewableProviderModelId("openai", "gpt-image-2"), true);
+  assert.equal(isReviewableProviderModelId("openai", "text-embedding-4-large"), false);
 });
 
 test("treats provider aliases as available model IDs", () => {
@@ -60,6 +69,21 @@ test("uses Gemini base model IDs and only keeps generateContent models", () => {
   assert.equal(models.length, 1);
   assert.equal(models[0].id, "gemini-3.5-flash");
   assert.equal(models[0].displayName, "Gemini 3.5 Flash");
+});
+
+test("keeps Google image models whose endpoint method is not generateContent", () => {
+  const models = parseProviderCatalogResponse("google", {
+    models: [
+      {
+        name: "models/imagen-5.0-generate-001",
+        baseModelId: "imagen-5.0-generate-001",
+        supportedGenerationMethods: ["predict"],
+      },
+    ],
+  });
+  assert.equal(models.length, 1);
+  assert.equal(models[0].id, "imagen-5.0-generate-001");
+  assert.equal(models[0].metadata.product, "image_generation");
 });
 
 test("preserves the exact 2026-08-01 provider API model strings", () => {

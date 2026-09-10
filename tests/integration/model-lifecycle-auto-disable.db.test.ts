@@ -338,6 +338,20 @@ test("a model the catalogue already serves opens nothing, whichever provider lis
   assert.equal(await prisma.modelLifecycleWorkItem.count(), 0);
 });
 
+test("the image registry prevents duplicates but a new image model opens review", async () => {
+  await recordDiscoveredWorkItems({
+    observed: [
+      { provider: "openai", apiModel: "gpt-image-2" },
+      { provider: "openai", apiModel: "gpt-image-3" },
+    ],
+  });
+
+  const items = await prisma.modelLifecycleWorkItem.findMany({
+    select: { apiModel: true },
+  });
+  assert.deepEqual(items, [{ apiModel: "gpt-image-3" }]);
+});
+
 test("a provider losing its whole lineup is held, and opens nothing", async () => {
   const first = await seedModel("llama-4-scout-17b");
   const second = await seedModel("llama-3-3-70b");
