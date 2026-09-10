@@ -458,6 +458,44 @@ US host의 401 네 건이 모두 같은 본문입니다.
 `feature.voiceInputEnabled`를 `'false'`로 바꾸거나 `VOICE_INPUT_KILL_SWITCH`를
 설정하는 것이며, 둘 다 되돌릴 수 있는 조작입니다.
 
+### 10-7. 배제된 조치 하나 — 인프라 지역 변경
+
+**Tomverse의 배포 지역(Railway)을 미국으로 옮겨도 이 401은 바뀌지 않습니다.**
+같은 공식 문서가 명시합니다.
+
+> *"Data residency does not apply to: (1) any transmission or storage of
+> Customer Content outside of the selected region caused by the location of an
+> End User or Customer's infrastructure when accessing the services."*
+
+즉 판정 기준은 **요청이 어디서 출발하는가**가 아니라 **key가 속한 조직이
+프로비저닝돼 있는가**입니다. 관측도 이와 일치합니다 — Railway
+`asia-southeast1-eqsg3a` 컨테이너와 운영자 로컬 PC라는 서로 다른 두 위치에서
+동일한 `incorrect_hostname`이 나왔습니다.
+
+**그리고 대가가 있습니다.** staging은 단일 지역 1 replica이고 multi-region은 상위
+플랜입니다. 지역을 옮기면 한국·호주 사용자 지연과 DB 왕복이 모두 늘어나며,
+Voice 오류는 그대로입니다. **이 시도를 하지 않는 것이 이 절의 목적입니다.**
+
+### 10-8. 갈래를 고르기 전에 볼 화면 하나
+
+문서가 자격 취득 경로를 이렇게 적습니다.
+
+> *"To configure data residency for regional storage, select the appropriate
+> region from the dropdown when creating a new project."*
+> *"Contact our sales team to see if you're eligible for using data residency
+> controls."*
+
+**OpenAI 대시보드의 새 프로젝트 생성 화면에 region 드롭다운이 있는지, 거기에
+United States가 있는지**가 §10-6의 갈래 **가**의 비용을 정합니다.
+
+- 드롭다운에 United States가 있으면 조직은 이미 자격이 있고, US residency
+  프로젝트를 만들어 그 key로 재시험하면 됩니다.
+- 없으면 sales 문의가 유일한 경로이고, 실을 근거는 §10-2의 표와
+  `incorrect_hostname` 원문입니다.
+
+**`Tomverse Voice`가 `GLOBAL`로 만들어진 이유는 미관측입니다** — 드롭다운이
+없었는지, 있었는데 고르지 않았는지 이 저장소는 알 수 없습니다.
+
 ---
 
 ## 판정과 서명 (사람이 채웁니다)
