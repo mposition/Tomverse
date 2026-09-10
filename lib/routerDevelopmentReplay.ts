@@ -7,7 +7,7 @@ import { selectRouterModel, type RouterSelectionResult } from "./routerSelection
 import { buildTaskProfile, TASK_KINDS, type TaskKind, type TaskProfile } from "./taskProfileCore";
 import { NO_WEB_SEARCH_BACKENDS } from "./webSearchBackends";
 import {
-  benchmarkDigest, canonicalBenchmarkJson, gradeDevelopmentAnswer, scoreDevelopmentResults,
+  benchmarkDigest, canonicalBenchmarkJson, gradeDevelopmentAnswer, isBenchmarkDigest, parseDevelopmentCorpus, scoreDevelopmentResults,
   strictBenchmarkObject, validateDevelopmentCorpus, validateDevelopmentResults,
   type DevelopmentCorpus, type DevelopmentResultRow,
 } from "./routerDevelopmentBenchmark";
@@ -67,7 +67,7 @@ type ReplayChoice = {
   rowId: string | null;
   reason: string;
   available: boolean;
-  unavailableReason: "no_router_candidate" | "benchmark_refused" | "not_selected_for_collection" | "not_observed" | "generation_contract_mismatch" | null;
+  unavailableReason: "no_router_candidate" | "benchmark_refused" | "not_selected_for_collection" | "not_observed" | null;
   contractDigest: string | null;
   outcome: ObservedOutcome | null;
   failureCode: string | null;
@@ -147,6 +147,7 @@ function productCompatibility(row: PlannedRow | undefined, profile: TaskProfile)
 
 export function replayDevelopment(input: {
   corpus: DevelopmentCorpus;
+  corpusText: string;
   models: readonly AiModel[];
   manifest: unknown;
   answers: unknown;
@@ -155,6 +156,8 @@ export function replayDevelopment(input: {
   replaySource: DevelopmentSource;
 }) {
   const corpus = validateDevelopmentCorpus(input.corpus);
+  if (typeof input.corpusText !== "string" || !isBenchmarkDigest(input.observationSource.corpusFileDigest) || benchmarkDigest(input.corpusText) !== input.observationSource.corpusFileDigest) throw new Error("replay_corpus_file_digest_mismatch");
+  if (canonicalBenchmarkJson(parseDevelopmentCorpus(input.corpusText)) !== canonicalBenchmarkJson(corpus)) throw new Error("replay_corpus_text_mismatch");
   const wrapper = strictBenchmarkObject(input.manifest, ["schemaVersion", "purpose", "status", "plan", "collectorSource", "selectedRowIds", "calls", "limits", "assumptions", "totalReservedMicroUsd", "completionPossibleWithinLimits", "manifestDigest"], "replay_manifest");
   if (input.observationSource.benchmark.dirty || input.observationSource.collector.dirty || input.observationSource.benchmark.commit !== input.observationSource.collector.commit) throw new Error("replay_observation_source_invalid");
   const plan = validateDevelopmentPlan(wrapper.plan, { corpus, models: input.models, source: input.observationSource.benchmark });
@@ -193,7 +196,8 @@ export function replayDevelopment(input: {
       const model = input.models.find((entry) => entry.id === modelId)!;
       const expected = replayGenerationContract(row, getModelGenerationSettings(model));
       const contract = replayGenerationContract(row, call.settings);
-      if (call.reserve.outputCapTokens !== expected.maxOutputTokens || replayContractMismatches(expected, contract).length) return { ...choice, unavailableReason: "generation_contract_mismatch" };
+      // Manifest reconstruction already checked these fields; a later contradiction is an invariant failure, never an excluded observation.
+      if (call.reserve.outputCapTokens !== expected.maxOutputTokens || replayContractMismatches(expected, contract).length) throw new Error("replay_generation_contract_invariant");
       choice.contractDigest = benchmarkDigest(canonicalBenchmarkJson(contract));
       const observed = observedByRow.get(row.rowId);
       if (!observed) return { ...choice, unavailableReason: "not_observed" };

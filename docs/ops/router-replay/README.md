@@ -71,7 +71,8 @@ turn development fixtures into a blind or human-adopted decision set.
 `benchmarkDomain` compares saved answers for the same case while requiring
 each selected model's observation to match its own frozen benchmark prompt,
 provider/API identity, cap, and settings. It does not require different models
-to have identical API names or output caps. Missing or incompatible
+to have identical API names or output caps. Tampered manifests, API identities,
+settings, or caps reject the entire input; selected models without valid collected
 observations are unavailable, not losses. Acquisition failures remain separate
 from incorrect returned answers.
 Corrected, regressed, unchanged, and unavailable counts must be read with their

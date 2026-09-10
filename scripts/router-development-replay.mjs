@@ -64,7 +64,7 @@ function main() {
   const answersText = readBoundedText(options.get("answers"));
   const candidateText = readBoundedText(options.get("candidate"), DEVELOPMENT_LIMITS.corpusBytes);
   const report = replayDevelopment({
-    corpus: parseDevelopmentCorpus(current[REPLAY_CORPUS_PATH]), models: AVAILABLE_MODELS,
+    corpus: parseDevelopmentCorpus(current[REPLAY_CORPUS_PATH]), corpusText: current[REPLAY_CORPUS_PATH], models: AVAILABLE_MODELS,
     manifest: parseBenchmarkJson(manifestText), answers: parseBenchmarkJson(answersText), candidate: parseBenchmarkJson(candidateText),
     observationSource, replaySource,
   });

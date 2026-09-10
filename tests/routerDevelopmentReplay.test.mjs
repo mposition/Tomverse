@@ -151,6 +151,24 @@ test("reconstruction refuses forged source, plan, API, cap, answers, duplicate a
   ]) { const input = clone(); mutate(input); assert.throws(() => replayDevelopment(input)); }
 });
 
+test("corpus file provenance binds the actual UTF-8 text and its separately parsed corpus", () => {
+  const actualText = readFileSync(new URL("../docs/ops/router-development-benchmark/development-v1.json", import.meta.url), "utf8");
+  assert.equal(fixture.corpusText, actualText);
+  assert.equal(fixture.observationSource.corpusFileDigest, benchmarkDigest(actualText));
+  assert.notEqual(fixture.observationSource.corpusFileDigest, benchmarkDigest(canonicalBenchmarkJson(fixture.corpus)));
+  for (const digest of ["not-a-sha256", "f".repeat(64), benchmarkDigest(canonicalBenchmarkJson(fixture.corpus))]) {
+    const input = clone(); input.observationSource.corpusFileDigest = digest;
+    assert.throws(() => replayDevelopment(input), /replay_corpus_file_digest_mismatch/);
+  }
+  const changedText = clone(); changedText.corpusText += "\n";
+  assert.throws(() => replayDevelopment(changedText), /replay_corpus_file_digest_mismatch/);
+  const mismatchedCorpus = clone();
+  const other = structuredClone(mismatchedCorpus.corpus); other.cases[0].prompt += " Different input.";
+  mismatchedCorpus.corpusText = JSON.stringify(other);
+  mismatchedCorpus.observationSource.corpusFileDigest = benchmarkDigest(mismatchedCorpus.corpusText);
+  assert.throws(() => replayDevelopment(mismatchedCorpus), /replay_corpus_text_mismatch/);
+});
+
 test("source compatibility permits only the exact additive replay npm script", () => {
   const original = { scripts: { existing: "unchanged" }, dependencies: { x: "1" } };
   const current = { ...original, scripts: { ...original.scripts, [REPLAY_SCRIPT_NAME]: REPLAY_SCRIPT_COMMAND } };

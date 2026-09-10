@@ -1,10 +1,11 @@
 import { readFileSync } from "node:fs";
 import { AVAILABLE_MODELS, DEFAULT_MODEL_ID } from "../lib/models.ts";
-import { benchmarkDigest, canonicalBenchmarkJson, parseDevelopmentCorpus } from "../lib/routerDevelopmentBenchmark.ts";
+import { benchmarkDigest, parseDevelopmentCorpus } from "../lib/routerDevelopmentBenchmark.ts";
 import { buildDevelopmentPlan } from "../lib/routerDevelopmentBenchmarkPlan.ts";
 import { buildCollectionManifest } from "../lib/routerDevelopmentCollector.ts";
 
-export const corpus = parseDevelopmentCorpus(readFileSync(new URL("../docs/ops/router-development-benchmark/development-v1.json", import.meta.url), "utf8"));
+export const corpusText = readFileSync(new URL("../docs/ops/router-development-benchmark/development-v1.json", import.meta.url), "utf8");
+export const corpus = parseDevelopmentCorpus(corpusText);
 export const fixtureSource = { commit: "a".repeat(40), dirty: false, files: { fixture: "b".repeat(64) } };
 export const control = { schemaVersion: "router-development-replay-policy-v1", purpose: "development-only", policyId: "default-model-control-v1", preferences: { general: [DEFAULT_MODEL_ID] }, fallback: "original-router" };
 export const identity = { ...control, policyId: "identity-control-v1", preferences: {} };
@@ -35,8 +36,8 @@ export function makeReplayFixture({ source = fixtureSource, collectorSource = so
     rows: selected.map((row) => savedReplayRow(plan, row.rowId)),
   };
   return {
-    corpus, models, manifest, answers, candidate: structuredClone(control),
-    observationSource: { benchmark: source, collector: collectorSource, corpusFileDigest: benchmarkDigest(canonicalBenchmarkJson(corpus)) },
+    corpus, corpusText, models, manifest, answers, candidate: structuredClone(control),
+    observationSource: { benchmark: source, collector: collectorSource, corpusFileDigest: benchmarkDigest(corpusText) },
     replaySource: fixtureSource,
   };
 }
