@@ -89,9 +89,13 @@ test("X3a: unjudgeable evidence is case 2', which is neither this branch nor a d
   assert.match(verdict.answer, /collect the evidence again/);
 });
 
-test("X2: a previous token rejected inside its grace window is a defect, not case 1", () => {
+test("X2: a still-valid token rejected inside its grace window is a defect, not case 1", () => {
   const verdict = classifyUndeterminedSigning(
-    caseOne({ previousAccessAxis: "rejected", graceRemainingAtRejectionSeconds: 1 })
+    caseOne({
+      previousAccessAxis: "rejected",
+      sampleValidAtRejection: true,
+      graceRemainingAtRejectionSeconds: 1,
+    })
   );
   assert.equal(verdict.case, "case_2");
   assert.equal(verdict.rollback, true);
@@ -108,6 +112,7 @@ test("X2a: a rejection after the window closed is the contract working, and neve
     const verdict = classifyUndeterminedSigning(
       caseOne({
         previousAccessAxis: "rejected",
+        sampleValidAtRejection: true,
         graceRemainingAtRejectionSeconds: remaining,
       })
     );
@@ -125,6 +130,7 @@ test("X2b: the boundary is read at the instant of the rejection, not at judgemen
   const verdict = classifyUndeterminedSigning(
     caseOne({
       previousAccessAxis: "rejected",
+      sampleValidAtRejection: true,
       graceRemainingAtRejectionSeconds: 1,
       graceWindowRemainingSeconds: -3600,
     })
@@ -143,18 +149,65 @@ test("the access axis reports observations, and every one of them is handled", (
   ]);
   for (const axis of MOBILE_ACCESS_AXIS_OBSERVATIONS) {
     const verdict = classifyUndeterminedSigning(
-      caseOne({ previousAccessAxis: axis, graceRemainingAtRejectionSeconds: 1 })
+      caseOne({
+        previousAccessAxis: axis,
+        sampleValidAtRejection: true,
+        graceRemainingAtRejectionSeconds: 1,
+      })
     );
     assert.notEqual(verdict.case, "insufficient_observation", axis);
     assert.equal(MOBILE_SIGNING_ROUND_CASES.includes(verdict.case), true, axis);
   }
 });
 
-test("X2c: a rejection with no grace state recorded is not classified either way", () => {
-  const verdict = classifyUndeterminedSigning(caseOne({ previousAccessAxis: "rejected" }));
-  assert.equal(verdict.case, "insufficient_observation");
-  assert.equal(verdict.rollback, false);
-  assert.match(verdict.answer, /grace window/);
+test("X2c: a rejection missing either observation is not classified either way", () => {
+  // Both are required and neither is inferred from the other. This module
+  // cannot see the sample, so an unasked question would be answered by
+  // default -- and the default here is a rollback.
+  const cases = [
+    [{}, ["sample", "grace"]],
+    [{ sampleValidAtRejection: true }, ["grace"]],
+    [{ graceRemainingAtRejectionSeconds: 200 }, ["sample"]],
+  ];
+  for (const [observations, expected] of cases) {
+    const verdict = classifyUndeterminedSigning(
+      caseOne({ previousAccessAxis: "rejected", ...observations })
+    );
+    assert.equal(verdict.case, "insufficient_observation", JSON.stringify(observations));
+    assert.equal(verdict.rollback, false, JSON.stringify(observations));
+    assert.equal(verdict.missingObservations.length, expected.length, JSON.stringify(verdict));
+    for (const word of expected) {
+      assert.match(verdict.missingObservations.join(" "), new RegExp(word));
+    }
+  }
+});
+
+test("X2e: a sample that had stopped being valid says nothing, whatever the window", () => {
+  // Item 7 of the runbook calls this undetermined, and the grace may well
+  // still be open -- the refusal is about the sample, not the deployment. It
+  // must not become a rollback, and the window still decides G7's wording.
+  const open = classifyUndeterminedSigning(
+    caseOne({
+      previousAccessAxis: "rejected",
+      sampleValidAtRejection: false,
+      graceRemainingAtRejectionSeconds: 200,
+      graceWindowRemainingSeconds: 120,
+    })
+  );
+  assert.equal(open.case, "case_1");
+  assert.equal(open.rollback, false);
+  assert.equal(open.previousGenerationQuestion, "undetermined");
+
+  const closed = classifyUndeterminedSigning(
+    caseOne({
+      previousAccessAxis: "rejected",
+      sampleValidAtRejection: false,
+      graceRemainingAtRejectionSeconds: 200,
+      graceWindowRemainingSeconds: 0,
+    })
+  );
+  assert.equal(closed.case, "case_1");
+  assert.equal(closed.previousGenerationQuestion, "not_applicable");
 });
 
 test("X2d: an axis reported as `rejected_while_valid` is refused, because the name is a verdict", () => {
@@ -162,7 +215,11 @@ test("X2d: an axis reported as `rejected_while_valid` is refused, because the na
   // silently reinterpreted: an observation and a verdict are asked for
   // separately.
   const verdict = classifyUndeterminedSigning(
-    caseOne({ previousAccessAxis: "rejected_while_valid", graceRemainingAtRejectionSeconds: 1 })
+    caseOne({
+      previousAccessAxis: "rejected_while_valid",
+      sampleValidAtRejection: true,
+      graceRemainingAtRejectionSeconds: 1,
+    })
   );
   assert.equal(verdict.case, "insufficient_observation");
   assert.equal(verdict.rollback, false);
@@ -199,8 +256,9 @@ test("every classification names one of the listed cases", () => {
     caseOne({ materialCheck: "mismatch_confirmed" }),
     caseOne({ materialCheck: "evidence_unjudgeable" }),
     caseOne({ materialCheck: "something else" }),
-    caseOne({ previousAccessAxis: "rejected", graceRemainingAtRejectionSeconds: 1 }),
-    caseOne({ previousAccessAxis: "rejected", graceRemainingAtRejectionSeconds: 0 }),
+    caseOne({ previousAccessAxis: "rejected", sampleValidAtRejection: true, graceRemainingAtRejectionSeconds: 1 }),
+    caseOne({ previousAccessAxis: "rejected", sampleValidAtRejection: true, graceRemainingAtRejectionSeconds: 0 }),
+    caseOne({ previousAccessAxis: "rejected", sampleValidAtRejection: false, graceRemainingAtRejectionSeconds: 1 }),
     caseOne({ previousAccessAxis: "rejected" }),
     caseOne({ previousAccessAxis: "rejected_while_valid" }),
     caseOne({ previousAccessAxis: "accepted" }),
