@@ -12,7 +12,11 @@ import {
   parseMobileRefreshToken,
 } from "../lib/mobileRefreshToken.ts";
 import { decideMobileRefresh } from "../lib/mobileRefreshRotationCore.ts";
-import { MOBILE_PREVIOUS_SIGNING_KEY_SECONDS } from "../lib/mobileAuthContract.ts";
+import {
+  MOBILE_ACCESS_TOKEN_TTL_SECONDS,
+  MOBILE_CLOCK_SKEW_SECONDS,
+  MOBILE_PREVIOUS_SIGNING_KEY_SECONDS,
+} from "../lib/mobileAuthContract.ts";
 
 /**
  * What a deployment answers when the material it holds is not the material
@@ -170,10 +174,9 @@ test("the previous signing key verifies to the last second of its grace, and not
   };
 
   // Minted late enough that its own `exp` outlives the window: otherwise the
-  // token expires first and the boundary under test is never reached. That is
-  // itself worth knowing -- the access TTL is shorter than the grace, so in a
-  // real deployment the last token the previous key signed is `expired`, not
-  // `unknown_kid`, well before +900s.
+  // token expires first and the boundary under test is never reached. The
+  // test below holds what "expires first" actually means -- it is not the
+  // TTL, and comparing two lengths does not predict the answer.
   const minted = mintMobileAccessToken(
     { ...SUBJECT, now: new Date(retiredAt.getTime() + 500 * 1_000) },
     before
@@ -188,4 +191,48 @@ test("the previous signing key verifies to the last second of its grace, and not
   assert.equal(at(MOBILE_PREVIOUS_SIGNING_KEY_SECONDS - 1).ok, true);
   assert.equal(at(MOBILE_PREVIOUS_SIGNING_KEY_SECONDS).failure, "unknown_kid");
   assert.equal(at(MOBILE_PREVIOUS_SIGNING_KEY_SECONDS + 1).failure, "unknown_kid");
+});
+
+
+test("which refusal comes back is decided by the skew and by the order of the checks", () => {
+  // Not by comparing the TTL with the grace. Two things move the answer away
+  // from that arithmetic:
+  //
+  //   * `exp` is judged against `exp + MOBILE_CLOCK_SKEW_SECONDS`, so a
+  //     600-second token is still accepted at +659s, and
+  //   * the key is looked up *before* the time claims are read, so once the
+  //     grace closes the answer is `unknown_kid` whether or not the token has
+  //     also expired.
+  //
+  // The runbook's item 7 quotes these numbers, and they hold only when the
+  // sample's `iat` and the retirement instant are the same -- which is what
+  // this test sets up, and which a real rotation does not do (section 3 has
+  // the operator date the retirement a few minutes in the past).
+  const retiredAt = new Date("2026-09-10T00:00:00.000Z");
+  const before = {
+    ...NAMES,
+    MOBILE_AUTH_SIGNING_KEYS: `sign-1:${SIGN_1}`,
+    MOBILE_AUTH_ACTIVE_SIGNING_KEY_ID: "sign-1",
+    MOBILE_AUTH_REFRESH_PEPPERS: `pep-1:${PEP_1}`,
+    MOBILE_AUTH_ACTIVE_REFRESH_PEPPER_ID: "pep-1",
+  };
+  const after = {
+    ...rolledForwardSigningOnly,
+    MOBILE_AUTH_RETIRED_SIGNING_KEYS: `sign-1@${retiredAt.toISOString()}`,
+  };
+  const minted = mintMobileAccessToken({ ...SUBJECT, now: retiredAt }, before);
+  const at = (offsetSeconds) =>
+    verifyMobileAccessTokenString(minted.token, {
+      now: new Date(retiredAt.getTime() + offsetSeconds * 1_000),
+      environment: after,
+    });
+
+  const expiresAt = MOBILE_ACCESS_TOKEN_TTL_SECONDS + MOBILE_CLOCK_SKEW_SECONDS;
+  assert.equal(expiresAt, 660);
+  assert.equal(at(MOBILE_ACCESS_TOKEN_TTL_SECONDS).ok, true);
+  assert.equal(at(expiresAt - 1).ok, true);
+  assert.equal(at(expiresAt).failure, "expired");
+  assert.equal(at(MOBILE_PREVIOUS_SIGNING_KEY_SECONDS - 1).failure, "expired");
+  // Expired *and* past the grace: the key lookup answers first.
+  assert.equal(at(MOBILE_PREVIOUS_SIGNING_KEY_SECONDS).failure, "unknown_kid");
 });
