@@ -11,6 +11,7 @@ import {
   providerCatalogHttpFailure,
   providerCatalogUrl,
   PROVIDER_CATALOG_KEY_REJECTED,
+  shouldQueueProviderCatalogObservation,
 } from "../lib/providerModelCatalogCore.ts";
 import {
   AI_PROVIDERS,
@@ -84,6 +85,44 @@ test("keeps Google image models whose endpoint method is not generateContent", (
   assert.equal(models.length, 1);
   assert.equal(models[0].id, "imagen-5.0-generate-001");
   assert.equal(models[0].metadata.product, "image_generation");
+});
+
+test("keeps prerelease observations as evidence but excludes them from review", () => {
+  const models = parseProviderCatalogResponse("google", {
+    models: [
+      {
+        name: "models/gemini-4-pro",
+        baseModelId: "gemini-4-pro",
+        supportedGenerationMethods: ["generateContent"],
+        stage: "PUBLIC_PREVIEW",
+      },
+      {
+        name: "models/gemini-4-flash",
+        baseModelId: "gemini-4-flash",
+        supportedGenerationMethods: ["generateContent"],
+        stage: "STABLE",
+      },
+      {
+        name: "models/imagen-6-beta",
+        baseModelId: "imagen-6-beta",
+        supportedGenerationMethods: ["predict"],
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    models.map((model) => ({
+      id: model.id,
+      prerelease: model.prerelease,
+      queued: shouldQueueProviderCatalogObservation(model),
+    })),
+    [
+      { id: "gemini-4-pro", prerelease: true, queued: false },
+      { id: "gemini-4-flash", prerelease: false, queued: true },
+      { id: "imagen-6-beta", prerelease: true, queued: false },
+    ]
+  );
+  assert.equal(models[0].metadata.releaseStage, "PUBLIC_PREVIEW");
 });
 
 test("preserves the exact 2026-08-01 provider API model strings", () => {

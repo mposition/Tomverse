@@ -5,6 +5,7 @@ import {
   candidateFamilyIdentity,
   candidateRepresentativeRank,
   isImageGenerationModel,
+  isPrereleaseModel,
   isSearchSpecializedModel,
   isSpecializedNonChatModel,
   modelProductSurface,
@@ -57,6 +58,33 @@ test("image generation models enter Studio review while unsupported products do 
   assert.equal(shouldQueueModelCandidate("gpt-5.6-sol"), true);
 });
 
+test("preview, beta, experimental and EAP models never enter human review", () => {
+  for (const apiModel of [
+    "gpt-5.7-preview",
+    "gemini-4-beta",
+    "grok-5.experimental",
+    "claude-opus-5-eap",
+    "gpt-image-3-preview",
+  ]) {
+    assert.equal(isPrereleaseModel(apiModel), true, apiModel);
+    assert.equal(shouldQueueModelCandidate(apiModel), false, apiModel);
+  }
+  for (const releaseStage of [
+    "PUBLIC PREVIEW",
+    "BETA",
+    "EXPERIMENTAL",
+    "EAP",
+  ]) {
+    assert.equal(
+      isPrereleaseModel("provider-model-with-stable-id", releaseStage),
+      true,
+      releaseStage
+    );
+  }
+  assert.equal(isPrereleaseModel("gpt-5.7", "stable"), false);
+  assert.equal(shouldQueueModelCandidate("gpt-image-3"), true);
+});
+
 test("a current unserved general chat model is recommended with Korean rationale", () => {
   const assessment = assessModelLifecycleItem({
     action: "add",
@@ -102,6 +130,21 @@ test("an image family already in Tomverse is a profile update, not a duplicate",
   assert.equal(assessment.priority, "no_action");
   assert.equal(assessment.kind, "image_generation");
   assert.match(assessment.analysisKo, /이미지 생성 원장/);
+});
+
+test("a legacy prerelease item is marked no-action under the stable-only policy", () => {
+  for (const apiModel of ["gpt-5.7-beta", "gpt-image-3-experimental"]) {
+    const assessment = assessModelLifecycleItem({
+      action: "add",
+      apiModel,
+      providers: ["openai"],
+      availability: "current",
+      lifecycle: null,
+      servedByTomverse: false,
+    });
+    assert.equal(assessment.priority, "no_action", apiModel);
+    assert.match(assessment.analysisKo, /후보에서 제외/);
+  }
 });
 
 test("a new Google chat model carries the Brave app-managed search requirement", () => {

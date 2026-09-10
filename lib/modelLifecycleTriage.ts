@@ -65,10 +65,21 @@ export const isDatedModelSnapshot = (apiModel: string) => {
 export const isMovingModelAlias = (apiModel: string) =>
   /(?:-|@)(?:latest|auto)$/.test(modelIdentityWithoutVendor(apiModel));
 
+const PRERELEASE_MARKER =
+  /(?:^|[-_.\s])(?:preview|beta|eap|experimental)(?:$|[-_.\s])/;
+
+/** Models that a provider has not presented as a stable production release. */
+export const isPrereleaseModel = (
+  apiModel: string,
+  releaseStage?: string | null
+) =>
+  PRERELEASE_MARKER.test(modelIdentityWithoutVendor(apiModel)) ||
+  (typeof releaseStage === "string" &&
+    PRERELEASE_MARKER.test(releaseStage.trim().toLowerCase()));
+
+/** Kept for the triage kind and existing callers; it covers every prerelease marker. */
 export const isPreviewModel = (apiModel: string) =>
-  /(?:^|[-_.])(?:preview|beta|eap|experimental)(?:$|[-_.])/.test(
-    modelIdentityWithoutVendor(apiModel)
-  );
+  isPrereleaseModel(apiModel);
 
 export const isCodeSpecializedModel = (apiModel: string) =>
   /(?:^|[-_.])(?:codex|coder|code)(?:$|[-_.])/.test(
@@ -128,9 +139,10 @@ export const candidateRepresentativeRank = (apiModel: string) => {
   return 0;
 };
 
-/** Chat and Image Studio candidates enter review; unsupported products do not. */
+/** Only stable Chat and Image Studio candidates enter review. */
 export const shouldQueueModelCandidate = (apiModel: string) =>
-  modelProductSurface(apiModel) !== "unsupported";
+  modelProductSurface(apiModel) !== "unsupported" &&
+  !isPrereleaseModel(apiModel);
 
 const providerLabel = (providers: readonly string[]) => {
   const unique = Array.from(new Set(providers.filter(Boolean)));
@@ -233,12 +245,12 @@ export const assessModelLifecycleItem = (input: {
     }
     if (isPreviewModel(input.apiModel)) {
       return {
-        priority: "low",
+        priority: "no_action",
         kind: "image_generation",
         product,
         analysisKo:
-          `${provider}에서 확인되는 미리보기 이미지 생성 모델입니다. ` +
-          "Studio 편입 전 지원 종료 조건과 이미지당 최악 비용, 품질·편집·해상도 이점을 검증해야 합니다.",
+          `${provider}에서 확인되는 미리보기·실험 단계 이미지 생성 모델입니다. ` +
+          "안정 버전만 검토하는 현재 정책에 따라 Studio 편입 후보에서 제외합니다.",
       };
     }
     return {
@@ -294,12 +306,12 @@ export const assessModelLifecycleItem = (input: {
   }
   if (isPreviewModel(input.apiModel)) {
     return {
-      priority: "low",
+      priority: "no_action",
       kind: "preview",
       product,
       analysisKo:
         `${provider}의 최신 모델 API에서 확인되지만 미리보기·실험 단계입니다. ` +
-        "안정성·가격·지원 종료 조건을 확인한 뒤 제한적으로 검토하는 편이 안전합니다." +
+        "안정 버전만 검토하는 현재 정책에 따라 모델 편입 후보에서 제외합니다." +
         googleBraveSearchNote,
     };
   }
