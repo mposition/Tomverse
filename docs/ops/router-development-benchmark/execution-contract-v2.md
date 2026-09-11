@@ -117,9 +117,9 @@ interruption proves that unknown state prevents dispatch and export; a
 synthetic length response remains held by v2 compatibility.
 Terminal-record counts include only attempts with a terminal, so the
 intent-only interruption records one dispatch intent and zero terminal
-records. The cross-run regression separately collects genuine A and B mock
-journals, verifies both, and refuses an A terminal rebound under B's contract
-even when the terminal content matches.
+records. The CLI test suite's cross-run regression separately collects genuine
+A and B mock journals, verifies both, and refuses an A terminal rebound under
+B's contract even when the terminal content matches.
 
 The mock uses a fixed clock, a plainly synthetic all-zero source commit and
 an in-memory mock approval identified as **not human spending authorization**.
