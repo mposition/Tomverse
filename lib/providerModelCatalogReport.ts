@@ -8,6 +8,7 @@ import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import {
   candidateIdentity,
+  type CandidateSuppression,
   workItemAgeDays,
 } from "@/lib/modelLifecycleWorkItemCore";
 import { modelOwnerPhrase } from "@/lib/modelOwner";
@@ -192,31 +193,39 @@ export const candidateRowsFor = (
  * can quietly widen -- which is the failure the OpenAI prefix guess taught this
  * pipeline once already.
  */
-const suppressionSummary = (discovery?: ProviderModelCatalogDiscovery) => {
+const SUPPRESSION_LABELS: Readonly<Record<CandidateSuppression, string>> = {
+  // Two reasons, one label: "this is behind something we have" reads the same
+  // whether the newer model is in the registry or arrived in the same scan.
+  superseded_by_served_version: "older generation",
+  superseded_within_scan: "older generation",
+  already_decided: "already decided",
+  already_served: "already served",
+  not_reviewable: "not reviewable",
+};
+
+export const suppressionSummary = (
+  discovery?: ProviderModelCatalogDiscovery
+) => {
   if (!discovery?.recorded || discovery.suppressed.length === 0) return "";
   const counts = new Map<string, number>();
+  // Keyed on the label rather than the reason, and built from the reason list
+  // itself: a `Record<CandidateSuppression, string>` makes a new reason a
+  // compile error instead of a count that silently never prints. A hand-written
+  // subset of the reasons did exactly that -- a scan whose only filtered
+  // candidates were `already_served` printed no filtered clause at all, so an
+  // invisible filter was back after one release.
   for (const item of discovery.suppressed) {
-    counts.set(item.reason, (counts.get(item.reason) ?? 0) + 1);
+    const label = SUPPRESSION_LABELS[item.reason];
+    counts.set(label, (counts.get(label) ?? 0) + 1);
   }
-  const named = [
-    ["superseded_by_served_version", "older generation"],
-    ["superseded_within_scan", "older generation"],
-    ["already_decided", "already decided"],
-    ["not_reviewable", "not reviewable"],
-  ] as const;
-  const parts: string[] = [];
-  let older = 0;
-  for (const [reason, label] of named) {
-    const count = counts.get(reason) ?? 0;
-    if (count === 0) continue;
-    if (label === "older generation") {
-      older += count;
-      continue;
-    }
-    parts.push(`${label} ${count}`);
-  }
-  if (older > 0) parts.unshift(`older generation ${older}`);
-  return parts.length ? ` · filtered ${parts.join(", ")}` : "";
+  const ordered = [...new Set(Object.values(SUPPRESSION_LABELS))].filter(
+    (label) => counts.has(label)
+  );
+  return ordered.length
+    ? ` · filtered ${ordered
+        .map((label) => `${label} ${counts.get(label)}`)
+        .join(", ")}`
+    : "";
 };
 
 const reportParts = (
