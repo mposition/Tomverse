@@ -1,7 +1,7 @@
 ---
 record: staging-verification
 checklist: docs/ops/external-conversation-continuation-staging-checklist.md
-templateRevision: 2026-09-01a
+templateRevision: 2026-09-11a
 environment:
 deploySha:
 startedAtUtc:
@@ -81,7 +81,8 @@ digest:
 |---|---|---|
 | E-1 기존 대화 열림 | | |
 | E-2 flag off에서 새 메시지 응답 | | |
-| E-3 CTA 403 | | |
+| E-3(a) 이어가기 카드가 화면에 없음 | | |
+| E-3(b) `POST /api/conversations/continue` 직접 요청 403 | | |
 | E-4 ordinary chat·Review 무회귀 | | |
 
 ## §H 목록 재진입 (차단)

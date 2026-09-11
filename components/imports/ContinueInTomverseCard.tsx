@@ -48,12 +48,20 @@ type CardState =
 export function ContinueInTomverseCard({
     externalConversationId,
     /**
-     * Whether this snapshot can be continued at all. False for a locked
-     * snapshot the browser has no grant for -- the viewer is showing the
-     * password gate in that case and the CTA would be an action the server is
-     * about to refuse.
+     * Whether this snapshot can be continued at all.
+     *
+     * False when the rollout flag is off for this deployment, and false for a
+     * locked snapshot the browser has no grant for -- the viewer is showing
+     * the password gate in that case. Both are the same fact to this card: the
+     * server is about to refuse, so there is nothing here to press.
+     *
+     * The default is `false` rather than `true`. It read `true` while nobody
+     * passed it, which made the `return null` below unreachable and left the
+     * card on screen with the flag off -- the state where a reader discovers
+     * the feature does not exist by pressing a button and reading a refusal.
+     * A default that hides is the one that fails safe.
      */
-    enabled = true,
+    enabled = false,
 }: {
     externalConversationId: string;
     enabled?: boolean;
