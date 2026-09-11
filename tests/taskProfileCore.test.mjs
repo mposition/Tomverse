@@ -262,3 +262,104 @@ test("the two axes are read from one definition without becoming one axis", () =
     assert.equal(document.kind, "documents");
     assert.equal(document.needsCurrentInformation, false);
 });
+
+test("v3 ignores incidental data cues on both the search and research axes", () => {
+    assert.equal(TASK_PROFILE_VERSION, "task-profile-v3");
+    for (const text of [
+        "Keep the names in source order.",
+        "Given records: current yes. Extract the current record.",
+        "오늘 날짜를 쓰지 마세요.",
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, false, text);
+        assert.notEqual(built.kind, "research", text);
+        assert.ok(!built.signals.includes("search:source-intent"), text);
+        assert.ok(!built.signals.includes("research:vocabulary"), text);
+        const explicit = profile(text, { webSearchRequested: true });
+        assert.equal(explicit.needsCurrentInformation, true, text);
+        assert.equal(explicit.kind, "research", text);
+        assert.ok(explicit.signals.includes("search:requested"), text);
+        assert.ok(!explicit.signals.includes("search:recency-heuristic"), text);
+    }
+});
+
+test("independent source requests and independent recency remain different axes", () => {
+    for (const text of ["출처", "근거", "웹검색", "Preserve source order; also cite external sources."]) {
+        const built = profile(text);
+        assert.equal(built.kind, "research", text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.ok(built.signals.includes("search:source-intent"), text);
+        assert.ok(built.signals.includes("research:vocabulary"), text);
+    }
+    for (const text of [
+        "Given records: current yes. Extract the current record; check the current law.",
+        "오늘 날짜를 쓰지 마세요. 최신 통계를 검색해 주세요.",
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.notEqual(built.kind, "research", text);
+        assert.ok(built.signals.includes("search:recency-heuristic"), text);
+    }
+});
+
+test("contextual search reading keeps coding and attachment precedence intact", () => {
+    const code = 'Explain this code: ```js\nconst row = {current: true, label: "source order"};\n```';
+    assert.equal(profile(code).kind, "coding");
+    assert.equal(profile(code).needsCurrentInformation, false);
+    const withSources = profile(`${code}\nGive me sources for the explanation.`);
+    assert.equal(withSources.kind, "coding");
+    assert.equal(withSources.needsCurrentInformation, true);
+    const document = profile("Keep the rows in source order.", { attachments: [{ name: "rows.pdf" }] });
+    assert.equal(document.kind, "documents");
+    assert.equal(document.hasDocumentInput, true);
+    assert.equal(document.needsCurrentInformation, false);
+    const requested = profile("Keep the rows in source order.", { attachments: [{ name: "rows.pdf" }], webSearchRequested: true });
+    assert.equal(requested.kind, "documents");
+    assert.equal(requested.needsCurrentInformation, true);
+});
+
+test("ordinary boolean-adjacent freshness and separate-line sources keep the full profile search boundary", () => {
+    for (const text of [
+        "What is the current true cost of this plan?",
+        "What is my current no-claims discount?",
+        "Use the supplied records for extraction. What is the current true cost of this plan?",
+        "Given records: current yes. What is my current no-claims discount?",
+        "현재: 참고자료가 어떤 상태인가요?",
+        "현재: 예외 규정은 무엇인가요?",
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.equal(built.kind, "general", text);
+        assert.ok(built.signals.includes("search:recency-heuristic"), text);
+    }
+    for (const text of ["Include the source\nOrder the rows by date", "Order in\r\nThe source must be included", "Include the source - order the rows by date", "Include the source--order the rows by date"]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.equal(built.kind, "research", text);
+        assert.ok(built.signals.includes("search:source-intent"), text);
+        assert.ok(built.signals.includes("research:vocabulary"), text);
+    }
+});
+
+test("comma-and coordination cannot remove the profile recency boundary", () => {
+    for (const [text, recent] of [
+        ["Do not open the attachments, and use today's date.", true],
+        ["Do not search the web, and use today's date.", true],
+        ["Do not read the notes and open the attachments, or use today's date.", true],
+        ["Do not open the attachments, read notes and consult the record, or use today's date.", true],
+        ["Do not use today's date.", false],
+        ["Do not open the attachments, or use today's date.", false],
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, recent, text);
+        assert.equal(built.kind, "general", text);
+        assert.equal(built.kindConfidence, "none", text);
+        assert.equal(built.version, "task-profile-v3", text);
+        assert.deepEqual(built.signals, recent ? ["search:recency-heuristic"] : [], text);
+        const requested = profile(text, { webSearchRequested: true });
+        assert.equal(requested.needsCurrentInformation, true, text);
+        assert.equal(requested.kind, "research", text);
+        assert.ok(requested.signals.includes("search:requested"), text);
+        assert.ok(!requested.signals.includes("search:recency-heuristic"), text);
+    }
+});

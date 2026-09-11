@@ -26,7 +26,10 @@ test("baseline cost signals and default-model control preserve the 24-case and 4
   assert.equal(candidate.availableCases, 4);
   assert.equal(baseline.correct, 4);
   assert.equal(candidate.correct, 4);
-  assert.equal(paired.changedSelectionCases, 15);
+  // This factory builds fresh synthetic observations under the current v3
+  // profiler, not the historical pilot: all four observed baseline choices
+  // are now DeepSeek after incidental search cues are removed.
+  assert.equal(paired.changedSelectionCases, 19);
   assert.equal(paired.changedSelectionObservedCases, 3);
   assert.equal(paired.commonObservedCases, 4);
   assert.equal(paired.unavailablePairCases, 20);
@@ -41,7 +44,7 @@ test("baseline cost signals and default-model control preserve the 24-case and 4
     assert.equal(report.productCompatibility.rows.find((entry) => entry.caseId === row.caseId).baseline.comparedFieldsCompatible, false);
   }
   assert.equal(rows.find((row) => row.caseId === "dev-en-calc-01").baseline.modelId, "deepseek-v4-flash");
-  assert.equal(rows.find((row) => row.caseId === "dev-en-extract-01").baseline.modelId, DEFAULT_MODEL_ID);
+  assert.equal(rows.find((row) => row.caseId === "dev-en-extract-01").baseline.modelId, "deepseek-v4-flash");
   assert.equal(report.providerCallsByThisTool, 0);
 });
 
@@ -92,8 +95,8 @@ test("saved whole-call measurements remain historical and nullable", () => {
     row.metrics.latencyMs = row.modelId === DEFAULT_MODEL_ID ? 20 : 10;
   }
   let result = replayDevelopment(input).benchmarkDomain;
-  assert.equal(result.baseline.historicalWholeCallLatencyMs.total, 50);
-  assert.equal(result.candidate.historicalWholeCallLatencyMs.total, 80);
+  assert.equal(result.baseline.historicalWholeCallLatencyMs.total, 40); // Four synthetic 10 ms DeepSeek observations, not pilot measurements.
+  assert.equal(result.candidate.historicalWholeCallLatencyMs.total, 70); // Three synthetic Luna choices and one writing-kind baseline fallback.
   assert.equal(result.baseline.reportedProviderCostUsd.total, null);
   input.answers.rows.find((row) => row.rowId === `dev-en-calc-01::${DEFAULT_MODEL_ID}`).metrics.latencyMs = null;
   result = replayDevelopment(input).benchmarkDomain;
