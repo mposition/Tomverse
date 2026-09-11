@@ -7,9 +7,10 @@ import { prisma } from "@/lib/prisma";
 import {
     OPEN_WORK_ITEM_STATUSES,
     mergeObservedVia,
-    newCandidatesForQueue,
     observationsForExistingItems,
+    selectQueueCandidates,
     type ModelObservation,
+    type SuppressedCandidate,
     workItemTimestampField,
     workItemTransitionRefusal,
     type WorkItemStatus,
@@ -17,7 +18,9 @@ import {
 } from "@/lib/modelLifecycleWorkItemCore";
 import {
     assessModelLifecycleItem,
+    candidateDecisionKey,
     candidateFamilyIdentity,
+    supersedingServedModel,
     type ModelAvailability,
     type ModelProductSurface,
     type ModelReviewKind,
@@ -49,8 +52,23 @@ import {
 export async function recordDiscoveredWorkItems(input: {
     observed: readonly { provider: string; apiModel: string }[];
     now?: Date;
-}): Promise<{ created: number; skipped: number }> {
-    if (input.observed.length === 0) return { created: 0, skipped: 0 };
+}): Promise<{
+    created: number;
+    skipped: number;
+    /**
+     * The models this run actually filed, and what it filtered out.
+     *
+     * Returned because the daily report used to answer "what is new today" from
+     * the observation table instead -- a row appeared, therefore the model was
+     * new -- and that answer is wrong the moment a second provider starts
+     * serving something already decided. What is new is what the queue accepted.
+     */
+    createdItems: Array<{ provider: string; apiModel: string; observedVia: ModelObservation[] }>;
+    suppressed: SuppressedCandidate[];
+}> {
+    if (input.observed.length === 0) {
+        return { created: 0, skipped: 0, createdItems: [], suppressed: [] };
+    }
     const now = input.now ?? new Date();
 
     const [catalogue, queued] = await Promise.all([
@@ -63,13 +81,16 @@ export async function recordDiscoveredWorkItems(input: {
         }),
     ]);
 
-    const fresh = newCandidatesForQueue({
+    const { fresh, suppressed } = selectQueueCandidates({
         observed: input.observed,
         catalogueApiModels: [
             ...catalogue.map((row) => row.apiModel),
             ...listImageModels().map((model) => model.apiModelId),
         ],
         queuedApiModels: queued.map((row) => row.apiModel),
+        queuedDecisionKeys: queued
+            .map((row) => storedDecisionKey(row.evidence))
+            .filter((key): key is string => Boolean(key)),
     });
 
     // A model already in the queue, seen through a provider that had not served
@@ -79,6 +100,11 @@ export async function recordDiscoveredWorkItems(input: {
     await recordAdditionalSightings(input.observed, queued);
 
     let created = 0;
+    const createdItems: Array<{
+        provider: string;
+        apiModel: string;
+        observedVia: ModelObservation[];
+    }> = [];
     for (const candidate of fresh) {
         try {
             await prisma.$transaction(async (tx) => {
@@ -94,6 +120,13 @@ export async function recordDiscoveredWorkItems(input: {
                             discoveredBy: "provider_model_catalog_monitor",
                             observedProvider: candidate.provider,
                             observedApiModel: candidate.apiModel,
+                            // The key this decision is remembered under, written
+                            // now rather than derived later. Normalisation rules
+                            // change -- that is how a decision stopped matching
+                            // the model it was about -- and a stored key keeps
+                            // suppressing what it suppressed on the day it was
+                            // filed.
+                            decisionKey: candidateDecisionKey(candidate.apiModel),
                             // Every provider that served it, not only the first
                             // one iterated. Which providers offer a model is
                             // what somebody deciding whether to add it needs.
@@ -116,6 +149,11 @@ export async function recordDiscoveredWorkItems(input: {
                 });
             });
             created += 1;
+            createdItems.push({
+                provider: candidate.provider,
+                apiModel: candidate.apiModel,
+                observedVia: candidate.observedVia,
+            });
         } catch (error) {
             // The unique key caught a concurrent creation. Losing that race is
             // not an error -- the row the winner wrote is the row we wanted --
@@ -123,7 +161,12 @@ export async function recordDiscoveredWorkItems(input: {
             if ((error as { code?: string }).code !== "P2002") throw error;
         }
     }
-    return { created, skipped: input.observed.length - created };
+    return {
+        created,
+        skipped: input.observed.length - created,
+        createdItems,
+        suppressed,
+    };
 }
 
 /**
@@ -221,6 +264,20 @@ export async function recordAutoDisableWorkItem(input: {
 
     return { created: true };
 }
+
+/**
+ * The decision key an item was filed under, if it has one.
+ *
+ * Absent on every row written before keys existed, and those rows fall back to
+ * deriving one from their `apiModel`. The fallback is the weaker of the two --
+ * it reads today's normalisation into yesterday's decision -- which is exactly
+ * why new rows store the key instead.
+ */
+const storedDecisionKey = (evidence: Prisma.JsonValue | null): string | null => {
+    if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return null;
+    const value = (evidence as Record<string, unknown>).decisionKey;
+    return typeof value === "string" && value.trim() ? value : null;
+};
 
 const storedObservedVia = (evidence: Prisma.JsonValue | null): ModelObservation[] => {
     if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return [];
@@ -506,6 +563,8 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     availability: ModelAvailability;
     lifecycle: string | null;
     servedByTomverse: boolean;
+    /** The served model that is a later generation of this one's line. */
+    supersededBy: string | null;
     familyKey: string;
     familySize: number;
     reviewPriority: ModelReviewPriority;
@@ -606,12 +665,11 @@ export async function listModelDiscoveryQueue(options?: {
             entry,
         ])
     );
-    const servedFamilies = new Set([
-        ...registry.map((entry) => candidateFamilyIdentity(entry.apiModel)),
-        ...listImageModels().map((model) =>
-            candidateFamilyIdentity(model.apiModelId)
-        ),
-    ]);
+    const servedApiModels = [
+        ...registry.map((entry) => entry.apiModel),
+        ...listImageModels().map((model) => model.apiModelId),
+    ];
+    const servedFamilies = new Set(servedApiModels.map(candidateFamilyIdentity));
     const familyCounts = new Map<string, number>();
     for (const row of rows) {
         const family = candidateFamilyIdentity(row.apiModel);
@@ -644,6 +702,13 @@ export async function listModelDiscoveryQueue(options?: {
             .find((value): value is string => Boolean(value)) ?? null;
         const familyKey = candidateFamilyIdentity(row.apiModel);
         const servedByTomverse = servedFamilies.has(familyKey);
+        // A retirement is about a model Tomverse serves, so its own line will
+        // always contain it. Asking whether it is superseded would answer yes
+        // about itself and bury the one item in this queue that is urgent.
+        const supersededBy =
+            row.action === "retire"
+                ? null
+                : supersedingServedModel(row.apiModel, servedApiModels);
         const assessment = assessModelLifecycleItem({
             action: row.action,
             apiModel: row.apiModel,
@@ -651,6 +716,7 @@ export async function listModelDiscoveryQueue(options?: {
             availability,
             lifecycle,
             servedByTomverse,
+            supersededBy,
         });
         return {
             id: row.id,
@@ -667,6 +733,7 @@ export async function listModelDiscoveryQueue(options?: {
             availability,
             lifecycle,
             servedByTomverse,
+            supersededBy,
             familyKey,
             familySize: familyCounts.get(familyKey) ?? 1,
             reviewPriority: assessment.priority,

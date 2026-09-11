@@ -228,3 +228,68 @@ test("a long detail is capped where the transport can carry it", () => {
     const exact = "y".repeat(200);
     assert.equal(catalogFailureDetail(exact), exact);
 });
+
+// The fourth way, and the newest: candidates the queue filtered before anybody
+// saw them. A count that only prints for some reasons is the same failure as a
+// provider printed as a raw key -- the report reads as more complete than it is.
+
+test("every suppression reason can reach the summary", async () => {
+    const { CANDIDATE_SUPPRESSIONS } = await import(
+        "../lib/modelLifecycleWorkItemCore.ts"
+    );
+    const { suppressionSummary } = await import(
+        "../lib/providerModelCatalogReport.ts"
+    );
+    for (const reason of CANDIDATE_SUPPRESSIONS) {
+        const summary = suppressionSummary({
+            recorded: true,
+            createdItems: [],
+            suppressed: [{ provider: "openai", apiModel: "gpt-5.5", reason }],
+        });
+        assert.match(summary, /filtered /, `${reason} left no trace`);
+        assert.match(summary, / 1/, `${reason} printed no count`);
+    }
+});
+
+test("a scan that filtered nothing says nothing", async () => {
+    const { suppressionSummary } = await import(
+        "../lib/providerModelCatalogReport.ts"
+    );
+    assert.equal(
+        suppressionSummary({ recorded: true, createdItems: [], suppressed: [] }),
+        ""
+    );
+    // A queue write that never ran has no filtering to report either, and must
+    // not borrow the scan's silence as a claim.
+    assert.equal(
+        suppressionSummary({
+            recorded: false,
+            createdItems: [],
+            suppressed: [{ provider: "openai", apiModel: "x", reason: "not_reviewable" }],
+        }),
+        ""
+    );
+});
+
+test("the two version reasons are counted as one line", async () => {
+    const { suppressionSummary } = await import(
+        "../lib/providerModelCatalogReport.ts"
+    );
+    const summary = suppressionSummary({
+        recorded: true,
+        createdItems: [],
+        suppressed: [
+            {
+                provider: "anthropic",
+                apiModel: "claude-opus-4-6",
+                reason: "superseded_by_served_version",
+            },
+            {
+                provider: "anthropic",
+                apiModel: "claude-opus-4-7",
+                reason: "superseded_within_scan",
+            },
+        ],
+    });
+    assert.match(summary, /older generation 2/);
+});

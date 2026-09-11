@@ -6,6 +6,7 @@ import {
   mergeObservedVia,
   newCandidatesForQueue,
   observationsForExistingItems,
+  selectQueueCandidates,
   TERMINAL_WORK_ITEM_STATUSES,
   WORK_ITEM_STATUSES,
   workItemAgeDays,
@@ -14,7 +15,10 @@ import {
   workItemTransitionRefusal,
   type WorkItemStatus,
 } from "../lib/modelLifecycleWorkItemCore.ts";
-import { candidateFamilyIdentity } from "../lib/modelLifecycleTriage.ts";
+import {
+  candidateDecisionKey,
+  candidateFamilyIdentity,
+} from "../lib/modelLifecycleTriage.ts";
 
 const move = (
   from: WorkItemStatus,
@@ -399,4 +403,141 @@ test("the same provider spelling a model two ways is two sightings, one candidat
 
     assert.equal(fresh.length, 1);
     assert.equal(fresh[0].observedVia.length, 2);
+});
+
+test("a model closed yesterday does not come back under another spelling", () => {
+  // Yesterday: `gemini-2.5-flash-preview-05-20` was filed and closed. Today
+  // Google lists the September snapshot and Qwen starts carrying it too.
+  const decided = candidateDecisionKey("gemini-2.5-flash-preview-05-20");
+  const { fresh, suppressed } = selectQueueCandidates({
+    observed: [
+      { provider: "google", apiModel: "gemini-2.5-flash-preview-09-2026" },
+      { provider: "qwen", apiModel: "google/gemini-2.5-flash-preview-09-2026" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: ["gemini-2.5-flash-preview-05-20"],
+    queuedDecisionKeys: [decided],
+  });
+  assert.deepEqual(fresh, []);
+  assert.ok(suppressed.every((item) => item.reason === "not_reviewable" || item.reason === "already_decided"));
+});
+
+test("declining a preview leaves the release a live question", () => {
+  const { fresh } = selectQueueCandidates({
+    observed: [{ provider: "google", apiModel: "gemini-2.5-flash" }],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+    queuedDecisionKeys: [candidateDecisionKey("gemini-2.5-flash-preview-05-20")],
+  });
+  assert.equal(fresh.length, 1);
+  assert.equal(fresh[0].apiModel, "gemini-2.5-flash");
+});
+
+test("a decision on the release also answers for its previews", () => {
+  const { fresh, suppressed } = selectQueueCandidates({
+    observed: [{ provider: "google", apiModel: "gemini-2.5-flash-preview-09-2026" }],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+    queuedDecisionKeys: [candidateDecisionKey("gemini-2.5-flash")],
+  });
+  assert.deepEqual(fresh, []);
+  // Prerelease is refused before the ledger is consulted; either way it is
+  // recorded rather than dropped in silence.
+  assert.equal(suppressed.length, 1);
+});
+
+test("an older generation of a line Tomverse serves is not queued", () => {
+  const { fresh, suppressed } = selectQueueCandidates({
+    observed: [
+      { provider: "anthropic", apiModel: "claude-opus-4-6" },
+      { provider: "anthropic", apiModel: "claude-opus-4-7" },
+    ],
+    catalogueApiModels: ["claude-opus-5", "claude-sonnet-5"],
+    queuedApiModels: [],
+  });
+  assert.deepEqual(fresh, []);
+  assert.deepEqual(
+    suppressed.map((item) => [item.apiModel, item.reason, item.supersededBy]),
+    [
+      ["claude-opus-4-6", "superseded_by_served_version", "claude-opus-5"],
+      ["claude-opus-4-7", "superseded_by_served_version", "claude-opus-5"],
+    ]
+  );
+});
+
+test("a newer generation and a different tier still reach review", () => {
+  const { fresh } = selectQueueCandidates({
+    observed: [
+      { provider: "anthropic", apiModel: "claude-opus-5-1" },
+      { provider: "openai", apiModel: "gpt-5.6-mini" },
+    ],
+    catalogueApiModels: ["claude-opus-5", "gpt-5.6"],
+    queuedApiModels: [],
+  });
+  assert.deepEqual(
+    fresh.map((item) => item.apiModel).sort(),
+    ["claude-opus-5-1", "gpt-5.6-mini"]
+  );
+});
+
+test("a name with no readable version is never suppressed as older", () => {
+  const { fresh } = selectQueueCandidates({
+    observed: [{ provider: "openai", apiModel: "gpt-4o" }],
+    catalogueApiModels: ["gpt-5.6"],
+    queuedApiModels: [],
+  });
+  assert.equal(fresh.length, 1);
+  assert.equal(fresh[0].apiModel, "gpt-4o");
+});
+
+test("two generations of one line in one scan is one question", () => {
+  const { fresh, suppressed } = selectQueueCandidates({
+    observed: [
+      { provider: "anthropic", apiModel: "claude-opus-4-7" },
+      { provider: "anthropic", apiModel: "claude-opus-5" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+  });
+  assert.deepEqual(
+    fresh.map((item) => item.apiModel),
+    ["claude-opus-5"]
+  );
+  assert.deepEqual(
+    suppressed.map((item) => [item.apiModel, item.reason]),
+    [["claude-opus-4-7", "superseded_within_scan"]]
+  );
+});
+
+test("every filtered candidate is reported rather than dropped in silence", () => {
+  const { fresh, suppressed } = selectQueueCandidates({
+    observed: [
+      { provider: "google", apiModel: "gemini-3-pro-exp-02-05" },
+      { provider: "openai", apiModel: "text-embedding-4" },
+      { provider: "anthropic", apiModel: "claude-opus-4-6" },
+      { provider: "openai", apiModel: "gpt-5.7" },
+    ],
+    catalogueApiModels: ["claude-opus-5"],
+    queuedApiModels: [],
+  });
+  assert.deepEqual(
+    fresh.map((item) => item.apiModel),
+    ["gpt-5.7"]
+  );
+  assert.deepEqual(
+    suppressed.map((item) => item.reason).sort(),
+    ["not_reviewable", "not_reviewable", "superseded_by_served_version"]
+  );
+});
+
+test("the report and the queue answer 'same model?' the same way", () => {
+  // Two layers with two normalisations is how a model the queue had collapsed
+  // was announced as new by the daily mail.
+  for (const apiModel of [
+    "gemini-2.5-flash-preview-05-20",
+    "openai/gpt-4o-latest",
+    "claude-opus-4-6-20260514",
+  ]) {
+    assert.equal(candidateIdentity(apiModel), candidateFamilyIdentity(apiModel));
+  }
 });
