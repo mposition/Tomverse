@@ -366,6 +366,8 @@ export const ko = {
         voiceErrorScopeChanged: "다른 대화로 이동해 음성 입력이 중단되었습니다. 입력창에 추가된 내용은 없습니다.",
         voiceErrorUnavailable: "지금은 음성 입력을 사용할 수 없습니다.",
         voiceErrorSignInRequired: "음성 입력을 사용하려면 로그인해 주세요.",
+        voiceErrorVerificationRequired: "간단한 확인을 완료한 뒤 다시 녹음해 주세요.",
+        voiceErrorVerificationUnavailable: "지금은 확인을 진행할 수 없습니다. 잠시 후 다시 시도해 주세요.",
         voiceErrorLimitReached: "오늘 사용할 수 있는 음성 입력 한도에 도달했습니다. 내일 다시 시도해 주세요.",
         voiceErrorProviderUnavailable:
             "음성 인식 서비스를 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
