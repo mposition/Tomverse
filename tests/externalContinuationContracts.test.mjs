@@ -783,3 +783,64 @@ test("a retry reuses the attempt's idempotency key and only cancel clears it", (
         assert.doesNotMatch(readFileSync(path, "utf8"), /idempotencyKey/, path);
     }
 });
+
+/* --------------------------------- the CTA is not offered with the flag off */
+
+test("the viewer's continue card is wired to the flag, server-read", () => {
+    /*
+      The defect this pins, found in production on 2026-09-11.
+
+      `ContinueInTomverseCard` has always had `if (!enabled) return null`, and
+      the viewer rendered it without passing `enabled`. The default was `true`,
+      so the branch was unreachable: with the rollout flag off the card sat on
+      screen and a reader learned the feature did not exist by pressing the
+      button and reading a 403 refusal. That is the "blocked only at the last
+      step" shape the image-generation UI contract in AGENTS.md forbids -- with
+      a flag off, nothing renders.
+
+      The flag is server state, so the value has to come from the route: a
+      Client Component cannot see an `AppSetting` row, and a client-side read
+      would paint the card and then take it away.
+    */
+    const page = readFileSync(
+        "app/(site)/(application)/settings/imports/conversations/[conversationId]/page.tsx",
+        "utf8"
+    );
+    assert.match(page, /isExternalContinuationEnabled/);
+    assert.match(page, /continuationEnabled=\{continuationEnabled\}/);
+    // Fail-closed: a read failure hides the card, like a missing flag row.
+    assert.match(page, /let continuationEnabled = false;/);
+    assert.match(page, /catch/);
+
+    const viewer = readFileSync(
+        "components/imports/ExternalConversationViewer.tsx",
+        "utf8"
+    );
+    assert.match(viewer, /continuationEnabled = false,/, "defaults to hidden");
+    assert.match(
+        viewer,
+        /<ContinueInTomverseCard[\s\S]*?enabled=\{continuationEnabled\}/,
+        "and hands it to the card"
+    );
+
+    const card = readFileSync(
+        "components/imports/ContinueInTomverseCard.tsx",
+        "utf8"
+    );
+    assert.match(
+        card,
+        /enabled = false,/,
+        "a caller that forgets the prop hides the card rather than offering it"
+    );
+    assert.match(card, /if \(!enabled\) return null;/);
+});
+
+test("hiding the card is not the boundary -- creation stays fail-closed", () => {
+    // The server refuses regardless of what the browser was shown. The card
+    // going away is a courtesy to the reader, never the gate.
+    const route = readFileSync(
+        "app/api/external-conversations/[conversationId]/continuations/route.ts",
+        "utf8"
+    );
+    assert.match(route, /EXTERNAL_CONTINUATION_DISABLED/);
+});

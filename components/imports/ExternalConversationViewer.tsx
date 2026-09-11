@@ -78,8 +78,16 @@ const sectionClass =
 
 export function ExternalConversationViewer({
     conversationId,
+    continuationEnabled = false,
 }: {
     conversationId: string;
+    /**
+     * Whether continuing an imported conversation is switched on for this
+     * deployment. Server-read, because the flag is not something a browser can
+     * see. Defaults to false so a caller that forgets it hides the card rather
+     * than offering an action the server will refuse.
+     */
+    continuationEnabled?: boolean;
 }) {
     const { t } = useLanguage();
     const router = useRouter();
@@ -373,6 +381,7 @@ export function ExternalConversationViewer({
                         satisfied. */}
                     <ContinueInTomverseCard
                         externalConversationId={conversationId}
+                        enabled={continuationEnabled}
                     />
 
                     <SnapshotLockPanel
