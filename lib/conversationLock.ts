@@ -212,18 +212,37 @@ const grantKey = (resourceType: LockResourceType): string | Buffer =>
               .update(`lock-resource.${resourceType}.v1`)
               .digest();
 
-const passwordFingerprint = (storedPassword: string) =>
-    createHash("sha256").update(storedPassword).digest("base64url");
-
+/**
+ * The grant signature, with the stored password folded into the *input*.
+ *
+ * A grant has to stop validating when the resource's password changes, and it
+ * used to do that by putting `sha256(storedPassword)` in the cookie beside the
+ * signature and comparing it on read. That handed the client a digest of the
+ * stored value: harmless for a scrypt row, where it is a hash of a hash, and
+ * not harmless for a row the legacy migration has not reached yet, where the
+ * stored value is the plaintext and the cookie therefore carried
+ * `sha256(password)` to the browser -- offline-brute-forceable by anyone who
+ * got hold of it.
+ *
+ * Folding the password into the HMAC input keeps the same property and emits
+ * nothing derived from it: a changed password changes the expected signature,
+ * so the old grant fails, and the cookie now carries only `expiresAt` and a
+ * keyed digest that cannot be recomputed without the server secret. The same
+ * two-part shape the guest Turnstile grant already uses.
+ *
+ * This does not replace `compareLegacyPassword` or the migration behind it
+ * (`.github/RELEASE_CHECKLIST.md` §7.5) -- it removes the one place that
+ * exposure left the server.
+ */
 const signUnlockGrant = (
     resourceType: LockResourceType,
     userId: string,
     resourceId: string,
     expiresAt: number,
-    fingerprint: string
+    storedPassword: string
 ) =>
     createHmac("sha256", grantKey(resourceType))
-        .update(`${userId}:${resourceId}:${expiresAt}:${fingerprint}`)
+        .update(`${userId}:${resourceId}:${expiresAt}:${storedPassword}`)
         .digest("base64url");
 
 const readCookie = (request: Request, name: string) => {
@@ -245,16 +264,15 @@ export const createResourceUnlockCookie = (
     storedPassword: string
 ) => {
     const expiresAt = Math.floor(Date.now() / 1000) + UNLOCK_GRANT_TTL_SECONDS;
-    const fingerprint = passwordFingerprint(storedPassword);
     const signature = signUnlockGrant(
         resourceType,
         userId,
         resourceId,
         expiresAt,
-        fingerprint
+        storedPassword
     );
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-    return `${unlockCookieName(resourceType, resourceId)}=${expiresAt}.${fingerprint}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
+    return `${unlockCookieName(resourceType, resourceId)}=${expiresAt}.${signature}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${UNLOCK_GRANT_TTL_SECONDS}; Priority=High${secure}`;
 };
 
 /** The native shape, unchanged, for the eighteen call sites that use it. */
@@ -294,23 +312,25 @@ export const hasResourceUnlockGrant = (
     const token = readCookie(request, unlockCookieName(resourceType, resourceId));
     if (!token) return false;
 
-    const [expiresValue, fingerprint, signature, ...extra] = token.split(".");
+    const [expiresValue, signature, ...extra] = token.split(".");
     const expiresAt = Number(expiresValue);
     if (
         extra.length > 0 ||
         !Number.isSafeInteger(expiresAt) ||
-        expiresAt <= Math.floor(Date.now() / 1000) ||
-        fingerprint !== passwordFingerprint(storedPassword)
+        expiresAt <= Math.floor(Date.now() / 1000)
     ) {
         return false;
     }
 
+    // The stored password is part of what is signed, so a changed password
+    // makes the expected signature differ and this comparison is the whole
+    // check -- there is no separate fingerprint to compare first.
     const expected = signUnlockGrant(
         resourceType,
         userId,
         conversationId,
         expiresAt,
-        fingerprint
+        storedPassword
     );
     const actualBuffer = Buffer.from(signature || "");
     const expectedBuffer = Buffer.from(expected);

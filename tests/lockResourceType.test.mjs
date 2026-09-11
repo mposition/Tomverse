@@ -196,14 +196,17 @@ test("a tampered or truncated grant is refused rather than parsed loosely", () =
         createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_HASH)
     );
     const [name, value] = [external.split("=")[0], external.split("=").slice(1).join("=")];
-    const [expires, fingerprint, signature] = value.split(".");
+    // Two segments: `expiresAt.signature`. The stored password is folded into
+    // the signature's HMAC input rather than carried beside it, so there is no
+    // third segment and nothing password-derived reaches the browser.
+    const [expires, signature] = value.split(".");
 
     const variants = [
         `${name}=`,
-        `${name}=${expires}.${fingerprint}`,
-        `${name}=${expires}.${fingerprint}.${signature}.extra`,
-        `${name}=not-a-number.${fingerprint}.${signature}`,
-        `${name}=${expires}.${fingerprint}.${signature.slice(0, -1)}x`,
+        `${name}=${expires}`,
+        `${name}=${expires}.${signature}.extra`,
+        `${name}=not-a-number.${signature}`,
+        `${name}=${expires}.${signature.slice(0, -1)}x`,
     ];
     for (const variant of variants) {
         assert.equal(
@@ -225,8 +228,8 @@ test("an expired grant is refused", () => {
         createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_HASH)
     );
     const [name, value] = [external.split("=")[0], external.split("=").slice(1).join("=")];
-    const [, fingerprint, signature] = value.split(".");
-    const stale = `${name}=1.${fingerprint}.${signature}`;
+    const [, signature] = value.split(".");
+    const stale = `${name}=1.${signature}`;
     assert.equal(
         hasResourceUnlockGrant(
             "external_conversation",
@@ -318,5 +321,75 @@ test("a resource id that forges the other type's cookie name still opens nothing
             PASSWORD_HASH
         ),
         true
+    );
+});
+
+/* ------------------------------- nothing password-derived leaves the server */
+
+test("the grant cookie carries nothing derived from the stored password", async () => {
+    /*
+      The defect this pins, found by CodeQL on PR #1354.
+
+      The cookie used to be `expiresAt.sha256(storedPassword).signature`. For a
+      scrypt row that middle segment is a hash of a hash and harmless; for a row
+      the legacy migration has not reached yet the stored value *is* the
+      plaintext, so the browser was handed `sha256(password)` — offline
+      brute-forceable by anyone who obtained the cookie.
+
+      The password is now folded into the signature's HMAC input instead, which
+      keeps the property that mattered (a changed password invalidates the
+      grant) while emitting nothing that can be attacked offline without the
+      server secret.
+    */
+    const { createHash, createHmac } = await import("node:crypto");
+    const plaintext = "hunter2-legacy-plaintext";
+    const value = cookieValue(
+        createResourceUnlockCookie("external_conversation", USER, ID, plaintext)
+    );
+
+    for (const digest of [
+        createHash("sha256").update(plaintext).digest("base64url"),
+        createHash("sha256").update(plaintext).digest("hex"),
+        createHash("sha256").update(plaintext).digest("base64"),
+        createHmac("sha256", "").update(plaintext).digest("base64url"),
+    ]) {
+        assert.ok(
+            !value.includes(digest),
+            "no digest of the stored password may appear in the cookie"
+        );
+    }
+    assert.ok(!value.includes(plaintext), "and certainly not the value itself");
+
+    // Two segments, not three: there is no fingerprint to carry.
+    const [, token] = [value.split("=")[0], value.split("=").slice(1).join("=")];
+    assert.equal(token.split(".").length, 2);
+});
+
+test("a changed password still invalidates an outstanding grant", () => {
+    // The property the fingerprint existed for, now carried by the signature.
+    const value = cookieValue(
+        createResourceUnlockCookie("external_conversation", USER, ID, PASSWORD_HASH)
+    );
+    assert.equal(
+        hasResourceUnlockGrant(
+            "external_conversation",
+            requestWith(value),
+            USER,
+            ID,
+            PASSWORD_HASH
+        ),
+        true,
+        "the grant it was minted for still opens"
+    );
+    assert.equal(
+        hasResourceUnlockGrant(
+            "external_conversation",
+            requestWith(value),
+            USER,
+            ID,
+            "scrypt$1$c2FsdA$c29tZXRoaW5nLWVsc2U"
+        ),
+        false,
+        "and stops the moment the stored password differs"
     );
 });
