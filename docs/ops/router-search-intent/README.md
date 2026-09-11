@@ -290,6 +290,16 @@ not a claim to resolve every natural-language conjunction. Its new Claude
 review must name the follow-up digest; no prior test or review is an approval
 of those new bytes.
 
+For `Do not search the web, and use today's date.`, the recorded `search-and`
+probe changes `classifyWebSearchTopic` from `suggested: false`, `signals: []`,
+`refusal: no_recency_signal` at `6a6a0999` to `suggested: true`,
+`signals: ["recency"]`, `refusal: null` in this candidate. The source-intent
+predicate remains `false` in both: the sentence is not classified as an
+explicit source request. This deterministic suggestion-classifier change,
+pinned by the helper/consumer regression, is not consent to execute a search.
+The exact before/after outputs are in `baseline-followup.probes.json` and
+`candidate-followup.probes.json` in the external evidence directory above.
+
 The fresh independent development checks bind helper SHA-256
 `d8a664b6729149733aa7721609c667912094aca86980c8e6e3a6c4bd2c502533`.
 The focused 15-file native suite passed **305/305**, with no failures,
