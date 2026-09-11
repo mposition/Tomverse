@@ -58,7 +58,12 @@ export type GuestVerificationAction =
   // and a worker-isolated file parse -- so both go through the same challenge
   // the chat already uses rather than inventing an unverified entry point.
   | "guest_ai_review"
-  | "guest_attachment";
+  | "guest_attachment"
+  // Voice input, opened to guests on 2026-09-10. User-initiated like the two
+  // above, and it spends the deployment's daily seconds at a paid third
+  // party, so it goes through the same challenge rather than being the one
+  // guest surface with no gate (docs/policy/voice-input.md §4.2).
+  | "guest_voice";
 
 export type GuestVerificationPhase =
   /** Nothing to verify. No verification UI exists anywhere. */
