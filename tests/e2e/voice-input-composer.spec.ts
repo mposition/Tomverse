@@ -709,6 +709,48 @@ test.describe("the microphone does not break the composer's geometry", () => {
     });
   }
 
+  test("the microphone is the control immediately left of send @ui-risk", async ({
+    page,
+  }) => {
+    /*
+      A placement decision, pinned so it survives a refactor.
+
+      The microphone began beside the tools "+" button at the far left, which
+      grouped it with adding things to the message. It was moved next to Send
+      because speaking is one of the two ways to put words in the box, and that
+      is where every product a user arrives here from puts it. Nothing in the
+      geometry specs above would notice it drifting back: they measure overlap
+      and overflow, and both sides of the row pass those.
+
+      Measured from the rendered boxes rather than from DOM order, because DOM
+      order is not what the user sees -- a flex row could reorder it and every
+      source-order assertion would still pass.
+    */
+    await page.setViewportSize({ width: 390, height: 780 });
+    await openComposerWithVoice(page);
+
+    const [microphone, send, tools] = await Promise.all([
+      page.getByTestId("composer-voice-button").boundingBox(),
+      page.getByTestId("chat-send-button").boundingBox(),
+      page.getByTestId("composer-tools-button").boundingBox(),
+    ]);
+    expect(microphone).not.toBeNull();
+    expect(send).not.toBeNull();
+    expect(tools).not.toBeNull();
+
+    // Same row as Send, and to its left.
+    expect(Math.abs(microphone!.y - send!.y)).toBeLessThanOrEqual(4);
+    expect(microphone!.x + microphone!.width).toBeLessThanOrEqual(send!.x + 1);
+
+    // Nothing between them: the gap is the row's own, not another control.
+    expect(send!.x - (microphone!.x + microphone!.width)).toBeLessThanOrEqual(12);
+
+    // And no longer next to the tools button, which is what it moved away
+    // from -- a test that only checked "left of Send" would pass at the far
+    // left too, since everything in the row is left of Send.
+    expect(microphone!.x).toBeGreaterThan(tools!.x + tools!.width);
+  });
+
   test("a running recording does not narrow the textarea @ui-risk", async ({
     page,
   }) => {
