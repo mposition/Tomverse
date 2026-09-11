@@ -10,6 +10,7 @@ import {
   resolveProviderApiKey,
 } from "@/lib/modelRegistryShared";
 import { recordDiscoveredWorkItems } from "@/lib/modelLifecycleWorkItems";
+import type { SuppressedCandidate } from "@/lib/modelLifecycleWorkItemCore";
 import {
   candidateFamilyIdentity,
 } from "@/lib/modelLifecycleTriage";
@@ -56,6 +57,29 @@ export type ProviderModelCatalogResult = {
   truncated: boolean;
   errorCode?: string;
   errorDetail?: string;
+};
+
+/**
+ * What the queue did with this scan's candidates.
+ *
+ * Carried out of the scan rather than left in the database because the daily
+ * report has to say two things it could not say before: which models were
+ * actually filed today -- not which observation rows happened to be new -- and
+ * which were filtered, so a rule that drops too much is visible to the person
+ * reading the mail rather than only to whoever next reads the code.
+ *
+ * `recorded: false` means the queue write failed and the scan carried on. The
+ * report must not then print "nothing new today", which is a claim this run is
+ * in no position to make.
+ */
+export type ProviderModelCatalogDiscovery = {
+  recorded: boolean;
+  createdItems: Array<{
+    provider: string;
+    apiModel: string;
+    observedVia: Array<{ provider: string; apiModel: string }>;
+  }>;
+  suppressed: SuppressedCandidate[];
 };
 
 class CatalogRequestError extends Error {
@@ -483,8 +507,13 @@ export async function checkProviderModelCatalogs(now = new Date()) {
   // the reconciliation above are already committed, and losing them to a
   // bookkeeping error would be a worse trade than a missed work item, which the
   // next run creates anyway.
+  let discovery: ProviderModelCatalogDiscovery = {
+    recorded: false,
+    createdItems: [],
+    suppressed: [],
+  };
   try {
-    await recordDiscoveredWorkItems({
+    const outcome = await recordDiscoveredWorkItems({
       observed: results.flatMap((result) =>
         result.status === "checked"
           ? result.candidates.map((apiModel) => ({
@@ -495,11 +524,16 @@ export async function checkProviderModelCatalogs(now = new Date()) {
       ),
       now,
     });
+    discovery = {
+      recorded: true,
+      createdItems: outcome.createdItems,
+      suppressed: outcome.suppressed,
+    };
   } catch (error) {
     console.error("Model lifecycle work item write failed:", {
       reason: error instanceof Error ? error.name : "unknown",
     });
   }
 
-  return results;
+  return { results, discovery };
 }

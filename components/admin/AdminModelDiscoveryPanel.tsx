@@ -29,6 +29,8 @@ export type ModelWorkItemRow = {
   availability: Availability;
   lifecycle: string | null;
   servedByTomverse: boolean;
+  /** The served model that is a later generation of this one's line, if any. */
+  supersededBy: string | null;
   familyKey: string;
   familySize: number;
   reviewPriority: ReviewPriority;
@@ -614,6 +616,11 @@ export function AdminModelDiscoveryPanel() {
                         </span>
                         {row.lifecycle ? (
                           <p className="mt-1 text-[10px] text-amber-300">{row.lifecycle}</p>
+                        ) : null}
+                        {row.supersededBy ? (
+                          <p className="mt-1 text-[10px] text-zinc-500">
+                            상위 버전 서비스 중: {row.supersededBy}
+                          </p>
                         ) : null}
                       </td>
                       <td className="py-3 pr-3 leading-relaxed text-zinc-300">

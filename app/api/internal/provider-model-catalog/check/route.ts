@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   const scheduledRun = await startScheduledJob("provider_model_catalog_monitor");
   try {
     const generatedAt = new Date();
-    const results = await checkProviderModelCatalogs(generatedAt);
+    const { results, discovery } = await checkProviderModelCatalogs(generatedAt);
     // Acts on the checks before they are reported, so the daily report states
     // what the registry now looks like rather than what it looked like when
     // the scan started. A failure here must not lose the report -- detection
@@ -77,6 +77,7 @@ export async function POST(request: Request) {
     const notification = await sendProviderModelCatalogReport({
       results,
       reconciliation,
+      discovery,
       openWorkItems,
       workItems,
       changes,
@@ -87,10 +88,10 @@ export async function POST(request: Request) {
     const failed = results.filter((result) => result.status === "failed").length;
     const skipped = results.filter((result) => result.status === "skipped").length;
     const missing = results.reduce((sum, result) => sum + result.missing.length, 0);
-    const newCandidates = results.reduce(
-      (sum, result) => sum + result.newCandidates.length,
-      0
-    );
+    // What the queue accepted, not how many observation rows were new. The two
+    // disagree whenever a second provider starts listing a model somebody has
+    // already decided about, and only the first is "new work".
+    const newCandidates = discovery.createdItems.length;
     const lifecycleWarnings = results.reduce(
       (sum, result) => sum + result.lifecycleWarnings.length,
       0

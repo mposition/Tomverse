@@ -23,10 +23,14 @@
  */
 
 import {
+    candidateDecisionKey,
     candidateFamilyIdentity,
     candidateRepresentativeRank,
-    modelIdentityWithoutVendor,
+    decisionKeyFamily,
+    decisionSuppressesCandidate,
+    newestByModelLine,
     shouldQueueModelCandidate,
+    supersedingServedModel,
 } from "@/lib/modelLifecycleTriage";
 
 /** What we intend to do about a model. */
@@ -233,7 +237,12 @@ export const workItemTimestampField = (
  * to send a request, so a false merge costs a candidate row rather than money.
  */
 export const candidateIdentity = (apiModel: string) => {
-    return modelIdentityWithoutVendor(apiModel);
+    // One identity for both layers, not two. The report used to group only by
+    // the bare id while the queue grouped by family, so the daily mail could
+    // announce `gemini-2.5-flash-preview-05-20` as new on a morning when the
+    // queue had long since collapsed it into a family somebody had decided
+    // about. Two answers to "is this the same model" is one answer too many.
+    return candidateFamilyIdentity(apiModel);
 };
 
 /**
@@ -306,26 +315,92 @@ export const mergeObservedVia = (
     return { merged, added };
 };
 
-export const newCandidatesForQueue = (input: {
+/** Why a model this scan saw was not put in front of a person. */
+export const CANDIDATE_SUPPRESSIONS = [
+    "not_reviewable",
+    "already_served",
+    "already_decided",
+    "superseded_by_served_version",
+    "superseded_within_scan",
+] as const;
+export type CandidateSuppression = (typeof CANDIDATE_SUPPRESSIONS)[number];
+
+export type SuppressedCandidate = {
+    apiModel: string;
+    provider: string;
+    reason: CandidateSuppression;
+    /** For the two version reasons, the model it lost to. */
+    supersededBy?: string;
+};
+
+export type QueueCandidateSelection = {
+    fresh: Array<ModelObservation & { observedVia: ObservedVia }>;
+    suppressed: SuppressedCandidate[];
+};
+
+/**
+ * Which of today's observations become work items, and what happened to the
+ * rest.
+ *
+ * The second list is not bookkeeping. Every filter here removes a model from a
+ * person's view, and a filter whose output nobody can count is a filter nobody
+ * can find a fault in -- which is how the OpenAI chat-prefix guess went a month
+ * without anyone noticing what it had dropped.
+ */
+export const selectQueueCandidates = (input: {
     observed: readonly ModelObservation[];
     /** Every apiModel the catalogue serves, any provider. */
     catalogueApiModels: readonly string[];
     /** Every apiModel that already has a work item, any provider. */
     queuedApiModels: readonly string[];
-}) => {
-    const known = new Set(
-        [...input.catalogueApiModels, ...input.queuedApiModels].map(
-            candidateFamilyIdentity
-        )
+    /**
+     * The decision keys stored on those work items, from
+     * `candidateDecisionKey` at the time each was filed.
+     *
+     * Read alongside `queuedApiModels` rather than instead of it: a key written
+     * under an older normalisation still has to suppress what it suppressed
+     * then, and a row filed before keys existed has only its apiModel.
+     */
+    queuedDecisionKeys?: readonly string[];
+}): QueueCandidateSelection => {
+    const servedFamilies = new Set(
+        input.catalogueApiModels.map(candidateFamilyIdentity)
     );
+    const decisionKeysByFamily = new Map<string, string[]>();
+    for (const key of [
+        ...input.queuedApiModels.map((apiModel) => candidateDecisionKey(apiModel)),
+        ...(input.queuedDecisionKeys ?? []),
+    ]) {
+        const family = decisionKeyFamily(key);
+        const held = decisionKeysByFamily.get(family);
+        if (held) held.push(key);
+        else decisionKeysByFamily.set(family, [key]);
+    }
     const fresh: Array<ModelObservation & { observedVia: ObservedVia }> = [];
+    const suppressed: SuppressedCandidate[] = [];
     const byIdentity = new Map<string, (typeof fresh)[number]>();
+    const note = (
+        observation: ModelObservation,
+        reason: CandidateSuppression,
+        supersededBy?: string
+    ) => {
+        suppressed.push({
+            apiModel: observation.apiModel,
+            provider: observation.provider,
+            reason,
+            ...(supersededBy ? { supersededBy } : {}),
+        });
+    };
+
     for (const observation of input.observed) {
         // Callers normally pass the monitor's already-filtered candidate set,
         // but the historical backfill reads observation rows directly. Keep
         // the eligibility policy here too so neither path can queue preview,
         // beta, experimental or otherwise unsupported models.
-        if (!shouldQueueModelCandidate(observation.apiModel)) continue;
+        if (!shouldQueueModelCandidate(observation.apiModel)) {
+            note(observation, "not_reviewable");
+            continue;
+        }
         const identity = candidateFamilyIdentity(observation.apiModel);
         const already = byIdentity.get(identity);
         if (already) {
@@ -341,14 +416,59 @@ export const newCandidatesForQueue = (input: {
             }
             continue;
         }
-        if (known.has(identity)) continue;
-        known.add(identity);
+        if (servedFamilies.has(identity)) {
+            note(observation, "already_served");
+            continue;
+        }
+        const decided = (decisionKeysByFamily.get(identity) ?? []).some((key) =>
+            decisionSuppressesCandidate(key, observation.apiModel)
+        );
+        if (decided) {
+            note(observation, "already_decided");
+            continue;
+        }
+        const supersededBy = supersedingServedModel(
+            observation.apiModel,
+            input.catalogueApiModels
+        );
+        if (supersededBy) {
+            note(observation, "superseded_by_served_version", supersededBy);
+            continue;
+        }
         const entry = { ...observation, observedVia: [observation] };
         byIdentity.set(identity, entry);
         fresh.push(entry);
     }
-    return fresh;
+
+    // One line, one decision. Two generations of the same line arriving on the
+    // same morning is one question -- "do we want the new one" -- and filing
+    // both puts the answer to the older one in front of somebody who has not
+    // yet answered the newer.
+    const newest = newestByModelLine(fresh, (entry) => entry.apiModel);
+    const kept = new Set(newest);
+    for (const entry of fresh) {
+        if (kept.has(entry)) continue;
+        note(
+            entry,
+            "superseded_within_scan",
+            newest.find(
+                (candidate) =>
+                    candidate !== entry &&
+                    supersedingServedModel(entry.apiModel, [candidate.apiModel])
+            )?.apiModel
+        );
+    }
+
+    return { fresh: newest, suppressed };
 };
+
+/** The candidates alone, for callers that do not report what was filtered. */
+export const newCandidatesForQueue = (input: {
+    observed: readonly ModelObservation[];
+    catalogueApiModels: readonly string[];
+    queuedApiModels: readonly string[];
+    queuedDecisionKeys?: readonly string[];
+}) => selectQueueCandidates(input).fresh;
 
 /**
  * Sightings of models the queue already holds, grouped by the item they belong
