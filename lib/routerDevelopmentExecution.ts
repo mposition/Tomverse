@@ -175,22 +175,29 @@ export function legacyExecutionObservationStatus(value: unknown, plan: Developme
     importedRows: results.rows.length, productExecutionVerified: false };
 }
 
-/** Callers reconstruct the manifest independently; the raw journal is always replayed here. */
+/** Reconstruct the frozen plan/manifest and replay the raw journal before accepting any receipt. */
 export function validateExecutionObservationSet(values: readonly unknown[], contracts: readonly DevelopmentExecutionContract[], input: {
   journalText: string; manifest: CollectionManifest; approval: CollectionApproval;
+  corpus: DevelopmentCorpus; models: readonly AiModel[];
+  benchmarkSource: DevelopmentSource; collectorSource: DevelopmentSource;
 }) {
   if (!Array.isArray(values) || values.length > contracts.length) fail("observation_count");
   const byRow = new Map(contracts.map((contract) => [validateDevelopmentExecutionContract(contract).rowId, contract]));
   if (byRow.size !== contracts.length) fail("duplicate_contract");
-  const journalInput = strictBenchmarkObject(input, ["journalText", "manifest", "approval"], "execution_journal_input");
+  const journalInput = strictBenchmarkObject(input, ["journalText", "manifest", "approval", "corpus", "models", "benchmarkSource", "collectorSource"], "execution_journal_input");
   const journalText = journalInput.journalText;
   if (typeof journalText !== "string" || Buffer.byteLength(journalText) > COLLECTION_LIMITS.journalBytes) return fail("journal_text_type_or_byte_limit");
   const { manifestDigest, ...manifestBody } = input.manifest;
   if (!isBenchmarkDigest(manifestDigest) || hash(manifestBody) !== manifestDigest) fail("journal_manifest_digest");
+  const authoritative = new Map(collectionExecutionContracts(input).map((contract) => [contract.rowId, contract]));
   const journal = replayCollectionJournal(journalText, input.manifest, input.approval);
   validateCollectionApproval(input.approval, input.manifest, Date.parse(journal.startedAt), true);
   const header = journal.entries[0]?.event;
   if (header?.kind !== "header" || contracts.some((contract) => contract.manifestDigest !== header.manifestDigest)) fail("journal_manifest_binding");
+  for (const contract of contracts) {
+    const expected = authoritative.get(contract.rowId);
+    if (!expected || executionContractMismatches(expected, contract).length) fail("journal_contract_snapshot_mismatch");
+  }
   const terminals = new Map(journal.entries.filter((entry) => entry.event.kind === "terminal").map((entry) => [entry.entryDigest, entry]));
   const byObservedRow = new Map<string, DevelopmentExecutionObservation>();
   for (const value of values) {

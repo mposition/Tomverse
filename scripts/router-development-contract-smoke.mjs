@@ -101,19 +101,22 @@ export async function runExecutionContractSmoke({ outputDirectory = null } = {})
       throw new Error("mock_interruption_not_observed");
     } catch (error) { if (error.message !== "mock_interrupt_after_two_terminals") throw error; }
     const interrupted = readState(directory, manifest, approval);
+    const beforeResume = calls.length;
     const collected = await collectDevelopment(input);
+    const recoveredRows = calls.length - beforeResume;
     const beforeReplay = calls.length;
     await collectDevelopment(input);
     if (calls.length !== beforeReplay || calls.length !== 8) throw new Error("mock_resume_dispatch_count");
     const journalText = readFileSync(collectorPaths(directory, approval.approvalId).ledger, "utf8");
     const state = replayCollectionJournal(journalText, manifest, approval);
     const observations = observationsFor(state, contracts);
-    const compatible = validateExecutionObservationSet(observations, contracts, { journalText, manifest, approval });
+    const compatible = validateExecutionObservationSet(observations, contracts, { journalText, manifest, approval,
+      corpus, models: AVAILABLE_MODELS, benchmarkSource: fixtureSource, collectorSource: fixtureSource });
     if (compatible.some((entry) => entry.compatibility.disposition !== "compatible")) throw new Error("mock_compatible_fixture_held");
     const exported = await exportDevelopmentCollection(input);
     // v1 export has no mock origin; normalize only this NEW mock fixture, preserving all identities/answers.
     // Local journal times are not provider observations. No historical observation is read or rewritten.
-    const answers = { ...exported, origin: { kind: "synthetic-fixture", description: "Fixed offline mock adapter only; no provider calls, measured timings, usage or spending." },
+    const answers = { ...exported, origin: { kind: "synthetic-fixture", description: `Fixed offline mock adapter only; no provider calls, measured timings, usage or spending. Manifest ${manifest.manifestDigest}.` },
       rows: exported.rows.map((row) => ({ ...row, recordedAt: null, providerResponseId: null, modelVersion: null,
         metrics: { inputTokens: null, outputTokens: null, latencyMs: null, providerCostUsd: null } })) };
     const score = scoreDevelopmentResults(corpus, plan, answers);
@@ -139,7 +142,7 @@ export async function runExecutionContractSmoke({ outputDirectory = null } = {})
       schemaVersion: "router-development-contract-smoke-v2", purpose: "development-only", evidenceStatus: "mock_validation_only",
       providerCalls: 0, incurredProviderSpendUsd: 0, implementationSource,
       fixtureSource, simulatedClock: AT, manifestDigest: manifest.manifestDigest,
-      mockCollection: { selectedRows: 8, adapterCalls: calls.length, interruptedTerminalRecords: [...interrupted.attempts.values()].filter((attempt) => attempt.terminal !== null).length,
+      mockCollection: { selectedRows: 8, adapterCalls: calls.length, recoveredRows, interruptedTerminalRecords: [...interrupted.attempts.values()].filter((attempt) => attempt.terminal !== null).length,
         finalTerminalRecords: [...state.attempts.values()].filter((attempt) => attempt.terminal !== null).length, repeatedCompletedCalls: calls.length - beforeReplay,
         outcome: collected.stopReason, simulatedReservationMicroUsd: state.totalReservedMicroUsd, actualInvoiceMicroUsd: null },
       uncertainRecovery: { stopReason: held.stopReason, adapterCalls: heldAdapterCalls, dispatchIntents: held.dispatchIntents,

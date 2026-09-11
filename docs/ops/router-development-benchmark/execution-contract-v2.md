@@ -42,11 +42,15 @@ not the execution contract. A changed plan/manifest is still incompatible;
 this slice does not merge different runs or infer that two aliases resolved
 to the same deployed provider version.
 
-`validateExecutionObservationSet()` accepts raw journal text plus the
-independently reconstructed manifest and its approval. It bounds the journal
-using the existing collector limit, checks the manifest body digest, calls
-`replayCollectionJournal()` internally, and reuses approval validation against
-the recorded run-start instant. A fabricated `{ entries }` object cannot
+`validateExecutionObservationSet()` accepts raw journal text, the manifest and
+its approval, plus independently supplied frozen corpus, catalogue and source
+snapshots. It bounds the journal using the existing collector limit, checks
+the manifest body digest and calls `collectionExecutionContracts()` internally
+to rerun the existing plan and manifest validators. Each supplied row contract
+must match its reconstructed contract; rehashing an invalid plan or changing
+a contract's model/settings/cap cannot manufacture compatible evidence.
+It calls `replayCollectionJournal()` internally and reuses approval validation
+against the recorded run-start instant. A fabricated `{ entries }` object cannot
 substitute for replay. It checks each observation's row, time, complete
 outcome and digest against the read-back terminal. Duplicates, unknown rows,
 swapped receipts and changed outcomes are refused. The reconstructed journal
@@ -105,6 +109,8 @@ does not receive gold, answers or grades.
 
 The command interrupts after two durable terminal records, resumes only the
 six unattempted rows, and confirms that another resume dispatches zero rows.
+The report's `recoveredRows` records the actual adapter-call count increase
+across that resume, independently of the terminal-record counters.
 It reads the journal back, checks observation binding, exports through v1,
 then grades and runs the existing Replay comparison. A separate intent-only
 interruption proves that unknown state prevents dispatch and export; a
@@ -123,7 +129,8 @@ complete transitive environment snapshot. Nothing runs against the real
 Git common-directory collector ledger or loads provider credentials.
 
 The unchanged v1 exporter labels records `externally-saved`. Only this new
-mock output is converted to `synthetic-fixture`, clearing local timestamps
+mock output is converted to `synthetic-fixture`, retaining the manifest digest
+in its origin description and clearing local timestamps
 and nullable provider fields before scoring/Replay. Answer bytes and identity
 bindings stay intact. The saved v2 observation retains the mock timestamp and
 `mock-only` provenance; synthetic finish markers are not provider evidence.

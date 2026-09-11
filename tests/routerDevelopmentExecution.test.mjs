@@ -23,8 +23,7 @@ const returned = (text = "{}", finish = "stop") => ({ status: "returned", answer
 const observationFor = (outcome = returned(), overrides = {}) => buildDevelopmentExecutionObservation({ executionDigest: contract.contractDigest,
   rowId: contract.rowId, recordedAt: "2026-09-10T00:00:00.000Z", provenance: "mock-only", journalEntryDigest: "e".repeat(64), outcome, ...overrides });
 const compatibility = (observation, observed = contract, expected = contract) => executionObservationCompatibility({ expected, observed, observation });
-function journalFixture(outcome = returned(), approvalOverrides = {}) {
-  const manifest = fixture.manifest;
+function journalFixture(outcome = returned(), approvalOverrides = {}, manifest = fixture.manifest) {
   const at = "2026-09-10T00:00:00.000Z";
   const approval = { schemaVersion: COLLECTION_VERSION, status: "approved", approvalId: "mock-unit-journal",
     manifestDigest: manifest.manifestDigest, approvedBy: "SYNTHETIC MOCK ONLY; NOT HUMAN SPENDING AUTHORIZATION",
@@ -42,7 +41,7 @@ function journalFixture(outcome = returned(), approvalOverrides = {}) {
     return entry;
   });
   const observation = observationFor(outcome, { journalEntryDigest: entries[2].entryDigest });
-  return { observation, input: { journalText: entries.map((entry) => canonicalBenchmarkJson(entry)).join("\n") + "\n", manifest, approval } };
+  return { observation, input: { ...buildInput, journalText: entries.map((entry) => canonicalBenchmarkJson(entry)).join("\n") + "\n", manifest, approval } };
 }
 
 test("canonical field ordering is stable and a collection timestamp does not change the execution contract", () => {
@@ -201,6 +200,34 @@ test("contracts without observations retain their row identities and not_observe
   const empty = validateExecutionObservationSet([], contracts, input);
   assert.equal(empty.length, contracts.length);
   assert.ok(empty.every((row) => row.observation === null && row.compatibility.holdReasons[0] === "not_observed"));
+});
+
+test("rehashing an invalid plan cannot manufacture an authoritative collection contract", () => {
+  const bad = structuredClone(fixture.manifest);
+  bad.plan.rows[0].modelId = "not-a-model";
+  const { planDigest: unusedPlanDigest, ...planBody } = bad.plan;
+  bad.plan.planDigest = hash(planBody);
+  const { manifestDigest: unusedManifestDigest, ...manifestBody } = bad;
+  bad.manifestDigest = hash(manifestBody);
+  assert.notEqual(bad.plan.planDigest, unusedPlanDigest);
+  assert.notEqual(bad.manifestDigest, unusedManifestDigest);
+  const { observation, input } = journalFixture(returned(), {}, bad);
+  const forgedContract = changed({ planDigest: bad.plan.planDigest, manifestDigest: bad.manifestDigest });
+  const forgedObservation = observationFor(observation.outcome, { journalEntryDigest: observation.journalEntryDigest,
+    executionDigest: forgedContract.contractDigest });
+  assert.throws(() => collectionExecutionContracts({ ...buildInput, manifest: bad }), /plan/);
+  assert.throws(() => validateExecutionObservationSet([forgedObservation], [forgedContract], input), /plan/);
+});
+
+test("self-consistent supplied contracts must match the independently reconstructed row", () => {
+  const { observation, input } = journalFixture();
+  for (const fields of [{ maxOutputTokens: contract.maxOutputTokens + 1 }, { modelId: "not-a-model" },
+    { generationSettingsDigest: hash({ temperature: 0.5 }) }, { rowId: "not-a-selected-row" }]) {
+    const forgedContract = changed(fields);
+    const forgedObservation = observationFor(observation.outcome, { rowId: forgedContract.rowId,
+      journalEntryDigest: observation.journalEntryDigest, executionDigest: forgedContract.contractDigest });
+    assert.throws(() => validateExecutionObservationSet([forgedObservation], [forgedContract], input), /journal_contract_snapshot_mismatch/);
+  }
 });
 
 test("strict bounded parsers reject tampering, extra gold fields, duplicate keys and oversize documents", () => {

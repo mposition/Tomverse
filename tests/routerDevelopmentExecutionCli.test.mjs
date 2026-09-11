@@ -22,6 +22,8 @@ after(() => {
 });
 const script = resolve(root, "scripts/router-development-contract-smoke.mjs");
 const cli = (args) => spawnSync(process.execPath, ["--conditions=react-server", "--import", "tsx", script, ...args], { cwd: root, encoding: "utf8", maxBuffer: 4_000_000 });
+const corpus = parseDevelopmentCorpus(readFileSync(resolve(root, "docs/ops/router-development-benchmark/development-v1.json"), "utf8"));
+const frozenContext = (report) => ({ corpus, models: AVAILABLE_MODELS, benchmarkSource: report.fixtureSource, collectorSource: report.fixtureSource });
 
 test("CLI help and rejected live/unknown/duplicate flags never create collector outputs", () => {
   assert.equal(cli(["--help"]).status, 0);
@@ -48,6 +50,7 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
   assert.equal(report.incurredProviderSpendUsd, 0);
   assert.deepEqual(report.mockCollection.adapterCalls, 8);
   assert.equal(report.mockCollection.interruptedTerminalRecords, 2);
+  assert.equal(report.mockCollection.recoveredRows, 6);
   assert.equal(report.mockCollection.finalTerminalRecords, 8);
   assert.equal(report.mockCollection.repeatedCompletedCalls, 0);
   assert.equal(report.uncertainRecovery.adapterCalls, 0);
@@ -85,7 +88,10 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
   const journalText = readFileSync(join(outputDirectory, "router-development-collector-v1.1/mock-only-main.jsonl"), "utf8");
   const journal = replayCollectionJournal(journalText, manifest, approval);
   assert.equal([...journal.attempts.values()].filter((attempt) => attempt.terminal !== null).length, 8);
-  assert.equal(validateExecutionObservationSet(readJson("observations.mock.json"), readJson("contracts.mock.json"), { journalText, manifest, approval }).length, 8);
+  assert.equal(validateExecutionObservationSet(readJson("observations.mock.json"), readJson("contracts.mock.json"), { ...frozenContext(report), journalText, manifest, approval }).length, 8);
+  const savedAnswers = readJson("answers.mock.json");
+  assert.equal(savedAnswers.origin.kind, "synthetic-fixture");
+  assert.ok(savedAnswers.origin.description.includes(`Manifest ${manifest.manifestDigest}.`));
   const mutatedJournal = journalText.replace('"mock_provider_error"', '"tampered_provider_error"');
   assert.throws(() => replayCollectionJournal(mutatedJournal, manifest, approval), /journal_chain/);
   const savedReport = readJson("report.json");
@@ -113,7 +119,7 @@ test("genuine A and B collection journals reject cross-manifest and relabelled t
     approvedBy: "SYNTHETIC MOCK ONLY; NOT HUMAN SPENDING AUTHORIZATION", approvedAt: report.simulatedClock,
     expiresAt: manifestA.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS] };
   const journalTextA = readFileSync(join(outputDirectory, "router-development-collector-v1.1/mock-only-main.jsonl"), "utf8");
-  const journalInputA = { journalText: journalTextA, manifest: manifestA, approval: approvalA };
+  const journalInputA = { ...frozenContext(report), journalText: journalTextA, manifest: manifestA, approval: approvalA };
   const journalA = replayCollectionJournal(journalTextA, manifestA, approvalA);
   assert.equal([...journalA.attempts.values()].filter((attempt) => attempt.terminal !== null).length, 8);
   const contractsA = readJson("contracts.mock.json");
@@ -123,10 +129,7 @@ test("genuine A and B collection journals reject cross-manifest and relabelled t
   const manifestB = buildCollectionManifest({ plan: manifestA.plan, models: AVAILABLE_MODELS, collectorSource: manifestA.collectorSource,
     selectedRowIds: manifestA.selectedRowIds, limits: { ...manifestA.limits, requestTimeoutMs: manifestA.limits.requestTimeoutMs - 1 } });
   assert.notEqual(manifestB.manifestDigest, manifestA.manifestDigest);
-  const contractsB = collectionExecutionContracts({
-    corpus: parseDevelopmentCorpus(readFileSync(resolve(root, "docs/ops/router-development-benchmark/development-v1.json"), "utf8")),
-    models: AVAILABLE_MODELS, manifest: manifestB, benchmarkSource: manifestB.plan.source, collectorSource: manifestB.collectorSource,
-  });
+  const contractsB = collectionExecutionContracts({ ...frozenContext(report), manifest: manifestB });
   const relabelledObservationsA = observationsA.map((observation) => buildDevelopmentExecutionObservation({
     executionDigest: contractsB.find((contract) => contract.rowId === observation.rowId).contractDigest,
     rowId: observation.rowId, recordedAt: observation.recordedAt, provenance: observation.provenance,
@@ -151,7 +154,7 @@ test("genuine A and B collection journals reject cross-manifest and relabelled t
   assert.equal(collectedB.terminalRecords, 8);
   const journalTextB = readFileSync(collectorPaths(commonDirB, approvalB.approvalId).ledger, "utf8");
   const journalB = replayCollectionJournal(journalTextB, manifestB, approvalB);
-  const journalInputB = { journalText: journalTextB, manifest: manifestB, approval: approvalB };
+  const journalInputB = { ...frozenContext(report), journalText: journalTextB, manifest: manifestB, approval: approvalB };
   const observationsB = journalB.entries.filter((entry) => entry.event.kind === "terminal").map((entry) => buildDevelopmentExecutionObservation({
     executionDigest: contractsB.find((contract) => contract.rowId === entry.event.rowId).contractDigest,
     rowId: entry.event.rowId, recordedAt: entry.event.at, provenance: "mock-only", journalEntryDigest: entry.entryDigest, outcome: entry.event.outcome,
