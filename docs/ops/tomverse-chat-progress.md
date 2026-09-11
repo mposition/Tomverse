@@ -24,7 +24,7 @@
   [기존 개발 계획](../policy/tomverse-chat-delivery-plan.md)에 그 미커밋 업데이트가
   병합되어 있다고 주장하지 않는다. 로컬 경로는 외부 영구 보관의 보장도 아니다.
 - 별도 표시가 없는 기능 행은 **그 계획이 기록한 기준 현황을 옮긴 것**이며,
-  이번 bridge 작업에서 해당 기능·배포·기기를 다시 검증했다는 뜻이 아니다.
+  게시된 bridge 작업에서 해당 기능·배포·기기를 다시 검증했다는 뜻이 아니다.
   새 source, 환경, 실행 관측으로 갱신할 때는 그 근거와 범위도 함께 기록한다.
 
 ## 전체 웹 Chat 계획 추정 — planning-estimate-v1
@@ -68,7 +68,7 @@ inventory를 바탕으로 한 계획 판단이지 새 전체 코드 감사나 �
 | 게시된 48문항 offline bridge | 동결 `d84c900`에서 339/339·guard 7개 통과; Claude 최종 approve·nit 2건, controller on_hold; 기록 기반 PR #1366 게시 | controller passed, 실제 provider 관측, 새 유료 승인 또는 Chat dispatch 검증 완료 |
 | 이번 식별자 검사·진행 기록 후속 | 기존 96행·2모델로 선택 식별자와 거부 검사를 보강; 웹 Chat 계획 추정의 첫 기준 정리 | 원래 검토의 재개·판정 변경 또는 이 후속 source의 독립 검토 완료 |
 | 모바일 Chat entry·단일 transcript | 계획의 후속 사용자 기능; 새 통합 상태는 본 회차에서 미검증 | 기존 Review panel을 숨기면 단일 Chat 구현이 된다는 해석 |
-| Planner·품질 개선 | 계획된 후속 작업; 새 관측과 별도 판정 필요 | 이번 exact-answer fixture로 일반적인 최적 모델을 입증 |
+| Planner·품질 개선 | 계획된 후속 작업; 새 관측과 별도 판정 필요 | 기존 exact-answer fixture로 일반적인 최적 모델을 입증 |
 | PWA·native·Memory Release B | 별도 milestone과 승인 경계 유지 | 모바일 웹 또는 corpus 작업의 자동 완료 범위 |
 
 실행 계약 선행 slice의 실제 Claude 최종 판정은 `approve`와 문서 nit 1건이었고,
@@ -108,17 +108,17 @@ controller는 `on_hold / revisions_exhausted`로 종료했다. 사용자의 별�
 
 ## Benchmark v2 개발 기반 — 별도 8개 종료 산출물
 
-이 목록은 전체 v2 기반의 범위다. **이번 offline bridge의 완료 조건과 같지 않다.**
+이 목록은 전체 v2 기반의 범위다. **게시된 offline bridge의 완료 조건과 같지 않다.**
 선행 8-row mock은 기존 v1 corpus와 실행 계약의 배선 검증이며, 48문항에 대한
 collector/Replay 실행 증거로 승격하지 않는다.
 
-| ID | 종료 산출물 | 선행 근거와 이번 범위 |
+| ID | 종료 산출물 | 선행 근거와 게시된 bridge 범위 |
 | --- | --- | --- |
 | F01 | versioned corpus/schema·coverage·독립 expected derivation | 48문항·8 cell·12 family·24/24 partition 및 oracle 정답 48/48; 선행 동결 source 검토 승인·PR #1359 병합 |
-| F02 | source/prompt/context/model/cap/settings/mode 실행 계약 | 이번 v2 plan/partition 재구성 후 96개 mock contract를 raw journal terminal과 결속; 실제 product dispatch는 미검증 |
-| F03 | refusal·unmeasured·acquisition·response·correctness 분리와 전체 분모 | 이번 full 2,016행 중 계획 가능 720·거절 1,296 유지; 선택 96과 미선택·미관측을 model/cell/partition/family별로 분리 |
+| F02 | source/prompt/context/model/cap/settings/mode 실행 계약 | 게시된 bridge의 v2 plan/partition 재구성 후 96개 mock contract를 raw journal terminal과 결속; 실제 product dispatch는 미검증 |
+| F03 | refusal·unmeasured·acquisition·response·correctness 분리와 전체 분모 | 게시된 bridge의 full 2,016행 중 계획 가능 720·거절 1,296 유지; 선택 96과 미선택·미관측을 model/cell/partition/family별로 분리 |
 | F04 | correctness/acquisition 및 시간·usage·가격·billed cost 분리 | mock 호출만 96개; token·TTFT·whole-call·end-to-end·billed cost 전부 null, 실제 provider 성능·청구 관측 없음 |
-| F05 | dry-run→mock collection→journal→grading/Replay/report | 이번 48문항 연결 구현; 2 terminal 뒤 중단→94개 재개→반복 0, intent-only hold·export 거절 및 length hold 검증 경로 |
+| F05 | dry-run→mock collection→journal→grading/Replay/report | 게시된 bridge에서 48문항 연결 구현; 2 terminal 뒤 중단→94개 재개→반복 0, intent-only hold·export 거절 및 length hold 검증 경로 |
 | F06 | corpus/plan/result/answer parser bound와 경계 검사 | 기존 200,000 nodes/16 MiB·선택 1,008 상한 유지; full v2 plan/manifest와 실제 저장 JSON 재파싱 및 byte/node 계측 |
 | F07 | 재현 명령·안전 artifact·제안 상태 paid manifest | 별도 v2 mock CLI/새 artifact directory 구현; legacy live 입구 거절, 신규 paid manifest·승인은 후속 결정이며 과거 60회 승인 재사용 금지 |
 | F08 | 동결 commit 테스트·Claude 독립 검토·정직한 잔여 기록 | bridge `d84c900`의 339/339·guard 7개, Claude approve·nit 2건과 on_hold를 보존하고 PR #1366 게시; 후속 source 검토·병합·배포는 별도 |
@@ -158,7 +158,7 @@ benchmark 96개, collector 80개, Replay 19개로 **320/320 통과**했다.
 
 ## 게시된 bridge의 범위와 이번 후속 상태
 
-이번 구현은 별도 [offline bridge guide](router-development-benchmark/bridge-v2.md)의
+게시된 bridge 구현은 별도 [offline bridge guide](router-development-benchmark/bridge-v2.md)의
 범위다. full catalogue 2,016행과 48문항·8 cell·12 family·24/24 partition을
 유지하면서 두 모델의 96개 답변을 고정 mock으로 생성한다. 실제 provider 호출과
 발생 비용은 0이고, 모형 실행의 정답 비율은 모델 품질 증거가 아니다.
