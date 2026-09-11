@@ -31,9 +31,12 @@ no runtime performance or cost improvement has been measured.
   external-request cue in the clause prevents this contextual masking.
 - Direct prohibitions on using today's date, including the supported Korean
   date-noun/direct-prohibition forms. The English comma-separated prohibition
-  list is bounded to four preceding items, each with at most 80 trailing
-  characters. Longer or ambiguous lists retain their cue. A prohibition is not
-  allowed to consume an unrelated later affirmative request.
+  list accepts only a final `or` and is bounded to four preceding items, each
+  with at most 80 trailing characters. A standalone `and` anywhere in the
+  matched span conservatively retains the cue rather than guessing its negation
+  scope. Longer or ambiguous lists also retain their cue. A prohibition is not
+  allowed to consume an unrelated later affirmative request; these boundaries
+  do not resolve arbitrary natural-language negation.
 
 There is no generic quoted-text removal, whole-turn closed-book override or
 general fix for substrings embedded in other words. `RECENCY_KEYWORDS` and the
