@@ -83,6 +83,12 @@ const mockContinuationApi = async (
         /** What POST .../continuations answers. */
         createStatus?: number;
         /**
+         * Whether the rollout flag reads on for this context. Defaults to on,
+         * because almost every spec here is about what the feature does; pass
+         * `false` to exercise the screen a deployment with the flag off shows.
+         */
+        continuationFlag?: boolean;
+        /**
          * Drops the connection on the first create only.
          *
          * Reproduces the one case the server's own idempotency cannot see: the
@@ -120,6 +126,26 @@ const mockContinuationApi = async (
         tomverseMessages: options.tomverseMessages ?? [],
     };
     const source = options.source ?? { status: "available" };
+
+    /*
+      The rollout flag, as this context sees it.
+
+      The viewer's route reads `isExternalContinuationEnabled()` server-side and
+      hides the CTA when it is off, which is the whole point of the card being
+      wired to the flag. With the database disabled that read can only answer
+      false, so a spec that wants the CTA opts in here -- the same cookie shape
+      `ReviewWorkspaceShell` takes for image generation and voice, honoured
+      only in fixture mode.
+    */
+    if (options.continuationFlag !== false) {
+        await page.context().addCookies([
+            {
+                name: "__tomverse_e2e_external_continuation",
+                value: "1",
+                url: "http://127.0.0.1:3100",
+            },
+        ]);
+    }
 
     await page.route("**/api/auth/session**", (route) =>
         route.fulfill(
@@ -458,6 +484,37 @@ test.describe("continuing an imported conversation", () => {
         expect(api.createBodies[0].idempotencyKey).toMatch(
             /^[0-9a-f-]{36}$/i
         );
+    });
+
+    test("with the flag off the card is not on screen at all", async ({
+        page,
+    }) => {
+        /*
+          The defect this covers, seen in production on 2026-09-11: the card
+          rendered whatever the flag said, and the only way to learn the
+          feature was off was to press the button and read a 403. AGENTS.md's
+          image-generation UI contract draws the line this restores -- an
+          entitlement lock is shown and explained up front, but with the flag
+          off nothing renders.
+
+          The viewer itself must still work: the imported conversation is
+          readable because *import* is a separate flag, and conflating the two
+          is what docs/policy/external-conversation-continuation.md §7 forbids.
+        */
+        await prepareGuestPage(page, "ko");
+        await mockContinuationApi(page, { continuationFlag: false });
+
+        await page.goto(`/settings/imports/conversations/${EXTERNAL_ID}`);
+        await expect(
+            page.getByTestId("external-conversation-viewer")
+        ).toBeVisible();
+
+        await expect(page.getByTestId("continuation-cta")).toHaveCount(0);
+        await expect(page.getByTestId("continuation-disclosure")).toHaveCount(0);
+        // And the transcript this page exists to show is still shown.
+        await expect(
+            page.getByText("What did we decide about the migration?")
+        ).toBeVisible();
     });
 
     test("the flag being off is a refusal, not a retry", async ({ page }) => {
