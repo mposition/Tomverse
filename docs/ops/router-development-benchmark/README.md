@@ -20,6 +20,9 @@ confidence interval, quality-band update, or product-readiness conclusion.
 The separate [v2 execution-contract slice](execution-contract-v2.md) validates
 condition/observation compatibility and a fixed offline collector-to-Replay
 mock. It does not replace this v1 corpus, grader or frozen result format.
+The separate [v2 corpus slice](corpus-v2.md) adds 48 synthetic cases and
+whole-family development partitions with independent deterministic answer
+checks. It does not expand the v1 plan, collector or Replay to 48 cases.
 
 - [development-v1.json](development-v1.json): exactly 24 cases, six in each
   language/task cell. Schema `router-development-corpus-v1`, corpus
