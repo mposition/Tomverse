@@ -83,8 +83,10 @@ export function collectionPricing(model: AiModel, at: number) {
     reasoningTokenBilling: resolved.reasoningTokenBilling,
     tiers: tiers.map((tier) => ({ ...tier, cacheWriteUsdPerMillionTokens: tier.cacheWriteUsdPerMillionTokens ?? null })) };
 }
-export function buildCollectionManifest(input: {
-  plan: DevelopmentPlan; models: readonly AiModel[]; collectorSource: DevelopmentSource;
+/** Acquisition needs these frozen matrix fields; the versioned caller validates the whole plan. */
+export type CollectionPlan = Pick<DevelopmentPlan, "createdAt" | "source" | "rows" | "corpusDigest" | "planDigest">;
+export function buildCollectionManifest<Plan extends CollectionPlan = DevelopmentPlan>(input: {
+  plan: Plan; models: readonly AiModel[]; collectorSource: DevelopmentSource;
   selectedRowIds: readonly string[]; limits: CollectionLimits;
 }) {
   const limits = validateCollectionLimits(input.limits);
@@ -108,18 +110,18 @@ export function buildCollectionManifest(input: {
     completionPossibleWithinLimits: totalReservedMicroUsd <= limits.maxTotalMicroUsd && calls.length <= limits.maxCalls && calls.every((call) => call.reserve.reservedMicroUsd <= limits.maxRequestMicroUsd) };
   return { ...body, manifestDigest: collectionHash(body) };
 }
-export type CollectionManifest = ReturnType<typeof buildCollectionManifest>;
+export type CollectionManifest<Plan extends CollectionPlan = DevelopmentPlan> = ReturnType<typeof buildCollectionManifest<Plan>>;
 export type CollectionApproval = {
   schemaVersion: typeof COLLECTION_VERSION; status: "approved"; approvalId: string; manifestDigest: string;
   approvedBy: string; approvedAt: string; expiresAt: string; acknowledgements: string[];
 };
-export function validateCollectionManifest(value: unknown, input: Omit<Parameters<typeof buildCollectionManifest>[0], "selectedRowIds" | "limits">): CollectionManifest {
+export function validateCollectionManifest<Plan extends CollectionPlan = DevelopmentPlan>(value: unknown, input: Omit<Parameters<typeof buildCollectionManifest<Plan>>[0], "selectedRowIds" | "limits">): CollectionManifest<Plan> {
   const obj = strictBenchmarkObject(value, ["schemaVersion", "purpose", "status", "plan", "collectorSource", "selectedRowIds", "calls", "limits", "assumptions", "totalReservedMicroUsd", "completionPossibleWithinLimits", "manifestDigest"], "collection_manifest");
   const expected = buildCollectionManifest({ ...input, selectedRowIds: obj.selectedRowIds as string[], limits: validateCollectionLimits(obj.limits) });
   if (canonicalBenchmarkJson(value) !== canonicalBenchmarkJson(expected)) collectionFail("manifest_snapshot_mismatch");
   return expected;
 }
-export function validateCollectionApproval(value: unknown, manifest: CollectionManifest, now: number, allowExpired = false): CollectionApproval {
+export function validateCollectionApproval(value: unknown, manifest: CollectionManifest<CollectionPlan>, now: number, allowExpired = false): CollectionApproval {
   const obj = strictBenchmarkObject(value, ["schemaVersion", "status", "approvalId", "manifestDigest", "approvedBy", "approvedAt", "expiresAt", "acknowledgements"], "collection_approval");
   collectionId(obj.approvalId);
   if (obj.schemaVersion !== COLLECTION_VERSION || obj.status !== "approved" || obj.manifestDigest !== manifest.manifestDigest || typeof obj.approvedBy !== "string" || !obj.approvedBy.trim() || obj.approvedBy.length > 200 || !isBenchmarkInstant(obj.approvedAt) || obj.expiresAt !== manifest.limits.expiresAt || canonicalBenchmarkJson(obj.acknowledgements) !== canonicalBenchmarkJson(COLLECTION_ASSUMPTIONS)) collectionFail("approval_binding");
@@ -159,7 +161,7 @@ export function validateCollectionOutcome(value: unknown): CollectionOutcome {
   if (observation.source === "unavailable" && canonicalBenchmarkJson(observation) !== canonicalBenchmarkJson({ ...emptyCollectionObservation(), unsupportedBilling: observation.unsupportedBilling })) collectionFail("unavailable_observation_has_metrics");
   return value as CollectionOutcome;
 }
-export function estimateCollectionUsageCost(observation: CollectionObservation, call: CollectionManifest["calls"][number]): number | null {
+export function estimateCollectionUsageCost(observation: CollectionObservation, call: CollectionManifest<CollectionPlan>["calls"][number]): number | null {
   const { inputTokens, outputTokens, noCacheInputTokens, cacheReadTokens, cacheWriteTokens } = observation;
   if (observation.unsupportedBilling || inputTokens === null || outputTokens === null || noCacheInputTokens === null || cacheReadTokens === null || cacheWriteTokens === null || noCacheInputTokens + cacheReadTokens + cacheWriteTokens !== inputTokens) return null;
   const tier = call.pricing.tiers.find((entry) => entry.maxPromptTokens === null || inputTokens <= entry.maxPromptTokens);

@@ -12,18 +12,18 @@ import type { TaskProfile } from "./taskProfileCore";
 import {
     benchmarkDigest, canonicalBenchmarkJson, DEVELOPMENT_GRADER_VERSION, DEVELOPMENT_LIMITS,
     isBenchmarkDigest, isBenchmarkInstant, modelInputForCase, strictBenchmarkObject,
-    validateDevelopmentCorpus, type DevelopmentCorpus,
+    type DevelopmentCase, validateDevelopmentCorpus, type DevelopmentCorpus,
 } from "./routerDevelopmentBenchmark";
 
-export const DEVELOPMENT_PLAN_VERSION = "router-development-plan-v1";
 export type DevelopmentSource = { commit: string; dirty: boolean; files: Record<string, string> };
-export type DevelopmentPlanInput = {
-    corpus: DevelopmentCorpus; models: readonly AiModel[]; plan: ModelTier | "Guest";
+export type DevelopmentMatrixInput = {
+    corpus: { corpusId: string; purpose: "development-only"; cases: readonly DevelopmentCase[] }; models: readonly AiModel[]; plan: ModelTier | "Guest";
     requestedModelId: string; createdAt: string; source: DevelopmentSource;
 };
 
-export function buildDevelopmentPlan(input: DevelopmentPlanInput) {
-    const corpus = validateDevelopmentCorpus(input.corpus);
+/** Internal calculation shared by strict versioned entry points; callers validate their corpus. */
+export function buildDevelopmentMatrix(input: DevelopmentMatrixInput) {
+    const corpus = input.corpus;
     if (!isBenchmarkInstant(input.createdAt)) throw new Error("plan_created_at_invalid");
     if (!["Guest", "Free", "Pro", "Max"].includes(input.plan)) throw new Error("plan_tier_invalid");
     const source = strictBenchmarkObject(input.source, ["commit", "dirty", "files"], "source");
@@ -124,7 +124,7 @@ export function buildDevelopmentPlan(input: DevelopmentPlanInput) {
     });
     const eligibleRows = rows.filter((row) => row.benchmarkEligibility.eligible);
     const body = {
-        schemaVersion: DEVELOPMENT_PLAN_VERSION, purpose: "development-only" as const,
+        purpose: "development-only" as const,
         corpusId: corpus.corpusId, corpusDigest: benchmarkDigest(canonicalBenchmarkJson(corpus)),
         createdAt: input.createdAt, source: input.source,
         catalogueDigest: benchmarkDigest(canonicalBenchmarkJson(manifest)),
@@ -162,6 +162,15 @@ export function buildDevelopmentPlan(input: DevelopmentPlanInput) {
             "No calls, quality intervals, band changes, or release verdicts are produced.",
         ],
     };
+    return body;
+}
+
+export const DEVELOPMENT_PLAN_VERSION = "router-development-plan-v1";
+export type DevelopmentPlanInput = Omit<DevelopmentMatrixInput, "corpus"> & { corpus: DevelopmentCorpus };
+
+export function buildDevelopmentPlan(input: DevelopmentPlanInput) {
+    const corpus = validateDevelopmentCorpus(input.corpus);
+    const body = { schemaVersion: DEVELOPMENT_PLAN_VERSION, ...buildDevelopmentMatrix({ ...input, corpus }) };
     return { ...body, planDigest: benchmarkDigest(canonicalBenchmarkJson(body)) };
 }
 
