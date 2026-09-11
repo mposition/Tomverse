@@ -46,6 +46,24 @@ export const VOICE_INPUT_ERROR_COPY_KEYS: Readonly<Record<string, string>> = {
   VOICE_INPUT_DISABLED: "chat.voiceErrorUnavailable",
   VOICE_AUTHENTICATION_REQUIRED: "chat.voiceErrorSignInRequired",
 
+  // -- Guest verification ----------------------------------------------------
+  // The challenge a guest passes before the clip is read
+  // (docs/policy/voice-input.md §4.2). Normally invisible: the client fetches
+  // a token and retries, so these sentences are what a guest sees when that
+  // did not work.
+  //
+  // `REQUIRED` and `FAILED` share one sentence because they share one fix --
+  // complete the verification and record again. They are still separate codes
+  // on the wire, where the difference is diagnostic rather than advice.
+  TURNSTILE_REQUIRED: "chat.voiceErrorVerificationRequired",
+  TURNSTILE_FAILED: "chat.voiceErrorVerificationRequired",
+  // Not the user's fault and not fixable by them: Cloudflare is unreachable,
+  // or this deployment has no key. Telling them to try the challenge again
+  // would be advice they cannot act on.
+  TURNSTILE_UNAVAILABLE: "chat.voiceErrorVerificationUnavailable",
+  TURNSTILE_NOT_CONFIGURED: "chat.voiceErrorVerificationUnavailable",
+  SECURITY_NOT_CONFIGURED: "chat.voiceErrorVerificationUnavailable",
+
   // -- Operational -----------------------------------------------------------
   VOICE_OPERATIONAL_LIMIT_REACHED: "chat.voiceErrorLimitReached",
   API_RATE_LIMITED: "chat.voiceErrorLimitReached",

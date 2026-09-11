@@ -84,6 +84,14 @@ export type UseVoiceRecorderOptions = {
   identityKey?: string | null;
   /** Where to POST the clip. Injected so a test can point it elsewhere. */
   endpoint?: string;
+  /**
+   * Obtains a Turnstile token when the endpoint asks a guest to verify.
+   *
+   * Optional because most callers are signed in and the endpoint challenges
+   * only guests. Supplied by the composer, which has the shared verification
+   * surface; the hook never reaches for it itself.
+   */
+  requestVerificationToken?: () => Promise<string | undefined>;
 };
 
 export type VoiceRecorderController = {
@@ -167,6 +175,12 @@ export function useVoiceRecorder(
    */
   const lastKnownIdentityRef = useRef(options.identityKey ?? null);
   const endpoint = options.endpoint ?? "/api/chat/voice-transcription";
+  /*
+    Held in a ref for the same reason `onTranscript` is: the adapter is built
+    once and reads this from an async continuation, so a new identity on a
+    later render must not force the adapter to be rebuilt mid-recording.
+  */
+  const requestVerificationTokenRef = useRef(options.requestVerificationToken);
 
   // The latest-callback pattern, in an effect rather than the render body: the
   // callback is only read from an async continuation, which by definition runs
@@ -174,6 +188,10 @@ export function useVoiceRecorder(
   useEffect(() => {
     onTranscriptRef.current = options.onTranscript;
   }, [options.onTranscript]);
+
+  useEffect(() => {
+    requestVerificationTokenRef.current = options.requestVerificationToken;
+  }, [options.requestVerificationToken]);
 
   const runEffects = useCallback(
     (effects: ReturnType<typeof voiceRecorderReducer>["effects"]) => {
@@ -281,6 +299,16 @@ export function useVoiceRecorder(
         mimeType,
         uploadMediaType: containerOf(mimeType),
         endpoint,
+        // Guests only in practice: the endpoint challenges nobody else, so a
+        // signed-in composer's uploads never reach the call behind this.
+        requestVerificationToken: () => {
+          const request = requestVerificationTokenRef.current;
+          // No caller supplied one: resolve to "no token", which the adapter
+          // reads as "do not retry". A rejection would say the same thing at
+          // the cost of an exception on an ordinary path.
+          if (!request) return Promise.resolve(undefined);
+          return request();
+        },
         dispatch: (event) => dispatchRef.current(event as VoiceRecorderEvent),
         onTranscript: (transcript, sessionId) => {
           // The scope this session started in, not the one on screen now.

@@ -371,6 +371,8 @@ export const de = {
         voiceErrorScopeChanged: "Die Spracheingabe wurde beendet, weil Sie zu einer anderen Unterhaltung gewechselt sind. Es wurde nichts eingefügt.",
         voiceErrorUnavailable: "Spracheingabe ist derzeit nicht verfügbar.",
         voiceErrorSignInRequired: "Melden Sie sich an, um die Spracheingabe zu nutzen.",
+        voiceErrorVerificationRequired: "Bitte schließen Sie die kurze Überprüfung ab und nehmen Sie erneut auf.",
+        voiceErrorVerificationUnavailable: "Die Überprüfung ist derzeit nicht verfügbar. Bitte versuchen Sie es gleich noch einmal.",
         voiceErrorLimitReached: "Sie haben das heutige Limit für Spracheingaben erreicht. Versuchen Sie es morgen erneut.",
         voiceErrorProviderUnavailable:
             "Der Spracherkennungsdienst ist nicht erreichbar. Bitte versuchen Sie es gleich noch einmal.",
