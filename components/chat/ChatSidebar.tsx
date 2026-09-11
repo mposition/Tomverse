@@ -20,10 +20,14 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
+import type { ConversationSurface } from "@/lib/continuationRoutes";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { ModelLogo } from "@/components/chat/ModelLogo";
+import { externalProviderBrand } from "@/lib/externalProviderBranding";
+import { providerLabel } from "@/components/imports/importFormatting";
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -37,7 +41,17 @@ type ChatSidebarProps = {
     /** Set when image generation is visible but not usable for this viewer. */
     imageLock?: "sign_in" | "upgrade" | null;
     onLockedImageClick?: (lock: "sign_in" | "upgrade") => void;
-    onSelectConversation: (id: string) => void;
+    /**
+     * `surfaceHint` is what a search result knows and the conversation list
+     * does not: a hit can name a conversation this sidebar never loaded, so
+     * the row carries its own answer. Omitted from the list rows, where the
+     * handler reads the conversation it already holds.
+     */
+    onSelectConversation: (
+        id: string,
+        skipLockCheck?: boolean,
+        surfaceHint?: ConversationSurface
+    ) => void;
     onRename: (id: string, title: string) => void;
     onDelete: (id: string) => void;
     onLock?: (id: string, password: string) => void;
@@ -178,6 +192,15 @@ export function ChatSidebar({
         conversationId: string;
         conversationTitle: string;
         snippet: string;
+        /**
+         * Where the conversation behind this hit opens
+         * (docs/policy/external-conversation-continuation.md §8.2). Carried on
+         * the result rather than looked up in the sidebar's list, because a
+         * search can surface a conversation the list has not loaded -- and a
+         * hit that fell back to the workspace would open a continuation
+         * without the imported half it continues.
+         */
+        surface?: ConversationSurface;
     }>>([]);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
@@ -1401,7 +1424,13 @@ export function ChatSidebar({
                             <button
                                 key={result.id}
                                 type="button"
-                                onClick={() => onSelectConversation(result.conversationId)}
+                                onClick={() =>
+                                    onSelectConversation(
+                                        result.conversationId,
+                                        false,
+                                        result.surface
+                                    )
+                                }
                                 className="block w-full rounded-lg px-2 py-1.5 text-left text-zinc-600 hover:bg-white dark:text-zinc-300 dark:hover:bg-zinc-900"
                             >
                                 <span className="block truncate font-bold">{result.conversationTitle}</span>
@@ -1467,6 +1496,56 @@ export function ChatSidebar({
                             title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
                             <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 ${isMobileDrawer ? "pr-11" : "pr-6"}`}>
+                                {(() => {
+                                    /*
+                                      A continued conversation wears the icon
+                                      of the service it was imported from.
+
+                                      The row is otherwise indistinguishable
+                                      from every other one, and where a
+                                      transcript came from is the single fact
+                                      that tells its owner which of their
+                                      conversations this is -- more than the
+                                      title does, since the title is the
+                                      source's own and they may have several.
+
+                                      The catalogue's own logos
+                                      (`lib/modelBranding.ts`, via
+                                      `externalProviderBrand`), never a new
+                                      asset and never a hard-coded brand
+                                      colour: the same three companies already
+                                      have marks in this app, and a second copy
+                                      would be a second thing to update.
+
+                                      The generic bubble stays the fallback for
+                                      a provider this build does not recognise.
+                                      A deleted snapshot is not that case --
+                                      the bridge keeps `provider` on purpose,
+                                      so a continuation says where it came from
+                                      for as long as it exists.
+                                    */
+                                    const importedBrand =
+                                        !conv.isLocked && conv.surface === "continuation"
+                                            ? externalProviderBrand(conv.sourceProvider)
+                                            : null;
+                                    if (importedBrand) {
+                                        return (
+                                            <span
+                                                data-testid="sidebar-conversation-provider-icon"
+                                                data-provider={conv.sourceProvider ?? ""}
+                                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-500/10"
+                                            >
+                                                <ModelLogo provider={importedBrand} size="sm" />
+                                                <span className="sr-only">
+                                                    {t("continuation.importedFrom").replaceAll(
+                                                        "{provider}",
+                                                        providerLabel(conv.sourceProvider ?? "")
+                                                    )}
+                                                </span>
+                                            </span>
+                                        );
+                                    }
+                                    return (
                                 <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conv.isLocked ? "bg-amber-500/10 text-amber-500" : conv.kind === "image" ? "bg-accent-image-500/10 text-accent-image-500" : "bg-blue-500/10 text-blue-500"}`}>
                                     {conv.isLocked ? (
                                         <Lock className="h-3.5 w-3.5" />
@@ -1476,6 +1555,8 @@ export function ChatSidebar({
                                         <MessageSquare className="h-3.5 w-3.5" />
                                     )}
                                 </span>
+                                    );
+                                })()}
                                 <span className="min-w-0 flex flex-col gap-1">
                                     <span className="truncate text-[13px] leading-4">{conv.title}</span>
                                     {conversationLabels[conv.id] && (

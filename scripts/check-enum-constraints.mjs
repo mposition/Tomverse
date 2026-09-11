@@ -338,6 +338,13 @@ const REGISTRY = {
     owner: "database",
     reason: "The same two providers, denormalised onto the conversation.",
   },
+  ConversationContinuationBridge_provider_check: {
+    owner: "list",
+    module: "lib/externalImportProviders.ts",
+    list: "EXTERNAL_IMPORT_PROVIDERS",
+    reason:
+      "The provider a continuation's source came from, kept on the bridge so the screen can still name it after the source is deleted. Compared against the canonical list rather than recorded as database-only: the bridge is written from that module's type, so a provider added to the list and not to this constraint would fail the write.",
+  },
   ExternalImport_status_check: {
     owner: "database",
     reason:

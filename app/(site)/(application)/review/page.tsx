@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
+import { CONVERSATION_HANDOFF_PARAM } from "@/lib/continuationRoutes";
 
 /**
  * `/review` — the canonical Tomverse Review URL, prepared but not announced.
@@ -13,6 +14,19 @@ import { ReviewWorkspaceShell } from "@/components/chat/ReviewWorkspaceShell";
  * navigation points at it, and no redirect moves anybody here yet. Making it
  * canonical is a later change that carries its own URL and deep-link evidence.
  */
-export default function ReviewPage() {
-  return <ReviewWorkspaceShell />;
+export default async function ReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // Same handoff `/chat` reads, for the same reason: both routes render this
+  // workspace, so a conversation handed to one of them has to be honoured by
+  // whichever one the user was sent to.
+  const params = await searchParams;
+  const handoff = params[CONVERSATION_HANDOFF_PARAM];
+  return (
+    <ReviewWorkspaceShell
+      initialConversationId={typeof handoff === "string" ? handoff : null}
+    />
+  );
 }

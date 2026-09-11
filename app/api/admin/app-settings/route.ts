@@ -13,6 +13,7 @@ import {
   getPublicAppSettings,
   isAssistantKnowledgeEnabled,
   isAssistantProfilesEnabled,
+  isExternalContinuationEnabled,
   isExternalImportEnabled,
   isImageGenerationEnabled,
   isMemoryExtractionEnabled,
@@ -20,6 +21,7 @@ import {
   isValidGuestDefaultModel,
   setAssistantKnowledgeEnabled,
   setAssistantProfilesEnabled,
+  setExternalContinuationEnabled,
   setExternalImportEnabled,
   setImageGenerationEnabled,
   updatePublicAppSettings,
@@ -43,6 +45,18 @@ const updateAppSettingsSchema = z
     // Same opt-in shape (lib/externalImportAccess.ts): the Release A import
     // rollout flag, default-off and fail-closed.
     externalConversationImportEnabled: z.boolean(),
+    // "Tomverse에서 이어가기" (lib/externalContinuationAccess.ts), also
+    // default-off and fail-closed. Its own switch rather than a rider on the
+    // import flag: import is already on in production, so sharing that flag
+    // would turn this on for every importing account at the moment it shipped
+    // (docs/policy/external-conversation-continuation.md §7).
+    //
+    // It IS here, unlike the two memory flags below, because turning it on is
+    // an operational decision with a staging checklist behind it -- not the
+    // human procedure of
+    // docs/policy/external-conversation-import-and-memory.md §12.4 that the
+    // memory flags' absence protects.
+    externalConversationContinuationEnabled: z.boolean(),
     // Release C rollout flags (lib/assistantProfileAccess.ts). Two switches
     // and not one: policy §15 enables profiles before knowledge, and the
     // knowledge flag reads as off on its own while profiles are off.
@@ -102,6 +116,8 @@ export async function GET(req: Request) {
       settings,
       imageGenerationEnabled: await isImageGenerationEnabled(),
       externalConversationImportEnabled: await isExternalImportEnabled(),
+      externalConversationContinuationEnabled:
+        await isExternalContinuationEnabled(),
       assistantProfilesEnabled: await isAssistantProfilesEnabled(),
       assistantKnowledgeEnabled: await isAssistantKnowledgeEnabled(),
       ...(await memoryReleaseStatus()),
@@ -152,6 +168,7 @@ export async function PATCH(req: Request) {
     const {
       imageGenerationEnabled,
       externalConversationImportEnabled,
+      externalConversationContinuationEnabled,
       assistantProfilesEnabled,
       assistantKnowledgeEnabled,
       ...publicSettings
@@ -159,6 +176,9 @@ export async function PATCH(req: Request) {
     const settings = await updatePublicAppSettings(publicSettings);
     await setImageGenerationEnabled(imageGenerationEnabled);
     await setExternalImportEnabled(externalConversationImportEnabled);
+    await setExternalContinuationEnabled(
+      externalConversationContinuationEnabled
+    );
     await setAssistantProfilesEnabled(assistantProfilesEnabled);
     await setAssistantKnowledgeEnabled(assistantKnowledgeEnabled);
     await writeAdminAuditLog({
@@ -182,6 +202,8 @@ export async function PATCH(req: Request) {
       settings,
       imageGenerationEnabled: await isImageGenerationEnabled(),
       externalConversationImportEnabled: await isExternalImportEnabled(),
+      externalConversationContinuationEnabled:
+        await isExternalContinuationEnabled(),
       assistantProfilesEnabled: await isAssistantProfilesEnabled(),
       assistantKnowledgeEnabled: await isAssistantKnowledgeEnabled(),
       // Unchanged by this request -- nothing above writes them -- and returned

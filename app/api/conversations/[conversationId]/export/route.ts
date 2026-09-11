@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { isMemoryInjectionEnabled } from "@/lib/appSettings";
 import { conversationExportPersonalizationNotice } from "@/lib/memorySharingNotice";
+import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
+import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
+import { getContinuationBridge } from "@/lib/externalContinuationService";
 import {
     formatConversationHeader,
     formatExportMessage,
@@ -84,6 +87,20 @@ export async function GET(
             ? conversationExportPersonalizationNotice()
             : undefined;
 
+        // §9: a continuation's export names where the conversation came from
+        // and says the imported original is a separate download. It never
+        // copies the imported transcript in -- that would put a third-party
+        // conversation into a file the user may forward anywhere, and it is the
+        // silent widening the policy exists to forbid.
+        const bridge = await getContinuationBridge(userId, conversationId);
+        const continuationProvenance = bridge
+            ? continuationExportProvenance({
+                  providerLabel: continuationProviderDisplay(bridge.provider),
+                  importedAt: bridge.sourceImportedAt,
+                  sourceDeleted: bridge.externalConversationId === null,
+              })
+            : [];
+
         const encoder = new TextEncoder();
         let cursor: string | undefined;
         let headerPending = true;
@@ -92,7 +109,9 @@ export async function GET(
                 if (headerPending) {
                     headerPending = false;
                     controller.enqueue(
-                        encoder.encode(`${formatConversationHeader(conversation, personalizationNotice)}\n`)
+                        encoder.encode(
+                            `${formatConversationHeader(conversation, personalizationNotice, continuationProvenance)}\n`
+                        )
                     );
                     return;
                 }

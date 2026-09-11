@@ -176,6 +176,22 @@ const chatPageClient = readFileSync(
   join(process.cwd(), "app/(site)/(application)/chat/ChatPageClient.tsx"),
   "utf8"
 );
+// The one wrapper the create path is allowed to reach the resolver through.
+//
+// `lib/newConversationSelectedModels.ts` exists because external continuation
+// starts a Review conversation from the same saved combination
+// (docs/policy/external-conversation-continuation.md §8.3), and two writers
+// each spelling out `resolveNewConversationModels` then `clampRuntimeSelectedModels`
+// is exactly the drift this section checks for. So the wrapper is accepted --
+// and is itself required to reach the resolver, or "shared" would mean nothing
+// more than "imports a file with a promising name".
+const sharedStartState = readFileSync(
+  join(process.cwd(), "lib/newConversationSelectedModels.ts"),
+  "utf8"
+);
+const sharedStartStateUsesResolver = /lib\/newConversationModels/.test(
+  sharedStartState
+);
 
 const resolveFixture = (stored) =>
   resolveNewConversationModels({
@@ -202,9 +218,10 @@ const newConversation = {
   settingsRouteRewritesOnRead: /userSettings\.update\(/.test(settingsRoute),
   modelFinderSavesCombination: /newConversationModelIds:/.test(modelFinderRoute),
   modelFinderEchoesRequest: /modelIds:\s*body\.modelIds/.test(modelFinderRoute),
-  conversationsRouteUsesResolver: /lib\/newConversationModels/.test(
-    conversationsRoute
-  ),
+  conversationsRouteUsesResolver:
+    /lib\/newConversationModels/.test(conversationsRoute) ||
+    (/lib\/newConversationSelectedModels/.test(conversationsRoute) &&
+      sharedStartStateUsesResolver),
   clientNewChatUsesSingleDefault:
     /setSelectedModels\(\[userDefaultEngine\]\)/.test(chatPageClient),
   resolverNullFallsBack:

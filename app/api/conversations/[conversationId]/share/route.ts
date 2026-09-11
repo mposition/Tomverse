@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getServerSession } from "next-auth/next";
 import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/lib/conversationKindGuard";
+import { continuationShareRefusal } from "@/lib/continuationSharingPolicy";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import { isMemoryInjectionEnabled } from "@/lib/appSettings";
@@ -107,6 +108,32 @@ export async function POST(
   // assets needs its own design (docs/policy/image-generation.md §1).
   if (!isChatConversationKind(accessConversation.kind)) {
     return conversationKindNotSupportedResponse();
+  }
+  // A conversation continued from an imported chat is not publishable in the
+  // first release (docs/policy/external-conversation-continuation.md §9). The
+  // snapshot carries `Message` rows, so publishing it would publish half a
+  // conversation -- answers that refer to an excerpt the reader cannot see --
+  // and carrying the other half would publish a third-party transcript the
+  // import promised to keep account-private. The refusal names itself so the
+  // composer can say why rather than showing a control that fails.
+  const shareRefusal = continuationShareRefusal({
+    hasContinuationBridge:
+      (await prisma.conversationContinuationBridge.count({
+        where: { conversationId, userId },
+      })) > 0,
+  });
+  if (shareRefusal) {
+    logSecurityAuditEvent("conversation.share.create", {
+      userId,
+      resourceId: conversationId,
+      request: req,
+      outcome: "denied",
+      reason: shareRefusal.code,
+    });
+    return NextResponse.json(
+      { error: shareRefusal.message, code: shareRefusal.code },
+      { status: shareRefusal.status }
+    );
   }
   logSecurityAuditEvent("conversation.share.create", {
     userId,
