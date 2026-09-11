@@ -2,14 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assessModelLifecycleItem,
+  candidateDecisionKey,
   candidateFamilyIdentity,
   candidateRepresentativeRank,
+  decisionSuppressesCandidate,
   isImageGenerationModel,
   isPrereleaseModel,
   isSearchSpecializedModel,
   isSpecializedNonChatModel,
+  modelLine,
   modelProductSurface,
+  newestByModelLine,
   shouldQueueModelCandidate,
+  supersedingServedModel,
 } from "../lib/modelLifecycleTriage.ts";
 
 test("dated snapshots and moving aliases share one semantic family", () => {
@@ -237,4 +242,159 @@ test("retirement work stays urgent even though the model is stale", () => {
   assert.equal(assessment.priority, "recommended");
   assert.equal(assessment.kind, "retirement");
   assert.match(assessment.analysisKo, /사용자 영향/);
+});
+
+test("the short spellings of a release stage are prerelease too", () => {
+  for (const apiModel of [
+    "gemini-3-pro-exp-02-05",
+    "deepseek-v3.2-exp",
+    "gpt-5.6-alpha",
+    "grok-5-rc1",
+    "claude-opus-6-nightly",
+    "mistral-next-canary",
+    "gpt-5.7-early-access",
+  ]) {
+    assert.equal(isPrereleaseModel(apiModel), true, apiModel);
+    assert.equal(shouldQueueModelCandidate(apiModel), false, apiModel);
+  }
+});
+
+test("a stage word inside a longer word is not a stage", () => {
+  // `expert` contains `exp`, `develop` contains `dev`, and a model whose name
+  // merely embeds those letters is a model a provider serves. Excluding one is
+  // silent, so the boundary matters more than the breadth of the list.
+  for (const apiModel of [
+    "expert-router-2",
+    "gpt-5.6",
+    "claude-opus-5",
+    "qwen3-max",
+  ]) {
+    assert.equal(isPrereleaseModel(apiModel), false, apiModel);
+    assert.equal(shouldQueueModelCandidate(apiModel), true, apiModel);
+  }
+});
+
+test("words a provider uses for shipped models are left alone", () => {
+  // FLUX.1-dev is a released weight and a speculative-decoding `-draft` model
+  // is one half of a production setup. Neither is a release stage.
+  assert.equal(isPrereleaseModel("flux.1-dev"), false);
+  assert.equal(isPrereleaseModel("llama-3.3-70b-draft"), false);
+});
+
+test("a date inside the name does not make a new family every month", () => {
+  assert.equal(
+    candidateFamilyIdentity("gemini-2.5-flash-preview-05-20"),
+    candidateFamilyIdentity("gemini-2.5-flash-preview-09-2026")
+  );
+  assert.equal(
+    candidateFamilyIdentity("gemini-2.5-flash-preview-05-20"),
+    "gemini-2.5-flash"
+  );
+  assert.equal(
+    candidateFamilyIdentity("openai/gpt-5.6-2026-01-15-preview-latest"),
+    "gpt-5.6"
+  );
+});
+
+test("a two-digit date is a date and a version number is not", () => {
+  assert.equal(candidateFamilyIdentity("claude-opus-4-6"), "claude-opus-4-6");
+  assert.equal(candidateFamilyIdentity("gpt-5.5"), "gpt-5.5");
+  assert.equal(candidateFamilyIdentity("gpt-5.6"), "gpt-5.6");
+});
+
+test("a decision about a preview does not answer for the release", () => {
+  const previewDecision = candidateDecisionKey("gemini-2.5-flash-preview-05-20");
+  const releaseDecision = candidateDecisionKey("gemini-2.5-flash");
+  assert.notEqual(previewDecision, releaseDecision);
+  // The release is still an open question after the preview was declined.
+  assert.equal(
+    decisionSuppressesCandidate(previewDecision, "gemini-2.5-flash"),
+    false
+  );
+  // Declining the release does answer for its previews.
+  assert.equal(
+    decisionSuppressesCandidate(releaseDecision, "gemini-2.5-flash-preview-09-2026"),
+    true
+  );
+  assert.equal(
+    decisionSuppressesCandidate(releaseDecision, "gemini-2.5-flash"),
+    true
+  );
+});
+
+test("a key written before stages existed still suppresses what it did", () => {
+  assert.equal(decisionSuppressesCandidate("gpt-5.6", "gpt-5.6"), true);
+  assert.equal(decisionSuppressesCandidate("gpt-5.6", "gpt-5.5"), false);
+});
+
+test("a model line keeps its tier and loses its generation", () => {
+  assert.deepEqual(modelLine("claude-opus-4-6"), {
+    line: "claude-opus",
+    version: [4, 6],
+  });
+  assert.deepEqual(modelLine("claude-opus-5"), {
+    line: "claude-opus",
+    version: [5],
+  });
+  assert.deepEqual(modelLine("gemini-2.5-flash"), {
+    line: "gemini-flash",
+    version: [2, 5],
+  });
+  assert.deepEqual(modelLine("qwen3-max"), { line: "qwen-max", version: [3] });
+  assert.deepEqual(modelLine("gpt-5.6-mini"), {
+    line: "gpt-mini",
+    version: [5, 6],
+  });
+});
+
+test("a name this cannot read has no version, and is never superseded", () => {
+  assert.equal(modelLine("gpt-4o").version, null);
+  assert.equal(supersedingServedModel("gpt-4o", ["gpt-5.6"]), null);
+  assert.equal(supersedingServedModel("sonar", ["sonar-pro"]), null);
+});
+
+test("an older generation of a served line is superseded by name", () => {
+  const served = ["claude-opus-5", "claude-sonnet-5", "gpt-5.6"];
+  assert.equal(
+    supersedingServedModel("claude-opus-4-6", served),
+    "claude-opus-5"
+  );
+  assert.equal(
+    supersedingServedModel("claude-opus-4-7", served),
+    "claude-opus-5"
+  );
+  assert.equal(
+    supersedingServedModel("anthropic/claude-opus-4-6-20260514", served),
+    "claude-opus-5"
+  );
+});
+
+test("a newer generation and a different tier are not superseded", () => {
+  const served = ["claude-opus-5", "gpt-5.6"];
+  assert.equal(supersedingServedModel("claude-opus-5-1", served), null);
+  assert.equal(supersedingServedModel("gpt-5.6-mini", served), null);
+  assert.equal(supersedingServedModel("claude-haiku-4-6", served), null);
+});
+
+test("the review says which served model the candidate is behind", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "claude-opus-4-6",
+    providers: ["anthropic"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    supersededBy: "claude-opus-5",
+  });
+  assert.equal(assessment.priority, "no_action");
+  assert.equal(assessment.kind, "superseded_version");
+  assert.match(assessment.analysisKo, /claude-opus-5/);
+});
+
+test("only the newest generation of a line survives one scan", () => {
+  const kept = newestByModelLine(
+    ["claude-opus-4-6", "claude-opus-5", "gpt-4o"],
+    (value) => value
+  );
+  assert.deepEqual(kept, ["claude-opus-5", "gpt-4o"]);
 });

@@ -161,3 +161,52 @@ test("different models stay on different lines", async () => {
   assert.ok(rows.some((row) => /Zhipu/.test(row)));
   assert.ok(rows.some((row) => /Moonshot/.test(row)));
 });
+
+test("today's new candidates are what the queue filed, not what the scan saw", async () => {
+  const { candidateRowsFor } = await import(
+    "../lib/providerModelCatalogReport.ts"
+  );
+  // The scan saw a model a second provider has started listing. The queue
+  // recognised it as one somebody already decided about and filed nothing --
+  // so the mail has nothing to announce, which is the difference between a
+  // report of new work and a report of new rows.
+  const rows = candidateRowsFor(
+    [scan("qwen", ["ZHIPU/GLM-5.3"])],
+    { recorded: true, createdItems: [], suppressed: [] }
+  );
+  assert.deepEqual(rows, []);
+});
+
+test("a queue write that failed does not become a claim that nothing is new", async () => {
+  const { candidateRowsFor } = await import(
+    "../lib/providerModelCatalogReport.ts"
+  );
+  const rows = candidateRowsFor(
+    [scan("qwen", ["ZHIPU/GLM-5.3"])],
+    { recorded: false, createdItems: [], suppressed: [] }
+  );
+  assert.equal(rows.length, 1);
+  assert.match(rows[0], /Zhipu/);
+});
+
+test("a filed candidate keeps every catalogue it was seen in", async () => {
+  const { candidateRowsFor } = await import(
+    "../lib/providerModelCatalogReport.ts"
+  );
+  const rows = candidateRowsFor([], {
+    recorded: true,
+    createdItems: [
+      {
+        provider: "zhipu",
+        apiModel: "glm-5.3",
+        observedVia: [
+          { provider: "zhipu", apiModel: "glm-5.3" },
+          { provider: "qwen", apiModel: "ZHIPU/GLM-5.3" },
+        ],
+      },
+    ],
+    suppressed: [],
+  });
+  assert.equal(rows.length, 1);
+  assert.match(rows[0], /as `ZHIPU\/GLM-5\.3`/);
+});

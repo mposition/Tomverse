@@ -12,7 +12,10 @@ import {
 } from "@/lib/modelLifecycleWorkItemCore";
 import { modelOwnerPhrase } from "@/lib/modelOwner";
 import type { LifecycleReportRow } from "@/lib/modelLifecycleWorkItems";
-import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
+import type {
+  ProviderModelCatalogDiscovery,
+  ProviderModelCatalogResult,
+} from "@/lib/providerModelCatalogMonitor";
 import {
   catalogFailureDetail,
   PROVIDER_CATALOG_KEY_REJECTED,
@@ -120,22 +123,50 @@ const reconciliationRows = (
  * identity the queue collapses on also stops one model occupying three lines
  * because three catalogues carry it.
  */
-export const candidateRowsFor = (results: ProviderModelCatalogResult[]) => {
+export const candidateRowsFor = (
+  results: ProviderModelCatalogResult[],
+  discovery?: ProviderModelCatalogDiscovery
+) => {
   const byIdentity = new Map<
     string,
     { apiModel: string; observedVia: Array<{ provider: string; apiModel: string }> }
   >();
-  for (const result of results) {
-    for (const model of result.newCandidates) {
-      const identity = candidateIdentity(model);
-      const entry = byIdentity.get(identity);
-      const sighting = { provider: result.provider, apiModel: model };
-      if (entry) {
+  // What the queue filed, when the queue got to run. `newCandidates` answers a
+  // different question -- "is this observation row new" -- and answered it with
+  // yes for a model somebody closed yesterday, as soon as a second provider
+  // started listing it. Only when the queue write failed does the scan fall
+  // back to the observation rows, and then the heading is all the report has.
+  const sightings = discovery?.recorded
+    ? discovery.createdItems.flatMap((item) =>
+        item.observedVia.length
+          ? item.observedVia
+          : [{ provider: item.provider, apiModel: item.apiModel }]
+      )
+    : results.flatMap((result) =>
+        result.newCandidates.map((apiModel) => ({
+          provider: result.provider,
+          apiModel,
+        }))
+      );
+  for (const sighting of sightings) {
+    const identity = candidateIdentity(sighting.apiModel);
+    const entry = byIdentity.get(identity);
+    if (entry) {
+      if (
+        !entry.observedVia.some(
+          (seen) =>
+            seen.provider === sighting.provider &&
+            seen.apiModel === sighting.apiModel
+        )
+      ) {
         entry.observedVia.push(sighting);
-        continue;
       }
-      byIdentity.set(identity, { apiModel: model, observedVia: [sighting] });
+      continue;
     }
+    byIdentity.set(identity, {
+      apiModel: sighting.apiModel,
+      observedVia: [sighting],
+    });
   }
   return [...byIdentity.values()].map((entry) => {
     // The exact string each catalogue returned, not the normalised key:
@@ -152,10 +183,47 @@ export const candidateRowsFor = (results: ProviderModelCatalogResult[]) => {
   });
 };
 
+/**
+ * How many candidates each filter took out of the operator's view today.
+ *
+ * A count and not a list: the ids are in the queue's own reasons, and a daily
+ * message that names thirty prerelease snapshots is a message nobody reads. But
+ * the number has to be there. A filter whose work is invisible is a filter that
+ * can quietly widen -- which is the failure the OpenAI prefix guess taught this
+ * pipeline once already.
+ */
+const suppressionSummary = (discovery?: ProviderModelCatalogDiscovery) => {
+  if (!discovery?.recorded || discovery.suppressed.length === 0) return "";
+  const counts = new Map<string, number>();
+  for (const item of discovery.suppressed) {
+    counts.set(item.reason, (counts.get(item.reason) ?? 0) + 1);
+  }
+  const named = [
+    ["superseded_by_served_version", "older generation"],
+    ["superseded_within_scan", "older generation"],
+    ["already_decided", "already decided"],
+    ["not_reviewable", "not reviewable"],
+  ] as const;
+  const parts: string[] = [];
+  let older = 0;
+  for (const [reason, label] of named) {
+    const count = counts.get(reason) ?? 0;
+    if (count === 0) continue;
+    if (label === "older generation") {
+      older += count;
+      continue;
+    }
+    parts.push(`${label} ${count}`);
+  }
+  if (older > 0) parts.unshift(`older generation ${older}`);
+  return parts.length ? ` · filtered ${parts.join(", ")}` : "";
+};
+
 const reportParts = (
   results: ProviderModelCatalogResult[],
   reconciliation?: CatalogReconciliationResult,
-  openWorkItems?: number
+  openWorkItems?: number,
+  discovery?: ProviderModelCatalogDiscovery
 ) => {
   const checked = results.filter((result) => result.status === "checked");
   const failed = results.filter((result) => result.status === "failed");
@@ -172,7 +240,7 @@ const reportParts = (
         `• ${providerName(result.provider)} ${code(item.apiModel)}: successful catalog scans missing ×${item.consecutiveMissing}`
     )
   );
-  const candidates = candidateRowsFor(results);
+  const candidates = candidateRowsFor(results, discovery);
   const failures = [...failed, ...skipped].map((result) => {
     const head = `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`;
     const detail = catalogFailureDetail(result.errorDetail);
@@ -206,7 +274,9 @@ const reportParts = (
       //
       // It is the number the report did not have. "New candidates 0" was true
       // every day that seven reviewed-by-nobody models sat in the queue.
-      summary: `*Summary* · checked ${checked.length}/${results.length} · lifecycle warnings ${lifecycle.length} · catalog missing ${missing.length} · new candidates ${candidates.length}${
+      summary: `*Summary* · checked ${checked.length}/${results.length} · lifecycle warnings ${lifecycle.length} · catalog missing ${missing.length} · new candidates ${candidates.length}${suppressionSummary(
+        discovery
+      )}${
         typeof openWorkItems === "number" ? ` · awaiting review ${openWorkItems}` : ""
       }${registrySummary}`,
       lifecycleRows: `*Lifecycle warning*\n${cappedRows(lifecycle, "None", 20, queueUrl)}`,
@@ -405,6 +475,8 @@ const reportPayload = (input: {
 export async function sendProviderModelCatalogReport(input: {
   results: ProviderModelCatalogResult[];
   reconciliation?: CatalogReconciliationResult;
+  /** What the queue filed and filtered. Absent falls back to observation rows. */
+  discovery?: ProviderModelCatalogDiscovery;
   /** Items still waiting on a person. Omitted leaves the line off entirely. */
   openWorkItems?: number;
   /** The queue itself. Absent leaves the email with counts and no rows. */
@@ -414,7 +486,12 @@ export async function sendProviderModelCatalogReport(input: {
   test?: boolean;
 }) {
   const generatedAt = input.generatedAt || new Date();
-  const parts = reportParts(input.results, input.reconciliation, input.openWorkItems);
+  const parts = reportParts(
+    input.results,
+    input.reconciliation,
+    input.openWorkItems,
+    input.discovery
+  );
   const generatedLabel = new Intl.DateTimeFormat("en-AU", {
     year: "numeric",
     month: "short",
