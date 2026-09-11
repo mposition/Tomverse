@@ -371,6 +371,8 @@ export const fr = {
         voiceErrorScopeChanged: "La dictée s'est arrêtée parce que vous avez changé de conversation. Rien n'a été ajouté.",
         voiceErrorUnavailable: "La dictée n'est pas disponible pour le moment.",
         voiceErrorSignInRequired: "Connectez-vous pour utiliser la dictée.",
+        voiceErrorVerificationRequired: "Terminez la vérification rapide, puis enregistrez à nouveau.",
+        voiceErrorVerificationUnavailable: "La vérification est indisponible pour le moment. Réessayez dans un instant.",
         voiceErrorLimitReached: "Vous avez atteint la limite de dictée du jour. Réessayez demain.",
         voiceErrorProviderUnavailable:
             "Le service de reconnaissance vocale est indisponible. Réessayez dans un instant.",

@@ -1,7 +1,8 @@
 export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
-import { identifyChatCaller } from "@/lib/chatSecurity";
+import { ChatAccessError, identifyChatCaller } from "@/lib/chatSecurity";
+import { ensureGuestVerified } from "@/lib/turnstile";
 
 import { authOptions } from "@/lib/auth";
 import {
@@ -199,9 +200,22 @@ export async function POST(request: Request) {
     exit, including the ones reached by throwing.
   */
   let guestSetCookie: string | undefined;
+  /*
+    The Turnstile grant, when this request earned one.
+
+    Carried by the same helper and under the same rule, which
+    `ensureGuestVerified` states and this endpoint has to honour on *every*
+    exit: a guest whose token was accepted has paid their challenge, and if a
+    later gate then refuses them -- the budget, the container inspection, the
+    provider -- dropping the grant makes the next attempt challenge again.
+    The user's experience of that is a checkbox that never stops coming back.
+  */
+  let turnstileGrantCookie: string | undefined;
   const withGuestCookie = (response: Response) => {
-    if (!guestSetCookie) return response;
-    response.headers.append("Set-Cookie", guestSetCookie);
+    if (guestSetCookie) response.headers.append("Set-Cookie", guestSetCookie);
+    if (turnstileGrantCookie) {
+      response.headers.append("Set-Cookie", turnstileGrantCookie);
+    }
     return response;
   };
   try {
@@ -271,6 +285,34 @@ export async function POST(request: Request) {
     if (!voiceClipFormatFor(declaredMediaType)) {
       report({ outcome: "refused_unsupported_type" });
       return withGuestCookie(jsonError("VOICE_CLIP_UNSUPPORTED_TYPE", 415));
+    }
+
+    /*
+      The challenge, for guests only (docs/policy/voice-input.md §4.2).
+
+      Placed here deliberately, between two cheap checks and the expensive
+      part:
+
+        * *after* the rate limit and the media-type check, so a malformed
+          request is refused without making anyone solve a puzzle for it;
+        * *before* the body is read, the container is inspected and any budget
+          is reserved, because those are the costs the challenge exists to
+          bound.
+
+      Guests only, because this is not an authentication step. A signed-in
+      caller is already a subject that survives clearing a cookie, and
+      challenging them would be asking a known account to prove it is not a
+      script. What the challenge answers is the one risk guest access left
+      open: a script cycling cookies is a new subject every time, so the
+      per-subject limits cannot bound it, and it can spend the deployment's
+      day of provider seconds and leave real callers refused.
+    */
+    if (access.kind === "guest") {
+      turnstileGrantCookie = await ensureGuestVerified(
+        request,
+        new URL(request.url).searchParams.get("turnstileToken") || undefined,
+        "guest_voice"
+      );
     }
 
     const body = await readBoundedBody(request);
@@ -442,6 +484,19 @@ export async function POST(request: Request) {
     }
     if (error instanceof VoiceBudgetError) {
       report({ outcome: "refused_budget" });
+      return withGuestCookie(
+        jsonError(error.code, error.status, error.retryAfter)
+      );
+    }
+    /*
+      `ensureGuestVerified` throws `ChatAccessError`, and its code is the
+      whole message: `TURNSTILE_REQUIRED` tells the client to fetch a token
+      and try once more, which no generic 500 could. Falling through to the
+      catch-all below would turn a solvable challenge into "transcription
+      failed", and the user would have no way to get past it.
+    */
+    if (error instanceof ChatAccessError) {
+      report({ outcome: "refused_verification", providerFailure: error.code });
       return withGuestCookie(
         jsonError(error.code, error.status, error.retryAfter)
       );

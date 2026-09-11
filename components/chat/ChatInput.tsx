@@ -1305,6 +1305,17 @@ export function ChatInput({
       // no longer belongs to.
       if (scopeId === voiceScopeId) textareaRef.current?.focus();
     },
+    /*
+      The guest challenge, through the one shared verification surface
+      (docs/policy/voice-input.md §4.2).
+
+      Reached only when the endpoint answers `TURNSTILE_REQUIRED`, which it
+      does for guests without a current grant and for nobody else. Routing it
+      through `useGuestVerification` rather than mounting a widget here is the
+      whole point of that provider: one widget at a time, in the shell's own
+      slot, never inside a panel.
+    */
+    requestVerificationToken: () => requestGuestVerificationToken("guest_voice"),
   });
 
   // Why Send is unavailable, for the cases a user cannot work out from the

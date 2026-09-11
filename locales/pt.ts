@@ -371,6 +371,8 @@ export const pt = {
         voiceErrorScopeChanged: "A entrada de voz parou porque você mudou para outra conversa. Nada foi adicionado.",
         voiceErrorUnavailable: "A entrada de voz não está disponível no momento.",
         voiceErrorSignInRequired: "Faça login para usar a entrada de voz.",
+        voiceErrorVerificationRequired: "Conclua a verificação rápida e grave novamente.",
+        voiceErrorVerificationUnavailable: "A verificação está indisponível no momento. Tente novamente em instantes.",
         voiceErrorLimitReached: "Você atingiu o limite de entrada de voz de hoje. Tente de novo amanhã.",
         voiceErrorProviderUnavailable:
             "O serviço de reconhecimento de voz está indisponível. Tente novamente em instantes.",

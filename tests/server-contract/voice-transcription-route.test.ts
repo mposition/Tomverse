@@ -54,6 +54,10 @@ type World = {
   /** Every settlement, with the basis the route chose for it. */
   settled: Array<{ reservedSeconds: number; basis: string; released: number }>;
   budgetShouldRefuse: boolean;
+  /** Every `ensureGuestVerified` call, with the action it was asked about. */
+  turnstileCalls: Array<{ action: string; token: string | undefined }>;
+  /** What the stub does: admit, or refuse with this code/status. */
+  turnstileRefusal: { code: string; status: number } | null;
   /** The deployment-wide booking, §6.1-4. Separate from the subject's. */
   providerReserved: Array<{ seconds: number }>;
   providerSettled: Array<{ basis: string; released: number }>;
@@ -71,6 +75,8 @@ const freshWorld = (): World => ({
   reserved: [],
   settled: [],
   budgetShouldRefuse: false,
+  turnstileCalls: [],
+  turnstileRefusal: null,
   providerReserved: [],
   providerSettled: [],
   providerBudgetShouldRefuse: false,
@@ -97,6 +103,35 @@ async function loadRoute(): Promise<{ POST: (request: Request) => Promise<Respon
       namedExports: {
         getServerSession: async () =>
           world.userId ? { user: { id: world.userId } } : null,
+      },
+    });
+
+    /*
+      The guest challenge (docs/policy/voice-input.md §4.2). Stubbed because
+      the real one talks to Cloudflare; what these tests are for is *when* the
+      endpoint asks, who it asks about, and whether the grant it earns rides
+      on the answer -- none of which a live challenge would tell us.
+    */
+    const { ChatAccessError } = (await import(mod("lib/chatSecurity.ts"))) as {
+      ChatAccessError: new (status: number, code: string, message: string) => Error;
+    };
+    mock.module(mod("lib/turnstile.ts"), {
+      namedExports: {
+        ensureGuestVerified: async (
+          _request: unknown,
+          token: string | undefined,
+          action: string
+        ) => {
+          world.turnstileCalls.push({ action, token });
+          if (world.turnstileRefusal) {
+            throw new ChatAccessError(
+              world.turnstileRefusal.status,
+              world.turnstileRefusal.code,
+              "refused"
+            );
+          }
+          return "tomverse_guest_verified_guest_voice=1.sig; Path=/; HttpOnly";
+        },
       },
     });
 
@@ -360,9 +395,16 @@ test("a guest without a cookie is issued one, and a returning guest is not", asy
 
   const cookie = setCookie.split(";", 1)[0];
   const second = await post(WEBM_2500MS, "audio/webm", { cookie });
-  assert.equal(
-    second.headers.get("Set-Cookie"),
-    null,
+  // The *identity* cookie specifically, not "no Set-Cookie at all": the
+  // Turnstile grant is a separate cookie on the same response, and asserting
+  // the header is absent would make this test fail for the wrong reason the
+  // moment a second cookie legitimately joined it.
+  const reissued = (second.headers.getSetCookie?.() ?? []).filter((value) =>
+    value.startsWith("tomverse_guest=")
+  );
+  assert.deepEqual(
+    reissued,
+    [],
     "a returning guest keeps the id it already has"
   );
   assert.equal(
@@ -383,6 +425,7 @@ test("a refusal reached before the subject resolves carries no cookie", async ()
 
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("Set-Cookie"), null);
+  assert.deepEqual(world.turnstileCalls, [], "and no challenge either");
 });
 
 test("a guest's refusal still carries the cookie it was just issued", async () => {
@@ -843,6 +886,85 @@ test("an impossibly long transcript is refused rather than truncated", async () 
 
   assert.equal(response.status, 422);
   assert.equal((await response.json()).code, "VOICE_TRANSCRIPT_EMPTY");
+});
+
+// ---------------------------------------------------------------------------
+// The guest challenge
+// ---------------------------------------------------------------------------
+
+test("a signed-in caller is never challenged", async () => {
+  // Not an authentication step. A session is already a subject that survives
+  // clearing a cookie, so asking it to prove it is not a script buys nothing
+  // and costs the user a puzzle.
+  reset();
+  await post(WEBM_2500MS, "audio/webm");
+  assert.deepEqual(world.turnstileCalls, []);
+});
+
+test("a guest is challenged under its own action, before the clip is read", async () => {
+  reset();
+  world.userId = null;
+  await post(WEBM_2500MS, "audio/webm");
+
+  assert.equal(world.turnstileCalls.length, 1);
+  assert.equal(
+    world.turnstileCalls[0].action,
+    "guest_voice",
+    "reusing guest_chat would let one challenge unlock both surfaces"
+  );
+});
+
+test("a malformed request is refused without a challenge", async () => {
+  // The challenge sits after the cheap checks on purpose: nobody should solve
+  // a puzzle for a request that was going to be refused anyway.
+  reset();
+  world.userId = null;
+  const response = await post(WEBM_2500MS, "audio/ogg");
+
+  assert.equal(response.status, 415);
+  assert.deepEqual(world.turnstileCalls, []);
+});
+
+test("a refused challenge keeps its own code, and costs nothing", async () => {
+  // Falling through to the generic handler would turn a solvable challenge
+  // into "transcription failed", leaving the user no way past it.
+  reset();
+  world.userId = null;
+  world.turnstileRefusal = { code: "TURNSTILE_REQUIRED", status: 403 };
+  const response = await post(WEBM_2500MS, "audio/webm");
+
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "TURNSTILE_REQUIRED");
+  assert.deepEqual(world.providerCalls, []);
+  assert.deepEqual(world.reserved, [], "a challenge is not a booking");
+  assert.deepEqual(world.providerReserved, []);
+});
+
+test("the grant rides on every answer, including a later refusal", async () => {
+  /*
+    The property `ensureGuestVerified` asks its callers for, and the one most
+    easily lost. A guest whose token was accepted has paid their challenge; if
+    the budget then refuses the request and the grant is dropped, the next
+    attempt challenges again. What the user sees is a checkbox that never
+    stops coming back.
+  */
+  reset();
+  world.userId = null;
+  world.budgetShouldRefuse = true;
+  const refused = await post(WEBM_2500MS, "audio/webm");
+
+  assert.equal(refused.status, 429);
+  const cookies = refused.headers.getSetCookie?.() ?? [
+    refused.headers.get("Set-Cookie") ?? "",
+  ];
+  assert.ok(
+    cookies.some((value) => value.includes("tomverse_guest_verified_guest_voice")),
+    "the earned grant must survive a refusal from a later gate"
+  );
+  assert.ok(
+    cookies.some((value) => value.startsWith("tomverse_guest=")),
+    "and so must the guest identity, for the same reason"
+  );
 });
 
 // ---------------------------------------------------------------------------
