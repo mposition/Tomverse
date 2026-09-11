@@ -6,6 +6,7 @@ import {
   getPublicAppSettings,
   isAssistantKnowledgeEnabled,
   isAssistantProfilesEnabled,
+  isExternalContinuationEnabled,
   isExternalImportEnabled,
   isImageGenerationEnabled,
   isMemoryExtractionEnabled,
@@ -18,6 +19,7 @@ export default async function AdminPlatformSettingsPage() {
     settings,
     imageGenerationEnabled,
     externalConversationImportEnabled,
+    externalConversationContinuationEnabled,
     assistantProfilesEnabled,
     assistantKnowledgeEnabled,
     memoryExtractionEnabled,
@@ -27,6 +29,7 @@ export default async function AdminPlatformSettingsPage() {
     getPublicAppSettings(),
     isImageGenerationEnabled(),
     isExternalImportEnabled(),
+    isExternalContinuationEnabled(),
     isAssistantProfilesEnabled(),
     isAssistantKnowledgeEnabled(),
     // Read, never written from this screen: the two Release B flags are the
@@ -42,6 +45,9 @@ export default async function AdminPlatformSettingsPage() {
       settings={settings}
       imageGenerationEnabled={imageGenerationEnabled}
       externalConversationImportEnabled={externalConversationImportEnabled}
+      externalConversationContinuationEnabled={
+        externalConversationContinuationEnabled
+      }
       assistantProfilesEnabled={assistantProfilesEnabled}
       assistantKnowledgeEnabled={assistantKnowledgeEnabled}
       memoryExtractionEnabled={memoryExtractionEnabled}

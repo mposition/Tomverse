@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import { conversationSurface } from "@/lib/continuationRoutes";
 import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import {
@@ -42,7 +43,16 @@ export async function GET(req: Request) {
         content: true,
         role: true,
         modelId: true,
-        conversation: { select: { title: true, password: true } },
+        conversation: {
+          select: {
+            title: true,
+            password: true,
+            // docs/policy/external-conversation-continuation.md §8.2: a
+            // search hit is a way into a conversation too, so it has to say
+            // where that conversation opens.
+            continuationBridge: { select: { id: true } },
+          },
+        },
       },
     });
 
@@ -62,6 +72,9 @@ export async function GET(req: Request) {
         id: message.id,
         conversationId: message.conversationId,
         conversationTitle: message.conversation.title,
+        surface: conversationSurface({
+          hasContinuationBridge: message.conversation.continuationBridge !== null,
+        }),
         role: message.role,
         modelId: message.modelId,
         snippet:

@@ -178,6 +178,7 @@ export default async function AdminConsoleFixturePage({
             }}
             imageGenerationEnabled={false}
             externalConversationImportEnabled={false}
+        externalConversationContinuationEnabled={false}
             assistantProfilesEnabled={false}
             assistantKnowledgeEnabled={false}
             /*

@@ -58,7 +58,13 @@ const englishEntries = entriesFor("en");
 const ENGLISH_STRING_CEILING = {
   // Primary market locales. The handful that match English are proper nouns
   // and shared technical labels ("Max", "GPT-5.4 mini"), not untranslated copy.
-  ko: 8,
+  // +1 on ko, de, es and pt (2026-09-01): the continuation composer's
+  // per-model credit line, `{model}: {credits}`. Two substitutions and a
+  // colon -- a model name and a number, with no word between them, and these
+  // four locales punctuate it identically. French takes a space before the
+  // colon and Chinese a full-width one, so neither moved. Allowlisted in
+  // check-locale-translation-core.mjs with the same reason.
+  ko: 9,
   // zh 191 -> 9, fr 235 -> 26, de 234 -> 20, es 230 -> 16, pt 227 -> 13.
   //
   // fr, de, es and pt each gain one on 2026-08-14: the Gemini import guide's
@@ -161,11 +167,18 @@ const ENGLISH_STRING_CEILING = {
   // files it is about to publish. French writes "Documents" exactly as English
   // does; the row beside it ("Modeles") and the heading above it are
   // translated, so this is the word rather than a skipped line.
+  //
+  // +1 fr on 2026-09-02 from the continuation prelude's message counter.
+  // French writes "{count} messages" exactly as English does -- the noun and
+  // the plural are the same word -- and the sentences around it
+  // ("Conversation importee", "Afficher la conversation source") are
+  // translated. Recorded with its reason in
+  // `scripts/check-locale-translation-core.mjs` as well.
   zh: 10,
-  fr: 39,
-  de: 29,
-  es: 18,
-  pt: 16,
+  fr: 40,
+  de: 30,
+  es: 19,
+  pt: 17,
 };
 
 test("every supported language is in the dictionary map", () => {

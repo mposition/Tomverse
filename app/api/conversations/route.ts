@@ -5,6 +5,7 @@ import { enqueueImageAssetCleanupForConversations } from "@/lib/imageAssetLifecy
 import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactStorage";
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
+import { conversationSurface } from "@/lib/continuationRoutes";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -86,6 +87,47 @@ export async function GET(req: Request) {
         // Read to derive `isLocked`, never emitted. Selecting it is the point
         // at which that decision is visible.
         password: true,
+        // Whether this row opens at its own surface rather than in the
+        // workspace (docs/policy/external-conversation-continuation.md §8.2).
+        // Selected as a relation existence check, not a join of the bridge's
+        // columns: the list needs the answer, and none of the provenance.
+        continuationBridge: {
+          select: {
+            id: true,
+            /*
+              Which service the transcript came from, so the sidebar row can
+              carry that service's own icon instead of the generic chat
+              bubble every other row has.
+
+              The bridge's own column rather than the snapshot's: the schema
+              keeps it precisely as "provenance kept after the source is
+              gone", so a continuation whose snapshot has been deleted still
+              says where it came from. Not sensitive and not the source's
+              words -- one of three fixed identifiers this deployment already
+              publishes as the set it can import.
+            */
+            provider: true,
+            /*
+              The imported conversation's own name, for a row nobody has
+              named yet (lib/continuationDisplayTitle.ts).
+
+              Read here rather than copied onto the row at creation:
+              docs/policy/external-conversation-continuation.md §3 keeps the
+              source's words out of tables its deletion does not reach,
+              and deleting a snapshot deliberately leaves the continuation
+              standing. Nulled by the foreign key when the source goes, so the
+              name goes with it.
+
+              `password` decides whether the name may be shown at all: a
+              locked snapshot withholds its transcript, and its title is part
+              of that transcript. Selected, never emitted -- exactly as this
+              query already treats the conversation's own password.
+            */
+            externalConversation: {
+              select: { title: true, password: true },
+            },
+          },
+        },
         _count: { select: { messages: true } },
       },
     });
@@ -126,6 +168,28 @@ export async function GET(req: Request) {
           conv.shareExpiresAt > new Date(),
         shareExpiresAt: conv.shareExpiresAt?.toISOString() || null,
         messageCount: conv._count.messages,
+        // Server-decided, so the sidebar cannot open a continuation in the
+        // workspace -- where the imported half it continues does not exist.
+        surface: conversationSurface({
+          hasContinuationBridge: conv.continuationBridge !== null,
+        }),
+        /*
+          The imported conversation's name, for the client to display when
+          this row still carries the placeholder the continuation writer
+          wrote (lib/continuationDisplayTitle.ts).
+
+          Withheld for a locked snapshot, whose title is part of the
+          transcript the lock is withholding, and absent entirely once the
+          source is deleted -- both leave the row on its translated fallback.
+        */
+        sourceTitle:
+          conv.continuationBridge?.externalConversation?.password === null
+            ? (conv.continuationBridge.externalConversation.title ?? null)
+            : null,
+        // Unlike the title, this is not withheld for a locked or deleted
+        // snapshot: it is the bridge's own provenance, not the transcript's
+        // content, and the row has to be identifiable either way.
+        sourceProvider: conv.continuationBridge?.provider ?? null,
       };
     });
 

@@ -864,6 +864,30 @@ application-managed 검색도 같습니다 — backend 요청을 이미 썼고 s
 예약**을 만듭니다(`ATTEMPT_BOUND_FIELDS`에 `appManagedSearch` 포함): 물려받은
 counter는 이미 쓴 allowance를 물려받거나, 지불하지 않은 allowance를 쓰게 합니다.
 
+### 외부 대화 이어가기의 seed는 모델마다 청구됩니다 (2026-09-01)
+
+**이 절은 새 계약을 만들지 않습니다.** 이어가기가 크레딧 계약 안에서 어디에
+해당하는지만 명시하고, 판정은 전부 이 문서의 기존 조항이 합니다. 기능 계약은
+docs/policy/external-conversation-continuation.md §4.4, §5.1입니다.
+
+- **가져온 원본의 발췌(seed)는 input context입니다.** 별도 요금이 아니라
+  `buildChatTurnSystemBlocks()`의 `promptTokens`에 포함되는 입력 토큰이고, 위의
+  입력 토큰 추정·예약 규칙이 그대로 적용됩니다.
+- **모델 요청마다 한 번씩 듭니다.** 이어가기는 Review 대화이므로 한 turn이 선택된
+  모델 수만큼의 요청을 만들고, 각 요청이 자기 seed를 자기 프롬프트에 싣습니다.
+  예상 크레딧은 **모델별 (seed + 기본 비용 + web search 등 surcharge)의 합계**이며,
+  한 모델 값을 곱해 유도하지 않습니다.
+- **preflight와 실제 요청은 같은 것을 셉니다** — 같은 `conversationId`, 같은
+  effective 모델, 같은 prompt·context 계산(`buildChatTurnSystemBlocks()` 한
+  builder). 한쪽만 seed를 세면 견적이 실제 요청을 설명하지 못합니다.
+- **preflight는 관측 지표를 이중 기록하지 않습니다.** seed outcome 계수는
+  `/api/chat`에서만 남깁니다
+  (`docs/policy/external-conversation-continuation.md` §12).
+- **한 모델의 실패가 다른 모델의 예약·정산·환급에 닿지 않습니다.** 예약과 정산은
+  이미 요청 단위이고, 이어가기가 그 경계를 바꾸지 않습니다.
+- **이어가기 전용 USD entitlement나 전용 guardrail을 만들지 않습니다.** §2의 두 층
+  구분이 그대로이며, 이어가기는 어느 쪽에도 새 층을 더하지 않습니다.
+
 ## 5. 시간대와 reset
 
 일일 window는 사용자 IANA timezone 기준(`lib/userTimeZone.ts`)입니다. 모든

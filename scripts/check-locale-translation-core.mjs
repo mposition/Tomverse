@@ -37,6 +37,12 @@ export const MIN_TRANSLATABLE_LENGTH = 13;
  */
 export const SHARED_STRING_ALLOWLIST = [
   {
+    key: "continuation.creditEstimatePerModel",
+    locales: ["ko", "de", "es", "pt"],
+    reason:
+      "Two substitutions and a separator: a model name and a number. There is no word to translate, and these four locales all punctuate it 'Name: number'. French takes a space before the colon and Chinese takes a full-width one, so both differ.",
+  },
+  {
     key: "chat.imageModelViaGateway",
     locales: ["fr", "pt"],
     reason:

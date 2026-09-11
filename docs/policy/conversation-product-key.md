@@ -86,6 +86,7 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
 | `POST /api/conversations` | `review` | 호환 경로. URL이 Chat/Review를 구분하지 못하므로 Review로 고정 |
 | `POST /api/conversations/import-guest` | `review` | 게스트 대화는 멀티 모델 비교였음. import는 소유권을 옮길 뿐 제품을 바꾸지 않음 |
 | `lib/imageGenerationService.ts` | `studio` | 이미지 대화 |
+| `lib/externalContinuationService.ts` | `review` | 외부 대화 이어가기. 서버 상수. §5.3 |
 
 **제품은 요청이 아니라 endpoint가 정합니다.** body 필드·`Referer`·임의 header는
 "어느 화면에서 왔다"는 클라이언트의 주장이고, 주장에서 유도한 제품 정체성은
@@ -126,6 +127,55 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
 것은 의도입니다 — 결정 기록 v1이 `lib/guestImport.ts`와
 `app/api/admin/users/[userId]/route.ts`를 writer로 셌던 것이 정확히 그 오독이었고,
 두 파일은 대화를 만들지 않습니다.
+
+## 5.3 외부 대화 이어가기는 `review`입니다 (2026-09-01)
+
+가져온 외부 원본을 **여러 모델에게 이어서 물어보는 것**은 Review 작업입니다.
+기능 계약은 `docs/policy/external-conversation-continuation.md` §3.1이고, 이
+문서가 정하는 것은 컬럼 쪽 규칙입니다.
+
+- **`lib/externalContinuationService.ts`는 `createConversation()`에
+  `REVIEW_PRODUCT_KEY`를 행과 같은 statement로 넘깁니다.** 다른 writer와 같은
+  규칙이고, `npm run check:conversation-writers`가 이 파일도 검사합니다.
+- **bridge 존재는 provenance와 전용 surface를 정하지, `productKey`를 정하지
+  않습니다.** 반대 방향도 마찬가지입니다 — surface를 `productKey`에서 유도하면
+  모든 Review 대화가 이어가기 화면으로 갑니다. 판정은
+  `conversationSurface()` 하나이며 근거는 bridge row뿐입니다.
+- **`selectedModels` 개수나 `selectionMode`에서 `productKey`를 유도하지
+  않습니다.** §1이 이미 `selectionMode`에 대해 같은 것을 말했고, 모델 개수는 더
+  약한 신호입니다 — 계정의 기본 조합이 하나면 일반 Review 대화도 하나입니다.
+- **`kind`는 `chat`으로 남습니다.** Chat과 Review는 같은 modality이므로
+  `PRODUCT_MODALITY`도 `Conversation_product_modality_check`도 교정 전후로 같은
+  답을 냅니다. `kind`는 계속 authorization·modality 경계이고 제품 정체성이
+  아닙니다.
+
+### 5.3.1 기존 행 교정 migration
+
+개정 전에 만들어진 continuation은 `productKey = 'chat'`으로 저장돼 있습니다.
+교정은 **명시적 migration**이고 대상은 정확히 다음 교집합입니다.
+
+> bridge를 가진 행 **그리고** `productKey = 'chat'`인 행.
+
+- **`NULL` 행은 대상이 아닙니다.** `NULL`은 §3의 "아직 안 정해짐"이고 그 해석은
+  backfill 단계(§4의 4단계)가 소유합니다. 이 migration이 그 결정을 앞당기지
+  않습니다.
+- **bridge 없는 일반 chat 대화에는 닿지 않습니다.** join이 그것을 보장하며,
+  migration 테스트가 대조군으로 bridge 없는 `chat` 행을 두고 그대로임을
+  확인합니다.
+- **`productKey` 한 컬럼만 씁니다.** `selectedModels`·`selectionMode`·`title`·
+  `kind`·bridge·`Message`를 건드리지 않습니다. 특히 `selectedModels` 확장은
+  사용자 동의 없이 매 turn 크레딧을 몇 배로 늘리는 일이라 금지입니다
+  (`docs/policy/external-conversation-continuation.md` §15.3).
+- **역연산이 있습니다** — 같은 교집합에 `productKey = 'chat'`을 다시 쓰는 것이며,
+  다른 컬럼이 그대로이므로 잃는 정보가 없습니다.
+
+### 5.3.2 허용값과 CHECK를 바꿀 때
+
+이 교정은 허용값을 바꾸지 않습니다(`review`는 이미 허용값입니다). 앞으로
+enum이나 DB CHECK를 바꿔야 한다면 **코드 allowlist(`CONVERSATION_PRODUCT_KEYS`)와
+migration을 같은 변경에서 함께** 고치고 `npm run check:enum-constraints`로
+확인합니다. 한쪽만 바꾸면 DB가 받는 값과 코드가 아는 값이 갈라지고, 그 차이는
+쓰기 실패로만 드러납니다.
 
 ## 6. 제약 셋
 

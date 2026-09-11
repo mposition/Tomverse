@@ -104,10 +104,26 @@ test("formattedMessages keeps the system turn for the paths that accept one", ()
   // system turn (lib/perplexityDeepResearch.ts keeps role "system"), and the
   // request manifest describes what was sent. Filtering at the source would
   // silently drop the profile's instructions from both.
+  // The assembly moved into `buildChatTurnPrelude` when the continuation
+  // feature needed a message that is deliberately NOT a system turn
+  // (docs/policy/external-conversation-continuation.md §4.3): an imported
+  // transcript at system authority is the promotion that policy forbids, and
+  // the ordering rule became a property of a function a test can call rather
+  // than of eight lines inside this route.
+  //
+  // What is pinned here is unchanged, and is the reason this test exists: the
+  // array the deep research path and the manifest see still carries its system
+  // turns. `tests/externalContinuationContracts.test.mjs` owns the other half
+  // -- that the prelude's non-system message is never a system one.
   assert.match(
     source,
-    /const formattedMessages: ModelMessage\[\] = contextSystemPrompt\s*\?\s*\[\{ role: "system", content: contextSystemPrompt \}\]\s*:\s*\[\];/,
+    /const formattedMessages: ModelMessage\[\] = buildChatTurnPrelude\(\{\s*contextSystemPrompt,/,
     `${ROUTE} must keep building the system turn into formattedMessages`
+  );
+  assert.match(
+    read("lib/chatTurnSystemBlocks.ts"),
+    /\.\.\.\(input\.contextSystemPrompt\s*\?\s*\[\{ role: "system" as const, content: input\.contextSystemPrompt \}\]\s*:\s*\[\]\),/,
+    "buildChatTurnPrelude must still place the context block as a system turn"
   );
   assert.match(
     source,

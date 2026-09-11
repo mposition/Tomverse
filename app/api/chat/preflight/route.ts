@@ -33,7 +33,11 @@ import { conversationKindNotSupportedResponse, isChatConversationKind } from "@/
 import { prisma } from "@/lib/prisma";
 import { estimatePreflightAttachmentTokens } from "@/lib/chatAttachmentTokens";
 import { buildChatTurnSystemBlocks } from "@/lib/chatTurnSystemBlocks";
-import { isImageGenerationEnabledCached } from "@/lib/appSettings";
+import {
+    isExternalContinuationEnabledCached,
+    isImageGenerationEnabledCached,
+} from "@/lib/appSettings";
+import { loadContinuationTurnSeed } from "@/lib/externalContinuationService";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { isChatCostSafetyCode } from "@/lib/chatCostSafetyCore";
 import { WEB_SEARCH_MODES } from "@/lib/appDefaults";
@@ -328,6 +332,60 @@ export async function POST(request: Request) {
             access.plan && planAllowsImageGeneration(access.plan)
         );
 
+        /*
+          The imported excerpt, priced here for exactly the reason the two
+          capability blocks are: this route quotes the credits and the chat
+          route sends the prompt, and a block counted on one side only is a
+          quote that does not describe the request
+          (docs/policy/external-conversation-continuation.md §5).
+
+          A continuation is a Review conversation
+          (docs/policy/external-conversation-continuation.md §3.1), so a
+          comparison of a bridged conversation is the ordinary shape rather
+          than an impossible one: this route takes two or three models and the
+          seed is priced into each of their budgets below. §4.4 -- the seed
+          costs one input block per model request, and the quote has to say so
+          before the requests go out.
+
+          The seed itself is read once, here. It is deterministic in the
+          snapshot and the seed version, so every model in the turn is priced
+          against the same excerpt they will each be sent
+          (docs/policy/external-conversation-continuation.md §5.1); reading it
+          per model would cost three identical queries to reach the same
+          answer.
+        */
+        let continuationSeed:
+            | { rulesText: string; transcriptText: string }
+            | undefined;
+        if (session?.user?.id && payload.conversationId !== "private-chat") {
+            try {
+                if (await isExternalContinuationEnabledCached()) {
+                    const { seed } = await loadContinuationTurnSeed({
+                        userId: session.user.id,
+                        conversationId: payload.conversationId,
+                        request,
+                    });
+                    // The outcome is deliberately NOT recorded here. This route
+                    // quotes a turn the chat route then sends, and counting
+                    // both would double every figure in
+                    // docs/policy/external-conversation-continuation.md §12 --
+                    // with the comparison shape counting three times.
+                    continuationSeed =
+                        seed?.prompt.rulesText && seed.prompt.transcriptText
+                            ? {
+                                  rulesText: seed.prompt.rulesText,
+                                  transcriptText: seed.prompt.transcriptText,
+                              }
+                            : undefined;
+                }
+            } catch {
+                // Quote without it rather than refuse the preparation. The
+                // chat route's own read fails the same way and sends the same
+                // prompt, so the two stay in agreement.
+                continuationSeed = undefined;
+            }
+        }
+
         // Bring the shared ceiling latch up to date before anything is
         // priced. A breach recorded by another instance, or by this one before
         // a restart, has to be visible here or the refusal it earned lasts
@@ -398,6 +456,7 @@ export async function POST(request: Request) {
                 promptText: payload.prompt,
                 imageGenerationFlagEnabled,
                 planAllowsImageGeneration: planAllowsImages,
+                continuationSeed,
             });
             estimate.addTokens(turnSystemBlocks.promptTokens);
             for (const message of history) {

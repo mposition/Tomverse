@@ -48,13 +48,25 @@ export function formatConversationHeader(
      * available. Omitted entirely when it was not — a notice about a feature
      * that could not have run is noise, not disclosure.
      */
-    personalizationNotice?: string
+    personalizationNotice?: string,
+    /**
+     * The provenance lines a conversation continued from an imported chat
+     * carries (docs/policy/external-conversation-continuation.md §9), built by
+     * `continuationExportProvenance`.
+     *
+     * In the header rather than beside the first message, because it is a fact
+     * about the whole document: every answer below it was produced with an
+     * excerpt this file does not contain. Empty for every ordinary
+     * conversation, which is nearly all of them.
+     */
+    continuationProvenance: readonly string[] = []
 ) {
     return [
         "Tomverse Review Export",
         `Conversation: ${conversation.title}`,
         `Created: ${formatDate(conversation.createdAt)}`,
         ...(personalizationNotice ? [personalizationNotice] : []),
+        ...continuationProvenance,
         "",
     ].join("\n");
 }

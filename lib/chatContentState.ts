@@ -144,6 +144,38 @@ export function resolveChatContentState({
   return storedSeed;
 }
 
+/**
+ * Whether the shell should render the welcome surface.
+ *
+ * `empty` used to be the whole answer, because "no user turn yet" and "nothing
+ * on this screen yet" were the same thing. A continuation broke that: it opens
+ * with a read-only imported transcript above the timeline and no native
+ * `Message` at all, so every panel reports `empty` — truthfully — and the
+ * shell greeted the owner with "welcome back, how can I help?", offered them
+ * other recent conversations, and floated the composer in the middle of a
+ * screen that already had a conversation on it.
+ *
+ * So the two questions are separated rather than the state machine bent.
+ * `empty` keeps meaning exactly what it says — no native turn — and stays what
+ * the comparison rail reads, because a conversation with no answers has
+ * nothing to compare whatever else is on screen. What the welcome surface
+ * needs is narrower: no native turn **and** nothing else here either.
+ *
+ * `hasConversationPrelude` is the server's answer, not the client's: it comes
+ * from the conversation row's own `surface`, which `conversationSurface()`
+ * derives from the continuation bridge. Never from the title, the `kind` or
+ * the selection mode.
+ */
+export function shouldRenderWelcomeSurface({
+  contentState,
+  hasConversationPrelude,
+}: {
+  contentState: ChatContentState;
+  hasConversationPrelude: boolean;
+}): boolean {
+  return contentState === "empty" && !hasConversationPrelude;
+}
+
 /** Storage surface used by {@link readGuestChatContentState}. */
 export type GuestTranscriptReader = {
   keys(): readonly string[];

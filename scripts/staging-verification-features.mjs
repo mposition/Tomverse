@@ -75,6 +75,14 @@ export const STAGING_VERIFICATION_FEATURES = [
         checklist: "docs/ops/voice-input-staging-checklist.md",
         records: "docs/ops/voice-input-staging-verification-records",
     },
+    {
+        key: "external-conversation-continuation",
+        label: "continuing an imported conversation in Tomverse",
+        checklist:
+            "docs/ops/external-conversation-continuation-staging-checklist.md",
+        records:
+            "docs/ops/external-conversation-continuation-staging-verification-records",
+    },
 ];
 
 export const stagingVerificationFeature = (key) => {
