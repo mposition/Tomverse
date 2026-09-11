@@ -1771,3 +1771,161 @@ test.describe("a continuation among ordinary conversations", () => {
         );
     };
 });
+
+test.describe("sharing a continuation", () => {
+    /**
+     * docs/policy/external-conversation-continuation.md section 9 refuses to
+     * publish a conversation continued from an imported chat, and the route has
+     * always answered 409 for one. What it did not have was a screen that said
+     * so: the client had no branch for that code, so the reason arrived as
+     * "failed to create share link" and the owner pressed again. A staging
+     * console carried three of those from a single session.
+     *
+     * Both projects run this. The refusal is not a layout, but the control it
+     * refuses lives in a drawer on mobile and in the sidebar on desktop, and
+     * the dialog is reached differently in each.
+     */
+    const openShareDialogFor = async (page: Page, title: string) => {
+        const list = await openConversationList(page);
+        const row = list
+            .getByTestId("sidebar-conversation-item")
+            .filter({ hasText: title })
+            .last();
+        await expect(row).toBeVisible();
+        await row.getByTestId("conversation-menu").click();
+        await page.getByTestId("conversation-share").click();
+        const dialog = page.getByTestId("share-confirmation-dialog");
+        await expect(dialog).toBeVisible();
+        return dialog;
+    };
+
+    test("the dialog states why a continuation cannot be published, and offers no confirm", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page);
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                // Not `LEGACY_CONTINUATION_TITLE`: that exact string is
+                // replaced on display (lib/continuationDisplayTitle.ts), so a row
+                // named it renders the source title or a placeholder instead.
+                title: "A continued conversation",
+                surface: "continuation",
+                sourceTitle: SOURCE_CONVERSATION_TITLE,
+            },
+        ]);
+        // Nothing may reach the route. The client decides with the same
+        // function the route decides with, so a request here would mean it had
+        // stopped asking -- and failing on the request rather than on a toast
+        // is the difference between the two things being tested.
+        let shareRequests = 0;
+        await page.route(
+            `**/api/conversations/${CONVERSATION_ID}/share`,
+            (route) => {
+                shareRequests += 1;
+                return route.fulfill(
+                    json(
+                        {
+                            error: "This conversation was started from an imported chat and cannot be shared publicly yet.",
+                            code: "CONTINUATION_SHARE_NOT_SUPPORTED",
+                        },
+                        409
+                    )
+                );
+            }
+        );
+
+        await page.goto("/chat");
+        const dialog = await openShareDialogFor(
+            page,
+            "A continued conversation"
+        );
+
+        const refusal = dialog.getByTestId("share-continuation-refusal");
+        await expect(refusal).toBeVisible();
+        await expect(refusal).toContainText("가져온 대화");
+        // The entry stays and the dialog explains; only the button whose
+        // request cannot succeed is gone.
+        await expect(
+            dialog.getByTestId("share-confirmation-submit")
+        ).toHaveCount(0);
+        expect(shareRequests).toBe(0);
+    });
+
+    test("an ordinary conversation still reaches the confirm", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page);
+        await mockConversationList(page, [
+            { id: "qa-ordinary-share", title: "An ordinary conversation" },
+        ]);
+
+        await page.goto("/chat");
+        const dialog = await openShareDialogFor(page, "An ordinary conversation");
+
+        await expect(
+            dialog.getByTestId("share-confirmation-submit")
+        ).toBeVisible();
+        await expect(
+            dialog.getByTestId("share-continuation-refusal")
+        ).toHaveCount(0);
+    });
+
+    test("a 409 from the server gets the refusal's own sentence, not the generic one", async ({
+        page,
+    }) => {
+        await prepareGuestPage(page, "ko");
+        await mockAuthenticatedApi(page);
+        // A row whose surface never arrived -- a list rendered by a client that
+        // has not refetched since the field existed. The client cannot know, so
+        // it asks, and the server's refusal has to arrive as itself.
+        await page.route("**/api/conversations", (route) => {
+            if (route.request().method() !== "GET") return route.fallback();
+            return route.fulfill(
+                json([
+                    {
+                        id: "qa-stale-row",
+                        title: "A row with no surface",
+                        kind: "chat",
+                        projectId: null,
+                        selectedModels: [PRIMARY_MODEL],
+                        disabledPanels: [],
+                        webSearchMode: "off",
+                        isLocked: false,
+                        shareEnabled: false,
+                        shareExpiresAt: null,
+                        messageCount: 2,
+                    },
+                ])
+            );
+        });
+        await page.route("**/api/conversations/qa-stale-row/share", (route) =>
+            route.fulfill(
+                json(
+                    {
+                        error: "This conversation was started from an imported chat and cannot be shared publicly yet.",
+                        code: "CONTINUATION_SHARE_NOT_SUPPORTED",
+                    },
+                    409
+                )
+            )
+        );
+
+        await page.goto("/chat");
+        const dialog = await openShareDialogFor(page, "A row with no surface");
+        await dialog.getByTestId("share-confirmation-submit").click();
+
+        // The refusal's own sentence, and specifically not "Failed to create
+        // share link" -- the string this defect showed for three presses.
+        await expect(
+            page.getByText(
+                "가져온 대화에서 시작한 대화는 공개 공유할 수 없습니다."
+            )
+        ).toBeVisible();
+        await expect(
+            page.getByText("공유 링크를 생성하지 못했습니다.")
+        ).toHaveCount(0);
+    });
+});
