@@ -79,8 +79,37 @@ test("eight cells, twelve families and whole-family 24/24 partitions retain sele
   assert.equal(report.selectionCoverage.byModel.filter((model) => model.selected === 48).length, 2);
   assert.ok(report.selectionCoverage.byModel.every((model) => model.selectedNotObserved === 0));
   assert.equal(report.replay.benchmarkDomain.paired.populationCases, 48);
+  assert.equal(report.replay.byCell.length, 8);
   assert.ok(report.replay.byCell.every((cell) => cell.paired.populationCases === 6));
   assert.deepEqual(report.replay.byPartition.map((part) => part.paired.populationCases), [24, 24]);
+  assert.equal(report.replay.byFamily.length, 12);
+  for (const [group, population] of [[report.replay.benchmarkDomain, 48],
+    ...report.replay.byCell.map((cell) => [cell, 6]),
+    ...report.replay.byPartition.map((part) => [part, 24]),
+    ...report.replay.byFamily.map((family) => [family, 4])]) {
+    for (const choice of [group.baseline, group.candidate]) {
+      assert.equal(choice.availableCases, population);
+      assert.equal(choice.unavailableCases, 0);
+      assert.equal(choice.coverage, 1);
+    }
+    assert.equal(group.paired.commonObservedCases, population);
+    assert.equal(group.paired.unavailablePairCases, 0);
+    assert.equal(group.paired.observedSubset.denominator, population);
+    assert.equal(group.paired.wholePopulationCorrectOutcomeShareDelta, 0);
+  }
+  const { baseline, candidate, paired, rows } = report.replay.benchmarkDomain;
+  assert.equal(baseline.wholePopulationCorrectOutcomeShare, 46 / 48);
+  assert.equal(candidate.wholePopulationCorrectOutcomeShare, 46 / 48);
+  assert.equal(paired.baselineCorrect, 46);
+  assert.equal(paired.candidateCorrect, 46);
+  assert.equal(paired.bothAnsweredCases, 47);
+  assert.equal(paired.acquisitionFailureCases, 1);
+  assert.equal(paired.correctedCases, 0);
+  assert.equal(paired.regressedCases, 0);
+  assert.equal(rows.length, 48);
+  const selectedRows = new Set(manifest.collection.selectedRowIds);
+  assert.ok(rows.every((row) => [row.baseline, row.candidate].every((choice) =>
+    choice.available && choice.unavailableReason === null && selectedRows.has(choice.rowId))));
 });
 
 test("all mock metrics remain null and unknown intent cannot resume or export", () => {
