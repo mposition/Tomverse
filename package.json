@@ -221,6 +221,8 @@
     "benchmark:router:replay": "node --import tsx scripts/router-development-replay.mjs",
     "benchmark:router:collect": "node --conditions=react-server --import tsx scripts/router-development-collect.mjs",
     "benchmark:router:contract-smoke": "node --conditions=react-server --import tsx scripts/router-development-contract-smoke.mjs",
+    "check:router-development-corpus-v2": "node --conditions=react-server --import tsx scripts/router-development-corpus-v2.mjs",
+    "test:router-development-corpus-v2": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentCorpusV2.test.mjs tests/routerDevelopmentCorpusOracleV2.test.mjs tests/routerDevelopmentCorpusV2Cli.test.mjs",
     "test:router-development-execution": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentExecution.test.mjs tests/routerDevelopmentExecutionCli.test.mjs",
     "test:router-development-collector": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentCollector.test.mjs tests/routerDevelopmentCollectorProvider.test.mjs tests/routerDevelopmentCollectorCli.test.mjs tests/routerDevelopmentCollectorAdversarial.test.mjs",
     "test:router-development-benchmark": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/routerDevelopmentBenchmark.test.mjs tests/routerDevelopmentBenchmarkCli.test.mjs tests/routerDevelopmentBenchmarkCorpus.test.mjs",
