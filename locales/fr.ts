@@ -54,6 +54,7 @@ export const fr = {
         downloadFailed: "Échec du téléchargement de la conversation.",
         downloadTxt: "Télécharger (.txt)",
         shareFailed: "Impossible de créer le lien de partage.",
+        shareContinuationUnavailable: "Cette conversation a été démarrée depuis une discussion importée : elle ne peut pas être partagée publiquement.",
         shareLocked: "Déverrouillez ce chat avec son mot de passe avant de le partager.",
         shareCopied: "Lien de partage copié dans le presse-papiers.",
         downloadAllTxt: "Télécharger tous les chats en .txt",

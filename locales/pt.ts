@@ -54,6 +54,7 @@ export const pt = {
         downloadFailed: "Falha ao baixar a conversa.",
         downloadTxt: "Baixar (.txt)",
         shareFailed: "Falha ao criar link de compartilhamento.",
+        shareContinuationUnavailable: "Esta conversa foi iniciada a partir de um chat importado e não pode ser compartilhada publicamente.",
         shareLocked: "Desbloqueie este chat com a senha antes de compartilhar.",
         shareCopied: "Link de compartilhamento copiado para a área de transferência.",
         downloadAllTxt: "Baixar todos os chats como .txt",
