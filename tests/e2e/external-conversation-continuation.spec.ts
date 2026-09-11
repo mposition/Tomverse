@@ -112,6 +112,15 @@ const mockContinuationApi = async (
          * one to three models and each of them answers every turn.
          */
         selectedModels?: string[];
+        /**
+         * Model ids whose `/api/chat` answers 500 instead of a stream.
+         *
+         * The checklist's K-7 asks whether one model failing damages another's
+         * answer, and says in as many words that it must not be reproduced
+         * with paid turns: staging has no way to fail one provider on demand.
+         * Failing the route for one id is that lever, deterministically.
+         */
+        failModelIds?: string[];
     } = {}
 ) => {
     const selectedModels = options.selectedModels ?? [PRIMARY_MODEL];
@@ -324,6 +333,21 @@ const mockContinuationApi = async (
         const body = route.request().postDataJSON() as { modelId?: string };
         state.chatRequests += 1;
         state.chatBodies.push(body);
+        if ((options.failModelIds ?? []).includes(body.modelId ?? "")) {
+            // Recorded above first: the request happened, and K-7's claim is
+            // about what the *other* panel does with it, not about the
+            // failing one going unseen.
+            await route.fulfill(
+                json(
+                    {
+                        error: "The provider did not answer.",
+                        code: "PROVIDER_ERROR",
+                    },
+                    500
+                )
+            );
+            return;
+        }
         state.tomverseMessages = [
             ...state.tomverseMessages,
             {
@@ -979,6 +1003,58 @@ test.describe("continuing an imported conversation", () => {
         );
         expect(perPanel.length).toBeGreaterThan(0);
         for (const count of perPanel) expect(count).toBe(1);
+    });
+
+    test("one model failing leaves the other model's answer standing", async ({
+        page,
+    }) => {
+        /*
+          The staging checklist's K-7, answered here rather than with paid
+          turns. The checklist says why: staging has no lever to fail one
+          provider, and buying failures with real calls costs more than the
+          property is worth. This spec is that lever.
+
+          What must hold is narrow and worth naming: the healthy panel shows
+          its own answer, the failing panel says it failed, and neither
+          borrows the other's text. A shared error banner or a swallowed
+          answer would both pass a looser assertion.
+        */
+        await prepareGuestPage(page, "ko");
+        const api = await openContinuation(page, {
+            selectedModels: [PRIMARY_MODEL, SECOND_MODEL],
+            failModelIds: [SECOND_MODEL],
+        });
+
+        await page.goto(`/continuations/${CONVERSATION_ID}`);
+        await expect(importedBubbles(page).first()).toBeVisible();
+
+        await page.getByTestId("chat-textarea").fill("Carry on from there.");
+        await page.getByTestId("chat-send-button").click();
+
+        // Both models were asked. Without this the assertions below could pass
+        // on a build that never sent the failing request at all.
+        await expect
+            .poll(() => api.chatBodies.map((body) => body.modelId).sort())
+            .toEqual([PRIMARY_MODEL, SECOND_MODEL].sort());
+
+        // The healthy model's answer is on screen, in full.
+        await expect(
+            page.getByText(`A ${PRIMARY_MODEL} answer that continues the thread.`)
+        ).toBeVisible();
+
+        // Exactly one panel is in an error state -- not zero, not both.
+        await expect(page.getByTestId("chat-error-icon")).toHaveCount(1);
+
+        // And the failing panel did not take the other's text with it: the
+        // healthy answer appears once, in one panel.
+        await expect(
+            page.getByText(`A ${PRIMARY_MODEL} answer that continues the thread.`)
+        ).toHaveCount(1);
+
+        // The imported half is untouched by either outcome -- it is the
+        // question both models were answering, and a failure is not a reason
+        // to lose it.
+        await expect(importedBubbles(page).first()).toBeVisible();
     });
 
     test("the transcript never covers the composer", async ({ page }) => {
