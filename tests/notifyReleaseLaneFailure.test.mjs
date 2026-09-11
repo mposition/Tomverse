@@ -169,7 +169,11 @@ test("the DB lane says why a green pull request did not answer for the branch", 
 });
 
 test("every lane has consequence text, and no lane is a bare event name", () => {
-  assert.deepEqual(LANE_KEYS, ["back-merge", "db-integration"]);
+  assert.deepEqual(LANE_KEYS, [
+    "back-merge",
+    "db-integration",
+    "deployed-commit-drift",
+  ]);
   for (const lane of LANE_KEYS) {
     assert.ok(LANE_CONSEQUENCES[lane].length > 80, lane);
   }

@@ -441,9 +441,18 @@ export async function checkProviderModelCatalogs(now = new Date()) {
             },
           })
           .catch(() => undefined);
+        // `detail` and not just `code`. PROVIDER_MODEL_CATALOG_FAILED is the
+        // catch-all for an error this module did not classify -- a fetch that
+        // threw, a payload that would not parse -- so the message is the only
+        // thing that knows what happened, and printing the code alone reports
+        // that something went wrong while withholding what. On 2026-09-11 that
+        // was qwen: one line reading `{ provider: 'qwen', code:
+        // 'PROVIDER_MODEL_CATALOG_FAILED' }`, beside an xai line that named
+        // the rejected key, the status and the consequence.
         console.error("Provider model catalog persistence failed:", {
           provider,
           code: safe.code,
+          detail: safe.detail,
         });
         return {
           provider,

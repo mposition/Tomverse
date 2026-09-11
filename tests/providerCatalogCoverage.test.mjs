@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
+    catalogFailureDetail,
     chatModelExclusion,
     isLikelyChatModelId,
     parseProviderCatalogModels,
@@ -184,4 +185,46 @@ test("a rejected key is named in the report row, not left as a status code", () 
         /chat requests are failing too/,
         "the row has to say the scan is the symptom, not the outage"
     );
+});
+
+// A fourth way the report could read as more complete than it is: the stored
+// cause of a failure, written on every failed scan and printed by nothing.
+//
+// On 2026-09-11 `qwen` failed with PROVIDER_MODEL_CATALOG_FAILED -- the code
+// for an error the monitor could not classify, so the code itself says only
+// "something we did not recognise". The row held the message; the daily report
+// and the log line both printed the code alone.
+
+test("a stored failure detail survives to the line that prints it", () => {
+    assert.equal(
+        catalogFailureDetail("fetch failed: ECONNREFUSED"),
+        "fetch failed: ECONNREFUSED"
+    );
+    // Multi-line provider messages become one row: these land in a Slack block
+    // and an email where the caller has already chosen the line breaks.
+    assert.equal(
+        catalogFailureDetail("fetch failed\n  cause: ECONNREFUSED\n"),
+        "fetch failed cause: ECONNREFUSED"
+    );
+});
+
+test("no detail prints no second line, rather than an empty one", () => {
+    // `errorDetail` is nullable in the schema and optional on the result, and
+    // rows written before it was populated have neither. Each must come back
+    // falsy so the caller emits the code on its own.
+    for (const empty of [undefined, null, "", "   ", "\n\t"]) {
+        assert.equal(catalogFailureDetail(empty), "", JSON.stringify(empty));
+    }
+});
+
+test("a long detail is capped where the transport can carry it", () => {
+    // `safeError` in the monitor slices the provider message to 500, which is
+    // longer than a row in a Slack block or an operator email should be.
+    const capped = catalogFailureDetail("x".repeat(500));
+    assert.equal(capped.length, 200);
+    assert.ok(capped.endsWith("\u2026"), capped.slice(-5));
+    // A detail exactly at the cap keeps every character and gains no ellipsis:
+    // an off-by-one here truncates a message that fit.
+    const exact = "y".repeat(200);
+    assert.equal(catalogFailureDetail(exact), exact);
 });

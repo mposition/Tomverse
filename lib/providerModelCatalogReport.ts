@@ -13,7 +13,10 @@ import {
 import { modelOwnerPhrase } from "@/lib/modelOwner";
 import type { LifecycleReportRow } from "@/lib/modelLifecycleWorkItems";
 import type { ProviderModelCatalogResult } from "@/lib/providerModelCatalogMonitor";
-import { PROVIDER_CATALOG_KEY_REJECTED } from "@/lib/providerModelCatalogCore";
+import {
+  catalogFailureDetail,
+  PROVIDER_CATALOG_KEY_REJECTED,
+} from "@/lib/providerModelCatalogCore";
 import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
 import { prisma } from "@/lib/prisma";
 import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
@@ -170,10 +173,11 @@ const reportParts = (
     )
   );
   const candidates = candidateRowsFor(results);
-  const failures = [...failed, ...skipped].map(
-    (result) =>
-      `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`
-  );
+  const failures = [...failed, ...skipped].map((result) => {
+    const head = `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`;
+    const detail = catalogFailureDetail(result.errorDetail);
+    return detail ? `${head}\n  ${detail}` : head;
+  });
   const registryUpdates = reconciliationRows(reconciliation);
   const queueUrl = workQueueUrl();
   // Folded into the existing summary line rather than added as a new template
