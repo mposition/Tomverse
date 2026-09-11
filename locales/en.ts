@@ -362,6 +362,8 @@ export const en = {
         voiceErrorScopeChanged: "Voice input stopped because you moved to another chat. Nothing was added.",
         voiceErrorUnavailable: "Voice input is not available right now.",
         voiceErrorSignInRequired: "Log in to use voice input.",
+        voiceErrorVerificationRequired: "Please complete the quick verification, then record again.",
+        voiceErrorVerificationUnavailable: "Verification is unavailable right now. Please try again in a moment.",
         voiceErrorLimitReached: "You have reached today's voice input limit. Try again tomorrow.",
         voiceErrorProviderUnavailable:
             "The speech-to-text service is unavailable. Please try again shortly.",

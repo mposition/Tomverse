@@ -72,6 +72,23 @@ export type VoiceCaptureAdapterOptions = {
   /** The media type the upload declares — the container without parameters. */
   uploadMediaType: string;
   endpoint: string;
+  /**
+   * Obtains a Turnstile token for the guest voice challenge, or `undefined`
+   * when this caller has no way to.
+   *
+   * Injected rather than imported for the reason every other device concern
+   * here is: this module knows about clips, requests and a state machine, and
+   * nothing about React context or a Cloudflare widget. A signed-in composer
+   * passes nothing and the retry below never runs, which is correct -- the
+   * server only challenges guests.
+   *
+   * It may reject (the user dismissed the widget, the challenge failed), and
+   * it may resolve to `undefined` when there is no token to be had at all --
+   * verification disabled, or a local bypass host. Both mean the same thing
+   * here: do not retry. Re-sending a byte-identical request that was just
+   * refused would spend the clip twice and refuse twice.
+   */
+  requestVerificationToken?: () => Promise<string | undefined>;
   dispatch: (event: VoiceCaptureDispatch) => void;
   /** Hands a finished transcript back, with the session it belongs to. */
   onTranscript: (transcript: string, sessionId: number) => void;
@@ -386,16 +403,59 @@ export const createVoiceCaptureAdapter = (
 
     const controller = new AbortController();
     abort = controller;
+    /*
+      The clip is sent as the raw body, so a Turnstile token has nowhere to go
+      but the query string -- the same place the guest attachment endpoint
+      takes it, for the same reason.
+    */
+    const send = (turnstileToken?: string) =>
+      options.deps.fetchImpl(
+        turnstileToken
+          ? `${options.endpoint}?turnstileToken=${encodeURIComponent(turnstileToken)}`
+          : options.endpoint,
+        {
+          method: "POST",
+          // The container only. A recorder mime carries a codec parameter the
+          // endpoint's allowlist does not key on.
+          headers: { "Content-Type": options.uploadMediaType },
+          body,
+          signal: controller.signal,
+          cache: "no-store",
+        }
+      );
     try {
-      const response = await options.deps.fetchImpl(options.endpoint, {
-        method: "POST",
-        // The container only. A recorder mime carries a codec parameter the
-        // endpoint's allowlist does not key on.
-        headers: { "Content-Type": options.uploadMediaType },
-        body,
-        signal: controller.signal,
-        cache: "no-store",
-      });
+      let response = await send();
+
+      /*
+        One retry, and only for the code that a token actually fixes.
+
+        The first attempt carries no token on purpose: a guest with a valid
+        grant cookie is not challenged at all, so sending one every time would
+        put a widget in front of people who did not need it. The server
+        answers `TURNSTILE_REQUIRED` when it does need one, and that answer is
+        what makes the challenge appear.
+
+        `TURNSTILE_FAILED` is deliberately not retried here: the token was
+        seen and rejected, so asking for another one immediately would loop
+        the user through a challenge that just refused them.
+      */
+      if (!response.ok && options.requestVerificationToken) {
+        const firstPayload = (await response.clone().json().catch(() => null)) as
+          | { code?: string }
+          | null;
+        if (firstPayload?.code === "TURNSTILE_REQUIRED") {
+          let token: string | undefined;
+          try {
+            token = await options.requestVerificationToken();
+          } catch {
+            // The user dismissed the widget or the challenge failed. The
+            // refusal already in hand is the honest thing to report.
+            token = undefined;
+          }
+          if (discarded.has(sessionId) || destroyed) return;
+          if (token) response = await send(token);
+        }
+      }
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as

@@ -48,6 +48,13 @@ export const GUEST_TURNSTILE_ACTIONS = [
   "guest_quick_summary",
   "guest_ai_review",
   "guest_attachment",
+  // Voice input, opened to guests on 2026-09-10
+  // (docs/policy/voice-input.md §4.2). Its own action rather than a reuse of
+  // `guest_chat`: the exposure it answers is different in kind. A guest who
+  // has verified to *send a message* has not thereby shown they should be
+  // able to spend the deployment's daily seconds at a third party, and
+  // folding voice into the chat grant would let one challenge unlock both.
+  "guest_voice",
   "support_request",
 ] as const;
 
@@ -73,6 +80,7 @@ const GRANT_COVERAGE: Record<
   guest_quick_summary: ["guest_quick_summary"],
   guest_ai_review: ["guest_ai_review"],
   guest_attachment: ["guest_attachment"],
+  guest_voice: ["guest_voice"],
   support_request: ["support_request"],
 };
 

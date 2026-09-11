@@ -380,6 +380,8 @@ export const zh = {
         voiceErrorScopeChanged: "因切换到其他对话，语音输入已停止，未添加任何内容。",
         voiceErrorUnavailable: "当前无法使用语音输入。",
         voiceErrorSignInRequired: "请登录后使用语音输入。",
+        voiceErrorVerificationRequired: "请完成快速验证后重新录音。",
+        voiceErrorVerificationUnavailable: "目前无法进行验证，请稍后再试。",
         voiceErrorLimitReached: "已达到今天的语音输入上限，请明天再试。",
         voiceErrorProviderUnavailable: "语音识别服务暂时不可用，请稍后再试。",
         voiceErrorNetwork: "录音发送失败。请检查网络连接后重试。",
