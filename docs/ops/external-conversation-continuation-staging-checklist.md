@@ -168,7 +168,8 @@ Railway의 deployment id(UUID)는 배포를 가리키지 코드를 가리키지 
       버튼도 실패입니다 — `AGENTS.md`의 잠금 규칙은 "요구사항을 앞에서 밝히거나,
       rollout flag가 꺼진 동안에는 아무것도 그리지 않는다" 둘 중 하나이고,
       "마지막 단계에서만 막는" 모양은 허용되지 않습니다.
-- [ ] E-3(b). 같은 상태에서 `POST /api/conversations/continue`를 직접 보낸다
+- [ ] E-3(b). 같은 상태에서 `POST /api/external-conversations/{externalConversationId}/continuations`를
+      직접 보낸다
       (DevTools의 `fetch`로 충분합니다). **403으로 거절되는가.** 카드를 숨기는
       것은 표현이지 경계가 아니므로, 이 요청이 통과하면 실패입니다.
 - [ ] E-4. flag off 상태에서 ordinary chat과 Review가 이전과 동일한가.
