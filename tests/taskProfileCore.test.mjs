@@ -340,3 +340,26 @@ test("ordinary boolean-adjacent freshness and separate-line sources keep the ful
         assert.ok(built.signals.includes("research:vocabulary"), text);
     }
 });
+
+test("comma-and coordination cannot remove the profile recency boundary", () => {
+    for (const [text, recent] of [
+        ["Do not open the attachments, and use today's date.", true],
+        ["Do not search the web, and use today's date.", true],
+        ["Do not read the notes and open the attachments, or use today's date.", true],
+        ["Do not open the attachments, read notes and consult the record, or use today's date.", true],
+        ["Do not use today's date.", false],
+        ["Do not open the attachments, or use today's date.", false],
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, recent, text);
+        assert.equal(built.kind, "general", text);
+        assert.equal(built.kindConfidence, "none", text);
+        assert.equal(built.version, "task-profile-v3", text);
+        assert.deepEqual(built.signals, recent ? ["search:recency-heuristic"] : [], text);
+        const requested = profile(text, { webSearchRequested: true });
+        assert.equal(requested.needsCurrentInformation, true, text);
+        assert.equal(requested.kind, "research", text);
+        assert.ok(requested.signals.includes("search:requested"), text);
+        assert.ok(!requested.signals.includes("search:recency-heuristic"), text);
+    }
+});

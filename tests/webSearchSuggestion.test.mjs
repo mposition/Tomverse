@@ -123,6 +123,34 @@ test("a prohibition on today's date masks only the incidental date cue", () => {
   ]) assert.equal(suggestsRecentInformationNeeded(text), true, text);
 });
 
+test("comma-and coordination keeps the date cue while explicit or prohibitions stay local", () => {
+  for (const [text, recent] of [
+    ["Do not open the attachments, and use today's date.", true],
+    ["Do not search the web, and use today's date.", true],
+    ["Don't open the attachments, and infer today’s date.", true],
+    ["Never read the notes, and assume today's date.", true],
+    ["Do not read the notes and open the attachments, or use today's date.", true],
+    ["Do not open the attachments, read notes and consult the record, or use today's date.", true],
+    ["Do not open the attachments. Use today's date.", true],
+    ["Do not open the attachments, use today's date.", true],
+    ["Do not use today's date.", false],
+    ["Do not open the attachments, or use today's date.", false],
+    ["Don't read the notes, open the attachments, or infer today’s date.", false],
+    ["Never read the notes, or assume today's date.", false],
+  ]) {
+    // These conservative boundaries preserve ambiguous affirmative coordination;
+    // they do not claim to resolve arbitrary natural-language negation scope.
+    assert.equal(hasExplicitSourceOrSearchIntent(text), false, text);
+    assert.equal(suggestsRecentInformationNeeded(text), recent, text);
+    assert.deepEqual(classifyWebSearchTopic({ text }), recent
+      ? { suggested: true, signals: ["recency"], refusal: null }
+      : { suggested: false, signals: [], refusal: "no_recency_signal" }, text);
+    assert.deepEqual(classifyDeepResearchTopic({ text }), {
+      suggested: false, signals: recent ? ["recency"] : [], refusal: "no_depth_signal",
+    }, text);
+  }
+});
+
 test("incidental masking does not alter the original length or bare-year thresholds", () => {
   assert.equal(suggestsRecentInformationNeeded("오늘"), false);
   assert.equal(suggestsRecentInformationNeeded("2026"), true);

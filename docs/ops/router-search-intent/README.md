@@ -167,11 +167,11 @@ retain the fresh evidence; earlier results were not overwritten. Preservation
 checks retained the original 71 files and 67 subsequent evidence pins. These
 checks are not approval; the actual round 1 review is recorded below.
 
-## Revision 2 verification
+## Revision 2 verification (historical candidate)
 
 The separate `revision2-final` observation binds helper SHA-256
 `eed056e52ca68814ddb3b41bf178ec386a00c724ec418fd8084662974f2b15eb`;
-the profiler hash and `task-profile-v3` remain unchanged. Its pre-commit
+the `lib/taskProfileCore.ts` hash and `task-profile-v3` remain unchanged. Its pre-commit
 metadata records dirty HEAD `c5c82f5f`, not an invented revision commit. The
 fresh 15-file run passed **303/303** tests, with zero failures, cancellations,
 skips or TODOs. The external `run-regressions-revision2.mjs` runner adds the
@@ -190,8 +190,9 @@ limitations remain the same. Instrumented runs reported zero network attempts.
 `final-independent-verification-revision2-final.json` and the separate
 `revision2-final.*` outputs retain commands, hashes and native results. The
 original 71 files and 113 subsequent preservation pins were checked without
-overwriting earlier evidence. The revised bytes still require the final
-independent Claude review.
+overwriting earlier evidence. At the time of that measurement, the revised
+bytes still required the final independent Claude review; its later terminal
+outcome is recorded below.
 
 ## Historical observations are not reinterpreted
 
@@ -253,8 +254,53 @@ qualification recorded, not silently edited.
 
 Revision 2 addresses the dash boundary, adds the dedicated consumer coverage
 and documentation, and separates the two masking passes. These are corrective
-dispositions, not independent acceptance. The last allowed Claude round 2
-review is pending; none of the 225-, 260- or 303-test runs substitutes for it.
+dispositions, not independent acceptance. When revision 2 was recorded, the
+last allowed Claude round 2 review was pending; none of the 225-, 260- or
+303-test runs substituted for it.
 Round 0 and 1 shared-file snapshots remain in the external
 `round0-before-revision1-c5c82f5f` and `round1-before-revision2-c5c82f5f`
 directories. No finding is waived here.
+
+The subsequent actual Claude round 2 review returned `request_changes` with
+two findings for commit `6a6a0999ba3dbbcb0fa9f258c5a81e8937f84b36`, digest
+`sha256:d3e8ec4d0e7107f3996bc81b2fc23986cf4d2a5e1e9c990595cff8e3f467eff9`.
+The controller concluded `on_hold` with `revisions_exhausted`. Its package,
+verdict and exchange remain unchanged, with a byte-identical terminal snapshot
+in the external `terminal-round2-6a6a0999` directory. The findings concern a
+comma-and date cue consumed by a prohibition list and the ambiguous hash
+referent clarified above; this clarification does not alter the old verdict.
+
+## Bounded follow-up
+
+`router-search-intent-followup-v1` explicitly supersedes that concluded
+exchange; it is not a reopening or an unbounded reset. Its base is
+`6a6a0999ba3dbbcb0fa9f258c5a81e8937f84b36`, and its source scope is the helper,
+the two helper/profile test files and this README. The core-profiler bytes and
+`task-profile-v3` stay unchanged for this still-unpromoted development candidate.
+Fresh evidence is stored separately in
+`H:/Project/router-search-intent-followup-v1-evidence-20260911`.
+
+The follow-up conservatively retains date cues in comma-and continuations,
+whose prohibition scope can be ambiguous, while keeping direct prohibitions
+and supported bounded comma-or lists. This is a chosen heuristic boundary,
+not a claim to resolve every natural-language conjunction. Its new Claude
+review must name the follow-up digest; no prior test or review is an approval
+of those new bytes.
+
+The fresh independent development checks bind helper SHA-256
+`d8a664b6729149733aa7721609c667912094aca86980c8e6e3a6c4bd2c502533`.
+The focused 15-file native suite passed **305/305**, with no failures,
+cancellations, skips or TODOs and zero observed network attempts. Of 51 pure
+function probes, only the four targeted conjunction variants changed; the
+33 earlier full boundary outputs and 41 earlier helper/profile outputs were
+preserved. The retained checks include 17 retry and 7 DeepResearch comparisons
+and the same three known heuristic limitations.
+
+All 1,008 static case-model rows (24 cases by 42 models), their selected-model
+decisions and the 360 planned / 648 refused split remain identical to the
+predecessor `6a6a0999`; search-inference and eligibility mismatch counts remain
+zero on that synthetic corpus. The 303 preservation pins matched. These results
+are recorded in `final-independent-verification.json` and the separate
+`followup-candidate.regressions.*` files in the new external evidence directory.
+No paid answer generation was performed; these checks do not measure answer
+quality, optimality or production readiness.

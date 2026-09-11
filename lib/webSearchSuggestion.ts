@@ -105,13 +105,15 @@ const withoutIncidentalRecencyCues = (text: string): string => {
             (match) => match.replace(/현재/g, blank));
       }
       // Require a directly forbidden verb, or the final verb of an explicit
-      // comma-separated prohibition list. "Do not forget to use today" is
+      // comma-separated "or" prohibition list. "Do not forget to use today" is
       // affirmative, as is a Korean date clause followed by an unrelated ban.
+      // An "and" anywhere in that list can start affirmative coordination;
+      // retain its cue rather than guessing the scope of the earlier negation.
       // At most four preceding items, each with at most 80 trailing characters:
       // scanning an unbounded suffix for every "do not" is quadratic on long
       // text without commas. Longer/ambiguous lists retain their recency cue.
-      return clause.replace(/\b(?:do\s+not|don['’]t|never)\s+(?:(?:(?:search|use|read|open|execute|consult|infer|assume)\b[^,.!?;\n]{0,80},\s*){1,4}(?:and|or)\s+)?(?:use|infer|assume|consult)\s+today(?:['’]s)?(?:\s+date)?\b/gi,
-        (match) => match.replace(/\btoday\b/gi, blank))
+      return clause.replace(/\b(?:do\s+not|don['’]t|never)\s+(?:(?:(?:search|use|read|open|execute|consult|infer|assume)\b[^,.!?;\n]{0,80},\s*){1,4}or\s+)?(?:use|infer|assume|consult)\s+today(?:['’]s)?(?:\s+date)?\b/gi,
+        (match) => /\band\b/i.test(match) ? match : match.replace(/\btoday\b/gi, blank))
       .replace(/오늘\s*(?:의\s*)?(?:날짜|기준|시점)(?:(?:나|와|과|및)\s*(?:실제\s*)?(?:달력|날짜)(?:\s*지식)?)?(?:은|는|을|를|도)?\s*(?:사용|쓰|추론|가정|참고)(?:하)?지\s*(?:마|말)/g,
         (match) => match.replace(/오늘/g, blank));
     })
