@@ -75,6 +75,18 @@ export const LANE_CONSEQUENCES = {
     "not answer this; until the branch is green, every pull request measured",
     "against it inherits the failure and it looks like theirs.",
   ].join("\n"),
+  "deployed-commit-drift": [
+    "An environment is serving an older commit than the branch it deploys",
+    "from, and has been for longer than the threshold. The run says which",
+    "environment, which commit, and how far behind.",
+    "This lane cannot fail its own run, and the reason is the drift itself:",
+    "it is scheduled, so it runs against main's head and joins that commit's",
+    "check suite, and the Tomverse app service waits on the suite. A red run",
+    "marked SKIPPED the deployment whose absence it was reporting, and the",
+    "next merge inherited the skip -- nine hours on 2026-09-10.",
+    "So read the job, not the run: the job is still red when this fires.",
+    "Check the deployment platform for what is holding the deployment now.",
+  ].join("\n"),
 };
 
 export const LANE_KEYS = Object.keys(LANE_CONSEQUENCES);

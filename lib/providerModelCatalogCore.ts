@@ -96,6 +96,37 @@ export const providerCatalogHttpFailure = (
   };
 };
 
+/**
+ * The stored `errorDetail`, ready to print under the code that names it.
+ *
+ * `ProviderModelCatalogRun.errorDetail` has been written on every failed scan
+ * since the table existed and read by nothing -- not the daily report, not the
+ * log line, not a panel. So the one code that carries no information of its
+ * own, `PROVIDER_MODEL_CATALOG_FAILED` -- the catch-all for an error the
+ * monitor could not classify, which is to say exactly the failures whose cause
+ * is not already in the code -- reached an operator as
+ * `• Qwen: failed (PROVIDER_MODEL_CATALOG_FAILED)` and stopped there, while
+ * the sentence saying what actually threw sat in the row behind it. That is
+ * the same shape as the two failures this module's comments already record:
+ * Anthropic's 404 read for a month as "the provider dropped this endpoint",
+ * and Perplexity's 401 reported as a status instead of its causes.
+ *
+ * Returned for every code rather than only the catch-all. Beside HTTP_404 the
+ * detail does restate the status, and that is a cheap thing to read; a rule
+ * that decided when a detail was redundant is the thing that would eventually
+ * hide the one that was not.
+ *
+ * Collapsed to a single line and capped, because the caller puts it in a Slack
+ * block and an email while the monitor allows 500 characters. An absent or
+ * whitespace-only detail returns "" so the caller prints the code alone rather
+ * than an empty second line.
+ */
+export const catalogFailureDetail = (detail: string | null | undefined) => {
+  const collapsed = (detail || "").replace(/\s+/g, " ").trim();
+  if (!collapsed) return "";
+  return collapsed.length > 200 ? `${collapsed.slice(0, 199)}\u2026` : collapsed;
+};
+
 export type ProviderCatalogObservation = {
   id: string;
   displayName: string | null;
