@@ -26,6 +26,46 @@ name: Deployed Commit Drift
 # run would have reported this one the next morning. The threshold does the
 # noise control instead of the schedule: a merge that has not deployed yet is
 # ordinary and passes.
+#
+# Why the job may go red but the run may not
+# ------------------------------------------
+#
+# This workflow is scheduled, so it runs against `main`'s head and its run
+# joins that commit's check suite. The Tomverse app service is configured with
+# `checkSuites: true` -- Railway's Wait for CI -- and that rule is
+# all-or-nothing: a red suite marks the deployment SKIPPED. The five worker
+# services have no such setting and deploy regardless.
+#
+# So a failing run here skipped the deployment of the very commit whose absence
+# it was reporting, and then reported the same absence an hour later against
+# the next commit. Once entered, the loop has no exit:
+#
+#   2026-09-10T21:36:37  77da3f41 merged; the app deployment is created
+#   2026-09-10T21:39:18  this workflow starts against 77da3f41
+#   2026-09-10T21:41:41  it fails -- production was 60+ minutes behind
+#   2026-09-10T21:41:43  Railway marks that deployment SKIPPED
+#                        (Provider Probe's deployment of the same commit, created
+#                         in the same second, built and ran: only the app waits
+#                         on the suite)
+#   2026-09-11T00:11:58  it fails again, now two commits behind
+#
+# Production served a commit from 22:02 for the next nine hours, and each new
+# merge inherited the skip.
+#
+# `continue-on-error` at the job level is the same instrument
+# back-merge-main-to-develop.yml uses for the same collision, and for the
+# reason its header records: a failing `continue-on-error` job reports check
+# run conclusion `failure` while the commit's check *suite* concludes
+# `success`. Railway reads the suite, a person reads the job.
+#
+# What is given up is the red X at the run level in the Actions list. The job
+# stays red inside the run, and the report step below pages Slack through the
+# same release-lane notifier -- keyed off the report step's own outcome rather
+# than `job.status`, so a step added below cannot quietly change what it says.
+#
+# This does NOT weaken the gate. The drift is still detected, still reported
+# and still fails a job; what changes is that reporting a stalled deployment no
+# longer causes one.
 
 on:
   schedule:
@@ -53,6 +93,8 @@ jobs:
   drift:
     name: Deployed commit vs branch head
     runs-on: ubuntu-latest
+    # The run must not fail; this job still does. See the header.
+    continue-on-error: true
     timeout-minutes: 10
 
     steps:
@@ -73,6 +115,7 @@ jobs:
       # out to git. Installing the dependency tree to run it would make an
       # hourly job depend on the registry being up, for nothing.
       - name: Compare each environment against its branch
+        id: drift
         timeout-minutes: 5
         env:
           # Overrides for a renamed host. Absent, the script falls back to the
@@ -84,3 +127,28 @@ jobs:
             --gate \
             --fetch \
             --threshold-minutes="${{ inputs.threshold-minutes || '60' }}"
+
+      # The alert, because the run's own conclusion no longer carries it.
+      #
+      # Keyed off the compare step's outcome rather than `job.status` for the
+      # reason back-merge-main-to-develop.yml gives: a step added below this
+      # one must not be able to change what this reports. The notifier never
+      # exits non-zero -- see its module header -- so a missing webhook or a
+      # Slack outage cannot turn a lagging deployment into a second failure.
+      #
+      # `github.event.head_commit` does not exist on a `schedule` event, so the
+      # commit message is empty here and the notifier prints the sha alone.
+      # That is the right amount: the run URL is what anyone opens.
+      - name: Report the red lane
+        if: always() && steps.drift.outcome == 'failure'
+        env:
+          RELEASE_LANE: deployed-commit-drift
+          RELEASE_LANE_CONCLUSION: failure
+          RELEASE_LANE_BRANCH: ${{ github.ref_name }}
+          RELEASE_LANE_WORKFLOW: ${{ github.workflow }}
+          RELEASE_LANE_SHA: ${{ github.sha }}
+          RELEASE_LANE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.RELEASE_LANE_ALERT_SLACK_WEBHOOK_URL }}
+          OPS_ALERT_SLACK_WEBHOOK_URL: ${{ secrets.OPS_ALERT_SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: node scripts/notify-release-lane-failure.mjs
