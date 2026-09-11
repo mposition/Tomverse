@@ -2,8 +2,9 @@
 import * as fs from "node:fs";
 import { resolve } from "node:path";
 import { AVAILABLE_MODELS } from "./models";
-import { canonicalBenchmarkJson, DEVELOPMENT_LIMITS, DEVELOPMENT_RESULTS_VERSION, isBenchmarkInstant, parseBenchmarkJson, strictBenchmarkObject, validateDevelopmentResults, type DevelopmentResults } from "./routerDevelopmentBenchmark";
-import { COLLECTION_LIMITS, COLLECTION_VERSION, collectionFail, collectionHash, collectionId, estimateCollectionUsageCost, sumCollectionMoney, validateCollectionApproval, validateCollectionManifest, validateCollectionOutcome, type CollectionApproval, type CollectionManifest, type CollectionOutcome } from "./routerDevelopmentCollector";
+import { canonicalBenchmarkJson, DEVELOPMENT_LIMITS, DEVELOPMENT_RESULTS_VERSION, isBenchmarkInstant, parseBenchmarkJson, strictBenchmarkObject, validateDevelopmentResults, type DevelopmentResultRow, type DevelopmentResults } from "./routerDevelopmentBenchmark";
+import type { DevelopmentPlan } from "./routerDevelopmentBenchmarkPlan";
+import { COLLECTION_LIMITS, COLLECTION_VERSION, collectionFail, collectionHash, collectionId, estimateCollectionUsageCost, sumCollectionMoney, validateCollectionApproval, validateCollectionManifest, validateCollectionOutcome, type CollectionApproval, type CollectionManifest, type CollectionOutcome, type CollectionPlan } from "./routerDevelopmentCollector";
 
 export type CollectionRequest = { modelId: string; prompt: string; maxOutputTokens: number; settings: CollectionManifest["calls"][number]["settings"]; signal: AbortSignal };
 export type CollectionAdapter = (request: CollectionRequest) => Promise<CollectionOutcome>;
@@ -71,7 +72,7 @@ function jsonLines(text: string) {
   if (lines.some((line) => !line)) collectionFail("journal_blank_line");
   return lines.map((line) => parseBenchmarkJson(line, COLLECTION_LIMITS.eventBytes));
 }
-export function replayCollectionJournal(text: string, manifest: CollectionManifest, approval: CollectionApproval) {
+export function replayCollectionJournal(text: string, manifest: CollectionManifest<CollectionPlan>, approval: CollectionApproval) {
   const entries: Envelope[] = [];
   const attempts = new Map<string, { intent: Intent; terminal: Terminal | null }>();
   let startedAt = "";
@@ -110,7 +111,7 @@ export function replayCollectionJournal(text: string, manifest: CollectionManife
   const timeout = [...attempts.values()].some((attempt) => attempt.terminal?.outcome.status === "timeout");
   return { entries, attempts, startedAt, totalReservedMicroUsd, unknownRows, stopReason: tokenBoundExceeded ? "observed_token_bound_exceeded" : overrun ? "observed_reservation_overrun" : unknownRows.length ? "unknown_after_dispatch" : unsupported ? "measurement_or_execution_unknown" : timeout ? "request_timeout" : null };
 }
-type CollectionRunInput = { manifest: CollectionManifest; approval: CollectionApproval; commonDir: string; now?: () => number; io?: CollectionIO };
+export type CollectionRunInput<Plan extends CollectionPlan = CollectionPlan> = { manifest: CollectionManifest<Plan>; approval: CollectionApproval; commonDir: string; now?: () => number; io?: CollectionIO };
 function withLock<T>(input: CollectionRunInput, fn: (io: CollectionIO, paths: ReturnType<typeof collectorPaths>) => Promise<T>): Promise<T> {
   const io = input.io ?? fs;
   const paths = collectorPaths(input.commonDir, input.approval.approvalId);
@@ -181,7 +182,7 @@ export async function collectDevelopment(input: CollectionRunInput & { adapter: 
     return collectionReport(input.manifest, state, stopReason);
   });
 }
-function collectionReport(manifest: CollectionManifest, state: ReturnType<typeof replayCollectionJournal>, stopReason: string | null) {
+function collectionReport(manifest: CollectionManifest<CollectionPlan>, state: ReturnType<typeof replayCollectionJournal>, stopReason: string | null) {
   const selected = new Set(manifest.selectedRowIds);
   return { schemaVersion: COLLECTION_VERSION, purpose: "development-only", manifestDigest: manifest.manifestDigest, stopReason,
     committedReservationMicroUsd: state.totalReservedMicroUsd, reservationPolicy: "never_released_not_actual_spend", actualInvoiceMicroUsd: null,
@@ -190,7 +191,10 @@ function collectionReport(manifest: CollectionManifest, state: ReturnType<typeof
       outcome: !row.benchmarkEligibility.eligible ? "refused" : state.attempts.get(row.rowId)?.terminal?.outcome.status ?? (state.attempts.has(row.rowId) ? "unknown_after_dispatch" : "not_run"),
       refusalReasons: row.benchmarkEligibility.reasons })) };
 }
-export async function exportDevelopmentCollection(input: CollectionRunInput): Promise<DevelopmentResults> {
+/** Neutral acquisition export. A versioned result wrapper must validate these rows against its plan. */
+export async function exportDevelopmentCollectionRows(input: CollectionRunInput, validateTerminal?: (receipt: {
+  rowId: string; recordedAt: string; journalEntryDigest: string; outcome: CollectionOutcome;
+}) => void): Promise<DevelopmentResultRow[]> {
   validateCollectionApproval(input.approval, input.manifest, (input.now ?? Date.now)(), true);
   return withLock(input, async (io, paths) => {
     const state = readRegistered(input, io, paths);
@@ -198,6 +202,8 @@ export async function exportDevelopmentCollection(input: CollectionRunInput): Pr
     const rows = [...state.attempts].map(([rowId, attempt]) => {
       const terminal = attempt.terminal!;
       const outcome = terminal.outcome;
+      const entry = state.entries.find((entry) => entry.event.kind === "terminal" && entry.event.rowId === rowId)!;
+      validateTerminal?.({ rowId, recordedAt: terminal.at, journalEntryDigest: entry.entryDigest, outcome });
       if (outcome.status === "returned" && !outcome.completeResponse || (outcome.answerBytes ?? 0) > DEVELOPMENT_LIMITS.answerBytes || outcome.textOmitted || !["returned", "failed", "timeout"].includes(outcome.status)) collectionFail("export_uncertain_or_unsupported");
       const row = input.manifest.plan.rows.find((candidate) => candidate.rowId === rowId)!;
       return { rowId, caseId: row.caseId, modelId: row.modelId, provider: row.provider, apiModel: row.apiModel, promptDigest: row.promptDigest, callConfigDigest: row.callConfigDigest,
@@ -206,9 +212,15 @@ export async function exportDevelopmentCollection(input: CollectionRunInput): Pr
         providerResponseId: outcome.observation.providerResponseId, modelVersion: outcome.observation.providerReportedModel,
         metrics: { inputTokens: outcome.observation.inputTokens, outputTokens: outcome.observation.outputTokens, latencyMs: outcome.latencyMs, providerCostUsd: null } };
     });
-    const results: DevelopmentResults = { schemaVersion: DEVELOPMENT_RESULTS_VERSION, purpose: "development-only", corpusDigest: input.manifest.plan.corpusDigest, planDigest: input.manifest.plan.planDigest,
-      origin: { kind: "externally-saved", description: `Local operator collector ${COLLECTION_VERSION}; journal-bound self-reported evidence, not provider-authenticated or invoice evidence. Manifest ${input.manifest.manifestDigest}.` }, rows };
-    if (Buffer.byteLength(JSON.stringify(results)) > DEVELOPMENT_LIMITS.documentBytes) collectionFail("export_document_limit");
-    return validateDevelopmentResults(results, input.manifest.plan);
+    if (Buffer.byteLength(JSON.stringify(rows)) > DEVELOPMENT_LIMITS.documentBytes) collectionFail("export_document_limit");
+    return rows;
   });
+}
+
+export async function exportDevelopmentCollection(input: CollectionRunInput<DevelopmentPlan>): Promise<DevelopmentResults> {
+  const rows = await exportDevelopmentCollectionRows(input);
+  const results: DevelopmentResults = { schemaVersion: DEVELOPMENT_RESULTS_VERSION, purpose: "development-only", corpusDigest: input.manifest.plan.corpusDigest, planDigest: input.manifest.plan.planDigest,
+    origin: { kind: "externally-saved", description: `Local operator collector ${COLLECTION_VERSION}; journal-bound self-reported evidence, not provider-authenticated or invoice evidence. Manifest ${input.manifest.manifestDigest}.` }, rows };
+  if (Buffer.byteLength(JSON.stringify(results)) > DEVELOPMENT_LIMITS.documentBytes) collectionFail("export_document_limit");
+  return validateDevelopmentResults(results, input.manifest.plan);
 }

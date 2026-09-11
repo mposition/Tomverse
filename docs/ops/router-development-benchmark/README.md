@@ -23,6 +23,10 @@ mock. It does not replace this v1 corpus, grader or frozen result format.
 The separate [v2 corpus slice](corpus-v2.md) adds 48 synthetic cases and
 whole-family development partitions with independent deterministic answer
 checks. It does not expand the v1 plan, collector or Replay to 48 cases.
+The separate [v2 offline bridge](bridge-v2.md) adds its own strict plan/result
+formats and mock-only entry, reusing the durable collector and static Replay
+primitives for all 48 cases. It preserves this v1 contract and historical
+60-call evidence; its 96 simulated calls are not provider observations.
 
 - [development-v1.json](development-v1.json): exactly 24 cases, six in each
   language/task cell. Schema `router-development-corpus-v1`, corpus

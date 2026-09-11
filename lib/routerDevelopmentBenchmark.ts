@@ -209,19 +209,15 @@ export type DevelopmentResults = {
     rows: DevelopmentResultRow[];
 };
 
-/** Identities and digests bind saved text to a plan. They are not proof of a provider call. */
-export function validateDevelopmentResults(value: unknown, plan: DevelopmentPlan): DevelopmentResults {
-    canonicalBenchmarkJson(value);
-    const results = strictBenchmarkObject(value, ["schemaVersion", "purpose", "corpusDigest", "planDigest", "origin", "rows"], "results");
-    if (results.schemaVersion !== DEVELOPMENT_RESULTS_VERSION || results.purpose !== "development-only") fail("results_version_or_purpose");
-    if (results.corpusDigest !== plan.corpusDigest || results.planDigest !== plan.planDigest) fail("results_digest_mismatch");
-    const origin = strictBenchmarkObject(results.origin, ["kind", "description"], "origin");
-    if (origin.kind !== "synthetic-fixture" && origin.kind !== "externally-saved") fail("results_origin");
-    benchmarkString(origin.description, "origin.description");
-    if (!Array.isArray(results.rows) || results.rows.length > plan.rows.length) fail("results_row_count");
+/** Shared row validation; versioned result envelopes are validated by their own entry points. */
+export function validateDevelopmentResultRows(
+    value: unknown, plan: Pick<DevelopmentPlan, "corpusDigest" | "planDigest" | "rows">,
+    originKind: DevelopmentResults["origin"]["kind"],
+): DevelopmentResultRow[] {
+    if (!Array.isArray(value) || value.length > plan.rows.length) fail("results_row_count");
     const planned = new Map(plan.rows.map((row) => [row.rowId, row]));
     const seen = new Set<string>();
-    for (const candidate of results.rows) {
+    for (const candidate of value) {
         const row = strictBenchmarkObject(candidate, ["rowId", "caseId", "modelId", "provider", "apiModel", "promptDigest", "callConfigDigest", "status", "answerText", "answerDigest", "failureCode", "recordedAt", "providerResponseId", "modelVersion", "metrics"], "result_row");
         if (typeof row.rowId !== "string" || seen.has(row.rowId)) fail("duplicate_or_invalid_result_row");
         seen.add(row.rowId);
@@ -245,9 +241,22 @@ export function validateDevelopmentResults(value: unknown, plan: DevelopmentPlan
         for (const [key, metric] of Object.entries(metrics)) {
             if (metric !== null && (typeof metric !== "number" || !Number.isFinite(metric) || metric < 0 || ((key === "inputTokens" || key === "outputTokens") && !Number.isSafeInteger(metric)))) fail("invalid_metric");
         }
-        if (origin.kind === "synthetic-fixture" && (Object.values(metrics).some((metric) => metric !== null) || row.recordedAt !== null || row.providerResponseId !== null || row.modelVersion !== null)) fail("synthetic_fixture_claims_provider_observation");
-        if (origin.kind === "externally-saved" && row.recordedAt === null) fail("external_recorded_at_required");
+        if (originKind === "synthetic-fixture" && (Object.values(metrics).some((metric) => metric !== null) || row.recordedAt !== null || row.providerResponseId !== null || row.modelVersion !== null)) fail("synthetic_fixture_claims_provider_observation");
+        if (originKind === "externally-saved" && row.recordedAt === null) fail("external_recorded_at_required");
     }
+    return value as DevelopmentResultRow[];
+}
+
+/** Identities and digests bind saved text to a plan. They are not proof of a provider call. */
+export function validateDevelopmentResults(value: unknown, plan: DevelopmentPlan): DevelopmentResults {
+    canonicalBenchmarkJson(value);
+    const results = strictBenchmarkObject(value, ["schemaVersion", "purpose", "corpusDigest", "planDigest", "origin", "rows"], "results");
+    if (results.schemaVersion !== DEVELOPMENT_RESULTS_VERSION || results.purpose !== "development-only") fail("results_version_or_purpose");
+    if (results.corpusDigest !== plan.corpusDigest || results.planDigest !== plan.planDigest) fail("results_digest_mismatch");
+    const origin = strictBenchmarkObject(results.origin, ["kind", "description"], "origin");
+    if (origin.kind !== "synthetic-fixture" && origin.kind !== "externally-saved") fail("results_origin");
+    benchmarkString(origin.description, "origin.description");
+    validateDevelopmentResultRows(results.rows, plan, origin.kind);
     return value as DevelopmentResults;
 }
 

@@ -7,9 +7,9 @@
 상태를 자동 산출하는 registry가 아니다.
 
 - 작성 기준일: 2026-09-11.
-- 이번 corpus 작업의 base: `30d9c8a3a237f575910031562c0dc84fe9f8cf9e`.
-  이 로컬 Git commit은 execution-contract 작업의 PR #1356 merge를 기록한다.
-  merge는 배포나 flag 활성화의 증거가 아니다.
+- 이번 offline bridge 작업의 base: `8646fcb50f868268bc90bf47fe0032c171251b45`.
+  선행 corpus PR #1359의 merge `8d86bd45efba789a058496128ecdd47b2033a9dd`를
+  포함한다. merge와 배포·flag 활성화는 별도 상태로 기록한다.
 - 기능 목록의 출처: 별도 worktree
   `H:/Project/tomverse-chat-mobile-web-plan-20260911/docs/policy/tomverse-chat-delivery-plan.md`의
   **미커밋 계획 업데이트**. 해당 worktree HEAD는
@@ -21,13 +21,13 @@
   [기존 개발 계획](../policy/tomverse-chat-delivery-plan.md)에 그 미커밋 업데이트가
   병합되어 있다고 주장하지 않는다. 로컬 경로는 외부 영구 보관의 보장도 아니다.
 - 별도 표시가 없는 기능 행은 **그 계획이 기록한 기준 현황을 옮긴 것**이며,
-  이번 corpus 작업에서 해당 기능·배포·기기를 다시 검증했다는 뜻이 아니다.
+  이번 bridge 작업에서 해당 기능·배포·기기를 다시 검증했다는 뜻이 아니다.
   새 source, 환경, 실행 관측으로 갱신할 때는 그 근거와 범위도 함께 기록한다.
 
 **전체 Chat 완료율: 산정 보류.** 21행은 추적할 기능 영역이지 동일 작업량의
 21개 완료 조건이 아니다. 가중치와 완료 판정 분모가 동결되지 않았으므로
 행 수, 테스트 통과 수 또는 pending release gate 수를 백분율로 바꾸지 않는다.
-이번 corpus의 48문항, 8개 cell, 기반 산출물 8개 역시 전체 Chat의 분모와 다르다.
+선행 corpus의 48문항, 8개 cell, 기반 산출물 8개 역시 전체 Chat의 분모와 다르다.
 
 구현 · 제품 연결 · 실행 검증 · 병합 · 배포/공개 · 품질/출시 승인은 구분한다.
 같은 기준의 이전 전체 백분율이 없으므로 이번 변화량도 지어내지 않는다.
@@ -38,7 +38,8 @@
 | --- | --- | --- |
 | 공용 Chat 기반 | 기존 플랫폼 기능 다수 존재; 아래 기준 inventory 유지 | 새 Chat end-to-end 또는 모든 mode의 production 검증 완료 |
 | 실행 계약 선행 slice | PR #1356이 base에 병합됨; 동결 코드의 221개 테스트와 6개 guard 기록 존재 | 48문항 v2 기반 전체 완료 또는 model-quality 향상 |
-| 이번 48문항 corpus·oracle | 봉인 후 정답 대조 48/48, precommit 테스트 320/320·guard 7종 통과; 동결 source 독립 검토 대기 | corpus 일치가 모델 품질 향상 또는 검토 승인이라는 해석 |
+| 선행 48문항 corpus·oracle | 봉인 후 정답 48/48; 동결 `64c713fe` Claude round 1 approve·controller passed, PR #1359 병합 및 해당 staging 배포 성공 확인 | corpus 일치나 staging 배포가 모델 품질 향상 또는 production 공개라는 해석 |
+| 이번 48문항 offline bridge | full catalogue plan·96개 mock·journal·정답 채점·Replay 연결 구현; 최종 source 검증·독립 검토 기록 준비 | 실제 provider 관측, 새 유료 승인 또는 Chat dispatch 검증 완료 |
 | 모바일 Chat entry·단일 transcript | 계획의 후속 사용자 기능; 새 통합 상태는 본 회차에서 미검증 | 기존 Review panel을 숨기면 단일 Chat 구현이 된다는 해석 |
 | Planner·품질 개선 | 계획된 후속 작업; 새 관측과 별도 판정 필요 | 이번 exact-answer fixture로 일반적인 최적 모델을 입증 |
 | PWA·native·Memory Release B | 별도 milestone과 승인 경계 유지 | 모바일 웹 또는 corpus 작업의 자동 완료 범위 |
@@ -75,27 +76,27 @@ controller는 `on_hold / revisions_exhausted`로 종료했다. 사용자의 별�
 | C17 | estimate·reserve·settle·refund | 공용 credit와 attempt billing 기반 | 새 경로의 primary/pass-through/fallback·중복·취소 회귀 |
 | C18 | 안전·개인정보·moderation | 소유권·lock·context 정책과 enforcement 기반 | Auto/manual/Planner/pass-through/fallback 전체 mode의 적용 추적 |
 | C19 | Prompt Refiner·Planner | state/version/failure plumbing; 계획은 active normal Planner call을 확인하지 못함 | 책임 경계·same-model pass-through 구현, 품질·지연·비용 별도 측정 |
-| C20 | Benchmark·collector·Replay | v1/collector/Replay/Search Intent와 선행 execution-contract slice 존재 | 이번 standalone corpus/oracle 진행; 이후 48문항 계획·관측 연결과 정책 실험은 별개 |
+| C20 | Benchmark·collector·Replay | v1/collector/Replay·실행 계약·48문항 corpus 병합; 이번 별도 v2 plan·96개 mock·journal·Replay 연결 구현 | 이번 최종 source 검증과 Claude 판정·병합은 별도 기록; 실제 provider 관측·정책 실험·Chat 연결은 남음 |
 | C21 | 공용 package·PWA·native | 기존 `chat-core`·`ui-tokens`; 추가 package/shell은 별도 architecture milestone | 필요한 seam 추출과 플랫폼 회귀; PWA/native/store는 별도 완료·승인 |
 
 ## Benchmark v2 개발 기반 — 별도 8개 종료 산출물
 
-이 목록은 전체 v2 기반의 범위다. **이번 corpus slice의 완료 조건과 같지 않다.**
+이 목록은 전체 v2 기반의 범위다. **이번 offline bridge의 완료 조건과 같지 않다.**
 선행 8-row mock은 기존 v1 corpus와 실행 계약의 배선 검증이며, 48문항에 대한
 collector/Replay 실행 증거로 승격하지 않는다.
 
 | ID | 종료 산출물 | 선행 근거와 이번 범위 |
 | --- | --- | --- |
-| F01 | versioned corpus/schema·coverage·독립 expected derivation | 48문항·8 cell·12 family·partition 구현, prompt-only oracle 봉인 후 정답 48/48 일치; 최종 source 검토 대기 |
-| F02 | source/prompt/context/model/cap/settings/mode 실행 계약 | 선행 순수 계약 모듈과 journal 결속이 병합됨; 이번 standalone corpus는 실제 48-case collection/dispatch 연결이 아님 |
-| F03 | refusal·unmeasured·acquisition·response·correctness 분리와 전체 분모 | 선행 v1/실행 계약 근거 존재; 이번엔 corpus/cell/partition 구조 검증, 48문항 관측 분모는 아직 없음 |
-| F04 | correctness/acquisition 및 시간·usage·가격·billed cost 분리 | 선행 mock의 미측정 metric은 null; 새 provider 성능·청구 관측 없음 |
-| F05 | dry-run→mock collection→journal→grading/Replay/report | 선행 8-row fixed mock 기록 존재; v2 48문항 collection/Replay는 이번 작업에서 구현·실행하지 않음 |
-| F06 | corpus/plan/result/answer parser bound와 경계 검사 | 기존 parser/plan 한도 유지; 새 corpus/oracle/CLI 테스트 99/99와 기존 회귀 221/221 통과; 전체 모델 규모 지원을 추정하지 않음 |
-| F07 | 재현 명령·안전 artifact·제안 상태 paid manifest | local corpus 명령/안전 packet 구현·CLI 검증; 신규 paid manifest·승인은 후속 결정, 과거 60회 승인 재사용 금지 |
-| F08 | 동결 commit 테스트·Claude 독립 검토·정직한 잔여 기록 | 선행 기록 보존, 이번 precommit 테스트 320/320·guard 7종 통과; 동결 commit 패키지와 Claude 판정은 아직 대기 |
+| F01 | versioned corpus/schema·coverage·독립 expected derivation | 48문항·8 cell·12 family·24/24 partition 및 oracle 정답 48/48; 선행 동결 source 검토 승인·PR #1359 병합 |
+| F02 | source/prompt/context/model/cap/settings/mode 실행 계약 | 이번 v2 plan/partition 재구성 후 96개 mock contract를 raw journal terminal과 결속; 실제 product dispatch는 미검증 |
+| F03 | refusal·unmeasured·acquisition·response·correctness 분리와 전체 분모 | 이번 full 2,016행 중 계획 가능 720·거절 1,296 유지; 선택 96과 미선택·미관측을 model/cell/partition/family별로 분리 |
+| F04 | correctness/acquisition 및 시간·usage·가격·billed cost 분리 | mock 호출만 96개; token·TTFT·whole-call·end-to-end·billed cost 전부 null, 실제 provider 성능·청구 관측 없음 |
+| F05 | dry-run→mock collection→journal→grading/Replay/report | 이번 48문항 연결 구현; 2 terminal 뒤 중단→94개 재개→반복 0, intent-only hold·export 거절 및 length hold 검증 경로 |
+| F06 | corpus/plan/result/answer parser bound와 경계 검사 | 기존 200,000 nodes/16 MiB·선택 1,008 상한 유지; full v2 plan/manifest와 실제 저장 JSON 재파싱 및 byte/node 계측 |
+| F07 | 재현 명령·안전 artifact·제안 상태 paid manifest | 별도 v2 mock CLI/새 artifact directory 구현; legacy live 입구 거절, 신규 paid manifest·승인은 후속 결정이며 과거 60회 승인 재사용 금지 |
+| F08 | 동결 commit 테스트·Claude 독립 검토·정직한 잔여 기록 | 선행 검토/병합과 별개로 이번 source 검증·동결 패키지·Claude 판정 준비; 검토·병합·배포는 아직 대기 |
 
-## 이번 corpus의 고정 범위와 독립성
+## 선행 corpus의 고정 범위와 독립성
 
 목표는 두 task × 한국어/영어 × basic/advanced의 **8 cell × 6문항 = 48문항**이다.
 task마다 여섯 template family를 두고 각 family는 네 language/difficulty
@@ -117,7 +118,7 @@ gold나 oracle source를 수정하지 않았다. 봉인 source SHA-256은
 standalone 구현·봉인 및 검증 절차는
 [corpus v2 guide](router-development-benchmark/corpus-v2.md)에 기록한다.
 봉인 후 CLI 테스트는 10/10 통과했고 실패·취소·skip·todo는 0이었다.
-그 뒤 precommit 검증은 신규 corpus/oracle/CLI 99개, 기존 실행 계약 26개,
+선행 corpus slice의 precommit 검증은 신규 corpus/oracle/CLI 99개, 기존 실행 계약 26개,
 benchmark 96개, collector 80개, Replay 19개로 **320/320 통과**했다.
 타입·lint·corpus 검사·encoding·문서 참조·정책 절 참조·diff whitespace의
 7개 guard도 통과했고, 검증 전후 12개 scope 파일의 해시는 같았다.
@@ -128,20 +129,33 @@ benchmark 96개, collector 80개, Replay 19개로 **320/320 통과**했다.
 결과는 별도 동결 review receipt로 결속할 수 있으며, 그 결과를 적기 위해 이미
 검토한 source를 조용히 바꾸지 않는다.
 
+## 이번 bridge의 범위와 상태
+
+이번 구현은 별도 [offline bridge guide](router-development-benchmark/bridge-v2.md)의
+범위다. full catalogue 2,016행과 48문항·8 cell·12 family·24/24 partition을
+유지하면서 두 모델의 96개 답변을 고정 mock으로 생성한다. 실제 provider 호출과
+발생 비용은 0이고, 모형 실행의 정답 비율은 모델 품질 증거가 아니다.
+v1 corpus·60회 유료 증거·원래 Replay source 허용 규칙은 그대로 보존한다.
+
+선행 corpus 동결 source `64c713fea47d7fa67b237b99ad8b6e928cc61b66`는 Claude
+round 1 `approve`, 지적 0건, controller `passed`로 확인됐다. PR #1359는
+2026-09-11 07:56:17 UTC에 `8d86bd45efba789a058496128ecdd47b2033a9dd`로 병합됐고,
+해당 commit의 Railway staging deployment
+`8969295a-15f4-4726-9096-ad366ea1c183`은 `SUCCESS`로 확인됐다. 이 관측은
+이번 bridge의 검토·병합·배포가 아니다. 이번 source freeze에서의 실제 테스트와
+Claude 판정은 별도 동결 검증 기록에 결속하며, 이 문서가 자기 승인을 선언하지 않는다.
+
 ## 권장 다음 순서와 필요한 결정
 
-1. **현재 corpus/partition/oracle을 구현·검증하고 Claude에 독립 검토 요청.**
-   source/gold 격리와 deterministic 정답 오류를 먼저 확인한다. 이번 작업에 한한
-   새 preflight 예외는 승인됐지만, 실제 검토 전에 알리고 동결 commit/digest와
-   기존 테스트·읽기 전용·구독 제한을 유지해야 한다. 과거 예외를 상속하지 않는다.
-2. **corpus slice를 수용한 뒤, 남은 v2 계획/실행 연결을 별도 bounded 작업으로 정의.**
-   기존 collector와 Replay를 재사용하되 이 corpus가 곧 48문항 실행이라는 주장은
-   하지 않는다. protocol/실행 경계가 바뀌면 새 Claude 검토가 필요하다.
-3. **독립 lane에서 gated Chat entry·단일 transcript·recovery를 준비.**
+1. **이번 offline bridge의 최종 검증과 동결 source Claude 독립 검토를 마친다.**
+   schema·raw journal·gold 격리·미측정 분모를 먼저 확인한다. 독립 검토는 이번
+   scope와 새 승인 기록에만 결속하며, 과거 검토나 60회 유료 승인을 상속하지 않는다.
+   검토 이후의 PR·병합·배포 상태는 각각 별도로 보고한다.
+2. **gated Chat entry·단일 transcript·recovery를 별도 제품 작업으로 준비.**
    실제 사용자 흐름을 진전시키는 단계이며 유료 benchmark 결과를 기다릴 필요는
    없다. 다만 product-entry/소유권 경계 검토, draft persistence 정책 및 공개/cutover
    결정이 필요한 부분은 별도로 승인받는다.
-4. **동결 proposal 이후에만 새 provider 관측 비용과 실행 범위를 결정.**
+3. **필요한 경우 동결 proposal 이후에만 새 provider 관측 비용과 실행 범위를 결정.**
    정확한 row·호출·예산·중단 규칙이 있어야 새 유료 승인을 요청할 수 있다.
    관측 전에는 Router quality band 게시, 제품 품질 향상 또는 출시 승인을 주장하지 않는다.
 
