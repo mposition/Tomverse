@@ -17,6 +17,10 @@ confidence interval, quality-band update, or product-readiness conclusion.
 
 ## Contents and scope
 
+The separate [v2 execution-contract slice](execution-contract-v2.md) validates
+condition/observation compatibility and a fixed offline collector-to-Replay
+mock. It does not replace this v1 corpus, grader or frozen result format.
+
 - [development-v1.json](development-v1.json): exactly 24 cases, six in each
   language/task cell. Schema `router-development-corpus-v1`, corpus
   `tomverse-router-development-v1`, purpose `development-only`.
