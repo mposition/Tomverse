@@ -40,7 +40,7 @@ after(() => {
   assert.ok(basename(temporary).startsWith("router-v2-bridge-test-"));
   rmSync(temporary, { recursive: true });
 });
-const replayInput = () => ({ ...context, manifest, answers, candidate: report.replay.candidate,
+const replayInput = () => ({ ...context, manifest, answers, candidate: policy(),
   replaySource: report.implementationSource, contracts, observations, journalText, approval });
 const policy = () => ({ schemaVersion: "router-development-replay-policy-v1", purpose: "development-only", policyId: "v2-test-control", preferences: { general: [DEFAULT_MODEL_ID] }, fallback: "original-router" });
 
@@ -61,6 +61,8 @@ test("48-case bridge retains all catalogue rows, 96 calls and 2/94/0 durable res
   { passed: 92, incorrect: 1, blank: 1, invalidJson: 1, failed: 1 });
   assert.equal(report.score.summary.correctnessRate, null);
   assert.equal(report.selectionCoverage.overall.planned + report.selectionCoverage.overall.refused, 2016);
+  assert.equal(report.selectionCoverage.overall.planned, 720);
+  assert.equal(report.selectionCoverage.overall.refused, 1296);
   assert.equal(report.selectionCoverage.overall.selected + report.selectionCoverage.overall.unselectedEligible, report.selectionCoverage.overall.planned);
 });
 
@@ -132,7 +134,7 @@ test("manifest and receipts refuse rehashed plan, partition, model, cap and obse
 });
 
 test("Replay requires exact journal receipts and keeps missing observations unavailable", () => {
-  const input = { ...replayInput(), candidate: policy() };
+  const input = replayInput();
   assert.equal(replayMockDevelopmentV2(input).benchmarkDomain.paired.populationCases, 48);
   const changed = structuredClone(answers); changed.rows[0].answerText = "{}"; changed.rows[0].answerDigest = benchmarkDigest("{}");
   assert.throws(() => replayMockDevelopmentV2({ ...input, answers: changed }), /replay_answer_receipt_mismatch/);
