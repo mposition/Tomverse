@@ -98,7 +98,7 @@ function main() {
     ...developmentCorpusV2Coverage(corpus, partitions),
     inputFileDigests: { corpus: benchmarkDigest(corpusText), partitions: benchmarkDigest(partitionText) },
     promptPacketDigest: packet.packetDigest,
-    oracle: { checkedCases: corpus.cases.length, matchedCases, mismatchedCases: 0, promptRuleChecksOnly: true, humanLabels: false },
+    oracle: { checkedCases: corpus.cases.length, matchedCases, mismatchedCases: corpus.cases.length - matchedCases, promptRuleChecksOnly: true, humanLabels: false },
     providerCalls: 0, incurredProviderSpendUsd: 0, modelQualityMeasured: false,
     measuredDifficulty: null, sampleSizeApproval: null, collectionOrReplayExecuted: false,
     limitations: [

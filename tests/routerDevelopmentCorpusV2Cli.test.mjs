@@ -64,6 +64,7 @@ test("v2 CLI validates all 48 cases offline and reports no measured quality or s
   assert.ok(report.cells.every((cell) => cell.cases === 6 && cell.tuning === 3 && cell.developmentValidation === 3));
   assert.deepEqual(report.partitions, { tuning: 24, developmentValidation: 24 });
   assert.deepEqual(report.oracle, { checkedCases: 48, matchedCases: 48, mismatchedCases: 0, promptRuleChecksOnly: true, humanLabels: false });
+  assert.equal(report.oracle.checkedCases, report.oracle.matchedCases + report.oracle.mismatchedCases);
   assert.equal(report.providerCalls, 0);
   assert.equal(report.incurredProviderSpendUsd, 0);
   assert.equal(report.decisionEvidence, false);
