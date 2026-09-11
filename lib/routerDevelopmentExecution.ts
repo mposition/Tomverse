@@ -6,10 +6,10 @@ import {
 } from "./routerDevelopmentBenchmark";
 import { validateDevelopmentPlan, type DevelopmentPlan, type DevelopmentSource } from "./routerDevelopmentBenchmarkPlan";
 import {
-  COLLECTION_VERSION, validateCollectionManifest, validateCollectionOutcome,
-  type CollectionOutcome,
+  COLLECTION_LIMITS, COLLECTION_VERSION, validateCollectionApproval, validateCollectionManifest, validateCollectionOutcome,
+  type CollectionApproval, type CollectionManifest, type CollectionOutcome,
 } from "./routerDevelopmentCollector";
-import type { replayCollectionJournal } from "./routerDevelopmentCollectorJournal";
+import { replayCollectionJournal } from "./routerDevelopmentCollectorJournal";
 
 export const DEVELOPMENT_EXECUTION_VERSION = "router-development-execution-v2";
 export const DEVELOPMENT_OBSERVATION_VERSION = "router-development-observation-v2";
@@ -175,25 +175,37 @@ export function legacyExecutionObservationStatus(value: unknown, plan: Developme
     importedRows: results.rows.length, productExecutionVerified: false };
 }
 
-/** Use entries freshly returned by replayCollectionJournal, which checks the chain and manifest/approval binding. */
-export function validateExecutionObservationSet(values: readonly unknown[], contracts: readonly DevelopmentExecutionContract[], journal: ReturnType<typeof replayCollectionJournal>) {
+/** Callers reconstruct the manifest independently; the raw journal is always replayed here. */
+export function validateExecutionObservationSet(values: readonly unknown[], contracts: readonly DevelopmentExecutionContract[], input: {
+  journalText: string; manifest: CollectionManifest; approval: CollectionApproval;
+}) {
   if (!Array.isArray(values) || values.length > contracts.length) fail("observation_count");
   const byRow = new Map(contracts.map((contract) => [validateDevelopmentExecutionContract(contract).rowId, contract]));
   if (byRow.size !== contracts.length) fail("duplicate_contract");
+  const journalInput = strictBenchmarkObject(input, ["journalText", "manifest", "approval"], "execution_journal_input");
+  const journalText = journalInput.journalText;
+  if (typeof journalText !== "string" || Buffer.byteLength(journalText) > COLLECTION_LIMITS.journalBytes) return fail("journal_text_type_or_byte_limit");
+  const { manifestDigest, ...manifestBody } = input.manifest;
+  if (!isBenchmarkDigest(manifestDigest) || hash(manifestBody) !== manifestDigest) fail("journal_manifest_digest");
+  const journal = replayCollectionJournal(journalText, input.manifest, input.approval);
+  validateCollectionApproval(input.approval, input.manifest, Date.parse(journal.startedAt), true);
   const header = journal.entries[0]?.event;
   if (header?.kind !== "header" || contracts.some((contract) => contract.manifestDigest !== header.manifestDigest)) fail("journal_manifest_binding");
   const terminals = new Map(journal.entries.filter((entry) => entry.event.kind === "terminal").map((entry) => [entry.entryDigest, entry]));
-  const seen = new Set<string>();
-  return values.map((value) => {
+  const byObservedRow = new Map<string, DevelopmentExecutionObservation>();
+  for (const value of values) {
     const observation = validateDevelopmentExecutionObservation(value);
-    if (seen.has(observation.rowId)) fail("duplicate_observation");
-    seen.add(observation.rowId);
+    if (byObservedRow.has(observation.rowId)) fail("duplicate_observation");
+    byObservedRow.set(observation.rowId, observation);
     const contract = byRow.get(observation.rowId);
     if (!contract) fail("unknown_observation");
     const receipt = terminals.get(observation.journalEntryDigest)?.event;
     if (!receipt || receipt.kind !== "terminal" || receipt.rowId !== observation.rowId || receipt.at !== observation.recordedAt
       || canonicalBenchmarkJson(receipt.outcome) !== canonicalBenchmarkJson(observation.outcome)) fail("journal_observation_binding");
+  }
+  return contracts.map((contract) => {
+    const observation = byObservedRow.get(contract.rowId) ?? null;
     const compatibility = executionObservationCompatibility({ expected: contract, observed: contract, observation });
-    return { observation, compatibility };
+    return { rowId: contract.rowId, observation, compatibility };
   });
 }

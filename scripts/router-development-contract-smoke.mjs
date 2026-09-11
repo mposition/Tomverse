@@ -105,9 +105,10 @@ export async function runExecutionContractSmoke({ outputDirectory = null } = {})
     const beforeReplay = calls.length;
     await collectDevelopment(input);
     if (calls.length !== beforeReplay || calls.length !== 8) throw new Error("mock_resume_dispatch_count");
-    const state = readState(directory, manifest, approval);
+    const journalText = readFileSync(collectorPaths(directory, approval.approvalId).ledger, "utf8");
+    const state = replayCollectionJournal(journalText, manifest, approval);
     const observations = observationsFor(state, contracts);
-    const compatible = validateExecutionObservationSet(observations, contracts, state);
+    const compatible = validateExecutionObservationSet(observations, contracts, { journalText, manifest, approval });
     if (compatible.some((entry) => entry.compatibility.disposition !== "compatible")) throw new Error("mock_compatible_fixture_held");
     const exported = await exportDevelopmentCollection(input);
     // v1 export has no mock origin; normalize only this NEW mock fixture, preserving all identities/answers.
@@ -138,13 +139,14 @@ export async function runExecutionContractSmoke({ outputDirectory = null } = {})
       schemaVersion: "router-development-contract-smoke-v2", purpose: "development-only", evidenceStatus: "mock_validation_only",
       providerCalls: 0, incurredProviderSpendUsd: 0, implementationSource,
       fixtureSource, simulatedClock: AT, manifestDigest: manifest.manifestDigest,
-      mockCollection: { selectedRows: 8, adapterCalls: calls.length, interruptedTerminalRecords: interrupted.attempts.size,
-        finalTerminalRecords: state.attempts.size, repeatedCompletedCalls: calls.length - beforeReplay,
+      mockCollection: { selectedRows: 8, adapterCalls: calls.length, interruptedTerminalRecords: [...interrupted.attempts.values()].filter((attempt) => attempt.terminal !== null).length,
+        finalTerminalRecords: [...state.attempts.values()].filter((attempt) => attempt.terminal !== null).length, repeatedCompletedCalls: calls.length - beforeReplay,
         outcome: collected.stopReason, simulatedReservationMicroUsd: state.totalReservedMicroUsd, actualInvoiceMicroUsd: null },
-      uncertainRecovery: { stopReason: held.stopReason, adapterCalls: heldAdapterCalls, exportRefused: heldExportRefused, unknownRows: held.unknownRows },
+      uncertainRecovery: { stopReason: held.stopReason, adapterCalls: heldAdapterCalls, dispatchIntents: held.dispatchIntents,
+        terminalRecords: held.terminalRecords, exportRefused: heldExportRefused, unknownRows: held.unknownRows },
       incompleteResponse: incompleteCompatibility,
       legacyImportWithoutJournal: legacyExecutionObservationStatus(answers, plan),
-      compatibility: compatible.map(({ observation, compatibility }) => ({ rowId: observation.rowId, provenance: observation.provenance, ...compatibility })),
+      compatibility: compatible.map(({ rowId, observation, compatibility }) => ({ rowId, provenance: observation?.provenance ?? null, ...compatibility })),
       metricCoverage: { observedRows: observations.length, measuredTtftRows: 0, ttftMs: null, measuredEndToEndRows: 0, endToEndLatencyMs: null,
         measuredBilledCostRows: 0, providerBilledCostUsd: null },
       score, replay, productExecutionVerified: false,

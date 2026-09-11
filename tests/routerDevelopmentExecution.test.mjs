@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { benchmarkDigest, canonicalBenchmarkJson } from "../lib/routerDevelopmentBenchmark.ts";
-import { emptyCollectionObservation } from "../lib/routerDevelopmentCollector.ts";
+import { COLLECTION_ASSUMPTIONS, COLLECTION_VERSION, emptyCollectionObservation } from "../lib/routerDevelopmentCollector.ts";
 import {
   buildDevelopmentExecutionContract, buildDevelopmentExecutionObservation, collectionExecutionContracts,
   executionContractMismatches, executionContractRefusals, executionObservationCompatibility,
@@ -23,6 +23,27 @@ const returned = (text = "{}", finish = "stop") => ({ status: "returned", answer
 const observationFor = (outcome = returned(), overrides = {}) => buildDevelopmentExecutionObservation({ executionDigest: contract.contractDigest,
   rowId: contract.rowId, recordedAt: "2026-09-10T00:00:00.000Z", provenance: "mock-only", journalEntryDigest: "e".repeat(64), outcome, ...overrides });
 const compatibility = (observation, observed = contract, expected = contract) => executionObservationCompatibility({ expected, observed, observation });
+function journalFixture(outcome = returned(), approvalOverrides = {}) {
+  const manifest = fixture.manifest;
+  const at = "2026-09-10T00:00:00.000Z";
+  const approval = { schemaVersion: COLLECTION_VERSION, status: "approved", approvalId: "mock-unit-journal",
+    manifestDigest: manifest.manifestDigest, approvedBy: "SYNTHETIC MOCK ONLY; NOT HUMAN SPENDING AUTHORIZATION",
+    approvedAt: at, expiresAt: manifest.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS], ...approvalOverrides };
+  const events = [
+    { kind: "header", approvalDigest: hash(approval), manifestDigest: manifest.manifestDigest, startedAt: at },
+    { kind: "intent", rowId: contract.rowId, at, reservedMicroUsd: manifest.calls[0].reserve.reservedMicroUsd },
+    { kind: "terminal", rowId: contract.rowId, at, outcome, tokenUsageAtFrozenRatesMicroUsd: null },
+  ];
+  let previousDigest = null;
+  const entries = events.map((event, seq) => {
+    const body = { seq, previousDigest, event };
+    const entry = { ...body, entryDigest: hash(body) };
+    previousDigest = entry.entryDigest;
+    return entry;
+  });
+  const observation = observationFor(outcome, { journalEntryDigest: entries[2].entryDigest });
+  return { observation, input: { journalText: entries.map((entry) => canonicalBenchmarkJson(entry)).join("\n") + "\n", manifest, approval } };
+}
 
 test("canonical field ordering is stable and a collection timestamp does not change the execution contract", () => {
   const reordered = Object.fromEntries(Object.entries(contract).reverse());
@@ -140,17 +161,46 @@ test("known output/reasoning bound violations remain held without fabricating mi
 });
 
 test("observations bind exact contracts, reject duplicates, and match read-back journal contents", () => {
-  const observation = observationFor();
-  const journal = { entries: [{ event: { kind: "header", manifestDigest: contract.manifestDigest } }, { entryDigest: observation.journalEntryDigest,
-    event: { kind: "terminal", rowId: observation.rowId, at: observation.recordedAt, outcome: observation.outcome } }] };
-  assert.equal(validateExecutionObservationSet([observation], [contract], journal).length, 1);
-  assert.throws(() => validateExecutionObservationSet([observation, observation], contracts, journal), /duplicate_observation/);
-  assert.throws(() => validateExecutionObservationSet([observation], [contract, contract], journal), /duplicate_contract/);
-  assert.throws(() => validateExecutionObservationSet([observation], [contract], { entries: journal.entries.slice(1) }), /journal_manifest_binding/);
+  const { observation, input } = journalFixture();
+  assert.equal(validateExecutionObservationSet([observation], [contract], input).length, 1);
+  assert.throws(() => validateExecutionObservationSet([observation, observation], contracts, input), /duplicate_observation/);
+  assert.throws(() => validateExecutionObservationSet([observation], [contract, contract], input), /duplicate_contract/);
   assert.throws(() => compatibility(observationFor(returned(), { executionDigest: hash("wrong") })), /observation_contract_binding/);
   for (const overrides of [{ outcome: returned("changed") }, { recordedAt: "2026-09-10T00:00:01.000Z" }, { journalEntryDigest: hash("other-receipt") }]) {
-    assert.throws(() => validateExecutionObservationSet([observationFor(overrides.outcome ?? returned(), overrides)], [contract], journal), /journal_observation_binding/);
+    assert.throws(() => validateExecutionObservationSet([observationFor(overrides.outcome ?? returned(), { ...overrides, journalEntryDigest: overrides.journalEntryDigest ?? observation.journalEntryDigest })], [contract], input), /journal_observation_binding/);
   }
+});
+
+test("raw journal chain, manifest body and approval checks run inside the observation boundary", () => {
+  const { observation, input } = journalFixture();
+  const fabricated = { entries: [{ event: { kind: "header", manifestDigest: contract.manifestDigest } }, { entryDigest: observation.journalEntryDigest,
+    event: { kind: "terminal", rowId: observation.rowId, at: observation.recordedAt, outcome: observation.outcome } }] };
+  assert.throws(() => validateExecutionObservationSet([observation], [contract], fabricated), /execution_journal_input/);
+  assert.throws(() => validateExecutionObservationSet([observation], [contract], { ...input, journalText: fabricated }), /journal_text_type_or_byte_limit/);
+  const tampered = input.journalText.replace('"seq":1', '"seq":9');
+  assert.throws(() => validateExecutionObservationSet([observation], [contract], { ...input, journalText: tampered }), /journal_chain/);
+  assert.throws(() => validateExecutionObservationSet([observation], [contract], { ...input,
+    manifest: { ...input.manifest, limits: { ...input.manifest.limits, requestTimeoutMs: 59999 } } }), /journal_manifest_digest/);
+  for (const overrides of [{ status: "proposal" }, { approvedAt: "2026-09-10T00:00:01.000Z" }]) {
+    const invalid = journalFixture(returned(), overrides);
+    assert.throws(() => validateExecutionObservationSet([invalid.observation], [contract], invalid.input), /collector_approval_/);
+  }
+});
+
+test("contracts without observations retain their row identities and not_observed holds", () => {
+  const { observation, input } = journalFixture();
+  const partial = validateExecutionObservationSet([observation], contracts, input);
+  assert.equal(partial.length, contracts.length);
+  assert.deepEqual(partial.map((row) => row.rowId), contracts.map((row) => row.rowId));
+  assert.equal(partial[0].compatibility.disposition, "compatible");
+  for (const row of partial.slice(1)) {
+    assert.equal(row.observation, null);
+    assert.equal(row.compatibility.disposition, "hold");
+    assert.deepEqual(row.compatibility.holdReasons, ["not_observed"]);
+  }
+  const empty = validateExecutionObservationSet([], contracts, input);
+  assert.equal(empty.length, contracts.length);
+  assert.ok(empty.every((row) => row.observation === null && row.compatibility.holdReasons[0] === "not_observed"));
 });
 
 test("strict bounded parsers reject tampering, extra gold fields, duplicate keys and oversize documents", () => {

@@ -42,8 +42,12 @@ not the execution contract. A changed plan/manifest is still incompatible;
 this slice does not merge different runs or infer that two aliases resolved
 to the same deployed provider version.
 
-`validateExecutionObservationSet()` accepts a state freshly reconstructed by
-`replayCollectionJournal()`. It checks each observation's row, time, complete
+`validateExecutionObservationSet()` accepts raw journal text plus the
+independently reconstructed manifest and its approval. It bounds the journal
+using the existing collector limit, checks the manifest body digest, calls
+`replayCollectionJournal()` internally, and reuses approval validation against
+the recorded run-start instant. A fabricated `{ entries }` object cannot
+substitute for replay. It checks each observation's row, time, complete
 outcome and digest against the read-back terminal. Duplicates, unknown rows,
 swapped receipts and changed outcomes are refused. The reconstructed journal
 header's manifest digest binds every execution contract to that same run;
@@ -52,6 +56,12 @@ existing exporter, which checks the registration witness under its lock.
 The journal hash chain and these comparisons establish local record
 consistency. They do not authenticate providers or prove that a metadata
 declaration describes an independently observed network request.
+
+The returned array preserves every supplied execution contract in its input
+order. A contract without an observation retains its row ID, a null
+observation, and `hold` / `not_observed`; partial input cannot silently shrink
+the selected-contract population. The full catalogue population remains in
+the separate v1 plan and score.
 
 `compatible` means the listed benchmark conditions match and the local
 acquisition outcome can be consumed in its stated category. It does not mean
@@ -99,6 +109,11 @@ It reads the journal back, checks observation binding, exports through v1,
 then grades and runs the existing Replay comparison. A separate intent-only
 interruption proves that unknown state prevents dispatch and export; a
 synthetic length response remains held by v2 compatibility.
+Terminal-record counts include only attempts with a terminal, so the
+intent-only interruption records one dispatch intent and zero terminal
+records. The cross-run regression separately collects genuine A and B mock
+journals, verifies both, and refuses an A terminal rebound under B's contract
+even when the terminal content matches.
 
 The mock uses a fixed clock, a plainly synthetic all-zero source commit and
 an in-memory mock approval identified as **not human spending authorization**.

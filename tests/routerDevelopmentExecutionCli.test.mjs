@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 import { runExecutionContractSmoke } from "../scripts/router-development-contract-smoke.mjs";
 import { parseBenchmarkJson, parseDevelopmentCorpus } from "../lib/routerDevelopmentBenchmark.ts";
-import { replayCollectionJournal } from "../lib/routerDevelopmentCollectorJournal.ts";
+import { collectDevelopment, collectorPaths, replayCollectionJournal } from "../lib/routerDevelopmentCollectorJournal.ts";
 import { buildCollectionManifest, COLLECTION_VERSION, COLLECTION_ASSUMPTIONS } from "../lib/routerDevelopmentCollector.ts";
 import { buildDevelopmentExecutionObservation, collectionExecutionContracts, validateExecutionObservationSet } from "../lib/routerDevelopmentExecution.ts";
 import { AVAILABLE_MODELS } from "../lib/models.ts";
@@ -51,6 +51,8 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
   assert.equal(report.mockCollection.finalTerminalRecords, 8);
   assert.equal(report.mockCollection.repeatedCompletedCalls, 0);
   assert.equal(report.uncertainRecovery.adapterCalls, 0);
+  assert.equal(report.uncertainRecovery.dispatchIntents, 1);
+  assert.equal(report.uncertainRecovery.terminalRecords, 0);
   assert.equal(report.uncertainRecovery.stopReason, "unknown_after_dispatch");
   assert.equal(report.uncertainRecovery.exportRefused, true);
   assert.equal(report.incompleteResponse.disposition, "hold");
@@ -82,7 +84,8 @@ test("offline mock spans collect, durable restart, journal, export, grader, Repl
     expiresAt: manifest.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS] };
   const journalText = readFileSync(join(outputDirectory, "router-development-collector-v1.1/mock-only-main.jsonl"), "utf8");
   const journal = replayCollectionJournal(journalText, manifest, approval);
-  assert.equal(validateExecutionObservationSet(readJson("observations.mock.json"), readJson("contracts.mock.json"), journal).length, 8);
+  assert.equal([...journal.attempts.values()].filter((attempt) => attempt.terminal !== null).length, 8);
+  assert.equal(validateExecutionObservationSet(readJson("observations.mock.json"), readJson("contracts.mock.json"), { journalText, manifest, approval }).length, 8);
   const mutatedJournal = journalText.replace('"mock_provider_error"', '"tampered_provider_error"');
   assert.throws(() => replayCollectionJournal(mutatedJournal, manifest, approval), /journal_chain/);
   const savedReport = readJson("report.json");
@@ -101,7 +104,7 @@ test("exclusive output directory preserves existing files and the command's prov
   assert.ok(!source.includes("process.env[") && !source.includes("resolveProviderApiKey"));
 });
 
-test("a validated journal from run A cannot be rebound to run B with different request limits", async () => {
+test("genuine A and B collection journals reject cross-manifest and relabelled terminal observations", async () => {
   const outputDirectory = join(temporary, "cross-run-results");
   const report = await runExecutionContractSmoke({ outputDirectory });
   const readJson = (name) => parseBenchmarkJson(readFileSync(join(outputDirectory, name), "utf8"));
@@ -109,10 +112,13 @@ test("a validated journal from run A cannot be rebound to run B with different r
   const approvalA = { schemaVersion: COLLECTION_VERSION, status: "approved", approvalId: "mock-only-main", manifestDigest: manifestA.manifestDigest,
     approvedBy: "SYNTHETIC MOCK ONLY; NOT HUMAN SPENDING AUTHORIZATION", approvedAt: report.simulatedClock,
     expiresAt: manifestA.limits.expiresAt, acknowledgements: [...COLLECTION_ASSUMPTIONS] };
-  const journalA = replayCollectionJournal(readFileSync(join(outputDirectory, "router-development-collector-v1.1/mock-only-main.jsonl"), "utf8"), manifestA, approvalA);
+  const journalTextA = readFileSync(join(outputDirectory, "router-development-collector-v1.1/mock-only-main.jsonl"), "utf8");
+  const journalInputA = { journalText: journalTextA, manifest: manifestA, approval: approvalA };
+  const journalA = replayCollectionJournal(journalTextA, manifestA, approvalA);
+  assert.equal([...journalA.attempts.values()].filter((attempt) => attempt.terminal !== null).length, 8);
   const contractsA = readJson("contracts.mock.json");
   const observationsA = readJson("observations.mock.json");
-  assert.equal(validateExecutionObservationSet(observationsA, contractsA, journalA).length, 8);
+  assert.equal(validateExecutionObservationSet(observationsA, contractsA, journalInputA).length, 8);
 
   const manifestB = buildCollectionManifest({ plan: manifestA.plan, models: AVAILABLE_MODELS, collectorSource: manifestA.collectorSource,
     selectedRowIds: manifestA.selectedRowIds, limits: { ...manifestA.limits, requestTimeoutMs: manifestA.limits.requestTimeoutMs - 1 } });
@@ -121,13 +127,37 @@ test("a validated journal from run A cannot be rebound to run B with different r
     corpus: parseDevelopmentCorpus(readFileSync(resolve(root, "docs/ops/router-development-benchmark/development-v1.json"), "utf8")),
     models: AVAILABLE_MODELS, manifest: manifestB, benchmarkSource: manifestB.plan.source, collectorSource: manifestB.collectorSource,
   });
-  const observationsB = observationsA.map((observation) => buildDevelopmentExecutionObservation({
+  const relabelledObservationsA = observationsA.map((observation) => buildDevelopmentExecutionObservation({
     executionDigest: contractsB.find((contract) => contract.rowId === observation.rowId).contractDigest,
     rowId: observation.rowId, recordedAt: observation.recordedAt, provenance: observation.provenance,
     journalEntryDigest: observation.journalEntryDigest, outcome: observation.outcome,
   }));
-  assert.throws(() => validateExecutionObservationSet(observationsB, contractsB, journalA), /journal_manifest_binding/);
-  assert.throws(() => validateExecutionObservationSet(observationsA.slice(0, 1), [contractsA[0], ...contractsB.slice(1)], journalA), /journal_manifest_binding/);
+  assert.throws(() => validateExecutionObservationSet(relabelledObservationsA, contractsB, journalInputA), /journal_manifest_binding/);
+  assert.throws(() => validateExecutionObservationSet(observationsA.slice(0, 1), [contractsA[0], ...contractsB.slice(1)], journalInputA), /journal_manifest_binding/);
+
+  // Produce B's own registration/ledger with the real collector and the same fixed synthetic outcomes.
+  const commonDirB = join(temporary, "genuine-b-journal");
+  const approvalB = { ...approvalA, approvalId: "mock-genuine-b", manifestDigest: manifestB.manifestDigest };
+  let callsB = 0;
+  const collectedB = await collectDevelopment({ manifest: manifestB, approval: approvalB, commonDir: commonDirB,
+    now: () => Date.parse(report.simulatedClock), assertCurrent() {}, adapter: async (request) => {
+      const row = manifestB.plan.rows.find((row) => row.modelId === request.modelId && row.input.prompt === request.prompt);
+      const observation = observationsA.find((observation) => observation.rowId === row?.rowId);
+      assert.ok(observation);
+      callsB++;
+      return structuredClone(observation.outcome);
+    } });
+  assert.equal(callsB, 8);
+  assert.equal(collectedB.terminalRecords, 8);
+  const journalTextB = readFileSync(collectorPaths(commonDirB, approvalB.approvalId).ledger, "utf8");
+  const journalB = replayCollectionJournal(journalTextB, manifestB, approvalB);
+  const journalInputB = { journalText: journalTextB, manifest: manifestB, approval: approvalB };
+  const observationsB = journalB.entries.filter((entry) => entry.event.kind === "terminal").map((entry) => buildDevelopmentExecutionObservation({
+    executionDigest: contractsB.find((contract) => contract.rowId === entry.event.rowId).contractDigest,
+    rowId: entry.event.rowId, recordedAt: entry.event.at, provenance: "mock-only", journalEntryDigest: entry.entryDigest, outcome: entry.event.outcome,
+  }));
+  assert.equal(validateExecutionObservationSet(observationsB, contractsB, journalInputB).length, 8);
+  assert.throws(() => validateExecutionObservationSet(relabelledObservationsA, contractsB, journalInputB), /journal_observation_binding/);
 });
 
 test("CLI saves a new mock directory with compact stdout and refuses reuse", () => {
