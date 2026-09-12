@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   AUTO_DISABLE_REASON,
   catalogNextCursor,
+  foreignProductSurfaceId,
   isLikelyChatModelId,
   isReviewableProviderModelId,
   missingConfirmationRuns,
@@ -455,4 +456,232 @@ test("a rejected credential says the provider's chat traffic is failing too", ()
     providerCatalogHttpFailure("perplexity", 401).detail,
     /chat requests to this provider send the same key/i
   );
+});
+
+// Field coverage. Every payload below is the shape the provider's own
+// documentation publishes; the assertions are about fields the parser used to
+// drop on the floor, which reached the operator as blank columns on the
+// adoption draft.
+
+test("reads Groq's context window, completion cap and active flag", () => {
+  const [model] = parseProviderCatalogResponse("groq", {
+    data: [
+      {
+        id: "llama-4.2-70b",
+        object: "model",
+        created: 1770000000,
+        owned_by: "Meta",
+        active: true,
+        context_window: 131072,
+        max_completion_tokens: 32768,
+      },
+    ],
+  });
+  assert.equal(model.metadata.contextLength, 131072);
+  assert.equal(model.metadata.outputTokenLimit, 32768);
+  assert.equal(model.metadata.active, true);
+});
+
+test("an inactive Groq model is not offered for review", () => {
+  const [model] = parseProviderCatalogResponse("groq", {
+    data: [{ id: "llama-4.2-70b", active: false, context_window: 131072 }],
+  });
+  assert.equal(model.metadata.active, false);
+  assert.equal(shouldQueueProviderCatalogObservation(model), false);
+});
+
+test("a provider that never mentions active is still queued", () => {
+  // `null` has to keep meaning "not stated". Reading the absence of the field
+  // as `false` would empty the queue for all eleven other providers.
+  const [model] = parseProviderCatalogResponse("openai", {
+    data: [{ id: "gpt-6-astra", owned_by: "openai" }],
+  });
+  assert.equal(model.metadata.active, null);
+  assert.equal(shouldQueueProviderCatalogObservation(model), true);
+});
+
+test("reads xAI modalities, long-context threshold and its quoted prices", () => {
+  const [model] = parseProviderCatalogResponse("xai", {
+    models: [
+      {
+        id: "grok-4.5",
+        input_modalities: ["text", "image"],
+        output_modalities: ["text"],
+        prompt_text_token_price: 30000,
+        completion_text_token_price: 150000,
+        cached_prompt_text_token_price: 3000,
+        long_context_threshold: 131072,
+      },
+    ],
+  });
+  assert.equal(model.metadata.inputModalities, "image,text");
+  assert.equal(model.metadata.outputModalities, "text");
+  // An image input modality is the capability the registry calls supportsImage.
+  assert.equal(model.metadata.vision, true);
+  assert.equal(model.metadata.longContextThreshold, 131072);
+  // Stored in the provider's own unit, under a name that says so. Converting
+  // here would make a catalogue read look like a verified price, and
+  // docs/policy/credit-and-cost-limits.md says where prices may come from.
+  assert.equal(model.metadata.observedPromptPriceCentsPer100MTokens, 30000);
+  assert.equal(model.metadata.observedCompletionPriceCentsPer100MTokens, 150000);
+  assert.equal(model.metadata.observedCachedPromptPriceCentsPer100MTokens, 3000);
+});
+
+test("reads Moonshot's flat capability flags", () => {
+  const [model] = parseProviderCatalogResponse("moonshot", {
+    data: [
+      {
+        id: "kimi-k3",
+        context_length: 262144,
+        supports_image_in: true,
+        supports_video_in: false,
+        supports_reasoning: true,
+      },
+    ],
+  });
+  assert.equal(model.metadata.contextLength, 262144);
+  assert.equal(model.metadata.vision, true);
+  assert.equal(model.metadata.videoInput, false);
+  assert.equal(model.metadata.thinking, true);
+});
+
+test("reads Anthropic's nested capability objects", () => {
+  const [model] = parseProviderCatalogResponse("anthropic", {
+    data: [
+      {
+        id: "claude-fable-5-1",
+        type: "model",
+        display_name: "Claude Fable 5.1",
+        created_at: "2026-02-04T00:00:00Z",
+        max_input_tokens: 1000000,
+        max_tokens: 128000,
+        capabilities: {
+          image_input: { supported: true },
+          pdf_input: { supported: true },
+          structured_outputs: { supported: true },
+          thinking: { supported: true, types: { adaptive: { supported: true } } },
+          effort: {
+            supported: true,
+            low: { supported: true },
+            medium: { supported: true },
+            high: { supported: true },
+            xhigh: { supported: true },
+            max: { supported: false },
+          },
+        },
+      },
+    ],
+  });
+  assert.equal(model.displayName, "Claude Fable 5.1");
+  assert.equal(model.metadata.inputTokenLimit, 1000000);
+  assert.equal(model.metadata.outputTokenLimit, 128000);
+  assert.equal(model.metadata.vision, true);
+  assert.equal(model.metadata.thinking, true);
+  assert.equal(model.metadata.pdfInput, true);
+  assert.equal(model.metadata.structuredOutputs, true);
+  // `supported` is the parent's own flag, not a level; `max` said false.
+  assert.equal(model.metadata.effortLevels, "high,low,medium,xhigh");
+});
+
+test("Perplexity's Agent API listing does not file other vendors' models", () => {
+  // https://docs.perplexity.ai/api-reference/models-get returns the models
+  // Perplexity resells through POST /v1/agent. Tomverse's Perplexity client
+  // calls Chat Completions with Sonar. Adopting a row out of this list gave a
+  // registry entry pointing at Perplexity carrying Anthropic's identifier.
+  assert.deepEqual(
+    parseProviderCatalogResponse("perplexity", {
+      object: "list",
+      data: [
+        { id: "anthropic/claude-opus-4-8", owned_by: "anthropic" },
+        { id: "openai/gpt-5.6-sol", owned_by: "openai" },
+        { id: "google/gemini-3.5-flash", owned_by: "google" },
+        { id: "xai/grok-4.5", owned_by: "xai" },
+        { id: "perplexity/glm-5.2", owned_by: "perplexity" },
+        { id: "perplexity/kimi-k2.7-code", owned_by: "perplexity" },
+        { id: "perplexity/sonar", owned_by: "perplexity" },
+      ],
+    }).map((model) => model.id),
+    ["perplexity/sonar"]
+  );
+});
+
+test("a new Sonar model is still discovered, prefixed or not", () => {
+  assert.deepEqual(
+    parseProviderCatalogResponse("perplexity", {
+      data: [
+        { id: "perplexity/sonar-pro", owned_by: "perplexity" },
+        { id: "sonar-reasoning-pro", owned_by: "perplexity" },
+        { id: "sonar", owned_by: "perplexity" },
+      ],
+    }).map((model) => model.id),
+    ["perplexity/sonar-pro", "sonar-reasoning-pro", "sonar"]
+  );
+});
+
+test("the product-surface rule is Perplexity's alone", () => {
+  // Every other provider lists its own models on the endpoint its chat client
+  // calls, and a rule that leaked would empty their queues.
+  for (const provider of AI_PROVIDERS) {
+    if (provider === "perplexity") continue;
+    assert.equal(
+      foreignProductSurfaceId(provider, "anthropic/claude-opus-4-8"),
+      false,
+      provider
+    );
+  }
+});
+
+test("an inactive Groq model is unavailable, not merely unqueued", () => {
+  // The review's P1. Blocking the candidate array alone left a *registered*
+  // model Groq had switched off reading as available and current, with no
+  // warning anywhere. `lifecycle` is the one channel the scan status, the
+  // daily report and the queue's availability column all read.
+  const [model] = parseProviderCatalogResponse("groq", {
+    data: [{ id: "llama-4.2-70b", active: false, context_window: 131072 }],
+  });
+  assert.equal(model.lifecycle, "inactive");
+  assert.equal(model.available, false);
+  assert.equal(model.metadata.active, false);
+  assert.equal(shouldQueueProviderCatalogObservation(model), false);
+});
+
+test("an active Groq model is untouched by that rule", () => {
+  const [model] = parseProviderCatalogResponse("groq", {
+    data: [{ id: "llama-4.2-70b", active: true, context_window: 131072 }],
+  });
+  assert.equal(model.lifecycle, null);
+  assert.equal(model.available, true);
+  assert.equal(shouldQueueProviderCatalogObservation(model), true);
+});
+
+test("`active` is read for Groq alone", () => {
+  // Groq is the provider that documents this field. Another provider using
+  // the same word for something else would have real models dropped from
+  // discovery -- the failure `openai_prefix_heuristic` exists to make visible.
+  // An id each provider's own admission rules accept, so the assertion is
+  // about the flag and not about a name one of them was going to drop anyway.
+  const admittedId: Partial<Record<string, string>> = {
+    openai: "gpt-6-astra",
+    perplexity: "sonar-pro",
+  };
+  for (const provider of AI_PROVIDERS) {
+    if (provider === "groq" || provider === "google") continue;
+    const id = admittedId[provider] || "test-chat-1";
+    const [model] = parseProviderCatalogResponse(provider, { data: [{ id, active: false }] });
+    assert.ok(model, provider + ": " + id + " was not admitted");
+    assert.equal(model.lifecycle, null, provider);
+    assert.equal(model.metadata.active, null, provider);
+    assert.equal(shouldQueueProviderCatalogObservation(model), true, provider);
+  }
+});
+
+test("an empty modality list is read as silence, not as a denial", () => {
+  // Both readings are available and only one can be wrong in a direction that
+  // costs something: `supportsImage: false` would reach the adoption draft as
+  // a capability the provider had denied.
+  const [model] = parseProviderCatalogResponse("xai", {
+    models: [{ id: "grok-4.5", input_modalities: [] }],
+  });
+  assert.equal(model.metadata.inputModalities, null);
+  assert.equal(model.metadata.vision, null);
 });
