@@ -329,3 +329,117 @@ test("the Playwright short-circuits stay loopback-only regardless of the flags",
     process.env.NEXTAUTH_URL = original.url;
   }
 });
+
+/**
+ * The two properties `resetAdminDatabase()` exists to hold.
+ *
+ * Read from the source rather than exercised against a server, because what is
+ * being fixed here is not a behaviour a passing reset would reveal -- both a
+ * catalogue-driven reset and a hand-written one leave the database empty, and
+ * both pass every spec on the day they are written. The hand-written one fails
+ * later, quietly, when somebody adds a Prisma model and its rows start
+ * surviving into the next test.
+ *
+ * The reset was made cheaper on 2026-09-11 (it truncates only the tables that
+ * hold a row, and no longer restarts identities). These assertions are what
+ * keeps that optimisation from being taken further than it can go.
+ */
+const adminResetSource = () =>
+  readFileSync(
+    join(import.meta.dirname, "e2e-admin", "support", "database.ts"),
+    "utf8"
+  );
+
+test("the admin fixture reset discovers its tables from the catalogue", () => {
+  const source = adminResetSource();
+
+  assert.match(
+    source,
+    /FROM pg_tables/,
+    "the reset must ask the database which tables exist"
+  );
+  assert.match(
+    source,
+    /tablename <> '_prisma_migrations'/,
+    "the migrations table must stay out of the truncation"
+  );
+  assert.match(
+    source,
+    /CASCADE/,
+    "truncation must cascade, so the order of the tables cannot matter"
+  );
+
+  // The barrier, and the reason this assertion exists at all.
+  //
+  // The reset truncates only the tables holding a row, and an independent
+  // review of that change found the defect it introduces if the lock goes:
+  // an uncommitted INSERT is invisible to the probe under MVCC, so the table
+  // reads as empty, is skipped, and the row surfaces in the next test when
+  // the writer commits. The unconditional TRUNCATE it replaced took
+  // ACCESS EXCLUSIVE over everything and therefore waited for that writer.
+  //
+  // Locking is not what the optimisation removed -- rewriting relfilenodes
+  // is -- so anybody tempted to drop the lock for speed would be trading the
+  // order independence in this file's header for nothing measurable.
+  assert.match(
+    source,
+    /LOCK TABLE/,
+    "the reset must lock every table before it judges any of them empty"
+  );
+  assert.match(
+    source,
+    /IN ACCESS EXCLUSIVE MODE/,
+    "the lock must be the one TRUNCATE would have taken, or it does not wait for a writer"
+  );
+  assert.ok(
+    source.indexOf("LOCK TABLE") < source.indexOf("SELECT EXISTS"),
+    "the lock must be taken before the emptiness probe, not after it"
+  );
+
+  // A list of model names written into the reset would be the failure this
+  // guards: it looks identical until the schema grows. Two representative
+  // fixture tables stand in for the whole schema -- the reset names no table
+  // at all, so any name appearing in a truncation is the regression.
+  for (const table of ["ModelRegistryEntry", "AdminAuditLog", "CreditLot"]) {
+    assert.ok(
+      !new RegExp(`TRUNCATE[^;]*${table}`, "i").test(source),
+      `the reset must not name ${table}; the catalogue decides the list`
+    );
+  }
+});
+
+test("the admin fixture seed writes in one transaction", () => {
+  const source = adminResetSource();
+
+  assert.match(
+    source,
+    /\$transaction\(writeAdminFixtures/,
+    "the seed body must run inside a transaction, not as loose writes"
+  );
+  // A default Prisma interactive transaction gives up after five seconds,
+  // which is inside the range a stalled CI disk reaches on its own -- and a
+  // seed that failed there would report a transaction timeout for exactly the
+  // condition the transaction was introduced to survive.
+  assert.match(
+    source,
+    /timeout: SEED_TRANSACTION_TIMEOUT_MS/,
+    "the seed transaction must set its own timeout"
+  );
+
+  // Order independence is the contract the automatic fixture sells. It holds
+  // only while every test gets the reset, so the fixture stays automatic.
+  const consoleSource = readFileSync(
+    join(import.meta.dirname, "e2e-admin", "support", "console.ts"),
+    "utf8"
+  );
+  assert.match(
+    consoleSource,
+    /resetAndSeedAdminFixtures\(\)/,
+    "the console fixture must reset and seed"
+  );
+  assert.match(
+    consoleSource,
+    /\{ auto: true \}/,
+    "the reset fixture must be automatic, so no spec can opt out of it"
+  );
+});
