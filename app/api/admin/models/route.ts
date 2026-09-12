@@ -279,7 +279,10 @@ export async function POST(req: Request) {
         // legitimately share one: `gpt-5-5` and `gpt-5-5-thinking`), so without
         // this the duplicate read is two reads of the same absence.
         await tx.$executeRaw(
-          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${body.provider} ${body.apiModel}`}, 0))`
+          // `::` and not a NUL separator: a provider id is lower-case
+          // alphanumeric, so the two halves cannot run together, and a source
+          // file in this repository carries no control characters.
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${body.provider}::${body.apiModel}`}, 0))`
         );
         const locked = await tx.$queryRaw<
           Array<{
