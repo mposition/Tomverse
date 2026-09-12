@@ -22,7 +22,10 @@ import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
 } from "@/lib/modelAdoptionDraft";
-import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
+import {
+  getModelPricingProfile,
+  PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
+} from "@/lib/modelPricing";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import type { AiModel } from "@/lib/models";
 
@@ -142,11 +145,29 @@ const readAdoptionContext = async (
         })
       )
     : false;
+  // The most expensive tier the profile carries, when there is a profile. The
+  // dearest one because the floor asks what the worst accepted turn costs, and
+  // a long prompt lands in the tier priced for long prompts.
+  const profile = getModelPricingProfile(body.id);
+  const dearestTier = profile?.tiers.reduce(
+    (dearest, tier) =>
+      !dearest || tier.inputUsdPerMillionTokens > dearest.inputUsdPerMillionTokens
+        ? tier
+        : dearest,
+    profile.tiers[0]
+  );
   return {
     workItem,
     body,
     observedPairs: observedPairsOf(workItem),
     providerPairRegistered,
+    profilePrice: dearestTier
+      ? {
+          inputUsdPerMillionTokens: dearestTier.inputUsdPerMillionTokens,
+          outputUsdPerMillionTokens: dearestTier.outputUsdPerMillionTokens,
+          maxOutputTokens: profile?.maxOutputTokens ?? null,
+        }
+      : null,
     // The limit the runtime actually enforces, not the one this module would
     // assume. A deployment that raised it is shown a floor that covers it.
     worstCaseInputTokens: chatUserMaxInputTokens(),
@@ -244,6 +265,45 @@ export async function POST(req: Request) {
     });
     let adoptedTo: string | null = null;
     const row = await prisma.$transaction(async (tx) => {
+      if (workItemId) {
+        // Everything that decides happens before the row exists. Creating it
+        // first and checking afterwards made the transaction find its own
+        // uncommitted row as an existing one for this provider and api model,
+        // so every adoption refused itself and rolled back -- the check passed
+        // at the door and failed at the till because the till could see what
+        // the door had just written.
+        //
+        // The advisory lock is what serialises two adoptions of the same model
+        // through two different work items. Their `FOR UPDATE` rows are
+        // different, and the registry has no unique key on the pair (two rows
+        // legitimately share one: `gpt-5-5` and `gpt-5-5-thinking`), so without
+        // this the duplicate read is two reads of the same absence.
+        await tx.$executeRaw(
+          Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${body.provider} ${body.apiModel}`}, 0))`
+        );
+        const locked = await tx.$queryRaw<
+          Array<{
+            id: string;
+            status: string;
+            action: string;
+            provider: string;
+            apiModel: string;
+            modelId: string | null;
+            evidence: Prisma.JsonValue | null;
+          }>
+        >(Prisma.sql`
+          SELECT "id", "status", "action", "provider", "apiModel", "modelId", "evidence"
+          FROM "ModelLifecycleWorkItem"
+          WHERE "id" = ${workItemId}
+          FOR UPDATE
+        `);
+        const workItem = locked[0] ?? null;
+        const refusal = adoptionPreflightRefusal(
+          await readAdoptionContext(workItemId, body, { workItem, tx })
+        );
+        if (refusal) throw new AdoptionRefused(refusal.message);
+      }
+
       const created = await tx.modelRegistryEntry.create({
         data: {
           id,
@@ -252,32 +312,12 @@ export async function POST(req: Request) {
       });
       if (!workItemId) return created;
 
-      // Read again inside the transaction. The preflight above answers the
-      // operator quickly; this is the read that decides, and it is the one that
-      // cannot be overtaken by a second adoption of the same item between the
-      // check and the write.
-      const locked = await tx.$queryRaw<
-        Array<{
-          id: string;
-          status: string;
-          action: string;
-          provider: string;
-          apiModel: string;
-          modelId: string | null;
-          evidence: Prisma.JsonValue | null;
-        }>
-      >(Prisma.sql`
-        SELECT "id", "status", "action", "provider", "apiModel", "modelId", "evidence"
-        FROM "ModelLifecycleWorkItem"
-        WHERE "id" = ${workItemId}
-        FOR UPDATE
-      `);
-      const workItem = locked[0] ?? null;
-      const refusal = adoptionPreflightRefusal(
-        await readAdoptionContext(workItemId, body, { workItem, tx })
-      );
-      if (refusal) throw new AdoptionRefused(refusal.message);
-
+      const workItem = (
+        await tx.modelLifecycleWorkItem.findUnique({
+          where: { id: workItemId },
+          select: WORK_ITEM_ADOPTION_SELECT,
+        })
+      )!;
       const path =
         adoptionTransitionPath(
           workItem!.status as Parameters<typeof adoptionTransitionPath>[0]
