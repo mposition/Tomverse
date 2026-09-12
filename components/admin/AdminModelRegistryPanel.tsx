@@ -185,6 +185,11 @@ export function AdminModelRegistryPanel() {
   // refresh cannot reopen a form for a model that has since been created.
   const [adoptWorkItemId, setAdoptWorkItemId] = useState<string | null>(null);
   const [adoptUnknowns, setAdoptUnknowns] = useState<string[]>([]);
+  const [adoptNotes, setAdoptNotes] = useState<string[]>([]);
+  // Set when the price re-resolution could not be reached. The panel then stops
+  // being the gate: the save resolves the profile server-side anyway, and a
+  // failed lookup must not be a locked screen with no way forward.
+  const [profileLookupFailed, setProfileLookupFailed] = useState(false);
   const [adoptReason, setAdoptReason] = useState("");
   // Whether the operator has actually chosen a sale class while adopting.
   // `usageClass` and `creditWeight` cannot hold "undecided" -- they are
@@ -248,6 +253,7 @@ export function AdminModelRegistryPanel() {
         const data = (await response.json().catch(() => null)) as {
           fields?: Partial<FormState>;
           unknowns?: string[];
+          notes?: string[];
           worstCaseInputTokens?: number;
           profilePrice?: {
             modelId: string;
@@ -263,6 +269,8 @@ export function AdminModelRegistryPanel() {
         if (cancelled) return;
         setForm({ ...emptyForm(), ...data.fields });
         setAdoptUnknowns(data.unknowns || []);
+        setAdoptNotes(data.notes || []);
+        setProfileLookupFailed(false);
         setAdoptWorkItemId(adoptParam);
         setAdoptReason("");
         setAdoptClassChosen(false);
@@ -345,18 +353,24 @@ export function AdminModelRegistryPanel() {
           );
           if (!response.ok) {
             await discardResponseBody(response);
+            setProfileLookupFailed(true);
             return;
           }
           const data = (await response.json().catch(() => null)) as {
             profilePrice?: typeof profilePrice;
             unknowns?: string[];
+            notes?: string[];
           } | null;
           if (cancelled || !data) return;
           setProfilePrice(data.profilePrice ?? null);
+          setProfileLookupFailed(false);
           if (data.unknowns) setAdoptUnknowns(data.unknowns);
+          if (data.notes) setAdoptNotes(data.notes);
         } catch {
-          // A failed re-resolution leaves the form as it was: the save is still
-          // judged by the server, which resolves the profile itself.
+          // A failed re-resolution must not leave the operator stuck. The save is
+          // judged by the server, which resolves the profile itself, so the
+          // panel stops gating rather than locking the screen.
+          if (!cancelled) setProfileLookupFailed(true);
         }
       })();
     }, 400);
@@ -731,6 +745,23 @@ export function AdminModelRegistryPanel() {
                       <li key={item}>· {item}</li>
                     ))}
                   </ul>
+                  {adoptNotes.length ? (
+                    <>
+                      <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
+                        이미 정해진 값 — 그대로 두세요
+                      </p>
+                      <ul className="mt-2 grid gap-1 text-xs text-zinc-400">
+                        {adoptNotes.map((item) => (
+                          <li key={item}>· {item}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  {profileLookupFailed ? (
+                    <p className="mt-3 text-xs text-amber-200">
+                      가격 상속 확인에 실패했습니다. 저장은 서버가 다시 판정합니다.
+                    </p>
+                  ) : null}
                   <label className={`${labelClass} mt-4`}>
                     채택 사유 (필수)
                     <input
@@ -848,7 +879,7 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> Validate</button>
-                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || !isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
+                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || (!profileLookupFailed && (!isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
               </div>
             </div>
           </div>
