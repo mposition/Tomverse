@@ -775,7 +775,7 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> Validate</button>
-                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
+                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || !isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
               </div>
             </div>
           </div>

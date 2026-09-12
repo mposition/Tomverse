@@ -1,5 +1,7 @@
 import "server-only";
 
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -852,7 +854,7 @@ export const createChatBudget = (
     const maxInputTokens =
         kind === "guest"
             ? positiveInteger(process.env.CHAT_GUEST_MAX_INPUT_TOKENS, 16_000)
-            : positiveInteger(process.env.CHAT_USER_MAX_INPUT_TOKENS, 128_000);
+            : chatUserMaxInputTokens();
 
     // The limit is checked against the raw estimate, deliberately: it bounds
     // the conversation the user sent, not the margin and tool overhead the

@@ -23,6 +23,7 @@ import {
   adoptionPreflightRefusal,
 } from "@/lib/modelAdoptionDraft";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
+import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import type { AiModel } from "@/lib/models";
 
 const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number]) => ({
@@ -55,9 +56,19 @@ const WORK_ITEM_ADOPTION_SELECT = {
   evidence: true,
 } as const;
 
-/** Every provider a scan has seen serving this model, from the item's sightings. */
-const observedProvidersOf = (
-  workItem: { provider: string; evidence: Prisma.JsonValue | null } | null
+/**
+ * The exact (provider, api model) pairs a scan has seen, from the item's own
+ * sightings.
+ *
+ * The pair and not its halves. Taking the providers from one sighting and the
+ * identifier from another allows a combination nothing ever served: Qwen
+ * carrying `ANTHROPIC/CLAUDE-FABLE-5-1` and Anthropic carrying
+ * `claude-fable-5-1` would, split apart, permit a row telling Qwen to serve
+ * `claude-fable-5-1` -- a string that provider has never returned, sent
+ * upstream on every request.
+ */
+const observedPairsOf = (
+  workItem: { provider: string; apiModel: string; evidence: Prisma.JsonValue | null } | null
 ) => {
   if (!workItem) return [];
   const evidence =
@@ -65,14 +76,18 @@ const observedProvidersOf = (
       ? (workItem.evidence as Record<string, unknown>)
       : null;
   const observedVia = Array.isArray(evidence?.observedVia) ? evidence.observedVia : [];
-  const providers = observedVia
-    .map((entry) =>
-      entry && typeof entry === "object" && typeof (entry as { provider?: unknown }).provider === "string"
-        ? ((entry as { provider: string }).provider)
-        : null
-    )
-    .filter((provider): provider is string => Boolean(provider));
-  return providers.length ? providers : [workItem.provider];
+  const pairs = observedVia
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      const sighting = entry as { provider?: unknown; apiModel?: unknown };
+      return typeof sighting.provider === "string" && typeof sighting.apiModel === "string"
+        ? { provider: sighting.provider, apiModel: sighting.apiModel }
+        : null;
+    })
+    .filter((pair): pair is { provider: string; apiModel: string } => Boolean(pair));
+  // An item filed before sightings were recorded has only the pair it was
+  // filed under, which is the pair the scan saw.
+  return pairs.length ? pairs : [{ provider: workItem.provider, apiModel: workItem.apiModel }];
 };
 
 /**
@@ -85,26 +100,43 @@ const observedProvidersOf = (
 const readAdoptionContext = async (
   workItemId: string,
   body: Parameters<typeof adoptionPreflightRefusal>[0]["body"],
-  workItemOverride?: {
-    id: string;
-    status: string;
-    action: string;
-    provider: string;
-    apiModel: string;
-    modelId: string | null;
-    evidence: Prisma.JsonValue | null;
-  } | null
+  options?: {
+    workItem?: {
+      id: string;
+      status: string;
+      action: string;
+      provider: string;
+      apiModel: string;
+      modelId: string | null;
+      evidence: Prisma.JsonValue | null;
+    } | null;
+    /**
+     * The transaction doing the write, when there is one.
+     *
+     * The duplicate-pair read has to happen on the same client as the create or
+     * it answers about a world the write is not in.
+     */
+    tx?: Prisma.TransactionClient;
+  }
 ): Promise<Parameters<typeof adoptionPreflightRefusal>[0]> => {
+  const client = options?.tx ?? prisma;
   const workItem =
-    workItemOverride !== undefined
-      ? workItemOverride
+    options && "workItem" in options
+      ? options.workItem ?? null
       : await prisma.modelLifecycleWorkItem.findUnique({
           where: { id: workItemId },
           select: WORK_ITEM_ADOPTION_SELECT,
         });
+  // Advisory, deliberately, and not a database constraint. Two registry rows
+  // legitimately share one provider and api model -- `gpt-5-5` and
+  // `gpt-5-5-thinking` are both `openai`/`gpt-5.5`, sold as different classes --
+  // so a unique index here would refuse a shape the catalogue already has. What
+  // it stops is the case adoption can be sure about: answering a discovery with
+  // a second row for a model this registry is already serving. A variant of an
+  // existing model is made by copying that row, not by adopting a discovery.
   const providerPairRegistered = workItem
     ? Boolean(
-        await prisma.modelRegistryEntry.findFirst({
+        await client.modelRegistryEntry.findFirst({
           where: { provider: body.provider, apiModel: body.apiModel, catalogDeleted: false },
           select: { id: true },
         })
@@ -113,7 +145,7 @@ const readAdoptionContext = async (
   return {
     workItem,
     body,
-    observedProviders: observedProvidersOf(workItem),
+    observedPairs: observedPairsOf(workItem),
     providerPairRegistered,
     // The limit the runtime actually enforces, not the one this module would
     // assume. A deployment that raised it is shown a floor that covers it.
@@ -121,18 +153,6 @@ const readAdoptionContext = async (
     inputPriceMultiplier:
       body.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
   };
-};
-
-/**
- * The largest prompt this deployment accepts.
- *
- * Read here rather than imported from the chat budget, which computes it inside
- * a per-request function alongside the guest limit. The default matches that
- * code and the derivation comment in `lib/chatCostGuardrails.ts`.
- */
-const chatUserMaxInputTokens = () => {
-  const configured = Number.parseInt(process.env.CHAT_USER_MAX_INPUT_TOKENS ?? "", 10);
-  return Number.isInteger(configured) && configured > 0 ? configured : 128_000;
 };
 
 export async function GET(req: Request) {
@@ -254,7 +274,7 @@ export async function POST(req: Request) {
       `);
       const workItem = locked[0] ?? null;
       const refusal = adoptionPreflightRefusal(
-        await readAdoptionContext(workItemId, body, workItem)
+        await readAdoptionContext(workItemId, body, { workItem, tx })
       );
       if (refusal) throw new AdoptionRefused(refusal.message);
 
