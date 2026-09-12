@@ -10,6 +10,8 @@ import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
 import { buildAdoptionDraft } from "@/lib/modelAdoptionDraft";
 import { modelProductSurface } from "@/lib/modelLifecycleTriage";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
+import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
+import type { AiModel } from "@/lib/models";
 
 /**
  * The registry form, prefilled from what this morning's scan already knows
@@ -116,12 +118,38 @@ export async function GET(req: Request) {
       takenIds: taken.map((row) => row.id),
     });
 
+    const draftModelId = draft.fields.id;
     return NextResponse.json({
       workItem: { id: workItem.id, status: workItem.status },
       // The prompt size this deployment actually accepts, so the panel's credit
       // floor prices the worst turn this installation can be sent rather than
       // the one the module assumes.
       worstCaseInputTokens: chatUserMaxInputTokens(),
+      // What this model would bill at with its price columns left null, when a
+      // profile already covers it. The panel computes the same floor the save
+      // will be judged by; without this it reads empty price fields as "no
+      // price" and refuses to save an adoption the server would accept.
+      profilePrice: getModelPricingProfile(draftModelId)
+        ? (() => {
+            const resolved = resolveModelPricing(
+              {
+                id: draftModelId,
+                apiModel: workItem.apiModel,
+                provider: workItem.provider as AiModel["provider"],
+                // The class is still the operator's to choose; it only selects
+                // a fallback here, and a profile exists or this branch is not
+                // reached.
+                usageClass: "premium",
+              },
+              { estimatedPromptTokens: chatUserMaxInputTokens() }
+            );
+            return {
+              inputUsdPerMillionTokens: resolved.inputUsdPerMillionTokens,
+              outputUsdPerMillionTokens: resolved.outputUsdPerMillionTokens,
+              maxOutputTokens: resolved.maxOutputTokens,
+            };
+          })()
+        : null,
       // Said out loud rather than left to the panel: the scan proves the
       // provider lists this model, and nothing more than that.
       observed: Boolean(observation),

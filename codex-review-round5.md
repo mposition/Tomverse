@@ -1,20 +1,22 @@
 # 발견 큐 → 레지스트리 채택 기능 독립 재검토 (Round 5)
 
 - 검토일: 2026-09-12
-- 검토 기준: `git show 4f8a98cd` 및 커밋 `4f8a98cd`의 현재 트리
+- 검토 기준: `git show 4f8a98cd` 및 현재 트리 `50c60a42`
+- 기준 변동: 검토 도중 후속 커밋 `50c60a42`가 HEAD에 들어와, `4f8a98cd` 자체의
+  결과와 최신 트리의 결과를 구분함
 - 이전 검토: `codex-review-round4.md`의 P1-A5, P1-A6, P1-2 동시 중복
 - 판정: **수정 후 재검토 필요**
-- 요청된 세 건 결과: **P1-A5의 자기 재조회 원인은 해결됐지만 닫힘 보류, P1-2와
-  P1-A6은 부분 해결**
-- 새 발견: **P1 2건** — advisory-lock key의 NUL 때문에 모든 adoption이 500,
-  profile fallback이 runtime 환경 가격 override를 무시해 낮은 credit floor를 승인
+- 요청된 세 건 결과: **현재 트리에서 P1-A5와 P1-2 해결, P1-A6 부분 해결**
+- 새 발견: **P1 2건** — `4f8a98cd`의 advisory-lock NUL은 `50c60a42`에서 해결,
+  profile fallback의 runtime 환경 가격 override 누락은 현재도 미해결
 
-결론부터 말하면 세 건을 현재 기능 승인 기준으로 닫을 수 없다. transaction 안의
+결론부터 말하면 현재 트리에서는 세 건 중 두 건을 닫고 P1-A6은 열어 둬야 한다.
+transaction 안의
 순서는 `pair lock → work item row lock → 재검사 → registry create → item transition`으로
 바뀌어 자기 신규 행을 중복으로 읽는 원인은 없어졌다. 유효한 pair lock이라면 서로
-다른 work item의 같은 pair도 직렬화하는 구조다. 그러나 lock key에 구분자로 넣은
-값은 문자열 `"\\0"`이 아니라 실제 U+0000/NUL이고, PostgreSQL `text`에는 NUL을
-보낼 수 없다. 따라서 첫 `$executeRaw`가 실패하고 정상 채택은 201 대신 500이 된다.
+다른 work item의 같은 pair도 직렬화한다. `4f8a98cd`에는 lock key 구분자로 실제
+U+0000/NUL을 넣어 PostgreSQL `text` 파라미터가 실패하는 새 결함이 있었지만,
+현재 트리 `50c60a42`는 provider enum에 들어올 수 없는 `::` 구분자로 바꿨다.
 
 가격 쪽도 server의 순수 preflight에서는 body 숫자가 profile보다 우선하고, body가
 `NULL`이면 profile을 써서 floor만 계산하므로 DB의 `NULL = 상속`, `숫자 = 관리자
@@ -28,15 +30,15 @@ override` 의미가 유지된다. 하지만 관리자 화면은 여전히 빈 fo
 
 | 항목 | 판정 | 핵심 근거 |
 |---|---|---|
-| P1-A5 transaction의 자기 신규 행 중복 판정 | **원 결함 해결 / 닫힘 보류** | 검사가 create 앞으로 이동해 자기 행은 보지 않음. 다만 새 P1-A7 때문에 같은 정상 입력은 현재 500 |
-| P1-2 같은 pair의 동시 채택 | **부분 해결** | 공통 transaction advisory lock의 위치와 범위는 맞지만 key의 NUL 때문에 lock을 취득할 수 없어 정상 채택과 직렬화를 함께 증명하지 못함 |
+| P1-A5 transaction의 자기 신규 행 중복 판정 | **해결** | 검사가 create 앞으로 이동해 자기 행을 보지 않고, 현재 lock key도 PostgreSQL-safe함 |
+| P1-2 같은 pair의 동시 채택 | **해결** | 같은 exact pair의 transaction advisory lock 뒤에서 duplicate read/create를 순서화함 |
 | P1-A6 profile 가격 상속 차단 | **부분 해결** | 직접 POST의 server preflight와 DB 저장 의미는 해결. UI는 `NULL` 가격을 계속 `price_unknown`으로 보고 Save를 차단 |
-| 새 P1-A7 | **미해결** | PostgreSQL `text` 파라미터에 실제 NUL을 보내 모든 work-item adoption이 generic 500 |
+| 새 P1-A7 | **`4f8a98cd`에서 발견, 현재 해결** | 후속 `50c60a42`가 실제 NUL을 `::`로 교체해 lock key를 정상 text로 만듦 |
 | 새 P1-A8 | **미해결** | profile fallback floor는 runtime의 env override와 현재 schedule revision을 무시해 실제 유효가격보다 낮은 creditWeight를 승인 가능 |
 
 ## 요청된 세 건 재검토
 
-### P1-A5. transaction이 자기 신규 행을 중복으로 판정 — 원 결함 해결, 닫힘 보류
+### P1-A5. transaction이 자기 신규 행을 중복으로 판정 — 해결
 
 **기존 재현 입력 → 기존 잘못된 출력:** registry에 `(anthropic,
 "claude-fable-5-1")`가 없고, exact 관측 pair와 유효한 가격·output cap·credit를 가진
@@ -50,16 +52,15 @@ rollback했다.
 정상 실행된다는 전제에서는 duplicate 조회 시점에 자기 신규 행이 없고, P1-A5의
 read-own-write 원인은 제거됐다.
 
-- transaction 검사가 create보다 앞: `app/api/admin/models/route.ts:267-305`
+- transaction 검사가 create보다 앞: `app/api/admin/models/route.ts:267-308`
 - pair 존재 여부를 같은 `tx`로 읽음: `app/api/admin/models/route.ts:125-146`
-- 검사가 끝난 뒤 registry row 생성: `app/api/admin/models/route.ts:307-312`
+- 검사가 끝난 뒤 registry row 생성: `app/api/admin/models/route.ts:310-315`
 
-그러나 같은 정상 입력의 **현재 실제 경로 → 잘못된 출력**은 201이 아니라 새
-P1-A7의 generic 500이다. 그러므로 “자기 중복 판정”이라는 정확한 원인은 해결됐지만,
-요청된 더 강한 조건인 “transaction 순서가 정상 채택을 통과시킨다”는 아직 성립하지
-않아 닫힘을 보류한다.
+**현재 출력:** 후속 `50c60a42`의 PostgreSQL-safe lock key까지 포함한 현재 트리에서는
+pair가 없다는 재검사를 통과한 뒤 row를 만들고 item을 `validation_pending`으로
+전환한다. 기존의 자기 행을 볼 순서가 아니므로 기대한 HTTP 201 경로가 복원됐다.
 
-### P1-2. 서로 다른 work item의 같은 pair 동시 채택 — 부분 해결
+### P1-2. 서로 다른 work item의 같은 pair 동시 채택 — 해결
 
 **기존 재현 입력 → 기존 잘못된 출력:** 서로 다른 두 open work item과 서로 다른
 registry `id`가 같은 `(provider, apiModel)`을 동시에 채택한다 → 두 transaction이
@@ -75,16 +76,17 @@ Zod enum이라 정규화된 소문자이고 API model은 duplicate query와 같�
 현재 한 건짜리 adoption 흐름에는 서로 반대 순서로 같은 두 lock을 잡는 경로도
 발견하지 못했다.
 
-- pair lock을 item lock과 pair 조회보다 먼저 요청: `app/api/admin/models/route.ts:267-304`
+- pair lock을 item lock과 pair 조회보다 먼저 요청: `app/api/admin/models/route.ts:267-307`
 - lock 아래 같은 client의 duplicate 조회: `app/api/admin/models/route.ts:125-146`
-- item별 row lock: `app/api/admin/models/route.ts:284-299`
+- item별 row lock: `app/api/admin/models/route.ts:287-302`
 - pair unique 제약이 없고 의도적 variant를 허용하는 schema: `prisma/schema.prisma:2136-2175`
 
-하지만 **현재 재현 입력 → 잘못된 출력:** 위 두 요청 또는 단일 정상 요청을 보내면
-둘 다 pair lock을 획득해 직렬화되는 것이 아니라 lock SQL의 NUL 파라미터에서 먼저
-실패한다. 단일 요청도 500이므로 “정상 채택 한 건은 통과하고 동시 중복 한 건만
-거부”하는 요구를 만족하지 못한다. NUL을 PostgreSQL-safe한, 모호하지 않은 pair
-encoding으로 바꾸면 현재 lock/check/create 순서는 Round 4의 race를 막는 구조다.
+**현재 출력:** provider는 `createModelRegistrySchema`의 enum이라 `::`를 포함할 수
+없고, API model은 delimiter 뒤의 나머지 exact 문자열이다. 따라서 서로 다른 pair를
+같은 연결 문자열로 만드는 경계 이동이 없고, 동일 pair의 두 요청은 같은 64-bit
+advisory key를 잡는다. 첫 요청은 201로 commit하고, 기다리던 둘째 요청은 새 statement의
+duplicate 조회에서 첫 row를 읽어 “already serves” 409가 된다. pair unique 제약 없이
+의도적 일반-admin variant 생성을 보존하면서 adoption 경로만 직렬화한다.
 
 추가된 테스트도 이 DB 경계를 실행하지 않는다. 기존 row 여부를 boolean으로 직접
 주입하는 순수 규칙 테스트만 있고, advisory SQL·명령 순서·두 transaction 경쟁을
@@ -134,31 +136,34 @@ UI가 안내하는 대로 숫자를 복사하면 저장은 가능하지만 DB �
 
 ## 새로 생긴 결함
 
-### P1-A7. advisory-lock key의 실제 NUL 때문에 모든 work-item adoption이 500
+### P1-A7. advisory-lock key의 실제 NUL 때문에 모든 work-item adoption이 500 — 현재 해결
 
 `4f8a98cd`는 pair 경계를 모호하지 않게 하려고 provider와 API model 사이에 실제
-U+0000을 넣었다. 현재 `app/api/admin/models/route.ts`에는 byte offset 11,769에 NUL
-바이트가 1개 있으며, line 282의 template parameter가 runtime에서도
+U+0000을 넣었다. 해당 commit의 `app/api/admin/models/route.ts`에는 byte offset
+11,769에 NUL 바이트가 1개 있으며, 당시 line 282의 template parameter가 runtime에서도
 `"provider\u0000apiModel"`이 된다. PostgreSQL 문자열과 `text` 값은 NUL을 허용하지
 않으므로 `hashtextextended(text, bigint)`에 도달하기 전에 그 파라미터를 받을 수 없다.
 
 **재현 입력 → 잘못된 출력:** 존재하는 open discovery item에 exact 관측 pair,
 유효한 disabled/unlisted body, 충분한 credit와 사유를 넣어
-`POST /api/admin/models?workItemId=...`를 호출한다 → 기대 출력은 pair lock 획득 후
-registry row/item transition commit과 HTTP 201이다. 현재는 transaction의 첫
+`POST /api/admin/models?workItemId=...`를 `4f8a98cd`에서 호출한다 → 기대 출력은
+pair lock 획득 후 registry row/item transition commit과 HTTP 201이다. 당시에는 transaction의 첫
 `$executeRaw`가 NUL text 파라미터로 DB 오류를 내고, 오류가 `AdoptionRefused`나
 `P2002`가 아니므로 generic `Failed to create model.` HTTP 500으로 끝난다. registry와
 work item은 바뀌지 않지만 transaction 밖에 먼저 기록한 `model.registry.create_started`
 audit는 남는다.
 
-- 실제 NUL이 든 lock parameter: `app/api/admin/models/route.ts:281-283`
+- 실제 NUL이 든 당시 lock parameter: `4f8a98cd:app/api/admin/models/route.ts:281-283`
 - create-started audit가 transaction보다 먼저 기록됨: `app/api/admin/models/route.ts:257-267`
-- DB 오류가 generic 500으로 매핑됨: `app/api/admin/models/route.ts:384-396`
+- 당시 DB 오류가 generic 500으로 매핑됨: `4f8a98cd:app/api/admin/models/route.ts:384-396`
 
-typecheck와 ESLint는 이 제어문자를 잡지 않았고, 현재 파일을 기본 `rg`로 읽으면
-`binary file matches (found "\\0" byte around offset 11769)`로 분류된다. 테스트는
-순수 함수에 `providerPairRegistered`를 주입할 뿐 이 SQL을 실행하지 않아 모두
-통과한다.
+typecheck와 ESLint는 이 제어문자를 잡지 않았고, `4f8a98cd`의 파일을 기본 `rg`로
+읽으면 binary로 분류됐다. 후속 `50c60a42`는 이를
+`${body.provider}::${body.apiModel}`로 바꿨고, 최신 파일의 NUL byte count는 0이다.
+현재 provider enum 값에는 `:`가 없으므로 pair boundary도 모호해지지 않는다.
+
+- 현재 PostgreSQL-safe lock parameter: `app/api/admin/models/route.ts:281-286`
+- provider enum: `lib/modelRegistryShared.ts:9-22`
 
 ### P1-A8. profile fallback floor가 runtime 환경 가격 override를 무시함
 
@@ -193,25 +198,25 @@ revision이라 오늘 트리의 schedule만으로 금액 차이는 나지 않는
 
 ## 검증과 한계
 
-- `git show 4f8a98cd`와 현재 트리의 route, draft rule, admin panel, registry 변환,
-  runtime pricing, schema와 관련 테스트를 읽음
+- `git show 4f8a98cd`, 후속 `git show 50c60a42`와 현재 트리의 route, draft rule,
+  admin panel, registry 변환, runtime pricing, schema와 관련 테스트를 읽음
 - `git diff 4f8a98cd^ 4f8a98cd --check` — 통과
 - `npm run typecheck` — 통과
-- 관련 5개 파일 ESLint — 통과
+- 관련 6개 파일 ESLint — 통과
 - `npm run check:model-pricing` — 통과: explicit profile 36, fallback/unpriced/register
   warning 0
 - `tests/model-adoption-draft.test.ts` +
   `tests/modelRegistryPricingInheritance.test.ts` — 52/52 통과
-- 여기에 `tests/modelPricing.test.mjs`까지 넓힌 실행은 78/79 통과. 실패 1건은
-  `tests/modelPricing.test.mjs:213-220`이 입력 상한 literal을 계속
-  `lib/chatSecurity.ts`에서 regex로 찾지만 현재 값은 `lib/chatInputLimits.ts` helper로
-  이동한 기존 test debt다. `4f8a98cd`가 만든 회귀는 아니지만 현재 전체 관련 묶음은
-  green이 아니다.
+- `tests/modelPricing.test.mjs`까지 포함한 최신 관련 묶음 — 79/79 통과. 최초
+  `4f8a98cd` 실행에서는 입력 상한 literal을 옛 `lib/chatSecurity.ts`에서 찾는 기존
+  test debt 때문에 78/79였고, 후속 `50c60a42`가 probe를 실제 소유 모듈
+  `lib/chatInputLimits.ts`로 옮긴 뒤 green이 됨
 - `DATABASE_URL`과 `DIRECT_URL`이 없어 실제 route/두 PostgreSQL transaction 경쟁은
-  실행하지 않았다. P1-A7은 source byte를 직접 검사해 NUL 1개와 offset을 확인했고,
-  P1-A8은 현재 모듈을 환경 override와 함께 실행해 위 수치와 반환값을 확인했다.
+  실행하지 않았다. P1-A7은 `4f8a98cd` source byte를 직접 검사해 NUL 1개와 offset을
+  확인했고, 현재 트리에서는 NUL 0개를 확인했다. P1-A8은 현재 모듈을 환경 override와
+  함께 실행해 위 수치와 반환값을 확인했다.
 
 현재 추가 테스트는 server 순수 규칙 세 건만 다룬다. 이 변경의 위험 경계인 실제
 advisory SQL, `lock → read → create` 순서, 두 connection 경쟁, 그리고 profile 상속
-draft의 UI Save 조건을 실행하는 회귀 테스트가 없어 새 P1 두 건과 남은 P1-A6을
-검출하지 못했다.
+draft의 UI Save 조건을 실행하는 회귀 테스트가 없어 `4f8a98cd`의 P1-A7과 현재 남은
+P1-A6/P1-A8을 검출하지 못했다.

@@ -25,6 +25,7 @@ import {
 import {
   getModelPricingProfile,
   PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
+  resolveModelPricing,
 } from "@/lib/modelPricing";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import type { AiModel } from "@/lib/models";
@@ -94,6 +95,40 @@ const observedPairsOf = (
 };
 
 /**
+ * What this model would actually be billed at, if its price columns stay null.
+ *
+ * Resolved rather than read off the profile's tiers. The number a request pays
+ * is not `profile.tiers[0]`: it is the tier the prompt's size lands in, of the
+ * `priceSchedule` revision in force today, after any per-model environment
+ * override. Pricing the floor from the raw profile would approve a class that
+ * the deployment's own effective price does not support -- which is the same
+ * understatement this floor exists to prevent, arrived at from the other side.
+ *
+ * Priced at the worst prompt the deployment accepts, because that is the turn
+ * the floor is about.
+ */
+const effectiveProfilePrice = (
+  body: Parameters<typeof adoptionPreflightRefusal>[0]["body"],
+  worstCaseInputTokens: number
+) => {
+  if (!getModelPricingProfile(body.id)) return null;
+  const resolved = resolveModelPricing(
+    {
+      id: body.id,
+      apiModel: body.apiModel,
+      provider: body.provider as AiModel["provider"],
+      usageClass: body.usageClass as AiModel["usageClass"],
+    },
+    { estimatedPromptTokens: worstCaseInputTokens }
+  );
+  return {
+    inputUsdPerMillionTokens: resolved.inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens: resolved.outputUsdPerMillionTokens,
+    maxOutputTokens: resolved.maxOutputTokens,
+  };
+};
+
+/**
  * Everything the adoption rules need, read from the database in one place.
  *
  * Gathered here so the preflight before the transaction and the one inside it
@@ -123,6 +158,7 @@ const readAdoptionContext = async (
   }
 ): Promise<Parameters<typeof adoptionPreflightRefusal>[0]> => {
   const client = options?.tx ?? prisma;
+  const worstCaseInputTokens = chatUserMaxInputTokens();
   const workItem =
     options && "workItem" in options
       ? options.workItem ?? null
@@ -145,32 +181,15 @@ const readAdoptionContext = async (
         })
       )
     : false;
-  // The most expensive tier the profile carries, when there is a profile. The
-  // dearest one because the floor asks what the worst accepted turn costs, and
-  // a long prompt lands in the tier priced for long prompts.
-  const profile = getModelPricingProfile(body.id);
-  const dearestTier = profile?.tiers.reduce(
-    (dearest, tier) =>
-      !dearest || tier.inputUsdPerMillionTokens > dearest.inputUsdPerMillionTokens
-        ? tier
-        : dearest,
-    profile.tiers[0]
-  );
   return {
     workItem,
     body,
     observedPairs: observedPairsOf(workItem),
     providerPairRegistered,
-    profilePrice: dearestTier
-      ? {
-          inputUsdPerMillionTokens: dearestTier.inputUsdPerMillionTokens,
-          outputUsdPerMillionTokens: dearestTier.outputUsdPerMillionTokens,
-          maxOutputTokens: profile?.maxOutputTokens ?? null,
-        }
-      : null,
+    profilePrice: effectiveProfilePrice(body, worstCaseInputTokens),
     // The limit the runtime actually enforces, not the one this module would
     // assume. A deployment that raised it is shown a floor that covers it.
-    worstCaseInputTokens: chatUserMaxInputTokens(),
+    worstCaseInputTokens,
     inputPriceMultiplier:
       body.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
   };
