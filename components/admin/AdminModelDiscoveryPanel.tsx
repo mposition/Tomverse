@@ -126,6 +126,33 @@ const transitionableIds = (group: ModelFamilyGroup, to: string) => {
     .map((member) => member.id);
 };
 
+/**
+ * The member of a family an adoption would register, or null.
+ *
+ * The representative rather than the whole group: a family collapses several
+ * spellings of one model -- a dated snapshot, a moving alias, a second
+ * provider's prefix -- and exactly one of them becomes the identifier requests
+ * will carry. `buildGroups` already sorts the stable id to the front for that
+ * reason.
+ *
+ * Only `add` items, and only ones the queue can still move. A retirement is
+ * about a model the registry already has, and a closed item is a decision
+ * somebody made: reopening it is a new work item, not a button.
+ */
+const adoptableMember = (group: ModelFamilyGroup) => {
+  const candidate = group.representative;
+  if (candidate.action !== "add") return null;
+  // Chat only. Image generation models have their own ledger, and this row's
+  // `supportsImage` means image *input*; adopting a generation model here would
+  // price and route it as a chat model. The server refuses it as well.
+  if (candidate.product !== "chat") return null;
+  return ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"].includes(
+    candidate.status
+  )
+    ? candidate
+    : null;
+};
+
 const buildGroups = (rows: readonly ModelWorkItemRow[]): ModelFamilyGroup[] => {
   const byFamily = new Map<string, ModelWorkItemRow[]>();
   for (const row of rows) {
@@ -651,6 +678,16 @@ export function AdminModelDiscoveryPanel() {
                               {label}
                             </button>
                           ))}
+                          {adoptableMember(group) ? (
+                            <a
+                              href={`/admin/models?tab=registry&adopt=${encodeURIComponent(
+                                adoptableMember(group)!.id
+                              )}`}
+                              className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
+                            >
+                              채택
+                            </a>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

@@ -15,12 +15,34 @@ import {
   getRuntimeModels,
   registryRowToModel,
 } from "@/lib/modelRegistry";
+import { Prisma } from "@prisma/client";
+import { adoptionTransitionPath } from "@/lib/modelLifecycleWorkItemCore";
+import { transitionWorkItems } from "@/lib/modelLifecycleWorkItems";
+import {
+  ADOPTION_PENDING_VALIDATIONS,
+  adoptionPreflightRefusal,
+} from "@/lib/modelAdoptionDraft";
 import type { AiModel } from "@/lib/models";
 
 const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number]) => ({
   ...model,
   environment: validateProviderConfiguration(model),
 });
+
+/**
+ * A queue transition the state machine refused, raised so the surrounding
+ * transaction rolls the registry row back with it.
+ *
+ * Adoption is one act. A model created while its work item stayed undecided is
+ * the half-applied state the queue was built to make impossible, so a refusal
+ * has to undo the create rather than be reported beside it.
+ */
+class AdoptionRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AdoptionRefused";
+  }
+}
 
 export async function GET(req: Request) {
   try {
@@ -70,6 +92,41 @@ export async function POST(req: Request) {
       }
     }
     const { id, ...fields } = body;
+
+    // Adoption: this create is answering a discovered-model work item, and the
+    // queue has to learn about it in the same breath. Two writes with a gap
+    // between them is how the registry ends up holding a model the queue still
+    // lists as undecided -- which is the state this whole pipeline exists to
+    // end. The work item id arrives as a query parameter so the body stays the
+    // strict registry contract every other caller sends.
+    const url = new URL(req.url);
+    const workItemId = url.searchParams.get("workItemId")?.trim() || null;
+    // Why the operator is adopting, in their words. The state machine records a
+    // reason on the `approved` hop and that record is the only thing a later
+    // reader has: the registry row can be edited afterwards, and the event
+    // history holds no snapshot of the form. A sentence composed by this route
+    // would repeat what was done and answer nothing.
+    const adoptionReason = url.searchParams.get("reason")?.trim() || "";
+    if (workItemId && adoptionReason.length < 4) {
+      return NextResponse.json(
+        { error: "An adoption needs the reason it is being made." },
+        { status: 400 }
+      );
+    }
+
+    const adoptionRefusal = workItemId
+      ? adoptionPreflightRefusal({
+          workItem: await prisma.modelLifecycleWorkItem.findUnique({
+            where: { id: workItemId },
+            select: { id: true, status: true, action: true, apiModel: true, modelId: true },
+          }),
+          body,
+        })
+      : null;
+    if (adoptionRefusal) {
+      return NextResponse.json({ error: adoptionRefusal.message }, { status: adoptionRefusal.status });
+    }
+
     await writeAdminAuditLog({
       session,
       request: req,
@@ -77,13 +134,66 @@ export async function POST(req: Request) {
       targetType: "Model",
       targetId: id,
       summary: `Started model registry creation for ${id}.`,
-      metadata: { provider: body.provider, status: body.status },
+      metadata: { provider: body.provider, status: body.status, workItemId },
     });
-    const row = await prisma.modelRegistryEntry.create({
-      data: {
-        id,
-        ...registryInputToData(fields, { id: session.user.id, email: session.user.email }),
-      },
+    let adoptedTo: string | null = null;
+    const row = await prisma.$transaction(async (tx) => {
+      const created = await tx.modelRegistryEntry.create({
+        data: {
+          id,
+          ...registryInputToData(fields, { id: session.user.id, email: session.user.email }),
+        },
+      });
+      if (!workItemId) return created;
+
+      // Read again inside the transaction. The preflight above answers the
+      // operator quickly; this is the read that decides, and it is the one that
+      // cannot be overtaken by a second adoption of the same item between the
+      // check and the write.
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; status: string; action: string; apiModel: string; modelId: string | null }>
+      >(Prisma.sql`
+        SELECT "id", "status", "action", "apiModel", "modelId"
+        FROM "ModelLifecycleWorkItem"
+        WHERE "id" = ${workItemId}
+        FOR UPDATE
+      `);
+      const workItem = locked[0] ?? null;
+      const refusal = adoptionPreflightRefusal({ workItem, body });
+      if (refusal) throw new AdoptionRefused(refusal.message);
+
+      const path =
+        adoptionTransitionPath(
+          workItem!.status as Parameters<typeof adoptionTransitionPath>[0]
+        ) ?? [];
+      for (const to of path) {
+        const result = await transitionWorkItems(
+          {
+            workItemIds: [workItemId],
+            to,
+            actorEmail: session.user.email ?? session.user.id,
+            note: `Adopted into the registry as ${id}. ${adoptionReason}`,
+            ...(to === "approved"
+              ? { decision: { decision: "approve" as const, reason: adoptionReason } }
+              : {}),
+          },
+          { tx }
+        );
+        if (!result.ok) throw new AdoptionRefused(result.refusal.message);
+      }
+      adoptedTo = path.at(-1) ?? workItem!.status;
+      await tx.modelLifecycleWorkItem.update({
+        where: { id: workItemId },
+        data: {
+          modelId: id,
+          // What the item still owes before it may ship. Written here because
+          // `validation_pending` is only a claim without it: the rollout gate
+          // reads this list, and an item that arrives with it empty walks
+          // straight through the check that exists to hold it.
+          pendingValidations: ADOPTION_PENDING_VALIDATIONS,
+        },
+      });
+      return created;
     });
     await writeAdminAuditLog({
       session,
@@ -91,8 +201,23 @@ export async function POST(req: Request) {
       action: "model.registry.created",
       targetType: "Model",
       targetId: id,
-      summary: `Created model registry entry ${id}.`,
-      metadata: { provider: body.provider, apiModel: body.apiModel, minimumPlan: body.minimumPlan, creditWeight: body.creditWeight },
+      summary: workItemId
+        ? `Created model registry entry ${id} by adopting work item ${workItemId}.`
+        : `Created model registry entry ${id}.`,
+      metadata: {
+        provider: body.provider,
+        apiModel: body.apiModel,
+        minimumPlan: body.minimumPlan,
+        creditWeight: body.creditWeight,
+        ...(workItemId
+          ? {
+              workItemId,
+              workItemStatus: adoptedTo,
+              adoptionReason,
+              pendingValidations: ADOPTION_PENDING_VALIDATIONS,
+            }
+          : {}),
+      },
     });
     // SEC-012. `/api/models/catalog` answers from a shared snapshot, so a
     // registry write has to drop it or the console shows the model it just
@@ -103,6 +228,11 @@ export async function POST(req: Request) {
   } catch (error) {
     const response = apiSecurityResponse(error);
     if (response) return response;
+    if (error instanceof AdoptionRefused) {
+      // The registry row went back with it. Reporting the queue's own words
+      // rather than a generic failure: the refusal names which rule stopped it.
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
       return NextResponse.json({ error: "That model ID already exists." }, { status: 409 });
     }
