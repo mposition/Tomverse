@@ -559,3 +559,49 @@ export const adoptionTransitionPath = (
             return null;
     }
 };
+
+/**
+ * The exact (provider, api model) pairs a scan has seen for a work item.
+ *
+ * The pair and not its halves. Taking the providers from one sighting and the
+ * identifier from another allows a combination nothing ever served: Qwen
+ * carrying `ANTHROPIC/CLAUDE-FABLE-5-1` and Anthropic carrying
+ * `claude-fable-5-1` would, split apart, permit a row telling Qwen to serve
+ * `claude-fable-5-1` -- a string that provider has never returned, sent
+ * upstream on every request.
+ *
+ * Shared rather than duplicated. Adoption refuses on what these pairs say and
+ * the queue cleanup closes on it, and two readings of the same evidence that
+ * drift apart is one surface refusing what the other has already thrown away.
+ */
+export const observedPairsOf = (
+    workItem: {
+        provider: string;
+        apiModel: string;
+        evidence: unknown;
+    } | null
+): Array<{ provider: string; apiModel: string }> => {
+    if (!workItem) return [];
+    const evidence =
+        workItem.evidence &&
+        typeof workItem.evidence === "object" &&
+        !Array.isArray(workItem.evidence)
+            ? (workItem.evidence as Record<string, unknown>)
+            : null;
+    const observedVia = Array.isArray(evidence?.observedVia) ? evidence.observedVia : [];
+    const pairs = observedVia
+        .map((entry) => {
+            if (!entry || typeof entry !== "object") return null;
+            const sighting = entry as { provider?: unknown; apiModel?: unknown };
+            return typeof sighting.provider === "string" &&
+                typeof sighting.apiModel === "string"
+                ? { provider: sighting.provider, apiModel: sighting.apiModel }
+                : null;
+        })
+        .filter((pair): pair is { provider: string; apiModel: string } => Boolean(pair));
+    // An item filed before sightings were recorded has only the pair it was
+    // filed under, which is the pair the scan saw.
+    return pairs.length
+        ? pairs
+        : [{ provider: workItem.provider, apiModel: workItem.apiModel }];
+};
