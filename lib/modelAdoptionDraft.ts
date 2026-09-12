@@ -448,6 +448,26 @@ export const adoptionPreflightRefusal = (input: {
   };
   /** The exact pairs a scan has seen, from the item's own sightings. */
   observedPairs?: ReadonlyArray<{ provider: string; apiModel: string }>;
+  /**
+   * Whether the catalogue says the pair being saved is not servable.
+   *
+   * The pair in `body`, not the work item. A registry row carries one
+   * `(provider, apiModel)` and the runtime sends requests to exactly that
+   * pair -- it does not fall through to another provider that lists the same
+   * model. So an item Groq has switched off and Anthropic still serves is
+   * adoptable *as the Anthropic pair* and must be refused *as the Groq pair*,
+   * and a question asked about the item as a whole gets both halves wrong.
+   *
+   * The panel already prints the lifecycle and the triage already reads
+   * `조치 비권장`, but neither stops a save: the row said do not adopt this
+   * and the button adopted it anyway. Refused on the server because that is
+   * the side that decides.
+   *
+   * `false` when the catalogue has no row for the pair. Absence is the
+   * missing-detection machinery's question, and reading it as "unservable"
+   * would refuse adoptions on the strength of a row nobody wrote.
+   */
+  submittedPairUnservable?: boolean;
   /** Whether the registry already has a row for this provider and api model. */
   providerPairRegistered?: boolean;
   /**
@@ -493,6 +513,12 @@ export const adoptionPreflightRefusal = (input: {
       status: 409,
       message:
         "Only chat models are adopted into this registry. Image generation models belong to the Image Studio ledger.",
+    };
+  }
+  if (input.submittedPairUnservable) {
+    return {
+      status: 409,
+      message: `${input.body.provider} lists ${input.body.apiModel} as not servable. Adopting it would put a row in the registry that answers no request. If another provider still serves this model, adopt that pair instead.`,
     };
   }
   if (

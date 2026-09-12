@@ -728,3 +728,33 @@ test("an inherited price is a settled note, not an open question", () => {
   assert.deepEqual(unpriced.notes, []);
   assert.match(unpriced.unknowns.join("\n"), /가격을 넣으면/);
 });
+
+test("the pair being saved is the one judged servable", () => {
+  // The panel already printed the lifecycle and the triage already read
+  // "조치 비권장", but neither stopped a save: the row said do not adopt this
+  // and the button adopted it anyway. The server is the side that decides.
+  const refusal = adoptionPreflightRefusal({
+    workItem: { ...adoptable },
+    body: { ...adoptBody },
+    submittedPairUnservable: true,
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /not servable/);
+  // Names the other way out, because on a mixed item there is one.
+  assert.match(refusal!.message, /adopt that pair instead/);
+});
+
+test("a live pair on an item another provider has switched off is adoptable", () => {
+  // A registry row carries one (provider, apiModel) and the runtime sends
+  // requests to exactly that pair -- it does not fall through to whichever
+  // provider still lists the model. So the question is about the pair, not
+  // about the work item, and asking it of the item gets both halves wrong.
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: { ...adoptable },
+      body: { ...adoptBody },
+      submittedPairUnservable: false,
+    }),
+    null
+  );
+});

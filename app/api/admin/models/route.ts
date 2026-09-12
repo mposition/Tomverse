@@ -16,7 +16,10 @@ import {
   registryRowToModel,
 } from "@/lib/modelRegistry";
 import { Prisma } from "@prisma/client";
-import { adoptionTransitionPath } from "@/lib/modelLifecycleWorkItemCore";
+import {
+  adoptionTransitionPath,
+  observedPairsOf,
+} from "@/lib/modelLifecycleWorkItemCore";
 import { transitionWorkItems } from "@/lib/modelLifecycleWorkItems";
 import {
   ADOPTION_PENDING_VALIDATIONS,
@@ -27,6 +30,7 @@ import {
   PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER,
   resolveModelPricing,
 } from "@/lib/modelPricing";
+import { providerReportedUnservable } from "@/lib/providerModelCatalogCore";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import type { AiModel } from "@/lib/models";
 
@@ -60,39 +64,6 @@ const WORK_ITEM_ADOPTION_SELECT = {
   evidence: true,
 } as const;
 
-/**
- * The exact (provider, api model) pairs a scan has seen, from the item's own
- * sightings.
- *
- * The pair and not its halves. Taking the providers from one sighting and the
- * identifier from another allows a combination nothing ever served: Qwen
- * carrying `ANTHROPIC/CLAUDE-FABLE-5-1` and Anthropic carrying
- * `claude-fable-5-1` would, split apart, permit a row telling Qwen to serve
- * `claude-fable-5-1` -- a string that provider has never returned, sent
- * upstream on every request.
- */
-const observedPairsOf = (
-  workItem: { provider: string; apiModel: string; evidence: Prisma.JsonValue | null } | null
-) => {
-  if (!workItem) return [];
-  const evidence =
-    workItem.evidence && typeof workItem.evidence === "object" && !Array.isArray(workItem.evidence)
-      ? (workItem.evidence as Record<string, unknown>)
-      : null;
-  const observedVia = Array.isArray(evidence?.observedVia) ? evidence.observedVia : [];
-  const pairs = observedVia
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
-      const sighting = entry as { provider?: unknown; apiModel?: unknown };
-      return typeof sighting.provider === "string" && typeof sighting.apiModel === "string"
-        ? { provider: sighting.provider, apiModel: sighting.apiModel }
-        : null;
-    })
-    .filter((pair): pair is { provider: string; apiModel: string } => Boolean(pair));
-  // An item filed before sightings were recorded has only the pair it was
-  // filed under, which is the pair the scan saw.
-  return pairs.length ? pairs : [{ provider: workItem.provider, apiModel: workItem.apiModel }];
-};
 
 /**
  * What this model would actually be billed at, if its price columns stay null.
@@ -181,10 +152,31 @@ const readAdoptionContext = async (
         })
       )
     : false;
+  // Asked of the pair being saved, not of the work item. A registry row carries
+  // one (provider, api model) and the runtime sends requests to exactly that
+  // pair; it does not fall through to another provider listing the same model.
+  // So an item one provider has switched off while another still serves it is
+  // adoptable as the live pair and has to be refused as the dead one, and a
+  // question asked about the item as a whole gets both halves wrong.
+  //
+  // No row means not judged -- absence is the missing-detection machinery's
+  // question, and reading it as "unservable" would refuse adoptions on the
+  // strength of a row nobody wrote.
+  const submittedEntry = workItem
+    ? await client.providerModelCatalogEntry.findUnique({
+        where: {
+          provider_apiModel: { provider: body.provider, apiModel: body.apiModel },
+        },
+        select: { lifecycle: true },
+      })
+    : null;
   return {
     workItem,
     body,
     observedPairs: observedPairsOf(workItem),
+    submittedPairUnservable: providerReportedUnservable({
+      lifecycle: submittedEntry?.lifecycle ?? null,
+    }),
     providerPairRegistered,
     profilePrice: effectiveProfilePrice(body, worstCaseInputTokens),
     // The limit the runtime actually enforces, not the one this module would
