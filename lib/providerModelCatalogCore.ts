@@ -341,6 +341,31 @@ export const isReviewableProviderModelId = (
   (isLikelyChatModelId(provider, modelId) || isImageGenerationModel(modelId));
 
 /**
+ * The lifecycle values that mean "the provider is not serving this", as
+ * against the ones that announce an end while still answering requests.
+ *
+ * The split is the point. `deprecated`, `legacy` and `shutdown_scheduled` are
+ * notices about a future: the model answers today, and treating them as dead
+ * would leave a working model switched off after a transient catalogue gap --
+ * exactly the damage `planCatalogReconciliation`'s restore exists to undo.
+ * `inactive`, `archived`, `retired` and `sunset` are statements about now.
+ *
+ * Named because two decisions turn on it and both read wrong if they ask
+ * about lifecycle in general: whether a reappearing model may be auto-restored,
+ * and whether a queued model may be adopted into the registry.
+ */
+export const UNSERVABLE_LIFECYCLES: ReadonlySet<string> = new Set([
+  "inactive",
+  "archived",
+  "retired",
+  "sunset",
+]);
+
+export const providerReportedUnservable = (
+  observation: Pick<ProviderCatalogObservation, "lifecycle">
+) => Boolean(observation.lifecycle && UNSERVABLE_LIFECYCLES.has(observation.lifecycle));
+
+/**
  * Whether an observation belongs in the human model review queue.
  *
  * A Groq model marked `active: false` is excluded here too, and without a
