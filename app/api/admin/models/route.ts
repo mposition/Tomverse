@@ -22,6 +22,7 @@ import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
 } from "@/lib/modelAdoptionDraft";
+import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel } from "@/lib/models";
 
 const adminModel = (model: Awaited<ReturnType<typeof getRuntimeModels>>[number]) => ({
@@ -43,6 +44,96 @@ class AdoptionRefused extends Error {
     this.name = "AdoptionRefused";
   }
 }
+
+const WORK_ITEM_ADOPTION_SELECT = {
+  id: true,
+  status: true,
+  action: true,
+  provider: true,
+  apiModel: true,
+  modelId: true,
+  evidence: true,
+} as const;
+
+/** Every provider a scan has seen serving this model, from the item's sightings. */
+const observedProvidersOf = (
+  workItem: { provider: string; evidence: Prisma.JsonValue | null } | null
+) => {
+  if (!workItem) return [];
+  const evidence =
+    workItem.evidence && typeof workItem.evidence === "object" && !Array.isArray(workItem.evidence)
+      ? (workItem.evidence as Record<string, unknown>)
+      : null;
+  const observedVia = Array.isArray(evidence?.observedVia) ? evidence.observedVia : [];
+  const providers = observedVia
+    .map((entry) =>
+      entry && typeof entry === "object" && typeof (entry as { provider?: unknown }).provider === "string"
+        ? ((entry as { provider: string }).provider)
+        : null
+    )
+    .filter((provider): provider is string => Boolean(provider));
+  return providers.length ? providers : [workItem.provider];
+};
+
+/**
+ * Everything the adoption rules need, read from the database in one place.
+ *
+ * Gathered here so the preflight before the transaction and the one inside it
+ * ask exactly the same question of exactly the same shape. The two diverging is
+ * how a check passes at the door and fails at the till.
+ */
+const readAdoptionContext = async (
+  workItemId: string,
+  body: Parameters<typeof adoptionPreflightRefusal>[0]["body"],
+  workItemOverride?: {
+    id: string;
+    status: string;
+    action: string;
+    provider: string;
+    apiModel: string;
+    modelId: string | null;
+    evidence: Prisma.JsonValue | null;
+  } | null
+): Promise<Parameters<typeof adoptionPreflightRefusal>[0]> => {
+  const workItem =
+    workItemOverride !== undefined
+      ? workItemOverride
+      : await prisma.modelLifecycleWorkItem.findUnique({
+          where: { id: workItemId },
+          select: WORK_ITEM_ADOPTION_SELECT,
+        });
+  const providerPairRegistered = workItem
+    ? Boolean(
+        await prisma.modelRegistryEntry.findFirst({
+          where: { provider: body.provider, apiModel: body.apiModel, catalogDeleted: false },
+          select: { id: true },
+        })
+      )
+    : false;
+  return {
+    workItem,
+    body,
+    observedProviders: observedProvidersOf(workItem),
+    providerPairRegistered,
+    // The limit the runtime actually enforces, not the one this module would
+    // assume. A deployment that raised it is shown a floor that covers it.
+    worstCaseInputTokens: chatUserMaxInputTokens(),
+    inputPriceMultiplier:
+      body.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+  };
+};
+
+/**
+ * The largest prompt this deployment accepts.
+ *
+ * Read here rather than imported from the chat budget, which computes it inside
+ * a per-request function alongside the guest limit. The default matches that
+ * code and the derivation comment in `lib/chatCostGuardrails.ts`.
+ */
+const chatUserMaxInputTokens = () => {
+  const configured = Number.parseInt(process.env.CHAT_USER_MAX_INPUT_TOKENS ?? "", 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 128_000;
+};
 
 export async function GET(req: Request) {
   try {
@@ -114,14 +205,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const adoptionRefusal = workItemId
-      ? adoptionPreflightRefusal({
-          workItem: await prisma.modelLifecycleWorkItem.findUnique({
-            where: { id: workItemId },
-            select: { id: true, status: true, action: true, apiModel: true, modelId: true },
-          }),
-          body,
-        })
+    const adoptionContext = workItemId ? await readAdoptionContext(workItemId, body) : null;
+    const adoptionRefusal = adoptionContext
+      ? adoptionPreflightRefusal(adoptionContext)
       : null;
     if (adoptionRefusal) {
       return NextResponse.json({ error: adoptionRefusal.message }, { status: adoptionRefusal.status });
@@ -151,15 +237,25 @@ export async function POST(req: Request) {
       // cannot be overtaken by a second adoption of the same item between the
       // check and the write.
       const locked = await tx.$queryRaw<
-        Array<{ id: string; status: string; action: string; apiModel: string; modelId: string | null }>
+        Array<{
+          id: string;
+          status: string;
+          action: string;
+          provider: string;
+          apiModel: string;
+          modelId: string | null;
+          evidence: Prisma.JsonValue | null;
+        }>
       >(Prisma.sql`
-        SELECT "id", "status", "action", "apiModel", "modelId"
+        SELECT "id", "status", "action", "provider", "apiModel", "modelId", "evidence"
         FROM "ModelLifecycleWorkItem"
         WHERE "id" = ${workItemId}
         FOR UPDATE
       `);
       const workItem = locked[0] ?? null;
-      const refusal = adoptionPreflightRefusal({ workItem, body });
+      const refusal = adoptionPreflightRefusal(
+        await readAdoptionContext(workItemId, body, workItem)
+      );
       if (refusal) throw new AdoptionRefused(refusal.message);
 
       const path =
