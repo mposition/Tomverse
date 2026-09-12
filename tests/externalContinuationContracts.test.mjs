@@ -614,11 +614,9 @@ function routingFixture(source) {
         replaceRouting: (before, after) => replaceWithin(bounds.start, bounds.end, before, after),
         replaceTrailingRouting: (before, after) => replaceWithin(bounds.end, bounds.handlerEnd, before, after),
         removeConjunct: (name) => {
-            const range = anchor(name);
-            const condition = anchor("trailingCondition");
-            const followingAnd = source.slice(range.end, condition.end).match(/^\s*&&\s*/);
-            assert.ok(followingAnd, "mutation requires the selected trailing conjunct's AND");
-            return replaceRange(range.start, range.end + followingAnd[0].length, "");
+            const removal = anchor(name).removal;
+            assert.ok(removal, "mutation requires the selected trailing conjunct's parent AND");
+            return replaceRange(removal.start, removal.end, removal.replacement);
         },
         targetText: source.slice(bounds.start, bounds.targetEnd),
         boundaryText: source.slice(bounds.end, bounds.boundaryEnd),
@@ -734,9 +732,17 @@ for (const mutation of routingMutations) {
 }
 
 test("equivalent trailing guard grouping and order preserve routing behavior", async () => {
-    const regrouped = routingFixture(routingClient).replaceAnchor("trailingCondition",
-        "(data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)) && (currentChatIdRef.current === id)");
-    await assertClientSurfaceRouting(regrouped);
+    // First/middle/last guard positions, both association directions, and a
+    // reversed/parenthesized origin comparison must preserve mutation setup.
+    for (const condition of [
+        "(data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface)) && (currentChatIdRef.current === id)",
+        "(['chat', 'workspace', 'continuation'].includes(data.surface) && (((id) === (currentChatIdRef.current)) && (data.surface !== mountedSurface)))",
+        "(((currentChatIdRef.current) === (id)) && ((data.surface !== mountedSurface) && (['chat', 'workspace', 'continuation'].includes(data.surface))))",
+    ]) {
+        const regrouped = routingFixture(routingClient).replaceAnchor("trailingCondition", condition);
+        await assertClientSurfaceRouting(regrouped);
+        for (const mutation of routingMutations) await assertRoutingMutation(mutation, regrouped);
+    }
 });
 
 test("equivalent surface-guard formatting preserves behavior and every mutation", async () => {

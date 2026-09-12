@@ -114,6 +114,18 @@ export function extractContinuationRouting(text) {
     // for missing/wrong guards. A factory naming an unsupported shape reports
     // its own preparation failure without preventing later test registration.
     const span = (node) => ({ start: node.getStart(source), end: node.end });
+    const conjunctSpan = (node) => {
+        const result = span(node);
+        while (ts.isParenthesizedExpression(node.parent)) node = node.parent;
+        const parent = node.parent;
+        if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+            // Delete this conjunct and its AND by retaining the actual sibling.
+            // Wrapping the sibling preserves precedence inside outer groups.
+            const sibling = parent.left === node ? parent.right : parent.left;
+            result.removal = { ...span(parent), replacement: `(${sibling.getText(source)})` };
+        }
+        return result;
+    };
     const prefixNodes = (predicate) => statements.slice(0, -1).flatMap((statement) => findNodes(statement, predicate));
     const mentions = (node, path) => findNodes(node, (child) => accessPath(child) === path).length > 0;
     const anchors = {
@@ -126,10 +138,13 @@ export function extractContinuationRouting(text) {
             ts.isCallExpression(node.expression) && accessPath(node.expression.expression) === "conversations.find").map(span),
         trailingHandoff: [span(trailingHandoff.parent)],
         trailingCondition: [span(trailingDecision.expression)],
-        trailingAllowlist: conjuncts(trailingDecision.expression).filter(isSurfaceAllowlist).map(span),
-        trailingOrigin: findNodes(trailingDecision.expression, (node) => ts.isBinaryExpression(node) &&
-            node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
-            accessPath(node.left) === "currentChatIdRef.current" && accessPath(node.right) === "id").map(span),
+        trailingAllowlist: conjuncts(trailingDecision.expression).filter(isSurfaceAllowlist).map(conjunctSpan),
+        trailingOrigin: conjuncts(trailingDecision.expression).filter((node) => {
+            node = unparenthesized(node);
+            if (!ts.isBinaryExpression(node) || node.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) return false;
+            const sides = [node.left, node.right].map((side) => accessPath(unparenthesized(side)));
+            return sides.includes("currentChatIdRef.current") && sides.includes("id");
+        }).map(conjunctSpan),
     };
     return {
         anchors,
