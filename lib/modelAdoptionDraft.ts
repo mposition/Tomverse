@@ -248,6 +248,8 @@ export type ModelAdoptionDraft = {
   sources: Record<string, AdoptionFieldSource>;
   /** Fields a person still has to answer, in the words the panel shows. */
   unknowns: string[];
+  /** Values already settled, in the words the panel shows. */
+  notes: string[];
 };
 
 /**
@@ -304,6 +306,9 @@ export const buildAdoptionDraft = (input: {
     outputUsdPerMillionTokens: "needs_decision",
   };
   const unknowns: string[] = [];
+  // Values this draft settled on its own and the operator should leave alone.
+  // Kept apart from  because the two ask for opposite actions.
+  const notes: string[] = [];
 
   if (contextWindowTokens !== null) sources.contextWindowTokens = "provider_catalogue";
   else unknowns.push("컨텍스트 윈도우 — 공급자 목록에 없습니다.");
@@ -325,13 +330,18 @@ export const buildAdoptionDraft = (input: {
   // schedule and a typed number replaces both for good. Telling an operator to
   // enter a price they already have would be telling them to break that.
   if (input.hasPricingProfile) {
-    unknowns.push(
+    // Settled, not owed. It goes in `notes` so the panel does not file it under
+    // the values nobody has decided: leaving these columns empty *is* the
+    // decision, and a list headed "still to decide" that contains "leave this
+    // alone" tells an operator to act on it.
+    notes.push(
       "입력·출력 단가 — lib/modelPricing.ts의 profile을 상속합니다. 비워 두세요. 숫자를 넣으면 tier와 예정 가격이 영구 override 됩니다."
     );
+    unknowns.push("판매 등급과 크레딧 — 최소 등급은 상속 가격으로 계산됩니다.");
   } else {
     unknowns.push("입력·출력 단가 — 공급자 공식 가격표에서 확인해 입력합니다.");
+    unknowns.push("판매 등급과 크레딧 — 최소 등급은 가격을 넣으면 계산됩니다.");
   }
-  unknowns.push("판매 등급과 크레딧 — 최소 등급은 가격을 넣으면 계산됩니다.");
   unknowns.push("최소 플랜 — Pro로 두었습니다. 더 열려면 제품 결정이 필요합니다.");
   unknowns.push(
     providerMaxOutputTokens === null
@@ -370,6 +380,7 @@ export const buildAdoptionDraft = (input: {
     observedCapabilities: { providerMaxOutputTokens },
     sources,
     unknowns,
+    notes,
   };
 };
 

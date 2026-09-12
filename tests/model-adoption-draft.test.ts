@@ -692,13 +692,39 @@ test("a model with a pricing profile is told to leave its price columns empty", 
     apiModel: "claude-fable-5-1",
     hasPricingProfile: true,
   });
-  assert.match(inherited.unknowns.join("\n"), /상속합니다/);
-  assert.match(inherited.unknowns.join("\n"), /비워 두세요/);
+  assert.match(inherited.notes.join("\n"), /상속합니다/);
+  assert.match(inherited.notes.join("\n"), /비워 두세요/);
 
   const unpriced = buildAdoptionDraft({
     provider: "anthropic",
     apiModel: "claude-fable-5-1",
   });
   assert.match(unpriced.unknowns.join("\n"), /공식 가격표/);
-  assert.doesNotMatch(unpriced.unknowns.join("\n"), /상속합니다/);
+  assert.doesNotMatch(
+    [...unpriced.unknowns, ...unpriced.notes].join("\n"),
+    /상속합니다/
+  );
+});
+
+test("an inherited price is a settled note, not an open question", () => {
+  // The two lists ask for opposite actions. A "leave this alone" line filed
+  // under "still to decide" is an instruction to act on it.
+  const inherited = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    hasPricingProfile: true,
+  });
+  assert.match(inherited.notes.join("\n"), /상속합니다/);
+  assert.doesNotMatch(inherited.unknowns.join("\n"), /상속합니다/);
+  // ...and the class line stops telling them to enter a price they are not
+  // going to enter.
+  assert.match(inherited.unknowns.join("\n"), /상속 가격으로 계산/);
+  assert.doesNotMatch(inherited.unknowns.join("\n"), /가격을 넣으면/);
+
+  const unpriced = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+  });
+  assert.deepEqual(unpriced.notes, []);
+  assert.match(unpriced.unknowns.join("\n"), /가격을 넣으면/);
 });
