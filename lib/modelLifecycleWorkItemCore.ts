@@ -510,3 +510,52 @@ export const OPEN_WORK_ITEM_STATUSES: readonly WorkItemStatus[] =
     WORK_ITEM_STATUSES.filter(
         (status) => !TERMINAL_WORK_ITEM_STATUSES.has(status)
     );
+
+/**
+ * The states an adoption walks through, from wherever the item is standing.
+ *
+ * Creating the registry row *is* the implementation step, so an adopted item
+ * has to arrive at `validation_pending` -- pricing, access and staging are
+ * still owed, and that is the state that says so. Getting there from
+ * `discovered` is four hops, and the alternative was asking the operator to
+ * click through them by hand before the adopt button would appear.
+ *
+ * Every hop is real and is written to the history with the operator's name on
+ * it; none of them is skipped or synthesised. What this function removes is the
+ * clicking, not the record. The `approve` hop carries the decision, because the
+ * state machine will not enter `approved` without one -- and filling a
+ * registry form in is the decision.
+ *
+ * Returns an empty path for an item already at or past `validation_pending`
+ * (the row is being created for an item somebody had already walked forward),
+ * and `null` when there is no legitimate way from here -- a terminal item, or
+ * one sitting in a state that adoption is not the answer to.
+ */
+export const adoptionTransitionPath = (
+    from: WorkItemStatus
+): WorkItemStatus[] | null => {
+    switch (from) {
+        case "discovered":
+        case "deferred":
+            return [
+                "awaiting_decision",
+                "approved",
+                "implementation_pending",
+                "validation_pending",
+            ];
+        case "awaiting_decision":
+            return ["approved", "implementation_pending", "validation_pending"];
+        case "approved":
+            return ["implementation_pending", "validation_pending"];
+        case "implementation_pending":
+            return ["validation_pending"];
+        // Already past the point this walk exists to reach. The row still gets
+        // created and linked; the queue position is left where it is.
+        case "validation_pending":
+        case "rollout_pending":
+        case "communication_pending":
+            return [];
+        default:
+            return null;
+    }
+};

@@ -19,6 +19,8 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
+import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
 import {
   DEFAULT_MODEL_LIFECYCLE_FILTER,
@@ -176,6 +178,13 @@ export function AdminModelRegistryPanel() {
   );
   const [editingId, setEditingId] = useState<string | "new" | null>(null);
   const [copySourceId, setCopySourceId] = useState<string | null>(null);
+  // The discovery queue item this form is answering, from `?adopt=`. Held in
+  // state rather than read on each render because the save has to name it, and
+  // the parameter is dropped from the URL once the draft is in hand so a
+  // refresh cannot reopen a form for a model that has since been created.
+  const [adoptWorkItemId, setAdoptWorkItemId] = useState<string | null>(null);
+  const [adoptUnknowns, setAdoptUnknowns] = useState<string[]>([]);
+  const [adoptReason, setAdoptReason] = useState("");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -204,6 +213,63 @@ export function AdminModelRegistryPanel() {
     queueMicrotask(() => void load());
   }, [load]);
 
+  // `?adopt=<work item>` arrives from the discovery queue. The draft is the
+  // scan's own answer to the fields it can answer -- identifier, display name,
+  // context window, output ceiling, image input -- and the rest of the form
+  // stays at its defaults with `unknowns` naming what a person still has to
+  // decide. Nothing is saved here: this only opens the form somebody then
+  // fills in and submits.
+  const adoptParam = searchParams.get("adopt");
+  useEffect(() => {
+    if (!adoptParam) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(
+          `/api/admin/model-lifecycle/adoption-draft?workItemId=${encodeURIComponent(adoptParam)}`,
+          { cache: "no-store" }
+        );
+        const data = (await response.json().catch(() => null)) as {
+          fields?: Partial<FormState>;
+          unknowns?: string[];
+          error?: string;
+        } | null;
+        if (!response.ok || !data?.fields) {
+          throw new Error(data?.error || "Failed to load the adoption draft.");
+        }
+        if (cancelled) return;
+        setForm({ ...emptyForm(), ...data.fields });
+        setAdoptUnknowns(data.unknowns || []);
+        setAdoptWorkItemId(adoptParam);
+        setAdoptReason("");
+        setCopySourceId(null);
+        setValidation(null);
+        setEditingId("new");
+      } catch (error) {
+        if (cancelled) return;
+        dispatchAppToast(
+          error instanceof Error ? error.message : "Failed to load the adoption draft.",
+          "error"
+        );
+      } finally {
+        if (cancelled) return;
+        // Dropped with replace, never a pushed entry: the browser's Back
+        // button belongs to the operator, and a reload must not reopen a form
+        // for a model that has since been created.
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("adopt");
+        const suffix = params.toString();
+        router.replace(suffix ? `${pathname}?${suffix}` : pathname, { scroll: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately keyed on the parameter alone. Re-running when the router
+    // objects change would refetch the draft and overwrite edits already typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adoptParam]);
+
   // Display only. `models` stays the complete registry, so editing,
   // duplicating, archiving and the replacement-model selector keep seeing
   // every row whatever the list is currently showing.
@@ -216,6 +282,30 @@ export function AdminModelRegistryPanel() {
     [models, lifecycle]
   );
   const hiddenNote = lifecycleHiddenNote(lifecycle, hiddenByLifecycle);
+
+  // Recomputed as the prices are typed, so the class an operator is about to
+  // save is measured against the model's own cost before the save rather than
+  // in a report afterwards. A floor, not a recommendation -- what Tomverse
+  // charges sits at or above it and is nobody's arithmetic but a person's.
+  const creditFloor = useMemo(
+    () =>
+      suggestCreditFloor({
+        inputUsdPerMillionTokens: form.inputUsdPerMillionTokens,
+        outputUsdPerMillionTokens: form.outputUsdPerMillionTokens,
+        maxOutputTokens: form.maxOutputTokens,
+        // Anthropic first-party requests write a five-minute prompt cache at a
+        // premium on the input price, so the costliest input token on that
+        // provider is not the list price. Left at 1 elsewhere.
+        inputPriceMultiplier:
+          form.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+      }),
+    [
+      form.inputUsdPerMillionTokens,
+      form.outputUsdPerMillionTokens,
+      form.maxOutputTokens,
+      form.provider,
+    ]
+  );
 
   const updateLocation = (
     nextQuery: string,
@@ -280,8 +370,17 @@ export function AdminModelRegistryPanel() {
       const isNew = editingId === "new";
       const updatePayload: Partial<FormState> = { ...form };
       delete updatePayload.id;
+      // Adopting: the create and the queue transition are one act on the
+      // server, so the work item travels with the request rather than being
+      // moved by a second call that can fail on its own.
+      const createUrl =
+        isNew && adoptWorkItemId
+          ? `/api/admin/models?workItemId=${encodeURIComponent(
+              adoptWorkItemId
+            )}&reason=${encodeURIComponent(adoptReason.trim())}`
+          : "/api/admin/models";
       const response = await fetch(
-        isNew ? "/api/admin/models" : `/api/admin/models/${encodeURIComponent(form.id)}`,
+        isNew ? createUrl : `/api/admin/models/${encodeURIComponent(form.id)}`,
         {
           method: isNew ? "POST" : "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -297,8 +396,19 @@ export function AdminModelRegistryPanel() {
       setEditingId(null);
       setCopySourceId(null);
       setValidation(null);
+      const adopted = isNew && Boolean(adoptWorkItemId);
+      setAdoptWorkItemId(null);
+      setAdoptUnknowns([]);
+      setAdoptReason("");
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
-      dispatchAppToast(isNew ? "Model added to the DB registry." : "Model registry updated.", "success");
+      dispatchAppToast(
+        adopted
+          ? "Model added, and its discovery item moved to validation."
+          : isNew
+            ? "Model added to the DB registry."
+            : "Model registry updated.",
+        "success"
+      );
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : "Failed to save model.", "error");
     } finally {
@@ -508,18 +618,85 @@ export function AdminModelRegistryPanel() {
           <div className="my-auto w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{copySourceId ? "Duplicate registry entry" : editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{adoptWorkItemId ? "Adopt discovered model" : copySourceId ? "Duplicate registry entry" : editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
                 <h3 className="mt-1 text-xl font-black text-white">{form.name || "Untitled model"}</h3>
                 {copySourceId ? (
                   <p className="mt-1 text-xs text-amber-200">
                     Copied from {copySourceId}. Confirm the new Registry ID and Provider API model ID before enabling it.
                   </p>
                 ) : null}
+                {adoptWorkItemId ? (
+                  <p className="mt-1 text-xs text-zinc-300">
+                    Prefilled from the provider catalogue. Saving also moves this
+                    discovery item to validation.
+                  </p>
+                ) : null}
               </div>
-              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
+              <button type="button" onClick={() => { setEditingId(null); setCopySourceId(null); setAdoptWorkItemId(null); setAdoptUnknowns([]); }} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800"><X className="h-5 w-5" /></button>
             </div>
 
             <div className="grid gap-6 p-5">
+              {adoptWorkItemId ? (
+                <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-200">
+                    아직 사람이 정해야 하는 값
+                  </p>
+                  <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
+                    {adoptUnknowns.map((item) => (
+                      <li key={item}>· {item}</li>
+                    ))}
+                  </ul>
+                  <label className={`${labelClass} mt-4`}>
+                    채택 사유 (필수)
+                    <input
+                      value={adoptReason}
+                      onChange={(e) => setAdoptReason(e.target.value)}
+                      className={inputClass}
+                      placeholder="왜 지금 이 모델을 편입하는지 — 승인 기록에 남습니다"
+                    />
+                  </label>
+                </div>
+              ) : null}
+              {editingId === "new" ? (
+                <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
+                    Credit floor from base token prices
+                  </p>
+                  {isCreditFloor(creditFloor) ? (
+                    <p className="mt-2 text-xs leading-relaxed text-zinc-300">
+                      Worst accepted turn — {creditFloor.inputTokens.toLocaleString()} input
+                      tokens plus a full {creditFloor.outputTokens.toLocaleString()}-token
+                      answer — costs{" "}
+                      <span className="font-mono text-white">
+                        US${(creditFloor.worstCaseMicroUsd / 1_000_000).toFixed(3)}
+                      </span>
+                      {creditFloor.inputMultiplier > 0 && form.provider === "anthropic"
+                        ? " (input at the prompt-cache write premium)"
+                        : ""}
+                      . The cheapest class that covers it is{" "}
+                      <span className="font-bold text-white">{creditFloor.usageClass}</span> at{" "}
+                      <span className="font-bold text-white">{creditFloor.credits}</span> credits —
+                      a lower bound, not a price. Native search per query, long-context price
+                      tiers and separately billed reasoning tokens are not in this figure, so a
+                      model carrying any of them needs more.
+                    </p>
+                  ) : creditFloor.reason === "above_every_class" ? (
+                    <p className="mt-2 text-xs leading-relaxed text-red-300">
+                      No usage class covers this price: the worst accepted turn costs{" "}
+                      <span className="font-mono">
+                        US${((creditFloor.worstCaseMicroUsd ?? 0) / 1_000_000).toFixed(3)}
+                      </span>
+                      . Either the credit ceiling moves, or this model waits.
+                    </p>
+                  ) : (
+                    <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+                      {creditFloor.reason === "output_cap_unknown"
+                        ? "Set the maximum output tokens to compute the floor."
+                        : "Enter the provider's input and output prices to compute the floor."}
+                    </p>
+                  )}
+                </div>
+              ) : null}
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-2">
                 <legend className="px-2 text-sm font-bold text-white">Identity and provider API</legend>
                 <label className={labelClass}>Registry ID<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
@@ -585,7 +762,7 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> Validate</button>
-                <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
+                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && adoptReason.trim().length < 4)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
               </div>
             </div>
           </div>
