@@ -251,6 +251,60 @@ files, remain byte-identical. The package must verify that boundary, bind the
 final documents and source commit, preserve all round-0 records, and run its
 own checks. Round-1 independent review is still pending at this source record.
 
+### Last allowed revision — round 2 local verification
+
+Claude round 1 actually reviewed source
+`43fc1a36d7f0104975391a8645e0f53d74a94170` and digest
+`sha256:c902e6ba41ad3c0577cb0271c31c40c2b6251106feecb550e58b345bc372cf10`.
+The verdict was `approve` with two nits, but the unchanged controller recorded
+both as `fix_requested` and kept the exchange `awaiting_revision`. This was
+not a passed exchange. The original seven findings were not re-raised.
+
+Both Chat shells now route the retired-model/account-quota recovery action to
+the existing model picker, preserving its focus return and Review's toggle
+behavior. Both model-removal handlers refuse Chat before confirmation, mutation
+or DELETE. The reviewer found no user-reachable destructive path through the
+already gated shells; the handler correction is defense in depth, not evidence
+of an observed user data-loss incident. Actual AST-extracted callbacks were
+executed before and after the correction, with Review as the behavior control.
+
+Fresh final round-2 observations, completed by `2026-09-12T07:33:18.716Z`:
+
+| Receipt | Actual result |
+| --- | --- |
+| `round2-final-build` | Production build passed |
+| `round2-chat-desktop-e2e` / `round2-chat-mobile-e2e` | 34 + 34 passed, zero failures/skips |
+| `round2-affected-desktop-e2e` / `round2-affected-mobile-e2e` | 150 + 82 passed, existing skips 37 + 48, zero failures |
+| `round2-attachment-browser-e2e` | 28 passed, zero failures/skips |
+| `round2-final-typecheck` / `round2-final-scoped-lint` | Passed; 42 code files, lint warnings zero |
+| `postgres-f4-20260912/round2-final-attachment-db` | 42 passed, zero failures/skips; real isolated PostgreSQL and stubbed object storage |
+
+Browser total is **328 passed**, with 85 existing skips separate. The same two
+Linux-canonical composer golden cases were not selected, re-recorded or waived.
+The new browser cases click the recovery action itself, rather than using a
+different picker opener, and verify a singleton replacement while retaining the
+transcript/conversation with zero DELETE and zero additional answer requests.
+The database tests reran against the same dedicated retained test cluster,
+including strict `P2028` behavior; no new migration or real R2 call was made.
+
+The ten final receipt directories (including prebuild typecheck) bind 47 paths.
+Their UI/build/static scope hash is
+`f664738db1f702778d4f3497bb1a05ec7fba8968cc044a01cbe54954e14c7df2`.
+The DB manifest has a different entry structure; the root compared all before
+and after per-file hashes with live source, with zero differences. Successful
+desktop partial/recovery and mobile 390px screenshots were also opened by the
+root. These are bounded mock observations, not canonical-golden, live-provider
+or physical-device certification.
+
+Only this plan and the progress report change after these runs. All other 45
+paths remain fixed. The fresh precommit/native package must bind these reporting
+edits, rerun its five suites and eleven guards, and record their actual counts.
+Round 2 is the last authorized revision of this same exchange; its independent
+verdict remains pending at this source record. Do not treat `approve` prose,
+author checks or the absence of an execution error as a passed controller gate.
+No new exchange, automatic execution retry, API billing, rollout or extra
+completion percentage is authorized by this correction.
+
 Freeze source commit and diff digest after local checks. Ask Claude to review
 requirements and diff first, then test evidence and the author's account, through
 the existing controller and subscription CLI in read-only mode. Initial review

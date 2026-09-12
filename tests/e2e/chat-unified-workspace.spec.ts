@@ -55,7 +55,7 @@ type ConversationFixture = {
   surface: "chat" | "workspace";
 };
 
-function installControlledChatFetch(options: { routedModelId?: string } = {}) {
+function installControlledChatFetch(options: { routedModelId?: string; responseErrorCode?: string } = {}) {
   const originalFetch = window.fetch.bind(window);
   const controls: Array<{
     request: RecordedRequest;
@@ -81,6 +81,15 @@ function installControlledChatFetch(options: { routedModelId?: string } = {}) {
       fail: () => {},
       aborted: false,
     };
+    if (options.responseErrorCode) {
+      controls.push(control);
+      return new Response(JSON.stringify({
+        code: options.responseErrorCode, error: "QA controlled model refusal", traceId: "qa-unified-refusal",
+      }), {
+        status: options.responseErrorCode === "MODEL_RETIRED" ? 410 : 402,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         control.push = (text) => {
@@ -139,6 +148,7 @@ async function openChat(page: Page, options: {
   newAccount?: boolean;
   selectedModels?: string[];
   routedModelId?: string;
+  responseErrorCode?: string;
 } = {}) {
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, { selectedModels: [MODEL_A] });
@@ -247,7 +257,9 @@ async function openChat(page: Page, options: {
   await page.route("**/api/chat/context", (route) => route.fulfill({
     json: { ok: true, contextBundle: null, memoryUsedCount: 0 },
   }));
-  await page.addInitScript(installControlledChatFetch, { routedModelId: options.routedModelId });
+  await page.addInitScript(installControlledChatFetch, {
+    routedModelId: options.routedModelId, responseErrorCode: options.responseErrorCode,
+  });
   await page.setViewportSize(options.viewport ?? DESKTOP_VIEWPORT);
   await page.goto(`/chat/workspace?lang=en${options.fresh ? "" : `&conversation=${CONVERSATION}`}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
@@ -538,6 +550,35 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(JSON.stringify(second.messages)).toContain(prompt);
     expect(await requests(page)).toHaveLength(2);
   });
+
+  for (const errorCode of ["MODEL_RETIRED", "CREDIT_BALANCE_INSUFFICIENT"] as const) {
+    test(`${errorCode} recovery opens the model picker and changes selection without deleting history or resending`, async ({ page }, testInfo) => {
+      const viewport = testInfo.project.name === "mobile-chromium" ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const state = await openChat(page, { responseErrorCode: errorCode, viewport });
+      await submitComposer(page, "Keep this refused question while I choose another model.", viewport.width);
+      const recoveryButton = page.getByRole("button", { name: "Choose another model", exact: true });
+      await expect(recoveryButton).toBeVisible();
+      await expect(message(page, FIRST_ANSWER)).toBeVisible();
+      const transcript = await page.getByTestId("chat-message").allTextContents();
+      expect(await requests(page)).toHaveLength(1);
+      await recoveryButton.click();
+      const picker = page.locator("#chat-input-popover");
+      // Do not use the general picker-opening helper here: that would conceal
+      // an inert recovery button by independently opening the normal trigger.
+      await expect(picker).toBeVisible();
+      await picker.getByTestId("model-picker-open-all").click();
+      await picker.locator(`[data-testid="model-option"][data-model-id="${MODEL_B}"]`).click();
+      await expect(picker.getByTestId("selected-model-chip")).toHaveCount(1);
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      await expect(picker).toHaveCount(0);
+      await expect.poll(() => state.conversations[0].selectedModels).toEqual([MODEL_B]);
+      await expect(page).toHaveURL(new RegExp(`conversation=${CONVERSATION}`));
+      expect(await page.getByTestId("chat-message").allTextContents()).toEqual(transcript);
+      expect(state.writes.filter((write) => write.method === "DELETE")).toEqual([]);
+      expect(await requests(page)).toHaveLength(1);
+    });
+  }
 
   test("reload is GET-only and restores the selected failed question, not the newest question", async ({ page }) => {
     const olderPrompt = "The older failed question that must be restored.";

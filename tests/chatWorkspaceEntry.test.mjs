@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
+import ts from "typescript";
 import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, chatSingleModelRefusal, decideChatWorkspaceEntry, newWorkspaceDraftModels } from "../lib/chatWorkspaceEntry.ts";
 import { conversationHandoffHref, conversationSurface, surfaceHasContinuationBridge } from "../lib/continuationRoutes.ts";
 
@@ -63,4 +66,77 @@ test("only the consumed draft may clear; edits, added/removed/reordered files re
     { currentAttachmentIds: ["file-a", "file-b", "file-c"] },
     { currentAttachmentIds: ["file-b", "file-a"] },
   ]) assert.equal(chatDraftMatchesSubmission({ ...draft, ...changed }), false);
+});
+
+// Execute the actual private callbacks without mounting the entire page or
+// adding a production-only test API. AST selection fails if the handler moves.
+const parseSource = (path) => ts.createSourceFile(path,
+  readFileSync(new URL(path, import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const findNodes = (source, predicate) => {
+  const matches = [];
+  const visit = (node) => { if (predicate(node)) matches.push(node); ts.forEachChild(node, visit); };
+  visit(source);
+  return matches;
+};
+const executable = (node, source, context) => vm.runInNewContext(ts.transpileModule(
+  `(${node.getText(source)})`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+).outputText, context);
+const pageSource = parseSource("../app/(site)/(application)/chat/ChatPageClient.tsx");
+const pageHandler = (name, context) => {
+  const matches = findNodes(pageSource, (node) => ts.isVariableDeclaration(node) &&
+    ts.isIdentifier(node.name) && node.name.text === name);
+  assert.equal(matches.length, 1, `${name} must identify the actual page handler`);
+  assert.ok(matches[0].initializer && ts.isArrowFunction(matches[0].initializer));
+  return executable(matches[0].initializer, pageSource, context);
+};
+
+test("actual Chat remove handlers refuse before confirmation, selection mutation or history deletion", async () => {
+  const events = [];
+  const context = {
+    mountedSurface: "chat", selectedModels: { filter: () => { events.push("selection-read"); return []; } },
+    disabledPanels: { filter: () => { events.push("disabled-read"); return []; } },
+    currentChatId: "chat-owned", setPendingRemoveModelId: () => events.push("confirmation"),
+    mutateModelSettings: () => events.push("mutation"), accountConversationId: (id) => id,
+    fetch: async () => { events.push("DELETE"); return {}; }, discardResponseBody: async () => {},
+  };
+  await pageHandler("handleRemoveModel", context)("model-a");
+  await pageHandler("executeRemoveModel", context)("model-a");
+  assert.deepEqual(events, []);
+});
+
+test("actual Review remove handlers retain confirmation, model mutation and model-scoped DELETE", async () => {
+  const events = [];
+  const context = {
+    mountedSurface: "workspace", selectedModels: ["model-a", "model-b"], disabledPanels: ["model-a"],
+    currentChatId: "review-owned", setPendingRemoveModelId: (id) => events.push(["confirmation", id]),
+    mutateModelSettings: (id, models, disabled) => events.push(["mutation", id, models, disabled]),
+    accountConversationId: (id) => id,
+    fetch: async (url, options) => { events.push([options.method, url]); return {}; },
+    discardResponseBody: async () => {},
+  };
+  await pageHandler("handleRemoveModel", context)("model-a");
+  await pageHandler("executeRemoveModel", context)("model-a");
+  assert.deepEqual(events, [["confirmation", "model-a"], ["mutation", "review-owned", ["model-b"], []],
+    ["DELETE", "/api/conversations/review-owned/messages?modelId=model-a"]]);
+});
+
+test("both actual shell recovery callbacks open the existing picker only for the unified Chat transcript", () => {
+  class FocusTarget {}
+  const trigger = new FocusTarget();
+  for (const path of ["../components/chat/DesktopChatShell.tsx", "../components/chat/MobileChatShell.tsx"]) {
+    const source = parseSource(path);
+    const attributes = findNodes(source, (node) => ts.isJsxAttribute(node) && node.name.getText(source) === "onRequestCloseModel");
+    assert.equal(attributes.length, 1);
+    const expression = attributes[0].initializer.expression;
+    for (const singleTranscript of [true, false]) {
+      const events = [];
+      executable(expression, source, { singleTranscript, modelId: "model-a", HTMLElement: FocusTarget,
+        document: { activeElement: trigger }, openChatModelPicker: (target) => events.push(["picker", target]),
+        onToggleModel: (id) => events.push(["toggle", id]),
+      })();
+      assert.deepEqual(events, singleTranscript ? [["picker", trigger]] : [["toggle", "model-a"]]);
+    }
+    assert.ok(findNodes(source, (node) => ts.isImportDeclaration(node) &&
+      node.moduleSpecifier.text === "@/lib/chatModelPickerEvents").length > 0);
+  }
 });

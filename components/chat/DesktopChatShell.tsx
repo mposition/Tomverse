@@ -66,6 +66,7 @@ import type {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { ConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import { openChatModelPicker } from "@/lib/chatModelPickerEvents";
 
 const interpolate = (template: string, values: Record<string, string | number>) =>
   Object.entries(values).reduce(
@@ -1194,7 +1195,9 @@ export function DesktopChatShell({
                   useCenteredWelcome
                   onContentStateChange={handleContentStateChange}
                   onStatusChange={handleModelStatusChange}
-                  onRequestCloseModel={() => onToggleModel(modelId)}
+                  onRequestCloseModel={() => singleTranscript
+                    ? openChatModelPicker(document.activeElement instanceof HTMLElement ? document.activeElement : null)
+                    : onToggleModel(modelId)}
                   hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}
                 />

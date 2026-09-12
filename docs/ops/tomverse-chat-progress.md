@@ -79,15 +79,43 @@
 | C02·C04 단일 흐름·저자 | 모델과 무관한 대화 runtime·전체 모델 history; fallback/routed/requested 순서로 답변 저자 표시 | 모든 모델의 일반적인 최적성 또는 새로운 Router 품질 증거 |
 | C05·C06 중단·초안 | partial과 오류 안내 분리; 선택한 실패 질문·첨부를 명시적으로 복원하고 새 질문에 저장; 준비 중 계정·대화·모델·새 Chat 의도 변경과 수정한 초안 보호 | 새로고침 뒤 미저장 partial 복구, 서버 attempt 재개, draft 디스크 저장 |
 | C07 모바일·기존 기능 | 기존 composer·drawer·Review·Studio 경로를 재사용하고 mock 브라우저 회귀 검증 | 실제 OS/키보드·native 앱 검증 또는 모든 기능 조합의 운영 검증 |
-| 검증 | 수정본 build·typecheck·42파일 lint 통과; 브라우저 324개와 격리 PostgreSQL 42개 통과, 기존 project skip 85개는 별도 집계 | Linux golden·실기기·운영 DB·실제 R2/provider 검증 또는 아직 실행하지 않은 동결 패키지 체크의 통과 |
-| 독립 검토 | 실제 Claude round 0은 request_changes 7건; 수정 구현·로컬 검증 후 round 1 검토 대기 | 독립 승인 완료, 기존 작업의 승인 상속, 사람의 출시 승인 |
+| 검증 | 마지막 수정본 build·typecheck·42파일 lint 통과; 브라우저 328개와 격리 PostgreSQL 42개 통과, 기존 project skip 85개는 별도 집계 | Linux golden·실기기·운영 DB·실제 R2/provider 검증 또는 아직 실행하지 않은 동결 패키지 체크의 통과 |
+| 독립 검토 | 실제 Claude round 0의 7건 수정 후 round 1은 approve + nit 2건; controller는 awaiting_revision. 두 항목 보완·검증 후 마지막 round 2 검토 대기 | controller 통과, 기존 작업의 승인 상속, 사람의 출시 승인 |
 | 병합·배포 | 이번 변경은 로컬 작업이며 미병합·미배포 | 선행 #1367 배포를 이번 코드의 배포로 해석 |
 
 Windows conversation-writer 검사기의 경로 정규화도 포함한다. 기존 검사 규칙과
 허용 목록은 유지하며, 실제 CLI가 허용 writer를 통과시키고 비허용 production
 writer를 거부하는 회귀 테스트를 추가했다. 테스트 실패를 면제한 것이 아니다.
 
-### 수정 검토 회차의 최종 로컬 근거
+### 마지막 round 2 수정본의 로컬 근거
+
+round 1의 source `43fc1a36d7f0104975391a8645e0f53d74a94170`와
+digest `sha256:c902e6ba41ad3c0577cb0271c31c40c2b6251106feecb550e58b345bc372cf10`에
+대한 실제 Claude 판정은 approve였지만, 지적 2건이 남아 제어 프로그램은
+통과로 처리하지 않았다. Chat의 오류 복구 버튼이 기존 모델 선택기를 열도록
+연결하고, 모델 제거 핸들러는 확인창·설정 변경·DELETE 전에 Chat을 거부하도록
+보완했다. Review 동작은 유지했다. 현재 UI에서 삭제에 도달할 수 있었다는
+주장은 아니며, 이 항목은 핸들러 자체의 방어 보강이다.
+
+새 round2 기록은 브라우저 **328건 통과**(Chat 34+34, 주변 회귀 150+82,
+첨부 28), 기존 skip 85건·실패 0건이다. 같은 Linux golden 2건은 미실행으로
+남겼고 gate를 완화하지 않았다. 격리 PostgreSQL 42건, build·typecheck·42파일
+lint도 새로 통과했다. 실제 공급자·R2·운영 DB 호출은 없다.
+
+최종 검사들은 `2026-09-12T07:33:18.716Z`까지 완료했다. UI·정적 검사 47경로
+scope SHA는 `f664738db1f702778d4f3497bb1a05ec7fba8968cc044a01cbe54954e14c7df2`로
+전후 동일했다. DB와 UI를 포함한 열 개 receipt의 파일별 해시를 실제 소스와
+대조해 차이 0을 확인했다. 두 운영 문서만 이후 갱신하며, 나머지 45경로는
+유지한다. 새 동결 패키지가 문서와 소스를 결속하고 자체 검사를 실행해야 한다.
+마지막 허용 round 2의 독립 판정은 이 소스 기록 시점에 아직 대기 중이다.
+
+동일 기능 사이클의 수정이므로 전체 웹 Chat 추정은 **약 60%**, 작업 시작 전
+약 55% 대비 **+5%p**를 유지한다. 이번 nit 보완에 추가 진척을 더하지 않는다.
+권장 순서는 마지막 독립 검토·PR 통합 CI → 승인 범위의 staging 흐름 확인 →
+영속 중단 복구 계약·구현 → Refiner/Planner 및 별도 승인된 모델 품질 평가다.
+병합·배포·flag 활성화·새 과금은 이 기록이 승인하지 않는다.
+
+### 이전 round 1 수정 검토에서 보존한 로컬 근거
 
 같은 작업의 round 0 커밋 `af298c77b034e1eee894bc5103f8dafe65ac7a6b`와
 실제 Claude 지적 7건은 보존했다. 새 초안의 단일 모델 초기화, 정확한 실패 안내,

@@ -5509,10 +5509,14 @@ export function ChatPageClient({
     };
 
   const handleRemoveModel = async (modelId: string) => {
+    if (mountedSurface === "chat") return;
     setPendingRemoveModelId(modelId);
   };
 
   const executeRemoveModel = async (modelId: string) => {
+    // A unified transcript must not inherit a model-scoped destructive action,
+    // even if a stale confirmation or future caller reaches this handler.
+    if (mountedSurface === "chat") return;
     const nextModels = selectedModels.filter((id) => id !== modelId);
     const nextDisabled = disabledPanels.filter((id) => id !== modelId);
 
