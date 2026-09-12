@@ -78,7 +78,8 @@ jobs:
     # for this job. The continuation contract suite added ~31s, and run
     # 34695229219 then hit the old 10-minute step ceiling while still passing
     # tests. Keep the unit deadline below the job deadline so an actual hang
-    # still identifies its stage and leaves time for the static checks below.
+    # identifies its stage; the remaining job budget covers the static checks
+    # below on a slow but passing run.
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -113,7 +114,7 @@ jobs:
         run: npm run security:regression
 
       - name: Unit and API policy tests
-        timeout-minutes: 12
+        timeout-minutes: 15
         run: npm run test:unit
 
       # Its own process, not part of test:unit, because it needs
@@ -328,6 +329,7 @@ jobs:
         run: npm run check:memory-eval-succ8
 
       - name: Memory eval succ-9 structural checks
+        timeout-minutes: 5
         run: npm run check:memory-eval-succ9
 
       # Tomverse Chat release thresholds live only in the canonical registry
