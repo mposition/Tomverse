@@ -33,7 +33,10 @@ import {
   shouldQueueModelCandidate,
   supersedingServedModel,
 } from "../lib/modelLifecycleTriage.ts";
-import { OPEN_WORK_ITEM_STATUSES } from "../lib/modelLifecycleWorkItemCore.ts";
+import {
+  OPEN_WORK_ITEM_STATUSES,
+  observedPairsOf,
+} from "../lib/modelLifecycleWorkItemCore.ts";
 import { foreignProductSurfaceId } from "../lib/providerModelCatalogCore.ts";
 import { transitionWorkItems } from "../lib/modelLifecycleWorkItems.ts";
 import { listImageModels } from "../lib/imageModelRegistry.ts";
@@ -75,6 +78,7 @@ try {
         apiModel: true,
         status: true,
         firstSeenAt: true,
+        evidence: true,
       },
     }),
     prisma.modelRegistryEntry.findMany({
@@ -99,7 +103,17 @@ try {
     // Perplexity candidates until the parser stopped it -- and a parser fix
     // only governs tomorrow's scan. The rows already in the queue stay open,
     // and a backfill re-creates them, until something closes them.
-    const reason = foreignProductSurfaceId(item.provider, item.apiModel)
+    //
+    // Asked of *every* sighting, not the pair the row was filed under. The
+    // queue accumulates later providers onto an existing item, so an item that
+    // Perplexity's Agent list created and Anthropic's own catalogue later
+    // confirmed is a real discovery wearing a bad first sighting. Closing it
+    // would also stamp a decision key that suppresses the legitimate finding
+    // from then on.
+    const sightings = observedPairsOf(item);
+    const reason = sightings.every((pair) =>
+      foreignProductSurfaceId(pair.provider, pair.apiModel)
+    )
       ? "foreign_product_surface"
       : !shouldQueueModelCandidate(item.apiModel)
       ? isPrereleaseModel(item.apiModel)

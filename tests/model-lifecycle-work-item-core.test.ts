@@ -5,6 +5,7 @@ import {
   candidateIdentity,
   mergeObservedVia,
   newCandidatesForQueue,
+  observedPairsOf,
   observationsForExistingItems,
   selectQueueCandidates,
   TERMINAL_WORK_ITEM_STATUSES,
@@ -540,4 +541,47 @@ test("the report and the queue answer 'same model?' the same way", () => {
   ]) {
     assert.equal(candidateIdentity(apiModel), candidateFamilyIdentity(apiModel));
   }
+});
+
+// Sightings. Shared with the adoption preflight and the queue cleanup, which
+// refuse and close on what these pairs say; two readings of the same evidence
+// that drift apart is one surface refusing what the other has thrown away.
+
+test("sightings come back as whole pairs", () => {
+  assert.deepEqual(
+    observedPairsOf({
+      provider: "perplexity",
+      apiModel: "anthropic/claude-fable-5-1",
+      evidence: {
+        observedVia: [
+          { provider: "perplexity", apiModel: "anthropic/claude-fable-5-1" },
+          { provider: "anthropic", apiModel: "claude-fable-5-1" },
+        ],
+      },
+    }),
+    [
+      { provider: "perplexity", apiModel: "anthropic/claude-fable-5-1" },
+      { provider: "anthropic", apiModel: "claude-fable-5-1" },
+    ]
+  );
+});
+
+test("an item filed before sightings existed reports the pair it was filed under", () => {
+  assert.deepEqual(
+    observedPairsOf({ provider: "groq", apiModel: "llama-4.2-70b", evidence: null }),
+    [{ provider: "groq", apiModel: "llama-4.2-70b" }]
+  );
+});
+
+test("a half-written sighting is dropped rather than halved", () => {
+  // Taking the provider from one sighting and the identifier from another
+  // permits a combination nothing ever served.
+  assert.deepEqual(
+    observedPairsOf({
+      provider: "groq",
+      apiModel: "llama-4.2-70b",
+      evidence: { observedVia: [{ provider: "qwen" }, "nonsense", null] },
+    }),
+    [{ provider: "groq", apiModel: "llama-4.2-70b" }]
+  );
 });

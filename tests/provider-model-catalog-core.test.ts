@@ -8,6 +8,7 @@ import {
   isReviewableProviderModelId,
   missingConfirmationRuns,
   parseProviderCatalogResponse,
+  providerReportedUnservable,
   planCatalogReconciliation,
   providerCatalogHttpFailure,
   providerCatalogUrl,
@@ -684,4 +685,44 @@ test("an empty modality list is read as silence, not as a denial", () => {
   });
   assert.equal(model.metadata.inputModalities, null);
   assert.equal(model.metadata.vision, null);
+});
+
+test("terminal lifecycles block auto-restore, announced endings do not", () => {
+  // `mapped` is what reconciliation restores from: a model this automation
+  // disabled for being absent is switched back on the day it reappears.
+  //
+  // The split is the whole point. `deprecated`, `legacy` and a scheduled
+  // shutdown are notices about a future -- the model answers today, and
+  // refusing to restore those leaves a working model off after a transient
+  // catalogue gap, which is the damage restore exists to undo. `inactive`,
+  // `archived`, `retired` and `sunset` are statements about now.
+  const observed = (item: Record<string, unknown>) =>
+    parseProviderCatalogResponse("groq", { data: [{ id: "llama-4.2-70b", ...item }] })[0];
+
+  for (const dead of [
+    { active: false },
+    { archived: true },
+    { stage: "retired" },
+    { stage: "sunset" },
+  ]) {
+    assert.equal(providerReportedUnservable(observed(dead)), true, JSON.stringify(dead));
+  }
+  for (const alive of [
+    { deprecated: true },
+    { stage: "legacy" },
+    { shutdown_date: "2027-01-01" },
+  ]) {
+    const model = observed(alive);
+    assert.equal(providerReportedUnservable(model), false, JSON.stringify(alive));
+    // Still a lifecycle: the operator is told, the model is not restored-blocked.
+    assert.ok(model.lifecycle, JSON.stringify(alive));
+  }
+});
+
+test("a model with no lifecycle at all is servable", () => {
+  const [model] = parseProviderCatalogResponse("groq", {
+    data: [{ id: "llama-4.2-70b", active: true }],
+  });
+  assert.equal(model.lifecycle, null);
+  assert.equal(providerReportedUnservable(model), false);
 });
