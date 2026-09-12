@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { resolvePostgresConnectionConfig } from "../../../lib/postgresConnectionConfigCore.mjs";
@@ -70,6 +70,31 @@ export const adminFixtureDatabase = () => {
       connectionString: config.connectionString,
       options: config.poolOptions,
     });
+    // The fixture writes do not need to survive a crash of the machine they
+    // run on. `resolveAdminE2EDatabaseUrl()` has already refused anything but
+    // a test-marked, disposable database -- one this harness truncates before
+    // every single test -- so a commit that returns before its WAL reaches the
+    // disk loses nothing that was going to be read again.
+    //
+    // It is the commit count that made this worth setting. Every test resets
+    // and re-seeds, and the seed is one transaction per reset (see
+    // `seedAdminFixtures`), so the suite commits a few hundred times; before
+    // that change it committed a few thousand. On a runner whose disk is
+    // stalling -- the observed failure mode, 20m12s against a 7m31s run
+    // starting in the same minute -- each of those commits waits on an fsync.
+    //
+    // Scoped to this pool, so it says nothing about how the application's own
+    // connections commit. Visibility is unaffected: `synchronous_commit` is a
+    // durability setting, and the server behind the tests reads these rows
+    // through its own pool exactly as before.
+    pool.on("connect", (connection) => {
+      connection
+        .query("SET synchronous_commit = off")
+        .catch(() => {
+          // A server that refuses the SET keeps its default. Slower, still
+          // correct -- and not a reason to fail a test run.
+        });
+    });
     client = new PrismaClient({
       adapter: new PrismaPg(
         pool,
@@ -89,14 +114,25 @@ export const disconnectAdminFixtureDatabase = async () => {
 };
 
 /**
- * Truncates every application table.
+ * Asserts the schema is there, once per process.
  *
- * Discovered from `information_schema` rather than listed by hand, so a new
- * Prisma model cannot silently start leaking state between tests. `CASCADE`
- * makes the order irrelevant; `_prisma_migrations` is left alone because
- * dropping it would make the schema look unmigrated.
+ * The assertion is what this is for: a database with no tables means nobody
+ * pushed the schema, and saying so names the cause far better than 200 specs
+ * failing on a missing relation. It ran on every reset before, which is 200-odd
+ * identical catalogue queries for an answer that cannot change inside a run --
+ * the schema is pushed by `scripts/run-admin-e2e.mjs` before Playwright starts
+ * and nothing after that adds a table.
+ *
+ * It deliberately does *not* hand the list to the truncate below. Discovery has
+ * to happen at the moment of truncation, from the catalogue, or a new Prisma
+ * model could start leaking state between tests; a list cached here and reused
+ * there would be the hand-written list this file has always refused, just
+ * written by a query instead of a person.
  */
-export const resetAdminDatabase = async () => {
+let schemaAsserted = false;
+
+const assertAdminSchemaPresent = async () => {
+  if (schemaAsserted) return;
   const prisma = adminFixtureDatabase();
   const tables = await prisma.$queryRaw<{ tablename: string }[]>`
     SELECT tablename FROM pg_tables
@@ -107,28 +143,165 @@ export const resetAdminDatabase = async () => {
       "The admin E2E database has no tables. Run `npm run test:e2e:admin`, which pushes the Prisma schema before starting Playwright."
     );
   }
-  const quoteIdentifier = (value: string) => `"${value.replaceAll('"', '""')}"`;
-  const list = tables
-    .map(
-      (row) =>
-        `${quoteIdentifier(fixtureSchema)}.${quoteIdentifier(row.tablename)}`
-    )
-    .join(", ");
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`
-  );
+  schemaAsserted = true;
+};
+
+/**
+ * Empties every application table.
+ *
+ * Discovered from the catalogue rather than listed by hand, so a new Prisma
+ * model cannot silently start leaking state between tests. `CASCADE` makes the
+ * order irrelevant; `_prisma_migrations` is left alone because dropping it
+ * would make the schema look unmigrated.
+ *
+ * ## Why it truncates only the tables that hold a row
+ *
+ * `TRUNCATE` is not free on an empty table. It allocates a new relfilenode for
+ * the relation and for each of its indexes, so truncating all 122 models writes
+ * a few hundred new files -- per test. Run 33349427451 recorded the bill: a
+ * single PostgreSQL checkpoint with write=55s, sync=11s over 52,974 files,
+ * inside a job that then hit its step cap with no test having failed. The
+ * fixtures touch roughly a quarter of the schema, so most of those files were
+ * for tables that were already empty and would be empty afterwards.
+ *
+ * The probe that decides is a server-side `EXISTS ... LIMIT 1` per table, which
+ * on an empty relation is a scan of zero pages. Doing it inside one `DO` block
+ * keeps it to a single round trip and keeps the catalogue as the source of the
+ * table list -- both properties the previous statement had.
+ *
+ * ## Why it locks everything before it probes anything
+ *
+ * This is the part that cannot be dropped, and it is why the lock is a separate
+ * statement from the truncation that follows it.
+ *
+ * `TRUNCATE` takes `ACCESS EXCLUSIVE`, so the unconditional statement did two
+ * things at once: it emptied the tables, and it *waited* for any transaction
+ * still writing to them. Probing first would have kept only the first half. An
+ * uncommitted `INSERT` -- the application server finishing a request whose
+ * browser context Playwright has already closed -- is invisible to `EXISTS`
+ * under MVCC, so the probe would call that table empty, skip it, and the row
+ * would appear in the next test when the writer committed. Order independence,
+ * which is the whole claim this file makes, would hold for every test except
+ * the ones that came after a slow request.
+ *
+ * So the lock is taken over every table first, exactly as `TRUNCATE` would
+ * have, and only then is anything probed. Locking is not what cost the 52,974
+ * files -- rewriting relfilenodes is -- so this keeps the barrier and drops
+ * only the work. In `READ COMMITTED` each statement inside the block takes a
+ * fresh snapshot, so a probe that runs after the lock was granted sees whatever
+ * the blocked writer committed on its way out.
+ *
+ * The deadlock exposure is the one the previous statement already had: it also
+ * locked every table it listed, in catalogue order, while the application locks
+ * in its own. Unchanged, and it fails loudly rather than silently.
+ *
+ * `RESTART IDENTITY` is gone because there is nothing to restart: the schema
+ * declares no `autoincrement()` column, so no table owns an identity sequence,
+ * and every fixture id is an explicit value from `fixture-data.ts`. It was
+ * asking the server to rewrite sequences that do not exist.
+ *
+ * Not combined with the seed's transaction, on purpose. `TRUNCATE` takes
+ * ACCESS EXCLUSIVE on everything it touches, and holding those locks for the
+ * length of the seed would block the application server's own reads -- turning
+ * a fixture detail into test flake.
+ */
+export const resetAdminDatabase = async () => {
+  const prisma = adminFixtureDatabase();
+  await assertAdminSchemaPresent();
+  // The schema is a declared variable rather than an interpolated identifier,
+  // so `format('%I.%I', ...)` does the quoting for both halves of every name.
+  // It has to be `fixtureSchema` and not `public`: the harness supports a
+  // schema-qualified connection string, and a reset hard-coded to `public`
+  // would report success having emptied a schema the tests are not using.
+  await prisma.$executeRawUnsafe(`
+    DO $reset$
+    DECLARE
+      target_schema text := '${fixtureSchema.replaceAll("'", "''")}';
+      candidate record;
+      qualified text;
+      every text[] := '{}';
+      occupied text[] := '{}';
+      has_row boolean;
+    BEGIN
+      FOR candidate IN
+        SELECT tablename FROM pg_tables
+        WHERE schemaname = target_schema AND tablename <> '_prisma_migrations'
+      LOOP
+        every := every || format('%I.%I', target_schema, candidate.tablename);
+      END LOOP;
+
+      IF array_length(every, 1) IS NULL THEN
+        RETURN;
+      END IF;
+
+      -- The barrier. Same lock the unconditional TRUNCATE took, taken before
+      -- any table is judged empty, so an in-flight writer finishes first and
+      -- its rows are visible to the probes below.
+      EXECUTE 'LOCK TABLE ' || array_to_string(every, ', ')
+        || ' IN ACCESS EXCLUSIVE MODE';
+
+      FOREACH qualified IN ARRAY every LOOP
+        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s LIMIT 1)', qualified)
+          INTO has_row;
+        IF has_row THEN
+          occupied := occupied || qualified;
+        END IF;
+      END LOOP;
+
+      IF array_length(occupied, 1) > 0 THEN
+        EXECUTE 'TRUNCATE TABLE ' || array_to_string(occupied, ', ') || ' CASCADE';
+      END IF;
+    END
+    $reset$;
+  `);
 };
 
 const iso = (offsetMs: number, from: number) => new Date(from + offsetMs);
+
+/**
+ * How long the seed transaction may take before Prisma abandons it.
+ *
+ * Generous rather than tight. The point of the number is to stop a wedged
+ * transaction holding rows open forever, not to police the seed's speed -- and
+ * a seed that fails because a slow runner crossed a deadline would report
+ * "transaction timed out" for the same condition this whole change is about.
+ * Prisma's default is 5s, which a stalled disk can exceed on its own.
+ */
+const SEED_TRANSACTION_TIMEOUT_MS = 60_000;
+const SEED_TRANSACTION_MAX_WAIT_MS = 20_000;
 
 /**
  * Writes the deterministic dataset described in `fixture-data.ts`.
  *
  * Returns the seed instant so a spec that needs to reason about relative ages
  * can do so without reading the clock a second time.
+ *
+ * ## Why one transaction
+ *
+ * The body issues about thirty writes. Sent one at a time they were thirty
+ * commits, each of which waits for its WAL to reach the disk, and the fixture
+ * is re-written before every test -- so the suite paid a few thousand fsyncs
+ * for a dataset that is identical every time. One transaction makes it one
+ * commit per test.
+ *
+ * It also removes a window rather than adding one. The application server runs
+ * against the same database and is free to serve a request mid-seed; until now
+ * it could read a half-written fixture, and the only reason that never showed
+ * up as flake is that the specs navigate after the fixture returns. Inside a
+ * transaction there is no half-written state to read.
+ *
+ * The body is a separate function purely so it receives the transaction client
+ * under the name it already uses. Nothing inside it changed, and nothing inside
+ * it consumes a write's return value, so the order it writes in is the order it
+ * wrote in before.
  */
-export const seedAdminFixtures = async () => {
-  const prisma = adminFixtureDatabase();
+export const seedAdminFixtures = async () =>
+  adminFixtureDatabase().$transaction(writeAdminFixtures, {
+    timeout: SEED_TRANSACTION_TIMEOUT_MS,
+    maxWait: SEED_TRANSACTION_MAX_WAIT_MS,
+  });
+
+const writeAdminFixtures = async (prisma: Prisma.TransactionClient) => {
   const now = Date.now();
   const at = (offsetMs: number) => iso(offsetMs, now);
 

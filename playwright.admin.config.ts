@@ -57,7 +57,30 @@ export default defineConfig({
   // One worker, always: every test truncates and re-seeds the single fixture
   // database, so concurrent workers would reset each other's state.
   workers: 1,
-  reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report-admin" }]],
+  /**
+   * Ends the run before the CI step's own cap does.
+   *
+   * The cap is 20 minutes in `.github/workflows/admin-console-e2e.yml`. When
+   * GitHub enforces it the runner kills Playwright, and Playwright has not
+   * written its report yet -- run 34600100588 uploaded nothing at all ("No
+   * files were found with the provided path"), so the one run that needed
+   * explaining was the one run with no evidence. Every test in it had passed.
+   *
+   * Three minutes short of the cap, so Playwright reaches its own reporters:
+   * the run still fails, and it fails with a JSON report naming what it got
+   * through and how long each test took. Unset outside CI, where there is no
+   * cap to stay inside and a debugging session may take as long as it likes.
+   */
+  globalTimeout: process.env.CI ? 17 * 60_000 : undefined,
+  // The JSON report is what makes a slow run diagnosable after the fact: per
+  // test durations, uploaded on every run rather than only on failure, so the
+  // next timeout can be compared against the runs that were healthy instead of
+  // against a recollection of them.
+  reporter: [
+    ["list"],
+    ["json", { outputFile: "test-results-admin/report.json" }],
+    ["html", { open: "never", outputFolder: "playwright-report-admin" }],
+  ],
   outputDir: "test-results-admin",
   globalTeardown: "./tests/e2e-admin/support/global-teardown.ts",
   use: {
