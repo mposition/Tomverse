@@ -195,6 +195,7 @@ export function AdminModelRegistryPanel() {
   // profile already covers it. Without it the floor reads empty price fields as
   // "no price" and the panel refuses a save the server would accept.
   const [profilePrice, setProfilePrice] = useState<{
+    modelId: string;
     inputUsdPerMillionTokens: number;
     outputUsdPerMillionTokens: number;
     maxOutputTokens: number | null;
@@ -248,6 +249,7 @@ export function AdminModelRegistryPanel() {
           unknowns?: string[];
           worstCaseInputTokens?: number;
           profilePrice?: {
+            modelId: string;
             inputUsdPerMillionTokens: number;
             outputUsdPerMillionTokens: number;
             maxOutputTokens: number | null;
@@ -310,14 +312,20 @@ export function AdminModelRegistryPanel() {
   // save is measured against the model's own cost before the save rather than
   // in a report afterwards. A floor, not a recommendation -- what Tomverse
   // charges sits at or above it and is nobody's arithmetic but a person's.
+  // The inherited price belongs to one registry id. The id is editable, so a
+  // price resolved for the proposed id must not keep standing in for a
+  // different one -- the server resolves the profile from whatever id is saved,
+  // and the two disagreeing is the floor the operator sees not being the floor
+  // the save is judged by.
+  const inheritedPrice = profilePrice?.modelId === form.id ? profilePrice : null;
   const creditFloor = useMemo(
     () =>
       suggestCreditFloor({
         inputUsdPerMillionTokens:
-          form.inputUsdPerMillionTokens ?? profilePrice?.inputUsdPerMillionTokens ?? null,
+          form.inputUsdPerMillionTokens ?? inheritedPrice?.inputUsdPerMillionTokens ?? null,
         outputUsdPerMillionTokens:
-          form.outputUsdPerMillionTokens ?? profilePrice?.outputUsdPerMillionTokens ?? null,
-        maxOutputTokens: form.maxOutputTokens ?? profilePrice?.maxOutputTokens ?? null,
+          form.outputUsdPerMillionTokens ?? inheritedPrice?.outputUsdPerMillionTokens ?? null,
+        maxOutputTokens: form.maxOutputTokens ?? inheritedPrice?.maxOutputTokens ?? null,
         // Anthropic first-party requests write a five-minute prompt cache at a
         // premium on the input price, so the costliest input token on that
         // provider is not the list price. Left at 1 elsewhere.
@@ -333,7 +341,7 @@ export function AdminModelRegistryPanel() {
       form.maxOutputTokens,
       form.provider,
       worstCaseInputTokens,
-      profilePrice,
+      inheritedPrice,
     ]
   );
 
@@ -706,9 +714,10 @@ export function AdminModelRegistryPanel() {
                       . The cheapest class that covers it is{" "}
                       <span className="font-bold text-white">{creditFloor.usageClass}</span> at{" "}
                       <span className="font-bold text-white">{creditFloor.credits}</span> credits —
-                      a lower bound, not a price. Native search per query, long-context price
-                      tiers and separately billed reasoning tokens are not in this figure, so a
-                      model carrying any of them needs more.
+                      a lower bound, not a price.{" "}
+                      {inheritedPrice
+                        ? "Priced from this model's pricing profile, at the tier a prompt that size lands in, with the price columns left empty so the profile keeps applying."
+                        : "Native search per query, long-context price tiers and separately billed reasoning tokens are not in this figure, so a model carrying any of them needs more."}
                     </p>
                   ) : creditFloor.reason === "above_every_class" ? (
                     <p className="mt-2 text-xs leading-relaxed text-red-300">

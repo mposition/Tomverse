@@ -7,7 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { buildAdoptionDraft } from "@/lib/modelAdoptionDraft";
+import { buildAdoptionDraft, registryIdFromApiModel } from "@/lib/modelAdoptionDraft";
 import { modelProductSurface } from "@/lib/modelLifecycleTriage";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
@@ -94,9 +94,11 @@ export async function GET(req: Request) {
         ? (observation.metadata as Record<string, unknown>)
         : null;
 
+    const proposedId = registryIdFromApiModel(workItem.apiModel, taken.map((row) => row.id));
     const draft = buildAdoptionDraft({
       provider: workItem.provider,
       apiModel: workItem.apiModel,
+      hasPricingProfile: Boolean(getModelPricingProfile(proposedId)),
       observation: {
         displayName: observation?.displayName ?? null,
         metadata: metadata
@@ -117,6 +119,7 @@ export async function GET(req: Request) {
       // model is a 409 the operator meets after filling the whole form in.
       takenIds: taken.map((row) => row.id),
     });
+
 
     const draftModelId = draft.fields.id;
     return NextResponse.json({
@@ -144,6 +147,11 @@ export async function GET(req: Request) {
               { estimatedPromptTokens: chatUserMaxInputTokens() }
             );
             return {
+              // Which id this price belongs to. The registry id is editable and
+              // the save resolves the profile from whatever id is submitted, so
+              // a price resolved for the proposed one must not keep standing in
+              // for a different one.
+              modelId: draftModelId,
               inputUsdPerMillionTokens: resolved.inputUsdPerMillionTokens,
               outputUsdPerMillionTokens: resolved.outputUsdPerMillionTokens,
               maxOutputTokens: resolved.maxOutputTokens,
