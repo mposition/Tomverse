@@ -111,7 +111,13 @@ export const ko = {
         projectDeleteConfirm: "한 번 더 클릭하면 이 프로젝트가 삭제됩니다. 대화는 미분류로 이동합니다.",
         projectDeleteFailed: "프로젝트를 삭제하지 못했습니다.",
     },
-    chat: {
+   chat: {
+        sendPreparationChanged: "답변 준비 중 대화 또는 모델이 변경되었습니다. 질문을 확인한 뒤 다시 전송해 주세요.",
+        restoreQuestion: "질문 복원",
+        restoreQuestionHint: "질문을 입력창에 복원합니다. 새 답변을 요청하려면 별도로 전송하세요.",
+        singleModelRequired: "Chat은 답변 모델을 하나만 사용합니다. 모델을 선택하면 현재 선택을 교체합니다.",
+        singleModelProfileRequired: "이 어시스턴트는 여러 모델을 사용합니다. Chat에서는 단일 모델 어시스턴트를 선택해 주세요.",
+        restoreDraftNotEmpty: "작성 중인 내용은 유지했습니다. 질문을 복원하려면 먼저 전송하거나 입력창을 비워 주세요.",
         // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
         // It renders below the (application) layout, so LanguageProvider is
         // mounted; global-error.tsx replaces that layout and stays English.

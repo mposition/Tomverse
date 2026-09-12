@@ -136,6 +136,8 @@ const PROVIDER_BANNER_MIN_REM = 5;
 const MIN_CONVERSATION_AREA_REM = 4;
 
 type MobileChatShellProps = {
+  transcriptScope?: "model" | "conversation";
+  onRestorePrompt?: (prompt: { text: string; attachments: ChatAttachment[]; targetChatId: string }) => void;
   conversations: Conversation[];
   currentChatId: string | null;
   selectedModels: string[];
@@ -368,6 +370,8 @@ const mobileModelTabPanelId = (modelId: string) =>
   `mobile-model-tabpanel-${modelId}`;
 
 export function MobileChatShell({
+  transcriptScope = "model",
+  onRestorePrompt,
   conversations,
   currentChatId,
   selectedModels,
@@ -463,6 +467,9 @@ export function MobileChatShell({
   onFollowupSent,
   onContextBundleStale,
 }: MobileChatShellProps) {
+  const singleTranscript = transcriptScope === "conversation";
+  const panelModels = singleTranscript ? selectedModels.slice(0, 1) : selectedModels;
+  const statusModels = useMemo(() => singleTranscript ? ["@conversation"] : selectedModels, [singleTranscript, selectedModels]);
   const { models: AVAILABLE_MODELS } = useModelCatalog();
   const { t, lang } = useLanguage();
   const registerChatConsentSlot = useChatConsentSlotRef();
@@ -567,13 +574,19 @@ export function MobileChatShell({
   // What every consumer below reads: this conversation's currently selected
   // models and nothing else.
   const modelStatuses = useMemo(
-    () =>
-      scopeModelStatusesToConversation({
+    () => {
+      const scoped = scopeModelStatusesToConversation({
         statuses: reportedModelStatuses,
         conversationId: currentChatId,
-        selectedModelIds: selectedModels,
-      }),
-    [currentChatId, reportedModelStatuses, selectedModels]
+        selectedModelIds: statusModels,
+      });
+      // Consumers that label a model still use its id; busy ownership stays
+      // on the conversation key even while the next model is being selected.
+      return singleTranscript
+        ? { ...scoped, ...Object.fromEntries(selectedModels.map((id) => [id, scoped["@conversation"]])) }
+        : scoped;
+    },
+    [currentChatId, reportedModelStatuses, selectedModels, singleTranscript, statusModels]
   );
   // Only a run this conversation's own, un-paused panels are performing may
   // hold this composer, and only those panels are what the stop button then
@@ -581,8 +594,8 @@ export function MobileChatShell({
   // and has no say here.
   const isAnyModelResponding = isConversationResponding({
     statuses: modelStatuses,
-    selectedModelIds: selectedModels,
-    disabledModelIds: disabledPanels,
+    selectedModelIds: statusModels,
+    disabledModelIds: singleTranscript ? [] : disabledPanels,
   });
 
   const handleModelStatusChange = useCallback(
@@ -591,22 +604,22 @@ export function MobileChatShell({
       nextStatus: ModelRuntimeStatus,
       conversationId: string | null
     ) => {
-      const key = chatModelStatusKey(conversationId, modelId);
+      const key = chatModelStatusKey(conversationId, singleTranscript ? "@conversation" : modelId);
       setReportedModelStatuses((current) =>
         current[key] === nextStatus ? current : { ...current, [key]: nextStatus }
       );
     },
-    []
+    [singleTranscript]
   );
 
   const handleContentStateChange = useCallback(
     (modelId: string, state: ChatContentState) => {
-      const key = chatContentStateKey(currentChatId, modelId);
+      const key = chatContentStateKey(currentChatId, singleTranscript ? "@conversation" : modelId);
       setModelContentStates((current) =>
         current[key] === state ? current : { ...current, [key]: state }
       );
     },
-    [currentChatId]
+    [currentChatId, singleTranscript]
   );
 
   const activeModelIndex = resolvedActiveModelId
@@ -810,7 +823,7 @@ export function MobileChatShell({
     resolveChatContentState({
       isConversationSelectionResolved,
       conversationId: currentChatId,
-      selectedModelIds: modelIds,
+      selectedModelIds: singleTranscript ? statusModels : modelIds,
       reported: modelContentStates,
       hasAcceptedSubmission,
       storedSeed: guestContentSeed,
@@ -996,7 +1009,7 @@ export function MobileChatShell({
   const showWelcomeSurface = showsWelcomeSurface && selectedModels.length > 0;
   // UX-026. The single condition the tab strip and its panels both read, so a
   // tab can never be rendered without the panel its `aria-controls` names.
-  const showModelTabs = !showsWelcomeSurface && selectedModels.length > 1;
+  const showModelTabs = !singleTranscript && !showsWelcomeSurface && selectedModels.length > 1;
   const isCompactBottomDock = useCompactBottomDock();
   // SHORT-VIEWPORT-001: on iOS Safari and Android Chrome's default mode the
   // layout viewport keeps its full height while the keyboard is up, so a
@@ -1483,14 +1496,14 @@ export function MobileChatShell({
           />
         )}
         {selectedModels.length > 0 ? (
-          selectedModels.map((modelId, panelIndex) => {
+          panelModels.map((modelId, panelIndex) => {
             // The panels stay mounted while the welcome surface is up -- they
             // are what reports the conversation empty in the first place -- but
             // they render no transcript in that state (ChatApp's
             // `useCenteredWelcome` branch), so they are laid out only when they
             // have something to lay out.
             const isPanelVisible =
-              resolvedActiveModelId === modelId && !showWelcomeSurface;
+              (singleTranscript || resolvedActiveModelId === modelId) && !showWelcomeSurface;
 
             return (
               <div
@@ -1514,13 +1527,15 @@ export function MobileChatShell({
                 aria-hidden={!isPanelVisible}
               >
                 <ChatApp
+                  transcriptScope={transcriptScope}
+                  onRestorePrompt={onRestorePrompt}
                   hasImportedTranscript={hasImportedTranscript}
                   importedMessages={importedMessages}
                   importedTranscript={importedTranscript}
                   modelId={modelId}
                   initialConversationId={currentChatId}
                   promptPayload={promptPayload}
-                  isPanelDisabled={disabledPanels.includes(modelId)}
+                  isPanelDisabled={!singleTranscript && disabledPanels.includes(modelId)}
                   isGuestMode={isGuestMode}
                   webSearchMode={webSearchMode}
                   onBeforeSend={onBeforeModelSend}
@@ -1533,7 +1548,7 @@ export function MobileChatShell({
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
                   onRequestCloseModel={() => onToggleModel(modelId)}
-                  hasMultipleActiveModels={selectedModels.length > 1}
+                  hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}
                 />
               </div>
@@ -1644,7 +1659,7 @@ export function MobileChatShell({
           }
         />
       )}
-      <ComparisonActionRail
+      {!singleTranscript && <ComparisonActionRail
         layout="mobile"
         readiness={comparisonReadiness}
         aiReviewAccess={aiReviewAccess}
@@ -1655,13 +1670,14 @@ export function MobileChatShell({
         onCompareSummary={onCompareSummary}
         onComparisonReview={onComparisonReview}
         onGuestSignInPrompt={onGuestSignInPrompt}
-      />
+      />}
 
       <div ref={setBottomConsentSlot} className="shrink-0" />
       <div ref={setBottomInputSlot} />
       {composerPortalHost &&
         createPortal(
           <ChatInput
+            singleModelSelection={singleTranscript}
             value={inputValue}
             onChange={setInputValue}
             personalizedPrompt={personalizedPrompt}
@@ -1708,7 +1724,7 @@ export function MobileChatShell({
             guestMessageCount={guestMessageCount}
             maxGuestMessages={maxGuestMessages}
             variant={showsWelcomeSurface ? "floating" : "bar"}
-            hideTopBorder={comparisonReadiness.isVisible}
+            hideTopBorder={!singleTranscript && comparisonReadiness.isVisible}
             hideDisclaimer
             conversationDropSurface={conversationDropSurface}
           />,

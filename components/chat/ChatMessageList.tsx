@@ -56,10 +56,13 @@ import {
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
+import { recoveryPromptForMessage } from "@/lib/chatTranscriptRecovery";
 
 type ChatMessageListProps = {
   messages: Message[];
   onRetryLast?: () => void;
+  /** Chat restores this message's question to the composer; never dispatches. */
+  onRestoreQuestion?: (messageId: string) => void;
   onRetryWithoutAttachments?: () => void;
   /**
    * Re-sends the last prompt with a set of already-missing stored files
@@ -311,6 +314,7 @@ function TypingIndicator({ label }: { label?: string }) {
 export function ChatMessageList({
   messages,
   onRetryLast,
+  onRestoreQuestion,
   onRetryWithoutAttachments,
   onContinueWithoutUnavailableAttachments,
   onRequestCloseModel,
@@ -355,10 +359,10 @@ export function ChatMessageList({
   const liveStatusMessage = (() => {
     if (!lastMessage || lastMessage.role !== "assistant") return "";
     if (lastMessage.id === "welcome") return "";
-    if (!lastMessage.content) return t("chat.responseGenerating");
     if (lastMessage.status === "error") return t("chat.responseFailed");
     if (lastMessage.status === "cancelled") return t("chat.responseCancelled");
     if (lastMessage.status === "incomplete") return t("chat.responseIncomplete");
+    if (!lastMessage.content) return t("chat.responseGenerating");
     return t("chat.responseComplete");
   })();
 
@@ -670,14 +674,17 @@ export function ChatMessageList({
             // the primary, user-facing message; any remaining lines are
             // rendered separately below as a de-emphasized auxiliary layer
             // (see errorAuxiliaryLines) rather than dropped entirely.
+            const errorText = msg.recoveryNotice ?? msg.content;
             const displayContent =
-              !isUser && msg.status === "error"
+              !isUser && msg.status === "error" && msg.recoveryNotice === undefined
                 ? msg.content.split("\n")[0]
                 : msg.content;
             const errorAuxiliaryLines =
               !isUser && msg.status === "error"
-                ? msg.content.split("\n").slice(1).filter(Boolean)
+                ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
+            const canRestoreQuestion = Boolean(onRestoreQuestion) && !isSending &&
+              recoveryPromptForMessage(messages, msg.id, currentChatId) !== null;
 
             // UI-ERR-001. A failed turn is a state of one answer, not of the
             // conversation: three failed panels used to paint the whole
@@ -1052,7 +1059,7 @@ export function ChatMessageList({
                       ))}
                     </div>
                   )}
-                  {msg.role === "assistant" && !msg.content ? (
+                  {msg.role === "assistant" && !msg.content && msg.status !== "error" ? (
                     isActivelyGenerating ? (
                       <div className="flex items-center gap-2">
                         <TypingIndicator />
@@ -1322,6 +1329,11 @@ export function ChatMessageList({
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
+                  {!isUser && msg.status === "error" && msg.recoveryNotice !== undefined && (
+                    <p data-testid="chat-recovery-notice" className="mt-3 whitespace-pre-wrap text-sm font-medium">
+                      {msg.recoveryNotice.split("\n")[0]}
+                    </p>
+                  )}
                   {!isUser && msg.status === "error" && (() => {
                     const errorCategory = classifyError(msg);
                     // UI-ERR-001. These actions move the conversation
@@ -1448,10 +1460,10 @@ export function ChatMessageList({
                               </button>
                             )}
                           <FeedbackButton
-                            currentModelId={currentModelId}
+                            currentModelId={msg.modelId ?? currentModelId}
                             currentPlan={currentPlan}
                             attachmentCount={msg.errorHadAttachments ? 1 : 0}
-                            rawErrorDetails={msg.content}
+                            rawErrorDetails={errorText}
                             errorReport={msg.errorReport}
                             triggerLabel={t("chat.reportError")}
                             triggerClassName={secondaryButtonClass}
@@ -1521,6 +1533,22 @@ export function ChatMessageList({
                           {t("chat.regenerate")}
                         </button>
                       )}
+                    </div>
+                  )}
+                  {canRestoreQuestion && (
+                    <div className="mt-3 space-y-2 border-t border-zinc-200 pt-3 dark:border-zinc-700">
+                      <button
+                        type="button"
+                        data-testid="restore-chat-question"
+                        onClick={() => onRestoreQuestion?.(msg.id)}
+                        className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-500"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                        {t("chat.restoreQuestion")}
+                      </button>
+                      <p className={`text-xs ${isUser ? "text-white" : "text-zinc-600 dark:text-zinc-400"}`}>
+                        {t("chat.restoreQuestionHint")}
+                      </p>
                     </div>
                   )}
                 </div>

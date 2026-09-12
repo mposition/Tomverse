@@ -40,6 +40,7 @@ import {
   modelLimitResponse,
 } from "@/lib/billingEntitlements";
 import { createConversation } from "@/lib/conversationCreation";
+import { chatSingleModelRefusal } from "@/lib/chatWorkspaceEntry";
 import type { ConversationProductKey } from "@/lib/conversationProduct";
 import {
   ConversationProfileError,
@@ -139,9 +140,17 @@ export const createConversationForProduct = async (
         ? [...binding.modelIds]
         : null;
 
-    const normalizedModels = await clampRuntimeSelectedModels(
-      profileModels || body.selectedModels || fallbackModels || [defaultEngine]
-    );
+    const requestedModels = profileModels || body.selectedModels || fallbackModels || [defaultEngine];
+    const singleModelRefusal = chatSingleModelRefusal({
+      productKey, selectedModels: requestedModels, fromProfile: Boolean(profileModels),
+    });
+    if (singleModelRefusal) {
+      return NextResponse.json({
+        error: "Chat requires exactly one answer model. Select one model or a single-model assistant.",
+        code: singleModelRefusal,
+      }, { status: profileModels ? 409 : 400 });
+    }
+    const normalizedModels = await clampRuntimeSelectedModels(requestedModels);
     // Only when the client's own list is what was clamped. A profile's models
     // come from a published version rather than from this request, so
     // comparing them against `body.selectedModels` would refuse a valid
@@ -216,6 +225,7 @@ export const createConversationForProduct = async (
 
       const formattedConversation = {
           ...newConversation,
+          surface: productKey === "chat" ? "chat" : "workspace",
           projectId: newConversation.projectId || null,
           selectedModels: safeParse(newConversation.selectedModels, [defaultEngine]),
           disabledPanels: safeParse(newConversation.disabledPanels, []),

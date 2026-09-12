@@ -78,6 +78,7 @@ export async function GET(req: Request) {
         id: true,
         title: true,
         kind: true,
+        productKey: true,
         projectId: true,
         selectedModels: true,
         disabledPanels: true,
@@ -172,6 +173,7 @@ export async function GET(req: Request) {
         // workspace -- where the imported half it continues does not exist.
         surface: conversationSurface({
           hasContinuationBridge: conv.continuationBridge !== null,
+          productKey: conv.productKey,
         }),
         /*
           The imported conversation's name, for the client to display when

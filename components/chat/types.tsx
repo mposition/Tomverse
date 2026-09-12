@@ -91,6 +91,8 @@ export type Message = {
   modelId?: string;
   errorCode?: string;
   errorHadAttachments?: boolean;
+  /** Runtime-only recovery notice, never mixed into a partial answer body. */
+  recoveryNotice?: string;
   /**
    * The stored attachments this turn could not read, from an
    * ATTACHMENT_UNAVAILABLE refusal.

@@ -549,6 +549,7 @@ const loadExternalScript = (src: string) =>
   });
 
 type ChatInputProps = {
+  singleModelSelection?: boolean;
   value: string;
   onChange: (value: string) => void;
   personalizedPrompt?: string | null;
@@ -810,6 +811,7 @@ const isGooglePickerConfig = (value: unknown): value is GooglePickerConfig => {
 };
 
 export function ChatInput({
+  singleModelSelection = false,
   value,
   onChange,
   personalizedPrompt,
@@ -1062,7 +1064,7 @@ export function ChatInput({
           all: extensions.join(", "),
         }));
     }, [isEphemeralAttachment, t]);
-  const maxSelectableModels = isGuestMode
+  const maxSelectableModels = singleModelSelection ? 1 : isGuestMode
       ? APP_DEFAULTS.maxGuestSelectedModels
       : accountUsage?.limits.maxModels || MAX_SELECTED_MODELS;
   const disabledModelIdSet = useMemo(
@@ -1322,7 +1324,8 @@ export function ChatInput({
   // button itself. `title` alone does not reach a screen reader or a keyboard
   // user, so this is rendered as text the button points at with
   // aria-describedby (docs/ui-contracts/mobile-chat-composer.md).
-  const sendDisabledReason = isUsageLimitReached
+  const sendDisabledReason = singleModelSelection && selectedModels.length !== 1
+    ? t("chat.singleModelRequired") : isUsageLimitReached
     ? t("chat.exceedDailyLimit")
     : activeSelectedModels.length === 0
       ? t("chat.chooseModel")
@@ -3473,6 +3476,11 @@ export function ChatInput({
           visible line -- the invariant in
           docs/ui-contracts/mobile-chat-composer.md.
         */}
+        {singleModelSelection && selectedModels.length !== 1 && (
+          <p data-testid="chat-single-model-notice" className="text-xs text-amber-700 dark:text-amber-300">
+            {t("chat.singleModelRequired")}
+          </p>
+        )}
         <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
         <textarea
           data-testid="chat-textarea"
@@ -3685,6 +3693,7 @@ export function ChatInput({
               }}
               disabled={
                 isDisabled ||
+                (singleModelSelection && selectedModels.length !== 1) ||
                 activeSelectedModels.length === 0 ||
                 (!value.trim() && attachments.length === 0)
               }
@@ -4580,6 +4589,7 @@ export function ChatInput({
 
                     return (
                       <ModelPickerPanel
+                        singleModelSelection={singleModelSelection}
                         models={PUBLIC_MODELS}
                         selectedModelIds={selectedModels}
                         activeSelectedCount={activeSelectedModels.length}

@@ -388,6 +388,7 @@ export async function GET(
         continuationBridge: undefined,
         surface: conversationSurface({
           hasContinuationBridge: conversation.continuationBridge !== null,
+          productKey: conversation.productKey,
         }),
         messages,
         kind:
