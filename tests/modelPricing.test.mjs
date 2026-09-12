@@ -206,16 +206,17 @@ test("the price-correction migration writes what this registry says", () => {
 //
 // That is safe only while a request cannot get past the boundary. The user
 // ceiling is CHAT_USER_MAX_INPUT_TOKENS, defaulting to 128,000 in
-// lib/chatSecurity.ts. Raising it to 200,000 or beyond without first clearing
-// that stored price would silently bill long-context Gemini requests at the
-// short-context rate -- understating cost, which is the direction this
-// codebase never accepts.
+// lib/chatInputLimits.ts -- the module the chat budget and the model adoption
+// floor now share, after two copies of the parser disagreed about `1e6`.
+// Raising it to 200,000 or beyond without first clearing that stored price
+// would silently bill long-context Gemini requests at the short-context rate --
+// understating cost, which is the direction this codebase never accepts.
 test("raising the input ceiling past a long-context boundary is not silent", () => {
   const source = readFileSync(
-    join(import.meta.dirname, "..", "lib", "chatSecurity.ts"),
+    join(import.meta.dirname, "..", "lib", "chatInputLimits.ts"),
     "utf8"
   );
-  const ceiling = /CHAT_USER_MAX_INPUT_TOKENS,\s*([\d_]+)\)/.exec(source);
+  const ceiling = /CHAT_USER_MAX_INPUT_TOKENS_DEFAULT\s*=\s*([\d_]+)/.exec(source);
   assert.ok(ceiling, "could not read the default user input ceiling");
   const maxInputTokens = Number(ceiling[1].replace(/_/g, ""));
 

@@ -565,6 +565,8 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     servedByTomverse: boolean;
     /** The served model that is a later generation of this one's line. */
     supersededBy: string | null;
+    /** Verifications still owed before this item may be rolled out. */
+    pendingValidations: string[];
     familyKey: string;
     familySize: number;
     reviewPriority: ModelReviewPriority;
@@ -613,6 +615,7 @@ export async function listModelDiscoveryQueue(options?: {
                 dueAt: true,
                 firstSeenAt: true,
                 recommendation: true,
+                pendingValidations: true,
                 evidence: true,
             },
         }),
@@ -734,6 +737,7 @@ export async function listModelDiscoveryQueue(options?: {
             lifecycle,
             servedByTomverse,
             supersededBy,
+            pendingValidations: stringList(row.pendingValidations),
             familyKey,
             familySize: familyCounts.get(familyKey) ?? 1,
             reviewPriority: assessment.priority,

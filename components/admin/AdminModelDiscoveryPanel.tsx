@@ -31,6 +31,8 @@ export type ModelWorkItemRow = {
   servedByTomverse: boolean;
   /** The served model that is a later generation of this one's line, if any. */
   supersededBy: string | null;
+  /** Verifications still owed before rollout, ticked off from this panel. */
+  pendingValidations?: string[];
   familyKey: string;
   familySize: number;
   reviewPriority: ReviewPriority;
@@ -124,6 +126,33 @@ const transitionableIds = (group: ModelFamilyGroup, to: string) => {
   return group.members
     .filter((member) => allowedFrom.has(member.status))
     .map((member) => member.id);
+};
+
+/**
+ * The member of a family an adoption would register, or null.
+ *
+ * The representative rather than the whole group: a family collapses several
+ * spellings of one model -- a dated snapshot, a moving alias, a second
+ * provider's prefix -- and exactly one of them becomes the identifier requests
+ * will carry. `buildGroups` already sorts the stable id to the front for that
+ * reason.
+ *
+ * Only `add` items, and only ones the queue can still move. A retirement is
+ * about a model the registry already has, and a closed item is a decision
+ * somebody made: reopening it is a new work item, not a button.
+ */
+const adoptableMember = (group: ModelFamilyGroup) => {
+  const candidate = group.representative;
+  if (candidate.action !== "add") return null;
+  // Chat only. Image generation models have their own ledger, and this row's
+  // `supportsImage` means image *input*; adopting a generation model here would
+  // price and route it as a chat model. The server refuses it as well.
+  if (candidate.product !== "chat") return null;
+  return ["discovered", "awaiting_decision", "deferred", "approved", "implementation_pending"].includes(
+    candidate.status
+  )
+    ? candidate
+    : null;
 };
 
 const buildGroups = (rows: readonly ModelWorkItemRow[]): ModelFamilyGroup[] => {
@@ -317,6 +346,60 @@ export function AdminModelDiscoveryPanel() {
         }
         setSelectedFamilies(new Set());
         dispatchAppToast(`${workItemIds.length}개 항목을 업데이트했습니다.`, "success");
+      } catch {
+        dispatchAppToast("The request did not reach the server.", "error");
+      } finally {
+        setBusyIds(new Set());
+      }
+    },
+    []
+  );
+
+  /**
+   * Marks one validation satisfied on an item that owes it.
+   *
+   * Here because adoption writes `pricing`, `access` and `staging` onto the
+   * item, and the rollout gate refuses while any remain. Without a way to tick
+   * them off, filling the list in would have made every adopted model
+   * unrolloutable -- the gate turned into a wall.
+   */
+  const clearValidation = useCallback(
+    async (row: ModelWorkItemRow, validation: string) => {
+      const note = window.prompt(
+        `'${validation}' 검증을 완료로 기록합니다. 무엇을 확인했는지 적어 주세요.`
+      );
+      if (!note?.trim()) return;
+      setBusyIds(new Set([row.id]));
+      try {
+        const response = await fetch("/api/admin/model-lifecycle/validations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            workItemId: row.id,
+            completed: [validation],
+            note: note.trim(),
+          }),
+        });
+        const data = (await response.json().catch(() => null)) as {
+          pendingValidations?: string[];
+          error?: string;
+        } | null;
+        if (!response.ok || !data?.pendingValidations) {
+          dispatchAppToast(data?.error || "검증을 기록하지 못했습니다.", "error");
+          return;
+        }
+        const remaining = data.pendingValidations;
+        setRows((current) =>
+          current.map((item) =>
+            item.id === row.id ? { ...item, pendingValidations: remaining } : item
+          )
+        );
+        dispatchAppToast(
+          remaining.length
+            ? `'${validation}' 완료. 남은 검증 ${remaining.length}건.`
+            : `'${validation}' 완료. 남은 검증이 없습니다.`,
+          "success"
+        );
       } catch {
         dispatchAppToast("The request did not reach the server.", "error");
       } finally {
@@ -651,6 +734,30 @@ export function AdminModelDiscoveryPanel() {
                               {label}
                             </button>
                           ))}
+                          {group.representative.pendingValidations?.map((validation) => (
+                            <button
+                              key={validation}
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                void clearValidation(group.representative, validation)
+                              }
+                              className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 disabled:opacity-40"
+                              title="이 검증을 완료로 기록합니다"
+                            >
+                              ✓ {validation}
+                            </button>
+                          ))}
+                          {adoptableMember(group) ? (
+                            <a
+                              href={`/admin/models?tab=registry&adopt=${encodeURIComponent(
+                                adoptableMember(group)!.id
+                              )}`}
+                              className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
+                            >
+                              채택
+                            </a>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
