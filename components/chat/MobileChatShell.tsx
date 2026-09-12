@@ -1547,8 +1547,8 @@ export function MobileChatShell({
                   onTurnError={onTurnError}
                   onFollowupSent={onFollowupSent}
                   onContextBundleStale={onContextBundleStale}
-                  onRequestCloseModel={() => singleTranscript
-                    ? openChatModelPicker(document.activeElement instanceof HTMLElement ? document.activeElement : null)
+                  onRequestCloseModel={(event) => singleTranscript
+                    ? openChatModelPicker(event.currentTarget)
                     : onToggleModel(modelId)}
                   hasMultipleActiveModels={!singleTranscript && selectedModels.length > 1}
                   stopSignal={stopSignal}

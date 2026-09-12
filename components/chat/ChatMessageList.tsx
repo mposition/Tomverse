@@ -12,7 +12,7 @@ import {
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import type { ExtraProps } from "react-markdown";
-import type { ComponentPropsWithoutRef } from "react";
+import type { ComponentPropsWithoutRef, MouseEventHandler } from "react";
 import { CHAT_MARKDOWN_REMARK_PLUGINS } from "@/lib/chatMarkdownPlugins";
 import rehypeHighlight from "rehype-highlight";
 import {
@@ -75,7 +75,7 @@ type ChatMessageListProps = {
    * and no stored message changes.
    */
   onContinueWithoutUnavailableAttachments?: (attachmentIds: string[]) => void;
-  onRequestCloseModel?: () => void;
+  onRequestCloseModel?: MouseEventHandler<HTMLButtonElement>;
   hasMultipleActiveModels?: boolean;
   currentModelId?: string | null;
   currentPlan?: string | null;

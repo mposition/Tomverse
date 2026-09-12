@@ -552,6 +552,43 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
   });
 
   for (const errorCode of ["MODEL_RETIRED", "CREDIT_BALANCE_INSUFFICIENT"] as const) {
+    test(`${errorCode} recovery returns focus to its button after an unfocused nested click and keyboard activation`, async ({ page }, testInfo) => {
+      const viewport = testInfo.project.name === "mobile-chromium" ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
+      const state = await openChat(page, { responseErrorCode: errorCode, viewport });
+      await submitComposer(page, "Keep the transcript unchanged when I close recovery model selection.", viewport.width);
+      const recoveryButton = page.getByRole("button", { name: "Choose another model", exact: true });
+      await expect(recoveryButton).toBeVisible();
+      const textarea = page.getByTestId("chat-textarea");
+      await expect(textarea).toBeEnabled();
+      const transcript = await page.getByTestId("chat-message").allTextContents();
+      const writesBeforeOpen = [...state.writes];
+      const picker = page.locator("#chat-input-popover");
+
+      // dispatchEvent deliberately omits the browser's default click focus.
+      // This reproduces the relevant event condition, NOT a Safari/macOS run.
+      // The icon is the target; the recovery button must remain currentTarget.
+      await textarea.focus();
+      await expect(textarea).toBeFocused();
+      await recoveryButton.locator("svg path").first().dispatchEvent("click");
+      await expect(picker).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(picker).toHaveCount(0);
+      await expect(recoveryButton).toBeFocused();
+
+      // Normal keyboard activation must keep the same focus-return contract.
+      await recoveryButton.press("Enter");
+      await expect(picker).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(picker).toHaveCount(0);
+      await expect(recoveryButton).toBeFocused();
+      await expect(page).toHaveURL(new RegExp(`conversation=${CONVERSATION}`));
+      expect(state.conversations[0].selectedModels).toEqual([MODEL_A]);
+      expect(await page.getByTestId("chat-message").allTextContents()).toEqual(transcript);
+      expect(state.writes).toEqual(writesBeforeOpen);
+      expect(state.writes.filter((write) => write.method === "DELETE")).toEqual([]);
+      expect(await requests(page)).toHaveLength(1);
+    });
+
     test(`${errorCode} recovery opens the model picker and changes selection without deleting history or resending`, async ({ page }, testInfo) => {
       const viewport = testInfo.project.name === "mobile-chromium" ? MOBILE_VIEWPORT : DESKTOP_VIEWPORT;
       const state = await openChat(page, { responseErrorCode: errorCode, viewport });

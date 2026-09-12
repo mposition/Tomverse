@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type MouseEventHandler,
 } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
@@ -250,7 +251,7 @@ type ChatAppProps = {
   ) => void;
   onFollowupSent?: (modelId: string) => void;
   onBeforeSend?: (chatId: string) => Promise<boolean>;
-  onRequestCloseModel?: () => void;
+  onRequestCloseModel?: MouseEventHandler<HTMLButtonElement>;
   hasMultipleActiveModels?: boolean;
   currentPlan?: string | null;
   // Bumped by the parent (e.g. a global "stop all" button) to abort this

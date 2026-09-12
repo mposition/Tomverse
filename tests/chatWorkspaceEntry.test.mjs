@@ -120,23 +120,32 @@ test("actual Review remove handlers retain confirmation, model mutation and mode
     ["DELETE", "/api/conversations/review-owned/messages?modelId=model-a"]]);
 });
 
-test("both actual shell recovery callbacks open the existing picker only for the unified Chat transcript", () => {
-  class FocusTarget {}
-  const trigger = new FocusTarget();
-  for (const path of ["../components/chat/DesktopChatShell.tsx", "../components/chat/MobileChatShell.tsx"]) {
+for (const shell of ["DesktopChatShell", "MobileChatShell"]) {
+  test(`${shell} recovery captures the actual button even when focus and the nested click target differ`, () => {
+    class FocusTarget {}
+    const trigger = new FocusTarget();
+    const previouslyFocused = new FocusTarget();
+    const nestedIcon = { parentElement: trigger };
+    const path = `../components/chat/${shell}.tsx`;
     const source = parseSource(path);
     const attributes = findNodes(source, (node) => ts.isJsxAttribute(node) && node.name.getText(source) === "onRequestCloseModel");
     assert.equal(attributes.length, 1);
     const expression = attributes[0].initializer.expression;
     for (const singleTranscript of [true, false]) {
       const events = [];
-      executable(expression, source, { singleTranscript, modelId: "model-a", HTMLElement: FocusTarget,
-        document: { activeElement: trigger }, openChatModelPicker: (target) => events.push(["picker", target]),
+      const click = { currentTarget: trigger, target: nestedIcon };
+      const handler = executable(expression, source, { singleTranscript, modelId: "model-a", HTMLElement: FocusTarget,
+        document: { activeElement: previouslyFocused }, openChatModelPicker: (target) => events.push(["picker", target]),
         onToggleModel: (id) => events.push(["toggle", id]),
-      })();
+      });
+      handler(singleTranscript ? click : undefined);
+      // React's currentTarget is only available during dispatch. Keep the node,
+      // not the event, for the later close operation. Review needs no event.
+      click.currentTarget = null;
       assert.deepEqual(events, singleTranscript ? [["picker", trigger]] : [["toggle", "model-a"]]);
+      if (singleTranscript) assert.equal(events[0][1], trigger);
     }
     assert.ok(findNodes(source, (node) => ts.isImportDeclaration(node) &&
       node.moduleSpecifier.text === "@/lib/chatModelPickerEvents").length > 0);
-  }
-});
+  });
+}
