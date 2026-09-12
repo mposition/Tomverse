@@ -452,6 +452,7 @@ test("every route that can lead into a conversation reports its surface", () => 
 });
 
 const routingClient = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");
+const routingIds = ["owned/a", "continuation_a", "chat_a"];
 
 // Run the same contract against the production source and every in-memory
 // mutation below. The page's actual routing prefix is executed with a local
@@ -462,7 +463,7 @@ async function assertClientSurfaceRouting(client) {
     const { prefix, trailing } = compileContinuationRouting(client);
     // These representative ids expose prefix/substring/regex regressions; they
     // do not claim to prove independence for every possible client derivation.
-    for (const id of ["owned/a", "continuation_a", "chat_a"]) {
+    for (const id of routingIds) {
         const encodedId = encodeURIComponent(id);
         const cases = [
             { name: "search hint wins over a conflicting list row", hint: "continuation", row: "workspace", path: `/continuations/${encodedId}` },
@@ -553,24 +554,27 @@ async function assertClientSurfaceRouting(client) {
     }
 
     // Execute the actual trailing if/body against valid and invalid server
-    // surfaces and both current/stale origins. Merely mentioning a guard cannot
-    // satisfy these assertions, and unrelated image/workspace code is absent.
-    for (const mountedSurface of ["workspace", "chat", "continuation"]) {
-        for (const surface of ["workspace", "chat", "continuation", "invented", null, undefined]) {
-            for (const currentId of ["owned/a", "other"]) {
-                const valid = ["workspace", "chat", "continuation"].includes(surface);
-                const paths = [];
-                trailing({ data: { surface }, id: "owned/a", currentChatIdRef: { current: currentId },
-                    mountedSurface, router: { push: (path) => paths.push(path) },
-                    conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
-                    PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
-                })();
-                const expected = valid && currentId === "owned/a" && surface !== mountedSurface
-                    ? [conversationHandoffHref(surface, "owned/a", "/chat")] : [];
-                const message = !valid ? "trailing handoff rejects an invalid server surface"
-                    : currentId !== "owned/a" ? "trailing handoff rejects a stale origin"
-                    : "trailing handoff follows the current owned server surface";
-                assert.deepEqual(paths, expected, `${message} (${mountedSurface}, ${surface}, ${currentId})`);
+    // surfaces, current/stale origins and the same finite id set: 108 cases.
+    // Merely mentioning a guard cannot satisfy these assertions. This does not
+    // prove independence from every possible id derivation or run restoration.
+    for (const id of routingIds) {
+        for (const mountedSurface of ["workspace", "chat", "continuation"]) {
+            for (const surface of ["workspace", "chat", "continuation", "invented", null, undefined]) {
+                for (const currentId of [id, "other"]) {
+                    const valid = ["workspace", "chat", "continuation"].includes(surface);
+                    const paths = [];
+                    trailing({ data: { surface }, id, currentChatIdRef: { current: currentId },
+                        mountedSurface, router: { push: (path) => paths.push(path) },
+                        conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
+                        PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
+                    })();
+                    const expected = valid && currentId === id && surface !== mountedSurface
+                        ? [conversationHandoffHref(surface, id, "/chat")] : [];
+                    const message = !valid ? "trailing handoff rejects an invalid server surface"
+                        : currentId !== id ? "trailing handoff rejects a stale origin"
+                        : "trailing handoff follows the current owned server surface";
+                    assert.deepEqual(paths, expected, `${message} (${id}, ${mountedSurface}, ${surface}, ${currentId})`);
+                }
             }
         }
     }
@@ -708,6 +712,14 @@ const routingMutations = [
     ["trailing origin check is bypassed", (f) => f.replaceAnchor("trailingOrigin", "true"), /trailing handoff rejects a stale/],
     ["trailing guard is changed from AND to OR", (f) => f.replaceAnchor("trailingCondition",
         '(currentChatIdRef.current === id || ["chat", "workspace", "continuation"].includes(data.surface)) && data.surface !== mountedSurface'), /trailing handoff rejects an invalid|trailing handoff rejects a stale/],
+    ["trailing id substring infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface",
+        '(id.includes("continuation_") || data.surface !== mountedSurface)'), /trailing handoff follows the current owned server surface/],
+    ["trailing id regex infers a handoff", (f) => f.replaceTrailingRouting("data.surface !== mountedSurface",
+        '(/^continuation_/.test(id) || data.surface !== mountedSurface)'), /trailing handoff follows the current owned server surface/],
+    ["trailing allowlist drops a valid surface", (f) => f.replaceAnchor("trailingAllowlist",
+        '(data.surface === "workspace" || data.surface === "continuation")'), /trailing handoff follows the current owned server surface/],
+    ["trailing allowlist admits an unknown surface", (f) => f.replaceAnchor("trailingAllowlist",
+        '(["chat", "workspace", "continuation", "invented"].includes(data.surface))'), /trailing handoff rejects an invalid/],
 ];
 
 async function assertRoutingMutation([name, build, expected], source) {
@@ -732,6 +744,18 @@ test("equivalent surface-guard formatting preserves behavior and every mutation"
         "if (!['chat', 'workspace', 'continuation'].includes(detail.surface)) {\n return;\n}");
     await assertClientSurfaceRouting(reformatted);
     for (const mutation of routingMutations) await assertRoutingMutation(mutation, reformatted);
+});
+
+test("equivalent strict OR surface membership preserves behavior and every mutation", async () => {
+    for (const membership of [
+        '(data.surface === "chat" || data.surface === "workspace" || data.surface === "continuation")',
+        "((('continuation' === (data.surface)) || ((data.surface) === 'workspace')) || ('chat' === data.surface))",
+        '(data.surface === "chat" || data.surface === "workspace" || data.surface === "continuation" || data.surface === "chat")',
+    ]) {
+        const equivalent = routingFixture(routingClient).replaceAnchor("trailingAllowlist", membership);
+        await assertClientSurfaceRouting(equivalent);
+        for (const mutation of routingMutations) await assertRoutingMutation(mutation, equivalent);
+    }
 });
 
 /* ------------------------------------------------------- flag operability */

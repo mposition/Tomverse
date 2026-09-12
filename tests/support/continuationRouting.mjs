@@ -21,6 +21,43 @@ const namedVariable = (name) => (node) => ts.isVariableDeclaration(node) &&
     ts.isIdentifier(node.name) && node.name.text === name;
 const accessPath = (node) => ts.isIdentifier(node) ? node.text :
     ts.isPropertyAccessExpression(node) ? `${accessPath(node.expression)}.${node.name.text}` : "";
+const unparenthesized = (node) => {
+    while (ts.isParenthesizedExpression(node)) node = node.expression;
+    return node;
+};
+const conjuncts = (node) => {
+    const inner = unparenthesized(node);
+    return ts.isBinaryExpression(inner) && inner.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+        ? [...conjuncts(inner.left), ...conjuncts(inner.right)] : [node];
+};
+// Recognize only strict comparisons joined by OR, not arbitrary boolean logic.
+const comparedSurfaces = (node) => {
+    node = unparenthesized(node);
+    if (!ts.isBinaryExpression(node)) return null;
+    if (node.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        const left = comparedSurfaces(node.left), right = comparedSurfaces(node.right);
+        return left && right ? [...left, ...right] : null;
+    }
+    if (node.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) return null;
+    const left = unparenthesized(node.left), right = unparenthesized(node.right);
+    if (accessPath(left) === "data.surface" && ts.isStringLiteral(right)) return [right.text];
+    if (accessPath(right) === "data.surface" && ts.isStringLiteral(left)) return [left.text];
+    return null;
+};
+const isSurfaceAllowlist = (node) => {
+    node = unparenthesized(node);
+    let values = comparedSurfaces(node);
+    if (ts.isCallExpression(node) && node.arguments.length === 1 &&
+        accessPath(unparenthesized(node.arguments[0])) === "data.surface" &&
+        ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "includes") {
+        const array = unparenthesized(node.expression.expression);
+        if (ts.isArrayLiteralExpression(array) && array.elements.every(ts.isStringLiteral)) {
+            values = array.elements.map((element) => element.text);
+        }
+    }
+    return values !== null && new Set(values).size === 3 &&
+        values.every((value) => ["chat", "workspace", "continuation"].includes(value));
+};
 
 export function extractContinuationRouting(text) {
     const source = ts.createSourceFile("ChatPageClient.tsx", text,
@@ -73,8 +110,9 @@ export function extractContinuationRouting(text) {
                 node.argumentExpression.text === forbidden)));
         assert.equal(references.length, 0, `routing: surface must not be derived from ${forbidden}`);
     }
-    // Optional mutation anchors are consumed only by a mutation factory. Their
-    // absence cannot replace a behavioral failure with an extraction failure.
+    // Extraction leaves mutation anchors optional, so behavior is still tested
+    // for missing/wrong guards. A factory naming an unsupported shape reports
+    // its own preparation failure without preventing later test registration.
     const span = (node) => ({ start: node.getStart(source), end: node.end });
     const prefixNodes = (predicate) => statements.slice(0, -1).flatMap((statement) => findNodes(statement, predicate));
     const mentions = (node, path) => findNodes(node, (child) => accessPath(child) === path).length > 0;
@@ -88,9 +126,7 @@ export function extractContinuationRouting(text) {
             ts.isCallExpression(node.expression) && accessPath(node.expression.expression) === "conversations.find").map(span),
         trailingHandoff: [span(trailingHandoff.parent)],
         trailingCondition: [span(trailingDecision.expression)],
-        trailingAllowlist: findNodes(trailingDecision.expression, (node) => ts.isCallExpression(node) &&
-            ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === "includes" &&
-            mentions(node, "data.surface")).map(span),
+        trailingAllowlist: conjuncts(trailingDecision.expression).filter(isSurfaceAllowlist).map(span),
         trailingOrigin: findNodes(trailingDecision.expression, (node) => ts.isBinaryExpression(node) &&
             node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
             accessPath(node.left) === "currentChatIdRef.current" && accessPath(node.right) === "id").map(span),
