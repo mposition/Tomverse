@@ -125,6 +125,10 @@ export async function GET(req: Request) {
                 typeof metadata.outputTokenLimit === "number" ? metadata.outputTokenLimit : null,
               vision: typeof metadata.vision === "boolean" ? metadata.vision : null,
               thinking: typeof metadata.thinking === "boolean" ? metadata.thinking : null,
+              effortLevels:
+                typeof metadata.effortLevels === "string"
+                  ? metadata.effortLevels
+                  : null,
             }
           : null,
       },
