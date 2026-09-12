@@ -353,7 +353,10 @@ export function AdminModelRegistryPanel() {
           );
           if (!response.ok) {
             await discardResponseBody(response);
-            setProfileLookupFailed(true);
+            // Guarded, like every other write here. A refusal for an id the
+            // operator has already moved on from would otherwise arrive late
+            // and turn the current id's success back into a failure.
+            if (!cancelled) setProfileLookupFailed(true);
             return;
           }
           const data = (await response.json().catch(() => null)) as {
@@ -361,7 +364,14 @@ export function AdminModelRegistryPanel() {
             unknowns?: string[];
             notes?: string[];
           } | null;
-          if (cancelled || !data) return;
+          if (cancelled) return;
+          if (!data) {
+            // A 200 whose body will not parse is a lookup that did not happen.
+            // Treating it as silence left the operator with a Save button that
+            // would never enable.
+            setProfileLookupFailed(true);
+            return;
+          }
           setProfilePrice(data.profilePrice ?? null);
           setProfileLookupFailed(false);
           if (data.unknowns) setAdoptUnknowns(data.unknowns);
