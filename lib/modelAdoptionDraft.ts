@@ -281,6 +281,8 @@ export const buildAdoptionDraft = (input: {
   apiModel: string;
   observation?: AdoptionObservation | null;
   takenIds?: readonly string[];
+  /** Whether lib/modelPricing.ts already prices the id this draft proposes. */
+  hasPricingProfile?: boolean;
 }): ModelAdoptionDraft => {
   const metadata = input.observation?.metadata ?? null;
   const contextWindowTokens =
@@ -316,7 +318,19 @@ export const buildAdoptionDraft = (input: {
 
   // Named rather than guessed. Each of these is somebody's decision, and a
   // draft that filled them in would be making it.
-  unknowns.push("입력·출력 단가 — 공급자 공식 가격표에서 확인해 입력합니다.");
+  //
+  // The price is the exception, and only when a profile already covers this
+  // model: leaving the columns empty is then the *correct* answer, not an
+  // unmade decision, because a null column inherits the profile's tiers and
+  // schedule and a typed number replaces both for good. Telling an operator to
+  // enter a price they already have would be telling them to break that.
+  if (input.hasPricingProfile) {
+    unknowns.push(
+      "입력·출력 단가 — lib/modelPricing.ts의 profile을 상속합니다. 비워 두세요. 숫자를 넣으면 tier와 예정 가격이 영구 override 됩니다."
+    );
+  } else {
+    unknowns.push("입력·출력 단가 — 공급자 공식 가격표에서 확인해 입력합니다.");
+  }
   unknowns.push("판매 등급과 크레딧 — 최소 등급은 가격을 넣으면 계산됩니다.");
   unknowns.push("최소 플랜 — Pro로 두었습니다. 더 열려면 제품 결정이 필요합니다.");
   unknowns.push(

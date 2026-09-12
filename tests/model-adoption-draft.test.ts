@@ -683,3 +683,22 @@ test("the form's own price wins over the profile when both are present", () => {
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /at least 8 credits/);
 });
+
+test("a model with a pricing profile is told to leave its price columns empty", () => {
+  // Telling an operator to type a price they already have is telling them to
+  // replace the profile with a flat override for good.
+  const inherited = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    hasPricingProfile: true,
+  });
+  assert.match(inherited.unknowns.join("\n"), /상속합니다/);
+  assert.match(inherited.unknowns.join("\n"), /비워 두세요/);
+
+  const unpriced = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+  });
+  assert.match(unpriced.unknowns.join("\n"), /공식 가격표/);
+  assert.doesNotMatch(unpriced.unknowns.join("\n"), /상속합니다/);
+});
