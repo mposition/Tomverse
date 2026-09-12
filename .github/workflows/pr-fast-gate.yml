@@ -80,7 +80,7 @@ jobs:
     # tests. Keep the unit deadline below the job deadline so an actual hang
     # identifies its stage; the remaining job budget covers the static checks
     # below on a slow but passing run.
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
