@@ -3149,8 +3149,16 @@ const checks = [
         read("package.json").includes(
           '"test:unit": "node scripts/run-unit-tests.mjs"'
         ) &&
+        // This audit's unit lane has to cover both extensions. The shell glob
+        // this runner replaced saw only `.test.mjs`, which dropped every
+        // `.test.ts` policy test from the run without saying so. The literal
+        // moved on 2026-09-12, when the runner started handing `node --test`
+        // glob patterns instead of a list of paths -- 518 absolute paths no
+        // longer fit in a Windows command line. The guarantee is unchanged:
+        // the server lane still names both suffixes, and the patterns are
+        // built from that same field.
         read("scripts/run-unit-tests.mjs").includes(
-          'name.endsWith(".test.mjs") || name.endsWith(".test.ts")'
+          'suffixes: [".test.mjs", ".test.ts"]'
         ) &&
         !source.includes("ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION")
       );
