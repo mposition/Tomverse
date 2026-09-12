@@ -195,6 +195,17 @@ export type AdoptionObservation = {
     outputTokenLimit?: number | null;
     vision?: boolean | null;
     thinking?: boolean | null;
+    /**
+     * The effort levels the provider admits, comma-joined, when it publishes
+     * them at all (Anthropic's `capabilities.effort`). Carried so the draft
+     * stops telling the operator the provider said nothing about depth on a
+     * model whose listing named every level.
+     *
+     * Still not mapped onto the registry's `reasoning` field: those are the
+     * provider's words for how hard the model may think, and which of them
+     * Tomverse sells a model at is a product decision.
+     */
+    effortLevels?: string | null;
   } | null;
 };
 
@@ -352,8 +363,11 @@ export const buildAdoptionDraft = (input: {
     "예약 출력 토큰 — 능력이 아니라 entitlement이므로 출력 한도에서 유도하지 않습니다."
   );
   if (metadata?.thinking === true) {
+    const levels = metadata.effortLevels?.trim();
     unknowns.push(
-      "추론 강도 — 공급자가 thinking 지원을 알렸을 뿐 등급은 알리지 않습니다."
+      levels
+        ? `추론 강도 — 공급자가 알린 단계는 ${levels}입니다. 어느 단계로 판매할지는 제품 결정입니다.`
+        : "추론 강도 — 공급자가 thinking 지원을 알렸을 뿐 등급은 알리지 않습니다."
     );
   }
 
@@ -434,6 +448,26 @@ export const adoptionPreflightRefusal = (input: {
   };
   /** The exact pairs a scan has seen, from the item's own sightings. */
   observedPairs?: ReadonlyArray<{ provider: string; apiModel: string }>;
+  /**
+   * Whether the catalogue says the pair being saved is not servable.
+   *
+   * The pair in `body`, not the work item. A registry row carries one
+   * `(provider, apiModel)` and the runtime sends requests to exactly that
+   * pair -- it does not fall through to another provider that lists the same
+   * model. So an item Groq has switched off and Anthropic still serves is
+   * adoptable *as the Anthropic pair* and must be refused *as the Groq pair*,
+   * and a question asked about the item as a whole gets both halves wrong.
+   *
+   * The panel already prints the lifecycle and the triage already reads
+   * `조치 비권장`, but neither stops a save: the row said do not adopt this
+   * and the button adopted it anyway. Refused on the server because that is
+   * the side that decides.
+   *
+   * `false` when the catalogue has no row for the pair. Absence is the
+   * missing-detection machinery's question, and reading it as "unservable"
+   * would refuse adoptions on the strength of a row nobody wrote.
+   */
+  submittedPairUnservable?: boolean;
   /** Whether the registry already has a row for this provider and api model. */
   providerPairRegistered?: boolean;
   /**
@@ -479,6 +513,12 @@ export const adoptionPreflightRefusal = (input: {
       status: 409,
       message:
         "Only chat models are adopted into this registry. Image generation models belong to the Image Studio ledger.",
+    };
+  }
+  if (input.submittedPairUnservable) {
+    return {
+      status: 409,
+      message: `${input.body.provider} lists ${input.body.apiModel} as not servable. Adopting it would put a row in the registry that answers no request. If another provider still serves this model, adopt that pair instead.`,
     };
   }
   if (

@@ -20,6 +20,7 @@ import {
   missingConfirmationRuns,
   parseProviderCatalogModels,
   providerCatalogHttpFailure,
+  providerReportedUnservable,
   providerCatalogUrl,
   PROVIDER_CATALOG_KEY_REJECTED,
   shouldQueueProviderCatalogObservation,
@@ -315,8 +316,29 @@ const runProviderCheck = async (
         : model
           ? "available"
           : "candidate";
-      if (model) mapped.push(model.id);
-      else if (
+      // `mapped` is what `planCatalogReconciliation` restores from: a model
+      // this automation disabled for being absent is switched back on the day
+      // it reappears. A listing that reappears saying `active: false` is the
+      // provider telling us it is not servable, and restoring on the strength
+      // of it would re-enable a model Groq has switched off -- a wrong action,
+      // not merely a missing warning. The operator still hears about it: a
+      // registered model with a lifecycle goes into `lifecycleWarnings` below
+      // carrying its own `modelId`.
+      //
+      // `UNSERVABLE_LIFECYCLES` rather than any lifecycle at all. A
+      // `deprecated` or `legacy` model, or one with a shutdown scheduled, is
+      // still being served -- the provider is announcing an end, not refusing
+      // requests today -- and declining to restore those would leave a working
+      // model switched off after a transient catalogue gap, which is the
+      // damage `restore` exists to undo. Only the values that speak about now
+      // count here.
+      //
+      // Absence and an explicit refusal stay separate decisions. This only
+      // declines to restore; disabling on the provider's word is the
+      // confirmation-runs machinery's question, not this line's.
+      if (model) {
+        if (!providerReportedUnservable(observation)) mapped.push(model.id);
+      } else if (
         shouldQueueProviderCatalogObservation(observation) &&
         !catalogueIdentities.has(candidateFamilyIdentity(observation.id))
       ) {

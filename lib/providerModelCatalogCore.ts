@@ -150,7 +150,81 @@ const record = (value: unknown): Record<string, unknown> | null =>
     ? (value as Record<string, unknown>)
     : null;
 
-const lifecycleFromRecord = (item: Record<string, unknown>) => {
+/**
+ * A provider's modality list, lowercased, or `null` when there is nothing
+ * usable to report.
+ *
+ * An explicitly empty array collapses to `null` along with an absent field,
+ * and that is the intended reading, not an oversight: `[]` from a provider
+ * whose contract says the field is always populated is a degenerate response,
+ * and the two ways to read it are "supports nothing" and "says nothing". Only
+ * the first can be wrong in a direction that matters -- it would write
+ * `supportsImage: false` onto the adoption draft as though the provider had
+ * denied it, and the operator would approve a capability nobody asserted.
+ */
+const modalities = (value: unknown): string[] | null => {
+  if (!Array.isArray(value)) return null;
+  const named = value
+    .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
+    .filter((entry) => entry.length > 0 && entry.length <= 40);
+  return named.length > 0 ? Array.from(new Set(named)).sort() : null;
+};
+
+/**
+ * The sub-capabilities a capability object says it supports, comma-joined.
+ *
+ * Anthropic nests these -- `capabilities.effort.{low,medium,high,xhigh,max}`,
+ * each an object with its own `supported` -- alongside the parent's own
+ * `supported` flag, which is not one of the levels and is skipped.
+ */
+const supportedKeys = (value: unknown): string | null => {
+  const parent = record(value);
+  if (!parent) return null;
+  const keys = Object.entries(parent)
+    .filter(
+      ([key, entry]) => key !== "supported" && record(entry)?.supported === true
+    )
+    .map(([key]) => key)
+    .sort();
+  return keys.length > 0 ? keys.join(",") : null;
+};
+
+/**
+ * Groq's `active` flag, and only Groq's.
+ *
+ * The field says whether a listed model is currently servable. Scoped to the
+ * one provider that documents it because the failure mode of guessing is the
+ * one this module keeps paying for: a provider using `active` to mean
+ * something else would have its real models silently dropped from discovery,
+ * which is exactly what `openai_prefix_heuristic` exists to make visible.
+ *
+ * Only an explicit `false` counts. Every other provider omits the field, and
+ * absence has to keep meaning "not stated" or eleven queues empty at once.
+ */
+const providerReportedInactive = (
+  provider: AiProvider,
+  item: Record<string, unknown>
+) => provider === "groq" && item.active === false;
+
+const lifecycleFromRecord = (
+  provider: AiProvider,
+  item: Record<string, unknown>
+) => {
+  // Carried as a lifecycle value rather than as metadata nobody reads.
+  //
+  // `lifecycle` is the single channel that reaches all four places this has to
+  // land: the observation's `available`, the scan's per-entry status, the
+  // daily report's lifecycle warnings, and the queue's availability column
+  // (`modelLifecycleWorkItems.ts` selects `lifecycle` and nothing else from
+  // the catalogue entry). Recording `active` in metadata alone stopped new
+  // candidates being filed and left a *registered* model Groq had switched off
+  // reading as `available` / `current`, with no warning anywhere -- which is
+  // the case that actually costs an operator something.
+  //
+  // Its own word, not one of the retirement words below: Groq switching a
+  // model off is not a deprecation announcement, and the report prints this
+  // string verbatim.
+  if (providerReportedInactive(provider, item)) return "inactive";
   if (item.archived === true) return "archived";
   if (item.deprecated === true) return "deprecated";
   if (number(item.shutdown_date) !== null || text(item.shutdown_date)) {
@@ -179,13 +253,59 @@ const lifecycleFromRecord = (item: Record<string, unknown>) => {
  * So the second reason is carried out of the parser instead of vanishing
  * inside a boolean, and the daily report names what it dropped.
  */
-export type ChatModelExclusion = "non_chat_kind" | "openai_prefix_heuristic";
+export type ChatModelExclusion =
+  | "non_chat_kind"
+  | "openai_prefix_heuristic"
+  | "foreign_product_surface";
+
+/**
+ * An id a provider lists that its *chat* surface does not serve.
+ *
+ * Only Perplexity so far, and the reason is already written down one module
+ * away: `providerModelCatalogMonitor.ts` skips Perplexity when deciding what
+ * has been retired, because `GET /v1/models` describes the **Agent API**
+ * (`POST /v1/agent`) while Tomverse's Sonar entries go to Chat Completions.
+ * That guard was applied to one half of the scan. This is the other half.
+ *
+ * Left unguarded, the discovery side files every model Perplexity resells
+ * through the Agent API as a Perplexity candidate:
+ *
+ *     anthropic/claude-opus-4-8   openai/gpt-5.6-sol   xai/grok-4.5
+ *     google/gemini-3.5-flash     perplexity/glm-5.2   perplexity/sonar
+ *
+ * -- because the id regex allows `/` and nothing downstream asks whose model
+ * it is. An operator adopting `anthropic/claude-opus-4-8` out of that queue
+ * gets a registry row pointing at Perplexity carrying Anthropic's identifier.
+ *
+ * The admitted set is the Sonar family, with or without the vendor prefix,
+ * because that is the product Tomverse routes. A new `sonar-*` model is still
+ * discovered; nothing else from this endpoint is.
+ *
+ * Deliberately *not* reported in `heuristicallyExcluded`. That list exists for
+ * the OpenAI prefix *guess*, whose whole risk is being wrong about a real chat
+ * model. This is not a guess -- it is a documented product boundary, like
+ * `non_chat_kind` -- and a daily report naming sixteen resold models would be
+ * noise stacked on a fact that does not change.
+ */
+export const foreignProductSurfaceId = (
+  provider: AiProvider,
+  modelId: string
+) => {
+  if (provider !== "perplexity") return false;
+  const id = modelId.toLowerCase();
+  const slash = id.indexOf("/");
+  if (slash >= 0 && id.slice(0, slash) !== "perplexity") return true;
+  return !/^sonar(?:$|[-.])/.test(slash >= 0 ? id.slice(slash + 1) : id);
+};
 
 export const chatModelExclusion = (
   provider: AiProvider,
   modelId: string
 ): ChatModelExclusion | null => {
   const id = modelId.toLowerCase();
+  if (foreignProductSurfaceId(provider, id)) {
+    return "foreign_product_surface";
+  }
   if (isImageGenerationModel(id)) {
     return "non_chat_kind";
   }
@@ -205,13 +325,55 @@ export const chatModelExclusion = (
 export const isLikelyChatModelId = (provider: AiProvider, modelId: string) =>
   chatModelExclusion(provider, modelId) === null;
 
-/** Products Tomverse can currently route into a model-backed workspace. */
+/**
+ * Products Tomverse can currently route into a model-backed workspace.
+ *
+ * The product-surface check is asked first rather than folded into the `||`,
+ * because the image-generation branch answers a question about the id's *kind*
+ * and would happily admit an image model listed on an endpoint this provider's
+ * chat client never calls.
+ */
 export const isReviewableProviderModelId = (
   provider: AiProvider,
   modelId: string
-) => isLikelyChatModelId(provider, modelId) || isImageGenerationModel(modelId);
+) =>
+  !foreignProductSurfaceId(provider, modelId) &&
+  (isLikelyChatModelId(provider, modelId) || isImageGenerationModel(modelId));
 
-/** Whether an observation belongs in the human model review queue. */
+/**
+ * The lifecycle values that mean "the provider is not serving this", as
+ * against the ones that announce an end while still answering requests.
+ *
+ * The split is the point. `deprecated`, `legacy` and `shutdown_scheduled` are
+ * notices about a future: the model answers today, and treating them as dead
+ * would leave a working model switched off after a transient catalogue gap --
+ * exactly the damage `planCatalogReconciliation`'s restore exists to undo.
+ * `inactive`, `archived`, `retired` and `sunset` are statements about now.
+ *
+ * Named because two decisions turn on it and both read wrong if they ask
+ * about lifecycle in general: whether a reappearing model may be auto-restored,
+ * and whether a queued model may be adopted into the registry.
+ */
+export const UNSERVABLE_LIFECYCLES: ReadonlySet<string> = new Set([
+  "inactive",
+  "archived",
+  "retired",
+  "sunset",
+]);
+
+export const providerReportedUnservable = (
+  observation: Pick<ProviderCatalogObservation, "lifecycle">
+) => Boolean(observation.lifecycle && UNSERVABLE_LIFECYCLES.has(observation.lifecycle));
+
+/**
+ * Whether an observation belongs in the human model review queue.
+ *
+ * A Groq model marked `active: false` is excluded here too, and without a
+ * clause of its own: `lifecycleFromRecord` has already turned that flag into
+ * `lifecycle: "inactive"`, so one mechanism decides it and every reader of
+ * `lifecycle` agrees. A second check here would be a place for the two to
+ * drift apart.
+ */
 export const shouldQueueProviderCatalogObservation = (
   observation: ProviderCatalogObservation
 ) =>
@@ -255,25 +417,74 @@ const observationFromItem = (
   }
   if (!isReviewableProviderModelId(provider, id)) return null;
 
-  const lifecycle = lifecycleFromRecord(item);
+  const lifecycle = lifecycleFromRecord(provider, item);
   const releaseStage =
     text(item.stage) || text(item.lifecycle) || text(item.status);
   const prerelease = isPrereleaseModel(id, releaseStage);
+  const inputModalities = modalities(item.input_modalities);
+  const outputModalities = modalities(item.output_modalities);
   const metadata = {
     created: number(item.created),
     createdAt: text(item.created_at),
     shutdownDate: number(item.shutdown_date) ?? text(item.shutdown_date),
     ownedBy: text(item.owned_by),
-    contextLength: number(item.context_length) || number(item.max_context_length),
+    // `context_window` is Groq's name for the same number every other provider
+    // spells `context_length`. Reading only the latter left every Groq row with
+    // a blank context window, which is the field the adoption draft prefills.
+    contextLength:
+      number(item.context_length) ||
+      number(item.max_context_length) ||
+      number(item.context_window),
     inputTokenLimit: number(item.inputTokenLimit) || number(item.max_input_tokens),
-    outputTokenLimit: number(item.outputTokenLimit) || number(item.max_tokens),
+    // Groq says `max_completion_tokens`; Anthropic and the OpenAI-shaped
+    // providers say `max_tokens`. This is the provider's *capability*, and the
+    // registry's request cap is a separate decision -- see the
+    // `providerMaxOutputTokens` note; Kimi K3 is why they are not the same
+    // column.
+    outputTokenLimit:
+      number(item.outputTokenLimit) ||
+      number(item.max_tokens) ||
+      number(item.max_completion_tokens),
     vision:
       boolean(record(capabilities?.vision)?.supported) ??
       boolean(capabilities?.vision) ??
-      boolean(record(record(item.capabilities)?.image_input)?.supported),
+      boolean(record(capabilities?.image_input)?.supported) ??
+      // Moonshot/Kimi states the same capability as a flat flag, and xAI as a
+      // modality list. Both were read as "unknown" until now.
+      boolean(item.supports_image_in) ??
+      (inputModalities ? inputModalities.includes("image") : null),
     thinking:
       boolean(item.thinking) ??
-      boolean(record(record(item.capabilities)?.thinking)?.supported),
+      boolean(record(capabilities?.thinking)?.supported) ??
+      boolean(item.supports_reasoning),
+    // Anthropic reports PDF as its own capability, and the registry has a
+    // column for it the operator has so far been filling in by hand.
+    pdfInput: boolean(record(capabilities?.pdf_input)?.supported),
+    structuredOutputs: boolean(record(capabilities?.structured_outputs)?.supported),
+    // Which effort levels the provider admits, in the order it listed them.
+    // Recorded, not interpreted: mapping these onto the registry's `reasoning`
+    // field is a product decision, not a parse.
+    effortLevels: supportedKeys(capabilities?.effort),
+    videoInput: boolean(item.supports_video_in),
+    inputModalities: inputModalities?.join(",") ?? null,
+    outputModalities: outputModalities?.join(",") ?? null,
+    // xAI is the only provider that prices its own catalogue response, in
+    // hundredths of a cent per million tokens (USD cents per 100M tokens).
+    // Stored verbatim under names that say so, and stored nowhere else: a
+    // catalogue read is not a verified price, and docs/policy/credit-and-cost-limits.md
+    // says where prices may come from. This is evidence for a human, not a rate.
+    observedPromptPriceCentsPer100MTokens: number(item.prompt_text_token_price),
+    observedCompletionPriceCentsPer100MTokens: number(
+      item.completion_text_token_price
+    ),
+    observedCachedPromptPriceCentsPer100MTokens: number(
+      item.cached_prompt_text_token_price
+    ),
+    longContextThreshold: number(item.long_context_threshold),
+    // Groq marks a listed model that is not currently servable. The decision
+    // this drives lives in `lifecycleFromRecord`; the flag is kept here so the
+    // report and the adoption draft can say where "inactive" came from.
+    active: provider === "groq" ? boolean(item.active) : null,
     releaseStage,
     prerelease,
     product: modelProductSurface(id),
