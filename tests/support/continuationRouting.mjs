@@ -35,7 +35,7 @@ export function extractContinuationRouting(text) {
     const target = unique(findNodes(handler.body, namedVariable("targetSurface")), "targetSurface declaration");
     assert.ok(target.initializer, "routing: targetSurface must be initialized");
     const targetStatement = target.parent.parent;
-    assert.equal(targetStatement.parent, handler.body, "routing: targetSurface must be a direct handler statement");
+    assert.ok(targetStatement.parent === handler.body, "routing: targetSurface must be a direct handler statement");
     const targetKeyword = target.parent.getFirstToken(source);
     assert.ok(targetKeyword && [ts.SyntaxKind.ConstKeyword, ts.SyntaxKind.LetKeyword, ts.SyntaxKind.VarKeyword]
         .includes(targetKeyword.kind), "routing: targetSurface must have a declaration keyword");
