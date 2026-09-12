@@ -34,6 +34,7 @@ import {
   supersedingServedModel,
 } from "../lib/modelLifecycleTriage.ts";
 import { OPEN_WORK_ITEM_STATUSES } from "../lib/modelLifecycleWorkItemCore.ts";
+import { foreignProductSurfaceId } from "../lib/providerModelCatalogCore.ts";
 import { transitionWorkItems } from "../lib/modelLifecycleWorkItems.ts";
 import { listImageModels } from "../lib/imageModelRegistry.ts";
 
@@ -91,7 +92,16 @@ try {
   const blocked = [];
   for (const item of items) {
     const supersededBy = supersedingServedModel(item.apiModel, servedApiModels);
-    const reason = !shouldQueueModelCandidate(item.apiModel)
+    // Asked first, and by (provider, apiModel) rather than by the id alone:
+    // this is the only reason here that is a fact about *which endpoint filed
+    // the item*, not about the model. Perplexity's list endpoint describes the
+    // Agent API, so it filed anthropic/, openai/, google/ and xai/ models as
+    // Perplexity candidates until the parser stopped it -- and a parser fix
+    // only governs tomorrow's scan. The rows already in the queue stay open,
+    // and a backfill re-creates them, until something closes them.
+    const reason = foreignProductSurfaceId(item.provider, item.apiModel)
+      ? "foreign_product_surface"
+      : !shouldQueueModelCandidate(item.apiModel)
       ? isPrereleaseModel(item.apiModel)
         ? "prerelease"
         : "not_reviewable"
@@ -179,7 +189,9 @@ try {
       note:
         entry.reason === "superseded_by_served_version"
           ? `Closed by queue cleanup: Tomverse already serves ${entry.supersededBy}, a later generation of the same line.`
-          : "Closed by queue cleanup: prerelease and other non-reviewable models are no longer queued for review.",
+          : entry.reason === "foreign_product_surface"
+            ? `Closed by queue cleanup: ${entry.provider}'s model list describes a product surface Tomverse does not route, so this row does not name a model this provider would serve us.`
+            : "Closed by queue cleanup: prerelease and other non-reviewable models are no longer queued for review.",
     });
     if (result.ok) {
       closed += 1;

@@ -195,6 +195,17 @@ export type AdoptionObservation = {
     outputTokenLimit?: number | null;
     vision?: boolean | null;
     thinking?: boolean | null;
+    /**
+     * The effort levels the provider admits, comma-joined, when it publishes
+     * them at all (Anthropic's `capabilities.effort`). Carried so the draft
+     * stops telling the operator the provider said nothing about depth on a
+     * model whose listing named every level.
+     *
+     * Still not mapped onto the registry's `reasoning` field: those are the
+     * provider's words for how hard the model may think, and which of them
+     * Tomverse sells a model at is a product decision.
+     */
+    effortLevels?: string | null;
   } | null;
 };
 
@@ -352,8 +363,11 @@ export const buildAdoptionDraft = (input: {
     "예약 출력 토큰 — 능력이 아니라 entitlement이므로 출력 한도에서 유도하지 않습니다."
   );
   if (metadata?.thinking === true) {
+    const levels = metadata.effortLevels?.trim();
     unknowns.push(
-      "추론 강도 — 공급자가 thinking 지원을 알렸을 뿐 등급은 알리지 않습니다."
+      levels
+        ? `추론 강도 — 공급자가 알린 단계는 ${levels}입니다. 어느 단계로 판매할지는 제품 결정입니다.`
+        : "추론 강도 — 공급자가 thinking 지원을 알렸을 뿐 등급은 알리지 않습니다."
     );
   }
 
