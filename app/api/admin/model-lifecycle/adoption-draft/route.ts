@@ -40,10 +40,21 @@ export async function GET(req: Request) {
       day: 500,
     });
 
-    const workItemId = new URL(req.url).searchParams.get("workItemId")?.trim();
+    const requestUrl = new URL(req.url);
+    const workItemId = requestUrl.searchParams.get("workItemId")?.trim();
     if (!workItemId) {
       return NextResponse.json({ error: "workItemId is required." }, { status: 400 });
     }
+    // The registry id the operator currently has in the form, when it is no
+    // longer the one this draft proposed.
+    //
+    // The proposed id comes from the provider's own identifier, and a model
+    // whose price profile is registered under a different canonical id --
+    // `claude-haiku-4-5` for an api model of `claude-haiku-4-5-20251001` -- only
+    // matches once the operator corrects it. Without re-resolving, the panel
+    // keeps the first answer: it tells them to type a price they are actually
+    // inheriting, and refuses to save the inheritance.
+    const requestedModelId = requestUrl.searchParams.get("modelId")?.trim() || null;
 
     const workItem = await prisma.modelLifecycleWorkItem.findUnique({
       where: { id: workItemId },
@@ -95,10 +106,13 @@ export async function GET(req: Request) {
         : null;
 
     const proposedId = registryIdFromApiModel(workItem.apiModel, taken.map((row) => row.id));
+    // What the price is being judged for: the id in the form if the operator has
+    // changed it, the proposed one otherwise.
+    const pricedModelId = requestedModelId || proposedId;
     const draft = buildAdoptionDraft({
       provider: workItem.provider,
       apiModel: workItem.apiModel,
-      hasPricingProfile: Boolean(getModelPricingProfile(proposedId)),
+      hasPricingProfile: Boolean(getModelPricingProfile(pricedModelId)),
       observation: {
         displayName: observation?.displayName ?? null,
         metadata: metadata
@@ -121,7 +135,7 @@ export async function GET(req: Request) {
     });
 
 
-    const draftModelId = draft.fields.id;
+    const draftModelId = requestedModelId || draft.fields.id;
     return NextResponse.json({
       workItem: { id: workItem.id, status: workItem.status },
       // The prompt size this deployment actually accepts, so the panel's credit

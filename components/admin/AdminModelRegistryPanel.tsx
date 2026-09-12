@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { discardResponseBody } from "@/lib/discardResponseBody";
 import { isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
 import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClass } from "@/lib/models";
@@ -318,6 +319,52 @@ export function AdminModelRegistryPanel() {
   // and the two disagreeing is the floor the operator sees not being the floor
   // the save is judged by.
   const inheritedPrice = profilePrice?.modelId === form.id ? profilePrice : null;
+
+  // ...and when the id moves, the price is resolved again for the new one.
+  //
+  // The proposed id is built from the provider's identifier, so a model whose
+  // profile is registered under a canonical id -- `claude-haiku-4-5` for an api
+  // model of `claude-haiku-4-5-20251001` -- only matches after the operator
+  // corrects it. Keeping the first answer told them to type a price they were
+  // actually inheriting, and refused to save the inheritance.
+  const adoptedModelId = adoptWorkItemId ? form.id : null;
+  useEffect(() => {
+    if (!adoptWorkItemId || !adoptedModelId) return;
+    if (profilePrice?.modelId === adoptedModelId) return;
+    let cancelled = false;
+    // Debounced: the id is typed, and a request per keystroke would be one per
+    // character of a name the operator has not finished writing.
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/admin/model-lifecycle/adoption-draft?workItemId=${encodeURIComponent(
+              adoptWorkItemId
+            )}&modelId=${encodeURIComponent(adoptedModelId)}`,
+            { cache: "no-store" }
+          );
+          if (!response.ok) {
+            await discardResponseBody(response);
+            return;
+          }
+          const data = (await response.json().catch(() => null)) as {
+            profilePrice?: typeof profilePrice;
+            unknowns?: string[];
+          } | null;
+          if (cancelled || !data) return;
+          setProfilePrice(data.profilePrice ?? null);
+          if (data.unknowns) setAdoptUnknowns(data.unknowns);
+        } catch {
+          // A failed re-resolution leaves the form as it was: the save is still
+          // judged by the server, which resolves the profile itself.
+        }
+      })();
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [adoptWorkItemId, adoptedModelId, profilePrice?.modelId]);
   const creditFloor = useMemo(
     () =>
       suggestCreditFloor({
