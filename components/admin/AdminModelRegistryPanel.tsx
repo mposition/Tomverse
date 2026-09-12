@@ -191,6 +191,14 @@ export function AdminModelRegistryPanel() {
   // a sale decision nobody made, under a banner calling it undecided.
   const [adoptClassChosen, setAdoptClassChosen] = useState(false);
   const [worstCaseInputTokens, setWorstCaseInputTokens] = useState<number | null>(null);
+  // What this model bills at with its price columns left null, when a pricing
+  // profile already covers it. Without it the floor reads empty price fields as
+  // "no price" and the panel refuses a save the server would accept.
+  const [profilePrice, setProfilePrice] = useState<{
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    maxOutputTokens: number | null;
+  } | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -239,6 +247,11 @@ export function AdminModelRegistryPanel() {
           fields?: Partial<FormState>;
           unknowns?: string[];
           worstCaseInputTokens?: number;
+          profilePrice?: {
+            inputUsdPerMillionTokens: number;
+            outputUsdPerMillionTokens: number;
+            maxOutputTokens: number | null;
+          } | null;
           error?: string;
         } | null;
         if (!response.ok || !data?.fields) {
@@ -251,6 +264,7 @@ export function AdminModelRegistryPanel() {
         setAdoptReason("");
         setAdoptClassChosen(false);
         setWorstCaseInputTokens(data.worstCaseInputTokens ?? null);
+        setProfilePrice(data.profilePrice ?? null);
         setCopySourceId(null);
         setValidation(null);
         setEditingId("new");
@@ -299,9 +313,11 @@ export function AdminModelRegistryPanel() {
   const creditFloor = useMemo(
     () =>
       suggestCreditFloor({
-        inputUsdPerMillionTokens: form.inputUsdPerMillionTokens,
-        outputUsdPerMillionTokens: form.outputUsdPerMillionTokens,
-        maxOutputTokens: form.maxOutputTokens,
+        inputUsdPerMillionTokens:
+          form.inputUsdPerMillionTokens ?? profilePrice?.inputUsdPerMillionTokens ?? null,
+        outputUsdPerMillionTokens:
+          form.outputUsdPerMillionTokens ?? profilePrice?.outputUsdPerMillionTokens ?? null,
+        maxOutputTokens: form.maxOutputTokens ?? profilePrice?.maxOutputTokens ?? null,
         // Anthropic first-party requests write a five-minute prompt cache at a
         // premium on the input price, so the costliest input token on that
         // provider is not the list price. Left at 1 elsewhere.
@@ -317,6 +333,7 @@ export function AdminModelRegistryPanel() {
       form.maxOutputTokens,
       form.provider,
       worstCaseInputTokens,
+      profilePrice,
     ]
   );
 
