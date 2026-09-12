@@ -106,10 +106,37 @@ test("eight cells, twelve families and whole-family 24/24 partitions retain sele
   assert.equal(paired.acquisitionFailureCases, 1);
   assert.equal(paired.correctedCases, 0);
   assert.equal(paired.regressedCases, 0);
+  assert.equal(paired.changedSelectionCases, 21);
+  assert.equal(paired.changedSelectionObservedCases, 21);
+  assert.equal(paired.sameSelectionObservedCases, 27);
   assert.equal(rows.length, 48);
+  assert.equal(rows.filter((row) => row.baseline.modelId !== row.candidate.modelId).length, 21);
   const selectedRows = new Set(manifest.collection.selectedRowIds);
   assert.ok(rows.every((row) => [row.baseline, row.candidate].every((choice) =>
     choice.available && choice.unavailableReason === null && selectedRows.has(choice.rowId))));
+  // Use the report's actual fixture policy, without its report-only digest field.
+  const { schemaVersion, purpose, policyId, preferences, fallback } = report.replay.candidate;
+  const fixturePolicy = { schemaVersion, purpose, policyId, preferences, fallback };
+  assert.equal(hash(fixturePolicy), report.replay.candidate.policyDigest);
+  const selectionByCase = new Map(selectReplayModelsV2(manifest.collection.plan, AVAILABLE_MODELS, fixturePolicy)
+    .map((selection) => [selection.caseId, selection]));
+  assert.equal(selectionByCase.size, 48);
+  const assertSelectionIdentity = (observedRows) => {
+    for (const row of observedRows) {
+      const selection = selectionByCase.get(row.caseId);
+      assert.ok(selection, "selection_case_exists");
+      for (const arm of ["baseline", "candidate"]) {
+        const expected = selection[arm];
+        const planned = manifest.collection.plan.rows.find((entry) => entry.caseId === row.caseId && entry.modelId === expected.modelId);
+        assert.ok(planned, "selection_plan_row_exists");
+        assert.deepEqual({ modelId: row[arm].modelId, rowId: row[arm].rowId, reason: row[arm].reason },
+          { modelId: expected.modelId, rowId: planned.rowId, reason: expected.reason }, `${arm}_selection_identity`);
+      }
+    }
+  };
+  assertSelectionIdentity(rows);
+  // Reuse the same check on an in-memory projection; do not mutate the runtime or fixture.
+  assert.throws(() => assertSelectionIdentity(rows.map((row) => ({ ...row, candidate: { ...row.baseline } }))), /candidate_selection_identity/);
 });
 
 test("all mock metrics remain null and unknown intent cannot resume or export", () => {
