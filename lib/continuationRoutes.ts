@@ -59,6 +59,31 @@ export const conversationSurface = (input: {
     input.hasContinuationBridge ? "continuation" : "workspace";
 
 /**
+ * The fact a surface was derived from, read back out of it.
+ *
+ * The client already receives `surface` on every row, so it already knows
+ * which conversations have an imported half -- it just knows it in a shape
+ * that says "where this opens" rather than "what it is". Callers that need
+ * the fact, such as the share control asking
+ * `lib/continuationSharingPolicy.ts` whether this conversation may be
+ * published, need the second.
+ *
+ * Written here, beside `conversationSurface`, rather than as
+ * `surface === "continuation"` at each call site. The two functions are one
+ * decision read in two directions, and an inversion spelled out in a
+ * component drifts the moment a third surface exists: `=== "continuation"`
+ * would then quietly answer "no bridge" for a surface nobody had considered,
+ * whereas this signature has to be revisited.
+ *
+ * An absent surface is a conversation with no server row -- a guest
+ * conversation, which can never be a continuation -- so it reads as no
+ * bridge, exactly as `conversationSurface`'s own default does.
+ */
+export const surfaceHasContinuationBridge = (
+    surface: ConversationSurface | undefined
+): boolean => surface === "continuation";
+
+/**
  * The path a surface opens at, or `null` for the workspace.
  *
  * Null rather than the workspace's own path because the two are not the same

@@ -20,7 +20,11 @@ import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { chatWorkspaceGuideHref } from "@/lib/localizedHelpHref";
 import { ACCOUNT_SETTINGS_OPEN_EVENT } from "@/lib/accountSettingsEvents";
 import { parseSettingsDeepLink } from "@/lib/settingsNavigation";
-import type { ConversationSurface } from "@/lib/continuationRoutes";
+import {
+    surfaceHasContinuationBridge,
+    type ConversationSurface,
+} from "@/lib/continuationRoutes";
+import { continuationShareRefusal } from "@/lib/continuationSharingPolicy";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -204,6 +208,24 @@ export function ChatSidebar({
     }>>([]);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
+    /**
+     * Whether the open share dialog is looking at a conversation that may not
+     * be published, decided by `lib/continuationSharingPolicy.ts` -- the same
+     * function `POST /api/conversations/[id]/share` decides with.
+     *
+     * The dialog explains rather than disappears. The menu entry that opens it
+     * is how somebody finds out whether this conversation can be shared, and
+     * an entry that is simply absent answers that question with nothing; this
+     * one answers it with the reason. Only the confirm button goes, because
+     * the request behind it cannot succeed.
+     */
+    const shareRefusal = shareTarget
+        ? continuationShareRefusal({
+              hasContinuationBridge: surfaceHasContinuationBridge(
+                  shareTarget.surface
+              ),
+          })
+        : null;
     const [renameValue, setRenameValue] = useState("");
     const [lockTarget, setLockTarget] = useState<Conversation | null>(null);
     const [lockPassword, setLockPassword] = useState("");
@@ -1762,6 +1784,7 @@ export function ChatSidebar({
                                         {conv.kind !== "image" && (<>
                                         <button
                                             type="button"
+                                            data-testid="conversation-share"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (canShare) {
@@ -2060,14 +2083,26 @@ export function ChatSidebar({
                         </div>
                     </div>
                     <div className="mt-5 space-y-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                        <p>{helpCopy.shareDialogBody}</p>
-                        <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs font-semibold text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100">
-                            {helpCopy.shareDialogSnapshot}
-                        </p>
-                        <p className="flex gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
-                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                            {helpCopy.shareDialogVisibility}
-                        </p>
+                        {shareRefusal ? (
+                            <p
+                                data-testid="share-continuation-refusal"
+                                className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100"
+                            >
+                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                                {t("sidebar.shareContinuationUnavailable")}
+                            </p>
+                        ) : (
+                            <>
+                                <p>{helpCopy.shareDialogBody}</p>
+                                <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs font-semibold text-blue-950 dark:border-blue-900/70 dark:bg-blue-950/30 dark:text-blue-100">
+                                    {helpCopy.shareDialogSnapshot}
+                                </p>
+                                <p className="flex gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                                    {helpCopy.shareDialogVisibility}
+                                </p>
+                            </>
+                        )}
                     </div>
                     <div className="mt-5 flex justify-end gap-2">
                         <button
@@ -2075,21 +2110,27 @@ export function ChatSidebar({
                             onClick={() => setShareTarget(null)}
                             className="rounded-lg px-4 py-2 text-sm font-semibold text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
                         >
-                            {t("auth.cancel")}
+                            {/* "Close", not "Cancel": with the confirm button
+                                gone there is nothing left to cancel, and a
+                                dialog whose only button says Cancel reads as
+                                though something were pending. */}
+                            {shareRefusal ? t("chat.close") : t("auth.cancel")}
                         </button>
-                        <button
-                            type="button"
-                            data-testid="share-confirmation-submit"
-                            onClick={() => {
-                                onShare(shareTarget.id, shareTarget.title);
-                                setShareTarget(null);
-                            }}
-                            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500"
-                        >
-                            {shareTarget.shareEnabled
-                                ? t("sidebar.refreshShare")
-                                : helpCopy.shareDialogConfirm}
-                        </button>
+                        {!shareRefusal && (
+                            <button
+                                type="button"
+                                data-testid="share-confirmation-submit"
+                                onClick={() => {
+                                    onShare(shareTarget.id, shareTarget.title);
+                                    setShareTarget(null);
+                                }}
+                                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500"
+                            >
+                                {shareTarget.shareEnabled
+                                    ? t("sidebar.refreshShare")
+                                    : helpCopy.shareDialogConfirm}
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
