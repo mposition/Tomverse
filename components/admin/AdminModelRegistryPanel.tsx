@@ -150,6 +150,17 @@ const labelClass = "grid gap-1.5 text-xs font-bold uppercase tracking-[0.12em] t
 
 const numericValue = (value: string) => (value === "" ? null : Number(value));
 
+/**
+ * The adoption draft endpoint, named rather than spelled inline.
+ *
+ * Both callers build their query with `URLSearchParams`, which encodes each
+ * value and keeps the `?` next to a `$` -- the encoding check reads a lone `?`
+ * between letters as a character that used to be something else, and
+ * `adoption-draft?workItemId` is long enough that the nearest `/` or `=` falls
+ * outside the window it looks in.
+ */
+const ADOPTION_DRAFT_PATH = "/api/admin/model-lifecycle/adoption-draft";
+
 const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
   const base = `${sourceId}-copy`;
   const existing = new Set(models.map((model) => model.id));
@@ -247,7 +258,7 @@ export function AdminModelRegistryPanel() {
     void (async () => {
       try {
         const response = await fetch(
-          `/api/admin/model-lifecycle/adoption-draft?workItemId=${encodeURIComponent(adoptParam)}`,
+          `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({ workItemId: adoptParam })}`,
           { cache: "no-store" }
         );
         const data = (await response.json().catch(() => null)) as {
@@ -346,9 +357,10 @@ export function AdminModelRegistryPanel() {
       void (async () => {
         try {
           const response = await fetch(
-            `/api/admin/model-lifecycle/adoption-draft?workItemId=${encodeURIComponent(
-              adoptWorkItemId
-            )}&modelId=${encodeURIComponent(adoptedModelId)}`,
+            `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({
+              workItemId: adoptWorkItemId,
+              modelId: adoptedModelId,
+            })}`,
             { cache: "no-store" }
           );
           if (!response.ok) {
