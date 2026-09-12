@@ -6,6 +6,7 @@ import {
   buildAdoptionDraft,
   isCreditFloor,
   registryIdFromApiModel,
+  remainingValidations,
   suggestCreditFloor,
   WORST_CASE_INPUT_TOKENS,
 } from "../lib/modelAdoptionDraft.ts";
@@ -289,17 +290,31 @@ test("the floor prices the costliest input token, not the list price", () => {
 // them, and why the review found four of them by reading rather than running.
 
 const adoptable = {
-  id: "wi_1",
-  status: "discovered",
-  action: "add",
-  apiModel: "claude-fable-5-1",
+  id: 'wi_1',
+  status: 'discovered',
+  action: 'add',
+  provider: 'anthropic',
+  apiModel: 'claude-fable-5-1',
   modelId: null as string | null,
+};
+
+/** A saved form that would be accepted, for overriding one field at a time. */
+const adoptBody = {
+  apiModel: 'claude-fable-5-1',
+  provider: 'anthropic',
+  status: 'coming-soon',
+  publiclyListed: false,
+  usageClass: 'standard',
+  creditWeight: 1,
+  inputUsdPerMillionTokens: null as number | null,
+  outputUsdPerMillionTokens: null as number | null,
+  maxOutputTokens: null as number | null,
 };
 
 test("an adoption that names a different model is refused", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: adoptable,
-    body: { apiModel: "gpt-other" },
+    body: { ...adoptBody, apiModel: "gpt-other" },
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /claude-fable-5-1/);
@@ -312,7 +327,7 @@ test("a different spelling of the same model is still the same decision", () => 
   assert.equal(
     adoptionPreflightRefusal({
       workItem: adoptable,
-      body: { apiModel: "claude-fable-5-1-20260901" },
+      body: { ...adoptBody, apiModel: "claude-fable-5-1-20260901" },
     }),
     null
   );
@@ -321,7 +336,7 @@ test("a different spelling of the same model is still the same decision", () => 
 test("a work item already adopted cannot be adopted again", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: { ...adoptable, status: "validation_pending", modelId: "claude-fable-5-1" },
-    body: { apiModel: "claude-fable-5-1" },
+    body: { ...adoptBody },
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /already adopted/);
@@ -330,7 +345,7 @@ test("a work item already adopted cannot be adopted again", () => {
 test("an image generation model is not adopted into the chat registry", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: { ...adoptable, apiModel: "gpt-image-3" },
-    body: { apiModel: "gpt-image-3" },
+    body: { ...adoptBody, apiModel: "gpt-image-3" },
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /Image Studio/);
@@ -339,7 +354,7 @@ test("an image generation model is not adopted into the chat registry", () => {
 test("a retirement item is not an adoption", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: { ...adoptable, action: "retire" },
-    body: { apiModel: "claude-fable-5-1" },
+    body: { ...adoptBody },
   });
   assert.equal(refusal?.status, 409);
 });
@@ -347,7 +362,7 @@ test("a retirement item is not an adoption", () => {
 test("a closed decision is refused before anything is created", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: { ...adoptable, status: "closed_no_action" },
-    body: { apiModel: "claude-fable-5-1" },
+    body: { ...adoptBody },
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /new work item/);
@@ -356,7 +371,7 @@ test("a closed decision is refused before anything is created", () => {
 test("a missing work item is a 404, not a silent plain create", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: null,
-    body: { apiModel: "claude-fable-5-1" },
+    body: { ...adoptBody },
   });
   assert.equal(refusal?.status, 404);
 });
@@ -375,5 +390,138 @@ test("an adopted item owes the validations the rollout gate reads", () => {
       actorEmail: "operator@tomverse.app",
     })?.code,
     "validations_outstanding"
+  );
+});
+
+// Round 2 of the independent review. Each of these is a way the first set of
+// fixes could still be walked around.
+
+test("a provider no scan has seen serving this model is refused", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: { ...adoptBody, provider: "openai" },
+    observedProviders: ["anthropic"],
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /openai/);
+});
+
+test("a second provider that does serve it is a legitimate choice", () => {
+  // The same model reaching us through two catalogues is the normal case; which
+  // one carries the requests is a registry decision.
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: adoptable,
+      body: { ...adoptBody, provider: "qwen" },
+      observedProviders: ["anthropic", "qwen"],
+    }),
+    null
+  );
+});
+
+test("a second row for a model the registry already serves is refused", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: { ...adoptBody },
+    providerPairRegistered: true,
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /already serves/);
+});
+
+test("an adopted model cannot be born enabled or listed", () => {
+  for (const status of ["enabled", "limited"]) {
+    const refusal = adoptionPreflightRefusal({
+      workItem: adoptable,
+      body: { ...adoptBody, status },
+    });
+    assert.equal(refusal?.status, 409, status);
+    assert.match(refusal!.message, /switched off/);
+  }
+  const listed = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: { ...adoptBody, publiclyListed: true },
+  });
+  assert.equal(listed?.status, 409);
+  assert.match(listed!.message, /unlisted/);
+});
+
+test("a class below the floor is refused at the save, not just warned about", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: {
+      ...adoptBody,
+      usageClass: "standard",
+      creditWeight: 1,
+      inputUsdPerMillionTokens: 5,
+      outputUsdPerMillionTokens: 25,
+      maxOutputTokens: 8_192,
+    },
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /at least 8 credits/);
+});
+
+test("a class at or above the floor is accepted", () => {
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: adoptable,
+      body: {
+        ...adoptBody,
+        usageClass: "premium",
+        creditWeight: 8,
+        inputUsdPerMillionTokens: 5,
+        outputUsdPerMillionTokens: 25,
+        maxOutputTokens: 8_192,
+      },
+    }),
+    null
+  );
+});
+
+test("an item already past the state that holds validations is refused", () => {
+  // Adoption files what a model still owes. An item at rollout_pending would
+  // have those owed checks written behind it and could complete anyway.
+  for (const status of ["validation_pending", "rollout_pending", "communication_pending"]) {
+    const refusal = adoptionPreflightRefusal({
+      workItem: { ...adoptable, status },
+      body: { ...adoptBody },
+    });
+    assert.equal(refusal?.status, 409, status);
+    assert.match(refusal!.message, /past the state/);
+  }
+});
+
+test("the floor follows the input limit this deployment actually accepts", () => {
+  // A deployment that raised CHAT_USER_MAX_INPUT_TOKENS to 200,000 was shown a
+  // floor priced for 128,000, short by 14,800 micro-USD with no extra credits
+  // to cover it: the multiplier stops rising above 100,000 tokens.
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: 5,
+    outputUsdPerMillionTokens: 25,
+    maxOutputTokens: 8_192,
+    inputPriceMultiplier: 1.25,
+    worstCaseInputTokens: 200_000,
+  });
+  assert.ok(isCreditFloor(floor));
+  assert.equal(floor.inputTokens, 200_000);
+  assert.equal(floor.worstCaseMicroUsd, 1_454_800);
+  assert.ok(floor.coverMicroUsd >= floor.worstCaseMicroUsd);
+});
+
+test("clearing a validation leaves the rest, and names what was not owed", () => {
+  const outcome = remainingValidations(["pricing", "access", "staging"], ["pricing"]);
+  assert.deepEqual(outcome.remaining, ["access", "staging"]);
+  assert.deepEqual(outcome.unknown, []);
+
+  // A typo clears nothing and says so, rather than reading as a satisfied check.
+  const typo = remainingValidations(["pricing"], ["pricng"]);
+  assert.deepEqual(typo.remaining, ["pricing"]);
+  assert.deepEqual(typo.unknown, ["pricng"]);
+
+  // An item that owes nothing is the state the rollout gate lets through.
+  assert.deepEqual(
+    remainingValidations(["pricing"], ["pricing"]).remaining,
+    []
   );
 });

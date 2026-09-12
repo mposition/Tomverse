@@ -133,6 +133,16 @@ export const suggestCreditFloor = (input: {
    * is worse than no floor, because it is the number somebody trusts.
    */
   inputPriceMultiplier?: number;
+  /**
+   * The largest prompt this deployment accepts, from `CHAT_USER_MAX_INPUT_TOKENS`.
+   *
+   * Passed in rather than assumed. The runtime reads it from the environment,
+   * and a deployment that had raised it to 200,000 was shown a floor computed
+   * for 128,000 -- short of the real worst turn by 14,800 micro-USD, with no
+   * extra credits to cover the gap because the input multiplier stops rising
+   * above 100,000 tokens.
+   */
+  worstCaseInputTokens?: number;
 }): CreditFloor | CreditFloorRefusal => {
   const listInputPrice = positive(input.inputUsdPerMillionTokens);
   const outputPrice = positive(input.outputUsdPerMillionTokens);
@@ -144,12 +154,13 @@ export const suggestCreditFloor = (input: {
     return { reason: "output_cap_unknown", worstCaseMicroUsd: null };
   }
   const inputPrice = listInputPrice * (positive(input.inputPriceMultiplier) ?? 1);
+  const inputTokens =
+    positive(input.worstCaseInputTokens) ?? WORST_CASE_INPUT_TOKENS;
 
   // Tokens times USD-per-million is already micro-USD: 128,000 tokens at
   // US$5/M is 640,000 micro-USD.
-  const worstCaseMicroUsd =
-    WORST_CASE_INPUT_TOKENS * inputPrice + outputTokens * outputPrice;
-  const inputMultiplier = getInputCreditMultiplier(WORST_CASE_INPUT_TOKENS);
+  const worstCaseMicroUsd = inputTokens * inputPrice + outputTokens * outputPrice;
+  const inputMultiplier = getInputCreditMultiplier(inputTokens);
 
   for (const { usageClass, credits } of CLASS_CREDITS) {
     const coverMicroUsd =
@@ -160,7 +171,7 @@ export const suggestCreditFloor = (input: {
       credits,
       worstCaseMicroUsd,
       coverMicroUsd,
-      inputTokens: WORST_CASE_INPUT_TOKENS,
+      inputTokens,
       outputTokens,
       inputMultiplier,
     };
@@ -379,10 +390,29 @@ export const adoptionPreflightRefusal = (input: {
     id: string;
     status: string;
     action: string;
+    provider: string;
     apiModel: string;
     modelId: string | null;
   } | null;
-  body: { apiModel: string };
+  body: {
+    apiModel: string;
+    provider: string;
+    status: string;
+    publiclyListed: boolean;
+    usageClass: string;
+    creditWeight: number;
+    inputUsdPerMillionTokens?: number | null;
+    outputUsdPerMillionTokens?: number | null;
+    maxOutputTokens?: number | null;
+  };
+  /** Every provider seen serving this model, from the item's own sightings. */
+  observedProviders?: readonly string[];
+  /** Whether the registry already has a row for this provider and api model. */
+  providerPairRegistered?: boolean;
+  /** `CHAT_USER_MAX_INPUT_TOKENS`, for the floor. */
+  worstCaseInputTokens?: number;
+  /** The costliest input token relative to list price, for the floor. */
+  inputPriceMultiplier?: number;
 }): { status: number; message: string } | null => {
   const { workItem } = input;
   if (!workItem) return { status: 404, message: "No such work item." };
@@ -418,15 +448,105 @@ export const adoptionPreflightRefusal = (input: {
       message: `This work item is about ${workItem.apiModel}. Register that model, or adopt the work item that names the one you are creating.`,
     };
   }
-  if (
-    adoptionTransitionPath(
-      workItem.status as Parameters<typeof adoptionTransitionPath>[0]
-    ) === null
-  ) {
+  // Which provider will carry the requests is a real choice -- several
+  // catalogues list the same model -- but it is a choice between the ones that
+  // actually serve it. Without this, an Anthropic discovery could be answered
+  // with a row pointing at OpenAI, and nothing downstream would notice: the
+  // registry checks that a provider is *configured*, never that it serves the
+  // model named beside it.
+  const servingProviders = new Set(
+    (input.observedProviders?.length
+      ? input.observedProviders
+      : [workItem.provider]
+    ).map((provider) => provider.toLowerCase())
+  );
+  if (!servingProviders.has(input.body.provider.toLowerCase())) {
+    return {
+      status: 409,
+      message: `No catalogue scan has seen ${workItem.apiModel} served by ${input.body.provider}. It was seen through ${[...servingProviders].join(", ")}.`,
+    };
+  }
+  if (input.providerPairRegistered) {
+    return {
+      status: 409,
+      message: `The registry already serves ${input.body.apiModel} on ${input.body.provider}. Edit that row rather than creating a second one.`,
+    };
+  }
+  const path = adoptionTransitionPath(
+    workItem.status as Parameters<typeof adoptionTransitionPath>[0]
+  );
+  if (path === null) {
     return {
       status: 409,
       message: `A work item in ${workItem.status} cannot be adopted. Reopening a closed decision is a new work item.`,
     };
   }
+  // An empty path means the item is already at or past `validation_pending`
+  // without a model. Creating the row then records the validations it owes
+  // *after* the state that was supposed to hold them, and an item already at
+  // `rollout_pending` would walk straight to completed with the checks written
+  // behind it. The item is in a shape adoption cannot explain, so it is refused
+  // rather than half-handled.
+  if (path.length === 0) {
+    return {
+      status: 409,
+      message: `This work item is already at ${workItem.status} with no model against it. Adoption files the validations a model still owes, and this item is past the state that holds them.`,
+    };
+  }
+  // Born switched off, enforced rather than suggested. The draft proposes
+  // `coming-soon` and unlisted, and the same form can flip both before saving:
+  // a model enabled here is live to users while its work item still lists
+  // pricing, access and staging as owed.
+  if (input.body.status === "enabled" || input.body.status === "limited") {
+    return {
+      status: 409,
+      message:
+        "An adopted model is created switched off. Enable it from the registry once pricing, access and staging are verified.",
+    };
+  }
+  if (input.body.publiclyListed) {
+    return {
+      status: 409,
+      message:
+        "An adopted model is created unlisted. List it once it is verified and enabled.",
+    };
+  }
+  // And if a price is known, the class has to cover it. The panel shows this
+  // floor as the operator types; refusing it here is what makes the figure
+  // more than decoration.
+  const floor = suggestCreditFloor({
+    inputUsdPerMillionTokens: input.body.inputUsdPerMillionTokens ?? null,
+    outputUsdPerMillionTokens: input.body.outputUsdPerMillionTokens ?? null,
+    maxOutputTokens: input.body.maxOutputTokens ?? null,
+    worstCaseInputTokens: input.worstCaseInputTokens,
+    inputPriceMultiplier: input.inputPriceMultiplier,
+  });
+  if (isCreditFloor(floor) && input.body.creditWeight < floor.credits) {
+    return {
+      status: 409,
+      message: `At this price the worst accepted turn costs US$${(floor.worstCaseMicroUsd / 1_000_000).toFixed(3)}, which needs at least ${floor.credits} credits (${floor.usageClass}). This entry sells it for ${input.body.creditWeight}.`,
+    };
+  }
   return null;
+};
+
+/**
+ * What an item still owes after some validations are marked satisfied.
+ *
+ * Pure, and it answers three questions at once: what was owed, what is left,
+ * and which of the names offered were not on the list. The last one matters
+ * because a typo that silently clears nothing looks exactly like a validation
+ * that was satisfied.
+ */
+export const remainingValidations = (
+  pending: unknown,
+  completed: readonly string[]
+) => {
+  const before = Array.isArray(pending)
+    ? pending.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const owed = new Set(before);
+  const unknown = completed.filter((name) => !owed.has(name));
+  for (const name of completed) owed.delete(name);
+  return { before, remaining: [...owed], unknown };
 };

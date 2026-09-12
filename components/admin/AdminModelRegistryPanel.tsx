@@ -185,6 +185,12 @@ export function AdminModelRegistryPanel() {
   const [adoptWorkItemId, setAdoptWorkItemId] = useState<string | null>(null);
   const [adoptUnknowns, setAdoptUnknowns] = useState<string[]>([]);
   const [adoptReason, setAdoptReason] = useState("");
+  // Whether the operator has actually chosen a sale class while adopting.
+  // `usageClass` and `creditWeight` cannot hold "undecided" -- they are
+  // non-nullable columns -- so an untouched form would save `standard` and 1,
+  // a sale decision nobody made, under a banner calling it undecided.
+  const [adoptClassChosen, setAdoptClassChosen] = useState(false);
+  const [worstCaseInputTokens, setWorstCaseInputTokens] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -232,6 +238,7 @@ export function AdminModelRegistryPanel() {
         const data = (await response.json().catch(() => null)) as {
           fields?: Partial<FormState>;
           unknowns?: string[];
+          worstCaseInputTokens?: number;
           error?: string;
         } | null;
         if (!response.ok || !data?.fields) {
@@ -242,6 +249,8 @@ export function AdminModelRegistryPanel() {
         setAdoptUnknowns(data.unknowns || []);
         setAdoptWorkItemId(adoptParam);
         setAdoptReason("");
+        setAdoptClassChosen(false);
+        setWorstCaseInputTokens(data.worstCaseInputTokens ?? null);
         setCopySourceId(null);
         setValidation(null);
         setEditingId("new");
@@ -298,12 +307,16 @@ export function AdminModelRegistryPanel() {
         // provider is not the list price. Left at 1 elsewhere.
         inputPriceMultiplier:
           form.provider === "anthropic" ? PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER : 1,
+        // The limit this deployment enforces, from the server. Absent on a
+        // plain create, where the module's own default applies.
+        ...(worstCaseInputTokens ? { worstCaseInputTokens } : {}),
       }),
     [
       form.inputUsdPerMillionTokens,
       form.outputUsdPerMillionTokens,
       form.maxOutputTokens,
       form.provider,
+      worstCaseInputTokens,
     ]
   );
 
@@ -716,7 +729,7 @@ export function AdminModelRegistryPanel() {
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">Catalogue, access, and credits</legend>
                 <label className={labelClass}>Minimum plan<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
-                <label className={labelClass}>Internal usage class<select value={form.usageClass} onChange={(e) => setField("usageClass", e.target.value as ModelUsageClass)} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label className={labelClass}>Internal usage class<select value={form.usageClass} onChange={(e) => { setField("usageClass", e.target.value as ModelUsageClass); setAdoptClassChosen(true); }} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="text-[11px] font-normal normal-case tracking-normal text-amber-200">판매 등급을 직접 선택해야 저장됩니다 — 기본값은 아무도 정하지 않은 값입니다.</span> : null}</label>
                 <label className={labelClass}>Base credit weight<input type="number" min={1} max={1000} value={form.creditWeight} onChange={(e) => setField("creditWeight", Number(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>Runtime status<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">Enabled</option><option value="limited">Limited</option><option value="disabled">Disabled</option><option value="coming-soon">Coming soon</option></select></label>
                 <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.publiclyListed} onChange={(e) => setField("publiclyListed", e.target.checked)} className="h-4 w-4" /> Publicly listed</label>
@@ -762,7 +775,7 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> Validate</button>
-                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && adoptReason.trim().length < 4)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
+                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
               </div>
             </div>
           </div>

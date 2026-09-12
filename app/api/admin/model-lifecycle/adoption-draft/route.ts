@@ -115,8 +115,19 @@ export async function GET(req: Request) {
       takenIds: taken.map((row) => row.id),
     });
 
+    const configuredInputLimit = Number.parseInt(
+      process.env.CHAT_USER_MAX_INPUT_TOKENS ?? "",
+      10
+    );
     return NextResponse.json({
       workItem: { id: workItem.id, status: workItem.status },
+      // The prompt size this deployment actually accepts, so the panel's credit
+      // floor prices the worst turn this installation can be sent rather than
+      // the one the module assumes.
+      worstCaseInputTokens:
+        Number.isInteger(configuredInputLimit) && configuredInputLimit > 0
+          ? configuredInputLimit
+          : 128_000,
       // Said out loud rather than left to the panel: the scan proves the
       // provider lists this model, and nothing more than that.
       observed: Boolean(observation),
