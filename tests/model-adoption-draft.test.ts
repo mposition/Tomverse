@@ -304,6 +304,7 @@ const adoptable = {
 
 /** A saved form that would be accepted, for overriding one field at a time. */
 const adoptBody = {
+  id: 'claude-fable-5-1',
   apiModel: 'claude-fable-5-1',
   provider: 'anthropic',
   status: 'coming-soon',
@@ -612,4 +613,73 @@ test("the adoption floor reads the input limit the way the runtime does", () => 
       String(invalid)
     );
   }
+});
+
+test("a model priced by a code profile keeps its columns null", () => {
+  // A null price column inherits the versioned, tiered profile; a number
+  // replaces it permanently and flattens both. Requiring the form's own numbers
+  // would force every adopted model into an override.
+  assert.equal(
+    adoptionPreflightRefusal({
+      workItem: adoptable,
+      body: {
+        ...adoptBody,
+        inputUsdPerMillionTokens: null,
+        outputUsdPerMillionTokens: null,
+        maxOutputTokens: null,
+      },
+      profilePrice: {
+        inputUsdPerMillionTokens: 5,
+        outputUsdPerMillionTokens: 25,
+        maxOutputTokens: 8_192,
+      },
+    }),
+    null
+  );
+});
+
+test("the profile's price still has to clear the floor", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: {
+      ...adoptBody,
+      usageClass: "standard",
+      creditWeight: 1,
+      inputUsdPerMillionTokens: null,
+      outputUsdPerMillionTokens: null,
+      maxOutputTokens: null,
+    },
+    profilePrice: {
+      inputUsdPerMillionTokens: 5,
+      outputUsdPerMillionTokens: 25,
+      maxOutputTokens: 8_192,
+    },
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /at least 8 credits/);
+});
+
+test("the form's own price wins over the profile when both are present", () => {
+  // An override is an override: if somebody typed a number, that is the number
+  // the row will bill at, so it is the number the floor must cover.
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: {
+      ...adoptBody,
+      usageClass: "standard",
+      creditWeight: 1,
+      inputUsdPerMillionTokens: 5,
+      outputUsdPerMillionTokens: 25,
+      maxOutputTokens: 8_192,
+    },
+    // One credit would have cleared the profile's price. It is the typed number
+    // that will bill, so it is the number the class has to cover.
+    profilePrice: {
+      inputUsdPerMillionTokens: 0.1,
+      outputUsdPerMillionTokens: 0.4,
+      maxOutputTokens: 8_192,
+    },
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /at least 8 credits/);
 });

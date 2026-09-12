@@ -395,6 +395,8 @@ export const adoptionPreflightRefusal = (input: {
     modelId: string | null;
   } | null;
   body: {
+    /** The registry id being created, which is how a price profile is keyed. */
+    id: string;
     apiModel: string;
     provider: string;
     status: string;
@@ -409,6 +411,21 @@ export const adoptionPreflightRefusal = (input: {
   observedPairs?: ReadonlyArray<{ provider: string; apiModel: string }>;
   /** Whether the registry already has a row for this provider and api model. */
   providerPairRegistered?: boolean;
+  /**
+   * The price the code profile already carries for this model, when one exists.
+   *
+   * Here because requiring the form's own numbers would force an override on a
+   * model whose price is already versioned in `lib/modelPricing.ts`. A `NULL`
+   * price column *inherits* that profile, tiers, schedule and all; a number
+   * replaces it permanently and flattens both. So a model with a profile is
+   * adopted with its price columns empty, and the floor is computed from the
+   * profile instead.
+   */
+  profilePrice?: {
+    inputUsdPerMillionTokens: number;
+    outputUsdPerMillionTokens: number;
+    maxOutputTokens?: number | null;
+  } | null;
   /** `CHAT_USER_MAX_INPUT_TOKENS`, for the floor. */
   worstCaseInputTokens?: number;
   /** The costliest input token relative to list price, for the floor. */
@@ -521,10 +538,21 @@ export const adoptionPreflightRefusal = (input: {
   // And if a price is known, the class has to cover it. The panel shows this
   // floor as the operator types; refusing it here is what makes the figure
   // more than decoration.
+  // The row's own numbers when it has them, the code profile when it does not.
+  // Either way a price this adoption can be measured against -- and a model
+  // whose price lives in a profile keeps its columns null, which is what makes
+  // the profile's tiers and schedule apply at all.
   const floor = suggestCreditFloor({
-    inputUsdPerMillionTokens: input.body.inputUsdPerMillionTokens ?? null,
-    outputUsdPerMillionTokens: input.body.outputUsdPerMillionTokens ?? null,
-    maxOutputTokens: input.body.maxOutputTokens ?? null,
+    inputUsdPerMillionTokens:
+      input.body.inputUsdPerMillionTokens ??
+      input.profilePrice?.inputUsdPerMillionTokens ??
+      null,
+    outputUsdPerMillionTokens:
+      input.body.outputUsdPerMillionTokens ??
+      input.profilePrice?.outputUsdPerMillionTokens ??
+      null,
+    maxOutputTokens:
+      input.body.maxOutputTokens ?? input.profilePrice?.maxOutputTokens ?? null,
     worstCaseInputTokens: input.worstCaseInputTokens,
     inputPriceMultiplier: input.inputPriceMultiplier,
   });
@@ -545,7 +573,7 @@ export const adoptionPreflightRefusal = (input: {
       message:
         floor.reason === "output_cap_unknown"
           ? "An adopted model needs its maximum output tokens, so the credit floor can be computed before it is priced."
-          : "An adopted model needs the provider's input and output prices. Without them no class can be justified, and the form would save one credit by default.",
+          : "An adopted model needs a price: either a profile in lib/modelPricing.ts, or the provider's input and output prices on this entry. Without one no class can be justified, and the form would save one credit by default.",
     };
   }
   if (input.body.creditWeight < floor.credits) {
