@@ -456,7 +456,9 @@ const routingBounds = extractContinuationRouting(routingClient);
 
 // Run the same contract against the production source and every in-memory
 // mutation below. The page's actual routing prefix is executed with a local
-// fetch stub; there are no account, provider or database requests.
+// fetch stub; there are no account, provider or database requests. The later
+// owned-detail handoff has an AST check for forbidden derivations; that later
+// branch and the rest of workspace restoration are not executed here.
 async function assertClientSurfaceRouting(client) {
     const createHandler = compileContinuationRouting(client);
     const id = "owned/a";
@@ -479,6 +481,12 @@ async function assertClientSurfaceRouting(client) {
         { name: "a failed owned read cannot select or navigate", mounted: "chat", fail: true, lookup: true },
         { name: "a newer selection invalidates an owned response", mounted: "chat", detail: "continuation", stale: "response", lookup: true, discarded: true },
         { name: "a newer selection invalidates parsed owned detail", mounted: "chat", detail: "continuation", stale: "json", lookup: true },
+        { name: "a missing identity cannot start an owned read", mounted: "chat", detail: "continuation", identity: "", namespace: "" },
+        { name: "an initial identity namespace mismatch cannot start an owned read", mounted: "chat", detail: "continuation", namespace: "account:other" },
+        { name: "identity namespace drift invalidates an owned response", mounted: "chat", detail: "continuation", namespaceDrift: "response", lookup: true, discarded: true },
+        { name: "identity namespace drift invalidates parsed owned detail", mounted: "chat", detail: "continuation", namespaceDrift: "json", lookup: true },
+        { name: "origin conversation drift invalidates an owned response", mounted: "chat", detail: "continuation", originDrift: "response", lookup: true, discarded: true },
+        { name: "origin conversation drift invalidates parsed owned detail", mounted: "chat", detail: "continuation", originDrift: "json", lookup: true },
         { name: "guest selection keeps the existing in-place path", guest: true, mounted: "chat", workspace: true },
     ];
     for (const scenario of cases) {
@@ -486,28 +494,36 @@ async function assertClientSurfaceRouting(client) {
         const reads = [];
         let discarded = 0;
         const ticket = { current: 0 };
+        const identityNamespace = { current: scenario.namespace ?? "account:test" };
+        const currentConversation = { current: "previous" };
+        const invalidate = (phase) => {
+            if (scenario.stale === phase) ticket.current += 1;
+            if (scenario.namespaceDrift === phase) identityNamespace.current = "account:changed";
+            if (scenario.originDrift === phase) currentConversation.current = "other-conversation";
+        };
         const context = {
             conversations: scenario.row ? [{ id, surface: scenario.row }] : [],
             mountedSurface: scenario.mounted ?? "workspace",
             pathname: scenario.pathname ?? "/continuations/other",
             isGuestMode: scenario.guest ?? false,
             conversationSelectionTicketRef: ticket,
-            currentChatIdRef: { current: "previous" },
-            identityKey: "account:test", identityNamespaceRef: { current: "account:test" },
+            currentChatIdRef: currentConversation,
+            identityKey: scenario.identity ?? "account:test", identityNamespaceRef: identityNamespace,
             identityNamespaceKey: (namespace) => namespace,
             accountConversationId: () => scenario.accountId === null ? null : "owned-id",
             conversationSurfaceHref, conversationHandoffHref, LEGACY_REVIEW_PATH: "/chat",
+            PRODUCT_SURFACE_PATH: { ...PRODUCT_SURFACE_PATH, review: "/future-review" },
             router: { push: (path) => paths.push(path) },
             discardResponseBody: async () => { discarded += 1; },
             showToast: () => {}, t: (key) => key,
             fetch: async (url, options) => {
                 reads.push([url, options.cache]);
                 if (scenario.fail) throw new Error("fixture read failure");
-                if (scenario.stale === "response") ticket.current += 1;
+                invalidate("response");
                 return {
                     ok: !scenario.status, status: scenario.status ?? 200,
                     json: async () => {
-                        if (scenario.stale === "json") ticket.current += 1;
+                        invalidate("json");
                         return { surface: scenario.detail };
                     },
                 };
@@ -536,6 +552,11 @@ const replaceRouting = (before, after) => {
     assert.equal(prefix.split(before).length, 2, "mutation must replace exactly one real routing expression");
     return replaceRange(routingBounds.start, routingBounds.end, prefix.replace(before, after));
 };
+const replaceTrailingRouting = (before, after) => {
+    const trailing = routingClient.slice(routingBounds.end, routingBounds.handlerEnd);
+    assert.equal(trailing.split(before).length, 2, "mutation must replace exactly one trailing routing expression");
+    return replaceRange(routingBounds.end, routingBounds.handlerEnd, trailing.replace(before, after));
+};
 
 test("routing extraction ignores global decoys and accepts declaration keywords without empty slices", async () => {
     assert.ok(routingBounds.end > routingBounds.start);
@@ -555,11 +576,14 @@ test("routing extraction ignores global decoys and accepts declaration keywords 
     // or forbidden fields.
     await assertClientSurfaceRouting(`// const handleSelectConversation = () => {}; productKey kind startsWith\n` +
         `const decoy = "localComparisonResponsesRef.current.clear(); let targetSurface = kind";\n` + routingClient);
+    await assertClientSurfaceRouting(replaceTrailingRouting('selectedTarget?.kind === "image"',
+        'selectedTarget?.["kind"] === "image"'));
 });
 
 const targetText = routingClient.slice(routingBounds.start, routingBounds.targetEnd);
 const boundaryText = routingClient.slice(routingBounds.end, routingBounds.boundaryEnd);
 const initializerText = routingClient.slice(routingBounds.initializerStart, routingBounds.initializerEnd);
+const trailingHandoffText = "router.push(conversationHandoffHref(data.surface, id, LEGACY_REVIEW_PATH));";
 const routingMutations = [
     ["missing handler", replaceRange(routingBounds.handlerNameStart, routingBounds.handlerNameEnd, "missingHandler"), /exactly one selection handler/],
     ["duplicate handler", routingClient + "\nconst handleSelectConversation = async () => {};", /exactly one selection handler/],
@@ -594,6 +618,21 @@ const routingMutations = [
     ["owned refusal falls through", replaceRouting("if (!response.ok) {", "if (false) {"), /refused owned read/],
     ["invalid owned answer is accepted", replaceRouting('if (!["chat", "workspace", "continuation"].includes(detail.surface)) return;', ""), /invalid owned surface/],
     ["stale selection check is bypassed", replaceRouting("selectionTicket === conversationSelectionTicketRef.current", "true"), /newer selection invalidates/],
+    ["missing identity guard is bypassed", replaceRouting("Boolean(identityKey)", "true"), /missing identity/],
+    ["identity namespace guard is bypassed", replaceRouting("identityKey === identityNamespaceKey(identityNamespaceRef.current)", "true"), /identity namespace/],
+    ["origin conversation guard is bypassed", replaceRouting("originConversationId === currentChatIdRef.current", "true"), /origin conversation/],
+    ["pre-fetch current-state guard is removed", replaceRouting(/if \(!lookupIsCurrent\(\)\) return;\s*(?=try \{)/, ""), /missing identity|initial identity namespace/],
+    ["trailing detail derives from kind", replaceTrailingRouting("data.surface !== mountedSurface", "data.kind !== mountedSurface"), /derived from kind/],
+    ["trailing detail derives from product", replaceTrailingRouting("data.surface !== mountedSurface", "data.productKey !== mountedSurface"), /derived from productKey/],
+    ["trailing detail derives from id prefix", replaceTrailingRouting("data.surface !== mountedSurface", 'id.startsWith("continuation_")'), /derived from startsWith/],
+    ["trailing handoff argument derives from kind", replaceTrailingRouting(trailingHandoffText,
+        "router.push(conversationHandoffHref(data.kind, id, LEGACY_REVIEW_PATH));"), /derived from kind/],
+    ["missing trailing handoff", replaceTrailingRouting(trailingHandoffText, ""), /exactly one trailing owned handoff/],
+    ["duplicate trailing handoff", replaceTrailingRouting(trailingHandoffText, `${trailingHandoffText}\n${trailingHandoffText}`), /exactly one trailing owned handoff/],
+    ["comment trailing handoff decoy", replaceTrailingRouting(trailingHandoffText, `/* ${trailingHandoffText} */`), /exactly one trailing owned handoff/],
+    ["string trailing handoff decoy", replaceTrailingRouting(trailingHandoffText, `${JSON.stringify(trailingHandoffText)};`), /exactly one trailing owned handoff/],
+    ["handoff uses the future Review path", replaceRouting("conversationHandoffHref(targetSurface, id, LEGACY_REVIEW_PATH)",
+        "conversationHandoffHref(targetSurface, id, PRODUCT_SURFACE_PATH.review)"), /preserves the workspace id/],
 ];
 for (const [name, mutant, expected] of routingMutations) {
     test(`the routing contract rejects production-source mutation: ${name}`, async () => {

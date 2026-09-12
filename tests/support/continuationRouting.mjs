@@ -3,7 +3,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 // The same AST/VM approach as chatWorkspaceEntry.test.mjs, scoped to the
-// selection handler's routing prefix. Nothing mounts or imports the page.
+// selection handler's routing decisions. Nothing mounts or imports the page.
 const findNodes = (root, predicate) => {
     const matches = [];
     const visit = (node) => {
@@ -49,9 +49,26 @@ export function extractContinuationRouting(text) {
     assert.ok(start < end && text.slice(start, end).trim().length > 0,
         "routing: nonempty, ordered bounds required");
     const statements = handler.body.statements.slice(0, handler.body.statements.indexOf(boundaryStatement));
+    // The later owned detail read can also hand off to another surface. Check
+    // its actual navigation and enclosing decision without executing unrelated
+    // workspace restoration or rejecting the legitimate image-kind branch.
+    const trailingHandoff = unique(findNodes(handler.body, (node) => ts.isCallExpression(node) &&
+        node.getStart(source) > end && accessPath(node.expression) === "router.push" &&
+        node.arguments.some((argument) => ts.isCallExpression(argument) &&
+            accessPath(argument.expression) === "conversationHandoffHref")), "trailing owned handoff");
+    let trailingDecision = trailingHandoff.parent;
+    while (trailingDecision && trailingDecision !== handler.body && !ts.isIfStatement(trailingDecision)) {
+        trailingDecision = trailingDecision.parent;
+    }
+    assert.ok(trailingDecision && ts.isIfStatement(trailingDecision) &&
+        trailingHandoff.parent.parent === trailingDecision.thenStatement,
+    "routing: trailing owned handoff must be a direct conditional navigation");
+    assert.ok(findNodes(trailingDecision.expression, (node) => accessPath(node) === "data.surface").length > 0,
+        "routing: trailing owned handoff must be guarded by the server surface");
+    statements.push(trailingDecision);
     // Identifiers and computed property reads are executable evidence; prose
-    // containing these words is not. Later image-kind handling is outside this
-    // routing boundary and is deliberately not a surface inference.
+    // containing these words is not. The image-kind workspace branch is outside
+    // these two surface decisions and is deliberately not a surface inference.
     for (const forbidden of ["productKey", "kind", "startsWith"]) {
         const references = statements.flatMap((statement) => findNodes(statement, (node) =>
             (ts.isIdentifier(node) && node.text === forbidden) ||
