@@ -17,6 +17,10 @@ import {
   workItemTransitionRefusal,
   type WorkItemStatus,
 } from "../lib/modelLifecycleWorkItemCore.ts";
+import {
+  chatUserMaxInputTokens,
+  CHAT_USER_MAX_INPUT_TOKENS_DEFAULT,
+} from "../lib/chatInputLimits.ts";
 
 test("the floor is the cheapest class that covers the worst accepted turn", () => {
   // The example worked through in lib/chatCostGuardrails.ts: US$5 in, US$25
@@ -304,11 +308,14 @@ const adoptBody = {
   provider: 'anthropic',
   status: 'coming-soon',
   publiclyListed: false,
-  usageClass: 'standard',
-  creditWeight: 1,
-  inputUsdPerMillionTokens: null as number | null,
-  outputUsdPerMillionTokens: null as number | null,
-  maxOutputTokens: null as number | null,
+  // Priced, because an adoption that cannot compute a floor is refused. The
+  // sale columns cannot hold "undecided" -- they are non-nullable -- so an
+  // unpriced adoption would save one credit by default.
+  usageClass: 'premium' as string,
+  creditWeight: 8,
+  inputUsdPerMillionTokens: 5 as number | null,
+  outputUsdPerMillionTokens: 25 as number | null,
+  maxOutputTokens: 8_192 as number | null,
 };
 
 test("an adoption that names a different model is refused", () => {
@@ -320,17 +327,46 @@ test("an adoption that names a different model is refused", () => {
   assert.match(refusal!.message, /claude-fable-5-1/);
 });
 
-test("a different spelling of the same model is still the same decision", () => {
-  // The family is what "the same model" means everywhere else in this
-  // pipeline: registering the dated snapshot against the item filed under the
-  // stable id is one decision, not two.
+test("a spelling no provider returned is refused, even within the family", () => {
+  // The family answers "is this the same decision". It does not answer "may we
+  // send this string upstream", and only a scan can: the api model is the
+  // literal identifier every request carries.
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: { ...adoptBody, apiModel: "claude-fable-5-1-20260901" },
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /No catalogue scan has seen/);
+});
+
+test("a dated snapshot a scan did return may be registered", () => {
   assert.equal(
     adoptionPreflightRefusal({
       workItem: adoptable,
       body: { ...adoptBody, apiModel: "claude-fable-5-1-20260901" },
+      observedPairs: [
+        { provider: "anthropic", apiModel: "claude-fable-5-1" },
+        { provider: "anthropic", apiModel: "claude-fable-5-1-20260901" },
+      ],
     }),
     null
   );
+});
+
+test("one sighting's provider cannot carry another sighting's identifier", () => {
+  // Qwen returned `ANTHROPIC/CLAUDE-FABLE-5-1`; Anthropic returned
+  // `claude-fable-5-1`. Splitting the pairs apart would let a row tell Qwen to
+  // serve a string it has never returned.
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: { ...adoptBody, provider: "qwen", apiModel: "claude-fable-5-1" },
+    observedPairs: [
+      { provider: "anthropic", apiModel: "claude-fable-5-1" },
+      { provider: "qwen", apiModel: "ANTHROPIC/CLAUDE-FABLE-5-1" },
+    ],
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /qwen/);
 });
 
 test("a work item already adopted cannot be adopted again", () => {
@@ -400,7 +436,7 @@ test("a provider no scan has seen serving this model is refused", () => {
   const refusal = adoptionPreflightRefusal({
     workItem: adoptable,
     body: { ...adoptBody, provider: "openai" },
-    observedProviders: ["anthropic"],
+    observedPairs: [{ provider: "anthropic", apiModel: "claude-fable-5-1" }],
   });
   assert.equal(refusal?.status, 409);
   assert.match(refusal!.message, /openai/);
@@ -413,7 +449,10 @@ test("a second provider that does serve it is a legitimate choice", () => {
     adoptionPreflightRefusal({
       workItem: adoptable,
       body: { ...adoptBody, provider: "qwen" },
-      observedProviders: ["anthropic", "qwen"],
+      observedPairs: [
+        { provider: "anthropic", apiModel: "claude-fable-5-1" },
+        { provider: "qwen", apiModel: "claude-fable-5-1" },
+      ],
     }),
     null
   );
@@ -524,4 +563,53 @@ test("clearing a validation leaves the rest, and names what was not owed", () =>
     remainingValidations(["pricing"], ["pricing"]).remaining,
     []
   );
+});
+
+test("an adoption with no price is refused rather than sold for one credit", () => {
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: {
+      ...adoptBody,
+      usageClass: "standard",
+      creditWeight: 1,
+      inputUsdPerMillionTokens: null,
+      outputUsdPerMillionTokens: null,
+    },
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /input and output prices/);
+});
+
+test("an adoption no class can cover is refused, not saved at one credit", () => {
+  // The panel says "this model waits". The save has to say it too.
+  const refusal = adoptionPreflightRefusal({
+    workItem: adoptable,
+    body: {
+      ...adoptBody,
+      usageClass: "standard",
+      creditWeight: 1,
+      inputUsdPerMillionTokens: 5,
+      outputUsdPerMillionTokens: 25,
+      maxOutputTokens: 8_192,
+    },
+    worstCaseInputTokens: 400_000,
+    inputPriceMultiplier: 1.25,
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /No usage class covers/);
+});
+
+test("the adoption floor reads the input limit the way the runtime does", () => {
+  // `1e6` is a valid limit to the runtime and reads as 1 to parseInt. The two
+  // must not disagree: a one-token worst case passes a class that covers a
+  // thirtieth of the real one.
+  assert.equal(chatUserMaxInputTokens({ CHAT_USER_MAX_INPUT_TOKENS: "1e6" }), 1_000_000);
+  assert.equal(chatUserMaxInputTokens({ CHAT_USER_MAX_INPUT_TOKENS: "200000" }), 200_000);
+  for (const invalid of ["", "0", "-5", "abc", undefined]) {
+    assert.equal(
+      chatUserMaxInputTokens({ CHAT_USER_MAX_INPUT_TOKENS: invalid }),
+      CHAT_USER_MAX_INPUT_TOKENS_DEFAULT,
+      String(invalid)
+    );
+  }
 });

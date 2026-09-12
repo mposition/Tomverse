@@ -405,8 +405,8 @@ export const adoptionPreflightRefusal = (input: {
     outputUsdPerMillionTokens?: number | null;
     maxOutputTokens?: number | null;
   };
-  /** Every provider seen serving this model, from the item's own sightings. */
-  observedProviders?: readonly string[];
+  /** The exact pairs a scan has seen, from the item's own sightings. */
+  observedPairs?: ReadonlyArray<{ provider: string; apiModel: string }>;
   /** Whether the registry already has a row for this provider and api model. */
   providerPairRegistered?: boolean;
   /** `CHAT_USER_MAX_INPUT_TOKENS`, for the floor. */
@@ -454,16 +454,23 @@ export const adoptionPreflightRefusal = (input: {
   // with a row pointing at OpenAI, and nothing downstream would notice: the
   // registry checks that a provider is *configured*, never that it serves the
   // model named beside it.
-  const servingProviders = new Set(
-    (input.observedProviders?.length
-      ? input.observedProviders
-      : [workItem.provider]
-    ).map((provider) => provider.toLowerCase())
+  const observedPairs = input.observedPairs?.length
+    ? input.observedPairs
+    : [{ provider: workItem.provider, apiModel: workItem.apiModel }];
+  // The pair, not its halves. The api model is the literal string every request
+  // carries upstream, so the provider that returned it is the only provider
+  // that can be asked for it.
+  const served = observedPairs.some(
+    (pair) =>
+      pair.provider.toLowerCase() === input.body.provider.toLowerCase() &&
+      pair.apiModel === input.body.apiModel
   );
-  if (!servingProviders.has(input.body.provider.toLowerCase())) {
+  if (!served) {
     return {
       status: 409,
-      message: `No catalogue scan has seen ${workItem.apiModel} served by ${input.body.provider}. It was seen through ${[...servingProviders].join(", ")}.`,
+      message: `No catalogue scan has seen ${input.body.provider} serve ${input.body.apiModel}. It was seen as ${observedPairs
+        .map((pair) => `${pair.provider} ${pair.apiModel}`)
+        .join(", ")}.`,
     };
   }
   if (input.providerPairRegistered) {
@@ -521,7 +528,27 @@ export const adoptionPreflightRefusal = (input: {
     worstCaseInputTokens: input.worstCaseInputTokens,
     inputPriceMultiplier: input.inputPriceMultiplier,
   });
-  if (isCreditFloor(floor) && input.body.creditWeight < floor.credits) {
+  if (!isCreditFloor(floor)) {
+    // A model nobody has priced is a model nobody can class, and the sale
+    // fields cannot hold "undecided": they are non-nullable columns, so an
+    // untouched form saves `standard` and one credit -- a price nobody set,
+    // under a banner calling it unset. Refusing here is what makes the floor
+    // below reachable at all.
+    if (floor.reason === "above_every_class") {
+      return {
+        status: 409,
+        message: `No usage class covers this price: the worst accepted turn costs US$${((floor.worstCaseMicroUsd ?? 0) / 1_000_000).toFixed(3)}. Either the credit ceiling moves or this model waits.`,
+      };
+    }
+    return {
+      status: 409,
+      message:
+        floor.reason === "output_cap_unknown"
+          ? "An adopted model needs its maximum output tokens, so the credit floor can be computed before it is priced."
+          : "An adopted model needs the provider's input and output prices. Without them no class can be justified, and the form would save one credit by default.",
+    };
+  }
+  if (input.body.creditWeight < floor.credits) {
     return {
       status: 409,
       message: `At this price the worst accepted turn costs US$${(floor.worstCaseMicroUsd / 1_000_000).toFixed(3)}, which needs at least ${floor.credits} credits (${floor.usageClass}). This entry sells it for ${input.body.creditWeight}.`,

@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
@@ -63,10 +64,21 @@ export async function POST(req: Request) {
     const parsed = await readLimitedJson(req, 8 * 1024, clearSchema);
 
     const result = await prisma.$transaction(async (tx) => {
-      const item = await tx.modelLifecycleWorkItem.findUnique({
-        where: { id: parsed.workItemId },
-        select: { id: true, status: true, pendingValidations: true },
-      });
+      // Locked before it is read, the way every transition in this queue is.
+      // Two administrators clearing two different validations at once would
+      // otherwise each read the same three-item list, each write their own
+      // two-item remainder, and the second write would restore the validation
+      // the first had just satisfied -- with both events in the history saying
+      // it was done.
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; status: string; pendingValidations: Prisma.JsonValue | null }>
+      >(Prisma.sql`
+        SELECT "id", "status", "pendingValidations"
+        FROM "ModelLifecycleWorkItem"
+        WHERE "id" = ${parsed.workItemId}
+        FOR UPDATE
+      `);
+      const item = locked[0] ?? null;
       if (!item) return { ok: false as const, status: 404, message: "No such work item." };
 
       const outcome = remainingValidations(item.pendingValidations, parsed.completed);
