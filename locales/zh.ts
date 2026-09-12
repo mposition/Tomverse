@@ -71,6 +71,7 @@ export const zh = {
         downloadFailed: "无法下载该对话。",
         downloadTxt: "下载（.txt）",
         shareFailed: "无法创建分享链接。",
+        shareContinuationUnavailable: "此对话由导入的聊天记录发起，无法公开分享。",
         shareLocked: "请先输入密码解锁此对话，然后再分享。",
         shareCopied: "分享链接已复制到剪贴板。",
         downloadAllTxt: "将所有对话下载为 .txt",

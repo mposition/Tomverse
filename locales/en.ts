@@ -52,6 +52,7 @@ export const en = {
         downloadFailed: "Failed to download the conversation.",
         downloadTxt: "Download (.txt)",
         shareFailed: "Failed to create share link.",
+        shareContinuationUnavailable: "This conversation was started from an imported chat, so it cannot be shared publicly.",
         shareLocked: "Unlock this chat with its password before sharing.",
         shareCopied: "Share link copied to clipboard.",
         downloadAllTxt: "Download all chats as .txt",

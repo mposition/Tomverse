@@ -56,6 +56,7 @@ export const ko = {
         downloadFailed: "대화를 다운로드하지 못했습니다.",
         downloadTxt: "다운로드(.txt)",
         shareFailed: "공유 링크를 생성하지 못했습니다.",
+        shareContinuationUnavailable: "가져온 대화에서 시작한 대화는 공개 공유할 수 없습니다.",
         shareLocked: "비밀번호로 대화를 잠금 해제한 후 공유해 주세요.",
         shareCopied: "공유 링크가 클립보드에 복사되었습니다.",
         downloadAllTxt: "모든 대화를 .txt로 다운로드",

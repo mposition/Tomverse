@@ -65,8 +65,13 @@ import {
   CONVERSATION_HANDOFF_PARAM,
   conversationHandoffHref,
   conversationSurfaceHref,
+  surfaceHasContinuationBridge,
   type ConversationSurface,
 } from "@/lib/continuationRoutes";
+import {
+  CONTINUATION_SHARE_REFUSAL_CODE,
+  continuationShareRefusal,
+} from "@/lib/continuationSharingPolicy";
 import { continuationDisplayTitle } from "@/lib/continuationDisplayTitle";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
@@ -5377,6 +5382,29 @@ export function ChatPageClient({
     const handleShareConversation = async (convId: string) => {
         if (isGuestMode) return;
 
+        // Asked before the request, and answered by the same function the
+        // route answers with (lib/continuationSharingPolicy.ts). The policy
+        // requires both to call it for a reason this handler was the proof of:
+        // the server has always refused a continuation with 409, and until now
+        // this fell through to `shareFailed` -- "Failed to create share link",
+        // a sentence that reads as a transient error for a refusal that is
+        // permanent. The console for a single session carried three of them,
+        // one per press.
+        //
+        // The surface is the only fact needed and the list already carries it
+        // from the server (`app/api/conversations/route.ts`), so no request is
+        // spent discovering that one will be refused.
+        const shareRefusal = continuationShareRefusal({
+            hasContinuationBridge: surfaceHasContinuationBridge(
+                conversations.find((conversation) => conversation.id === convId)
+                    ?.surface
+            ),
+        });
+        if (shareRefusal) {
+            showToast(t("sidebar.shareContinuationUnavailable"), "error");
+            return;
+        }
+
         try {
             const res = await fetch(`/api/conversations/${convId}/share`, {
                 method: "POST",
@@ -5384,11 +5412,18 @@ export function ChatPageClient({
             const data = await res.json().catch(() => null);
 
             if (!res.ok) {
+                // The server stays the authority. A row whose `surface` never
+                // arrived -- a list rendered before the field existed, a
+                // client that has not refetched -- reaches the route anyway,
+                // and this is where its refusal gets its own sentence instead
+                // of the generic one.
                 showToast(
                     res.status === 423 ||
                         data?.code === "CONVERSATION_LOCKED"
                         ? t("sidebar.shareLocked")
-                        : t("sidebar.shareFailed"),
+                        : data?.code === CONTINUATION_SHARE_REFUSAL_CODE
+                          ? t("sidebar.shareContinuationUnavailable")
+                          : t("sidebar.shareFailed"),
                     "error"
                 );
                 return;

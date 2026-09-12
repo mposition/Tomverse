@@ -54,6 +54,7 @@ export const de = {
         downloadFailed: "Unterhaltung konnte nicht heruntergeladen werden.",
         downloadTxt: "Herunterladen (.txt)",
         shareFailed: "Freigabelink konnte nicht erstellt werden.",
+        shareContinuationUnavailable: "Dieses Gespräch wurde aus einem importierten Chat gestartet und kann nicht öffentlich geteilt werden.",
         shareLocked: "Entsperren Sie diesen Chat vor dem Teilen mit dem Passwort.",
         shareCopied: "Freigabelink in die Zwischenablage kopiert.",
         downloadAllTxt: "Alle Chats als .txt herunterladen",
