@@ -6,33 +6,66 @@ export type ChatRecoveryPrompt = {
   targetChatId: string;
 };
 
-/** The question belonging to this failed reply, not the runtime's last send. */
-export function recoveryPromptForMessage(
-  messages: Message[],
-  assistantMessageId: string,
+/** UI-only greeting; never part of a provider transcript. */
+export const CHAT_WELCOME_MESSAGE_ID = "welcome";
+
+/** Keep UI failures in memory, but do not send their empty placeholders. */
+export function requestTranscriptForScope(
+  messages: readonly Message[],
+  userMessage: Message,
+  scope: "model" | "conversation"
+): Message[] {
+  return [
+    ...messages.filter((message) =>
+      message.id !== CHAT_WELCOME_MESSAGE_ID && message.id !== userMessage.id &&
+      !(scope === "conversation" && message.role === "assistant" &&
+        !message.content.trim() && !message.attachments?.length)
+    ),
+    userMessage,
+  ];
+}
+
+/** One pass, reset at imported boundaries, rather than a scan per visible row. */
+export function recoveryPromptsForMessages(
+  messages: readonly Message[],
   conversationId: string | null
-): ChatRecoveryPrompt | null {
-  if (!conversationId) return null;
-  const index = messages.findIndex((message) => message.id === assistantMessageId);
-  const reply = messages[index];
-  if (!reply || reply.imported) return null;
-  // A reload may find only the pre-saved question: absence of a reply does
-  // not prove server failure, but the user can explicitly restore that text.
-  const unansweredQuestion = reply.role === "user" && index === messages.length - 1;
-  if (!unansweredQuestion && (reply.role !== "assistant" ||
-      (reply.status !== "error" && reply.status !== "cancelled"))) return null;
-  for (let cursor = unansweredQuestion ? index : index - 1; cursor >= 0; cursor -= 1) {
-    const question = messages[cursor];
-    if (question.imported) return null;
-    if (question.role !== "user") continue;
-    if (!question.content.trim() && !question.attachments?.length) return null;
-    return {
+): Map<string, ChatRecoveryPrompt> {
+  const prompts = new Map<string, ChatRecoveryPrompt>();
+  if (!conversationId) return prompts;
+  const seen = new Set<string>();
+  let question: Message | null = null;
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.imported) question = null;
+    else if (message.role === "user") {
+      question = message.content.trim() || message.attachments?.length ? message : null;
+    }
+    // Match the old findIndex contract for duplicate ids, even if the first
+    // occurrence was not restorable. Loaded history is normally deduplicated.
+    const firstOccurrence = !seen.has(message.id);
+    seen.add(message.id);
+    if (!firstOccurrence || message.imported || !question) continue;
+    // No reply after a pre-saved question is not proof of server failure.
+    const unansweredQuestion = message.role === "user" && index === messages.length - 1;
+    const failedReply = message.role === "assistant" &&
+      (message.status === "error" || message.status === "cancelled");
+    if (!unansweredQuestion && !failedReply) continue;
+    prompts.set(message.id, {
       text: question.content,
       attachments: question.attachments?.map((attachment) => ({ ...attachment })) ?? [],
       targetChatId: conversationId,
-    };
+    });
   }
-  return null;
+  return prompts;
+}
+
+/** The question belonging to this failed reply, not the runtime's last send. */
+export function recoveryPromptForMessage(
+  messages: readonly Message[],
+  assistantMessageId: string,
+  conversationId: string | null
+): ChatRecoveryPrompt | null {
+  return recoveryPromptsForMessages(messages, conversationId).get(assistantMessageId) ?? null;
 }
 
 /** A routed header names the first model; a fallback signal supersedes it. */

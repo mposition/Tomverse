@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { answeringModelId, recoveryPromptForMessage, transcriptMessagesForScope } from "../lib/chatTranscriptRecovery.ts";
+import * as transcriptRecovery from "../lib/chatTranscriptRecovery.ts";
+import { toChatRequestMessage } from "../lib/chatMessageSerialization.ts";
 import { abortChatRuntime, advanceChatRuntimeRevision, beginChatRuntimeRun, chatRuntimeKey,
   claimChatRuntimeLoad, getChatRuntimeRevision, getChatRuntimeSnapshot, isChatRuntimeStreaming,
   isCurrentChatRuntimeLoad, resetChatStreamRuntime, settleChatRuntimeLoad,
@@ -80,4 +82,68 @@ test("actual answering model uses fallback then routed then requested precedence
   assert.equal(answeringModelId({ requestedModelId: "a", routedModelId: "b", retryingWithModelId: "c" }), "c");
   assert.equal(answeringModelId({ requestedModelId: "a", routedModelId: "b" }), "b");
   assert.equal(answeringModelId({ requestedModelId: "a" }), "a");
+});
+
+test("Chat request omits empty assistant placeholders without deleting their UI history or attachment-only turns", () => {
+  const attachment = { id: "file", name: "notes.txt", mediaType: "text/plain", size: 4,
+    kind: "file", attachmentId: "stored-file" };
+  const currentUser = { id: "retry", role: "user", content: "Specific question" };
+  const rows = [
+    { id: "welcome", role: "assistant", content: "Welcome" },
+    { id: "original", role: "user", content: "Specific question" },
+    { id: "error", role: "assistant", content: "", status: "error", recoveryNotice: "Unable to connect" },
+    { id: "cancelled", role: "assistant", content: " \n", status: "cancelled" },
+    { id: "partial", role: "assistant", content: "Kept partial", status: "error", recoveryNotice: "Interrupted" },
+    { id: "file-only", role: "user", content: "", attachments: [attachment] },
+    { id: "assistant-file", role: "assistant", content: "", attachments: [attachment] },
+    currentUser,
+  ];
+  writeChatRuntimeMessages(key("a"), rows);
+  const outgoing = transcriptRecovery.requestTranscriptForScope(rows, currentUser, "conversation").map(toChatRequestMessage);
+  assert.deepEqual(outgoing.map(row => row.id), ["original", "partial", "file-only", "assistant-file", "retry"]);
+  assert.equal(outgoing.find(row => row.id === "partial").content, "Kept partial");
+  assert.equal("recoveryNotice" in outgoing.find(row => row.id === "partial"), false);
+  assert.equal(outgoing.find(row => row.id === "file-only").attachments[0].attachmentId, "stored-file");
+  assert.equal(getChatRuntimeSnapshot(key("a")).messages, rows);
+  assert.equal(rows.find(row => row.id === "error").status, "error");
+  // Review keeps its existing outbound semantics; current-user deduplication
+  // remains by id, not by text that a user may deliberately repeat.
+  assert.deepEqual(transcriptRecovery.requestTranscriptForScope(rows, currentUser, "model").map(row => row.id),
+    ["original", "error", "cancelled", "partial", "file-only", "assistant-file", "retry"]);
+});
+
+test("recovery index preserves imported boundaries, blank questions, duplicate ids and the last unanswered user", () => {
+  const rows = [
+    { id: "orphan", role: "assistant", content: "", status: "error" },
+    { id: "u1", role: "user", content: "First" },
+    { id: "a1", role: "assistant", content: "partial", status: "error" },
+    { id: "a2", role: "assistant", content: "partial", status: "cancelled" },
+    { id: "import", role: "assistant", content: "Imported", imported: { provider: "openai" } },
+    { id: "after-import", role: "assistant", content: "", status: "error" },
+    { id: "blank", role: "user", content: " " },
+    { id: "after-blank", role: "assistant", content: "", status: "error" },
+    { id: "u1", role: "user", content: "Duplicate id, last question" },
+  ];
+  const indexed = transcriptRecovery.recoveryPromptsForMessages(rows, "c");
+  assert.deepEqual([...indexed.keys()], ["a1", "a2"]);
+  assert.equal(indexed.get("a1").text, "First");
+  assert.equal(indexed.get("a2").text, "First");
+  assert.equal(indexed.get("missing"), undefined);
+  assert.equal(transcriptRecovery.recoveryPromptsForMessages(rows, null).size, 0);
+  const trailing = [...rows, { id: "last", role: "user", content: "Last question" }];
+  assert.equal(transcriptRecovery.recoveryPromptsForMessages(trailing, "c").get("last").text, "Last question");
+  assert.equal(recoveryPromptForMessage(trailing, "last", "c").text, "Last question");
+});
+
+test("recovery index reads transcript entries once rather than once per rendered message", () => {
+  const rows = Array.from({ length: 1000 }, (_, index) => ({ id: `m${index}`,
+    role: index % 2 ? "assistant" : "user", content: "text", status: index % 2 ? "error" : "normal" }));
+  let indexedReads = 0;
+  const observed = new Proxy(rows, { get(target, property, receiver) {
+    if (/^\d+$/.test(String(property))) indexedReads++;
+    return Reflect.get(target, property, receiver);
+  } });
+  const indexed = transcriptRecovery.recoveryPromptsForMessages(observed, "c");
+  assert.equal(indexed.size, 500);
+  assert.ok(indexedReads <= rows.length * 2, `${indexedReads} indexed reads for ${rows.length} messages`);
 });

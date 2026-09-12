@@ -135,10 +135,26 @@ async function openChat(page: Page, options: {
   disabledPanels?: string[];
   unclassifiedThird?: boolean;
   fresh?: boolean;
+  accountDefaults?: string[];
+  newAccount?: boolean;
+  selectedModels?: string[];
   routedModelId?: string;
 } = {}) {
   await prepareGuestPage(page, "en");
   await mockAuthenticatedApi(page, { selectedModels: [MODEL_A] });
+  const userSettingsWrites: Array<Record<string, unknown>> = [];
+  if (options.accountDefaults) {
+    await page.route("**/api/user/settings**", async (route) => {
+      if (route.request().method() !== "GET") userSettingsWrites.push(route.request().postDataJSON() ?? {});
+      await route.fulfill({ json: {
+        defaultModel: MODEL_A, newConversationModelIds: [...options.accountDefaults!],
+        isNewAccount: options.newAccount ?? false,
+        theme: "light", language: "en", timeZone: "UTC",
+        timeZoneInitializedAt: "2026-05-01T00:00:00.000Z",
+        timeZoneChangedAt: "2026-05-01T00:00:00.000Z", imageHandoffAutoGenerate: false,
+      } });
+    });
+  }
   await mockUserUsage(page, { plan: "Pro" });
   await setDeterministicTheme(page, "light");
   await suppressTransientUi(page);
@@ -146,7 +162,7 @@ async function openChat(page: Page, options: {
     name: "__tomverse_e2e_chat_workspace", value: "1", url: "http://127.0.0.1:3100",
   }]);
   const conversations: ConversationFixture[] = [{
-    id: CONVERSATION, title: "QA unified Chat", selectedModels: [MODEL_A],
+    id: CONVERSATION, title: "QA unified Chat", selectedModels: options.selectedModels ?? [MODEL_A],
     productKey: "chat", surface: "chat",
     messages: options.messages ?? [
       { id: "seed-u", role: "user", content: "A prior question." },
@@ -198,10 +214,26 @@ async function openChat(page: Page, options: {
     const row = visibleConversations.find((candidate) => path === `/api/conversations/${candidate.id}` || path === `/api/conversations/${candidate.id}/messages`);
     if (!row) return route.fulfill({ status: 404, json: { code: "CONVERSATION_NOT_FOUND" } });
     if (path.endsWith("/messages") && method === "POST") {
-      for (const message of (body.messages ?? []) as QaConversationMessage[]) {
-        if (!row.messages.some((saved) => saved.id === message.id)) row.messages.push(message);
+      // A mock of the server's ordered restored-reference response, not proof
+      // of object copying or DB atomicity. Those require the separate real-DB
+      // tests. In particular, no attachmentId is invented as an uploadId.
+      const bound: Array<NonNullable<QaConversationMessage["attachments"]>[number] & { messageId: string }> = [];
+      for (const message of (body.messages ?? []) as Array<QaConversationMessage & {
+        attachmentReferences?: Array<{ attachmentId: string }>;
+      }>) {
+        const attachments = message.attachmentReferences?.map((reference, ordinal) => {
+          const original = row.messages.flatMap((saved) => saved.attachments ?? [])
+            .find((attachment) => attachment.id === reference.attachmentId);
+          if (!original) throw new Error("QA restored attachment reference is not in this conversation");
+          const id = `qa-restored-${message.id}-${ordinal}`;
+          return { ...original, id, attachmentId: id, ordinal };
+        });
+        if (attachments) bound.push(...attachments.map((attachment) => ({ ...attachment, messageId: message.id })));
+        if (!row.messages.some((saved) => saved.id === message.id)) row.messages.push({
+          ...message, ...(attachments ? { attachments } : {}),
+        });
       }
-      return route.fulfill({ status: 201, json: { success: true, attachments: [] } });
+      return route.fulfill({ status: 201, json: { success: true, attachments: bound } });
     }
     if (method === "PATCH" && Array.isArray(body.selectedModels)) row.selectedModels = body.selectedModels as string[];
     if (method === "GET") historyReads.push(url.pathname + url.search);
@@ -220,7 +252,7 @@ async function openChat(page: Page, options: {
   await page.goto(`/chat/workspace?lang=en${options.fresh ? "" : `&conversation=${CONVERSATION}`}`);
   await expect(page.getByTestId("chat-textarea")).toBeVisible();
   return {
-    conversations, writes, historyReads,
+    conversations, writes, historyReads, userSettingsWrites,
     detail: (id: string) => payload(conversations.find((row) => row.id === id)!),
     hidePreviousAccount: () => { visibleConversations = []; },
   };
@@ -285,6 +317,59 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect(page).toHaveURL(new RegExp(`conversation=${SECOND_CONVERSATION}`));
     await expect(message(page, SECOND_ANSWER)).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toHaveValue(laterDraft);
+    expect(await requests(page)).toHaveLength(0);
+  });
+
+  test("New Chat from a still-null conversation invalidates an earlier pending create", async ({ page }) => {
+    await openChat(page, { fresh: true });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let held = false;
+    await page.route("**/api/products/chat/conversations", async (route) => {
+      held = true;
+      await gate;
+      await route.fallback();
+    });
+    await submitComposer(page, "Earlier fresh Chat question that is now abandoned.", DESKTOP_VIEWPORT.width);
+    await expect.poll(() => held).toBe(true);
+    await page.getByTestId("sidebar-new-chat").click();
+    const nextDraft = "New blank Chat draft that must remain untouched.";
+    await page.getByTestId("chat-textarea").fill(nextDraft);
+    expect(new URL(page.url()).searchParams.get("conversation")).toBeNull();
+    const response = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/products/chat/conversations");
+    release();
+    await response;
+    // Previously this exact null -> null reset sent the abandoned question.
+    // No provider runs; the fixture records any answer-fetch attempt locally.
+    await expect(page.getByText("The conversation or model changed while preparing the answer. Check your question and send again.", { exact: true })).toBeVisible();
+    expect(await requests(page)).toHaveLength(0);
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(nextDraft);
+    expect(new URL(page.url()).searchParams.get("conversation")).toBeNull();
+  });
+
+  for (const entry of ["fresh", "fresh new-account", "New Chat"] as const) {
+    test(`multi-model account defaults keep their settings while ${entry} uses one local Chat model`, async ({ page }) => {
+      const accountDefaults = [MODEL_A, MODEL_B];
+      const state = await openChat(page, { accountDefaults, fresh: entry !== "New Chat", newAccount: entry === "fresh new-account" });
+      if (entry === "New Chat") await page.getByTestId("sidebar-new-chat").click();
+      await expect(page.getByTestId("chat-single-model-notice")).toHaveCount(0);
+      await submitComposer(page, "Send with one Chat-local default model.", DESKTOP_VIEWPORT.width);
+      await drive(page, 0, "push", "A single default answer.");
+      await drive(page, 0, "finish");
+      expect(await requests(page)).toHaveLength(1);
+      expect(state.writes.filter((write) => write.path === "/api/products/chat/conversations").map((write) => write.body.selectedModels)).toEqual([[MODEL_A]]);
+      expect(state.userSettingsWrites).toEqual([]);
+      expect(accountDefaults).toEqual([MODEL_A, MODEL_B]);
+    });
+  }
+
+  test("an existing multi-model Chat keeps its stored selection and refuses silent collapse", async ({ page }) => {
+    const state = await openChat(page, { selectedModels: [MODEL_A, MODEL_B] });
+    await expect(page.getByTestId("chat-single-model-notice")).toBeVisible();
+    await page.getByTestId("chat-textarea").fill("Do not silently rewrite this saved selection.");
+    await expect(page.getByTestId("chat-send-button")).toBeDisabled();
+    expect(state.conversations[0].selectedModels).toEqual([MODEL_A, MODEL_B]);
+    expect(state.writes.filter((write) => write.method === "PATCH")).toEqual([]);
     expect(await requests(page)).toHaveLength(0);
   });
 
@@ -415,7 +500,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await requests(page)).toHaveLength(1);
   });
 
-  test("transport failure keeps partial text and restoration does not send until explicit submit", async ({ page }) => {
+  test("transport failure keeps partial text and restoration does not send until explicit submit", async ({ page }, testInfo) => {
     await openChat(page);
     const prompt = "The exact interrupted question.";
     await submitComposer(page, prompt, DESKTOP_VIEWPORT.width);
@@ -424,6 +509,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await drive(page, 0, "fail");
     await expect(page.getByTestId("chat-recovery-notice")).toBeVisible();
     await expect(message(page, "Partial text must not become an error title.")).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("chat-desktop-partial-recovery.png"), fullPage: true });
     await page.getByTestId("restore-chat-question").click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
     expect(await requests(page)).toHaveLength(1);
@@ -431,6 +517,25 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await drive(page, 1, "push", "Explicit new attempt.");
     await drive(page, 1, "finish");
     await expect(message(page, "Explicit new attempt.")).toBeVisible();
+    expect(await requests(page)).toHaveLength(2);
+  });
+
+  test("a failure before the first chunk is recoverable without an empty assistant in the next request", async ({ page }) => {
+    await openChat(page);
+    const prompt = "A failed-before-first-chunk question.";
+    await submitComposer(page, prompt, DESKTOP_VIEWPORT.width);
+    await drive(page, 0, "fail");
+    await expect(page.getByTestId("chat-recovery-notice")).toBeVisible();
+    await page.getByTestId("restore-chat-question").click();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
+    expect(await requests(page)).toHaveLength(1);
+    await page.getByTestId("chat-send-button").click();
+    await drive(page, 1, "push", "The explicit restored send succeeded.");
+    await drive(page, 1, "finish");
+    const second = (await requests(page))[1];
+    const emptyAssistants = second.messages?.filter((message) => message.role === "assistant" && typeof message.content === "string" && message.content.trim() === "");
+    expect(emptyAssistants).toEqual([]);
+    expect(JSON.stringify(second.messages)).toContain(prompt);
     expect(await requests(page)).toHaveLength(2);
   });
 
@@ -502,6 +607,91 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await requests(page)).toHaveLength(1);
   });
 
+  test("a restored attached question sends ordered references and keeps both turns' file cards after reload", async ({ page }) => {
+    const attachment = {
+      id: "qa-original-attachment", attachmentId: "qa-original-attachment", ordinal: 0,
+      name: "recovered-question.pdf", mediaType: "application/pdf", size: 1024, kind: "file" as const,
+    };
+    const secondAttachment = {
+      id: "qa-second-attachment", attachmentId: "qa-second-attachment", ordinal: 1,
+      name: "recovered-notes.txt", mediaType: "text/plain", size: 128, kind: "file" as const,
+    };
+    const prompt = "Please inspect this restored attachment.";
+    const state = await openChat(page, { messages: [
+      { id: "attached-user", role: "user", content: prompt, attachments: [attachment, secondAttachment] },
+      { id: "attached-error", role: "assistant", content: "", modelId: MODEL_A, status: "error" },
+    ] });
+    await expect(page.getByTestId("chat-attachment-card")).toHaveCount(2);
+    await page.getByTestId("restore-chat-question").click();
+    await expect(page.getByTestId("attachment-complete")).toHaveCount(2);
+    await expect(page.getByTestId("attachment-complete").first()).toContainText(attachment.name);
+    expect(await requests(page)).toHaveLength(0);
+    await page.getByTestId("chat-send-button").click();
+    await drive(page, 0, "push", "Restored attachment answered.");
+    await drive(page, 0, "finish");
+    await expect(message(page, "Restored attachment answered.")).toBeVisible();
+    const savedUser = state.writes.flatMap((write) => (
+      write.method === "POST" && write.path.endsWith("/messages")
+        ? (write.body.messages ?? []) as Array<Record<string, unknown>> : []
+    )).find((saved) => saved.role === "user" && saved.id !== "attached-user")!;
+    expect(savedUser.attachmentReferences).toEqual([{ attachmentId: attachment.id }, { attachmentId: secondAttachment.id }]);
+    expect(savedUser).not.toHaveProperty("attachmentUploadIds");
+    const rebound = state.conversations[0].messages.find((saved) => saved.id === savedUser.id)!.attachments!;
+    expect(rebound.map((item) => item.name)).toEqual([attachment.name, secondAttachment.name]);
+    expect(rebound[0].id).not.toBe(attachment.id);
+    const sent = (await requests(page))[0];
+    const userMessages = sent.messages?.filter((item) => item.role === "user") as Array<{
+      content: string; attachments?: Array<{ attachmentId?: string; uploadId?: string }>;
+    }>;
+    expect(userMessages.at(-1)?.attachments?.map((item) => item.attachmentId)).toEqual(rebound.map((item) => item.id));
+    expect(userMessages.at(-1)?.attachments?.every((item) => item.uploadId === undefined)).toBe(true);
+    await page.reload();
+    await expect(page.getByTestId("chat-attachment-card")).toHaveCount(4);
+    await expect(page.getByTestId("chat-attachment-card").nth(2)).toContainText(attachment.name);
+    await expect(page.getByTestId("chat-attachment-card").nth(3)).toContainText(secondAttachment.name);
+    expect(await requests(page)).toHaveLength(0);
+  });
+
+  for (const failure of ["missing-file-410", "storage-503", "invalid-success-map"] as const) {
+    test(`a restored attachment save ${failure} retains the question and file without sending an answer`, async ({ page }) => {
+      const prompt = "Keep this attached question until it can be saved.";
+      const attachment = {
+        id: "qa-retained-attachment", attachmentId: "qa-retained-attachment", ordinal: 0,
+        name: "retained-document.pdf", mediaType: "application/pdf", size: 1024, kind: "file" as const,
+      };
+      await openChat(page, { messages: [
+        { id: "retained-u", role: "user", content: prompt, attachments: [attachment] },
+        { id: "retained-a", role: "assistant", content: "", modelId: MODEL_A, status: "error" },
+      ] });
+      const savedBodies: Array<Record<string, unknown>> = [];
+      await page.route(`**/api/conversations/${CONVERSATION}/messages`, async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        const body = route.request().postDataJSON() as { messages: Array<Record<string, unknown>> };
+        savedBodies.push(...body.messages);
+        if (failure === "invalid-success-map") return route.fulfill({ status: 200, json: {
+          success: true, attachments: [{ messageId: body.messages[0].id, id: "qa-invalid-ordinal", ordinal: 8 }],
+        } });
+        return route.fulfill({ status: failure === "missing-file-410" ? 410 : 503, json: {
+          code: failure === "missing-file-410" ? "ATTACHMENT_UNAVAILABLE" : "ATTACHMENT_STORAGE_UNAVAILABLE",
+        } });
+      });
+      await page.getByTestId("restore-chat-question").click();
+      await page.getByTestId("chat-send-button").click();
+      const expectedMessage = failure === "missing-file-410"
+        ? "This file is no longer stored and could not be read. Attach it again to continue."
+        : failure === "storage-503"
+          ? "File storage could not be reached. Please try again in a moment."
+          : "The question could not be saved with its files. Your draft has been kept.";
+      await expect(page.getByText(expectedMessage, { exact: true })).toBeVisible();
+      expect(savedBodies).toHaveLength(1);
+      expect(savedBodies[0].attachmentReferences).toEqual([{ attachmentId: attachment.id }]);
+      expect(await requests(page)).toHaveLength(0);
+      await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
+      await expect(page.getByTestId("attachment-complete")).toContainText(attachment.name);
+      await expect(page.getByTestId("chat-attachment-card")).toHaveCount(1);
+    });
+  }
+
   for (const change of ["conversation", "account"] as const) {
     test(`a late unclassified conversation lookup cannot overwrite a newer ${change}`, async ({ page }) => {
       const state = await openChat(page, { unclassifiedThird: true });
@@ -541,12 +731,29 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       expect(await requests(page)).toHaveLength(0);
     });
   }
+
+  for (const failure of ["server-500", "network-reject"] as const) {
+    test(`an unclassified lookup ${failure} describes failure without claiming or creating a new conversation`, async ({ page }) => {
+      const state = await openChat(page, { unclassifiedThird: true });
+      await page.route(`**/api/conversations/${UNCLASSIFIED_CONVERSATION}`, async (route) => {
+        if (failure === "network-reject") await route.abort("failed");
+        else await route.fulfill({ status: 500, json: { error: "QA detail temporarily unavailable" } });
+      });
+      await page.locator(`[data-testid="sidebar-conversation-item"][data-conversation-id="${UNCLASSIFIED_CONVERSATION}"]`).click();
+      await expect(page.getByText("This conversation could not be opened. Your current conversation has not changed.", { exact: true })).toBeVisible();
+      await expect(page.getByText("This conversation cannot be opened with the current account, so a new conversation was safely started instead.", { exact: true })).toHaveCount(0);
+      await expect(message(page, FIRST_ANSWER)).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`conversation=${CONVERSATION}`));
+      expect(state.writes.filter((write) => write.method === "POST")).toEqual([]);
+      expect(await requests(page)).toHaveLength(0);
+    });
+  }
 });
 
 test.describe("Chat single-transcript mobile composer", { tag: "@ui-risk" }, () => {
   test.use({ hasTouch: true });
   for (const width of [320, 390]) {
-    test(`${width}px and 200% text preserve the textarea row and Korean composition`, async ({ page }) => {
+    test(`${width}px and 200% text preserve the textarea row and Korean composition`, async ({ page }, testInfo) => {
       await openChat(page, { viewport: { ...MOBILE_VIEWPORT, width } });
       await expect(page.getByTestId("mobile-chat-shell")).toBeVisible();
       await expect(page.getByTestId("chat-message-list")).toHaveCount(1);
@@ -589,6 +796,9 @@ test.describe("Chat single-transcript mobile composer", { tag: "@ui-risk" }, () 
         expect(geometry.x).toBeCloseTo(before!.x, 0);
         expect(geometry.width).toBeCloseTo(before!.width, 0);
         await expectNoHorizontalOverflow(page);
+        if (width === 390 && fontSize === 16) {
+          await page.screenshot({ path: testInfo.outputPath("chat-mobile-390-transcript.png"), fullPage: true });
+        }
         await textarea.dispatchEvent("compositionend", { data: "한국어 조합" });
       }
     });

@@ -129,6 +129,8 @@ export const zh = {
     chat: {
        ...en.chat,
         sendPreparationChanged: "准备回答时，对话或模型发生了变化。请检查问题后重新发送。",
+        conversationOpenFailed: "无法打开此对话。您当前的对话保持不变。",
+        questionSaveFailed: "无法连同文件一起保存问题。你的草稿已保留。",
         restoreQuestion: "恢复问题",
         restoreQuestionHint: "将问题恢复到输入框。请另行发送以请求新的回答。",
         singleModelRequired: "Chat 使用一个回答模型。选择模型将替换当前选择。",

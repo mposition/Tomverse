@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -56,7 +57,7 @@ import {
 import { decideWebSearchBadge } from "@/lib/webSearchStatusBadge";
 import { useWebSearchBackendReadiness } from "@/components/chat/WebSearchBackendReadinessProvider";
 import { decideAnswerContextDisclosure } from "@/lib/answerContextDisclosure";
-import { recoveryPromptForMessage } from "@/lib/chatTranscriptRecovery";
+import { recoveryPromptsForMessages } from "@/lib/chatTranscriptRecovery";
 
 type ChatMessageListProps = {
   messages: Message[];
@@ -139,7 +140,7 @@ type ErrorCategory = "quota" | "model_retired" | "attachment" | "generic";
 const classifyError = (message: Message): ErrorCategory => {
   if (message.errorCode === "MODEL_RETIRED") return "model_retired";
   if (message.errorCode && QUOTA_ERROR_CODES.has(message.errorCode)) return "quota";
-  if (message.errorHadAttachments && isFileParsingError(message.content)) return "attachment";
+  if (message.errorHadAttachments && isFileParsingError(message.recoveryNotice ?? message.content)) return "attachment";
   return "generic";
 };
 
@@ -349,6 +350,12 @@ export function ChatMessageList({
     const { t, lang } = useLanguage();
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const recoveryEnabled = Boolean(onRestoreQuestion);
+  const recoveryPrompts = useMemo(
+    () => recoveryPromptsForMessages(recoveryEnabled ? messages : [], currentChatId),
+    [currentChatId, messages, recoveryEnabled]
+  );
 
   // Coarse announcement of the response lifecycle. Deliberately NOT an
   // aria-live region around the transcript itself: streaming token-by-token
@@ -683,8 +690,7 @@ export function ChatMessageList({
               !isUser && msg.status === "error"
                 ? errorText.split("\n").slice(1).filter(Boolean)
                 : [];
-            const canRestoreQuestion = Boolean(onRestoreQuestion) && !isSending &&
-              recoveryPromptForMessage(messages, msg.id, currentChatId) !== null;
+            const canRestoreQuestion = recoveryEnabled && !isSending && recoveryPrompts.has(msg.id);
 
             // UI-ERR-001. A failed turn is a state of one answer, not of the
             // conversation: three failed panels used to paint the whole

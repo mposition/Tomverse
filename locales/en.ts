@@ -109,6 +109,8 @@ export const en = {
     },
    chat: {
         sendPreparationChanged: "The conversation or model changed while preparing the answer. Check your question and send again.",
+        conversationOpenFailed: "This conversation could not be opened. Your current conversation has not changed.",
+        questionSaveFailed: "The question could not be saved with its files. Your draft has been kept.",
         restoreQuestion: "Restore question",
         restoreQuestionHint: "Restores the question to the composer. Send separately to request a new answer.",
         singleModelRequired: "Chat uses one answer model. Select a model to replace the current selection.",

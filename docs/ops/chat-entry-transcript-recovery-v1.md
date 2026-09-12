@@ -113,7 +113,7 @@ Actual CLI fixture tests must both admit the existing allowed locations and
 reject an unauthorized production writer. This correction is reviewed with the
 slice, not treated as a waived or skipped guard.
 
-### Recorded local verification — 2026-09-12
+### Historical round-0 local verification — 2026-09-12
 
 The final local build and browser runs below have persistent receipts under
 `H:/Project/chat-entry-transcript-recovery-evidence-20260912/`. Each named
@@ -168,6 +168,88 @@ not rewritten, and are not represented as having tested a future commit or
 approved these new paragraphs. Application/test source bytes are unchanged by
 this documentation-only completion pass. The final review package must bind
 the resulting source and record its own checks.
+
+### Round-1 corrections and final local verification — 2026-09-12
+
+Claude actually reviewed source `af298c77b034e1eee894bc5103f8dafe65ac7a6b`
+with diff digest
+`sha256:976026419a6c9b5c46a509fce43d461abea710aa52f10a743366e79f4d3d9102`.
+Its round-0 verdict was `request_changes`, with seven findings. The original
+task, package, verdict and execution receipts are preserved. This is the same
+exchange's first revision, not a new allowance or an approval by another author.
+
+The corrections initialize only a new unbound Chat with one local model while
+preserving stored defaults and profile refusals; report lookup failure without
+claiming navigation; exclude empty failed assistant placeholders from outgoing
+Chat context; and classify the recovery notice rather than unrelated partial
+text. Recovery eligibility is indexed in one pass. The product/continuation
+policies now state the implemented authority order.
+
+Restored attachments are saved on the new user message through strict ordered
+opaque references. Same-owner/conversation resolution precedes bounded object
+copying outside the DB transaction. A short transaction binds the winner's new
+rows; losing or failed requests queue only their own unbound copy keys. Original
+and winner objects are not cleanup targets. Duplicate batch IDs and reference
+handles are refused. Fully persisted new-format retries read back without
+reserving more message quota. The client uses new read-back attachment IDs and
+stops before an answer request on failed or incomplete attachment persistence.
+Legacy upload-only behavior remains separate. No storage schema was changed.
+
+An additional author-observed race was reproduced on round 0: New Chat while a
+creation request was pending could leave both conversation IDs null and still
+issue the abandoned answer POST. The newer draft remained intact and the URL
+stayed unbound; URL takeover is not claimed. The correction carries a selection
+intent ticket through asynchronous send preparation. Its browser regression
+waits for the actual refusal notice rather than relying on a timed delay.
+
+The final round-1 receipts below are under the same external evidence directory
+as round 0. They are new executions, not renamed round-0 results.
+
+| Receipt | Actual result | Boundary |
+| --- | --- | --- |
+| `round1-final-build` | Production build passed | Local build, not deployment |
+| `round1-chat-desktop-e2e` | 32 passed, 0 failed/skipped | Mock Chat desktop journeys |
+| `round1-chat-mobile-e2e` | 32 passed, 0 failed/skipped | Mobile Chromium project, not a physical device |
+| `round1-affected-desktop-e2e` | 150 passed, 37 existing project skips, 0 failed | 187 registered affected cases; one worker |
+| `round1-affected-mobile-e2e` | 82 passed, 48 existing project skips, 0 failed | 130 registered affected cases |
+| `round1-attachment-browser-e2e` | 28 passed, 0 failed/skipped | Existing attachment suites, both Chromium projects |
+| `round1-final-typecheck` | Passed | Explicit type generation and TypeScript check |
+| `round1-final-scoped-lint` | 42 code files passed, warnings 0 | Scoped lint, not full-repository lint |
+| `postgres-f4-20260912/round1-final-attachment-db-p2028` | 42 passed: existing 28 + resend 14; 0 failed/skipped | Fresh isolated PostgreSQL with object storage stubbed |
+
+Browser total: **324 passed, 85 existing skips, zero failures**. The same two
+Linux-canonical composer golden cases remain outside the Windows functional
+invocation; they were not re-recorded or waived. Final UI/build/static receipts
+share the unchanged 47-path scope SHA-256
+`50a82d41ee070d90384f76c66a40233ad4246612ce1be2cfc5f5606647634911`.
+DB manifests use a different entry structure, so their aggregate hashes are not
+compared directly. All 47 per-file hashes were independently compared with the
+UI manifest and live bytes, with zero differences. The root also opened the
+successful desktop partial/recovery and 390px mobile screenshots; that bounded
+visual inspection is not golden or real-device certification.
+
+The dedicated database was created at `127.0.0.1:55437`, database
+`tomverse_chat_f4_test`, with 99 existing migrations and no detected drift.
+No existing/production database or real R2 endpoint was used. Tests exercised
+concurrent duplicate writes, owner isolation, ordered mixed references,
+at-capacity readback, cleanup, a copy delayed beyond five seconds before the
+binding transaction, and an actual default transaction timeout explicitly
+asserting `P2028`. An earlier test-import setup failure and intermediate runs
+are retained separately. Process termination, ambiguous remote write outcomes
+or an unavailable cleanup DB remain objects-first recovery limitations, not a
+cross-store atomicity guarantee.
+
+Focused development checks were runtime/serialization 57, client SSR 5, server
+contracts 27, entry/destination 26 and writer tests 17 when observed. The DB
+runner-registration guard also passed six checks. The precommit/native package
+must rerun its commands and record their actual results; these observations do
+not claim that a future package or independent review has already passed.
+
+Only this plan and the progress report are updated after the final executions.
+The other 45 scope files, including the three governing policies and 42 code
+files, remain byte-identical. The package must verify that boundary, bind the
+final documents and source commit, preserve all round-0 records, and run its
+own checks. Round-1 independent review is still pending at this source record.
 
 Freeze source commit and diff digest after local checks. Ask Claude to review
 requirements and diff first, then test evidence and the author's account, through

@@ -24,6 +24,17 @@ export function decideChatWorkspaceEntry(input: {
 export const CHAT_SINGLE_MODEL_REQUIRED = "CHAT_SINGLE_MODEL_REQUIRED";
 export const CHAT_PROFILE_SINGLE_MODEL_REQUIRED = "CHAT_PROFILE_SINGLE_MODEL_REQUIRED";
 
+/** Only for a new, unbound draft; never apply to a saved conversation/profile. */
+export function newWorkspaceDraftModels(input: {
+  surface: ConversationSurface;
+  models: readonly string[];
+  fallbackModelId: string;
+}): string[] {
+  return input.surface === "chat"
+    ? [input.models[0] ?? input.fallbackModelId]
+    : [...input.models];
+}
+
 /** Validate the original choice, never silently shrink a profile or default. */
 export function chatSingleModelRefusal(input: {
   productKey: string;
@@ -38,13 +49,16 @@ export function chatSingleModelRefusal(input: {
 export function chatPreparedSendIsCurrent(input: {
   identityKey: string | null;
   currentIdentityKey: string;
-  conversationId: string;
+  conversationId: string | null;
   currentConversationId: string | null;
+  selectionTicket: number;
+  currentSelectionTicket: number;
   modelIds: readonly string[];
   currentModelIds: readonly string[];
   currentDisabledIds: readonly string[];
 }): boolean {
   return Boolean(input.identityKey) && input.identityKey === input.currentIdentityKey &&
+    input.selectionTicket === input.currentSelectionTicket &&
     input.conversationId === input.currentConversationId &&
     input.modelIds.length === 1 && input.currentModelIds.length === 1 &&
     input.modelIds[0] === input.currentModelIds[0] &&

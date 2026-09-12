@@ -48,3 +48,18 @@ test("legacy Review errors still split their existing title and auxiliary detail
   assert.match(html, /Trace ID: review/);
   assert.doesNotMatch(html, /chat-recovery-notice|restore-chat-question/);
 });
+
+test("Chat attachment errors classify the recovery notice, not an empty or unrelated partial body", () => {
+  for (const content of ["", "Kept partial answer"]) {
+    const html = render([question, { id: "a", role: "assistant", status: "error", content,
+      errorHadAttachments: true, recoveryNotice: "Invalid PDF document" }]);
+    assert.match(html, /Attachment troubleshooting/);
+  }
+  const generic = render([question, { id: "a", role: "assistant", status: "error",
+    content: "This partial answer mentions PDF and invalid inputs", errorHadAttachments: true,
+    recoveryNotice: "Connection interrupted" }]);
+  assert.doesNotMatch(generic, /Attachment troubleshooting/);
+  const review = render([question, { id: "a", role: "assistant", status: "error",
+    content: "Invalid PDF document", errorHadAttachments: true }], false);
+  assert.match(review, /Attachment troubleshooting/);
+});

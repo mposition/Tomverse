@@ -77,17 +77,49 @@
 | --- | --- | --- |
 | C01 진입·새 대화 | `/chat/workspace`에 서버 gate·owned read·Chat 전용 생성 연결; 기존 `/chat`은 Review 유지 | 공개 cutover, flag 활성화, 기존 데이터 일괄 변경 |
 | C02·C04 단일 흐름·저자 | 모델과 무관한 대화 runtime·전체 모델 history; fallback/routed/requested 순서로 답변 저자 표시 | 모든 모델의 일반적인 최적성 또는 새로운 Router 품질 증거 |
-| C05·C06 중단·초안 | partial과 오류 안내 분리; 선택한 실패 질문을 명시적으로 복원; 준비 중 계정·대화·모델 변경과 수정한 초안 보호 | 새로고침 뒤 미저장 partial 복구, 서버 attempt 재개, draft 디스크 저장 |
+| C05·C06 중단·초안 | partial과 오류 안내 분리; 선택한 실패 질문·첨부를 명시적으로 복원하고 새 질문에 저장; 준비 중 계정·대화·모델·새 Chat 의도 변경과 수정한 초안 보호 | 새로고침 뒤 미저장 partial 복구, 서버 attempt 재개, draft 디스크 저장 |
 | C07 모바일·기존 기능 | 기존 composer·drawer·Review·Studio 경로를 재사용하고 mock 브라우저 회귀 검증 | 실제 OS/키보드·native 앱 검증 또는 모든 기능 조합의 운영 검증 |
-| 검증 | 최종 로컬 build·typecheck·37파일 lint 통과; 새 Chat 20개와 영향 회귀 232개 통과, 기존 project skip 85개는 별도 집계 | Linux golden·실기기·실제 DB/provider 검증 또는 아직 실행하지 않은 동결 패키지 체크의 통과 |
-| 독립 검토 | 이번 작업에 한한 skip-preflight 승인 확인; 실제 Claude 판정 전 | 기존 작업의 승인 상속, 사람의 출시 승인 |
+| 검증 | 수정본 build·typecheck·42파일 lint 통과; 브라우저 324개와 격리 PostgreSQL 42개 통과, 기존 project skip 85개는 별도 집계 | Linux golden·실기기·운영 DB·실제 R2/provider 검증 또는 아직 실행하지 않은 동결 패키지 체크의 통과 |
+| 독립 검토 | 실제 Claude round 0은 request_changes 7건; 수정 구현·로컬 검증 후 round 1 검토 대기 | 독립 승인 완료, 기존 작업의 승인 상속, 사람의 출시 승인 |
 | 병합·배포 | 이번 변경은 로컬 작업이며 미병합·미배포 | 선행 #1367 배포를 이번 코드의 배포로 해석 |
 
 Windows conversation-writer 검사기의 경로 정규화도 포함한다. 기존 검사 규칙과
 허용 목록은 유지하며, 실제 CLI가 허용 writer를 통과시키고 비허용 production
 writer를 거부하는 회귀 테스트를 추가했다. 테스트 실패를 면제한 것이 아니다.
 
-### 이번 회차에서 보존한 로컬 실행 근거
+### 수정 검토 회차의 최종 로컬 근거
+
+같은 작업의 round 0 커밋 `af298c77b034e1eee894bc5103f8dafe65ac7a6b`와
+실제 Claude 지적 7건은 보존했다. 새 초안의 단일 모델 초기화, 정확한 실패 안내,
+빈 실패 메시지의 요청 문맥 제외, 복원 첨부의 새 메시지 영속화, 정책 정합성,
+선형 복원 대상 계산, 오류 분류를 보완했다. 같은 null ID를 유지한 New Chat이
+이전 요청을 무효화하지 못하던 경합도 실제 재현 후 intent ticket으로 막았다.
+
+`round1-*` 최종 기록의 브라우저 324건은 새 Chat 32+32, 인접 회귀 150+82,
+기존 첨부 회귀 28건이다. 기존 조건부 skip 85건과 Linux golden 미실행 2건은
+통과에 넣지 않았다. build·typecheck·42개 코드 파일 lint도 통과했으며 UI·정적
+검사 동안 47개 파일의 scope SHA-256은
+`50a82d41ee070d90384f76c66a40233ad4246612ce1be2cfc5f5606647634911`로
+전후 동일했다. DB와 UI 기록은 manifest 형식이 달라 aggregate hash가 다르지만
+47개 파일별 해시를 대조한 차이는 0이다.
+
+격리 PostgreSQL은 기존 migration 99개와 drift 검사를 통과했고, 기존 첨부
+28개·새 재전송 14개 테스트가 통과했다. 실제 행·동시성·트랜잭션 timeout
+`P2028`은 관측했지만 객체 저장소는 stub이다. 원본과 새 첨부의 수명주기를
+분리하고, 파일 복사는 DB 트랜잭션 밖에서 끝낸다. 강제 종료·불명확한 원격
+쓰기 결과·cleanup DB 불능까지 원자적 정리를 보장하는 것은 아니다.
+
+이 두 운영 문서는 최종 실행 후 기록을 갱신했다. 나머지 45개 파일은 동일하며
+precommit·검토 패키지가 최종 문서와 소스 해시를 새로 결속해야 한다. 이 기록은
+아직 실행하지 않은 round 1 독립 승인을 앞당겨 주장하지 않는다. 같은 개발
+사이클 안의 수정 검토이므로 전체 계획 추정은 **약 60%, 이전 회차 대비 +5%p**로
+유지하고, 검토 지적을 고친 횟수만큼 진척률을 다시 더하지 않는다.
+
+다음 권장 순서는 ① 수정본 Claude 검토·PR 통합 CI, ② 승인된 gate 범위의 staging
+사용자 흐름 확인, ③ 영속 중단 복구 계약·구현, ④ Refiner/Planner 연결과 별도 승인된
+실제 모델 품질 평가다. 새 과금·flag 활성화·병합·배포 승인을 포함하지 않는다.
+
+### 이전 round 0에서 보존한 로컬 실행 근거
 
 보관 위치는 `H:/Project/chat-entry-transcript-recovery-evidence-20260912/`다.
 아래 여섯 디렉터리의 `command.json`, `output.log`, `result.json`,

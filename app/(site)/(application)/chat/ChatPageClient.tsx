@@ -15,6 +15,7 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { chatAttachmentErrorCopyKey } from "@/lib/chatAttachmentErrorCopy";
 import { saveResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
@@ -77,7 +78,7 @@ import { useContinuationSource } from "@/components/continuations/useContinuatio
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
 import { chatRuntimeKey, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
-import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent } from "@/lib/chatWorkspaceEntry";
+import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, newWorkspaceDraftModels } from "@/lib/chatWorkspaceEntry";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
@@ -2511,7 +2512,13 @@ export function ChatPageClient({
                     ? clampSelectedModels(lastGuestModels.filter((id): id is string => typeof id === "string"))
                     : [];
                 if (carriedOverModels.length > 0) {
-                    queueMicrotask(() => setSelectedModels(carriedOverModels));
+                    queueMicrotask(() => {
+                        if (mountedSurface === "chat" && currentChatIdRef.current) return;
+                        setSelectedModels(newWorkspaceDraftModels({
+                            surface: mountedSurface, models: carriedOverModels,
+                            fallbackModelId: APP_DEFAULTS.defaultModelId,
+                        }));
+                    });
                 }
             } catch (error) {
                 console.error("Failed to read guest model configuration for carryover:", error);
@@ -2525,6 +2532,7 @@ export function ChatPageClient({
         isConversationsLoaded,
         isGuestMode,
         isUserSettingsLoaded,
+        mountedSurface,
     ]);
 
     useEffect(() => {
@@ -2541,7 +2549,10 @@ export function ChatPageClient({
 
             setUserDefaultModelIds(nextDefaultModels);
             if (!currentChatId) {
-                setSelectedModels(nextDefaultModels);
+                setSelectedModels(newWorkspaceDraftModels({
+                    surface: mountedSurface, models: nextDefaultModels,
+                    fallbackModelId: APP_DEFAULTS.defaultModelId,
+                }));
                 setDisabledPanels([]);
             }
         };
@@ -2556,7 +2567,7 @@ export function ChatPageClient({
                 handleSettingsUpdated
             );
         };
-    }, [currentChatId, isEnabledModelId]);
+    }, [currentChatId, isEnabledModelId, mountedSurface]);
 
   const fetchConversations = useCallback(async () => {
     if (!sessionUserId) return;
@@ -2672,11 +2683,13 @@ export function ChatPageClient({
                                 : [data.defaultModel];
                         setUserDefaultModelIds(nextDefaultModels);
                         if (!currentChatIdRef.current) {
-                            setSelectedModels(
-                                data.isNewAccount
+                            setSelectedModels(newWorkspaceDraftModels({
+                                surface: mountedSurface,
+                                models: data.isNewAccount
                                     ? newAccountDefaultSelectedModelsRef.current
-                                    : nextDefaultModels
-                            );
+                                    : nextDefaultModels,
+                                fallbackModelId: APP_DEFAULTS.defaultModelId,
+                            }));
                         }
                     }
 
@@ -2768,7 +2781,7 @@ export function ChatPageClient({
         } else if (status !== "loading") {
             queueMicrotask(() => setIsUserSettingsLoaded(true));
         }
-    }, [fetchConversations, sessionUserId, setLang, status]);
+    }, [fetchConversations, mountedSurface, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
         conversationSelectionTicketRef.current += 1;
@@ -2838,7 +2851,11 @@ export function ChatPageClient({
         setCurrentChatId(null);
         // A new chat starts from the saved new-conversation combination, not
         // just the representative model.
-        setSelectedModels(clampSelectedModels(uniqueStrings(userDefaultModelIds)));
+        setSelectedModels(newWorkspaceDraftModels({
+            surface: mountedSurface,
+            models: clampSelectedModels(uniqueStrings(userDefaultModelIds)),
+            fallbackModelId: APP_DEFAULTS.defaultModelId,
+        }));
         blankedDraftScope = null;
     }
 
@@ -3027,7 +3044,7 @@ export function ChatPageClient({
                 }
                 if (!response.ok) {
                     await discardResponseBody(response);
-                    if (lookupIsCurrent()) showToast(t("chat.conversationUnavailableSwitched"), "info");
+                    if (lookupIsCurrent()) showToast(t("chat.conversationOpenFailed"), "info");
                     return;
                 }
                 const detail = await response.json();
@@ -3035,7 +3052,7 @@ export function ChatPageClient({
                 if (!["chat", "workspace", "continuation"].includes(detail.surface)) return;
                 targetSurface = detail.surface;
             } catch {
-                if (lookupIsCurrent()) showToast(t("chat.conversationUnavailableSwitched"), "info");
+                if (lookupIsCurrent()) showToast(t("chat.conversationOpenFailed"), "info");
                 return;
             }
         }
@@ -3915,10 +3932,13 @@ export function ChatPageClient({
     // user is looking somewhere else, and this draft must only ever be
     // cleared once this send has actually been accepted.
     const originScopeId = currentChatId;
+    // A new blank draft is a new intent even when its id and model stay equal.
+    const preparedSelectionTicket = conversationSelectionTicketRef.current;
     const preparedModels = [...latestModelSettingsRef.current.models];
     const preparedDisabled = [...latestModelSettingsRef.current.disabled];
     const chatOriginStillCurrent = () => mountedSurface !== "chat" || (
       Boolean(identityKey) && identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
+      preparedSelectionTicket === conversationSelectionTicketRef.current &&
       currentChatIdRef.current === originScopeId &&
       sameStringList(preparedModels, latestModelSettingsRef.current.models) &&
       sameStringList(preparedDisabled, latestModelSettingsRef.current.disabled)
@@ -4146,6 +4166,8 @@ export function ChatPageClient({
         const current = chatPreparedSendIsCurrent({
           identityKey, currentIdentityKey,
           conversationId: activeChatId!, currentConversationId: currentChatIdRef.current,
+          selectionTicket: preparedSelectionTicket,
+          currentSelectionTicket: conversationSelectionTicketRef.current,
           modelIds: activeModelIds, currentModelIds: latestModelSettingsRef.current.models,
           currentDisabledIds: latestModelSettingsRef.current.disabled,
         });
@@ -4200,6 +4222,15 @@ export function ChatPageClient({
       const promptUploadIds = promptAttachments
         .map((attachment) => attachment.uploadId)
         .filter((uploadId): uploadId is string => Boolean(uploadId));
+      const carriesStoredAttachments = promptAttachments.some((attachment) => Boolean(attachment.attachmentId));
+      const promptAttachmentReferences = promptAttachments.flatMap<{ attachmentId: string } | { uploadId: string }>((attachment) =>
+        attachment.attachmentId ? [{ attachmentId: attachment.attachmentId }]
+          : attachment.uploadId ? [{ uploadId: attachment.uploadId }] : []
+      );
+      if (carriesStoredAttachments && promptAttachmentReferences.length !== promptAttachments.length) {
+        showToast(t("chat.questionSaveFailed"), "info");
+        return;
+      }
       let savedAttachments: ChatAttachment[] = promptAttachments;
       if (!isGuestMode) {
       try {
@@ -4211,13 +4242,20 @@ export function ChatPageClient({
               id: userMsgId,
               role: "user",
               content: trimmed,
-              ...(promptUploadIds.length
+              ...(carriesStoredAttachments
+                ? { attachmentReferences: promptAttachmentReferences }
+                : promptUploadIds.length
                 ? { attachmentUploadIds: promptUploadIds }
                 : {}),
             }]
           }),
         });
         if (!saveResponse.ok) {
+          if (carriesStoredAttachments) {
+            const failure = await saveResponse.json().catch(() => null);
+            if (chatSendIsCurrent()) showToast(t(chatAttachmentErrorCopyKey(failure?.code) ?? "chat.questionSaveFailed"), "info");
+            return;
+          }
           await discardResponseBody(saveResponse);
           console.error("Failed to pre-save user message:", saveResponse.status);
         } else {
@@ -4235,17 +4273,28 @@ export function ChatPageClient({
                 (item: { messageId?: string }) => item?.messageId === userMsgId
               )
             : [];
+          if (carriesStoredAttachments && (bound.length !== promptAttachments.length ||
+            new Set(bound.map((item) => item.ordinal)).size !== promptAttachments.length ||
+            bound.some((item) => !Number.isInteger(item.ordinal) || item.ordinal < 0 || item.ordinal >= promptAttachments.length || typeof item.id !== "string" || !item.id))) {
+            if (chatSendIsCurrent()) showToast(t("chat.questionSaveFailed"), "info");
+            return;
+          }
           if (bound.length) {
             const byOrdinal = new Map(
               bound.map((item) => [item.ordinal, item.id])
             );
             savedAttachments = promptAttachments.map((attachment, index) => {
               const attachmentId = byOrdinal.get(index);
-              return attachmentId ? { ...attachment, attachmentId } : attachment;
+              return attachmentId ? { ...attachment, attachmentId,
+                ...(carriesStoredAttachments ? { uploadId: undefined } : {}) } : attachment;
             });
           }
         }
       } catch (e) {
+        if (carriesStoredAttachments) {
+          if (chatSendIsCurrent()) showToast(t("chat.questionSaveFailed"), "info");
+          return;
+        }
         console.error("Failed to pre-save user message:", e);
       }
     }

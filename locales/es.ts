@@ -112,6 +112,8 @@ export const es = {
     chat: {
        ...en.chat,
         sendPreparationChanged: "La conversación o el modelo cambió mientras se preparaba la respuesta. Revisa tu pregunta y envíala de nuevo.",
+        conversationOpenFailed: "No se pudo abrir esta conversación. Tu conversación actual no ha cambiado.",
+        questionSaveFailed: "No se pudo guardar la pregunta con sus archivos. Tu borrador se ha conservado.",
         restoreQuestion: "Restaurar pregunta",
         restoreQuestionHint: "Restaura la pregunta en el cuadro de texto. Envíala por separado para solicitar una nueva respuesta.",
         singleModelRequired: "Chat utiliza un modelo de respuesta. Selecciona uno para reemplazar la selección actual.",

@@ -605,3 +605,18 @@ run(
   ],
   "Running the Auto selection-mode route scenarios"
 );
+// Real row/transaction semantics with storage fully stubbed. Keep the R2 mock
+// in its own process rather than changing another integration suite's client.
+run(
+  [
+    "--conditions=react-server",
+    "--experimental-test-module-mocks",
+    "--no-warnings=ExperimentalWarning",
+    "--import",
+    "tsx",
+    "--test",
+    "--test-concurrency=1",
+    "tests/integration/message-attachment-resend.db.test.ts",
+  ],
+  "Running restored question attachment persistence scenarios"
+);

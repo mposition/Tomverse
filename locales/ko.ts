@@ -113,6 +113,8 @@ export const ko = {
     },
    chat: {
         sendPreparationChanged: "답변 준비 중 대화 또는 모델이 변경되었습니다. 질문을 확인한 뒤 다시 전송해 주세요.",
+        conversationOpenFailed: "이 대화를 열지 못했습니다. 현재 대화는 그대로 유지됩니다.",
+        questionSaveFailed: "파일과 함께 질문을 저장하지 못했습니다. 작성 중인 초안은 유지됩니다.",
         restoreQuestion: "질문 복원",
         restoreQuestionHint: "질문을 입력창에 복원합니다. 새 답변을 요청하려면 별도로 전송하세요.",
         singleModelRequired: "Chat은 답변 모델을 하나만 사용합니다. 모델을 선택하면 현재 선택을 교체합니다.",

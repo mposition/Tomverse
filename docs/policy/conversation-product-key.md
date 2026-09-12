@@ -138,9 +138,14 @@ Tomverse Code는 아직 `Conversation` 행을 쓰지 않으므로, 지금 `code`
   `REVIEW_PRODUCT_KEY`를 행과 같은 statement로 넘깁니다.** 다른 writer와 같은
   규칙이고, `npm run check:conversation-writers`가 이 파일도 검사합니다.
 - **bridge 존재는 provenance와 전용 surface를 정하지, `productKey`를 정하지
-  않습니다.** 반대 방향도 마찬가지입니다 — surface를 `productKey`에서 유도하면
-  모든 Review 대화가 이어가기 화면으로 갑니다. 판정은
-  `conversationSurface()` 하나이며 근거는 bridge row뿐입니다.
+  않습니다.** `conversationSurface()`는 서버가 소유권을 확인한 행에서 **bridge를
+  먼저** 봅니다. bridge가 있으면 저장된 제품값과 무관하게 `continuation`, 없으면
+  저장된 `productKey = "chat"`만 `chat`, 나머지(Review·Studio·NULL)는
+  `workspace`입니다(2026-09-12 additive Chat 진입점). `review` 값만으로
+  continuation을 유도하지 않으므로 일반 Review가 이어가기 화면으로 가지 않습니다.
+  이 읽기 판정은 제품값을 쓰거나 백필하지 않으며, `kind`·모델 수·URL·클라이언트
+  hint는 권한 근거가 아닙니다. Chat의 새 진입 eligibility gate와 기존 소유 대화
+  열람은 별개이고, `/chat/workspace` 추가가 `/chat`의 legacy 의미를 바꾸지 않습니다.
 - **`selectedModels` 개수나 `selectionMode`에서 `productKey`를 유도하지
   않습니다.** §1이 이미 `selectionMode`에 대해 같은 것을 말했고, 모델 개수는 더
   약한 신호입니다 — 계정의 기본 조합이 하나면 일반 Review 대화도 하나입니다.

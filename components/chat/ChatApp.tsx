@@ -49,7 +49,9 @@ import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
 import {
   answeringModelId,
+  CHAT_WELCOME_MESSAGE_ID as WELCOME_MESSAGE_ID,
   recoveryPromptForMessage,
+  requestTranscriptForScope,
   transcriptMessagesForScope,
   type ChatRecoveryPrompt,
 } from "@/lib/chatTranscriptRecovery";
@@ -94,8 +96,6 @@ const processedPromptKeys = new Set<string>();
 // which Perplexity's async deep-research endpoint rejects outright
 // ("user or tool message(s) should alternate with assistant message(s)")
 // and every other provider merely pays for as a wasted input turn.
-const WELCOME_MESSAGE_ID = "welcome";
-
 const isTranscriptMessage = (message: Message) =>
   message.id !== WELCOME_MESSAGE_ID;
 
@@ -1175,13 +1175,8 @@ function ChatAppComponent({
             // message is appended exactly once -- `messages` is the pre-send
             // snapshot, and the id filter keeps a re-render or a resend from
             // duplicating it.
-            messages: [
-              ...messages.filter(
-                (message) =>
-                  isTranscriptMessage(message) && message.id !== userMessage.id
-              ),
-              userMessage,
-            ].map(toChatRequestMessage),
+            messages: requestTranscriptForScope(messages, userMessage, transcriptScope)
+              .map(toChatRequestMessage),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, chatSingleModelRefusal, decideChatWorkspaceEntry } from "../lib/chatWorkspaceEntry.ts";
+import { chatDraftMatchesSubmission, chatPreparedSendIsCurrent, chatSingleModelRefusal, decideChatWorkspaceEntry, newWorkspaceDraftModels } from "../lib/chatWorkspaceEntry.ts";
 import { conversationHandoffHref, conversationSurface, surfaceHasContinuationBridge } from "../lib/continuationRoutes.ts";
 
 test("stored Chat routes additively while bridge, legacy and Review remain on their own surfaces", () => {
@@ -22,10 +22,21 @@ test("single-model admission refuses original multi-choice without mutating it",
   assert.equal(chatSingleModelRefusal({ productKey: "review", selectedModels, fromProfile: false }), null);
   assert.deepEqual(selectedModels, ["a", "b"]);
 });
+test("a new Chat draft uses the first effective default without rewriting the stored combination", () => {
+  const models = Object.freeze(["model-b", "model-a", "model-c"]);
+  assert.deepEqual(newWorkspaceDraftModels({ surface: "chat", models, fallbackModelId: "fallback" }), ["model-b"]);
+  for (const surface of ["workspace", "continuation"]) {
+    assert.deepEqual(newWorkspaceDraftModels({ surface, models, fallbackModelId: "fallback" }), models);
+  }
+  assert.deepEqual(newWorkspaceDraftModels({ surface: "chat", models: [], fallbackModelId: "fallback" }), ["fallback"]);
+  assert.deepEqual(models, ["model-b", "model-a", "model-c"]);
+  assert.equal(chatSingleModelRefusal({ productKey: "chat", selectedModels: models, fromProfile: true }), "CHAT_PROFILE_SINGLE_MODEL_REQUIRED");
+});
 const prepared = {
   identityKey: "account:a", currentIdentityKey: "account:a",
   conversationId: "chat-a", currentConversationId: "chat-a",
   modelIds: ["model-a"], currentModelIds: ["model-a"], currentDisabledIds: [],
+  selectionTicket: 1, currentSelectionTicket: 1,
 };
 test("prepared Chat send requires the same identity, conversation and exact enabled singleton", () => {
   assert.equal(chatPreparedSendIsCurrent(prepared), true);
@@ -35,7 +46,13 @@ test("prepared Chat send requires the same identity, conversation and exact enab
     { modelIds: [] }, { modelIds: ["model-a", "model-b"] },
     { currentModelIds: ["model-b"] }, { currentModelIds: ["model-a", "model-b"] },
     { currentDisabledIds: ["model-a"] },
+    { currentSelectionTicket: 2 },
   ]) assert.equal(chatPreparedSendIsCurrent({ ...prepared, ...changed }), false, JSON.stringify(changed));
+});
+test("an explicit New Chat invalidates an old same-null preparation even with the same model", () => {
+  const fresh = { ...prepared, conversationId: null, currentConversationId: null };
+  assert.equal(chatPreparedSendIsCurrent(fresh), true);
+  assert.equal(chatPreparedSendIsCurrent({ ...fresh, currentSelectionTicket: 2 }), false);
 });
 test("only the consumed draft may clear; edits, added/removed/reordered files remain", () => {
   const draft = { submittedText: "Question  ", currentText: "Question  ", submittedAttachmentIds: ["file-a", "file-b"], currentAttachmentIds: ["file-a", "file-b"] };
