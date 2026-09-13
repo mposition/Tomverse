@@ -1,4 +1,6 @@
 import { Activity, TimerReset } from "lucide-react";
+import { adminModelMetricsMessages } from "@/lib/adminMessages/modelMetrics";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
 
 export type AdminModelMetricRow = {
   modelId: string;
@@ -33,7 +35,8 @@ const widthClass = (value: number) => {
   return "w-0";
 };
 
-export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }) {
+export async function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }) {
+  const m = await getAdminMessages(adminModelMetricsMessages);
   const sortedRows = [...rows].sort((a, b) => {
     if (b.failureCount5m !== a.failureCount5m) {
       return b.failureCount5m - a.failureCount5m;
@@ -46,14 +49,13 @@ export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-          Model metrics
+          {m.eyebrow}
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">
-          Failure rate and latency watch
+          {m.title}
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Model-level incident signals from the current monitoring window, combined
-          with the latest manual provider health checks.
+          {m.description}
         </p>
       </div>
 
@@ -72,14 +74,14 @@ export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Last signal {dateLabel(row.updatedAt)} UTC / {row.recentErrorCode || "No recent error"}
+                  {m.lastSignal(dateLabel(row.updatedAt), row.recentErrorCode || m.noRecentError)}
                 </p>
               </div>
               <div className="grid w-full gap-2 md:w-80">
                 <div className="flex items-center justify-between text-xs text-zinc-500">
                   <span className="inline-flex items-center gap-1">
                     <Activity className="h-3.5 w-3.5" />
-                    5m failures
+                    {m.failures5m}
                   </span>
                   <span className="font-black text-zinc-200">{row.failureCount5m}</span>
                 </div>
@@ -93,7 +95,7 @@ export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }
                 <div className="flex items-center justify-between text-xs text-zinc-500">
                   <span className="inline-flex items-center gap-1">
                     <TimerReset className="h-3.5 w-3.5" />
-                    Last latency
+                    {m.lastLatency}
                   </span>
                   <span className="font-black text-zinc-200">
                     {row.latencyMs === null ? "-" : `${row.latencyMs}ms`}
@@ -105,7 +107,7 @@ export function AdminModelMetricsPanel({ rows }: { rows: AdminModelMetricRow[] }
         ))}
         {sortedRows.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No model metrics are available yet.
+            {m.empty}
           </div>
         ) : null}
       </div>

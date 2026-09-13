@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminEmailCampaignDetailMessages } from "@/lib/adminMessages/emailCampaignDetail";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   AdminAddressRevealProvider,
   AdminRevealableAddress,
@@ -59,20 +61,10 @@ type LedgerPage = {
   limit: number;
 };
 
-const EXCLUDED_LABEL: Record<string, string> = {
-  no_email: "No address on the account",
-  account_inactive: "Account inactive",
-  suppressed: "Address suppressed",
-  no_consent: "No consent for this purpose",
-  plan_incompatible: "Replacement not available on their plan",
-  already_changed: "No longer in any cohort",
-};
-
-const COHORT_LABEL: Record<string, string> = {
-  default_model: "Their default model",
-  new_conversation_lead: "Lead of their new-conversation set",
-  conversation_selection: "Selected in a conversation",
-};
+const labelFor = (labels: object, key: string): string | undefined =>
+  Object.hasOwn(labels, key)
+    ? (labels as Record<string, string>)[key]
+    : undefined;
 
 export function AdminWaveLedger({
   campaignId,
@@ -85,6 +77,14 @@ export function AdminWaveLedger({
   dryRun: boolean;
   mayRevealAddresses: boolean;
 }) {
+  const messages = useAdminMessages(adminEmailCampaignDetailMessages);
+  const m = messages.ledger;
+  // Read through a ref so a language switch does not re-run `load`: a reload
+  // is a new page, and a new page drops the addresses already revealed.
+  const loadFailedMessage = useRef(m.loadFailed);
+  useEffect(() => {
+    loadFailedMessage.current = m.loadFailed;
+  }, [m.loadFailed]);
   const [page, setPage] = useState<LedgerPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -113,7 +113,7 @@ export function AdminWaveLedger({
           throw new Error(
             payload && "error" in payload && payload.error
               ? payload.error
-              : "Could not read this wave's ledger."
+              : loadFailedMessage.current
           );
         }
         setPage(payload);
@@ -122,7 +122,7 @@ export function AdminWaveLedger({
         dispatchAppToast(
           error instanceof Error
             ? error.message
-            : "Could not read this wave's ledger.",
+            : loadFailedMessage.current,
           "error"
         );
       } finally {
@@ -146,7 +146,7 @@ export function AdminWaveLedger({
     return (
       <p className="mt-3 flex items-center gap-2 text-sm text-zinc-400">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-        Reading the ledger…
+        {m.loading}
       </p>
     );
   }
@@ -156,7 +156,7 @@ export function AdminWaveLedger({
   if (page.rows.length === 0) {
     return (
       <p className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 text-sm text-zinc-400">
-        This wave has no ledger rows, so nobody has been considered for it yet.
+        {m.empty}
       </p>
     );
   }
@@ -168,9 +168,7 @@ export function AdminWaveLedger({
           {/* Says what is on screen and what it is a page of. A list that
               silently stops at its limit reads as the whole ledger. */}
           <p className="text-xs text-zinc-500">
-            Showing {page.rows.length}
-            {page.nextCursor ? " of more" : ""} — up to {page.limit} at a time,
-            which is what one reveal covers.
+            {m.showing(page.rows.length, Boolean(page.nextCursor), page.limit)}
           </p>
           <AdminRevealAddressesButton
             kind="campaign_recipient"
@@ -183,10 +181,10 @@ export function AdminWaveLedger({
           <table className="w-full min-w-[44rem] text-left text-sm">
             <thead className="text-xs uppercase tracking-wider text-zinc-500">
               <tr>
-                <th scope="col" className="py-2 pr-3 font-bold">Address</th>
-                <th scope="col" className="py-2 pr-3 font-bold">Why they were in</th>
-                <th scope="col" className="py-2 pr-3 font-bold">Outcome</th>
-                <th scope="col" className="py-2 pr-3 font-bold">Locale</th>
+                <th scope="col" className="py-2 pr-3 font-bold">{m.columns.address}</th>
+                <th scope="col" className="py-2 pr-3 font-bold">{m.columns.why}</th>
+                <th scope="col" className="py-2 pr-3 font-bold">{m.columns.outcome}</th>
+                <th scope="col" className="py-2 pr-3 font-bold">{m.columns.locale}</th>
               </tr>
             </thead>
             <tbody className="text-zinc-300">
@@ -206,20 +204,20 @@ export function AdminWaveLedger({
                         className="ml-2 rounded-md border border-amber-800 px-1.5 py-0.5 text-[11px] font-bold text-amber-200"
                         data-testid="admin-wave-ledger-malformed"
                       >
-                        unreadable stored value
+                        {m.malformed}
                       </span>
                     ) : null}
                   </td>
                   <td className="py-2 pr-3 text-zinc-400">
                     {row.eligibilityReason
-                      ? (COHORT_LABEL[row.eligibilityReason] ??
+                      ? (labelFor(messages.cohort, row.eligibilityReason) ??
                         row.eligibilityReason)
-                      : "No longer in any cohort"}
+                      : m.noLongerInCohort}
                   </td>
                   <td className="py-2 pr-3">
                     {row.excludedReason ? (
                       <span className="text-amber-200">
-                        {EXCLUDED_LABEL[row.excludedReason] ??
+                        {labelFor(messages.excluded, row.excludedReason) ??
                           row.excludedReason}
                       </span>
                     ) : (
@@ -228,9 +226,9 @@ export function AdminWaveLedger({
                       <span className="text-zinc-300">
                         {row.hasDelivery
                           ? dryRun
-                            ? "A delivery row was written and skipped — dry run"
-                            : "A delivery row was written"
-                          : "No delivery row"}
+                            ? m.writtenDryRun
+                            : m.written
+                          : m.noDelivery}
                       </span>
                     )}
                   </td>
@@ -254,7 +252,7 @@ export function AdminWaveLedger({
               disabled={loading || !cursor}
               className="min-h-11 rounded-xl border border-zinc-800 px-3 text-sm font-bold text-zinc-300 disabled:opacity-50"
             >
-              First page
+              {m.firstPage}
             </button>
             <button
               type="button"
@@ -263,11 +261,10 @@ export function AdminWaveLedger({
               className="min-h-11 rounded-xl border border-zinc-800 px-3 text-sm font-bold text-zinc-300 disabled:opacity-50"
               data-testid="admin-wave-ledger-next"
             >
-              Next page
+              {m.nextPage}
             </button>
             <p className="text-xs text-zinc-500">
-              A new page is a new set of rows, so any addresses shown here are
-              dropped and revealing them again is a new entry in the log.
+              {m.pagingNote}
             </p>
           </div>
         ) : null}

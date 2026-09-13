@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw, Route } from "lucide-react";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
+import { adminRoutingShadowMessages } from "@/lib/adminMessages/routingShadow";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 /**
  * The reader for `/api/admin/routing-shadow`.
@@ -60,7 +63,8 @@ type ShadowReport = {
     decisionMicrosP95: number;
 };
 
-const num = (value: number) => value.toLocaleString("en-US");
+const num = (value: number, locale: AdminLocale) =>
+    value.toLocaleString(adminIntlLocale(locale));
 const pct = (value: number | null) =>
     value === null ? "—" : `${(value * 100).toFixed(1)}%`;
 const ms = (micros: number) => `${(micros / 1000).toFixed(1)}ms`;
@@ -93,6 +97,8 @@ const CountList = ({
     counts: Record<string, number>;
     testId: string;
 }) => {
+    const m = useAdminMessages(adminRoutingShadowMessages);
+    const { locale } = useAdminLocale();
     const entries = Object.entries(counts).sort((left, right) => right[1] - left[1]);
     return (
         <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
@@ -100,7 +106,7 @@ const CountList = ({
                 {label}
             </p>
             {entries.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-500">None in this window.</p>
+                <p className="mt-2 text-sm text-zinc-500">{m.groups.noneInWindow}</p>
             ) : (
                 <ul className="mt-2 space-y-1" data-testid={testId}>
                     {entries.map(([key, value]) => (
@@ -109,7 +115,7 @@ const CountList = ({
                             className="flex items-baseline justify-between gap-3 text-sm"
                         >
                             <span className="text-zinc-400">{readable(key)}</span>
-                            <span className="font-bold text-white">{num(value)}</span>
+                            <span className="font-bold text-white">{num(value, locale)}</span>
                         </li>
                     ))}
                 </ul>
@@ -126,13 +132,16 @@ const GroupTable = ({
     label: string;
     groups: GroupAgreement[];
     testId: string;
-}) => (
+}) => {
+    const m = useAdminMessages(adminRoutingShadowMessages);
+    const { locale } = useAdminLocale();
+    return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
             {label}
         </p>
         {groups.length === 0 ? (
-            <p className="mt-2 text-sm text-zinc-500">Nothing decided yet.</p>
+            <p className="mt-2 text-sm text-zinc-500">{m.groups.nothingDecided}</p>
         ) : (
             <ul className="mt-2 space-y-1" data-testid={testId}>
                 {groups.map((group) => (
@@ -144,7 +153,7 @@ const GroupTable = ({
                         <span className="font-bold text-white">
                             {pct(group.agreementRate)}{" "}
                             <span className="font-normal text-zinc-500">
-                                ({num(group.agreed)}/{num(group.decided)})
+                                ({num(group.agreed, locale)}/{num(group.decided, locale)})
                             </span>
                         </span>
                     </li>
@@ -152,9 +161,12 @@ const GroupTable = ({
             </ul>
         )}
     </div>
-);
+    );
+};
 
 export function AdminRoutingShadowPanel() {
+    const m = useAdminMessages(adminRoutingShadowMessages);
+    const { locale } = useAdminLocale();
     const [report, setReport] = useState<ShadowReport | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -177,11 +189,11 @@ export function AdminRoutingShadowPanel() {
             }
             setReport((await response.json()) as ShadowReport);
         } catch {
-            setError("Could not load the shadow routing report.");
+            setError(m.loadFailed);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [m]);
 
     useEffect(() => {
         // Deferred a tick so no state write is synchronous within the effect.
@@ -197,14 +209,13 @@ export function AdminRoutingShadowPanel() {
                 <div>
                     <div className="inline-flex items-center gap-2 rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-sky-200">
                         <Route className="h-3.5 w-3.5" />
-                        Shadow routing
+                        {m.eyebrow}
                     </div>
                     <h2 className="mt-3 text-2xl font-black text-white">
-                        What Auto would have chosen
+                        {m.title}
                     </h2>
                     <p className="mt-1 max-w-2xl text-sm leading-6 text-zinc-400">
-                        The Router&apos;s rules run on real turns and the decision is
-                        recorded; the model the user selected is what executed.
+                        {m.description}
                     </p>
                 </div>
                 <button
@@ -219,7 +230,7 @@ export function AdminRoutingShadowPanel() {
                     ) : (
                         <RefreshCw className="h-4 w-4" />
                     )}
-                    Refresh
+                    {m.refresh}
                 </button>
             </div>
 
@@ -240,12 +251,11 @@ export function AdminRoutingShadowPanel() {
                         className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 text-sm leading-6 text-zinc-300"
                         data-testid="admin-routing-shadow-empty"
                     >
-                        No shadow runs in the last {report.windowDays} days.
-                        Shadow routing is off unless{" "}
+                        {m.emptyBefore(report.windowDays)}{" "}
                         <code className="font-mono text-xs">
                             TOMVERSE_ROUTER_SHADOW_ENABLED
                         </code>{" "}
-                        is set, so this is expected until it is turned on.
+                        {m.emptyAfter}
                     </p>
                 )}
 
@@ -256,48 +266,45 @@ export function AdminRoutingShadowPanel() {
                                 className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-100"
                                 data-testid="admin-routing-shadow-mixed-versions"
                             >
-                                This window spans more than one rule version, so the
-                                rates below describe no single Router. Narrow the
-                                window before drawing a conclusion.
+                                {m.mixedVersions}
                             </p>
                         )}
                         {report.truncated && (
                             <p className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-3 text-sm text-zinc-300">
-                                The row cap was reached, so this window is only
-                                partly covered.
+                                {m.truncated}
                             </p>
                         )}
 
                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                             <Stat
-                                label="Runs"
-                                value={num(report.rows)}
-                                detail={`Last ${report.windowDays} days`}
+                                label={m.stats.runs}
+                                value={num(report.rows, locale)}
+                                detail={m.stats.lastDays(report.windowDays)}
                             />
                             <Stat
-                                label="Agreement"
+                                label={m.stats.agreement}
                                 value={pct(report.agreementRate)}
-                                detail={`${num(report.agreed)} of ${num(report.decided)} decided`}
+                                detail={m.stats.agreedOfDecided(num(report.agreed, locale), num(report.decided, locale))}
                             />
                             <Stat
-                                label="No candidate"
-                                value={num(report.undecided)}
-                                detail="Nothing survived the filters"
+                                label={m.stats.noCandidate}
+                                value={num(report.undecided, locale)}
+                                detail={m.stats.noCandidateDetail}
                             />
                             <Stat
-                                label="Decision p50 / p95"
+                                label={m.stats.decisionLatency}
                                 value={`${ms(report.decisionMicrosP50)} / ${ms(report.decisionMicrosP95)}`}
-                                detail="ROUTE-02 bounds p95 at 300ms"
+                                detail={m.stats.decisionLatencyDetail}
                             />
                         </div>
 
                         <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
                             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
-                                Where Auto would move traffic
+                                {m.switches.title}
                             </p>
                             {report.switches.length === 0 ? (
                                 <p className="mt-2 text-sm text-zinc-500">
-                                    No disagreements in this window.
+                                    {m.switches.none}
                                 </p>
                             ) : (
                                 <ul
@@ -313,7 +320,7 @@ export function AdminRoutingShadowPanel() {
                                                 {pair.from} → {pair.to}
                                             </span>
                                             <span className="font-bold text-white">
-                                                {num(pair.count)}
+                                                {num(pair.count, locale)}
                                             </span>
                                         </li>
                                     ))}
@@ -323,22 +330,22 @@ export function AdminRoutingShadowPanel() {
 
                         <div className="grid gap-3 lg:grid-cols-2">
                             <GroupTable
-                                label="Agreement by task kind"
+                                label={m.groups.byTaskKind}
                                 groups={report.byTaskKind}
                                 testId="admin-routing-shadow-by-task"
                             />
                             <GroupTable
-                                label="Agreement by plan"
+                                label={m.groups.byPlan}
                                 groups={report.byPlan}
                                 testId="admin-routing-shadow-by-plan"
                             />
                             <CountList
-                                label="Selection reasons"
+                                label={m.groups.selectionReasons}
                                 counts={report.selectionReasons}
                                 testId="admin-routing-shadow-selection-reasons"
                             />
                             <CountList
-                                label="Models refused, by filter"
+                                label={m.groups.rejections}
                                 counts={report.rejectionReasons}
                                 testId="admin-routing-shadow-rejections"
                             />
@@ -350,13 +357,7 @@ export function AdminRoutingShadowPanel() {
                     className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs leading-6 text-zinc-400"
                     data-testid="admin-routing-shadow-caveat"
                 >
-                    Agreement is not a score. ROUTE-01 grades the Router on a
-                    win-rate against the fixed-model baseline, measured on an
-                    evaluation set. A Router that echoed the user would agree every
-                    time and be worth nothing; one that is right where the user was
-                    wrong appears here as disagreement. This measures how much would
-                    change if Auto were switched on, not whether the change would be
-                    an improvement.
+                    {m.caveat}
                 </p>
             </div>
         </section>

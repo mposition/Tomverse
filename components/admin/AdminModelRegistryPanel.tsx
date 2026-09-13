@@ -19,6 +19,9 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminIntlLocale } from "@/lib/adminLocale";
+import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { blankTokenFieldValues, isCreditFloor, suggestCreditFloor } from "@/lib/modelAdoptionDraft";
 import { PROMPT_CACHE_WRITE_5M_PRICE_MULTIPLIER } from "@/lib/modelPricing";
@@ -26,14 +29,10 @@ import type { AiModel, AiProvider, ModelMinimumPlan, ModelStatus, ModelUsageClas
 import {
   DEFAULT_MODEL_LIFECYCLE_FILTER,
   MODEL_LIFECYCLE_FILTERS,
-  MODEL_LIFECYCLE_LABELS,
   countModelsInLifecycleView,
   filterRegistryModels,
-  lifecycleHiddenNote,
   modelLifecycleState,
   normalizeModelLifecycleFilter,
-  registryEmptyStateMessage,
-  registryResultSummary,
   type ModelLifecycleFilter,
 } from "@/lib/adminModelRegistryFilters";
 import { AI_PROVIDERS, PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
@@ -220,6 +219,8 @@ const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
 };
 
 export function AdminModelRegistryPanel() {
+  const m = useAdminMessages(adminModelRegistryMessages);
+  const { locale } = useAdminLocale();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -337,15 +338,15 @@ export function AdminModelRegistryPanel() {
         securityFindings?: RegistrySecurityFinding[];
         error?: string;
       } | null;
-      if (!response.ok || !data?.models) throw new Error(data?.error || "Failed to load model registry.");
+      if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
       setModels(data.models);
       setSecurityFindings(data.securityFindings || []);
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Failed to load model registry.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.toast.loadFailed, "error");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [m]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -384,7 +385,7 @@ export function AdminModelRegistryPanel() {
           error?: string;
         } | null;
         if (!response.ok || !data?.fields) {
-          throw new Error(data?.error || "Failed to load the adoption draft.");
+          throw new Error(data?.error || m.toast.adoptionDraftFailed);
         }
         if (cancelled) return;
         setForm({ ...emptyForm(), ...data.fields });
@@ -416,7 +417,7 @@ export function AdminModelRegistryPanel() {
       } catch (error) {
         if (cancelled) return;
         dispatchAppToast(
-          error instanceof Error ? error.message : "Failed to load the adoption draft.",
+          error instanceof Error ? error.message : m.toast.adoptionDraftFailed,
           "error"
         );
       } finally {
@@ -449,7 +450,11 @@ export function AdminModelRegistryPanel() {
     () => models.length - countModelsInLifecycleView(models, lifecycle),
     [models, lifecycle]
   );
-  const hiddenNote = lifecycleHiddenNote(lifecycle, hiddenByLifecycle);
+  const lifecycleLabels = m.lifecycle.labels;
+  const hiddenNote =
+    lifecycle === "all" || hiddenByLifecycle <= 0
+      ? null
+      : m.lifecycle.hiddenNote(hiddenByLifecycle, lifecycleLabels[lifecycle]);
 
   // Recomputed as the prices are typed, so the class an operator is about to
   // save is measured against the model's own cost before the save rather than
@@ -668,9 +673,9 @@ export function AdminModelRegistryPanel() {
     : null;
   const blankSavesAs = (value: number | "required" | null | undefined) =>
     value === "required"
-      ? "필수 · 비우면 저장되지 않습니다"
+      ? m.tokens.blankRequired
       : typeof value === "number"
-        ? `${value.toLocaleString("en-US")} · 비워 두면 적용`
+        ? m.tokens.blankSavesAs(value.toLocaleString(adminIntlLocale(locale)))
         : undefined;
 
   const creditFloor = useMemo(
@@ -768,11 +773,11 @@ export function AdminModelRegistryPanel() {
         body: JSON.stringify(form),
       });
       const data = (await response.json().catch(() => null)) as { validation?: EnvironmentStatus; error?: string } | null;
-      if (!response.ok || !data?.validation) throw new Error(data?.error || "Configuration validation failed.");
+      if (!response.ok || !data?.validation) throw new Error(data?.error || m.toast.validationFailed);
       setValidation(data.validation);
-      dispatchAppToast("Model configuration is structurally valid.", "success");
+      dispatchAppToast(m.toast.validationPassed, "success");
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Configuration validation failed.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.toast.validationFailed, "error");
     } finally {
       setSaving(false);
     }
@@ -802,7 +807,7 @@ export function AdminModelRegistryPanel() {
         }
       );
       const data = (await response.json().catch(() => null)) as { model?: AdminModel; error?: string } | null;
-      if (!response.ok || !data?.model) throw new Error(data?.error || "Failed to save model.");
+      if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.saveFailed);
       setModels((current) => {
         const next = current.filter((model) => model.id !== data.model!.id);
         return [...next, data.model!].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
@@ -817,33 +822,33 @@ export function AdminModelRegistryPanel() {
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
       dispatchAppToast(
         adopted
-          ? "Model added, and its discovery item moved to validation."
+          ? m.toast.addedAndAdopted
           : isNew
-            ? "Model added to the DB registry."
-            : "Model registry updated.",
+            ? m.toast.added
+            : m.toast.updated,
         "success"
       );
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Failed to save model.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.toast.saveFailed, "error");
     } finally {
       setSaving(false);
     }
   };
 
   const archive = async (model: AdminModel) => {
-    if (!window.confirm(`Remove ${model.name} from the active catalogue? Historical conversations will remain readable.`)) return;
+    if (!window.confirm(m.toast.archiveConfirm(model.name))) return;
     setSaving(true);
     try {
       const response = await fetch(`/api/admin/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
       const data = (await response.json().catch(() => null)) as { model?: AdminModel; error?: string } | null;
-      if (!response.ok || !data?.model) throw new Error(data?.error || "Failed to archive model.");
+      if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.archiveFailed);
       await load();
       setEditingId(null);
       setCopySourceId(null);
       window.dispatchEvent(new Event("tomverse:model-registry-updated"));
-      dispatchAppToast("Model removed from the active catalogue.", "success");
+      dispatchAppToast(m.toast.archived, "success");
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Failed to archive model.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.toast.archiveFailed, "error");
     } finally {
       setSaving(false);
     }
@@ -883,27 +888,27 @@ export function AdminModelRegistryPanel() {
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">DB Model Registry</p>
-          <h2 className="mt-2 text-2xl font-black text-white">Model catalogue and API configuration</h2>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">{m.header.eyebrow}</p>
+          <h2 className="mt-2 text-2xl font-black text-white">{m.header.title}</h2>
           <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-400">
-            Add and edit model identity, plan access, credits, capabilities, context, and token prices without a code deployment. Provider endpoints and API-key environment names are fixed in server code and cannot be changed from this console.
+            {m.header.description}
           </p>
         </div>
         <div className="flex gap-2">
           <button type="button" onClick={() => void load()} disabled={loading || saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Reload
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} {m.header.reload}
           </button>
           <button type="button" onClick={beginCreate} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500">
-            <Plus className="h-4 w-4" /> Add model
+            <Plus className="h-4 w-4" /> {m.header.addModel}
           </button>
         </div>
       </div>
 
       {securityFindings.length > 0 ? (
         <div className="border-b border-red-900/60 bg-red-950/40 p-4 text-sm text-red-100" role="alert">
-          <p className="font-black">Blocked model-registry connection overrides detected</p>
+          <p className="font-black">{m.security.title}</p>
           <p className="mt-1 text-red-200/80">
-            {securityFindings.length} stored value{securityFindings.length === 1 ? "" : "s"} do not match the server allowlist. These entries are excluded from runtime use. Apply the security migration and rotate any secret that may have been exposed.
+            {m.security.detail(securityFindings.length)}
           </p>
           <ul className="mt-2 list-disc space-y-1 pl-5 font-mono text-xs">
             {securityFindings.slice(0, 8).map((finding) => (
@@ -917,7 +922,7 @@ export function AdminModelRegistryPanel() {
 
       <div className="grid items-end gap-3 border-b border-zinc-800 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_220px_220px]">
         <label className="relative md:col-span-2 xl:col-span-1">
-          <span className="sr-only">Search models</span>
+          <span className="sr-only">{m.filters.searchLabel}</span>
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
           <input
             value={query}
@@ -926,12 +931,12 @@ export function AdminModelRegistryPanel() {
               setQuery(value);
               updateLocation(value, provider, lifecycle);
             }}
-            placeholder="Search name, model ID, API ID, provider, or purpose"
+            placeholder={m.filters.searchPlaceholder}
             className={`${inputClass} pl-10`}
           />
         </label>
         <label className={labelClass}>
-          Provider
+          {m.filters.provider}
           <select
             value={provider}
             onChange={(event) => {
@@ -942,12 +947,12 @@ export function AdminModelRegistryPanel() {
             className={inputClass}
             data-testid="model-registry-provider-filter"
           >
-            <option value="all">All providers</option>
+            <option value="all">{m.filters.allProviders}</option>
             {AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </label>
         <label className={labelClass}>
-          Lifecycle
+          {m.filters.lifecycle}
           <select
             value={lifecycle}
             onChange={(event) => {
@@ -959,7 +964,7 @@ export function AdminModelRegistryPanel() {
             data-testid="model-registry-lifecycle-filter"
           >
             {MODEL_LIFECYCLE_FILTERS.map((item) => (
-              <option key={item} value={item}>{MODEL_LIFECYCLE_LABELS[item]}</option>
+              <option key={item} value={item}>{lifecycleLabels[item]}</option>
             ))}
           </select>
         </label>
@@ -967,7 +972,7 @@ export function AdminModelRegistryPanel() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
         <p className="text-xs text-zinc-400" role="status" data-testid="model-registry-result-summary">
-          <span className="font-bold text-zinc-300">{registryResultSummary(filtered.length, models.length)}</span>
+          <span className="font-bold text-zinc-300">{m.lifecycle.resultSummary(filtered.length, models.length)}</span>
           {hiddenNote ? <span className="ml-2 text-zinc-500">{hiddenNote}</span> : null}
         </p>
         <button
@@ -975,7 +980,7 @@ export function AdminModelRegistryPanel() {
           onClick={clearFilters}
           className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-3 py-1.5 text-xs font-bold text-zinc-200 hover:bg-zinc-900"
         >
-          <FilterX className="h-3.5 w-3.5" /> Clear filters
+          <FilterX className="h-3.5 w-3.5" /> {m.filters.clear}
         </button>
       </div>
 
@@ -992,9 +997,9 @@ export function AdminModelRegistryPanel() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-black text-white">{model.name}</h3>
                     <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase ${state === "limited" ? "border-amber-500/30 bg-amber-500/10 text-amber-200" : state === "active" ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-700 bg-zinc-950 text-zinc-400"}`} data-testid={`model-registry-lifecycle-badge-${model.id}`}>
-                      {MODEL_LIFECYCLE_LABELS[state]}
+                      {lifecycleLabels[state]}
                     </span>
-                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{model.creditWeight || 1} credits</span>
+                    <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-200">{m.card.credits(model.creditWeight || 1)}</span>
                   </div>
                   <p className="mt-1 break-all font-mono text-xs text-zinc-500">{model.id} → {model.apiModel}</p>
                   <p className="mt-2 truncate text-xs text-zinc-400">{model.apiBaseUrl}</p>
@@ -1008,16 +1013,16 @@ export function AdminModelRegistryPanel() {
                   </div>
                   {model.operationalReason ? (
                     <p className="mt-3 line-clamp-2 text-xs text-amber-200/80">
-                      Internal: {model.operationalReason}
+                      {m.card.internalPrefix}{model.operationalReason}
                     </p>
                   ) : null}
                 </div>
                 <div className="flex shrink-0 gap-2">
-                  <button type="button" onClick={() => beginDuplicate(model)} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Duplicate ${model.name}`} title="Duplicate as a new disabled model">
+                  <button type="button" onClick={() => beginDuplicate(model)} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={m.card.duplicateLabel(model.name)} title={m.card.duplicateTitle}>
                     <Copy className="h-4 w-4" />
-                    <span className="hidden text-xs font-bold 2xl:inline">Copy</span>
+                    <span className="hidden text-xs font-bold 2xl:inline">{m.card.copy}</span>
                   </button>
-                  <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={`Edit ${model.name}`}>
+                  <button type="button" onClick={() => beginEdit(model)} className="rounded-xl border border-zinc-700 p-2 text-zinc-300 hover:bg-zinc-800" aria-label={m.card.editLabel(model.name)}>
                     <Pencil className="h-4 w-4" />
                   </button>
                 </div>
@@ -1028,21 +1033,20 @@ export function AdminModelRegistryPanel() {
       </div>
 
       {editingId ? (
-        <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/75 p-3 backdrop-blur-sm md:p-8" role="dialog" aria-modal="true" aria-label={editingId === "new" ? "Add model" : `Edit ${form.name}`}>
+        <div className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/75 p-3 backdrop-blur-sm md:p-8" role="dialog" aria-modal="true" aria-label={editingId === "new" ? m.dialog.addModel : m.dialog.editModel(form.name)}>
           <div className="my-auto w-full max-w-5xl overflow-hidden rounded-3xl border border-zinc-700 bg-zinc-950 shadow-2xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
-                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{adoptWorkItemId ? "Adopt discovered model" : copySourceId ? "Duplicate registry entry" : editingId === "new" ? "New registry entry" : "Edit registry entry"}</p>
-                <h3 className="mt-1 text-xl font-black text-white">{form.name || "Untitled model"}</h3>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{adoptWorkItemId ? m.dialog.eyebrowAdopt : copySourceId ? m.dialog.eyebrowDuplicate : editingId === "new" ? m.dialog.eyebrowNew : m.dialog.eyebrowEdit}</p>
+                <h3 className="mt-1 text-xl font-black text-white">{form.name || m.dialog.untitled}</h3>
                 {copySourceId ? (
                   <p className="mt-1 text-xs text-amber-200">
-                    Copied from {copySourceId}. Confirm the new Registry ID and Provider API model ID before enabling it.
+                    {m.dialog.copiedFrom(copySourceId)}
                   </p>
                 ) : null}
                 {adoptWorkItemId ? (
                   <p className="mt-1 text-xs text-zinc-300">
-                    Prefilled from the provider catalogue. Saving also moves this
-                    discovery item to validation.
+                    {m.dialog.adoptPrefilled}
                   </p>
                 ) : null}
               </div>
@@ -1053,23 +1057,23 @@ export function AdminModelRegistryPanel() {
               {adoptWorkItemId ? (
                 <div className="rounded-2xl border border-amber-500/25 bg-amber-500/5 p-4">
                   <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-200">
-                    아직 사람이 정해야 하는 값
+                    {m.adopt.unknownsTitle}
                   </p>
                   <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
                     {guidanceIsCurrent ? (
                       adoptUnknowns.map((item) => <li key={item}>· {item}</li>)
                     ) : !lookupKey ? (
-                      <li>· Registry ID를 입력하면 초안을 다시 불러옵니다.</li>
+                      <li>· {m.adopt.draftNeedsId}</li>
                     ) : profileLookupFailed ? (
-                      <li>· 선택한 공급자·모델·ID의 초안을 불러오지 못했습니다. 공급자가 제공한 값을 직접 확인해 입력하세요.</li>
+                      <li>· {m.adopt.draftFailed}</li>
                     ) : (
-                      <li>· 선택한 공급자·모델·ID에 대한 초안을 다시 불러오는 중입니다.</li>
+                      <li>· {m.adopt.draftReloading}</li>
                     )}
                   </ul>
                   {guidanceIsCurrent && adoptNotes.length ? (
                     <>
                       <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                        이미 정해진 값 — 그대로 두세요
+                        {m.adopt.notesTitle}
                       </p>
                       <ul className="mt-2 grid gap-1 text-xs text-zinc-400">
                         {adoptNotes.map((item) => (
@@ -1082,7 +1086,7 @@ export function AdminModelRegistryPanel() {
                     <div className="mt-4">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                          lib/modelPricing.ts profile 제안 — 검토 후 PR로 등록
+                          {m.adopt.profileProposalTitle}
                         </p>
                         <button
                           type="button"
@@ -1090,13 +1094,13 @@ export function AdminModelRegistryPanel() {
                             void navigator.clipboard
                               ?.writeText(pricingProfileProposal)
                               .then(
-                                () => dispatchAppToast("Profile 제안을 복사했습니다.", "success"),
-                                () => dispatchAppToast("복사하지 못했습니다. 직접 선택해 복사하세요.", "error")
+                                () => dispatchAppToast(m.adopt.proposalCopied, "success"),
+                                () => dispatchAppToast(m.adopt.proposalCopyFailed, "error")
                               );
                           }}
                           className="rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800"
                         >
-                          복사
+                          {m.adopt.copyProposal}
                         </button>
                       </div>
                       <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
@@ -1106,16 +1110,16 @@ export function AdminModelRegistryPanel() {
                   ) : null}
                   {profileLookupFailed ? (
                     <p className="mt-3 text-xs text-amber-200">
-                      가격 상속 확인에 실패했습니다. 저장은 서버가 다시 판정합니다.
+                      {m.adopt.profileLookupFailed}
                     </p>
                   ) : null}
                   <label className={`${labelClass} mt-4`}>
-                    채택 사유 (필수)
+                    {m.adopt.reason}
                     <input
                       value={adoptReason}
                       onChange={(e) => setAdoptReason(e.target.value)}
                       className={inputClass}
-                      placeholder="왜 지금 이 모델을 편입하는지 — 승인 기록에 남습니다"
+                      placeholder={m.adopt.reasonPlaceholder}
                     />
                   </label>
                 </div>
@@ -1123,102 +1127,102 @@ export function AdminModelRegistryPanel() {
               {editingId === "new" ? (
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
                   <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
-                    Credit floor from base token prices
+                    {m.floor.title}
                   </p>
                   {isCreditFloor(creditFloor) ? (
                     <p className="mt-2 text-xs leading-relaxed text-zinc-300">
-                      Worst accepted turn — {creditFloor.inputTokens.toLocaleString()} input
-                      tokens plus a full {creditFloor.outputTokens.toLocaleString()}-token
-                      answer — costs{" "}
+                      {m.floor.worstTurn(
+                        creditFloor.inputTokens.toLocaleString(adminIntlLocale(locale)),
+                        creditFloor.outputTokens.toLocaleString(adminIntlLocale(locale))
+                      )}{" "}
                       <span className="font-mono text-white">
                         US${(creditFloor.worstCaseMicroUsd / 1_000_000).toFixed(3)}
                       </span>
                       {creditFloor.inputMultiplier > 0 && form.provider === "anthropic"
-                        ? " (input at the prompt-cache write premium)"
+                        ? m.floor.cacheWritePremium
                         : ""}
-                      . The cheapest class that covers it is{" "}
-                      <span className="font-bold text-white">{creditFloor.usageClass}</span> at{" "}
-                      <span className="font-bold text-white">{creditFloor.credits}</span> credits —
-                      a lower bound, not a price.{" "}
+                      {m.floor.cheapestClass}{" "}
+                      <span className="font-bold text-white">{creditFloor.usageClass}</span>{m.floor.classCreditsJoin}{" "}
+                      <span className="font-bold text-white">{creditFloor.credits}</span>{m.floor.creditsLowerBound}{" "}
                       {inheritedPrice
-                        ? "Priced from this model's pricing profile, at the tier a prompt that size lands in, with the price columns left empty so the profile keeps applying."
-                        : "Native search per query, long-context price tiers and separately billed reasoning tokens are not in this figure, so a model carrying any of them needs more."}
+                        ? m.floor.inheritedProfile
+                        : m.floor.notIncluded}
                     </p>
                   ) : creditFloor.reason === "above_every_class" ? (
                     <p className="mt-2 text-xs leading-relaxed text-red-300">
-                      No usage class covers this price: the worst accepted turn costs{" "}
+                      {m.floor.noClassBefore}{" "}
                       <span className="font-mono">
                         US${((creditFloor.worstCaseMicroUsd ?? 0) / 1_000_000).toFixed(3)}
                       </span>
-                      . Either the credit ceiling moves, or this model waits.
+                      {m.floor.noClassAfter}
                     </p>
                   ) : (
                     <p className="mt-2 text-xs leading-relaxed text-zinc-400">
                       {creditFloor.reason === "output_cap_unknown"
-                        ? "Set the maximum output tokens to compute the floor."
-                        : "Enter the provider's input and output prices to compute the floor."}
+                        ? m.floor.outputCapUnknown
+                        : m.floor.pricesUnknown}
                     </p>
                   )}
                 </div>
               ) : null}
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-2">
-                <legend className="px-2 text-sm font-bold text-white">Identity and provider API</legend>
-                <label className={labelClass}>Registry ID<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
-                <label className={labelClass}>Display name<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
-                <label className={labelClass}>Provider<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-                <label className={labelClass}>Provider API model ID<input value={form.apiModel} onChange={(e) => { if (adoptWorkItemId && e.target.value.trim() !== form.apiModel.trim()) startNewPair(); setField("apiModel", e.target.value); }} className={inputClass} placeholder="Exact model ID sent to provider" /></label>
+                <legend className="px-2 text-sm font-bold text-white">{m.identity.legend}</legend>
+                <label className={labelClass}>{m.identity.registryId}<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
+                <label className={labelClass}>{m.identity.displayName}<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
+                <label className={labelClass}>{m.identity.provider}<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label className={labelClass}>{m.identity.apiModel}<input value={form.apiModel} onChange={(e) => { if (adoptWorkItemId && e.target.value.trim() !== form.apiModel.trim()) startNewPair(); setField("apiModel", e.target.value); }} className={inputClass} placeholder={m.identity.apiModelPlaceholder} /></label>
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 md:col-span-2">
-                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-200">Server-enforced provider connection</p>
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-200">{m.identity.connectionTitle}</p>
                   <p className="mt-2 break-all font-mono text-xs text-zinc-300">{PROVIDER_API_CONFIGURATION[form.provider].baseUrl}</p>
                   <p className="mt-1 font-mono text-xs text-zinc-400">{PROVIDER_API_CONFIGURATION[form.provider].apiKeyEnvName}</p>
-                  <p className="mt-2 text-xs leading-5 text-zinc-400">These values are allowlisted in server code. Model registry requests cannot override the destination or select another server secret.</p>
+                  <p className="mt-2 text-xs leading-5 text-zinc-400">{m.identity.connectionNote}</p>
                 </div>
-                <label className={labelClass}>Icon / short mark<input value={form.icon} onChange={(e) => setField("icon", e.target.value)} className={inputClass} /></label>
-                <label className={`${labelClass} md:col-span-2`}>Model-specific purpose<input value={form.bestFor} onChange={(e) => setField("bestFor", e.target.value)} className={inputClass} placeholder="One concise line shown in the model picker" /></label>
+                <label className={labelClass}>{m.identity.icon}<input value={form.icon} onChange={(e) => setField("icon", e.target.value)} className={inputClass} /></label>
+                <label className={`${labelClass} md:col-span-2`}>{m.identity.purpose}<input value={form.bestFor} onChange={(e) => setField("bestFor", e.target.value)} className={inputClass} placeholder={m.identity.purposePlaceholder} /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
-                <legend className="px-2 text-sm font-bold text-white">Catalogue, access, and credits</legend>
-                <label className={labelClass}>Minimum plan<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
-                <label className={labelClass}>Internal usage class<select value={form.usageClass} onChange={(e) => { setField("usageClass", e.target.value as ModelUsageClass); setAdoptClassChosen(true); }} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="text-[11px] font-normal normal-case tracking-normal text-amber-200">판매 등급을 직접 선택해야 저장됩니다 — 기본값은 아무도 정하지 않은 값입니다.</span> : null}</label>
-                <label className={labelClass}>Base credit weight<input type="number" min={1} max={1000} value={form.creditWeight} onChange={(e) => setField("creditWeight", Number(e.target.value))} className={inputClass} /></label>
-                <label className={labelClass}>Runtime status<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">Enabled</option><option value="limited">Limited</option><option value="disabled">Disabled</option><option value="coming-soon">Coming soon</option></select></label>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.publiclyListed} onChange={(e) => setField("publiclyListed", e.target.checked)} className="h-4 w-4" /> Publicly listed</label>
-                <label className={`${labelClass} md:col-span-2`}>Replacement model<select value={form.replacementModelId} onChange={(e) => setField("replacementModelId", e.target.value)} className={inputClass}><option value="">None</option>{models.filter((model) => model.id !== form.id && !model.catalogDeleted).map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select></label>
-                <label className={labelClass}>Sort order<input type="number" value={form.sortOrder} onChange={(e) => setField("sortOrder", Number(e.target.value))} className={inputClass} /></label>
-                <label className={`${labelClass} md:col-span-2`}>Internal operational reason<textarea rows={3} value={form.operationalReason} onChange={(e) => setField("operationalReason", e.target.value)} className={inputClass} placeholder="Visible only to administrators" /></label>
-                <label className={`${labelClass} md:col-span-2`}>User-visible status note<textarea rows={3} value={form.userVisibleNote} onChange={(e) => setField("userVisibleNote", e.target.value)} className={inputClass} placeholder="Safe explanation shown when this model is limited or unavailable" /></label>
+                <legend className="px-2 text-sm font-bold text-white">{m.catalogue.legend}</legend>
+                <label className={labelClass}>{m.catalogue.minimumPlan}<select value={form.minimumPlan} onChange={(e) => setField("minimumPlan", e.target.value as ModelMinimumPlan)} className={inputClass}><option>Guest</option><option>Free</option><option>Pro</option></select></label>
+                <label className={labelClass}>{m.catalogue.usageClass}<select value={form.usageClass} onChange={(e) => { setField("usageClass", e.target.value as ModelUsageClass); setAdoptClassChosen(true); }} className={inputClass}>{["standard","advanced","premium","reasoning","premium-reasoning","research","deep-research"].map((item) => <option key={item}>{item}</option>)}</select>{adoptWorkItemId && !adoptClassChosen ? <span className="text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.classRequired}</span> : null}</label>
+                <label className={labelClass}>{m.catalogue.creditWeight}<input type="number" min={1} max={1000} value={form.creditWeight} onChange={(e) => setField("creditWeight", Number(e.target.value))} className={inputClass} /></label>
+                <label className={labelClass}>{m.catalogue.runtimeStatus}<select value={form.status} onChange={(e) => setField("status", e.target.value as ModelStatus)} className={inputClass}><option value="enabled">{m.catalogue.status.enabled}</option><option value="limited">{m.catalogue.status.limited}</option><option value="disabled">{m.catalogue.status.disabled}</option><option value="coming-soon">{m.catalogue.status.comingSoon}</option></select></label>
+                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.publiclyListed} onChange={(e) => setField("publiclyListed", e.target.checked)} className="h-4 w-4" /> {m.catalogue.publiclyListed}</label>
+                <label className={`${labelClass} md:col-span-2`}>{m.catalogue.replacementModel}<select value={form.replacementModelId} onChange={(e) => setField("replacementModelId", e.target.value)} className={inputClass}><option value="">{m.catalogue.none}</option>{models.filter((model) => model.id !== form.id && !model.catalogDeleted).map((model) => <option key={model.id} value={model.id}>{model.name} ({model.id})</option>)}</select></label>
+                <label className={labelClass}>{m.catalogue.sortOrder}<input type="number" value={form.sortOrder} onChange={(e) => setField("sortOrder", Number(e.target.value))} className={inputClass} /></label>
+                <label className={`${labelClass} md:col-span-2`}>{m.catalogue.operationalReason}<textarea rows={3} value={form.operationalReason} onChange={(e) => setField("operationalReason", e.target.value)} className={inputClass} placeholder={m.catalogue.operationalReasonPlaceholder} /></label>
+                <label className={`${labelClass} md:col-span-2`}>{m.catalogue.userVisibleNote}<textarea rows={3} value={form.userVisibleNote} onChange={(e) => setField("userVisibleNote", e.target.value)} className={inputClass} placeholder={m.catalogue.userVisibleNotePlaceholder} /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
-                <legend className="px-2 text-sm font-bold text-white">Capabilities and context</legend>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> Image input</label>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> Native PDF</label>
-                <label className={labelClass}>Reasoning<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">None</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">공급자 정보로 제안한 값입니다 — 확정해야 저장됩니다.<button type="button" onClick={() => { touchedDraftFieldsRef.current.add("reasoning"); setAdoptReasoningConfirmed(true); }} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">이 값으로 확정</button></span> : null}</label>
-                <label className={labelClass}>Context window<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
-                <label className={labelClass}>Max images<input type="number" value={form.maxImages ?? ""} onChange={(e) => setField("maxImages", numericValue(e.target.value))} className={inputClass} /></label>
-                <label className={labelClass}>Max base64 image bytes<input type="number" value={form.maxBase64ImagePayloadBytes ?? ""} onChange={(e) => setField("maxBase64ImagePayloadBytes", numericValue(e.target.value))} className={inputClass} /></label>
+                <legend className="px-2 text-sm font-bold text-white">{m.capabilities.legend}</legend>
+                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> {m.capabilities.imageInput}</label>
+                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> {m.capabilities.nativePdf}</label>
+                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button></span> : null}</label>
+                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <label className={labelClass}>{m.capabilities.maxImages}<input type="number" value={form.maxImages ?? ""} onChange={(e) => setField("maxImages", numericValue(e.target.value))} className={inputClass} /></label>
+                <label className={labelClass}>{m.capabilities.maxBase64ImageBytes}<input type="number" value={form.maxBase64ImagePayloadBytes ?? ""} onChange={(e) => setField("maxBase64ImagePayloadBytes", numericValue(e.target.value))} className={inputClass} /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-3">
-                <legend className="px-2 text-sm font-bold text-white">Token limits and cost snapshot (USD per 1M tokens)</legend>
-                <label className={labelClass}>Max output tokens<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} /></label>
-                <label className={labelClass}>Reservation output tokens<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} /></label>
-                <label className={labelClass}>Cached input multiplier<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <legend className="px-2 text-sm font-bold text-white">{m.tokens.legend}</legend>
+                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} /></label>
+                <label className={labelClass}>{m.tokens.reservationOutputTokens}<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} /></label>
+                <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
                 {adoptWorkItemId && adoptPriceSuggested && !adoptPriceConfirmed ? (
                   <div className="md:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
-                    가격이 공급자 문서에서 채워졌습니다. 위 안내의 출처 문서와 대조한 뒤 확정해야 저장됩니다 — 임시 가격은 문구로 항상 알아볼 수 있지 않습니다.
-                    <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">출처와 대조했습니다</button>
+                    {m.adopt.priceFromDocs}
+                    <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmPrice}</button>
                   </div>
                 ) : null}
-                <label className={labelClass}>Input USD / 1M<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
-                <label className={labelClass}>Output USD / 1M<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
               </fieldset>
 
               {validation ? (
                 <div className={`rounded-2xl border p-4 ${validation.compatible && validation.apiKeyConfigured ? "border-emerald-500/30 bg-emerald-500/10" : "border-amber-500/30 bg-amber-500/10"}`}>
-                  <p className="flex items-center gap-2 font-black text-white"><ShieldCheck className="h-4 w-4" /> Configuration check</p>
-                  <p className="mt-2 text-sm text-zinc-300">Protocol: {validation.protocol} · Key: {validation.apiKeyEnvName} ({validation.apiKeyConfigured ? "configured" : "missing"})</p>
+                  <p className="flex items-center gap-2 font-black text-white"><ShieldCheck className="h-4 w-4" /> {m.validation.title}</p>
+                  <p className="mt-2 text-sm text-zinc-300">{m.validation.summary(validation.protocol, validation.apiKeyEnvName, validation.apiKeyConfigured ? m.validation.configured : m.validation.missing)}</p>
                   {validation.warnings.map((warning) => <p key={warning} className="mt-1 text-xs text-amber-200">• {warning}</p>)}
                 </div>
               ) : null}
@@ -1227,12 +1231,12 @@ export function AdminModelRegistryPanel() {
             <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 bg-zinc-950/95 p-4 backdrop-blur">
               <div>
                 {editingId !== "new" ? (
-                  <button type="button" onClick={() => void archive(models.find((model) => model.id === editingId)!)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> Remove from catalogue</button>
+                  <button type="button" onClick={() => void archive(models.find((model) => model.id === editingId)!)} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-500/10 disabled:opacity-50"><Archive className="h-4 w-4" /> {m.actions.removeFromCatalogue}</button>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> Validate</button>
-                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || profileLookupPending || (adoptReasoningSuggested && !adoptReasoningConfirmed) || (adoptPriceSuggested && !adoptPriceConfirmed) || (!profileLookupFailed && (!isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? "Restore and save" : "Save model"}</button>
+                <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> {m.actions.validate}</button>
+                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || profileLookupPending || (adoptReasoningSuggested && !adoptReasoningConfirmed) || (adoptPriceSuggested && !adoptPriceConfirmed) || (!profileLookupFailed && (!isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
               </div>
             </div>
           </div>
@@ -1240,7 +1244,7 @@ export function AdminModelRegistryPanel() {
       ) : null}
 
       {!loading && filtered.length === 0 ? (
-        <div className="p-10 text-center text-sm text-zinc-500" data-testid="model-registry-empty-state"><Database className="mx-auto mb-3 h-6 w-6" />{registryEmptyStateMessage(lifecycle)}</div>
+        <div className="p-10 text-center text-sm text-zinc-500" data-testid="model-registry-empty-state"><Database className="mx-auto mb-3 h-6 w-6" />{lifecycle === "all" ? m.lifecycle.emptyAll : m.lifecycle.emptyInView(lifecycleLabels[lifecycle])}</div>
       ) : null}
     </section>
   );

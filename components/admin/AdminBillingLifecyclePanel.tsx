@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { CreditCard, RotateCcw, UserMinus, Users } from "lucide-react";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminBillingLifecycleMessages } from "@/lib/adminMessages/billingLifecycle";
 
 type Props = {
   activePaidUsers: number;
@@ -43,7 +45,7 @@ function Card({
   );
 }
 
-export function AdminBillingLifecyclePanel({
+export async function AdminBillingLifecyclePanel({
   activePaidUsers,
   activeSubscriptions,
   pendingRefunds,
@@ -51,46 +53,46 @@ export function AdminBillingLifecyclePanel({
   rejectedRefunds,
   cancelAtPeriodEnd,
 }: Props) {
+  const m = await getAdminMessages(adminBillingLifecycleMessages);
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-          Billing lifecycle
+          {m.eyebrow}
         </p>
         <h2 className="mt-2 text-2xl font-black text-white">
-          Refunds and cancellations split
+          {m.title}
         </h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Separate paid subscribers, refund workflow, and subscriptions scheduled
-          to end so finance and support do not treat them as the same state.
+          {m.description}
         </p>
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Card
-          label="Paid users"
+          label={m.paidUsers}
           value={String(activePaidUsers)}
-          detail={`${activeSubscriptions} active subscriptions currently synced from Stripe.`}
+          detail={m.paidUsersDetail(activeSubscriptions)}
           icon={<Users className="h-3.5 w-3.5" />}
           tone="blue"
         />
         <Card
-          label="Canceling"
+          label={m.canceling}
           value={String(cancelAtPeriodEnd)}
-          detail="Users remain paid until the current Stripe period ends."
+          detail={m.cancelingDetail}
           icon={<UserMinus className="h-3.5 w-3.5" />}
           tone="amber"
         />
         <Card
-          label="Refund queue"
+          label={m.refundQueue}
           value={String(pendingRefunds)}
-          detail={`${approvedRefunds} approved and ${rejectedRefunds} rejected requests recorded.`}
+          detail={m.refundQueueDetail(approvedRefunds, rejectedRefunds)}
           icon={<RotateCcw className="h-3.5 w-3.5" />}
           tone={pendingRefunds > 0 ? "red" : "emerald"}
         />
         <Card
-          label="Payment state"
-          value={activeSubscriptions > 0 ? "Live" : "Watch"}
-          detail="Use Stripe webhooks and billing resync before manual plan changes."
+          label={m.paymentState}
+          value={activeSubscriptions > 0 ? m.paymentStateLive : m.paymentStateWatch}
+          detail={m.paymentStateDetail}
           icon={<CreditCard className="h-3.5 w-3.5" />}
           tone="emerald"
         />
