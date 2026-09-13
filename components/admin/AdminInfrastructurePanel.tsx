@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -17,7 +17,12 @@ import {
   Server,
   XCircle,
 } from "lucide-react";
+import {
+  useAdminLocale,
+  useAdminMessages,
+} from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminInfrastructureMessages } from "@/lib/adminMessages/infrastructure";
 import {
   RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE,
   type InfrastructureDashboard,
@@ -71,12 +76,13 @@ function AllowanceBar({ value }: { value: number | null }) {
 }
 
 function StatusBadge({ status }: { status: InfrastructureStatus }) {
+  const m = useAdminMessages(adminInfrastructureMessages);
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold capitalize ${statusStyle[status]}`}
     >
       {statusIcon(status)}
-      {status}
+      {m.status[status]}
     </span>
   );
 }
@@ -86,6 +92,12 @@ export function AdminInfrastructurePanel({
 }: {
   canManageCosts: boolean;
 }) {
+  const m = useAdminMessages(adminInfrastructureMessages);
+  const { locale } = useAdminLocale();
+  const messagesRef = useRef(m);
+  useEffect(() => {
+    messagesRef.current = m;
+  }, [m]);
   const [data, setData] = useState<InfrastructureDashboard | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -108,7 +120,7 @@ export function AdminInfrastructurePanel({
         throw new Error(
           payload && "error" in payload && payload.error
             ? payload.error
-            : "Could not load infrastructure audit."
+            : messagesRef.current.loadFailed
         );
       }
       setData(payload);
@@ -122,7 +134,7 @@ export function AdminInfrastructurePanel({
       setError(
         loadError instanceof Error
           ? loadError.message
-          : "Could not load infrastructure audit."
+          : messagesRef.current.loadFailed
       );
     } finally {
       setLoading(false);
@@ -164,15 +176,15 @@ export function AdminInfrastructurePanel({
         error?: string;
       } | null;
       if (!response.ok) {
-        throw new Error(payload?.error || "Could not save Railway credit.");
+        throw new Error(payload?.error || m.saveCreditFailed);
       }
-      dispatchAppToast("Railway credit saved.", "success");
+      dispatchAppToast(m.creditSaved, "success");
       await load();
     } catch (saveError) {
       dispatchAppToast(
         saveError instanceof Error
           ? saveError.message
-          : "Could not save Railway credit.",
+          : m.saveCreditFailed,
         "error"
       );
     } finally {
@@ -187,14 +199,13 @@ export function AdminInfrastructurePanel({
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-blue-200">
               <Activity className="h-3.5 w-3.5" />
-              Infrastructure audit
+              {m.eyebrow}
             </div>
             <h2 className="mt-3 text-2xl font-black text-white">
-              Railway, R2, and database operations
+              {m.title}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Read-only external metrics are refreshed every fifteen minutes. Tokens stay on
-              the server and are never returned to the browser.
+              {m.description}
             </p>
           </div>
           <button
@@ -208,7 +219,7 @@ export function AdminInfrastructurePanel({
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Refresh audit
+            {m.refresh}
           </button>
         </div>
         {error ? (
@@ -218,7 +229,7 @@ export function AdminInfrastructurePanel({
         ) : null}
         {!data && !error ? (
           <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
-            Loading infrastructure metrics...
+            {m.loading}
           </div>
         ) : null}
       </div>
@@ -233,7 +244,7 @@ export function AdminInfrastructurePanel({
                 </span>
                 <div>
                   <h3 className="font-black text-white">Railway</h3>
-                  <p className="text-xs text-zinc-500">Projected billing usage</p>
+                  <p className="text-xs text-zinc-500">{m.railway.subtitle}</p>
                 </div>
               </div>
               <StatusBadge status={data.railway.status} />
@@ -247,22 +258,22 @@ export function AdminInfrastructurePanel({
                 data-testid="railway-usage-monitor-disabled"
               >
                 <p className="text-xs font-bold text-zinc-200">
-                  {RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE}
+                  {locale === "ko"
+                    ? m.railway.disabledTitle
+                    : RAILWAY_USAGE_MONITOR_DISABLED_MESSAGE}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-zinc-400">
-                  No Railway usage query is sent from here, so projected cost and
-                  balance stay empty. Credentials are untouched and every other
-                  monitor keeps running. Remove{" "}
+                  {m.railway.disabledBefore}
                   <code className="text-[10px] font-bold text-zinc-300">
                     RAILWAY_USAGE_MONITOR_ENABLED=false
-                  </code>{" "}
-                  from this environment&apos;s variables to resume monitoring.
+                  </code>
+                  {m.railway.disabledAfter}
                 </p>
               </div>
             ) : null}
             {data.railway.warningReasons.length > 0 ? (
               <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">
-                <p className="text-xs font-bold text-amber-200">Warning details</p>
+                <p className="text-xs font-bold text-amber-200">{m.railway.warningDetails}</p>
                 <div className="mt-2 space-y-2">
                   {data.railway.warningReasons.map((reason) => (
                     <div key={reason.code} className="text-xs leading-5 text-zinc-400">
@@ -277,19 +288,19 @@ export function AdminInfrastructurePanel({
             ) : null}
             <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-                <p className="text-zinc-500">Estimated resource cost</p>
+                <p className="text-zinc-500">{m.railway.estimatedCost}</p>
                 <p className="mt-1 font-black text-white">
                   {money(data.railway.projectedMonthCostMicroUsd)}
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-                <p className="text-zinc-500">Credit</p>
+                <p className="text-zinc-500">{m.railway.credit}</p>
                 <p className="mt-1 font-black text-white">
                   {money(data.railway.configuredCreditMicroUsd)}
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-                <p className="text-zinc-500">Projected balance</p>
+                <p className="text-zinc-500">{m.railway.projectedBalance}</p>
                 <p
                   className={`mt-1 font-black ${
                     (data.railway.projectedBalanceMicroUsd !== null
@@ -319,32 +330,31 @@ export function AdminInfrastructurePanel({
                   </span>
                   <span className="shrink-0 font-black text-zinc-200">
                     {measurement.estimatedCostMicroUsd === null
-                      ? "Not priced"
+                      ? m.railway.notPriced
                       : money(measurement.estimatedCostMicroUsd)}
                   </span>
                 </div>
               ))}
             </div>
             <p className="mt-3 text-[10px] leading-4 text-zinc-600">
-              Resource estimate applies Railway&apos;s published CPU, RAM, egress, and
-              volume rates to API usage units. Subscription, included usage,
-              discounts, taxes, backups, and unclassified resources are excluded;
-              Railway Billing remains authoritative.
+              {m.railway.estimateNote}
             </p>
             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
-              <p>Token: {data.railway.tokenConfigured ? "configured" : "missing"}</p>
-              <p className="mt-1">Scope: {data.railway.scope}</p>
+              <p>{m.railway.token}: {data.railway.tokenConfigured ? m.configured : m.missing}</p>
+              <p className="mt-1">{m.railway.scope}: {data.railway.scope}</p>
               {data.railway.apiRateLimit.remaining !== null ? (
                 <p className="mt-1">
-                  API quota: {data.railway.apiRateLimit.remaining}/
-                  {data.railway.apiRateLimit.limit ?? "?"} remaining
+                  {m.railway.apiQuota(
+                    data.railway.apiRateLimit.remaining,
+                    data.railway.apiRateLimit.limit ?? "?"
+                  )}
                 </p>
               ) : null}
             </div>
             {canManageCosts ? (
               <div className="mt-4 rounded-xl border border-purple-500/20 bg-purple-500/5 p-3">
                 <div className="flex items-center gap-2 text-xs font-bold text-purple-100">
-                  <Coins className="h-4 w-4" /> Monthly credit
+                  <Coins className="h-4 w-4" /> {m.railway.monthlyCredit}
                 </div>
                 <div className="mt-3 grid gap-2">
                   <input
@@ -354,7 +364,7 @@ export function AdminInfrastructurePanel({
                     step="0.01"
                     value={creditUsd}
                     onChange={(event) => setCreditUsd(event.target.value)}
-                    placeholder="Credit in USD"
+                    placeholder={m.railway.creditPlaceholder}
                     className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-purple-400"
                   />
                   <input
@@ -362,7 +372,7 @@ export function AdminInfrastructurePanel({
                     maxLength={300}
                     value={creditNote}
                     onChange={(event) => setCreditNote(event.target.value)}
-                    placeholder="Billing note"
+                    placeholder={m.railway.notePlaceholder}
                     className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-purple-400"
                   />
                   <button
@@ -376,7 +386,7 @@ export function AdminInfrastructurePanel({
                     ) : (
                       <Save className="h-4 w-4" />
                     )}
-                    Save credit
+                    {m.railway.saveCredit}
                   </button>
                 </div>
               </div>
@@ -392,7 +402,7 @@ export function AdminInfrastructurePanel({
                 <div>
                   <h3 className="font-black text-white">Cloudflare R2</h3>
                   <p className="text-xs text-zinc-500">
-                    {data.r2.bucketName || "Bucket not configured"}
+                    {data.r2.bucketName || m.r2.bucketNotConfigured}
                   </p>
                 </div>
               </div>
@@ -402,17 +412,17 @@ export function AdminInfrastructurePanel({
             <div className="mt-4 space-y-3">
               {[
                 {
-                  label: "Current storage / 10 GB free-tier reference",
+                  label: m.r2.storage,
                   value: `${byteLabel(data.r2.storageBytes)} / ${data.r2.storageAllowancePercent === null ? "-" : data.r2.storageAllowancePercent}%`,
                   percent: data.r2.storageAllowancePercent,
                 },
                 {
-                  label: "Class A operations / 1M monthly",
+                  label: m.r2.classA,
                   value: `${numberLabel(data.r2.classAOperations)} / ${data.r2.classAAllowancePercent === null ? "-" : data.r2.classAAllowancePercent}%`,
                   percent: data.r2.classAAllowancePercent,
                 },
                 {
-                  label: "Class B operations / 10M monthly",
+                  label: m.r2.classB,
                   value: `${numberLabel(data.r2.classBOperations)} / ${data.r2.classBAllowancePercent === null ? "-" : data.r2.classBAllowancePercent}%`,
                   percent: data.r2.classBAllowancePercent,
                 },
@@ -428,13 +438,13 @@ export function AdminInfrastructurePanel({
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-                <p className="text-zinc-500">Objects</p>
+                <p className="text-zinc-500">{m.r2.objects}</p>
                 <p className="mt-1 text-lg font-black text-white">
                   {numberLabel(data.r2.objectCount)}
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-                <p className="text-zinc-500">Pending uploads</p>
+                <p className="text-zinc-500">{m.r2.pendingUploads}</p>
                 <p className="mt-1 text-lg font-black text-white">
                   {numberLabel(data.r2.pendingUploads)}
                 </p>
@@ -442,14 +452,14 @@ export function AdminInfrastructurePanel({
             </div>
             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 text-xs leading-5 text-zinc-400">
               <p>
-                Object credentials: {data.r2.objectCredentialsConfigured ? "configured" : "missing"}
+                {m.r2.objectCredentials}: {data.r2.objectCredentialsConfigured ? m.configured : m.missing}
               </p>
               <p>
-                Analytics token: {data.r2.analyticsTokenConfigured ? "configured" : "missing"}
+                {m.r2.analyticsToken}: {data.r2.analyticsTokenConfigured ? m.configured : m.missing}
               </p>
-              <p>Unclassified operations: {numberLabel(data.r2.unclassifiedOperations)}</p>
+              <p>{m.r2.unclassifiedOperations}: {numberLabel(data.r2.unclassifiedOperations)}</p>
               <p className="mt-2 text-zinc-500">
-                Analytics is operational telemetry, not a final Cloudflare invoice.
+                {m.r2.analyticsNote}
               </p>
             </div>
           </article>
@@ -461,8 +471,8 @@ export function AdminInfrastructurePanel({
                   <Database className="h-5 w-5" />
                 </span>
                 <div>
-                  <h3 className="font-black text-white">Application database</h3>
-                  <p className="text-xs text-zinc-500">Operational inventory</p>
+                  <h3 className="font-black text-white">{m.database.title}</h3>
+                  <p className="text-xs text-zinc-500">{m.database.subtitle}</p>
                 </div>
               </div>
               <StatusBadge status={data.database.status} />
@@ -472,13 +482,13 @@ export function AdminInfrastructurePanel({
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
               {[
-                ["Active sessions", data.database.activeSessions],
-                ["Conversations", data.database.conversations],
-                ["Messages", data.database.messages],
-                ["Usage buckets", data.database.usageBuckets],
-                ["Provider errors / 24h", data.database.providerErrors24h],
-                ["Errors pending cleanup", data.database.providerErrorsPendingCleanup],
-                ["Errors overdue cleanup", data.database.providerErrorsOverdueCleanup],
+                [m.database.activeSessions, data.database.activeSessions],
+                [m.database.conversations, data.database.conversations],
+                [m.database.messages, data.database.messages],
+                [m.database.usageBuckets, data.database.usageBuckets],
+                [m.database.providerErrors24h, data.database.providerErrors24h],
+                [m.database.errorsPendingCleanup, data.database.providerErrorsPendingCleanup],
+                [m.database.errorsOverdueCleanup, data.database.providerErrorsOverdueCleanup],
               ].map(([label, value]) => (
                 <div
                   key={String(label)}
@@ -493,8 +503,7 @@ export function AdminInfrastructurePanel({
               <div className="flex items-start gap-2">
                 <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
                 <p className="text-xs leading-5 text-zinc-400">
-                  Provider error events retain sanitized diagnostics for 30 days. Admin action
-                  logs remain separately available under the Audit tab.
+                  {m.database.retentionNote}
                 </p>
               </div>
             </div>
@@ -508,7 +517,7 @@ export function AdminInfrastructurePanel({
                 </span>
                 <div>
                   <h3 className="font-black text-white">Prisma Postgres</h3>
-                  <p className="text-xs text-zinc-500">Monthly operations</p>
+                  <p className="text-xs text-zinc-500">{m.prisma.subtitle}</p>
                 </div>
               </div>
               <StatusBadge status={data.prismaUsage.status} />
@@ -518,26 +527,26 @@ export function AdminInfrastructurePanel({
             </p>
             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                Total operations
+                {m.prisma.totalOperations}
               </p>
               <div className="mt-2 flex items-end justify-between gap-3">
                 <p className="text-2xl font-black text-white">
                   {numberLabel(data.prismaUsage.operationsUsed)}
                 </p>
                 <p className="text-xs text-zinc-400">
-                  of {numberLabel(data.prismaUsage.operationsLimit)}
+                  {m.prisma.of(numberLabel(data.prismaUsage.operationsLimit))}
                 </p>
               </div>
               <AllowanceBar value={data.prismaUsage.operationsAllowancePercent} />
               <p className="mt-2 text-right text-xs font-bold text-zinc-300">
                 {data.prismaUsage.operationsAllowancePercent === null
                   ? "-"
-                  : `${data.prismaUsage.operationsAllowancePercent}% used`}
+                  : m.prisma.percentUsed(data.prismaUsage.operationsAllowancePercent)}
               </p>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-                <p className="text-zinc-500">Storage</p>
+                <p className="text-zinc-500">{m.prisma.storage}</p>
                 <p className="mt-1 text-lg font-black text-white">
                   {data.prismaUsage.storageGiB === null
                     ? "-"
@@ -545,7 +554,7 @@ export function AdminInfrastructurePanel({
                 </p>
               </div>
               <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-                <p className="text-zinc-500">Period start</p>
+                <p className="text-zinc-500">{m.prisma.periodStart}</p>
                 <p className="mt-1 font-black text-white">
                   {data.prismaUsage.periodStart
                     ? data.prismaUsage.periodStart.slice(0, 10)
@@ -555,13 +564,13 @@ export function AdminInfrastructurePanel({
             </div>
             <div className="mt-4 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs leading-5 text-zinc-400">
               <p>
-                Management token: {data.prismaUsage.tokenConfigured ? "configured" : "missing"}
+                {m.prisma.managementToken}: {data.prismaUsage.tokenConfigured ? m.configured : m.missing}
               </p>
               <p>
-                Database ID: {data.prismaUsage.databaseIdConfigured ? "configured" : "missing"}
+                {m.prisma.databaseId}: {data.prismaUsage.databaseIdConfigured ? m.configured : m.missing}
               </p>
               <p className="mt-2 text-zinc-500">
-                The limit is configurable because Prisma plan allowances can change.
+                {m.prisma.limitNote}
               </p>
             </div>
           </article>

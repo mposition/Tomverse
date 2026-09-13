@@ -22,6 +22,8 @@ import {
 import type { BillingPromotionConfig } from "@/lib/billingConfig";
 import { BILLING_CURRENCIES, type BillingCurrency } from "@/lib/billingMarkets";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminPromotionDiagnosticsMessages } from "@/lib/adminMessages/promotionDiagnostics";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   currentPromotionDraftState,
   serverPromotionDraftState,
@@ -68,15 +70,15 @@ type Props = {
 
 const STATUS_STYLES: Record<
   DiagnosticStatus | "ready" | "blocked" | "warning",
-  { label: string; className: string }
+  { className: string }
 > = {
-  pass: { label: "Pass", className: "text-emerald-300" },
-  ready: { label: "Ready", className: "text-emerald-300" },
-  fail: { label: "Fail", className: "text-red-300" },
-  blocked: { label: "Blocked", className: "text-red-300" },
-  warn: { label: "Warning", className: "text-amber-300" },
-  warning: { label: "Warning", className: "text-amber-300" },
-  not_checked: { label: "Not checked", className: "text-zinc-400" },
+  pass: { className: "text-emerald-300" },
+  ready: { className: "text-emerald-300" },
+  fail: { className: "text-red-300" },
+  blocked: { className: "text-red-300" },
+  warn: { className: "text-amber-300" },
+  warning: { className: "text-amber-300" },
+  not_checked: { className: "text-zinc-400" },
 };
 
 const StatusIcon = ({ status }: { status: DiagnosticStatus }) => {
@@ -95,29 +97,32 @@ const StatusIcon = ({ status }: { status: DiagnosticStatus }) => {
 const humanise = (value: string) =>
   value.replace(/_/g, " ").replace(/^./, (first) => first.toUpperCase());
 
-const CheckList = ({ checks }: { checks: DiagnosticCheck[] }) => (
-  <ul className="flex flex-col gap-1.5">
-    {checks.map((item) => (
-      <li
-        key={`${item.id}:${item.reason || ""}`}
-        className="flex items-start gap-2 text-sm text-zinc-300"
-        data-testid={`promotion-diagnostics-check-${item.id}`}
-        data-status={item.status}
-      >
-        <StatusIcon status={item.status} />
-        <span className="min-w-0">
-          <span className="font-bold text-white">{humanise(item.id)}</span>
-          <span className="text-zinc-500"> — {STATUS_STYLES[item.status].label}</span>
-          {item.reason ? (
-            <code className="ml-2 break-all rounded bg-zinc-900 px-1.5 py-0.5 text-xs text-zinc-400">
-              {item.reason}
-            </code>
-          ) : null}
-        </span>
-      </li>
-    ))}
-  </ul>
-);
+const CheckList = ({ checks }: { checks: DiagnosticCheck[] }) => {
+  const m = useAdminMessages(adminPromotionDiagnosticsMessages);
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {checks.map((item) => (
+        <li
+          key={`${item.id}:${item.reason || ""}`}
+          className="flex items-start gap-2 text-sm text-zinc-300"
+          data-testid={`promotion-diagnostics-check-${item.id}`}
+          data-status={item.status}
+        >
+          <StatusIcon status={item.status} />
+          <span className="min-w-0">
+            <span className="font-bold text-white">{humanise(item.id)}</span>
+            <span className="text-zinc-500"> — {m.status[item.status]}</span>
+            {item.reason ? (
+              <code className="ml-2 break-all rounded bg-zinc-900 px-1.5 py-0.5 text-xs text-zinc-400">
+                {item.reason}
+              </code>
+            ) : null}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+};
 
 const Section = ({
   title,
@@ -131,24 +136,27 @@ const Section = ({
   description?: string;
   children: React.ReactNode;
   testId: string;
-}) => (
-  <section
-    className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
-    data-testid={testId}
-    data-status={status}
-  >
-    <div className="mb-2 flex flex-wrap items-center gap-2">
-      <h4 className="text-sm font-black text-white">{title}</h4>
-      <span className={`text-xs font-bold ${STATUS_STYLES[status].className}`}>
-        {STATUS_STYLES[status].label}
-      </span>
-    </div>
-    {description ? (
-      <p className="mb-3 text-xs text-zinc-500">{description}</p>
-    ) : null}
-    {children}
-  </section>
-);
+}) => {
+  const m = useAdminMessages(adminPromotionDiagnosticsMessages);
+  return (
+    <section
+      className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4"
+      data-testid={testId}
+      data-status={status}
+    >
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h4 className="text-sm font-black text-white">{title}</h4>
+        <span className={`text-xs font-bold ${STATUS_STYLES[status].className}`}>
+          {m.status[status]}
+        </span>
+      </div>
+      {description ? (
+        <p className="mb-3 text-xs text-zinc-500">{description}</p>
+      ) : null}
+      {children}
+    </section>
+  );
+};
 
 /**
  * A Stripe object id is an operator's fact, not a customer's, and it is still
@@ -156,11 +164,12 @@ const Section = ({
  * asked for, and never auto-selected into a screenshot.
  */
 const MaskedId = ({ label, value }: { label: string; value: string | null }) => {
+  const m = useAdminMessages(adminPromotionDiagnosticsMessages);
   const [revealed, setRevealed] = useState(false);
   if (!value) {
     return (
       <p className="text-xs text-zinc-500">
-        {label}: <span className="text-zinc-400">not stored</span>
+        {label}: <span className="text-zinc-400">{m.maskedId.notStored}</span>
       </p>
     );
   }
@@ -180,13 +189,14 @@ const MaskedId = ({ label, value }: { label: string; value: string | null }) => 
         ) : (
           <Eye className="h-3 w-3" aria-hidden />
         )}
-        {revealed ? `Hide ${label}` : `Reveal ${label}`}
+        {revealed ? m.maskedId.hide(label) : m.maskedId.reveal(label)}
       </button>
     </p>
   );
 };
 
 export function PromotionDiagnosticsPanel({ promotions }: Props) {
+  const m = useAdminMessages(adminPromotionDiagnosticsMessages);
   const fieldId = useId();
   const [promotionId, setPromotionId] = useState(promotions[0]?.id || "");
   const [planId, setPlanId] = useState<"pro" | "max">("pro");
@@ -236,7 +246,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
         setError(
           typeof data?.error === "string"
             ? data.error
-            : "Promotion diagnostics could not be completed."
+            : m.errors.notCompleted
         );
         return;
       }
@@ -246,20 +256,20 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
       requestAnimationFrame(() => resultRef.current?.focus());
     } catch {
       setResult(null);
-      setError("Promotion diagnostics could not be reached.");
+      setError(m.errors.unreachable);
     } finally {
       setIsRunning(false);
     }
-  }, [billingInterval, currency, planId, promotionId, selectionIsDirty, userId]);
+  }, [billingInterval, currency, m, planId, promotionId, selectionIsDirty, userId]);
 
   const copy = useCallback(async (value: string, what: string) => {
     try {
       await navigator.clipboard.writeText(value);
-      dispatchAppToast(`${what} copied.`, "success");
+      dispatchAppToast(m.copy.copied(what), "success");
     } catch {
-      dispatchAppToast(`${what} could not be copied.`, "error");
+      dispatchAppToast(m.copy.failed(what), "error");
     }
-  }, []);
+  }, [m]);
 
   const report = result?.report || null;
   const summaryText = report
@@ -285,19 +295,16 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
       <header className="border-b border-zinc-800 p-5">
         <div className="flex flex-wrap items-center gap-2">
           <Stethoscope className="h-5 w-5 text-blue-400" aria-hidden />
-          <h3 className="text-lg font-black text-white">Promotion diagnostics</h3>
+          <h3 className="text-lg font-black text-white">{m.title}</h3>
         </div>
         <p className="mt-1 max-w-3xl text-sm text-zinc-400">
-          Reads the saved promotion policy, the selected account and the Stripe
-          Coupon and Promotion Code behind this code. It creates nothing: no
-          account, no Coupon, no Promotion Code, no Checkout Session, and no
-          redemption.
+          {m.description}
         </p>
       </header>
 
       <div className="grid gap-4 p-5 lg:grid-cols-2 xl:grid-cols-3">
         <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-bold text-zinc-300">Promotion</span>
+          <span className="font-bold text-zinc-300">{m.fields.promotion}</span>
           <select
             id={`${fieldId}-promotion`}
             data-testid="promotion-diagnostics-promotion"
@@ -305,7 +312,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
             onChange={(event) => setPromotionId(event.target.value)}
             className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
           >
-            {promotions.length === 0 ? <option value="">No promotions</option> : null}
+            {promotions.length === 0 ? <option value="">{m.fields.noPromotions}</option> : null}
             {promotions.map((promotion) => (
               <option key={promotion.id} value={promotion.id}>
                 {promotion.code}
@@ -315,7 +322,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
         </label>
 
         <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-bold text-zinc-300">Plan</span>
+          <span className="font-bold text-zinc-300">{m.fields.plan}</span>
           <select
             data-testid="promotion-diagnostics-plan"
             value={planId}
@@ -328,7 +335,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
         </label>
 
         <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-bold text-zinc-300">Billing interval</span>
+          <span className="font-bold text-zinc-300">{m.fields.billingInterval}</span>
           <select
             data-testid="promotion-diagnostics-interval"
             value={billingInterval}
@@ -337,13 +344,13 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
             }
             className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
           >
-            <option value="monthly">Monthly</option>
-            <option value="annual">Annual</option>
+            <option value="monthly">{m.fields.monthly}</option>
+            <option value="annual">{m.fields.annual}</option>
           </select>
         </label>
 
         <label className="flex flex-col gap-1.5 text-sm">
-          <span className="font-bold text-zinc-300">Market currency</span>
+          <span className="font-bold text-zinc-300">{m.fields.marketCurrency}</span>
           <select
             data-testid="promotion-diagnostics-currency"
             value={currency}
@@ -362,19 +369,18 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
 
         <label className="flex flex-col gap-1.5 text-sm lg:col-span-2">
           <span className="font-bold text-zinc-300">
-            Existing account (optional)
+            {m.fields.existingAccount}
           </span>
           <input
             data-testid="promotion-diagnostics-user"
             value={userId}
             onChange={(event) => setUserId(event.target.value)}
-            placeholder="User ID — leave blank for a configuration-only run"
+            placeholder={m.fields.userPlaceholder}
             aria-describedby={`${fieldId}-account-help`}
             className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-white placeholder:text-zinc-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
           />
           <span id={`${fieldId}-account-help`} className="text-xs text-zinc-500">
-            An existing account only. Nothing here creates one, and no account is
-            required to diagnose the configuration.
+            {m.fields.accountHelp}
           </span>
         </label>
       </div>
@@ -386,14 +392,11 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
             className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            Save or discard changes before diagnosing. Diagnostics read the saved
-            database configuration, not the unsaved edits in the promotion
-            editor.
+            {m.dirtyNotice}
           </p>
         ) : (
           <p className="text-xs text-zinc-500">
-            Diagnostics read the saved database configuration, not unsaved edits
-            in the promotion editor.
+            {m.cleanNotice}
           </p>
         )}
         <div className="flex flex-wrap gap-2">
@@ -409,29 +412,29 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
             ) : (
               <Stethoscope className="h-4 w-4" aria-hidden />
             )}
-            {isRunning ? "Running diagnostics…" : "Run diagnostics"}
+            {isRunning ? m.running : m.run}
           </button>
           {report ? (
             <>
               <button
                 type="button"
-                onClick={() => copy(summaryText, "Diagnostics summary")}
+                onClick={() => copy(summaryText, m.copy.summaryTarget)}
                 data-testid="promotion-diagnostics-copy-summary"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
               >
                 <ClipboardCopy className="h-4 w-4" aria-hidden />
-                Copy summary
+                {m.copySummary}
               </button>
               <button
                 type="button"
                 onClick={() =>
-                  copy(JSON.stringify(result, null, 2), "Diagnostics JSON")
+                  copy(JSON.stringify(result, null, 2), m.copy.jsonTarget)
                 }
                 data-testid="promotion-diagnostics-copy-json"
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
               >
                 <ClipboardCopy className="h-4 w-4" aria-hidden />
-                Copy JSON
+                {m.copyJson}
               </button>
             </>
           ) : null}
@@ -449,7 +452,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
               onClick={run}
               className="rounded-lg border border-red-400/50 px-2 py-1 text-xs font-bold text-red-100 hover:bg-red-500/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-300"
             >
-              Retry
+              {m.retry}
             </button>
           </div>
         ) : null}
@@ -469,23 +472,23 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
               className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4"
             >
               <p className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-bold text-zinc-300">Summary</span>
+                <span className="text-sm font-bold text-zinc-300">{m.summary.label}</span>
                 <span
                   className={`text-sm font-black ${STATUS_STYLES[report.status].className}`}
                 >
-                  {STATUS_STYLES[report.status].label}
+                  {m.status[report.status]}
                 </span>
               </p>
               <p className="mt-2 text-xs text-zinc-500">
                 {report.status === "ready"
-                  ? "No blocker was found in the policy and Stripe linkage that can be read from here. This is not a guarantee that Checkout will succeed."
-                  : "Blockers below are read from the saved configuration and Stripe. Fix them before retrying a customer checkout."}
+                  ? m.summary.ready
+                  : m.summary.blocked}
               </p>
             </div>
 
             <Section
               testId="promotion-diagnostics-local-policy"
-              title="Local policy"
+              title={m.localPolicy}
               status={report.localPolicy.status}
             >
               <CheckList checks={report.localPolicy.checks} />
@@ -493,12 +496,12 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
 
             <Section
               testId="promotion-diagnostics-account"
-              title="Account eligibility"
+              title={m.account.title}
               status={report.account.status}
               description={
                 report.account.evaluated
-                  ? "Judged with the same function /api/billing/checkout uses."
-                  : "Not evaluated — no account selected."
+                  ? m.account.evaluated
+                  : m.account.notEvaluated
               }
             >
               <CheckList checks={report.account.checks} />
@@ -506,17 +509,19 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
 
             <Section
               testId="promotion-diagnostics-stripe"
-              title="Stripe linkage"
+              title={m.stripe.title}
               status={report.stripe.status}
               description={
                 report.stripe.facts
-                  ? `Expected mode: ${
+                  ? m.stripe.facts(
                       report.stripe.facts.expectLiveMode === null
-                        ? "unknown"
+                        ? m.stripe.modeUnknown
                         : report.stripe.facts.expectLiveMode
-                          ? "live"
-                          : "test"
-                    } · exact-code candidates: ${report.stripe.facts.exactCodeCandidates.length} · recommendation: ${report.stripe.facts.recommendation}`
+                          ? m.stripe.modeLive
+                          : m.stripe.modeTest,
+                      report.stripe.facts.exactCodeCandidates.length,
+                      report.stripe.facts.recommendation
+                    )
                   : undefined
               }
             >
@@ -524,19 +529,19 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
               {report.stripe.facts ? (
                 <div className="mt-3 flex flex-col gap-1">
                   <MaskedId
-                    label="Stored coupon"
+                    label={m.stripe.storedCoupon}
                     value={report.stripe.facts.storedCouponId}
                   />
                   {report.stripe.facts.storedCouponId ? (
                     <p className="text-xs text-zinc-500">
-                      Stored coupon in Stripe:{" "}
+                      {m.stripe.storedCouponInStripe}
                       {report.stripe.facts.storedCouponExists
-                        ? "found"
-                        : "not found in this mode"}
+                        ? m.stripe.found
+                        : m.stripe.notFoundInMode}
                     </p>
                   ) : null}
                   <MaskedId
-                    label="Stored promotion code"
+                    label={m.stripe.storedPromotionCode}
                     value={report.stripe.facts.storedPromotionCodeId}
                   />
                   {/*
@@ -553,12 +558,12 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                       className="text-xs text-red-300"
                       data-testid="promotion-diagnostics-blocking-reasons"
                     >
-                      Blocking: {report.stripe.blockingReasons.join(", ")}
+                      {m.stripe.blocking(report.stripe.blockingReasons.join(", "))}
                     </p>
                   ) : null}
                   {report.stripe.driftReasons.length > 0 ? (
                     <p className="text-xs text-amber-300">
-                      Drift (non-fatal): {report.stripe.driftReasons.join(", ")}
+                      {m.stripe.drift(report.stripe.driftReasons.join(", "))}
                     </p>
                   ) : null}
                   {report.stripe.facts.exactCodeCandidates.length > 0 ? (
@@ -567,15 +572,16 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                       data-testid="promotion-diagnostics-candidates"
                     >
                       <p className="text-xs font-bold text-zinc-400">
-                        Stripe objects holding this code string
+                        {m.stripe.candidatesHeading}
                       </p>
                       {report.stripe.facts.exactCodeCandidates.map(
                         (candidate) => (
                           <div key={candidate.id} className="flex flex-col gap-1">
                             <MaskedId
-                              label={`${candidate.active ? "Active" : "Inactive"}${
-                                candidate.adoptable ? ", adoptable" : ""
-                              }`}
+                              label={m.stripe.candidateLabel(
+                                candidate.active,
+                                candidate.adoptable
+                              )}
                               value={candidate.id}
                             />
                             {candidate.mismatches.length > 0 ? (
@@ -594,36 +600,40 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
 
             <Section
               testId="promotion-diagnostics-preview"
-              title="Checkout request preview"
+              title={m.preview.title}
               status={
                 report.checkoutPreview.bothDiscountParamsSent ? "fail" : "pass"
               }
-              description="Predicted from the resolved configuration. No Checkout Session is created."
+              description={m.preview.description}
             >
               <div className="min-w-0 overflow-x-auto">
                 <table className="w-full min-w-[26rem] text-left text-sm text-zinc-300">
                   <tbody>
                     <tr>
                       <th scope="row" className="py-1 pr-4 font-bold text-zinc-400">
-                        Base amount
+                        {m.preview.baseAmount}
                       </th>
                       <td className="py-1">
-                        {report.checkoutPreview.baseAmountMinor}{" "}
-                        {report.checkoutPreview.currency} (minor units)
+                        {m.preview.minorUnits(
+                          report.checkoutPreview.baseAmountMinor,
+                          report.checkoutPreview.currency
+                        )}
                       </td>
                     </tr>
                     <tr>
                       <th scope="row" className="py-1 pr-4 font-bold text-zinc-400">
-                        Discounted amount
+                        {m.preview.discountedAmount}
                       </th>
                       <td className="py-1" data-testid="promotion-diagnostics-discounted">
-                        {report.checkoutPreview.discountedAmountMinor}{" "}
-                        {report.checkoutPreview.currency} (minor units)
+                        {m.preview.minorUnits(
+                          report.checkoutPreview.discountedAmountMinor,
+                          report.checkoutPreview.currency
+                        )}
                       </td>
                     </tr>
                     <tr>
                       <th scope="row" className="py-1 pr-4 font-bold text-zinc-400">
-                        Discount source
+                        {m.preview.discountSource}
                       </th>
                       <td className="py-1">
                         {report.checkoutPreview.expectedDiscountSource}
@@ -631,10 +641,10 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                     </tr>
                     <tr>
                       <th scope="row" className="py-1 pr-4 font-bold text-zinc-400">
-                        <code>discounts</code> sent
+                        <code>discounts</code>{m.preview.discountsSentSuffix}
                       </th>
                       <td className="py-1">
-                        {report.checkoutPreview.discountsParamSent ? "yes" : "no"}
+                        {report.checkoutPreview.discountsParamSent ? m.preview.yes : m.preview.no}
                       </td>
                     </tr>
                     <tr>
@@ -650,18 +660,18 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                     </tr>
                     <tr>
                       <th scope="row" className="py-1 pr-4 font-bold text-zinc-400">
-                        Payment method required
+                        {m.preview.paymentMethodRequired}
                       </th>
                       <td className="py-1">
-                        {report.checkoutPreview.paymentMethodRequired ? "yes" : "no"}
+                        {report.checkoutPreview.paymentMethodRequired ? m.preview.yes : m.preview.no}
                       </td>
                     </tr>
                     <tr>
                       <th scope="row" className="py-1 pr-4 font-bold text-zinc-400">
-                        Automatic renewal
+                        {m.preview.automaticRenewal}
                       </th>
                       <td className="py-1">
-                        {report.checkoutPreview.automaticRenewal ? "yes" : "no"}
+                        {report.checkoutPreview.automaticRenewal ? m.preview.yes : m.preview.no}
                       </td>
                     </tr>
                   </tbody>
@@ -669,30 +679,33 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
               </div>
               {report.checkoutPreview.bothDiscountParamsSent ? (
                 <p className="mt-2 text-sm text-red-300">
-                  Blocker: the Session request would carry both{" "}
-                  <code>discounts</code> and <code>allow_promotion_codes</code>.
-                  Stripe refuses that request whatever the value is.
+                  {m.preview.bothParamsBefore}
+                  <code>discounts</code>
+                  {m.preview.bothParamsBetween}
+                  <code>allow_promotion_codes</code>
+                  {m.preview.bothParamsAfter}
                 </p>
               ) : null}
             </Section>
 
             <Section
               testId="promotion-diagnostics-abuse"
-              title="Abuse signals"
+              title={m.abuse.title}
               status="not_checked"
-              description="Not evaluated — the admin request's IP is not the customer's IP, and evaluating it here would corrupt the shared-IP signal."
+              description={m.abuse.description}
             >
               <p className="text-sm text-zinc-300">
-                Stored signals on this promotion: {report.abuseSignals.storedRiskSignals.total} total ·{" "}
-                {report.abuseSignals.storedRiskSignals.sharedIp} shared IP ·{" "}
-                {report.abuseSignals.storedRiskSignals.sharedPaymentMethod} shared
-                payment method.
+                {m.abuse.stored(
+                  report.abuseSignals.storedRiskSignals.total,
+                  report.abuseSignals.storedRiskSignals.sharedIp,
+                  report.abuseSignals.storedRiskSignals.sharedPaymentMethod
+                )}
               </p>
             </Section>
 
             <Section
               testId="promotion-diagnostics-actions"
-              title="Recommended action"
+              title={m.actions.title}
               status={
                 report.recommendedActions.some(
                   (item) => item.severity === "blocker"
@@ -721,28 +734,24 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
                 </code>
                 <button
                   type="button"
-                  onClick={() => copy(dryRunCommand, "Dry-run command")}
+                  onClick={() => copy(dryRunCommand, m.copy.dryRunTarget)}
                   className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 px-2 py-1 text-xs font-bold text-zinc-200 hover:bg-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
                 >
                   <ClipboardCopy className="h-3 w-3" aria-hidden />
-                  Copy dry-run command
+                  {m.actions.copyDryRun}
                 </button>
               </div>
               <p className="mt-2 text-xs text-zinc-500">
-                Repairs are run deliberately from a terminal with an incident
-                reference. This console never applies one, and never deletes or
-                deactivates a Stripe object.
+                {m.actions.repairsNote}
               </p>
             </Section>
 
             {selectedPromotion &&
             selectedPromotion.appliesToPlanIds.length > 1 ? (
               <p className="text-xs text-zinc-500">
-                This promotion is eligible for{" "}
-                {selectedPromotion.appliesToPlanIds.join(" and ")}. One promotion
-                row carries one Stripe Coupon and Promotion Code for every
-                eligible plan, because a Stripe promotion code string is unique
-                across the account.
+                {m.multiPlan(
+                  selectedPromotion.appliesToPlanIds.join(m.planJoiner)
+                )}
               </p>
             ) : null}
           </div>

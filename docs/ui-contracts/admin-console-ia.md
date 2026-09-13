@@ -136,14 +136,21 @@ console has no copy for (French, German, …) reads English.
    cookie `tomverse_admin_lang`, an explicit `?lang=`, the product cookie
    `tomverse_lang`, then `Accept-Language`. The layout passes the answer to
    `AdminLocaleProvider`; server components (`AdminPageTabs`, pages) call
-   the same function. Nothing in the console restores a language in the browser
-   after hydration — that is what would leave a server-rendered tab strip in one
-   language beside a client-rendered panel in the other.
+   the same function. Nothing in the console picks a language in the browser,
+   either after hydration or optimistically on a click — either would leave a
+   server-rendered tab strip in one language beside a client-rendered panel in
+   the other. A layout is not re-rendered by client navigation, so when the tab
+   regains focus and the locale cookies differ from the ones the current render
+   was made with, the provider refreshes the route. Router prefetches skip the
+   proxy's language headers, so `getAdminLocale()` reads `Accept-Language`
+   itself when they are absent.
 2. **Copy lives in `lib/adminMessages/<namespace>.ts`, declared with
    `defineAdminMessages({ en, ko })`.** English is the shape; the Korean
-   dictionary is type-checked against it, and `tests/adminLocale.test.mjs`
-   fails on a missing key, an empty string or a formatter with a different
-   arity. Client components read it with `useAdminMessages()`, server
+   dictionary is type-checked against it. The type catches most mistakes but
+   not all (TypeScript accepts a formatter with fewer parameters, and an extra
+   key on a dictionary built elsewhere), so `tests/adminLocale.test.mjs` is the
+   enforcement: it fails on a missing or extra key, an empty string, a formatter
+   with a different arity, and a formatter that returns empty text. Client components read it with `useAdminMessages()`, server
    components with `getAdminMessages()`. No panel compares
    `locale === "ko"` to choose a string.
 3. **The route table stays English.** `lib/adminNavigation.ts` owns ids, hrefs,
@@ -159,13 +166,27 @@ console has no copy for (French, German, …) reads English.
    language, and choosing one writes the console cookie and refreshes the route.
    It never writes the product cookie: the console choice must not move an
    operator's customer-facing language.
-6. **The console root carries `lang`**, so `:lang(ko)` selects the Korean
-   typeface for the console subtree (docs/ui-contracts/typography.md) and
-   assistive technology announces Korean copy as Korean.
+6. **The console root carries `lang` and `data-locale-root`.** `:lang()` only
+   re-points the font tokens, and `font-family` is inherited as the family
+   already resolved on `<body>`, so the root re-applies `var(--font-ui)` and
+   re-declares the Latin stack for `:lang(en)` (`app/globals.css`). Without it
+   a Korean console inside an English document keeps Geist, and an English
+   console inside a Korean document keeps the Korean stack
+   (docs/ui-contracts/typography.md). Assistive technology announces Korean
+   copy as Korean.
 7. **Server-generated text is not yet translated.** API error messages, audit
    summaries and diagnostic sentences built in `lib/**` and `/api/admin/**`
    arrive in English and are shown as they arrive. Translating them means
    returning codes the client renders, not translating strings on the server.
+   The one exception is `describeAdminApiFailure()` (`lib/adminApiOutcome.ts`),
+   which composes the console's own sentences around a response and takes the
+   console locale; the server's `error` text inside it is still shown as sent.
+8. **Every component under `components/admin/` reads a catalog.** The test
+   above fails on a component that imports none, unless it is listed as having
+   no copy of its own. The audit integrity verdicts in
+   `AdminAuditIntegrityPanel.tsx` keep their sentences inline, Korean beside
+   English, because `tests/adminAuditIntegrityDiagnosis.test.mjs` reads those
+   literals from the function body.
 
 ## What was removed, and what replaced it
 

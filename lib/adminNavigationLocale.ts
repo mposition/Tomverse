@@ -68,7 +68,6 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     tabs: {
       product: { label: "제품 분석", description: "유입, 활성화, 매출 퍼널" },
       imports: { label: "가져오기·메모리", description: "외부 대화 가져오기와 메모리 지표" },
-      "ai-review": { label: "AI Review", description: "신뢰성, 채택, 검토자 쌍 근거" },
     },
   },
   users: {
