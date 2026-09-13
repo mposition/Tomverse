@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { Clipboard, Mail } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminOverviewMessages } from "@/lib/adminMessages/overview";
 
 /**
  * The two operator actions that used to live inside `AdminOperationsPanel`.
@@ -13,14 +15,15 @@ import { dispatchAppToast } from "@/lib/appToast";
  * without taking these with it.
  */
 export function AdminSnapshotActions({ report }: { report: string }) {
+  const { snapshotActions: m } = useAdminMessages(adminOverviewMessages);
   const [sending, setSending] = useState(false);
 
   const copyReport = async () => {
     try {
       await navigator.clipboard.writeText(report);
-      dispatchAppToast("Admin snapshot copied.", "success");
+      dispatchAppToast(m.copied, "success");
     } catch {
-      dispatchAppToast("Could not copy admin snapshot.", "error");
+      dispatchAppToast(m.copyFailed, "error");
     }
   };
 
@@ -33,14 +36,14 @@ export function AdminSnapshotActions({ report }: { report: string }) {
         error?: string;
         id?: string | null;
       } | null;
-      if (!response.ok) throw new Error(data?.error || "Could not send test email.");
+      if (!response.ok) throw new Error(data?.error || m.sendFailed);
       dispatchAppToast(
-        data?.id ? `Test email sent. Resend ID: ${data.id}` : "Test email sent.",
+        data?.id ? m.sentWithId(data.id) : m.sent,
         "success"
       );
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not send test email.",
+        error instanceof Error ? error.message : m.sendFailed,
         "error"
       );
     } finally {
@@ -56,7 +59,7 @@ export function AdminSnapshotActions({ report }: { report: string }) {
         className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-500"
       >
         <Clipboard className="h-4 w-4" aria-hidden />
-        Copy snapshot
+        {m.copySnapshot}
       </button>
       <button
         type="button"
@@ -65,7 +68,7 @@ export function AdminSnapshotActions({ report }: { report: string }) {
         className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <Mail className="h-4 w-4" aria-hidden />
-        {sending ? "Sending..." : "Send test email"}
+        {sending ? m.sending : m.sendTestEmail}
       </button>
     </div>
   );

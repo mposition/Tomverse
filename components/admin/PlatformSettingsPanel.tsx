@@ -13,6 +13,8 @@ import type { PublicAppSettings } from "@/lib/appSettings";
 import { dispatchAppToast } from "@/lib/appToast";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminPlatformSettingsMessages } from "@/lib/adminMessages/platformSettings";
 
 /**
  * Where the reauthentication CTA brings the operator back to.
@@ -105,6 +107,7 @@ export function PlatformSettingsPanel({
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
 }: Props) {
+  const m = useAdminMessages(adminPlatformSettingsMessages);
   const { models } = useModelCatalog();
   const guestModels = useMemo(
     () =>
@@ -169,15 +172,15 @@ export function PlatformSettingsPanel({
           // instead of inventing a second way to say the same thing.
           setReauthenticationRequired(true);
           dispatchAppToast(
-            "Sign in again before changing this flag. Use the link at the top of this screen.",
+            m.toast.packageImportSignIn,
             "error"
           );
           return;
         }
         dispatchAppToast(
           data.code === "ASSISTANT_PACKAGE_IMPORT_RATIONALE_REQUIRED"
-            ? "Say why this is changing. It goes on the audit row."
-            : "Refused. This needs ops:write.",
+            ? m.toast.rationaleRequired
+            : m.toast.refused,
           "error"
         );
         return;
@@ -189,12 +192,12 @@ export function PlatformSettingsPanel({
         // enable on something already enabled is a different fact from
         // enabling it.
         data.outcome === "unchanged"
-          ? `Recorded. It was already ${data.after}.`
-          : `Package import is now ${data.after}. Recorded with before=${data.before ?? "(none)"}.`,
+          ? m.toast.packageImportUnchanged(data.after)
+          : m.toast.packageImportChanged(data.after, data.before ?? m.toast.noBefore),
         "success"
       );
     } catch {
-      dispatchAppToast("The change could not be delivered.", "error");
+      dispatchAppToast(m.toast.packageImportUndelivered, "error");
     } finally {
       setPackageImportBusy(false);
     }
@@ -301,9 +304,9 @@ export function PlatformSettingsPanel({
         data.assistantKnowledgeEnabled
       );
       applyMemoryStatus(data);
-      dispatchAppToast("Platform settings reloaded. The form now matches what is stored.", "success");
+      dispatchAppToast(m.toast.reloaded, "success");
     } catch {
-      dispatchAppToast("Platform settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
+      dispatchAppToast(m.toast.reloadFailed, "error");
     } finally {
       setIsLoading(false);
     }
@@ -345,15 +348,15 @@ export function PlatformSettingsPanel({
           // sign-in, by the operator looking at the values.
           setReauthenticationRequired(true);
           dispatchAppToast(
-            "Platform settings were not saved: this is a high-risk action, so sign in again before saving.",
+            m.toast.saveNeedsSignIn,
             "error"
           );
           return;
         }
         dispatchAppToast(
           data?.error
-            ? `Platform settings were not saved. ${data.error} Nothing changed.`
-            : "Platform settings were not saved. Nothing changed -- retry, or reload to discard the edit.",
+            ? m.toast.notSavedWithError(data.error)
+            : m.toast.notSaved,
           "error"
         );
         return;
@@ -367,10 +370,10 @@ export function PlatformSettingsPanel({
         data.assistantKnowledgeEnabled
       );
       applyMemoryStatus(data);
-      dispatchAppToast("Platform settings saved and are live.", "success");
+      dispatchAppToast(m.toast.saved, "success");
     } catch {
       // Only a transport failure reaches here now; a retry is the right advice.
-      dispatchAppToast("Platform settings could not be sent. Nothing changed -- check your connection and retry.", "error");
+      dispatchAppToast(m.toast.sendFailed, "error");
     } finally {
       setIsSaving(false);
     }
@@ -383,14 +386,13 @@ export function PlatformSettingsPanel({
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
               <Settings2 className="h-3.5 w-3.5" />
-              Platform settings
+              {m.eyebrow}
             </div>
             <h2 className="mt-3 text-2xl font-black text-white">
-              Product defaults and guest experience
+              {m.title}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Configure platform-level behavior that is not part of billing,
-              provider health, or user support workflows.
+              {m.description}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -405,7 +407,7 @@ export function PlatformSettingsPanel({
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              Reload DB
+              {m.reload}
             </button>
             <button
               type="button"
@@ -427,7 +429,7 @@ export function PlatformSettingsPanel({
               ) : (
                 <Save className="h-4 w-4" />
               )}
-              Save platform settings
+              {m.save}
             </button>
           </div>
         </div>
@@ -447,19 +449,13 @@ export function PlatformSettingsPanel({
             </span>
             <div className="min-w-0 flex-1">
               <h3 className="text-lg font-black text-amber-100">
-                Nothing was saved
+                {m.reauth.title}
               </h3>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                Changing platform settings is a high-risk action and needs a
-                more recent administrator sign-in than this session has. The
-                whole request was refused, so every setting is still exactly as
-                it was stored -- your edits below have not been applied and
-                will not be re-sent for you.
+                {m.reauth.body}
               </p>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-100/90">
-                Signing in again ends this app session and brings you back to
-                this screen. Review the settings here and save them again.
-                Refreshing the page does not renew the sign-in.
+                {m.reauth.next}
               </p>
               <Link
                 href={adminRecentAuthenticationHref(PLATFORM_SETTINGS_PATH)}
@@ -467,7 +463,7 @@ export function PlatformSettingsPanel({
                 className="mt-4 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-4 py-2 text-sm font-black text-zinc-950 transition hover:bg-amber-300"
               >
                 <KeyRound className="h-4 w-4" aria-hidden />
-                Sign in again to continue
+                {m.reauth.link}
               </Link>
             </div>
           </div>
@@ -481,16 +477,16 @@ export function PlatformSettingsPanel({
               <ShieldAlert className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-300">Emergency kill switches</p>
-              <h3 className="mt-2 text-xl font-black text-white">Operational feature controls</h3>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-red-300">{m.killSwitches.eyebrow}</p>
+              <h3 className="mt-2 text-xl font-black text-white">{m.killSwitches.title}</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Disabled features are blocked by the server immediately. Attachment deletion and share revocation remain available for safe cleanup.
+                {m.killSwitches.description}
               </p>
               <div className="mt-4 grid gap-2 md:grid-cols-3">
                 {([
-                  ["AI chat", aiChatEnabled, setAiChatEnabled],
-                  ["Attachments", attachmentsEnabled, setAttachmentsEnabled],
-                  ["Public sharing", publicSharingEnabled, setPublicSharingEnabled],
+                  [m.killSwitches.aiChat, aiChatEnabled, setAiChatEnabled],
+                  [m.killSwitches.attachments, attachmentsEnabled, setAttachmentsEnabled],
+                  [m.killSwitches.publicSharing, publicSharingEnabled, setPublicSharingEnabled],
                 ] as const).map(([label, enabled, setEnabled]) => (
                   <label key={label} className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                     <span>{label}</span>
@@ -512,13 +508,10 @@ export function PlatformSettingsPanel({
               <ImageIcon className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-fuchsia-300">Opt-in beta</p>
-              <h3 className="mt-2 text-xl font-black text-white">Image generation</h3>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-fuchsia-300">{m.imageGeneration.eyebrow}</p>
+              <h3 className="mt-2 text-xl font-black text-white">{m.imageGeneration.title}</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Default-off, unlike the kill switches above: it is enabled only
-                while this toggle is on. Provider budget env vars must be live
-                first or /api/ready fails the moment this turns on
-                (docs/policy/image-generation.md §8).
+                {m.imageGeneration.description}
               </p>
               <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                 <input
@@ -528,7 +521,7 @@ export function PlatformSettingsPanel({
                   onChange={(event) => setImageGenerationEnabled(event.target.checked)}
                   className="h-5 w-5 accent-fuchsia-600"
                 />
-                <span>Image generation enabled</span>
+                <span>{m.imageGeneration.toggle}</span>
               </label>
             </div>
           </div>
@@ -539,17 +532,10 @@ export function PlatformSettingsPanel({
               <Database className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Opt-in rollout</p>
-              <h3 className="mt-2 text-xl font-black text-white">External conversation import</h3>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.optInRollout}</p>
+              <h3 className="mt-2 text-xl font-black text-white">{m.externalImport.title}</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Release A of the import/memory program: ChatGPT, Claude and
-                Gemini (Google Takeout) export files, parsed in the browser,
-                stored per account. One switch for all three — there is no
-                per-provider flag, so enabling this enables Gemini too.
-                Default-off and fail-closed; turning this off closes the
-                import APIs and UI while listing, deletion and export stay
-                available to owners
-                (docs/policy/external-conversation-import-and-memory.md §15).
+                {m.externalImport.description}
               </p>
               <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                 <input
@@ -559,17 +545,14 @@ export function PlatformSettingsPanel({
                   onChange={(event) => setExternalImportEnabled(event.target.checked)}
                   className="h-5 w-5 accent-blue-600"
                 />
-                <span>External conversation import enabled</span>
+                <span>{m.externalImport.toggle}</span>
               </label>
               <p className="mt-4 text-sm leading-6 text-zinc-400">
-                Continuing an imported conversation is a{" "}
-                <strong className="text-zinc-200">separate</strong> switch. It
-                starts a new Tomverse conversation from an imported one and
-                gives each of its turns a bounded excerpt of the source. Turning
-                it off stops new continuations and stops the excerpt reaching a
-                prompt; conversations already continued stay open and their
-                messages stay readable
-                (docs/policy/external-conversation-continuation.md §7).
+                {m.externalImport.continuationBefore}
+                <strong className="text-zinc-200">
+                  {m.externalImport.continuationSeparate}
+                </strong>
+                {m.externalImport.continuationAfter}
               </p>
               <label className="mt-3 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                 <input
@@ -581,7 +564,7 @@ export function PlatformSettingsPanel({
                   }
                   className="h-5 w-5 accent-blue-600"
                 />
-                <span>Continue an imported conversation enabled</span>
+                <span>{m.externalImport.continuationToggle}</span>
               </label>
             </div>
           </div>
@@ -592,17 +575,10 @@ export function PlatformSettingsPanel({
               <Bot className="h-5 w-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Opt-in rollout</p>
-              <h3 className="mt-2 text-xl font-black text-white">Assistant profiles</h3>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.optInRollout}</p>
+              <h3 className="mt-2 text-xl font-black text-white">{m.assistantProfiles.title}</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Release C of the import/memory program: private assistant
-                profiles with their own instructions, model and versioned
-                snapshots. Default-off and fail-closed. Knowledge files are a
-                second switch and are only in force while profiles are on, so
-                the order in
-                docs/policy/external-conversation-import-and-memory.md §15 --
-                profiles first, then knowledge -- is what the two checkboxes
-                below enforce, not a note to follow by hand.
+                {m.assistantProfiles.description}
               </p>
               <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                 <input
@@ -612,7 +588,7 @@ export function PlatformSettingsPanel({
                   onChange={(event) => setAssistantProfilesEnabled(event.target.checked)}
                   className="h-5 w-5 accent-blue-600"
                 />
-                <span>Assistant profiles enabled</span>
+                <span>{m.assistantProfiles.profilesToggle}</span>
               </label>
               <label className="mt-3 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
                 <input
@@ -622,11 +598,11 @@ export function PlatformSettingsPanel({
                   onChange={(event) => setAssistantKnowledgeEnabled(event.target.checked)}
                   className="h-5 w-5 accent-blue-600"
                 />
-                <span>Assistant knowledge files enabled</span>
+                <span>{m.assistantProfiles.knowledgeToggle}</span>
               </label>
               {assistantKnowledgeEnabled && !assistantProfilesEnabled ? (
                 <p className="mt-3 text-sm font-bold text-amber-300">
-                  Knowledge stays off until assistant profiles are enabled.
+                  {m.assistantProfiles.knowledgeStaysOff}
                 </p>
               ) : null}
             </div>
@@ -642,23 +618,17 @@ export function PlatformSettingsPanel({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-300">
-                Reported, not editable
+                {m.memory.eyebrow}
               </p>
-              <h3 className="mt-2 text-xl font-black text-white">Account memory (Release B)</h3>
+              <h3 className="mt-2 text-xl font-black text-white">{m.memory.title}</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                Enabling either flag is the import/memory policy &sect;12.4 human
-                procedure &mdash; a decision-grade eval, blind review, an
-                independent re-run, a signed approval, a register merge and a
-                staging verification. There is no control here on purpose, and
-                the endpoint refuses a request naming these flags rather than
-                ignoring it. Stopping is the opposite direction and does have a
-                control: emergency pair revocation (&sect;12.1).
+                {m.memory.description}
               </p>
               <dl className="mt-4 grid gap-2 md:grid-cols-3">
                 {([
                   ["memoryExtractionEnabled", memoryStatus.memoryExtractionEnabled ? "on" : "off", "memory-extraction-flag"],
                   ["memoryInjectionEnabled", memoryStatus.memoryInjectionEnabled ? "on" : "off", "memory-injection-flag"],
-                  ["Approved, un-revoked pairs", String(memoryStatus.memoryApprovedPairCount), "memory-approved-pairs"],
+                  [m.memory.approvedPairs, String(memoryStatus.memoryApprovedPairCount), "memory-approved-pairs"],
                 ] as const).map(([label, value, testId]) => (
                   <div
                     key={label}
@@ -679,12 +649,7 @@ export function PlatformSettingsPanel({
                   data-testid="admin-memory-blocked-notice"
                   className="mt-3 text-sm font-bold text-amber-300"
                 >
-                  Blocked &mdash; no decision-grade eval has been run and no
-                  extraction pair is approved. Both flags above are inert
-                  whatever they read: every extraction run answers
-                  MEMORY_EXTRACTION_PAIR_UNAVAILABLE and injection refuses with
-                  no_approved_pair. What has to be decided first is in
-                  docs/ops/memory-extraction-eval-program-kickoff.md.
+                  {m.memory.blocked}
                 </p>
               ) : null}
             </div>
@@ -697,20 +662,18 @@ export function PlatformSettingsPanel({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-                Guest default model
+                {m.guestDefault.eyebrow}
               </p>
               <h3 className="mt-2 text-xl font-black text-white">
-                게스트 모드 기본 대화 엔진
+                {m.guestDefault.title}
               </h3>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-                로그인하지 않은 게스트에게는 항상 GPT · Claude · Gemini 3개 모델이
-                함께 제공됩니다. 여기서 고르는 모델은 그중 어느 모델을 맨 앞(리딩
-                슬롯)에 둘지만 결정하며, 게스트 첫 사용 경험에 영향을 줍니다.
+                {m.guestDefault.description}
               </p>
 
               <label className="mt-5 block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
-                  Leading engine
+                  {m.guestDefault.leadingEngine}
                 </span>
                 <select
                   value={guestDefaultModelId}
@@ -733,23 +696,21 @@ export function PlatformSettingsPanel({
           data-testid="admin-package-import-control"
         >
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
-            Its own control, not part of the save above
+            {m.packageImport.eyebrow}
           </p>
           <h3 className="mt-2 text-xl font-black text-white">
-            External assistant package import
+            {m.packageImport.title}
           </h3>
           <p className="mt-2 text-sm leading-6 text-zinc-400">
-            Enabling and rolling back take the same path, and each press writes
-            one audit row carrying the value on both sides of it, who pressed
-            it, when, and the reason below. Needs ops:write and a session that
-            has not aged out
-            (docs/policy/assistant-package-import.md §12.2.1).
+            {m.packageImport.description}
           </p>
           <p className="mt-3 text-sm font-bold text-white">
-            Currently {packageImportEnabled ? "enabled" : "disabled"}
+            {packageImportEnabled
+              ? m.packageImport.currentlyEnabled
+              : m.packageImport.currentlyDisabled}
           </p>
           <label className="mt-4 block text-sm font-bold text-white">
-            Why this is changing
+            {m.packageImport.rationale}
             <textarea
               value={packageImportRationale}
               onChange={(event) => setPackageImportRationale(event.target.value)}
@@ -767,7 +728,7 @@ export function PlatformSettingsPanel({
               className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
               data-testid="admin-package-import-enable"
             >
-              Enable
+              {m.packageImport.enable}
             </button>
             <button
               type="button"
@@ -776,14 +737,14 @@ export function PlatformSettingsPanel({
               className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
               data-testid="admin-package-import-disable"
             >
-              Roll back
+              {m.packageImport.rollBack}
             </button>
           </div>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-zinc-500">
-            Current selection
+            {m.selection.eyebrow}
           </p>
           {selectedModel ? (
             <div className="mt-4 flex items-start gap-4">
@@ -794,19 +755,19 @@ export function PlatformSettingsPanel({
                   {selectedModel.provider} · {getModelUsageProfile(selectedModel).category} · Guest
                 </p>
                 <p className="mt-3 text-sm leading-6 text-zinc-400">
-                  Only enabled guest-accessible Standard models can be used as the guest default.
+                  {m.selection.eligibility}
                 </p>
               </div>
             </div>
           ) : (
             <p className="mt-4 text-sm text-red-200">
-              No eligible guest-accessible Standard model is available.
+              {m.selection.noEligible}
             </p>
           )}
           <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
             <p className="flex items-center gap-2 text-sm font-bold text-emerald-300">
               <Database className="h-4 w-4" />
-              {lastSyncedAt ? `Synced ${lastSyncedAt}` : "Loaded on page open"}
+              {lastSyncedAt ? m.selection.synced(lastSyncedAt) : m.selection.loadedOnOpen}
             </p>
           </div>
         </div>

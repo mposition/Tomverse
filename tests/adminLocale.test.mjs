@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -160,6 +160,39 @@ test("the palette finds a page by either language in either console", () => {
 });
 
 /**
+ * Components that render no operator-visible copy of their own. Anything else
+ * under components/admin/ must read a message catalog, so a new panel written
+ * with English literals fails here instead of shipping an English island in the
+ * Korean console.
+ */
+const COMPONENTS_WITHOUT_COPY = new Set([
+  "AdminConsolePreferences.tsx",
+  "AdminLocaleProvider.tsx",
+]);
+
+test("every admin component reads its copy from a message catalog", () => {
+  const directory = join(process.cwd(), "components", "admin");
+  const missing = readdirSync(directory)
+    .filter((name) => name.endsWith(".tsx") && !COMPONENTS_WITHOUT_COPY.has(name))
+    .filter(
+      (name) =>
+        !readFileSync(join(directory, name), "utf8").includes("@/lib/adminMessages/")
+    );
+  assert.deepEqual(missing, [], "components with no message catalog");
+});
+
+test("the console root re-resolves its typeface for its own language", () => {
+  const provider = readFileSync(
+    join(process.cwd(), "components", "admin", "AdminLocaleProvider.tsx"),
+    "utf8"
+  );
+  assert.match(provider, /lang=\{locale\}\s+data-locale-root/);
+  const css = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8");
+  assert.match(css, /\[data-locale-root\]:lang\(en\)\s*\{[^}]*--font-ui:/);
+  assert.match(css, /\[data-locale-root\]\s*\{\s*font-family:\s*var\(--font-ui\);/);
+});
+
+/**
  * TypeScript already rejects a Korean dictionary whose shape differs from the
  * English one. This is the runtime half: no empty strings, and formatters that
  * actually return text, in every namespace that exists.
@@ -178,6 +211,22 @@ const assertSameShape = (en, ko, path) => {
     } else if (typeof en[key] === "function") {
       assert.equal(typeof ko[key], "function", here);
       assert.equal(ko[key].length, en[key].length, `${here} arity`);
+      // Call both with the same placeholder arguments. A formatter whose
+      // parameters are objects may throw on a placeholder; that says nothing
+      // about its copy, so only a formatter that returns is judged.
+      const sample = Array.from({ length: en[key].length }, () => 2);
+      let enOut;
+      let koOut;
+      try {
+        enOut = en[key](...sample);
+        koOut = ko[key](...sample);
+      } catch {
+        continue;
+      }
+      if (typeof enOut === "string" && enOut.trim().length > 0) {
+        assert.equal(typeof koOut, "string", `${here} returns no string`);
+        assert.ok(koOut.trim().length > 0, `${here} returns empty text`);
+      }
     } else if (en[key] && typeof en[key] === "object") {
       assertSameShape(en[key], ko[key], here);
     }

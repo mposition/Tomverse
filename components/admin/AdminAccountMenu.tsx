@@ -47,7 +47,7 @@ export function AdminAccountMenu({ user, role }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const { locale, setLocale } = useAdminLocale();
+  const { locale, pending, setLocale } = useAdminLocale();
   const m = useAdminMessages(adminShellMessages).account;
   const label = user.name || user.email || m.fallbackName;
 
@@ -175,7 +175,7 @@ export function AdminAccountMenu({ user, role }: Props) {
             </p>
           </div>
           <div className="my-1 border-t border-zinc-800" />
-          <div role="group" aria-label={m.language}>
+          <div role="group" aria-label={m.language} aria-busy={pending || undefined}>
             <p className="flex items-center gap-2 px-3 pb-1 pt-1.5 text-xs font-bold text-zinc-400">
               <Languages className="h-3.5 w-3.5" aria-hidden />
               {m.language}
@@ -189,8 +189,11 @@ export function AdminAccountMenu({ user, role }: Props) {
                 lang={option}
                 data-testid={`admin-account-menu-locale-${option}`}
                 onClick={() => {
-                  setOpen(false);
-                  if (option !== locale) setLocale(option);
+                  // Focus returns to the trigger: the item that had it is about
+                  // to unmount, and a keyboard user would otherwise restart
+                  // from the top of the page.
+                  close(true);
+                  setLocale(option);
                 }}
                 className={itemClass}
               >

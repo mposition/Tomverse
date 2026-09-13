@@ -1,0 +1,176 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+/**
+ * Copy for the AI Review M5 scorecard tab. `insufficient_evidence` is a state
+ * name from docs/policy/ai-review-m5-quality-contract.md and stays verbatim.
+ */
+export const adminAiReviewScorecardMessages = defineAdminMessages({
+  en: {
+    rate: {
+      insufficient: (denominator: number, minimum: number, label: string) =>
+        `insufficient_evidence — ${denominator} of ${minimum} ${label}`,
+      ratio: (numerator: number, denominator: number, label: string) =>
+        `${numerator} of ${denominator} ${label}`,
+      excluded: (excluded: string) => `excluded: ${excluded}`,
+    },
+    eyebrow: "AI Review",
+    title: "M5 scorecard",
+    descriptionBefore:
+      "Reliability is written by the server on the path that calls the reviewer, so it needs no analytics consent and covers guest runs, failures, refusals and cache hits. Adoption is consented client telemetry and is never mixed into a reliability rate. A metric below its sample floor reports",
+    descriptionAfter: "rather than a zero.",
+    approvedPairs: (count: number) => `${count} approved reviewer pair(s)`,
+    noApprovedPair: "No approved reviewer pair",
+    lastDays: (days: number) => `Last ${days} days`,
+    reliabilityHeading: "Reliability · server-recorded runs",
+    runsRecorded: "Runs recorded",
+    runsRecordedDetail: (guest: number, account: number) =>
+      `${guest} guest · ${account} account`,
+    completion: "Completion",
+    primaryOnly: "Primary only",
+    primaryOnlyDetail: "Of completed runs, those with one reviewer",
+    dualAvailable: "Dual review available",
+    dualCompleted: "Dual review completed",
+    cached: "Cached",
+    retried: "Retried",
+    unreconciled: "Unreconciled settlements",
+    unreconciledDetail: "Completed attempts with no settled figure at all",
+    settledAbove: "Settled above reservation",
+    settledAboveDetail:
+      "Charged more than was held. Settling below a reservation is normal; above it is not.",
+    duration: "Duration p50 / p95",
+    durationDetail: "Milliseconds, completed runs only",
+    telemetryCoverage: "Telemetry coverage",
+    telemetryCoverageDetail:
+      "Client events over server runs. A comparison, never a reliability rate: client events need consent.",
+    reviewer: "Reviewer",
+    provider: "Provider",
+    attempts: "Attempts",
+    failures: "Failures",
+    failureRate: "Failure rate",
+    attemptsNote:
+      "Attempts count only what reached a provider. A refusal for credits, a limit or the context window never sent anything and says nothing about the model.",
+    noAttempts: "No reviewer attempt reached a provider in this window.",
+    adoptionHeading: "Adoption and value · consented client analytics",
+    weeklyActive: "Weekly active",
+    weeklyActiveDetail: "Users who started or completed a review in the last 7 days",
+    comparisonToReview: "Comparison → Review",
+    reviewToFollowUp: "Review → follow-up",
+    reviewToSaveOrShare: "Review → save or share",
+    reviewToItemWebCheck: "Review → item web check",
+    firstToSecondReview: "First → second review",
+    firstToSecondReviewDetail:
+      "Counted from completions: starting twice is not returning to a result",
+    d1AfterFirstReview: "D1 after first review",
+    d7AfterFirstReview: "D7 after first review",
+    d30AfterFirstReview: "D30 after first review",
+    d7ByAccountAge: "D7 by account age",
+    d7ByAccountAgeDetail:
+      "Comparable with the product-wide funnel, which uses the same events. Not review retention.",
+    d7ComparisonOnly: "D7 · comparison-only cohort",
+    d7AiReview: "D7 · AI Review cohort",
+    cohortNote:
+      "The two cohorts self-selected. A difference between them is a difference in who used the feature as much as in what it did for them. Every conversion above is ordered -- the second event must follow the first -- which is the strongest claim these events support: they carry no conversation id, so a later action may belong to another thread. The review-anchored returns are a floor: a user who came back and generated no event is not counted.",
+    qualityHeading: "Quality · reviewer-pair register",
+    approvedPairsLabel: "Approved pairs",
+    candidates: (count: number) => `${count} candidate(s)`,
+    dataset: "Dataset",
+    evaluated: (at: string) => `Evaluated ${at}`,
+    noEvaluationCited: "No pair is approved, so no evaluation is cited",
+    independentRuns: "Independent runs",
+    independentRunsDetail: "Distinct run ordinals the approval rests on",
+    criticalViolations: "Critical violations",
+    violationsNotMeasured: "Not measured — no approved pair",
+    violationsDetail: "Zero-tolerance rule breaches recorded at approval",
+    driftInSync: "The served reviewer pairs are exactly the approved ones.",
+    driftOutOfSync: "The served reviewer pairs do not match the approved ones.",
+    servedNotApproved: "Served but not approved:",
+    approvedNotServed: "Approved but not served:",
+    none: "none",
+    registerNote:
+      "Read from the running configuration, not from the register. Nothing on this screen changes the register, a feature flag or a release gate: approval is a person's act, recorded in commit history.",
+  },
+  ko: {
+    rate: {
+      insufficient: (denominator: number, minimum: number, label: string) =>
+        `insufficient_evidence — 최소 ${minimum} 중 ${denominator} ${label}`,
+      ratio: (numerator: number, denominator: number, label: string) =>
+        `${denominator} ${label} 중 ${numerator}`,
+      excluded: (excluded: string) => `제외: ${excluded}`,
+    },
+    eyebrow: "AI Review",
+    title: "M5 스코어카드",
+    descriptionBefore:
+      "신뢰성 지표는 reviewer를 호출하는 경로에서 서버가 기록하므로 분석 동의가 필요 없고, 게스트 실행·실패·거절·cache hit를 모두 포함합니다. 채택 지표는 동의를 받은 클라이언트 telemetry이며 신뢰성 비율에 섞지 않습니다. 표본 하한에 못 미치는 지표는 0 대신",
+    descriptionAfter: "상태로 보고합니다.",
+    approvedPairs: (count: number) => `승인된 reviewer 쌍 ${count}개`,
+    noApprovedPair: "승인된 reviewer 쌍 없음",
+    lastDays: (days: number) => `최근 ${days}일`,
+    reliabilityHeading: "신뢰성 · 서버 기록 실행",
+    runsRecorded: "기록된 실행",
+    runsRecordedDetail: (guest: number, account: number) =>
+      `게스트 ${guest} · 계정 ${account}`,
+    completion: "완료",
+    primaryOnly: "주 reviewer만",
+    primaryOnlyDetail: "완료된 실행 중 reviewer가 하나인 실행",
+    dualAvailable: "이중 검토 가능",
+    dualCompleted: "이중 검토 완료",
+    cached: "cache 사용",
+    retried: "재시도",
+    unreconciled: "미정산 대조",
+    unreconciledDetail: "정산 금액이 전혀 없는 완료 시도",
+    settledAbove: "예약 초과 정산",
+    settledAboveDetail:
+      "예약한 것보다 많이 청구된 경우입니다. 예약보다 적게 정산되는 것은 정상이지만, 초과는 정상이 아닙니다.",
+    duration: "소요 시간 p50 / p95",
+    durationDetail: "밀리초, 완료된 실행만",
+    telemetryCoverage: "Telemetry 포착률",
+    telemetryCoverageDetail:
+      "서버 실행 대비 클라이언트 이벤트입니다. 비교용일 뿐 신뢰성 비율이 아닙니다. 클라이언트 이벤트에는 동의가 필요합니다.",
+    reviewer: "Reviewer",
+    provider: "공급자",
+    attempts: "시도",
+    failures: "실패",
+    failureRate: "실패율",
+    attemptsNote:
+      "시도는 공급자에 도달한 것만 셉니다. 크레딧·한도·context window 때문에 거절된 요청은 아무것도 보내지 않았으므로 모델에 대해 아무것도 말해 주지 않습니다.",
+    noAttempts: "이 기간에 공급자에 도달한 reviewer 시도가 없습니다.",
+    adoptionHeading: "채택과 가치 · 동의 기반 클라이언트 분석",
+    weeklyActive: "주간 활성",
+    weeklyActiveDetail: "최근 7일 동안 검토를 시작하거나 완료한 사용자",
+    comparisonToReview: "비교 → 검토",
+    reviewToFollowUp: "검토 → 후속 질문",
+    reviewToSaveOrShare: "검토 → 저장 또는 공유",
+    reviewToItemWebCheck: "검토 → 항목 웹 확인",
+    firstToSecondReview: "첫 검토 → 두 번째 검토",
+    firstToSecondReviewDetail:
+      "완료 기준으로 셉니다. 두 번 시작한 것은 결과로 돌아온 것이 아닙니다",
+    d1AfterFirstReview: "첫 검토 후 D1",
+    d7AfterFirstReview: "첫 검토 후 D7",
+    d30AfterFirstReview: "첫 검토 후 D30",
+    d7ByAccountAge: "계정 나이 기준 D7",
+    d7ByAccountAgeDetail:
+      "같은 이벤트를 쓰는 제품 전체 퍼널과 비교할 수 있습니다. 검토 retention이 아닙니다.",
+    d7ComparisonOnly: "D7 · 비교만 사용한 집단",
+    d7AiReview: "D7 · AI Review 집단",
+    cohortNote:
+      "두 집단은 스스로 선택된 집단입니다. 둘의 차이는 기능이 준 효과만큼이나 누가 기능을 썼는지의 차이이기도 합니다. 위의 모든 전환은 순서를 지킵니다(두 번째 이벤트가 첫 번째 이후에 일어나야 함). 이것이 이 이벤트들이 뒷받침할 수 있는 가장 강한 주장입니다. 이벤트에 대화 id가 없으므로 이후 행동이 다른 대화에 속할 수 있습니다. 검토 기준 재방문은 하한값입니다. 돌아왔지만 이벤트를 남기지 않은 사용자는 세지 않습니다.",
+    qualityHeading: "품질 · reviewer 쌍 레지스트리",
+    approvedPairsLabel: "승인된 쌍",
+    candidates: (count: number) => `후보 ${count}개`,
+    dataset: "Dataset",
+    evaluated: (at: string) => `평가 ${at}`,
+    noEvaluationCited: "승인된 쌍이 없으므로 인용된 평가가 없습니다",
+    independentRuns: "독립 실행",
+    independentRunsDetail: "승인의 근거가 된 서로 다른 run ordinal",
+    criticalViolations: "치명적 위반",
+    violationsNotMeasured: "측정되지 않음 — 승인된 쌍 없음",
+    violationsDetail: "승인 시점에 기록된 zero-tolerance 규칙 위반",
+    driftInSync: "제공 중인 reviewer 쌍이 승인된 쌍과 정확히 일치합니다.",
+    driftOutOfSync: "제공 중인 reviewer 쌍이 승인된 쌍과 일치하지 않습니다.",
+    servedNotApproved: "제공 중이지만 승인되지 않음:",
+    approvedNotServed: "승인되었지만 제공되지 않음:",
+    none: "없음",
+    registerNote:
+      "레지스트리가 아니라 실행 중인 설정에서 읽은 값입니다. 이 화면의 어떤 것도 레지스트리, feature flag, 릴리스 게이트를 바꾸지 않습니다. 승인은 사람이 하는 행위이며 commit 이력에 기록됩니다.",
+  },
+});

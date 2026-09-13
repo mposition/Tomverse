@@ -1,7 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useTransition,
+} from "react";
 import {
   ADMIN_LOCALE_COOKIE,
   ADMIN_LOCALE_COOKIE_MAX_AGE,
@@ -14,62 +22,104 @@ import {
 
 type AdminLocaleContextValue = {
   locale: AdminLocale;
+  /** True between choosing a language and the server re-render landing. */
+  pending: boolean;
   setLocale: (next: AdminLocale) => void;
 };
 
 const AdminLocaleContext = createContext<AdminLocaleContextValue>({
   locale: DEFAULT_ADMIN_LOCALE,
+  pending: false,
   setLocale: () => {},
 });
 
+/** The cookies the server's locale resolution reads. */
+const LOCALE_COOKIE_NAMES = [ADMIN_LOCALE_COOKIE, "tomverse_lang"];
+
+const localeCookieSnapshot = () =>
+  document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => LOCALE_COOKIE_NAMES.some((name) => part.startsWith(`${name}=`)))
+    .sort()
+    .join(";");
+
 /**
- * The console's language, as the server resolved it for this request.
+ * The console's language, exactly as the server resolved it for this render.
  *
- * The value is a prop, not something read in the browser after mount. The
- * product's `LanguageProvider` restores a saved language in an effect, which is
- * fine for a page that renders entirely on the client -- but the console also
- * renders copy in server components (page tabs, page headings), and a client
- * that switched language after hydration would leave those in the other
- * language beside it.
+ * The server value is the only value. The product's `LanguageProvider` restores
+ * a saved language in an effect, which suits a page rendered entirely on the
+ * client -- but the console also renders copy in server components (page tabs,
+ * page panels), and any client-side guess would let the shell speak one
+ * language while those speak another. So nothing here switches language
+ * locally: choosing one writes the cookie and refreshes the route, and the new
+ * value arrives as a prop with the server components that use it.
  *
- * Changing language writes the console cookie and refreshes the route, so the
- * server re-renders every server component in the new language. The chosen
- * locale is applied to client components immediately rather than after the
- * refresh lands, so the control the operator just pressed answers at once.
+ * A layout is not re-rendered by client navigation, so a cookie changed in
+ * another tab would leave this shell on the old language while the next page's
+ * server components read the new one. When the tab regains focus and the
+ * locale cookies differ from what this render was made with, it refreshes.
  */
 export function AdminLocaleProvider({
-  locale: serverLocale,
+  locale,
   children,
 }: {
   locale: AdminLocale;
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [chosen, setChosen] = useState<AdminLocale | null>(null);
-  const locale = chosen ?? serverLocale;
+  const [pending, startTransition] = useTransition();
+  const renderedCookies = useRef<string | null>(null);
+
+  useEffect(() => {
+    // Recorded after every server render of this provider, so the comparison
+    // is always against the cookies the current `locale` came from.
+    renderedCookies.current = localeCookieSnapshot();
+  }, [locale]);
+
+  useEffect(() => {
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      if (renderedCookies.current === null) return;
+      if (localeCookieSnapshot() === renderedCookies.current) return;
+      renderedCookies.current = localeCookieSnapshot();
+      startTransition(() => router.refresh());
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [router]);
 
   const setLocale = useCallback(
     (next: AdminLocale) => {
-      setChosen(next);
       document.cookie =
         `${ADMIN_LOCALE_COOKIE}=${next}; path=/; max-age=${ADMIN_LOCALE_COOKIE_MAX_AGE}; samesite=lax` +
         (window.location.protocol === "https:" ? "; secure" : "");
-      router.refresh();
+      // Always refresh, even when `next` is the language on screen: it is also
+      // how an operator recovers a shell that disagrees with its cookie.
+      startTransition(() => router.refresh());
     },
     [router]
   );
 
-  const value = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
+  const value = useMemo(
+    () => ({ locale, pending, setLocale }),
+    [locale, pending, setLocale]
+  );
 
   return (
     <AdminLocaleContext.Provider value={value}>
       {/*
         `lang` on the console's own root, not on <html>: the document element
-        belongs to the product's language, and `:lang()` selects the Korean
-        typeface for this subtree (docs/ui-contracts/typography.md). It is
-        `display: contents` so it adds no box to the shell's layout.
+        belongs to the product's language. `data-locale-root` makes the root
+        re-resolve the typeface for its own language (app/globals.css,
+        docs/ui-contracts/typography.md). `display: contents` adds no box to the
+        shell's layout; `font-family` still inherits through it.
       */}
-      <div lang={locale} className="contents">
+      <div lang={locale} data-locale-root="" className="contents">
         {children}
       </div>
     </AdminLocaleContext.Provider>
