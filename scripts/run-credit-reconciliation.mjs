@@ -24,8 +24,31 @@ try {
   process.exit(1);
 }
 
+/**
+ * How long this runner waits before giving up on the route.
+ *
+ * It has to outlast the route, not merely approach it. The route declares
+ * `maxDuration = 300` because it ends with the memory extraction dispatch,
+ * which is budgeted at 120s and may overrun by one chunk -- so a healthy run
+ * can take several minutes. This was 60s, left over from before that dispatch
+ * existed, and on 2026-09-13 the staging route took 125s: the platform logged
+ * `499 125012ms` for a request this runner had already abandoned at 60s, the
+ * script exited 1, and Railway marked the deployment CRASHED. Nothing was
+ * broken. The sweep finished; only the process that was waiting for it had
+ * stopped waiting.
+ *
+ * Past the route's own limit, a slow run ends with whatever the platform
+ * answers -- a result, a 503 this script already treats as a deferral, or a
+ * timeout from the server side -- instead of an abort this process chose.
+ * The margin covers a cold start and the network. The cron fires every fifteen
+ * minutes (`railway.credit-reconciliation.json`), so a run this long never
+ * overlaps the next. `tests/cronClientTimeouts.test.mjs` fails if this ever
+ * falls back under the route's limit.
+ */
+const REQUEST_TIMEOUT_MS = 330_000;
+
 const controller = new AbortController();
-const timeout = setTimeout(() => controller.abort(), 60_000);
+const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 try {
   const response = await fetch(endpoint, {
     method: "POST",
