@@ -67,4 +67,9 @@ regexes = [
   # repeating: pin the shape, not the value, or the next digest fails the same
   # way and gets its own line here.
   '''sha256:[0-9a-f]{12,64}\b''',
+  # Synthetic conversation scope names in durable-recovery tests and their
+  # immutable review records. `conversation_1` is an opaque fixture label,
+  # not a credential. Anchor both the field and the complete value so this
+  # cannot suppress an arbitrary token merely because it appears in a test.
+  '''scopeKey:\s*"conversation_[0-9]+"''',
 ]
