@@ -294,6 +294,9 @@ export type ParsedChatDraftConflict = {
   currentDraft: PublicChatDraft | null;
 };
 
+export const isChatDraftAttachmentRecoveryConflict = (value: unknown) =>
+  isRecord(value) && value.code === "CHAT_DRAFT_ATTACHMENT_INVALID";
+
 /**
  * A 409 is not enough to discard local input. Accept only the two snapshots
  * the server can coherently report: no row at all, or one parsed draft whose
@@ -303,7 +306,9 @@ export function parseChatDraftConflict(
   value: unknown,
   expectedScopeKey: string
 ): ParsedChatDraftConflict | null {
-  if (!isRecord(value) || value.code !== "CHAT_DRAFT_REVISION_CONFLICT" ||
+  if (!isRecord(value) ||
+      (value.code !== "CHAT_DRAFT_REVISION_CONFLICT" &&
+        value.code !== "CHAT_DRAFT_ATTACHMENT_INVALID") ||
       !Object.prototype.hasOwnProperty.call(value, "currentRevision") ||
       !Object.prototype.hasOwnProperty.call(value, "currentDraft")) {
     return null;
@@ -393,7 +398,6 @@ export const isInvisiblePreDispatchAttempt = (
 ) =>
   attempt.status === "failed" &&
   attempt.failureCode === "request_refused" &&
-  attempt.checkpointRevision === 0 &&
   attempt.partialContent.length === 0;
 
 export function messageFromChatResponseAttempt(

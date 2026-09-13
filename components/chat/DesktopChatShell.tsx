@@ -135,6 +135,8 @@ type DesktopChatShellProps = {
   durableDraftLocked: boolean;
   /** Refuses submit while a durable Chat voice transcript is unfinished. */
   blockSubmitWhileVoiceBusy: boolean;
+  /** Authenticated durable Chat may compose its next turn during a response. */
+  allowEditingWhileSending: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -356,6 +358,7 @@ export function DesktopChatShell({
   pendingSubmission,
   durableDraftLocked,
   blockSubmitWhileVoiceBusy,
+  allowEditingWhileSending,
   onNewChat,
   onNewImage,
   imageLock,
@@ -1328,6 +1331,7 @@ export function DesktopChatShell({
               draftLocked={durableDraftLocked}
               blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
               isSending={isAnyModelResponding}
+              allowEditingWhileSending={allowEditingWhileSending}
               focusToken={focusToken}
               currentChatId={currentChatId}
               selectedModels={selectedModels}

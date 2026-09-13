@@ -9,13 +9,14 @@ import {
   chatComposerDraftDeleteSchema,
   chatComposerDraftPutSchema,
   chatDraftScopeKeySchema,
+  publicChatComposerDraft,
   validateDraftReferencesForScope,
 } from "@/lib/chatComposerDraftCore";
 import {
   ChatDraftRevisionConflictError,
   deleteChatComposerDraft,
   publicChatComposerDraftWithAttachments,
-  readPublicChatComposerDraft,
+  readChatComposerDraft,
   writeChatComposerDraft,
 } from "@/lib/chatComposerDraftPersistence";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
@@ -36,6 +37,47 @@ const noStore = (response: Response) => {
   response.headers.set("Cache-Control", "private, no-store");
   return response;
 };
+
+/**
+ * A draft whose attachment row disappeared still contains recoverable text
+ * and CAS authority. Return that exact row with only the unresolvable
+ * references removed, and require an explicit client choice before a repair
+ * PUT. This never silently mutates stored state from a read endpoint.
+ */
+async function readRecoverablePublicDraft(input: {
+  userId: string;
+  userEmail: string | null | undefined;
+  scopeKey: string;
+}) {
+  const stored = await readChatComposerDraft(input.userId, input.scopeKey);
+  if (!stored) return { draft: null, attachmentRecoveryRequired: false };
+  try {
+    return {
+      draft: await publicChatComposerDraftWithAttachments({ ...input, draft: stored }),
+      attachmentRecoveryRequired: false,
+    };
+  } catch (error) {
+    if (!(error instanceof MessageAttachmentResolveError)) throw error;
+    return {
+      draft: {
+        ...publicChatComposerDraft(stored),
+        attachmentReferences: [],
+        attachments: [],
+      },
+      attachmentRecoveryRequired: true,
+    };
+  }
+}
+
+const attachmentRecoveryResponse = (draft: NonNullable<Awaited<
+  ReturnType<typeof readRecoverablePublicDraft>
+>["draft"]>) =>
+  jsonError(
+    "A saved draft attachment is no longer available. Choose which draft to keep.",
+    "CHAT_DRAFT_ATTACHMENT_INVALID",
+    409,
+    { currentRevision: draft.revision, currentDraft: draft }
+  );
 
 async function requestScope(
   request: Request,
@@ -75,13 +117,16 @@ export async function GET(request: Request, { params }: Params) {
       day: 4_000,
     });
     if ("response" in scope) return noStore(scope.response);
-    const draft = await readPublicChatComposerDraft({
+    const result = await readRecoverablePublicDraft({
       userId: scope.userId,
       userEmail: scope.userEmail,
       scopeKey: scope.scopeKey,
     });
+    if (result.attachmentRecoveryRequired && result.draft) {
+      return attachmentRecoveryResponse(result.draft);
+    }
     return Response.json(
-      { scopeKey: scope.scopeKey, draft },
+      { scopeKey: scope.scopeKey, draft: result.draft },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {
@@ -123,11 +168,15 @@ export async function PUT(request: Request, { params }: Params) {
       });
     } catch (error) {
       if (error instanceof ChatDraftRevisionConflictError) {
-        const currentDraft = await readPublicChatComposerDraft({
+        const current = await readRecoverablePublicDraft({
           userId: scope.userId,
           userEmail: scope.userEmail,
           scopeKey: scope.scopeKey,
         });
+        if (current.attachmentRecoveryRequired && current.draft) {
+          return attachmentRecoveryResponse(current.draft);
+        }
+        const currentDraft = current.draft;
         return jsonError(error.message, error.code, 409, {
           currentRevision: currentDraft?.revision ?? null,
           currentDraft,
@@ -173,11 +222,15 @@ export async function DELETE(request: Request, { params }: Params) {
       });
     } catch (error) {
       if (error instanceof ChatDraftRevisionConflictError) {
-        const currentDraft = await readPublicChatComposerDraft({
+        const current = await readRecoverablePublicDraft({
           userId: scope.userId,
           userEmail: scope.userEmail,
           scopeKey: scope.scopeKey,
         });
+        if (current.attachmentRecoveryRequired && current.draft) {
+          return attachmentRecoveryResponse(current.draft);
+        }
+        const currentDraft = current.draft;
         return jsonError(error.message, error.code, 409, {
           currentRevision: currentDraft?.revision ?? null,
           currentDraft,

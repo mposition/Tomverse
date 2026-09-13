@@ -22,6 +22,7 @@ import {
 } from "@/lib/conversationDraftStore";
 import {
   draftAttachmentReferences,
+  isChatDraftAttachmentRecoveryConflict,
   parseChatDraftConflict,
   parseChatDraftResponse,
   sameDraftSnapshot,
@@ -138,6 +139,7 @@ type DraftSyncMeta = {
   hydrated: boolean;
   conflict: boolean;
   conflictDraft: PublicChatDraft | null;
+  repairAttachmentsOnResolution: boolean;
   frozen: boolean;
   inFlight: Promise<void> | null;
   writeEpoch: number;
@@ -344,6 +346,7 @@ export function useConversationDrafts(
       hydrated: false,
       conflict: false,
       conflictDraft: null,
+      repairAttachmentsOnResolution: false,
       frozen: false,
       inFlight: null,
       writeEpoch: 0,
@@ -399,6 +402,8 @@ export function useConversationDrafts(
       meta.revision = currentRevision;
       meta.conflict = true;
       meta.conflictDraft = currentDraft;
+      meta.repairAttachmentsOnResolution =
+        isChatDraftAttachmentRecoveryConflict(body);
       meta.hydrated = true;
       meta.frozen = false;
       // A well-formed 409 is a successful server response carrying the
@@ -506,6 +511,7 @@ export function useConversationDrafts(
           meta.hydrated = true;
           meta.conflict = false;
           meta.conflictDraft = null;
+          meta.repairAttachmentsOnResolution = false;
           cancelPersistRetry(key);
           setConflict(key, false);
           setSyncFailure(key, false);
@@ -563,6 +569,7 @@ export function useConversationDrafts(
         meta.hydrated = true;
         meta.conflict = false;
         meta.conflictDraft = null;
+        meta.repairAttachmentsOnResolution = false;
         cancelPersistRetry(key);
         setConflict(key, false);
         setSyncFailure(key, false);
@@ -672,6 +679,23 @@ export function useConversationDrafts(
           `/api/products/chat/drafts/${encodeURIComponent(activeScopeKey)}`,
           { cache: "no-store", signal: controller.signal }
         );
+        if (response.status === 409) {
+          const payload = await response.json().catch(() => null);
+          if (controller.signal.aborted || ticket !== hydrateTicketRef.current ||
+              !identityFenceIsCurrent(expectedIdentityKey, expectedIdentityEpoch) ||
+              meta.identityKey !== expectedIdentityKey ||
+              meta.identityEpoch !== expectedIdentityEpoch) return;
+          if (!applyConflict(
+            key,
+            meta,
+            payload,
+            expectedIdentityKey,
+            expectedIdentityEpoch
+          )) {
+            throw new Error("CHAT_DRAFT_HYDRATE_CONFLICT_INVALID");
+          }
+          return;
+        }
         if (!response.ok) {
           await discardResponseBody(response);
           throw new Error("CHAT_DRAFT_HYDRATE_FAILED");
@@ -710,6 +734,7 @@ export function useConversationDrafts(
           meta.revision = remote?.revision ?? 0;
           meta.conflict = false;
           meta.conflictDraft = null;
+          meta.repairAttachmentsOnResolution = false;
           const current = draftsRef.current;
           const next = remote
             ? writeDraftEntry(current, key, () => ({
@@ -927,6 +952,7 @@ export function useConversationDrafts(
       toMeta.frozen = false;
       toMeta.conflict = false;
       toMeta.conflictDraft = null;
+      toMeta.repairAttachmentsOnResolution = false;
       const sourceTimer = saveTimersRef.current.get(fromKey);
       if (sourceTimer) clearTimeout(sourceTimer);
       saveTimersRef.current.delete(fromKey);
@@ -1112,6 +1138,7 @@ export function useConversationDrafts(
           freshMeta.revision = 0;
           freshMeta.conflict = false;
           freshMeta.conflictDraft = null;
+          freshMeta.repairAttachmentsOnResolution = false;
           freshMeta.frozen = false;
           freshMeta.hydrated = true;
           freshMeta.generation += 1;
@@ -1132,6 +1159,7 @@ export function useConversationDrafts(
       meta.persistedGeneration = 0;
       meta.conflict = false;
       meta.conflictDraft = null;
+      meta.repairAttachmentsOnResolution = false;
       setConflict(key, false);
       meta.frozen = false;
       const current = readDraftEntry(draftsRef.current, key);
@@ -1204,6 +1232,7 @@ export function useConversationDrafts(
       meta.hydrated = true;
       meta.conflict = false;
       meta.conflictDraft = null;
+      meta.repairAttachmentsOnResolution = false;
       setConflict(prepared.key, false);
       const current = readDraftEntry(draftsRef.current, prepared.key);
       if (sameDraftSnapshot(current, prepared.localDraft)) {
@@ -1218,6 +1247,7 @@ export function useConversationDrafts(
       const key = activeDraftKeyRef.current;
       const meta = syncMetaRef.current.get(key);
       if (!meta?.conflict) return;
+      const repairAttachments = meta.repairAttachmentsOnResolution;
       if (choice === "use-server") {
         const current = readDraftEntry(draftsRef.current, key);
         const remote = meta.conflictDraft;
@@ -1237,8 +1267,12 @@ export function useConversationDrafts(
       // explicit overwrite choice is allowed to use it as the next CAS base.
       meta.conflict = false;
       meta.conflictDraft = null;
+      meta.repairAttachmentsOnResolution = false;
       setConflict(key, false);
-      if (choice === "overwrite-local") scheduleSave(key);
+      // Both choices must escape a dangling-reference state. "Use server"
+      // adopts its recoverable text-only snapshot and then persists removal
+      // of the references; "overwrite" preserves this tab's local snapshot.
+      if (choice === "overwrite-local" || repairAttachments) scheduleSave(key);
       bumpSyncRevision();
     },
     [bumpSyncRevision, replaceDrafts, scheduleSave, setConflict]

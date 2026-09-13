@@ -218,6 +218,11 @@ test("draft conflict parser accepts only a coherent server snapshot", () => {
     currentRevision: 4,
     currentDraft,
   }, "conversation_1"), { currentRevision: 4, currentDraft });
+  assert.deepEqual(parseChatDraftConflict({
+    code: "CHAT_DRAFT_ATTACHMENT_INVALID",
+    currentRevision: 4,
+    currentDraft,
+  }, "conversation_1"), { currentRevision: 4, currentDraft });
   for (const malformed of [
     null,
     {},
@@ -353,7 +358,10 @@ test("an empty pre-dispatch refusal does not create a phantom assistant bubble",
     [attempt({
       status: "failed",
       partialContent: "",
-      checkpointRevision: 0,
+      // The terminal transition itself advances the durable revision. A real
+      // pre-dispatch refusal is therefore revision 1, not the impossible 0
+      // fixture this regression originally used.
+      checkpointRevision: 1,
       finishReason: "error",
       failureCode: "request_refused",
       terminalAt: "2026-09-13T00:00:01.000Z",
@@ -363,6 +371,25 @@ test("an empty pre-dispatch refusal does not create a phantom assistant bubble",
   );
   assert.deepEqual(merged.messages, [source]);
   assert.equal(merged.attemptBackedIds.size, 0);
+});
+
+test("a refusal with a committed prefix remains visible", () => {
+  const source = { id: "user_1", role: "user", content: "Question" };
+  const merged = mergeChatResponseAttempts(
+    [source],
+    [attempt({
+      status: "failed",
+      partialContent: "A provider-visible prefix",
+      checkpointRevision: 2,
+      finishReason: "error",
+      failureCode: "request_refused",
+      terminalAt: "2026-09-13T00:00:01.000Z",
+    })],
+    "gpt-5-6-luna",
+    "Interrupted"
+  );
+  assert.equal(merged.messages.at(-1)?.content, "A provider-visible prefix");
+  assert.equal(merged.attemptBackedIds.has("assistant_1"), true);
 });
 
 test("poll replacement only changes messages proven to be attempt-backed", () => {

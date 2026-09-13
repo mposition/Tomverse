@@ -566,6 +566,12 @@ type ChatInputProps = {
   /** Durable Chat cannot submit before an async voice transcript has landed. */
   blockSubmitWhileVoiceBusy?: boolean;
   isSending?: boolean;
+  /**
+   * Authenticated durable Chat owns a successor draft independently of the
+   * response already streaming. Other surfaces retain the single-flight
+   * composer contract and stay disabled until that response settles.
+   */
+  allowEditingWhileSending?: boolean;
   focusToken?: number;
   isNewConversation?: boolean;
   currentChatId?: string | null;
@@ -830,6 +836,7 @@ export function ChatInput({
   draftLocked = false,
   blockSubmitWhileVoiceBusy = false,
   isSending = false,
+  allowEditingWhileSending = false,
   focusToken,
   isNewConversation = true,
   currentChatId = null,
@@ -1276,10 +1283,15 @@ export function ChatInput({
     ? t("chat.exceedDailyLimit")
     : t("chat.inputPlaceholder");
   
-  // Once the Message transaction has accepted the submitted snapshot, a live
-  // provider stream no longer owns the composer. The user may safely build
-  // the next durable draft while Stop continues to control that stream.
-  const isDisabled = disabled || isUploading || isUsageLimitReached;
+  // Only the authenticated durable Chat surface has transferred the accepted
+  // snapshot into a Message transaction and can therefore own a successor
+  // draft while the provider streams. Review, continuation and guest surfaces
+  // keep the historical single-flight composer contract.
+  const isDisabled =
+    disabled ||
+    isUploading ||
+    isUsageLimitReached ||
+    (isSending && !allowEditingWhileSending);
   const isDraftMutationDisabled = isDisabled || draftLocked;
 
   /*

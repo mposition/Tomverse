@@ -182,6 +182,8 @@ type MobileChatShellProps = {
   durableDraftLocked: boolean;
   /** Refuses submit while a durable Chat voice transcript is unfinished. */
   blockSubmitWhileVoiceBusy: boolean;
+  /** Authenticated durable Chat may compose its next turn during a response. */
+  allowEditingWhileSending: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -401,6 +403,7 @@ export function MobileChatShell({
   pendingSubmission,
   durableDraftLocked,
   blockSubmitWhileVoiceBusy,
+  allowEditingWhileSending,
   onNewChat,
   onNewImage,
   imageLock,
@@ -1694,6 +1697,7 @@ export function MobileChatShell({
             draftLocked={durableDraftLocked}
             blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
             isSending={isAnyModelResponding}
+            allowEditingWhileSending={allowEditingWhileSending}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}
             currentChatId={currentChatId}

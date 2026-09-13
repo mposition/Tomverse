@@ -115,6 +115,37 @@ production build·typecheck·lint·Prisma validate·migration status·schema dri
 ③ 승인된 gate 안의 무과금 staging DB·복구 흐름 확인, ④ 기존 기능의 Chat 연결
 회귀, ⑤ Refiner·Planner 제안형 UI와 별도 승인된 실제 모델 품질 평가다.
 
+### 2026-09-14 Claude round 0 대응 기록
+
+동결 source `a6ea0837a13e1ea52ce1164792a8beaebb2c2cc3`에 대한 Claude 읽기 전용
+round 0은 `request_changes`와 지적 4건을 반환했다. Review·continuation까지
+전송 중 편집 가능해진 회귀, terminal 전환 뒤 증가한 checkpoint revision 때문에
+빈 사전-dispatch 실패가 보이던 조건, 사라진 첨부를 가진 서버 draft의 무한 GET
+실패, 실제 modal 동작이 없는 `alertdialog`가 각각 지적됐다. 검토 기록은 수정하지
+않고 보존하며, 아래 대응은 새 source로 별도 재검토한다.
+
+수정본은 전송 중 후속 draft 편집을 인증된 durable Chat에만 한정하고 기존 surface의
+single-flight 계약을 복구했다. 빈 사전-dispatch 실패 판정은 terminal transition의
+revision과 분리했다. 사라진 첨부가 있는 draft는 서버가 저장 행을 읽기에서 바꾸지
+않고 text와 CAS revision을 포함한 명시적 409로 돌려주며, 사용자가 어느 초안을
+유지할지 선택한 뒤에만 dangling reference를 제거하는 PUT을 수행한다. 하단 알림은
+focus trap이 없는 실제 동작에 맞춰 비모달 `alert`로 표현했다.
+
+이 문구를 쓰기 전 수정본의 집중 관측은 관련 단위·계약 묶음 **83/83**, draft route
+단독 **14/14**, desktop·compact·mobile Safari·mobile Chromium의 위험 시나리오
+**20/20** 통과다. production build·typecheck·수정 10파일 lint와 diff whitespace도
+통과했다. route 14건은 83건 묶음에 포함되므로 별도 합산하지 않는다. 첫 브라우저
+시도는 source 수정 뒤 build 전의 오래된 `.next`를 읽어 실패했고, 새 production
+build 뒤 같은 네 project를 재실행해 20/20을 확인했다. 이 기록은 아직 Claude
+round 1 승인, Linux CI, PR 병합, staging·production 배포 또는 실제 provider/R2
+검증을 뜻하지 않는다.
+
+같은 기능의 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 새 source의 Claude 재검토와
+기록 봉인, ② PR·통합 CI, ③ 승인된 범위의 무과금 staging DB 복구 흐름 확인,
+④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀, ⑤ Prompt Refiner
+제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.

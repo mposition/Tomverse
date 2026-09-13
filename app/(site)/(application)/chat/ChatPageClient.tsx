@@ -6880,6 +6880,7 @@ export function ChatPageClient({
             mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
+          allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -7009,6 +7010,7 @@ export function ChatPageClient({
             mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
           }
           blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
+          allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -7115,8 +7117,7 @@ export function ChatPageClient({
       )}
     {pendingSubmission?.recovery === "message-receipt-unknown" && (
       <section
-        role="alertdialog"
-        aria-modal="true"
+        role="alert"
         aria-labelledby="message-receipt-recovery-title"
         data-testid="message-receipt-recovery-dialog"
         className="fixed inset-x-3 bottom-4 z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
@@ -7142,8 +7143,7 @@ export function ChatPageClient({
     )}
     {draftConflict && (
       <section
-        role="alertdialog"
-        aria-modal="true"
+        role="alert"
         aria-labelledby="draft-conflict-title"
         data-testid="draft-conflict-dialog"
         className="fixed inset-x-3 bottom-4 z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"

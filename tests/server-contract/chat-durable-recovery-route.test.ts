@@ -18,6 +18,7 @@ let authorizedScopes: string[] = [];
 let deniedAccessScopes = new Set<string>();
 let rateLimitRefused = false;
 let draftReadCount = 0;
+let draftAttachmentResolveFailure = false;
 let writtenDraftRow: Record<string, unknown> | null = null;
 let hydratedDraftRow: Record<string, unknown> | null = null;
 let receiptResult: Record<string, unknown> = {
@@ -39,6 +40,8 @@ class DraftConflict extends Error {
     super("The Chat draft changed before this request was applied.");
   }
 }
+
+class AttachmentResolve extends Error {}
 
 mock.module("next-auth/next", {
   namedExports: { getServerSession: async () => session },
@@ -96,8 +99,13 @@ mock.module(mod("lib/chatComposerDraftPersistence.ts"), {
   namedExports: {
     ChatDraftRevisionConflictError: DraftConflict,
     publicChatComposerDraftWithAttachments: async ({ draft }: { draft: Record<string, unknown> }) => {
+      if (draftAttachmentResolveFailure) throw new AttachmentResolve();
       hydratedDraftRow = draft;
       return draft;
+    },
+    readChatComposerDraft: async () => {
+      draftReadCount += 1;
+      return draftRow;
     },
     readPublicChatComposerDraft: async () => {
       draftReadCount += 1;
@@ -125,7 +133,7 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
   },
 });
 mock.module(mod("lib/messageAttachmentStorage.ts"), {
-  namedExports: { MessageAttachmentResolveError: class extends Error {} },
+  namedExports: { MessageAttachmentResolveError: AttachmentResolve },
 });
 mock.module(mod("lib/chatDraftMessageConsume.ts"), {
   namedExports: {
@@ -181,6 +189,7 @@ test.beforeEach(() => {
   deniedAccessScopes = new Set();
   rateLimitRefused = false;
   draftReadCount = 0;
+  draftAttachmentResolveFailure = false;
   writtenDraftRow = null;
   hydratedDraftRow = null;
   receiptResult = { outcome: "unchanged", attachments: [] };
@@ -314,6 +323,32 @@ test("draft GET returns exact text and ordered opaque references", async () => {
     { uploadId: "up_1" },
     { uploadId: "up_2" },
   ]);
+});
+
+test("draft GET turns a dangling attachment into an explicit recoverable conflict", async () => {
+  const { draftRoute } = await loadRoutes();
+  draftAttachmentResolveFailure = true;
+  draftRow = {
+    scopeKey: "new",
+    conversationId: null,
+    text: "Keep the recoverable text.",
+    attachmentReferences: [{ uploadId: "missing_upload" }],
+    revision: 3,
+    createdAt: new Date("2026-09-13T01:00:00.000Z"),
+    updatedAt: new Date("2026-09-13T01:01:00.000Z"),
+  };
+  const response = await draftRoute.GET(request("/api/products/chat/drafts/new"), {
+    params: Promise.resolve({ scopeKey: "new" }),
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const body = await response.json();
+  assert.equal(body.code, "CHAT_DRAFT_ATTACHMENT_INVALID");
+  assert.equal(body.currentRevision, 3);
+  assert.equal(body.currentDraft.text, "Keep the recoverable text.");
+  assert.deepEqual(body.currentDraft.attachmentReferences, []);
+  assert.deepEqual(body.currentDraft.attachments, []);
 });
 
 test("an access refusal remains no-store", async () => {

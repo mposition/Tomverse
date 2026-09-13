@@ -299,6 +299,7 @@ async function openChat(page: Page, options: {
   holdNextDraftMutation?: boolean;
   draftSyncFailure?: boolean;
   malformedDraftRead?: boolean;
+  invalidDraftAttachmentRead?: boolean;
   draftFailurePlan?: Array<{ method: string; scopeKey: string }>;
 } = {}) {
   await prepareGuestPage(page, "en");
@@ -439,6 +440,20 @@ async function openChat(page: Page, options: {
       if (options.holdDraftHydrate) {
         draftHydrateStarted = true;
         await draftHydrateGate;
+      }
+      if (options.invalidDraftAttachmentRead && current) {
+        return route.fulfill({
+          status: 409,
+          json: {
+            code: "CHAT_DRAFT_ATTACHMENT_INVALID",
+            currentRevision: current.revision,
+            currentDraft: {
+              ...current,
+              attachmentReferences: [],
+              attachments: [],
+            },
+          },
+        });
       }
       return route.fulfill({
         json: options.malformedDraftRead ? {} : { scopeKey, draft: current },
@@ -867,13 +882,48 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
       updatedAt: now,
     });
     await page.getByTestId("draft-sync-retry").click();
-    await expect(page.getByTestId("draft-conflict-dialog")).toBeVisible();
+    const conflictNotice = page.getByTestId("draft-conflict-dialog");
+    await expect(conflictNotice).toBeVisible();
+    await expect(conflictNotice).toHaveAttribute("role", "alert");
+    await expect(conflictNotice).not.toHaveAttribute("aria-modal");
     await expect(page.getByTestId("draft-sync-failed")).toHaveCount(0);
 
     await page.getByTestId("draft-conflict-use-server").click();
     await expect(page.getByTestId("chat-textarea")).toHaveValue(
       "Server version after the transport failure."
     );
+    await expect(page.getByTestId("draft-conflict-dialog")).toHaveCount(0);
+    await expect(page.getByTestId("draft-sync-failed")).toHaveCount(0);
+  });
+
+  test("a dangling server attachment becomes an explicit choice and either choice can repair it", async ({ page }) => {
+    const now = "2026-09-13T00:00:00.000Z";
+    const sharedDrafts = new Map<string, DraftFixture>([[CONVERSATION, {
+      scopeKey: CONVERSATION,
+      text: "The server text remains recoverable.",
+      attachmentReferences: [{ attachmentId: "missing_attachment" }],
+      attachments: [{
+        id: "missing_attachment", ordinal: 0, name: "missing.pdf",
+        mediaType: "application/pdf", size: 12, kind: "file",
+        attachmentId: "missing_attachment",
+      }],
+      revision: 1,
+      createdAt: now,
+      updatedAt: now,
+    }]]);
+    const state = await openChat(page, {
+      sharedDrafts,
+      invalidDraftAttachmentRead: true,
+    });
+
+    await expect(page.getByTestId("draft-conflict-dialog")).toBeVisible();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
+    await page.getByTestId("draft-conflict-use-server").click();
+    await expect(page.getByTestId("chat-textarea")).toHaveValue(
+      "The server text remains recoverable."
+    );
+    await expect.poll(() => state.drafts.get(CONVERSATION)?.revision).toBe(2);
+    expect(state.drafts.get(CONVERSATION)?.attachmentReferences).toEqual([]);
     await expect(page.getByTestId("draft-conflict-dialog")).toHaveCount(0);
     await expect(page.getByTestId("draft-sync-failed")).toHaveCount(0);
   });
@@ -1329,7 +1379,10 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(state.messageReceiptStarted).toBe(true);
     await expect(page.getByTestId("chat-textarea")).toHaveValue(prompt);
     await expect(page.getByTestId("chat-textarea")).toHaveAttribute("readonly", "");
-    await expect(page.getByTestId("message-receipt-recovery-dialog")).toBeVisible();
+    const recoveryNotice = page.getByTestId("message-receipt-recovery-dialog");
+    await expect(recoveryNotice).toBeVisible();
+    await expect(recoveryNotice).toHaveAttribute("role", "alert");
+    await expect(recoveryNotice).not.toHaveAttribute("aria-modal");
     expect(state.drafts.get(CONVERSATION)?.text).toBe(prompt);
     expect(await persistentChatPostCount(page)).toBe(0);
   });
@@ -1809,6 +1862,40 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await drive(page, 0, "finish");
     await expect(message(page, "Review provider response.")).toBeVisible();
     expect(await persistentChatPostCount(page)).toBe(1);
+  });
+
+  test("legacy Review keeps its composer single-flight while a provider response is active", async ({ page }) => {
+    await openChat(page, { legacyReview: true });
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("Only one Review turn may be active.");
+    await page.getByTestId("chat-send-button").click();
+
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await expect(textarea).toBeDisabled();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(100);
+    expect(await requests(page)).toHaveLength(1);
+    expect(await persistentChatPostCount(page)).toBe(1);
+
+    await drive(page, 0, "finish");
+    await expect(textarea).toBeEnabled();
+  });
+
+  test("authenticated Chat can compose a successor draft without submitting it during a stream", async ({ page }) => {
+    const state = await openChat(page);
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("The accepted turn starts one stream.");
+    await page.getByTestId("chat-send-button").click();
+
+    await expect.poll(async () => (await requests(page)).length).toBe(1);
+    await expect(textarea).toBeEnabled();
+    await textarea.fill("This is the next durable draft, not a second request.");
+    await expect.poll(() => state.drafts.get(CONVERSATION)?.text).toBe(
+      "This is the next durable draft, not a second request."
+    );
+    expect(await requests(page)).toHaveLength(1);
+
+    await drive(page, 0, "finish");
   });
 
   test("a fresh Chat creates the Chat product and sends exactly one answer request", async ({ page }) => {
