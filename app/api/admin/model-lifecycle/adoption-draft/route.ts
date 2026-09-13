@@ -7,7 +7,11 @@ import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { prisma } from "@/lib/prisma";
 import { apiSecurityResponse, consumeApiRateLimit } from "@/lib/apiSecurity";
-import { buildAdoptionDraft, registryIdFromApiModel } from "@/lib/modelAdoptionDraft";
+import {
+  ADOPTION_USAGE_CLASSES,
+  buildAdoptionDraft,
+  registryIdFromApiModel,
+} from "@/lib/modelAdoptionDraft";
 import { modelProductSurface } from "@/lib/modelLifecycleTriage";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
@@ -129,6 +133,7 @@ export async function GET(req: Request) {
                 typeof metadata.effortLevels === "string"
                   ? metadata.effortLevels
                   : null,
+              pdfInput: typeof metadata.pdfInput === "boolean" ? metadata.pdfInput : null,
             }
           : null,
       },
@@ -136,11 +141,49 @@ export async function GET(req: Request) {
       // about `catalogDeleted`, so a suggestion that collides with a retired
       // model is a 409 the operator meets after filling the whole form in.
       takenIds: taken.map((row) => row.id),
+      worstCaseInputTokens: chatUserMaxInputTokens(),
     });
-
 
     const draftModelId = requestedModelId || draft.fields.id;
     return NextResponse.json({
+      // What the two token columns resolve to at request time if they are left
+      // empty, for every sale class the operator might pick. Resolved by the
+      // same function a live request uses -- profile, per-model environment
+      // override, then the class fallback -- so the greyed-in value the panel
+      // shows is the value the model will actually run with, and nothing here
+      // restates that chain for it to drift from.
+      effectiveTokenLimits: {
+        modelId: draftModelId,
+        byClass: Object.fromEntries(
+          ADOPTION_USAGE_CLASSES.map((usageClass) => {
+            const base = {
+              id: draftModelId,
+              apiModel: workItem.apiModel,
+              provider: workItem.provider as AiModel["provider"],
+              usageClass,
+            };
+            const resolved = resolveModelPricing(base);
+            // The reservation before the resolver clamps it to the cap. The
+            // clamp is against whatever cap is in force, and the operator may
+            // be about to type a different one: a reservation already cut to
+            // the default cap cannot be un-cut in the panel, so a per-model
+            // override of 8,192 under a default cap of 4,096 would be shown as
+            // 4,096 and saved as 8,192. Resolved through the same function with
+            // the cap lifted out of the way, so the chain is still not restated.
+            const uncapped = resolveModelPricing({
+              ...base,
+              maxOutputTokens: Number.MAX_SAFE_INTEGER,
+            });
+            return [
+              usageClass,
+              {
+                maxOutputTokens: resolved.maxOutputTokens,
+                reservationBeforeCap: uncapped.reservationOutputTokens,
+              },
+            ];
+          })
+        ),
+      },
       workItem: { id: workItem.id, status: workItem.status },
       // The prompt size this deployment actually accepts, so the panel's credit
       // floor prices the worst turn this installation can be sent rather than
