@@ -54,16 +54,11 @@ GPT-6 Astra의 가격·장문 tier·cache write 요율은 모델 API에 없고 �
 서버가 강제하는 최초 `coming-soon`·비공개 상태, lifecycle의 별도 `pricing` 검증이
 겹치므로 P2로 하향이 타당하나, 탐지 자체가 완전해진 것은 아니므로 P2는 남습니다.
 
-## 승인 이후 변경 — 검토 대상 아님을 밝힘
+## 승인 이후 변경 — main
 
-6차 승인 뒤 develop에 Admin Console 한국어화(#1390)가 병합되어
-`AdminModelRegistryPanel.tsx`가 충돌했습니다. 해결은 **로직 변경 없이** develop의 catalog
-라벨(`m.*`)을 받아들이고, 1·2단계가 패널에 직접 쓴 문구를
-`lib/adminMessages/modelRegistry.ts`의 `adopt` 네임스페이스(en/ko)로 옮긴 것입니다
-(docs/ui-contracts/admin-console-ia.md "Language" 2·8항). 핸들러·저장 버튼 조건은 승인된
-형태 그대로 옮겼고, `tests/adminLocale.test.mjs`(key·arity 대조), typecheck, lint,
-관련 단위 테스트 137건으로 확인했습니다. 기계적 이동이라 codex 재검토는 요청하지
-않았습니다.
+main에는 Admin Console 한국어화(#1390)가 아직 없어, 승인된 커밋을 그대로 cherry-pick 했습니다.
+패널 문구를 catalog로 옮기는 변경은 develop 쪽에만 있고, #1390이 main에 올 때 함께 옵니다.
+main에는 `.gitattributes`가 없어 이 변경의 fixture LF 고정 한 항목만 담아 새로 만들었습니다.
 
 ## 검토 범위 밖 발견 — 운영자 결정 필요
 
