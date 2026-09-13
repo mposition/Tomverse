@@ -1,6 +1,8 @@
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 
 import type { SendingDomainReport } from "@/lib/emailSendingDomains";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminEmailPolicyMessages } from "@/lib/adminMessages/emailPolicy";
 
 /**
  * Sending domain and DNS status.
@@ -23,17 +25,14 @@ const SEVERITY = {
   error: {
     Icon: XCircle,
     className: "border-red-800 bg-red-950/50 text-red-200",
-    label: "Blocking",
   },
   warning: {
     Icon: AlertTriangle,
     className: "border-amber-800 bg-amber-950/50 text-amber-200",
-    label: "Outstanding",
   },
   info: {
     Icon: Info,
     className: "border-zinc-800 bg-zinc-900/70 text-zinc-300",
-    label: "Check by hand",
   },
 } as const;
 
@@ -44,41 +43,40 @@ const recordStatus = (status: string | null) =>
       ? "text-amber-300"
       : "text-zinc-500";
 
-export function AdminEmailDomainsPanel({
+export async function AdminEmailDomainsPanel({
   report,
 }: {
   report: SendingDomainReport;
 }) {
+  const messages = await getAdminMessages(adminEmailPolicyMessages);
+  const m = messages.domains;
   const blocking = report.findings.filter((finding) => finding.severity === "error");
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Email
+        {messages.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Sending domains</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        Transactional and marketing mail send from separate domains so their
-        reputations and DMARC policies are separate. That is the only layer that
-        separates: the sending IP, the provider account and its suppression list
-        are shared across every domain in the region.
+        {m.intro}
       </p>
 
       <dl className="mt-5 grid gap-3 md:grid-cols-2">
         {(
           [
-            ["Transactional", report.configured.transactional],
-            ["Marketing", report.configured.marketing],
+            ["transactional", m.transactional, report.configured.transactional],
+            ["marketing", m.marketing, report.configured.marketing],
           ] as const
-        ).map(([label, domain]) => (
+        ).map(([stream, label, domain]) => (
           <div
-            key={label}
-            data-testid={`email-domain-configured-${label.toLowerCase()}`}
+            key={stream}
+            data-testid={`email-domain-configured-${stream}`}
             className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3"
           >
             <dt className="text-xs text-zinc-500">{label}</dt>
             <dd className="mt-1 font-mono text-sm text-zinc-200">
-              {domain ?? "not configured"}
+              {domain ?? m.notConfigured}
             </dd>
           </div>
         ))}
@@ -89,9 +87,7 @@ export function AdminEmailDomainsPanel({
           data-testid="email-domain-provider-error"
           className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/50 px-4 py-3 text-sm leading-6 text-amber-200"
         >
-          {report.providerError} Nothing below is a statement about the domains
-          themselves — the provider was not reached, so this screen has no
-          findings rather than findings derived from an empty list.
+          {report.providerError} {m.providerErrorSuffix}
         </p>
       ) : null}
 
@@ -128,7 +124,7 @@ export function AdminEmailDomainsPanel({
                       {record.name ?? "—"}
                     </span>
                     <span className={recordStatus(record.status)}>
-                      {record.status ?? "unknown"}
+                      {record.status ?? m.recordUnknown}
                     </span>
                   </li>
                 ))}
@@ -139,7 +135,7 @@ export function AdminEmailDomainsPanel({
                     _dmarc.{domain.name}
                   </span>
                   <span className="text-zinc-500">
-                    not issued by the provider — check the zone
+                    {m.dmarcNotIssued}
                   </span>
                 </li>
               </ul>
@@ -150,7 +146,8 @@ export function AdminEmailDomainsPanel({
 
       <div className="mt-5 space-y-2" data-testid="email-domain-findings">
         {report.findings.map((finding, index) => {
-          const { Icon, className, label } = SEVERITY[finding.severity];
+          const { Icon, className } = SEVERITY[finding.severity];
+          const label = m.severity[finding.severity];
           return (
             <p
               key={`${finding.code}-${finding.stream}-${index}`}
@@ -166,18 +163,14 @@ export function AdminEmailDomainsPanel({
         {report.findings.length === 0 && !report.providerError ? (
           <p className="flex gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-sm leading-6 text-zinc-300">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-            Nothing configured to report on.
+            {m.nothingToReport}
           </p>
         ) : null}
       </div>
 
       <p className="mt-5 text-xs leading-5 text-zinc-500">
-        {blocking.length > 0
-          ? `${blocking.length} blocking finding${blocking.length === 1 ? "" : "s"}. `
-          : ""}
-        Read at {report.checkedAt.replace("T", " ").slice(0, 16)} UTC. The DNS
-        records themselves are added at the registrar; see
-        docs/ops/email-sending-domains.md.
+        {blocking.length > 0 ? m.blockingCount(blocking.length) : ""}
+        {m.readAt(report.checkedAt.replace("T", " ").slice(0, 16))}
       </p>
     </section>
   );

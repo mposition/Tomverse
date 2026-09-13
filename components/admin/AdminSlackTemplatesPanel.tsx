@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock3, Loader2, MessageSquareText, Save, Send } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminSlackTemplatesMessages } from "@/lib/adminMessages/slackTemplates";
 import type { SlackTemplateKey } from "@/lib/slackMessageTemplateCore";
 
 type TemplateRow = {
@@ -27,6 +29,11 @@ const EMPTY_WEBHOOK_CONFIGURATION: WebhookConfiguration = {
 };
 
 export function AdminSlackTemplatesPanel() {
+  const m = useAdminMessages(adminSlackTemplatesMessages);
+  const messagesRef = useRef(m);
+  useEffect(() => {
+    messagesRef.current = m;
+  }, [m]);
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
@@ -48,7 +55,7 @@ export function AdminSlackTemplatesPanel() {
           }
         | null;
       if (!response.ok || !data?.templates) {
-        throw new Error(data?.error || "Could not load Slack templates.");
+        throw new Error(data?.error || messagesRef.current.loadFailed);
       }
       setTemplates(data.templates);
       setWebhookConfigured({
@@ -60,7 +67,7 @@ export function AdminSlackTemplatesPanel() {
       );
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not load Slack templates.",
+        error instanceof Error ? error.message : messagesRef.current.loadFailed,
         "error"
       );
     } finally {
@@ -94,12 +101,12 @@ export function AdminSlackTemplatesPanel() {
         }),
       });
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
-      if (!response.ok) throw new Error(data?.error || "Could not save Slack template.");
-      dispatchAppToast("Slack template saved.", "success");
+      if (!response.ok) throw new Error(data?.error || m.saveFailed);
+      dispatchAppToast(m.saved, "success");
       await load();
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not save Slack template.",
+        error instanceof Error ? error.message : m.saveFailed,
         "error"
       );
     } finally {
@@ -119,12 +126,12 @@ export function AdminSlackTemplatesPanel() {
         | { result?: { status?: string; error?: string }; error?: string }
         | null;
       if (!response.ok) {
-        throw new Error(data?.result?.error || data?.error || "Slack test failed.");
+        throw new Error(data?.result?.error || data?.error || m.testFailed);
       }
-      dispatchAppToast("Slack test message sent.", "success");
+      dispatchAppToast(m.testSent, "success");
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Slack test failed.",
+        error instanceof Error ? error.message : m.testFailed,
         "error"
       );
     } finally {
@@ -137,21 +144,18 @@ export function AdminSlackTemplatesPanel() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-300">
-            Slack messages
+            {m.eyebrow}
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
-            Templates and delivery tests
+            {m.title}
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Edit scheduled reports and provider alert messages, then send a safe
-            test from Admin. Database outage alerts remain independent so they still
-            work when the application database is unavailable. Every Slack delivery
-            automatically starts with &lt;!channel&gt; to notify the channel.
+            {m.description}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-bold">
           <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700 px-3 py-2 text-zinc-300">
-            <Clock3 className="h-3.5 w-3.5" /> Daily {schedule}
+            <Clock3 className="h-3.5 w-3.5" /> {m.daily(schedule)}
           </span>
           <span
             className={`rounded-full border px-3 py-2 ${
@@ -160,7 +164,9 @@ export function AdminSlackTemplatesPanel() {
                 : "border-red-500/30 bg-red-500/10 text-red-200"
             }`}
           >
-            Webhooks {Object.values(webhookConfigured).every(Boolean) ? "configured" : "incomplete"}
+            {Object.values(webhookConfigured).every(Boolean)
+              ? m.webhooksConfigured
+              : m.webhooksIncomplete}
           </span>
         </div>
       </div>
@@ -168,7 +174,7 @@ export function AdminSlackTemplatesPanel() {
       <div className="mt-5 grid gap-4">
         {loading ? (
           <div className="flex items-center gap-2 rounded-2xl border border-zinc-800 p-4 text-sm text-zinc-400">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading Slack templates...
+            <Loader2 className="h-4 w-4 animate-spin" /> {m.loading}
           </div>
         ) : (
           templates.map((template) => (
@@ -187,12 +193,12 @@ export function AdminSlackTemplatesPanel() {
                     checked={template.enabled}
                     onChange={(event) => update(template.key, { enabled: event.target.checked })}
                   />
-                  Scheduled delivery enabled
+                  {m.scheduledDeliveryEnabled}
                 </label>
               </div>
               <div className="mt-4 grid gap-3">
                 <label>
-                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">Title</span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">{m.titleField}</span>
                   <input
                     value={template.titleTemplate}
                     onChange={(event) => update(template.key, { titleTemplate: event.target.value })}
@@ -201,7 +207,7 @@ export function AdminSlackTemplatesPanel() {
                   />
                 </label>
                 <label>
-                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">Message body</span>
+                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">{m.bodyField}</span>
                   <textarea
                     value={template.bodyTemplate}
                     onChange={(event) => update(template.key, { bodyTemplate: event.target.value })}
@@ -211,7 +217,7 @@ export function AdminSlackTemplatesPanel() {
                   />
                 </label>
                 <p className="text-[11px] leading-5 text-zinc-500">
-                  Variables: {template.allowedVariables.map((name) => `{{${name}}}`).join(", ")}
+                  {m.variables}{template.allowedVariables.map((name) => `{{${name}}}`).join(", ")}
                 </p>
               </div>
               <div className="mt-4 flex flex-wrap justify-end gap-2">
@@ -222,7 +228,7 @@ export function AdminSlackTemplatesPanel() {
                   className="inline-flex items-center gap-2 rounded-xl border border-emerald-500/30 px-3 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-50"
                 >
                   {testingKey === template.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                  Send test
+                  {m.sendTest}
                 </button>
                 <button
                   type="button"
@@ -231,7 +237,7 @@ export function AdminSlackTemplatesPanel() {
                   className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50"
                 >
                   {savingKey === template.key ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                  Save
+                  {m.save}
                 </button>
               </div>
             </article>

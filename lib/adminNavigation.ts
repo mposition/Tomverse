@@ -573,8 +573,9 @@ const matchesRoute = (pathname: string, href: string) =>
 export const findAdminNavItem = (pathname: string): AdminNavItem | null =>
   ADMIN_NAVIGATION.find((item) => matchesRoute(pathname, item.href)) || null;
 
-const ADMIN_DETAIL_ROUTES = [
+export const ADMIN_DETAIL_ROUTES = [
   {
+    id: "user-detail",
     pattern: /^\/admin\/users\/[^/]+$/,
     label: "Customer detail",
     description: "Account timeline, billing, credits, and security controls",
@@ -583,6 +584,7 @@ const ADMIN_DETAIL_ROUTES = [
     group: "Customers" as const,
   },
   {
+    id: "campaign-detail",
     pattern: /^\/admin\/email-campaigns\/[^/]+$/,
     label: "Campaign detail",
     description:
@@ -592,6 +594,7 @@ const ADMIN_DETAIL_ROUTES = [
     group: "Operations" as const,
   },
   {
+    id: "provider-detail",
     pattern: /^\/admin\/providers\/[^/]+$/,
     label: "Provider detail",
     description: "Usage diagnostics, billing, fallback, and recent errors",
