@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -15,10 +15,12 @@ import {
   ADMIN_LOCALE_COOKIE_MAX_AGE,
   DEFAULT_ADMIN_LOCALE,
   adminMessagesFor,
+  isAdminLocale,
   type AdminLocale,
   type AdminMessageCatalog,
   type AdminMessageShape,
 } from "@/lib/adminLocale";
+import { isLanguage } from "@/lib/language";
 
 type AdminLocaleContextValue = {
   locale: AdminLocale;
@@ -33,16 +35,26 @@ const AdminLocaleContext = createContext<AdminLocaleContextValue>({
   setLocale: () => {},
 });
 
-/** The cookies the server's locale resolution reads. */
-const LOCALE_COOKIE_NAMES = [ADMIN_LOCALE_COOKIE, "tomverse_lang"];
-
-const localeCookieSnapshot = () =>
+const readCookie = (name: string) =>
   document.cookie
     .split(";")
     .map((part) => part.trim())
-    .filter((part) => LOCALE_COOKIE_NAMES.some((name) => part.startsWith(`${name}=`)))
-    .sort()
-    .join(";");
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1) ?? null;
+
+/**
+ * The locale the server would resolve now, as far as the browser can tell.
+ *
+ * The same precedence as `resolveAdminLocale()` for the two inputs a browser
+ * can read. The third, `Accept-Language`, is not visible here, so with neither
+ * cookie set the answer is unknown and nothing is refreshed.
+ */
+const localeFromCookies = (): AdminLocale | null => {
+  const consoleChoice = readCookie(ADMIN_LOCALE_COOKIE);
+  if (isAdminLocale(consoleChoice)) return consoleChoice;
+  const product = readCookie("tomverse_lang");
+  return isLanguage(product) ? (product === "ko" ? "ko" : "en") : null;
+};
 
 /**
  * The console's language, exactly as the server resolved it for this render.
@@ -55,10 +67,15 @@ const localeCookieSnapshot = () =>
  * locally: choosing one writes the cookie and refreshes the route, and the new
  * value arrives as a prop with the server components that use it.
  *
- * A layout is not re-rendered by client navigation, so a cookie changed in
- * another tab would leave this shell on the old language while the next page's
- * server components read the new one. When the tab regains focus and the
- * locale cookies differ from what this render was made with, it refreshes.
+ * A layout is not re-rendered by client navigation, so a locale cookie that
+ * changes after this render would leave the shell on the old language while
+ * the next page's server components read the new one. The cookie can change in
+ * another tab, or in this one: the product's `LanguageProvider`, mounted above
+ * the console, persists a restored or detected language to `tomverse_lang`
+ * after hydration. So shortly after mount, after every navigation and whenever
+ * the tab regains focus, the locale the cookies now imply is compared with the
+ * one on screen, and a difference refreshes the route. A cookie rewritten with
+ * the value it already implied -- the ordinary page load -- refreshes nothing.
  */
 export function AdminLocaleProvider({
   locale,
@@ -68,22 +85,29 @@ export function AdminLocaleProvider({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [pending, startTransition] = useTransition();
-  const renderedCookies = useRef<string | null>(null);
+  // The locale a refresh was last requested for, so a server that answers
+  // differently from the cookies' implication is asked once, not in a loop.
+  const requested = useRef<AdminLocale | null>(null);
+
+  const refreshIfCookiesMoved = useCallback(() => {
+    const implied = localeFromCookies();
+    if (!implied || implied === locale || implied === requested.current) return;
+    requested.current = implied;
+    startTransition(() => router.refresh());
+  }, [locale, router]);
 
   useEffect(() => {
-    // Recorded after every server render of this provider, so the comparison
-    // is always against the cookies the current `locale` came from.
-    renderedCookies.current = localeCookieSnapshot();
-  }, [locale]);
+    // Deferred past `LanguageProvider`'s own zero-delay restore, which is the
+    // write this is waiting for on first load.
+    const timer = window.setTimeout(refreshIfCookiesMoved, 250);
+    return () => window.clearTimeout(timer);
+  }, [pathname, refreshIfCookiesMoved]);
 
   useEffect(() => {
     const onReturn = () => {
-      if (document.visibilityState !== "visible") return;
-      if (renderedCookies.current === null) return;
-      if (localeCookieSnapshot() === renderedCookies.current) return;
-      renderedCookies.current = localeCookieSnapshot();
-      startTransition(() => router.refresh());
+      if (document.visibilityState === "visible") refreshIfCookiesMoved();
     };
     window.addEventListener("focus", onReturn);
     document.addEventListener("visibilitychange", onReturn);
@@ -91,7 +115,7 @@ export function AdminLocaleProvider({
       window.removeEventListener("focus", onReturn);
       document.removeEventListener("visibilitychange", onReturn);
     };
-  }, [router]);
+  }, [refreshIfCookiesMoved]);
 
   const setLocale = useCallback(
     (next: AdminLocale) => {

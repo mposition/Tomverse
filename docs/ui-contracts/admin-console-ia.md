@@ -141,9 +141,12 @@ console has no copy for (French, German, …) reads English.
    the same function. Nothing in the console picks a language in the browser,
    either after hydration or optimistically on a click — either would leave a
    server-rendered tab strip in one language beside a client-rendered panel in
-   the other. A layout is not re-rendered by client navigation, so when the tab
-   regains focus and the locale cookies differ from the ones the current render
-   was made with, the provider refreshes the route. Router prefetches skip the
+   the other. A layout is not re-rendered by client navigation, and a locale
+   cookie can change after the shell rendered — in another tab, or in this one
+   when the product's `LanguageProvider` persists a restored language after
+   hydration. Shortly after mount, after each navigation and on focus, the
+   provider compares the locale the cookies imply with the one on screen and
+   refreshes the route when they differ. Router prefetches skip the
    proxy's language headers, so `getAdminLocale()` reads the raw request
    instead of those headers.
 2. **Copy lives in `lib/adminMessages/<namespace>.ts`, declared with
