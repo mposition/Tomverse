@@ -4,16 +4,6 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminPlatformSettingsMessages = defineAdminMessages({
   en: {
     toast: {
-      packageImportSignIn:
-        "Sign in again before changing this flag. Use the link at the top of this screen.",
-      rationaleRequired: "Say why this is changing. It goes on the audit row.",
-      refused: "Refused. This needs ops:write.",
-      packageImportUnchanged: (after: string | undefined) =>
-        `Recorded. It was already ${after}.`,
-      packageImportChanged: (after: string | undefined, before: string) =>
-        `Package import is now ${after}. Recorded with before=${before}.`,
-      noBefore: "(none)",
-      packageImportUndelivered: "The change could not be delivered.",
       reloaded: "Platform settings reloaded. The form now matches what is stored.",
       reloadFailed:
         "Platform settings could not be reloaded, so the form still shows the values it had. Retry before editing.",
@@ -84,17 +74,6 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
         "Guests who are not signed in always get three models together: GPT · Claude · Gemini. The model chosen here only decides which of them goes first (the leading slot), and shapes a guest's first experience.",
       leadingEngine: "Leading engine",
     },
-    packageImport: {
-      eyebrow: "Its own control, not part of the save above",
-      title: "External assistant package import",
-      description:
-        "Enabling and rolling back take the same path, and each press writes one audit row carrying the value on both sides of it, who pressed it, when, and the reason below. Needs ops:write and a session that has not aged out (docs/policy/assistant-package-import.md §12.2.1).",
-      currentlyEnabled: "Currently enabled",
-      currentlyDisabled: "Currently disabled",
-      rationale: "Why this is changing",
-      enable: "Enable",
-      rollBack: "Roll back",
-    },
     selection: {
       eyebrow: "Current selection",
       eligibility: "Only enabled guest-accessible Standard models can be used as the guest default.",
@@ -105,16 +84,6 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
   },
   ko: {
     toast: {
-      packageImportSignIn:
-        "이 flag를 바꾸기 전에 다시 로그인하세요. 화면 상단의 링크를 사용하세요.",
-      rationaleRequired: "변경 사유를 입력하세요. 감사 로그 행에 기록됩니다.",
-      refused: "거부되었습니다. ops:write 권한이 필요합니다.",
-      packageImportUnchanged: (after: string | undefined) =>
-        `기록했습니다. 이미 ${after} 상태였습니다.`,
-      packageImportChanged: (after: string | undefined, before: string) =>
-        `패키지 가져오기가 이제 ${after} 상태입니다. before=${before}로 기록했습니다.`,
-      noBefore: "(없음)",
-      packageImportUndelivered: "변경 요청을 전달하지 못했습니다.",
       reloaded: "플랫폼 설정을 다시 불러왔습니다. 이제 양식이 저장된 값과 같습니다.",
       reloadFailed:
         "플랫폼 설정을 다시 불러오지 못해 양식에는 이전 값이 그대로 표시됩니다. 편집하기 전에 다시 시도하세요.",
@@ -184,17 +153,6 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       description:
         "로그인하지 않은 게스트에게는 항상 GPT · Claude · Gemini 3개 모델이 함께 제공됩니다. 여기서 고르는 모델은 그중 어느 모델을 맨 앞(리딩 슬롯)에 둘지만 결정하며, 게스트 첫 사용 경험에 영향을 줍니다.",
       leadingEngine: "리딩 엔진",
-    },
-    packageImport: {
-      eyebrow: "위의 저장과 별개인 전용 제어",
-      title: "외부 어시스턴트 패키지 가져오기",
-      description:
-        "켜기와 롤백은 같은 경로를 거치며, 누를 때마다 변경 전후 값, 누른 사람, 시각, 아래 사유를 담은 감사 로그 행이 하나씩 기록됩니다. ops:write 권한과 만료되지 않은 세션이 필요합니다(docs/policy/assistant-package-import.md §12.2.1).",
-      currentlyEnabled: "현재 켜짐",
-      currentlyDisabled: "현재 꺼짐",
-      rationale: "변경 사유",
-      enable: "켜기",
-      rollBack: "롤백",
     },
     selection: {
       eyebrow: "현재 선택",
