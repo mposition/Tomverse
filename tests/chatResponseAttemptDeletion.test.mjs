@@ -3,9 +3,10 @@ import test from "node:test";
 
 import { deleteChatResponseAttemptsForModelHistory } from "../lib/chatResponseAttemptDeletion.ts";
 
-test("per-model history deletion scopes message and active-attribution matches", async () => {
+test("per-model history deletion blocks conversation-wide active work then scopes terminal cleanup", async () => {
   const calls = [];
   const tx = {
+    $executeRaw: async () => { calls.push(["sql"]); return 1; },
     message: {
       findMany: async (input) => {
         calls.push(["find", input]);
@@ -13,10 +14,14 @@ test("per-model history deletion scopes message and active-attribution matches",
       },
     },
     chatResponseAttempt: {
+      findFirst: async (input) => { calls.push(["active", input]); return null; },
       deleteMany: async (input) => {
         calls.push(["delete", input]);
         return { count: 2 };
       },
+    },
+    conversation: {
+      updateMany: async (input) => { calls.push(["fence", input]); return { count: 1 }; },
     },
   };
 
@@ -27,7 +32,19 @@ test("per-model history deletion scopes message and active-attribution matches",
   });
 
   assert.equal(count, 2);
-  assert.deepEqual(calls[0][1], {
+  assert.equal(calls[0][0], "sql");
+  assert.equal(calls[1][0], "sql");
+  assert.equal(calls[2][0], "active");
+  assert.deepEqual(calls[2][1], {
+    where: {
+      userId: "user_1",
+      conversationId: "conversation_1",
+      status: { in: ["claimed", "streaming"] },
+    },
+    select: { assistantMessageId: true },
+  });
+  assert.equal(calls[3][0], "fence");
+  assert.deepEqual(calls[4][1], {
     where: {
       conversationId: "conversation_1",
       modelId: "provider/model-a",
@@ -35,7 +52,7 @@ test("per-model history deletion scopes message and active-attribution matches",
     },
     select: { id: true },
   });
-  assert.deepEqual(calls[1][1].where, {
+  assert.deepEqual(calls[5][1].where, {
     userId: "user_1",
     conversationId: "conversation_1",
     OR: [
@@ -45,22 +62,25 @@ test("per-model history deletion scopes message and active-attribution matches",
     ],
   });
   assert.deepEqual(
-    calls[1][1].where.OR[0].assistantMessageId.in.includes("assistant_unrelated"),
+    calls[5][1].where.OR[0].assistantMessageId.in.includes("assistant_unrelated"),
     false
   );
 });
 
-test("a no-message attempt is removed without restricting its status", async () => {
+test("a terminal no-message attempt is removed after the active precheck", async () => {
   let deletionWhere;
   const count = await deleteChatResponseAttemptsForModelHistory(
     {
+      $executeRaw: async () => 1,
       message: { findMany: async () => [] },
       chatResponseAttempt: {
+        findFirst: async () => null,
         deleteMany: async (input) => {
           deletionWhere = input.where;
           return { count: 1 };
         },
       },
+      conversation: { updateMany: async () => ({ count: 1 }) },
     },
     { userId: "user_1", conversationId: "conversation_1", modelId: "provider/model-a" }
   );
@@ -70,6 +90,57 @@ test("a no-message attempt is removed without restricting its status", async () 
     { actualModelId: null, requestedModelId: "provider/model-a" },
   ]);
   assert.equal(Object.hasOwn(deletionWhere, "status"), false);
+});
+
+test("an active attempt from any model refuses clear before fencing or deletion", async () => {
+  const calls = [];
+  await assert.rejects(
+    deleteChatResponseAttemptsForModelHistory(
+      {
+        $executeRaw: async () => { calls.push("sql"); return 1; },
+        message: { findMany: async () => { calls.push("messages"); return []; } },
+        chatResponseAttempt: {
+          findFirst: async (input) => {
+            calls.push("active");
+            assert.deepEqual(input.where, {
+              userId: "user_1",
+              conversationId: "conversation_1",
+              status: { in: ["claimed", "streaming"] },
+            });
+            return { assistantMessageId: "assistant_active_orphan" };
+          },
+          deleteMany: async () => { calls.push("delete"); return { count: 1 }; },
+        },
+        conversation: {
+          updateMany: async () => { calls.push("fence"); return { count: 1 }; },
+        },
+      },
+      {
+        userId: "user_1",
+        conversationId: "conversation_1",
+        modelId: "provider/model-a",
+      }
+    ),
+    (error) => error?.code === "CHAT_RESPONSE_IN_PROGRESS"
+  );
+  assert.deepEqual(calls, ["sql", "sql", "active"]);
+});
+
+test("expired active rows are reconciled before the deletion precheck", async () => {
+  const calls = [];
+  await deleteChatResponseAttemptsForModelHistory(
+    {
+      $executeRaw: async () => { calls.push("sql"); return 1; },
+      message: { findMany: async () => [] },
+      chatResponseAttempt: {
+        findFirst: async () => { calls.push("active"); return null; },
+        deleteMany: async () => ({ count: 1 }),
+      },
+      conversation: { updateMany: async () => ({ count: 1 }) },
+    },
+    { userId: "user_1", conversationId: "conversation_1", modelId: "provider/model-a" }
+  );
+  assert.deepEqual(calls.slice(0, 3), ["sql", "sql", "active"]);
 });
 
 test("the message route invokes attempt cleanup inside its existing transaction", () => {

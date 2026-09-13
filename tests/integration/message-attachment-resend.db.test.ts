@@ -31,15 +31,18 @@ let bindMessageAttachments: typeof import("@/lib/messageAttachmentStorage").bind
 let accountAttachmentPrefix: typeof import("@/lib/messageAttachmentStorage").accountAttachmentPrefix;
 let drainMessageAttachmentCleanupQueue: typeof import("@/lib/messageAttachmentStorage").drainMessageAttachmentCleanupQueue;
 let saveMessagesWithAttachmentReferences: typeof import("@/lib/messageAttachmentResend").saveMessagesWithAttachmentReferences;
+let consumeChatDraftForMessage: typeof import("@/lib/chatDraftMessageConsume").consumeChatDraftForMessage;
+let preflightChatDraftForMessage: typeof import("@/lib/chatDraftMessageConsume").preflightChatDraftForMessage;
 before(async () => {
   assert.equal(process.env.NODE_ENV, "test", "Destructive fixture requires the isolated test environment.");
   ({ prisma } = await import("@/lib/prisma"));
   ({ bindMessageAttachments, accountAttachmentPrefix, drainMessageAttachmentCleanupQueue } = await import("@/lib/messageAttachmentStorage"));
   ({ saveMessagesWithAttachmentReferences } = await import("@/lib/messageAttachmentResend"));
+  ({ consumeChatDraftForMessage, preflightChatDraftForMessage } = await import("@/lib/chatDraftMessageConsume"));
 });
 
 beforeEach(async () => {
-  await prisma.$executeRawUnsafe('TRUNCATE TABLE "MessageAttachmentCleanup", "MessageAttachment", "MessageAttachmentUpload", "Message", "Conversation", "User" RESTART IDENTITY CASCADE');
+  await prisma.$executeRawUnsafe('TRUNCATE TABLE "ChatComposerDraft", "MessageAttachmentCleanup", "MessageAttachment", "MessageAttachmentUpload", "Message", "Conversation", "User" RESTART IDENTITY CASCADE');
   objects.clear(); reads = []; writes = []; deletes = []; readFailure = null; writeHook = null;
 });
 async function seed() {
@@ -162,6 +165,61 @@ test("capacity refusal happens before storage writes; authoritative transaction 
   await assert.rejects(saveMessagesWithAttachmentReferences({ ...input, beforeCreate: async () => { if (++checks === 2) throw new Error("DB refusal"); } }), /DB refusal/);
   assert.equal(await prisma.message.count({ where: { id: messageId } }), 0);
   assert.deepEqual(await pendingKeys(), writes); await drainMessageAttachmentCleanupQueue(); await assertOriginal(objectKey);
+});
+test("draft CAS and provenance mismatches fail before object I/O while a matching consume remains atomic", async () => {
+  const { input, source, messageId } = await seed();
+  const message = input.messages[0]!;
+  await prisma.chatComposerDraft.create({ data: {
+    userId: input.userId,
+    scopeKey: input.conversationId,
+    conversationId: input.conversationId,
+    text: message.content,
+    attachmentReferences: [{ attachmentId: source.id }],
+    revision: 1,
+  } });
+  const save = (
+    candidate: typeof message,
+    expectedRevision = 1
+  ) => saveMessagesWithAttachmentReferences({
+    ...input,
+    messages: [candidate],
+    beforePrepare: () => preflightChatDraftForMessage({
+      userId: input.userId,
+      conversationId: input.conversationId,
+      draftConsume: { scopeKey: input.conversationId, expectedRevision, messageId },
+      message: candidate,
+    }),
+    beforeCommit: (tx) => consumeChatDraftForMessage(tx, {
+      userId: input.userId,
+      conversationId: input.conversationId,
+      draftConsume: { scopeKey: input.conversationId, expectedRevision, messageId },
+      message: candidate,
+    }),
+  });
+
+  await assert.rejects(save(message, 2), { code: "MESSAGE_SAVE_CONFLICT", status: 409 });
+  await assert.rejects(save({ ...message, content: "altered" }), {
+    code: "MESSAGE_SAVE_CONFLICT",
+    status: 409,
+  });
+  await assert.rejects(save({
+    ...message,
+    attachmentReferences: [{ attachmentId: randomUUID() }],
+  }), { code: "MESSAGE_SAVE_CONFLICT", status: 409 });
+  assert.deepEqual(reads, []);
+  assert.deepEqual(writes, []);
+  assert.equal(await prisma.message.count({ where: { id: messageId } }), 0);
+  assert.equal(await prisma.chatComposerDraft.count({
+    where: { userId: input.userId, scopeKey: input.conversationId },
+  }), 1);
+
+  assert.deepEqual(await save(message), { count: 1 });
+  assert.equal(reads.length, 1);
+  assert.equal(writes.length, 1);
+  assert.equal(await prisma.message.count({ where: { id: messageId } }), 1);
+  assert.equal(await prisma.chatComposerDraft.count({
+    where: { userId: input.userId, scopeKey: input.conversationId },
+  }), 0);
 });
 test("source availability is checked again inside the binding transaction", async () => {
   const { input, source, messageId } = await seed();

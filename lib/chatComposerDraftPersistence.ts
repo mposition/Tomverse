@@ -7,6 +7,7 @@ import {
   decideDraftCas,
   draftConversationId,
   parseStoredDraftReferences,
+  publicChatComposerDraft,
   type ChatComposerDraftPut,
 } from "@/lib/chatComposerDraftCore";
 import {
@@ -52,6 +53,56 @@ export async function readChatComposerDraft(userId: string, scopeKey: string) {
     select: DRAFT_SELECT,
   });
   return row ? normalizeDraftRow(row) : null;
+}
+
+export async function readPublicChatComposerDraft(input: {
+  userId: string;
+  userEmail: string | null | undefined;
+  scopeKey: string;
+}) {
+  const draft = await readChatComposerDraft(input.userId, input.scopeKey);
+  if (!draft) return null;
+  return publicChatComposerDraftWithAttachments({ ...input, draft });
+}
+
+export async function publicChatComposerDraftWithAttachments(input: {
+  userId: string;
+  userEmail: string | null | undefined;
+  draft: ReturnType<typeof normalizeDraftRow>;
+}) {
+  const { draft } = input;
+  if (draft.attachmentReferences.length === 0) {
+    return { ...publicChatComposerDraft(draft), attachments: [] };
+  }
+  if (!input.userEmail) {
+    throw new Error("CHAT_DRAFT_ATTACHMENT_ACCOUNT_ADDRESS_REQUIRED");
+  }
+  const resolved = await resolveMessageAttachmentReferences({
+    userId: input.userId,
+    ownPrefix: accountAttachmentPrefix(input.userEmail),
+    conversationId: draft.conversationId,
+    references: draft.attachmentReferences,
+  });
+  return {
+    ...publicChatComposerDraft(draft),
+    attachments: resolved.map((attachment, ordinal) => ({
+      id: attachment.attachmentId ?? attachment.uploadId!,
+      ordinal,
+      name: attachment.name,
+      mediaType: attachment.mediaType,
+      size: attachment.size,
+      kind: attachment.kind,
+      ...(attachment.attachmentId
+        ? { attachmentId: attachment.attachmentId }
+        : { uploadId: attachment.uploadId! }),
+      ...(attachment.unavailableAt
+        ? { unavailableAt: attachment.unavailableAt.toISOString() }
+        : {}),
+      ...(attachment.unavailableReason
+        ? { unavailableReason: attachment.unavailableReason }
+        : {}),
+    })),
+  };
 }
 
 async function validateAttachmentOwnership(input: {
@@ -116,7 +167,7 @@ export async function writeChatComposerDraft(input: {
     }
   }
 
-  const updated = await prisma.chatComposerDraft.updateMany({
+  const updated = await prisma.chatComposerDraft.updateManyAndReturn({
     where: {
       userId: input.userId,
       scopeKey: input.scopeKey,
@@ -127,8 +178,9 @@ export async function writeChatComposerDraft(input: {
       attachmentReferences,
       revision: decision.nextRevision,
     },
+    select: DRAFT_SELECT,
   });
-  if (updated.count !== 1) {
+  if (updated.length !== 1) {
     const raced = await prisma.chatComposerDraft.findUnique({
       where: { userId_scopeKey: { userId: input.userId, scopeKey: input.scopeKey } },
       select: { revision: true },
@@ -136,11 +188,7 @@ export async function writeChatComposerDraft(input: {
     throw new ChatDraftRevisionConflictError(raced?.revision ?? null);
   }
 
-  const row = await prisma.chatComposerDraft.findUniqueOrThrow({
-    where: { userId_scopeKey: { userId: input.userId, scopeKey: input.scopeKey } },
-    select: DRAFT_SELECT,
-  });
-  return normalizeDraftRow(row);
+  return normalizeDraftRow(updated[0]!);
 }
 
 export async function deleteChatComposerDraft(input: {

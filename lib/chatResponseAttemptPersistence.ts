@@ -44,6 +44,36 @@ const ATTEMPT_SELECT = {
   updatedAt: true,
 } as const;
 
+type AttemptDb = Pick<
+  Prisma.TransactionClient,
+  "chatResponseAttempt" | "conversation" | "$executeRaw" | "$queryRaw"
+>;
+
+const positiveInteger = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+export const CHAT_RESPONSE_ATTEMPT_STORAGE_LIMITS = {
+  perConversation: () =>
+    positiveInteger(process.env.CHAT_RESPONSE_ATTEMPTS_PER_CONVERSATION, 2_000),
+  perUser: () => positiveInteger(process.env.CHAT_RESPONSE_ATTEMPTS_PER_USER, 10_000),
+};
+
+export const chatRecoveryConversationLockKey = (userId: string, conversationId: string) =>
+  `chat-recovery:${userId}:${conversationId}`;
+
+export async function lockChatRecoveryConversation(
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">,
+  userId: string,
+  conversationId: string
+) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${chatRecoveryConversationLockKey(
+    userId,
+    conversationId
+  )}))`;
+}
+
 export class ChatAttemptIdentityConflictError extends Error {
   readonly code = CHAT_ATTEMPT_ID_REUSED;
 
@@ -71,6 +101,16 @@ export class ChatAttemptScopeError extends Error {
   }
 }
 
+export class ChatAttemptCapacityError extends Error {
+  readonly code = "CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED";
+  readonly status = 409;
+
+  constructor() {
+    super("Chat response recovery storage quota exceeded.");
+    this.name = "ChatAttemptCapacityError";
+  }
+}
+
 const normalizeAttempt = (row: Omit<ChatResponseAttemptRecord, "status" | "finishReason" | "failureCode"> & {
   status: string;
   finishReason: string | null;
@@ -84,12 +124,120 @@ const normalizeAttempt = (row: Omit<ChatResponseAttemptRecord, "status" | "finis
     row.failureCode === null ? null : chatResponseAttemptFailureCodeSchema.parse(row.failureCode),
 });
 
-export async function readChatResponseAttempt(userId: string, assistantMessageId: string) {
-  const row = await prisma.chatResponseAttempt.findFirst({
-    where: { assistantMessageId, userId },
+async function readChatResponseAttemptFrom(
+  db: AttemptDb,
+  userId: string,
+  assistantMessageId: string,
+  expectedConversationId?: string
+) {
+  const row = await db.chatResponseAttempt.findFirst({
+    where: {
+      assistantMessageId,
+      userId,
+      ...(expectedConversationId === undefined
+        ? {}
+        : { conversationId: expectedConversationId }),
+    },
     select: ATTEMPT_SELECT,
   });
   return row ? normalizeAttempt(row) : null;
+}
+
+/**
+ * A dead worker cannot leave polling in an active state forever. The database
+ * clock is authoritative, and the single conditional UPDATE makes concurrent
+ * pollers converge on one terminal revision.
+ */
+export async function reconcileExpiredChatResponseAttempt(
+  userId: string,
+  assistantMessageId: string,
+  expectedConversationId?: string
+) {
+  const conversationGuard = expectedConversationId === undefined
+    ? Prisma.empty
+    : Prisma.sql`AND "conversationId" = ${expectedConversationId}`;
+  await prisma.$executeRaw(
+    Prisma.sql`
+      UPDATE "ChatResponseAttempt"
+      SET "status" = 'failed',
+          "checkpointRevision" = "checkpointRevision" + 1,
+          "finishReason" = 'error',
+          "failureCode" = 'worker_lease_expired',
+          "terminalAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+          "updatedAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+      WHERE "assistantMessageId" = ${assistantMessageId}
+        AND "userId" = ${userId}
+        ${conversationGuard}
+        AND "status" IN ('claimed', 'streaming')
+        AND "leaseExpiresAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+        AND "checkpointRevision" < 2147483647
+    `
+  );
+}
+
+export async function readChatResponseAttempt(
+  userId: string,
+  assistantMessageId: string,
+  expectedConversationId?: string
+) {
+  await reconcileExpiredChatResponseAttempt(
+    userId,
+    assistantMessageId,
+    expectedConversationId
+  );
+  return readChatResponseAttemptFrom(
+    prisma,
+    userId,
+    assistantMessageId,
+    expectedConversationId
+  );
+}
+
+/** Ownership-scoped, non-mutating lookup used before conversation unlock. */
+export async function peekChatResponseAttempt(userId: string, assistantMessageId: string) {
+  return readChatResponseAttemptFrom(prisma, userId, assistantMessageId);
+}
+
+export async function listChatResponseAttempts(input: {
+  userId: string;
+  conversationId: string;
+  limit?: number;
+}) {
+  const limit = Math.max(1, Math.min(input.limit ?? 50, 50));
+  await prisma.$executeRaw(
+    Prisma.sql`
+      UPDATE "ChatResponseAttempt"
+      SET "status" = 'failed',
+          "checkpointRevision" = "checkpointRevision" + 1,
+          "finishReason" = 'error',
+          "failureCode" = 'worker_lease_expired',
+          "terminalAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'),
+          "updatedAt" = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+      WHERE "userId" = ${input.userId}
+        AND "conversationId" = ${input.conversationId}
+        AND "status" IN ('claimed', 'streaming')
+        AND "leaseExpiresAt" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
+        AND "checkpointRevision" < 2147483647
+    `
+  );
+  const rows = await prisma.chatResponseAttempt.findMany({
+    where: {
+      userId: input.userId,
+      conversationId: input.conversationId,
+      // A context-consumption loser never reached credit reservation or a
+      // provider. It stays directly queryable for security/audit recovery but
+      // is not a phantom assistant turn in conversation discovery.
+      NOT: {
+        status: "failed",
+        failureCode: "request_refused",
+        partialContent: "",
+      },
+    },
+    orderBy: [{ updatedAt: "desc" }, { assistantMessageId: "desc" }],
+    take: limit,
+    select: ATTEMPT_SELECT,
+  });
+  return rows.map(normalizeAttempt);
 }
 
 /**
@@ -103,9 +251,13 @@ export async function claimChatResponseAttempt(input: {
   sourceUserMessageId: string;
   requestedModelId: string;
   requestPayloadDigest: string;
+  expectedRecoveryEpoch: number;
   ownerId: string;
   leaseExpiresAt: Date;
 }): Promise<{ disposition: "claimed" | "reattach"; attempt: ChatResponseAttemptRecord }> {
+  if (!Number.isInteger(input.expectedRecoveryEpoch) || input.expectedRecoveryEpoch < 0) {
+    throw new ChatAttemptCasError("recovery_epoch_invalid");
+  }
   const parsed = chatResponseAttemptClaimSchema.parse({
     assistantMessageId: input.assistantMessageId,
     conversationId: input.conversationId,
@@ -118,63 +270,83 @@ export async function claimChatResponseAttempt(input: {
   const fingerprint = chatResponseAttemptFingerprint(parsed);
   const identity = { ...parsed, userId: input.userId, fingerprint };
 
-  const existing = await prisma.chatResponseAttempt.findFirst({
-    where: { assistantMessageId: parsed.assistantMessageId, userId: input.userId },
-    select: ATTEMPT_SELECT,
-  });
-  const decision = decideAttemptClaim(existing, identity);
-  if (decision.action === "conflict") throw new ChatAttemptIdentityConflictError();
-  if (decision.action === "reattach" && existing) {
-    return { disposition: "reattach", attempt: normalizeAttempt(existing) };
-  }
-
-  const scoped = await prisma.conversation.findFirst({
-    where: {
-      id: parsed.conversationId,
-      userId: input.userId,
-      kind: "chat",
-      productKey: "chat",
-      messages: { some: { id: parsed.sourceUserMessageId, role: "user" } },
-    },
-    select: { id: true },
-  });
-  if (!scoped) throw new ChatAttemptScopeError();
-
-  // A replay reads or conflicts with the existing identity irrespective of
-  // the new caller's proposed lease. Lease validity governs creation only.
-  const lease = validateAttemptLease({ now: new Date(), leaseExpiresAt: parsed.leaseExpiresAt });
-  if (lease !== "valid") {
-    throw new ChatAttemptCasError(lease);
-  }
-
-  try {
-    const created = await prisma.chatResponseAttempt.create({
-      data: {
-        assistantMessageId: parsed.assistantMessageId,
-        userId: input.userId,
-        conversationId: parsed.conversationId,
-        sourceUserMessageId: parsed.sourceUserMessageId,
-        fingerprint,
-        requestedModelId: parsed.requestedModelId,
-        ownerId: parsed.ownerId,
-        leaseExpiresAt: parsed.leaseExpiresAt,
-      },
-      select: ATTEMPT_SELECT,
-    });
-    return { disposition: "claimed", attempt: normalizeAttempt(created) };
-  } catch (error) {
-    if (!(error && typeof error === "object" && "code" in error && error.code === "P2002")) {
-      throw error;
-    }
-    const raced = await prisma.chatResponseAttempt.findFirst({
+  return prisma.$transaction(async (tx) => {
+    // Serialize the account-wide count before the narrower conversation lock.
+    // Existing identities are checked after both locks and may always
+    // reattach, even when the account has since reached its creation cap.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${
+      `chat-response-attempts:${input.userId}`
+    }))`;
+    await lockChatRecoveryConversation(tx, input.userId, parsed.conversationId);
+    const existing = await tx.chatResponseAttempt.findFirst({
       where: { assistantMessageId: parsed.assistantMessageId, userId: input.userId },
       select: ATTEMPT_SELECT,
     });
-    if (decideAttemptClaim(raced, identity).action !== "reattach" || !raced) {
+    const decision = decideAttemptClaim(existing, identity);
+    if (decision.action === "conflict") throw new ChatAttemptIdentityConflictError();
+    if (decision.action === "reattach" && existing) {
+      return { disposition: "reattach" as const, attempt: normalizeAttempt(existing) };
+    }
+
+    const scoped = await tx.conversation.findFirst({
+      where: {
+        id: parsed.conversationId,
+        userId: input.userId,
+        kind: "chat",
+        productKey: "chat",
+        messages: { some: { id: parsed.sourceUserMessageId, role: "user" } },
+      },
+      select: { id: true, chatRecoveryEpoch: true },
+    });
+    if (!scoped) throw new ChatAttemptScopeError();
+    if (scoped.chatRecoveryEpoch !== input.expectedRecoveryEpoch) {
+      throw new ChatAttemptCasError("recovery_epoch_changed");
+    }
+
+    const [conversationAttempts, userAttempts] = await Promise.all([
+      tx.chatResponseAttempt.count({
+        where: { userId: input.userId, conversationId: parsed.conversationId },
+      }),
+      tx.chatResponseAttempt.count({ where: { userId: input.userId } }),
+    ]);
+    if (
+      conversationAttempts >= CHAT_RESPONSE_ATTEMPT_STORAGE_LIMITS.perConversation() ||
+      userAttempts >= CHAT_RESPONSE_ATTEMPT_STORAGE_LIMITS.perUser()
+    ) {
+      throw new ChatAttemptCapacityError();
+    }
+
+    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
+      SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AS "now"
+    `;
+    const lease = validateAttemptLease({
+      now: clock?.now ?? new Date(),
+      leaseExpiresAt: parsed.leaseExpiresAt,
+    });
+    if (lease !== "valid") throw new ChatAttemptCasError(lease);
+
+    try {
+      const created = await tx.chatResponseAttempt.create({
+        data: {
+          assistantMessageId: parsed.assistantMessageId,
+          userId: input.userId,
+          conversationId: parsed.conversationId,
+          sourceUserMessageId: parsed.sourceUserMessageId,
+          fingerprint,
+          requestedModelId: parsed.requestedModelId,
+          ownerId: parsed.ownerId,
+          leaseExpiresAt: parsed.leaseExpiresAt,
+        },
+        select: ATTEMPT_SELECT,
+      });
+      return { disposition: "claimed" as const, attempt: normalizeAttempt(created) };
+    } catch (error) {
+      if (!(error && typeof error === "object" && "code" in error && error.code === "P2002")) {
+        throw error;
+      }
       throw new ChatAttemptIdentityConflictError();
     }
-    return { disposition: "reattach", attempt: normalizeAttempt(raced) };
-  }
+  });
 }
 
 export async function checkpointChatResponseAttempt(input: {
@@ -187,9 +359,9 @@ export async function checkpointChatResponseAttempt(input: {
   provider?: string | null;
   leaseExpiresAt?: Date;
   now?: Date;
-}) {
+}, db: AttemptDb = prisma) {
   const now = input.now ?? new Date();
-  const current = await readChatResponseAttempt(input.userId, input.assistantMessageId);
+  const current = await readChatResponseAttemptFrom(db, input.userId, input.assistantMessageId);
   if (!current) throw new ChatAttemptCasError("revision_conflict");
   const decision = decideAttemptCheckpoint({
     ...current,
@@ -223,7 +395,7 @@ export async function checkpointChatResponseAttempt(input: {
     ? Prisma.sql`AND ${input.leaseExpiresAt} > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')
         AND ${input.leaseExpiresAt} <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '5 minutes'`
     : Prisma.empty;
-  const updated = await prisma.$executeRaw(
+  const updated = await db.$executeRaw(
     Prisma.sql`
       UPDATE "ChatResponseAttempt"
       SET ${Prisma.join(assignments)},
@@ -239,7 +411,7 @@ export async function checkpointChatResponseAttempt(input: {
     `
   );
   if (updated !== 1) throw new ChatAttemptCasError("revision_conflict");
-  return readChatResponseAttempt(input.userId, input.assistantMessageId);
+  return readChatResponseAttemptFrom(db, input.userId, input.assistantMessageId);
 }
 
 export async function terminalChatResponseAttempt(input: {
@@ -254,7 +426,7 @@ export async function terminalChatResponseAttempt(input: {
   finishReason?: ChatResponseAttemptFinishReason | null;
   failureCode?: ChatResponseAttemptFailureCode | null;
   now?: Date;
-}) {
+}, db: AttemptDb = prisma) {
   const now = input.now ?? new Date();
   const status = chatResponseAttemptTerminalStatusSchema.safeParse(input.status);
   if (!status.success) {
@@ -277,7 +449,7 @@ export async function terminalChatResponseAttempt(input: {
   ) {
     throw new ChatAttemptCasError("terminal_metadata_invalid");
   }
-  const current = await readChatResponseAttempt(input.userId, input.assistantMessageId);
+  const current = await readChatResponseAttemptFrom(db, input.userId, input.assistantMessageId);
   if (!current) throw new ChatAttemptCasError("revision_conflict");
   const decision = decideAttemptTerminal({
     ...current,
@@ -304,7 +476,7 @@ export async function terminalChatResponseAttempt(input: {
   if (input.provider !== undefined) {
     assignments.push(Prisma.sql`"provider" = ${input.provider}`);
   }
-  const updated = await prisma.$executeRaw(
+  const updated = await db.$executeRaw(
     Prisma.sql`
       UPDATE "ChatResponseAttempt"
       SET ${Prisma.join(assignments)},
@@ -319,5 +491,5 @@ export async function terminalChatResponseAttempt(input: {
     `
   );
   if (updated !== 1) throw new ChatAttemptCasError("revision_conflict");
-  return readChatResponseAttempt(input.userId, input.assistantMessageId);
+  return readChatResponseAttemptFrom(db, input.userId, input.assistantMessageId);
 }

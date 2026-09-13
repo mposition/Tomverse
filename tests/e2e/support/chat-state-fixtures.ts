@@ -288,6 +288,10 @@ function patchWindowFetchForChatStub(serializedSpec: string) {
         try {
           const rawBody = init?.body;
           const parsed = typeof rawBody === "string" ? JSON.parse(rawBody) : null;
+          const requestLog = window as typeof window & {
+            __chatModelStubRequests?: Array<Record<string, unknown>>;
+          };
+          (requestLog.__chatModelStubRequests ??= []).push(parsed ?? {});
           modelId = parsed?.modelId;
         } catch {
           modelId = undefined;

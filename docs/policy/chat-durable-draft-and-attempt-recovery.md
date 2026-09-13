@@ -1,6 +1,6 @@
 # Chat durable draft and response-attempt recovery
 
-Status: implementation contract, Phase 1 backend foundation.
+Status: implementation contract, Phase 2 durable send and recovery.
 
 This policy extends the bounded in-memory recovery in
 `docs/ops/chat-entry-transcript-recovery-v1.md`. It does not change Review,
@@ -54,6 +54,57 @@ one. There is no last-write-wins and no silent text or attachment merge. A
 mismatch returns `409 CHAT_DRAFT_REVISION_CONFLICT` and the caller must read the
 current state before choosing what to keep.
 
+Draft synchronisation failure is visible state, not a silent best-effort path.
+A failed or malformed GET, PUT, or DELETE keeps the local composer value,
+shows a retry control, and retries only the same authenticated identity and
+scope with bounded exponential backoff. Success clears the failure state;
+changing account, conversation, or `new`-Chat identity cancels the old retry.
+The retry never resolves a revision conflict or overwrites the server copy on
+the user's behalf.
+
+Consuming a draft into a persisted user Message is one transaction: the exact
+draft text and the ordered opaque reference identities are verified, the new
+Message and attachment bindings are written, and that exact draft revision is
+deleted. The browser supplies a UUID `clientRequestId`, not a database Message
+primary key. Before any Message or attachment lookup, the server derives a
+deterministic version-8 UUID from a fixed SHA-256 namespace, the owned
+conversation id, and that request id. Only the derived id is written to the
+Message and MessageAttachment tables. The response returns the explicit
+`{requestId,messageId}` mapping; only that persisted `messageId` may become the
+provider request's `sourceUserMessageId`. The receipt route repeats the same
+derivation from the request id and returns the mapping when it proves a commit.
+Consequently, copying an actual Message UUID from another account or
+conversation into `clientRequestId` cannot name, probe, or bind attachments to
+that row.
+
+An exact replay of an already-persisted derived Message id succeeds without
+deleting a newer draft. Replay equality is based on the original upload or
+source-attachment identity and order, not mutable display metadata; reusing the
+same request id with different content or provenance is a generic conflict.
+Every partial `createMany` result is accepted only when all derived rows are an
+exact, ownership-scoped replay; otherwise the transaction rolls back. The
+attachment binder independently verifies the target user Message belongs to
+the same owner and conversation, then reads back the complete ordered binding
+set before it can report success.
+For an authenticated stored-attachment save, a read-only comparison of the
+draft revision, exact text, ordered provenance, and exact Message replay runs
+before any attachment object is read or copied. That comparison grants no write
+authority: the same checks repeat in the database transaction under the
+conversation advisory lock, so a stale concurrent writer cannot commit. A
+writer that loses only after preparing a fresh copy queues that unbound copy
+through the existing attachment-cleanup path; process termination or cleanup-DB
+unavailability retains the documented objects-first residual.
+
+The pre-save replay check and provider source binding intentionally compare
+different identities. Pre-save compares `sourceAttachmentId`, the immutable
+provenance of the draft reference copied into the saved attachment. A later
+provider request compares the current bound `MessageAttachment.id` returned to
+the client and uses `sourceAttachmentId` only to validate provenance. Neither
+path substitutes mutable attachment metadata for identity.
+The first stored conversation may consume `scopeKey = new` through this same
+server transaction. This contract proves the server-side consume boundary; it
+does not infer or certify any preceding browser copy/delete sequence.
+
 ## 3. Response attempt identity
 
 `ChatResponseAttempt` is keyed by the client-selected assistant message id. Its
@@ -62,9 +113,27 @@ conversation id, persisted source user-message id, requested model id, and the
 effective request payload digest. Prompt text and attachment storage facts are
 not copied into the row.
 
+For a context bundle, the effective request digest binds the verified semantic
+context fingerprint and its bounded token fields. It deliberately excludes the
+opaque bearer token or bundle id, so two independently issued bundles with the
+same verified context cannot produce different attempt identities merely due to
+credential identity. Only the claim winner may consume the bundle. A collision
+during that consumption immediately terminalises the claimed attempt with a
+public-safe failure, performs no provider call or credit reservation, and
+requires a new assistant id and fresh context bundle for a later request.
+The empty `failed / request_refused` row remains available through its direct,
+owner-scoped attempt GET but is omitted from the conversation-detail attempt
+list, where it would otherwise appear as an assistant turn that never ran.
+
 The attempt must be claimed before any provider call or credit/provider-budget
 reservation. Creation records the owner and a lease no more than five minutes
 after the server's claim time; checkpoint lease changes have the same bound.
+Before source lookup, advisory locking, or claim, the durable POST consumes a
+separate authenticated admission bucket (`60/minute`, `5,000/day`) which also
+applies the API security layer's coarser IP bucket. Both a fresh claim and an
+exact POST reattachment consume it. This prevents recovery identity probes
+from creating unbounded database or lock work before the ordinary Chat
+admission path.
 Repeating the same assistant id with the same account and fingerprint returns
 the existing state for read/reattachment; it never creates a second execution.
 Within an account, reusing the id with a different fingerprint, source,
@@ -74,10 +143,18 @@ never read for identity comparison; if creation otherwise passes validation,
 the uniqueness conflict returns that same generic 409 without disclosing the
 owner or stored attempt.
 
-Phase 1 exposes only an authenticated GET for attempts. It does not wire claim,
-checkpoint, terminal transition, cancellation, provider dispatch, reservation,
-or client UI. Those server functions are foundations for Phase 2; adding a
-route that calls them requires its own execution-order tests.
+New attempts are also bounded by storage quotas, defaulting to 2,000 rows per
+account/conversation and 10,000 rows per account. Deployments may lower or
+raise those positive limits with `CHAT_RESPONSE_ATTEMPTS_PER_CONVERSATION` and
+`CHAT_RESPONSE_ATTEMPTS_PER_USER`. Creation counts are serialised by an
+account-wide advisory lock before the conversation lock. An exact existing
+identity may still reattach at capacity, but a different new identity is
+refused with `409 CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED`. These caps are a hard
+storage bound, not a retention promise or permission to remove audit rows.
+
+The authenticated stored-Chat send path wires claim, checkpoint and terminal
+transition around the existing provider dispatch. Review, continuation, guest
+and Deep Research keep their existing contracts and do not enter this path.
 
 ## 4. Checkpoints and terminal CAS
 
@@ -93,6 +170,20 @@ sets `terminalAt` in the same update. A completed value must also preserve the
 committed prefix. Terminal rows are immutable. A stale worker cannot overwrite
 a newer checkpoint or terminal result.
 
+Visible stream prefixes are coalesced by size or one second, whichever arrives
+first. A small final chunk therefore receives a scheduled checkpoint even when
+no later chunk arrives; terminal flush remains the final owner/revision/database
+clock barrier.
+
+Credit settlement follows the provider outcome and is separate from Message
+and attempt-state persistence. A checkpoint or terminal CAS failure is logged
+and later reconciled through lease expiry, but it cannot suppress the provider
+request's financial settle/refund call. If the transaction that would atomically
+create the assistant
+Message and complete its attempt rolls back, settlement is not repeated and the
+attempt is immediately terminalised as a public-safe internal failure rather
+than remaining active until lease expiry.
+
 Finish reasons and failure codes are closed, public-safe classifications shared
 by runtime parsing and database constraints. A failed attempt must use the
 generic `error` finish reason and one of the approved coarse failure codes.
@@ -104,17 +195,32 @@ These rules preserve what the server has committed; they do not claim that a
 provider stream can resume at an exact token boundary. Reattachment reads the
 committed prefix and current state.
 
-## 5. Read and reload are passive
+## 5. Read and reload are passive, except expired-lease reconciliation
 
-Draft GET and attempt GET are passive with respect to recovery and model work.
-A browser reload may call them, but neither route imports or invokes provider
-dispatch, credit reservation, admission, routing, or retry code. They may write
-ordinary security rate-limit bookkeeping. GET never changes recovery state,
-changes owner, extends a lease, creates an attempt, or submits a message. A
-retry remains an explicit user action and Phase 2 must claim it before any paid
-or capacity-affecting work.
+Draft GET and attempt GET are passive with respect to model work. A browser
+reload may call them, but neither route imports or invokes provider dispatch,
+credit reservation, admission, routing, or retry code. They may write ordinary
+security rate-limit bookkeeping.
 
-All responses use `Cache-Control: no-store`. Route parameters follow the
+There is exactly one recovery-state mutation authorised on an attempt or
+conversation-detail GET: a fail-closed, ownership-scoped conditional update may
+use the database clock to turn a `claimed` or `streaming` row whose lease has
+already expired into terminal `failed / worker_lease_expired`. The update does
+not change the owner, extend the lease, call a provider, reserve or settle
+credit, reroute, create an attempt, or submit a Message. If the predicate no
+longer matches, the read returns the newer row without retrying a mutation.
+This bounded reconciliation is what prevents polling an abandoned worker from
+reporting an active attempt forever; no other GET mutation is permitted.
+The direct attempt route performs a non-mutating owner lookup and conversation
+unlock check before invoking this reconciliation, so a caller without the
+unlock grant cannot cause even that bounded state transition. Destructive
+message-history operations perform the same expired-lease reconciliation under
+the conversation advisory lock before their active-attempt refusal check; an
+expired worker therefore cannot block deletion indefinitely merely because no
+GET happened first.
+
+All recovery JSON and errors use `Cache-Control: private, no-store`. A durable
+POST stream additionally uses `no-transform`. Route parameters follow the
 installed Next.js 16 contract and are awaited promises.
 
 ## 6. Deletion, export, and privacy
@@ -131,14 +237,21 @@ installed Next.js 16 contract and are awaited promises.
 - Neither table changes attachment object retention. Deleting a draft does not
   delete an upload or a previously bound attachment; the existing attachment
   lifecycle remains authoritative.
-- Per-model assistant-history deletion removes attempt rows for the assistant
+- Per-model assistant-history deletion increments the conversation recovery
+  epoch under the same advisory transaction lock used by claim, then removes
+  attempt rows for the assistant
   message ids being deleted and no-message attempts attributed to that model,
-  whether those orphan rows are active or terminal, inside the same
-  transaction. It does not match on model alone without also scoping account
-  and conversation. Before Phase 2 can dispatch attempts,
-  claim and per-model deletion must additionally serialize on their shared
-  conversation so a claim cannot commit immediately after a concurrent clear;
-  that database race remains part of the Phase 2 integration test gate.
+  inside the same transaction. Any attempt in the conversation that is still
+  `claimed` or `streaming` refuses every per-model clear, even when its current
+  requested or actual model differs: fallback attribution is not final until
+  dispatch. Terminal orphans for the cleared model are removed. Attempt deletion
+  does not match on model alone without also scoping account and conversation.
+  Before Phase 2 can dispatch attempts,
+  claim and per-model deletion serialize on their shared conversation. A send
+  captures the epoch while preparing its persisted source and claim verifies
+  it under that lock, so a clear that wins first fences the stale send; a claim
+  that wins first makes the clear refuse the active attempt. A new request that
+  captures the incremented epoch remains valid.
 - No recovery response returns storage keys, provider-private state, prompt
   digests, fingerprints, owner ids, or lease ids.
 

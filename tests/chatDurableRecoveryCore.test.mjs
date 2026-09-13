@@ -12,6 +12,7 @@ import {
   CHAT_ATTEMPT_ID_REUSED,
   chatResponseAttemptFailureCodeSchema,
   chatResponseAttemptFingerprint,
+  chatResponseAttemptRequestPayloadDigest,
   chatResponseAttemptTerminalStatusSchema,
   decideAttemptCheckpoint,
   decideAttemptClaim,
@@ -74,6 +75,36 @@ test("attempt fingerprint is deterministic and length-delimited", () => {
   assert.notEqual(
     first,
     chatResponseAttemptFingerprint({ ...fingerprintInput, requestedModelId: "provider/other" })
+  );
+});
+
+test("request digests ignore object key order but preserve transcript order", () => {
+  const first = chatResponseAttemptRequestPayloadDigest({
+    modelId: "provider/model",
+    messages: [
+      { role: "user", content: "first" },
+      { role: "assistant", content: "second" },
+    ],
+  });
+  assert.equal(
+    first,
+    chatResponseAttemptRequestPayloadDigest({
+      messages: [
+        { content: "first", role: "user" },
+        { content: "second", role: "assistant" },
+      ],
+      modelId: "provider/model",
+    })
+  );
+  assert.notEqual(
+    first,
+    chatResponseAttemptRequestPayloadDigest({
+      modelId: "provider/model",
+      messages: [
+        { role: "assistant", content: "second" },
+        { role: "user", content: "first" },
+      ],
+    })
   );
 });
 

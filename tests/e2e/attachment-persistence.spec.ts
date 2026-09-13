@@ -8,6 +8,7 @@ import {
   mockChatStream,
   openRecentConversation,
   prepareGuestPage,
+  qaPersistedMessageId,
   type AttachmentUploadQaState,
 } from "./support/app-fixtures";
 
@@ -346,9 +347,63 @@ test.describe("a stored attachment across panels and retries", () => {
     page,
   }) => {
     const chatRequests: string[] = [];
+    let attachmentFreeSaveRequests = 0;
+    let releaseAttachmentFreeSave!: () => void;
+    const attachmentFreeSaveGate = new Promise<void>((resolve) => {
+      releaseAttachmentFreeSave = resolve;
+    });
+    const messageSaveBodies: Array<{
+      messages?: Array<{ clientRequestId?: string }>;
+    }> = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        /\/api\/conversations\/qa-conversation\/messages(?:$|\?)/.test(request.url())
+      ) {
+        messageSaveBodies.push(request.postDataJSON());
+      }
+    });
     await prepareGuestPage(page, "ko");
     await mockAuthenticatedApi(page);
     const uploads = await mockAttachmentUpload(page);
+    await page.route(
+      "**/api/conversations/qa-conversation/messages**",
+      async (route) => {
+        if (route.request().method() !== "POST" || chatRequests.length < 2) {
+          await route.fallback();
+          return;
+        }
+        const body = route.request().postDataJSON() as {
+          messages?: Array<{
+            clientRequestId?: string;
+            attachmentUploadIds?: string[];
+            attachmentReferences?: unknown[];
+          }>;
+        };
+        const request = body.messages?.[0];
+        if (!request?.clientRequestId || request.attachmentUploadIds || request.attachmentReferences) {
+          await route.fallback();
+          return;
+        }
+        attachmentFreeSaveRequests += 1;
+        await attachmentFreeSaveGate;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            created: 1,
+            messageMappings: [{
+              requestId: request.clientRequestId,
+              messageId: qaPersistedMessageId(
+                "qa-conversation",
+                request.clientRequestId
+              ),
+            }],
+          }),
+        });
+      }
+    );
     await page.route("**/api/chat", async (route) => {
       if (route.request().method() !== "POST") {
         await route.fallback();
@@ -392,22 +447,61 @@ test.describe("a stored attachment across panels and retries", () => {
     // The plain retry sends the same reference again.
     await page.getByRole("button", { name: /^다시 시도$/ }).first().click();
     await expect.poll(() => chatRequests.length).toBe(2);
+    expect(messageSaveBodies).toHaveLength(1);
     expect(newestUserTurn(chatRequests[1]).attachments?.[0]).toMatchObject({
       attachmentId: handle,
     });
+    const firstRequest = JSON.parse(chatRequests[0]) as {
+      sourceUserMessageId?: string;
+    };
+    const samePayloadRetry = JSON.parse(chatRequests[1]) as {
+      sourceUserMessageId?: string;
+      messages?: Array<{ id?: string; role?: string }>;
+    };
+    expect(samePayloadRetry.sourceUserMessageId).toBe(firstRequest.sourceUserMessageId);
+    expect(samePayloadRetry.messages?.filter((message) => message.role === "user").at(-1)?.id)
+      .toBe(firstRequest.sourceUserMessageId);
 
     // Without files: **that attempt only**. The earlier turns keep their
     // attachment, because they really did carry it -- excluding it from the
     // history would be rewriting what was sent. And nothing was deleted to
     // achieve any of this.
-    await page
+    const retryWithoutFilesButton = page
       .getByRole("button", { name: /첨부파일 없이 다시 시도/ })
-      .first()
-      .click();
+      .first();
+    await retryWithoutFilesButton.evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      (button as HTMLButtonElement).click();
+    });
+    await expect.poll(() => messageSaveBodies.length).toBe(2);
+    await expect.poll(() => attachmentFreeSaveRequests).toBe(1);
+    await expect(retryWithoutFilesButton).toBeDisabled();
+    // The synchronous preparation CAS rejects the second click before it can
+    // mint a second request id or persist a phantom question.
+    await page.waitForTimeout(150);
+    expect(messageSaveBodies).toHaveLength(2);
+    expect(attachmentFreeSaveRequests).toBe(1);
+    releaseAttachmentFreeSave();
     await expect.poll(() => chatRequests.length).toBe(3);
     const withoutFiles = chatRequests[2];
     expect(newestUserTurn(withoutFiles).attachments).toEqual([]);
     expect(withoutFiles).toContain(handle);
+    const attachmentFreeRetry = JSON.parse(withoutFiles) as {
+      sourceUserMessageId?: string;
+      messages?: Array<{ id?: string; role?: string }>;
+    };
+    const retryClientRequestId = messageSaveBodies[1].messages?.[0]?.clientRequestId;
+    expect(retryClientRequestId).toBeTruthy();
+    const retryPersistedId = qaPersistedMessageId(
+      "qa-conversation",
+      retryClientRequestId!
+    );
+    expect(attachmentFreeRetry.sourceUserMessageId).toBe(retryPersistedId);
+    expect(attachmentFreeRetry.sourceUserMessageId).not.toBe(
+      firstRequest.sourceUserMessageId
+    );
+    expect(attachmentFreeRetry.messages?.filter((message) => message.role === "user").at(-1)?.id)
+      .toBe(retryPersistedId);
     expect(uploads.deleteCount).toBe(0);
   });
 });

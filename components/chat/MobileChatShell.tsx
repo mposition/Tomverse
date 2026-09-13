@@ -178,6 +178,10 @@ type MobileChatShellProps = {
    * it; it decides nothing about credits, preflight or admission.
    */
   pendingSubmission: { originConversationId: string | null } | null;
+  /** Locks durable Chat draft bytes until its Message transaction accepts. */
+  durableDraftLocked: boolean;
+  /** Refuses submit while a durable Chat voice transcript is unfinished. */
+  blockSubmitWhileVoiceBusy: boolean;
   onNewChat: () => void;
   onNewImage?: (() => void) | null;
   /** Set when image generation is visible to this viewer but not usable. */
@@ -395,6 +399,8 @@ export function MobileChatShell({
   isModelSelectionReady,
   isConversationSelectionResolved,
   pendingSubmission,
+  durableDraftLocked,
+  blockSubmitWhileVoiceBusy,
   onNewChat,
   onNewImage,
   imageLock,
@@ -1685,6 +1691,8 @@ export function MobileChatShell({
             personalizedPrompt={personalizedPrompt}
             onSubmit={onSubmit}
             onCancel={() => setStopSignal((current) => current + 1)}
+            draftLocked={durableDraftLocked}
+            blockSubmitWhileVoiceBusy={blockSubmitWhileVoiceBusy}
             isSending={isAnyModelResponding}
             focusToken={focusToken}
             isNewConversation={isActiveConversationEmpty}

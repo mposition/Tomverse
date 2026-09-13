@@ -1105,6 +1105,58 @@ const openComposerSignedIn = async (page: Page) => {
 };
 
 test.describe("a voice session belongs to one person", () => {
+  test("authenticated Chat refuses Send while recording or transcription is unfinished @ui-risk", async ({
+    page,
+  }) => {
+    await openComposerSignedIn(page);
+    await page.context().addCookies([{
+      name: "__tomverse_e2e_chat_workspace",
+      value: "1",
+      url: "http://127.0.0.1:3100",
+    }]);
+    await page.goto("/chat/workspace?lang=ko");
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    const chatRequests: string[] = [];
+    await page.route("**/api/chat", async (route) => {
+      chatRequests.push(route.request().method());
+      await route.abort();
+    });
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let transcriptionStarted = false;
+    await page.route(VOICE_ENDPOINT, async (route) => {
+      transcriptionStarted = true;
+      await gate;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ transcript: "비동기 음성 후속" }),
+      });
+    });
+
+    const textarea = page.getByTestId("chat-textarea");
+    const send = page.getByTestId("chat-send-button");
+    await textarea.fill("먼저 입력한 질문");
+    await page.getByTestId("composer-voice-button").click();
+    await expect(send).toBeDisabled();
+    await textarea.press("Enter");
+    expect(chatRequests).toEqual([]);
+
+    await page.waitForTimeout(600);
+    await page.getByTestId("composer-voice-button").click();
+    await expect.poll(() => transcriptionStarted).toBe(true);
+    await expect(send).toBeDisabled();
+    await textarea.press("Enter");
+    expect(chatRequests).toEqual([]);
+
+    release();
+    await expect(textarea).toHaveValue(/먼저 입력한 질문\s*비동기 음성 후속/, {
+      timeout: 15_000,
+    });
+    await expect(send).toBeEnabled();
+    expect(chatRequests).toEqual([]);
+  });
+
   test("a session refetch for the same account does not end a recording @ui-risk", async ({
     page,
   }) => {

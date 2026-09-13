@@ -108,6 +108,15 @@ export type ChatRuntimeLastPrompt = {
   targetChatId: string;
   attachments: ChatAttachment[];
   /**
+   * The durable user Message this request was verified against.
+   *
+   * A panel retry may render a second optimistic copy of the question, but it
+   * must not invent a new persistence identity. The server checks this value
+   * against the latest user message in the provider transcript before it can
+   * claim credit or contact a provider.
+   */
+  sourceUserMessageId: string;
+  /**
    * The one-shot web-search mode this send carried, when it carried one.
    *
    * Recorded so the panel's own "retry" repeats the request that was made

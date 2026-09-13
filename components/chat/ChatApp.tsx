@@ -88,8 +88,21 @@ import {
   subscribeChatRuntime,
   writeChatRuntimeMessages,
 } from "@/lib/chatStreamRuntime";
+import {
+  isActiveChatResponseAttempt,
+  mergeChatResponseAttempts,
+  messageFromChatResponseAttempt,
+  parseMessageSaveMapping,
+  parsePublicChatResponseAttempt,
+  replaceAttemptBackedMessage,
+  type PublicChatResponseAttempt,
+} from "@/components/chat/chatDurableRecoveryClient";
+import { dispatchAppToast } from "@/lib/appToast";
 
 const processedPromptKeys = new Set<string>();
+const DURABLE_ATTEMPT_POLL_INTERVAL_MS = 1_000;
+const DURABLE_ATTEMPT_MAX_POLL_MS = 5 * 60 * 1_000;
+const DURABLE_ATTEMPT_MAX_BACKOFF_MS = 15_000;
 
 // The greeting bubble an empty conversation renders. It is UI, not
 // transcript: it is never persisted, and it must never be sent to
@@ -339,7 +352,37 @@ function ChatAppComponent({
     getChatRuntimeServerSnapshot
   );
   const messages = runtime.messages;
-  const isSending = runtime.isStreaming;
+  const sendPreparationsRef = useRef(new Map<string, symbol>());
+  const [sendPreparationKeys, setSendPreparationKeys] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const beginSendPreparation = useCallback((key: string) => {
+    const preparations = sendPreparationsRef.current;
+    if (preparations.has(key) || isChatRuntimeStreaming(key)) return null;
+    const token = Symbol("chat-send-preparation");
+    preparations.set(key, token);
+    setSendPreparationKeys(new Set(preparations.keys()));
+    return token;
+  }, []);
+  const endSendPreparation = useCallback((key: string, token: symbol) => {
+    const preparations = sendPreparationsRef.current;
+    if (preparations.get(key) !== token) return;
+    preparations.delete(key);
+    setSendPreparationKeys(new Set(preparations.keys()));
+  }, []);
+  const [durableAttemptIds, setDurableAttemptIds] = useState<string[]>([]);
+  const durableAttemptRevisionsRef = useRef(new Map<string, number>());
+  const durableAttemptPollStartedRef = useRef(new Map<string, number>());
+  const durableAttemptIdentityRef = useRef(
+    new Map<string, {
+      conversationId: string;
+      sourceUserMessageId: string;
+      requestedModelId: string;
+    }>()
+  );
+  const attemptBackedMessageIdsRef = useRef(new Set<string>());
+  const isSending = runtime.isStreaming || durableAttemptIds.length > 0;
+  const isSendPreparing = sendPreparationKeys.has(runtimeKey);
   /**
    * The key the *current* view writes to.
    *
@@ -352,6 +395,14 @@ function ChatAppComponent({
   useLayoutEffect(() => {
     runtimeKeyRef.current = runtimeKey;
   });
+
+  useEffect(() => {
+    durableAttemptRevisionsRef.current = new Map();
+    durableAttemptPollStartedRef.current = new Map();
+    durableAttemptIdentityRef.current = new Map();
+    attemptBackedMessageIdsRef.current = new Set();
+    queueMicrotask(() => setDurableAttemptIds([]));
+  }, [runtimeKey]);
     const isMobileShell = useIsMobileShell();
     const [modelInputs, setModelInputs] = useState<Record<string, string>>({});
     const modelInput = modelInputs[modelId] || "";
@@ -790,8 +841,50 @@ function ChatAppComponent({
             const filteredMessages = transcriptMessagesForScope(
               data.messages, modelId, transcriptScope
             );
+            const parsedAttempts: PublicChatResponseAttempt[] = transcriptScope === "conversation" &&
+              Array.isArray(data.responseAttempts)
+              ? (data.responseAttempts as unknown[])
+                  .map(parsePublicChatResponseAttempt)
+                  .filter((attempt: PublicChatResponseAttempt | null): attempt is PublicChatResponseAttempt => Boolean(attempt))
+              : [];
+            const merged = mergeChatResponseAttempts(
+              filteredMessages,
+              parsedAttempts,
+              modelId,
+              t("chat.responseError"),
+              transcriptScope
+            );
+            attemptBackedMessageIdsRef.current = merged.attemptBackedIds;
+            durableAttemptRevisionsRef.current = new Map(
+              parsedAttempts
+                .filter((attempt) => merged.attemptBackedIds.has(attempt.assistantMessageId))
+                .map((attempt) => [attempt.assistantMessageId, attempt.checkpointRevision])
+            );
+            durableAttemptIdentityRef.current = new Map(
+              parsedAttempts
+                .filter((attempt) => merged.attemptBackedIds.has(attempt.assistantMessageId))
+                .map((attempt) => [attempt.assistantMessageId, {
+                  conversationId: attempt.conversationId,
+                  sourceUserMessageId: attempt.sourceUserMessageId,
+                  requestedModelId: attempt.requestedModelId,
+                }])
+            );
+            const activeAttemptIds = parsedAttempts
+              .filter(
+                (attempt) =>
+                  merged.attemptBackedIds.has(attempt.assistantMessageId) &&
+                  isActiveChatResponseAttempt(attempt)
+              )
+              .map((attempt) => attempt.assistantMessageId);
+            const discoveredAt = Date.now();
+            activeAttemptIds.forEach((id) => {
+              if (!durableAttemptPollStartedRef.current.has(id)) {
+                durableAttemptPollStartedRef.current.set(id, discoveredAt);
+              }
+            });
+            setDurableAttemptIds(activeAttemptIds);
 
-              writeChatRuntimeMessages(loadKey, filteredMessages.length > 0 ? filteredMessages : [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
+              writeChatRuntimeMessages(loadKey, merged.messages.length > 0 ? merged.messages : [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
               writeChatRuntimeMessages(loadKey, [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           }
@@ -847,6 +940,196 @@ function ChatAppComponent({
     runtimeKey,
     transcriptScope,
   ]);
+
+  // A reload never resubmits /api/chat. The history read above discovers
+  // active durable attempts and this effect only reads their public
+  // checkpoints until each becomes terminal. Revision monotonicity prevents a
+  // slow poll response from rolling visible text backwards.
+  useEffect(() => {
+    if (
+      isGuestMode ||
+      transcriptScope !== "conversation" ||
+      durableAttemptIds.length === 0
+    ) {
+      return;
+    }
+    const key = runtimeKey;
+    const controller = new AbortController();
+    const terminal = new Set<string>();
+    const transientFailures = new Map<string, number>();
+    const nextPollAt = new Map<string, number>();
+
+    const makeTerminalRecovery = (assistantMessageId: string, errorCode: string) => {
+      terminal.add(assistantMessageId);
+      durableAttemptPollStartedRef.current.delete(assistantMessageId);
+      durableAttemptIdentityRef.current.delete(assistantMessageId);
+      writeChatRuntimeMessages(key, (current) =>
+        current.map((message) =>
+          message.id === assistantMessageId &&
+          attemptBackedMessageIdsRef.current.has(assistantMessageId)
+            ? {
+                ...message,
+                status: "error",
+                errorCode,
+                recoveryNotice: t("chat.responseError"),
+              }
+            : message
+        )
+      );
+    };
+
+    const retryAfterMs = (value: string | null) => {
+      if (!value) return null;
+      const seconds = Number(value);
+      if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+      const at = Date.parse(value);
+      return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
+    };
+
+    const scheduleTransientRetry = (
+      assistantMessageId: string,
+      requestedDelayMs?: number | null
+    ) => {
+      const failures = (transientFailures.get(assistantMessageId) ?? 0) + 1;
+      transientFailures.set(assistantMessageId, failures);
+      const exponential = Math.min(
+        DURABLE_ATTEMPT_MAX_BACKOFF_MS,
+        DURABLE_ATTEMPT_POLL_INTERVAL_MS * 2 ** Math.min(failures - 1, 4)
+      );
+      nextPollAt.set(
+        assistantMessageId,
+        Date.now() + Math.min(
+          DURABLE_ATTEMPT_MAX_BACKOFF_MS,
+          Math.max(DURABLE_ATTEMPT_POLL_INTERVAL_MS, requestedDelayMs ?? exponential)
+        )
+      );
+    };
+
+    const pollOne = async (assistantMessageId: string) => {
+      const startedAt =
+        durableAttemptPollStartedRef.current.get(assistantMessageId) ?? Date.now();
+      durableAttemptPollStartedRef.current.set(assistantMessageId, startedAt);
+      if (Date.now() - startedAt >= DURABLE_ATTEMPT_MAX_POLL_MS) {
+        makeTerminalRecovery(assistantMessageId, "CHAT_ATTEMPT_POLL_EXPIRED");
+        return;
+      }
+      try {
+        const response = await fetch(
+          `/api/products/chat/attempts/${encodeURIComponent(assistantMessageId)}`,
+          { cache: "no-store", signal: controller.signal }
+        );
+        if (response.status === 429) {
+          await discardResponseBody(response);
+          scheduleTransientRetry(
+            assistantMessageId,
+            retryAfterMs(response.headers.get("Retry-After"))
+          );
+          return;
+        }
+        if ([401, 403, 404, 410].includes(response.status)) {
+          await discardResponseBody(response);
+          makeTerminalRecovery(
+            assistantMessageId,
+            `CHAT_ATTEMPT_POLL_${response.status}`
+          );
+          return;
+        }
+        if (!response.ok) {
+          await discardResponseBody(response);
+          scheduleTransientRetry(assistantMessageId);
+          return;
+        }
+        const payload = await response.json().catch(() => null);
+        const attempt = parsePublicChatResponseAttempt(payload?.attempt);
+        const expectedIdentity =
+          durableAttemptIdentityRef.current.get(assistantMessageId);
+        if (
+          !attempt ||
+          !expectedIdentity ||
+          attempt.assistantMessageId !== assistantMessageId ||
+          attempt.conversationId !== expectedIdentity.conversationId ||
+          attempt.sourceUserMessageId !== expectedIdentity.sourceUserMessageId ||
+          attempt.requestedModelId !== expectedIdentity.requestedModelId
+        ) {
+          makeTerminalRecovery(assistantMessageId, "CHAT_ATTEMPT_POLL_INVALID");
+          return;
+        }
+        transientFailures.delete(assistantMessageId);
+        nextPollAt.set(
+          assistantMessageId,
+          Date.now() + DURABLE_ATTEMPT_POLL_INTERVAL_MS
+        );
+        const priorRevision =
+          durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
+        if (attempt.checkpointRevision > priorRevision) {
+          durableAttemptRevisionsRef.current.set(
+            assistantMessageId,
+            attempt.checkpointRevision
+          );
+          writeChatRuntimeMessages(key, (current) =>
+            replaceAttemptBackedMessage(
+              current,
+              attempt,
+              attemptBackedMessageIdsRef.current,
+              t("chat.responseError")
+            )
+          );
+        }
+        if (!isActiveChatResponseAttempt(attempt)) {
+          terminal.add(assistantMessageId);
+          durableAttemptPollStartedRef.current.delete(assistantMessageId);
+          durableAttemptIdentityRef.current.delete(assistantMessageId);
+        }
+      } catch (error) {
+        if ((error as { name?: string })?.name !== "AbortError") {
+          // A transient read failure is retried. It never becomes a provider
+          // resend and never replaces the last durable checkpoint.
+          scheduleTransientRetry(assistantMessageId);
+        }
+      }
+    };
+
+    const loop = async () => {
+      while (!controller.signal.aborted) {
+        const now = Date.now();
+        await Promise.all(
+          durableAttemptIds
+            .filter(
+              (id) =>
+                !terminal.has(id) && (nextPollAt.get(id) ?? 0) <= now
+            )
+            .map(pollOne)
+        );
+        if (terminal.size > 0) {
+          setDurableAttemptIds((current) =>
+            current.filter((id) => !terminal.has(id))
+          );
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          const dueIn = durableAttemptIds.reduce(
+            (soonest, id) =>
+              Math.min(soonest, Math.max(0, (nextPollAt.get(id) ?? 0) - Date.now())),
+            DURABLE_ATTEMPT_POLL_INTERVAL_MS
+          );
+          let settled = false;
+          let timer: number | null = null;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (timer !== null) window.clearTimeout(timer);
+            controller.signal.removeEventListener("abort", finish);
+            resolve();
+          };
+          timer = window.setTimeout(finish, Math.max(50, dueIn));
+          controller.signal.addEventListener("abort", finish, { once: true });
+          if (controller.signal.aborted) finish();
+        });
+      }
+    };
+    void loop();
+    return () => controller.abort();
+  }, [durableAttemptIds, isGuestMode, runtimeKey, t, transcriptScope]);
   
   /**
    * Writes a guest's transcript back to localStorage.
@@ -924,7 +1207,9 @@ function ChatAppComponent({
       way: the message and its attachment cards stay as they are
       (docs/policy/user-attachment-persistence.md section 11).
     */
-    acknowledgedUnavailableAttachmentIds: string[] = []
+    acknowledgedUnavailableAttachmentIds: string[] = [],
+    /** Persisted identity used by authenticated durable Chat verification. */
+    sourceUserMessageId: string = userMsgId
   ) => {
     // The key this run owns for its whole life. `targetChatId` is the
     // conversation the send was made in, and every write below names this key
@@ -999,6 +1284,7 @@ function ChatAppComponent({
       text,
       targetChatId,
       attachments,
+      sourceUserMessageId,
       // Only when this send carried one; a composer send records nothing here
       // and its retry reads the conversation's mode exactly as before.
       ...(webSearchModeOverride ? { webSearchMode: webSearchModeOverride } : {}),
@@ -1018,7 +1304,7 @@ function ChatAppComponent({
 	  createdAt: new Date().toISOString(),
     };
 
-    const assistantMessageId = crypto.randomUUID();
+    let assistantMessageId = crypto.randomUUID();
     const assistantMessage: Message = {
 		id: assistantMessageId,
 		role: "assistant",
@@ -1156,6 +1442,7 @@ function ChatAppComponent({
     // for drift the request is re-prepared and this becomes the new one.
     let activeContextBundle = contextBundle ?? null;
     let contextBundleRetries = 0;
+    let contextBundleCollisionRetries = 0;
     let memoryUsedCount = 0;
     // Set only on a turn the Router actually chose the model for. The server
     // omits both headers on a manual turn and on an Auto turn that fell back,
@@ -1176,7 +1463,18 @@ function ChatAppComponent({
             // message is appended exactly once -- `messages` is the pre-send
             // snapshot, and the id filter keeps a re-render or a resend from
             // duplicating it.
-            messages: requestTranscriptForScope(messages, userMessage, transcriptScope)
+            messages: requestTranscriptForScope(
+              messages,
+              userMessage,
+              transcriptScope
+            )
+              // A retry is a new visible turn but is still verified against
+              // the original durable question. Preserve the earlier
+              // user/error ordering, and change only the newly appended
+              // request copy to the persisted source identity.
+              .map((message) => message === userMessage
+                ? { ...message, id: sourceUserMessageId }
+                : message)
               .map(toChatRequestMessage),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
@@ -1184,6 +1482,10 @@ function ChatAppComponent({
               ? {
                   conversationId: targetChatId,
                   assistantMessageId,
+                  // The saved user turn this response attempt is bound to.
+                  // The server fingerprints the attempt with it, so a reused
+                  // assistant id cannot be attached to a different question.
+                  sourceUserMessageId,
                 }
               : {}),
             ...(deepResearchDepth ? { deepResearchDepth } : {}),
@@ -1327,6 +1629,52 @@ function ChatAppComponent({
           // request never reached `acquireChatAccess`, so its slot is still
           // this panel's to spend.
           response = await sendChatRequest();
+        } else if (
+          code === "CHAT_CONTEXT_BUNDLE_ALREADY_CONSUMED" &&
+          !isGuestMode &&
+          contextBundleCollisionRetries < 1
+        ) {
+          // This refusal happened after the server claimed and terminalized
+          // the old durable attempt. Reusing its assistant id would reattach
+          // to that failed attempt forever, so the one permitted recovery is
+          // a fresh context preparation bound to a fresh assistant id.
+          const refreshed = onContextBundleStale
+            ? await onContextBundleStale({
+                promptId: analyticsPromptId,
+                modelId,
+              })
+            : contextLayout === "single"
+              ? await prepareChatContextBundle({
+                  conversationId: targetChatId,
+                  modelIds: [modelId],
+                  prompt: text,
+                })
+              : null;
+          if (!refreshed) throw error;
+
+          const refusedAssistantMessageId = assistantMessageId;
+          const freshAssistantMessageId = crypto.randomUUID();
+          const pending = getChatRuntimeSnapshot(runKey).messages.find(
+            (message) => message.id === refusedAssistantMessageId
+          );
+          if (!pending || pending.role !== "assistant" || pending.content) {
+            throw error;
+          }
+          writeChatRuntimeMessages(runKey, (current) =>
+            current.map((message) =>
+              message.id === refusedAssistantMessageId
+                ? {
+                    ...message,
+                    id: freshAssistantMessageId,
+                    createdAt: new Date().toISOString(),
+                  }
+                : message
+            )
+          );
+          assistantMessageId = freshAssistantMessageId;
+          activeContextBundle = refreshed;
+          contextBundleCollisionRetries += 1;
+          response = await sendChatRequest();
         } else {
           throw error;
         }
@@ -1353,6 +1701,58 @@ function ChatAppComponent({
           controller.signal,
           analyticsPromptId
         );
+        return;
+      }
+
+      if (response.headers.get("X-Chat-Response-Mode") === "durable-attempt") {
+        liveness.stop();
+        const payload = await response.json().catch(() => null);
+        const attempt = parsePublicChatResponseAttempt(payload?.attempt);
+        if (
+          !attempt ||
+          attempt.assistantMessageId !== assistantMessageId ||
+          attempt.conversationId !== targetChatId ||
+          attempt.sourceUserMessageId !== sourceUserMessageId
+        ) {
+          throw new Error(t("chat.responseBodyMissing"));
+        }
+        attemptBackedMessageIdsRef.current.add(assistantMessageId);
+        durableAttemptIdentityRef.current.set(assistantMessageId, {
+          conversationId: attempt.conversationId,
+          sourceUserMessageId: attempt.sourceUserMessageId,
+          requestedModelId: attempt.requestedModelId,
+        });
+        durableAttemptRevisionsRef.current.set(
+          assistantMessageId,
+          attempt.checkpointRevision
+        );
+        writeChatRuntimeMessages(runKey, (current) =>
+          current.map((message) =>
+            message.id === assistantMessageId
+              ? messageFromChatResponseAttempt(
+                  attempt,
+                  t("chat.responseError")
+                )
+              : message
+          )
+        );
+        if (isActiveChatResponseAttempt(attempt)) {
+          durableAttemptPollStartedRef.current.set(
+            assistantMessageId,
+            Date.now()
+          );
+          setDurableAttemptIds((current) =>
+            current.includes(assistantMessageId)
+              ? current
+              : [...current, assistantMessageId]
+          );
+        } else if (attempt.status === "completed") {
+          onResponseComplete?.(
+            analyticsPromptId,
+            attempt.actualModelId ?? attempt.requestedModelId,
+            attempt.partialContent
+          );
+        }
         return;
       }
 
@@ -1769,7 +2169,10 @@ function ChatAppComponent({
 
   const handleRetryLast = useCallback(() => {
     const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
-    if (!lastPrompt || isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    if (!lastPrompt) return;
+    const preparationKey = runtimeKeyRef.current;
+    const preparationToken = beginSendPreparation(preparationKey);
+    if (!preparationToken) return;
 
     // Unlike a fresh send, a retry doesn't go through handleGlobalSubmit or
     // handleModelOnlySubmit -- both of which flush any pending model-list
@@ -1777,27 +2180,32 @@ function ChatAppComponent({
     // failed because the server hadn't yet seen a just-added model would
     // keep failing on every retry, since nothing ever re-flushes the sync.
     void (async () => {
-      const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
-      if (!settingsReady) return;
+      try {
+        const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+        if (!settingsReady) return;
 
-      const retryUserMessageId = crypto.randomUUID();
-      void handleSendPrompt(
-        lastPrompt.text,
-        lastPrompt.targetChatId,
-        retryUserMessageId,
-        lastPrompt.attachments,
-        null,
-        undefined,
-        undefined,
-        undefined,
-        "single",
-        // Repeats the request that was made. A turn the web-search offer sent
-        // searched without changing the conversation's switch, so retrying it
-        // through the stored mode would quietly send it with search off.
-        lastPrompt.webSearchMode
-      );
+        await handleSendPrompt(
+          lastPrompt.text,
+          lastPrompt.targetChatId,
+          crypto.randomUUID(),
+          lastPrompt.attachments,
+          null,
+          undefined,
+          undefined,
+          undefined,
+          "single",
+          // Repeats the request that was made. A turn the web-search offer sent
+          // searched without changing the conversation's switch, so retrying it
+          // through the stored mode would quietly send it with search off.
+          lastPrompt.webSearchMode,
+          [],
+          lastPrompt.sourceUserMessageId
+        );
+      } finally {
+        endSendPreparation(preparationKey, preparationToken);
+      }
     })();
-  }, [handleSendPrompt, onBeforeSend]);
+  }, [beginSendPreparation, endSendPreparation, handleSendPrompt, onBeforeSend]);
 
   /**
    * Re-sends the last prompt, acknowledging files the server said are gone.
@@ -1812,54 +2220,111 @@ function ChatAppComponent({
   const handleContinueWithoutUnavailableAttachments = useCallback(
     (attachmentIds: string[]) => {
       const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
-      if (!lastPrompt || isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+      if (!lastPrompt) return;
       if (attachmentIds.length === 0) return;
+      const preparationKey = runtimeKeyRef.current;
+      const preparationToken = beginSendPreparation(preparationKey);
+      if (!preparationToken) return;
 
       void (async () => {
-        const settingsReady =
-          (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
-        if (!settingsReady) return;
+        try {
+          const settingsReady =
+            (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+          if (!settingsReady) return;
 
-        void handleSendPrompt(
-          lastPrompt.text,
-          lastPrompt.targetChatId,
-          crypto.randomUUID(),
-          lastPrompt.attachments,
-          null,
-          undefined,
-          null,
-          null,
-          "single",
-          undefined,
-          attachmentIds
-        );
+          await handleSendPrompt(
+            lastPrompt.text,
+            lastPrompt.targetChatId,
+            crypto.randomUUID(),
+            lastPrompt.attachments,
+            null,
+            undefined,
+            null,
+            null,
+            "single",
+            undefined,
+            attachmentIds,
+            lastPrompt.sourceUserMessageId
+          );
+        } finally {
+          endSendPreparation(preparationKey, preparationToken);
+        }
       })();
     },
-    [handleSendPrompt, onBeforeSend]
+    [beginSendPreparation, endSendPreparation, handleSendPrompt, onBeforeSend]
   );
 
   const handleRetryWithoutAttachments = useCallback(() => {
     const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
-    if (!lastPrompt || isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    if (!lastPrompt) return;
+    const preparationKey = runtimeKeyRef.current;
+    const preparationToken = beginSendPreparation(preparationKey);
+    if (!preparationToken) return;
 
     void (async () => {
-      const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
-      if (!settingsReady) return;
+      try {
+        const settingsReady = (await onBeforeSend?.(lastPrompt.targetChatId)) ?? true;
+        if (!settingsReady) return;
 
-      void handleSendPrompt(
-        lastPrompt.text,
-        lastPrompt.targetChatId,
-        crypto.randomUUID(),
-        [],
-        null,
-        undefined,
-        undefined,
-        undefined,
-        "single",
-        lastPrompt.webSearchMode
-      );
+        const retryRequestId = crypto.randomUUID();
+        let retrySourceUserMessageId = retryRequestId;
+        if (!isGuestMode) {
+          const response = await fetch(
+            `/api/conversations/${lastPrompt.targetChatId}/messages`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: [{
+                  clientRequestId: retryRequestId,
+                  role: "user",
+                  content: lastPrompt.text,
+                  modelId,
+                }],
+              }),
+            }
+          );
+          const body = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(`Attachment-free retry save failed: ${response.status}`);
+          }
+          const mapping = parseMessageSaveMapping(body, retryRequestId);
+          if (!mapping) {
+            throw new Error("Attachment-free retry save returned no valid id mapping.");
+          }
+          retrySourceUserMessageId = mapping.messageId;
+        }
+
+        await handleSendPrompt(
+          lastPrompt.text,
+          lastPrompt.targetChatId,
+          retrySourceUserMessageId,
+          [],
+          null,
+          undefined,
+          undefined,
+          undefined,
+          "single",
+          lastPrompt.webSearchMode,
+          [],
+          retrySourceUserMessageId
+        );
+      } catch (error) {
+        console.error("attachment-free retry user message save failed:", error);
+        dispatchAppToast(t("chat.retryQuestionSaveFailed"), "error");
+      } finally {
+        endSendPreparation(preparationKey, preparationToken);
+      }
     })();
-  }, [handleSendPrompt, onBeforeSend]);
+  }, [
+    beginSendPreparation,
+    endSendPreparation,
+    handleSendPrompt,
+    isGuestMode,
+    modelId,
+    onBeforeSend,
+    t,
+  ]);
 
   useEffect(() => {
     if (!isGuestMode && status === "loading") return;
@@ -1931,35 +2396,48 @@ function ChatAppComponent({
 
     const handleModelOnlySubmit = async () => {
         const trimmed = modelInput.trim();
-        if (!trimmed || isChatRuntimeStreaming(runtimeKey) || isPanelDisabled || !initialConversationId) return;
+        if (!trimmed || isSending || isPanelDisabled || !initialConversationId) return;
+        const preparationToken = beginSendPreparation(runtimeKey);
+        if (!preparationToken) return;
 
-        const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
-        if (!settingsReady) return;
+        try {
+          const settingsReady = await onBeforeSend?.(initialConversationId) ?? true;
+          if (!settingsReady) return;
 
-        const userMsgId = crypto.randomUUID();
+          const userRequestId = crypto.randomUUID();
+          let userMsgId = userRequestId;
 
-        if (!isGuestMode) {
+          if (!isGuestMode) {
             try {
                 const response = await fetch(`/api/conversations/${initialConversationId}/messages`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        messages: [{ id: userMsgId, role: "user", content: trimmed, modelId }],
+                        messages: [{ clientRequestId: userRequestId, role: "user", content: trimmed, modelId }],
                     }),
                 });
-                await discardResponseBody(response);
+                const body = await response.json().catch(() => null);
                 if (!response.ok) {
                   throw new Error(`Model-only user message save failed: ${response.status}`);
                 }
+                const mapping = parseMessageSaveMapping(body, userRequestId);
+                if (!mapping) {
+                  throw new Error("Model-only user message save returned no valid id mapping.");
+                }
+                userMsgId = mapping.messageId;
             } catch (error) {
                 console.error("model-only user message save failed:", error);
+                dispatchAppToast(t("chat.retryQuestionSaveFailed"), "error");
                 return;
             }
-        }
+          }
 
-        setModelInput("");
-        onFollowupSent?.(modelId);
-        await handleSendPrompt(trimmed, initialConversationId, userMsgId);
+          setModelInput("");
+          onFollowupSent?.(modelId);
+          await handleSendPrompt(trimmed, initialConversationId, userMsgId);
+        } finally {
+          endSendPreparation(runtimeKey, preparationToken);
+        }
     };
 
   return (
@@ -2007,7 +2485,11 @@ function ChatAppComponent({
         isGuestMode={isGuestMode}
         currentChatId={initialConversationId}
         isSending={isSending}
-        onStopGenerating={stopThisPanel}
+        isSendPreparing={isSendPreparing}
+        // A durable recovery poll is read-only. Without a server cancellation
+        // contract, presenting the local AbortController as "stop" would lie:
+        // it would only hide the poll while the provider kept running.
+        onStopGenerating={runtime.isStreaming ? stopThisPanel : undefined}
       />}
                   </div>
 
@@ -2044,7 +2526,7 @@ function ChatAppComponent({
                                       isModelInputComposingRef.current = false;
                                   });
                               }}
-                              disabled={isSending || !initialConversationId}
+                              disabled={isSending || isSendPreparing || !initialConversationId}
                               enterKeyHint={isMobileShell ? "enter" : undefined}
                               rows={1}
                               data-testid="model-only-input"
@@ -2061,7 +2543,7 @@ function ChatAppComponent({
                           type="submit"
                           data-testid="model-only-send"
                           data-model-id={modelId}
-                          disabled={!modelInput.trim() || isSending || !initialConversationId}
+                          disabled={!modelInput.trim() || isSending || isSendPreparing || !initialConversationId}
                           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-500"
                           title={t("chat.modelOnlySendTitle")}
                           aria-label={t("chat.modelOnlySendTitle")}

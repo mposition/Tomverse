@@ -9,13 +9,13 @@ import {
   chatComposerDraftDeleteSchema,
   chatComposerDraftPutSchema,
   chatDraftScopeKeySchema,
-  publicChatComposerDraft,
   validateDraftReferencesForScope,
 } from "@/lib/chatComposerDraftCore";
 import {
   ChatDraftRevisionConflictError,
   deleteChatComposerDraft,
-  readChatComposerDraft,
+  publicChatComposerDraftWithAttachments,
+  readPublicChatComposerDraft,
   writeChatComposerDraft,
 } from "@/lib/chatComposerDraftPersistence";
 import { authorizeChatRecoveryScope } from "@/lib/chatDurableRecoveryAccess";
@@ -29,11 +29,11 @@ type RequestScope =
 const jsonError = (error: string, code: string, status: number, extra?: object) =>
   Response.json(
     { error, code, ...extra },
-    { status, headers: { "Cache-Control": "no-store" } }
+    { status, headers: { "Cache-Control": "private, no-store" } }
   );
 
 const noStore = (response: Response) => {
-  response.headers.set("Cache-Control", "no-store");
+  response.headers.set("Cache-Control", "private, no-store");
   return response;
 };
 
@@ -75,10 +75,14 @@ export async function GET(request: Request, { params }: Params) {
       day: 4_000,
     });
     if ("response" in scope) return noStore(scope.response);
-    const draft = await readChatComposerDraft(scope.userId, scope.scopeKey);
+    const draft = await readPublicChatComposerDraft({
+      userId: scope.userId,
+      userEmail: scope.userEmail,
+      scopeKey: scope.scopeKey,
+    });
     return Response.json(
-      { scopeKey: scope.scopeKey, draft: draft ? publicChatComposerDraft(draft) : null },
-      { headers: { "Cache-Control": "no-store" } }
+      { scopeKey: scope.scopeKey, draft },
+      { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
@@ -104,24 +108,40 @@ export async function PUT(request: Request, { params }: Params) {
         400
       );
     }
-    const draft = await writeChatComposerDraft({
-      userId: scope.userId,
-      userEmail: scope.userEmail,
-      scopeKey: scope.scopeKey,
-      draft: body,
-    });
+    let draft;
+    try {
+      const written = await writeChatComposerDraft({
+        userId: scope.userId,
+        userEmail: scope.userEmail,
+        scopeKey: scope.scopeKey,
+        draft: body,
+      });
+      draft = await publicChatComposerDraftWithAttachments({
+        userId: scope.userId,
+        userEmail: scope.userEmail,
+        draft: written,
+      });
+    } catch (error) {
+      if (error instanceof ChatDraftRevisionConflictError) {
+        const currentDraft = await readPublicChatComposerDraft({
+          userId: scope.userId,
+          userEmail: scope.userEmail,
+          scopeKey: scope.scopeKey,
+        });
+        return jsonError(error.message, error.code, 409, {
+          currentRevision: currentDraft?.revision ?? null,
+          currentDraft,
+        });
+      }
+      throw error;
+    }
     return Response.json(
-      { draft: publicChatComposerDraft(draft) },
-      { headers: { "Cache-Control": "no-store" } }
+      { draft },
+      { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return jsonError("Invalid Chat draft.", "CHAT_DRAFT_INVALID", 400);
-    }
-    if (error instanceof ChatDraftRevisionConflictError) {
-      return jsonError(error.message, error.code, 409, {
-        currentRevision: error.currentRevision,
-      });
     }
     if (
       error instanceof MessageAttachmentResolveError ||
@@ -145,23 +165,33 @@ export async function DELETE(request: Request, { params }: Params) {
     });
     if ("response" in scope) return noStore(scope.response);
     const body = await readLimitedJson(request, 1024, chatComposerDraftDeleteSchema);
-    await deleteChatComposerDraft({
-      userId: scope.userId,
-      scopeKey: scope.scopeKey,
-      expectedRevision: body.expectedRevision,
-    });
+    try {
+      await deleteChatComposerDraft({
+        userId: scope.userId,
+        scopeKey: scope.scopeKey,
+        expectedRevision: body.expectedRevision,
+      });
+    } catch (error) {
+      if (error instanceof ChatDraftRevisionConflictError) {
+        const currentDraft = await readPublicChatComposerDraft({
+          userId: scope.userId,
+          userEmail: scope.userEmail,
+          scopeKey: scope.scopeKey,
+        });
+        return jsonError(error.message, error.code, 409, {
+          currentRevision: currentDraft?.revision ?? null,
+          currentDraft,
+        });
+      }
+      throw error;
+    }
     return new Response(null, {
       status: 204,
-      headers: { "Cache-Control": "no-store" },
+      headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return jsonError("Invalid Chat draft deletion.", "CHAT_DRAFT_INVALID", 400);
-    }
-    if (error instanceof ChatDraftRevisionConflictError) {
-      return jsonError(error.message, error.code, 409, {
-        currentRevision: error.currentRevision,
-      });
     }
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return noStore(securityResponse);

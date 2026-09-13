@@ -98,6 +98,30 @@ export type ChatResponseAttemptRecord = ChatResponseAttemptIdentity & {
 
 const fingerprintPart = (value: string) => `${Buffer.byteLength(value, "utf8")}:${value}`;
 
+const canonicalJson = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+    .join(",")}}`;
+};
+
+/**
+ * Digests the replay-significant request fields without storing prompt text.
+ * Object keys are sorted, while message and attachment array order remains
+ * significant. Ephemeral admission/worker tokens must not be included by the
+ * caller: refreshing one must not turn the same user action into a new
+ * execution identity.
+ */
+export function chatResponseAttemptRequestPayloadDigest(value: unknown): string {
+  return createHash("sha256")
+    .update("chat-response-request.v1\0")
+    .update(canonicalJson(value))
+    .digest("hex");
+}
+
 /** Versioned and length-delimited; no prompt text is persisted by this function. */
 export function chatResponseAttemptFingerprint(input: {
   conversationId: string;

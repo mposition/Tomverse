@@ -260,12 +260,16 @@ test("a superseded id in the decision set's graph is only ever a provenance labe
     // The succ-3 corpus and the review records are the input this filters,
     // so of course they name the cases. Everything else in the graph is code
     // written for succ-4.
-    const isRecord = (file) =>
-        file.includes("/memoryEvalSucc3Adopted/") ||
-        file.includes("/memoryEvalSuccessorAdopted/") ||
-        file.endsWith("/memoryEvalSucc3Fixtures.ts") ||
-        (file.includes("/memoryEvalSucc4Review/") &&
-            !file.endsWith("/bPlusMoves.ts"));
+    const isRecord = (file) => {
+        const portable = file.replaceAll("\\", "/");
+        return (
+            portable.includes("/memoryEvalSucc3Adopted/") ||
+            portable.includes("/memoryEvalSuccessorAdopted/") ||
+            portable.endsWith("/memoryEvalSucc3Fixtures.ts") ||
+            (portable.includes("/memoryEvalSucc4Review/") &&
+                !portable.endsWith("/bPlusMoves.ts"))
+        );
+    };
     const count = (haystack, needle) => haystack.split(needle).length - 1;
     let checked = 0;
     for (const file of reachableFrom(DATASET)) {

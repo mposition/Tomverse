@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   PROVIDER_CALL_DIAGNOSTIC_ROOTS,
   classifyProbeError,
@@ -200,7 +201,7 @@ test("an unclassifiable provider-call failure still counts against the provider"
   assert.equal(classification.scope, "provider");
 });
 
-const repoRoot = new URL("..", import.meta.url).pathname;
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 /** Every .ts/.tsx file under app/ and lib/, walked rather than listed. */
 const sourceFiles = (relativeDir) => {

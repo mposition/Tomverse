@@ -218,13 +218,31 @@ const digest = (text) => `sha256:${createHash("sha256").update(text, "utf8").dig
 const digestFile = (path) => `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-");
 
+const commandShell = (() => {
+  if (process.platform !== "win32") return "sh";
+  try {
+    // Git for Windows ships the POSIX shell this command contract requires,
+    // but its bin directory is not necessarily on PATH in PowerShell/Codex.
+    const gitExecPath = execFileSync("git", ["--exec-path"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+    const bundled = join(gitExecPath, "..", "..", "..", "bin", "sh.exe");
+    if (existsSync(bundled)) return bundled;
+  } catch {
+    // The command below will fail closed and be recorded as a failed check.
+  }
+  return "sh";
+})();
+
 // ---------------------------------------------------------------------------
 // Commands the control program runs: the test command and the guard commands.
 
 const runCommand = (command) => {
   const startedAt = Date.now();
   try {
-    const output = execFileSync("sh", ["-c", command], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const output = execFileSync(commandShell, ["-c", command], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     return { passed: true, output: output.trim().split("\n").slice(-5).join("\n"), durationMs: Date.now() - startedAt };
   } catch (error) {
     const output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`.trim().split("\n").slice(-10).join("\n");

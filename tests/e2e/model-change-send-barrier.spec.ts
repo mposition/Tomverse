@@ -5,6 +5,7 @@ import {
   openModelPickerCatalogue,
   openRecentConversation,
   prepareGuestPage,
+  qaPersistedMessageId,
   sendChatMessage,
   type AuthenticatedQaState,
 } from "./support/app-fixtures";
@@ -34,6 +35,7 @@ const MODEL_C = "claude-haiku-4-5";
 type ChatCall = {
   conversationId: string | null;
   modelId: string;
+  sourceUserMessageId: string | null;
   /** How many model PATCHes had been answered when this send started. */
   patchesConfirmedAtSend: number;
 };
@@ -45,6 +47,7 @@ type PatchCall = {
 
 type Recorder = {
   chatCalls: ChatCall[];
+  messageRequestIds: string[];
   patchRequests: PatchCall[];
   patchResponses: PatchCall[];
   /** Set while a PATCH is deliberately being held open. */
@@ -69,6 +72,7 @@ async function recordModelSyncTraffic(page: Page): Promise<Recorder> {
 
   const recorder: Recorder = {
     chatCalls: [],
+    messageRequestIds: [],
     patchRequests: [],
     patchResponses: [],
     holdPatch: false,
@@ -81,6 +85,23 @@ async function recordModelSyncTraffic(page: Page): Promise<Recorder> {
     chatCallsFor: (modelId) =>
       recorder.chatCalls.filter((call) => call.modelId === modelId),
   };
+
+  await page.route("**/api/conversations/*/messages**", async (route) => {
+    if (
+      route.request().method() === "POST" &&
+      !new URL(route.request().url()).pathname.endsWith("/receipt")
+    ) {
+      const body = route.request().postDataJSON() as {
+        messages?: Array<{ clientRequestId?: string }>;
+      };
+      for (const message of body.messages ?? []) {
+        if (typeof message.clientRequestId === "string") {
+          recorder.messageRequestIds.push(message.clientRequestId);
+        }
+      }
+    }
+    await route.fallback();
+  });
 
   await page.route(
     /.*\/api\/conversations\/([A-Za-z0-9_-]+)(\?.*)?$/,
@@ -119,10 +140,12 @@ async function recordModelSyncTraffic(page: Page): Promise<Recorder> {
     const body = route.request().postDataJSON() as {
       conversationId?: string;
       modelId?: string;
+      sourceUserMessageId?: string;
     };
     recorder.chatCalls.push({
       conversationId: body?.conversationId ?? null,
       modelId: body?.modelId ?? "",
+      sourceUserMessageId: body?.sourceUserMessageId ?? null,
       patchesConfirmedAtSend: recorder.patchResponses.length,
     });
     await route.fallback();
@@ -280,9 +303,128 @@ test.describe("model change send barrier (desktop)", () => {
     expect(sends).toHaveLength(1);
     expect(sends[0].patchesConfirmedAtSend).toBeGreaterThanOrEqual(1);
     expect(sends[0].conversationId).toBe("qa-conversation");
+    const requestId = recorder.messageRequestIds.at(-1)!;
+    expect(sends[0].sourceUserMessageId).toBe(
+      qaPersistedMessageId("qa-conversation", requestId)
+    );
+    expect(sends[0].sourceUserMessageId).not.toBe(requestId);
     // The panel that was not touched must not have been re-sent to.
     expect(recorder.chatCallsFor(MODEL_C)).toHaveLength(1);
     expect(state.selectedModels).toEqual([MODEL_B, MODEL_C]);
+  });
+
+  test("a model-only save with a malformed id mapping never reaches the provider", async ({
+    page,
+  }) => {
+    await openSeededConversation(page, [MODEL_A, MODEL_C]);
+    let providerRequests = 0;
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() === "POST") providerRequests += 1;
+      await route.fallback();
+    });
+    await page.route(
+      "**/api/conversations/qa-conversation/messages**",
+      async (route) => {
+        if (route.request().method() !== "POST") {
+          await route.fallback();
+          return;
+        }
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            created: 1,
+            messageMappings: [],
+          }),
+        });
+      }
+    );
+
+    const panelInput = page
+      .getByTestId("desktop-model-panel")
+      .first()
+      .getByTestId("model-only-input");
+    await panelInput.fill("저장 ID가 확인될 때만 보내세요");
+    await panelInput.press("Enter");
+
+    await page.waitForTimeout(500);
+    expect(providerRequests).toBe(0);
+    await expect(panelInput).toHaveValue("저장 ID가 확인될 때만 보내세요");
+    await expect(page.getByTestId("app-toast")).toContainText(
+      "답변 요청은 전송되지 않았습니다"
+    );
+  });
+
+  test("a held model-only save serializes a rapid double submit", async ({
+    page,
+  }) => {
+    await openSeededConversation(page, [MODEL_A, MODEL_C]);
+    let saveRequests = 0;
+    let providerRequests = 0;
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() === "POST") providerRequests += 1;
+      await route.fallback();
+    });
+    await page.route(
+      "**/api/conversations/qa-conversation/messages**",
+      async (route) => {
+        if (route.request().method() !== "POST") {
+          await route.fallback();
+          return;
+        }
+        const body = route.request().postDataJSON() as {
+          messages?: Array<{ clientRequestId?: string; content?: string }>;
+        };
+        const request = body.messages?.[0];
+        if (request?.content !== "한 번만 저장하고 보내세요" || !request.clientRequestId) {
+          await route.fallback();
+          return;
+        }
+        saveRequests += 1;
+        await saveGate;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            success: true,
+            created: 1,
+            messageMappings: [{
+              requestId: request.clientRequestId,
+              messageId: qaPersistedMessageId(
+                "qa-conversation",
+                request.clientRequestId
+              ),
+            }],
+          }),
+        });
+      }
+    );
+
+    const panel = page.getByTestId("desktop-model-panel").first();
+    const input = panel.getByTestId("model-only-input");
+    const send = panel.getByTestId("model-only-send");
+    await input.fill("한 번만 저장하고 보내세요");
+    await send.evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      (button as HTMLButtonElement).click();
+    });
+
+    await expect.poll(() => saveRequests).toBe(1);
+    await expect(input).toBeDisabled();
+    await page.waitForTimeout(150);
+    expect(saveRequests).toBe(1);
+    expect(providerRequests).toBe(0);
+
+    releaseSave();
+    await expect.poll(() => providerRequests).toBe(1);
+    await page.waitForTimeout(150);
+    expect(saveRequests).toBe(1);
+    expect(providerRequests).toBe(1);
   });
 
   test("A -> B -> C in one burst converges on C and never sends against an unconfirmed model", async ({

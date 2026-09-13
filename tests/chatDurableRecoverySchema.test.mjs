@@ -31,7 +31,7 @@ test("migration constrains draft scope, opaque JSON shape and terminal consisten
 test("recovery GET routes are model-passive and make every response no-store", () => {
   for (const source of [draftRoute, attemptRoute]) {
     assert.match(source, /export const dynamic = "force-dynamic"/);
-    assert.match(source, /"Cache-Control": "no-store"/);
+    assert.match(source, /"Cache-Control": "(?:private, )?no-store"/);
     assert.match(source, /if \(securityResponse\) return noStore\(securityResponse\)/);
     assert.doesNotMatch(source, /streamText|generateText|acquireChatAccess|reserve|providerAdapter/i);
   }
@@ -44,7 +44,10 @@ test("policy and account export encode the privacy boundary", () => {
   const domains = read("lib/accountDataExportDomains.ts");
   const exportSource = read("lib/accountDataExport.ts");
   assert.match(policy, /They may write[\s\S]*security rate-limit bookkeeping/);
-  assert.match(policy, /GET never changes recovery state,[\s\S]*creates an attempt, or submits a message/);
+  assert.match(
+    policy,
+    /exactly one recovery-state mutation[\s\S]*worker_lease_expired[\s\S]*no other GET mutation is permitted/
+  );
   assert.match(domains, /domain: "chatComposerDraft"[\s\S]*state: "included_filtered"/);
   assert.match(domains, /domain: "chatResponseAttempt"[\s\S]*state: "included_filtered"/);
   assert.match(exportSource, /chatComposerDraft: \(userId\)[\s\S]*text: true/);
@@ -84,23 +87,25 @@ test("attempt write CAS evaluates leases on the database clock", () => {
   assert.doesNotMatch(persistence, /leaseExpiresAt: \{ gt: now \}/);
 });
 
-test("an existing owned attempt resolves identity before create-only validation", () => {
+test("an existing owned attempt resolves identity under the advisory transaction lock before create-only validation", () => {
   const persistence = read("lib/chatResponseAttemptPersistence.ts");
   const claimStart = persistence.indexOf("export async function claimChatResponseAttempt");
   const claimEnd = persistence.indexOf("export async function checkpointChatResponseAttempt");
   const claim = persistence.slice(claimStart, claimEnd);
+  const transaction = claim.indexOf("return prisma.$transaction");
+  const advisoryLock = claim.indexOf("await lockChatRecoveryConversation");
+  const existingRead = claim.indexOf("const existing = await tx.chatResponseAttempt.findFirst");
   const identityDecision = claim.indexOf("decideAttemptClaim(existing, identity)");
-  const createScope = claim.indexOf("const scoped = await prisma.conversation.findFirst");
+  const createScope = claim.indexOf("const scoped = await tx.conversation.findFirst");
   const leaseValidation = claim.indexOf("validateAttemptLease");
   assert.match(
     claim,
-    /const existing = await prisma\.chatResponseAttempt\.findFirst\(\{[\s\S]*?where: \{ assistantMessageId: parsed\.assistantMessageId, userId: input\.userId \}/
-  );
-  assert.match(
-    claim,
-    /const raced = await prisma\.chatResponseAttempt\.findFirst\(\{[\s\S]*?where: \{ assistantMessageId: parsed\.assistantMessageId, userId: input\.userId \}/
+    /const existing = await tx\.chatResponseAttempt\.findFirst\(\{[\s\S]*?where: \{ assistantMessageId: parsed\.assistantMessageId, userId: input\.userId \}/
   );
   assert.doesNotMatch(claim, /chatResponseAttempt\.findUnique/);
+  assert.ok(transaction >= 0 && transaction < advisoryLock);
+  assert.ok(advisoryLock >= 0 && advisoryLock < existingRead);
+  assert.ok(existingRead >= 0 && existingRead < identityDecision);
   assert.ok(identityDecision >= 0 && identityDecision < createScope);
   assert.ok(identityDecision < leaseValidation);
 });

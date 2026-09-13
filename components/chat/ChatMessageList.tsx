@@ -86,6 +86,8 @@ type ChatMessageListProps = {
   // distinct from msg.status, which doesn't tell "still streaming" apart
   // from "finished normally".
   isSending?: boolean;
+  /** True while a retry/follow-up is awaiting its pre-send persistence gate. */
+  isSendPreparing?: boolean;
   // Aborts only this panel's in-flight request, distinct from the shell's
   // "stop all" button.
   onStopGenerating?: () => void;
@@ -325,6 +327,7 @@ export function ChatMessageList({
   isGuestMode = false,
   currentChatId = null,
   isSending = false,
+  isSendPreparing = false,
   onStopGenerating,
   importedTranscript,
 }: ChatMessageListProps) {
@@ -1423,6 +1426,7 @@ export function ChatMessageList({
                               <button
                                 type="button"
                                 onClick={onRetryLast}
+                                disabled={isSending || isSendPreparing}
                                 className={primaryButtonClass}
                               >
                                 <RotateCcw className="h-3.5 w-3.5" />
@@ -1433,6 +1437,7 @@ export function ChatMessageList({
                             <button
                               type="button"
                               onClick={onRetryWithoutAttachments}
+                              disabled={isSending || isSendPreparing}
                               className={secondaryButtonClass}
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
@@ -1454,6 +1459,7 @@ export function ChatMessageList({
                               <button
                                 type="button"
                                 data-testid="continue-without-unavailable-attachments"
+                                disabled={isSending || isSendPreparing}
                                 onClick={() =>
                                   onContinueWithoutUnavailableAttachments(
                                     msg.unavailableAttachmentIds ?? []
@@ -1533,6 +1539,7 @@ export function ChatMessageList({
                         <button
                           type="button"
                           onClick={onRetryLast}
+                          disabled={isSending || isSendPreparing}
                           className="inline-flex items-center gap-2 rounded-full border border-zinc-300 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />

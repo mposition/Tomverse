@@ -72,7 +72,9 @@ const walk = (directory, out = []) => {
     if (SKIP_DIRECTORIES.has(entry)) continue;
     const full = join(directory, entry);
     if (statSync(full).isDirectory()) walk(full, out);
-    else if (/\.(ts|tsx|mts|mjs)$/.test(entry)) out.push(relative(ROOT, full));
+    else if (/\.(ts|tsx|mts|mjs)$/.test(entry)) {
+      out.push(relative(ROOT, full).replaceAll("\\", "/"));
+    }
   }
   return out;
 };

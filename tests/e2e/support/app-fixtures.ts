@@ -1,4 +1,16 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
+import { createHash } from "node:crypto";
+
+export const qaPersistedMessageId = (conversationId: string, requestId: string) => {
+  const bytes = createHash("sha256")
+    .update(`qa-message\0${conversationId}\0${requestId}`)
+    .digest()
+    .subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const value = bytes.toString("hex");
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+};
 
 export type QaLanguage = "en" | "ko" | "zh";
 
@@ -1034,7 +1046,10 @@ export async function mockAuthenticatedApi(
   await page.route("**/api/conversations/qa-conversation/messages**", async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
-        messages?: Array<QaConversationMessage & { attachmentUploadIds?: string[] }>;
+        messages?: Array<Omit<QaConversationMessage, "id"> & {
+          clientRequestId: string;
+          attachmentUploadIds?: string[];
+        }>;
       };
       /*
         Binding, the way the real endpoint does it: the opaque upload ids
@@ -1048,8 +1063,17 @@ export async function mockAuthenticatedApi(
       const bound: Array<
         { messageId: string } & NonNullable<QaConversationMessage["attachments"]>[number]
       > = [];
-      for (const message of body?.messages ?? []) {
-        if (!message?.id) continue;
+      const messageMappings: Array<{ requestId: string; messageId: string }> = [];
+      for (const requestMessage of body?.messages ?? []) {
+        if (!requestMessage?.clientRequestId) continue;
+        const message = {
+          ...requestMessage,
+          id: qaPersistedMessageId("qa-conversation", requestMessage.clientRequestId),
+        };
+        messageMappings.push({
+          requestId: requestMessage.clientRequestId,
+          messageId: message.id,
+        });
         const attachments = (message.attachmentUploadIds ?? []).map(
           (uploadId, ordinal) => ({
             id: `ma-${message.id}-${ordinal}`,
@@ -1075,7 +1099,12 @@ export async function mockAuthenticatedApi(
         });
       }
       await route.fulfill(
-        json({ success: true, created: bound.length, attachments: bound }, 201)
+        json({
+          success: true,
+          created: body?.messages?.length ?? 0,
+          messageMappings,
+          attachments: bound,
+        }, 201)
       );
       return;
     }
@@ -1228,9 +1257,18 @@ export async function mockAuthenticatedApi(
       async (route) => {
         if (route.request().method() === "POST") {
           const body = route.request().postDataJSON() as {
-            messages?: QaConversationMessage[];
+            messages?: Array<Omit<QaConversationMessage, "id"> & { clientRequestId: string }>;
           };
-          for (const message of body?.messages ?? []) {
+          const messageMappings: Array<{ requestId: string; messageId: string }> = [];
+          for (const requestMessage of body?.messages ?? []) {
+            const message = {
+              ...requestMessage,
+              id: qaPersistedMessageId(extra.id, requestMessage.clientRequestId),
+            };
+            messageMappings.push({
+              requestId: requestMessage.clientRequestId,
+              messageId: message.id,
+            });
             if (
               !message?.id ||
               extra.savedMessages.some((saved) => saved.id === message.id)
@@ -1239,7 +1277,11 @@ export async function mockAuthenticatedApi(
             }
             extra.savedMessages.push(message);
           }
-          await route.fulfill(json({}, 201));
+          await route.fulfill(json({
+            success: true,
+            created: messageMappings.length,
+            messageMappings,
+          }, 201));
           return;
         }
         await route.fulfill(json({}));

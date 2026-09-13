@@ -319,6 +319,11 @@ model Conversation {
   routerSwitchReason    String?
   routerRecoveryModelId String?
 
+  /// Monotonic fence for Chat recovery claims. A per-model history clear
+  /// increments it under the same advisory lock used by claim, so a request
+  /// prepared before that clear cannot commit an attempt after it.
+  chatRecoveryEpoch Int @default(0)
+
   /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// The assistant profile version this conversation is pinned to (release C,
   /// policy §14). Set once when the conversation starts and never rewritten by
@@ -609,6 +614,12 @@ model MessageAttachment {
   /// recognisable and so an operator can trace a stored file back to the
   /// request that accepted it.
   uploadId String?
+
+  /// Exact source attachment identity when this row was created by carrying
+  /// a prior conversation attachment forward. Kept as opaque provenance (not
+  /// a relation) so deleting the source turn cannot rewrite an idempotency
+  /// receipt for the saved message.
+  sourceAttachmentId String?
 
   /// When storage confirmed, with a 404, that this object is gone.
   ///

@@ -124,6 +124,24 @@ test.describe("multi-model failure and recovery", () => {
     await expect(page.getByText(SECOND_B)).toHaveCount(0);
     await expect(page.getByText(SECOND_C)).toHaveCount(0);
 
+    const modelARequests = await page.evaluate((modelId) => {
+      const requests = (window as typeof window & {
+        __chatModelStubRequests?: Array<Record<string, unknown>>;
+      }).__chatModelStubRequests ?? [];
+      return requests.filter((request) => request.modelId === modelId);
+    }, MODEL_A);
+    expect(modelARequests).toHaveLength(2);
+    expect(modelARequests[1].sourceUserMessageId).toBe(
+      modelARequests[0].sourceUserMessageId
+    );
+    const retryMessages = modelARequests[1].messages as Array<{
+      id?: string;
+      role?: string;
+    }>;
+    expect(retryMessages.filter((message) => message.role === "user").at(-1)?.id).toBe(
+      modelARequests[0].sourceUserMessageId
+    );
+
     // The composer is usable again for the next turn.
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
   });

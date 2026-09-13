@@ -5,6 +5,7 @@ import {
   mockAuthenticatedApi,
   mockChatStream,
   prepareGuestPage,
+  qaPersistedMessageId,
 } from "./support/app-fixtures";
 import {
   restoreActiveConversation,
@@ -116,13 +117,23 @@ async function mockConversationPair(
   await page.route(/.*\/api\/conversations\/qa-conversation-b\/messages(\?.*)?$/, async (route) => {
     if (route.request().method() === "POST") {
       const body = route.request().postDataJSON() as {
-        messages?: Array<{ id: string; role: string; content: string }>;
+        messages?: Array<{ clientRequestId: string; role: string; content: string }>;
       };
-      for (const message of body?.messages ?? []) {
-        if (!message?.id) continue;
-        world.savedMessages[CONVERSATION_B].push(message);
+      const mappings = (body?.messages ?? []).map((message) => ({
+        requestId: message.clientRequestId,
+        messageId: qaPersistedMessageId(CONVERSATION_B, message.clientRequestId),
+      }));
+      for (const [index, message] of (body?.messages ?? []).entries()) {
+        world.savedMessages[CONVERSATION_B].push({
+          ...message,
+          id: mappings[index]!.messageId,
+        });
       }
-      await route.fulfill(json({}, 201));
+      await route.fulfill(json({
+        success: true,
+        created: mappings.length,
+        messageMappings: mappings,
+      }, 201));
       return;
     }
     await route.fulfill(json({}));

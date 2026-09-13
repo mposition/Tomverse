@@ -9,18 +9,21 @@ import {
   chatResponseAttemptIdSchema,
   publicChatResponseAttempt,
 } from "@/lib/chatResponseAttemptCore";
-import { readChatResponseAttempt } from "@/lib/chatResponseAttemptPersistence";
+import {
+  peekChatResponseAttempt,
+  readChatResponseAttempt,
+} from "@/lib/chatResponseAttemptPersistence";
 
 type Params = { params: Promise<{ assistantMessageId: string }> };
 
 const jsonError = (error: string, code: string, status: number) =>
   Response.json(
     { error, code },
-    { status, headers: { "Cache-Control": "no-store" } }
+    { status, headers: { "Cache-Control": "private, no-store" } }
   );
 
 const noStore = (response: Response) => {
-  response.headers.set("Cache-Control", "no-store");
+  response.headers.set("Cache-Control", "private, no-store");
   return response;
 };
 
@@ -40,8 +43,10 @@ export async function GET(request: Request, { params }: Params) {
     }
 
     // Ownership is inside this query. A foreign id and a missing id follow the
-    // same branch and reveal nothing about another account.
-    const attempt = await readChatResponseAttempt(session.user.id, parsed.data);
+    // same branch and reveal nothing about another account. This first lookup
+    // is deliberately non-mutating: a locked conversation must pass its
+    // unlock grant before lease reconciliation may UPDATE the attempt row.
+    const attempt = await peekChatResponseAttempt(session.user.id, parsed.data);
     if (!attempt) {
       return jsonError("Chat response attempt not found.", "CHAT_ATTEMPT_NOT_FOUND", 404);
     }
@@ -52,9 +57,24 @@ export async function GET(request: Request, { params }: Params) {
     });
     if (!access.ok) return noStore(access.response);
 
+    const reconciled = await readChatResponseAttempt(
+      session.user.id,
+      parsed.data,
+      attempt.conversationId
+    );
+    if (!reconciled) {
+      return jsonError("Chat response attempt not found.", "CHAT_ATTEMPT_NOT_FOUND", 404);
+    }
+    // Persistence scopes both its conditional reconciliation UPDATE and final
+    // SELECT to the authorized conversation. Keep this independent assertion
+    // fail-closed in case a future adapter violates that contract.
+    if (reconciled.conversationId !== attempt.conversationId) {
+      return jsonError("Chat response attempt not found.", "CHAT_ATTEMPT_NOT_FOUND", 404);
+    }
+
     return Response.json(
-      { attempt: publicChatResponseAttempt(attempt) },
-      { headers: { "Cache-Control": "no-store" } }
+      { attempt: publicChatResponseAttempt(reconciled) },
+      { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

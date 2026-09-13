@@ -132,7 +132,7 @@ test("only the shared module writes body.style.overflow", () => {
                 continue;
             }
             if (!/\.tsx?$/.test(entry)) continue;
-            const relative = path.slice(ROOT.length + 1);
+            const relative = path.slice(ROOT.length + 1).replaceAll("\\", "/");
             if (relative === "components/useBodyScrollLock.ts") continue;
             if (/document\.body\.style\.overflow\s*=/.test(readFileSync(path, "utf8"))) {
                 offenders.push(relative);

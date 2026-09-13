@@ -5323,6 +5323,7 @@ export const validateChatPayload = (body: unknown) => {
         modelId?: unknown;
         conversationId?: unknown;
         assistantMessageId?: unknown;
+        sourceUserMessageId?: unknown;
         turnstileToken?: unknown;
         deepResearchDepth?: unknown;
         webSearchMode?: unknown;
@@ -5371,6 +5372,29 @@ export const validateChatPayload = (body: unknown) => {
             400,
             "INVALID_MESSAGE_ID",
             "Invalid message ID."
+        );
+    }
+    if (
+        payload.sourceUserMessageId !== undefined &&
+        (typeof payload.sourceUserMessageId !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                payload.sourceUserMessageId
+            ))
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_MESSAGE_ID",
+            "Invalid source message ID."
+        );
+    }
+    if (
+        payload.sourceUserMessageId !== undefined &&
+        (!payload.conversationId || !payload.assistantMessageId)
+    ) {
+        throw new ChatAccessError(
+            400,
+            "INVALID_PERSISTENCE_TARGET",
+            "Incomplete persistence target."
         );
     }
     if (
@@ -5485,10 +5509,24 @@ export const validateChatPayload = (body: unknown) => {
             throw new ChatAccessError(400, "INVALID_CHAT_MESSAGE", "Invalid message.");
         }
         const candidate = message as {
+            id?: unknown;
             role?: unknown;
             content?: unknown;
             attachments?: unknown;
         };
+        if (
+            candidate.id !== undefined &&
+            (typeof candidate.id !== "string" ||
+                candidate.id.length < 1 ||
+                candidate.id.length > 64 ||
+                !/^[A-Za-z0-9_-]+$/.test(candidate.id))
+        ) {
+            throw new ChatAccessError(
+                400,
+                "INVALID_MESSAGE_ID",
+                "Invalid message ID."
+            );
+        }
         if (
             candidate.role !== "user" &&
             candidate.role !== "assistant"
@@ -5527,6 +5565,7 @@ export const validateChatPayload = (body: unknown) => {
 
     return payload as {
         messages: Array<{
+            id?: string;
             role: "user" | "assistant";
             content: string;
             attachments?: unknown[];
@@ -5534,6 +5573,7 @@ export const validateChatPayload = (body: unknown) => {
         modelId?: string;
         conversationId?: string;
         assistantMessageId?: string;
+        sourceUserMessageId?: string;
         turnstileToken?: string;
         deepResearchDepth?: "quick" | "standard" | "deep";
         webSearchMode?: WebSearchMode;
