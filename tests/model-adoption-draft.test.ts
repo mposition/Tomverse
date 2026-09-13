@@ -3,13 +3,17 @@ import test from "node:test";
 import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
+  blankTokenFieldValues,
   buildAdoptionDraft,
+  requestOutputCapFromProvider,
+  suggestReasoning,
   isCreditFloor,
   registryIdFromApiModel,
   remainingValidations,
   suggestCreditFloor,
   WORST_CASE_INPUT_TOKENS,
 } from "../lib/modelAdoptionDraft.ts";
+import { resolveModelPricing } from "../lib/modelPricing.ts";
 import {
   adoptionTransitionPath,
   TERMINAL_WORK_ITEM_STATUSES,
@@ -125,8 +129,10 @@ test("the draft copies what the provider said and nothing else", () => {
   assert.equal(draft.fields.contextWindowTokens, 1_000_000);
   assert.equal(draft.fields.supportsImage, true);
   assert.equal(draft.sources.contextWindowTokens, "provider_catalogue");
-  // The output ceiling is a capability, and is reported rather than written.
-  assert.equal(draft.fields.maxOutputTokens, null);
+  // 64,000 of output plus the largest prompt still fits in 1M, so the ceiling
+  // is safe as the request cap and is copied; it is also still reported.
+  assert.equal(draft.fields.maxOutputTokens, 64_000);
+  assert.equal(draft.sources.maxOutputTokens, "provider_catalogue");
   assert.equal(draft.observedCapabilities.providerMaxOutputTokens, 64_000);
 });
 
@@ -143,9 +149,12 @@ test("every money and product decision is named rather than filled in", () => {
     observation: { metadata: { thinking: true } },
   });
   const unknowns = draft.unknowns.join("\n");
-  for (const owed of ["단가", "등급", "최소 플랜", "예약 출력", "추론 강도"]) {
+  for (const owed of ["단가", "등급", "최소 플랜", "추론 강도"]) {
     assert.match(unknowns, new RegExp(owed), `${owed} must be named`);
   }
+  // The reservation is no longer owed: a blank resolves to the policy default,
+  // which the panel shows. It is named as settled instead.
+  assert.match(draft.notes.join("\n"), /예약 출력/);
   // Nothing about price or sale class is proposed in the fields themselves.
   // The plan is the exception and is set to the most restrictive tier: the
   // column cannot hold "undecided", so the draft picks the value that keeps a
@@ -224,9 +233,9 @@ test("undecided money and limit fields are left null, never zeroed", () => {
   assert.equal(draft.fields.reservationOutputTokens, null);
 });
 
-test("the provider's output ceiling is reported, never copied into the request cap", () => {
-  // Kimi K3: the ceiling is the whole context window, and using it as every
-  // request's output cap left no room for input at all.
+test("a ceiling with no known context window is reported, not copied", () => {
+  // Without the window there is no way to tell whether the ceiling leaves room
+  // for input, and Kimi K3 is what happens when it does not.
   const draft = buildAdoptionDraft({
     provider: "moonshot",
     apiModel: "kimi-k4",
@@ -235,7 +244,7 @@ test("the provider's output ceiling is reported, never copied into the request c
   assert.equal(draft.fields.maxOutputTokens, null);
   assert.equal(draft.observedCapabilities.providerMaxOutputTokens, 524_288);
   assert.match(draft.unknowns.join("\n"), /524,288/);
-  assert.match(draft.unknowns.join("\n"), /별개 결정/);
+  assert.match(draft.unknowns.join("\n"), /컨텍스트 윈도우를 몰라/);
 });
 
 test("an unmade plan decision cannot open a model to guests", () => {
@@ -725,7 +734,7 @@ test("an inherited price is a settled note, not an open question", () => {
     provider: "anthropic",
     apiModel: "claude-fable-5-1",
   });
-  assert.deepEqual(unpriced.notes, []);
+  assert.doesNotMatch(unpriced.notes.join("\n"), /단가/);
   assert.match(unpriced.unknowns.join("\n"), /가격을 넣으면/);
 });
 
@@ -757,4 +766,284 @@ test("a live pair on an item another provider has switched off is adoptable", ()
     }),
     null
   );
+});
+
+// Prefill from what the provider already sends, 2026-09-13. A staging adoption
+// of Claude Fable 5.1 came back with Native PDF, reasoning and the output cap
+// all empty although the scan held every one of them.
+
+test("the output ceiling becomes the request cap only when input still fits", () => {
+  // Claude Fable 5.1: 128,000 out plus the largest prompt is well inside 1M.
+  assert.deepEqual(
+    requestOutputCapFromProvider({
+      providerMaxOutputTokens: 128_000,
+      contextWindowTokens: 1_000_000,
+      worstCaseInputTokens: 128_000,
+    }),
+    { value: 128_000, reason: "fits_with_worst_case_input" }
+  );
+  // Kimi K3: the ceiling is the whole window. As a request cap it left no room
+  // for input and every request was refused -- the incident the guard encodes.
+  assert.deepEqual(
+    requestOutputCapFromProvider({
+      providerMaxOutputTokens: 262_144,
+      contextWindowTokens: 262_144,
+      worstCaseInputTokens: 128_000,
+    }),
+    { value: null, reason: "leaves_no_room_for_input" }
+  );
+});
+
+test("an exact fit is a fit", () => {
+  assert.equal(
+    requestOutputCapFromProvider({
+      providerMaxOutputTokens: 72_000,
+      contextWindowTokens: 200_000,
+      worstCaseInputTokens: 128_000,
+    }).value,
+    72_000
+  );
+});
+
+test("without a ceiling or a window there is nothing to copy", () => {
+  assert.equal(
+    requestOutputCapFromProvider({
+      providerMaxOutputTokens: null,
+      contextWindowTokens: 1_000_000,
+      worstCaseInputTokens: 128_000,
+    }).reason,
+    "no_provider_capability"
+  );
+  assert.equal(
+    requestOutputCapFromProvider({
+      providerMaxOutputTokens: 64_000,
+      contextWindowTokens: null,
+      worstCaseInputTokens: 128_000,
+    }).reason,
+    "no_context_window"
+  );
+});
+
+test("the guard prices the prompt this deployment actually accepts", () => {
+  // A deployment that raised CHAT_USER_MAX_INPUT_TOKENS to 1M has no room left
+  // in Fable 5.1's window for 128,000 of output, and the draft must know it.
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    worstCaseInputTokens: 1_000_000,
+    observation: { metadata: { contextLength: 1_000_000, outputTokenLimit: 128_000 } },
+  });
+  assert.equal(draft.fields.maxOutputTokens, null);
+  assert.match(draft.unknowns.join("\n"), /입력 자리가 남지 않습니다/);
+});
+
+test("a model a profile already covers inherits its cap instead", () => {
+  // A null column follows the profile; a copied number would override it for
+  // good, even when the profile later changes.
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    hasPricingProfile: true,
+    observation: { metadata: { contextLength: 1_000_000, outputTokenLimit: 128_000 } },
+  });
+  assert.equal(draft.fields.maxOutputTokens, null);
+  assert.match(draft.notes.join("\n"), /상한을 상속합니다/);
+});
+
+test("a copied cap is said out loud, with the arithmetic that allowed it", () => {
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { metadata: { contextLength: 1_000_000, outputTokenLimit: 128_000 } },
+  });
+  assert.equal(draft.fields.maxOutputTokens, 128_000);
+  const notes = draft.notes.join("\n");
+  assert.match(notes, /128,000을 채웠습니다/);
+  assert.match(notes, /1,000,000/);
+  // ...and that blank is not an option: without a profile the save needs a cap.
+  assert.match(notes, /비우면 저장되지 않습니다/);
+});
+
+test("Native PDF follows the provider, and silence is not a no", () => {
+  const said = (pdfInput: boolean | null) =>
+    buildAdoptionDraft({
+      provider: "anthropic",
+      apiModel: "claude-fable-5-1",
+      observation: { metadata: { pdfInput } },
+    });
+  assert.equal(said(true).fields.supportsNativePdf, true);
+  assert.equal(said(true).sources.supportsNativePdf, "provider_catalogue");
+  assert.equal(said(false).fields.supportsNativePdf, false);
+  assert.doesNotMatch(said(false).unknowns.join("\n"), /Native PDF/);
+  assert.equal(said(null).fields.supportsNativePdf, false);
+  assert.match(said(null).unknowns.join("\n"), /Native PDF/);
+});
+
+test("reasoning is proposed at the deepest level the provider accepts", () => {
+  assert.equal(
+    suggestReasoning({ thinking: true, effortLevels: "high,low,medium,xhigh" }).value,
+    "high"
+  );
+  // Anthropic sends this value as `effort`. Proposing a level the model does
+  // not list is proposing a request that fails.
+  assert.equal(suggestReasoning({ thinking: true, effortLevels: "low,medium" }).value, "medium");
+  assert.equal(suggestReasoning({ thinking: true }).value, "high");
+  assert.equal(suggestReasoning({ thinking: false, effortLevels: "high" }).value, null);
+  assert.equal(suggestReasoning({}).value, null);
+});
+
+test("levels the registry cannot hold propose nothing, and say so", () => {
+  assert.equal(suggestReasoning({ thinking: true, effortLevels: "xhigh,max" }).value, null);
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { metadata: { thinking: true, effortLevels: "xhigh,max" } },
+  });
+  assert.equal(draft.fields.reasoning, "none");
+  assert.equal(draft.suggestions.reasoning, null);
+  assert.match(draft.unknowns.join("\n"), /겹치지 않아 제안하지 않았습니다/);
+});
+
+test("a proposed reasoning value is marked as one the save must confirm", () => {
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { metadata: { thinking: true, effortLevels: "high,low,medium" } },
+  });
+  assert.equal(draft.fields.reasoning, "high");
+  assert.equal(draft.suggestions.reasoning, "high");
+  assert.equal(draft.sources.reasoning, "needs_decision");
+  assert.match(draft.unknowns.join("\n"), /확정해야 저장됩니다/);
+
+  const plain = buildAdoptionDraft({ provider: "openai", apiModel: "gpt-6-astra" });
+  assert.equal(plain.fields.reasoning, "none");
+  assert.equal(plain.suggestions.reasoning, null);
+});
+
+test("the reservation is shown as a policy default, never written", () => {
+  // A blank reservation already resolves to the profile's or the class's
+  // conservative default. Writing that number would leave a fossil that stops
+  // following the policy -- the failure this repository has met in exactly
+  // these columns.
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { metadata: { contextLength: 1_000_000, outputTokenLimit: 128_000 } },
+  });
+  assert.equal(draft.fields.reservationOutputTokens, null);
+  assert.equal(draft.sources.reservationOutputTokens, "derived");
+  assert.match(draft.notes.join("\n"), /예약 출력 토큰 — 비워 두면/);
+});
+
+// Independent review, 2026-09-13, round 1.
+
+test("an input limit used as the window can only make the guard stricter", () => {
+  // Anthropic publishes max_input_tokens and no total. The largest accepted
+  // input has to fit inside the real window, so the input limit is a lower
+  // bound on it: a cap that fits against the bound fits against the window.
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { metadata: { inputTokenLimit: 1_000_000, outputTokenLimit: 128_000 } },
+  });
+  assert.equal(draft.fields.maxOutputTokens, 128_000);
+
+  // And the bound still refuses what does not fit under it.
+  const tight = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-tight",
+    observation: { metadata: { inputTokenLimit: 200_000, outputTokenLimit: 128_000 } },
+  });
+  assert.equal(tight.fields.maxOutputTokens, null);
+});
+
+test("a blank cap without a profile is shown as required, not as a default", () => {
+  // The preflight refuses a blank cap when no profile covers the model. A
+  // greyed-in class fallback there described a save that cannot happen.
+  const blank = blankTokenFieldValues({
+    hasPricingProfile: false,
+    formMaxOutputTokens: null,
+    effective: { maxOutputTokens: 8_192, reservationBeforeCap: 4_096 },
+  });
+  assert.equal(blank.maxOutputTokens, "required");
+  assert.equal(blank.reservationOutputTokens, 4_096);
+
+  const inherited = blankTokenFieldValues({
+    hasPricingProfile: true,
+    formMaxOutputTokens: null,
+    effective: { maxOutputTokens: 128_000, reservationBeforeCap: 8_192 },
+  });
+  assert.equal(inherited.maxOutputTokens, 128_000);
+});
+
+test("while the profile is unknown the cap field makes no claim either way", () => {
+  // Round 2: a pending or failed lookup was read as "no profile" and the field
+  // said required, although the id might be one a profile covers, where blank
+  // is exactly right.
+  assert.equal(
+    blankTokenFieldValues({
+      hasPricingProfile: null,
+      formMaxOutputTokens: null,
+      effective: null,
+    }).maxOutputTokens,
+    null
+  );
+});
+
+test("the reservation hint is clamped to the typed cap, from the unclamped figure", () => {
+  // The review's case: a per-model override reserves 8,192 under a default cap
+  // of 4,096. Blank, it saves 4,096; with 16,000 typed, it saves 8,192.
+  const effective = { maxOutputTokens: 4_096, reservationBeforeCap: 8_192 };
+  assert.equal(
+    blankTokenFieldValues({ hasPricingProfile: true, formMaxOutputTokens: null, effective })
+      .reservationOutputTokens,
+    4_096
+  );
+  assert.equal(
+    blankTokenFieldValues({ hasPricingProfile: true, formMaxOutputTokens: 16_000, effective })
+      .reservationOutputTokens,
+    8_192
+  );
+  assert.equal(
+    blankTokenFieldValues({ hasPricingProfile: true, formMaxOutputTokens: 2_000, effective })
+      .reservationOutputTokens,
+    2_000
+  );
+});
+
+test("lifting the cap is how the route reads the reservation before the clamp", () => {
+  // The route resolves twice through the live resolver rather than restating
+  // its chain; this pins that the second call really returns the unclamped
+  // figure, env override included, and that the saved result matches.
+  const keys = [
+    "CHAT_MODEL_DRAFT_MODEL_MAX_OUTPUT_TOKENS",
+    "CHAT_MODEL_DRAFT_MODEL_RESERVATION_OUTPUT_TOKENS",
+  ];
+  const previous = keys.map((key) => process.env[key]);
+  process.env[keys[0]] = "4096";
+  process.env[keys[1]] = "8192";
+  try {
+    const base = {
+      id: "draft-model",
+      apiModel: "draft-model",
+      provider: "openai" as const,
+      usageClass: "premium" as const,
+    };
+    assert.equal(resolveModelPricing(base).reservationOutputTokens, 4_096);
+    assert.equal(
+      resolveModelPricing({ ...base, maxOutputTokens: Number.MAX_SAFE_INTEGER })
+        .reservationOutputTokens,
+      8_192
+    );
+    // What a save with 16,000 typed and the reservation blank resolves to.
+    assert.equal(
+      resolveModelPricing({ ...base, maxOutputTokens: 16_000 }).reservationOutputTokens,
+      8_192
+    );
+  } finally {
+    keys.forEach((key, index) => {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    });
+  }
 });
