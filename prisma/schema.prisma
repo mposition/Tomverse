@@ -2002,6 +2002,30 @@ model ProviderModelCatalogEntry {
   @@index([status, lastCheckedAt])
 }
 
+/// What a provider's own documentation said about one model, read after the
+/// daily catalogue scan: evidence for the adoption form, with where it came
+/// from. Never a price source -- lib/modelPricing.ts is -- and nothing on the
+/// request path reads it. One row per exact (provider, apiModel), overwritten
+/// by each read.
+model ProviderModelDocEvidence {
+  id            String   @id @default(cuid())
+  provider      String
+  apiModel      String
+  /// parsed | not_found | fetch_failed | parse_failed
+  status        String
+  /// [{ url, digest }] -- every document the parse read, with a SHA-256 of its body.
+  sources       Json
+  parserVersion String
+  fields        Json?
+  problems      Json
+  fetchedAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([provider, apiModel])
+  @@index([status, fetchedAt])
+}
+
 /// Immutable summary of each provider catalog request. This makes daily
 /// monitoring auditable and distinguishes provider/API failures from absence.
 model ProviderModelCatalogRun {

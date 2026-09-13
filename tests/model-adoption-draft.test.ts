@@ -14,6 +14,13 @@ import {
   WORST_CASE_INPUT_TOKENS,
 } from "../lib/modelAdoptionDraft.ts";
 import { resolveModelPricing } from "../lib/modelPricing.ts";
+import { readFileSync } from "node:fs";
+import {
+  anthropicModelFromPricing,
+  parseAnthropicPricingPage,
+  parseOpenAiModelPage,
+  parseOpenAiStandardPricingTable,
+} from "../lib/providerModelDocsCore.ts";
 import {
   adoptionTransitionPath,
   TERMINAL_WORK_ITEM_STATUSES,
@@ -1046,4 +1053,219 @@ test("lifting the cap is how the route reads the reservation before the clamp", 
       else process.env[key] = previous[index];
     });
   }
+});
+
+// Documentation evidence, 2026-09-13. The two models the staging adoption was
+// tested on, read from the pages their providers served that day.
+
+const docFixture = (name: string) =>
+  readFileSync(new URL(`./fixtures/providerModelDocs/${name}`, import.meta.url), "utf8");
+const readAt = new Date("2026-09-13T01:00:00Z");
+const astraEvidence = {
+  parse: parseOpenAiModelPage({
+    apiModel: "gpt-6-astra",
+    modelPage: docFixture("openai-model-gpt-6-astra-2026-09-13.md"),
+    pricingTable: parseOpenAiStandardPricingTable(docFixture("openai-pricing-2026-09-13.md")),
+  }),
+  sources: [
+    { url: "https://developers.openai.com/api/docs/models/gpt-6-astra.md", digest: "b".repeat(64) },
+    { url: "https://developers.openai.com/api/docs/pricing.md", digest: "c".repeat(64) },
+  ],
+  fetchedAt: readAt,
+};
+const fableEvidence = {
+  parse: anthropicModelFromPricing(
+    parseAnthropicPricingPage(docFixture("anthropic-pricing-2026-09-13.md")),
+    "Claude Fable 5.1"
+  ),
+  sources: [{ url: "https://platform.claude.com/docs/en/about-claude/pricing.md", digest: "d".repeat(64) }],
+  fetchedAt: readAt,
+};
+const draftNow = new Date("2026-09-13T06:00:00Z");
+
+test("GPT-6 Astra: what OpenAI's models API left empty comes from its model page", () => {
+  // OpenAI's /v1/models gives { id, owned_by } and nothing else.
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { displayName: null, metadata: {} },
+    docEvidence: astraEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.fields.contextWindowTokens, 1_050_000);
+  assert.equal(draft.sources.contextWindowTokens, "provider_docs");
+  assert.equal(draft.fields.supportsImage, true);
+  assert.equal(draft.sources.supportsImage, "provider_docs");
+  // The documented ceiling runs through the same guard as an API one:
+  // 128,000 + 128,000 fits in 1,050,000.
+  assert.equal(draft.fields.maxOutputTokens, 128_000);
+  assert.equal(draft.sources.maxOutputTokens, "provider_docs");
+  assert.match(draft.notes.join("\n"), /developers\.openai\.com.*2026-09-13 조회/);
+});
+
+test("GPT-6 Astra: a tiered price is named and proposed as a profile, never prefilled", () => {
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: {} },
+    docEvidence: astraEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.fields.inputUsdPerMillionTokens, null);
+  assert.equal(draft.fields.outputUsdPerMillionTokens, null);
+  const unknowns = draft.unknowns.join("\n");
+  assert.match(unknowns, /장문 구간 가격이 있어 채우지 않았습니다/);
+  assert.match(unknowns, /272,000 입력 토큰 초과 시 입력 2배, 출력 1\.5배/);
+  assert.ok(draft.pricingProfileProposal);
+  assert.match(draft.pricingProfileProposal, /modelId: "gpt-6-astra"/);
+});
+
+test("Claude Fable 5.1: a flat documented price is prefilled with where it came from", () => {
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: {
+      displayName: "Claude Fable 5.1",
+      metadata: { inputTokenLimit: 1_000_000, outputTokenLimit: 128_000, vision: true, pdfInput: true },
+    },
+    docEvidence: fableEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.fields.inputUsdPerMillionTokens, 10);
+  assert.equal(draft.fields.outputUsdPerMillionTokens, 50);
+  assert.equal(draft.fields.cachedInputPriceMultiplier, 0.025);
+  assert.equal(draft.sources.inputUsdPerMillionTokens, "provider_docs");
+  assert.match(draft.notes.join("\n"), /US\$10 \/ US\$50, 캐시 입력 배수 0\.025/);
+  // Saying out loud that it is an override and still owes a pricing check.
+  assert.match(draft.notes.join("\n"), /관리자 override/);
+  // The API's own numbers are not replaced by the page.
+  assert.equal(draft.sources.contextWindowTokens, "provider_catalogue");
+});
+
+test("documentation never prices a model a profile already covers", () => {
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    hasPricingProfile: true,
+    observation: { displayName: "Claude Fable 5.1", metadata: { inputTokenLimit: 1_000_000 } },
+    docEvidence: fableEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.fields.inputUsdPerMillionTokens, null);
+  assert.equal(draft.pricingProfileProposal, null);
+});
+
+test("where the API and the page disagree, the API is kept and the difference named", () => {
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: { contextLength: 400_000 } },
+    docEvidence: astraEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.fields.contextWindowTokens, 400_000);
+  assert.match(draft.unknowns.join("\n"), /API는 400,000, 문서는 1,050,000/);
+});
+
+test("no evidence leaves the draft as it was", () => {
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: {} },
+  });
+  assert.equal(draft.fields.contextWindowTokens, null);
+  assert.equal(draft.fields.inputUsdPerMillionTokens, null);
+  assert.equal(draft.pricingProfileProposal, null);
+  assert.match(draft.unknowns.join("\n"), /공급자 문서에서 읽은 가격이 없습니다/);
+});
+
+// Independent review, 2026-09-13, round 1 (step 2).
+
+test("evidence older than a day and a half fills nothing at all", () => {
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: {} },
+    docEvidence: astraEvidence,
+    now: new Date("2026-09-20T00:00:00Z"),
+  });
+  assert.equal(draft.fields.contextWindowTokens, null);
+  assert.equal(draft.fields.maxOutputTokens, null);
+  assert.equal(draft.pricingProfileProposal, null);
+  assert.match(draft.unknowns.join("\n"), /2026-09-13에 읽은 증거라 어떤 값도 채우지 않았습니다/);
+});
+
+test("an API that disagrees with the page on the output ceiling or image input is named", () => {
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: { outputTokenLimit: 64_000, vision: false } },
+    docEvidence: astraEvidence,
+    now: draftNow,
+  });
+  const unknowns = draft.unknowns.join("\n");
+  assert.match(unknowns, /최대 출력 상한 — 공급자 API는 64,000, 문서는 128,000/);
+  assert.match(unknowns, /이미지 입력 지원 — 공급자 API는 미지원, 문서는 지원/);
+  assert.equal(draft.fields.supportsImage, false);
+});
+
+test("the profile proposal takes the guarded cap, not the documented ceiling", () => {
+  // A context window too small for the documented ceiling plus the largest
+  // prompt: the form refuses to copy the cap, and so must the proposal.
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: { contextLength: 200_000 } },
+    docEvidence: astraEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.fields.maxOutputTokens, null);
+  assert.match(draft.pricingProfileProposal ?? "", /maxOutputTokens: MAX_OUTPUT_TOKENS_TO_DECIDE/);
+});
+
+test("the profile proposal is keyed on the registry id being saved", () => {
+  // Review round 2: correcting the id left the proposal under the suggested
+  // one, and committing it would have priced a model nobody saves.
+  const draft = buildAdoptionDraft({
+    provider: "openai",
+    apiModel: "gpt-6-astra",
+    observation: { metadata: {} },
+    docEvidence: astraEvidence,
+    now: draftNow,
+    registryModelId: "astra-enterprise",
+  });
+  assert.match(draft.pricingProfileProposal ?? "", /modelId: "astra-enterprise"/);
+});
+
+test("documented prices are marked as needing confirmation", () => {
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { displayName: "Claude Fable 5.1", metadata: { inputTokenLimit: 1_000_000, outputTokenLimit: 128_000 } },
+    docEvidence: fableEvidence,
+    now: draftNow,
+  });
+  assert.equal(draft.suggestions.price, true);
+  const plain = buildAdoptionDraft({ provider: "openai", apiModel: "gpt-6-astra", observation: { metadata: {} } });
+  assert.equal(plain.suggestions.price, false);
+});
+
+test("a profile under this id for a different model is refused, not inherited", () => {
+  // Round 4: prices resolve by registry id alone, so a profile for another
+  // provider or api model under the same id would bill this model at its price.
+  const other = { provider: "openai", apiModelId: "gpt-5.5" };
+  const draft = buildAdoptionDraft({
+    provider: "anthropic",
+    apiModel: "claude-fable-5-1",
+    observation: { metadata: {} },
+    profileForOtherPair: other,
+  });
+  assert.match(draft.unknowns.join("\n"), /다른 모델\(openai \/ gpt-5\.5\)의 것입니다/);
+  const refusal = adoptionPreflightRefusal({
+    workItem: { ...adoptable },
+    body: { ...adoptBody },
+    profileForOtherPair: other,
+  });
+  assert.equal(refusal?.status, 409);
+  assert.match(refusal!.message, /Save it under a different id/);
 });
