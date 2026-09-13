@@ -25,19 +25,75 @@ test("a snapshot round-trips through the envelope", () => {
   assert.deepEqual(decryptSnapshot(sealed, keyring), payload);
 });
 
+// The envelope's whole field set, so a value added beside the ciphertext is a
+// failure on its own rather than something the search below has to notice.
+// Everything except `v` and `keyVersion` is base64 of a random-looking buffer.
+const ENVELOPE_FIELDS = ["v", "keyVersion", "dk", "dkIv", "dkTag", "ct", "iv", "tag"];
+
+// Long enough that a chance hit is not a thing that happens.
+//
+// This assertion used to search for `"Pro"`, and on 2026-09-12 it failed the
+// Daily Security Audit: the ciphertext's base64 spelled those three characters.
+// Nothing had leaked. A three-character needle over ~230 base64 positions hits
+// with probability 230 / 64^3, and measuring the real `encryptSnapshot` over
+// 400,000 envelopes gave 298 -- 0.0745%, against 0.0877% predicted. Every hit
+// was `"Pro"`; the two longer needles never fired.
+//
+// The cost was not the red run. This is a test that says a secret leaked, and
+// one that says so at random teaches its readers to re-run it -- so the first
+// real leak reads as the last false alarm. The needles are now 12+ characters
+// (230 / 64^12, which is once in about 10^17 runs), and the payload is checked
+// against itself below so the search is still known to be able to find them.
+const PAYLOAD = {
+  name: "Someone Recognisable",
+  plan: "Pro-Subscription-Tier",
+  email: "recognisable.someone@example.com",
+};
+const NEEDLES = Object.values(PAYLOAD);
+
 test("nothing recognisable survives into the stored value", () => {
-  const sealed = encryptSnapshot(
-    { name: "Someone", plan: "Pro", email: "someone@example.com" },
-    keyring
-  );
+  const sealed = encryptSnapshot(PAYLOAD, keyring);
   const asText = JSON.stringify(sealed);
 
-  for (const secret of ["Someone", "Pro", "someone@example.com"]) {
+  for (const secret of NEEDLES) {
     assert.equal(
       asText.includes(secret),
       false,
       `${secret} leaked into the stored envelope`
     );
+  }
+});
+
+test("the search that found nothing would have found a plaintext store", () => {
+  // The positive control the assertion above needs to mean anything. Without
+  // it, a `NEEDLES` that no longer matches `PAYLOAD` -- or an `encryptSnapshot`
+  // that returned an empty object -- passes by finding nothing anywhere.
+  const inTheClear = JSON.stringify(PAYLOAD);
+  for (const secret of NEEDLES) {
+    assert.equal(inTheClear.includes(secret), true, secret);
+  }
+});
+
+test("the envelope carries ciphertext and key metadata, and nothing else", () => {
+  // The deterministic half of "nothing recognisable survives": a field added
+  // beside the ciphertext -- a plan name kept for indexing, a preview string --
+  // fails here whatever it contains and however short it is. The search above
+  // is probabilistic in the other direction, and this is not.
+  const sealed = encryptSnapshot(PAYLOAD, keyring);
+
+  assert.deepEqual(Object.keys(sealed).sort(), [...ENVELOPE_FIELDS].sort());
+  assert.equal(sealed.v, 1);
+  assert.equal(sealed.keyVersion, "v1");
+
+  for (const field of ENVELOPE_FIELDS.filter(
+    (name) => name !== "v" && name !== "keyVersion"
+  )) {
+    const value = sealed[field];
+    assert.equal(typeof value, "string", field);
+    assert.match(value, /^[A-Za-z0-9+/]+={0,2}$/, field);
+    // Round-trips through base64, so the field is encoded bytes rather than a
+    // readable string that happens to use the same alphabet.
+    assert.equal(Buffer.from(value, "base64").toString("base64"), value, field);
   }
 });
 
