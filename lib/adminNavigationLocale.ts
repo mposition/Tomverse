@@ -22,7 +22,7 @@ import {
  * name. This file adds a second rendering of the same entries, keyed by the
  * same ids, and never decides a route, a tab or a permission.
  *
- * `tests/adminNavigationLocale.test.mjs` fails when an entry, tab, group,
+ * `tests/adminLocale.test.mjs` fails when an entry, tab, group,
  * detail route or unlisted page has no Korean copy, so adding one to the route
  * table without translating it cannot ship.
  */

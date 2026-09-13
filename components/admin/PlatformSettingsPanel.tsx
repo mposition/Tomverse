@@ -14,6 +14,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminPlatformMemoryMessages } from "@/lib/adminMessages/platformMemory";
 import { adminPlatformSettingsMessages } from "@/lib/adminMessages/platformSettings";
 
 /**
@@ -108,6 +109,7 @@ export function PlatformSettingsPanel({
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
 }: Props) {
   const m = useAdminMessages(adminPlatformSettingsMessages);
+  const memoryCopy = useAdminMessages(adminPlatformMemoryMessages);
   const { models } = useModelCatalog();
   const guestModels = useMemo(
     () =>
@@ -618,17 +620,17 @@ export function PlatformSettingsPanel({
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-teal-300">
-                {m.memory.eyebrow}
+                {memoryCopy.eyebrow}
               </p>
-              <h3 className="mt-2 text-xl font-black text-white">{m.memory.title}</h3>
+              <h3 className="mt-2 text-xl font-black text-white">{memoryCopy.title}</h3>
               <p className="mt-2 text-sm leading-6 text-zinc-400">
-                {m.memory.description}
+                {memoryCopy.description}
               </p>
               <dl className="mt-4 grid gap-2 md:grid-cols-3">
                 {([
                   ["memoryExtractionEnabled", memoryStatus.memoryExtractionEnabled ? "on" : "off", "memory-extraction-flag"],
                   ["memoryInjectionEnabled", memoryStatus.memoryInjectionEnabled ? "on" : "off", "memory-injection-flag"],
-                  [m.memory.approvedPairs, String(memoryStatus.memoryApprovedPairCount), "memory-approved-pairs"],
+                  [memoryCopy.approvedPairs, String(memoryStatus.memoryApprovedPairCount), "memory-approved-pairs"],
                 ] as const).map(([label, value, testId]) => (
                   <div
                     key={label}
@@ -649,7 +651,7 @@ export function PlatformSettingsPanel({
                   data-testid="admin-memory-blocked-notice"
                   className="mt-3 text-sm font-bold text-amber-300"
                 >
-                  {m.memory.blocked}
+                  {memoryCopy.blocked}
                 </p>
               ) : null}
             </div>

@@ -1,6 +1,10 @@
 import { defineAdminMessages } from "@/lib/adminLocale";
 
-/** Copy for the §12.1 emergency revocation control (`AdminMemoryRevocationPanel`). */
+/**
+ * Copy for the emergency revocation control (`AdminMemoryRevocationPanel`):
+ * docs/policy/external-conversation-import-and-memory.md §12.1, with enabling
+ * left to that document's §12.4 human procedure.
+ */
 export const adminMemoryRevocationMessages = defineAdminMessages({
   en: {
     state: {
