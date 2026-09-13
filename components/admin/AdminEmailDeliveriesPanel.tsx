@@ -6,6 +6,8 @@ import {
 } from "@/components/admin/AdminAddressReveal";
 
 import type { AdminEmailDeliveryRow } from "@/lib/adminEmailDeliveries";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminEmailDeliveryMessages } from "@/lib/adminMessages/emailDelivery";
 import {
   DELIVERY_STATUSES,
   UNDELIVERED_STATUSES,
@@ -50,7 +52,7 @@ const when = (value: Date | null) =>
 const hrefFor = (statuses: readonly string[]) =>
   `/admin/email-delivery?tab=deliveries&status=${statuses.join(",")}`;
 
-export function AdminEmailDeliveriesPanel({
+export async function AdminEmailDeliveriesPanel({
   rows,
   filters,
   statusCounts,
@@ -64,6 +66,8 @@ export function AdminEmailDeliveriesPanel({
   /** D10: `owner` and `ops`. Resolved on the server. */
   mayRevealAddresses: boolean;
 }) {
+  const messages = await getAdminMessages(adminEmailDeliveryMessages);
+  const m = messages.deliveries;
   const showing = new Set(filters.statuses);
   const hidden = DELIVERY_STATUSES.filter((status) => !showing.has(status));
   const hiddenRows = hidden.reduce(
@@ -74,13 +78,11 @@ export function AdminEmailDeliveriesPanel({
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Email
+        {messages.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Deliveries</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        Every message the outbox has handled, and what became of it. Abandoned
-        rows are the dead-letter queue — they stay here with their attempt count
-        and error rather than moving somewhere that loses both.
+        {m.intro}
       </p>
 
       {/* D10: masked by default, revealed by a deliberate audited act. The
@@ -95,7 +97,7 @@ export function AdminEmailDeliveriesPanel({
       </div>
 
       <nav
-        aria-label="Delivery status filters"
+        aria-label={m.filtersLabel}
         className="mt-5 flex flex-wrap gap-2"
       >
         <Link
@@ -107,7 +109,7 @@ export function AdminEmailDeliveriesPanel({
               : "border-zinc-700 bg-zinc-900 text-zinc-300"
           }`}
         >
-          Did not arrive
+          {m.didNotArrive}
         </Link>
         {DELIVERY_STATUSES.map((status) => (
           <Link
@@ -134,23 +136,20 @@ export function AdminEmailDeliveriesPanel({
         data-testid="email-delivery-scope"
         className="mt-4 text-xs text-zinc-500"
       >
-        Showing {rows.length} row{rows.length === 1 ? "" : "s"} in{" "}
-        {filters.statuses.join(", ")}.
-        {hidden.length > 0
-          ? ` ${hiddenRows} row${hiddenRows === 1 ? "" : "s"} in other statuses are not shown.`
-          : ""}
+        {m.scope(rows.length, filters.statuses.join(", "))}
+        {hidden.length > 0 ? m.hiddenRows(hiddenRows) : ""}
       </p>
 
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[64rem] text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-zinc-500">
             <tr>
-              <th className="py-2 pr-4 font-semibold">Status</th>
-              <th className="py-2 pr-4 font-semibold">Template</th>
-              <th className="py-2 pr-4 font-semibold">Recipient</th>
-              <th className="py-2 pr-4 font-semibold">Attempts</th>
-              <th className="py-2 pr-4 font-semibold">Last error</th>
-              <th className="py-2 pr-4 font-semibold">Created</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.status}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.template}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.recipient}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.attempts}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.lastError}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.created}</th>
             </tr>
           </thead>
           <tbody className="text-zinc-300">
@@ -161,7 +160,7 @@ export function AdminEmailDeliveriesPanel({
                   data-testid="email-delivery-empty"
                   className="py-6 text-sm text-zinc-500"
                 >
-                  Nothing in these statuses.
+                  {m.empty}
                 </td>
               </tr>
             ) : null}
@@ -231,7 +230,7 @@ export function AdminEmailDeliveriesPanel({
           href={`/admin/email-delivery?tab=deliveries&status=${filters.statuses.join(",")}&cursor=${nextCursor}`}
           className="mt-4 inline-block rounded-full border border-zinc-700 bg-zinc-900 px-4 py-1.5 text-xs font-semibold text-zinc-200"
         >
-          Older
+          {m.older}
         </Link>
       ) : null}
     </section>

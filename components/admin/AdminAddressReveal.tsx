@@ -11,6 +11,8 @@ import {
 import { Eye, Loader2 } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminAddressRevealMessages } from "@/lib/adminMessages/addressReveal";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AddressRevealKind } from "@/lib/emailAddressMaskingCore";
 
 /**
@@ -109,6 +111,7 @@ export function AdminRevealAddressesButton({
   rowIds: string[];
   allowed: boolean;
 }) {
+  const m = useAdminMessages(adminAddressRevealMessages);
   const setState = useContext(RevealSetter) as (next: RevealState) => void;
   const { revealed } = useContext(RevealContext);
   const [busy, setBusy] = useState(false);
@@ -128,23 +131,23 @@ export function AdminRevealAddressesButton({
         error?: string;
       } | null;
       if (!response.ok || !payload?.addresses) {
-        throw new Error(payload?.error || "Could not show the addresses.");
+        throw new Error(payload?.error || m.failed);
       }
       setState({ addresses: payload.addresses, revealed: true });
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not show the addresses.",
+        error instanceof Error ? error.message : m.failed,
         "error"
       );
     } finally {
       setBusy(false);
     }
-  }, [busy, ids, kind, revealed, setState]);
+  }, [busy, ids, kind, m.failed, revealed, setState]);
 
   if (!allowed) {
     return (
       <p className="text-xs text-zinc-500" data-testid="admin-reveal-not-permitted">
-        Addresses are shown masked. Revealing them is an owner or ops action.
+        {m.notPermitted}
       </p>
     );
   }
@@ -152,8 +155,7 @@ export function AdminRevealAddressesButton({
   if (revealed) {
     return (
       <p className="text-xs text-zinc-400" data-testid="admin-reveal-done">
-        Addresses shown, and recorded in the audit log. Reloading this page masks
-        them again.
+        {m.done}
       </p>
     );
   }
@@ -171,7 +173,7 @@ export function AdminRevealAddressesButton({
       ) : (
         <Eye className="h-4 w-4" aria-hidden />
       )}
-      Show addresses ({ids.length})
+      {m.show(ids.length)}
     </button>
   );
 }
