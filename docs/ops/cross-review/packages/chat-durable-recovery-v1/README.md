@@ -14,9 +14,11 @@ exchange는 사람이 disposition을 결정하는 상태로 종결됐다.
 | 2 | `3defa1a9` | `sha256:6b7f8382…bc9a0a` | `approve` | warning 1, nit 2 |
 
 `exchange.json`은 세 라운드의 제어 프로그램 replay다. `package-round*.json`은
-고정 commit·digest·테스트와 guard 결과를, `verdict-round*.json`은 Claude의 판정을,
-`review-round*.events.jsonl`은 읽기 전용 검토 실행 기록을 보존한다. `change.diff`와
-`review-prompt.md`는 마지막 라운드의 편의 사본이며 라운드별 원본이 우선한다.
+고정 commit·digest·전체 diff·테스트와 guard 결과를, `verdict-round*.json`은
+Claude의 판정을, `review-round*.events.jsonl`은 읽기 전용 검토 실행 기록을
+보존한다. plain `change*.diff`와 `review-prompt.md`는 package JSON에서 결정적으로
+재생성되는 중복 파일이고, 포함된 과거 source 공백이 통합 diff의 새 whitespace
+오류로 오인되지 않도록 영구 추적 사본에서는 제외했다.
 
 모든 검토는 author `codex`, reviewer `claude`로 실행했다. 사용자가 이번 작업에
 한해 허용한 `--skip-preflight` 예외가 verdict에 기록되어 있다. Claude에는
