@@ -27,7 +27,8 @@ import {
     candidateFamilyIdentity,
     candidateRepresentativeRank,
     decisionKeyFamily,
-    decisionSuppressesCandidate,
+    decisionSuppressesCandidateIdentity,
+    modelStage,
     newestByModelLine,
     shouldQueueModelCandidate,
     supersedingServedModel,
@@ -279,6 +280,80 @@ export const workItemForObservation = (input: {
 export type ModelObservation = { provider: string; apiModel: string };
 
 /**
+ * A provider's own statement that two request ids resolve to one model.
+ *
+ * This is deliberately evidence, not another model-name heuristic. xAI's
+ * `/v1/language-models` response, for example, returns a canonical `id` plus
+ * requestable `aliases`. Treating `grok-4.20-non-reasoning` and its `-gv2`
+ * revision as unrelated made the operator decide twice about one upstream
+ * model. Conversely, stripping arbitrary suffixes would silently merge models
+ * no provider said were equivalent.
+ */
+export type ModelAliasEvidence = {
+    aliasApiModel: string;
+    canonicalApiModel: string;
+};
+
+const aliasFamilyMap = (aliases: readonly ModelAliasEvidence[]) => {
+    const direct = new Map<string, string>();
+    const ambiguous = new Set<string>();
+    for (const alias of aliases) {
+        const from = candidateFamilyIdentity(alias.aliasApiModel);
+        const to = candidateFamilyIdentity(alias.canonicalApiModel);
+        if (!from || !to || from === to || ambiguous.has(from)) continue;
+
+        const existing = direct.get(from);
+        if (existing && existing !== to) {
+            // Alias evidence is gathered across every provider. If two of them
+            // assign the same request id to different canonical models, neither
+            // statement is safe enough to collapse an operator decision. Keep
+            // the id independent instead of making row order choose a winner.
+            direct.delete(from);
+            ambiguous.add(from);
+            continue;
+        }
+        direct.set(from, to);
+    }
+    return direct;
+};
+
+/** Build once per catalogue snapshot; callers use it in bounded row loops. */
+export const createModelDecisionIdentityResolver = (
+    aliases: readonly ModelAliasEvidence[] = []
+) => {
+    const direct = aliasFamilyMap(aliases);
+    return (apiModel: string) => {
+        let identity = candidateFamilyIdentity(apiModel);
+        const visited = new Set<string>();
+        while (!visited.has(identity)) {
+            visited.add(identity);
+            const next = direct.get(identity);
+            if (!next) break;
+            identity = next;
+        }
+        return identity;
+    };
+};
+
+/** One decision identity after applying provider-declared alias evidence. */
+export const modelDecisionIdentity = (
+    apiModel: string,
+    aliases: readonly ModelAliasEvidence[] = []
+) => createModelDecisionIdentityResolver(aliases)(apiModel);
+
+/** Alias statements that survived conflict handling and resolve to one family. */
+export const trustedModelAliasEvidence = (
+    aliases: readonly ModelAliasEvidence[] = []
+) => {
+    const decisionIdentity = createModelDecisionIdentityResolver(aliases);
+    return aliases.filter(
+        (alias) =>
+            decisionIdentity(alias.aliasApiModel) ===
+            decisionIdentity(alias.canonicalApiModel)
+    );
+};
+
+/**
  * Where a model was seen, kept beside the decision about it.
  *
  * One decision, several sightings: `glm-5.3` arrived three times over three
@@ -362,19 +437,25 @@ export const selectQueueCandidates = (input: {
      * then, and a row filed before keys existed has only its apiModel.
      */
     queuedDecisionKeys?: readonly string[];
+    /** Provider-declared aliases collected from the same catalogue state. */
+    aliases?: readonly ModelAliasEvidence[];
 }): QueueCandidateSelection => {
+    const decisionIdentity = createModelDecisionIdentityResolver(input.aliases);
     const servedFamilies = new Set(
-        input.catalogueApiModels.map(candidateFamilyIdentity)
+        input.catalogueApiModels.map(decisionIdentity)
     );
     const decisionKeysByFamily = new Map<string, string[]>();
     for (const key of [
         ...input.queuedApiModels.map((apiModel) => candidateDecisionKey(apiModel)),
         ...(input.queuedDecisionKeys ?? []),
     ]) {
-        const family = decisionKeyFamily(key);
+        const family = decisionIdentity(decisionKeyFamily(key));
+        const separator = key.lastIndexOf("@");
+        const stage = separator < 0 ? "stable" : key.slice(separator + 1) || "stable";
+        const normalizedKey = `${family}@${stage}`;
         const held = decisionKeysByFamily.get(family);
-        if (held) held.push(key);
-        else decisionKeysByFamily.set(family, [key]);
+        if (held) held.push(normalizedKey);
+        else decisionKeysByFamily.set(family, [normalizedKey]);
     }
     const fresh: Array<ModelObservation & { observedVia: ObservedVia }> = [];
     const suppressed: SuppressedCandidate[] = [];
@@ -401,7 +482,7 @@ export const selectQueueCandidates = (input: {
             note(observation, "not_reviewable");
             continue;
         }
-        const identity = candidateFamilyIdentity(observation.apiModel);
+        const identity = decisionIdentity(observation.apiModel);
         const already = byIdentity.get(identity);
         if (already) {
             // Two providers listing the same new model on the same day is one
@@ -421,7 +502,11 @@ export const selectQueueCandidates = (input: {
             continue;
         }
         const decided = (decisionKeysByFamily.get(identity) ?? []).some((key) =>
-            decisionSuppressesCandidate(key, observation.apiModel)
+            decisionSuppressesCandidateIdentity(
+                key,
+                identity,
+                modelStage(observation.apiModel)
+            )
         );
         if (decided) {
             note(observation, "already_decided");
@@ -468,6 +553,7 @@ export const newCandidatesForQueue = (input: {
     catalogueApiModels: readonly string[];
     queuedApiModels: readonly string[];
     queuedDecisionKeys?: readonly string[];
+    aliases?: readonly ModelAliasEvidence[];
 }) => selectQueueCandidates(input).fresh;
 
 /**
@@ -483,11 +569,15 @@ export const observationsForExistingItems = (input: {
     observed: readonly ModelObservation[];
     /** The identities the queue holds, from `candidateIdentity`. */
     queuedIdentities: readonly string[];
+    aliases?: readonly ModelAliasEvidence[];
 }) => {
-    const queued = new Set(input.queuedIdentities);
+    const decisionIdentity = createModelDecisionIdentityResolver(input.aliases);
+    const queued = new Set(
+        input.queuedIdentities.map(decisionIdentity)
+    );
     const byIdentity = new Map<string, ObservedVia>();
     for (const observation of input.observed) {
-        const identity = candidateFamilyIdentity(observation.apiModel);
+        const identity = decisionIdentity(observation.apiModel);
         if (!queued.has(identity)) continue;
         const existing = byIdentity.get(identity);
         if (existing) byIdentity.set(identity, mergeObservedVia(existing, [observation]).merged);
