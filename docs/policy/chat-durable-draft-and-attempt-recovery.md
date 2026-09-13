@@ -71,8 +71,11 @@ deterministic version-8 UUID from a fixed SHA-256 namespace, the owned
 conversation id, and that request id. Only the derived id is written to the
 Message and MessageAttachment tables. The response returns the explicit
 `{requestId,messageId}` mapping; only that persisted `messageId` may become the
-provider request's `sourceUserMessageId`. The receipt route repeats the same
-derivation from the request id and returns the mapping when it proves a commit.
+provider request's `sourceUserMessageId`. The read-only receipt operation uses
+POST so exact draft text and attachment provenance remain in a bounded private
+body rather than a URL, but it performs no write and never calls a provider. It
+repeats the same derivation from the request id and returns the mapping when it
+proves a commit.
 Consequently, copying an actual Message UUID from another account or
 conversation into `clientRequestId` cannot name, probe, or bind attachments to
 that row.

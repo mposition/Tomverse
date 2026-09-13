@@ -433,6 +433,25 @@ test("the actual message route atomically consumes scopeKey new with the first s
   assert.deepEqual(responseBody.messageMappings[0].requestId, prompt.clientRequestId);
   assert.equal(state.drafts.length, 0);
   assert.equal(state.messages.some((row) => row.id === responseBody.messageMappings[0].messageId), true);
+
+  state.drafts.push({
+    userId: "owner",
+    scopeKey: "new",
+    revision: 1,
+    text: "newer unsent draft",
+    attachmentReferences: [],
+  });
+  const replay = await save([prompt], "conversation", {
+    scopeKey: "new",
+    expectedRevision: 1,
+    requestId: prompt.clientRequestId,
+  });
+  assert.equal(replay.status, 200);
+  const replayBody = await replay.json();
+  assert.equal(replayBody.created, 0);
+  assert.equal("draftConsumed" in replayBody, false);
+  assert.equal(state.drafts.length, 1);
+  assert.equal(state.drafts[0].text, "newer unsent draft");
 });
 
 test("draftConsume is refused outside a stored Chat while an ordinary Review message stays unchanged", async () => {

@@ -220,6 +220,7 @@ export async function POST(
       (messageId, ordinal) is what makes that idempotent rather than merely
       forgiving.
     */
+    let draftWasConsumed = false;
     const created = messages.some((message) => message.attachmentReferences !== undefined)
       ? await saveMessagesWithAttachmentReferences({
           userId, conversationId, ownPrefix: ownPrefix ?? "", messages,
@@ -234,12 +235,14 @@ export async function POST(
                   });
                 },
                 beforeCommit: async (tx) => {
-                  return consumeChatDraftForMessage(tx, {
+                  const consumption = await consumeChatDraftForMessage(tx, {
                     userId,
                     conversationId,
                     draftConsume,
                     message: messages[0]!,
                   });
+                  draftWasConsumed = !consumption.replay;
+                  return consumption;
                 },
               }
             : {}),
@@ -254,6 +257,7 @@ export async function POST(
           message: messages[0]!,
         });
         if (consumption.replay) return { count: 0 };
+        draftWasConsumed = true;
       }
       await assertMessageCapacity(
         tx,
@@ -324,7 +328,7 @@ export async function POST(
       success: true,
       created: created.count,
       messageMappings,
-      ...(body.draftConsume ? { draftConsumed: true } : {}),
+      ...(body.draftConsume && draftWasConsumed ? { draftConsumed: true } : {}),
       ...(carriesAttachments
         ? {
             attachments: attachments.map((attachment) => ({

@@ -1691,6 +1691,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(state.attemptReadCount).toBeGreaterThan(0);
     await page.getByTestId("chat-textarea").fill("Keep this successor draft while recovery is active.");
     await expect(page.getByTestId("chat-send-button")).toHaveCount(0);
+    await expect(page.getByTestId("chat-stop-all-button")).toHaveCount(0);
     await page.getByTestId("chat-textarea").press("Enter");
     await page.waitForTimeout(100);
     expect(await persistentChatPostCount(page)).toBe(0);
@@ -1914,6 +1915,7 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect.poll(async () => (await requests(page)).length).toBe(1);
     await expect(textarea).toBeEnabled();
     await expect(page.getByTestId("chat-send-button")).toHaveCount(0);
+    await expect(page.getByTestId("chat-stop-all-button")).toHaveCount(0);
     await textarea.fill("This is the next durable draft, not a second request.");
     await expect.poll(() => state.drafts.get(CONVERSATION)?.text).toBe(
       "This is the next durable draft, not a second request."

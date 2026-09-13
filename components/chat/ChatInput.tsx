@@ -3719,9 +3719,10 @@ export function ChatInput({
               onStop={voice.stop}
             />
           )}
-          {isSending ? (
+          {isSending && !allowEditingWhileSending ? (
             <button
               type="button"
+              data-testid="chat-stop-all-button"
               onClick={onCancel}
               className={`flex shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-500 ${isMobileShell ? "h-11 w-11" : "h-9 w-9"}`}
               title={t("chat.stopAllResponses")}
@@ -3729,7 +3730,7 @@ export function ChatInput({
             >
               <Square className="h-3.5 w-3.5 fill-current" />
             </button>
-          ) : (
+          ) : !isSending ? (
             <button
               type="button"
               data-testid="chat-send-button"
@@ -3755,7 +3756,7 @@ export function ChatInput({
             >
               <ArrowUp className="h-4 w-4" />
             </button>
-          )}
+          ) : null}
           {sendDisabledReason && (
             <p
               id="chat-send-disabled-reason"
