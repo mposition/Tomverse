@@ -4,6 +4,9 @@ import {
   CheckCircle2,
   ShieldCheck,
 } from "lucide-react";
+import type { AdminMessageShape } from "@/lib/adminLocale";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAiReviewScorecardMessages } from "@/lib/adminMessages/aiReviewScorecard";
 import type { AiReviewScorecard } from "@/lib/aiReviewScorecard";
 import type { ScorecardMetric } from "@/lib/aiReviewScorecardCore";
 
@@ -25,6 +28,10 @@ import type { ScorecardMetric } from "@/lib/aiReviewScorecardCore";
  * them into one score would make a consent decision look like an outage.
  */
 
+type RateMessages = AdminMessageShape<
+  (typeof adminAiReviewScorecardMessages)["en"]["rate"]
+>;
+
 const pct = (metric: ScorecardMetric) =>
   metric.status === "ok" && metric.value !== null
     ? `${(metric.value * 100).toFixed(1)}%`
@@ -41,10 +48,12 @@ function Rate({
   label,
   metric,
   detail,
+  m,
 }: {
   label: string;
   metric: ScorecardMetric;
   detail?: string;
+  m: RateMessages;
 }) {
   const insufficient = metric.status !== "ok";
   return (
@@ -59,17 +68,20 @@ function Rate({
       </p>
       {insufficient ? (
         <p className="mt-1 text-xs leading-5 text-amber-300">
-          insufficient_evidence — {metric.denominator} of{" "}
-          {metric.minimumDenominator} {metric.denominatorLabel}
+          {m.insufficient(
+            metric.denominator,
+            metric.minimumDenominator,
+            metric.denominatorLabel
+          )}
         </p>
       ) : (
         <p className="mt-1 text-xs leading-5 text-zinc-500">
-          {metric.numerator} of {metric.denominator} {metric.denominatorLabel}
+          {m.ratio(metric.numerator, metric.denominator, metric.denominatorLabel)}
         </p>
       )}
       {metric.excluded ? (
         <p className="mt-1 text-xs leading-5 text-zinc-600">
-          excluded: {metric.excluded}
+          {m.excluded(metric.excluded)}
         </p>
       ) : null}
       {detail ? (
@@ -99,11 +111,12 @@ function Count({
   );
 }
 
-export function AdminAiReviewScorecardPanel({
+export async function AdminAiReviewScorecardPanel({
   scorecards,
 }: {
   scorecards: readonly AiReviewScorecard[];
 }) {
+  const m = await getAdminMessages(adminAiReviewScorecardMessages);
   const primary = scorecards[0];
   if (!primary) return null;
   const { quality } = primary;
@@ -116,22 +129,18 @@ export function AdminAiReviewScorecardPanel({
             <div className="flex items-center gap-2 text-blue-300">
               <BarChart3 className="h-5 w-5" />
               <span className="text-xs font-bold uppercase tracking-[0.18em]">
-                AI Review
+                {m.eyebrow}
               </span>
             </div>
             <h2 className="mt-3 text-2xl font-black text-white">
-              M5 scorecard
+              {m.title}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              Reliability is written by the server on the path that calls the
-              reviewer, so it needs no analytics consent and covers guest runs,
-              failures, refusals and cache hits. Adoption is consented client
-              telemetry and is never mixed into a reliability rate. A metric
-              below its sample floor reports{" "}
+              {m.descriptionBefore}{" "}
               <span className="font-bold text-amber-300">
                 insufficient_evidence
               </span>{" "}
-              rather than a zero.
+              {m.descriptionAfter}
             </p>
           </div>
           <span
@@ -147,8 +156,8 @@ export function AdminAiReviewScorecardPanel({
               <AlertTriangle className="h-4 w-4" />
             )}
             {quality.approvedPairCount > 0
-              ? `${quality.approvedPairCount} approved reviewer pair(s)`
-              : "No approved reviewer pair"}
+              ? m.approvedPairs(quality.approvedPairCount)
+              : m.noApprovedPair}
           </span>
         </div>
       </div>
@@ -159,53 +168,61 @@ export function AdminAiReviewScorecardPanel({
           className="rounded-3xl border border-zinc-800 bg-zinc-900/60 p-6"
         >
           <h3 className="text-lg font-black text-white">
-            Last {card.windowDays} days
+            {m.lastDays(card.windowDays)}
           </h3>
 
           <p className="mt-4 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-            Reliability · server-recorded runs
+            {m.reliabilityHeading}
           </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Count
-              label="Runs recorded"
+              label={m.runsRecorded}
               value={String(card.reliability.runs)}
-              detail={`${card.reliability.guestRuns} guest · ${card.reliability.accountRuns} account`}
+              detail={m.runsRecordedDetail(
+                card.reliability.guestRuns,
+                card.reliability.accountRuns
+              )}
             />
-            <Rate label="Completion" metric={card.reliability.completionRate} />
+            <Rate m={m.rate} label={m.completion} metric={card.reliability.completionRate} />
             <Rate
-              label="Primary only"
+              m={m.rate}
+              label={m.primaryOnly}
               metric={card.reliability.primaryOnlyRate}
-              detail="Of completed runs, those with one reviewer"
+              detail={m.primaryOnlyDetail}
             />
             <Rate
-              label="Dual review available"
+              m={m.rate}
+              label={m.dualAvailable}
               metric={card.reliability.dualAvailabilityRate}
             />
             <Rate
-              label="Dual review completed"
+              m={m.rate}
+              label={m.dualCompleted}
               metric={card.reliability.dualCompletionRate}
             />
-            <Rate label="Cached" metric={card.reliability.cachedRate} />
-            <Rate label="Retried" metric={card.reliability.retryRate} />
+            <Rate m={m.rate} label={m.cached} metric={card.reliability.cachedRate} />
+            <Rate m={m.rate} label={m.retried} metric={card.reliability.retryRate} />
             <Rate
-              label="Unreconciled settlements"
+              m={m.rate}
+              label={m.unreconciled}
               metric={card.reliability.unreconciledSettlements}
-              detail="Completed attempts with no settled figure at all"
+              detail={m.unreconciledDetail}
             />
             <Rate
-              label="Settled above reservation"
+              m={m.rate}
+              label={m.settledAbove}
               metric={card.reliability.creditReconciliation}
-              detail="Charged more than was held. Settling below a reservation is normal; above it is not."
+              detail={m.settledAboveDetail}
             />
             <Count
-              label="Duration p50 / p95"
+              label={m.duration}
               value={`${card.reliability.p50DurationMs ?? "—"} / ${card.reliability.p95DurationMs ?? "—"}`}
-              detail="Milliseconds, completed runs only"
+              detail={m.durationDetail}
             />
             <Count
-              label="Telemetry coverage"
+              label={m.telemetryCoverage}
               value={`${card.coverage.clientStartedEvents} / ${card.coverage.serverRuns}`}
-              detail="Client events over server runs. A comparison, never a reliability rate: client events need consent."
+              detail={m.telemetryCoverageDetail}
             />
           </div>
 
@@ -214,11 +231,11 @@ export function AdminAiReviewScorecardPanel({
               <table className="w-full min-w-[32rem] text-left text-sm">
                 <thead>
                   <tr className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                    <th className="pb-2">Reviewer</th>
-                    <th className="pb-2">Provider</th>
-                    <th className="pb-2">Attempts</th>
-                    <th className="pb-2">Failures</th>
-                    <th className="pb-2">Failure rate</th>
+                    <th className="pb-2">{m.reviewer}</th>
+                    <th className="pb-2">{m.provider}</th>
+                    <th className="pb-2">{m.attempts}</th>
+                    <th className="pb-2">{m.failures}</th>
+                    <th className="pb-2">{m.failureRate}</th>
                   </tr>
                 </thead>
                 <tbody className="text-zinc-300">
@@ -239,81 +256,84 @@ export function AdminAiReviewScorecardPanel({
                 </tbody>
               </table>
               <p className="mt-2 text-xs leading-5 text-zinc-600">
-                Attempts count only what reached a provider. A refusal for
-                credits, a limit or the context window never sent anything and
-                says nothing about the model.
+                {m.attemptsNote}
               </p>
             </div>
           ) : (
             <p className="mt-3 text-xs leading-5 text-zinc-500">
-              No reviewer attempt reached a provider in this window.
+              {m.noAttempts}
             </p>
           )}
 
           <p className="mt-6 text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-            Adoption and value · consented client analytics
+            {m.adoptionHeading}
           </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Count
-              label="Weekly active"
+              label={m.weeklyActive}
               value={String(card.adoption.weeklyActiveReviewUsers)}
-              detail="Users who started or completed a review in the last 7 days"
+              detail={m.weeklyActiveDetail}
             />
             <Rate
-              label="Comparison → Review"
+              m={m.rate}
+              label={m.comparisonToReview}
               metric={card.adoption.comparisonToReview}
             />
             <Rate
-              label="Review → follow-up"
+              m={m.rate}
+              label={m.reviewToFollowUp}
               metric={card.adoption.reviewToFollowUp}
             />
             <Rate
-              label="Review → save or share"
+              m={m.rate}
+              label={m.reviewToSaveOrShare}
               metric={card.adoption.reviewToSaveOrShare}
             />
             <Rate
-              label="Review → item web check"
+              m={m.rate}
+              label={m.reviewToItemWebCheck}
               metric={card.adoption.reviewToItemWebCheck}
             />
             <Rate
-              label="First → second review"
+              m={m.rate}
+              label={m.firstToSecondReview}
               metric={card.adoption.firstToSecondReview}
-              detail="Counted from completions: starting twice is not returning to a result"
+              detail={m.firstToSecondReviewDetail}
             />
             <Rate
-              label="D1 after first review"
+              m={m.rate}
+              label={m.d1AfterFirstReview}
               metric={card.adoption.reviewAnchoredReturnDay1}
             />
             <Rate
-              label="D7 after first review"
+              m={m.rate}
+              label={m.d7AfterFirstReview}
               metric={card.adoption.reviewAnchoredReturnDay7}
             />
             <Rate
-              label="D30 after first review"
+              m={m.rate}
+              label={m.d30AfterFirstReview}
               metric={card.adoption.reviewAnchoredReturnDay30}
             />
             <Rate
-              label="D7 by account age"
+              m={m.rate}
+              label={m.d7ByAccountAge}
               metric={card.adoption.accountAgeReturnDay7}
-              detail="Comparable with the product-wide funnel, which uses the same events. Not review retention."
+              detail={m.d7ByAccountAgeDetail}
             />
             <Rate
-              label="D7 · comparison-only cohort"
+              m={m.rate}
+              label={m.d7ComparisonOnly}
               metric={card.adoption.cohortReturnDay7.comparisonOnly}
             />
             <Rate
-              label="D7 · AI Review cohort"
+              m={m.rate}
+              label={m.d7AiReview}
               metric={card.adoption.cohortReturnDay7.aiReview}
             />
           </div>
           <p className="mt-2 text-xs leading-5 text-zinc-600">
-            The two cohorts self-selected. A difference between them is a
-            difference in who used the feature as much as in what it did for
-            them. Every conversion above is ordered -- the second event must
-            follow the first -- which is the strongest claim these events
-            support: they carry no conversation id, so a later action may
-            belong to another thread. The review-anchored returns are a floor:
-            a user who came back and generated no event is not counted.
+            {m.cohortNote}
           </p>
         </div>
       ))}
@@ -322,35 +342,35 @@ export function AdminAiReviewScorecardPanel({
         <div className="flex items-center gap-2 text-blue-300">
           <ShieldCheck className="h-5 w-5" />
           <span className="text-xs font-bold uppercase tracking-[0.18em]">
-            Quality · reviewer-pair register
+            {m.qualityHeading}
           </span>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Count
-            label="Approved pairs"
+            label={m.approvedPairsLabel}
             value={String(quality.approvedPairCount)}
-            detail={`${quality.candidatePairCount} candidate(s)`}
+            detail={m.candidates(quality.candidatePairCount)}
           />
           <Count
-            label="Dataset"
+            label={m.dataset}
             value={quality.datasetVersion ?? "—"}
             detail={
               quality.datasetVersion
-                ? `Evaluated ${quality.evaluatedAt ?? "—"}`
-                : "No pair is approved, so no evaluation is cited"
+                ? m.evaluated(quality.evaluatedAt ?? "—")
+                : m.noEvaluationCited
             }
           />
           <Count
-            label="Independent runs"
+            label={m.independentRuns}
             value={
               quality.independentRunOrdinals.length > 0
                 ? quality.independentRunOrdinals.join(", ")
                 : "—"
             }
-            detail="Distinct run ordinals the approval rests on"
+            detail={m.independentRunsDetail}
           />
           <Count
-            label="Critical violations"
+            label={m.criticalViolations}
             value={
               quality.zeroToleranceViolations === null
                 ? "—"
@@ -358,8 +378,8 @@ export function AdminAiReviewScorecardPanel({
             }
             detail={
               quality.zeroToleranceViolations === null
-                ? "Not measured — no approved pair"
-                : "Zero-tolerance rule breaches recorded at approval"
+                ? m.violationsNotMeasured
+                : m.violationsDetail
             }
           />
         </div>
@@ -371,26 +391,22 @@ export function AdminAiReviewScorecardPanel({
           }`}
         >
           <p className="font-bold">
-            {quality.drift.inSync
-              ? "The served reviewer pairs are exactly the approved ones."
-              : "The served reviewer pairs do not match the approved ones."}
+            {quality.drift.inSync ? m.driftInSync : m.driftOutOfSync}
           </p>
           {!quality.drift.inSync ? (
             <ul className="mt-2 list-disc pl-5 text-xs leading-5">
               <li>
-                Served but not approved:{" "}
-                {quality.drift.servedButNotApproved.join(", ") || "none"}
+                {m.servedNotApproved}{" "}
+                {quality.drift.servedButNotApproved.join(", ") || m.none}
               </li>
               <li>
-                Approved but not served:{" "}
-                {quality.drift.approvedButNotServed.join(", ") || "none"}
+                {m.approvedNotServed}{" "}
+                {quality.drift.approvedButNotServed.join(", ") || m.none}
               </li>
             </ul>
           ) : null}
           <p className="mt-2 text-xs leading-5 opacity-80">
-            Read from the running configuration, not from the register. Nothing
-            on this screen changes the register, a feature flag or a release
-            gate: approval is a person&apos;s act, recorded in commit history.
+            {m.registerNote}
           </p>
         </div>
       </div>

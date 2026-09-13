@@ -6,6 +6,8 @@ import { useId, useRef, useState } from "react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminDateTimeLabel } from "@/lib/adminDateTime";
 import { adminRecentAuthenticationHref } from "@/lib/adminReauthenticationCore";
+import { adminUserSecurityMessages } from "@/lib/adminMessages/userSecurity";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import {
   ADMIN_SECURITY_NETWORK_FAILURE_MESSAGE,
   ADMIN_SECURITY_REASON_MIN_LENGTH,
@@ -102,6 +104,7 @@ export function AdminUserSecurityControls({
   onApplied,
 }: Props) {
   const pathname = usePathname();
+  const m = useAdminMessages(adminUserSecurityMessages);
   const fieldId = useId();
   const reasonRef = useRef<HTMLInputElement | null>(null);
   const ticketRef = useRef<HTMLInputElement | null>(null);
@@ -251,9 +254,9 @@ export function AdminUserSecurityControls({
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="font-black text-white">Account security controls</h4>
+          <h4 className="font-black text-white">{m.title}</h4>
           <p className="mt-1 text-xs text-zinc-400">
-            Last login: {adminDateTimeLabel(user.lastLoginAt, user.timeZone)} · Active sessions: {user.sessionCount}
+            {m.lastLogin(adminDateTimeLabel(user.lastLoginAt, user.timeZone), user.sessionCount)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-bold">
@@ -265,7 +268,7 @@ export function AdminUserSecurityControls({
                 : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
             }`}
           >
-            Account {user.accountStatus}
+            {m.accountStatus(user.accountStatus)}
           </span>
           <span
             data-testid="admin-security-ai-status"
@@ -275,7 +278,7 @@ export function AdminUserSecurityControls({
                 : "border-zinc-700 text-zinc-300"
             }`}
           >
-            AI {user.aiUsageRestricted ? "restricted" : "allowed"}
+            {user.aiUsageRestricted ? m.aiRestricted : m.aiAllowed}
           </span>
         </div>
       </div>
@@ -285,7 +288,10 @@ export function AdminUserSecurityControls({
           data-testid="admin-security-deletion-schedule"
           className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs font-bold text-red-100"
         >
-          Deletion requested {adminDateTimeLabel(user.accountDeletionRequestedAt, user.timeZone)} · scheduled for {adminDateTimeLabel(user.accountDeletionScheduledFor, user.timeZone)}
+          {m.deletionSchedule(
+            adminDateTimeLabel(user.accountDeletionRequestedAt, user.timeZone),
+            adminDateTimeLabel(user.accountDeletionScheduledFor, user.timeZone)
+          )}
         </p>
       ) : null}
 
@@ -293,16 +299,16 @@ export function AdminUserSecurityControls({
         <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
           {user.accountSuspensionReason ? (
             <p>
-              Suspension: {user.accountSuspensionReason} · until {adminDateTimeLabel(user.accountSuspendedUntil, user.timeZone)}
+              {m.suspension(user.accountSuspensionReason, adminDateTimeLabel(user.accountSuspendedUntil, user.timeZone))}
             </p>
           ) : null}
           {user.aiUsageRestrictionReason ? (
             <p>
-              AI restriction: {user.aiUsageRestrictionReason} · until {adminDateTimeLabel(user.aiUsageRestrictedUntil, user.timeZone)}
+              {m.aiRestriction(user.aiUsageRestrictionReason, adminDateTimeLabel(user.aiUsageRestrictedUntil, user.timeZone))}
             </p>
           ) : null}
           {user.securityIncidentNote ? (
-            <p className="mt-1 text-zinc-300">Incident note: {user.securityIncidentNote}</p>
+            <p className="mt-1 text-zinc-300">{m.incidentNote(user.securityIncidentNote)}</p>
           ) : null}
         </div>
       ) : null}
@@ -313,10 +319,10 @@ export function AdminUserSecurityControls({
             htmlFor={ids.reason}
             className="block text-xs font-bold text-zinc-200"
           >
-            Audit reason <span className="text-red-300">(required)</span>
+            {m.reason.label}<span className="text-red-300">{m.reason.required}</span>
           </label>
           <p id={ids.reasonHint} className="mt-1 text-[11px] leading-4 text-zinc-500">
-            At least {ADMIN_SECURITY_REASON_MIN_LENGTH} characters. Applies to every control below and is stored in the admin audit log.
+            {m.reason.hint(ADMIN_SECURITY_REASON_MIN_LENGTH)}
           </p>
           <input
             id={ids.reason}
@@ -348,10 +354,10 @@ export function AdminUserSecurityControls({
             htmlFor={ids.note}
             className="block text-xs font-bold text-zinc-200"
           >
-            Security incident note <span className="text-zinc-500">(optional)</span>
+            {m.note.label}<span className="text-zinc-500">{m.note.optional}</span>
           </label>
           <p id={ids.noteHint} className="mt-1 text-[11px] leading-4 text-zinc-500">
-            Free-text context kept on the account. Leave out anything the audit log does not need.
+            {m.note.hint}
           </p>
           <input
             id={ids.note}
@@ -369,19 +375,19 @@ export function AdminUserSecurityControls({
           data-testid="admin-security-restore-group"
           className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4"
         >
-          <h5 className="text-sm font-black text-emerald-100">Cancel scheduled deletion</h5>
+          <h5 className="text-sm font-black text-emerald-100">{m.restore.title}</h5>
           <p className="mt-1 text-xs text-emerald-100/80">
-            Restores the account to active and clears the deletion schedule. A control expiry does not apply here, and automatic subscription renewal is not switched back on.
+            {m.restore.description}
           </p>
           <div className="mt-3 max-w-md">
             <label
               htmlFor={ids.ticket}
               className="block text-xs font-bold text-zinc-200"
             >
-              Support ticket reference <span className="text-red-300">(required to restore)</span>
+              {m.restore.ticketLabel}<span className="text-red-300">{m.restore.ticketRequired}</span>
             </label>
             <p id={ids.ticketHint} className="mt-1 text-[11px] leading-4 text-zinc-400">
-              At least {ADMIN_SECURITY_TICKET_MIN_LENGTH} characters. Links this restoration to the customer request that authorised it.
+              {m.restore.ticketHint(ADMIN_SECURITY_TICKET_MIN_LENGTH)}
             </p>
             <input
               id={ids.ticket}
@@ -414,7 +420,7 @@ export function AdminUserSecurityControls({
             disabled={disabled}
             className="mt-3 cursor-pointer rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {actionLabel("restore_account", "Cancel deletion & restore account")}
+            {actionLabel("restore_account", m.restore.action)}
           </button>
         </div>
       ) : null}
@@ -423,16 +429,16 @@ export function AdminUserSecurityControls({
         data-testid="admin-security-restriction-group"
         className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/60 p-4"
       >
-        <h5 className="text-sm font-black text-white">Access restrictions</h5>
+        <h5 className="text-sm font-black text-white">{m.restrictions.title}</h5>
         <div className="mt-3 max-w-md">
           <label
             htmlFor={ids.until}
             className="block text-xs font-bold text-zinc-200"
           >
-            Control expiry <span className="text-zinc-500">(optional)</span>
+            {m.restrictions.expiryLabel}<span className="text-zinc-500">{m.restrictions.expiryOptional}</span>
           </label>
           <p id={ids.untilHint} className="mt-1 text-[11px] leading-4 text-zinc-500">
-            Applies only to <strong className="text-zinc-300">Suspend account</strong> and <strong className="text-zinc-300">Restrict AI usage</strong>. The restriction lifts automatically at this time. Entered in this browser&apos;s local time. It is not sent for session revocation, unlinking a login, or cancelling a scheduled deletion.
+            {m.restrictions.expiryHint.before}<strong className="text-zinc-300">{m.restrictions.expiryHint.suspend}</strong>{m.restrictions.expiryHint.between}<strong className="text-zinc-300">{m.restrictions.expiryHint.restrict}</strong>{m.restrictions.expiryHint.after}
           </p>
           <input
             id={ids.until}
@@ -471,8 +477,8 @@ export function AdminUserSecurityControls({
               className="cursor-pointer rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {suspended
-                ? actionLabel("unsuspend", "Unsuspend account")
-                : actionLabel("suspend", "Suspend account")}
+                ? actionLabel("unsuspend", m.restrictions.unsuspend)
+                : actionLabel("suspend", m.restrictions.suspend)}
             </button>
           )}
           <button
@@ -487,8 +493,8 @@ export function AdminUserSecurityControls({
             className="cursor-pointer rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {user.aiUsageRestricted
-              ? actionLabel("unrestrict_ai", "Restore AI usage")
-              : actionLabel("restrict_ai", "Restrict AI usage")}
+              ? actionLabel("unrestrict_ai", m.restrictions.restoreAi)
+              : actionLabel("restrict_ai", m.restrictions.restrictAi)}
           </button>
           <button
             type="button"
@@ -497,7 +503,7 @@ export function AdminUserSecurityControls({
             disabled={disabled}
             className="cursor-pointer rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-bold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {actionLabel("revoke_sessions", "Revoke all sessions")}
+            {actionLabel("revoke_sessions", m.restrictions.revokeSessions)}
           </button>
         </div>
       </div>
@@ -505,7 +511,7 @@ export function AdminUserSecurityControls({
       {user.accounts.length > 0 ? (
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-800 pt-3">
           <span className="text-xs font-bold text-zinc-500">
-            Unlink OAuth (owner + two-person approval):
+            {m.unlinkLabel}
           </span>
           {user.accounts.map((account) => (
             <button
@@ -518,7 +524,7 @@ export function AdminUserSecurityControls({
             >
               {actionLabel(
                 "unlink_oauth",
-                `Unlink ${account.provider}`,
+                m.unlink(account.provider),
                 account.provider
               )}
             </button>
@@ -548,14 +554,14 @@ export function AdminUserSecurityControls({
               data-testid="admin-security-reauthenticate-link"
               className="mt-2 inline-flex cursor-pointer items-center rounded-lg border border-red-400/50 px-2.5 py-1.5 font-bold text-red-50 underline-offset-4 transition hover:bg-red-500/20 hover:underline"
             >
-              Sign in again to continue
+              {m.reauthenticate}
             </Link>
           ) : null}
         </div>
       ) : null}
 
       <p className="mt-3 text-xs text-zinc-500">
-        High-risk controls require a recent administrator login. Sign in again if the console requests reauthentication.
+        {m.footer}
       </p>
     </section>
   );

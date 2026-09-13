@@ -8,6 +8,8 @@ import {
   type PromoRiskRow,
 } from "@/components/admin/AdminRiskPanels";
 import { PromotionDiagnosticsPanel } from "@/components/admin/PromotionDiagnosticsPanel";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminRiskPanelsMessages } from "@/lib/adminMessages/riskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAdminUserStats } from "@/lib/adminUsers";
 import {
@@ -56,6 +58,8 @@ export default async function AdminBillingPage({
   );
 
   if (tab.id === "promotions") {
+    const riskLabels = (await getAdminMessages(adminRiskPanelsMessages))
+      .promotionRisk.risk;
     const riskGroups = await prisma.billingPromotionRedemption.groupBy({
       by: ["promotionId", "riskFlags"],
       where: { riskFlags: { not: "[]" } },
@@ -95,13 +99,13 @@ export default async function AdminBillingPage({
           promotion.redeemedCount >= promotion.maxRedemptions;
         const risk =
           signals.total > 0
-            ? `${signals.total} abuse signal${signals.total === 1 ? "" : "s"}`
+            ? riskLabels.abuseSignals(signals.total)
             : exhausted
-              ? "exhausted"
+              ? riskLabels.exhausted
               : nearingLimit
-                ? "near limit"
+                ? riskLabels.nearLimit
                 : promotion.discountPercent >= 80
-                  ? "high discount"
+                  ? riskLabels.highDiscount
                   : "";
         return {
           code: promotion.code,

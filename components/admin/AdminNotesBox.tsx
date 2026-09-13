@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
+import { adminNotesMessages } from "@/lib/adminMessages/notes";
 
 type AdminNote = {
   id: string;
@@ -26,6 +28,9 @@ const dateLabel = (value: string) => {
 };
 
 export function AdminNotesBox({ targetType, targetId }: Props) {
+  const m = useAdminMessages(adminNotesMessages);
+  const { locale: apiLocale } = useAdminLocale();
+  const loadFailed = m.loadFailed;
   const [notes, setNotes] = useState<AdminNote[]>([]);
   const [body, setBody] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -49,7 +54,8 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
               status: response.status,
               error: data?.error,
               code: data?.code,
-              fallback: `Existing notes on this ${targetType.toLowerCase()} could not be loaded, so the list below is incomplete.`,
+              fallback: loadFailed(targetType),
+              locale: apiLocale,
             });
             dispatchAppToast(failure.message, failure.tone);
           }
@@ -58,10 +64,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
         if (!cancelled) setNotes(data.notes);
       } catch {
         if (!cancelled) {
-          dispatchAppToast(
-            `Existing notes on this ${targetType.toLowerCase()} could not be loaded, so the list below is incomplete.`,
-            "error"
-          );
+          dispatchAppToast(loadFailed(targetType), "error");
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -71,7 +74,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [targetId, targetType]);
+  }, [apiLocale, loadFailed, targetId, targetType]);
 
   const saveNote = async () => {
     const trimmed = body.trim();
@@ -95,19 +98,17 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
           // The draft is deliberately left in the box on failure, and the
           // message says so -- an operator who has just written a long note
           // needs to know it was not thrown away.
-          fallback: "The note was not saved. Your text is still in the box -- retry.",
+          fallback: m.saveFailed,
+          locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
         return;
       }
       setNotes((current) => [data.note!, ...current]);
       setBody("");
-      dispatchAppToast(`Admin note saved on this ${targetType.toLowerCase()}.`, "success");
+      dispatchAppToast(m.saved(targetType), "success");
     } catch {
-      dispatchAppToast(
-        "The note was not saved. Your text is still in the box -- retry.",
-        "error"
-      );
+      dispatchAppToast(m.saveFailed, "error");
     } finally {
       setIsSaving(false);
     }
@@ -118,10 +119,10 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-            Internal notes
+            {m.title}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Visible only to Admin operators.
+            {m.visibility}
           </p>
         </div>
         {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-zinc-500" /> : null}
@@ -131,7 +132,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
         <textarea
           value={body}
           onChange={(event) => setBody(event.target.value)}
-          placeholder="Add context, follow-up, risk notes, or customer handling details..."
+          placeholder={m.placeholder}
           rows={3}
           className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
         />
@@ -142,21 +143,21 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
           className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquarePlus className="h-3.5 w-3.5" />}
-          Save note
+          {m.save}
         </button>
       </div>
 
       <div className="mt-4 grid gap-2">
         {notes.length === 0 ? (
           <p className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-500">
-            No internal notes yet.
+            {m.empty}
           </p>
         ) : (
           notes.map((note) => (
             <article key={note.id} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2">
               <p className="whitespace-pre-wrap text-sm leading-6 text-zinc-200">{note.body}</p>
               <p className="mt-2 text-xs text-zinc-500">
-                {note.createdByEmail || "Admin"} · {dateLabel(note.createdAt)} UTC
+                {note.createdByEmail || m.fallbackAuthor} · {dateLabel(note.createdAt)} UTC
               </p>
             </article>
           ))

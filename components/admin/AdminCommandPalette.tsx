@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Command, FileClock, Loader2, Pin, Search, X } from "lucide-react";
+import { ADMIN_NAV_GROUPS } from "@/lib/adminNavigation";
 import {
-  ADMIN_NAV_GROUPS,
-  ADMIN_SEARCHABLE_PAGES,
-  matchAdminPages,
-  resolveAdminPageMeta,
-  type AdminSearchablePage,
-} from "@/lib/adminNavigation";
+  adminNavGroupLabel,
+  localizeAdminPageMeta,
+  localizedAdminSearchablePages,
+  matchLocalizedAdminPages,
+  type LocalizedAdminSearchablePage,
+} from "@/lib/adminNavigationLocale";
+import { adminShellMessages } from "@/lib/adminMessages/shell";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminNavIcon } from "@/components/admin/adminNavigationIcons";
 import { useAdminConsolePreferences } from "@/components/admin/AdminConsolePreferences";
 
@@ -46,7 +49,7 @@ type Section = {
 
 const MINIMUM_QUERY_LENGTH = 2;
 
-const pageOption = (page: AdminSearchablePage, prefix: string): Option => ({
+const pageOption = (page: LocalizedAdminSearchablePage, prefix: string): Option => ({
   key: `${prefix}:${page.href}`,
   href: page.href,
   label: page.label,
@@ -63,6 +66,9 @@ const pageOption = (page: AdminSearchablePage, prefix: string): Option => ({
 export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const { pinned, recent } = useAdminConsolePreferences();
+  const { locale } = useAdminLocale();
+  const m = useAdminMessages(adminShellMessages).palette;
+  const searchablePages = useMemo(() => localizedAdminSearchablePages(locale), [locale]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -121,18 +127,17 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
 
   const sections = useMemo<Section[]>(() => {
     if (isSearch) {
-      const pages = matchAdminPages(normalized);
+      const pages = matchLocalizedAdminPages(normalized, searchablePages);
       return [
         {
           id: "pages",
-          heading: `Pages (${pages.length})`,
-          emptyMessage:
-            pages.length === 0 ? "No console page matches that name." : undefined,
+          heading: m.pages(pages.length),
+          emptyMessage: pages.length === 0 ? m.noPages : undefined,
           options: pages.map((page) => pageOption(page, "match")),
         },
         {
           id: "records",
-          heading: `Records (${results.length})`,
+          heading: m.records(results.length),
           // Worded as a scope statement, not as a verdict on the whole search:
           // a query that matched three pages and no customers is a successful
           // search, and the previous "No matching records." sat under those
@@ -141,8 +146,8 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
             results.length > 0
               ? undefined
               : searching
-                ? "Searching customers, refunds, traces, and audit events..."
-                : "No customer, refund, trace, or audit record matches. Page results above are unaffected.",
+                ? m.searchingRecords
+                : m.noRecords,
           options: [
             ...results.map((result) => ({
               key: `record:${result.type}:${result.id}`,
@@ -154,8 +159,8 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
             {
               key: "action:view-all",
               href: `/admin/search?q=${encodeURIComponent(normalized)}`,
-              label: "View all results",
-              detail: "Open the global search workspace for this query",
+              label: m.viewAllResults,
+              detail: m.viewAllResultsDetail,
               kind: "action" as const,
             },
           ],
@@ -164,10 +169,10 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
     }
 
     const pinnedPages = pinned
-      .map((href) => ADMIN_SEARCHABLE_PAGES.find((page) => page.href === href))
-      .filter((page): page is AdminSearchablePage => Boolean(page));
+      .map((href) => searchablePages.find((page) => page.href === href))
+      .filter((page): page is LocalizedAdminSearchablePage => Boolean(page));
     const recentOptions = recent
-      .map((path) => ({ path, meta: resolveAdminPageMeta(path) }))
+      .map((path) => ({ path, meta: localizeAdminPageMeta(path, locale) }))
       // A recent route the table no longer describes is dropped rather than
       // shown under a borrowed title.
       .filter(({ meta }) => meta.isKnown)
@@ -184,33 +189,33 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
         ? [
             {
               id: "pinned",
-              heading: "Pinned",
+              heading: m.pinned,
               options: pinnedPages.map((page) => pageOption(page, "pinned")),
             },
           ]
         : []),
       ...(recentOptions.length > 0
-        ? [{ id: "recent", heading: "Recent", options: recentOptions }]
+        ? [{ id: "recent", heading: m.recent, options: recentOptions }]
         : []),
       // Every page, grouped exactly as the sidebar groups them. The palette
       // used to list `ALL_ITEMS.slice(0, 9)`, so seven of the console's pages
       // were unreachable from an empty palette and nothing said so.
       ...ADMIN_NAV_GROUPS.map((group) => ({
         id: `group:${group}`,
-        heading: group,
-        options: ADMIN_SEARCHABLE_PAGES.filter(
+        heading: adminNavGroupLabel(group, locale),
+        options: searchablePages.filter(
           (page) => page.group === group
         ).map((page) => pageOption(page, "all")),
       })),
       {
         id: "group:other",
-        heading: "Other",
-        options: ADMIN_SEARCHABLE_PAGES.filter((page) => page.group === null).map(
+        heading: m.other,
+        options: searchablePages.filter((page) => page.group === null).map(
           (page) => pageOption(page, "all")
         ),
       },
     ].filter((section) => section.options.length > 0);
-  }, [isSearch, normalized, pinned, recent, results, searching]);
+  }, [isSearch, locale, m, normalized, pinned, recent, results, searchablePages, searching]);
 
   const options = useMemo(
     () => sections.flatMap((section) => section.options),
@@ -277,13 +282,13 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
       className="fixed inset-0 z-[100] flex w-screen max-w-[100vw] items-start justify-center overflow-hidden bg-black/75 px-4 pt-[8vh] backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label="Admin command palette"
+      aria-label={m.dialog}
     >
       <button
         type="button"
         className="absolute inset-0"
         onClick={onClose}
-        aria-label="Close command palette"
+        aria-label={m.close}
       />
       <div className="relative z-10 flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-zinc-700 bg-zinc-950 shadow-2xl">
         <div className="flex items-center gap-3 border-b border-zinc-800 px-4">
@@ -297,8 +302,8 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
             aria-expanded
             aria-controls="admin-palette-results"
             aria-activedescendant={activeOptionId}
-            aria-label="Search records or type a page name"
-            placeholder="Search records or type a page name..."
+            aria-label={m.input}
+            placeholder={m.inputPlaceholder}
             className="h-14 min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-zinc-500"
           />
           {/*
@@ -317,7 +322,7 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
             type="button"
             onClick={onClose}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg hover:bg-zinc-900"
-            aria-label="Close"
+            aria-label={m.closeButton}
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -327,7 +332,7 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
           ref={listRef}
           id="admin-palette-results"
           role="listbox"
-          aria-label="Command palette results"
+          aria-label={m.results}
           className="min-h-0 flex-1 overflow-y-auto p-3"
         >
           {sections.map((section) => (
@@ -353,7 +358,7 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
                         : section.id === "pinned"
                           ? Pin
                           : adminNavIcon(
-                              ADMIN_SEARCHABLE_PAGES.find(
+                              searchablePages.find(
                                 (page) => page.href === option.href
                               )?.id || "overview"
                             );
@@ -391,9 +396,9 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
 
         <p className="border-t border-zinc-800 px-4 py-2 text-xs text-zinc-500">
           <kbd className="font-bold text-zinc-300">↑</kbd>{" "}
-          <kbd className="font-bold text-zinc-300">↓</kbd> to move ·{" "}
-          <kbd className="font-bold text-zinc-300">Enter</kbd> to open ·{" "}
-          <kbd className="font-bold text-zinc-300">Esc</kbd> to close
+          <kbd className="font-bold text-zinc-300">↓</kbd> {m.toMove} ·{" "}
+          <kbd className="font-bold text-zinc-300">Enter</kbd> {m.toOpen} ·{" "}
+          <kbd className="font-bold text-zinc-300">Esc</kbd> {m.toClose}
         </p>
       </div>
     </div>
