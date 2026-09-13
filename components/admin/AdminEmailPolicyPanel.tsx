@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Mail, RefreshCw } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminEmailPolicyMessages } from "@/lib/adminMessages/emailPolicy";
 
 /**
  * The jurisdiction policy console.
@@ -81,6 +83,14 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export function AdminEmailPolicyPanel() {
+  const messages = useAdminMessages(adminEmailPolicyMessages);
+  const m = messages.policy;
+  // Read through a ref so a language switch does not re-run `load`, which
+  // would reset the selected version to the server's default.
+  const loadFailedMessage = useRef(m.toast.loadFailed);
+  useEffect(() => {
+    loadFailedMessage.current = m.toast.loadFailed;
+  }, [m.toast.loadFailed]);
   const [data, setData] = useState<PolicyResponse | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,16 +112,14 @@ export function AdminEmailPolicyPanel() {
         throw new Error(
           payload && "error" in payload && payload.error
             ? payload.error
-            : "Could not load jurisdiction policy versions."
+            : loadFailedMessage.current
         );
       }
       setData(payload);
       setSelectedId(payload.selected?.id ?? null);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error
-          ? error.message
-          : "Could not load jurisdiction policy versions.",
+        error instanceof Error ? error.message : loadFailedMessage.current,
         "error"
       );
     } finally {
@@ -139,16 +147,11 @@ export function AdminEmailPolicyPanel() {
       // The expected first answer, not a failure: the request has been
       // recorded and is waiting for a second administrator.
       if (code === "ADMIN_APPROVAL_REQUIRED") {
-        dispatchAppToast(
-          "Recorded. A second administrator has to approve this in the work queue before it takes effect.",
-          "success"
-        );
+        dispatchAppToast(m.toast.approvalRecorded, "success");
         return null;
       }
       throw new Error(
-        typeof payload?.error === "string"
-          ? payload.error
-          : "The request was refused."
+        typeof payload?.error === "string" ? payload.error : m.toast.refused
       );
     }
     return payload;
@@ -160,9 +163,7 @@ export function AdminEmailPolicyPanel() {
     try {
       const result = await post({ action: "create_draft" });
       dispatchAppToast(
-        result?.created
-          ? "Draft created. It changes nothing until it is activated."
-          : "That draft already exists.",
+        result?.created ? m.toast.draftCreated : m.toast.draftExists,
         "success"
       );
       await load(
@@ -172,7 +173,7 @@ export function AdminEmailPolicyPanel() {
       );
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not create the draft.",
+        error instanceof Error ? error.message : m.toast.draftFailed,
         "error"
       );
     } finally {
@@ -190,13 +191,13 @@ export function AdminEmailPolicyPanel() {
         reason: reason.trim(),
       });
       if (result) {
-        dispatchAppToast("Activated. The previous version is now superseded.", "success");
+        dispatchAppToast(m.toast.activated, "success");
         setReason("");
       }
       await load(selectedId);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not activate the version.",
+        error instanceof Error ? error.message : m.toast.activateFailed,
         "error"
       );
     } finally {
@@ -211,16 +212,13 @@ export function AdminEmailPolicyPanel() {
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Email
+            {messages.eyebrow}
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
-            Jurisdiction policy
+            {m.title}
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Subject prefixes, footer blocks, unsubscribe wording, quiet hours and
-            consent notice intervals, per jurisdiction. Exactly one version is in
-            force; a delivery already in flight keeps the version it was rendered
-            under.
+            {m.intro}
           </p>
         </div>
         <div className="flex gap-2">
@@ -236,7 +234,7 @@ export function AdminEmailPolicyPanel() {
             ) : (
               <RefreshCw className="h-4 w-4" />
             )}
-            Refresh
+            {m.refresh}
           </button>
           <button
             type="button"
@@ -246,7 +244,7 @@ export function AdminEmailPolicyPanel() {
             className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <Mail className="h-4 w-4" />
-            Seed draft
+            {m.seedDraft}
           </button>
         </div>
       </div>
@@ -278,15 +276,14 @@ export function AdminEmailPolicyPanel() {
                   </span>
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-zinc-500">
-                  {version.profileCount} profiles · {version.countryCount} countries
+                  {m.versionCounts(version.profileCount, version.countryCount)}
                 </span>
               </button>
             </li>
           ))}
           {data && data.versions.length === 0 ? (
             <li className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-3 py-4 text-xs leading-5 text-zinc-400">
-              No policy version exists yet. Seeding one creates a draft; nothing
-              is sent under it until it is activated.
+              {m.noVersions}
             </li>
           ) : null}
         </ol>
@@ -300,10 +297,10 @@ export function AdminEmailPolicyPanel() {
                 </p>
                 <dl className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
                   {[
-                    ["Created", dateLabel(selected.createdAt)],
-                    ["Activated", dateLabel(selected.activatedAt)],
-                    ["Superseded", dateLabel(selected.supersededAt)],
-                    ["Approved by", selected.approvedByEmail ?? "—"],
+                    [m.fields.created, dateLabel(selected.createdAt)],
+                    [m.fields.activated, dateLabel(selected.activatedAt)],
+                    [m.fields.superseded, dateLabel(selected.supersededAt)],
+                    [m.fields.approvedBy, selected.approvedByEmail ?? "—"],
                   ].map(([label, value]) => (
                     <div
                       key={label}
@@ -321,15 +318,13 @@ export function AdminEmailPolicyPanel() {
                       htmlFor="email-policy-reason"
                       className="text-xs font-bold text-zinc-300"
                     >
-                      Why this version is being activated
+                      {m.reasonLabel}
                     </label>
                     <p
                       id="email-policy-reason-help"
                       className="mt-1 text-xs leading-5 text-zinc-500"
                     >
-                      Activation needs a second administrator&rsquo;s approval.
-                      The first submission records the request; the change lands
-                      when the approval is granted and the request is repeated.
+                      {m.reasonHelp}
                     </p>
                     <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                       <input
@@ -347,7 +342,7 @@ export function AdminEmailPolicyPanel() {
                         data-testid="email-policy-activate"
                         className="shrink-0 cursor-pointer rounded-xl border border-emerald-700 bg-emerald-950/60 px-4 py-2 text-sm font-bold text-emerald-200 transition hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        Activate
+                        {m.activate}
                       </button>
                     </div>
                   </div>
@@ -373,7 +368,7 @@ export function AdminEmailPolicyPanel() {
                     <dl className="mt-3 space-y-1 text-xs">
                       <div className="flex gap-2">
                         <dt className="w-40 shrink-0 text-zinc-500">
-                          Subject prefix
+                          {m.profile.subjectPrefix}
                         </dt>
                         <dd className="font-mono text-zinc-200">
                           {profile.subjectPrefix
@@ -382,45 +377,45 @@ export function AdminEmailPolicyPanel() {
                         </dd>
                       </div>
                       <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">Footer blocks</dt>
+                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.footerBlocks}</dt>
                         <dd className="text-zinc-200">
                           {footerBlockList(profile.footerBlocks).join(", ") || "—"}
                         </dd>
                       </div>
                       <div className="flex gap-2">
                         <dt className="w-40 shrink-0 text-zinc-500">
-                          Unsubscribe copy
+                          {m.profile.unsubscribeCopy}
                         </dt>
                         <dd className="text-zinc-200">
-                          {profile.unsubscribeSlaBusinessDays} business days
-                          <span className="text-zinc-500"> (processed immediately)</span>
+                          {m.profile.businessDays(profile.unsubscribeSlaBusinessDays)}
+                          <span className="text-zinc-500">{m.profile.processedImmediately}</span>
                         </dd>
                       </div>
                       <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">Consent notice</dt>
+                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.consentNotice}</dt>
                         <dd className="text-zinc-200">
                           {profile.consentNoticeIntervalMonths
-                            ? `every ${profile.consentNoticeIntervalMonths} months`
-                            : "no duty"}
+                            ? m.profile.everyMonths(profile.consentNoticeIntervalMonths)
+                            : m.profile.noDuty}
                         </dd>
                       </div>
                       <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">Quiet hours</dt>
+                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.quietHours}</dt>
                         <dd className="text-zinc-200">
                           {quietHoursLabel(profile.quietHours)}
                         </dd>
                       </div>
                       <div className="flex gap-2">
-                        <dt className="w-40 shrink-0 text-zinc-500">Countries</dt>
+                        <dt className="w-40 shrink-0 text-zinc-500">{m.profile.countries}</dt>
                         <dd className="break-all font-mono text-zinc-200">
-                          {profile.countries.join(" ") || "— (fallback)"}
+                          {profile.countries.join(" ") || m.profile.fallback}
                         </dd>
                       </div>
                     </dl>
 
                     <details className="mt-3">
                       <summary className="cursor-pointer text-xs font-bold text-blue-300">
-                        Sources and confirmation dates
+                        {m.profile.sources}
                       </summary>
                       <p className="mt-2 whitespace-pre-line text-xs leading-5 text-zinc-400">
                         {profile.notes}
@@ -432,7 +427,7 @@ export function AdminEmailPolicyPanel() {
             </>
           ) : (
             <p className="rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-6 text-sm leading-6 text-zinc-400">
-              Nothing selected.
+              {m.nothingSelected}
             </p>
           )}
         </div>

@@ -17,6 +17,9 @@ import {
 } from "@/lib/adminNavigationBadges";
 import { adminNavIcon } from "@/components/admin/adminNavigationIcons";
 import { useAdminConsolePreferences } from "@/components/admin/AdminConsolePreferences";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminNavGroupLabel, localizeAdminNavItem } from "@/lib/adminNavigationLocale";
+import { adminShellMessages } from "@/lib/adminMessages/shell";
 import type { AdminRole } from "@/lib/adminAuthCore";
 
 const COLLAPSED_STORAGE_KEY = "tomverse-admin-collapsed-groups";
@@ -54,6 +57,8 @@ export function AdminSidebar({
   revealToken = 0,
 }: Props) {
   const { pinned, isPinned, togglePin, pinLimit } = useAdminConsolePreferences();
+  const { locale } = useAdminLocale();
+  const m = useAdminMessages(adminShellMessages).sidebar;
   const [collapsed, setCollapsed] = useState<AdminNavGroup[]>([]);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const activeItem = findAdminNavItem(pathname);
@@ -128,7 +133,10 @@ export function AdminSidebar({
     return () => cancelAnimationFrame(frame);
   }, [pathname, revealToken, collapsed]);
 
-  const renderItem = (item: AdminNavItem, keyPrefix: string) => {
+  const renderItem = (entry: AdminNavItem, keyPrefix: string) => {
+    // Ids, hrefs, roles and badges come from the route table; only the words
+    // are localised.
+    const item = localizeAdminNavItem(entry, locale);
     const Icon = adminNavIcon(item.id);
     const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
     const writable = adminItemIsWritable(role, item);
@@ -153,8 +161,8 @@ export function AdminSidebar({
           // -- the label, whether anything is waiting, whether they can write
           // here -- is spelled out instead.
           aria-label={`${item.label}${
-            badge !== null && badge > 0 ? `, ${badge} awaiting action` : ""
-          }${writable ? "" : ", read-only"}`}
+            badge !== null && badge > 0 ? m.awaitingAction(badge) : ""
+          }${writable ? "" : m.readOnlySuffix}`}
           className={`flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold transition ${
             active ? "text-white" : "text-zinc-300 group-hover:text-white"
           }`}
@@ -192,7 +200,7 @@ export function AdminSidebar({
                 active ? "text-blue-100" : "text-zinc-500"
               }`}
             >
-              Read
+              {m.readMarker}
             </span>
           ) : null}
         </Link>
@@ -203,10 +211,10 @@ export function AdminSidebar({
           aria-pressed={pinnedNow}
           aria-label={
             pinnedNow
-              ? `Unpin ${item.label} from quick access`
+              ? m.unpin(item.label)
               : atLimit
-                ? `Quick access is full; unpin a page before pinning ${item.label}`
-                : `Pin ${item.label} to quick access`
+                ? m.pinLimitReached(item.label)
+                : m.pin(item.label)
           }
           className={`flex w-9 shrink-0 items-center justify-center rounded-xl transition disabled:cursor-not-allowed disabled:opacity-40 ${
             pinnedNow
@@ -238,7 +246,7 @@ export function AdminSidebar({
           <span>
             <span className="block text-sm font-bold text-white">Tomverse</span>
             <span className="block text-xs font-bold text-blue-300">
-              Admin Console
+              {m.brandSubtitle}
             </span>
           </span>
         </Link>
@@ -252,9 +260,9 @@ export function AdminSidebar({
       */}
       <div ref={scrollerRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
         {pinnedItems.length > 0 ? (
-          <nav aria-label="Quick access" className="mb-5">
+          <nav aria-label={m.quickAccess} className="mb-5">
             <p className="mb-1.5 px-3 text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
-              Quick access
+              {m.quickAccess}
             </p>
             <div className="grid gap-0.5">
               {pinnedItems.map((item) => renderItem(item, "pinned"))}
@@ -262,7 +270,7 @@ export function AdminSidebar({
           </nav>
         ) : null}
 
-        <nav aria-label="Admin console navigation">
+        <nav aria-label={m.navigation}>
           {ADMIN_NAV_ITEMS_BY_GROUP.map((group) => {
             const open = isOpen(group.label);
             const panelId = `admin-nav-group-${group.label
@@ -290,7 +298,9 @@ export function AdminSidebar({
                     }`}
                     aria-hidden
                   />
-                  <span className="min-w-0 flex-1 truncate">{group.label}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {adminNavGroupLabel(group.label, locale)}
+                  </span>
                   {!open && groupBadge && groupBadge > 0 ? (
                     <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold tabular-nums text-amber-200">
                       {groupBadge}
@@ -311,7 +321,7 @@ export function AdminSidebar({
           href="/chat"
           className="flex items-center justify-center gap-2 rounded-xl border border-zinc-800 px-3 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-900"
         >
-          Open Tomverse <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+          {m.openProduct} <ExternalLink className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </div>
     </div>

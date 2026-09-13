@@ -3,8 +3,10 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
 import { AdminConsoleShell } from "@/components/admin/AdminConsoleShell";
+import { AdminLocaleProvider } from "@/components/admin/AdminLocaleProvider";
 import { authOptions } from "@/lib/auth";
 import { getAdminRole, getAdminSessionAccessState } from "@/lib/adminAuth";
+import { getAdminLocale } from "@/lib/adminLocaleServer";
 import { adminReauthenticationHref } from "@/lib/adminReauthenticationCore";
 import { getAdminNavigationCounts } from "@/lib/adminNavigationCounts";
 import { resolveDeploymentEnvironment } from "@/lib/deploymentEnvironment";
@@ -36,7 +38,10 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
     );
   }
   const role = getAdminRole(session) || "readonly";
-  const { counts, healthy } = await getAdminNavigationCounts();
+  const [{ counts, healthy }, locale] = await Promise.all([
+    getAdminNavigationCounts(),
+    getAdminLocale(),
+  ]);
 
   // The badge an operator reads before acting has to agree with the rules the
   // server is actually applying, so it comes from the same resolver. Its own
@@ -54,19 +59,21 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   ).slice(0, 12);
 
   return (
-    <AdminConsoleShell
-      role={role}
-      user={{
-        name: session.user.name || null,
-        email: session.user.email || null,
-        image: session.user.image || null,
-      }}
-      environment={environment}
-      version={version}
-      apiStatus={healthy ? "healthy" : "degraded"}
-      counts={counts}
-    >
-      {children}
-    </AdminConsoleShell>
+    <AdminLocaleProvider locale={locale}>
+      <AdminConsoleShell
+        role={role}
+        user={{
+          name: session.user.name || null,
+          email: session.user.email || null,
+          image: session.user.image || null,
+        }}
+        environment={environment}
+        version={version}
+        apiStatus={healthy ? "healthy" : "degraded"}
+        counts={counts}
+      >
+        {children}
+      </AdminConsoleShell>
+    </AdminLocaleProvider>
   );
 }

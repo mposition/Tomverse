@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Brain, Loader2, RefreshCw } from "lucide-react";
 
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminMemoryImportMessages } from "@/lib/adminMessages/memoryImport";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 /**
@@ -121,6 +123,7 @@ function CountList({
     counts: Record<string, number>;
     testId: string;
 }) {
+    const m = useAdminMessages(adminMemoryImportMessages);
     const entries = Object.entries(counts).sort(([left], [right]) =>
         left < right ? -1 : 1
     );
@@ -130,7 +133,7 @@ function CountList({
                 {title}
             </p>
             {entries.length === 0 ? (
-                <p className="mt-2 text-sm text-zinc-500">None in this window.</p>
+                <p className="mt-2 text-sm text-zinc-500">{m.noneInWindow}</p>
             ) : (
                 <ul className="mt-2 space-y-1" data-testid={testId}>
                     {entries.map(([key, value]) => (
@@ -149,6 +152,8 @@ function CountList({
 }
 
 export function AdminMemoryImportPanel() {
+    const m = useAdminMessages(adminMemoryImportMessages);
+    const loadFailed = m.loadFailed;
     const [memory, setMemory] = useState<MemoryReport | null>(null);
     const [imports, setImports] = useState<ImportReport | null>(null);
     const [error, setError] = useState<string | null>(null);
@@ -184,7 +189,7 @@ export function AdminMemoryImportPanel() {
             if (!memoryResponse.ok || !memoryData || "error" in memoryData) {
                 throw new Error(
                     (memoryData && "error" in memoryData && memoryData.error) ||
-                        "Failed to load the memory report."
+                        loadFailed
                 );
             }
             setMemory(memoryData as MemoryReport);
@@ -193,12 +198,12 @@ export function AdminMemoryImportPanel() {
             setError(
                 loadError instanceof Error
                     ? loadError.message
-                    : "Failed to load the memory report."
+                    : loadFailed
             );
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [loadFailed]);
 
     useEffect(() => {
         // Deferred a tick so no state write is synchronous within the effect.
@@ -214,16 +219,13 @@ export function AdminMemoryImportPanel() {
                 <div>
                     <div className="inline-flex items-center gap-2 rounded-full border border-teal-500/30 bg-teal-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-teal-200">
                         <Brain className="h-3.5 w-3.5" />
-                        Import &amp; memory
+                        {m.eyebrow}
                     </div>
                     <h2 className="mt-3 text-2xl font-black text-white">
-                        Review outcomes and extraction runs
+                        {m.title}
                     </h2>
                     <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                        Content-free counts and rates only (docs/policy/
-                        external-conversation-import-and-memory.md §22). Statements,
-                        evidence, titles and ids are excluded at the query layer, so
-                        nothing here can carry them.
+                        {m.description}
                     </p>
                 </div>
                 <button
@@ -240,7 +242,7 @@ export function AdminMemoryImportPanel() {
                     ) : (
                         <RefreshCw className="h-4 w-4" />
                     )}
-                    Refresh
+                    {m.refresh}
                 </button>
             </div>
 
@@ -257,44 +259,44 @@ export function AdminMemoryImportPanel() {
                 <div className="grid gap-5 p-5">
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <Stat
-                            label="Memories"
+                            label={m.memories}
                             value={String(memory.memories.total)}
-                            detail={`${memory.memories.userAuthored} written by hand · last ${memory.windowDays}d`}
+                            detail={m.memoriesDetail(memory.memories.userAuthored, memory.windowDays)}
                         />
                         <Stat
-                            label="Approved of decided"
+                            label={m.approvedOfDecided}
                             value={rate(memory.memories.approvalRate)}
-                            detail={`rejected ${rate(memory.memories.rejectionRate)} · edited before approval ${rate(memory.memories.editedRate)}`}
+                            detail={m.approvedDetail(rate(memory.memories.rejectionRate), rate(memory.memories.editedRate))}
                         />
                         <Stat
-                            label="Sensitive share"
+                            label={m.sensitiveShare}
                             value={rate(memory.memories.sensitiveRate)}
-                            detail="always excluded from bulk approval"
+                            detail={m.sensitiveDetail}
                         />
                         <Stat
-                            label="Extraction runs"
+                            label={m.extractionRuns}
                             value={String(memory.runs.total)}
                             detail={
                                 memory.runs.byPair.length === 0
-                                    ? "no approved pair has run yet"
-                                    : `${memory.runs.byPair.length} pair(s)`
+                                    ? m.noPairRun
+                                    : m.pairCount(memory.runs.byPair.length)
                             }
                         />
                     </div>
 
                     <div className="grid gap-3 md:grid-cols-3">
                         <CountList
-                            title="Memories by status"
+                            title={m.memoriesByStatus}
                             counts={memory.memories.byStatus}
                             testId="admin-memory-status-list"
                         />
                         <CountList
-                            title="Runs by status"
+                            title={m.runsByStatus}
                             counts={memory.runs.byStatus}
                             testId="admin-memory-run-status-list"
                         />
                         <CountList
-                            title="Counters (window)"
+                            title={m.counters}
                             counts={memory.counters}
                             testId="admin-memory-counter-list"
                         />
@@ -305,7 +307,7 @@ export function AdminMemoryImportPanel() {
                         data-testid="admin-memory-followup-proxy"
                     >
                         <h3 className="text-sm font-semibold text-zinc-200">
-                            Follow-up and regenerate proxy
+                            {m.followupTitle}
                         </h3>
                         {/* §22 requires this to be labelled as a proxy where
                             it is read, not only where it is computed. A
@@ -314,22 +316,19 @@ export function AdminMemoryImportPanel() {
                             the difference between the arms carries a signal,
                             and even that is indirect. */}
                         <p className="mt-1 text-xs leading-5 text-zinc-500">
-                            A proxy, not a measurement of answer quality. A
-                            follow-up often means the answer was useful. Read
-                            the difference between the two arms, never either
-                            rate on its own, and never as a re-ask rate.
+                            {m.followupNote}
                         </p>
                         {memory.followupProxy ? (
                             <div className="mt-3 grid gap-3 md:grid-cols-2">
                                 <Stat
-                                    label="Follow-up within 120s"
-                                    value={`${rate(memory.followupProxy.memory.followupRate)} vs ${rate(memory.followupProxy.plain.followupRate)}`}
-                                    detail={`memory-shaped (${memory.followupProxy.memory.answers}) vs other answers (${memory.followupProxy.plain.answers}) · difference ${rate(memory.followupProxy.followupDifference)}`}
+                                    label={m.followupWithin}
+                                    value={m.versus(rate(memory.followupProxy.memory.followupRate), rate(memory.followupProxy.plain.followupRate))}
+                                    detail={m.followupDetail(memory.followupProxy.memory.answers, memory.followupProxy.plain.answers, rate(memory.followupProxy.followupDifference))}
                                 />
                                 <Stat
-                                    label="Regenerate within 120s"
-                                    value={`${rate(memory.followupProxy.memory.regenerateRate)} vs ${rate(memory.followupProxy.plain.regenerateRate)}`}
-                                    detail={`difference ${rate(memory.followupProxy.regenerateDifference)}`}
+                                    label={m.regenerateWithin}
+                                    value={m.versus(rate(memory.followupProxy.memory.regenerateRate), rate(memory.followupProxy.plain.regenerateRate))}
+                                    detail={m.regenerateDetail(rate(memory.followupProxy.regenerateDifference))}
                                 />
                             </div>
                         ) : (
@@ -343,9 +342,7 @@ export function AdminMemoryImportPanel() {
                                 className="mt-3 text-xs leading-5 text-amber-300"
                                 data-testid="admin-memory-followup-proxy-unavailable"
                             >
-                                Not measured — this report does not carry the
-                                follow-up proxy. Nothing is being claimed about
-                                either arm.
+                                {m.followupUnavailable}
                             </p>
                         )}
                     </section>
@@ -355,12 +352,12 @@ export function AdminMemoryImportPanel() {
                             <table className="w-full min-w-[36rem] text-left text-sm">
                                 <thead className="bg-zinc-900/60 text-[11px] uppercase tracking-[0.14em] text-zinc-500">
                                     <tr>
-                                        <th className="px-3 py-2">Pair</th>
-                                        <th className="px-3 py-2">Runs</th>
-                                        <th className="px-3 py-2">Completed</th>
-                                        <th className="px-3 py-2">Failed</th>
-                                        <th className="px-3 py-2">Cancelled</th>
-                                        <th className="px-3 py-2">Failure rate</th>
+                                        <th className="px-3 py-2">{m.pair}</th>
+                                        <th className="px-3 py-2">{m.runs}</th>
+                                        <th className="px-3 py-2">{m.completed}</th>
+                                        <th className="px-3 py-2">{m.failed}</th>
+                                        <th className="px-3 py-2">{m.cancelled}</th>
+                                        <th className="px-3 py-2">{m.failureRate}</th>
                                     </tr>
                                 </thead>
                                 <tbody data-testid="admin-memory-pair-rows">
@@ -400,12 +397,10 @@ export function AdminMemoryImportPanel() {
                         data-testid="admin-memory-unavailable"
                     >
                         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-amber-300/80">
-                            Not measured yet
+                            {m.notMeasuredTitle}
                         </p>
                         <p className="mt-1 text-xs leading-5 text-amber-200/70">
-                            These §22 metrics have no source in this build. They are
-                            listed rather than shown as zero, because a zero would read
-                            as &ldquo;nothing is happening&rdquo;.
+                            {m.notMeasuredNote}
                         </p>
                         <ul className="mt-2 space-y-1 text-xs leading-5">
                             {memory.unavailable.map((entry) => (
@@ -427,15 +422,14 @@ export function AdminMemoryImportPanel() {
                             data-testid="admin-memory-caveat"
                         >
                             {memory.truncated
-                                ? "The window hit the row cap; narrow it for exact figures."
-                                : "Some memory tables are not migrated in this environment."}
+                                ? m.truncated
+                                : m.notMigrated}
                         </p>
                     )}
 
                     {imports === null && (
                         <p className="text-xs text-zinc-500" data-testid="admin-import-missing">
-                            The import report is unavailable in this environment; the
-                            memory figures above are unaffected.
+                            {m.importMissing}
                         </p>
                     )}
                 </div>

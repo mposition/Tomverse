@@ -24,7 +24,10 @@ import type {
   AdminUserStats,
 } from "@/lib/adminUserTypes";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
+import { adminIntlLocale } from "@/lib/adminLocale";
+import { adminUsersMessages } from "@/lib/adminMessages/users";
 import { AdminNotesBox } from "@/components/admin/AdminNotesBox";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AdminUserDeleteButton } from "@/components/admin/AdminUserDeleteButton";
 import {
   AdminUserSecurityControls,
@@ -206,17 +209,6 @@ const planClass = (plan: string | null | undefined) => {
   return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
 };
 
-const segmentLabels: Record<AdminUserSegment, string> = {
-  all: "All accounts",
-  free: "Free access",
-  pro: "Pro access",
-  max: "Max access",
-  activePaid: "Active paid subscriptions",
-  testerPass: "Tester Pass",
-  canceling: "Canceling subscriptions",
-  billingRisk: "Billing risk",
-};
-
 export function AdminUsersPanel({
   rows,
   initialNextCursor,
@@ -232,6 +224,9 @@ export function AdminUsersPanel({
   initialPageCursors = [null],
 }: Props) {
   const router = useRouter();
+  const m = useAdminMessages(adminUsersMessages);
+  const { locale: apiLocale } = useAdminLocale();
+  const intl = adminIntlLocale(apiLocale);
   const [items, setItems] = useState(rows);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [statsSnapshot, setStatsSnapshot] = useState(stats);
@@ -256,8 +251,8 @@ export function AdminUsersPanel({
   const initialDetailLoadedRef = useRef<string | null>(null);
 
   const title = useMemo(
-    () => (appliedQuery ? "Search results" : segmentLabels[segment]),
-    [appliedQuery, segment]
+    () => (appliedQuery ? m.searchResults : m.segments[segment]),
+    [appliedQuery, segment, m]
   );
 
   const fetchUsers = async ({
@@ -299,7 +294,7 @@ export function AdminUsersPanel({
           }
         | null;
       if (!response.ok || !data?.users) {
-        throw new Error(data?.error || "Failed to search users.");
+        throw new Error(data?.error || m.toast.searchFailed);
       }
       setItems(data.users);
       setNextCursor(data.nextCursor || null);
@@ -322,7 +317,7 @@ export function AdminUsersPanel({
       }
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Failed to search users.",
+        error instanceof Error ? error.message : m.toast.searchFailed,
         "error"
       );
     } finally {
@@ -394,18 +389,18 @@ export function AdminUsersPanel({
         | { user?: AdminUserDetail; error?: string }
         | null;
       if (!response.ok || !data?.user) {
-        throw new Error(data?.error || "Failed to load user detail.");
+        throw new Error(data?.error || m.toast.detailFailed);
       }
       setDetailUser(data.user);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Failed to load user detail.";
+        error instanceof Error ? error.message : m.toast.detailFailed;
       setDetailError(message);
       dispatchAppToast(message, "error");
     } finally {
       setLoadingDetailId(null);
     }
-  }, []);
+  }, [m.toast.detailFailed]);
 
   const copyUserContext = async (user: AdminUserDetail) => {
     const text = [
@@ -430,9 +425,9 @@ export function AdminUsersPanel({
 
     try {
       await navigator.clipboard.writeText(text);
-      dispatchAppToast("User context copied.", "success");
+      dispatchAppToast(m.toast.contextCopied, "success");
     } catch {
-      dispatchAppToast("Could not copy user context.", "error");
+      dispatchAppToast(m.toast.contextCopyFailed, "error");
     }
   };
 
@@ -452,7 +447,8 @@ export function AdminUsersPanel({
           error: data?.error,
           code: data?.code,
           approvalId: data?.approvalId,
-          fallback: "Stripe was not resynced, so nothing changed.",
+          fallback: m.toast.resyncFallback,
+          locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
         return;
@@ -460,15 +456,9 @@ export function AdminUsersPanel({
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
       // The route reads Stripe and writes the plan, subscription and price it
       // found -- it does not change anything in Stripe.
-      dispatchAppToast(
-        "Plan, subscription and price re-read from Stripe and saved.",
-        "success"
-      );
+      dispatchAppToast(m.toast.resyncDone, "success");
     } catch {
-      dispatchAppToast(
-        "Stripe was not resynced. Check the connection and retry.",
-        "error"
-      );
+      dispatchAppToast(m.toast.resyncNetwork, "error");
     } finally {
       setBillingAction(null);
     }
@@ -496,15 +486,15 @@ export function AdminUsersPanel({
         | { user?: Partial<AdminUserDetail>; error?: string }
         | null;
       if (!response.ok || !data?.user) {
-        throw new Error(data?.error || "Plan adjustment failed.");
+        throw new Error(data?.error || m.toast.adjustFailed);
       }
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
       setAdjustReason("");
       setAdjustConfirm("");
-      dispatchAppToast("User plan adjusted.", "success");
+      dispatchAppToast(m.toast.adjustDone, "success");
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Plan adjustment failed.",
+        error instanceof Error ? error.message : m.toast.adjustFailed,
         "error"
       );
     } finally {
@@ -537,7 +527,8 @@ export function AdminUsersPanel({
           error: data?.error,
           code: data?.code,
           approvalId: data?.approvalId,
-          fallback: "The billing hold was not released, so AI access is unchanged.",
+          fallback: m.toast.releaseFallback,
+          locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
         return;
@@ -545,15 +536,9 @@ export function AdminUsersPanel({
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
       setRiskReleaseReason("");
       setRiskReleaseConfirm("");
-      dispatchAppToast(
-        "AI access restored. The outstanding credit debt is unchanged and still enforceable.",
-        "success"
-      );
+      dispatchAppToast(m.toast.releaseDone, "success");
     } catch {
-      dispatchAppToast(
-        "The billing hold was not released. Check the connection and retry.",
-        "error"
-      );
+      dispatchAppToast(m.toast.releaseNetwork, "error");
     } finally {
       setBillingAction(null);
     }
@@ -596,7 +581,8 @@ export function AdminUsersPanel({
           error: data?.error,
           code: data?.code,
           approvalId: data?.approvalId,
-          fallback: "The credit purchase was not refunded, so balances are unchanged.",
+          fallback: m.toast.refundFallback,
+          locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
         return;
@@ -607,15 +593,9 @@ export function AdminUsersPanel({
       // The route only reaches `success` after Stripe accepted the refund, so
       // this may claim the money moved -- and consumed credits that could not
       // be revoked are now debt, which the reloaded detail shows above.
-      dispatchAppToast(
-        "Stripe refunded the purchase. Remaining credits were revoked, and any already-consumed value is now recorded as credit debt.",
-        "success"
-      );
+      dispatchAppToast(m.toast.refundDone, "success");
     } catch {
-      dispatchAppToast(
-        "The credit purchase refund did not complete. Reload the customer before retrying.",
-        "error"
-      );
+      dispatchAppToast(m.toast.refundNetwork, "error");
     } finally {
       setBillingAction(null);
     }
@@ -635,12 +615,12 @@ export function AdminUsersPanel({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-              User overview
+              {m.overview.eyebrow}
             </p>
-            <h2 className="mt-2 text-xl font-black text-white">All-database account statistics</h2>
+            <h2 className="mt-2 text-xl font-black text-white">{m.overview.title}</h2>
           </div>
           <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <span>Last aggregated {dateTimeLabel(statsSnapshot.generatedAt)}</span>
+            <span>{m.overview.lastAggregated(dateTimeLabel(statsSnapshot.generatedAt))}</span>
             <button
               type="button"
               onClick={() =>
@@ -652,7 +632,7 @@ export function AdminUsersPanel({
               }
               disabled={isSearching}
               className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-zinc-800 text-zinc-300 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="Refresh user statistics and current results"
+              aria-label={m.overview.refresh}
             >
               <RefreshCw className={`h-4 w-4 ${isSearching ? "animate-spin" : ""}`} />
             </button>
@@ -661,14 +641,14 @@ export function AdminUsersPanel({
 
         <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-4">
           {([
-            { segment: "all", label: "Total accounts", value: statsSnapshot.totalAccounts, detail: "All User records" },
-            { segment: "free", label: "Free access", value: statsSnapshot.freeUsers, detail: "Current DB access plan" },
-            { segment: "pro", label: "Pro access", value: statsSnapshot.proUsers, detail: "Paid and granted access" },
-            { segment: "max", label: "Max access", value: statsSnapshot.maxUsers, detail: "Paid and granted access" },
-            { segment: "activePaid", label: "Active paid", value: statsSnapshot.activePaidSubscriptions, detail: "Active or trialing Stripe" },
-            { segment: "testerPass", label: "Tester Pass", value: statsSnapshot.testerPassUsers, detail: "Active internal pass" },
-            { segment: "canceling", label: "Canceling", value: statsSnapshot.cancelingSubscriptions, detail: "Paid, cancel at period end" },
-            { segment: "billingRisk", label: "Billing risk", value: statsSnapshot.billingRiskUsers, detail: "Hold or unrecovered debt" },
+            { segment: "all", ...m.overview.cards.all, value: statsSnapshot.totalAccounts },
+            { segment: "free", ...m.overview.cards.free, value: statsSnapshot.freeUsers },
+            { segment: "pro", ...m.overview.cards.pro, value: statsSnapshot.proUsers },
+            { segment: "max", ...m.overview.cards.max, value: statsSnapshot.maxUsers },
+            { segment: "activePaid", ...m.overview.cards.activePaid, value: statsSnapshot.activePaidSubscriptions },
+            { segment: "testerPass", ...m.overview.cards.testerPass, value: statsSnapshot.testerPassUsers },
+            { segment: "canceling", ...m.overview.cards.canceling, value: statsSnapshot.cancelingSubscriptions },
+            { segment: "billingRisk", ...m.overview.cards.billingRisk, value: statsSnapshot.billingRiskUsers },
           ] satisfies Array<{
             segment: AdminUserSegment;
             label: string;
@@ -687,7 +667,7 @@ export function AdminUsersPanel({
               }`}
             >
               <span className="block text-xs font-bold text-zinc-400">{card.label}</span>
-              <span className="mt-2 block text-2xl font-black text-white">{card.value.toLocaleString()}</span>
+              <span className="mt-2 block text-2xl font-black text-white">{card.value.toLocaleString(intl)}</span>
               <span className="mt-1 block text-[11px] leading-4 text-zinc-500">{card.detail}</span>
             </button>
           ))}
@@ -695,15 +675,15 @@ export function AdminUsersPanel({
 
         <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
-            <span className="text-xs text-zinc-500">New accounts · 7 days</span>
-            <strong className="ml-2 text-sm text-white">{statsSnapshot.newUsers7d.toLocaleString()}</strong>
+            <span className="text-xs text-zinc-500">{m.overview.newAccounts7d}</span>
+            <strong className="ml-2 text-sm text-white">{statsSnapshot.newUsers7d.toLocaleString(intl)}</strong>
           </div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
-            <span className="text-xs text-zinc-500">New accounts · 30 days</span>
-            <strong className="ml-2 text-sm text-white">{statsSnapshot.newUsers30d.toLocaleString()}</strong>
+            <span className="text-xs text-zinc-500">{m.overview.newAccounts30d}</span>
+            <strong className="ml-2 text-sm text-white">{statsSnapshot.newUsers30d.toLocaleString(intl)}</strong>
           </div>
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-3 py-2">
-            <span className="text-xs text-zinc-500">Paid conversion</span>
+            <span className="text-xs text-zinc-500">{m.overview.paidConversion}</span>
             <strong className="ml-2 text-sm text-white">{statsSnapshot.paidConversionRatePercent.toFixed(2)}%</strong>
           </div>
         </div>
@@ -712,11 +692,11 @@ export function AdminUsersPanel({
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="mt-5">
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Users
+            {m.list.eyebrow}
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">{title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Search by email, name, user ID, or Stripe customer ID. {conversationCount} conversations are stored across the workspace.
+            {m.list.description(conversationCount)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -726,7 +706,7 @@ export function AdminUsersPanel({
             className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
           >
             <Download className="h-3.5 w-3.5" />
-            Export current result
+            {m.list.exportCurrent}
           </a>
           <a
             href="/api/admin/users/export?q=&segment=all"
@@ -734,7 +714,7 @@ export function AdminUsersPanel({
             className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/40 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20"
           >
             <Download className="h-3.5 w-3.5" />
-            Export all users
+            {m.list.exportAll}
           </a>
         </div>
       </div>
@@ -751,7 +731,7 @@ export function AdminUsersPanel({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search users by email, ID, name, or Stripe customer..."
+            placeholder={m.list.searchPlaceholder}
             className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
         </label>
@@ -761,24 +741,24 @@ export function AdminUsersPanel({
           className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          Search
+          {m.list.search}
         </button>
       </form>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
         <span className="rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 font-bold text-zinc-300">
-          Page {pageIndex + 1} - {items.length} accounts shown
+          {m.list.pageSummary(pageIndex + 1, items.length)}
         </span>
         <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 font-bold text-blue-200">
-          Segment: {segmentLabels[segment]}
+          {m.list.segment(m.segments[segment])}
         </span>
         {appliedQuery ? (
           <span className="max-w-full truncate rounded-full border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-zinc-400">
-            Search: {appliedQuery}
+            {m.list.searchChip(appliedQuery)}
           </span>
         ) : null}
         <label className="ml-auto inline-flex items-center gap-2 text-zinc-400">
-          <span>Rows per page</span>
+          <span>{m.list.rowsPerPage}</span>
           <select
             value={pageSize}
             onChange={(event) =>
@@ -786,7 +766,7 @@ export function AdminUsersPanel({
             }
             disabled={isSearching}
             className="h-8 cursor-pointer rounded-lg border border-zinc-700 bg-zinc-900 px-2 font-bold text-zinc-100 outline-none focus:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-            aria-label="Rows per page"
+            aria-label={m.list.rowsPerPage}
           >
             <option value={30}>30</option>
             <option value={50}>50</option>
@@ -798,12 +778,12 @@ export function AdminUsersPanel({
         <table className="w-full min-w-[980px] border-separate border-spacing-y-2 text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
             <tr>
-              <th className="px-3 py-2">User</th>
-              <th className="px-3 py-2">Plan</th>
-              <th className="px-3 py-2">Subscription</th>
-              <th className="px-3 py-2">Today (user time zone)</th>
-              <th className="px-3 py-2">Data</th>
-              <th className="px-3 py-2">Actions</th>
+              <th className="px-3 py-2">{m.list.columns.user}</th>
+              <th className="px-3 py-2">{m.list.columns.plan}</th>
+              <th className="px-3 py-2">{m.list.columns.subscription}</th>
+              <th className="px-3 py-2">{m.list.columns.today}</th>
+              <th className="px-3 py-2">{m.list.columns.data}</th>
+              <th className="px-3 py-2">{m.list.columns.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -811,14 +791,14 @@ export function AdminUsersPanel({
               <tr key={user.id} className="rounded-2xl bg-zinc-900/70 text-zinc-200">
                 <td className="rounded-l-2xl px-3 py-3">
                   <div className="font-bold text-zinc-100">
-                    {user.name || "Name not provided"}
+                    {user.name || m.list.nameNotProvided}
                   </div>
                   <Link
                     href={`/admin/users/${encodeURIComponent(user.id)}`}
                     className="mt-1 inline-flex cursor-pointer items-center gap-1.5 text-left text-xs font-bold text-blue-300 underline-offset-4 transition hover:text-blue-200 hover:underline"
-                    aria-label={`View details for ${user.email || user.name || "user"}`}
+                    aria-label={m.list.viewDetailsFor(user.email || user.name || m.list.userFallback)}
                   >
-                    {user.email || "No email · View details"}
+                    {user.email || m.list.noEmailViewDetails}
                   </Link>
                 </td>
                 <td className="px-3 py-3">
@@ -827,37 +807,37 @@ export function AdminUsersPanel({
                   </span>
                 </td>
                 <td className="px-3 py-3 text-xs text-zinc-400">
-                  <div>{user.subscriptionStatus || "none"}</div>
+                  <div>{user.subscriptionStatus || m.list.subscriptionNone}</div>
                   <div>{user.subscriptionBillingInterval || "-"}</div>
                   <div>{dateTimeLabel(user.subscriptionCurrentPeriodEnd, user.timeZone)}</div>
                   {user.subscriptionCancelAtPeriodEnd ? (
-                    <div className="mt-1 text-amber-300">Cancels at period end</div>
+                    <div className="mt-1 text-amber-300">{m.list.cancelsAtPeriodEnd}</div>
                   ) : null}
                 </td>
                 <td className="px-3 py-3 text-xs text-zinc-400">
                   <div>
-                    <span className="font-bold text-zinc-200">{user.messagesToday.toLocaleString()}</span>
-                    <span className="ml-1">messages</span>
+                    <span className="font-bold text-zinc-200">{user.messagesToday.toLocaleString(intl)}</span>
+                    <span className="ml-1">{m.list.messages}</span>
                   </div>
                   <div className="mt-1">
-                    <span className="font-bold text-amber-200">{user.creditsToday.toLocaleString()}</span>
-                    <span className="ml-1">plan credits</span>
+                    <span className="font-bold text-amber-200">{user.creditsToday.toLocaleString(intl)}</span>
+                    <span className="ml-1">{m.list.planCredits}</span>
                   </div>
                   <div className="mt-1 text-[11px] text-zinc-500">{user.timeZone}</div>
                   {(user.creditDebtCredits || 0) > 0 ? (
                     <div className="mt-1 font-bold text-red-300">
-                      Debt {user.creditDebtCredits?.toLocaleString()} credits
+                      {m.list.debtCredits((user.creditDebtCredits ?? 0).toLocaleString(intl))}
                     </div>
                   ) : null}
                   {user.billingRiskStatus === "disputed_hold" ? (
-                    <div className="mt-1 font-black text-red-300">AI access held</div>
+                    <div className="mt-1 font-black text-red-300">{m.list.aiAccessHeld}</div>
                   ) : null}
                 </td>
                 <td className="px-3 py-3 text-xs text-zinc-400">
-                  <div>{user._count.conversations} conversations</div>
-                  <div>{user._count.accounts} linked accounts</div>
-                  <div>{user._count.refundRequests || 0} refund requests</div>
-                  <div>{user._count.promotionRedemptions || 0} promo redemptions</div>
+                  <div>{m.list.conversations(user._count.conversations)}</div>
+                  <div>{m.list.linkedAccounts(user._count.accounts)}</div>
+                  <div>{m.list.refundRequests(user._count.refundRequests || 0)}</div>
+                  <div>{m.list.promoRedemptions(user._count.promotionRedemptions || 0)}</div>
                 </td>
                 <td className="rounded-r-2xl px-3 py-3">
                   <div className="flex flex-wrap gap-2">
@@ -873,14 +853,14 @@ export function AdminUsersPanel({
         </table>
         {items.length === 0 ? (
           <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No users match the current database segment and search.
+            {m.list.empty}
           </div>
         ) : null}
       </div>
 
       <nav
         className="mt-4 flex flex-wrap items-center justify-center gap-3"
-        aria-label="User result pages"
+        aria-label={m.list.pagination}
       >
         <button
           type="button"
@@ -889,13 +869,13 @@ export function AdminUsersPanel({
           className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <ChevronLeft className="h-4 w-4" />
-          Previous
+          {m.list.previous}
         </button>
         <span className="min-w-24 text-center text-sm font-bold text-zinc-400">
           {isSearching ? (
             <Loader2 className="mx-auto h-4 w-4 animate-spin" />
           ) : (
-            `Page ${pageIndex + 1}`
+            m.list.page(pageIndex + 1)
           )}
         </span>
         <button
@@ -904,7 +884,7 @@ export function AdminUsersPanel({
           disabled={!nextCursor || isSearching}
           className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-bold text-zinc-100 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Next
+          {m.list.next}
           <ChevronRight className="h-4 w-4" />
         </button>
       </nav>
@@ -912,7 +892,7 @@ export function AdminUsersPanel({
       </>
       ) : loadingDetailId ? (
         <div className="flex min-h-80 items-center justify-center rounded-2xl border border-zinc-800 bg-zinc-900/50 text-sm text-zinc-500">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading customer detail
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> {m.detail.loading}
         </div>
       ) : null}
 
@@ -922,13 +902,13 @@ export function AdminUsersPanel({
             <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-zinc-800 bg-zinc-950/95 p-5 backdrop-blur">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-                  Customer detail
+                  {m.detail.eyebrow}
                 </p>
                 <h3 className="mt-2 text-2xl font-black text-white">
-                  {detailUser.name || "Name not provided"}
+                  {detailUser.name || m.list.nameNotProvided}
                 </h3>
                 <p className="mt-1 text-sm font-medium text-zinc-400">
-                  {detailUser.email || "No email address"}
+                  {detailUser.email || m.detail.noEmail}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -938,13 +918,13 @@ export function AdminUsersPanel({
                   className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-zinc-800"
                 >
                   <Clipboard className="h-3.5 w-3.5" />
-                  Copy
+                  {m.detail.copy}
                 </button>
                 <button
                   type="button"
                   onClick={() => detailMode === "page" ? router.push("/admin/users") : setDetailUser(null)}
                   className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                  aria-label="Close user detail"
+                  aria-label={m.detail.close}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -954,7 +934,7 @@ export function AdminUsersPanel({
             <div className="grid gap-4 p-5 lg:grid-cols-3">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                  Plan
+                  {m.detail.plan}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${planClass(detailUser.plan)}`}>
@@ -962,14 +942,14 @@ export function AdminUsersPanel({
                   </span>
                   {detailUser.subscriptionCancelAtPeriodEnd ? (
                     <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-200">
-                      Cancels at period end
+                      {m.list.cancelsAtPeriodEnd}
                     </span>
                   ) : null}
                 </div>
                 <div className="mt-3 space-y-1 text-xs text-zinc-400">
-                  <div>Status: {detailUser.subscriptionStatus || "-"}</div>
-                  <div>Billing: {detailUser.subscriptionBillingInterval || "-"}</div>
-                  <div>Period end: {dateTimeLabel(detailUser.subscriptionCurrentPeriodEnd, detailUser.usage.timeZone)}</div>
+                  <div>{m.detail.status(detailUser.subscriptionStatus || "-")}</div>
+                  <div>{m.detail.billing(detailUser.subscriptionBillingInterval || "-")}</div>
+                  <div>{m.detail.periodEnd(dateTimeLabel(detailUser.subscriptionCurrentPeriodEnd, detailUser.usage.timeZone))}</div>
                 </div>
                 <button
                   type="button"
@@ -978,30 +958,30 @@ export function AdminUsersPanel({
                   className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {billingAction === "resync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  Resync Stripe
+                  {m.detail.resyncStripe}
                 </button>
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                  Usage
+                  {m.detail.usage}
                 </p>
                 <div className="mt-3 grid grid-cols-3 gap-3">
                   <div>
                     <div data-testid="admin-user-detail-messages-today" className="text-2xl font-black text-white">{detailUser.usage.messagesToday}</div>
-                    <div className="text-xs text-zinc-500">messages today</div>
+                    <div className="text-xs text-zinc-500">{m.detail.messagesToday}</div>
                   </div>
                   <div>
                     <div data-testid="admin-user-detail-credits-today" className="text-2xl font-black text-amber-200">{detailUser.usage.creditsToday}</div>
-                    <div className="text-xs text-zinc-500">plan credits today</div>
+                    <div className="text-xs text-zinc-500">{m.detail.planCreditsToday}</div>
                   </div>
                   <div>
                     <div data-testid="admin-user-detail-credits-month" className="text-2xl font-black text-white">{detailUser.usage.creditsMonth}</div>
-                    <div className="text-xs text-zinc-500">plan credits this month</div>
+                    <div className="text-xs text-zinc-500">{m.detail.planCreditsMonth}</div>
                   </div>
                 </div>
                 <p className="mt-3 text-xs text-zinc-500">
-                  Daily window: {detailUser.usage.timeZone} · resets at {dateTimeLabel(detailUser.usage.dayEnd, detailUser.usage.timeZone)}
+                  {m.detail.dailyWindow(detailUser.usage.timeZone, dateTimeLabel(detailUser.usage.dayEnd, detailUser.usage.timeZone))}
                 </p>
               </div>
 
@@ -1010,9 +990,9 @@ export function AdminUsersPanel({
                   Stripe
                 </p>
                 <div className="mt-3 space-y-1 text-xs text-zinc-400">
-                  <div className="truncate">Customer: {detailUser.stripeCustomerId || "-"}</div>
-                  <div className="truncate">Subscription: {detailUser.stripeSubscriptionId || "-"}</div>
-                  <div className="truncate">Price: {detailUser.stripePriceId || "-"}</div>
+                  <div className="truncate">{m.detail.stripeCustomer(detailUser.stripeCustomerId || "-")}</div>
+                  <div className="truncate">{m.detail.stripeSubscription(detailUser.stripeSubscriptionId || "-")}</div>
+                  <div className="truncate">{m.detail.stripePrice(detailUser.stripePriceId || "-")}</div>
                 </div>
               </div>
             </div>
@@ -1032,19 +1012,19 @@ export function AdminUsersPanel({
               }`}>
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
-                    <h4 className="font-black text-white">Credit debt & billing risk</h4>
+                    <h4 className="font-black text-white">{m.detail.risk.title}</h4>
                     <p className="mt-1 text-sm text-zinc-400">
-                      Risk status: <strong className={detailUser.billingRiskStatus === "disputed_hold" ? "text-red-300" : "text-emerald-300"}>{detailUser.billingRiskStatus}</strong>
+                      {m.detail.risk.statusLabel}<strong className={detailUser.billingRiskStatus === "disputed_hold" ? "text-red-300" : "text-emerald-300"}>{detailUser.billingRiskStatus}</strong>
                     </p>
                     {detailUser.billingRiskReason ? <p className="mt-1 text-xs text-red-200">{detailUser.billingRiskReason}</p> : null}
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-right">
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-zinc-500">Unrecovered</p>
-                      <p className="mt-1 text-xl font-black text-white">{detailUser.creditDebtCredits.toLocaleString()} credits</p>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">{m.detail.risk.unrecovered}</p>
+                      <p className="mt-1 text-xl font-black text-white">{m.detail.risk.credits(detailUser.creditDebtCredits.toLocaleString(intl))}</p>
                     </div>
                     <div>
-                      <p className="text-xs uppercase tracking-wide text-zinc-500">Funded cost</p>
+                      <p className="text-xs uppercase tracking-wide text-zinc-500">{m.detail.risk.fundedCost}</p>
                       <p className="mt-1 text-xl font-black text-white">${(detailUser.creditDebtCostMicroUsd / 1_000_000).toFixed(2)}</p>
                     </div>
                   </div>
@@ -1054,7 +1034,7 @@ export function AdminUsersPanel({
                     <input
                       value={riskReleaseReason}
                       onChange={(event) => setRiskReleaseReason(event.target.value)}
-                      placeholder="Verified resolution reason"
+                      placeholder={m.detail.risk.reasonPlaceholder}
                       className="h-11 rounded-xl border border-red-500/30 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-red-400"
                     />
                     <input
@@ -1069,20 +1049,20 @@ export function AdminUsersPanel({
                       disabled={Boolean(billingAction) || riskReleaseReason.trim().length < 5 || riskReleaseConfirm !== "RELEASE BILLING HOLD"}
                       className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      {billingAction === "risk" ? "Releasing..." : "Release hold"}
+                      {billingAction === "risk" ? m.detail.risk.releasing : m.detail.risk.release}
                     </button>
                   </div>
                 ) : null}
                 <p className="mt-3 text-xs text-zinc-500">
-                  Releasing the AI hold does not forgive outstanding debt. Future plan and purchased credits continue to offset it first.
+                  {m.detail.risk.note}
                 </p>
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
-                <h4 className="font-black text-white">Additional credit purchases</h4>
+                <h4 className="font-black text-white">{m.detail.purchases.title}</h4>
                 <div className="mt-3 grid gap-2">
                   {detailUser.creditPurchases.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No additional credit purchases.</p>
+                    <p className="text-sm text-zinc-500">{m.detail.purchases.empty}</p>
                   ) : detailUser.creditPurchases.map((purchase) => (
                     <div key={purchase.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1090,34 +1070,42 @@ export function AdminUsersPanel({
                         <p>{dateTimeLabel(purchase.purchasedAt, detailUser.usage.timeZone)}</p>
                       </div>
                       <p className="mt-2 font-bold text-zinc-200">
-                        Paid: {formatBillingMinor(
-                          purchase.amountPaidCents,
-                          normalizeBillingCurrency(purchase.currency) || "USD",
-                          "en"
-                        )} · USD snapshot ${(purchase.amountPaidUsdMicroUsd / 1_000_000).toFixed(2)}
+                        {m.detail.purchases.paid(
+                          formatBillingMinor(
+                            purchase.amountPaidCents,
+                            normalizeBillingCurrency(purchase.currency) || "USD",
+                            "en"
+                          ),
+                          (purchase.amountPaidUsdMicroUsd / 1_000_000).toFixed(2)
+                        )}
                       </p>
                       <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
-                        <span>Purchased: {purchase.creditsPurchased.toLocaleString()} / ${(purchase.fundedCostMicroUsd / 1_000_000).toFixed(2)}</span>
-                        <span>Remaining: {purchase.remainingCredits.toLocaleString()} / ${(purchase.remainingFundedCostMicroUsd / 1_000_000).toFixed(2)}</span>
-                        <span>Revoked: {purchase.revokedCredits.toLocaleString()} / ${(purchase.revokedCostMicroUsd / 1_000_000).toFixed(2)}</span>
-                        <span className={purchase.unrecoveredCredits > 0 ? "font-black text-red-300" : ""}>Unrecovered: {purchase.unrecoveredCredits.toLocaleString()} / ${(purchase.unrecoveredCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                        <span>{m.detail.purchases.purchased(purchase.creditsPurchased.toLocaleString(intl), (purchase.fundedCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                        <span>{m.detail.purchases.remaining(purchase.remainingCredits.toLocaleString(intl), (purchase.remainingFundedCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                        <span>{m.detail.purchases.revoked(purchase.revokedCredits.toLocaleString(intl), (purchase.revokedCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                        <span className={purchase.unrecoveredCredits > 0 ? "font-black text-red-300" : ""}>{m.detail.purchases.unrecovered(purchase.unrecoveredCredits.toLocaleString(intl), (purchase.unrecoveredCostMicroUsd / 1_000_000).toFixed(2))}</span>
                       </div>
                       <div className="mt-2 break-all text-zinc-600">
-                        Payment: {purchase.stripePaymentIntentId || "-"} / Charge: {purchase.stripeChargeId || "-"} / Dispute: {purchase.stripeDisputeId || "-"} {purchase.disputeStatus ? `(${purchase.disputeStatus})` : ""}
+                        {m.detail.purchases.stripeIds(
+                          purchase.stripePaymentIntentId || "-",
+                          purchase.stripeChargeId || "-",
+                          purchase.stripeDisputeId || "-",
+                          purchase.disputeStatus ? `(${purchase.disputeStatus})` : ""
+                        )}
                       </div>
                       {(purchase.status === "paid" || purchase.status === "partially_refunded") ? (
                         <details className="mt-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3">
                           <summary className="cursor-pointer font-black text-red-200">
-                            Review and refund remaining Stripe charge
+                            {m.detail.purchases.refundSummary}
                           </summary>
                           <p className="mt-2 text-zinc-500">
-                            Confirm the remaining balance and estimated consumed cost above. If the customer already used credits, the unrecovered portion becomes credit debt.
+                            {m.detail.purchases.refundExplainer}
                           </p>
                           <div className="mt-3 grid gap-2 md:grid-cols-[1fr_14rem_auto]">
                             <input
                               value={creditRefundReasons[purchase.id] || ""}
                               onChange={(event) => setCreditRefundReasons((current) => ({ ...current, [purchase.id]: event.target.value }))}
-                              placeholder="Refund reason for audit log"
+                              placeholder={m.detail.purchases.refundReasonPlaceholder}
                               className="h-10 rounded-lg border border-zinc-700 bg-zinc-950 px-3 text-white outline-none focus:border-red-400"
                             />
                             <input
@@ -1132,7 +1120,7 @@ export function AdminUsersPanel({
                               disabled={Boolean(billingAction) || (creditRefundReasons[purchase.id] || "").trim().length < 5 || creditRefundConfirms[purchase.id] !== "REFUND CREDIT PURCHASE"}
                               className="rounded-lg bg-red-600 px-3 py-2 font-black text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {billingAction === `refund:${purchase.id}` ? "Refunding..." : "Refund"}
+                              {billingAction === `refund:${purchase.id}` ? m.detail.purchases.refunding : m.detail.purchases.refund}
                             </button>
                           </div>
                         </details>
@@ -1143,13 +1131,13 @@ export function AdminUsersPanel({
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
-                <h4 className="font-black text-white">Durable credit reservations</h4>
+                <h4 className="font-black text-white">{m.detail.reservations.title}</h4>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Recent reserved → settled/refunded transitions with provider correlation IDs.
+                  {m.detail.reservations.description}
                 </p>
                 <div className="mt-3 grid gap-2">
                   {detailUser.chatCreditReservations.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No credit reservations.</p>
+                    <p className="text-sm text-zinc-500">{m.detail.reservations.empty}</p>
                   ) : detailUser.chatCreditReservations.map((reservation) => (
                     <div key={reservation.id} className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1167,13 +1155,13 @@ export function AdminUsersPanel({
                         <span>{dateTimeLabel(reservation.createdAt, detailUser.usage.timeZone)}</span>
                       </div>
                       <div className="mt-2 grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
-                        <span>Credits: {reservation.reservedCredits} reserved / {reservation.settledCredits} settled</span>
-                        <span>Cost: ${(reservation.reservedCostMicroUsd / 1_000_000).toFixed(4)} / ${(reservation.settledCostMicroUsd / 1_000_000).toFixed(4)}</span>
-                        <span>Outcome: {reservation.outcome || "-"}</span>
-                        <span>{reservation.reconciledAt ? `Auto-refunded ${dateTimeLabel(reservation.reconciledAt, detailUser.usage.timeZone)}` : `Expires ${dateTimeLabel(reservation.expiresAt, detailUser.usage.timeZone)}`}</span>
+                        <span>{m.detail.reservations.credits(reservation.reservedCredits, reservation.settledCredits)}</span>
+                        <span>{m.detail.reservations.cost((reservation.reservedCostMicroUsd / 1_000_000).toFixed(4), (reservation.settledCostMicroUsd / 1_000_000).toFixed(4))}</span>
+                        <span>{m.detail.reservations.outcome(reservation.outcome || "-")}</span>
+                        <span>{reservation.reconciledAt ? m.detail.reservations.autoRefunded(dateTimeLabel(reservation.reconciledAt, detailUser.usage.timeZone)) : m.detail.reservations.expires(dateTimeLabel(reservation.expiresAt, detailUser.usage.timeZone))}</span>
                       </div>
                       <div className="mt-2 break-all text-zinc-600">
-                        Reservation: {reservation.id} / Trace: {reservation.traceId} / Provider request: {reservation.providerRequestId || "-"} / Response: {reservation.providerResponseId || "-"}
+                        {m.detail.reservations.ids(reservation.id, reservation.traceId, reservation.providerRequestId || "-", reservation.providerResponseId || "-")}
                       </div>
                       {reservation.lastError ? <p className="mt-2 text-red-300">{reservation.lastError}</p> : null}
                     </div>
@@ -1186,10 +1174,10 @@ export function AdminUsersPanel({
               </div>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <h4 className="font-black text-white">Linked accounts</h4>
+                <h4 className="font-black text-white">{m.detail.linkedAccounts.title}</h4>
                 <div className="mt-3 grid gap-2">
                   {detailUser.accounts.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No OAuth accounts linked.</p>
+                    <p className="text-sm text-zinc-500">{m.detail.linkedAccounts.empty}</p>
                   ) : (
                     detailUser.accounts.map((account) => (
                       <div key={`${account.provider}-${account.providerAccountId}`} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400">
@@ -1202,28 +1190,28 @@ export function AdminUsersPanel({
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <h4 className="font-black text-white">Settings</h4>
+                <h4 className="font-black text-white">{m.detail.settings.title}</h4>
                 <div className="mt-3 grid gap-2 text-xs text-zinc-400">
-                  <div>Language: {detailUser.settings?.language || "-"}</div>
-                  <div>Theme: {detailUser.settings?.theme || "-"}</div>
-                  <div>Default model: {detailUser.settings?.defaultModel || "-"}</div>
-                  <div>Time zone: {detailUser.usage.timeZone}</div>
-                  <div>Sessions: {detailUser._count.sessions}</div>
+                  <div>{m.detail.settings.language(detailUser.settings?.language || "-")}</div>
+                  <div>{m.detail.settings.theme(detailUser.settings?.theme || "-")}</div>
+                  <div>{m.detail.settings.defaultModel(detailUser.settings?.defaultModel || "-")}</div>
+                  <div>{m.detail.settings.timeZone(detailUser.usage.timeZone)}</div>
+                  <div>{m.detail.settings.sessions(detailUser._count.sessions)}</div>
                 </div>
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <h4 className="font-black text-white">Recent conversations</h4>
+                <h4 className="font-black text-white">{m.detail.conversations.title}</h4>
                 <div className="mt-3 grid gap-2">
                   {detailUser.recentConversations.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No conversations yet.</p>
+                    <p className="text-sm text-zinc-500">{m.detail.conversations.empty}</p>
                   ) : (
                     detailUser.recentConversations.map((conversation) => (
                       <div key={conversation.id} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-400">
                         <div className="font-bold text-zinc-200">{conversation.title}</div>
                         <div className="mt-1">
-                          {conversation._count.messages} messages / updated {dateTimeLabel(conversation.updatedAt, detailUser.usage.timeZone)}
-                          {conversation.shareEnabled ? " / shared" : ""}
+                          {m.detail.conversations.meta(conversation._count.messages, dateTimeLabel(conversation.updatedAt, detailUser.usage.timeZone))}
+                          {conversation.shareEnabled ? m.detail.conversations.shared : ""}
                         </div>
                       </div>
                     ))
@@ -1232,28 +1220,28 @@ export function AdminUsersPanel({
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-                <h4 className="font-black text-white">Billing history</h4>
+                <h4 className="font-black text-white">{m.detail.billingHistory.title}</h4>
                 <div className="mt-3 grid gap-2">
                   {detailUser.promotionRedemptions.map((redemption) => (
                     <div key={redemption.id} className="rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs text-blue-100">
-                      Promo {redemption.promotion.code} / {redemption.planId} / {dateTimeLabel(redemption.redeemedAt, detailUser.usage.timeZone)}
+                      {m.detail.billingHistory.promo(redemption.promotion.code, redemption.planId, dateTimeLabel(redemption.redeemedAt, detailUser.usage.timeZone))}
                     </div>
                   ))}
                   {detailUser.refundRequests.map((request) => (
                     <div key={request.id} className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                      Refund {request.status} / {request.plan || "-"} / {dateTimeLabel(request.requestedAt, detailUser.usage.timeZone)}
+                      {m.detail.billingHistory.refund(request.status, request.plan || "-", dateTimeLabel(request.requestedAt, detailUser.usage.timeZone))}
                     </div>
                   ))}
                   {detailUser.promotionRedemptions.length === 0 && detailUser.refundRequests.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No promotion or refund history.</p>
+                    <p className="text-sm text-zinc-500">{m.detail.billingHistory.empty}</p>
                   ) : null}
                 </div>
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
-                <h4 className="font-black text-white">Manual plan adjustment</h4>
+                <h4 className="font-black text-white">{m.detail.adjust.title}</h4>
                 <p className="mt-1 text-sm leading-6 text-zinc-500">
-                  Use only for billing support recovery. Type ADJUST PLAN to confirm.
+                  {m.detail.adjust.description}
                 </p>
                 <div className="mt-3 grid gap-3 md:grid-cols-[10rem_1fr_10rem_auto]">
                   <select
@@ -1270,7 +1258,7 @@ export function AdminUsersPanel({
                   <input
                     value={adjustReason}
                     onChange={(event) => setAdjustReason(event.target.value)}
-                    placeholder="Reason for audit log"
+                    placeholder={m.detail.adjust.reasonPlaceholder}
                     className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
                   />
                   <input
@@ -1286,16 +1274,16 @@ export function AdminUsersPanel({
                     className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-sm font-bold text-white transition hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {billingAction === "adjust" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Save
+                    {m.detail.adjust.save}
                   </button>
                 </div>
               </section>
 
               <section className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 lg:col-span-2">
-                <h4 className="font-black text-white">Customer timeline</h4>
+                <h4 className="font-black text-white">{m.detail.timeline.title}</h4>
                 <div className="mt-3 grid gap-2">
                   {detailUser.timeline.length === 0 ? (
-                    <p className="text-sm text-zinc-500">No customer timeline events yet.</p>
+                    <p className="text-sm text-zinc-500">{m.detail.timeline.empty}</p>
                   ) : (
                     detailUser.timeline.map((event) => (
                       <div key={`${event.type}-${event.id}`} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">

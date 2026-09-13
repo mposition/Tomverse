@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { AdminProviderHealthPanel } from "@/components/admin/AdminProviderHealthPanel";
 import { AdminProviderUsageSyncPanel } from "@/components/admin/AdminProviderUsageSyncPanel";
 import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminProvidersPageMessages } from "@/lib/adminMessages/providersPage";
 import { authOptions } from "@/lib/auth";
 import type { AiProvider } from "@/lib/models";
 import {
@@ -23,12 +25,13 @@ export default async function AdminProviderDetailPage({
   const selected = dashboard.providers.find((row) => row.provider === providerId);
   if (!selected) notFound();
   const role = getAdminRole(session);
+  const m = await getAdminMessages(adminProvidersPageMessages);
   return (
     <section className="flex flex-col gap-4">
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">Provider workspace</p>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.detail.eyebrow}</p>
         <h2 className="mt-2 text-xl font-black text-white">{PROVIDER_DISPLAY_NAMES[providerId]}</h2>
-        <p className="mt-1 text-sm text-zinc-500">Summary, usage diagnostics, billing profile, credit checkpoint, recent errors, fallback policy, and manual operations.</p>
+        <p className="mt-1 text-sm text-zinc-500">{m.detail.description}</p>
       </div>
       <AdminProviderUsageSyncPanel />
       <AdminProviderHealthPanel

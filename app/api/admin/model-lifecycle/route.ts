@@ -14,12 +14,19 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import {
+  OPERATOR_REASON_MAX_LENGTH,
   WORK_ITEM_DECISIONS,
+  WORK_ITEM_EXCLUSION_REASONS,
   WORK_ITEM_STATUSES,
+  analysisFingerprint,
+  workItemDecisionTarget,
 } from "@/lib/modelLifecycleWorkItemCore";
 import {
   MAX_BULK_WORK_ITEM_TRANSITIONS,
+  EXCLUDABLE_WORK_ITEM_STATUSES,
   listModelDiscoveryQueue,
+  queueFamilies,
+  queueStatusSetUnchanged,
   transitionWorkItem,
   transitionWorkItems,
 } from "@/lib/modelLifecycleWorkItems";
@@ -72,7 +79,82 @@ const bulkTransitionSchema = z.object({
   note: z.string().trim().min(1).max(1_000),
 });
 
-const transitionSchema = z.union([bulkTransitionSchema, singleTransitionSchema]);
+const workItemIdsField = z
+  .array(z.string().trim().min(1).max(60))
+  .min(1)
+  .max(MAX_BULK_WORK_ITEM_TRANSITIONS);
+
+/**
+ * The two operator decisions the discovery queue offers besides adoption.
+ *
+ * Their own shapes rather than a `to` with a note, because each carries a
+ * structured record the history keeps apart: the chosen reason, the operator's
+ * own words, and -- added here, never read from the request -- the analysis
+ * the queue was showing.
+ */
+/**
+ * An exclusion is made per family: the operator reads one row -- the family's
+ * representative -- and decides for every member.
+ *
+ * `shownAnalysisFingerprint` is the fingerprint of the sentence that row
+ * showed. It is compared, not recorded: the server records its own computation
+ * of the representative's analysis, on every member's event, and refuses when
+ * the two differ -- a scan that moved the evidence between the list loading and
+ * the click would otherwise record a sentence the operator never saw.
+ *
+ * `workItemIds` must be exactly the family's undecided members as the server
+ * reads them now -- not a subset, not another family's items. An exclusion is a
+ * decision about a family; accepting part of one would leave the rest in the
+ * queue under a decision recorded as made.
+ */
+const excludeSchema = z.object({
+  decision: z.literal("exclude"),
+  reasonCode: z.enum(WORK_ITEM_EXCLUSION_REASONS),
+  operatorReason: z.string().trim().max(OPERATOR_REASON_MAX_LENGTH).optional(),
+  families: z
+    .array(
+      z.object({
+        representativeId: z.string().trim().min(1).max(60),
+        workItemIds: workItemIdsField,
+        shownAnalysisFingerprint: z.string().regex(/^[0-9a-f]{16}$/),
+      })
+    )
+    .min(1)
+    .max(MAX_BULK_WORK_ITEM_TRANSITIONS),
+});
+
+/** A reopen is per family too: every excluded member returns, or none does. */
+const reopenSchema = z.object({
+  decision: z.literal("reopen"),
+  operatorReason: z.string().trim().min(1).max(OPERATOR_REASON_MAX_LENGTH),
+  families: z
+    .array(
+      z.object({
+        representativeId: z.string().trim().min(1).max(60),
+        workItemIds: workItemIdsField,
+      })
+    )
+    .min(1)
+    .max(MAX_BULK_WORK_ITEM_TRANSITIONS),
+});
+
+const transitionSchema = z.union([
+  excludeSchema,
+  reopenSchema,
+  bulkTransitionSchema,
+  singleTransitionSchema,
+]);
+
+/**
+ * Moves the generic transition shape may not make.
+ *
+ * Closing an item, reopening one and approving one are decisions with a
+ * record; accepting them as a bare `to` would write an exclusion with no
+ * reason code, or an approval the adoption record never follows -- the
+ * adoption walk starts past `approved` once an item is there. Approval
+ * happens by adopting (POST /api/admin/models with a work item).
+ */
+const DECISION_ONLY_TARGETS = new Set(["closed_no_action", "discovered", "approved"]);
 
 export async function GET(req: Request) {
   try {
@@ -86,13 +168,19 @@ export async function GET(req: Request) {
       day: 500,
     });
 
-    const queue = await listModelDiscoveryQueue({ limit: 1_000 });
+    const view =
+      new URL(req.url).searchParams.get("view") === "excluded" ? "excluded" : "open";
+    const queue = await listModelDiscoveryQueue({ limit: 1_000, view });
     return NextResponse.json({
       ...queue,
+      view,
       items: queue.items.map((item) => ({
         ...item,
         dueAt: item.dueAt?.toISOString() ?? null,
         firstSeenAt: item.firstSeenAt.toISOString(),
+        exclusion: item.exclusion
+          ? { ...item.exclusion, excludedAt: item.exclusion.excludedAt.toISOString() }
+          : null,
       })),
     });
   } catch (error) {
@@ -131,27 +219,190 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "ACTOR_REQUIRED" }, { status: 400 });
     }
 
-    const isBulk = "workItemIds" in parsed;
-    const workItemIds = isBulk ? parsed.workItemIds : [parsed.workItemId];
+    if ("decision" in parsed && typeof parsed.decision === "string") {
+      const decided = parsed;
+      const to = workItemDecisionTarget(decided.decision);
+      const workItemIds = decided.families.flatMap((family) => family.workItemIds);
+      if (workItemIds.length > MAX_BULK_WORK_ITEM_TRANSITIONS) {
+        return NextResponse.json(
+          {
+            error: "too_many",
+            message: `At most ${MAX_BULK_WORK_ITEM_TRANSITIONS} work items may be changed at once.`,
+          },
+          { status: 400 }
+        );
+      }
+      // Read before the transaction: this is what the queue shows, computed
+      // from the same evidence the panel was given. Reopening has nothing to
+      // snapshot -- the reason is the operator's, and the analysis they will
+      // act on is the one the reopened row shows next.
+      // Both decisions are about whole families as the server reads them now.
+      // For an exclusion the representative's analysis must also be the one
+      // the operator read; a reopen acts on no analysis.
+      const checkedStatuses =
+        decided.decision === "exclude"
+          ? [...EXCLUDABLE_WORK_ITEM_STATUSES]
+          : (["closed_no_action"] as const);
+      const queue = await queueFamilies(
+        decided.decision === "exclude" ? "excludable" : "excluded"
+      );
+      if (!queue.complete) {
+        return NextResponse.json(
+          {
+            error: "QUEUE_TOO_LARGE",
+            message:
+              "There are more items than one read holds, so family membership cannot be confirmed.",
+          },
+          { status: 503 }
+        );
+      }
+      const checkedIds = new Set(queue.items.keys());
+      const membersByFamily = new Map<string, string[]>();
+      for (const [id, item] of queue.items) {
+        const members = membersByFamily.get(item.familyKey);
+        if (members) members.push(id);
+        else membersByFamily.set(item.familyKey, [id]);
+      }
+      const analysisSnapshots =
+        decided.decision === "exclude" ? new Map<string, string>() : undefined;
+      const stale: string[] = [];
+      for (const family of decided.families) {
+        const representative = queue.items.get(family.representativeId);
+        const members = representative
+          ? (membersByFamily.get(representative.familyKey) ?? [])
+          : [];
+        const submitted = new Set(family.workItemIds);
+        const coherent =
+          representative !== undefined &&
+          submitted.size === family.workItemIds.length &&
+          submitted.size === members.length &&
+          members.every((id) => submitted.has(id));
+        if (!coherent) {
+          return NextResponse.json(
+            {
+              error: "FAMILY_MISMATCH",
+              message:
+                "The family's members changed since this list loaded. Reload and decide again.",
+            },
+            { status: 409 }
+          );
+        }
+        if (decided.decision === "exclude") {
+          if (
+            analysisFingerprint(representative.analysisKo) !==
+            (family as { shownAnalysisFingerprint: string }).shownAnalysisFingerprint
+          ) {
+            stale.push(family.representativeId);
+            continue;
+          }
+          for (const id of family.workItemIds) {
+            analysisSnapshots!.set(id, representative.analysisKo);
+          }
+        }
+      }
+      if (stale.length > 0) {
+        return NextResponse.json(
+          {
+            error: "ANALYSIS_CHANGED",
+            message: "The analysis changed since this list loaded. Reload and decide again.",
+            workItemIds: stale,
+          },
+          { status: 409 }
+        );
+      }
+
+      const outcome = await prisma.$transaction(async (tx) => {
+        if (!(await queueStatusSetUnchanged(tx, checkedStatuses, checkedIds))) {
+          return {
+            ok: false as const,
+            refusal: {
+              code: "FAMILY_MISMATCH",
+              message:
+                "The family's members changed since this list loaded. Reload and decide again.",
+            },
+          };
+        }
+        const transition = await transitionWorkItems(
+          {
+            workItemIds,
+            to,
+            actorEmail,
+            eventDecision: {
+              decision: decided.decision,
+              reasonCode: decided.decision === "exclude" ? decided.reasonCode : null,
+              operatorReason: decided.operatorReason ?? null,
+              analysisSnapshots,
+            },
+          },
+          { tx }
+        );
+        if (!transition.ok) return transition;
+        await writeAdminAuditLog({
+          session,
+          request: req,
+          action:
+            decided.decision === "exclude"
+              ? "model_lifecycle.exclude"
+              : "model_lifecycle.reopen",
+          targetType: "ModelLifecycleWorkItemBatch",
+          targetId: null,
+          summary:
+            decided.decision === "exclude"
+              ? `${workItemIds.length} model lifecycle items excluded`
+              : `${workItemIds.length} excluded model lifecycle items reopened`,
+          metadata: {
+            to,
+            count: workItemIds.length,
+            workItemIds,
+            ...(decided.decision === "exclude" ? { reasonCode: decided.reasonCode } : {}),
+          },
+          tx,
+        });
+        return transition;
+      });
+      if (!outcome.ok) {
+        return NextResponse.json(
+          { error: outcome.refusal.code, message: outcome.refusal.message },
+          { status: outcome.refusal.code === "not_found" ? 404 : 409 }
+        );
+      }
+      return NextResponse.json({ status: outcome.status, updated: outcome.updated });
+    }
+
+    const generic = parsed as
+      | z.infer<typeof bulkTransitionSchema>
+      | z.infer<typeof singleTransitionSchema>;
+    if (DECISION_ONLY_TARGETS.has(generic.to)) {
+      return NextResponse.json(
+        {
+          error: "DECISION_REQUIRED",
+          message: "Excluding and reopening are recorded as decisions, not bare transitions.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const isBulk = "workItemIds" in generic;
+    const workItemIds = isBulk ? generic.workItemIds : [generic.workItemId];
     const result = await prisma.$transaction(async (tx) => {
       const transition = isBulk
         ? await transitionWorkItems(
             {
               workItemIds,
-              to: parsed.to,
+              to: generic.to,
               actorEmail,
-              note: parsed.note,
-              decision: parsed.decision,
+              note: generic.note,
+              decision: generic.decision,
             },
             { tx }
           )
         : await transitionWorkItem(
             {
-              workItemId: parsed.workItemId,
-              to: parsed.to,
+              workItemId: generic.workItemId,
+              to: generic.to,
               actorEmail,
-              note: parsed.note,
-              decision: parsed.decision,
+              note: generic.note,
+              decision: generic.decision,
             },
             { tx }
           );
@@ -169,13 +420,13 @@ export async function PATCH(req: Request) {
           : "ModelLifecycleWorkItem",
         targetId: isBulk ? null : workItemIds[0],
         summary: isBulk
-          ? `${workItemIds.length} model lifecycle items moved to ${parsed.to}`
-          : `Model lifecycle item moved to ${parsed.to}`,
+          ? `${workItemIds.length} model lifecycle items moved to ${generic.to}`
+          : `Model lifecycle item moved to ${generic.to}`,
         metadata: {
-          to: parsed.to,
+          to: generic.to,
           count: workItemIds.length,
           workItemIds,
-          ...(parsed.decision ? { decision: parsed.decision.decision } : {}),
+          ...(generic.decision ? { decision: generic.decision.decision } : {}),
         },
         tx,
       });

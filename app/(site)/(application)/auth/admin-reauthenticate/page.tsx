@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth/next";
+import { AdminLocaleProvider } from "@/components/admin/AdminLocaleProvider";
 import { AdminReauthenticationCard } from "@/components/admin/AdminReauthenticationCard";
 import { authOptions } from "@/lib/auth";
 import { getAdminSessionAccessState } from "@/lib/adminAuth";
+import { getAdminLocale } from "@/lib/adminLocaleServer";
 import { hasRecentAdminAuthentication } from "@/lib/adminReauthentication";
 import {
   normalizeAdminReauthenticationMode,
@@ -52,11 +54,16 @@ export default async function AdminReauthenticatePage({
   if (view.kind === "not-found") notFound();
   if (view.kind === "sign-in" || view.kind === "callback") redirect(view.href);
 
+  // Outside the /admin layout, so it resolves the console locale itself: this
+  // card is where a console session is sent back to, and it should read in the
+  // language the console was being read in.
   return (
-    <AdminReauthenticationCard
-      callbackUrl={view.callbackUrl}
-      reason={view.reason}
-      email={session?.user?.email || null}
-    />
+    <AdminLocaleProvider locale={await getAdminLocale()}>
+      <AdminReauthenticationCard
+        callbackUrl={view.callbackUrl}
+        reason={view.reason}
+        email={session?.user?.email || null}
+      />
+    </AdminLocaleProvider>
   );
 }

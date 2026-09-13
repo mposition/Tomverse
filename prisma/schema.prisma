@@ -2276,6 +2276,30 @@ model ProviderModelCatalogEntry {
   @@index([status, lastCheckedAt])
 }
 
+/// What a provider's own documentation said about one model, read after the
+/// daily catalogue scan: evidence for the adoption form, with where it came
+/// from. Never a price source -- lib/modelPricing.ts is -- and nothing on the
+/// request path reads it. One row per exact (provider, apiModel), overwritten
+/// by each read.
+model ProviderModelDocEvidence {
+  id            String   @id @default(cuid())
+  provider      String
+  apiModel      String
+  /// parsed | not_found | fetch_failed | parse_failed
+  status        String
+  /// [{ url, digest }] -- every document the parse read, with a SHA-256 of its body.
+  sources       Json
+  parserVersion String
+  fields        Json?
+  problems      Json
+  fetchedAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([provider, apiModel])
+  @@index([status, fetchedAt])
+}
+
 /// Immutable summary of each provider catalog request. This makes daily
 /// monitoring auditable and distinguishes provider/API failures from absence.
 model ProviderModelCatalogRun {
@@ -2400,6 +2424,19 @@ model ModelLifecycleWorkItemEvent {
   toStatus   String
   note       String?
   evidence   Json?
+
+  /// adopt | exclude | reopen, on an event that records an operator decision.
+  /// Null on the steps between decisions and on the automatic creation event.
+  decision         String?
+  /// The exclusion reason chosen from WORK_ITEM_EXCLUSION_REASONS. Only on an
+  /// exclude, and required there.
+  reasonCode       String?
+  /// What the operator wrote. Required for a reopen and for reasonCode "other".
+  operatorReason   String?
+  /// The queue's automatic analysis as the operator saw it at the decision.
+  /// Kept apart from operatorReason so a suggestion is never recorded as the
+  /// reason a person gave.
+  analysisSnapshot String?
 
   @@index([workItemId, occurredAt])
 }

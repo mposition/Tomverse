@@ -32,6 +32,8 @@ import {
   evaluateRecoveryEligibility,
 } from "@/lib/providerRecoveryCore";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminProviderHealthMessages } from "@/lib/adminMessages/providerHealth";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 const REFRESH_INTERVAL_MS = 120_000;
 
@@ -54,8 +56,8 @@ const providerConsoleHref: Record<AiProvider, string> = {
 
 const money = (microUsd: number) =>
   `${microUsd < 0 ? "-" : ""}$${Math.abs(microUsd / 1_000_000).toFixed(2)}`;
-const optionalMoney = (microUsd: number | null) =>
-  microUsd === null ? "Not synced" : money(microUsd);
+const optionalMoney = (microUsd: number | null, notSynced: string) =>
+  microUsd === null ? notSynced : money(microUsd);
 const balanceMoney = (amount: number, currency: string) => {
   try {
     return new Intl.NumberFormat("en-US", {
@@ -67,14 +69,9 @@ const balanceMoney = (amount: number, currency: string) => {
     return `${currency} ${amount.toFixed(4)}`;
   }
 };
-const dateLabel = (value: string | null, fallback = "No success yet") => {
+const dateLabel = (value: string | null, fallback: string) => {
   if (!value) return fallback;
   return new Date(value).toISOString().replace("T", " ").slice(0, 16);
-};
-const statusCopy: Record<ProviderHealthStatus, string> = {
-  available: "Available",
-  limited: "Limited",
-  outage: "Outage",
 };
 const statusClass: Record<ProviderHealthStatus, string> = {
   available: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
@@ -90,41 +87,11 @@ const statusPanelClass: Record<ProviderHealthStatus, string> = {
 // here too so admins can see the public claim can't have drifted from this
 // panel's own diagnostics (both read provider.publicStatus off the same
 // dashboard row; see lib/providerPublicStatusCore.ts).
-const publicStatusCopy: Record<PublicProviderStatus, string> = {
-  operational: "Public: Operational",
-  degraded: "Public: Degraded",
-  incident: "Public: Incident",
-  unknown: "Public: Unknown",
-};
 const publicStatusClass: Record<PublicProviderStatus, string> = {
   operational: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   degraded: "border-amber-500/30 bg-amber-500/10 text-amber-300",
   incident: "border-red-500/30 bg-red-500/10 text-red-300",
   unknown: "border-zinc-600/40 bg-zinc-700/20 text-zinc-300",
-};
-const balanceSourceCopy: Record<ProviderHealthRow["balanceSource"], string> = {
-  api: "provider API",
-  db_estimate: "DB estimate",
-  env_manual: "environment value",
-  unavailable: "not configured",
-};
-const pricingModelCopy: Record<ProviderPricingModel, string> = {
-  usage_based: "Usage-based",
-  subscription: "Subscription",
-  committed_capacity: "Committed capacity",
-  unknown: "Unverified pricing",
-};
-const settlementModelCopy: Record<ProviderSettlementModel, string> = {
-  prepaid: "Prepaid",
-  postpaid: "Postpaid",
-  hybrid: "Hybrid",
-  invoice: "Invoice",
-  unknown: "Unverified settlement",
-};
-const billingSourceCopy: Record<ProviderHealthRow["billingProfile"]["source"], string> = {
-  provider_api: "Provider API",
-  admin_verified: "Admin verified",
-  documented_default: "Documented default",
 };
 const creditAlertClass = (level: ProviderHealthRow["creditAlertLevel"]) => {
   if (level === "5") return "text-red-300";
@@ -170,12 +137,6 @@ type ProviderVerificationSummary = {
 type RunVerification = (provider: AiProvider) => Promise<boolean>;
 type RunRecovery = (provider: AiProvider, checkId: string) => Promise<boolean>;
 
-const verificationStatusCopy: Record<string, string> = {
-  success: "Verification succeeded",
-  failed: "Verification failed",
-  unavailable: "Verification unavailable",
-  running: "Verification in progress",
-};
 const verificationStatusClass: Record<string, string> = {
   success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
   failed: "border-red-500/30 bg-red-500/10 text-red-300",
@@ -220,6 +181,8 @@ function ProviderVerificationSection({
   onVerify: RunVerification;
   onRecover: RunRecovery;
 }) {
+  const m = useAdminMessages(adminProviderHealthMessages);
+  const v = m.verification;
   const [confirmingVerification, setConfirmingVerification] = useState(false);
   const lastCheck = summary?.lastCheck ?? null;
   const busy = verifying || recovering;
@@ -269,15 +232,13 @@ function ProviderVerificationSection({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <PanelLabel>Verification and recovery</PanelLabel>
+          <PanelLabel>{v.panelLabel}</PanelLabel>
           <p className="mt-2 text-xs leading-5 text-zinc-500">
-            Sends one minimal request to{" "}
+            {v.sendsBefore}
             <span className="font-mono text-zinc-400">
-              {provider.verificationModelId || "no eligible model"}
+              {provider.verificationModelId || v.noEligibleModel}
             </span>
-            . This call is billed by the provider. It never creates a
-            conversation, a message, or a credit ledger entry, and never charges
-            a customer.
+            {v.sendsAfter}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -293,7 +254,7 @@ function ProviderVerificationSection({
             className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-            {verifying ? "Running verification" : "Run verification"}
+            {verifying ? v.running : v.run}
           </button>
           <button
             type="button"
@@ -307,35 +268,33 @@ function ProviderVerificationSection({
             className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-bold text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:border-zinc-700 disabled:bg-zinc-900 disabled:text-zinc-500"
           >
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-            {recovering ? "Recovering" : "Recover provider status"}
+            {recovering ? v.recovering : v.recover}
           </button>
         </div>
       </div>
 
       {!canRunVerification ? (
         <p className="mt-3 text-xs text-zinc-500">
-          Running a verification requires the ops or owner admin role.
+          {v.requiresRole}
         </p>
       ) : null}
       {canRunVerification && !provider.verificationModelId ? (
         <p className="mt-3 text-xs text-amber-300">
-          No enabled model is available to verify this provider with.
+          {v.noModel}
         </p>
       ) : null}
 
       {confirmingVerification ? (
         <div
           role="alertdialog"
-          aria-label={`Confirm a live verification call to ${provider.displayName}`}
+          aria-label={v.confirmAria(provider.displayName)}
           className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3"
         >
           <p className="text-xs font-semibold text-amber-100">
-            This sends a real, billed request to {provider.displayName}.
+            {v.confirmTitle(provider.displayName)}
           </p>
           <p className="mt-1 text-xs leading-5 text-amber-100/80">
-            One call to {provider.verificationModelId} with a minimal token
-            budget. A further verification for this provider is refused until
-            the cooldown elapses.
+            {v.confirmDetail(provider.verificationModelId ?? "")}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -349,14 +308,14 @@ function ProviderVerificationSection({
               disabled={busy}
               className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-amber-500/40 bg-amber-500/20 px-3 text-xs font-bold text-amber-100 transition hover:bg-amber-500/30 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Confirm and run
+              {v.confirmRun}
             </button>
             <button
               type="button"
               onClick={() => setConfirmingVerification(false)}
               className="inline-flex h-8 cursor-pointer items-center rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-300 transition hover:bg-zinc-800"
             >
-              Cancel
+              {v.cancel}
             </button>
           </div>
         </div>
@@ -377,11 +336,11 @@ function ProviderVerificationSection({
           >
             <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
               <span>
-                {verificationStatusCopy[lastCheck.status] ||
-                  `Verification ${lastCheck.status}`}
+                {(v.status as Record<string, string>)[lastCheck.status] ||
+                  v.statusFallback(lastCheck.status)}
               </span>
               <span className="text-[11px] font-normal opacity-80">
-                {dateLabel(lastCheck.createdAt, "Never run")}
+                {dateLabel(lastCheck.createdAt, v.neverRun)}
               </span>
               {lastCheck.latencyMs !== null ? (
                 <span className="text-[11px] font-normal opacity-80">
@@ -395,7 +354,7 @@ function ProviderVerificationSection({
               ) : null}
               {lastCheck.recoveryApplied ? (
                 <span className="rounded-full bg-black/30 px-2 py-0.5 text-[10px] font-normal">
-                  Already used for a recovery
+                  {v.alreadyUsed}
                 </span>
               ) : null}
             </div>
@@ -413,7 +372,7 @@ function ProviderVerificationSection({
           </div>
         ) : (
           <p className="text-xs text-zinc-500">
-            No live verification has been run for this provider yet.
+            {v.noVerification}
           </p>
         )}
       </div>
@@ -426,15 +385,17 @@ function ProviderVerificationSection({
 
       {summary && summary.recentRecoveries.length > 0 ? (
         <div className="mt-3">
-          <PanelLabel>Recovery history</PanelLabel>
+          <PanelLabel>{v.recoveryHistory}</PanelLabel>
           <ul className="mt-2 space-y-1.5">
             {summary.recentRecoveries.map((recovery) => (
               <li
                 key={recovery.id}
                 className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2 text-[11px] leading-5 text-zinc-400"
               >
-                {dateLabel(recovery.recoveryAppliedAt, "Unknown time")} · cleared{" "}
-                {recovery.previousConsecutiveFailures ?? 0} consecutive failures
+                {v.recoveryItem(
+                  dateLabel(recovery.recoveryAppliedAt, v.unknownTime),
+                  recovery.previousConsecutiveFailures ?? 0
+                )}
                 {recovery.createdByEmail ? ` · ${recovery.createdByEmail}` : ""}
               </li>
             ))}
@@ -474,6 +435,8 @@ function ProviderRow({
   onVerify: RunVerification;
   onRecover: RunRecovery;
 }) {
+  const m = useAdminMessages(adminProviderHealthMessages);
+  const r = m.row;
   const { getEnabledModel } = useModelCatalog();
   const [statusOpen, setStatusOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -507,7 +470,7 @@ function ProviderRow({
     .map((model) => model.name);
   const varianceLabel =
     provider.usageVariancePercent === null
-      ? "No reconciliation yet"
+      ? r.noReconciliation
       : `${provider.usageVariancePercent > 0 ? "+" : ""}${provider.usageVariancePercent}%`;
   const statusDetailsId = `provider-status-${provider.provider}`;
   const parsedCreditUsd = Number(creditUsd);
@@ -526,7 +489,7 @@ function ProviderRow({
       ? balanceMoney(provider.balanceAmount, provider.balanceCurrency)
       : estimatedBalance !== null
         ? money(estimatedBalance)
-        : "Not available"
+        : r.notAvailable
     : money(provider.internalBudgetHeadroomMicroUsd);
   const billingBasisMicroUsd =
     provider.providerReportedMonthCostMicroUsd ?? provider.monthCostMicroUsd;
@@ -535,22 +498,22 @@ function ProviderRow({
     `CHAT_PROVIDER_${provider.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH`;
   const internalBudgetSourceDetail =
     provider.internalBudgetSource === "railway_environment"
-      ? `Railway ${internalBudgetVariableName}`
+      ? r.budgetSourceRailway(internalBudgetVariableName)
       : provider.internalBudgetSource === "unconfigured"
-        ? `UNCONFIGURED · ${internalBudgetVariableName} absent in production, enforcement failing closed`
-        : `Code default · ${internalBudgetVariableName} absent or invalid`;
+        ? r.budgetSourceUnconfigured(internalBudgetVariableName)
+        : r.budgetSourceCodeDefault(internalBudgetVariableName);
   const limitDifferenceMicroUsd =
     providerBillingLimitMicroUsd === null
       ? null
       : Math.abs(providerBillingLimitMicroUsd - provider.monthBudgetMicroUsd);
   const limitAlignmentCopy =
     provider.limitAlignment === "provider_not_configured"
-      ? "No provider billing limit is recorded in DB. The Tomverse cap is the only known operational ceiling."
+      ? r.limitProviderNotConfigured
       : provider.limitAlignment === "provider_lower"
-        ? `The provider billing limit is ${money(limitDifferenceMicroUsd!)} lower. The provider may stop service before Tomverse reaches its cap.`
+        ? r.limitProviderLower(money(limitDifferenceMicroUsd!))
         : provider.limitAlignment === "tomverse_lower"
-          ? `The Tomverse enforced cap is ${money(limitDifferenceMicroUsd!)} lower, so Tomverse blocks new usage first.`
-          : "The provider billing limit and Tomverse enforced cap are aligned.";
+          ? r.limitTomverseLower(money(limitDifferenceMicroUsd!))
+          : r.limitAligned;
   const limitAlignmentClass =
     provider.limitAlignment === "provider_lower"
       ? "border-amber-500/25 bg-amber-500/5 text-amber-100/80"
@@ -637,8 +600,8 @@ function ProviderRow({
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-sm underline-offset-4 transition hover:text-blue-300 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-                  aria-label={`Open ${provider.displayName} provider console in a new tab`}
-                  title={`Open ${provider.displayName} provider console`}
+                  aria-label={r.consoleAria(provider.displayName)}
+                  title={r.consoleTitle(provider.displayName)}
                 >
                   {provider.displayName}
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
@@ -648,17 +611,17 @@ function ProviderRow({
                 href={`/admin/providers/${provider.provider}`}
                 className="rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs font-bold text-zinc-300 transition hover:border-blue-500/40 hover:text-blue-200"
               >
-                Workspace
+                {r.workspace}
               </Link>
               <button
                 type="button"
                 onClick={() => setStatusOpen((open) => !open)}
                 aria-expanded={statusOpen}
                 aria-controls={statusDetailsId}
-                title="Show the status decision details"
+                title={r.statusDetailsTitle}
                 className={`inline-flex cursor-pointer items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold transition hover:brightness-125 ${statusClass[provider.status]}`}
               >
-                {statusCopy[provider.status]}
+                {m.status[provider.status]}
                 <ChevronDown
                   className={`h-3 w-3 transition-transform ${statusOpen ? "rotate-180" : ""}`}
                 />
@@ -667,28 +630,28 @@ function ProviderRow({
                 title={provider.publicStatusReasonText}
                 className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${publicStatusClass[provider.publicStatus]}`}
               >
-                {publicStatusCopy[provider.publicStatus]}
+                {m.publicStatus[provider.publicStatus]}
               </span>
               <span
                 className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${apiKeyClass(provider.apiKeyConfigured)}`}
               >
-                {provider.apiKeyConfigured ? "API key set" : "API key missing"}
+                {provider.apiKeyConfigured ? r.apiKeySet : r.apiKeyMissing}
               </span>
               <span className="rounded-full border border-blue-500/25 bg-blue-500/10 px-2.5 py-1 text-xs font-semibold text-blue-200">
-                {pricingModelCopy[provider.billingProfile.pricingModel]} ·{" "}
-                {settlementModelCopy[provider.billingProfile.settlementModel]}
+                {m.pricingModel[provider.billingProfile.pricingModel]} ·{" "}
+                {m.settlementModel[provider.billingProfile.settlementModel]}
               </span>
             </div>
             <p className="mt-2 text-sm text-zinc-400">
-              Last good response: {dateLabel(provider.lastSuccessAt)}
+              {r.lastGoodResponse(dateLabel(provider.lastSuccessAt, m.noSuccessYet))}
             </p>
           </div>
         </div>
         <div className="flex flex-col gap-3 lg:min-w-[600px]">
           <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <Metric label="Today usage" value={money(provider.todayCostMicroUsd)} />
+            <Metric label={r.todayUsage} value={money(provider.todayCostMicroUsd)} />
             <Metric
-              label={tracksCredit ? "Estimated balance" : "Budget headroom"}
+              label={tracksCredit ? r.estimatedBalance : r.budgetHeadroom}
               value={compactBalance}
               valueClass={
                 tracksCredit
@@ -698,10 +661,10 @@ function ProviderRow({
                     : "text-emerald-300"
               }
             />
-            <Metric label="Month usage" value={money(billingBasisMicroUsd)} />
+            <Metric label={r.monthUsage} value={money(billingBasisMicroUsd)} />
             <Metric
-              label="Recent error"
-              value={provider.recentErrorCode || "None"}
+              label={r.recentError}
+              value={provider.recentErrorCode || r.none}
               valueClass={provider.recentErrorCode ? "text-amber-300" : "text-emerald-300"}
             />
           </div>
@@ -711,7 +674,7 @@ function ProviderRow({
             aria-expanded={detailsOpen}
             className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 self-end rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
           >
-            {detailsOpen ? "Hide details" : "Details"}
+            {detailsOpen ? r.hideDetails : r.details}
             <ChevronDown
               className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
             />
@@ -727,7 +690,7 @@ function ProviderRow({
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-zinc-300" />
             <h3 className="text-sm font-bold text-white">
-              Why {provider.displayName} is {statusCopy[provider.status]}
+              {r.whyStatus(provider.displayName, m.status[provider.status])}
             </h3>
           </div>
           <div className="mt-3 grid gap-2">
@@ -751,11 +714,7 @@ function ProviderRow({
             ))}
           </div>
           <p className="mt-3 text-[11px] leading-5 text-zinc-500">
-            Policy: the recent {provider.healthWindowMinutes}-minute window needs at
-            least 5 calls, 3 failures, and a 50% failure rate before a provider is
-            Limited. Five failures at an 80% rate indicate Outage. Three consecutive
-            successes restore Available status. Empty model output remains a model-level
-            diagnostic. Monthly budget warnings still apply at 80% and 100%.
+            {r.policy(provider.healthWindowMinutes)}
           </p>
         </div>
       )}
@@ -775,46 +734,51 @@ function ProviderRow({
         <>
       <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-3">
         <div>
-          <PanelLabel>Usage / Cost</PanelLabel>
+          <PanelLabel>{r.usageCost}</PanelLabel>
           <p className="mt-2 text-sm font-semibold text-zinc-200">
-            Today internal (UTC) {money(provider.todayCostMicroUsd)}
+            {r.todayInternal(money(provider.todayCostMicroUsd))}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Month internal {money(provider.monthCostMicroUsd)} of{" "}
-            {money(provider.monthBudgetMicroUsd)}
-          </p>
-          <p className="mt-1 text-xs text-zinc-500">
-            {provider.provider === "mistral"
-              ? "Provider reconciliation: Unavailable on current Mistral plan"
-              : `Provider reported net cost ${optionalMoney(provider.providerReportedMonthCostMicroUsd)}`}
-          </p>
-          <p className="mt-1 text-xs text-zinc-500">Variance {varianceLabel}</p>
-          <p className="mt-1 text-xs text-zinc-500">
-            Usage source: {provider.provider === "mistral" ? "Internal response accounting" : provider.usageSource}
+            {r.monthInternal(
+              money(provider.monthCostMicroUsd),
+              money(provider.monthBudgetMicroUsd)
+            )}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
             {provider.provider === "mistral"
-              ? "Monthly verification: Compare manually with the Mistral Usage dashboard"
-              : `Last usage sync ${dateLabel(provider.lastUsageSyncAt)}`}
+              ? r.mistralReconciliation
+              : r.providerReportedCost(
+                  optionalMoney(provider.providerReportedMonthCostMicroUsd, m.notSynced)
+                )}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">{r.variance(varianceLabel)}</p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {r.usageSource(
+              provider.provider === "mistral" ? r.mistralUsageSource : provider.usageSource
+            )}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {provider.provider === "mistral"
+              ? r.mistralMonthly
+              : r.lastUsageSync(dateLabel(provider.lastUsageSyncAt, m.noSuccessYet))}
           </p>
         </div>
         <div>
-          <PanelLabel>Alerts</PanelLabel>
+          <PanelLabel>{r.alerts}</PanelLabel>
           <p className="mt-2 text-sm text-zinc-300">
-            Alert threshold:{" "}
             {provider.alertLevel === "none"
-              ? "below 50%"
-              : `${provider.alertLevel}% reached`}
+              ? r.alertBelow
+              : r.alertReached(provider.alertLevel)}
           </p>
           <p className="mt-1 text-xs text-zinc-500">
-            Failure surge status is based on recent provider errors.
+            {r.failureSurge}
           </p>
         </div>
         <div>
-          <PanelLabel>Fallback Policy</PanelLabel>
+          <PanelLabel>{r.fallbackPolicy}</PanelLabel>
           <p className="mt-2 text-sm text-zinc-300">{provider.fallback.reason}</p>
           <p className="mt-1 text-xs text-zinc-500">
-            {fallbackModels.join(" / ") || "No fallback model configured"}
+            {fallbackModels.join(" / ") || r.noFallback}
           </p>
         </div>
       </div>
@@ -824,18 +788,17 @@ function ProviderRow({
           <div className="flex items-start gap-3">
             <CreditCard className="mt-0.5 h-5 w-5 text-blue-300" />
             <div>
-              <PanelLabel>Billing model</PanelLabel>
+              <PanelLabel>{r.billingModel}</PanelLabel>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                {pricingModelCopy[provider.billingProfile.pricingModel]} ·{" "}
-                {settlementModelCopy[provider.billingProfile.settlementModel]} ·{" "}
-                {billingSourceCopy[provider.billingProfile.source]}
+                {m.pricingModel[provider.billingProfile.pricingModel]} ·{" "}
+                {m.settlementModel[provider.billingProfile.settlementModel]} ·{" "}
+                {m.billingSource[provider.billingProfile.source]}
                 {provider.billingProfile.verifiedAt
-                  ? ` · Verified ${dateLabel(provider.billingProfile.verifiedAt)}`
-                  : " · Verify against your account contract"}
+                  ? r.verifiedOn(dateLabel(provider.billingProfile.verifiedAt, m.noSuccessYet))
+                  : r.verifyContract}
               </p>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                Provider billing limit is a DB-recorded account/contract reference.
-                Tomverse enforced cap is the application limit used to block new usage.
+                {r.billingExplainer}
               </p>
             </div>
           </div>
@@ -846,19 +809,19 @@ function ProviderRow({
               className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
             >
               <Settings2 className="h-3.5 w-3.5" />
-              {billingEditorOpen ? "Close profile" : "Edit profile"}
+              {billingEditorOpen ? r.closeProfile : r.editProfile}
             </button>
           )}
         </div>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {tracksCredit && (
             <Metric
-              label={provider.billingProfile.settlementModel === "hybrid" ? "Optional credit" : "Estimated balance"}
+              label={provider.billingProfile.settlementModel === "hybrid" ? r.optionalCredit : r.estimatedBalance}
               value={
                 provider.balanceAmount === null
                   ? provider.billingProfile.settlementModel === "hybrid"
-                    ? "Not synced (optional)"
-                    : "Not configured"
+                    ? r.notSyncedOptional
+                    : r.notConfigured
                   : balanceMoney(
                       provider.balanceAmount,
                       provider.balanceCurrency
@@ -868,43 +831,47 @@ function ProviderRow({
                 provider.balanceAmount === null
                   ? undefined
                   : [
-                      balanceSourceCopy[provider.balanceSource],
+                      m.balanceSource[provider.balanceSource],
                       provider.balanceAvailable === null
                         ? null
                         : provider.balanceAvailable
-                          ? "available"
-                          : "unavailable",
+                          ? r.balanceAvailable
+                          : r.balanceUnavailable,
                       provider.balanceGrantedAmount === null
                         ? null
-                        : `granted ${balanceMoney(
-                            provider.balanceGrantedAmount,
-                            provider.balanceCurrency
-                          )}`,
+                        : r.granted(
+                            balanceMoney(
+                              provider.balanceGrantedAmount,
+                              provider.balanceCurrency
+                            )
+                          ),
                       provider.balanceToppedUpAmount === null
                         ? null
-                        : `topped up ${balanceMoney(
-                            provider.balanceToppedUpAmount,
-                            provider.balanceCurrency
-                          )}`,
+                        : r.toppedUp(
+                            balanceMoney(
+                              provider.balanceToppedUpAmount,
+                              provider.balanceCurrency
+                            )
+                          ),
                     ]
                       .filter(Boolean)
                       .join(" · ")
               }
             />
           )}
-          <Metric label="Month accrued" value={money(billingBasisMicroUsd)} />
-          <Metric label="Projected month-end" value={money(provider.projectedMonthEndMicroUsd)} />
+          <Metric label={r.monthAccrued} value={money(billingBasisMicroUsd)} />
+          <Metric label={r.projectedMonthEnd} value={money(provider.projectedMonthEndMicroUsd)} />
           <Metric
-            label="Provider billing limit (DB reference)"
+            label={r.providerBillingLimit}
             value={
               providerBillingLimitMicroUsd === null
-                ? "Not configured"
+                ? r.notConfigured
                 : money(providerBillingLimitMicroUsd)
             }
             detail={
               provider.providerBillingHeadroomMicroUsd === null
-                ? "Reference only · Set in Edit profile"
-                : `${money(provider.providerBillingHeadroomMicroUsd)} headroom · Not enforced by Tomverse`
+                ? r.referenceOnly
+                : r.providerHeadroom(money(provider.providerBillingHeadroomMicroUsd))
             }
             valueClass={
               provider.providerBillingHeadroomMicroUsd !== null &&
@@ -914,15 +881,18 @@ function ProviderRow({
             }
           />
           <Metric
-            label="Tomverse enforced monthly cap"
+            label={r.tomverseCap}
             value={money(provider.monthBudgetMicroUsd)}
-            detail={`${money(provider.internalBudgetHeadroomMicroUsd)} headroom · ${internalBudgetSourceDetail} · Request blocking`}
+            detail={r.tomverseCapDetail(
+              money(provider.internalBudgetHeadroomMicroUsd),
+              internalBudgetSourceDetail
+            )}
             valueClass={provider.internalBudgetHeadroomMicroUsd < 0 ? "text-red-300" : "text-white"}
           />
           <Metric
-            label="Expected effective ceiling (lower limit)"
+            label={r.effectiveCeiling}
             value={money(provider.expectedEffectiveCeilingMicroUsd)}
-            detail={`${money(provider.expectedEffectiveHeadroomMicroUsd)} expected headroom`}
+            detail={r.effectiveHeadroom(money(provider.expectedEffectiveHeadroomMicroUsd))}
             valueClass={provider.expectedEffectiveHeadroomMicroUsd < 0 ? "text-red-300" : "text-white"}
           />
         </div>
@@ -931,7 +901,7 @@ function ProviderRow({
         </p>
         {provider.billingProfile.note && (
           <p className="mt-2 text-[11px] text-zinc-500">
-            Profile note · {provider.billingProfile.note}
+            {r.profileNote(provider.billingProfile.note)}
           </p>
         )}
         {billingEditorOpen && canManageCredits && (
@@ -940,31 +910,31 @@ function ProviderRow({
             className="mt-4 grid gap-3 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4 md:grid-cols-2 xl:grid-cols-5 xl:items-end"
           >
             <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-              Pricing model
+              {r.pricingModelLabel}
               <select
                 value={pricingModel}
                 onChange={(event) => setPricingModel(event.target.value as ProviderPricingModel)}
                 className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
               >
-                {Object.entries(pricingModelCopy).map(([value, label]) => (
+                {Object.entries(m.pricingModel).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
             </label>
             <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-              Settlement
+              {r.settlementLabel}
               <select
                 value={settlementModel}
                 onChange={(event) => setSettlementModel(event.target.value as ProviderSettlementModel)}
                 className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
               >
-                {Object.entries(settlementModelCopy).map(([value, label]) => (
+                {Object.entries(m.settlementModel).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
             </label>
             <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-              Provider limit (USD)
+              {r.providerLimitLabel}
               <input
                 type="number"
                 inputMode="decimal"
@@ -973,18 +943,18 @@ function ProviderRow({
                 step="0.01"
                 value={monthlyLimitUsd}
                 onChange={(event) => setMonthlyLimitUsd(event.target.value)}
-                placeholder="Optional"
+                placeholder={r.optionalPlaceholder}
                 className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
               />
             </label>
             <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-              Verification note
+              {r.verificationNote}
               <input
                 type="text"
                 maxLength={300}
                 value={billingNote}
                 onChange={(event) => setBillingNote(event.target.value)}
-                placeholder="Checked in provider console"
+                placeholder={r.verificationNotePlaceholder}
                 className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
               />
             </label>
@@ -994,7 +964,7 @@ function ProviderRow({
               className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              {savingBilling ? "Saving" : "Save profile"}
+              {savingBilling ? r.saving : r.saveProfile}
             </button>
           </form>
         )}
@@ -1008,13 +978,11 @@ function ProviderRow({
               <div>
                 <PanelLabel>
                   {provider.billingProfile.settlementModel === "hybrid"
-                    ? "Optional credit checkpoint"
-                    : "Prepaid credit checkpoint"}
+                    ? r.optionalCheckpoint
+                    : r.prepaidCheckpoint}
                 </PanelLabel>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">
-                  Saves a manually verified credit in DB and subtracts internal
-                  usage recorded after the checkpoint. It does not change routing
-                  or provider health.
+                  {r.checkpointExplainer}
                 </p>
               </div>
             </div>
@@ -1024,38 +992,38 @@ function ProviderRow({
                 onClick={toggleCreditEditor}
                 className="inline-flex h-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
               >
-                {creditEditorOpen ? "Close editor" : "Set credit"}
+                {creditEditorOpen ? r.closeEditor : r.setCredit}
               </button>
             )}
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <Metric
-              label="Opening credit"
+              label={r.openingCredit}
               value={
                 provider.credit.configuredCreditMicroUsd === null
                   ? provider.billingProfile.settlementModel === "hybrid"
-                    ? "Not set (optional)"
-                    : "Not configured"
+                    ? r.notSetOptional
+                    : r.notConfigured
                   : money(provider.credit.configuredCreditMicroUsd)
               }
             />
-            <Metric label="Tracked usage" value={money(provider.credit.usedSinceCheckpointMicroUsd)} />
+            <Metric label={r.trackedUsage} value={money(provider.credit.usedSinceCheckpointMicroUsd)} />
             <Metric
-              label="Estimated remaining"
+              label={r.estimatedRemaining}
               value={
                 estimatedBalance === null
                   ? provider.billingProfile.settlementModel === "hybrid"
-                    ? "Not set (optional)"
-                    : "Not configured"
+                    ? r.notSetOptional
+                    : r.notConfigured
                   : money(estimatedBalance)
               }
               detail={
                 provider.creditRemainingPercent === null
                   ? undefined
-                  : `${provider.creditRemainingPercent.toFixed(1)}% of checkpoint remaining${
+                  : `${r.remainingPercent(provider.creditRemainingPercent.toFixed(1))}${
                       provider.creditAlertLevel === "none"
                         ? ""
-                        : ` · ${provider.creditAlertLevel}% alert active`
+                        : r.alertActive(provider.creditAlertLevel)
                     }`
               }
               valueClass={creditAlertClass(provider.creditAlertLevel)}
@@ -1063,7 +1031,7 @@ function ProviderRow({
           </div>
           {provider.credit.checkpointAt && (
             <p className="mt-2 text-[11px] text-zinc-500">
-              Checkpoint {dateLabel(provider.credit.checkpointAt, "Not configured")}
+              {r.checkpoint(dateLabel(provider.credit.checkpointAt, r.notConfigured))}
               {provider.credit.note ? ` · ${provider.credit.note}` : ""}
             </p>
           )}
@@ -1073,7 +1041,7 @@ function ProviderRow({
               className="mt-4 grid gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)_auto] md:items-end"
             >
               <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-                Current credit (USD)
+                {r.currentCredit}
                 <input
                   type="number"
                   inputMode="decimal"
@@ -1087,13 +1055,13 @@ function ProviderRow({
                 />
               </label>
               <label className="grid gap-1.5 text-xs font-semibold text-zinc-300">
-                Note (optional)
+                {r.noteOptional}
                 <input
                   type="text"
                   maxLength={300}
                   value={creditNote}
                   onChange={(event) => setCreditNote(event.target.value)}
-                  placeholder="Provider console balance checked"
+                  placeholder={r.creditNotePlaceholder}
                   className="h-10 rounded-xl border border-zinc-700 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-emerald-500"
                 />
               </label>
@@ -1103,7 +1071,7 @@ function ProviderRow({
                 className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
-                {savingCredit ? "Saving" : "Save checkpoint"}
+                {savingCredit ? r.saving : r.saveCheckpoint}
               </button>
             </form>
           )}
@@ -1112,10 +1080,10 @@ function ProviderRow({
 
       <div className="mt-5 grid gap-4 border-t border-zinc-800 pt-5 lg:grid-cols-2">
         <div>
-          <PanelLabel>Recent error log</PanelLabel>
+          <PanelLabel>{r.recentErrorLog}</PanelLabel>
           {provider.recentErrors.length === 0 ? (
             <p className="mt-2 text-sm text-zinc-500">
-              No provider errors recorded today.
+              {r.noErrorsToday}
             </p>
           ) : (
             <div className="mt-2 space-y-2">
@@ -1135,7 +1103,7 @@ function ProviderRow({
                     {error.code}
                   </span>
                   <span className="flex shrink-0 items-center gap-2 text-zinc-500">
-                    {error.count} / {dateLabel(error.updatedAt)}
+                    {error.count} / {dateLabel(error.updatedAt, m.noSuccessYet)}
                     <ChevronDown
                       className={`h-3.5 w-3.5 transition-transform ${
                         selectedErrorCode === error.code ? "rotate-180" : ""
@@ -1159,9 +1127,7 @@ function ProviderRow({
                   </div>
                   {selectedErrorEvents.length === 0 ? (
                     <p className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100/80">
-                      Historical aggregate only. This error was recorded before event-level
-                      diagnostics were enabled, so its original trace and provider response
-                      cannot be reconstructed.
+                      {r.historicalOnly}
                     </p>
                   ) : (
                     <div className="mt-3 space-y-2">
@@ -1172,10 +1138,10 @@ function ProviderRow({
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="font-black text-zinc-200">
-                              {event.modelId || "Provider-level"} · {event.phase}
+                              {event.modelId || r.providerLevel} · {event.phase}
                             </span>
                             <span className="text-zinc-500">
-                              {dateLabel(event.createdAt)}
+                              {dateLabel(event.createdAt, m.noSuccessYet)}
                             </span>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
@@ -1196,7 +1162,7 @@ function ProviderRow({
                             ) : null}
                             {event.retryable !== null ? (
                               <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-zinc-300">
-                                {event.retryable ? "Retryable" : "Not retryable"}
+                                {event.retryable ? r.retryable : r.notRetryable}
                               </span>
                             ) : null}
                           </div>
@@ -1206,7 +1172,7 @@ function ProviderRow({
                             </p>
                           ) : null}
                           <p className="mt-2 break-all font-mono text-[10px] text-zinc-600">
-                            Trace {event.traceId}
+                            {r.trace(event.traceId)}
                           </p>
                         </div>
                       ))}
@@ -1218,10 +1184,10 @@ function ProviderRow({
           )}
         </div>
         <div>
-          <PanelLabel>Model 5-minute incidents</PanelLabel>
+          <PanelLabel>{r.modelIncidents}</PanelLabel>
           {provider.modelIncidents.length === 0 ? (
             <p className="mt-2 text-sm text-zinc-500">
-              No model-specific incidents in the current 5-minute window.
+              {r.noModelIncidents}
             </p>
           ) : (
             <div className="mt-2 space-y-2">
@@ -1235,12 +1201,12 @@ function ProviderRow({
                       {incident.modelName}
                     </span>
                     <span className="shrink-0 text-red-200">
-                      {incident.failureCount5m} failures
+                      {r.failures(incident.failureCount5m)}
                     </span>
                   </div>
                   <p className="mt-1 truncate text-red-200/70">
                     {incident.recentErrorCode || "UNKNOWN"} /{" "}
-                    {dateLabel(incident.updatedAt)}
+                    {dateLabel(incident.updatedAt, m.noSuccessYet)}
                   </p>
                 </div>
               ))}
@@ -1295,6 +1261,8 @@ export function AdminProviderHealthPanel({
   canRunVerification?: boolean;
   providerFilter?: AiProvider;
 }) {
+  const m = useAdminMessages(adminProviderHealthMessages);
+  const p = m.panel;
   const [dashboard, setDashboard] = useState(initialDashboard);
   const [refreshing, setRefreshing] = useState(false);
   const [savingProvider, setSavingProvider] = useState<AiProvider | null>(null);
@@ -1321,7 +1289,7 @@ export function AdminProviderHealthPanel({
       });
       if (!response.ok) {
         await discardResponseBody(response);
-        throw new Error(`Provider API returned ${response.status}.`);
+        throw new Error(p.providerApiReturned(response.status));
       }
       const nextDashboard = (await response.json()) as ProviderHealthDashboard;
       setDashboard(
@@ -1334,12 +1302,12 @@ export function AdminProviderHealthPanel({
       setError(
         refreshError instanceof Error
           ? refreshError.message
-          : "Provider data refresh failed."
+          : p.refreshFailed
       );
     } finally {
       setRefreshing(false);
     }
-  }, [providerFilter]);
+  }, [p, providerFilter]);
 
   const refreshVerification = useCallback(async () => {
     if (!canRunVerification) return;
@@ -1382,13 +1350,13 @@ export function AdminProviderHealthPanel({
           | null;
         if (!response.ok) {
           throw new Error(
-            data?.error || `Verification API returned ${response.status}.`
+            data?.error || p.verificationApiReturned(response.status)
           );
         }
         setNotice(
           data?.check?.status === "success"
-            ? `Verification for ${provider} succeeded.`
-            : `Verification for ${provider} returned ${data?.check?.status || "no result"}.`
+            ? p.verificationSucceeded(provider)
+            : p.verificationReturned(provider, data?.check?.status || p.noResult)
         );
         setError(null);
         return data?.check?.status === "success";
@@ -1396,7 +1364,7 @@ export function AdminProviderHealthPanel({
         setError(
           verifyError instanceof Error
             ? verifyError.message
-            : "Provider verification failed."
+            : p.verificationFailed
         );
         return false;
       } finally {
@@ -1405,7 +1373,7 @@ export function AdminProviderHealthPanel({
         await refreshDashboard();
       }
     },
-    [recoveringProvider, refreshDashboard, refreshVerification, verifyingProvider]
+    [p, recoveringProvider, refreshDashboard, refreshVerification, verifyingProvider]
   );
 
   const runRecovery = useCallback<RunRecovery>(
@@ -1430,11 +1398,11 @@ export function AdminProviderHealthPanel({
           | null;
         if (!response.ok) {
           throw new Error(
-            data?.error || `Recovery API returned ${response.status}.`
+            data?.error || p.recoveryApiReturned(response.status)
           );
         }
         setNotice(
-          `Cleared ${data?.previousConsecutiveFailures ?? 0} consecutive failures for ${provider}. The last successful traffic timestamp was not modified.`
+          p.recoveryCleared(data?.previousConsecutiveFailures ?? 0, provider)
         );
         setError(null);
         return true;
@@ -1442,7 +1410,7 @@ export function AdminProviderHealthPanel({
         setError(
           recoveryError instanceof Error
             ? recoveryError.message
-            : "Provider recovery failed."
+            : p.recoveryFailed
         );
         return false;
       } finally {
@@ -1451,7 +1419,7 @@ export function AdminProviderHealthPanel({
         await refreshDashboard();
       }
     },
-    [recoveringProvider, refreshDashboard, refreshVerification, verifyingProvider]
+    [p, recoveringProvider, refreshDashboard, refreshVerification, verifyingProvider]
   );
 
   const saveProviderCredit = useCallback<SaveCredit>(
@@ -1474,7 +1442,7 @@ export function AdminProviderHealthPanel({
           throw new Error(
             data && "error" in data && data.error
               ? data.error
-              : `Credit API returned ${response.status}.`
+              : p.creditApiReturned(response.status)
           );
         }
         const nextDashboard = data as ProviderHealthDashboard;
@@ -1489,14 +1457,14 @@ export function AdminProviderHealthPanel({
         setError(
           saveError instanceof Error
             ? saveError.message
-            : "Provider credit update failed."
+            : p.creditFailed
         );
         return false;
       } finally {
         setSavingProvider(null);
       }
     },
-    [providerFilter]
+    [p, providerFilter]
   );
 
   const saveProviderBilling = useCallback<SaveBilling>(
@@ -1523,7 +1491,7 @@ export function AdminProviderHealthPanel({
           throw new Error(
             data && "error" in data && data.error
               ? data.error
-              : `Billing profile API returned ${response.status}.`
+              : p.billingApiReturned(response.status)
           );
         }
         const nextDashboard = data as ProviderHealthDashboard;
@@ -1538,14 +1506,14 @@ export function AdminProviderHealthPanel({
         setError(
           saveError instanceof Error
             ? saveError.message
-            : "Provider billing profile update failed."
+            : p.billingFailed
         );
         return false;
       } finally {
         setSavingBillingProvider(null);
       }
     },
-    [providerFilter]
+    [p, providerFilter]
   );
 
   useEffect(() => {
@@ -1578,10 +1546,9 @@ export function AdminProviderHealthPanel({
     <div className="space-y-4">
       <div className="flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-bold text-zinc-200">Live admin API panel</p>
+          <p className="text-sm font-bold text-zinc-200">{p.liveTitle}</p>
           <p className="mt-1 text-xs text-zinc-500">
-            Admin API refreshes every 30 seconds · Updated{" "}
-            {dateLabel(dashboard.generatedAt)}
+            {p.refreshCadence(dateLabel(dashboard.generatedAt, m.noSuccessYet))}
           </p>
           <p
             className={`mt-1 text-xs ${
@@ -1591,8 +1558,10 @@ export function AdminProviderHealthPanel({
                 : "text-zinc-500"
             }`}
           >
-            Synthetic probe spend today: {money(dashboard.probeCostTodayMicroUsd)} of{" "}
-            {money(dashboard.probeCostCapMicroUsd)} daily cap
+            {p.probeSpend(
+              money(dashboard.probeCostTodayMicroUsd),
+              money(dashboard.probeCostCapMicroUsd)
+            )}
           </p>
         </div>
         <button
@@ -1602,7 +1571,7 @@ export function AdminProviderHealthPanel({
           className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 transition hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60"
         >
           <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-          {refreshing ? "Refreshing" : "Refresh now"}
+          {refreshing ? p.refreshing : p.refreshNow}
         </button>
       </div>
       {error && (
@@ -1611,7 +1580,8 @@ export function AdminProviderHealthPanel({
           className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-200"
         >
           <AlertCircle className="h-4 w-4 shrink-0" />
-          {error} Showing the last successful snapshot.
+          {error}
+          {p.lastSnapshot}
         </div>
       )}
       {notice && (

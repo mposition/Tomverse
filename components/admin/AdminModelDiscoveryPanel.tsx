@@ -1,8 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, PackageSearch, RefreshCw } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminModelDiscoveryMessages } from "@/lib/adminMessages/modelDiscovery";
+import {
+  WORK_ITEM_EXCLUSION_REASONS,
+  analysisFingerprint,
+  type WorkItemExclusionReason,
+} from "@/lib/modelLifecycleWorkItemCore";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type ReviewPriority =
@@ -39,6 +46,31 @@ export type ModelWorkItemRow = {
   reviewKind: string;
   product: ModelProduct;
   analysisKo: string;
+  /** Present only in the excluded view: what closed the item, and who. */
+  exclusion?: {
+    reasonCode: string | null;
+    operatorReason: string | null;
+    analysisSnapshot: string | null;
+    note: string | null;
+    actorEmail: string | null;
+    excludedAt: string;
+  } | null;
+};
+
+type QueueView = "open" | "excluded";
+
+type DecisionDialog = {
+  decision: "exclude" | "reopen";
+  /**
+   * One entry per family the operator chose: the row they read (its
+   * representative), the members the decision applies to, and a fingerprint
+   * of the sentence that row showed.
+   */
+  families: Array<{
+    representativeId: string;
+    workItemIds: string[];
+    shownAnalysisFingerprint: string;
+  }>;
 };
 
 type QueueResponse = {
@@ -67,25 +99,11 @@ const PRIORITY_ORDER: Record<ReviewPriority, number> = {
   no_action: 4,
 };
 
-const PRIORITY_LABELS: Record<ReviewPriority, string> = {
-  recommended: "권장 검토",
-  review: "패밀리 검토",
-  needs_evidence: "근거 확인 필요",
-  low: "낮은 우선순위",
-  no_action: "조치 비권장",
-};
+const PRIORITY_VALUES = Object.keys(PRIORITY_ORDER) as ReviewPriority[];
 
-const AVAILABILITY_LABELS: Record<Availability, string> = {
-  current: "최신 API 확인",
-  stale: "최신 API 미확인",
-  unknown: "확인 불가",
-};
+const AVAILABILITY_VALUES: Availability[] = ["current", "stale", "unknown"];
 
-const PRODUCT_LABELS: Record<ModelProduct, string> = {
-  chat: "Chat",
-  image_generation: "이미지 생성",
-  unsupported: "미지원 제품",
-};
+const PRODUCT_VALUES: ModelProduct[] = ["chat", "image_generation", "unsupported"];
 
 const ageDays = (firstSeenAt: string) => {
   const seen = new Date(firstSeenAt).getTime();
@@ -116,17 +134,24 @@ const availabilityClass = (availability: Availability) => {
   return "border-zinc-700 bg-zinc-800 text-zinc-400";
 };
 
-const transitionableIds = (group: ModelFamilyGroup, to: string) => {
-  const allowedFrom =
-    to === "awaiting_decision"
-      ? new Set(["discovered", "deferred"])
-      : to === "deferred"
-        ? new Set(["discovered", "awaiting_decision"])
-        : new Set(["discovered", "awaiting_decision", "deferred"]);
-  return group.members
-    .filter((member) => allowedFrom.has(member.status))
+/**
+ * The members a decision applies to.
+ *
+ * Exclusion takes the members still undecided -- including any left in the two
+ * internal states the panel no longer offers as buttons -- and never an item
+ * somebody has already adopted and is walking to rollout. Reopening takes only
+ * excluded members.
+ */
+const EXCLUDABLE_STATUSES = new Set(["discovered", "awaiting_decision", "deferred"]);
+
+const decisionIds = (group: ModelFamilyGroup, decision: DecisionDialog["decision"]) =>
+  group.members
+    .filter((member) =>
+      decision === "exclude"
+        ? EXCLUDABLE_STATUSES.has(member.status)
+        : member.status === "closed_no_action"
+    )
     .map((member) => member.id);
-};
 
 /**
  * The member of a family an adoption would register, or null.
@@ -138,8 +163,9 @@ const transitionableIds = (group: ModelFamilyGroup, to: string) => {
  * reason.
  *
  * Only `add` items, and only ones the queue can still move. A retirement is
- * about a model the registry already has, and a closed item is a decision
- * somebody made: reopening it is a new work item, not a button.
+ * about a model the registry already has, and an excluded item is reopened
+ * first -- from the excluded view -- so the reopen is recorded with its reason
+ * before anything is adopted.
  */
 const adoptableMember = (group: ModelFamilyGroup) => {
   const candidate = group.representative;
@@ -195,6 +221,7 @@ const selectClass =
   "rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-500";
 
 export function AdminModelDiscoveryPanel() {
+  const m = useAdminMessages(adminModelDiscoveryMessages);
   const [rows, setRows] = useState<ModelWorkItemRow[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
@@ -213,31 +240,47 @@ export function AdminModelDiscoveryPanel() {
   const [availability, setAvailability] = useState<Availability | "all">("all");
   const [product, setProduct] = useState<ModelProduct | "all">("all");
   const [status, setStatus] = useState("all");
-  const [bulkNote, setBulkNote] = useState("");
   const [page, setPage] = useState(1);
+  const [view, setView] = useState<QueueView>("open");
+  const [dialog, setDialog] = useState<DecisionDialog | null>(null);
+  const [reasonCode, setReasonCode] = useState<WorkItemExclusionReason | "">("");
+  const [operatorReason, setOperatorReason] = useState("");
+
+  // Which load is current. A response from an earlier load -- the other view,
+  // or a refresh overtaken by a decision -- is dropped instead of replacing
+  // rows the operator is now looking at.
+  const loadGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
+    const current = () => generation === loadGenerationRef.current;
     setRefreshing(true);
     try {
-      const response = await fetch("/api/admin/model-lifecycle", {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        view === "excluded"
+          ? "/api/admin/model-lifecycle?view=excluded"
+          : "/api/admin/model-lifecycle",
+        { cache: "no-store" }
+      );
       if (!response.ok) {
         await discardResponseBody(response);
         throw new Error(String(response.status));
       }
       const data = (await response.json()) as QueueResponse;
+      if (!current()) return;
       setRows(data.items);
       setTotal(data.total);
       setTruncated(data.truncated);
       setFailed(false);
     } catch {
-      setFailed(true);
+      if (current()) setFailed(true);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -296,64 +339,127 @@ export function AdminModelDiscoveryPanel() {
     currentPage * PAGE_SIZE
   );
 
-  const move = useCallback(
-    async (workItemIds: string[], to: string, note: string) => {
+  const openDecision = useCallback(
+    (decision: DecisionDialog["decision"], chosen: readonly ModelFamilyGroup[]) => {
+      const families = chosen
+        .map((group) => ({
+          representativeId: group.representative.id,
+          workItemIds: decisionIds(group, decision),
+          shownAnalysisFingerprint: analysisFingerprint(group.representative.analysisKo),
+        }))
+        .filter((family) => family.workItemIds.length > 0);
+      const workItemIds = families.flatMap((family) => family.workItemIds);
       if (workItemIds.length === 0) {
-        dispatchAppToast("선택한 그룹에 적용 가능한 항목이 없습니다.", "error");
+        dispatchAppToast(m.toast.noApplicableItems, "error");
         return;
       }
       if (workItemIds.length > MAX_BULK_ITEMS) {
-        dispatchAppToast("한 번에 최대 200개 항목까지 처리할 수 있습니다.", "error");
+        dispatchAppToast(m.toast.tooManyItems(MAX_BULK_ITEMS), "error");
         return;
       }
-      if (
-        to === "closed_no_action" &&
-        !window.confirm(
-          `${workItemIds.length}개 항목을 'No action'으로 종료할까요? 이 상태는 되돌릴 수 없습니다.`
-        )
-      ) {
+      setReasonCode("");
+      setOperatorReason("");
+      // Either decision is checked against the row the operator read, so the
+      // representative must be one of the members it covers.
+      if (families.some((family) => !family.workItemIds.includes(family.representativeId))) {
+        dispatchAppToast(m.toast.representativeNotExcludable, "error");
         return;
       }
+      setDialog({ decision, families });
+    },
+    [m]
+  );
 
-      setBusyIds(new Set(workItemIds));
-      try {
-        const response = await fetch("/api/admin/model-lifecycle", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workItemIds, to, note }),
-        });
-        const data = (await response.json().catch(() => null)) as {
-          message?: string;
-        } | null;
-        if (!response.ok) {
+  const dialogItemCount = dialog
+    ? dialog.families.reduce((sum, family) => sum + family.workItemIds.length, 0)
+    : 0;
+
+  const dialogReasonMissing =
+    dialog?.decision === "exclude"
+      ? !reasonCode || (reasonCode === "other" && !operatorReason.trim())
+      : !operatorReason.trim();
+
+  /**
+   * Sends the decision in the dialog.
+   *
+   * The body names the decision and the operator's own reason only. The
+   * analysis the row was showing is added by the server, so the record keeps
+   * what the queue said apart from what the person said.
+   */
+  const submitDecision = useCallback(async () => {
+    if (!dialog || dialogReasonMissing) return;
+    const { decision, families } = dialog;
+    const workItemIds = families.flatMap((family) => family.workItemIds);
+    setBusyIds(new Set(workItemIds));
+    try {
+      const response = await fetch("/api/admin/model-lifecycle", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          decision === "exclude"
+            ? {
+                decision,
+                reasonCode,
+                ...(operatorReason.trim() ? { operatorReason: operatorReason.trim() } : {}),
+                families,
+              }
+            : {
+                decision,
+                operatorReason: operatorReason.trim(),
+                families: families.map(({ representativeId, workItemIds: ids }) => ({
+                  representativeId,
+                  workItemIds: ids,
+                })),
+              }
+        ),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
+      if (!response.ok) {
+        if (
+          data?.error === "ANALYSIS_CHANGED" ||
+          data?.error === "FAMILY_MISMATCH" ||
+          data?.error === "QUEUE_TOO_LARGE"
+        ) {
+          setDialog(null);
           dispatchAppToast(
-            data?.message || "The queue refused that transition.",
+            data.error === "ANALYSIS_CHANGED"
+              ? m.toast.analysisChanged
+              : data.error === "FAMILY_MISMATCH"
+                ? m.toast.familyChanged
+                : m.toast.queueTooLarge,
             "error"
           );
+          void load();
           return;
         }
-
-        const changed = new Set(workItemIds);
-        setRows((current) =>
-          to === "closed_no_action"
-            ? current.filter((row) => !changed.has(row.id))
-            : current.map((row) =>
-                changed.has(row.id) ? { ...row, status: to } : row
-              )
-        );
-        if (to === "closed_no_action") {
-          setTotal((current) => Math.max(0, current - workItemIds.length));
-        }
-        setSelectedFamilies(new Set());
-        dispatchAppToast(`${workItemIds.length}개 항목을 업데이트했습니다.`, "success");
-      } catch {
-        dispatchAppToast("The request did not reach the server.", "error");
-      } finally {
-        setBusyIds(new Set());
+        dispatchAppToast(data?.message || m.toast.transitionRefused, "error");
+        return;
       }
-    },
-    []
-  );
+      // Any load already in flight read the queue before this decision; its
+      // answer would put the decided rows back.
+      loadGenerationRef.current += 1;
+      setRefreshing(false);
+      // Either decision moves the items to the other view.
+      const changed = new Set(workItemIds);
+      setRows((current) => current.filter((row) => !changed.has(row.id)));
+      setTotal((current) => Math.max(0, current - workItemIds.length));
+      setSelectedFamilies(new Set());
+      setDialog(null);
+      dispatchAppToast(
+        decision === "exclude"
+          ? m.toast.excluded(workItemIds.length)
+          : m.toast.reopened(workItemIds.length),
+        "success"
+      );
+    } catch {
+      dispatchAppToast(m.toast.unreachable, "error");
+    } finally {
+      setBusyIds(new Set());
+    }
+  }, [dialog, dialogReasonMissing, load, m, operatorReason, reasonCode]);
 
   /**
    * Marks one validation satisfied on an item that owes it.
@@ -365,9 +471,7 @@ export function AdminModelDiscoveryPanel() {
    */
   const clearValidation = useCallback(
     async (row: ModelWorkItemRow, validation: string) => {
-      const note = window.prompt(
-        `'${validation}' 검증을 완료로 기록합니다. 무엇을 확인했는지 적어 주세요.`
-      );
+      const note = window.prompt(m.toast.validationPrompt(validation));
       if (!note?.trim()) return;
       setBusyIds(new Set([row.id]));
       try {
@@ -385,7 +489,7 @@ export function AdminModelDiscoveryPanel() {
           error?: string;
         } | null;
         if (!response.ok || !data?.pendingValidations) {
-          dispatchAppToast(data?.error || "검증을 기록하지 못했습니다.", "error");
+          dispatchAppToast(data?.error || m.toast.validationFailed, "error");
           return;
         }
         const remaining = data.pendingValidations;
@@ -396,42 +500,44 @@ export function AdminModelDiscoveryPanel() {
         );
         dispatchAppToast(
           remaining.length
-            ? `'${validation}' 완료. 남은 검증 ${remaining.length}건.`
-            : `'${validation}' 완료. 남은 검증이 없습니다.`,
+            ? m.toast.validationRemaining(validation, remaining.length)
+            : m.toast.validationNoneRemaining(validation),
           "success"
         );
       } catch {
-        dispatchAppToast("The request did not reach the server.", "error");
+        dispatchAppToast(m.toast.unreachable, "error");
       } finally {
         setBusyIds(new Set());
       }
     },
-    []
+    [m]
   );
 
-  const moveGroup = (group: ModelFamilyGroup, to: string) => {
-    void move(
-      transitionableIds(group, to),
-      to,
-      `${group.representative.analysisKo} 관리자 패밀리 검토.`
+  const decideSelected = (decision: DecisionDialog["decision"]) => {
+    openDecision(
+      decision,
+      groups.filter((group) => selectedFamilies.has(group.key))
     );
   };
 
-  const moveSelected = (to: string) => {
-    const note = bulkNote.trim();
-    if (!note) {
-      dispatchAppToast("벌크 검토 사유를 먼저 입력해 주세요.", "error");
-      return;
-    }
-    const ids = Array.from(
-      new Set(
-        groups
-          .filter((group) => selectedFamilies.has(group.key))
-          .flatMap((group) => transitionableIds(group, to))
-      )
-    );
-    void move(ids, to, note);
+  const switchView = (next: QueueView) => {
+    if (next === view || dialog !== null || busyIds.size > 0) return;
+    // Retire any load in flight now, not when the next one starts: that one
+    // is only scheduled, and an answer arriving in between is the other view's.
+    loadGenerationRef.current += 1;
+    setView(next);
+    setRows([]);
+    setTotal(0);
+    setLoading(true);
+    setSelectedFamilies(new Set());
+    setStatus("all");
+    setPage(1);
   };
+
+  const excludeReasonLabel = (code: string | null) =>
+    code && (WORK_ITEM_EXCLUSION_REASONS as readonly string[]).includes(code)
+      ? m.exclusionReasons[code as WorkItemExclusionReason]
+      : m.excluded.noReasonCode;
 
   const pageFamilyKeys = visibleGroups.map((group) => group.key);
   const allPageSelected =
@@ -448,45 +554,71 @@ export function AdminModelDiscoveryPanel() {
 
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+      {/*
+        Inert while a decision is open or being sent. The decision was made in
+        one view about that view's rows; letting focus reach the view switch or
+        another row's button would let the answer land on a different list.
+      */}
+      <div inert={dialog !== null || busyIds.size > 0}>
       <header className="mb-3 flex flex-wrap items-center gap-2">
         <PackageSearch className="h-4 w-4 text-zinc-400" aria-hidden />
-        <h2 className="text-sm font-semibold text-zinc-100">Awaiting review</h2>
+        <h2 className="text-sm font-semibold text-zinc-100">{m.header.title}</h2>
         <span className="text-xs text-zinc-500">
-          {loading ? "loading" : `${total} items · ${groups.length} families`}
+          {loading
+            ? m.header.loading
+            : view === "excluded"
+              ? m.header.excludedCounts(total, groups.length)
+              : m.header.counts(total, groups.length)}
         </span>
         {refreshing && !loading ? (
-          <Loader2 className="h-3 w-3 animate-spin text-zinc-500" aria-label="Refreshing" />
+          <Loader2 className="h-3 w-3 animate-spin text-zinc-500" aria-label={m.header.refreshing} />
         ) : null}
       </header>
 
-      <p className="mb-4 text-xs leading-relaxed text-zinc-500">
-        공급자의 최신 모델 API 증거와 Tomverse 제품별 편입 가치를 분리해 보여줍니다.
-        이미지 모델은 Studio 후보로, Google 채팅 모델은 Brave 웹검색 경로까지 검토합니다.
-        날짜별 버전과 별칭은 한 패밀리로 묶이며, 추천은 자동 결정이 아닙니다.
+      <p className="mb-3 text-xs leading-relaxed text-zinc-500">
+        {m.header.intro}
       </p>
+
+      <div className="mb-4 flex gap-1" role="group" aria-label={m.views.label}>
+        {(["open", "excluded"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={view === value}
+            onClick={() => switchView(value)}
+            className={
+              view === value
+                ? "rounded-md border border-zinc-500 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100"
+                : "rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+            }
+          >
+            {value === "open" ? m.views.open : m.views.excluded}
+          </button>
+        ))}
+      </div>
 
       {failed ? (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
-          <span>큐를 읽지 못했습니다. 현재 목록이 최신이라는 뜻이 아닙니다.</span>
+          <span>{m.failed}</span>
           <button type="button" onClick={() => void load()} className="flex items-center gap-1">
-            <RefreshCw className="h-3 w-3" /> 다시 시도
+            <RefreshCw className="h-3 w-3" /> {m.retry}
           </button>
         </div>
       ) : null}
 
       {truncated ? (
         <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
-          안전 한도인 1,000개까지만 불러왔습니다. 필터 집계는 로드된 항목 기준입니다.
+          {m.truncated}
         </p>
       ) : null}
 
       {loading ? (
         <p className="flex items-center gap-2 text-xs text-zinc-400">
-          <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Loading the backlog…
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> {m.loadingBacklog}
         </p>
       ) : rows.length === 0 && !failed ? (
         <p className="text-xs text-zinc-400">
-          Nothing is waiting. Discovery runs daily at 10:00 Australia/Brisbane.
+          {view === "excluded" ? m.excluded.empty : m.empty}
         </p>
       ) : (
         <>
@@ -498,8 +630,8 @@ export function AdminModelDiscoveryPanel() {
                 setSearch(event.target.value);
                 setPage(1);
               }}
-              placeholder="모델·공급자·분석 검색"
-              aria-label="Search model review queue"
+              placeholder={m.filters.searchPlaceholder}
+              aria-label={m.filters.searchLabel}
               className={`${selectClass} md:col-span-2`}
             />
             <select
@@ -508,13 +640,13 @@ export function AdminModelDiscoveryPanel() {
                 setPriority(event.target.value as ReviewPriority | "all");
                 setPage(1);
               }}
-              aria-label="Filter by review priority"
+              aria-label={m.filters.priorityLabel}
               className={selectClass}
             >
-              <option value="all">모든 우선순위 ({groups.length})</option>
-              {(Object.keys(PRIORITY_LABELS) as ReviewPriority[]).map((value) => (
+              <option value="all">{m.filters.allPriorities(groups.length)}</option>
+              {PRIORITY_VALUES.map((value) => (
                 <option key={value} value={value}>
-                  {PRIORITY_LABELS[value]} ({priorityCounts.get(value) ?? 0})
+                  {m.priority[value]} ({priorityCounts.get(value) ?? 0})
                 </option>
               ))}
             </select>
@@ -524,12 +656,12 @@ export function AdminModelDiscoveryPanel() {
                 setProduct(event.target.value as ModelProduct | "all");
                 setPage(1);
               }}
-              aria-label="Filter by Tomverse product"
+              aria-label={m.filters.productLabel}
               className={selectClass}
             >
-              <option value="all">모든 제품</option>
-              {(Object.keys(PRODUCT_LABELS) as ModelProduct[]).map((value) => (
-                <option key={value} value={value}>{PRODUCT_LABELS[value]}</option>
+              <option value="all">{m.filters.allProducts}</option>
+              {PRODUCT_VALUES.map((value) => (
+                <option key={value} value={value}>{m.product[value]}</option>
               ))}
             </select>
             <select
@@ -538,10 +670,10 @@ export function AdminModelDiscoveryPanel() {
                 setProvider(event.target.value);
                 setPage(1);
               }}
-              aria-label="Filter by provider"
+              aria-label={m.filters.providerLabel}
               className={selectClass}
             >
-              <option value="all">모든 공급자</option>
+              <option value="all">{m.filters.allProviders}</option>
               {providers.map((value) => (
                 <option key={value} value={value}>{value}</option>
               ))}
@@ -552,62 +684,49 @@ export function AdminModelDiscoveryPanel() {
                 setAvailability(event.target.value as Availability | "all");
                 setPage(1);
               }}
-              aria-label="Filter by provider availability"
+              aria-label={m.filters.availabilityLabel}
               className={selectClass}
             >
-              <option value="all">모든 제공 상태</option>
-              {(Object.keys(AVAILABILITY_LABELS) as Availability[]).map((value) => (
-                <option key={value} value={value}>{AVAILABILITY_LABELS[value]}</option>
+              <option value="all">{m.filters.allAvailability}</option>
+              {AVAILABILITY_VALUES.map((value) => (
+                <option key={value} value={value}>{m.availability[value]}</option>
               ))}
             </select>
           </div>
 
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2">
-            <select
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                setPage(1);
-              }}
-              aria-label="Filter by workflow status"
-              className={selectClass}
-            >
-              <option value="all">모든 워크플로 상태</option>
-              <option value="discovered">discovered</option>
-              <option value="awaiting_decision">awaiting decision</option>
-              <option value="deferred">deferred</option>
-              <option value="approved">approved</option>
-              <option value="implementation_pending">implementation pending</option>
-              <option value="validation_pending">validation pending</option>
-              <option value="rollout_pending">rollout pending</option>
-              <option value="communication_pending">communication pending</option>
-            </select>
-            <input
-              value={bulkNote}
-              onChange={(event) => setBulkNote(event.target.value)}
-              maxLength={1_000}
-              placeholder="벌크 검토 사유 (필수, 선택 항목에 공통 기록)"
-              aria-label="Bulk review reason"
-              className={`${selectClass} min-w-[18rem] flex-1`}
-            />
-            <span className="text-xs text-zinc-500">
-              {selectedFamilies.size} families selected
-            </span>
-            {[
-              ["awaiting_decision", "Needs decision"],
-              ["deferred", "Not yet"],
-              ["closed_no_action", "No action"],
-            ].map(([to, label]) => (
-              <button
-                key={to}
-                type="button"
-                disabled={selectedFamilies.size === 0 || busyIds.size > 0}
-                onClick={() => moveSelected(to)}
-                className="rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-200 disabled:opacity-40"
+            {view === "open" ? (
+              <select
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.target.value);
+                  setPage(1);
+                }}
+                aria-label={m.filters.statusLabel}
+                className={selectClass}
               >
-                {label}
-              </button>
-            ))}
+                <option value="all">{m.filters.allStatuses}</option>
+                <option value="discovered">discovered</option>
+                <option value="awaiting_decision">awaiting decision</option>
+                <option value="deferred">deferred</option>
+                <option value="approved">approved</option>
+                <option value="implementation_pending">implementation pending</option>
+                <option value="validation_pending">validation pending</option>
+                <option value="rollout_pending">rollout pending</option>
+                <option value="communication_pending">communication pending</option>
+              </select>
+            ) : null}
+            <span className="flex-1 text-xs text-zinc-500">
+              {m.bulk.selected(selectedFamilies.size)}
+            </span>
+            <button
+              type="button"
+              disabled={selectedFamilies.size === 0 || busyIds.size > 0}
+              onClick={() => decideSelected(view === "open" ? "exclude" : "reopen")}
+              className="rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-200 disabled:opacity-40"
+            >
+              {view === "open" ? m.bulk.excludeSelected : m.bulk.reopenSelected}
+            </button>
           </div>
 
           <div className="max-h-[42rem] overflow-auto rounded-lg border border-zinc-800">
@@ -619,15 +738,15 @@ export function AdminModelDiscoveryPanel() {
                       type="checkbox"
                       checked={allPageSelected}
                       onChange={togglePage}
-                      aria-label="Select all families on this page"
+                      aria-label={m.table.selectPage}
                     />
                   </th>
-                  <th className="py-2 pr-3 font-medium">Model family</th>
-                  <th className="py-2 pr-3 font-medium">Evidence</th>
-                  <th className="w-[32rem] py-2 pr-3 font-medium">Tomverse 분석</th>
-                  <th className="py-2 pr-3 font-medium">Workflow</th>
-                  <th className="py-2 pr-3 font-medium">Waiting</th>
-                  <th className="py-2 pr-3 font-medium">Triage</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.modelFamily}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.evidence}</th>
+                  <th className="w-[32rem] py-2 pr-3 font-medium">{m.table.analysis}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.workflow}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.waiting}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.triage}</th>
                 </tr>
               </thead>
               <tbody className="text-zinc-300">
@@ -649,7 +768,7 @@ export function AdminModelDiscoveryPanel() {
                               return next;
                             })
                           }
-                          aria-label={`Select ${group.key}`}
+                          aria-label={m.table.selectFamily(group.key)}
                         />
                       </td>
                       <td className="py-3 pr-3">
@@ -659,7 +778,7 @@ export function AdminModelDiscoveryPanel() {
                         {group.members.length > 1 ? (
                           <details className="mt-1 text-[11px] text-zinc-500">
                             <summary className="cursor-pointer">
-                              +{group.members.length - 1} related IDs
+                              {m.table.relatedIds(group.members.length - 1)}
                             </summary>
                             <ul className="mt-1 space-y-1 pl-3">
                               {group.members.map((member) => (
@@ -674,10 +793,10 @@ export function AdminModelDiscoveryPanel() {
                       <td className="py-3 pr-3">
                         <div className="mb-1 flex flex-wrap gap-1">
                           <span className={`rounded border px-1.5 py-0.5 text-[10px] ${priorityClass(group.priority)}`}>
-                            {PRIORITY_LABELS[group.priority]}
+                            {m.priority[group.priority]}
                           </span>
                           <span className={`rounded border px-1.5 py-0.5 text-[10px] ${availabilityClass(row.availability)}`}>
-                            {AVAILABILITY_LABELS[row.availability]}
+                            {m.availability[row.availability]}
                           </span>
                           <span
                             className={
@@ -686,11 +805,11 @@ export function AdminModelDiscoveryPanel() {
                                 : "rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300"
                             }
                           >
-                            {PRODUCT_LABELS[row.product]}
+                            {m.product[row.product]}
                           </span>
                           {row.product === "chat" && group.providers.includes("google") ? (
                             <span className="rounded border border-accent-web-search-500/30 bg-accent-web-search-500/10 px-1.5 py-0.5 text-[10px] text-accent-web-search-200">
-                              Brave 웹검색 검토
+                              {m.table.braveReview}
                             </span>
                           ) : null}
                         </div>
@@ -702,7 +821,7 @@ export function AdminModelDiscoveryPanel() {
                         ) : null}
                         {row.supersededBy ? (
                           <p className="mt-1 text-[10px] text-zinc-500">
-                            상위 버전 서비스 중: {row.supersededBy}
+                            {m.table.supersededBy(row.supersededBy)}
                           </p>
                         ) : null}
                       </td>
@@ -710,31 +829,69 @@ export function AdminModelDiscoveryPanel() {
                         {row.analysisKo}
                       </td>
                       <td className="py-3 pr-3 text-zinc-400">
-                        {Array.from(new Set(group.members.map((member) => member.status)))
-                          .join(", ")
-                          .replace(/_/g, " ")}
+                        {view === "excluded" && row.exclusion ? (
+                          <div className="max-w-[16rem] space-y-1">
+                            <p className="text-zinc-200">{excludeReasonLabel(row.exclusion.reasonCode)}</p>
+                            {row.exclusion.operatorReason || row.exclusion.note ? (
+                              <p className="text-[11px] text-zinc-400">
+                                {row.exclusion.operatorReason ?? row.exclusion.note}
+                              </p>
+                            ) : null}
+                            <p className="text-[10px] text-zinc-500">
+                              {m.excluded.by(
+                                row.exclusion.actorEmail ?? "—",
+                                row.exclusion.excludedAt.slice(0, 10)
+                              )}
+                            </p>
+                            {row.exclusion.analysisSnapshot ? (
+                              <details className="text-[10px] text-zinc-500">
+                                <summary className="cursor-pointer">{m.excluded.analysisAtDecision}</summary>
+                                <p className="mt-1 leading-relaxed">{row.exclusion.analysisSnapshot}</p>
+                              </details>
+                            ) : null}
+                          </div>
+                        ) : (
+                          Array.from(new Set(group.members.map((member) => member.status)))
+                            .join(", ")
+                            .replace(/_/g, " ")
+                        )}
                       </td>
                       <td className="py-3 pr-3 text-zinc-400">
-                        {days === null ? "—" : `${days}d`}
+                        {days === null ? "—" : m.table.days(days)}
                       </td>
                       <td className="py-3 pr-3">
                         <div className="flex max-w-[12rem] flex-wrap gap-1">
-                          {[
-                            ["awaiting_decision", "Needs decision"],
-                            ["deferred", "Not yet"],
-                            ["closed_no_action", "No action"],
-                          ].map(([to, label]) => (
+                          {view === "open" && adoptableMember(group) ? (
+                            <a
+                              href={`/admin/models?tab=registry&adopt=${encodeURIComponent(
+                                adoptableMember(group)!.id
+                              )}`}
+                              className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
+                            >
+                              {m.table.adopt}
+                            </a>
+                          ) : null}
+                          {view === "open" && decisionIds(group, "exclude").length > 0 ? (
                             <button
-                              key={to}
                               type="button"
-                              disabled={busy || transitionableIds(group, to).length === 0}
-                              onClick={() => moveGroup(group, to)}
+                              disabled={busy}
+                              onClick={() => openDecision("exclude", [group])}
                               className="rounded border border-zinc-600 px-2 py-1 text-[11px] text-zinc-200 disabled:opacity-40"
                             >
-                              {label}
+                              {m.table.exclude}
                             </button>
-                          ))}
-                          {group.representative.pendingValidations?.map((validation) => (
+                          ) : null}
+                          {view === "excluded" ? (
+                            <button
+                              type="button"
+                              disabled={busy || decisionIds(group, "reopen").length === 0}
+                              onClick={() => openDecision("reopen", [group])}
+                              className="rounded border border-zinc-600 px-2 py-1 text-[11px] text-zinc-200 disabled:opacity-40"
+                            >
+                              {m.table.reopen}
+                            </button>
+                          ) : null}
+                          {view === "open" && group.representative.pendingValidations?.map((validation) => (
                             <button
                               key={validation}
                               type="button"
@@ -743,21 +900,11 @@ export function AdminModelDiscoveryPanel() {
                                 void clearValidation(group.representative, validation)
                               }
                               className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 disabled:opacity-40"
-                              title="이 검증을 완료로 기록합니다"
+                              title={m.table.recordValidationTitle}
                             >
                               ✓ {validation}
                             </button>
                           ))}
-                          {adoptableMember(group) ? (
-                            <a
-                              href={`/admin/models?tab=registry&adopt=${encodeURIComponent(
-                                adoptableMember(group)!.id
-                              )}`}
-                              className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
-                            >
-                              채택
-                            </a>
-                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -767,13 +914,13 @@ export function AdminModelDiscoveryPanel() {
             </table>
             {visibleGroups.length === 0 ? (
               <p className="p-6 text-center text-xs text-zinc-500">
-                현재 필터에 맞는 모델 패밀리가 없습니다.
+                {m.table.noMatches}
               </p>
             ) : null}
           </div>
 
           <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-            <span>{filtered.length} families · page {currentPage} / {pageCount}</span>
+            <span>{m.pagination.summary(filtered.length, currentPage, pageCount)}</span>
             <div className="flex gap-1">
               <button
                 type="button"
@@ -781,7 +928,7 @@ export function AdminModelDiscoveryPanel() {
                 onClick={() => setPage(Math.max(1, currentPage - 1))}
                 className="rounded border border-zinc-700 px-2 py-1 disabled:opacity-40"
               >
-                Previous
+                {m.pagination.previous}
               </button>
               <button
                 type="button"
@@ -789,12 +936,90 @@ export function AdminModelDiscoveryPanel() {
                 onClick={() => setPage(Math.min(pageCount, currentPage + 1))}
                 className="rounded border border-zinc-700 px-2 py-1 disabled:opacity-40"
               >
-                Next
+                {m.pagination.next}
               </button>
             </div>
           </div>
         </>
       )}
+
+      </div>
+
+      {dialog ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && busyIds.size === 0) setDialog(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="model-discovery-decision-title"
+            className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-950 p-4 text-xs text-zinc-300"
+          >
+            <h3 id="model-discovery-decision-title" className="mb-2 text-sm font-semibold text-zinc-100">
+              {dialog.decision === "exclude"
+                ? m.dialog.excludeTitle(dialog.families.length, dialogItemCount)
+                : m.dialog.reopenTitle(dialog.families.length, dialogItemCount)}
+            </h3>
+            <p className="mb-3 leading-relaxed text-zinc-400">
+              {dialog.decision === "exclude" ? m.dialog.excludeNotice : m.dialog.reopenNotice}
+            </p>
+            {dialog.decision === "exclude" ? (
+              <fieldset className="mb-3 space-y-1">
+                <legend className="mb-1 font-medium text-zinc-200">{m.dialog.reasonLegend}</legend>
+                {WORK_ITEM_EXCLUSION_REASONS.map((code, index) => (
+                  <label key={code} className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="model-discovery-exclusion-reason"
+                      value={code}
+                      checked={reasonCode === code}
+                      onChange={() => setReasonCode(code)}
+                      autoFocus={index === 0}
+                    />
+                    {m.exclusionReasons[code]}
+                  </label>
+                ))}
+              </fieldset>
+            ) : null}
+            <label className="mb-3 block">
+              <span className="mb-1 block font-medium text-zinc-200">
+                {dialog.decision === "reopen" || reasonCode === "other"
+                  ? m.dialog.operatorReasonRequired
+                  : m.dialog.operatorReasonOptional}
+              </span>
+              <textarea
+                value={operatorReason}
+                onChange={(event) => setOperatorReason(event.target.value)}
+                maxLength={1_000}
+                rows={3}
+                autoFocus={dialog.decision === "reopen"}
+                className={`${selectClass} w-full`}
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={busyIds.size > 0}
+                onClick={() => setDialog(null)}
+                className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 disabled:opacity-40"
+              >
+                {m.dialog.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={dialogReasonMissing || busyIds.size > 0}
+                onClick={() => void submitDecision()}
+                className="rounded border border-zinc-500 bg-zinc-800 px-3 py-1.5 font-semibold text-zinc-100 disabled:opacity-40"
+              >
+                {dialog.decision === "exclude" ? m.dialog.confirmExclude : m.dialog.confirmReopen}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

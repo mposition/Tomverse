@@ -2,6 +2,8 @@ import Link from "next/link";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { AdminSnapshotActions } from "@/components/admin/AdminSnapshotActions";
 import type { AdminEnvCheck } from "@/lib/adminEnvironmentChecks";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminOverviewMessages } from "@/lib/adminMessages/overview";
 
 /**
  * The whole Overview page, as one structure.
@@ -62,7 +64,7 @@ function KpiCard({ label, value, detail, tone }: Kpi) {
   );
 }
 
-export function AdminOverviewSummary({
+export async function AdminOverviewSummary({
   generatedAt,
   adminRole,
   healthScore,
@@ -91,6 +93,7 @@ export function AdminOverviewSummary({
   recentActivityLimit: number;
   snapshotReport: string;
 }) {
+  const { summary: m } = await getAdminMessages(adminOverviewMessages);
   const missingEnv = envChecks.filter((check) => !check.configured);
 
   return (
@@ -98,9 +101,9 @@ export function AdminOverviewSummary({
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0">
-            <h2 className="text-xl font-black text-white">Operations snapshot</h2>
+            <h2 className="text-xl font-black text-white">{m.snapshotTitle}</h2>
             <p className="mt-1 text-sm leading-6 text-zinc-400">
-              Generated {generatedAt} UTC · signed in as {adminRole}.
+              {m.generated(generatedAt, adminRole)}
             </p>
           </div>
           <AdminSnapshotActions report={snapshotReport} />
@@ -108,9 +111,9 @@ export function AdminOverviewSummary({
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
-            label="Health score"
+            label={m.healthScore}
             value={String(healthScore)}
-            detail="Readiness out of 100, weighted by outages, queue depth, and missing configuration."
+            detail={m.healthScoreDetail}
             tone="blue"
           />
           {operationalKpis.map((kpi) => (
@@ -120,12 +123,9 @@ export function AdminOverviewSummary({
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <h2 className="text-xl font-black text-white">
-          Revenue and retention snapshot
-        </h2>
+        <h2 className="text-xl font-black text-white">{m.revenueTitle}</h2>
         <p className="mt-1 text-sm leading-6 text-zinc-400">
-          Paid conversion, active plan mix, promotions, refunds, and subscriptions
-          scheduled to cancel.
+          {m.revenueDescription}
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {commercialKpis.map((kpi) => (
@@ -137,22 +137,21 @@ export function AdminOverviewSummary({
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
         <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-xl font-black text-white">Launch readiness queue</h2>
+            <h2 className="text-xl font-black text-white">{m.launchQueueTitle}</h2>
             <Link
               href="/admin/work-queue"
               className="text-xs font-bold text-blue-300 hover:text-blue-200"
             >
-              Open work queue
+              {m.openWorkQueue}
             </Link>
           </div>
           <p className="mt-1 text-sm leading-6 text-zinc-400">
-            The highest-signal items to review before they become user-facing
-            incidents. Capped at six; the work queue lists every open item.
+            {m.launchQueueDescription}
           </p>
           <div className="mt-5 grid gap-2">
             {needsAttention.length === 0 ? (
               <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-                No immediate operational issues detected.
+                {m.noIssues}
               </div>
             ) : (
               needsAttention.map((item) => (
@@ -170,11 +169,11 @@ export function AdminOverviewSummary({
         </section>
 
         <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-          <h2 className="text-xl font-black text-white">Environment health</h2>
+          <h2 className="text-xl font-black text-white">{m.environmentTitle}</h2>
           <p className="mt-1 text-sm leading-6 text-zinc-400">
             {missingEnv.length === 0
-              ? `All ${envChecks.length} tracked variables are configured.`
-              : `${missingEnv.length} of ${envChecks.length} tracked variables are not configured.`}
+              ? m.environmentAllConfigured(envChecks.length)
+              : m.environmentMissing(missingEnv.length, envChecks.length)}
           </p>
           <div className="mt-4 grid gap-2">
             {missingEnv.map((check) => (
@@ -217,7 +216,7 @@ export function AdminOverviewSummary({
           */}
           <details className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50">
             <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-zinc-300">
-              Show all {envChecks.length} tracked variables
+              {m.showAllVariables(envChecks.length)}
             </summary>
             <div className="grid gap-2 px-3 pb-3">
               {envChecks.map((check) => (
@@ -236,12 +235,12 @@ export function AdminOverviewSummary({
                   {check.configured ? (
                     <CheckCircle2
                       className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300"
-                      aria-label="Configured"
+                      aria-label={m.configured}
                     />
                   ) : (
                     <XCircle
                       className="mt-0.5 h-4 w-4 shrink-0 text-amber-300"
-                      aria-label="Not configured"
+                      aria-label={m.notConfigured}
                     />
                   )}
                 </div>
@@ -253,24 +252,21 @@ export function AdminOverviewSummary({
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-xl font-black text-white">
-            Latest administrator changes
-          </h2>
+          <h2 className="text-xl font-black text-white">{m.latestChangesTitle}</h2>
           <Link
             href="/admin/audit"
             className="shrink-0 text-xs font-bold text-blue-300 hover:text-blue-200"
           >
-            Open audit log
+            {m.openAuditLog}
           </Link>
         </div>
         <p className="mt-1 text-sm leading-6 text-zinc-400">
-          The {recentActivityLimit} most recent audit entries, newest first. Not a
-          count of all administrator activity.
+          {m.latestChangesDescription(recentActivityLimit)}
         </p>
         <div className="mt-4 grid gap-2">
           {recentActivity.length === 0 ? (
             <p className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-400">
-              No administrator activity has been recorded yet.
+              {m.noActivity}
             </p>
           ) : (
             recentActivity.map((entry) => (
@@ -283,7 +279,7 @@ export function AdminOverviewSummary({
                     {entry.summary}
                   </p>
                   <p className="mt-1 truncate text-xs text-zinc-400">
-                    {entry.actorEmail || "Administrator"} · {entry.action}
+                    {entry.actorEmail || m.fallbackActor} · {entry.action}
                   </p>
                 </div>
                 <span className="text-xs text-zinc-500">

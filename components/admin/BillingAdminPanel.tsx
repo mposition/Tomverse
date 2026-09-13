@@ -36,7 +36,9 @@ import {
   type BillingCurrency,
 } from "@/lib/billingMarkets";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminBillingMessages } from "@/lib/adminMessages/billing";
 import { publishPromotionDraftState } from "@/lib/promotionDiagnosticsEvents";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 type BillingConfigPayload = {
   plans: BillingPlanConfig[];
@@ -185,6 +187,7 @@ function PlanEditor({
   plan: EditablePlan;
   onChange: (plan: EditablePlan) => void;
 }) {
+  const m = useAdminMessages(adminBillingMessages).plan;
   const hasStripeIds = Boolean(plan.stripeProductId && plan.stripePriceId);
   const annualSavings = plan.monthlyPriceCents > 0
     ? Math.max(0, 100 - Math.round((plan.annualPriceCents / (plan.monthlyPriceCents * 12)) * 100))
@@ -197,7 +200,7 @@ function PlanEditor({
           <div className="flex items-center gap-2">
             <h3 className="text-xl font-black text-white">{plan.name}</h3>
             <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusPill(plan.isActive)}`}>
-              {plan.isActive ? "Active" : "Hidden"}
+              {plan.isActive ? m.active : m.hidden}
             </span>
           </div>
           <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
@@ -205,7 +208,7 @@ function PlanEditor({
           </p>
         </div>
         <label className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs font-semibold text-zinc-300">
-          Active
+          {m.active}
           <input
             type="checkbox"
             checked={plan.isActive}
@@ -217,21 +220,21 @@ function PlanEditor({
 
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">Monthly</p>
+          <p className="text-xs font-semibold text-zinc-500">{m.monthly}</p>
           <p className="mt-1 text-lg font-black text-white">{money(plan.monthlyPriceCents)}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">Annual</p>
+          <p className="text-xs font-semibold text-zinc-500">{m.annual}</p>
           <p className="mt-1 text-lg font-black text-white">{money(plan.annualPriceCents)}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">Annual save</p>
+          <p className="text-xs font-semibold text-zinc-500">{m.annualSave}</p>
           <p className="mt-1 text-lg font-black text-white">{annualSavings}%</p>
         </div>
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <Field label="Monthly price USD">
+        <Field label={m.monthlyPriceUsd}>
           <TextInput
             type="number"
             min="0"
@@ -242,7 +245,7 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label="Annual price USD">
+        <Field label={m.annualPriceUsd}>
           <TextInput
             type="number"
             min="0"
@@ -253,7 +256,7 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label="Daily AI response credits (0 = no daily guardrail)">
+        <Field label={m.dailyCredits}>
           <TextInput
             type="number"
             min="0"
@@ -263,7 +266,7 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label="Monthly AI response credits">
+        <Field label={m.monthlyCredits}>
           <TextInput
             type="number"
             min="0"
@@ -273,7 +276,7 @@ function PlanEditor({
             }
           />
         </Field>
-        <Field label="Max compared models">
+        <Field label={m.maxModels}>
           <TextInput
             type="number"
             min="1"
@@ -285,15 +288,15 @@ function PlanEditor({
           />
         </Field>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
-          <p className="text-xs font-semibold text-zinc-500">Stripe status</p>
+          <p className="text-xs font-semibold text-zinc-500">{m.stripeStatus}</p>
           <p className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${statusPill(hasStripeIds)}`}>
-            {hasStripeIds ? "Linked" : "Price ID needed"}
+            {hasStripeIds ? m.linked : m.priceIdNeeded}
           </p>
         </div>
       </div>
 
       <div className="mt-5 grid gap-3">
-        <Field label="Stripe Product ID">
+        <Field label={m.stripeProductId}>
           <TextInput
             value={plan.stripeProductId || ""}
             onChange={(event) =>
@@ -303,7 +306,7 @@ function PlanEditor({
           />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Stripe Monthly Price ID">
+          <Field label={m.stripeMonthlyPriceId}>
             <TextInput
               value={plan.stripePriceId || ""}
               onChange={(event) =>
@@ -312,7 +315,7 @@ function PlanEditor({
               placeholder="price_..."
             />
           </Field>
-          <Field label="Stripe Annual Price ID">
+          <Field label={m.stripeAnnualPriceId}>
             <TextInput
               value={plan.stripeAnnualPriceId || ""}
               onChange={(event) =>
@@ -326,9 +329,9 @@ function PlanEditor({
 
       <div className="mt-5 flex flex-wrap gap-2">
         {[
-          ["allowAttachments", "Attachments"],
-          ["allowSharing", "Sharing"],
-          ["allowDownloads", "Downloads"],
+          ["allowAttachments", m.features.allowAttachments],
+          ["allowSharing", m.features.allowSharing],
+          ["allowDownloads", m.features.allowDownloads],
         ].map(([key, label]) => (
           <label
             key={key}
@@ -364,6 +367,7 @@ function PromotionEditor({
   onChange: (promotion: EditablePromotion) => void;
   onDelete: () => void;
 }) {
+  const m = useAdminMessages(adminBillingMessages).promotion;
   // Whether a fixed amount may be typed here at all is decided by what is
   // stored, not by what the draft currently says: a promotion that is a
   // percentage one in the database can never acquire an amount, and clearing
@@ -387,18 +391,20 @@ function PromotionEditor({
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-lg font-black text-white">{promotion.code}</h3>
             <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusPill(promotion.isActive)}`}>
-              {promotion.isActive ? "Active" : "Paused"}
+              {promotion.isActive ? m.active : m.paused}
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-500">
-            Redeemed {promotion.redeemedCount || 0}
-            {promotion.maxRedemptions ? ` / ${promotion.maxRedemptions}` : ""}
-            {remaining !== null ? `, ${remaining} left` : ""}
+            {m.redeemed(
+              promotion.redeemedCount || 0,
+              promotion.maxRedemptions,
+              remaining
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300">
-            Active
+            {m.active}
             <input
               type="checkbox"
               checked={promotion.isActive}
@@ -412,7 +418,7 @@ function PromotionEditor({
             type="button"
             onClick={onDelete}
             className="rounded-xl border border-red-500/30 p-2 text-red-300 hover:bg-red-500/10"
-            aria-label="Delete promotion"
+            aria-label={m.deletePromotion}
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -420,7 +426,7 @@ function PromotionEditor({
       </div>
 
       <div className="mt-5 grid gap-3 md:grid-cols-3">
-        <Field label="Code">
+        <Field label={m.code}>
           <TextInput
             value={promotion.code}
             onChange={(event) =>
@@ -428,7 +434,7 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Discount percent">
+        <Field label={m.discountPercent}>
           <TextInput
             type="number"
             min="0"
@@ -439,7 +445,7 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Fixed discount USD (deprecated)">
+        <Field label={m.fixedDiscountUsd}>
           <TextInput
             type="number"
             min="0"
@@ -464,8 +470,8 @@ function PromotionEditor({
             className="mt-1.5 text-[11px] font-medium leading-4 text-zinc-500"
           >
             {fixedAmountEditable
-              ? "USD checkout only. This amount can be lowered, never raised, and this code cannot be reactivated once paused."
-              : "New fixed-amount promotions are not accepted -- the amount is USD and would be unusable in every other market. Use a percentage discount."}
+              ? m.fixedAmountEditableNote
+              : m.fixedAmountLockedNote}
           </p>
         </Field>
       </div>
@@ -481,7 +487,7 @@ function PromotionEditor({
       ) : null}
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <Field label="Fulfillment">
+        <Field label={m.fulfillment}>
           <select
             value={promotion.fulfillmentType}
             onChange={(event) => {
@@ -499,11 +505,11 @@ function PromotionEditor({
             }}
             className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none focus:border-blue-500"
           >
-            <option value="stripe_subscription">Stripe subscription</option>
-            <option value="internal_pass">Internal pass (no renewal)</option>
+            <option value="stripe_subscription">{m.stripeSubscription}</option>
+            <option value="internal_pass">{m.internalPass}</option>
           </select>
         </Field>
-        <Field label="Pass duration days">
+        <Field label={m.passDurationDays}>
           <TextInput
             type="number"
             min="1"
@@ -518,7 +524,7 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Duration months">
+        <Field label={m.durationMonths}>
           <TextInput
             type="number"
             min="1"
@@ -529,7 +535,7 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Max redemptions">
+        <Field label={m.maxRedemptions}>
           <TextInput
             type="number"
             min="1"
@@ -545,7 +551,7 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Starts">
+        <Field label={m.starts}>
           <TextInput
             type="date"
             value={toDateInputValue(promotion.startsAt)}
@@ -554,7 +560,7 @@ function PromotionEditor({
             }
           />
         </Field>
-        <Field label="Ends">
+        <Field label={m.ends}>
           <TextInput
             type="date"
             value={toDateInputValue(promotion.endsAt)}
@@ -567,9 +573,7 @@ function PromotionEditor({
 
       {promotion.fulfillmentType === "internal_pass" ? (
         <p className="mt-3 rounded-xl border border-blue-500/20 bg-blue-500/10 px-3 py-2 text-xs font-semibold leading-5 text-blue-200">
-          Internal passes collect no payment method, do not renew, and return the
-          user to Free after the configured number of days. Use 100% discount and
-          Pro-only eligibility.
+          {m.internalPassNote}
         </p>
       ) : null}
 
@@ -607,21 +611,19 @@ function PromotionEditor({
             }
             className="h-4 w-4 accent-amber-500"
           />
-          Allow stacking with annual discount
+          {m.allowAnnualStacking}
         </label>
       </div>
       <p className="mt-2 text-xs leading-5 text-zinc-500">
-        Annual stacking is denied by default and must be explicitly enabled for
-        this code. Active codes always require both a redemption cap and an end
-        date.
+        {m.stackingNote}
       </p>
 
       <details className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
         <summary className="cursor-pointer text-sm font-bold text-zinc-200">
-          Stripe coupon linkage
+          {m.stripeCouponLinkage}
         </summary>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Field label="Stripe Coupon ID">
+          <Field label={m.stripeCouponId}>
             <TextInput
               value={promotion.stripeCouponId || ""}
               onChange={(event) =>
@@ -630,7 +632,7 @@ function PromotionEditor({
               placeholder="coupon_..."
             />
           </Field>
-          <Field label="Stripe Promotion Code ID">
+          <Field label={m.stripePromotionCodeId}>
             <TextInput
               value={promotion.stripePromotionCodeId || ""}
               onChange={(event) =>
@@ -649,11 +651,7 @@ function PromotionEditor({
 }
 
 const LOCALIZED_PLAN_CURRENCIES = ["AUD", "CNY", "EUR", "KRW"] as const;
-const CREDIT_PACK_LABELS = {
-  starter_500: "Starter · 500 credits",
-  project_1500: "Project · 1,500 credits",
-  power_4000: "Power · 4,000 credits",
-} as const;
+const CREDIT_PACK_IDS = ["starter_500", "project_1500", "power_4000"] as const;
 
 function LocalizedPriceEditor({
   catalog,
@@ -662,6 +660,7 @@ function LocalizedPriceEditor({
   catalog: BillingPriceCatalog;
   onChange: (catalog: BillingPriceCatalog) => void;
 }) {
+  const m = useAdminMessages(adminBillingMessages).prices;
   const updatePlanPrice = (
     planId: "pro" | "max",
     currency: (typeof LOCALIZED_PLAN_CURRENCIES)[number],
@@ -703,23 +702,20 @@ function LocalizedPriceEditor({
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-black text-white">Fixed subscription prices</h3>
+        <h3 className="text-lg font-black text-white">{m.subscriptionTitle}</h3>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-zinc-400">
-          These are the exact amounts charged by Stripe for each billing market.
-          USD remains managed in the Plans tab. KRW is zero-decimal; all other
-          currencies accept two decimal places. Changes apply to new checkouts;
-          existing subscriptions retain the price accepted at purchase.
+          {m.subscriptionDescription}
         </p>
       </div>
       <div className="overflow-x-auto rounded-2xl border border-zinc-800">
         <table className="min-w-[860px] w-full text-left text-sm">
           <thead className="bg-zinc-900 text-xs uppercase tracking-[0.12em] text-zinc-500">
             <tr>
-              <th className="px-4 py-3">Currency</th>
-              <th className="px-4 py-3">Pro monthly</th>
-              <th className="px-4 py-3">Pro annual</th>
-              <th className="px-4 py-3">Max monthly</th>
-              <th className="px-4 py-3">Max annual</th>
+              <th className="px-4 py-3">{m.currency}</th>
+              <th className="px-4 py-3">{m.proMonthly}</th>
+              <th className="px-4 py-3">{m.proAnnual}</th>
+              <th className="px-4 py-3">{m.maxMonthly}</th>
+              <th className="px-4 py-3">{m.maxAnnual}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -745,7 +741,7 @@ function LocalizedPriceEditor({
                             event.target.value
                           )
                         }
-                        aria-label={`${planId} ${interval} ${currency}`}
+                        aria-label={m.priceInputLabel(planId, interval, currency)}
                       />
                     </td>
                   ))
@@ -757,19 +753,19 @@ function LocalizedPriceEditor({
       </div>
 
       <div>
-        <h3 className="text-lg font-black text-white">Fixed credit-pack prices</h3>
+        <h3 className="text-lg font-black text-white">{m.creditPackTitle}</h3>
         <p className="mt-1 text-sm text-zinc-400">
-          Credit entitlements stay unchanged; only the one-time checkout amount is edited here.
+          {m.creditPackDescription}
         </p>
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
-        {(Object.keys(CREDIT_PACK_LABELS) as Array<keyof typeof CREDIT_PACK_LABELS>).map(
+        {CREDIT_PACK_IDS.map(
           (packId) => (
             <article key={packId} className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
-              <h4 className="font-black text-white">{CREDIT_PACK_LABELS[packId]}</h4>
+              <h4 className="font-black text-white">{m.creditPacks[packId]}</h4>
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
                 {BILLING_CURRENCIES.map((currency) => (
-                  <Field key={currency} label={`${currency} checkout amount`}>
+                  <Field key={currency} label={m.checkoutAmount(currency)}>
                     <TextInput
                       type="number"
                       min="0.01"
@@ -803,6 +799,7 @@ export function BillingAdminPanel({
   activeSubscriptionCount,
   initialTab = "plans",
 }: Props) {
+  const m = useAdminMessages(adminBillingMessages);
   const [draftPlans, setDraftPlans] = useState<EditablePlan[]>(plans);
   const [draftPromotions, setDraftPromotions] =
     useState<EditablePromotion[]>(promotions);
@@ -919,52 +916,50 @@ export function BillingAdminPanel({
       .filter((plan) => plan.id !== "free")
       .forEach((plan) => {
         if (!plan.stripeProductId?.startsWith("prod_")) {
-          warnings.push(`${plan.name}: Stripe product ID should start with prod_.`);
+          warnings.push(m.warnings.productId(plan.name));
         }
         if (!plan.stripePriceId?.startsWith("price_")) {
-          warnings.push(`${plan.name}: monthly Stripe price ID should start with price_.`);
+          warnings.push(m.warnings.monthlyPriceId(plan.name));
         }
         if (!plan.stripeAnnualPriceId?.startsWith("price_")) {
-          warnings.push(`${plan.name}: annual Stripe price ID should start with price_.`);
+          warnings.push(m.warnings.annualPriceId(plan.name));
         }
       });
     draftPromotions.forEach((promotion) => {
       if (promotion.discountPercent > 100) {
-        warnings.push(`${promotion.code}: discount percent cannot exceed 100%.`);
+        warnings.push(m.warnings.discountOver100(promotion.code));
       }
       if (promotion.appliesToPlanIds.length === 0) {
-        warnings.push(`${promotion.code}: choose at least one eligible plan.`);
+        warnings.push(m.warnings.noEligiblePlan(promotion.code));
       }
       if (
         promotion.isActive &&
         (!promotion.maxRedemptions || !promotion.endsAt)
       ) {
-        warnings.push(
-          `${promotion.code}: active codes require max redemptions and an end date.`
-        );
+        warnings.push(m.warnings.activeNeedsCapAndEnd(promotion.code));
       }
       if (
         promotion.startsAt &&
         promotion.endsAt &&
         new Date(promotion.startsAt) >= new Date(promotion.endsAt)
       ) {
-        warnings.push(`${promotion.code}: end date must be after start date.`);
+        warnings.push(m.warnings.endBeforeStart(promotion.code));
       }
       if (
         promotion.stripeCouponId &&
         !promotion.stripeCouponId.startsWith("coupon_")
       ) {
-        warnings.push(`${promotion.code}: Stripe coupon ID should start with coupon_.`);
+        warnings.push(m.warnings.couponId(promotion.code));
       }
       if (
         promotion.stripePromotionCodeId &&
         !promotion.stripePromotionCodeId.startsWith("promo_")
       ) {
-        warnings.push(`${promotion.code}: Stripe promotion code ID should start with promo_.`);
+        warnings.push(m.warnings.promotionCodeId(promotion.code));
       }
     });
     return warnings;
-  }, [draftPlans, draftPromotions]);
+  }, [draftPlans, draftPromotions, m]);
 
   const totals = useMemo(() => {
     const paidPlans = draftPlans.filter((plan) => plan.id !== "free");
@@ -1004,9 +999,9 @@ export function BillingAdminPanel({
         throw new Error(data?.error || "Billing refresh failed");
       }
       applyResponse(data);
-      dispatchAppToast("Billing settings reloaded. The form now matches what is stored.", "success");
+      dispatchAppToast(m.toasts.reloaded, "success");
     } catch {
-      dispatchAppToast("Billing settings could not be reloaded, so the form still shows the values it had. Retry before editing.", "error");
+      dispatchAppToast(m.toasts.reloadFailed, "error");
     } finally {
       setIsRefreshing(false);
     }
@@ -1016,7 +1011,7 @@ export function BillingAdminPanel({
     if (isSaving) return;
     if (promotionRefusals.size > 0) {
       dispatchAppToast(
-        `${Array.from(promotionRefusals.values())[0]} Nothing was saved.`,
+        m.toasts.nothingSaved(Array.from(promotionRefusals.values())[0]),
         "error"
       );
       return;
@@ -1036,16 +1031,16 @@ export function BillingAdminPanel({
       });
       const data = (await response.json().catch(() => null)) as AdminBillingResponse | null;
       if (data?.code === PROMOTION_POLICY_REFUSAL_CODE && data.error) {
-        dispatchAppToast(`${data.error} Nothing was saved.`, "error");
+        dispatchAppToast(m.toasts.nothingSaved(data.error), "error");
         return;
       }
       if (!response.ok || !data?.plans || !data?.promotions || !data?.priceCatalog) {
         throw new Error(data?.error || "Billing save failed");
       }
       applyResponse(data);
-      dispatchAppToast("Billing settings saved. Plans, promotions and the price catalogue are live.", "success");
+      dispatchAppToast(m.toasts.saved, "success");
     } catch {
-      dispatchAppToast("Billing settings were not saved. Nothing changed -- retry, or reload to discard the edit.", "error");
+      dispatchAppToast(m.toasts.saveFailed, "error");
     } finally {
       setIsSaving(false);
     }
@@ -1080,7 +1075,7 @@ export function BillingAdminPanel({
           }
         | null;
       if (!response.ok || !data?.results) {
-        throw new Error(data?.error || "Stripe validation failed.");
+        throw new Error(data?.error || m.toasts.stripeValidationFailed);
       }
       setStripeValidation(data.results);
       const failed = data.results.some((result) =>
@@ -1089,12 +1084,12 @@ export function BillingAdminPanel({
         )
       );
       dispatchAppToast(
-        failed ? "Stripe validation found issues." : "Stripe IDs validated.",
+        failed ? m.toasts.stripeIssues : m.toasts.stripeValidated,
         failed ? "error" : "success"
       );
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Stripe validation failed.",
+        error instanceof Error ? error.message : m.toasts.stripeValidationFailed,
         "error"
       );
     } finally {
@@ -1109,15 +1104,13 @@ export function BillingAdminPanel({
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-blue-200">
               <CreditCard className="h-3.5 w-3.5" />
-              Billing control center
+              {m.header.eyebrow}
             </div>
             <h2 className="mt-3 text-2xl font-black text-white">
-              Plans, fixed market prices, Stripe IDs, and promotion codes
+              {m.header.title}
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-              These values are loaded from the production database and saved back through
-              the admin API. Stripe checkout reads the same records for monthly,
-              annual, and zero-dollar promotional upgrades.
+              {m.header.description}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1128,7 +1121,7 @@ export function BillingAdminPanel({
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Reload DB
+              {m.header.reloadDb}
             </button>
             <button
               type="button"
@@ -1137,52 +1130,50 @@ export function BillingAdminPanel({
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save to DB
+              {m.header.saveToDb}
             </button>
           </div>
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Paid users</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.paidUsers}</p>
             <p className="mt-2 text-2xl font-black text-white">{paidUserCount}</p>
             <p className="mt-1 text-xs font-semibold text-zinc-500">
-              Active Stripe: {activeSubscriptionCount}
+              {m.stats.activeStripe(activeSubscriptionCount)}
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Stripe linked</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.stripeLinked}</p>
             <p className="mt-2 text-2xl font-black text-white">
               {totals.linkedPlanCount}/{totals.paidPlanTypeCount}
             </p>
             <p className="mt-1 text-xs font-semibold text-zinc-500">
-              Paid plan types
+              {m.stats.paidPlanTypes}
             </p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Active promos</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.activePromos}</p>
             <p className="mt-2 text-2xl font-black text-white">{totals.activePromotionCount}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">DB sync</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">{m.stats.dbSync}</p>
             <p className="mt-2 flex items-center gap-2 text-sm font-bold text-emerald-300">
               <Database className="h-4 w-4" />
-              {lastSyncedAt ? `Synced ${lastSyncedAt}` : "Loaded on page open"}
+              {lastSyncedAt ? m.stats.synced(lastSyncedAt) : m.stats.loadedOnOpen}
             </p>
           </div>
         </div>
         <div className="mt-5 grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-200/80">
-              Unsaved changes
+              {m.unsaved.title}
             </p>
             <p className="mt-2 text-sm font-bold text-blue-100">
-              {dirtyPlanCount} plan change{dirtyPlanCount === 1 ? "" : "s"} ·{" "}
-              {dirtyPriceCount} market price change{dirtyPriceCount === 1 ? "" : "s"} ·{" "}
-              {dirtyPromotionCount} promotion change{dirtyPromotionCount === 1 ? "" : "s"}
+              {m.unsaved.summary(dirtyPlanCount, dirtyPriceCount, dirtyPromotionCount)}
             </p>
             <p className="mt-1 text-xs leading-5 text-blue-100/70">
-              Review this preview before saving. Checkout uses these DB records immediately after publish.
+              {m.unsaved.note}
             </p>
           </div>
           <div className={`rounded-2xl border p-4 ${
@@ -1199,7 +1190,7 @@ export function BillingAdminPanel({
                   ? "text-amber-200/80"
                   : "text-emerald-200/80"
             }`}>
-              Pre-save validation
+              {m.validation.title}
             </p>
             {promotionRefusals.size > 0 ? (
               <ul
@@ -1215,11 +1206,11 @@ export function BillingAdminPanel({
                 {stripeWarnings.slice(0, 5).map((warning) => (
                   <li key={warning}>- {warning}</li>
                 ))}
-                {stripeWarnings.length > 5 ? <li>- Plus {stripeWarnings.length - 5} more.</li> : null}
+                {stripeWarnings.length > 5 ? <li>- {m.validation.plusMore(stripeWarnings.length - 5)}</li> : null}
               </ul>
             ) : (
               <p className="mt-2 text-sm font-bold text-emerald-100">
-                Stripe ID formats and promotion rules look ready.
+                {m.validation.ready}
               </p>
             )}
           </div>
@@ -1231,11 +1222,10 @@ export function BillingAdminPanel({
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-200" />
                 <div>
                   <p className="text-sm font-bold text-amber-100">
-                    Review before publishing billing changes
+                    {m.review.title}
                   </p>
                   <p className="mt-1 text-xs leading-5 text-amber-100/80">
-                    Checkout uses these values immediately. Confirm that plan limits,
-                    promotion windows, redemption caps, and Stripe IDs are correct.
+                    {m.review.description}
                   </p>
                 </div>
               </div>
@@ -1245,7 +1235,7 @@ export function BillingAdminPanel({
                   onClick={() => setShowSaveReview(false)}
                   className="cursor-pointer rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
                 >
-                  Keep editing
+                  {m.review.keepEditing}
                 </button>
                 <button
                   type="button"
@@ -1253,7 +1243,7 @@ export function BillingAdminPanel({
                   disabled={isSaving}
                   className="cursor-pointer rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-zinc-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Publish changes
+                  {m.review.publish}
                 </button>
               </div>
             </div>
@@ -1264,9 +1254,9 @@ export function BillingAdminPanel({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-5 py-4">
         <div className="inline-flex rounded-2xl border border-zinc-800 bg-zinc-900 p-1">
           {[
-            ["plans", "Plans", WalletCards],
-            ["prices", "Market prices", Globe2],
-            ["promotions", "Promotions", TicketPercent],
+            ["plans", m.tabs.plans, WalletCards],
+            ["prices", m.tabs.prices, Globe2],
+            ["promotions", m.tabs.promotions, TicketPercent],
           ].map(([value, label, Icon]) => {
             const active = activeTab === value;
             const TypedIcon = Icon as typeof WalletCards;
@@ -1292,7 +1282,7 @@ export function BillingAdminPanel({
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
             <CheckCircle2 className="h-3.5 w-3.5" />
-            Connected to BillingPlan / AppSetting / BillingPromotion
+            {m.toolbar.connected}
           </div>
           <button
             type="button"
@@ -1301,7 +1291,7 @@ export function BillingAdminPanel({
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Reload
+            {m.toolbar.reload}
           </button>
           <button
             type="button"
@@ -1310,7 +1300,7 @@ export function BillingAdminPanel({
             className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-xs font-bold text-purple-100 hover:bg-purple-500/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isValidatingStripe ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
-            Validate Stripe
+            {m.toolbar.validateStripe}
           </button>
           <button
             type="button"
@@ -1319,7 +1309,7 @@ export function BillingAdminPanel({
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            Save changes
+            {m.toolbar.saveChanges}
           </button>
         </div>
       </div>
@@ -1328,14 +1318,14 @@ export function BillingAdminPanel({
         <div className="border-b border-zinc-800 px-5 py-4">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
             <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-              Stripe validation
+              {m.stripeValidation.title}
             </p>
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {stripeValidation.map((result) => (
                 <div key={result.planId} className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
                   <div className="font-black text-white">{result.name}</div>
                   <div className="mt-1 text-zinc-400">
-                    Product {result.product} · Monthly {result.monthlyPrice} · Annual {result.annualPrice}
+                    {m.stripeValidation.result(result.product, result.monthlyPrice, result.annualPrice)}
                   </div>
                   {result.errors.length > 0 ? (
                     <div className="mt-1 truncate text-red-300">{result.errors[0]}</div>
@@ -1373,8 +1363,8 @@ export function BillingAdminPanel({
                 className="mb-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-semibold leading-5 text-amber-100"
               >
                 {catalogSource === "created_from_default"
-                  ? "There was no stored price catalogue, so these are the code defaults and they have just been written to the database."
-                  : "The stored price catalogue could not be read, so these are the code defaults. The timestamp above belongs to the unreadable row, not to these numbers. Saving replaces the row."}
+                  ? m.prices.fallbackCreated
+                  : m.prices.fallbackUnreadable}
               </p>
             ) : null}
             <LocalizedPriceEditor
@@ -1386,10 +1376,9 @@ export function BillingAdminPanel({
           <div>
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-lg font-black text-white">Promotion codes</h3>
+                <h3 className="text-lg font-black text-white">{m.promotions.title}</h3>
                 <p className="mt-1 text-sm text-zinc-400">
-                  Active codes require a redemption cap and end date. Annual
-                  discount stacking is denied unless explicitly enabled per code.
+                  {m.promotions.description}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1401,7 +1390,7 @@ export function BillingAdminPanel({
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900"
                 >
                   <Plus className="h-4 w-4" />
-                  Add code
+                  {m.promotions.addCode}
                 </button>
                 <button
                   type="button"
@@ -1410,7 +1399,7 @@ export function BillingAdminPanel({
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Save to DB
+                  {m.header.saveToDb}
                 </button>
               </div>
             </div>
@@ -1445,9 +1434,9 @@ export function BillingAdminPanel({
       </div>
       <div className="flex flex-col gap-3 border-t border-zinc-800 bg-zinc-900/60 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-bold text-white">Ready to publish billing changes?</p>
+          <p className="text-sm font-bold text-white">{m.footer.title}</p>
           <p className="mt-1 text-xs text-zinc-400">
-            Plan prices, localized market prices, Stripe IDs, and promotion rules are applied after saving to DB.
+            {m.footer.description}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -1458,7 +1447,7 @@ export function BillingAdminPanel({
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Reload DB
+            {m.header.reloadDb}
           </button>
           <button
             type="button"
@@ -1467,7 +1456,7 @@ export function BillingAdminPanel({
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save to DB
+            {m.header.saveToDb}
           </button>
         </div>
       </div>

@@ -13,19 +13,14 @@ import {
   adminEnvironmentChecks,
   adminHealthScore,
 } from "@/lib/adminEnvironmentChecks";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminOverviewMessages } from "@/lib/adminMessages/overview";
 import { getAdminActivePaidWhere, getAdminUserStats } from "@/lib/adminUsers";
 import { authOptions } from "@/lib/auth";
 import { getBillingPlans } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
-import type { ProviderHealthStatus } from "@/lib/providerMonitoring";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
-
-const statusCopy: Record<ProviderHealthStatus, string> = {
-  available: "Available",
-  limited: "Limited",
-  outage: "Outage",
-};
 
 /**
  * Overview loads what Overview shows, and nothing else.
@@ -37,6 +32,7 @@ const statusCopy: Record<ProviderHealthStatus, string> = {
  * the ones its own sections display.
  */
 export default async function AdminOverviewPage() {
+  const m = await getAdminMessages(adminOverviewMessages);
   const now = new Date();
   const dayStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
@@ -147,7 +143,10 @@ export default async function AdminOverviewPage() {
     ...dashboard.providers
       .filter((provider) => provider.status !== "available")
       .map((provider) => ({
-        title: `${provider.displayName} is ${statusCopy[provider.status]}`,
+        title: m.attention.providerStatus(
+          provider.displayName,
+          m.providerStatus[provider.status]
+        ),
         detail: provider.recentErrorCode || provider.fallback.reason,
         tone: (provider.status === "outage" ? "red" : "amber") as AttentionItem["tone"],
         href: `/admin/providers/${provider.provider}`,
@@ -155,19 +154,16 @@ export default async function AdminOverviewPage() {
     ...dashboard.providers
       .filter((provider) => !provider.apiKeyConfigured)
       .map((provider) => ({
-        title: `${provider.displayName} API key missing`,
-        detail:
-          "Provider calls will fail or remain unavailable until the key is configured.",
+        title: m.attention.apiKeyMissing(provider.displayName),
+        detail: m.attention.apiKeyMissingDetail,
         tone: "zinc" as const,
         href: `/admin/providers/${provider.provider}`,
       })),
     ...(openFeedbackCount > 0
       ? [
           {
-            title: `${openFeedbackCount} open feedback item${
-              openFeedbackCount === 1 ? "" : "s"
-            }`,
-            detail: "Review user-reported issues before launch traffic grows.",
+            title: m.attention.openFeedback(openFeedbackCount),
+            detail: m.attention.openFeedbackDetail,
             tone: "blue" as const,
             href: "/admin/support?tab=feedback",
           },
@@ -176,11 +172,8 @@ export default async function AdminOverviewPage() {
     ...(pendingRefundCount > 0
       ? [
           {
-            title: `${pendingRefundCount} pending refund request${
-              pendingRefundCount === 1 ? "" : "s"
-            }`,
-            detail:
-              "Review billing cancellation requests and approve or reject them before renewal disputes grow.",
+            title: m.attention.pendingRefunds(pendingRefundCount),
+            detail: m.attention.pendingRefundsDetail,
             tone: "amber" as const,
             href: "/admin/refunds",
           },
@@ -190,22 +183,22 @@ export default async function AdminOverviewPage() {
 
   const generatedAtLabel = dashboard.generatedAt.replace("T", " ").slice(0, 16);
   const snapshotReport = [
-    "Tomverse Admin Snapshot",
-    `Generated: ${generatedAtLabel} UTC`,
-    `Users: ${totalUsers} total / ${paidUsers} paid / ${activeSubscriptions} active subscriptions`,
-    `Providers: ${availableCount}/${dashboard.providers.length} available`,
-    `Estimated monthly spend: ${monthSpendLabel}`,
-    `Open feedback: ${openFeedbackCount}`,
-    `Pending refunds: ${pendingRefundCount}`,
-    `Missing environment setup: ${
+    m.report.title,
+    m.report.generated(generatedAtLabel),
+    m.report.users(totalUsers, paidUsers, activeSubscriptions),
+    m.report.providers(availableCount, dashboard.providers.length),
+    m.report.monthlySpend(monthSpendLabel),
+    m.report.openFeedback(openFeedbackCount),
+    m.report.pendingRefunds(pendingRefundCount),
+    m.report.missingEnv(
       envChecks
         .filter((check) => !check.configured)
         .map((check) => check.name)
-        .join(", ") || "none"
-    }`,
-    "Needs attention:",
+        .join(", ") || m.report.none
+    ),
+    m.report.needsAttention,
     needsAttention.map((item) => `- ${item.title}: ${item.detail}`).join("\n") ||
-      "- none",
+      m.report.noAttentionItems,
   ].join("\n");
 
   return (
@@ -218,59 +211,60 @@ export default async function AdminOverviewPage() {
         snapshotReport={snapshotReport}
         operationalKpis={[
           {
-            label: "Users",
+            label: m.kpi.users,
             value: String(totalUsers),
-            detail: `${paidUsers} paid · ${activeSubscriptions} active subscriptions`,
+            detail: m.kpi.usersDetail(paidUsers, activeSubscriptions),
           },
           {
-            label: "Work queue",
+            label: m.kpi.workQueue,
             value: String(openFeedbackCount + pendingRefundCount),
-            detail: `${openFeedbackCount} feedback / ${pendingRefundCount} refunds`,
+            detail: m.kpi.workQueueDetail(openFeedbackCount, pendingRefundCount),
             tone: openFeedbackCount + pendingRefundCount > 0 ? "amber" : "zinc",
           },
           {
-            label: "Providers",
+            label: m.kpi.providers,
             value: `${availableCount} / ${dashboard.providers.length}`,
-            detail: `${limitedCount} limited · ${outageCount} outage`,
+            detail: m.kpi.providersDetail(limitedCount, outageCount),
             tone: outageCount > 0 ? "amber" : "zinc",
           },
           {
-            label: "Monthly spend",
+            label: m.kpi.monthlySpend,
             value: monthSpendLabel,
-            detail: `Estimated from reserved token budgets. ${
-              todayUsage._sum.count || 0
-            } plan credits today, ${monthlyUsage._sum.count || 0} this month (UTC).`,
+            detail: m.kpi.monthlySpendDetail(
+              todayUsage._sum.count || 0,
+              monthlyUsage._sum.count || 0
+            ),
           },
         ]}
         commercialKpis={[
           {
-            label: "Estimated MRR",
+            label: m.kpi.estimatedMrr,
             value: `$${(monthlyRevenueCents / 100).toFixed(0)}`,
-            detail: "Calculated from active Pro and Max monthly list prices.",
+            detail: m.kpi.estimatedMrrDetail,
             tone: "emerald",
           },
           {
-            label: "Paid conversion",
+            label: m.kpi.paidConversion,
             value: paidConversion,
-            detail: `${paidUsers} active paid users out of ${totalUsers} total accounts.`,
+            detail: m.kpi.paidConversionDetail(paidUsers, totalUsers),
             tone: "blue",
           },
           {
-            label: "Plan mix",
+            label: m.kpi.planMix,
             value: `${activeProCount} / ${activeMaxCount}`,
-            detail: "Active Pro / Max subscriptions.",
+            detail: m.kpi.planMixDetail,
             tone: "purple",
           },
           {
-            label: "Promo redemptions",
+            label: m.kpi.promoRedemptions,
             value: String(promotionRedemptions),
-            detail: "Total redeemed promotion records in the database.",
+            detail: m.kpi.promoRedemptionsDetail,
             tone: "amber",
           },
           {
-            label: "Churn watch",
+            label: m.kpi.churnWatch,
             value: String(cancelAtPeriodEndCount),
-            detail: `Cancel at period end. Approved refund rate ${refundRate}.`,
+            detail: m.kpi.churnWatchDetail(refundRate),
             tone: cancelAtPeriodEndCount > 0 ? "amber" : "zinc",
           },
         ]}

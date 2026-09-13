@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Clipboard, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminAuditMessages } from "@/lib/adminMessages/audit";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 export type AdminAuditRow = {
   id: string;
@@ -57,6 +59,7 @@ export function AdminAuditPanel({
   requestedEntryId = null,
   requestedEntry = null,
 }: Props) {
+  const m = useAdminMessages(adminAuditMessages);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -128,9 +131,9 @@ export function AdminAuditPanel({
 
     try {
       await navigator.clipboard.writeText(text);
-      dispatchAppToast("Audit event copied.", "success");
+      dispatchAppToast(m.toast.copied, "success");
     } catch {
-      dispatchAppToast("Could not copy audit event.", "error");
+      dispatchAppToast(m.toast.copyFailed, "error");
     }
   };
 
@@ -143,12 +146,12 @@ export function AdminAuditPanel({
         error?: string;
       } | null;
       if (!response.ok || !data?.audit) {
-        throw new Error(data?.error || "Could not load audit detail.");
+        throw new Error(data?.error || m.toast.detailFailed);
       }
       setDetail(data.audit);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not load audit detail.",
+        error instanceof Error ? error.message : m.toast.detailFailed,
         "error"
       );
     } finally {
@@ -189,15 +192,12 @@ export function AdminAuditPanel({
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Audit
+            {m.eyebrow}
           </p>
-          <h2 className="mt-2 text-2xl font-black text-white">Admin activity log</h2>
+          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Search sensitive operational actions, copy incident context, and review
-            billing or user-impacting changes from the console.
-            {rowLimit
-              ? ` The ${rowLimit} most recent entries; filters below search within them.`
-              : ""}
+            {m.description}
+            {rowLimit ? m.rowLimit(rowLimit) : ""}
           </p>
 
           {/* A row named in the URL, rendered whether or not it is in that
@@ -211,7 +211,7 @@ export function AdminAuditPanel({
               data-testid="admin-audit-requested-entry"
             >
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-blue-300">
-                Entry from the link
+                {m.requestedEntry}
               </p>
               <p className="mt-2 font-mono text-xs break-all text-zinc-400">
                 {requestedEntry.id}
@@ -223,7 +223,7 @@ export function AdminAuditPanel({
                 {dateTimeLabel(requestedEntry.createdAt)} UTC ·{" "}
                 {requestedEntry.actorEmail ||
                   requestedEntry.actorUserId ||
-                  "Unknown admin"}{" "}
+                  m.unknownAdmin}{" "}
                 · {requestedEntry.targetType}
                 {requestedEntry.targetId ? ` ${requestedEntry.targetId}` : ""}
               </p>
@@ -236,7 +236,7 @@ export function AdminAuditPanel({
                 className="mt-3 min-h-11 rounded-xl border border-zinc-800 px-3 text-sm font-bold text-zinc-200 hover:border-zinc-700"
                 data-testid="admin-audit-requested-entry-open"
               >
-                Open the full entry
+                {m.openFullEntry}
               </button>
             </div>
           ) : null}
@@ -249,29 +249,28 @@ export function AdminAuditPanel({
               className="mt-3 rounded-2xl border border-amber-900 bg-amber-950/30 p-4 text-sm leading-6 text-amber-100"
               data-testid="admin-audit-requested-entry-missing"
             >
-              No audit entry has the id{" "}
-              <span className="font-mono break-all">{requestedEntryId}</span>. The
-              link may be stale, or the entry may belong to a different
-              environment.
+              {m.missingEntryBefore}{" "}
+              <span className="font-mono break-all">{requestedEntryId}</span>
+              {m.missingEntryAfter}
             </p>
           ) : null}
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-              Events
+              {m.events}
             </p>
             <p className="mt-1 text-xl font-black text-white">{rows.length}</p>
           </div>
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-zinc-500">
-              Actors
+              {m.actors}
             </p>
             <p className="mt-1 text-xl font-black text-white">{uniqueActors}</p>
           </div>
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3">
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-red-200/80">
-              High risk
+              {m.highRisk}
             </p>
             <p className="mt-1 text-xl font-black text-red-100">{highRiskCount}</p>
           </div>
@@ -282,7 +281,7 @@ export function AdminAuditPanel({
           className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800 xl:self-start"
         >
           <Clipboard className="h-3.5 w-3.5" />
-          Export CSV
+          {m.exportCsv}
         </button>
       </div>
 
@@ -296,7 +295,7 @@ export function AdminAuditPanel({
               setQuery(value);
               updateLocation(value, targetFilter);
             }}
-            placeholder="Search actor, action, target, summary, IP..."
+            placeholder={m.searchPlaceholder}
             className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
         </label>
@@ -311,7 +310,7 @@ export function AdminAuditPanel({
         >
           {targets.map((target) => (
             <option key={target} value={target}>
-              {target === "all" ? "All targets" : target}
+              {target === "all" ? m.allTargets : target}
             </option>
           ))}
         </select>
@@ -321,12 +320,12 @@ export function AdminAuditPanel({
         <table className="w-full min-w-[980px] border-separate border-spacing-y-2 text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.16em] text-zinc-500">
             <tr>
-              <th className="px-3 py-2">Time</th>
-              <th className="px-3 py-2">Actor</th>
-              <th className="px-3 py-2">Action</th>
-              <th className="px-3 py-2">Target</th>
-              <th className="px-3 py-2">Summary</th>
-              <th className="px-3 py-2">Context</th>
+              <th className="px-3 py-2">{m.columns.time}</th>
+              <th className="px-3 py-2">{m.columns.actor}</th>
+              <th className="px-3 py-2">{m.columns.action}</th>
+              <th className="px-3 py-2">{m.columns.target}</th>
+              <th className="px-3 py-2">{m.columns.summary}</th>
+              <th className="px-3 py-2">{m.columns.context}</th>
             </tr>
           </thead>
           <tbody>
@@ -336,7 +335,7 @@ export function AdminAuditPanel({
                   {dateTimeLabel(log.createdAt)}
                 </td>
                 <td className="px-3 py-3">
-                  <div className="font-bold">{log.actorEmail || "Unknown admin"}</div>
+                  <div className="font-bold">{log.actorEmail || m.unknownAdmin}</div>
                   <div className="mt-1 max-w-[12rem] truncate text-xs text-zinc-500">
                     {log.actorUserId || "-"}
                   </div>
@@ -358,7 +357,7 @@ export function AdminAuditPanel({
                     className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
                   >
                     <Clipboard className="h-3.5 w-3.5" />
-                    Copy
+                    {m.copy}
                   </button>
                   <button
                     type="button"
@@ -371,7 +370,7 @@ export function AdminAuditPanel({
                     ) : (
                       <Eye className="h-3.5 w-3.5" />
                     )}
-                    Details
+                    {m.details}
                   </button>
                 </td>
               </tr>
@@ -380,15 +379,14 @@ export function AdminAuditPanel({
         </table>
         {filteredRows.length === 0 ? (
           <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No audit events match the current filters.
+            {m.noMatches}
           </div>
         ) : null}
       </div>
 
       <div className="mt-4 flex items-start gap-2 rounded-2xl border border-blue-500/20 bg-blue-500/10 p-4 text-sm leading-6 text-blue-100">
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-        Keep this log reviewed after billing, refund, or user deletion changes. It is
-        intended for operational investigation, not customer-facing disclosure.
+        {m.footer}
       </div>
 
       {detail ? (
@@ -397,11 +395,11 @@ export function AdminAuditPanel({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-                  Audit detail
+                  {m.detail.eyebrow}
                 </p>
                 <h3 className="mt-2 text-xl font-black text-white">{detail.action}</h3>
                 <p className="mt-1 text-sm text-zinc-500">
-                  {dateTimeLabel(detail.createdAt)} UTC / {detail.actorEmail || "Unknown admin"}
+                  {dateTimeLabel(detail.createdAt)} UTC / {detail.actorEmail || m.unknownAdmin}
                 </p>
               </div>
               <button
@@ -414,22 +412,22 @@ export function AdminAuditPanel({
             </div>
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Target</p>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.target}</p>
                 <p className="mt-2 text-sm font-bold text-white">{detail.targetType}</p>
                 <p className="mt-1 break-all text-xs text-zinc-400">{detail.targetId || "-"}</p>
               </div>
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Request</p>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.request}</p>
                 <p className="mt-2 break-all text-xs text-zinc-400">IP: {detail.ipAddress || "-"}</p>
                 <p className="mt-1 break-all text-xs text-zinc-400">UA: {detail.userAgent || "-"}</p>
               </div>
             </div>
             <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Summary</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.summary}</p>
               <p className="mt-2 text-sm leading-6 text-zinc-200">{detail.summary}</p>
             </div>
             <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">Metadata</p>
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">{m.detail.metadata}</p>
               <pre className="mt-3 max-h-96 overflow-auto rounded-xl bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">
                 {JSON.stringify(detail.metadata || {}, null, 2)}
               </pre>

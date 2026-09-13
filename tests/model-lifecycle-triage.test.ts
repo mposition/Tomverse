@@ -6,7 +6,9 @@ import {
   candidateFamilyIdentity,
   candidateRepresentativeRank,
   decisionSuppressesCandidate,
+  decisionSuppressesCandidateIdentity,
   isImageGenerationModel,
+  isMultiAgentModel,
   isPrereleaseModel,
   isSearchSpecializedModel,
   isSpecializedNonChatModel,
@@ -90,7 +92,7 @@ test("preview, beta, experimental and EAP models never enter human review", () =
   assert.equal(shouldQueueModelCandidate("gpt-image-3"), true);
 });
 
-test("a current unserved general chat model is recommended with Korean rationale", () => {
+test("a current chat candidate is compared with the active same-owner portfolio", () => {
   const assessment = assessModelLifecycleItem({
     action: "add",
     apiModel: "gpt-5.6-sol",
@@ -98,12 +100,269 @@ test("a current unserved general chat model is recommended with Korean rationale
     availability: "current",
     lifecycle: null,
     servedByTomverse: false,
+    candidateEvidence: {
+      contextWindowTokens: 1_050_000,
+      maxOutputTokens: 128_000,
+      supportsImage: true,
+      reasoning: true,
+    },
+    servedModels: [
+      {
+        provider: "openai",
+        apiModel: "gpt-5.5-thinking",
+        name: "GPT 5.5 Thinking",
+        reasoning: "high",
+        contextWindowTokens: 400_000,
+        maxOutputTokens: 64_000,
+        supportsImage: true,
+        product: "chat",
+      },
+    ],
   });
   assert.equal(assessment.priority, "recommended");
   assert.equal(assessment.kind, "general_chat");
   assert.equal(assessment.product, "chat");
-  assert.match(assessment.analysisKo, /최신 모델 API/);
-  assert.match(assessment.analysisKo, /편입 가치/);
+  assert.match(assessment.analysisKo, /GPT 5\.5 Thinking/);
+  assert.match(assessment.analysisKo, /컨텍스트가/);
+  assert.match(assessment.analysisKo, /최대 출력/);
+});
+
+test("a non-reasoning xAI candidate explains the real Grok portfolio gap", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "grok-4.20-non-reasoning",
+    providers: ["xai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: {
+      reasoning: false,
+      observedInputUsdPerMillionTokens: 2,
+      observedOutputUsdPerMillionTokens: 8,
+    },
+    servedModels: [
+      {
+        provider: "xai",
+        apiModel: "grok-4.5",
+        name: "Grok 4.5",
+        reasoning: "high",
+        contextWindowTokens: 500_000,
+        supportsImage: true,
+        product: "chat",
+      },
+    ],
+  });
+  assert.equal(assessment.priority, "recommended");
+  assert.match(assessment.analysisKo, /Grok 4\.5/);
+  assert.match(assessment.analysisKo, /현재 라인업에 없는 역할/);
+  assert.match(assessment.analysisKo, /입력 \$2\/출력 \$8/);
+});
+
+test("a reasoning xAI candidate is not presented as a missing reasoning slot", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "grok-4.20-reasoning",
+    providers: ["xai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: { reasoning: true },
+    servedModels: [
+      {
+        provider: "xai",
+        apiModel: "grok-4.5",
+        name: "Grok 4.5",
+        reasoning: "high",
+        product: "chat",
+      },
+    ],
+  });
+  assert.notEqual(assessment.priority, "recommended");
+  assert.match(assessment.analysisKo, /Grok 4\.5/);
+  assert.match(assessment.analysisKo, /역할이 겹칩니다/);
+  assert.match(assessment.analysisKo, /품질은 모델 목록에서 알 수 없으므로/);
+});
+
+test("a latency tier remains a portfolio role even when it supports thinking", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "gemini-4-flash",
+    providers: ["google"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: { reasoning: true },
+    servedModels: [
+      {
+        provider: "google",
+        apiModel: "gemini-4-pro",
+        name: "Gemini 4 Pro",
+        reasoning: "high",
+        product: "chat",
+      },
+    ],
+  });
+  assert.equal(assessment.priority, "recommended");
+  assert.match(assessment.analysisKo, /속도·비용형/);
+  assert.match(assessment.analysisKo, /현재 라인업에 없는 역할/);
+});
+
+test("an unclassified served role prevents a false portfolio-gap claim", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "mistral-medium-4",
+    providers: ["mistral"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: { reasoning: false },
+    servedModels: [
+      {
+        provider: "mistral",
+        apiModel: "mistral-medium-3.5",
+        name: "Mistral Medium 3.5",
+        reasoning: null,
+        product: "chat",
+      },
+    ],
+  });
+  assert.equal(assessment.priority, "needs_evidence");
+  assert.doesNotMatch(assessment.analysisKo, /현재 라인업에 없는 역할/);
+  assert.match(assessment.analysisKo, /공식 포지셔닝/);
+});
+
+test("a new Anthropic tier names the existing lineup and missing decision evidence", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "claude-fable-5-1",
+    providers: ["anthropic"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: {
+      contextWindowTokens: 500_000,
+      maxOutputTokens: 64_000,
+      supportsImage: true,
+      observedInputUsdPerMillionTokens: 2.5,
+      observedOutputUsdPerMillionTokens: 12.5,
+      priceEvidenceSource: "provider_docs",
+    },
+    servedModels: [
+      {
+        provider: "anthropic",
+        apiModel: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        reasoning: "medium",
+        contextWindowTokens: 1_000_000,
+        maxOutputTokens: 128_000,
+        supportsImage: true,
+        inputUsdPerMillionTokens: 3,
+        outputUsdPerMillionTokens: 15,
+        product: "chat",
+      },
+      {
+        provider: "anthropic",
+        apiModel: "claude-opus-5",
+        name: "Claude Opus 5",
+        reasoning: "high",
+        product: "chat",
+      },
+    ],
+  });
+  assert.match(assessment.analysisKo, /Claude Sonnet 5/);
+  assert.match(assessment.analysisKo, /Claude Opus 5/);
+  assert.match(assessment.analysisKo, /컨텍스트가 .*보다 작음/);
+  assert.match(assessment.analysisKo, /공식 문서 관측 가격/);
+  assert.match(assessment.analysisKo, /단가 .*보다 낮음/);
+  assert.doesNotMatch(assessment.analysisKo, /품질·가격·컨텍스트 이점이 확인되면/);
+});
+
+test("an aggregator sighting compares by model maker, not scanning provider", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "perplexity/claude-fable-5-1",
+    providers: ["perplexity"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    servedModels: [
+      {
+        provider: "openai",
+        apiModel: "gpt-5.6-sol",
+        name: "GPT 5.6 Sol",
+        product: "chat",
+      },
+      {
+        provider: "anthropic",
+        apiModel: "claude-sonnet-5",
+        name: "Claude Sonnet 5",
+        product: "chat",
+      },
+    ],
+  });
+  assert.match(assessment.analysisKo, /Claude Sonnet 5/);
+  assert.doesNotMatch(assessment.analysisKo, /GPT 5\.6 Sol/);
+});
+
+test("an unknown maker is not silently equated with an aggregator portfolio", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "perplexity/new-family-7",
+    providers: ["perplexity"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    servedModels: [
+      {
+        provider: "perplexity",
+        apiModel: "sonar-pro",
+        name: "Sonar Pro",
+        product: "chat",
+      },
+    ],
+  });
+  assert.equal(assessment.priority, "needs_evidence");
+  assert.match(assessment.analysisKo, /제작사를 식별하지 못해/);
+  assert.doesNotMatch(assessment.analysisKo, /Sonar Pro/);
+});
+
+test("provider aliases are explained as one adoption decision", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "grok-4.20-non-reasoning",
+    providers: ["xai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: {
+      canonicalApiModel: "grok-4.20-non-reasoning-gv2",
+      equivalentApiModels: [
+        "grok-4.20-non-reasoning-gv2",
+        "grok-4.20-non-reasoning",
+      ],
+      reasoning: false,
+    },
+    servedModels: [],
+  });
+  assert.match(assessment.analysisKo, /동일 모델 alias/);
+  assert.match(assessment.analysisKo, /한 개면 충분/);
+});
+
+test("multi-agent research models are not treated as ordinary chat", () => {
+  assert.equal(isMultiAgentModel("grok-4.20-multi-agent"), true);
+  assert.equal(modelProductSurface("grok-4.20-multi-agent"), "unsupported");
+  assert.equal(shouldQueueModelCandidate("grok-4.20-multi-agent"), false);
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "grok-4.20-multi-agent",
+    providers: ["xai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+  });
+  assert.equal(assessment.priority, "no_action");
+  assert.match(assessment.analysisKo, /Responses API/);
+  assert.match(assessment.analysisKo, /현재 Tomverse 채팅 모델로 등록해도 동작하지 않습니다/);
 });
 
 test("a current unserved image model is recommended for Image Studio review", () => {
@@ -118,9 +377,61 @@ test("a current unserved image model is recommended for Image Studio review", ()
   assert.equal(assessment.priority, "recommended");
   assert.equal(assessment.kind, "image_generation");
   assert.equal(assessment.product, "image_generation");
-  assert.match(assessment.analysisKo, /이미지 생성 후보/);
-  assert.match(assessment.analysisKo, /품질·편집·해상도·속도/);
+  assert.match(assessment.analysisKo, /Studio/);
+  assert.match(assessment.analysisKo, /동일 프롬프트 품질/);
+  assert.match(assessment.analysisKo, /실제 지연시간/);
   assert.match(assessment.analysisKo, /최악 비용/);
+});
+
+test("unknown image makers are not grouped together as one Studio vendor", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "black-forest-labs/flux-2-image",
+    providers: ["fal"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    servedModels: [
+      {
+        provider: "fal",
+        apiModel: "fal-ai/nano-banana-2",
+        name: "Nano Banana 2",
+        product: "image_generation",
+      },
+    ],
+  });
+  assert.equal(assessment.priority, "needs_evidence");
+  assert.match(assessment.analysisKo, /제작사를 식별하지 못해/);
+  assert.doesNotMatch(assessment.analysisKo, /Nano Banana 2/);
+});
+
+test("mixed input and output prices are described as a tradeoff", () => {
+  const assessment = assessModelLifecycleItem({
+    action: "add",
+    apiModel: "grok-4.30-reasoning",
+    providers: ["xai"],
+    availability: "current",
+    lifecycle: null,
+    servedByTomverse: false,
+    candidateEvidence: {
+      reasoning: true,
+      observedInputUsdPerMillionTokens: 1,
+      observedOutputUsdPerMillionTokens: 20,
+      priceEvidenceSource: "provider_api",
+    },
+    servedModels: [
+      {
+        provider: "xai",
+        apiModel: "grok-4.5",
+        name: "Grok 4.5",
+        reasoning: "high",
+        inputUsdPerMillionTokens: 2,
+        outputUsdPerMillionTokens: 10,
+        product: "chat",
+      },
+    ],
+  });
+  assert.match(assessment.analysisKo, /가격.*엇갈림/);
 });
 
 test("an image family already in Tomverse is a profile update, not a duplicate", () => {
@@ -319,6 +630,25 @@ test("a decision about a preview does not answer for the release", () => {
   assert.equal(
     decisionSuppressesCandidate(releaseDecision, "gemini-2.5-flash"),
     true
+  );
+});
+
+test("an alias-aware decision keeps prerelease stage semantics", () => {
+  assert.equal(
+    decisionSuppressesCandidateIdentity(
+      "gemini-2.5-flash@prerelease",
+      "gemini-2.5-flash",
+      "prerelease"
+    ),
+    true
+  );
+  assert.equal(
+    decisionSuppressesCandidateIdentity(
+      "gemini-2.5-flash@prerelease",
+      "gemini-2.5-flash",
+      "stable"
+    ),
+    false
   );
 });
 

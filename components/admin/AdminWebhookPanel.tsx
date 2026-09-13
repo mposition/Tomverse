@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw, Webhook } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminWebhooksMessages } from "@/lib/adminMessages/webhooks";
 
 type WebhookRow = {
   id: string;
@@ -29,6 +31,11 @@ const statusClass = (status: string) => {
 };
 
 export function AdminWebhookPanel() {
+  const m = useAdminMessages(adminWebhooksMessages);
+  const messagesRef = useRef(m);
+  useEffect(() => {
+    messagesRef.current = m;
+  }, [m]);
   const [rows, setRows] = useState<WebhookRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [reprocessingId, setReprocessingId] = useState<string | null>(null);
@@ -41,12 +48,12 @@ export function AdminWebhookPanel() {
         | { webhooks?: WebhookRow[]; error?: string }
         | null;
       if (!response.ok || !data?.webhooks) {
-        throw new Error(data?.error || "Could not load webhook logs.");
+        throw new Error(data?.error || messagesRef.current.loadFailed);
       }
       setRows(data.webhooks);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not load webhook logs.",
+        error instanceof Error ? error.message : messagesRef.current.loadFailed,
         "error"
       );
     } finally {
@@ -73,32 +80,32 @@ export function AdminWebhookPanel() {
         | { webhook?: WebhookRow; error?: string }
         | null;
       if (!response.ok || !data?.webhook) {
-        throw new Error(data?.error || "Could not reprocess webhook.");
+        throw new Error(data?.error || m.reprocessFailed);
       }
       setRows((current) =>
         current.map((item) => (item.id === data.webhook?.id ? data.webhook : item))
       );
-      dispatchAppToast("Stripe webhook was reprocessed.", "success");
+      dispatchAppToast(m.reprocessed, "success");
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not reprocess webhook.",
+        error instanceof Error ? error.message : m.reprocessFailed,
         "error"
       );
     } finally {
       setReprocessingId(null);
     }
-  }, []);
+  }, [m]);
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Stripe webhooks
+            {m.eyebrow}
           </p>
-          <h2 className="mt-2 text-2xl font-black text-white">Billing event monitor</h2>
+          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Track recent Stripe webhook delivery and processing failures before they become plan sync issues.
+            {m.description}
           </p>
         </div>
         <button
@@ -108,7 +115,7 @@ export function AdminWebhookPanel() {
           className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-sm font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          Refresh
+          {m.refresh}
         </button>
       </div>
 
@@ -116,10 +123,10 @@ export function AdminWebhookPanel() {
         <div className="flex items-center justify-between gap-3">
           <div className="inline-flex items-center gap-2 text-sm font-bold text-white">
             <Webhook className="h-4 w-4 text-blue-300" />
-            Recent webhook events
+            {m.recentEvents}
           </div>
           <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${failedCount ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"}`}>
-            {failedCount} failed
+            {m.failedCount(failedCount)}
           </span>
         </div>
         <div className="mt-4 grid gap-2">
@@ -134,7 +141,7 @@ export function AdminWebhookPanel() {
                   <span className="text-zinc-600">{dateLabel(row.receivedAt)} UTC</span>
                   {row.replayedAt ? (
                     <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 font-black text-blue-200">
-                      replayed
+                      {m.replayed}
                     </span>
                   ) : null}
                 </div>
@@ -150,7 +157,7 @@ export function AdminWebhookPanel() {
                     ) : (
                       <RefreshCw className="h-3.5 w-3.5" />
                     )}
-                    Reprocess
+                    {m.reprocess}
                   </button>
                 ) : null}
               </div>
@@ -162,7 +169,7 @@ export function AdminWebhookPanel() {
           ))}
           {!loading && rows.length === 0 ? (
             <div className="rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-4 text-sm text-zinc-500">
-              No Stripe webhook events recorded yet.
+              {m.empty}
             </div>
           ) : null}
         </div>

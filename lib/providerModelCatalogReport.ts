@@ -22,6 +22,11 @@ import {
   PROVIDER_CATALOG_KEY_REJECTED,
 } from "@/lib/providerModelCatalogCore";
 import type { CatalogReconciliationResult } from "@/lib/providerModelCatalogReconciliation";
+import {
+  docEvidenceProviderNote,
+  docEvidenceReportLines,
+  type ProviderModelDocEvidenceSummary,
+} from "@/lib/providerModelDocsCore";
 import { prisma } from "@/lib/prisma";
 import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
 
@@ -232,7 +237,9 @@ const reportParts = (
   results: ProviderModelCatalogResult[],
   reconciliation?: CatalogReconciliationResult,
   openWorkItems?: number,
-  discovery?: ProviderModelCatalogDiscovery
+  discovery?: ProviderModelCatalogDiscovery,
+  /** `null` when the documentation read was not part of this run at all. */
+  docEvidence?: ProviderModelDocEvidenceSummary | null
 ) => {
   const checked = results.filter((result) => result.status === "checked");
   const failed = results.filter((result) => result.status === "failed");
@@ -250,11 +257,19 @@ const reportParts = (
     )
   );
   const candidates = candidateRowsFor(results, discovery);
-  const failures = [...failed, ...skipped].map((result) => {
-    const head = `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`;
-    const detail = catalogFailureDetail(result.errorDetail);
-    return detail ? `${head}\n  ${detail}` : head;
-  });
+  const docs = docEvidence === null ? { summary: "", failures: [] } : docEvidenceReportLines(docEvidence);
+  const failures = [
+    ...[...failed, ...skipped].map((result) => {
+      const head = `• ${providerName(result.provider)}: ${result.status} (${result.errorCode || "unknown"})`;
+      const detail = catalogFailureDetail(result.errorDetail);
+      return detail ? `${head}\n  ${detail}` : head;
+    }),
+    // In the same block as provider scans that did not complete: a documentation
+    // read that failed is the same kind of thing -- a source this run could not
+    // use -- and a new template variable would be dropped by the stored Slack
+    // template, for the reason the summary comments give below.
+    ...docs.failures,
+  ];
   const registryUpdates = reconciliationRows(reconciliation);
   const queueUrl = workQueueUrl();
   // Folded into the existing summary line rather than added as a new template
@@ -287,7 +302,7 @@ const reportParts = (
         discovery
       )}${
         typeof openWorkItems === "number" ? ` · awaiting review ${openWorkItems}` : ""
-      }${registrySummary}`,
+      }${registrySummary}${docs.summary}`,
       lifecycleRows: `*Lifecycle warning*\n${cappedRows(lifecycle, "None", 20, queueUrl)}`,
       missingRows: `*Missing from successful provider catalogs*\n${cappedRows(missing, "None", 20, queueUrl)}`,
       candidateRows: `*New model candidates found today*\n${cappedRows(candidates, "None", 20, queueUrl)}`,
@@ -364,6 +379,8 @@ const reportPayload = (input: {
   generatedLabel: string;
   dayLabel: (value: Date) => string;
   test?: boolean;
+  /** `null` when this run did not read documentation at all. */
+  docEvidence: ProviderModelDocEvidenceSummary | undefined | null;
 }): LifecycleReportInput => ({
   localDate: input.localDate,
   generatedLabel: input.generatedLabel,
@@ -406,6 +423,10 @@ const reportPayload = (input: {
                 .slice(0, 6)
                 .join(", ")}${result.heuristicallyExcluded.length > 6 ? ` (+${result.heuristicallyExcluded.length - 6} more)` : ""}`
             : null,
+          // The documentation read for this provider, on this provider's row:
+          // the email has no section of its own for it, and a read that failed
+          // is only useful if the person reading the mail sees it.
+          docEvidenceProviderNote(input.docEvidence, result.provider),
           result.prereleaseExcluded.length
             ? `excluded from review as prerelease: ${result.prereleaseExcluded
                 .slice(0, 6)
@@ -493,13 +514,20 @@ export async function sendProviderModelCatalogReport(input: {
   changes?: { discovered: number; decided: number; transitions: number; completed: number };
   generatedAt?: Date;
   test?: boolean;
+  /**
+   * What the documentation read found. `undefined` means the read was
+   * attempted and threw, and is reported as such; `null` means this caller
+   * does not run it.
+   */
+  docEvidence?: ProviderModelDocEvidenceSummary | null;
 }) {
   const generatedAt = input.generatedAt || new Date();
   const parts = reportParts(
     input.results,
     input.reconciliation,
     input.openWorkItems,
-    input.discovery
+    input.discovery,
+    "docEvidence" in input ? input.docEvidence : null
   );
   const generatedLabel = new Intl.DateTimeFormat("en-AU", {
     year: "numeric",
@@ -542,6 +570,7 @@ export async function sendProviderModelCatalogReport(input: {
     generatedLabel,
     dayLabel,
     test: input.test,
+    docEvidence: "docEvidence" in input ? input.docEvidence : null,
   });
   const rendered = buildModelLifecycleDailyEmail(payload);
   const recipients = emailRecipients();

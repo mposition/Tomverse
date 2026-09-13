@@ -50,6 +50,13 @@ const REGISTRY = {
     reason:
       "aged, memory_deleted, memory_superseded. Account deletion is deliberately absent: it removes the row through the cascade rather than compacting it, so no compacted manifest can carry it, and a fourth value would be a report category that is always zero for a reason nobody could work out from the data.",
   },
+  ProviderModelDocEvidence_status_check: {
+    owner: "list",
+    module: "lib/providerModelDocsCore.ts",
+    list: "PROVIDER_MODEL_DOC_EVIDENCE_STATUSES",
+    reason:
+      "How a documentation read ended: parsed, not_found (the page or the table row is not there), fetch_failed, parse_failed (the document's structure moved). The adoption draft reads only 'parsed', so a status the list does not know would be evidence silently ignored rather than a write refused.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",
@@ -328,6 +335,20 @@ const REGISTRY = {
     list: "WORK_ITEM_STATUSES",
     reason:
       "The same eleven states, on the append-only history. Recorded separately from the item's own column because the history outlives the state it describes.",
+  },
+  ModelLifecycleWorkItemEvent_decision_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_EVENT_DECISIONS",
+    reason:
+      "adopt, exclude, reopen -- the operator decisions the discovery queue records on its history. Null on every step between decisions. Paired with ModelLifecycleWorkItemEvent_decision_shape_check, which refuses an exclusion without a reason code and a reopen without a written reason.",
+  },
+  ModelLifecycleWorkItemEvent_reasonCode_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_EXCLUSION_REASONS",
+    reason:
+      "The six exclusion reasons an operator picks from. A value the panel does not know would be an exclusion nobody can read back or count.",
   },
   ModelLifecycleWorkItemEvent_fromStatus_check: {
     owner: "list",

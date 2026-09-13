@@ -1,0 +1,71 @@
+import { defineAdminMessages } from "@/lib/adminLocale";
+
+/** Copy for the notification delivery log under Alerts. */
+export const adminNotificationsMessages = defineAdminMessages({
+  en: {
+    loadFailed: "Could not load notification logs.",
+    acknowledgeFailed: "Could not acknowledge alert.",
+    acknowledged: "Alert acknowledged.",
+    eyebrow: "Alerts",
+    title: "Notification delivery log",
+    description: (pageSize: number) =>
+      `Track all Slack, Discord, and email delivery records. Results are loaded from the database in pages of ${pageSize}.`,
+    total: (count: number) => `${count} total`,
+    sent: (count: number) => `${count} sent`,
+    failed: (count: number) => `${count} failed`,
+    unacknowledged: (count: number) => `${count} unacknowledged`,
+    filter: {
+      all: "all",
+      sent: "sent",
+      failed: "failed",
+      skipped: "skipped",
+    },
+    refresh: "Refresh",
+    exportPage: "Export this page",
+    showing: (start: number, end: number, total: number, filter: string) =>
+      `Showing ${start}-${end} of ${total} ${filter} records`,
+    page: (page: number) => `Page ${page}`,
+    loading: "Loading logs...",
+    empty: "No notification logs match this filter.",
+    target: "Target: ",
+    error: "Error: ",
+    ack: "Ack: ",
+    adminFallback: "admin",
+    acknowledge: "Acknowledge",
+    previous: "Previous",
+    next: "Next",
+  },
+  ko: {
+    loadFailed: "알림 로그를 불러오지 못했습니다.",
+    acknowledgeFailed: "알림을 확인 처리하지 못했습니다.",
+    acknowledged: "알림을 확인 처리했습니다.",
+    eyebrow: "알림",
+    title: "알림 전송 로그",
+    description: (pageSize: number) =>
+      `Slack, Discord, 이메일 전송 기록을 모두 추적합니다. 결과는 데이터베이스에서 ${pageSize}건씩 페이지 단위로 불러옵니다.`,
+    total: (count: number) => `전체 ${count}건`,
+    sent: (count: number) => `발송 ${count}건`,
+    failed: (count: number) => `실패 ${count}건`,
+    unacknowledged: (count: number) => `미확인 ${count}건`,
+    filter: {
+      all: "전체",
+      sent: "발송",
+      failed: "실패",
+      skipped: "건너뜀",
+    },
+    refresh: "새로고침",
+    exportPage: "이 페이지 내보내기",
+    showing: (start: number, end: number, total: number, filter: string) =>
+      `${filter} 기록 ${total}건 중 ${start}-${end} 표시`,
+    page: (page: number) => `${page}페이지`,
+    loading: "로그를 불러오는 중...",
+    empty: "이 필터에 맞는 알림 로그가 없습니다.",
+    target: "대상: ",
+    error: "오류: ",
+    ack: "확인: ",
+    adminFallback: "관리자",
+    acknowledge: "확인 처리",
+    previous: "이전",
+    next: "다음",
+  },
+});

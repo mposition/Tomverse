@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, BookOpen, TrendingUp } from "lucide-react";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminRiskPanelsMessages } from "@/lib/adminMessages/riskPanels";
 
 /**
  * Four independent operator panels that used to be rendered together.
@@ -48,25 +50,25 @@ const dateLabel = (value: string) => {
   return date.toISOString().replace("T", " ").slice(0, 16);
 };
 
-export function PromotionRiskPanel({
+export async function PromotionRiskPanel({
   promoRisks,
 }: {
   promoRisks: PromoRiskRow[];
 }) {
+  const m = (await getAdminMessages(adminRiskPanelsMessages)).promotionRisk;
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Risk
+        {m.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Promotion risk monitor</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 text-sm leading-6 text-zinc-400">
-        Codes that are close to exhaustion, discount unusually deeply, or carry
-        hashed abuse signals from their redemptions.
+        {m.description}
       </p>
       <div className="mt-5 grid gap-2">
         {promoRisks.length === 0 ? (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-            No promotion is currently flagged.
+            {m.empty}
           </div>
         ) : (
           promoRisks.map((promo) => (
@@ -81,20 +83,20 @@ export function PromotionRiskPanel({
                 </span>
               </div>
               <p className="mt-1 text-xs text-amber-100/70">
-                {promo.redeemedCount}
-                {promo.maxRedemptions ? ` / ${promo.maxRedemptions}` : ""} redeemed ·{" "}
-                {promo.discountPercent}% off
-                {promo.abuseSignalCount > 0
-                  ? ` / ${promo.abuseSignalCount} hashed abuse signal${
-                      promo.abuseSignalCount === 1 ? "" : "s"
-                    }`
-                  : ""}
+                {m.redemptionSummary(
+                  promo.redeemedCount,
+                  promo.maxRedemptions,
+                  promo.discountPercent,
+                  promo.abuseSignalCount
+                )}
               </p>
               {promo.sharedIpSignalCount > 0 ||
               promo.sharedPaymentMethodSignalCount > 0 ? (
                 <p className="mt-1 text-xs text-amber-100/70">
-                  {promo.sharedIpSignalCount} shared IP ·{" "}
-                  {promo.sharedPaymentMethodSignalCount} shared payment method
+                  {m.sharedSignals(
+                    promo.sharedIpSignalCount,
+                    promo.sharedPaymentMethodSignalCount
+                  )}
                 </p>
               ) : null}
             </div>
@@ -105,20 +107,21 @@ export function PromotionRiskPanel({
   );
 }
 
-export function SupportAgePanel({ slaRows }: { slaRows: SlaRow[] }) {
+export async function SupportAgePanel({ slaRows }: { slaRows: SlaRow[] }) {
+  const m = (await getAdminMessages(adminRiskPanelsMessages)).supportAge;
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Service level
+        {m.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Open support age</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 text-sm leading-6 text-zinc-400">
-        Open feedback older than 24 hours, from the ten most recent reports.
+        {m.description}
       </p>
       <div className="mt-5 grid gap-2">
         {slaRows.length === 0 ? (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-            No open report has breached the 24-hour mark.
+            {m.empty}
           </div>
         ) : (
           slaRows.map((row) => (
@@ -130,11 +133,11 @@ export function SupportAgePanel({ slaRows }: { slaRows: SlaRow[] }) {
               <div className="flex items-center justify-between gap-3">
                 <div className="font-black text-white">{row.email || row.id}</div>
                 <span className="rounded-full border border-red-500/30 px-2.5 py-1 text-xs font-bold text-red-100">
-                  {row.ageHours}h open
+                  {m.hoursOpen(row.ageHours)}
                 </span>
               </div>
               <p className="mt-1 text-xs text-red-100/70">
-                {row.type} · {row.status} · reported {dateLabel(row.createdAt)} UTC
+                {m.reported(row.type, row.status, dateLabel(row.createdAt))}
               </p>
             </Link>
           ))
@@ -144,34 +147,35 @@ export function SupportAgePanel({ slaRows }: { slaRows: SlaRow[] }) {
   );
 }
 
-export function LaunchFunnelPanel({ funnel }: { funnel: FunnelMetrics }) {
+export async function LaunchFunnelPanel({ funnel }: { funnel: FunnelMetrics }) {
+  const m = (await getAdminMessages(adminRiskPanelsMessages)).funnel;
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
         <TrendingUp className="h-4 w-4" aria-hidden />
-        Funnel
+        {m.eyebrow}
       </div>
       <h2 className="mt-2 text-2xl font-black text-white">
-        Launch conversion funnel
+        {m.title}
       </h2>
       <p className="mt-2 text-sm leading-6 text-zinc-400">
-        Account-level counts over the whole database, not a sampled window.
+        {m.description}
       </p>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {(
           [
-            ["Accounts", funnel.totalUsers, "100%"],
+            [m.accounts, funnel.totalUsers, "100%"],
             [
-              "Used chat",
+              m.usedChat,
               funnel.usersWithConversations,
               pct(funnel.usersWithConversations, funnel.totalUsers),
             ],
             [
-              "Checkout started",
+              m.checkoutStarted,
               funnel.checkoutStarted,
               pct(funnel.checkoutStarted, funnel.totalUsers),
             ],
-            ["Paid users", funnel.paidUsers, pct(funnel.paidUsers, funnel.totalUsers)],
+            [m.paidUsers, funnel.paidUsers, pct(funnel.paidUsers, funnel.totalUsers)],
           ] as const
         ).map(([label, value, rate]) => (
           <div
@@ -190,33 +194,22 @@ export function LaunchFunnelPanel({ funnel }: { funnel: FunnelMetrics }) {
   );
 }
 
-export function OperatorPlaybooksPanel() {
+export async function OperatorPlaybooksPanel() {
+  const m = (await getAdminMessages(adminRiskPanelsMessages)).playbooks;
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
         <BookOpen className="h-4 w-4" aria-hidden />
-        Runbooks
+        {m.eyebrow}
       </div>
-      <h2 className="mt-2 text-2xl font-black text-white">Operator playbooks</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <div className="mt-5 grid gap-2 xl:grid-cols-2">
         {(
           [
-            [
-              "Plan not updated after payment",
-              "Open user detail, run Stripe resync, then verify webhook log.",
-            ],
-            [
-              "Provider outage",
-              "Create incident mode, add user-facing note, recommend fallback model.",
-            ],
-            [
-              "File upload failure",
-              "Check R2 CORS, attachment limits, and support trace ID.",
-            ],
-            [
-              "OAuth login issue",
-              "Check provider account link, callback URL, and account linking audit log.",
-            ],
+            [m.planNotUpdated.title, m.planNotUpdated.detail],
+            [m.providerOutage.title, m.providerOutage.detail],
+            [m.fileUploadFailure.title, m.fileUploadFailure.detail],
+            [m.oauthLogin.title, m.oauthLogin.detail],
           ] as const
         ).map(([title, detail]) => (
           <div

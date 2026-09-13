@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
 import { AdminWaveLedger } from "@/components/admin/AdminWaveLedger";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminEmailCampaignDetailMessages } from "@/lib/adminMessages/emailCampaignDetail";
 
 /**
  * One campaign, and every decision an operator makes about it.
@@ -124,43 +126,18 @@ type DetailResponse = {
   audience: AudienceView[];
 };
 
-const ATTESTATION_LABEL: Record<string, string> = {
-  differences_stated:
-    "The copy states the capability and credit differences",
-  staging_verified: "The migration was rehearsed on staging",
-  reconciliation_ready: "The reconciliation script and its rollback are ready",
-};
+/** The exclusion reasons an estimate labels; any other key shows as stored. */
+const ESTIMATE_EXCLUDED_REASONS = new Set([
+  "no_email",
+  "account_inactive",
+  "suppressed",
+  "plan_incompatible",
+]);
 
-const ATTESTATION_ABOUT: Record<string, string> = {
-  differences_stated:
-    "About the body. Goes stale when the copy changes, because the reading no longer describes what would be sent.",
-  staging_verified:
-    "About the migration. A copy edit does not undo a rehearsal, so this does not expire with one.",
-  reconciliation_ready:
-    "About the script. A copy edit does not undo it either.",
-};
-
-const EXCLUDED_LABEL: Record<string, string> = {
-  no_email: "No address on the account",
-  account_inactive: "Account inactive",
-  suppressed: "Address suppressed",
-  no_consent: "No consent for this purpose",
-  plan_incompatible: "Replacement not available on their plan",
-  already_changed: "No longer in any cohort",
-};
-
-const ESTIMATE_EXCLUDED_LABEL: Record<string, string> = {
-  no_email: "No address on the account",
-  account_inactive: "Account inactive",
-  suppressed: "Address suppressed",
-  plan_incompatible: "Replacement not available on their plan",
-};
-
-const COHORT_LABEL: Record<string, string> = {
-  default_model: "Their default model",
-  new_conversation_lead: "Lead of their new-conversation set",
-  conversation_selection: "Selected in a conversation",
-};
+const labelFor = (labels: object, key: string): string | undefined =>
+  Object.hasOwn(labels, key)
+    ? (labels as Record<string, string>)[key]
+    : undefined;
 
 const when = (value: string | null) => {
   if (!value) return "—";
@@ -184,6 +161,12 @@ export function AdminCampaignDetailPanel({
   campaignId: string;
   mayRevealAddresses: boolean;
 }) {
+  const m = useAdminMessages(adminEmailCampaignDetailMessages);
+  // Read through a ref so a language switch does not re-run `load`.
+  const loadFailedMessage = useRef(m.toast.loadFailed);
+  useEffect(() => {
+    loadFailedMessage.current = m.toast.loadFailed;
+  }, [m.toast.loadFailed]);
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -209,13 +192,13 @@ export function AdminCampaignDetailPanel({
         throw new Error(
           payload && "error" in payload && payload.error
             ? payload.error
-            : "Could not load this campaign."
+            : loadFailedMessage.current
         );
       }
       setData(payload);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not load this campaign.",
+        error instanceof Error ? error.message : loadFailedMessage.current,
         "error"
       );
     } finally {
@@ -250,16 +233,11 @@ export function AdminCampaignDetailPanel({
       // Recorded and waiting for a second administrator: the ordinary first
       // answer for the one two-person action on this page.
       if (payload?.code === "ADMIN_APPROVAL_REQUIRED") {
-        dispatchAppToast(
-          "Recorded. A second administrator has to approve this in the work queue before the campaign is approved.",
-          "success"
-        );
+        dispatchAppToast(m.toast.approvalRecorded, "success");
         return null;
       }
       throw new Error(
-        typeof payload?.error === "string"
-          ? payload.error
-          : "The request was refused."
+        typeof payload?.error === "string" ? payload.error : m.toast.refused
       );
     }
     return payload;
@@ -277,7 +255,7 @@ export function AdminCampaignDetailPanel({
       dispatchAppToast(success, "success");
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "The request was refused.",
+        error instanceof Error ? error.message : m.toast.refused,
         "error"
       );
     } finally {
@@ -290,7 +268,7 @@ export function AdminCampaignDetailPanel({
     return (
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
         <p className="text-sm text-zinc-400">
-          {loading ? "Loading the campaign…" : "This campaign could not be loaded."}
+          {loading ? m.loading : m.loadFailed}
         </p>
       </section>
     );
@@ -331,38 +309,43 @@ export function AdminCampaignDetailPanel({
             ) : (
               <RefreshCw className="h-4 w-4" aria-hidden />
             )}
-            Refresh
+            {m.refresh}
           </button>
         </div>
 
         <dl className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
-            ["Status", campaign.status],
-            ["Trigger", campaign.triggerMode],
-            ["Languages", campaign.locales.join(", ") || "—"],
+            [m.fields.status, campaign.status],
+            [m.fields.trigger, campaign.triggerMode],
+            [m.fields.languages, campaign.locales.join(", ") || "—"],
             [
-              "Effective",
+              m.fields.effective,
               campaign.effectiveAt
-                ? `${when(campaign.effectiveAt)} (${campaign.timezoneLabel ?? "no timezone"})`
+                ? `${when(campaign.effectiveAt)} (${campaign.timezoneLabel ?? m.fields.noTimezone})`
                 : "—",
             ],
             [
-              "Models",
+              m.fields.models,
               campaign.targetModelId
                 ? `${campaign.targetModelId} → ${campaign.replacementModelId ?? "—"}`
                 : "—",
             ],
             [
-              "Estimated recipients",
+              m.fields.estimatedRecipients,
               campaign.estimatedRecipients === null
-                ? "not measured"
-                : `${campaign.estimatedRecipients} — measured ${when(campaign.estimatedAt)} by ${campaign.estimatedByEmail ?? "unknown"} (rules v${campaign.audienceVersion})`,
+                ? m.fields.notMeasured
+                : m.fields.estimateValue(
+                    campaign.estimatedRecipients,
+                    when(campaign.estimatedAt),
+                    campaign.estimatedByEmail ?? m.fields.unknown,
+                    campaign.audienceVersion
+                  ),
             ],
-            ["Work item", campaign.workItemId ?? "—"],
-            ["Drafted by", campaign.createdByEmail],
+            [m.fields.workItem, campaign.workItemId ?? "—"],
+            [m.fields.draftedBy, campaign.createdByEmail],
             [
-              "Approved",
-              campaign.approvedAt ? when(campaign.approvedAt) : "not approved",
+              m.fields.approved,
+              campaign.approvedAt ? when(campaign.approvedAt) : m.fields.notApproved,
             ],
           ].map(([label, value]) => (
             <div key={label} className="min-w-0">
@@ -376,7 +359,7 @@ export function AdminCampaignDetailPanel({
 
         {campaign.cancelledAt ? (
           <p className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-300">
-            Cancelled {when(campaign.cancelledAt)}: {campaign.cancelReason}
+            {m.cancelledAt(when(campaign.cancelledAt), campaign.cancelReason ?? "")}
           </p>
         ) : null}
       </section>
@@ -385,11 +368,9 @@ export function AdminCampaignDetailPanel({
         className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
         data-testid="admin-campaign-gates"
       >
-        <h3 className="text-lg font-black text-white">What this campaign is waiting on</h3>
+        <h3 className="text-lg font-black text-white">{m.gates.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Asked of the server every time this page loads. A gate answered once is
-          a gate that was true once — a replacement model can be disabled and a
-          copy edit takes an attestation with it.
+          {m.gates.intro}
         </p>
 
         <div className="mt-4 space-y-3">
@@ -402,7 +383,9 @@ export function AdminCampaignDetailPanel({
             data-testid="admin-campaign-send-refusal"
           >
             <p className="text-sm font-bold text-white">
-              {sendRefusal ? `Send refused: ${sendRefusal.refusal}` : "The send gate passes"}
+              {sendRefusal
+                ? m.gates.sendRefused(sendRefusal.refusal)
+                : m.gates.sendPasses}
             </p>
             {sendRefusal ? (
               <p className="mt-1 text-sm leading-6 text-amber-100">
@@ -410,8 +393,7 @@ export function AdminCampaignDetailPanel({
               </p>
             ) : (
               <p className="mt-1 text-sm leading-6 text-emerald-100">
-                Nothing refuses this campaign right now. It is still re-asked at
-                the moment each wave runs.
+                {m.gates.sendPassesDetail}
               </p>
             )}
           </div>
@@ -426,8 +408,8 @@ export function AdminCampaignDetailPanel({
           >
             <p className="text-sm font-bold text-white">
               {scheduleProblems.length > 0
-                ? `${scheduleProblems.length} problem(s) with the schedule`
-                : "The schedule is consistent"}
+                ? m.gates.scheduleProblems(scheduleProblems.length)
+                : m.gates.scheduleConsistent}
             </p>
             <ul className="mt-1 space-y-1 text-sm leading-6 text-zinc-300">
               {scheduleProblems.map((problem) => (
@@ -448,12 +430,12 @@ export function AdminCampaignDetailPanel({
               data-testid="admin-campaign-transition-claim"
             >
               <p className="text-sm font-bold text-white">
-                This campaign promises an automatic transition
+                {m.gates.transitionTitle}
               </p>
               <p className="mt-1 text-sm leading-6 text-zinc-300">
                 {transitionClaim?.mayClaim
-                  ? "Every condition for that promise is met."
-                  : `${transitionClaim?.unmet.length ?? 0} of the twelve conditions are unmet. The send is refused rather than quietly downgraded to the safe sentence — otherwise words nobody chose would go out and the operator would never learn the promise was not made.`}
+                  ? m.gates.transitionMet
+                  : m.gates.transitionUnmet(transitionClaim?.unmet.length ?? 0)}
               </p>
               {transitionClaim && !transitionClaim.mayClaim ? (
                 <ul className="mt-2 space-y-1 text-sm leading-6 text-amber-100">
@@ -473,11 +455,9 @@ export function AdminCampaignDetailPanel({
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <h3 className="text-lg font-black text-white">Attestations</h3>
+        <h3 className="text-lg font-black text-white">{m.attestations.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Three things no column can answer, so a person says them. Recorded with
-          who and when — that is what makes an attestation worth more than a
-          parameter somebody passed.
+          {m.attestations.intro}
         </p>
         <ul className="mt-4 space-y-3">
           {attestations.map((attestation) => (
@@ -493,17 +473,23 @@ export function AdminCampaignDetailPanel({
               data-testid={`admin-campaign-attestation-${attestation.kind}`}
             >
               <p className="text-sm font-bold text-white">
-                {ATTESTATION_LABEL[attestation.kind] ?? attestation.kind}
+                {labelFor(m.attestation, attestation.kind) ?? attestation.kind}
               </p>
               <p className="mt-1 text-xs leading-5 text-zinc-500">
-                {ATTESTATION_ABOUT[attestation.kind] ?? ""}
+                {labelFor(m.attestationAbout, attestation.kind) ?? ""}
               </p>
               <p className="mt-2 text-sm text-zinc-200">
                 {attestation.stale
-                  ? `${attestation.attestedByEmail} said this on ${when(attestation.attestedAt)}, and the copy has changed since. It no longer describes what would be sent.`
+                  ? m.attestations.stale(
+                      `${attestation.attestedByEmail}`,
+                      when(attestation.attestedAt)
+                    )
                   : attestation.satisfied
-                    ? `${attestation.attestedByEmail} said this on ${when(attestation.attestedAt)}.`
-                    : "Nobody has said this."}
+                    ? m.attestations.satisfied(
+                        `${attestation.attestedByEmail}`,
+                        when(attestation.attestedAt)
+                      )
+                    : m.attestations.nobody}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -513,13 +499,15 @@ export function AdminCampaignDetailPanel({
                       `attest:${attestation.kind}`,
                       () =>
                         send("/attestations", "POST", { kind: attestation.kind }),
-                      "Recorded."
+                      m.toast.recorded
                     )
                   }
                   disabled={busy !== null}
                   className="inline-flex min-h-11 items-center rounded-xl border border-blue-500/40 bg-blue-500/15 px-4 text-sm font-bold text-white hover:border-blue-400 disabled:opacity-60"
                 >
-                  {attestation.satisfied ? "Re-attest" : "I checked this"}
+                  {attestation.satisfied
+                    ? m.attestations.reattest
+                    : m.attestations.attest}
                 </button>
                 {attestation.satisfied || attestation.stale ? (
                   <button
@@ -531,13 +519,13 @@ export function AdminCampaignDetailPanel({
                           send("/attestations", "DELETE", {
                             kind: attestation.kind,
                           }),
-                        "Withdrawn."
+                        m.toast.withdrawn
                       )
                     }
                     disabled={busy !== null}
                     className="inline-flex min-h-11 items-center rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 hover:border-zinc-700 disabled:opacity-60"
                   >
-                    Withdraw
+                    {m.attestations.withdraw}
                   </button>
                 ) : null}
               </div>
@@ -547,32 +535,29 @@ export function AdminCampaignDetailPanel({
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <h3 className="text-lg font-black text-white">Approval</h3>
+        <h3 className="text-lg font-black text-white">{m.approval.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          The only two-person action here, and the only place a person reads the
-          copy. Drafting sends nothing; scheduling a wave sends nothing; running
-          a wave carries out what was approved. Approving is what is reviewed.
+          {m.approval.intro}
         </p>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          The request carries this campaign&rsquo;s language list —{" "}
+          {m.approval.localesBefore}{" "}
           <span
             className="font-mono text-zinc-200"
             data-testid="admin-campaign-approve-locales"
           >
-            {campaign.locales.join(", ") || "none"}
+            {campaign.locales.join(", ") || m.approval.localesNone}
           </span>{" "}
-          — so an approval cannot be inherited by a campaign that has since
-          changed which languages it sends in.
+          {m.approval.localesAfter}
         </p>
         <label className="mt-4 block text-sm font-bold text-zinc-200">
-          Why this may go out
+          {m.approval.reasonLabel}
           <input
             type="text"
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             maxLength={500}
             className="mt-2 min-h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm text-white placeholder:text-zinc-600"
-            placeholder="Read the copy in every language and confirmed the effective date"
+            placeholder={m.approval.reasonPlaceholder}
             data-testid="admin-campaign-approve-reason"
           />
         </label>
@@ -586,27 +571,25 @@ export function AdminCampaignDetailPanel({
                   reason: reason.trim(),
                   locales: campaign.locales,
                 }),
-              "Approved."
+              m.toast.approved
             )
           }
           disabled={busy !== null || reason.trim().length === 0}
           className="mt-3 inline-flex min-h-11 items-center rounded-xl border border-blue-500/40 bg-blue-500/15 px-5 text-sm font-bold text-white hover:border-blue-400 disabled:opacity-60"
           data-testid="admin-campaign-approve"
         >
-          Approve this campaign
+          {m.approval.approve}
         </button>
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <h3 className="text-lg font-black text-white">Waves</h3>
+        <h3 className="text-lg font-black text-white">{m.waves.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Listed in the order they are meant to happen, not the order they are
-          scheduled — a reminder set before its announcement is a mistake, and a
-          list sorted by time would render it as a correct-looking sequence.
+          {m.waves.intro}
         </p>
         {campaign.waves.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-            No waves have been created for this campaign.
+            {m.waves.empty}
           </p>
         ) : (
           <ul className="mt-4 space-y-3">
@@ -625,13 +608,13 @@ export function AdminCampaignDetailPanel({
                     </p>
                     <p className="mt-1 text-xs text-zinc-500">
                       {wave.scheduledAt
-                        ? `due ${when(wave.scheduledAt)}`
-                        : "started by hand"}
-                      {wave.dryRun ? " · dry run" : ""}
+                        ? m.waves.due(when(wave.scheduledAt))
+                        : m.waves.startedByHand}
+                      {wave.dryRun ? m.waves.dryRun : ""}
                       {wave.recipientCap === null
                         ? ""
-                        : ` · cap ${wave.recipientCap}`}
-                      {` · expanded ${wave.expandedCount}`}
+                        : m.waves.cap(wave.recipientCap)}
+                      {m.waves.expanded(wave.expandedCount)}
                     </p>
                   </div>
                   <button
@@ -645,13 +628,13 @@ export function AdminCampaignDetailPanel({
                             sequence: wave.sequence,
                             action: "run",
                           }),
-                        "Started."
+                        m.toast.started
                       )
                     }
                     disabled={busy !== null}
                     className="inline-flex min-h-11 items-center rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm font-bold text-zinc-200 hover:border-zinc-700 disabled:opacity-60"
                   >
-                    Start now
+                    {m.waves.startNow}
                   </button>
                 </div>
               </li>
@@ -664,17 +647,12 @@ export function AdminCampaignDetailPanel({
         className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
         data-testid="admin-campaign-estimate"
       >
-        <h3 className="text-lg font-black text-white">How large is this?</h3>
+        <h3 className="text-lg font-black text-white">{m.estimate.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Counted from the audience rules, not typed in. The number is who the
-          notice would go to after exclusions — not everyone in the cohort,
-          which would size the send on people it is about to decide not to write
-          to.
+          {m.estimate.intro}
         </p>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          This gates nothing. It exists so the size is knowable before anybody
-          commits to it; a campaign still sends on the same conditions it did
-          before.
+          {m.estimate.gatesNothing}
         </p>
 
         {campaign.audienceEstimate === null ? (
@@ -682,7 +660,7 @@ export function AdminCampaignDetailPanel({
             className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
             data-testid="admin-campaign-estimate-absent"
           >
-            Nobody has measured this audience.
+            {m.estimate.absent}
           </p>
         ) : (
           <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
@@ -691,17 +669,17 @@ export function AdminCampaignDetailPanel({
                 className="text-2xl font-black text-white"
                 data-testid="admin-campaign-estimate-headline"
               >
-                {campaign.audienceEstimate.truncated ? "at least " : ""}
+                {campaign.audienceEstimate.truncated ? m.estimate.atLeast : ""}
                 {campaign.audienceEstimate.noticeAudience}
               </span>{" "}
-              would receive the notice, out of{" "}
-              {campaign.audienceEstimate.distinctUsers} people in the cohort.
+              {m.estimate.headlineAfter(campaign.audienceEstimate.distinctUsers)}
             </p>
             <p className="mt-1 text-xs text-zinc-500">
-              Measured {when(campaign.estimatedAt)} by{" "}
-              {campaign.estimatedByEmail ?? "unknown"} under audience rules v
-              {campaign.audienceVersion}. The audience moves; a count is about
-              the moment it was taken.
+              {m.estimate.measured(
+                when(campaign.estimatedAt),
+                campaign.estimatedByEmail ?? m.fields.unknown,
+                campaign.audienceVersion
+              )}
             </p>
 
             {campaign.audienceEstimate.truncated ? (
@@ -709,9 +687,7 @@ export function AdminCampaignDetailPanel({
                 className="mt-3 rounded-xl border border-amber-800 bg-amber-950/40 p-3 text-sm leading-6 text-amber-100"
                 data-testid="admin-campaign-estimate-truncated"
               >
-                The scan stopped before the audience did, so every figure here
-                is a floor rather than a total. The real audience is larger by
-                an unknown amount.
+                {m.estimate.truncated}
               </p>
             ) : null}
 
@@ -723,7 +699,9 @@ export function AdminCampaignDetailPanel({
                     className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
                   >
                     <dt className="min-w-0 text-sm text-zinc-400">
-                      {ESTIMATE_EXCLUDED_LABEL[reason] ?? reason}
+                      {(ESTIMATE_EXCLUDED_REASONS.has(reason)
+                        ? labelFor(m.excluded, reason)
+                        : undefined) ?? reason}
                     </dt>
                     <dd
                       className={`text-sm font-bold ${
@@ -738,10 +716,11 @@ export function AdminCampaignDetailPanel({
             </dl>
 
             <p className="mt-3 text-sm text-zinc-300">
-              {campaign.audienceEstimate.autoMigratable} of them could be moved
-              automatically.{" "}
+              {m.estimate.autoMigratable(
+                campaign.audienceEstimate.autoMigratable
+              )}{" "}
               {campaign.audienceEstimate.malformed > 0
-                ? `${campaign.audienceEstimate.malformed} could not, because a stored value the parser cannot read is preserved rather than rewritten — promising those accounts an automatic change would be untrue.`
+                ? m.estimate.malformed(campaign.audienceEstimate.malformed)
                 : ""}
             </p>
           </div>
@@ -753,7 +732,7 @@ export function AdminCampaignDetailPanel({
             void run(
               "estimate",
               () => send("/estimate", "POST", {}),
-              "Measured."
+              m.toast.measured
             )
           }
           disabled={busy !== null}
@@ -761,10 +740,10 @@ export function AdminCampaignDetailPanel({
           data-testid="admin-campaign-estimate-run"
         >
           {busy === "estimate"
-            ? "Counting…"
+            ? m.estimate.counting
             : campaign.audienceEstimate
-              ? "Measure again"
-              : "Measure the audience"}
+              ? m.estimate.measureAgain
+              : m.estimate.measure}
         </button>
       </section>
 
@@ -772,22 +751,17 @@ export function AdminCampaignDetailPanel({
         className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
         data-testid="admin-campaign-audience"
       >
-        <h3 className="text-lg font-black text-white">Who each wave reached</h3>
+        <h3 className="text-lg font-black text-white">{m.audience.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          The expansion ledger, read back. Every person the expander considered
-          is one row: either a delivery was written for them, or a reason was
-          recorded for why it was not.
+          {m.audience.intro}
         </p>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Counts first, and the people behind them on request. Each row holds
-          the address it was written to, so the list follows the rule Email
-          delivery follows: addresses are masked, and showing them is a
-          deliberate act that is recorded.
+          {m.audience.introMasked}
         </p>
 
         {audience.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-            No wave has expanded yet, so nobody has been considered.
+            {m.audience.empty}
           </p>
         ) : (
           <ul className="mt-4 space-y-3">
@@ -803,13 +777,13 @@ export function AdminCampaignDetailPanel({
                     {wave.sequence > 1 ? ` #${wave.sequence}` : ""}
                   </p>
                   <p className="text-xs text-zinc-500">
-                    {wave.total} considered
+                    {m.audience.considered(wave.total)}
                   </p>
                 </div>
 
                 {wave.total === 0 ? (
                   <p className="mt-2 text-sm text-zinc-400">
-                    This wave has not expanded.
+                    {m.audience.notExpanded}
                   </p>
                 ) : (
                   <>
@@ -821,12 +795,10 @@ export function AdminCampaignDetailPanel({
                       <span className="font-bold">{wave.written}</span>{" "}
                       {wave.dryRun ? (
                         <span data-testid="admin-campaign-audience-dry-run">
-                          would have been written to — this was a dry run, so
-                          every one of those deliveries was skipped and nothing
-                          was sent.
+                          {m.audience.dryRunWritten}
                         </span>
                       ) : (
-                        "had a delivery row written."
+                        m.audience.written
                       )}
                     </p>
 
@@ -837,7 +809,7 @@ export function AdminCampaignDetailPanel({
                           className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
                         >
                           <dt className="min-w-0 text-sm text-zinc-400">
-                            {EXCLUDED_LABEL[reason] ?? reason}
+                            {labelFor(m.excluded, reason) ?? reason}
                           </dt>
                           <dd
                             className={`text-sm font-bold ${
@@ -851,7 +823,7 @@ export function AdminCampaignDetailPanel({
                     </dl>
 
                     <p className="mt-3 text-xs uppercase tracking-wider text-zinc-500">
-                      Why they were in the audience
+                      {m.audience.whyInAudience}
                     </p>
                     <dl className="mt-1 grid gap-x-6 gap-y-1 sm:grid-cols-2">
                       {Object.entries(wave.cohorts).map(([cohort, count]) => (
@@ -860,7 +832,7 @@ export function AdminCampaignDetailPanel({
                           className="flex items-baseline justify-between gap-3 py-1"
                         >
                           <dt className="min-w-0 text-sm text-zinc-400">
-                            {COHORT_LABEL[cohort] ?? cohort}
+                            {labelFor(m.cohort, cohort) ?? cohort}
                           </dt>
                           <dd className="text-sm text-zinc-300">{count}</dd>
                         </div>
@@ -872,10 +844,7 @@ export function AdminCampaignDetailPanel({
                         className="mt-3 rounded-xl border border-amber-800 bg-amber-950/40 p-3 text-sm leading-6 text-amber-100"
                         data-testid="admin-campaign-audience-malformed"
                       >
-                        {wave.malformed} of these people had a stored value the
-                        parser could not read. It was reported and left exactly
-                        as it was — nothing rewrote it — so the count is here
-                        rather than in a log nobody opens.
+                        {m.audience.malformed(wave.malformed)}
                       </p>
                     ) : null}
 
@@ -895,8 +864,8 @@ export function AdminCampaignDetailPanel({
                       data-testid="admin-campaign-audience-open-ledger"
                     >
                       {openLedgerWaveId === wave.waveId
-                        ? "Hide the people"
-                        : "Show the people"}
+                        ? m.audience.hidePeople
+                        : m.audience.showPeople}
                     </button>
 
                     {openLedgerWaveId === wave.waveId ? (
@@ -916,22 +885,20 @@ export function AdminCampaignDetailPanel({
       </section>
 
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
-        <h3 className="text-lg font-black text-white">Cancel</h3>
+        <h3 className="text-lg font-black text-white">{m.cancel.title}</h3>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Cancelling stops every wave that has not started.{" "}
-          {editable
-            ? "This campaign can still be edited through the API; once it is approved, editing is refused and cancelling is how it is stopped."
-            : "This campaign can no longer be edited — an approval covers the copy it was given, so changing it afterwards is what this layer refuses. Cancel it and draft another."}
+          {m.cancel.intro}{" "}
+          {editable ? m.cancel.editable : m.cancel.notEditable}
         </p>
         <label className="mt-4 block text-sm font-bold text-zinc-200">
-          Why
+          {m.cancel.reasonLabel}
           <input
             type="text"
             value={cancelReason}
             onChange={(event) => setCancelReason(event.target.value)}
             maxLength={500}
             className="mt-2 min-h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 text-sm text-white placeholder:text-zinc-600"
-            placeholder="The retirement date moved"
+            placeholder={m.cancel.reasonPlaceholder}
             data-testid="admin-campaign-cancel-reason"
           />
         </label>
@@ -941,14 +908,14 @@ export function AdminCampaignDetailPanel({
             void run(
               "cancel",
               () => send("", "PATCH", { cancelReason: cancelReason.trim() }),
-              "Cancelled."
+              m.toast.cancelled
             )
           }
           disabled={busy !== null || cancelReason.trim().length === 0}
           className="mt-3 inline-flex min-h-11 items-center rounded-xl border border-red-800 bg-red-950/40 px-5 text-sm font-bold text-red-100 hover:border-red-700 disabled:opacity-60"
           data-testid="admin-campaign-cancel"
         >
-          Cancel this campaign
+          {m.cancel.cancel}
         </button>
       </section>
     </div>

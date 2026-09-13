@@ -2,9 +2,24 @@
 
 import Link from "next/link";
 import { signOut } from "next-auth/react";
-import { ExternalLink, LogOut, UserRound } from "lucide-react";
+import { Check, ExternalLink, Languages, LogOut, UserRound } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminRole } from "@/lib/adminAuthCore";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { ADMIN_LOCALES, type AdminLocale } from "@/lib/adminLocale";
+import { adminShellMessages } from "@/lib/adminMessages/shell";
+
+/**
+ * Each language names itself, in its own language, in both consoles: an
+ * operator who cannot read the current language still has to recognise the
+ * way out of it.
+ */
+const LOCALE_SELF_NAMES: Record<AdminLocale, string> = {
+  en: "English",
+  ko: "한국어",
+};
+
+const MENU_ITEM_SELECTOR = "[role='menuitem'], [role='menuitemradio']";
 
 type Props = {
   user: { name: string | null; email: string | null };
@@ -32,7 +47,9 @@ export function AdminAccountMenu({ user, role }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const label = user.name || user.email || "Administrator";
+  const { locale, pending, setLocale } = useAdminLocale();
+  const m = useAdminMessages(adminShellMessages).account;
+  const label = user.name || user.email || m.fallbackName;
 
   const close = useCallback((returnFocus: boolean) => {
     setOpen(false);
@@ -44,7 +61,7 @@ export function AdminAccountMenu({ user, role }: Props) {
     // Focus the first item so the menu is usable from the keyboard the moment
     // it opens, rather than leaving focus behind on the trigger.
     const frame = requestAnimationFrame(() => {
-      menuRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
+      menuRef.current?.querySelector<HTMLElement>(MENU_ITEM_SELECTOR)?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [open]);
@@ -69,7 +86,7 @@ export function AdminAccountMenu({ user, role }: Props) {
 
   const moveFocus = (direction: 1 | -1) => {
     const items = Array.from(
-      menuRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']") || []
+      menuRef.current?.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR) || []
     );
     if (items.length === 0) return;
     const index = items.indexOf(document.activeElement as HTMLElement);
@@ -122,7 +139,7 @@ export function AdminAccountMenu({ user, role }: Props) {
         aria-expanded={open}
         // The visible name is truncated and hidden entirely on small screens,
         // so the accessible name carries the account and the role in full.
-        aria-label={`Account menu for ${label} (${role})`}
+        aria-label={m.trigger(label, role)}
         // Below `sm` it is the same 40px square as the other header controls,
         // with the name and role carried by `aria-label` alone; from `sm` it
         // grows the chip the console has always shown.
@@ -143,7 +160,7 @@ export function AdminAccountMenu({ user, role }: Props) {
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Administrator account"
+          aria-label={m.menu}
           data-testid="admin-account-menu"
           onKeyDown={onMenuKeyDown}
           className="absolute right-0 top-12 z-50 w-[min(18rem,calc(100vw-2rem))] rounded-2xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl"
@@ -158,6 +175,36 @@ export function AdminAccountMenu({ user, role }: Props) {
             </p>
           </div>
           <div className="my-1 border-t border-zinc-800" />
+          <div role="group" aria-label={m.language} aria-busy={pending || undefined}>
+            <p className="flex items-center gap-2 px-3 pb-1 pt-1.5 text-xs font-bold text-zinc-400">
+              <Languages className="h-3.5 w-3.5" aria-hidden />
+              {m.language}
+            </p>
+            {ADMIN_LOCALES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                aria-checked={locale === option}
+                lang={option}
+                data-testid={`admin-account-menu-locale-${option}`}
+                onClick={() => {
+                  // Focus returns to the trigger: the item that had it is about
+                  // to unmount, and a keyboard user would otherwise restart
+                  // from the top of the page.
+                  close(true);
+                  setLocale(option);
+                }}
+                className={itemClass}
+              >
+                <span className="flex h-4 w-4 items-center justify-center" aria-hidden>
+                  {locale === option ? <Check className="h-4 w-4" /> : null}
+                </span>
+                {LOCALE_SELF_NAMES[option]}
+              </button>
+            ))}
+          </div>
+          <div className="my-1 border-t border-zinc-800" />
           <Link
             href="/"
             role="menuitem"
@@ -166,7 +213,7 @@ export function AdminAccountMenu({ user, role }: Props) {
             className={itemClass}
           >
             <ExternalLink className="h-4 w-4" aria-hidden />
-            Return to Tomverse
+            {m.returnToProduct}
           </Link>
           <button
             type="button"
@@ -177,11 +224,10 @@ export function AdminAccountMenu({ user, role }: Props) {
             className={`${itemClass} disabled:cursor-wait disabled:opacity-70`}
           >
             <LogOut className="h-4 w-4" aria-hidden />
-            {signingOut ? "Signing out…" : "Sign out"}
+            {signingOut ? m.signingOut : m.signOut}
           </button>
           <p className="px-3 pb-1 pt-2 text-xs leading-5 text-zinc-500">
-            Signing out ends this session. It does not extend the
-            administrator or high-risk sign-in windows.
+            {m.signOutNote}
           </p>
         </div>
       ) : null}

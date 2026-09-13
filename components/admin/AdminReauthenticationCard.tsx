@@ -4,6 +4,8 @@ import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { KeyRound, Loader2, LogIn, ShieldCheck } from "lucide-react";
 import { useState } from "react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminReauthenticationMessages } from "@/lib/adminMessages/reauthentication";
 import {
   adminReauthenticationSignInHref,
   type AdminReauthenticationReason,
@@ -20,22 +22,6 @@ import {
  * has to end, the original screen is where you come back to, and nothing
  * pending is replayed) are stated once, below, for both.
  */
-const COPY: Record<
-  AdminReauthenticationReason,
-  { eyebrow: string; title: string; lead: string }
-> = {
-  "admin-session": {
-    eyebrow: "Administrator session expired",
-    title: "Administrator reauthentication required",
-    lead: "Your normal Tomverse session is still active, but the shorter administrator session that opens the Admin Console has expired.",
-  },
-  "recent-auth": {
-    eyebrow: "High-risk action needs a fresh sign-in",
-    title: "Sign in again to make this change",
-    lead: "Your Admin Console session is still valid. High-risk changes need a more recent sign-in than that, and this one is no longer recent enough, so the change was refused and nothing was saved.",
-  },
-};
-
 export function AdminReauthenticationCard({
   callbackUrl,
   email,
@@ -46,9 +32,10 @@ export function AdminReauthenticationCard({
   /** Which window expired; decided server-side, never from the browser. */
   reason?: AdminReauthenticationReason;
 }) {
+  const m = useAdminMessages(adminReauthenticationMessages);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const copy = COPY[reason];
+  const copy = m.reasons[reason];
 
   const reauthenticate = async () => {
     setSubmitting(true);
@@ -60,7 +47,7 @@ export function AdminReauthenticationCard({
       await signOut({ callbackUrl: signInUrl });
     } catch {
       setSubmitting(false);
-      setError("Could not end the current session. Please try again.");
+      setError(m.signOutFailed);
     }
   };
 
@@ -89,23 +76,15 @@ export function AdminReauthenticationCard({
             <div className="flex items-start gap-3">
               <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
               <div>
-                <p>
-                  A browser refresh cannot renew administrator authentication.
-                  Sign out of the current app session completely, then sign in
-                  again to continue securely.
-                </p>
-                <p className="mt-2">
-                  You will come back to the Admin Console screen you started
-                  from. Nothing you had not saved is carried over or re-sent --
-                  review the change there and submit it again.
-                </p>
+                <p>{m.refreshCannotRenew}</p>
+                <p className="mt-2">{m.returnNote}</p>
               </div>
             </div>
           </div>
 
           {email ? (
             <p className="text-sm text-zinc-400">
-              Current account: <span className="font-semibold text-zinc-200">{email}</span>
+              {m.currentAccount} <span className="font-semibold text-zinc-200">{email}</span>
             </p>
           ) : null}
 
@@ -127,14 +106,14 @@ export function AdminReauthenticationCard({
             ) : (
               <LogIn className="h-4 w-4" aria-hidden="true" />
             )}
-            {submitting ? "Signing out…" : "Sign out and reauthenticate"}
+            {submitting ? m.signingOut : m.signOutAndReauthenticate}
           </button>
 
           <Link
             href="/"
             className="flex w-full items-center justify-center rounded-xl border border-zinc-700 px-5 py-3 text-sm font-semibold text-zinc-300 transition hover:border-zinc-600 hover:bg-zinc-800 hover:text-white"
           >
-            Return to Tomverse
+            {m.returnToProduct}
           </Link>
         </div>
       </section>

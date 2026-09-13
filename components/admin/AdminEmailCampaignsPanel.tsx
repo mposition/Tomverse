@@ -1,6 +1,8 @@
 import Link from "next/link";
 
 import type { AdminCampaignRow } from "@/lib/adminEmailCampaigns";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 
 /**
  * The campaign list.
@@ -32,37 +34,35 @@ const STATUS_TONE: Record<string, string> = {
 const when = (value: Date | null) =>
   value ? value.toISOString().replace("T", " ").slice(0, 16) : "—";
 
-export function AdminEmailCampaignsPanel({
+export async function AdminEmailCampaignsPanel({
   rows,
   limit,
 }: {
   rows: AdminCampaignRow[];
   limit: number;
 }) {
+  const messages = await getAdminMessages(adminEmailCampaignsMessages);
+  const m = messages.list;
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Email
+        {messages.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Campaigns</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        Every campaign this console knows about, newest first. A campaign is a
-        set of waves over one piece of copy; approving it is where a person reads
-        that copy, and it is the only two-person action here.
+        {m.intro}
       </p>
       <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-500">
-        Showing the newest {limit}. Drafting a campaign is done through{" "}
+        {m.draftingBefore(limit)}{" "}
         <code className="rounded bg-zinc-900 px-1 py-0.5 text-zinc-300">
           POST /api/admin/email-campaigns
         </code>{" "}
-        — the audience spec is a document the expansion layer owns, and a
-        free-text box for it here would be a worse editor than the request that
-        already validates it.
+        {m.draftingAfter}
       </p>
 
       {rows.length === 0 ? (
         <p className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-          No campaigns have been drafted.
+          {m.empty}
         </p>
       ) : (
         <div className="mt-5 overflow-x-auto">
@@ -70,25 +70,25 @@ export function AdminEmailCampaignsPanel({
             <thead>
               <tr className="border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-500">
                 <th scope="col" className="py-2 pr-4 font-bold">
-                  Campaign
+                  {m.columns.campaign}
                 </th>
                 <th scope="col" className="py-2 pr-4 font-bold">
-                  Status
+                  {m.columns.status}
                 </th>
                 <th scope="col" className="py-2 pr-4 font-bold">
-                  Trigger
+                  {m.columns.trigger}
                 </th>
                 <th scope="col" className="py-2 pr-4 font-bold">
-                  Languages
+                  {m.columns.languages}
                 </th>
                 <th scope="col" className="py-2 pr-4 font-bold">
-                  Waves
+                  {m.columns.waves}
                 </th>
                 <th scope="col" className="py-2 pr-4 font-bold">
-                  Next due
+                  {m.columns.nextDue}
                 </th>
                 <th scope="col" className="py-2 font-bold">
-                  Drafted
+                  {m.columns.drafted}
                 </th>
               </tr>
             </thead>
@@ -109,7 +109,7 @@ export function AdminEmailCampaignsPanel({
                     <p className="mt-1 text-xs text-zinc-500">{row.category}</p>
                     {row.claimsAutomaticTransition ? (
                       <p className="mt-1 text-xs font-bold text-amber-300">
-                        Promises an automatic transition
+                        {m.promisesTransition}
                       </p>
                     ) : null}
                     {row.targetModelId ? (
@@ -132,7 +132,7 @@ export function AdminEmailCampaignsPanel({
                     </span>
                     {row.approvedAt ? (
                       <p className="mt-1 text-xs text-zinc-500">
-                        approved {when(row.approvedAt)}
+                        {m.approvedAt(when(row.approvedAt))}
                       </p>
                     ) : null}
                   </td>
@@ -149,7 +149,7 @@ export function AdminEmailCampaignsPanel({
                         className="ml-2 inline-flex rounded-full border border-red-800 bg-red-950/50 px-2 py-0.5 font-bold text-red-200"
                         data-testid="admin-campaign-overdue"
                       >
-                        {row.overdueWaves} overdue
+                        {m.overdue(row.overdueWaves)}
                       </span>
                     ) : null}
                   </td>

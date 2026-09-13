@@ -1,4 +1,6 @@
 import type { AdminSuppressionRow } from "@/lib/adminEmailDeliveries";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminEmailDeliveryMessages } from "@/lib/adminMessages/emailDelivery";
 import {
   AdminRevealableAddress,
   AdminRevealAddressesButton,
@@ -33,7 +35,7 @@ const REASON_TONE: Record<string, string> = {
 const when = (value: Date | null) =>
   value ? value.toISOString().replace("T", " ").slice(0, 19) : "—";
 
-export function AdminEmailSuppressionsPanel({
+export async function AdminEmailSuppressionsPanel({
   rows,
   mayRevealAddresses,
 }: {
@@ -41,17 +43,16 @@ export function AdminEmailSuppressionsPanel({
   /** D10: `owner` and `ops`. Resolved on the server. */
   mayRevealAddresses: boolean;
 }) {
+  const messages = await getAdminMessages(adminEmailDeliveryMessages);
+  const m = messages.suppressions;
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Email
+        {messages.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Suppressions</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        Addresses this system will not send to. A hard bounce or a complaint has
-        no expiry; a soft bounce holds for a day. Lifting one is audited and
-        needs a written reason, and lifting a hard bounce or a complaint needs a
-        second administrator.
+        {m.intro}
       </p>
 
       {/* D10: masked by default, revealed by a deliberate audited act. The
@@ -69,22 +70,19 @@ export function AdminEmailSuppressionsPanel({
         data-testid="email-suppression-provider-notice"
         className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-xs leading-5 text-zinc-400"
       >
-        This is our list, not the provider&apos;s. Resend keeps its own
-        suppression list across the whole account and region, so an address
-        removed here can still be refused there — and a promotion&apos;s
-        complaint can refuse a login code no matter what this table says.
+        {m.providerNotice}
       </p>
 
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[52rem] text-left text-sm">
           <thead className="text-xs uppercase tracking-wide text-zinc-500">
             <tr>
-              <th className="py-2 pr-4 font-semibold">Address</th>
-              <th className="py-2 pr-4 font-semibold">Reason</th>
-              <th className="py-2 pr-4 font-semibold">Scope</th>
-              <th className="py-2 pr-4 font-semibold">Source</th>
-              <th className="py-2 pr-4 font-semibold">Occurred</th>
-              <th className="py-2 pr-4 font-semibold">Expires</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.address}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.reason}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.scope}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.source}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.occurred}</th>
+              <th className="py-2 pr-4 font-semibold">{m.columns.expires}</th>
             </tr>
           </thead>
           <tbody className="text-zinc-300">
@@ -95,7 +93,7 @@ export function AdminEmailSuppressionsPanel({
                   data-testid="email-suppression-empty"
                   className="py-6 text-sm text-zinc-500"
                 >
-                  No addresses are suppressed.
+                  {m.empty}
                 </td>
               </tr>
             ) : null}
@@ -122,7 +120,7 @@ export function AdminEmailSuppressionsPanel({
                   </span>
                 </td>
                 <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
-                  {row.scope === "global" ? "all mail" : row.purposeKey}
+                  {row.scope === "global" ? m.allMail : row.purposeKey}
                 </td>
                 <td className="py-3 pr-4 font-mono text-xs text-zinc-400">
                   {row.source}
@@ -136,7 +134,7 @@ export function AdminEmailSuppressionsPanel({
                   {when(row.occurredAt)}
                 </td>
                 <td className="py-3 pr-4 font-mono text-[11px] text-zinc-500">
-                  {row.expiresAt ? when(row.expiresAt) : "never"}
+                  {row.expiresAt ? when(row.expiresAt) : m.never}
                 </td>
               </tr>
             ))}

@@ -18,9 +18,14 @@ import {
 import { Prisma } from "@prisma/client";
 import {
   adoptionTransitionPath,
+  OPERATOR_REASON_MAX_LENGTH,
   observedPairsOf,
 } from "@/lib/modelLifecycleWorkItemCore";
-import { transitionWorkItems } from "@/lib/modelLifecycleWorkItems";
+import {
+  analysisSnapshotsFor,
+  recordAdoptionDecision,
+  transitionWorkItems,
+} from "@/lib/modelLifecycleWorkItems";
 import {
   ADOPTION_PENDING_VALIDATIONS,
   adoptionPreflightRefusal,
@@ -82,7 +87,11 @@ const effectiveProfilePrice = (
   body: Parameters<typeof adoptionPreflightRefusal>[0]["body"],
   worstCaseInputTokens: number
 ) => {
-  if (!getModelPricingProfile(body.id)) return null;
+  const profile = getModelPricingProfile(body.id);
+  // Only a profile for this exact pair is an inheritance. See profileForOtherPair.
+  if (!profile || profile.provider !== body.provider || profile.apiModelId !== body.apiModel) {
+    return null;
+  }
   const resolved = resolveModelPricing(
     {
       id: body.id,
@@ -179,6 +188,12 @@ const readAdoptionContext = async (
     }),
     providerPairRegistered,
     profilePrice: effectiveProfilePrice(body, worstCaseInputTokens),
+    profileForOtherPair: (() => {
+      const profile = getModelPricingProfile(body.id);
+      return profile && (profile.provider !== body.provider || profile.apiModelId !== body.apiModel)
+        ? { provider: profile.provider, apiModelId: profile.apiModelId }
+        : null;
+    })(),
     // The limit the runtime actually enforces, not the one this module would
     // assume. A deployment that raised it is shown a floor that covers it.
     worstCaseInputTokens,
@@ -250,6 +265,12 @@ export async function POST(req: Request) {
     // history holds no snapshot of the form. A sentence composed by this route
     // would repeat what was done and answer nothing.
     const adoptionReason = url.searchParams.get("reason")?.trim() || "";
+    if (workItemId && adoptionReason.length > OPERATOR_REASON_MAX_LENGTH) {
+      return NextResponse.json(
+        { error: `An adoption reason is at most ${OPERATOR_REASON_MAX_LENGTH} characters.` },
+        { status: 400 }
+      );
+    }
     if (workItemId && adoptionReason.length < 4) {
       return NextResponse.json(
         { error: "An adoption needs the reason it is being made." },
@@ -275,6 +296,38 @@ export async function POST(req: Request) {
       metadata: { provider: body.provider, status: body.status, workItemId },
     });
     let adoptedTo: string | null = null;
+    // What the queue was showing about this item when it was adopted, kept on
+    // the approving event beside -- never as -- the operator's reason. Read
+    // outside the transaction: it is evidence of what was shown, not part of
+    // the write.
+    let adoptionAnalysis = "";
+    if (workItemId) {
+      // Fail closed, as an exclusion does: an adoption recorded without the
+      // analysis it was made against is the half-record this column exists to
+      // prevent, and the operator can retry once the queue reads again.
+      let computed: Awaited<ReturnType<typeof analysisSnapshotsFor>>;
+      try {
+        computed = await analysisSnapshotsFor([workItemId]);
+      } catch (error) {
+        console.error("Adoption analysis snapshot failed:", error);
+        return NextResponse.json(
+          {
+            error: "ADOPTION_ANALYSIS_UNAVAILABLE",
+            message:
+              "The queue analysis for this item could not be read, so the adoption cannot be recorded. Try again.",
+          },
+          { status: 503 }
+        );
+      }
+      const entry = computed.get(workItemId);
+      if (!entry) {
+        return NextResponse.json(
+          { error: "ADOPTION_REFUSED", message: "No such work item." },
+          { status: 409 }
+        );
+      }
+      adoptionAnalysis = entry.analysisKo;
+    }
     const row = await prisma.$transaction(async (tx) => {
       if (workItemId) {
         // Everything that decides happens before the row exists. Creating it
@@ -352,6 +405,15 @@ export async function POST(req: Request) {
         if (!result.ok) throw new AdoptionRefused(result.refusal.message);
       }
       adoptedTo = path.at(-1) ?? workItem!.status;
+      const recorded = await recordAdoptionDecision(tx, {
+        workItemId,
+        actorEmail: session.user.email ?? session.user.id,
+        status: adoptedTo as Parameters<typeof recordAdoptionDecision>[1]["status"],
+        operatorReason: adoptionReason,
+        analysisSnapshot: adoptionAnalysis,
+        note: `Adopted into the registry as ${id}.`,
+      });
+      if (!recorded.ok) throw new AdoptionRefused(recorded.refusal.message);
       await tx.modelLifecycleWorkItem.update({
         where: { id: workItemId },
         data: {

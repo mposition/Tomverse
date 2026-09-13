@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, OctagonX, RefreshCw, ShieldAlert } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminMemoryRevocationMessages } from "@/lib/adminMessages/memoryRevocation";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import type { AdminMessageShape } from "@/lib/adminLocale";
 
 /**
  * The §12.1 emergency revocation control.
@@ -44,17 +47,22 @@ type RevocationResponse = {
     unknownLabels?: string[];
 };
 
-const stateSentence = (revoked: RevokedView) => {
-    if (revoked.kind === "none") return "Nothing is revoked. Every approved pair may run.";
+type StateMessages = AdminMessageShape<(typeof adminMemoryRevocationMessages)["en"]["state"]>;
+
+const stateSentence = (revoked: RevokedView, m: StateMessages) => {
+    if (revoked.kind === "none") return m.none;
     if (revoked.kind === "revoke_all") {
-        return revoked.reason === "operator"
-            ? "All extraction is stopped by an operator. No pair may run."
-            : "The stored revocation list is unreadable, so every pair is treated as revoked. No pair may run until it is rewritten.";
+        return revoked.reason === "operator" ? m.stoppedByOperator : m.malformed;
     }
-    return `${revoked.pairs.length} pair(s) revoked. They cannot run; other approved pairs can.`;
+    return m.revoked(revoked.pairs.length);
 };
 
 export function AdminMemoryRevocationPanel() {
+    const m = useAdminMessages(adminMemoryRevocationMessages);
+    const messagesRef = useRef(m);
+    useEffect(() => {
+        messagesRef.current = m;
+    }, [m]);
     const [data, setData] = useState<RevocationResponse | null>(null);
     const [selected, setSelected] = useState<string[]>([]);
     const [extraLabels, setExtraLabels] = useState("");
@@ -84,7 +92,7 @@ export function AdminMemoryRevocationPanel() {
             if (!response.ok || !body || "error" in body) {
                 throw new Error(
                     (body && "error" in body && body.error) ||
-                        "Failed to load extraction revocations."
+                        messagesRef.current.error.loadFailed
                 );
             }
             setError(null);
@@ -93,7 +101,7 @@ export function AdminMemoryRevocationPanel() {
             setError(
                 loadError instanceof Error
                     ? loadError.message
-                    : "Failed to load extraction revocations."
+                    : messagesRef.current.error.loadFailed
             );
         } finally {
             setIsLoading(false);
@@ -134,7 +142,7 @@ export function AdminMemoryRevocationPanel() {
             if (!response.ok || !body || body.error) {
                 setProblems(body?.problems ?? []);
                 throw new Error(
-                    body?.error || "The revocation could not be saved. Nothing changed."
+                    body?.error || m.error.saveFailed
                 );
             }
             apply(body);
@@ -144,15 +152,15 @@ export function AdminMemoryRevocationPanel() {
             const unknown = body.unknownLabels ?? [];
             dispatchAppToast(
                 unknown.length > 0
-                    ? `Saved. ${unknown.length} label(s) are not in the register: ${unknown.join(", ")}. Check them if that was not deliberate.`
-                    : "Saved. The next extraction reads this immediately.",
+                    ? m.toast.savedWithUnknown(unknown.length, unknown.join(", "))
+                    : m.toast.saved,
                 unknown.length > 0 ? "info" : "success"
             );
         } catch (saveError) {
             const message =
                 saveError instanceof Error
                     ? saveError.message
-                    : "The revocation could not be saved. Nothing changed.";
+                    : m.error.saveFailed;
             setError(message);
             dispatchAppToast(message, "error");
         } finally {
@@ -172,16 +180,13 @@ export function AdminMemoryRevocationPanel() {
                 <div>
                     <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
                         <ShieldAlert className="h-3.5 w-3.5" />
-                        Emergency revocation
+                        {m.badge}
                     </div>
                     <h2 className="mt-3 text-2xl font-black text-white">
-                        Stop an extraction pair without a deploy
+                        {m.title}
                     </h2>
                     <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                        Revocation takes effect on the next extraction and on the next
-                        injected memory — there is no cache to wait out. It only ever
-                        restricts: enabling memory is the §12.4 human procedure and is
-                        deliberately not on this screen.
+                        {m.description}
                     </p>
                 </div>
                 <button
@@ -198,7 +203,7 @@ export function AdminMemoryRevocationPanel() {
                     ) : (
                         <RefreshCw className="h-4 w-4" />
                     )}
-                    Refresh
+                    {m.refresh}
                 </button>
             </div>
 
@@ -228,16 +233,16 @@ export function AdminMemoryRevocationPanel() {
                         className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm font-semibold text-zinc-200"
                         data-testid="admin-memory-revocation-state"
                     >
-                        {stateSentence(data.revoked)}
+                        {stateSentence(data.revoked, m.state)}
                     </p>
 
                     <fieldset className="rounded-xl border border-zinc-800 bg-zinc-950 p-3">
                         <legend className="px-1 text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500">
-                            Registered pairs
+                            {m.registeredPairs}
                         </legend>
                         {data.register.length === 0 ? (
                             <p className="mt-2 text-sm text-zinc-500">
-                                The register lists no pairs.
+                                {m.registerEmpty}
                             </p>
                         ) : (
                             <ul className="mt-2 space-y-2">
@@ -278,7 +283,7 @@ export function AdminMemoryRevocationPanel() {
                             htmlFor="revocation-extra-labels"
                             className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500"
                         >
-                            Other pairs, one per line
+                            {m.otherPairs}
                         </label>
                         <textarea
                             id="revocation-extra-labels"
@@ -290,8 +295,7 @@ export function AdminMemoryRevocationPanel() {
                             className="rounded-xl border border-zinc-800 bg-zinc-950 p-3 font-mono text-sm text-white placeholder:text-zinc-600 disabled:opacity-60"
                         />
                         <p className="text-xs text-zinc-500">
-                            For a pair the register no longer lists. A label that is not
-                            registered is saved and reported back, not refused.
+                            {m.otherPairsHelp}
                         </p>
                     </div>
 
@@ -300,7 +304,7 @@ export function AdminMemoryRevocationPanel() {
                             htmlFor="revocation-reason"
                             className="text-[11px] font-bold uppercase tracking-[0.14em] text-zinc-500"
                         >
-                            Reason (recorded in the audit log)
+                            {m.reason}
                         </label>
                         <textarea
                             id="revocation-reason"
@@ -314,8 +318,7 @@ export function AdminMemoryRevocationPanel() {
 
                     {!canWrite && (
                         <p className="text-sm font-semibold text-amber-300">
-                            Your admin role can read this but not change it. Revocation
-                            needs the ops write permission.
+                            {m.readOnly}
                         </p>
                     )}
 
@@ -331,8 +334,8 @@ export function AdminMemoryRevocationPanel() {
                         >
                             {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
                             {requestedLabels.length === 0
-                                ? "Clear all revocations"
-                                : `Revoke ${requestedLabels.length} pair(s)`}
+                                ? m.clearAll
+                                : m.revokePairs(requestedLabels.length)}
                         </button>
                         <button
                             type="button"
@@ -342,11 +345,11 @@ export function AdminMemoryRevocationPanel() {
                             className="inline-flex items-center gap-2 rounded-xl border border-red-700 px-4 py-2 text-sm font-bold text-red-200 hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             <OctagonX className="h-4 w-4" />
-                            Stop all extraction
+                            {m.stopAll}
                         </button>
                     </div>
                     <p className="text-xs text-zinc-500">
-                        A reason is required before either action is available.
+                        {m.reasonRequired}
                     </p>
                 </div>
             )}

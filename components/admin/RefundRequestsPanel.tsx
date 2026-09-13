@@ -7,6 +7,9 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
 import { describeRefundApproval } from "@/lib/adminRefundOutcomeCopy";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
+import { adminIntlLocale } from "@/lib/adminLocale";
+import { adminRefundsMessages } from "@/lib/adminMessages/refunds";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 export type RefundRequestRow = {
   id: string;
@@ -84,6 +87,9 @@ const escapeCsv = (value: unknown) => {
 };
 
 export function RefundRequestsPanel({ rows, rowLimit }: Props) {
+  const m = useAdminMessages(adminRefundsMessages);
+  const { locale: apiLocale } = useAdminLocale();
+  const intlLocale = adminIntlLocale(apiLocale);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -107,7 +113,6 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
     statusFilter === "all"
       ? items
       : items.filter((item) => item.status === statusFilter);
-  const pendingLabel = visiblePendingCount === 1 ? "pending" : "pending";
 
   const selectStatus = (status: typeof statusFilter) => {
     setStatusFilter(status);
@@ -176,7 +181,8 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
           error: data?.error,
           code: data?.code,
           approvalId: data?.approvalId,
-          fallback: "The refund request was not updated.",
+          fallback: m.toasts.notUpdated,
+          locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
         return;
@@ -199,16 +205,10 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
         const outcome = describeRefundApproval(data.refundRequest);
         dispatchAppToast(outcome.message, outcome.tone);
       } else {
-        dispatchAppToast(
-          "Refund request rejected. The subscription and plan were left unchanged.",
-          "success"
-        );
+        dispatchAppToast(m.toasts.rejected, "success");
       }
     } catch {
-      dispatchAppToast(
-        "The refund request was not updated. Check the connection and retry.",
-        "error"
-      );
+      dispatchAppToast(m.toasts.connectionFailed, "error");
     } finally {
       setBusyId(null);
     }
@@ -219,22 +219,19 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Refunds
+            {m.eyebrow}
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
-            Cancellation and refund requests
+            {m.title}
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Review customer refund requests, cancel Stripe subscriptions, reset paid
-            membership to Free, and send transactional email updates.
-            {rowLimit
-              ? ` Showing the ${rowLimit} most recent requests; the status counts describe those requests only.`
-              : ""}
+            {m.description}
+            {rowLimit ? m.rowLimit(rowLimit) : ""}
           </p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <RotateCcw className="h-3.5 w-3.5" />
-          {visiblePendingCount} {pendingLabel}
+          {m.pendingBadge(visiblePendingCount)}
         </span>
         <button
           type="button"
@@ -242,17 +239,17 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
           className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900"
         >
           <Download className="h-3.5 w-3.5" />
-          Export CSV
+          {m.exportCsv}
         </button>
       </div>
 
       <div className="mt-5 grid gap-3">
         <div className="flex flex-wrap gap-2">
           {[
-            ["pending", `Pending ${visiblePendingCount}`],
-            ["approved", `Approved ${approvedCount}`],
-            ["rejected", `Rejected ${rejectedCount}`],
-            ["all", `All ${items.length}`],
+            ["pending", m.filters.pending(visiblePendingCount)],
+            ["approved", m.filters.approved(approvedCount)],
+            ["rejected", m.filters.rejected(rejectedCount)],
+            ["all", m.filters.all(items.length)],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -271,22 +268,22 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
 
         <div className="grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-200/80">Pending</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-200/80">{m.counters.pending}</p>
             <p className="mt-1 text-2xl font-black text-white">{visiblePendingCount}</p>
           </div>
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-200/80">Approved</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-200/80">{m.counters.approved}</p>
             <p className="mt-1 text-2xl font-black text-white">{approvedCount}</p>
           </div>
           <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/80">Rejected</p>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200/80">{m.counters.rejected}</p>
             <p className="mt-1 text-2xl font-black text-white">{rejectedCount}</p>
           </div>
         </div>
 
         {filteredItems.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No refund requests match the current filter.
+            {m.empty}
           </div>
         ) : (
           filteredItems.map((request) => {
@@ -301,51 +298,51 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                         {request.status}
                       </span>
                       <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-2.5 py-1 text-xs font-bold text-blue-200">
-                        {request.plan || "Unknown plan"}
+                        {request.plan || m.unknownPlan}
                       </span>
                       <span className="text-xs text-zinc-500">
-                        Requested {dateLabel(request.requestedAt)}
+                        {m.requested(dateLabel(request.requestedAt))}
                       </span>
                     </div>
                     <h3 className="mt-3 truncate text-base font-bold text-white">
-                      {request.email || "No email"}
+                      {request.email || m.noEmail}
                     </h3>
                     <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
-                      {request.reason || "No reason provided."}
+                      {request.reason || m.noReason}
                     </p>
                   </div>
                   <div className="grid gap-2 text-xs text-zinc-500 lg:min-w-[280px]">
-                    <span>Stripe customer: {request.stripeCustomerId || "-"}</span>
-                    <span>Subscription: {request.stripeSubscriptionId || "-"}</span>
-                    <span>Status: {request.subscriptionStatus || "-"}</span>
-                    <span>Billing: {request.subscriptionBillingInterval || "-"}</span>
-                    <span>Period end: {dateLabel(request.subscriptionCurrentPeriodEnd)}</span>
-                    <span>Stripe refund: {request.stripeRefundId || "-"}</span>
-                    <span>Refund status: {request.stripeRefundStatus || "-"}</span>
-                    <span>Refund amount: {money(request.refundAmountCents, request.refundCurrency)}</span>
-                    <span>Reviewed: {dateLabel(request.reviewedAt)}</span>
+                    <span>{m.details.stripeCustomer(request.stripeCustomerId || "-")}</span>
+                    <span>{m.details.subscription(request.stripeSubscriptionId || "-")}</span>
+                    <span>{m.details.status(request.subscriptionStatus || "-")}</span>
+                    <span>{m.details.billing(request.subscriptionBillingInterval || "-")}</span>
+                    <span>{m.details.periodEnd(dateLabel(request.subscriptionCurrentPeriodEnd))}</span>
+                    <span>{m.details.stripeRefund(request.stripeRefundId || "-")}</span>
+                    <span>{m.details.refundStatus(request.stripeRefundStatus || "-")}</span>
+                    <span>{m.details.refundAmount(money(request.refundAmountCents, request.refundCurrency))}</span>
+                    <span>{m.details.reviewed(dateLabel(request.reviewedAt))}</span>
                   </div>
                 </div>
 
                 {request.adminNote && (
                   <p className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs leading-5 text-zinc-400">
-                    Admin note: {request.adminNote}
+                    {m.adminNote(request.adminNote)}
                   </p>
                 )}
 
                 {request.creditRisk?.requiresReview ? (
                   <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4">
                     <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-200">
-                      Credit balance and cost review required
+                      {m.creditRisk.title}
                     </p>
                     <div className="mt-3 grid gap-2 text-xs text-red-100 sm:grid-cols-2 lg:grid-cols-4">
-                      <span>{request.creditRisk.purchaseCount} credit-pack purchases</span>
-                      <span>Remaining: {request.creditRisk.remainingCredits.toLocaleString()} credits / ${(request.creditRisk.remainingCostMicroUsd / 1_000_000).toFixed(2)}</span>
-                      <span>Estimated consumed: {request.creditRisk.estimatedUsedCredits.toLocaleString()} credits / ${(request.creditRisk.estimatedConsumedCostMicroUsd / 1_000_000).toFixed(2)}</span>
-                      <span className="font-black">Unrecovered: {request.creditRisk.unrecoveredCredits.toLocaleString()} credits / ${(request.creditRisk.unrecoveredCostMicroUsd / 1_000_000).toFixed(2)}</span>
+                      <span>{m.creditRisk.purchases(request.creditRisk.purchaseCount)}</span>
+                      <span>{m.creditRisk.remaining(request.creditRisk.remainingCredits.toLocaleString(intlLocale), (request.creditRisk.remainingCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                      <span>{m.creditRisk.estimatedConsumed(request.creditRisk.estimatedUsedCredits.toLocaleString(intlLocale), (request.creditRisk.estimatedConsumedCostMicroUsd / 1_000_000).toFixed(2))}</span>
+                      <span className="font-black">{m.creditRisk.unrecovered(request.creditRisk.unrecoveredCredits.toLocaleString(intlLocale), (request.creditRisk.unrecoveredCostMicroUsd / 1_000_000).toFixed(2))}</span>
                     </div>
                     <p className="mt-2 text-xs text-red-200/80">
-                      Billing risk: {request.creditRisk.billingRiskStatus}. Verify the refundable balance and consumed AI cost before approving.
+                      {m.creditRisk.billingRisk(request.creditRisk.billingRiskStatus)}
                     </p>
                     {request.status === "pending" ? (
                       <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs font-bold text-white">
@@ -360,7 +357,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                           }
                           className="mt-0.5 h-4 w-4"
                         />
-                        I reviewed purchased credit balance, used credits, and funded AI cost.
+                        {m.creditRisk.confirm}
                       </label>
                     ) : null}
                   </div>
@@ -369,7 +366,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                 {request.timelineEvents && request.timelineEvents.length > 0 ? (
                   <div className="mt-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-3">
                     <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
-                      Timeline
+                      {m.timeline}
                     </p>
                     <div className="mt-3 grid gap-2">
                       {request.timelineEvents.map((event) => (
@@ -379,7 +376,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                             <p className="font-black text-zinc-200">{event.eventType}</p>
                             <p className="mt-0.5 text-zinc-400">{event.message}</p>
                             <p className="mt-0.5 text-zinc-600">
-                              {dateLabel(event.createdAt)} UTC / {event.actorEmail || "system"}
+                              {m.timelineMeta(dateLabel(event.createdAt), event.actorEmail)}
                             </p>
                           </div>
                         </div>
@@ -398,7 +395,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                           [request.id]: event.target.value,
                         }))
                       }
-                      placeholder="Optional note for the customer email"
+                      placeholder={m.notePlaceholder}
                       className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2.5 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
                     />
                     <div className="flex flex-wrap gap-2">
@@ -415,7 +412,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                         className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                        Approve
+                        {m.approve}
                       </button>
                       <button
                         type="button"
@@ -424,7 +421,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
                         className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/30 px-4 py-2.5 text-sm font-bold text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <XCircle className="h-4 w-4" />
-                        Reject
+                        {m.reject}
                       </button>
                     </div>
                   </div>

@@ -11,6 +11,7 @@ regexTarget = "line"
 regexes = [
   # e.g. lib/models.ts, components/chat/*.tsx: apiModel: "claude-haiku-4-5-20251001"
   # e.g. lib/modelPricing.ts: apiModelId: "claude-haiku-4-5-20251001"
+  # e.g. alias evidence: aliasApiModel/canonicalApiModel with public provider IDs
   # A public provider model identifier, not a secret.
   #
   # `apiModelId` is spelled out here because `apiModel:` does not match it --
@@ -20,7 +21,7 @@ regexes = [
   # tripped it on entropy alone. The `mistral-medium-3-5` line below is the
   # scar from the first time that happened: one value pinned instead of the
   # field, which fixed that model and left the next one to fail the same way.
-  '''apiModel(?:Id)?:\s*"[A-Za-z0-9._/-]+"''',
+  '''(?:apiModel(?:Id)?|aliasApiModel|canonicalApiModel):\s*"[A-Za-z0-9._/-]+"''',
   # Still needed after the rule above: this identifier also appears as an
   # assertion argument (`mistral.apiModel, "mistral-medium-3-5"`), where there
   # is no `field:` for a field rule to anchor to.

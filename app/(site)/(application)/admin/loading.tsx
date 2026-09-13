@@ -1,3 +1,8 @@
+"use client";
+
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminCommonMessages } from "@/lib/adminMessages/common";
+
 /**
  * The content-area loading state.
  *
@@ -8,13 +13,14 @@
  * console.
  */
 export default function AdminLoading() {
+  const m = useAdminMessages(adminCommonMessages);
   return (
     <div
       className="flex min-w-0 flex-col gap-4"
       aria-busy="true"
       aria-live="polite"
     >
-      <p className="sr-only">Loading this Admin workspace.</p>
+      <p className="sr-only">{m.loading}</p>
       <div className="h-11 w-full max-w-md animate-pulse rounded-xl bg-zinc-900" />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {[0, 1, 2, 3].map((index) => (

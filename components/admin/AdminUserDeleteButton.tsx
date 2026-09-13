@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminUserDeleteMessages } from "@/lib/adminMessages/userDelete";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 type Props = {
   userId: string;
@@ -13,8 +15,9 @@ type Props = {
 export function AdminUserDeleteButton({
   userId,
   currentUserId,
-  label = "Delete",
+  label,
 }: Props) {
+  const m = useAdminMessages(adminUserDeleteMessages);
   const [isArmed, setIsArmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState("");
@@ -22,23 +25,17 @@ export function AdminUserDeleteButton({
 
   const handleDelete = async () => {
     if (isCurrentAdmin) {
-      dispatchAppToast(
-        "Use account settings to delete the currently signed-in admin account.",
-        "info"
-      );
+      dispatchAppToast(m.toast.currentAdmin, "info");
       return;
     }
     if (isDeleting) return;
     if (!isArmed) {
       setIsArmed(true);
-      dispatchAppToast(
-        "Click delete again to permanently remove this user account and all owned data.",
-        "info"
-      );
+      dispatchAppToast(m.toast.armed, "info");
       return;
     }
     if (confirmText !== "DELETE USER") {
-      dispatchAppToast("Type DELETE USER before confirming account deletion.", "error");
+      dispatchAppToast(m.toast.typeConfirm, "error");
       return;
     }
 
@@ -53,13 +50,13 @@ export function AdminUserDeleteButton({
         | { error?: string }
         | null;
       if (!response.ok) {
-        throw new Error(data?.error || "Failed to delete user.");
+        throw new Error(data?.error || m.toast.failed);
       }
-      dispatchAppToast("User account deleted.", "success");
+      dispatchAppToast(m.toast.deleted, "success");
       window.location.reload();
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Failed to delete user.",
+        error instanceof Error ? error.message : m.toast.failed,
         "error"
       );
     } finally {
@@ -88,7 +85,7 @@ export function AdminUserDeleteButton({
         }`}
       >
         {isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-        {isCurrentAdmin ? "Current admin" : isDeleting ? "Deleting" : isArmed ? "Confirm" : label}
+        {isCurrentAdmin ? m.currentAdmin : isDeleting ? m.deleting : isArmed ? m.confirm : label ?? m.delete}
       </button>
     </span>
   );

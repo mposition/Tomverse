@@ -35,3 +35,13 @@ docs/ops/ai-review-evaluation-set/*.json text eol=lf
 # loop. Pinned for the same reason as the files above: an operator's own clone
 # must read what CI reads.
 docs/ops/ai-review-evaluation-set/*.jsonl text eol=lf
+
+# Provider documentation, saved exactly as the provider served it.
+#
+# The parsers in lib/providerModelDocsCore.ts read these as the markdown the
+# provider publishes, which is LF, and match line ends with `$`. A CRLF checkout
+# on Windows leaves a `\r` before every line end, no pattern matches, and the
+# tests report a parser failure that is really a checkout artefact. The
+# trailing whitespace in some rows is the provider's, kept so the fixtures stay
+# byte-for-byte what was read.
+tests/fixtures/providerModelDocs/*.md text eol=lf

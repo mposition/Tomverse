@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Loader2, Send } from "lucide-react";
 
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminOperatorAlertProbeMessages } from "@/lib/adminMessages/operatorAlertProbe";
 import { dispatchAppToast } from "@/lib/appToast";
 import type {
   OperatorAlertPath,
@@ -27,27 +29,20 @@ import type {
 
 const PATHS: Array<{
   path: OperatorAlertPath;
-  name: string;
-  description: string;
   recipient: string;
 }> = [
   {
     path: "operational",
-    name: "Operational alerts",
-    description:
-      "Readiness failures, budget exhaustion and other incidents raised by the platform itself.",
     recipient: "OPS_ALERT_EMAIL, or ADMIN_ALERT_EMAIL",
   },
   {
     path: "provider",
-    name: "Provider alerts",
-    description:
-      "Model provider outages, spend budgets and account balances. Records its outcome in the delivery log.",
     recipient: "ADMIN_ALERT_EMAIL",
   },
 ];
 
 export function AdminOperatorAlertProbePanel() {
+  const m = useAdminMessages(adminOperatorAlertProbeMessages);
   const [running, setRunning] = useState<OperatorAlertPath | null>(null);
   const [results, setResults] = useState<
     Partial<Record<OperatorAlertPath, OperatorAlertProbeResult>>
@@ -67,18 +62,18 @@ export function AdminOperatorAlertProbePanel() {
       // The endpoint answers 200 even when the path did not send: "the probe
       // ran and the path is broken" is a successful probe, and only a
       // non-200 means the probe itself could not run.
-      if (!response.ok) throw new Error(data?.error || "Could not run the test.");
-      if (!data) throw new Error("Could not run the test.");
+      if (!response.ok) throw new Error(data?.error || m.runFailed);
+      if (!data) throw new Error(m.runFailed);
       setResults((current) => ({ ...current, [path]: data }));
       dispatchAppToast(
         data.delivered
-          ? `Sent from ${data.from}.`
-          : `Nothing was sent: ${data.failure?.code}.`,
+          ? m.sentFrom(data.from)
+          : m.nothingSent(data.failure?.code),
         data.delivered ? "success" : "error"
       );
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not run the test.",
+        error instanceof Error ? error.message : m.runFailed,
         "error"
       );
     } finally {
@@ -92,22 +87,18 @@ export function AdminOperatorAlertProbePanel() {
       className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5"
     >
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Email
+        {m.eyebrow}
       </p>
       <h2 className="mt-2 text-2xl font-black text-white">
-        Operator alert paths
+        {m.title}
       </h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        These two paths send only when something is wrong, so nothing exercises
-        them in ordinary operation. Each button sends one real message through
-        that path&apos;s own code and reports the address the provider accepted.
+        {m.description}
       </p>
       {/* Said on screen, because a control that implies more than it checked is
           worse than no control at all. */}
       <p className="mt-3 max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-xs leading-5 text-zinc-400">
-        A passing test shows the path can send. It does not show that the
-        condition which should trigger it — a failed readiness check, an
-        exhausted budget — still calls it.
+        {m.caveat}
       </p>
 
       <div className="mt-5 grid gap-3">
@@ -121,12 +112,12 @@ export function AdminOperatorAlertProbePanel() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-zinc-100">{entry.name}</p>
+                  <p className="text-sm font-bold text-zinc-100">{m.paths[entry.path].name}</p>
                   <p className="mt-1 text-xs leading-5 text-zinc-400">
-                    {entry.description}
+                    {m.paths[entry.path].description}
                   </p>
                   <p className="mt-1 font-mono text-[11px] text-zinc-500">
-                    to: {entry.recipient}
+                    {m.to}{entry.recipient}
                   </p>
                 </div>
                 <button
@@ -140,7 +131,7 @@ export function AdminOperatorAlertProbePanel() {
                   ) : (
                     <Send className="h-4 w-4" aria-hidden />
                   )}
-                  {running === entry.path ? "Sending..." : "Send test"}
+                  {running === entry.path ? m.sending : m.sendTest}
                 </button>
               </div>
 
@@ -150,39 +141,39 @@ export function AdminOperatorAlertProbePanel() {
                   className="mt-3 grid gap-1 border-t border-zinc-800 pt-3 text-xs"
                 >
                   <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-zinc-500">Result</dt>
+                    <dt className="w-24 shrink-0 text-zinc-500">{m.result}</dt>
                     <dd
                       className={
                         result.delivered ? "text-emerald-300" : "text-red-300"
                       }
                     >
-                      {result.delivered ? "Sent" : "Not sent"}
+                      {result.delivered ? m.sent : m.notSent}
                     </dd>
                   </div>
                   {result.delivered ? (
                     <>
                       <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-zinc-500">From</dt>
+                        <dt className="w-24 shrink-0 text-zinc-500">{m.from}</dt>
                         <dd className="min-w-0 break-all font-mono text-zinc-200">
                           {result.from}
                         </dd>
                       </div>
                       <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-zinc-500">To</dt>
+                        <dt className="w-24 shrink-0 text-zinc-500">{m.recipient}</dt>
                         <dd className="min-w-0 break-all font-mono text-zinc-400">
                           {result.recipient}
                         </dd>
                       </div>
                       <div className="flex gap-2">
-                        <dt className="w-24 shrink-0 text-zinc-500">Provider</dt>
+                        <dt className="w-24 shrink-0 text-zinc-500">{m.provider}</dt>
                         <dd className="min-w-0 break-all font-mono text-zinc-400">
-                          {result.providerMessageId ?? "no id returned"}
+                          {result.providerMessageId ?? m.noIdReturned}
                         </dd>
                       </div>
                     </>
                   ) : (
                     <div className="flex gap-2">
-                      <dt className="w-24 shrink-0 text-zinc-500">Reason</dt>
+                      <dt className="w-24 shrink-0 text-zinc-500">{m.reason}</dt>
                       <dd className="min-w-0 text-red-200">
                         <span className="font-mono">{result.failure?.code}</span>
                         <span className="mt-1 block text-zinc-400">

@@ -333,8 +333,48 @@ test("a late result from a timed-out handler stores nothing (§11)", async () =>
 
 test("a call issued before an abort keeps its operational cost (§3)", async () => {
     const { run } = await seedRun();
-    await drive(run.id, fakeAdapter({ delayMs: 400 }), { chunkTimeoutMs: 50 });
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const lease = await claimMemoryExtractionRun({
+        runId: run.id,
+        owner: "worker-issued-before-abort",
+    });
+    assert.ok(lease);
+    const chunk = await claimNextExtractionChunk(lease);
+    assert.ok(chunk);
+
+    const controller = new AbortController();
+    let confirmIssued!: () => void;
+    const issued = new Promise<void>((resolve) => {
+        confirmIssued = resolve;
+    });
+    const handled = handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        signal: controller.signal,
+        register: APPROVED_REGISTER,
+        environment: ENV,
+        adapterFactory: (options) => async () => {
+            options.signal.throwIfAborted();
+            const aborted = new Promise<never>((_resolve, reject) => {
+                options.signal.addEventListener(
+                    "abort",
+                    () => reject(options.signal.reason),
+                    { once: true }
+                );
+            });
+            await options.onCallIssued();
+            confirmIssued();
+            return aborted;
+        },
+    });
+
+    // Order the test around the durable ledger write instead of assuming a
+    // shared CI runner can finish it inside an arbitrary 50 ms window.
+    await issued;
+    controller.abort(new Error("test abort after provider call issuance"));
+    assert.deepEqual(await handled, {
+        outcome: "failed",
+        code: "chunk_timeout",
+    });
 
     const call = await prisma.memoryExtractionProviderCall.findFirstOrThrow({
         where: { chunk: { runId: run.id } },

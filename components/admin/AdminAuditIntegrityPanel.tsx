@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
+import { adminAuditIntegrityMessages } from "@/lib/adminMessages/auditIntegrity";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 type Integrity = {
   configured: boolean;
@@ -80,27 +83,40 @@ type AuditEntry = {
  * because scattered failures after a verified run are not a key problem and
  * there is nothing honest to add without looking at the rows.
  */
-function auditIntegrityReading(integrity: Integrity): string {
+function auditIntegrityReading(integrity: Integrity, locale: AdminLocale): string {
+  const count = (value: number) => value.toLocaleString(adminIntlLocale(locale));
+  const ko = locale === "ko";
   const scattered = integrity.invalidEntries - integrity.unverifiedPrefix;
   if (integrity.verifiedEntries === 0) {
+    if (ko) return "사용 가능한 어떤 키로도 검증된 항목이 없습니다. 항목이 변조된 것이 아니라 서명 키가 바뀌었을 때 나타나는 모습입니다. 이전 키를 ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS에 추가하고 다시 검증하세요 — docs/ops/admin-audit-key-epochs.md 참고.";
     return "Nothing has verified under any available key. That is what a changed signing key looks like rather than an altered entry: add the previous key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.";
   }
   if (scattered > 0) {
     // Entries interleaved with verified ones. No key boundary produces that,
     // so naming a key here would send the reader somewhere there is nothing.
+    if (ko) {
+      const koHead =
+        integrity.unverifiedPrefix > 0
+          ? `가장 오래된 항목 ${count(integrity.unverifiedPrefix)}건이 검증되지 않고, 그 이후 항목 ${count(scattered)}건도 검증되지 않습니다`
+          : `검증되는 항목들 사이에 흩어진 ${count(scattered)}건이 검증되지 않습니다`;
+      return `${koHead}. 통과한 항목들 사이에서 실패하는 항목은 서명 키 경계가 아닙니다 — 키 변경은 연속된 구간을 무효화합니다. 서명된 이후 무언가가 이 행들을 다시 썼습니다. 아래에서 최신 항목부터 진단하세요. 최근까지 검증되던 행은 변경이 일어난 기간의 경계를 알려 줍니다.`;
+    }
     const head =
       integrity.unverifiedPrefix > 0
-        ? `The oldest ${integrity.unverifiedPrefix.toLocaleString()} ${integrity.unverifiedPrefix === 1 ? "entry does" : "entries do"} not verify, and ${scattered.toLocaleString()} later ${scattered === 1 ? "entry does" : "entries do"} not either`
-        : `${scattered.toLocaleString()} ${scattered === 1 ? "entry does" : "entries do"} not verify, scattered among entries that do`;
+        ? `The oldest ${count(integrity.unverifiedPrefix)} ${integrity.unverifiedPrefix === 1 ? "entry does" : "entries do"} not verify, and ${count(scattered)} later ${scattered === 1 ? "entry does" : "entries do"} not either`
+        : `${count(scattered)} ${scattered === 1 ? "entry does" : "entries do"} not verify, scattered among entries that do`;
     return `${head}. Entries that fail among entries that pass are not a signing-key boundary — a key change invalidates a contiguous run. Something has rewritten these rows since they were signed. Diagnose them below, newest first: a row that verified recently bounds the window it changed in.`;
   }
   if (integrity.unverifiedPrefix === 0) {
+    if (ko) return "체인 시작 부분의 항목은 검증되었으므로, 서명 키 변경만으로는 이 결과를 설명할 수 없습니다.";
     return "Entries at the start of the chain verified, so a changed signing key does not explain this on its own.";
   }
   if (integrity.unverifiedPrefix === 1) {
+    if (ko) return "체인의 첫 항목만 검증되지 않고 그 이후 항목은 모두 검증됩니다. 서명 키 변경은 한 행이 아니라 연속된 구간을 무효화하므로, 이는 키 누락이 아니라 그 항목에 저장된 내용을 가리킵니다 — 항목을 열어 그 항목이 기록한 변경과 비교하세요.";
     return "Only the chain's first entry does not verify, and every entry after it does. A changed signing key invalidates a contiguous span rather than a single row, so this points at that entry's stored content rather than at a missing key — open it and compare it against the change it describes.";
   }
-  return `The oldest ${integrity.unverifiedPrefix.toLocaleString()} entries do not verify and everything after them does, so that span was signed with a key that is not listed — one rotation further back than the current keys account for. Add that older key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.`;
+  if (ko) return `가장 오래된 항목 ${count(integrity.unverifiedPrefix)}건은 검증되지 않고 그 이후는 모두 검증되므로, 그 구간은 목록에 없는 키로 서명되었습니다 — 현재 키들보다 rotation이 한 번 더 이전인 키입니다. 그 이전 키를 ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS에 추가하고 다시 검증하세요 — docs/ops/admin-audit-key-epochs.md 참고.`;
+  return `The oldest ${count(integrity.unverifiedPrefix)} entries do not verify and everything after them does, so that span was signed with a key that is not listed — one rotation further back than the current keys account for. Add that older key to ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS and verify again — see docs/ops/admin-audit-key-epochs.md.`;
 }
 
 /**
@@ -130,6 +146,9 @@ function auditIntegrityReading(integrity: Integrity): string {
  * rotation is spanned, that more than one signing key was needed to do it.
  */
 export function AdminAuditIntegrityPanel() {
+  const m = useAdminMessages(adminAuditIntegrityMessages);
+  const { locale } = useAdminLocale();
+  const count = (value: number) => value.toLocaleString(adminIntlLocale(locale));
   const [integrity, setIntegrity] = useState<Integrity | null>(null);
   const [loading, setLoading] = useState(false);
   const [entry, setEntry] = useState<AuditEntry | null>(null);
@@ -146,11 +165,11 @@ export function AdminAuditIntegrityPanel() {
     try {
       const response = await fetch("/api/admin/audit-integrity", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { integrity?: Integrity; error?: string } | null;
-      if (!response.ok || !data?.integrity) throw new Error(data?.error || "Audit verification failed.");
+      if (!response.ok || !data?.integrity) throw new Error(data?.error || m.toast.verificationFailed);
       setIntegrity(data.integrity);
       dispatchAppToast(data.integrity.message, data.integrity.valid ? "success" : "error");
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Audit verification failed.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.toast.verificationFailed, "error");
     } finally { setLoading(false); }
   };
 
@@ -171,12 +190,12 @@ export function AdminAuditIntegrityPanel() {
         | { diagnosis?: Diagnosis; error?: string }
         | null;
       if (!response.ok || !data?.diagnosis) {
-        throw new Error(data?.error || "Could not diagnose this entry.");
+        throw new Error(data?.error || m.toast.diagnoseFailed);
       }
       setDiagnosis({ auditId, result: data.diagnosis });
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not diagnose this entry.",
+        error instanceof Error ? error.message : m.toast.diagnoseFailed,
         "error"
       );
     } finally {
@@ -189,10 +208,10 @@ export function AdminAuditIntegrityPanel() {
     try {
       const response = await fetch(`/api/admin/audit/${encodeURIComponent(auditId)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { audit?: AuditEntry; error?: string } | null;
-      if (!response.ok || !data?.audit) throw new Error(data?.error || "Audit event not found.");
+      if (!response.ok || !data?.audit) throw new Error(data?.error || m.toast.entryNotFound);
       setEntry(data.audit);
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Audit event not found.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.toast.entryNotFound, "error");
     } finally { setEntryLoading(false); }
   };
 
@@ -201,9 +220,9 @@ export function AdminAuditIntegrityPanel() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-300"><ShieldCheck className="h-5 w-5" /></span>
-          <div><h2 className="font-black text-white">Admin audit integrity</h2><p className="mt-1 text-sm text-zinc-400">New audit entries form a serialized HMAC chain. Verify it before exporting or investigating an incident.</p></div>
+          <div><h2 className="font-black text-white">{m.title}</h2><p className="mt-1 text-sm text-zinc-400">{m.description}</p></div>
         </div>
-        <button type="button" onClick={() => void verify()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} Verify chain</button>
+        <button type="button" onClick={() => void verify()} disabled={loading} className="inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-500 disabled:opacity-50">{loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />} {m.verifyChain}</button>
       </div>
 
       {integrity ? (
@@ -220,16 +239,15 @@ export function AdminAuditIntegrityPanel() {
                     green verdict once meant 110 entries were fine; with more
                     than one signing key in play it has to say how many
                     actually verified, or the number flatters the answer. */}
-                Verified {integrity.verifiedEntries.toLocaleString()} of{" "}
-                {integrity.checkedEntries.toLocaleString()} entries
-                {integrity.invalidEntries > 0 ? <> · {integrity.invalidEntries.toLocaleString()} unverified</> : null}
-                {integrity.linkageBreaks > 0 ? <> · {integrity.linkageBreaks.toLocaleString()} linkage {integrity.linkageBreaks === 1 ? "break" : "breaks"}</> : null}
-                {integrity.keysUsed > 1 ? <> · {integrity.keysUsed} of {integrity.keysAvailable} keys used</> : null}
-                {integrity.firstInvalidId ? <> · first unverified <span className="font-mono">{integrity.firstInvalidId}</span></> : null}
+                {m.verifiedOf(count(integrity.verifiedEntries), count(integrity.checkedEntries))}
+                {integrity.invalidEntries > 0 ? m.unverifiedCount(count(integrity.invalidEntries)) : null}
+                {integrity.linkageBreaks > 0 ? m.linkageBreaks({ text: count(integrity.linkageBreaks), value: integrity.linkageBreaks }) : null}
+                {integrity.keysUsed > 1 ? m.keysUsed(integrity.keysUsed, integrity.keysAvailable) : null}
+                {integrity.firstInvalidId ? <>{m.firstUnverified}<span className="font-mono">{integrity.firstInvalidId}</span></> : null}
               </p>
               {integrity.firstInvalidId ? (
                 <p data-testid="admin-audit-integrity-reading" className="mt-2 text-xs opacity-90">
-                  {auditIntegrityReading(integrity)}
+                  {auditIntegrityReading(integrity, locale)}
                 </p>
               ) : null}
               {integrity.legacyOrderEntries > 0 ? (
@@ -240,12 +258,7 @@ export function AdminAuditIntegrityPanel() {
                       ends what the chain proves -- so it falls only as those
                       rows age out. Absent when zero: a count of nothing is a
                       line of noise on every healthy chain. */}
-                  {integrity.legacyOrderEntries.toLocaleString()}{" "}
-                  {integrity.legacyOrderEntries === 1 ? "entry was" : "entries were"} signed
-                  before the key order moved to code point and{" "}
-                  {integrity.legacyOrderEntries === 1 ? "reproduces" : "reproduce"} only under
-                  the older order. Verification accepts them; they stay exposed to a change
-                  of runtime collation. See docs/ops/admin-audit-key-epochs.md.
+                  {m.legacyOrder({ text: count(integrity.legacyOrderEntries), value: integrity.legacyOrderEntries })}
                 </p>
               ) : null}
               {integrity.keysAvailable > 1 ? (
@@ -257,9 +270,9 @@ export function AdminAuditIntegrityPanel() {
                       still produce entries that verify, so it should be
                       dropped rather than left. Key 1 is the signing key; the
                       rest are ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS in order. */}
-                  Entries opened per key:{" "}
+                  {m.keyCountsLabel}{" "}
                   {integrity.keyEntryCounts
-                    .map((count, index) => `key ${index + 1} — ${count.toLocaleString()}`)
+                    .map((entries, index) => m.keyCount(index + 1, count(entries)))
                     .join(" · ")}
                 </p>
               ) : null}
@@ -276,7 +289,7 @@ export function AdminAuditIntegrityPanel() {
                   disabled={entryLoading}
                   className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 text-xs font-bold text-red-100 hover:bg-red-500/20 disabled:opacity-50"
                 >
-                  {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Show this entry
+                  {entryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} {m.showEntry}
                 </button>
               ) : null}
               {/* The same row in the audit workspace, which is where an
@@ -289,7 +302,7 @@ export function AdminAuditIntegrityPanel() {
                 data-testid="admin-audit-integrity-open-in-log"
                 className="inline-flex h-9 items-center gap-2 rounded-xl border border-red-400/30 px-3 text-xs font-bold text-red-100 hover:bg-red-500/10"
               >
-                Open in the audit log
+                {m.openInLog}
               </a>
               <button
                 type="button"
@@ -301,7 +314,7 @@ export function AdminAuditIntegrityPanel() {
                 {diagnosing === integrity.firstInvalidId ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : null}{" "}
-                What changed?
+                {m.whatChanged}
               </button>
             </div>
           ) : null}
@@ -319,10 +332,10 @@ export function AdminAuditIntegrityPanel() {
               className="mt-3 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs"
             >
               <p className="font-black">
-                Every unverified entry, newest first
-                {integrity.unverifiedIdsTruncated > 0 ? (
-                  <> · {integrity.unverifiedIdsTruncated.toLocaleString()} more not listed</>
-                ) : null}
+                {m.unverifiedListTitle}
+                {integrity.unverifiedIdsTruncated > 0
+                  ? m.moreNotListed(count(integrity.unverifiedIdsTruncated))
+                  : null}
               </p>
               <ul className="mt-2 space-y-1">
                 {[...integrity.unverifiedIds].reverse().map((auditId) => (
@@ -332,7 +345,7 @@ export function AdminAuditIntegrityPanel() {
                       href={`/admin/audit?entry=${encodeURIComponent(auditId)}`}
                       className="underline decoration-red-400/50 underline-offset-2 hover:text-white"
                     >
-                      open
+                      {m.open}
                     </a>
                     <button
                       type="button"
@@ -344,7 +357,7 @@ export function AdminAuditIntegrityPanel() {
                       {diagnosing === auditId ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : null}
-                      what changed?
+                      {m.whatChangedShort}
                     </button>
                   </li>
                 ))}
@@ -363,28 +376,22 @@ export function AdminAuditIntegrityPanel() {
                   wording commits, and no-match commits to the opposite. */}
               {diagnosis.result.matches.length === 0 ? (
                 <p className="mt-1">
-                  No single-field change reproduces this entry&apos;s hash.{" "}
-                  {diagnosis.result.candidatesTried.toLocaleString()} reconstructions were
-                  tried against {diagnosis.result.keysTried} key
-                  {diagnosis.result.keysTried === 1 ? "" : "s"}. More than one field
-                  differs from what was signed, or a field this does not vary
-                  does, or it was signed with a key this environment no longer
-                  has.
+                  {m.noMatch(count(diagnosis.result.candidatesTried), diagnosis.result.keysTried)}
                 </p>
               ) : (
                 <>
                   <p className="mt-1 font-black">
-                    The hash is reproduced by content differing in one field:
+                    {m.matchTitle}
                   </p>
                   <ul className="mt-1 space-y-0.5">
                     {diagnosis.result.matches.map((match) => (
                       <li key={`${match.label}-${match.keyPosition}`} className="font-mono">
-                        {match.label} <span className="opacity-70">(key {match.keyPosition})</span>
+                        {match.label} <span className="opacity-70">{m.matchKey(match.keyPosition)}</span>
                       </li>
                     ))}
                   </ul>
                   <p className="mt-2 opacity-90">
-                    That is what changed since the entry was signed.
+                    {m.matchConclusion}
                   </p>
                 </>
               )}
@@ -392,11 +399,7 @@ export function AdminAuditIntegrityPanel() {
                   mismatch calls for: nothing about the entry is wrong. */}
               {diagnosis.result.reproducesUnderOrder === "locale" ? (
                 <p data-testid="admin-audit-integrity-collation" className="mt-2 font-black">
-                  This entry reproduces its stored digest when object keys are
-                  sorted by collation rather than by code point — the order
-                  signing used before 2026-08-27. Nothing about the row
-                  changed, and verification accepts it. See
-                  docs/ops/admin-audit-key-epochs.md.
+                  {m.collation}
                 </p>
               ) : null}
               {/* Not a match, and said separately because it is not one: a cuid
@@ -404,16 +407,11 @@ export function AdminAuditIntegrityPanel() {
                   reconstructed. What can be said is which mechanism fits. */}
               {diagnosis.result.actorIdMissingWithEmail ? (
                 <p data-testid="admin-audit-integrity-actor-fingerprint" className="mt-2 opacity-90">
-                  This row names an actor by address but carries no user id.
-                  That is what deleting a user leaves behind: `actorUserId` is
-                  in the hash and also a foreign key set to null on delete, so
-                  the database rewrote the row with no application code
-                  involved. The id it was signed with cannot be recovered.
+                  {m.actorFingerprint}
                 </p>
               ) : null}
               <p className="mt-2 opacity-90">
-                Do not re-hash the row: rewriting an audit entry to satisfy its
-                own checker ends what the chain proves.
+                {m.doNotRehash}
               </p>
             </div>
           ) : null}
@@ -421,10 +419,10 @@ export function AdminAuditIntegrityPanel() {
           {entry ? (
             <dl data-testid="admin-audit-integrity-entry" className="mt-3 grid gap-x-4 gap-y-1 rounded-xl border border-red-400/20 bg-black/20 p-3 text-xs sm:grid-cols-2">
               {[
-                ["Written", new Date(entry.createdAt).toISOString()],
-                ["Action", entry.action],
-                ["Target", entry.targetId ? `${entry.targetType} ${entry.targetId}` : entry.targetType],
-                ["Actor", entry.actorEmail || entry.actorUserId || "Unknown admin"],
+                [m.entry.written, new Date(entry.createdAt).toISOString()],
+                [m.entry.action, entry.action],
+                [m.entry.target, entry.targetId ? `${entry.targetType} ${entry.targetId}` : entry.targetType],
+                [m.entry.actor, entry.actorEmail || entry.actorUserId || m.entry.unknownAdmin],
               ].map(([label, value]) => (
                 <div key={label} className="flex gap-2">
                   <dt className="shrink-0 opacity-70">{label}</dt>

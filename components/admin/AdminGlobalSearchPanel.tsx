@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Search } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminGlobalSearchMessages } from "@/lib/adminMessages/globalSearch";
 
 type SearchResult = {
   type: string;
@@ -23,12 +25,14 @@ const dateLabel = (value: string | null) => {
 };
 
 export function AdminGlobalSearchPanel() {
+  const m = useAdminMessages(adminGlobalSearchMessages);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const searchFailed = m.failed;
 
   const runSearch = useCallback(async (searchQuery: string) => {
     const normalized = searchQuery.trim();
@@ -46,18 +50,18 @@ export function AdminGlobalSearchPanel() {
         | { results?: SearchResult[]; error?: string }
         | null;
       if (!response.ok || !data?.results) {
-        throw new Error(data?.error || "Admin search failed.");
+        throw new Error(data?.error || searchFailed);
       }
       setResults(data.results);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Admin search failed.",
+        error instanceof Error ? error.message : searchFailed,
         "error"
       );
     } finally {
       setIsSearching(false);
     }
-  }, []);
+  }, [searchFailed]);
 
   useEffect(() => {
     const initialQuery = searchParams.get("q") || "";
@@ -80,11 +84,11 @@ export function AdminGlobalSearchPanel() {
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div>
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-          Global search
+          {m.eyebrow}
         </p>
-        <h2 className="mt-2 text-2xl font-black text-white">Find customers, tickets, refunds, and audit events</h2>
+        <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-          Search across the operational records operators use most often.
+          {m.description}
         </p>
       </div>
 
@@ -100,8 +104,8 @@ export function AdminGlobalSearchPanel() {
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search records by email, Stripe ID, trace ID, refund or audit action"
-            placeholder="Search email, Stripe ID, trace ID, refund, audit action..."
+            aria-label={m.inputLabel}
+            placeholder={m.inputPlaceholder}
             className="h-11 w-full rounded-xl border border-zinc-800 bg-zinc-950 pl-10 pr-3 text-sm text-white outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
           />
         </label>
@@ -111,14 +115,14 @@ export function AdminGlobalSearchPanel() {
           className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-          Search
+          {m.submit}
         </button>
       </form>
 
       <div className="mt-5 grid gap-2">
         {results.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            Enter at least two characters to search Admin records.
+            {m.empty}
           </div>
         ) : (
           results.map((result) => (

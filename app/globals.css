@@ -116,6 +116,26 @@
     Consolas, var(--font-noto-sans-sc), "PingFang SC", monospace;
 }
 
+/*
+ * A subtree that declares a language other than the document's -- the Admin
+ * Console root carries its own `lang` (docs/ui-contracts/admin-console-ia.md).
+ * The tokens above are inherited from <html>, and `font-family` is inherited as
+ * the family already resolved on <body>, so re-pointing a token on a nested
+ * element changes nothing by itself. The root re-declares the Latin stack for
+ * English (an English console inside a Korean document would otherwise keep the
+ * Korean stack) and consumes the token, so its subtree inherits the right family.
+ */
+[data-locale-root]:lang(en) {
+  --font-ui: var(--font-geist-sans), system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-code: var(--font-geist-mono), ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+[data-locale-root] {
+  font-family: var(--font-ui);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

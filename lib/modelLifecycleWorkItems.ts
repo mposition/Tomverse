@@ -3,28 +3,45 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 
 import { listImageModels } from "@/lib/imageModelRegistry";
+import { modelOwner } from "@/lib/modelOwner";
+import { resolveModelPricing } from "@/lib/modelPricing";
+import type { AiModel } from "@/lib/models";
 import { prisma } from "@/lib/prisma";
 import {
+    DOC_EVIDENCE_MAX_AGE_MS,
+    docEvidenceIsFresh,
+    docParseFromStored,
+} from "@/lib/providerModelDocsCore";
+import {
     OPEN_WORK_ITEM_STATUSES,
+    createModelDecisionIdentityResolver,
     mergeObservedVia,
     observationsForExistingItems,
     selectQueueCandidates,
+    trustedModelAliasEvidence,
+    type ModelAliasEvidence,
     type ModelObservation,
     type SuppressedCandidate,
+    ADOPTION_RECORD_STATUSES,
+    workItemDecisionRecordRefusal,
+    workItemDecisionTarget,
     workItemTimestampField,
     workItemTransitionRefusal,
+    type WorkItemEventDecision,
+    type WorkItemExclusionReason,
     type WorkItemStatus,
     type WorkItemTransitionRefusal,
 } from "@/lib/modelLifecycleWorkItemCore";
 import {
     assessModelLifecycleItem,
-    candidateDecisionKey,
-    candidateFamilyIdentity,
+    modelStage,
     supersedingServedModel,
+    type ModelCandidateEvidence,
     type ModelAvailability,
     type ModelProductSurface,
     type ModelReviewKind,
     type ModelReviewPriority,
+    type ServedModelPortfolioEntry,
 } from "@/lib/modelLifecycleTriage";
 
 /**
@@ -71,7 +88,7 @@ export async function recordDiscoveredWorkItems(input: {
     }
     const now = input.now ?? new Date();
 
-    const [catalogue, queued] = await Promise.all([
+    const [catalogue, queued, catalogueEntries] = await Promise.all([
         prisma.modelRegistryEntry.findMany({
             where: { catalogDeleted: false },
             select: { apiModel: true },
@@ -79,7 +96,12 @@ export async function recordDiscoveredWorkItems(input: {
         prisma.modelLifecycleWorkItem.findMany({
             select: { id: true, apiModel: true, evidence: true },
         }),
+        prisma.providerModelCatalogEntry.findMany({
+            select: { apiModel: true, metadata: true },
+        }),
     ]);
+    const aliases = providerAliasEvidence(catalogueEntries);
+    const decisionIdentity = createModelDecisionIdentityResolver(aliases);
 
     const { fresh, suppressed } = selectQueueCandidates({
         observed: input.observed,
@@ -91,13 +113,14 @@ export async function recordDiscoveredWorkItems(input: {
         queuedDecisionKeys: queued
             .map((row) => storedDecisionKey(row.evidence))
             .filter((key): key is string => Boolean(key)),
+        aliases,
     });
 
     // A model already in the queue, seen through a provider that had not served
     // it before, is new information about a decision somebody is already
     // making. Recording it on that row is the difference between "three reports
     // of the same model" and "one model, three providers" (ML-12).
-    await recordAdditionalSightings(input.observed, queued);
+    await recordAdditionalSightings(input.observed, queued, aliases);
 
     let created = 0;
     const createdItems: Array<{
@@ -126,7 +149,7 @@ export async function recordDiscoveredWorkItems(input: {
                             // the model it was about -- and a stored key keeps
                             // suppressing what it suppressed on the day it was
                             // filed.
-                            decisionKey: candidateDecisionKey(candidate.apiModel),
+                            decisionKey: `${decisionIdentity(candidate.apiModel)}@${modelStage(candidate.apiModel)}`,
                             // Every provider that served it, not only the first
                             // one iterated. Which providers offer a model is
                             // what somebody deciding whether to add it needs.
@@ -292,6 +315,23 @@ const storedObservedVia = (evidence: Prisma.JsonValue | null): ModelObservation[
     );
 };
 
+const providerAliasEvidence = (
+    entries: readonly { apiModel: string; metadata: Prisma.JsonValue | null }[]
+): ModelAliasEvidence[] =>
+    entries.flatMap((entry) => {
+        if (
+            !entry.metadata ||
+            typeof entry.metadata !== "object" ||
+            Array.isArray(entry.metadata)
+        ) {
+            return [];
+        }
+        const aliasOf = (entry.metadata as Record<string, unknown>).aliasOf;
+        return typeof aliasOf === "string" && aliasOf.trim()
+            ? [{ aliasApiModel: entry.apiModel, canonicalApiModel: aliasOf }]
+            : [];
+    });
+
 /**
  * Appends today's sightings to the items that already exist for them.
  *
@@ -302,16 +342,19 @@ const storedObservedVia = (evidence: Prisma.JsonValue | null): ModelObservation[
  */
 const recordAdditionalSightings = async (
     observed: readonly ModelObservation[],
-    queued: readonly { id: string; apiModel: string; evidence: Prisma.JsonValue | null }[]
+    queued: readonly { id: string; apiModel: string; evidence: Prisma.JsonValue | null }[],
+    aliases: readonly ModelAliasEvidence[]
 ) => {
+    const decisionIdentity = createModelDecisionIdentityResolver(aliases);
     const grouped = observationsForExistingItems({
         observed,
-        queuedIdentities: queued.map((row) => candidateFamilyIdentity(row.apiModel)),
+        queuedIdentities: queued.map((row) => decisionIdentity(row.apiModel)),
+        aliases,
     });
     if (grouped.size === 0) return;
 
     for (const row of queued) {
-        const sightings = grouped.get(candidateFamilyIdentity(row.apiModel));
+        const sightings = grouped.get(decisionIdentity(row.apiModel));
         if (!sightings) continue;
         const { merged, added } = mergeObservedVia(storedObservedVia(row.evidence), sightings);
         if (added === 0) continue;
@@ -346,6 +389,24 @@ export type WorkItemTransitionInput = {
 
 export const MAX_BULK_WORK_ITEM_TRANSITIONS = 200;
 
+/**
+ * An operator decision written on the history event a transition creates.
+ *
+ * `analysisSnapshots` is per item: a bulk exclusion covers families the queue
+ * described differently, and each event keeps the sentence its own row showed.
+ */
+export type WorkItemEventDecisionInput = {
+    decision: WorkItemEventDecision;
+    reasonCode?: WorkItemExclusionReason | null;
+    operatorReason?: string | null;
+    analysisSnapshots?: ReadonlyMap<string, string>;
+};
+
+export type WorkItemDecisionRefusal = {
+    code: "reason_required" | "unknown_reason" | "decision_mismatch" | "analysis_required";
+    message: string;
+};
+
 export type BulkWorkItemTransitionResult =
     | { ok: true; status: WorkItemStatus; updated: number }
     | {
@@ -358,7 +419,8 @@ export type BulkWorkItemTransitionResult =
                     workItemId?: string;
                 }
               | { code: "duplicate_id"; message: string }
-              | { code: "too_many"; message: string };
+              | { code: "too_many"; message: string }
+              | WorkItemDecisionRefusal;
       };
 
 const transitionWorkItemsInTransaction = async (
@@ -369,10 +431,74 @@ const transitionWorkItemsInTransaction = async (
         actorEmail: string;
         note?: string;
         decision?: { decision: "approve" | "reject" | "defer"; reason: string };
+        eventDecision?: WorkItemEventDecisionInput;
         now?: Date;
     }
 ): Promise<BulkWorkItemTransitionResult> => {
     const now = input.now ?? new Date();
+    const eventDecision = input.eventDecision;
+    // Exclusions and reopens are checked for their own shape before anything is
+    // locked; the database refuses the same shapes, but a constraint name is not
+    // an answer an operator can act on.
+    if (eventDecision?.decision === "adopt") {
+        return {
+            ok: false,
+            refusal: {
+                code: "decision_mismatch",
+                message: "An adoption is recorded with recordAdoptionDecision, not on a transition.",
+            },
+        };
+    }
+    if (eventDecision) {
+        const record =
+            eventDecision.decision === "exclude"
+                ? {
+                      decision: "exclude" as const,
+                      reasonCode: eventDecision.reasonCode as WorkItemExclusionReason,
+                      operatorReason: eventDecision.operatorReason ?? null,
+                  }
+                : {
+                      decision: "reopen" as const,
+                      operatorReason: eventDecision.operatorReason ?? "",
+                  };
+        const refusal = workItemDecisionRecordRefusal(record);
+        if (refusal) return { ok: false, refusal };
+        // An exclusion is recorded against the analysis it was made on, for
+        // every item, or not at all.
+        if (
+            eventDecision.decision === "exclude" &&
+            input.workItemIds.some(
+                (id) => !eventDecision.analysisSnapshots?.get(id)?.trim()
+            )
+        ) {
+            return {
+                ok: false,
+                refusal: {
+                    code: "analysis_required",
+                    message: "Every excluded item needs the analysis it was excluded against.",
+                },
+            };
+        }
+        if (eventDecision.decision === "reopen" && eventDecision.analysisSnapshots?.size) {
+            return {
+                ok: false,
+                refusal: {
+                    code: "decision_mismatch",
+                    message: "A reopen records the operator's reason, not an analysis.",
+                },
+            };
+        }
+        if (workItemDecisionTarget(eventDecision.decision) !== input.to) {
+            return {
+                ok: false,
+                refusal: {
+                    code: "decision_mismatch",
+                    message: `${eventDecision.decision} does not move an item to ${input.to}.`,
+                },
+            };
+        }
+    }
+    const operatorReason = eventDecision?.operatorReason?.trim() || null;
     const uniqueIds = Array.from(new Set(input.workItemIds));
     if (uniqueIds.length === 0) {
         return {
@@ -455,6 +581,7 @@ const transitionWorkItemsInTransaction = async (
     const stamp = workItemTimestampField(input.to);
     for (const id of uniqueIds) {
         const item = itemById.get(id)!;
+        const reopening = eventDecision?.decision === "reopen";
         await tx.modelLifecycleWorkItem.update({
             where: { id: item.id },
             data: {
@@ -468,6 +595,31 @@ const transitionWorkItemsInTransaction = async (
                           reviewerEmail: input.actorEmail,
                       }
                     : {}),
+                // The item carries the exclusion as its current decision, so a
+                // row read on its own still says who excluded it and why.
+                ...(eventDecision?.decision === "exclude"
+                    ? {
+                          decision: "reject",
+                          decisionReason: operatorReason
+                              ? `${eventDecision.reasonCode}: ${operatorReason}`
+                              : String(eventDecision.reasonCode),
+                          decidedAt: now,
+                          reviewerEmail: input.actorEmail,
+                      }
+                    : {}),
+                // A reopened item is undecided again. What it was reopened from
+                // stays on the history, which is where a past decision belongs;
+                // left on the row, it would describe an item that is open as one
+                // somebody rejected.
+                ...(reopening
+                    ? {
+                          closedAt: null,
+                          decision: null,
+                          decisionReason: null,
+                          decidedAt: null,
+                          reviewerEmail: null,
+                      }
+                    : {}),
             },
         });
         await tx.modelLifecycleWorkItemEvent.create({
@@ -478,11 +630,93 @@ const transitionWorkItemsInTransaction = async (
                 fromStatus: item.status,
                 toStatus: input.to,
                 note: input.note ?? null,
+                ...(eventDecision
+                    ? {
+                          decision: eventDecision.decision,
+                          reasonCode:
+                              eventDecision.decision === "exclude"
+                                  ? eventDecision.reasonCode ?? null
+                                  : null,
+                          operatorReason,
+                          analysisSnapshot:
+                              eventDecision.analysisSnapshots?.get(item.id) ?? null,
+                      }
+                    : {}),
             },
         });
     }
     return { ok: true, status: input.to, updated: uniqueIds.length };
 };
+
+/**
+ * Records that an operator adopted an item into the registry.
+ *
+ * One event, after the adoption walk and in the same transaction, rather than a
+ * field on whichever step happened to be first: an item that was already past
+ * `approved` walks no approving step, and a record that exists only on that
+ * step would be missing for exactly those items. The event moves nothing -- its
+ * from and to are the state the walk ended in -- and carries the operator's
+ * reason and the queue's analysis in their own columns.
+ */
+export async function recordAdoptionDecision(
+    tx: Prisma.TransactionClient,
+    input: {
+        workItemId: string;
+        actorEmail: string;
+        status: WorkItemStatus;
+        operatorReason: string;
+        analysisSnapshot: string;
+        note: string;
+        now?: Date;
+    }
+): Promise<{ ok: true } | { ok: false; refusal: WorkItemDecisionRefusal }> {
+    const refusal = workItemDecisionRecordRefusal({
+        decision: "adopt",
+        operatorReason: input.operatorReason,
+    });
+    if (refusal) return { ok: false, refusal };
+    if (!input.actorEmail?.trim()) {
+        return {
+            ok: false,
+            refusal: {
+                code: "decision_mismatch",
+                message: "An adoption needs the person who made it.",
+            },
+        };
+    }
+    if (!input.analysisSnapshot?.trim()) {
+        return {
+            ok: false,
+            refusal: {
+                code: "analysis_required",
+                message: "An adoption needs the analysis it was made against.",
+            },
+        };
+    }
+    if (!ADOPTION_RECORD_STATUSES.has(input.status)) {
+        return {
+            ok: false,
+            refusal: {
+                code: "decision_mismatch",
+                message: `An adoption cannot be recorded on an item in ${input.status}.`,
+            },
+        };
+    }
+    await tx.modelLifecycleWorkItemEvent.create({
+        data: {
+            workItemId: input.workItemId,
+            occurredAt: input.now ?? new Date(),
+            actorEmail: input.actorEmail,
+            fromStatus: input.status,
+            toStatus: input.status,
+            note: input.note,
+            decision: "adopt",
+            operatorReason: input.operatorReason.trim(),
+            analysisSnapshot: input.analysisSnapshot,
+        },
+    });
+    return { ok: true };
+}
 
 /** Moves several items atomically, recording one event per item. */
 export async function transitionWorkItems(
@@ -492,6 +726,7 @@ export async function transitionWorkItems(
         actorEmail: string;
         note?: string;
         decision?: { decision: "approve" | "reject" | "defer"; reason: string };
+        eventDecision?: WorkItemEventDecisionInput;
         now?: Date;
     },
     options?: { tx?: Prisma.TransactionClient }
@@ -524,7 +759,10 @@ export async function transitionWorkItem(
     if (!result.ok) {
         if (
             result.refusal.code === "duplicate_id" ||
-            result.refusal.code === "too_many"
+            result.refusal.code === "too_many" ||
+            result.refusal.code === "reason_required" ||
+            result.refusal.code === "unknown_reason" ||
+            result.refusal.code === "decision_mismatch"
         ) {
             throw new Error(`Unexpected single-item refusal: ${result.refusal.code}`);
         }
@@ -573,7 +811,31 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     reviewKind: ModelReviewKind;
     product: ModelProductSurface;
     analysisKo: string;
+    /** The exclusion that closed this item; only in the excluded view. */
+    exclusion: WorkItemExclusionSummary | null;
 };
+
+export type WorkItemExclusionSummary = {
+    /** Null for an item closed before exclusions had reasons, or by a script. */
+    reasonCode: string | null;
+    operatorReason: string | null;
+    analysisSnapshot: string | null;
+    note: string | null;
+    actorEmail: string | null;
+    excludedAt: Date;
+};
+
+/**
+ * `excludable` is the undecided part of the open queue -- what an exclusion
+ * may close -- read in full so a family's members can be counted.
+ */
+export type ModelDiscoveryQueueView = "open" | "excluded" | "excludable";
+
+export const EXCLUDABLE_WORK_ITEM_STATUSES = [
+    "discovered",
+    "awaiting_decision",
+    "deferred",
+] as const satisfies readonly WorkItemStatus[];
 
 export type ModelDiscoveryQueue = {
     items: ModelDiscoveryQueueItem[];
@@ -583,6 +845,169 @@ export type ModelDiscoveryQueue = {
 
 const observationKey = (provider: string, apiModel: string) =>
     `${provider}\u0000${apiModel}`;
+
+const metadataRecord = (value: Prisma.JsonValue | null) =>
+    value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+
+const finiteNumber = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+const nullableBoolean = (value: unknown) =>
+    typeof value === "boolean" ? value : null;
+
+const consensus = <T>(values: readonly (T | null)[]): T | null => {
+    const present = values.filter((value): value is T => value !== null);
+    if (present.length === 0) return null;
+    return present.every((value) => Object.is(value, present[0]))
+        ? present[0]
+        : null;
+};
+
+type StoredDocEvidence = {
+    provider: string;
+    apiModel: string;
+    status: string;
+    parserVersion: string;
+    fields: Prisma.JsonValue | null;
+    problems: Prisma.JsonValue;
+    fetchedAt: Date;
+};
+
+type CandidateCatalogEntry = {
+    provider: string;
+    apiModel: string;
+    metadata: Prisma.JsonValue | null;
+};
+
+/**
+ * Collapses copied alias metadata into one conservative capability view.
+ * A disagreement becomes unknown rather than whichever provider row happened
+ * to be read first; this text is decision support and must not invent a fact.
+ */
+const candidateEvidenceForFamily = (
+    familyEntries: readonly CandidateCatalogEntry[],
+    docByObservation: ReadonlyMap<string, StoredDocEvidence>,
+    aliases: readonly ModelAliasEvidence[],
+    now: Date
+): ModelCandidateEvidence | null => {
+    if (familyEntries.length === 0) return null;
+    const observations = familyEntries.map((entry) => {
+        const metadata = metadataRecord(entry.metadata);
+        const row = docByObservation.get(
+            observationKey(entry.provider, entry.apiModel)
+        );
+        const parsed =
+            row && docEvidenceIsFresh(row.fetchedAt, now)
+                ? docParseFromStored(row)
+                : null;
+        const doc = parsed?.status === "parsed" ? parsed.fields : null;
+        const apiInputPrice = finiteNumber(
+            metadata?.observedPromptPriceCentsPer100MTokens
+        );
+        const apiOutputPrice = finiteNumber(
+            metadata?.observedCompletionPriceCentsPer100MTokens
+        );
+        // A documented price with a parser problem or a promotion marker is
+        // still visible in the adoption form beside its source, but it is not
+        // sound enough to rank a model in this compact queue sentence.
+        const docPriceUsable =
+            parsed?.status === "parsed" &&
+            parsed.problems.length === 0 &&
+            doc?.promotional === null;
+        return {
+            contextWindowTokens:
+                finiteNumber(metadata?.contextLength) ??
+                finiteNumber(metadata?.inputTokenLimit) ??
+                finiteNumber(doc?.contextWindowTokens),
+            maxOutputTokens:
+                finiteNumber(metadata?.outputTokenLimit) ??
+                finiteNumber(doc?.maxOutputTokens),
+            supportsImage:
+                nullableBoolean(metadata?.vision) ??
+                nullableBoolean(doc?.imageInput),
+            supportsNativePdf: nullableBoolean(metadata?.pdfInput),
+            reasoning: nullableBoolean(metadata?.thinking),
+            inputPrice:
+                apiInputPrice !== null
+                    ? apiInputPrice / 10_000
+                    : docPriceUsable
+                      ? finiteNumber(doc?.inputUsdPerMillionTokens)
+                      : null,
+            outputPrice:
+                apiOutputPrice !== null
+                    ? apiOutputPrice / 10_000
+                    : docPriceUsable
+                      ? finiteNumber(doc?.outputUsdPerMillionTokens)
+                      : null,
+            priceSource:
+                apiInputPrice !== null && apiOutputPrice !== null
+                    ? ("provider_api" as const)
+                    : docPriceUsable &&
+                        doc?.inputUsdPerMillionTokens != null &&
+                        doc?.outputUsdPerMillionTokens != null
+                      ? ("provider_docs" as const)
+                      : null,
+            longContextThreshold:
+                finiteNumber(metadata?.longContextThreshold) ??
+                (doc?.longContext.kind === "tiered"
+                    ? doc.longContext.thresholdTokens
+                    : null),
+        };
+    });
+    const canonicalIds = Array.from(
+        new Set(aliases.map((alias) => alias.canonicalApiModel))
+    );
+    const equivalentApiModels = Array.from(
+        new Set(
+            aliases
+                .flatMap((alias) => [alias.aliasApiModel, alias.canonicalApiModel])
+        )
+    );
+    const contextWindowTokens = consensus(
+        observations.map((item) => item.contextWindowTokens)
+    );
+    const inputPrice = consensus(observations.map((item) => item.inputPrice));
+    const outputPrice = consensus(observations.map((item) => item.outputPrice));
+    const priceSources = Array.from(
+        new Set(
+            observations
+                .map((item) => item.priceSource)
+                .filter((value): value is "provider_api" | "provider_docs" =>
+                    Boolean(value)
+                )
+        )
+    );
+    return {
+        canonicalApiModel: canonicalIds.length === 1 ? canonicalIds[0] : null,
+        equivalentApiModels,
+        contextWindowTokens,
+        maxOutputTokens: consensus(
+            observations.map((item) => item.maxOutputTokens)
+        ),
+        supportsImage: consensus(
+            observations.map((item) => item.supportsImage)
+        ),
+        supportsNativePdf: consensus(
+            observations.map((item) => item.supportsNativePdf)
+        ),
+        reasoning: consensus(
+            observations.map((item) => item.reasoning)
+        ),
+        observedInputUsdPerMillionTokens: inputPrice,
+        observedOutputUsdPerMillionTokens: outputPrice,
+        priceEvidenceSource:
+            inputPrice === null || outputPrice === null
+                ? null
+                : priceSources.length > 1
+                  ? "mixed"
+                  : priceSources[0] ?? null,
+        longContextThreshold: consensus(
+            observations.map((item) => item.longContextThreshold)
+        ),
+    };
+};
 
 /**
  * The discovery panel's evidence-enriched queue.
@@ -594,14 +1019,26 @@ const observationKey = (provider: string, apiModel: string) =>
  */
 export async function listModelDiscoveryQueue(options?: {
     limit?: number;
+    view?: ModelDiscoveryQueueView;
+    /** Exactly these items, whatever their state. */
+    workItemIds?: readonly string[];
 }): Promise<ModelDiscoveryQueue> {
     const limit = Math.max(1, Math.min(options?.limit ?? 1_000, 1_000));
+    const now = new Date();
+    const view = options?.view ?? "open";
+    const rowWhere: Prisma.ModelLifecycleWorkItemWhereInput = options?.workItemIds
+        ? { id: { in: [...options.workItemIds] } }
+        : view === "excluded"
+          ? { status: "closed_no_action" }
+          : view === "excludable"
+            ? { status: { in: [...EXCLUDABLE_WORK_ITEM_STATUSES] } }
+            : { status: { in: [...OPEN_WORK_ITEM_STATUSES] } };
     // These reads are independent. Keeping them in one parallel round avoids
     // making a remote database pay a second network latency merely to derive
     // the exact observation pairs from the work-item evidence.
-    const [rows, total, registry, latestRuns, entries] = await Promise.all([
+    const [rows, total, registry, latestRuns, entries, docRows] = await Promise.all([
         prisma.modelLifecycleWorkItem.findMany({
-            where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
+            where: rowWhere,
             orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
             take: limit,
             select: {
@@ -619,10 +1056,34 @@ export async function listModelDiscoveryQueue(options?: {
                 evidence: true,
             },
         }),
-        countOpenWorkItems(),
+        options?.workItemIds
+            ? Promise.resolve(options.workItemIds.length)
+            : view === "open"
+              ? countOpenWorkItems()
+              : prisma.modelLifecycleWorkItem.count({ where: rowWhere }),
         prisma.modelRegistryEntry.findMany({
             where: { catalogDeleted: false },
-            select: { apiModel: true },
+            select: {
+                id: true,
+                apiModel: true,
+                provider: true,
+                name: true,
+                bestFor: true,
+                reasoning: true,
+                contextWindowTokens: true,
+                supportsImage: true,
+                supportsNativePdf: true,
+                maxOutputTokens: true,
+                reservationOutputTokens: true,
+                inputUsdPerMillionTokens: true,
+                outputUsdPerMillionTokens: true,
+                cachedInputPriceMultiplier: true,
+                usageClass: true,
+                publiclyListed: true,
+                enabled: true,
+                status: true,
+                sortOrder: true,
+            },
         }),
         prisma.providerModelCatalogRun.findMany({
             distinct: ["provider"],
@@ -636,16 +1097,115 @@ export async function listModelDiscoveryQueue(options?: {
         // ProviderModelCatalogEntry is current state, not an append-only run
         // log: one row per exact provider/id pair. Reading its compact evidence
         // projection is bounded by the providers' live catalogues and lets all
-        // five database reads run concurrently.
+        // six database reads run concurrently.
         prisma.providerModelCatalogEntry.findMany({
             select: {
                 provider: true,
                 apiModel: true,
                 lastSeenAt: true,
                 lifecycle: true,
+                metadata: true,
+            },
+        }),
+        prisma.providerModelDocEvidence.findMany({
+            // Analysis uses the same freshness boundary as adoption prefill.
+            // Keeping this in SQL also prevents an evidence history that grows
+            // over years from turning every panel load into an unbounded read.
+            where: {
+                fetchedAt: {
+                    gte: new Date(now.getTime() - DOC_EVIDENCE_MAX_AGE_MS),
+                },
+            },
+            select: {
+                provider: true,
+                apiModel: true,
+                status: true,
+                parserVersion: true,
+                fields: true,
+                problems: true,
+                fetchedAt: true,
             },
         }),
     ]);
+
+    const aliases = providerAliasEvidence(entries);
+    const decisionIdentity = createModelDecisionIdentityResolver(aliases);
+    const imageModels = listImageModels();
+    const servedModels: ServedModelPortfolioEntry[] = [
+        ...registry
+            .filter(
+                (entry) =>
+                    entry.enabled &&
+                    entry.publiclyListed &&
+                    entry.status !== "disabled"
+            )
+            .map((entry) => {
+                // Registry price columns are usually null by design: null
+                // inherits the code profile. Compare with the same effective
+                // rate live requests use instead of treating inheritance as
+                // "price unknown".
+                const pricing = resolveModelPricing(
+                    {
+                        id: entry.id,
+                        apiModel: entry.apiModel,
+                        provider: entry.provider as AiModel["provider"],
+                        usageClass: entry.usageClass as AiModel["usageClass"],
+                        maxOutputTokens: entry.maxOutputTokens ?? undefined,
+                        reservationOutputTokens:
+                            entry.reservationOutputTokens ?? undefined,
+                        inputUsdPerMillionTokens:
+                            entry.inputUsdPerMillionTokens ?? undefined,
+                        outputUsdPerMillionTokens:
+                            entry.outputUsdPerMillionTokens ?? undefined,
+                        cachedInputPriceMultiplier:
+                            entry.cachedInputPriceMultiplier ?? undefined,
+                    },
+                    { at: now }
+                );
+                return {
+                    apiModel: entry.apiModel,
+                    provider: entry.provider,
+                    name: entry.name,
+                    bestFor: entry.bestFor,
+                    reasoning: entry.reasoning,
+                    contextWindowTokens: entry.contextWindowTokens,
+                    supportsImage: entry.supportsImage,
+                    supportsNativePdf: entry.supportsNativePdf,
+                    maxOutputTokens: entry.maxOutputTokens,
+                    inputUsdPerMillionTokens:
+                        pricing.costSource.startsWith("conservative_fallback")
+                            ? null
+                            : pricing.inputUsdPerMillionTokens,
+                    outputUsdPerMillionTokens:
+                        pricing.costSource.startsWith("conservative_fallback")
+                            ? null
+                            : pricing.outputUsdPerMillionTokens,
+                    usageClass: entry.usageClass,
+                    product: "chat" as const,
+                    sortOrder: entry.sortOrder,
+                };
+            }),
+        ...imageModels
+            .filter((model) => model.disabledReason === null)
+            .map((model, index) => ({
+                apiModel: model.apiModelId,
+                provider: model.provider,
+                name: model.name,
+                product: "image_generation" as const,
+                sortOrder: index,
+            })),
+    ];
+    const servedModelsByOwner = new Map<
+        ReturnType<typeof modelOwner>,
+        ServedModelPortfolioEntry[]
+    >();
+    for (const model of servedModels) {
+        const owner = modelOwner(model.apiModel);
+        if (owner === "unknown") continue;
+        const grouped = servedModelsByOwner.get(owner);
+        if (grouped) grouped.push(model);
+        else servedModelsByOwner.set(owner, [model]);
+    }
 
     const sightingsByItem = new Map(
         rows.map((row) => {
@@ -662,6 +1222,31 @@ export async function listModelDiscoveryQueue(options?: {
     const latestRunByProvider = new Map(
         latestRuns.map((run) => [run.provider, run])
     );
+    const currentEntries = entries.filter((entry) => {
+        const run = latestRunByProvider.get(entry.provider);
+        return (
+            run?.status === "checked" &&
+            entry.lastSeenAt !== null &&
+            entry.lastSeenAt >= run.startedAt
+        );
+    });
+    const currentEntriesByFamily = new Map<string, CandidateCatalogEntry[]>();
+    for (const entry of currentEntries) {
+        const family = decisionIdentity(entry.apiModel);
+        const grouped = currentEntriesByFamily.get(family);
+        if (grouped) grouped.push(entry);
+        else currentEntriesByFamily.set(family, [entry]);
+    }
+    const trustedAliasesByFamily = new Map<string, ModelAliasEvidence[]>();
+    for (const alias of trustedModelAliasEvidence(aliases)) {
+        const family = decisionIdentity(alias.canonicalApiModel);
+        const grouped = trustedAliasesByFamily.get(family);
+        if (grouped) grouped.push(alias);
+        else trustedAliasesByFamily.set(family, [alias]);
+    }
+    const docByObservation = new Map(
+        docRows.map((row) => [observationKey(row.provider, row.apiModel), row])
+    );
     const entryByObservation = new Map(
         entries.map((entry) => [
             observationKey(entry.provider, entry.apiModel),
@@ -670,13 +1255,54 @@ export async function listModelDiscoveryQueue(options?: {
     );
     const servedApiModels = [
         ...registry.map((entry) => entry.apiModel),
-        ...listImageModels().map((model) => model.apiModelId),
+        ...imageModels.map((model) => model.apiModelId),
     ];
-    const servedFamilies = new Set(servedApiModels.map(candidateFamilyIdentity));
+    const servedFamilies = new Set(
+        servedApiModels.map(decisionIdentity)
+    );
     const familyCounts = new Map<string, number>();
     for (const row of rows) {
-        const family = candidateFamilyIdentity(row.apiModel);
+        const family = decisionIdentity(row.apiModel);
         familyCounts.set(family, (familyCounts.get(family) ?? 0) + 1);
+    }
+
+    // The exclusion each excluded item was closed by: its latest move into
+    // closed_no_action. Read only for that view; an open item has none.
+    const exclusionByItem = new Map<string, WorkItemExclusionSummary>();
+    if (view === "excluded" && !options?.workItemIds && rows.length > 0) {
+        // One row per item, chosen in the database: an item excluded, reopened
+        // and excluded again many times has many closings, and only the latest
+        // is on screen. DISTINCT ON walks the (workItemId, occurredAt) index.
+        const closings = await prisma.$queryRaw<
+            Array<{
+                workItemId: string;
+                occurredAt: Date;
+                actorEmail: string | null;
+                note: string | null;
+                reasonCode: string | null;
+                operatorReason: string | null;
+                analysisSnapshot: string | null;
+            }>
+        >(Prisma.sql`
+            SELECT DISTINCT ON ("workItemId")
+                "workItemId", "occurredAt", "actorEmail", "note",
+                "reasonCode", "operatorReason", "analysisSnapshot"
+            FROM "ModelLifecycleWorkItemEvent"
+            WHERE "workItemId" IN (${Prisma.join(rows.map((row) => row.id))})
+              AND "toStatus" = 'closed_no_action'
+              AND "fromStatus" IS DISTINCT FROM 'closed_no_action'
+            ORDER BY "workItemId", "occurredAt" DESC, "id" DESC
+        `);
+        for (const event of closings) {
+            exclusionByItem.set(event.workItemId, {
+                reasonCode: event.reasonCode,
+                operatorReason: event.operatorReason,
+                analysisSnapshot: event.analysisSnapshot,
+                note: event.note,
+                actorEmail: event.actorEmail,
+                excludedAt: event.occurredAt,
+            });
+        }
     }
 
     const items = rows.map((row) => {
@@ -703,7 +1329,7 @@ export async function listModelDiscoveryQueue(options?: {
                 )?.lifecycle
             )
             .find((value): value is string => Boolean(value)) ?? null;
-        const familyKey = candidateFamilyIdentity(row.apiModel);
+        const familyKey = decisionIdentity(row.apiModel);
         const servedByTomverse = servedFamilies.has(familyKey);
         // A retirement is about a model Tomverse serves, so its own line will
         // always contain it. Asking whether it is superseded would answer yes
@@ -720,6 +1346,14 @@ export async function listModelDiscoveryQueue(options?: {
             lifecycle,
             servedByTomverse,
             supersededBy,
+            candidateEvidence: candidateEvidenceForFamily(
+                currentEntriesByFamily.get(familyKey) ?? [],
+                docByObservation,
+                trustedAliasesByFamily.get(familyKey) ?? [],
+                now
+            ),
+            servedModels:
+                servedModelsByOwner.get(modelOwner(row.apiModel)) ?? [],
         });
         return {
             id: row.id,
@@ -744,10 +1378,82 @@ export async function listModelDiscoveryQueue(options?: {
             reviewKind: assessment.kind,
             product: assessment.product,
             analysisKo: assessment.analysisKo,
+            exclusion: exclusionByItem.get(row.id) ?? null,
         };
     });
 
     return { items, total, truncated: total > items.length };
+}
+
+/**
+ * The analysis sentence the queue shows for each item, as of now.
+ *
+ * Computed by the server rather than accepted from the request: the snapshot is
+ * evidence of what the operator was shown, and a value the client supplies would
+ * be evidence of whatever the client sent.
+ */
+/**
+ * Every item a decision could apply to, with its analysis and family: the
+ * undecided queue for an exclusion, the excluded items for a reopen.
+ *
+ * `complete` is false when there are more than one read holds: a family check
+ * against a partial list could approve a decision that leaves members behind.
+ */
+export async function queueFamilies(view: "excludable" | "excluded"): Promise<{
+    complete: boolean;
+    items: Map<string, { analysisKo: string; familyKey: string }>;
+}> {
+    const queue = await listModelDiscoveryQueue({ view, limit: 1_000 });
+    return {
+        complete: !queue.truncated,
+        items: new Map(
+            queue.items.map((item) => [
+                item.id,
+                { analysisKo: item.analysisKo, familyKey: item.familyKey },
+            ])
+        ),
+    };
+}
+
+/**
+ * Whether the items in `statuses` are still the ones a family check read.
+ *
+ * Re-read inside the write transaction, so an item filed, reopened or excluded
+ * between the family check and the write is caught in the common case. It takes
+ * no table lock, deliberately: the adoption transaction holds a row lock and
+ * then updates, and a table lock here waiting on that row made the two
+ * deadlock. What remains is a narrow window between this read and commit, and
+ * an alias change in the catalogue that regroups families without touching this
+ * table. Both cost the same, reversible thing -- a family member left in the
+ * view it was in, visible there and decidable on its own -- which is why this is
+ * a check and not a serialisation.
+ */
+export async function queueStatusSetUnchanged(
+    tx: Prisma.TransactionClient,
+    statuses: readonly WorkItemStatus[],
+    checkedIds: ReadonlySet<string>
+): Promise<boolean> {
+    const current = await tx.modelLifecycleWorkItem.findMany({
+        where: { status: { in: [...statuses] } },
+        select: { id: true },
+    });
+    return current.every((row) => checkedIds.has(row.id));
+}
+
+export async function analysisSnapshotsFor(
+    workItemIds: readonly string[]
+): Promise<Map<string, { analysisKo: string; familyKey: string }>> {
+    if (workItemIds.length === 0) return new Map();
+    const queue = await listModelDiscoveryQueue({
+        workItemIds,
+        limit: workItemIds.length,
+    });
+    return new Map(
+        queue.items.map((item) => [
+            item.id,
+            { analysisKo: item.analysisKo, familyKey: item.familyKey },
+        ])
+    );
 }
 
 /**
@@ -874,14 +1580,26 @@ export async function summariseLifecycleChanges(since: Date): Promise<{
     let discovered = 0;
     let decided = 0;
     let completed = 0;
+    let records = 0;
     for (const event of events) {
+        // An adoption record moves nothing; counting it would report a
+        // transition that did not happen.
+        if (event.fromStatus !== null && event.fromStatus === event.toStatus) {
+            records += 1;
+            continue;
+        }
         if (event.fromStatus === null) discovered += 1;
         if (["approved", "rejected", "deferred"].includes(event.toStatus)) decided += 1;
         if (event.toStatus === "completed" || event.toStatus === "closed_no_action") {
             completed += 1;
         }
     }
-    return { discovered, decided, transitions: events.length - discovered, completed };
+    return {
+        discovered,
+        decided,
+        transitions: events.length - discovered - records,
+        completed,
+    };
 }
 
 export type { Prisma };

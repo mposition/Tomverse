@@ -1,12 +1,22 @@
 import Link from "next/link";
-import type { AdminNavTab } from "@/lib/adminNavigation";
+import { findAdminNavItem, type AdminNavTab } from "@/lib/adminNavigation";
+import { adminMessagesFor } from "@/lib/adminLocale";
+import { getAdminLocale } from "@/lib/adminLocaleServer";
+import { adminShellMessages } from "@/lib/adminMessages/shell";
+import {
+  localizeAdminNavItem,
+  localizeAdminTabs,
+} from "@/lib/adminNavigationLocale";
 
 type Props = {
   /** The page's own path, e.g. `/admin/providers`. */
   basePath: string;
   tabs: readonly AdminNavTab[];
   activeTabId: string;
-  /** Accessible name for the tab strip, e.g. "Providers sections". */
+  /**
+   * Accessible name for the tab strip, e.g. "Providers sections". English; in
+   * another console locale the name is derived from the localised page label.
+   */
   label: string;
   /**
    * The rest of the page's query string, carried onto every tab link so a
@@ -25,15 +35,25 @@ type Props = {
  * of every section's.
  *
  * A server component on purpose -- there is no state to hold, and the query is
- * already resolved by the page above it.
+ * already resolved by the page above it. It reads the console locale from the
+ * same request the layout did, so its labels cannot disagree with the shell's.
  */
-export function AdminPageTabs({
+export async function AdminPageTabs({
   basePath,
-  tabs,
+  tabs: sourceTabs,
   activeTabId,
-  label,
+  label: sourceLabel,
   query = {},
 }: Props) {
+  const locale = await getAdminLocale();
+  const item = findAdminNavItem(basePath);
+  const tabs = item ? localizeAdminTabs(item.id, sourceTabs, locale) : sourceTabs;
+  const label =
+    item && locale !== "en"
+      ? adminMessagesFor(adminShellMessages, locale).tabs.sections(
+          localizeAdminNavItem(item, locale).label
+        )
+      : sourceLabel;
   const hrefFor = (tabId: string) => {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {

@@ -349,11 +349,17 @@ const checks = [
   {
     name: "Provider credit controls are limited to prepaid and hybrid profiles",
     file: "components/admin/AdminProviderHealthPanel.tsx",
+    // The label lives in the console's message catalog since the Admin Console
+    // gained a Korean locale (docs/ui-contracts/admin-console-ia.md, Language):
+    // the panel must still render it, and the catalog must still say it.
     test: (source) =>
       source.includes('provider.billingProfile.settlementModel === "prepaid"') &&
       source.includes('provider.billingProfile.settlementModel === "hybrid"') &&
       source.includes("{tracksCredit && (") &&
-      source.includes("Projected month-end"),
+      source.includes("label={r.projectedMonthEnd}") &&
+      read("lib/adminMessages/providerHealth.ts").includes(
+        'projectedMonthEnd: "Projected month-end"'
+      ),
   },
   {
     name: "OpenAI usage reconciliation requires a dedicated bounded Admin API adapter",
@@ -482,10 +488,18 @@ const checks = [
   {
     name: "Provider usage diagnostics are redacted and visible only in Admin UI",
     file: "components/admin/AdminProviderUsageSyncPanel.tsx",
-    test: (source) =>
-      source.includes("View failure details") &&
-      source.includes("Provider request ID") &&
-      source.includes("Tomverse trace"),
+    // Copy is in the console message catalog; the panel renders each key.
+    test: (source) => {
+      const copy = read("lib/adminMessages/providerUsageSync.ts");
+      return (
+        source.includes("{m.viewFailureDetails}") &&
+        source.includes("{m.providerRequestId}") &&
+        source.includes("{m.tomverseTrace}") &&
+        copy.includes('viewFailureDetails: "View failure details"') &&
+        copy.includes('providerRequestId: "Provider request ID"') &&
+        copy.includes('tomverseTrace: "Tomverse trace"')
+      );
+    },
   },
   {
     name: "Provider health exposes explicit status decision reasons",
@@ -1073,13 +1087,22 @@ const checks = [
   {
     name: "Admin provider panel labels DB reference and enforced cap explicitly",
     file: "components/admin/AdminProviderHealthPanel.tsx",
-    test: (source) =>
-      source.includes('label="Provider billing limit (DB reference)"') &&
-      source.includes('label="Tomverse enforced monthly cap"') &&
-      source.includes('label="Expected effective ceiling (lower limit)"') &&
-      source.includes("CHAT_PROVIDER_${provider.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH") &&
-      source.includes("Not enforced by Tomverse") &&
-      source.includes("Request blocking"),
+    // Labels are in the console message catalog; the panel binds each one to
+    // its metric, and the English catalog keeps the exact wording.
+    test: (source) => {
+      const copy = read("lib/adminMessages/providerHealth.ts");
+      return (
+        source.includes("label={r.providerBillingLimit}") &&
+        source.includes("label={r.tomverseCap}") &&
+        source.includes("label={r.effectiveCeiling}") &&
+        source.includes("CHAT_PROVIDER_${provider.provider.toUpperCase()}_COST_MICROUSD_PER_MONTH") &&
+        copy.includes('providerBillingLimit: "Provider billing limit (DB reference)"') &&
+        copy.includes('tomverseCap: "Tomverse enforced monthly cap"') &&
+        copy.includes('effectiveCeiling: "Expected effective ceiling (lower limit)"') &&
+        copy.includes("Not enforced by Tomverse") &&
+        copy.includes("Request blocking")
+      );
+    },
   },
   {
     name: "Image provider budget has no silent production default",

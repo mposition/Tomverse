@@ -27,7 +27,8 @@ import {
     candidateFamilyIdentity,
     candidateRepresentativeRank,
     decisionKeyFamily,
-    decisionSuppressesCandidate,
+    decisionSuppressesCandidateIdentity,
+    modelStage,
     newestByModelLine,
     shouldQueueModelCandidate,
     supersedingServedModel,
@@ -81,12 +82,54 @@ export const WORK_ITEM_DECISIONS = ["approve", "reject", "defer"] as const;
 export type WorkItemDecision = (typeof WORK_ITEM_DECISIONS)[number];
 
 /**
- * States nothing leaves.
+ * What an operator decided on one event of the history, when the event is a
+ * decision rather than a step.
  *
- * `completed` is here as firmly as the two refusals: a finished item that can
- * be reopened is a queue that can be silently rewritten after the fact, and the
- * audit trail would then describe a history that no longer holds. Reopening is
- * a new item, which is also what a model coming back from retirement is.
+ * Kept on the event, not only on the item, because the item says what is true
+ * now and a reopened item no longer carries the exclusion it was reopened from.
+ */
+export const WORK_ITEM_EVENT_DECISIONS = ["adopt", "exclude", "reopen"] as const;
+export type WorkItemEventDecision = (typeof WORK_ITEM_EVENT_DECISIONS)[number];
+
+/**
+ * Why an operator excluded a model family, as a choice rather than a sentence.
+ *
+ * A short list so exclusions can be counted and read back; `other` carries a
+ * written reason and the database refuses it without one.
+ */
+export const WORK_ITEM_EXCLUSION_REASONS = [
+    "served_by_better_model",
+    "duplicate_alias",
+    "no_product_path",
+    "insufficient_advantage",
+    "unstable_provider",
+    "other",
+] as const;
+export type WorkItemExclusionReason = (typeof WORK_ITEM_EXCLUSION_REASONS)[number];
+
+export const isWorkItemExclusionReason = (
+    value: unknown
+): value is WorkItemExclusionReason =>
+    typeof value === "string" &&
+    (WORK_ITEM_EXCLUSION_REASONS as readonly string[]).includes(value);
+
+/**
+ * Closed states: no longer waiting on anyone, and outside every open count.
+ *
+ * `completed` and `rejected` are also final. A finished item that can be
+ * reopened is a queue that can be silently rewritten after the fact.
+ *
+ * `closed_no_action` -- shown to operators as "excluded" -- is the one closed
+ * state with a way back, and only one: an explicit reopen to `discovered`
+ * (`REOPENABLE_WORK_ITEM_STATUSES`). An exclusion is a judgement about a model
+ * at a price, a capability and a product line-up, all of which move; a state
+ * nobody could ever reopen would leave a later better answer with nowhere to
+ * go, because `(provider, apiModel, action)` is unique and a second item for
+ * the same model cannot be filed. Scans still never reopen it: a sighting of an
+ * item that exists leaves it alone (`workItemForObservation`), whatever its
+ * state. The reopen is a transition like any other, written to the history
+ * with the person's name and reason, so the history still describes what
+ * happened.
  */
 export const TERMINAL_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
     "rejected",
@@ -107,8 +150,13 @@ const ALLOWED_TRANSITIONS: Readonly<Record<WorkItemStatus, readonly WorkItemStat
     communication_pending: ["completed"],
     rejected: [],
     completed: [],
-    closed_no_action: [],
+    closed_no_action: ["discovered"],
 };
+
+/** Closed states an operator may explicitly return to the queue. */
+export const REOPENABLE_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "closed_no_action",
+]);
 
 export type WorkItemTransitionInput = {
     from: WorkItemStatus;
@@ -156,10 +204,18 @@ export const workItemTransitionRefusal = (
     if (!isWorkItemStatus(input.from) || !isWorkItemStatus(input.to)) {
         return { code: "unknown_status", message: "Unknown work item status." };
     }
-    if (TERMINAL_WORK_ITEM_STATUSES.has(input.from)) {
+    if (
+        TERMINAL_WORK_ITEM_STATUSES.has(input.from) &&
+        !(
+            REOPENABLE_WORK_ITEM_STATUSES.has(input.from) &&
+            ALLOWED_TRANSITIONS[input.from].includes(input.to)
+        )
+    ) {
         return {
             code: "terminal",
-            message: `${input.from} is terminal. Reopening is a new work item, not an edit to this one.`,
+            message: REOPENABLE_WORK_ITEM_STATUSES.has(input.from)
+                ? `${input.from} only reopens to discovered.`
+                : `${input.from} is terminal and cannot be reopened.`,
         };
     }
     if (!ALLOWED_TRANSITIONS[input.from].includes(input.to)) {
@@ -221,6 +277,93 @@ export const workItemTimestampField = (
 };
 
 /**
+ * The structured record an exclusion or a reopen carries, checked before any
+ * write.
+ *
+ * The same rules as the history table's CHECK constraints, here so the API can
+ * answer with a reason rather than a constraint violation. The analysis the
+ * queue showed is recorded beside the operator's reason, never as it: an
+ * automatic suggestion written into the reason column reads, a month later, as
+ * the reason a person gave.
+ */
+export type WorkItemDecisionRecord =
+    | {
+          decision: "exclude";
+          reasonCode: WorkItemExclusionReason;
+          operatorReason: string | null;
+      }
+    | { decision: "reopen"; operatorReason: string }
+    | { decision: "adopt"; operatorReason: string };
+
+export const OPERATOR_REASON_MAX_LENGTH = 1_000;
+
+export const workItemDecisionRecordRefusal = (
+    record: WorkItemDecisionRecord
+): { code: "reason_required" | "unknown_reason"; message: string } | null => {
+    const written = record.operatorReason?.trim() ?? "";
+    if (written.length > OPERATOR_REASON_MAX_LENGTH) {
+        return {
+            code: "reason_required",
+            message: `A reason is at most ${OPERATOR_REASON_MAX_LENGTH} characters.`,
+        };
+    }
+    if (record.decision === "exclude") {
+        if (!isWorkItemExclusionReason(record.reasonCode)) {
+            return { code: "unknown_reason", message: "Unknown exclusion reason." };
+        }
+        if (record.reasonCode === "other" && !written) {
+            return {
+                code: "reason_required",
+                message: "An exclusion for another reason needs that reason written down.",
+            };
+        }
+        return null;
+    }
+    if (!written) {
+        return {
+            code: "reason_required",
+            message:
+                record.decision === "adopt"
+                    ? "An adoption needs the operator's reason."
+                    : "Reopening an excluded model needs a reason.",
+        };
+    }
+    return null;
+};
+
+/** States an adoption record may stand in: where the adoption walk ends. */
+export const ADOPTION_RECORD_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "validation_pending",
+    "rollout_pending",
+    "communication_pending",
+]);
+
+/** The transition each decision record makes. */
+export const workItemDecisionTarget = (
+    decision: "exclude" | "reopen"
+): WorkItemStatus => (decision === "exclude" ? "closed_no_action" : "discovered");
+
+/**
+ * A stable fingerprint of an analysis sentence, for comparing what a panel
+ * showed with what the server computes without sending the sentence back.
+ *
+ * FNV-1a over UTF-16 code units, twice with different offsets, as 16 hex
+ * digits. Not a security boundary -- the server records its own text and an
+ * operator is already authorised to decide -- only a cheap equality check that
+ * behaves the same in the browser and on the server with no async crypto.
+ */
+export const analysisFingerprint = (text: string) => {
+    let a = 0x811c9dc5;
+    let b = 0x01000193 ^ text.length;
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        a = Math.imul(a ^ code, 0x01000193) >>> 0;
+        b = Math.imul(b ^ code, 0x5bd1e995) >>> 0;
+    }
+    return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
+};
+
+/**
  * The identity a *decision* is made about, as opposed to the identity an
  * observation has.
  *
@@ -277,6 +420,80 @@ export const workItemForObservation = (input: {
  * other.
  */
 export type ModelObservation = { provider: string; apiModel: string };
+
+/**
+ * A provider's own statement that two request ids resolve to one model.
+ *
+ * This is deliberately evidence, not another model-name heuristic. xAI's
+ * `/v1/language-models` response, for example, returns a canonical `id` plus
+ * requestable `aliases`. Treating `grok-4.20-non-reasoning` and its `-gv2`
+ * revision as unrelated made the operator decide twice about one upstream
+ * model. Conversely, stripping arbitrary suffixes would silently merge models
+ * no provider said were equivalent.
+ */
+export type ModelAliasEvidence = {
+    aliasApiModel: string;
+    canonicalApiModel: string;
+};
+
+const aliasFamilyMap = (aliases: readonly ModelAliasEvidence[]) => {
+    const direct = new Map<string, string>();
+    const ambiguous = new Set<string>();
+    for (const alias of aliases) {
+        const from = candidateFamilyIdentity(alias.aliasApiModel);
+        const to = candidateFamilyIdentity(alias.canonicalApiModel);
+        if (!from || !to || from === to || ambiguous.has(from)) continue;
+
+        const existing = direct.get(from);
+        if (existing && existing !== to) {
+            // Alias evidence is gathered across every provider. If two of them
+            // assign the same request id to different canonical models, neither
+            // statement is safe enough to collapse an operator decision. Keep
+            // the id independent instead of making row order choose a winner.
+            direct.delete(from);
+            ambiguous.add(from);
+            continue;
+        }
+        direct.set(from, to);
+    }
+    return direct;
+};
+
+/** Build once per catalogue snapshot; callers use it in bounded row loops. */
+export const createModelDecisionIdentityResolver = (
+    aliases: readonly ModelAliasEvidence[] = []
+) => {
+    const direct = aliasFamilyMap(aliases);
+    return (apiModel: string) => {
+        let identity = candidateFamilyIdentity(apiModel);
+        const visited = new Set<string>();
+        while (!visited.has(identity)) {
+            visited.add(identity);
+            const next = direct.get(identity);
+            if (!next) break;
+            identity = next;
+        }
+        return identity;
+    };
+};
+
+/** One decision identity after applying provider-declared alias evidence. */
+export const modelDecisionIdentity = (
+    apiModel: string,
+    aliases: readonly ModelAliasEvidence[] = []
+) => createModelDecisionIdentityResolver(aliases)(apiModel);
+
+/** Alias statements that survived conflict handling and resolve to one family. */
+export const trustedModelAliasEvidence = (
+    aliases: readonly ModelAliasEvidence[] = []
+) => {
+    const decisionIdentity = createModelDecisionIdentityResolver(aliases);
+    return aliases.filter(
+        (alias) =>
+            decisionIdentity(alias.aliasApiModel) ===
+            decisionIdentity(alias.canonicalApiModel)
+    );
+};
 
 /**
  * Where a model was seen, kept beside the decision about it.
@@ -362,19 +579,25 @@ export const selectQueueCandidates = (input: {
      * then, and a row filed before keys existed has only its apiModel.
      */
     queuedDecisionKeys?: readonly string[];
+    /** Provider-declared aliases collected from the same catalogue state. */
+    aliases?: readonly ModelAliasEvidence[];
 }): QueueCandidateSelection => {
+    const decisionIdentity = createModelDecisionIdentityResolver(input.aliases);
     const servedFamilies = new Set(
-        input.catalogueApiModels.map(candidateFamilyIdentity)
+        input.catalogueApiModels.map(decisionIdentity)
     );
     const decisionKeysByFamily = new Map<string, string[]>();
     for (const key of [
         ...input.queuedApiModels.map((apiModel) => candidateDecisionKey(apiModel)),
         ...(input.queuedDecisionKeys ?? []),
     ]) {
-        const family = decisionKeyFamily(key);
+        const family = decisionIdentity(decisionKeyFamily(key));
+        const separator = key.lastIndexOf("@");
+        const stage = separator < 0 ? "stable" : key.slice(separator + 1) || "stable";
+        const normalizedKey = `${family}@${stage}`;
         const held = decisionKeysByFamily.get(family);
-        if (held) held.push(key);
-        else decisionKeysByFamily.set(family, [key]);
+        if (held) held.push(normalizedKey);
+        else decisionKeysByFamily.set(family, [normalizedKey]);
     }
     const fresh: Array<ModelObservation & { observedVia: ObservedVia }> = [];
     const suppressed: SuppressedCandidate[] = [];
@@ -401,7 +624,7 @@ export const selectQueueCandidates = (input: {
             note(observation, "not_reviewable");
             continue;
         }
-        const identity = candidateFamilyIdentity(observation.apiModel);
+        const identity = decisionIdentity(observation.apiModel);
         const already = byIdentity.get(identity);
         if (already) {
             // Two providers listing the same new model on the same day is one
@@ -421,7 +644,11 @@ export const selectQueueCandidates = (input: {
             continue;
         }
         const decided = (decisionKeysByFamily.get(identity) ?? []).some((key) =>
-            decisionSuppressesCandidate(key, observation.apiModel)
+            decisionSuppressesCandidateIdentity(
+                key,
+                identity,
+                modelStage(observation.apiModel)
+            )
         );
         if (decided) {
             note(observation, "already_decided");
@@ -468,6 +695,7 @@ export const newCandidatesForQueue = (input: {
     catalogueApiModels: readonly string[];
     queuedApiModels: readonly string[];
     queuedDecisionKeys?: readonly string[];
+    aliases?: readonly ModelAliasEvidence[];
 }) => selectQueueCandidates(input).fresh;
 
 /**
@@ -483,11 +711,15 @@ export const observationsForExistingItems = (input: {
     observed: readonly ModelObservation[];
     /** The identities the queue holds, from `candidateIdentity`. */
     queuedIdentities: readonly string[];
+    aliases?: readonly ModelAliasEvidence[];
 }) => {
-    const queued = new Set(input.queuedIdentities);
+    const decisionIdentity = createModelDecisionIdentityResolver(input.aliases);
+    const queued = new Set(
+        input.queuedIdentities.map(decisionIdentity)
+    );
     const byIdentity = new Map<string, ObservedVia>();
     for (const observation of input.observed) {
-        const identity = candidateFamilyIdentity(observation.apiModel);
+        const identity = decisionIdentity(observation.apiModel);
         if (!queued.has(identity)) continue;
         const existing = byIdentity.get(identity);
         if (existing) byIdentity.set(identity, mergeObservedVia(existing, [observation]).merged);

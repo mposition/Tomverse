@@ -4,10 +4,18 @@ import {
   OPEN_WORK_ITEM_STATUSES,
   candidateIdentity,
   mergeObservedVia,
+  modelDecisionIdentity,
   newCandidatesForQueue,
   observedPairsOf,
+  REOPENABLE_WORK_ITEM_STATUSES,
+  WORK_ITEM_EXCLUSION_REASONS,
+  workItemDecisionRecordRefusal,
+  workItemDecisionTarget,
+  analysisFingerprint,
+  ADOPTION_RECORD_STATUSES,
   observationsForExistingItems,
   selectQueueCandidates,
+  trustedModelAliasEvidence,
   TERMINAL_WORK_ITEM_STATUSES,
   WORK_ITEM_STATUSES,
   workItemAgeDays,
@@ -121,16 +129,95 @@ test("an item owing nobody a notice closes directly", () => {
   assert.equal(move("rollout_pending", "completed"), null);
 });
 
-test("terminal states are terminal, including completed", () => {
+test("closed states stay closed, except an exclusion reopening to discovered", () => {
   for (const from of TERMINAL_WORK_ITEM_STATUSES) {
     for (const to of WORK_ITEM_STATUSES) {
+      const reopen = from === "closed_no_action" && to === "discovered";
       assert.equal(
-        move(from, to)?.code,
-        "terminal",
-        `${from} -> ${to} must be refused`
+        move(from, to)?.code ?? null,
+        reopen ? null : "terminal",
+        `${from} -> ${to}`
       );
     }
   }
+  assert.deepEqual([...REOPENABLE_WORK_ITEM_STATUSES], ["closed_no_action"]);
+});
+
+test("a reopen still needs the person making it", () => {
+  assert.equal(
+    move("closed_no_action", "discovered", { actorEmail: null })?.code,
+    "actor_required"
+  );
+});
+
+test("an exclusion needs a listed reason, and 'other' needs it written", () => {
+  for (const reasonCode of WORK_ITEM_EXCLUSION_REASONS) {
+    const refusal = workItemDecisionRecordRefusal({
+      decision: "exclude",
+      reasonCode,
+      operatorReason: null,
+    });
+    assert.equal(refusal?.code ?? null, reasonCode === "other" ? "reason_required" : null);
+  }
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "exclude", reasonCode: "other", operatorReason: "  " })?.code,
+    "reason_required"
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "exclude", reasonCode: "other", operatorReason: "launch in Q4" }),
+    null
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({
+      decision: "exclude",
+      reasonCode: "because" as never,
+      operatorReason: null,
+    })?.code,
+    "unknown_reason"
+  );
+});
+
+test("a reopen needs a written reason", () => {
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "reopen", operatorReason: "" })?.code,
+    "reason_required"
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "reopen", operatorReason: "x".repeat(1_001) })?.code,
+    "reason_required"
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "reopen", operatorReason: "Price dropped" }),
+    null
+  );
+});
+
+test("an adoption record needs a reason and stands where the adoption walk ends", () => {
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "adopt", operatorReason: " " })?.code,
+    "reason_required"
+  );
+  assert.equal(workItemDecisionRecordRefusal({ decision: "adopt", operatorReason: "Worth it" }), null);
+  assert.deepEqual(
+    [...ADOPTION_RECORD_STATUSES].sort(),
+    ["communication_pending", "rollout_pending", "validation_pending"]
+  );
+});
+
+test("an analysis fingerprint is stable, fixed-width and sensitive to any change", () => {
+  const sentence = "현재 Tomverse의 같은 제작사 모델은 'Grok 4.5'입니다.";
+  assert.match(analysisFingerprint(sentence), /^[0-9a-f]{16}$/);
+  assert.equal(analysisFingerprint(sentence), analysisFingerprint(sentence));
+  assert.notEqual(analysisFingerprint(sentence), analysisFingerprint(sentence + " "));
+  assert.notEqual(analysisFingerprint(""), analysisFingerprint(" "));
+});
+
+test("each decision moves to the one state it names", () => {
+  assert.equal(workItemDecisionTarget("exclude"), "closed_no_action");
+  assert.equal(workItemDecisionTarget("reopen"), "discovered");
+  assert.equal(move("discovered", "closed_no_action"), null);
+  assert.equal(move("awaiting_decision", "closed_no_action"), null);
+  assert.equal(move("deferred", "closed_no_action"), null);
 });
 
 test("deferring is reversible and rejecting is not", () => {
@@ -241,6 +328,105 @@ test("a stable model, its dated snapshots and latest alias create one candidate"
   assert.equal(fresh[0].apiModel, "gpt-4o");
   assert.equal(fresh[0].observedVia.length, 3);
   assert.equal(candidateFamilyIdentity("gpt-4o-2024-08-06"), "gpt-4o");
+});
+
+test("provider-declared aliases and canonical revisions create one decision", () => {
+  const aliases = [
+    {
+      aliasApiModel: "grok-4.20-non-reasoning",
+      canonicalApiModel: "grok-4.20-non-reasoning-gv2",
+    },
+  ];
+  assert.equal(
+    modelDecisionIdentity("xai/grok-4.20-non-reasoning", aliases),
+    "grok-4.20-non-reasoning-gv2"
+  );
+
+  const fresh = newCandidatesForQueue({
+    observed: [
+      { provider: "xai", apiModel: "grok-4.20-non-reasoning-gv2" },
+      { provider: "xai", apiModel: "grok-4.20-non-reasoning" },
+      { provider: "perplexity", apiModel: "xai/grok-4.20-non-reasoning" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+    aliases,
+  });
+
+  assert.equal(fresh.length, 1);
+  assert.equal(fresh[0].observedVia.length, 3);
+
+  const afterDecision = newCandidatesForQueue({
+    observed: [
+      { provider: "xai", apiModel: "grok-4.20-non-reasoning" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+    queuedDecisionKeys: ["grok-4.20-non-reasoning-gv2@stable"],
+    aliases,
+  });
+  assert.deepEqual(afterDecision, []);
+
+  const queuedByCanonicalId = newCandidatesForQueue({
+    observed: [
+      { provider: "xai", apiModel: "grok-4.20-non-reasoning" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: ["grok-4.20-non-reasoning-gv2"],
+    aliases,
+  });
+  const queuedByAlias = newCandidatesForQueue({
+    observed: [
+      { provider: "xai", apiModel: "grok-4.20-non-reasoning-gv2" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: ["grok-4.20-non-reasoning"],
+    aliases,
+  });
+  assert.deepEqual(queuedByCanonicalId, []);
+  assert.deepEqual(queuedByAlias, []);
+});
+
+test("alias evidence does not merge neighboring variants by name", () => {
+  const aliases = [
+    {
+      aliasApiModel: "grok-4.20-non-reasoning",
+      canonicalApiModel: "grok-4.20-non-reasoning-gv2",
+    },
+  ];
+  const fresh = newCandidatesForQueue({
+    observed: [
+      { provider: "xai", apiModel: "grok-4.20-non-reasoning" },
+      { provider: "xai", apiModel: "grok-4.20-reasoning" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+    aliases,
+  });
+
+  assert.equal(fresh.length, 2);
+});
+
+test("conflicting provider alias evidence does not let row order choose a model", () => {
+  const aliases = [
+    { aliasApiModel: "shared-latest", canonicalApiModel: "maker-a-model-2" },
+    { aliasApiModel: "shared-latest", canonicalApiModel: "maker-b-model-3" },
+  ];
+
+  assert.equal(modelDecisionIdentity("shared-latest", aliases), "shared");
+  assert.equal(modelDecisionIdentity("shared-latest", [...aliases].reverse()), "shared");
+  assert.deepEqual(trustedModelAliasEvidence(aliases), []);
+
+  const fresh = newCandidatesForQueue({
+    observed: [
+      { provider: "maker-a", apiModel: "shared-latest" },
+      { provider: "maker-b", apiModel: "maker-b-model-3" },
+    ],
+    catalogueApiModels: [],
+    queuedApiModels: [],
+    aliases,
+  });
+  assert.equal(fresh.length, 2);
 });
 
 test("a registered stable family prevents snapshot and alias review rows", () => {

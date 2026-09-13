@@ -11,6 +11,8 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminNotificationsMessages } from "@/lib/adminMessages/notifications";
 import { dispatchAppToast } from "@/lib/appToast";
 
 export type AdminNotificationRow = {
@@ -94,6 +96,11 @@ const escapeCsv = (value: unknown) => {
 };
 
 export function AdminNotificationsPanel() {
+  const m = useAdminMessages(adminNotificationsMessages);
+  const messagesRef = useRef(m);
+  useEffect(() => {
+    messagesRef.current = m;
+  }, [m]);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -157,7 +164,7 @@ export function AdminNotificationsPanel() {
             }
           | null;
         if (!response.ok || !data?.logs || !data.stats) {
-          throw new Error(data?.error || "Could not load notification logs.");
+          throw new Error(data?.error || messagesRef.current.loadFailed);
         }
         if (version !== requestVersion.current) return;
         setItems(data.logs);
@@ -170,7 +177,7 @@ export function AdminNotificationsPanel() {
         dispatchAppToast(
           error instanceof Error
             ? error.message
-            : "Could not load notification logs.",
+            : messagesRef.current.loadFailed,
           "error"
         );
       } finally {
@@ -244,7 +251,7 @@ export function AdminNotificationsPanel() {
         | { notification?: AdminNotificationRow; error?: string }
         | null;
       if (!response.ok || !data?.notification) {
-        throw new Error(data?.error || "Could not acknowledge alert.");
+        throw new Error(data?.error || m.acknowledgeFailed);
       }
       setItems((current) =>
         current.map((item) =>
@@ -255,10 +262,10 @@ export function AdminNotificationsPanel() {
         ...current,
         unacknowledged: Math.max(0, current.unacknowledged - 1),
       }));
-      dispatchAppToast("Alert acknowledged.", "success");
+      dispatchAppToast(m.acknowledged, "success");
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not acknowledge alert.",
+        error instanceof Error ? error.message : m.acknowledgeFailed,
         "error"
       );
     } finally {
@@ -304,29 +311,28 @@ export function AdminNotificationsPanel() {
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Alerts
+            {m.eyebrow}
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
-            Notification delivery log
+            {m.title}
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Track all Slack, Discord, and email delivery records. Results are
-            loaded from the database in pages of {PAGE_SIZE}.
+            {m.description(PAGE_SIZE)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <span className="inline-flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs font-bold text-zinc-200">
-            {stats.total} total
+            {m.total(stats.total)}
           </span>
           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-200">
             <Bell className="h-3.5 w-3.5" />
-            {stats.sent} sent
+            {m.sent(stats.sent)}
           </span>
           <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-bold text-red-200">
-            {stats.failed} failed
+            {m.failed(stats.failed)}
           </span>
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
-            {stats.unacknowledged} unacknowledged
+            {m.unacknowledged(stats.unacknowledged)}
           </span>
         </div>
       </div>
@@ -345,7 +351,7 @@ export function AdminNotificationsPanel() {
                   : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
               }`}
             >
-              {status} {statusCounts[status]}
+              {m.filter[status]} {statusCounts[status]}
             </button>
           ))}
         </div>
@@ -357,7 +363,7 @@ export function AdminNotificationsPanel() {
             className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
+            {m.refresh}
           </button>
           <button
             type="button"
@@ -366,27 +372,27 @@ export function AdminNotificationsPanel() {
             className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Download className="h-3.5 w-3.5" />
-            Export this page
+            {m.exportPage}
           </button>
         </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-500">
         <span>
-          Showing {pageStart}-{pageEnd} of {filteredCount} {statusFilter} records
+          {m.showing(pageStart, pageEnd, filteredCount, m.filter[statusFilter])}
         </span>
-        <span>Page {pageIndex + 1}</span>
+        <span>{m.page(pageIndex + 1)}</span>
       </div>
 
       <div className="relative mt-5 grid min-h-32 gap-3">
         {loading ? (
           <div className="absolute inset-0 z-10 flex items-start justify-center rounded-2xl bg-zinc-950/70 pt-8 text-sm font-bold text-zinc-300 backdrop-blur-sm">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading logs...
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> {m.loading}
           </div>
         ) : null}
         {items.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No notification logs match this filter.
+            {m.empty}
           </div>
         ) : (
           items.map((row) => (
@@ -418,13 +424,13 @@ export function AdminNotificationsPanel() {
                 </div>
                 <div className="grid gap-1 text-xs text-zinc-500 md:min-w-64">
                   <span>
-                    Target: {row.targetType || "-"} {row.targetId || ""}
+                    {m.target}{row.targetType || "-"} {row.targetId || ""}
                   </span>
-                  <span>Error: {row.error || "-"}</span>
+                  <span>{m.error}{row.error || "-"}</span>
                   <span>
-                    Ack:{" "}
+                    {m.ack}
                     {row.acknowledgedAt
-                      ? `${dateLabel(row.acknowledgedAt)} / ${row.acknowledgedByEmail || "admin"}`
+                      ? `${dateLabel(row.acknowledgedAt)} / ${row.acknowledgedByEmail || m.adminFallback}`
                       : "-"}
                   </span>
                   {!row.acknowledgedAt && row.status === "failed" ? (
@@ -439,7 +445,7 @@ export function AdminNotificationsPanel() {
                       ) : (
                         <CheckCircle2 className="h-3.5 w-3.5" />
                       )}
-                      Acknowledge
+                      {m.acknowledge}
                     </button>
                   ) : null}
                 </div>
@@ -456,7 +462,7 @@ export function AdminNotificationsPanel() {
           disabled={pageIndex === 0 || loading}
           className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          <ChevronLeft className="h-4 w-4" /> Previous
+          <ChevronLeft className="h-4 w-4" /> {m.previous}
         </button>
         <span className="text-xs font-bold text-zinc-500">
           {pageStart}-{pageEnd} / {filteredCount}
@@ -467,7 +473,7 @@ export function AdminNotificationsPanel() {
           disabled={!nextCursor || loading}
           className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Next <ChevronRight className="h-4 w-4" />
+          {m.next} <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     </section>
