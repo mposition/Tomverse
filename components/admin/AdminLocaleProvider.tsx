@@ -99,6 +99,9 @@ export function AdminLocaleProvider({
   }, [locale, router]);
 
   useEffect(() => {
+    // A navigation discards a refresh still in flight, so a request made before
+    // it may never have landed: each page gets to ask again, once.
+    requested.current = null;
     // Deferred past `LanguageProvider`'s own zero-delay restore, which is the
     // write this is waiting for on first load.
     const timer = window.setTimeout(refreshIfCookiesMoved, 250);
