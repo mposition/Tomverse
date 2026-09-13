@@ -22,8 +22,13 @@ import {
     type ModelAliasEvidence,
     type ModelObservation,
     type SuppressedCandidate,
+    ADOPTION_RECORD_STATUSES,
+    workItemDecisionRecordRefusal,
+    workItemDecisionTarget,
     workItemTimestampField,
     workItemTransitionRefusal,
+    type WorkItemEventDecision,
+    type WorkItemExclusionReason,
     type WorkItemStatus,
     type WorkItemTransitionRefusal,
 } from "@/lib/modelLifecycleWorkItemCore";
@@ -384,6 +389,24 @@ export type WorkItemTransitionInput = {
 
 export const MAX_BULK_WORK_ITEM_TRANSITIONS = 200;
 
+/**
+ * An operator decision written on the history event a transition creates.
+ *
+ * `analysisSnapshots` is per item: a bulk exclusion covers families the queue
+ * described differently, and each event keeps the sentence its own row showed.
+ */
+export type WorkItemEventDecisionInput = {
+    decision: WorkItemEventDecision;
+    reasonCode?: WorkItemExclusionReason | null;
+    operatorReason?: string | null;
+    analysisSnapshots?: ReadonlyMap<string, string>;
+};
+
+export type WorkItemDecisionRefusal = {
+    code: "reason_required" | "unknown_reason" | "decision_mismatch" | "analysis_required";
+    message: string;
+};
+
 export type BulkWorkItemTransitionResult =
     | { ok: true; status: WorkItemStatus; updated: number }
     | {
@@ -396,7 +419,8 @@ export type BulkWorkItemTransitionResult =
                     workItemId?: string;
                 }
               | { code: "duplicate_id"; message: string }
-              | { code: "too_many"; message: string };
+              | { code: "too_many"; message: string }
+              | WorkItemDecisionRefusal;
       };
 
 const transitionWorkItemsInTransaction = async (
@@ -407,10 +431,74 @@ const transitionWorkItemsInTransaction = async (
         actorEmail: string;
         note?: string;
         decision?: { decision: "approve" | "reject" | "defer"; reason: string };
+        eventDecision?: WorkItemEventDecisionInput;
         now?: Date;
     }
 ): Promise<BulkWorkItemTransitionResult> => {
     const now = input.now ?? new Date();
+    const eventDecision = input.eventDecision;
+    // Exclusions and reopens are checked for their own shape before anything is
+    // locked; the database refuses the same shapes, but a constraint name is not
+    // an answer an operator can act on.
+    if (eventDecision?.decision === "adopt") {
+        return {
+            ok: false,
+            refusal: {
+                code: "decision_mismatch",
+                message: "An adoption is recorded with recordAdoptionDecision, not on a transition.",
+            },
+        };
+    }
+    if (eventDecision) {
+        const record =
+            eventDecision.decision === "exclude"
+                ? {
+                      decision: "exclude" as const,
+                      reasonCode: eventDecision.reasonCode as WorkItemExclusionReason,
+                      operatorReason: eventDecision.operatorReason ?? null,
+                  }
+                : {
+                      decision: "reopen" as const,
+                      operatorReason: eventDecision.operatorReason ?? "",
+                  };
+        const refusal = workItemDecisionRecordRefusal(record);
+        if (refusal) return { ok: false, refusal };
+        // An exclusion is recorded against the analysis it was made on, for
+        // every item, or not at all.
+        if (
+            eventDecision.decision === "exclude" &&
+            input.workItemIds.some(
+                (id) => !eventDecision.analysisSnapshots?.get(id)?.trim()
+            )
+        ) {
+            return {
+                ok: false,
+                refusal: {
+                    code: "analysis_required",
+                    message: "Every excluded item needs the analysis it was excluded against.",
+                },
+            };
+        }
+        if (eventDecision.decision === "reopen" && eventDecision.analysisSnapshots?.size) {
+            return {
+                ok: false,
+                refusal: {
+                    code: "decision_mismatch",
+                    message: "A reopen records the operator's reason, not an analysis.",
+                },
+            };
+        }
+        if (workItemDecisionTarget(eventDecision.decision) !== input.to) {
+            return {
+                ok: false,
+                refusal: {
+                    code: "decision_mismatch",
+                    message: `${eventDecision.decision} does not move an item to ${input.to}.`,
+                },
+            };
+        }
+    }
+    const operatorReason = eventDecision?.operatorReason?.trim() || null;
     const uniqueIds = Array.from(new Set(input.workItemIds));
     if (uniqueIds.length === 0) {
         return {
@@ -493,6 +581,7 @@ const transitionWorkItemsInTransaction = async (
     const stamp = workItemTimestampField(input.to);
     for (const id of uniqueIds) {
         const item = itemById.get(id)!;
+        const reopening = eventDecision?.decision === "reopen";
         await tx.modelLifecycleWorkItem.update({
             where: { id: item.id },
             data: {
@@ -506,6 +595,31 @@ const transitionWorkItemsInTransaction = async (
                           reviewerEmail: input.actorEmail,
                       }
                     : {}),
+                // The item carries the exclusion as its current decision, so a
+                // row read on its own still says who excluded it and why.
+                ...(eventDecision?.decision === "exclude"
+                    ? {
+                          decision: "reject",
+                          decisionReason: operatorReason
+                              ? `${eventDecision.reasonCode}: ${operatorReason}`
+                              : String(eventDecision.reasonCode),
+                          decidedAt: now,
+                          reviewerEmail: input.actorEmail,
+                      }
+                    : {}),
+                // A reopened item is undecided again. What it was reopened from
+                // stays on the history, which is where a past decision belongs;
+                // left on the row, it would describe an item that is open as one
+                // somebody rejected.
+                ...(reopening
+                    ? {
+                          closedAt: null,
+                          decision: null,
+                          decisionReason: null,
+                          decidedAt: null,
+                          reviewerEmail: null,
+                      }
+                    : {}),
             },
         });
         await tx.modelLifecycleWorkItemEvent.create({
@@ -516,11 +630,93 @@ const transitionWorkItemsInTransaction = async (
                 fromStatus: item.status,
                 toStatus: input.to,
                 note: input.note ?? null,
+                ...(eventDecision
+                    ? {
+                          decision: eventDecision.decision,
+                          reasonCode:
+                              eventDecision.decision === "exclude"
+                                  ? eventDecision.reasonCode ?? null
+                                  : null,
+                          operatorReason,
+                          analysisSnapshot:
+                              eventDecision.analysisSnapshots?.get(item.id) ?? null,
+                      }
+                    : {}),
             },
         });
     }
     return { ok: true, status: input.to, updated: uniqueIds.length };
 };
+
+/**
+ * Records that an operator adopted an item into the registry.
+ *
+ * One event, after the adoption walk and in the same transaction, rather than a
+ * field on whichever step happened to be first: an item that was already past
+ * `approved` walks no approving step, and a record that exists only on that
+ * step would be missing for exactly those items. The event moves nothing -- its
+ * from and to are the state the walk ended in -- and carries the operator's
+ * reason and the queue's analysis in their own columns.
+ */
+export async function recordAdoptionDecision(
+    tx: Prisma.TransactionClient,
+    input: {
+        workItemId: string;
+        actorEmail: string;
+        status: WorkItemStatus;
+        operatorReason: string;
+        analysisSnapshot: string;
+        note: string;
+        now?: Date;
+    }
+): Promise<{ ok: true } | { ok: false; refusal: WorkItemDecisionRefusal }> {
+    const refusal = workItemDecisionRecordRefusal({
+        decision: "adopt",
+        operatorReason: input.operatorReason,
+    });
+    if (refusal) return { ok: false, refusal };
+    if (!input.actorEmail?.trim()) {
+        return {
+            ok: false,
+            refusal: {
+                code: "decision_mismatch",
+                message: "An adoption needs the person who made it.",
+            },
+        };
+    }
+    if (!input.analysisSnapshot?.trim()) {
+        return {
+            ok: false,
+            refusal: {
+                code: "analysis_required",
+                message: "An adoption needs the analysis it was made against.",
+            },
+        };
+    }
+    if (!ADOPTION_RECORD_STATUSES.has(input.status)) {
+        return {
+            ok: false,
+            refusal: {
+                code: "decision_mismatch",
+                message: `An adoption cannot be recorded on an item in ${input.status}.`,
+            },
+        };
+    }
+    await tx.modelLifecycleWorkItemEvent.create({
+        data: {
+            workItemId: input.workItemId,
+            occurredAt: input.now ?? new Date(),
+            actorEmail: input.actorEmail,
+            fromStatus: input.status,
+            toStatus: input.status,
+            note: input.note,
+            decision: "adopt",
+            operatorReason: input.operatorReason.trim(),
+            analysisSnapshot: input.analysisSnapshot,
+        },
+    });
+    return { ok: true };
+}
 
 /** Moves several items atomically, recording one event per item. */
 export async function transitionWorkItems(
@@ -530,6 +726,7 @@ export async function transitionWorkItems(
         actorEmail: string;
         note?: string;
         decision?: { decision: "approve" | "reject" | "defer"; reason: string };
+        eventDecision?: WorkItemEventDecisionInput;
         now?: Date;
     },
     options?: { tx?: Prisma.TransactionClient }
@@ -562,7 +759,10 @@ export async function transitionWorkItem(
     if (!result.ok) {
         if (
             result.refusal.code === "duplicate_id" ||
-            result.refusal.code === "too_many"
+            result.refusal.code === "too_many" ||
+            result.refusal.code === "reason_required" ||
+            result.refusal.code === "unknown_reason" ||
+            result.refusal.code === "decision_mismatch"
         ) {
             throw new Error(`Unexpected single-item refusal: ${result.refusal.code}`);
         }
@@ -611,7 +811,31 @@ export type ModelDiscoveryQueueItem = OpenWorkItem & {
     reviewKind: ModelReviewKind;
     product: ModelProductSurface;
     analysisKo: string;
+    /** The exclusion that closed this item; only in the excluded view. */
+    exclusion: WorkItemExclusionSummary | null;
 };
+
+export type WorkItemExclusionSummary = {
+    /** Null for an item closed before exclusions had reasons, or by a script. */
+    reasonCode: string | null;
+    operatorReason: string | null;
+    analysisSnapshot: string | null;
+    note: string | null;
+    actorEmail: string | null;
+    excludedAt: Date;
+};
+
+/**
+ * `excludable` is the undecided part of the open queue -- what an exclusion
+ * may close -- read in full so a family's members can be counted.
+ */
+export type ModelDiscoveryQueueView = "open" | "excluded" | "excludable";
+
+export const EXCLUDABLE_WORK_ITEM_STATUSES = [
+    "discovered",
+    "awaiting_decision",
+    "deferred",
+] as const satisfies readonly WorkItemStatus[];
 
 export type ModelDiscoveryQueue = {
     items: ModelDiscoveryQueueItem[];
@@ -795,15 +1019,26 @@ const candidateEvidenceForFamily = (
  */
 export async function listModelDiscoveryQueue(options?: {
     limit?: number;
+    view?: ModelDiscoveryQueueView;
+    /** Exactly these items, whatever their state. */
+    workItemIds?: readonly string[];
 }): Promise<ModelDiscoveryQueue> {
     const limit = Math.max(1, Math.min(options?.limit ?? 1_000, 1_000));
     const now = new Date();
+    const view = options?.view ?? "open";
+    const rowWhere: Prisma.ModelLifecycleWorkItemWhereInput = options?.workItemIds
+        ? { id: { in: [...options.workItemIds] } }
+        : view === "excluded"
+          ? { status: "closed_no_action" }
+          : view === "excludable"
+            ? { status: { in: [...EXCLUDABLE_WORK_ITEM_STATUSES] } }
+            : { status: { in: [...OPEN_WORK_ITEM_STATUSES] } };
     // These reads are independent. Keeping them in one parallel round avoids
     // making a remote database pay a second network latency merely to derive
     // the exact observation pairs from the work-item evidence.
     const [rows, total, registry, latestRuns, entries, docRows] = await Promise.all([
         prisma.modelLifecycleWorkItem.findMany({
-            where: { status: { in: [...OPEN_WORK_ITEM_STATUSES] } },
+            where: rowWhere,
             orderBy: [{ firstSeenAt: "asc" }, { id: "asc" }],
             take: limit,
             select: {
@@ -821,7 +1056,11 @@ export async function listModelDiscoveryQueue(options?: {
                 evidence: true,
             },
         }),
-        countOpenWorkItems(),
+        options?.workItemIds
+            ? Promise.resolve(options.workItemIds.length)
+            : view === "open"
+              ? countOpenWorkItems()
+              : prisma.modelLifecycleWorkItem.count({ where: rowWhere }),
         prisma.modelRegistryEntry.findMany({
             where: { catalogDeleted: false },
             select: {
@@ -1027,6 +1266,45 @@ export async function listModelDiscoveryQueue(options?: {
         familyCounts.set(family, (familyCounts.get(family) ?? 0) + 1);
     }
 
+    // The exclusion each excluded item was closed by: its latest move into
+    // closed_no_action. Read only for that view; an open item has none.
+    const exclusionByItem = new Map<string, WorkItemExclusionSummary>();
+    if (view === "excluded" && !options?.workItemIds && rows.length > 0) {
+        // One row per item, chosen in the database: an item excluded, reopened
+        // and excluded again many times has many closings, and only the latest
+        // is on screen. DISTINCT ON walks the (workItemId, occurredAt) index.
+        const closings = await prisma.$queryRaw<
+            Array<{
+                workItemId: string;
+                occurredAt: Date;
+                actorEmail: string | null;
+                note: string | null;
+                reasonCode: string | null;
+                operatorReason: string | null;
+                analysisSnapshot: string | null;
+            }>
+        >(Prisma.sql`
+            SELECT DISTINCT ON ("workItemId")
+                "workItemId", "occurredAt", "actorEmail", "note",
+                "reasonCode", "operatorReason", "analysisSnapshot"
+            FROM "ModelLifecycleWorkItemEvent"
+            WHERE "workItemId" IN (${Prisma.join(rows.map((row) => row.id))})
+              AND "toStatus" = 'closed_no_action'
+              AND "fromStatus" IS DISTINCT FROM 'closed_no_action'
+            ORDER BY "workItemId", "occurredAt" DESC, "id" DESC
+        `);
+        for (const event of closings) {
+            exclusionByItem.set(event.workItemId, {
+                reasonCode: event.reasonCode,
+                operatorReason: event.operatorReason,
+                analysisSnapshot: event.analysisSnapshot,
+                note: event.note,
+                actorEmail: event.actorEmail,
+                excludedAt: event.occurredAt,
+            });
+        }
+    }
+
     const items = rows.map((row) => {
         const observedVia = sightingsByItem.get(row.id) ?? [];
         const observedStates = observedVia.map((observation): ModelAvailability => {
@@ -1100,10 +1378,82 @@ export async function listModelDiscoveryQueue(options?: {
             reviewKind: assessment.kind,
             product: assessment.product,
             analysisKo: assessment.analysisKo,
+            exclusion: exclusionByItem.get(row.id) ?? null,
         };
     });
 
     return { items, total, truncated: total > items.length };
+}
+
+/**
+ * The analysis sentence the queue shows for each item, as of now.
+ *
+ * Computed by the server rather than accepted from the request: the snapshot is
+ * evidence of what the operator was shown, and a value the client supplies would
+ * be evidence of whatever the client sent.
+ */
+/**
+ * Every item a decision could apply to, with its analysis and family: the
+ * undecided queue for an exclusion, the excluded items for a reopen.
+ *
+ * `complete` is false when there are more than one read holds: a family check
+ * against a partial list could approve a decision that leaves members behind.
+ */
+export async function queueFamilies(view: "excludable" | "excluded"): Promise<{
+    complete: boolean;
+    items: Map<string, { analysisKo: string; familyKey: string }>;
+}> {
+    const queue = await listModelDiscoveryQueue({ view, limit: 1_000 });
+    return {
+        complete: !queue.truncated,
+        items: new Map(
+            queue.items.map((item) => [
+                item.id,
+                { analysisKo: item.analysisKo, familyKey: item.familyKey },
+            ])
+        ),
+    };
+}
+
+/**
+ * Whether the items in `statuses` are still the ones a family check read.
+ *
+ * Re-read inside the write transaction, so an item filed, reopened or excluded
+ * between the family check and the write is caught in the common case. It takes
+ * no table lock, deliberately: the adoption transaction holds a row lock and
+ * then updates, and a table lock here waiting on that row made the two
+ * deadlock. What remains is a narrow window between this read and commit, and
+ * an alias change in the catalogue that regroups families without touching this
+ * table. Both cost the same, reversible thing -- a family member left in the
+ * view it was in, visible there and decidable on its own -- which is why this is
+ * a check and not a serialisation.
+ */
+export async function queueStatusSetUnchanged(
+    tx: Prisma.TransactionClient,
+    statuses: readonly WorkItemStatus[],
+    checkedIds: ReadonlySet<string>
+): Promise<boolean> {
+    const current = await tx.modelLifecycleWorkItem.findMany({
+        where: { status: { in: [...statuses] } },
+        select: { id: true },
+    });
+    return current.every((row) => checkedIds.has(row.id));
+}
+
+export async function analysisSnapshotsFor(
+    workItemIds: readonly string[]
+): Promise<Map<string, { analysisKo: string; familyKey: string }>> {
+    if (workItemIds.length === 0) return new Map();
+    const queue = await listModelDiscoveryQueue({
+        workItemIds,
+        limit: workItemIds.length,
+    });
+    return new Map(
+        queue.items.map((item) => [
+            item.id,
+            { analysisKo: item.analysisKo, familyKey: item.familyKey },
+        ])
+    );
 }
 
 /**
@@ -1230,14 +1580,26 @@ export async function summariseLifecycleChanges(since: Date): Promise<{
     let discovered = 0;
     let decided = 0;
     let completed = 0;
+    let records = 0;
     for (const event of events) {
+        // An adoption record moves nothing; counting it would report a
+        // transition that did not happen.
+        if (event.fromStatus !== null && event.fromStatus === event.toStatus) {
+            records += 1;
+            continue;
+        }
         if (event.fromStatus === null) discovered += 1;
         if (["approved", "rejected", "deferred"].includes(event.toStatus)) decided += 1;
         if (event.toStatus === "completed" || event.toStatus === "closed_no_action") {
             completed += 1;
         }
     }
-    return { discovered, decided, transitions: events.length - discovered, completed };
+    return {
+        discovered,
+        decided,
+        transitions: events.length - discovered - records,
+        completed,
+    };
 }
 
 export type { Prisma };

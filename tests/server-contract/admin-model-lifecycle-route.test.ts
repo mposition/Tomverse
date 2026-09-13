@@ -3,6 +3,8 @@ import test, { mock } from "node:test";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { analysisFingerprint } from "../../lib/modelLifecycleWorkItemCore.ts";
+
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relativePath: string) =>
   pathToFileURL(resolve(ROOT, relativePath)).href;
@@ -22,8 +24,12 @@ type World = {
     workItemIds: string[];
     to: string;
     note?: string;
+    eventDecision?: unknown;
     hasTx: boolean;
   };
+  snapshotRequests: string[][];
+  queueComplete: boolean;
+  queueUnchanged: boolean;
   audit: null | { action: string; hasTx: boolean; metadata: unknown };
 };
 
@@ -33,6 +39,9 @@ const freshWorld = (): World => ({
   txActive: false,
   transition: null,
   audit: null,
+  snapshotRequests: [],
+  queueComplete: true,
+  queueUnchanged: true,
 });
 
 let world = freshWorld();
@@ -102,6 +111,32 @@ async function loadRoute(): Promise<{
     mock.module(mod("lib/modelLifecycleWorkItems.ts"), {
       namedExports: {
         MAX_BULK_WORK_ITEM_TRANSITIONS: 200,
+        EXCLUDABLE_WORK_ITEM_STATUSES: ["discovered", "awaiting_decision", "deferred"],
+        queueStatusSetUnchanged: async (
+          tx: unknown,
+          _statuses: readonly string[],
+          ids: ReadonlySet<string>
+        ) => {
+          assert.ok(tx, "the recheck runs inside the write transaction");
+          assert.ok(ids.has("item_a"));
+          return world.queueUnchanged;
+        },
+        queueFamilies: async (view: string) => {
+          world.snapshotRequests.push([view]);
+          // item_a and item_b are one family (alpha); item_c is another.
+          return {
+            complete: world.queueComplete,
+            items: new Map(
+              ["item_a", "item_b", "item_c"].map((id) => [
+                id,
+                {
+                  analysisKo: `analysis of ${id}`,
+                  familyKey: id === "item_c" ? "gamma" : "alpha",
+                },
+              ])
+            ),
+          };
+        },
         listModelDiscoveryQueue: async () => ({
           items: [],
           total: 0,
@@ -177,6 +212,258 @@ test("bulk review and its audit record share one transaction", async () => {
     count: 2,
     workItemIds: ["item_a", "item_b"],
   });
+});
+
+test("an exclusion records the chosen reason and the server's own analysis", async () => {
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "duplicate_alias",
+      operatorReason: "Same as grok-4.20",
+      families: [
+        {
+          representativeId: "item_a",
+          workItemIds: ["item_a", "item_b"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_a"),
+        },
+      ],
+      // Ignored: the analysis snapshot is never taken from the request.
+      analysisSnapshot: "client text",
+    })
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(world.snapshotRequests, [["excludable"]]);
+  const transition = world.transition as NonNullable<World["transition"]> & {
+    eventDecision: {
+      decision: string;
+      reasonCode: string;
+      operatorReason: string;
+      analysisSnapshots: Map<string, string>;
+    };
+  };
+  assert.equal(transition.to, "closed_no_action");
+  assert.equal(transition.note, undefined, "no analysis sentence is written as the note");
+  assert.equal(transition.hasTx, true);
+  assert.equal(transition.eventDecision.decision, "exclude");
+  assert.equal(transition.eventDecision.reasonCode, "duplicate_alias");
+  assert.equal(transition.eventDecision.operatorReason, "Same as grok-4.20");
+  // Every member records the sentence the operator read: the representative's.
+  assert.deepEqual(
+    [...transition.eventDecision.analysisSnapshots],
+    [
+      ["item_a", "analysis of item_a"],
+      ["item_b", "analysis of item_a"],
+    ]
+  );
+  assert.equal(world.audit?.action, "model_lifecycle.exclude");
+  assert.deepEqual(world.audit?.metadata, {
+    to: "closed_no_action",
+    count: 2,
+    workItemIds: ["item_a", "item_b"],
+    reasonCode: "duplicate_alias",
+  });
+});
+
+test("an exclusion made against an analysis that has since changed is refused", async () => {
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "no_product_path",
+      families: [
+        {
+          representativeId: "item_a",
+          workItemIds: ["item_a", "item_b"],
+          shownAnalysisFingerprint: analysisFingerprint("yesterday's analysis"),
+        },
+      ],
+    })
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(response.status, 409);
+  assert.equal(body.error, "ANALYSIS_CHANGED");
+  assert.deepEqual(body.workItemIds, ["item_a"]);
+  assert.equal(world.transition, null);
+  assert.equal(world.audit, null);
+});
+
+test("an exclusion cannot pin one family's analysis on another family's items", async () => {
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "no_product_path",
+      families: [
+        {
+          representativeId: "item_a",
+          workItemIds: ["item_a", "item_c"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_a"),
+        },
+      ],
+    })
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(response.status, 409);
+  assert.equal(body.error, "FAMILY_MISMATCH");
+  assert.equal(world.transition, null);
+});
+
+test("a family's representative must be one of the items it excludes", async () => {
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "no_product_path",
+      families: [
+        {
+          representativeId: "item_a",
+          workItemIds: ["item_b"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_a"),
+        },
+      ],
+    })
+  );
+  assert.equal(response.status, 409);
+  assert.equal(world.transition, null);
+});
+
+test("an exclusion of part of a family is refused", async () => {
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "no_product_path",
+      families: [
+        {
+          representativeId: "item_a",
+          workItemIds: ["item_a"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_a"),
+        },
+      ],
+    })
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(response.status, 409);
+  assert.equal(body.error, "FAMILY_MISMATCH");
+  assert.equal(world.transition, null);
+});
+
+test("an exclusion is refused when an undecided item appeared after the family check", async () => {
+  const { PATCH } = await loadRoute();
+  world.queueUnchanged = false;
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "no_product_path",
+      families: [
+        {
+          representativeId: "item_c",
+          workItemIds: ["item_c"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_c"),
+        },
+      ],
+    })
+  );
+  const body = (await response.json()) as Record<string, unknown>;
+  assert.equal(response.status, 409);
+  assert.equal(body.error, "FAMILY_MISMATCH");
+  assert.equal(world.transition, null);
+  assert.equal(world.audit, null);
+});
+
+test("an exclusion is refused when the queue cannot be read whole", async () => {
+  const { PATCH } = await loadRoute();
+  world.queueComplete = false;
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "no_product_path",
+      families: [
+        {
+          representativeId: "item_c",
+          workItemIds: ["item_c"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_c"),
+        },
+      ],
+    })
+  );
+  assert.equal(response.status, 503);
+  assert.equal(world.transition, null);
+});
+
+test("a full bulk exclusion fits the request size limit", async () => {
+  const { PATCH } = await loadRoute();
+  const families = Array.from({ length: 200 }, (_, index) => ({
+    representativeId: `cm${"x".repeat(22)}${String(index).padStart(3, "0")}`,
+    workItemIds: [`cm${"x".repeat(22)}${String(index).padStart(3, "0")}`],
+    shownAnalysisFingerprint: "0".repeat(16),
+  }));
+  const response = await PATCH(
+    patch({ decision: "exclude", reasonCode: "no_product_path", families })
+  );
+  // Refused for naming items the queue does not hold, not for its size.
+  assert.equal(response.status, 409);
+});
+
+test("an exclusion reason outside the list is refused before any write", async () => {
+  const { PATCH } = await loadRoute();
+  const response = await PATCH(
+    patch({
+      decision: "exclude",
+      reasonCode: "because",
+      families: [
+        {
+          representativeId: "item_a",
+          workItemIds: ["item_a"],
+          shownAnalysisFingerprint: analysisFingerprint("analysis of item_a"),
+        },
+      ],
+    })
+  );
+  assert.equal(response.status, 400);
+  assert.equal(world.transition, null);
+});
+
+test("a reopen needs a written reason and moves the whole family back to discovered", async () => {
+  const { PATCH } = await loadRoute();
+  const family = [{ representativeId: "item_a", workItemIds: ["item_a", "item_b"] }];
+  const missing = await PATCH(patch({ decision: "reopen", families: family }));
+  assert.equal(missing.status, 400);
+  assert.equal(world.transition, null);
+
+  const partial = await PATCH(
+    patch({
+      decision: "reopen",
+      families: [{ representativeId: "item_a", workItemIds: ["item_a"] }],
+      operatorReason: "Price dropped",
+    })
+  );
+  assert.equal(partial.status, 409);
+  assert.equal(world.transition, null);
+
+  const response = await PATCH(
+    patch({ decision: "reopen", families: family, operatorReason: "Price dropped" })
+  );
+  assert.equal(response.status, 200);
+  const transition = world.transition as unknown as NonNullable<World["transition"]> & {
+    eventDecision: { analysisSnapshots?: unknown };
+  };
+  assert.equal(transition.to, "discovered");
+  assert.equal(transition.eventDecision.analysisSnapshots, undefined, "a reopen snapshots nothing");
+  assert.deepEqual(world.snapshotRequests.at(-1), ["excluded"]);
+  assert.equal(world.audit?.action, "model_lifecycle.reopen");
+});
+
+test("closing, reopening or approving through a bare transition is refused", async () => {
+  const { PATCH } = await loadRoute();
+  for (const to of ["closed_no_action", "discovered", "approved"]) {
+    const response = await PATCH(
+      patch({ workItemIds: ["item_a"], to, note: "Reviewed together." })
+    );
+    assert.equal(response.status, 400, to);
+  }
+  assert.equal(world.transition, null);
 });
 
 test("bulk review requires one common audit reason", async () => {

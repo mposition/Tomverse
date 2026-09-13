@@ -286,6 +286,20 @@ const REGISTRY = {
     reason:
       "The same eleven states, on the append-only history. Recorded separately from the item's own column because the history outlives the state it describes.",
   },
+  ModelLifecycleWorkItemEvent_decision_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_EVENT_DECISIONS",
+    reason:
+      "adopt, exclude, reopen -- the operator decisions the discovery queue records on its history. Null on every step between decisions. Paired with ModelLifecycleWorkItemEvent_decision_shape_check, which refuses an exclusion without a reason code and a reopen without a written reason.",
+  },
+  ModelLifecycleWorkItemEvent_reasonCode_check: {
+    owner: "list",
+    module: "lib/modelLifecycleWorkItemCore.ts",
+    list: "WORK_ITEM_EXCLUSION_REASONS",
+    reason:
+      "The six exclusion reasons an operator picks from. A value the panel does not know would be an exclusion nobody can read back or count.",
+  },
   ModelLifecycleWorkItemEvent_fromStatus_check: {
     owner: "list",
     module: "lib/modelLifecycleWorkItemCore.ts",

@@ -82,12 +82,54 @@ export const WORK_ITEM_DECISIONS = ["approve", "reject", "defer"] as const;
 export type WorkItemDecision = (typeof WORK_ITEM_DECISIONS)[number];
 
 /**
- * States nothing leaves.
+ * What an operator decided on one event of the history, when the event is a
+ * decision rather than a step.
  *
- * `completed` is here as firmly as the two refusals: a finished item that can
- * be reopened is a queue that can be silently rewritten after the fact, and the
- * audit trail would then describe a history that no longer holds. Reopening is
- * a new item, which is also what a model coming back from retirement is.
+ * Kept on the event, not only on the item, because the item says what is true
+ * now and a reopened item no longer carries the exclusion it was reopened from.
+ */
+export const WORK_ITEM_EVENT_DECISIONS = ["adopt", "exclude", "reopen"] as const;
+export type WorkItemEventDecision = (typeof WORK_ITEM_EVENT_DECISIONS)[number];
+
+/**
+ * Why an operator excluded a model family, as a choice rather than a sentence.
+ *
+ * A short list so exclusions can be counted and read back; `other` carries a
+ * written reason and the database refuses it without one.
+ */
+export const WORK_ITEM_EXCLUSION_REASONS = [
+    "served_by_better_model",
+    "duplicate_alias",
+    "no_product_path",
+    "insufficient_advantage",
+    "unstable_provider",
+    "other",
+] as const;
+export type WorkItemExclusionReason = (typeof WORK_ITEM_EXCLUSION_REASONS)[number];
+
+export const isWorkItemExclusionReason = (
+    value: unknown
+): value is WorkItemExclusionReason =>
+    typeof value === "string" &&
+    (WORK_ITEM_EXCLUSION_REASONS as readonly string[]).includes(value);
+
+/**
+ * Closed states: no longer waiting on anyone, and outside every open count.
+ *
+ * `completed` and `rejected` are also final. A finished item that can be
+ * reopened is a queue that can be silently rewritten after the fact.
+ *
+ * `closed_no_action` -- shown to operators as "excluded" -- is the one closed
+ * state with a way back, and only one: an explicit reopen to `discovered`
+ * (`REOPENABLE_WORK_ITEM_STATUSES`). An exclusion is a judgement about a model
+ * at a price, a capability and a product line-up, all of which move; a state
+ * nobody could ever reopen would leave a later better answer with nowhere to
+ * go, because `(provider, apiModel, action)` is unique and a second item for
+ * the same model cannot be filed. Scans still never reopen it: a sighting of an
+ * item that exists leaves it alone (`workItemForObservation`), whatever its
+ * state. The reopen is a transition like any other, written to the history
+ * with the person's name and reason, so the history still describes what
+ * happened.
  */
 export const TERMINAL_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
     "rejected",
@@ -108,8 +150,13 @@ const ALLOWED_TRANSITIONS: Readonly<Record<WorkItemStatus, readonly WorkItemStat
     communication_pending: ["completed"],
     rejected: [],
     completed: [],
-    closed_no_action: [],
+    closed_no_action: ["discovered"],
 };
+
+/** Closed states an operator may explicitly return to the queue. */
+export const REOPENABLE_WORK_ITEM_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "closed_no_action",
+]);
 
 export type WorkItemTransitionInput = {
     from: WorkItemStatus;
@@ -157,10 +204,18 @@ export const workItemTransitionRefusal = (
     if (!isWorkItemStatus(input.from) || !isWorkItemStatus(input.to)) {
         return { code: "unknown_status", message: "Unknown work item status." };
     }
-    if (TERMINAL_WORK_ITEM_STATUSES.has(input.from)) {
+    if (
+        TERMINAL_WORK_ITEM_STATUSES.has(input.from) &&
+        !(
+            REOPENABLE_WORK_ITEM_STATUSES.has(input.from) &&
+            ALLOWED_TRANSITIONS[input.from].includes(input.to)
+        )
+    ) {
         return {
             code: "terminal",
-            message: `${input.from} is terminal. Reopening is a new work item, not an edit to this one.`,
+            message: REOPENABLE_WORK_ITEM_STATUSES.has(input.from)
+                ? `${input.from} only reopens to discovered.`
+                : `${input.from} is terminal and cannot be reopened.`,
         };
     }
     if (!ALLOWED_TRANSITIONS[input.from].includes(input.to)) {
@@ -219,6 +274,93 @@ export const workItemTimestampField = (
     if (to === "completed") return "completedAt";
     if (to === "rejected" || to === "closed_no_action") return "closedAt";
     return null;
+};
+
+/**
+ * The structured record an exclusion or a reopen carries, checked before any
+ * write.
+ *
+ * The same rules as the history table's CHECK constraints, here so the API can
+ * answer with a reason rather than a constraint violation. The analysis the
+ * queue showed is recorded beside the operator's reason, never as it: an
+ * automatic suggestion written into the reason column reads, a month later, as
+ * the reason a person gave.
+ */
+export type WorkItemDecisionRecord =
+    | {
+          decision: "exclude";
+          reasonCode: WorkItemExclusionReason;
+          operatorReason: string | null;
+      }
+    | { decision: "reopen"; operatorReason: string }
+    | { decision: "adopt"; operatorReason: string };
+
+export const OPERATOR_REASON_MAX_LENGTH = 1_000;
+
+export const workItemDecisionRecordRefusal = (
+    record: WorkItemDecisionRecord
+): { code: "reason_required" | "unknown_reason"; message: string } | null => {
+    const written = record.operatorReason?.trim() ?? "";
+    if (written.length > OPERATOR_REASON_MAX_LENGTH) {
+        return {
+            code: "reason_required",
+            message: `A reason is at most ${OPERATOR_REASON_MAX_LENGTH} characters.`,
+        };
+    }
+    if (record.decision === "exclude") {
+        if (!isWorkItemExclusionReason(record.reasonCode)) {
+            return { code: "unknown_reason", message: "Unknown exclusion reason." };
+        }
+        if (record.reasonCode === "other" && !written) {
+            return {
+                code: "reason_required",
+                message: "An exclusion for another reason needs that reason written down.",
+            };
+        }
+        return null;
+    }
+    if (!written) {
+        return {
+            code: "reason_required",
+            message:
+                record.decision === "adopt"
+                    ? "An adoption needs the operator's reason."
+                    : "Reopening an excluded model needs a reason.",
+        };
+    }
+    return null;
+};
+
+/** States an adoption record may stand in: where the adoption walk ends. */
+export const ADOPTION_RECORD_STATUSES: ReadonlySet<WorkItemStatus> = new Set([
+    "validation_pending",
+    "rollout_pending",
+    "communication_pending",
+]);
+
+/** The transition each decision record makes. */
+export const workItemDecisionTarget = (
+    decision: "exclude" | "reopen"
+): WorkItemStatus => (decision === "exclude" ? "closed_no_action" : "discovered");
+
+/**
+ * A stable fingerprint of an analysis sentence, for comparing what a panel
+ * showed with what the server computes without sending the sentence back.
+ *
+ * FNV-1a over UTF-16 code units, twice with different offsets, as 16 hex
+ * digits. Not a security boundary -- the server records its own text and an
+ * operator is already authorised to decide -- only a cheap equality check that
+ * behaves the same in the browser and on the server with no async crypto.
+ */
+export const analysisFingerprint = (text: string) => {
+    let a = 0x811c9dc5;
+    let b = 0x01000193 ^ text.length;
+    for (let index = 0; index < text.length; index += 1) {
+        const code = text.charCodeAt(index);
+        a = Math.imul(a ^ code, 0x01000193) >>> 0;
+        b = Math.imul(b ^ code, 0x5bd1e995) >>> 0;
+    }
+    return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
 };
 
 /**
