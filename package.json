@@ -96,6 +96,7 @@
     "maintenance:notification-deliveries": "node scripts/run-notification-deliveries.mjs",
     "maintenance:provider-usage": "node scripts/run-provider-usage-sync.mjs",
     "maintenance:provider-model-catalog": "node scripts/run-provider-model-catalog-monitor.mjs",
+    "maintenance:provider-model-docs": "node --conditions=react-server --import tsx scripts/run-provider-model-doc-evidence.mjs",
     "maintenance:provider-probe": "node scripts/run-provider-probe.mjs",
     "maintenance:default-model-reconciliation": "node --import tsx scripts/run-default-model-reconciliation.mjs",
     "report:product-key-backfill": "node --conditions=react-server --import tsx scripts/report-product-key-backfill.mjs",

@@ -12,6 +12,7 @@ import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { checkProviderModelCatalogs } from "@/lib/providerModelCatalogMonitor";
 import { reconcileCatalogWithRegistry } from "@/lib/providerModelCatalogReconciliation";
 import { sendProviderModelCatalogReport } from "@/lib/providerModelCatalogReport";
+import { collectProviderModelDocEvidence } from "@/lib/providerModelDocEvidence";
 import {
   completeScheduledJob,
   failScheduledJob,
@@ -53,6 +54,17 @@ export async function POST(request: Request) {
         return undefined;
       }
     );
+    // After the scan, so the models it just queued have their documentation
+    // read the same morning. Degradable like everything below: a documentation
+    // host that is down costs the adoption form its prefill, never the scan its
+    // report -- and the report says so, because `undefined` is printed as a
+    // read that did not run.
+    const docEvidence = await collectProviderModelDocEvidence(generatedAt).catch(
+      (error) => {
+        console.error("Provider model documentation read failed:", error);
+        return undefined;
+      }
+    );
     // Read after the scan, so it counts the items this run just created as
     // well as everything still waiting from previous days -- which is the
     // number the report never had.
@@ -81,6 +93,7 @@ export async function POST(request: Request) {
       openWorkItems,
       workItems,
       changes,
+      docEvidence,
       generatedAt,
       test: new URL(request.url).searchParams.get("test") === "true",
     });
@@ -115,6 +128,8 @@ export async function POST(request: Request) {
       registryDisabled: reconciliation?.disabled.length ?? 0,
       registryRestored: reconciliation?.restored.length ?? 0,
       registryHeld: reconciliation?.held.length ?? 0,
+      docEvidenceAttempted: docEvidence?.attempted ?? null,
+      docEvidenceParsed: docEvidence?.byStatus.parsed ?? null,
     };
     // A provider whose every enabled model went missing at once is far more
     // likely to be a broken catalog response than a real mass retirement.
