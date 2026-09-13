@@ -26,11 +26,13 @@ test("route source places durable claim before context consumption, credit reser
 test("route source places exact source lookup and terminal call inside the assistant transaction", () => {
   const route = source("app/api/chat/route.ts");
   const transaction = route.indexOf("await prisma.$transaction(async (tx) => {", 100_000);
-  const exactSource = route.indexOf("id: sourceUserMessageId!", transaction);
+  const exactSource = route.indexOf("...(persistenceSourceUserMessageId", transaction);
+  const deterministicFallback = route.indexOf('{ createdAt: "desc" as const }', exactSource);
   const assistantCreate = route.indexOf("await tx.message.create({", exactSource);
   const terminal = route.indexOf("await terminalChatResponseAttempt(", assistantCreate);
   assert.ok(transaction > 0);
   assert.ok(exactSource > transaction);
+  assert.ok(deterministicFallback > exactSource);
   assert.ok(assistantCreate > exactSource);
   assert.ok(terminal > assistantCreate);
 });

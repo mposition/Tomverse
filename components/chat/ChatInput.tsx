@@ -2273,7 +2273,10 @@ export function ChatInput({
     if (action !== "submit") return;
 
     e.preventDefault();
-    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked) {
+    // The successor draft remains editable in durable Chat, but Enter cannot
+    // consume it while either a live response or a read-only recovery poll is
+    // still active. The visible branch below presents Stop instead of Send.
+    if (!isDraftMutationDisabled && !isVoiceSubmissionBlocked && !isSending) {
       dismissGuestQuickStart();
       rememberImageIntentPrompt();
       onSubmit();

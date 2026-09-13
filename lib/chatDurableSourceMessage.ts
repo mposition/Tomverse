@@ -1,6 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
+import { scopedMessageId } from "@/lib/messageRequestIdentity";
 
 type DurableRequestAttachment = {
   attachmentId?: unknown;
@@ -38,7 +39,13 @@ export async function verifyDurableChatSourceMessage(input: {
   const latestUserMessage = [...input.messages]
     .reverse()
     .find((message) => message.role === "user");
-  if (!latestUserMessage || latestUserMessage.id !== input.sourceUserMessageId) {
+  const requestMessageId = latestUserMessage?.id;
+  const sourceMatchesCurrentOrLegacyRequest =
+    typeof requestMessageId === "string" &&
+    (requestMessageId === input.sourceUserMessageId ||
+      scopedMessageId(input.conversationId, requestMessageId) ===
+        input.sourceUserMessageId);
+  if (!latestUserMessage || !sourceMatchesCurrentOrLegacyRequest) {
     throw new ChatSourceMessageMismatchError();
   }
 

@@ -146,6 +146,39 @@ round 1 승인, Linux CI, PR 병합, staging·production 배포 또는 실제 pr
 ④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀, ⑤ Prompt Refiner
 제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
 
+### 2026-09-14 Claude round 1 대응 기록
+
+round 0 대응 source `6c950c2308f6a3577fc3b4421583ab037077f639`과 변경
+digest `sha256:d3dab6e90a1aacbf17d51994a97bb37288ff430e853082fe596cddeb09d71d84`에
+대한 Claude 읽기 전용 round 1은 `request_changes`와 지적 5건을 반환했다.
+비영속 경로의 assistant 저장이 source id 부재 때 임의 user Message를 고를 수 있던
+점, 복구 polling과 live stream 중 후속 draft의 Enter 전송이 parent guard에 닿기 전
+소비될 수 있던 점, context bundle 충돌에 기존 정책 밖 오류 코드를 추가한 점,
+rolling deploy 중 구 browser bundle이 새 필수 source id를 보내지 못하는 점이
+핵심이었다. 원본 verdict와 exchange 상태는 수정하지 않고 보존한다.
+
+수정본은 source id가 없는 비영속 저장에서 `createdAt`, `id` 내림차순으로 최신 user
+Message를 결정한다. 영속 Chat의 후속 draft는 응답 중에도 편집할 수 있지만 Enter와
+Send는 차단하며, live stream과 GET-only 복구 polling 모두 같은 UI 경계를 쓴다.
+context bundle 중복 소비는 기존 `CHAT_CONTEXT_BUNDLE_STALE`와
+`requiresPreflight: true`를 유지하고 세부 사유만 추가해 재시도 분기를 구분한다.
+배포 전에 열려 있던 browser의 `id`는 외부 request id로만 받아 conversation-scoped
+Message id를 서버에서 파생하고, owner·본문·순서가 있는 첨부 검증과 동일 rate limit을
+거친 뒤에만 durable attempt를 claim한다. client가 보낸 값을 DB primary key로 직접
+신뢰하지 않으며 두 request-id 표기를 함께 보내는 요청은 거부한다.
+
+이 문구를 쓰기 전 집중 관측은 관련 단위·서버 계약 **91/91**, desktop Chromium·
+compact·mobile Safari·mobile Chromium 위험 시나리오 **16/16** 통과다. production
+build 88개 route, typecheck, 수정 source·test lint와 diff whitespace도 통과했다.
+아직 최종 round 2의 Claude 판정, Linux 통합 CI, PR 병합, staging·production 배포,
+실제 provider·R2 호출을 뜻하지 않는다.
+
+이번 회차도 동일 기능의 검토 결함을 닫는 안정화 작업이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 마지막 Claude round 2와 검토 기록 봉인, ② PR·통합 CI, ③ 승인된 무과금 staging
+DB 복구 흐름, ④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀,
+⑤ Prompt Refiner 제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.

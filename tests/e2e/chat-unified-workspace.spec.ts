@@ -83,6 +83,7 @@ function installControlledChatFetch(options: {
   routedModelId?: string;
   responseErrorCode?: string;
   responseErrorOnceCode?: string;
+  responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
   messageSaveBodyStall?: boolean;
   messageReceiptBodyStall?: boolean;
@@ -145,11 +146,16 @@ function installControlledChatFetch(options: {
       hasReturnedOneShotError = true;
       controls.push(control);
       return new Response(JSON.stringify({
-        code: responseErrorCode, error: "QA controlled model refusal", traceId: "qa-unified-refusal",
+        code: responseErrorCode,
+        error: "QA controlled model refusal",
+        traceId: "qa-unified-refusal",
+        ...(options.responseErrorOnceDetails
+          ? { details: options.responseErrorOnceDetails }
+          : {}),
       }), {
         status: responseErrorCode === "MODEL_RETIRED"
           ? 410
-          : responseErrorCode === "CHAT_CONTEXT_BUNDLE_ALREADY_CONSUMED"
+          : responseErrorCode === "CHAT_CONTEXT_BUNDLE_STALE"
             ? 409
             : 402,
         headers: { "Content-Type": "application/json" },
@@ -278,6 +284,7 @@ async function openChat(page: Page, options: {
   routedModelId?: string;
   responseErrorCode?: string;
   responseErrorOnceCode?: string;
+  responseErrorOnceDetails?: Record<string, unknown>;
   durableAttemptResponse?: boolean;
   contextBundle?: string | null;
   contextBundles?: Array<string | null>;
@@ -698,6 +705,7 @@ async function openChat(page: Page, options: {
     routedModelId: options.routedModelId,
     responseErrorCode: options.responseErrorCode,
     responseErrorOnceCode: options.responseErrorOnceCode,
+    responseErrorOnceDetails: options.responseErrorOnceDetails,
     durableAttemptResponse: options.durableAttemptResponse,
     messageSaveBodyStall: options.messageSaveBodyStall,
     messageReceiptBodyStall: options.messageReceiptBodyStall,
@@ -1636,7 +1644,11 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
   test("a post-claim context collision retries with a fresh assistant id and reaches one provider stream", async ({ page }) => {
     await openChat(page, {
-      responseErrorOnceCode: "CHAT_CONTEXT_BUNDLE_ALREADY_CONSUMED",
+      responseErrorOnceCode: "CHAT_CONTEXT_BUNDLE_STALE",
+      responseErrorOnceDetails: {
+        requiresPreflight: true,
+        refusalReason: "already_consumed",
+      },
       contextBundles: ["qa-consumed-context-bundle", "qa-fresh-context-bundle"],
     });
     await page.getByTestId("chat-textarea").fill("Recover this claimed collision once.");
@@ -1677,6 +1689,18 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     await expect(message(page, "Checkpoint before reload.")).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
     await expect.poll(state.attemptReadCount).toBeGreaterThan(0);
+    await page.getByTestId("chat-textarea").fill("Keep this successor draft while recovery is active.");
+    await expect(page.getByTestId("chat-send-button")).toHaveCount(0);
+    await page.getByTestId("chat-textarea").press("Enter");
+    await page.waitForTimeout(100);
+    expect(await persistentChatPostCount(page)).toBe(0);
+    expect(state.writes.filter(
+      (write) => write.method === "POST" &&
+        write.path === `/api/conversations/${CONVERSATION}/messages`
+    )).toHaveLength(0);
+    await expect.poll(() => state.drafts.get(CONVERSATION)?.text).toBe(
+      "Keep this successor draft while recovery is active."
+    );
 
     state.setResponseAttempts([{
       ...active,
@@ -1889,11 +1913,15 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
 
     await expect.poll(async () => (await requests(page)).length).toBe(1);
     await expect(textarea).toBeEnabled();
+    await expect(page.getByTestId("chat-send-button")).toHaveCount(0);
     await textarea.fill("This is the next durable draft, not a second request.");
     await expect.poll(() => state.drafts.get(CONVERSATION)?.text).toBe(
       "This is the next durable draft, not a second request."
     );
+    await textarea.press("Enter");
+    await page.waitForTimeout(100);
     expect(await requests(page)).toHaveLength(1);
+    expect(await persistentChatPostCount(page)).toBe(1);
 
     await drive(page, 0, "finish");
   });

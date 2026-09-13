@@ -332,6 +332,7 @@ import {
     ChatSourceMessageMismatchError,
     verifyDurableChatSourceMessage,
 } from "@/lib/chatDurableSourceMessage";
+import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
@@ -1026,6 +1027,8 @@ async function handleChatPost(
           }
         | null = null;
     let durableCheckpointWriter: ChatResponseAttemptCheckpointWriter | null = null;
+    let durableAttemptAdmissionConsumed = false;
+    let persistenceSourceUserMessageId: string | undefined;
     // Hoisted so the outer catch can close the attempt. A provider that
     // refuses the call leaves an attempt that was prepared and never
     // dispatched, and an attempt stuck at `pending` is one the reliability
@@ -1086,6 +1089,7 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        persistenceSourceUserMessageId = sourceUserMessageId;
         // Durable idempotency has to claim before credit reservation, but it
         // must not be a way around request admission. This cheap account+IP
         // bucket runs before source lookup, advisory locks and attempt row
@@ -1104,6 +1108,7 @@ async function handleChatPost(
                 "chat-durable-attempt",
                 { minute: 60, day: 5_000 }
             );
+            durableAttemptAdmissionConsumed = true;
         }
         /*
           Files this request has been told are gone and may proceed without.
@@ -2102,19 +2107,43 @@ async function handleChatPost(
                 conversationProductKey === "chat" &&
                 modelConfig.usageClass !== "deep-research"
         );
-        if (isDurableStoredChat && !sourceUserMessageId) {
-            return tracedJsonError(
-                "Incomplete persistence target.",
-                "INVALID_PERSISTENCE_TARGET",
-                400,
-                traceId
-            );
-        }
         if (isDurableStoredChat) {
+            if (!persistenceSourceUserMessageId) {
+                // A browser tab left open across the durable-recovery deploy
+                // still names its freshly saved user turn with the old
+                // client request id. Derive the same conversation-scoped id
+                // as the Message endpoint, then make the ordinary owner/text/
+                // ordered-attachment verification prove that row exists.
+                // Missing or malformed legacy identity remains fail-closed.
+                const legacyRequestId = [...messages]
+                    .reverse()
+                    .find((message) => message.role === "user")?.id;
+                if (!legacyRequestId) {
+                    return tracedJsonError(
+                        "Incomplete persistence target.",
+                        "INVALID_PERSISTENCE_TARGET",
+                        400,
+                        traceId
+                    );
+                }
+                persistenceSourceUserMessageId = scopedMessageId(
+                    conversationId!,
+                    legacyRequestId
+                );
+            }
+            if (!durableAttemptAdmissionConsumed) {
+                await consumeApiRateLimit(
+                    req,
+                    session!.user!.id,
+                    "chat-durable-attempt",
+                    { minute: 60, day: 5_000 }
+                );
+                durableAttemptAdmissionConsumed = true;
+            }
             await verifyDurableChatSourceMessage({
                 userId: session!.user!.id,
                 conversationId: conversationId!,
-                sourceUserMessageId: sourceUserMessageId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
                 messages,
             });
             const ownerId = randomUUID();
@@ -2130,7 +2159,7 @@ async function handleChatPost(
                 userId: session!.user!.id,
                 assistantMessageId: assistantMessageId!,
                 conversationId: conversationId!,
-                sourceUserMessageId: sourceUserMessageId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
                 requestedModelId,
                 requestPayloadDigest,
                 expectedRecoveryEpoch: conversationRecoveryEpoch!,
@@ -2152,7 +2181,7 @@ async function handleChatPost(
             durableAttempt = {
                 userId: session!.user!.id,
                 assistantMessageId: assistantMessageId!,
-                sourceUserMessageId: sourceUserMessageId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
                 ownerId,
                 revision: claim.attempt.checkpointRevision,
                 partialContent: claim.attempt.partialContent,
@@ -2191,9 +2220,13 @@ async function handleChatPost(
                 }
                 return tracedJsonError(
                     "This prepared conversation context has already been used.",
-                    "CHAT_CONTEXT_BUNDLE_ALREADY_CONSUMED",
+                    "CHAT_CONTEXT_BUNDLE_STALE",
                     409,
-                    traceId
+                    traceId,
+                    {
+                        requiresPreflight: true,
+                        refusalReason: "already_consumed",
+                    }
                 );
             }
             contextSystemPrompt = verifiedContext.systemPrompt;
@@ -5424,10 +5457,20 @@ async function handleChatPost(
                                     );
                                     const sourcePrompt = await tx.message.findFirst({
                                         where: {
-                                            id: sourceUserMessageId!,
+                                            ...(persistenceSourceUserMessageId
+                                                ? { id: persistenceSourceUserMessageId }
+                                                : {}),
                                             conversationId,
                                             role: "user",
                                         },
+                                        ...(persistenceSourceUserMessageId
+                                            ? {}
+                                            : {
+                                                  orderBy: [
+                                                      { createdAt: "desc" as const },
+                                                      { id: "desc" as const },
+                                                  ],
+                                              }),
                                         select: { id: true },
                                     });
                                     if (sourcePrompt) {

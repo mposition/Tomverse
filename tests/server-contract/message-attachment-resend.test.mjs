@@ -113,6 +113,27 @@ test("actual route and helper persist a restored attachment-only question and re
   assert.equal(JSON.stringify(body).includes(prefix), false); assert.equal("uploadId" in card, false); assert.equal("objectKey" in card, false);
   assert.equal(copied.length, 1); assert.equal(state.cleanup.length, 0); assert.equal(state.attachments[0].objectKey, `${prefix}original.txt`);
 });
+test("a pre-durable browser id remains an external request id across a rolling deploy", async () => {
+  const legacyRequestId = randomUUID();
+  const response = await save([{
+    id: legacyRequestId,
+    role: "user",
+    content: "A tab opened before the deploy can finish one safe send.",
+  }]);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.messageMappings[0].requestId, legacyRequestId);
+  assert.notEqual(body.messageMappings[0].messageId, legacyRequestId);
+  assert.equal(state.messages.some((row) => row.id === legacyRequestId), false);
+
+  const ambiguous = await save([{
+    id: randomUUID(),
+    clientRequestId: randomUUID(),
+    role: "user",
+    content: "Two identities are not accepted.",
+  }]);
+  assert.equal(ambiguous.status, 400);
+});
 test("actual route keeps mixed fresh/stored order and idempotent readback without recopy", async () => {
   state.uploads.push({ id: "fresh", userId: "owner", objectKey: `${prefix}fresh.txt`, name: "fresh.txt", mediaType: "text/plain", size: 4, kind: "text", boundAt: null });
   const prompt = message({ attachmentReferences: [{ uploadId: "fresh" }, { attachmentId: "source" }] });

@@ -1573,6 +1573,12 @@ function ChatAppComponent({
           error && typeof error === "object"
             ? (error as { code?: string }).code
             : undefined;
+        const refusalReason =
+          error && typeof error === "object" &&
+          (error as { details?: unknown }).details &&
+          typeof (error as { details?: unknown }).details === "object"
+            ? ((error as { details: Record<string, unknown> }).details.refusalReason)
+            : undefined;
         if (isGuestMode && code === "TURNSTILE_REQUIRED") {
           // The coordinator guarantees only one panel actually runs the
           // challenge; the rest wait for that panel's verified retry to finish
@@ -1582,7 +1588,10 @@ function ChatAppComponent({
             sendWithToken: (turnstileToken) => sendChatRequest(turnstileToken),
             sendAfterGrant: () => sendChatRequest(),
           });
-        } else if (code === "CHAT_CONTEXT_BUNDLE_STALE") {
+        } else if (
+          code === "CHAT_CONTEXT_BUNDLE_STALE" &&
+          refusalReason !== "already_consumed"
+        ) {
           // The user changed their memory while this send was in flight, so
           // the context that was priced is not the context that would be
           // sent. §10 decides what may be done about it, and the decision is
@@ -1630,7 +1639,8 @@ function ChatAppComponent({
           // this panel's to spend.
           response = await sendChatRequest();
         } else if (
-          code === "CHAT_CONTEXT_BUNDLE_ALREADY_CONSUMED" &&
+          code === "CHAT_CONTEXT_BUNDLE_STALE" &&
+          refusalReason === "already_consumed" &&
           !isGuestMode &&
           contextBundleCollisionRetries < 1
         ) {

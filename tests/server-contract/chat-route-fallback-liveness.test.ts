@@ -207,6 +207,7 @@ const attempts: Attempt[] = [];
  * spanning the swap.
  */
 let fallbackBehaviour: "answers" | "silent" = "answers";
+let injectPrimaryFault = true;
 
 mock.module("ai", {
   namedExports: {
@@ -227,7 +228,7 @@ mock.module("ai", {
       return {
         textStream: new ReadableStream<string>({
           start(controller) {
-            if (index === 0 || silent) return;
+            if ((index === 0 && injectPrimaryFault) || silent) return;
             controller.enqueue(ANSWER);
             controller.close();
           },
@@ -310,6 +311,9 @@ type MockStoredAttachment = {
 };
 let persistedSourceAttachments: MockStoredAttachment[] = [];
 let resolvedAttachmentRows: MockStoredAttachment[] = [];
+let conversationProductKey: "chat" | "review" = "chat";
+let messageFindFirstArgs: Array<Record<string, unknown>> = [];
+let lastDurableClaimInput: Record<string, unknown> | null = null;
 
 const conversationRow = () => ({
   id: CONVERSATION_ID,
@@ -317,7 +321,7 @@ const conversationRow = () => ({
   password: null,
   selectedModels: JSON.stringify([REQUESTED_MODEL_ID]),
   kind: "chat",
-  productKey: "chat",
+  productKey: conversationProductKey,
   selectionMode: conversationSelectionMode,
   chatRecoveryEpoch: 0,
 });
@@ -328,11 +332,15 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     findFirst: () => conversationRow(),
   },
   message: {
-    findFirst: () => ({
-      id: SOURCE_USER_MESSAGE_ID,
-      content: "이 질문에 답해 줘",
-      attachments: persistedSourceAttachments,
-    }),
+    findFirst: (args: Record<string, unknown>) => {
+      messageFindFirstArgs.push(args);
+      const where = args.where as { id?: string } | undefined;
+      return {
+        id: where?.id ?? SOURCE_USER_MESSAGE_ID,
+        content: "이 질문에 답해 줘",
+        attachments: persistedSourceAttachments,
+      };
+    },
     create: (args: {
       data: { id: string; status: string; modelId: string };
     }) => {
@@ -411,6 +419,7 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
     ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
     claimChatResponseAttempt: async (input: Record<string, unknown>) => {
       durableClaimCalls += 1;
+      lastDurableClaimInput = input;
       if (durableClaimMode === "conflict") throw new DurableConflict();
       return {
       disposition: durableClaimMode,
@@ -650,9 +659,12 @@ const ask = async (
   withContextBundle = false,
   requestMessages: Array<Record<string, unknown>> = [
     { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
-  ]
+  ],
+  includeSourceUserMessageId = true,
+  withInjectedPrimaryFault = true
 ) => {
   fallbackBehaviour = behaviour;
+  injectPrimaryFault = withInjectedPrimaryFault;
   durableClaimMode = claimMode;
   attempts.length = 0;
   world.messages = [];
@@ -666,6 +678,8 @@ const ask = async (
   durableRevision = 0;
   durableAttemptAdmissionCalls = 0;
   durableClaimCalls = 0;
+  lastDurableClaimInput = null;
+  messageFindFirstArgs = [];
 
   const { POST } = await loadRoute();
   const response = await POST(
@@ -675,14 +689,18 @@ const ask = async (
         "Content-Type": "application/json",
         // Step 4 of the drill: the first provider fails before its first
         // chunk. Also lock 2 of the readiness override -- one credential.
-        "x-tomverse-fault-injection": `${FAULT_SECRET}:attempt_0_pre_token`,
+        ...(withInjectedPrimaryFault
+          ? { "x-tomverse-fault-injection": `${FAULT_SECRET}:attempt_0_pre_token` }
+          : {}),
       },
       body: JSON.stringify({
         messages: requestMessages,
         modelId: REQUESTED_MODEL_ID,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
-        sourceUserMessageId: SOURCE_USER_MESSAGE_ID,
+        ...(includeSourceUserMessageId
+          ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
+          : {}),
         ...(withContextBundle ? { contextBundle: "signed-test-bundle" } : {}),
       }),
     })
@@ -870,10 +888,71 @@ test("a post-claim context consumption collision is terminal and dispatch-free",
     assert.equal(world.terminals[0]?.status, "failed");
     assert.equal(world.terminals[0]?.failureCode, "request_refused");
     const payload = JSON.parse(body) as Record<string, unknown>;
-    assert.equal(payload.code, "CHAT_CONTEXT_BUNDLE_ALREADY_CONSUMED");
+    assert.equal(payload.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.deepEqual(payload.details, {
+      requiresPreflight: true,
+      refusalReason: "already_consumed",
+    });
     assert.equal("bundleId" in payload, false);
   } finally {
     contextConsumeSucceeds = true;
+  }
+});
+
+test("a pre-durable browser request id derives and verifies one scoped durable source", async () => {
+  const legacyRequestId = "99999999-8888-4777-8666-555555555555";
+  const { scopedMessageId } = require(
+    resolve(ROOT, "lib/messageRequestIdentity.ts")
+  ) as typeof import("../../lib/messageRequestIdentity");
+  const expectedSourceId = scopedMessageId(CONVERSATION_ID, legacyRequestId);
+
+  await ask(
+    "answers",
+    "reattach",
+    200,
+    false,
+    [{ id: legacyRequestId, role: "user", content: "이 질문에 답해 줘" }],
+    false
+  );
+
+  assert.equal(durableAttemptAdmissionCalls, 1);
+  assert.equal(durableClaimCalls, 1);
+  assert.equal(lastDurableClaimInput?.sourceUserMessageId, expectedSourceId);
+  assert.equal(
+    (messageFindFirstArgs[0]?.where as { id?: string } | undefined)?.id,
+    expectedSourceId
+  );
+});
+
+test("a non-durable persisted answer resolves the latest prompt deterministically", async () => {
+  conversationProductKey = "review";
+  try {
+    await ask(
+      "answers",
+      "claimed",
+      200,
+      false,
+      [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }],
+      false,
+      false
+    );
+    const persistenceLookup = messageFindFirstArgs.find((args) =>
+      Array.isArray(args.orderBy)
+    );
+    assert.ok(
+      persistenceLookup,
+      `missing deterministic persistence lookup: ${JSON.stringify(messageFindFirstArgs)}`
+    );
+    assert.deepEqual(persistenceLookup?.orderBy, [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ]);
+    assert.equal(
+      "id" in ((persistenceLookup?.where ?? {}) as Record<string, unknown>),
+      false
+    );
+  } finally {
+    conversationProductKey = "chat";
   }
 });
 

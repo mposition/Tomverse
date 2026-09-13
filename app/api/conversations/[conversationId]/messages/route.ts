@@ -59,7 +59,11 @@ const attachmentUploadIdSchema = z.string().trim().min(1).max(64);
 
 const userMessageSchema = z
   .object({
-    clientRequestId: z.string().uuid(),
+    // `id` is the pre-durable browser bundle's spelling. Treat it as an
+    // external request id and still derive the database Message id on the
+    // server; never restore the old trust-in-client-primary-key behaviour.
+    clientRequestId: z.string().uuid().optional(),
+    id: z.string().uuid().optional(),
     role: z.literal("user"),
     /*
       Empty is allowed, and that is the fix rather than an oversight.
@@ -78,6 +82,10 @@ const userMessageSchema = z
     attachmentReferences: savedMessageAttachmentReferencesSchema.optional(),
   })
   .strict()
+  .refine(
+    (message) => Boolean(message.clientRequestId) !== Boolean(message.id),
+    { message: "Provide exactly one message request id." }
+  )
   .refine((message) => !(message.attachmentUploadIds && message.attachmentReferences),
     { message: "Use one attachment reference format per message." })
   .refine(
@@ -86,7 +94,11 @@ const userMessageSchema = z
       (message.attachmentUploadIds?.length ?? 0) > 0 ||
       (message.attachmentReferences?.length ?? 0) > 0,
     { message: "A message must have text or at least one attachment." }
-  );
+  )
+  .transform(({ id, clientRequestId, ...message }) => ({
+    ...message,
+    clientRequestId: (clientRequestId ?? id)!,
+  }));
 const saveMessagesSchema = z
   .object({
     messages: z.array(userMessageSchema).min(1).max(3),
