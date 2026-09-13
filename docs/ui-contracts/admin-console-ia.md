@@ -133,8 +133,10 @@ console has no copy for (French, German, …) reads English.
 
 1. **The server decides the language, once per request.** `getAdminLocale()`
    (`lib/adminLocaleServer.ts`) resolves, most specific first: the console
-   cookie `tomverse_admin_lang`, an explicit `?lang=`, the product cookie
-   `tomverse_lang`, then `Accept-Language`. The layout passes the answer to
+   cookie `tomverse_admin_lang`, the product cookie `tomverse_lang`, then
+   `Accept-Language`. The product's `?lang=` pin is deliberately not an input:
+   a per-URL value cannot survive a layout that client navigation does not
+   re-render, and prefetches never carry it. The layout passes the answer to
    `AdminLocaleProvider`; server components (`AdminPageTabs`, pages) call
    the same function. Nothing in the console picks a language in the browser,
    either after hydration or optimistically on a click — either would leave a
@@ -142,8 +144,8 @@ console has no copy for (French, German, …) reads English.
    the other. A layout is not re-rendered by client navigation, so when the tab
    regains focus and the locale cookies differ from the ones the current render
    was made with, the provider refreshes the route. Router prefetches skip the
-   proxy's language headers, so `getAdminLocale()` reads `Accept-Language`
-   itself when they are absent.
+   proxy's language headers, so `getAdminLocale()` reads the raw request
+   instead of those headers.
 2. **Copy lives in `lib/adminMessages/<namespace>.ts`, declared with
    `defineAdminMessages({ en, ko })`.** English is the shape; the Korean
    dictionary is type-checked against it. The type catches most mistakes but

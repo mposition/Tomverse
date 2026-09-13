@@ -1,3 +1,4 @@
+import { resolveDocumentLanguage } from "@/lib/documentLanguage";
 import { isLanguage } from "@/lib/language";
 
 /**
@@ -47,39 +48,39 @@ const fromProductLanguage = (value: unknown): AdminLocale | null =>
  * Most specific first:
  *
  * 1. the console's own cookie -- the operator picked a console language;
- * 2. an explicit `?lang=` on the request, the product's pinned-language
- *    convention (VAL-003), so a link shared as `?lang=ko` opens in Korean;
- * 3. the product language cookie -- the operator picked a product language,
+ * 2. the product language cookie -- the operator picked a product language,
  *    and Korean there means Korean here;
- * 4. the language the request's document was resolved to, which on an admin
- *    route can only have come from `Accept-Language`.
+ * 3. the browser's `Accept-Language`.
  *
  * Every step maps onto the two console languages, and anything unrecognised
  * falls through to the next step rather than to English, so a malformed cookie
  * cannot override the browser's preference.
+ *
+ * The product's `?lang=` pin (VAL-003) is deliberately not an input. The
+ * console has its own switch, and a query value is per-URL: the shell is
+ * rendered by a layout that survives client navigation, so a locale taken from
+ * one page's query would stay on screen beside the next page's server
+ * components rendered without it, and router prefetches never pass through the
+ * proxy step that reads it. Inputs that are the same for every request in a
+ * session -- two cookies and a request header -- cannot disagree that way.
  */
 export const resolveAdminLocale = ({
   adminCookie,
   productCookie,
-  documentLanguage,
-  documentLanguageSource,
+  acceptLanguage,
 }: {
   adminCookie?: string | null;
   productCookie?: string | null;
-  documentLanguage?: string | null;
-  documentLanguageSource?: string | null;
-}): AdminLocale => {
-  if (isAdminLocale(adminCookie)) return adminCookie;
-  if (documentLanguageSource === "search") {
-    const pinned = fromProductLanguage(documentLanguage);
-    if (pinned) return pinned;
-  }
-  return (
-    fromProductLanguage(productCookie) ||
-    fromProductLanguage(documentLanguage) ||
-    DEFAULT_ADMIN_LOCALE
-  );
-};
+  acceptLanguage?: string | null;
+}): AdminLocale =>
+  (isAdminLocale(adminCookie) ? adminCookie : null) ||
+  fromProductLanguage(productCookie) ||
+  fromProductLanguage(
+    acceptLanguage
+      ? resolveDocumentLanguage({ acceptLanguage }).language
+      : null
+  ) ||
+  DEFAULT_ADMIN_LOCALE;
 
 /** The BCP 47 tag for `Intl` formatting in a given console locale. */
 export const adminIntlLocale = (locale: AdminLocale) =>

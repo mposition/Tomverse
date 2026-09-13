@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync, readdirSync } from "node:fs";
+import fs, { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -30,71 +30,45 @@ test("the console speaks exactly English and Korean", () => {
 
 test("an explicit console choice wins over every other signal", () => {
   assert.equal(
-    resolveAdminLocale({
-      adminCookie: "ko",
-      productCookie: "en",
-      documentLanguage: "en",
-      documentLanguageSource: "search",
-    }),
+    resolveAdminLocale({ adminCookie: "ko", productCookie: "en", acceptLanguage: "en-US" }),
     "ko"
   );
   assert.equal(
-    resolveAdminLocale({ adminCookie: "en", documentLanguage: "ko" }),
+    resolveAdminLocale({ adminCookie: "en", productCookie: "ko", acceptLanguage: "ko-KR" }),
     "en"
-  );
-});
-
-test("a pinned ?lang= outranks the product cookie but not the console cookie", () => {
-  assert.equal(
-    resolveAdminLocale({
-      productCookie: "en",
-      documentLanguage: "ko",
-      documentLanguageSource: "search",
-    }),
-    "ko"
   );
 });
 
 test("the product cookie outranks the browser's Accept-Language", () => {
-  assert.equal(
-    resolveAdminLocale({
-      productCookie: "en",
-      documentLanguage: "ko",
-      documentLanguageSource: "accept",
-    }),
-    "en"
-  );
-  assert.equal(
-    resolveAdminLocale({
-      productCookie: "ko",
-      documentLanguage: "en",
-      documentLanguageSource: "accept",
-    }),
-    "ko"
-  );
+  assert.equal(resolveAdminLocale({ productCookie: "en", acceptLanguage: "ko-KR,ko;q=0.9" }), "en");
+  assert.equal(resolveAdminLocale({ productCookie: "ko", acceptLanguage: "en-US" }), "ko");
+});
+
+test("Accept-Language decides when no cookie does", () => {
+  assert.equal(resolveAdminLocale({ acceptLanguage: "ko-KR,ko;q=0.9,en;q=0.8" }), "ko");
+  assert.equal(resolveAdminLocale({ acceptLanguage: "en-US,ko;q=0.5" }), "en");
 });
 
 test("a product language the console has no copy for reads English", () => {
   for (const language of ["fr", "de", "es", "pt", "zh"]) {
-    assert.equal(resolveAdminLocale({ productCookie: language }), "en");
-    assert.equal(
-      resolveAdminLocale({ documentLanguage: language, documentLanguageSource: "accept" }),
-      "en"
-    );
+    assert.equal(resolveAdminLocale({ productCookie: language, acceptLanguage: "ko" }), "en");
+    assert.equal(resolveAdminLocale({ acceptLanguage: language }), "en");
   }
 });
 
 test("a malformed cookie falls through instead of forcing English", () => {
   assert.equal(
-    resolveAdminLocale({
-      adminCookie: "kr",
-      productCookie: "nonsense",
-      documentLanguage: "ko",
-      documentLanguageSource: "accept",
-    }),
+    resolveAdminLocale({ adminCookie: "kr", productCookie: "nonsense", acceptLanguage: "ko-KR" }),
     "ko"
   );
   assert.equal(resolveAdminLocale({}), "en");
+});
+
+test("the resolver takes no per-URL input", async () => {
+  // A query-derived locale cannot survive a layout that client navigation does
+  // not re-render, and prefetches never see it (docs/ui-contracts/admin-console-ia.md).
+  const source = fs.readFileSync("lib/adminLocaleServer.ts", "utf8");
+  assert.doesNotMatch(source, /searchParams|DOCUMENT_LANGUAGE|x-tomverse-document-lang/);
 });
 
 test("every navigation entry, tab, group and page has Korean copy", () => {
@@ -238,8 +212,8 @@ test("every console message namespace is complete in Korean", async () => {
   const files = readdirSync(directory).filter((name) => name.endsWith(".ts"));
   assert.ok(files.length > 0);
   for (const file of files) {
-    const module = await import(pathToFileURL(join(directory, file)).href);
-    const catalogs = Object.entries(module).filter(
+    const loaded = await import(pathToFileURL(join(directory, file)).href);
+    const catalogs = Object.entries(loaded).filter(
       ([, value]) => value && typeof value === "object" && "en" in value && "ko" in value
     );
     assert.ok(catalogs.length > 0, `${file} exports no catalog`);
