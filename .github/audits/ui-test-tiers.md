@@ -42,9 +42,10 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-실측: 2026-08-26 기준 `--grep=@ui-risk --list`가 desktop-chromium과
-mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니다
-(project당 708).
+현재 실측: 2026-09-13 기준 `CI=1 --grep=@ui-risk --list`가
+desktop-chromium과 mobile-chromium 각 project에서 **55개 파일, 765 test**를
+선택합니다(두 project 합계 1,530). 2026-08-26의 51개 파일, 1,416 test
+(project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
 |---|
@@ -117,7 +118,10 @@ desktop·mobile 두 project에서 돕니다.
 답변을 잃거나 잘못된 질문을 다시 보내게 되므로 release를 막습니다. `CI=1`
 `--grep=@ui-risk --list`의 현재 실측은 CI가 쓰는 각 Chromium project에서
 **55개 파일, 765 test**(두 project 합계 1,530)이며, 이 spec은 project당
-36 test입니다.
+36 test입니다. PR Fast Gate run 34726247430에서 새 목록을 실행한 네 shard는
+모두 통과했고, 가장 느린 desktop-chromium 1/2 job은 12분 57초로 25분 예산의
+약 52%를 사용했습니다(desktop 2/2 11분 12초, mobile 1/2 8분 33초,
+mobile 2/2 9분 24초).
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
