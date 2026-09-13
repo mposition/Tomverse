@@ -53,6 +53,8 @@ const NON_SECRETS = [
   '  process.env.PERPLEXITY_API_KEY = "test-key";',
   '        apiModel: "claude-haiku-4-5-20251001",',
   '        apiModelId: "mistral-medium-3-5",',
+  '        aliasApiModel: "grok-4.20-non-reasoning",',
+  '        canonicalApiModel: "grok-4.20-non-reasoning-gv2",',
   '  assert.equal(mistral.apiModel, "mistral-medium-3-5");',
   // The two lib/modelPricing.ts profiles that actually tripped gitleaks on
   // PR #356: `apiModelId` had no field rule, so these were scanned as bare

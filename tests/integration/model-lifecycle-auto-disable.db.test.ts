@@ -456,7 +456,7 @@ test("one invalid bulk transition leaves every other item unchanged", async () =
   );
 });
 
-test("the discovery queue distinguishes current provider evidence", async () => {
+test("the discovery queue does not recommend a current model without decision evidence", async () => {
   const startedAt = new Date("2026-09-10T00:00:00Z");
   await prisma.providerModelCatalogRun.create({
     data: {
@@ -485,8 +485,8 @@ test("the discovery queue distinguishes current provider evidence", async () => 
   assert.equal(queue.total, 1);
   assert.equal(queue.truncated, false);
   assert.equal(queue.items[0].availability, "current");
-  assert.equal(queue.items[0].reviewPriority, "recommended");
-  assert.match(queue.items[0].analysisKo, /편입 가치/);
+  assert.equal(queue.items[0].reviewPriority, "review");
+  assert.match(queue.items[0].analysisKo, /공급자 모델 목록만으로는/);
 });
 
 // ML-13: the report reads the sightings back, and falls back honestly when an
