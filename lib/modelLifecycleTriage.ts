@@ -7,6 +7,8 @@
  * closed automatically from this suggestion.
  */
 
+import { modelOwner } from "@/lib/modelOwner";
+
 export const MODEL_REVIEW_PRIORITIES = [
   "recommended",
   "review",
@@ -132,12 +134,19 @@ export const isSearchSpecializedModel = (apiModel: string) =>
     modelIdentityWithoutVendor(apiModel)
   );
 
+/** Research orchestrators that require a product path beyond ordinary chat. */
+export const isMultiAgentModel = (apiModel: string) =>
+  /(?:^|[-_.])multi[-_.]?agent(?:$|[-_.])/.test(
+    modelIdentityWithoutVendor(apiModel)
+  );
+
 /** Products whose endpoint is not implemented by either Chat or Image Studio. */
 export const isSpecializedNonChatModel = (apiModel: string) =>
   !isImageGenerationModel(apiModel) &&
-  /(?:^|[-_.])(?:audio|realtime|search|transcrib(?:e|er)|transcription|speech|tts|embedding|embed|moderation|rerank|video|veo|whisper|guard|safeguard)(?:$|[-_.])/.test(
-    modelIdentityWithoutVendor(apiModel)
-  );
+  (isMultiAgentModel(apiModel) ||
+    /(?:^|[-_.])(?:audio|realtime|search|transcrib(?:e|er)|transcription|speech|tts|embedding|embed|moderation|rerank|video|veo|whisper|guard|safeguard)(?:$|[-_.])/.test(
+      modelIdentityWithoutVendor(apiModel)
+    ));
 
 export const modelProductSurface = (apiModel: string): ModelProductSurface => {
   if (isImageGenerationModel(apiModel)) return "image_generation";
@@ -204,11 +213,23 @@ export const decisionSuppressesCandidate = (
   decisionKey: string,
   candidateApiModel: string,
   candidateReleaseStage?: string | null
+) =>
+  decisionSuppressesCandidateIdentity(
+    decisionKey,
+    candidateFamilyIdentity(candidateApiModel),
+    modelStage(candidateApiModel, candidateReleaseStage)
+  );
+
+/** The same stage-qualified decision rule after an evidence-aware resolver ran. */
+export const decisionSuppressesCandidateIdentity = (
+  decisionKey: string,
+  candidateFamily: string,
+  candidateStage: "stable" | "prerelease"
 ) => {
   const [decidedFamily, decidedStage] = splitDecisionKey(decisionKey);
-  if (decidedFamily !== candidateFamilyIdentity(candidateApiModel)) return false;
+  if (decidedFamily !== candidateFamily) return false;
   if (decidedStage === "stable") return true;
-  return modelStage(candidateApiModel, candidateReleaseStage) === "prerelease";
+  return candidateStage === "prerelease";
 };
 
 /** The family half of a decision key, for indexing decisions by model. */
@@ -378,6 +399,391 @@ export type ModelTriageAssessment = {
   analysisKo: string;
 };
 
+/** Facts copied from the provider catalogue response, never inferred pricing. */
+export type ModelCandidateEvidence = {
+  canonicalApiModel?: string | null;
+  equivalentApiModels?: readonly string[];
+  contextWindowTokens?: number | null;
+  maxOutputTokens?: number | null;
+  supportsImage?: boolean | null;
+  supportsNativePdf?: boolean | null;
+  reasoning?: boolean | null;
+  observedInputUsdPerMillionTokens?: number | null;
+  observedOutputUsdPerMillionTokens?: number | null;
+  /** Where the displayed price came from; it is evidence, never billing state. */
+  priceEvidenceSource?: "provider_api" | "provider_docs" | "mixed" | null;
+  longContextThreshold?: number | null;
+};
+
+/** The current Tomverse portfolio projection used only for decision support. */
+export type ServedModelPortfolioEntry = {
+  apiModel: string;
+  provider: string;
+  name?: string | null;
+  bestFor?: string | null;
+  reasoning?: string | null;
+  contextWindowTokens?: number | null;
+  supportsImage?: boolean | null;
+  supportsNativePdf?: boolean | null;
+  maxOutputTokens?: number | null;
+  inputUsdPerMillionTokens?: number | null;
+  outputUsdPerMillionTokens?: number | null;
+  usageClass?: string | null;
+  product?: ModelProductSurface;
+  sortOrder?: number;
+};
+
+type ChatRole =
+  | "reasoning"
+  | "non_reasoning"
+  | "economy"
+  | "flagship"
+  | "general";
+
+const chatRole = (
+  apiModel: string,
+  evidence?: ModelCandidateEvidence | null,
+  served?: ServedModelPortfolioEntry
+): ChatRole => {
+  const identity = modelIdentityWithoutVendor(apiModel);
+  if (/(?:^|[-_.])non[-_.]?reasoning(?:$|[-_.])/.test(identity)) {
+    return "non_reasoning";
+  }
+  if (/(?:^|[-_.])(?:reasoning|reasoner|thinking)(?:$|[-_.])/.test(identity)) {
+    return "reasoning";
+  }
+  // Tier/latency words describe the portfolio seat more specifically than
+  // the fact that a modern model can also think. Gemini Flash and Claude Opus
+  // should not both collapse into the generic reasoning bucket merely because
+  // Tomverse sends each one a reasoning effort.
+  if (/(?:^|[-_.])(?:mini|nano|flash|haiku|small|lite)(?:$|[-_.])/.test(identity)) {
+    return "economy";
+  }
+  if (/(?:^|[-_.])(?:opus|pro|max|large|ultra|premier)(?:$|[-_.])/.test(identity)) {
+    return "flagship";
+  }
+  if (
+    evidence?.reasoning === true ||
+    (served?.reasoning && served.reasoning !== "none") ||
+    served?.usageClass?.includes("reasoning")
+  ) {
+    return "reasoning";
+  }
+  if (evidence?.reasoning === false || served?.reasoning === "none") {
+    return "non_reasoning";
+  }
+  return "general";
+};
+
+const roleLabel = (role: ChatRole) => {
+  switch (role) {
+    case "reasoning":
+      return "추론형";
+    case "non_reasoning":
+      return "비추론 일반대화형";
+    case "economy":
+      return "속도·비용형";
+    case "flagship":
+      return "상위 성능형";
+    default:
+      return "일반대화형";
+  }
+};
+
+const formatInteger = (value: number) =>
+  new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(value);
+
+const formatUsd = (value: number) =>
+  value < 1 ? value.toFixed(2) : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+const portfolioName = (model: ServedModelPortfolioEntry) =>
+  model.name?.trim() || model.apiModel;
+
+const candidateFacts = (evidence?: ModelCandidateEvidence | null) => {
+  if (!evidence) return [];
+  const facts: string[] = [];
+  if (evidence.contextWindowTokens) {
+    facts.push(`컨텍스트 ${formatInteger(evidence.contextWindowTokens)}`);
+  }
+  if (evidence.maxOutputTokens) {
+    facts.push(`공급자 최대 출력 ${formatInteger(evidence.maxOutputTokens)}`);
+  }
+  if (evidence.supportsImage === true) facts.push("이미지 입력");
+  if (evidence.supportsImage === false) facts.push("텍스트 전용");
+  if (evidence.supportsNativePdf === true) facts.push("네이티브 PDF");
+  if (evidence.longContextThreshold) {
+    facts.push(`장문 가격 경계 ${formatInteger(evidence.longContextThreshold)}`);
+  }
+  if (
+    evidence.observedInputUsdPerMillionTokens != null &&
+    evidence.observedOutputUsdPerMillionTokens != null
+  ) {
+    const source =
+      evidence.priceEvidenceSource === "provider_docs"
+        ? "공식 문서 관측 가격"
+        : evidence.priceEvidenceSource === "mixed"
+          ? "공급자 근거 관측 가격"
+          : "API 관측 가격";
+    facts.push(
+      `${source} 입력 $${formatUsd(evidence.observedInputUsdPerMillionTokens)}/출력 $${formatUsd(evidence.observedOutputUsdPerMillionTokens)}`
+    );
+  }
+  return facts;
+};
+
+const providerAliasNote = (evidence?: ModelCandidateEvidence | null) => {
+  const equivalents = Array.from(
+    new Set(evidence?.equivalentApiModels?.filter(Boolean) ?? [])
+  ).sort((a, b) => a.length - b.length || a.localeCompare(b));
+  if (equivalents.length < 2 || !evidence?.canonicalApiModel) return "";
+  const preferred = equivalents.find(
+    (apiModel) =>
+      apiModel !== evidence.canonicalApiModel &&
+      !isMovingModelAlias(apiModel) &&
+      !isDatedModelSnapshot(apiModel)
+  );
+  return (
+    ` 공급자 API가 ${equivalents.map((item) => `'${item}'`).join("·")}를 canonical '${evidence.canonicalApiModel}'의 동일 모델 alias로 연결합니다.` +
+    (preferred
+      ? ` Tomverse 후보는 기본 alias '${preferred}' 한 개면 충분하며, canonical revision은 재현성 고정이 필요할 때만 대신 선택해야 합니다.`
+      : " 중복 채택하지 말고 자동 업데이트 또는 재현성 중 한 정책만 선택해야 합니다.")
+  );
+};
+
+const capabilityDeltas = (
+  evidence: ModelCandidateEvidence | null | undefined,
+  baseline: ServedModelPortfolioEntry | undefined
+) => {
+  if (!evidence || !baseline) {
+    return {
+      gains: [] as string[],
+      losses: [] as string[],
+      tradeoffs: [] as string[],
+    };
+  }
+  const gains: string[] = [];
+  const losses: string[] = [];
+  const tradeoffs: string[] = [];
+  if (evidence.contextWindowTokens && baseline.contextWindowTokens) {
+    if (evidence.contextWindowTokens > baseline.contextWindowTokens) {
+      gains.push(
+        `컨텍스트가 ${portfolioName(baseline)}의 ${formatInteger(baseline.contextWindowTokens)}보다 큼`
+      );
+    } else if (evidence.contextWindowTokens < baseline.contextWindowTokens) {
+      losses.push(
+        `컨텍스트가 ${portfolioName(baseline)}의 ${formatInteger(baseline.contextWindowTokens)}보다 작음`
+      );
+    }
+  }
+  if (evidence.maxOutputTokens && baseline.maxOutputTokens) {
+    if (evidence.maxOutputTokens > baseline.maxOutputTokens) {
+      gains.push(`최대 출력이 ${portfolioName(baseline)}보다 큼`);
+    } else if (evidence.maxOutputTokens < baseline.maxOutputTokens) {
+      losses.push(`최대 출력이 ${portfolioName(baseline)}보다 작음`);
+    }
+  }
+  if (evidence.supportsImage === true && baseline.supportsImage === false) {
+    gains.push(`${portfolioName(baseline)}에 없는 이미지 입력`);
+  } else if (evidence.supportsImage === false && baseline.supportsImage === true) {
+    losses.push(`${portfolioName(baseline)}과 달리 이미지 입력 없음`);
+  }
+  if (
+    evidence.supportsNativePdf === true &&
+    baseline.supportsNativePdf === false
+  ) {
+    gains.push(`${portfolioName(baseline)}에 없는 네이티브 PDF 입력`);
+  } else if (
+    evidence.supportsNativePdf === false &&
+    baseline.supportsNativePdf === true
+  ) {
+    losses.push(`${portfolioName(baseline)}과 달리 네이티브 PDF 입력 없음`);
+  }
+  const candidateInput = evidence.observedInputUsdPerMillionTokens;
+  const candidateOutput = evidence.observedOutputUsdPerMillionTokens;
+  const baselineInput = baseline.inputUsdPerMillionTokens;
+  const baselineOutput = baseline.outputUsdPerMillionTokens;
+  if (
+    candidateInput != null &&
+    candidateOutput != null &&
+    baselineInput != null &&
+    baselineOutput != null
+  ) {
+    const candidatePrice = `$${formatUsd(candidateInput)}/$${formatUsd(candidateOutput)}`;
+    const baselinePrice = `$${formatUsd(baselineInput)}/$${formatUsd(baselineOutput)}`;
+    if (
+      candidateInput <= baselineInput &&
+      candidateOutput <= baselineOutput &&
+      (candidateInput < baselineInput || candidateOutput < baselineOutput)
+    ) {
+      gains.push(
+        `입력/출력 단가 ${candidatePrice}가 ${portfolioName(baseline)}의 ${baselinePrice}보다 낮음`
+      );
+    } else if (
+      candidateInput >= baselineInput &&
+      candidateOutput >= baselineOutput &&
+      (candidateInput > baselineInput || candidateOutput > baselineOutput)
+    ) {
+      losses.push(
+        `입력/출력 단가 ${candidatePrice}가 ${portfolioName(baseline)}의 ${baselinePrice}보다 높음`
+      );
+    } else if (
+      candidateInput !== baselineInput ||
+      candidateOutput !== baselineOutput
+    ) {
+      tradeoffs.push(
+        `입력/출력 단가가 후보 ${candidatePrice}, ${portfolioName(baseline)} ${baselinePrice}로 엇갈림`
+      );
+    }
+  }
+  return { gains, losses, tradeoffs };
+};
+
+const smartChatAssessment = (input: {
+  apiModel: string;
+  provider: string;
+  providers: readonly string[];
+  candidateEvidence?: ModelCandidateEvidence | null;
+  servedModels?: readonly ServedModelPortfolioEntry[];
+  googleBraveSearchNote: string;
+}): ModelTriageAssessment => {
+  const candidateRole = chatRole(input.apiModel, input.candidateEvidence);
+  const owner = modelOwner(input.apiModel);
+  const ownerModels = (input.servedModels ?? [])
+    .filter(
+      (model) =>
+        (model.product ?? modelProductSurface(model.apiModel)) === "chat" &&
+        owner !== "unknown" &&
+        modelOwner(model.apiModel) === owner
+    )
+    .sort(
+      (a, b) =>
+        (a.sortOrder ?? Number.MAX_SAFE_INTEGER) -
+          (b.sortOrder ?? Number.MAX_SAFE_INTEGER) ||
+        portfolioName(a).localeCompare(portfolioName(b))
+    );
+  const ownerModelsWithRole = ownerModels.map((model) => ({
+    model,
+    role: chatRole(model.apiModel, null, model),
+  }));
+  const sameRole = ownerModelsWithRole
+    .filter((entry) => entry.role === candidateRole)
+    .map((entry) => entry.model);
+  const comparisonScore = (model: ServedModelPortfolioEntry) => {
+    const evidence = input.candidateEvidence;
+    if (!evidence) return 0;
+    return [
+      evidence.contextWindowTokens && model.contextWindowTokens,
+      evidence.maxOutputTokens && model.maxOutputTokens,
+      evidence.supportsImage != null && model.supportsImage != null,
+      evidence.supportsNativePdf != null && model.supportsNativePdf != null,
+      evidence.observedInputUsdPerMillionTokens != null &&
+        model.inputUsdPerMillionTokens != null,
+      evidence.observedOutputUsdPerMillionTokens != null &&
+        model.outputUsdPerMillionTokens != null,
+    ].filter(Boolean).length;
+  };
+  const comparisonPool = sameRole.length ? sameRole : ownerModels;
+  const baseline = [...comparisonPool].sort(
+    (a, b) =>
+      comparisonScore(b) - comparisonScore(a) ||
+      (a.sortOrder ?? Number.MAX_SAFE_INTEGER) -
+        (b.sortOrder ?? Number.MAX_SAFE_INTEGER)
+  )[0];
+  // `general` means the catalogue did not establish a role. Absence of a
+  // matching current role is not a gap when the candidate's own role is the
+  // missing fact -- Claude Fable is the concrete failure this distinction
+  // prevents.
+  const candidateRoleIsKnown = candidateRole !== "general";
+  const roleGap =
+    candidateRoleIsKnown &&
+    ownerModels.length > 0 &&
+    sameRole.length === 0 &&
+    ownerModelsWithRole.every((entry) => entry.role !== "general");
+  const overlapsRole = candidateRoleIsKnown && sameRole.length > 0;
+  const facts = candidateFacts(input.candidateEvidence);
+  const deltas = capabilityDeltas(input.candidateEvidence, baseline);
+  const current = owner === "unknown"
+    ? "후보 ID만으로 제작사를 식별하지 못해 현재 라인업과 안전하게 연결할 수 없습니다."
+    : ownerModels.length
+    ? `현재 Tomverse의 같은 제작사 모델은 ${ownerModels
+        .slice(0, 3)
+        .map((model) => `'${portfolioName(model)}'`)
+        .join("·")}입니다.`
+    : "현재 Tomverse에는 같은 제작사의 활성 모델이 없습니다.";
+  const evidenceLine = facts.length
+    ? ` 공급자 근거로 확인된 후보 특성은 ${facts.join(" · ")}입니다.`
+    : " 공급자 모델 목록만으로는 컨텍스트·출력·모달리티·가격 우위를 확인할 수 없습니다.";
+  const aliasNote = providerAliasNote(input.candidateEvidence);
+
+  if (roleGap) {
+    return {
+      priority: "recommended",
+      kind: "general_chat",
+      product: "chat",
+      analysisKo:
+        `${current} 후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}으로 현재 라인업에 없는 역할을 채울 수 있습니다.` +
+        evidenceLine +
+        (deltas.losses.length
+          ? ` 다만 ${deltas.losses.join(" · ")}이므로 기존 모델의 단순 대체재는 아닙니다.`
+          : "") +
+        (deltas.tradeoffs.length
+          ? ` 가격 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.`
+          : "") +
+        " 역할 보완 후보로 우선 검토하되 공식 가격과 실제 지연시간을 확인한 뒤 채택해야 합니다." +
+        aliasNote +
+        input.googleBraveSearchNote,
+    };
+  }
+
+  if (overlapsRole) {
+    const comparison = deltas.gains.length
+      ? ` 확인된 이점은 ${deltas.gains.join(" · ")}입니다.`
+      : " 현재 근거에서는 기존 모델보다 나은 지점이 확인되지 않습니다.";
+    return {
+      priority: deltas.gains.length > 0 ? "recommended" : facts.length ? "review" : "needs_evidence",
+      kind: "general_chat",
+      product: "chat",
+      analysisKo:
+        `${current} 후보도 ${roleLabel(candidateRole)}이라 '${portfolioName(baseline!)}'과 역할이 겹칩니다.` +
+        evidenceLine +
+        comparison +
+        (deltas.losses.length ? ` 확인된 열위는 ${deltas.losses.join(" · ")}입니다.` : "") +
+        (deltas.tradeoffs.length ? ` 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.` : "") +
+        " 품질은 모델 목록에서 알 수 없으므로 공식 벤치마크·가격·지연시간 중 명확한 우위가 없으면 병행 추가보다 기존 모델 유지 또는 교체 검토가 적절합니다." +
+        aliasNote +
+        input.googleBraveSearchNote,
+    };
+  }
+
+  return {
+    priority:
+      owner === "unknown" || ownerModels.length > 0
+        ? "needs_evidence"
+        : "review",
+    kind: "general_chat",
+    product: "chat",
+    analysisKo:
+      `${current} ${
+        candidateRoleIsKnown
+          ? `후보 ID와 공급자 근거상 ${roleLabel(candidateRole)}으로 보입니다.`
+          : "공급자 근거가 후보의 제품 역할을 분류할 만큼 충분하지 않습니다."
+      }` +
+      evidenceLine +
+      (deltas.gains.length
+        ? ` '${portfolioName(baseline!)}' 대비 확인된 이점은 ${deltas.gains.join(" · ")}입니다.`
+        : "") +
+      (deltas.losses.length
+        ? ` '${portfolioName(baseline!)}' 대비 확인된 열위는 ${deltas.losses.join(" · ")}입니다.`
+        : "") +
+      (deltas.tradeoffs.length
+        ? ` 가격 절충점은 ${deltas.tradeoffs.join(" · ")}입니다.`
+        : "") +
+      " 현재 정보만으로 Tomverse의 어떤 모델을 보완하거나 대체하는지 확정할 수 없으므로 공식 포지셔닝·가격과 실제 지연시간을 먼저 확인해야 합니다." +
+      aliasNote +
+      input.googleBraveSearchNote,
+  };
+};
+
 export const assessModelLifecycleItem = (input: {
   action: string;
   apiModel: string;
@@ -391,6 +797,10 @@ export const assessModelLifecycleItem = (input: {
    * to be able to check the claim.
    */
   supersededBy?: string | null;
+  /** Facts observed in the provider response for this candidate family. */
+  candidateEvidence?: ModelCandidateEvidence | null;
+  /** Active, user-visible Tomverse models; comparison is narrowed by owner. */
+  servedModels?: readonly ServedModelPortfolioEntry[];
 }): ModelTriageAssessment => {
   const provider = providerLabel(input.providers);
   const product = modelProductSurface(input.apiModel);
@@ -429,6 +839,16 @@ export const assessModelLifecycleItem = (input: {
     };
   }
   if (product === "unsupported") {
+    if (isMultiAgentModel(input.apiModel)) {
+      return {
+        priority: "no_action",
+        kind: "specialized_non_chat",
+        product,
+        analysisKo:
+          "멀티에이전트 연구 오케스트레이션 모델입니다. 일반 Chat Completions 모델이 아니라 별도 Responses API와 연구 도구 실행 경로가 필요하므로, 현재 Tomverse 채팅 모델로 등록해도 동작하지 않습니다. " +
+          "Deep Research와의 제품 역할·비용·비동기 실행 정책을 먼저 정한 뒤 별도 통합 과제로 다뤄야 합니다.",
+      };
+    }
     if (isSearchSpecializedModel(input.apiModel)) {
       return {
         priority: "no_action",
@@ -492,13 +912,36 @@ export const assessModelLifecycleItem = (input: {
           "안정 버전만 검토하는 현재 정책에 따라 Studio 편입 후보에서 제외합니다.",
       };
     }
+    const imageOwner = modelOwner(input.apiModel);
+    const imagePortfolio = (input.servedModels ?? []).filter(
+      (model) =>
+        (model.product ?? modelProductSurface(model.apiModel)) ===
+          "image_generation" &&
+        imageOwner !== "unknown" &&
+        modelOwner(model.apiModel) === imageOwner
+    );
+    const facts = candidateFacts(input.candidateEvidence);
+    const aliasNote = providerAliasNote(input.candidateEvidence);
     return {
-      priority: "recommended",
+      priority:
+        imageOwner === "unknown"
+          ? "needs_evidence"
+          : imagePortfolio.length === 0
+            ? "recommended"
+            : "review",
       kind: "image_generation",
       product,
       analysisKo:
-        `${provider}의 최신 모델 API에서 확인되는 Tomverse 이미지 생성 후보입니다. ` +
-        "현재 Studio 모델 대비 품질·편집·해상도·속도 이점과 이미지당 최악 비용, 공급자 연동 가능성을 비교할 가치가 있습니다.",
+        (imageOwner === "unknown"
+          ? "후보 ID만으로 이미지 모델 제작사를 식별하지 못해 Studio의 기존 모델과 안전하게 연결할 수 없습니다. "
+          : imagePortfolio.length
+          ? `Tomverse Studio가 같은 제작사의 '${portfolioName(imagePortfolio[0])}'을(를) 이미 제공합니다. `
+          : "Tomverse Studio에는 같은 제작사의 활성 이미지 생성 모델이 없어 공급자·모델 다양성을 보완할 수 있습니다. ") +
+        (facts.length
+          ? `공급자 근거로 확인된 후보 특성은 ${facts.join(" · ")}입니다. `
+          : `${provider} 모델 목록은 해상도·편집·지연시간·이미지당 가격을 충분히 설명하지 않습니다. `) +
+        "Studio 채택 전에는 기존 모델과 동일 프롬프트 품질, 편집 지원, 지원 해상도, 실제 지연시간, 이미지당 최악 비용을 대조해야 합니다." +
+        aliasNote,
     };
   }
   if (input.servedByTomverse) {
@@ -522,25 +965,39 @@ export const assessModelLifecycleItem = (input: {
     };
   }
   if (isMovingModelAlias(input.apiModel)) {
+    const portfolio = smartChatAssessment({
+      apiModel: input.apiModel,
+      provider,
+      providers: input.providers,
+      candidateEvidence: input.candidateEvidence,
+      servedModels: input.servedModels,
+      googleBraveSearchNote,
+    });
     return {
       priority: "review",
       kind: "moving_alias",
       product,
       analysisKo:
-        `${provider}의 최신 모델 API에서 확인되는 이동형 별칭입니다. ` +
-        "가리키는 버전이 바뀔 수 있으므로 고정 버전과 함께 한 패밀리로 검토해야 합니다." +
-        googleBraveSearchNote,
+        `${provider}의 이동형 별칭이라 가리키는 버전이 바뀔 수 있습니다. ` +
+        portfolio.analysisKo,
     };
   }
   if (isDatedModelSnapshot(input.apiModel)) {
+    const portfolio = smartChatAssessment({
+      apiModel: input.apiModel,
+      provider,
+      providers: input.providers,
+      candidateEvidence: input.candidateEvidence,
+      servedModels: input.servedModels,
+      googleBraveSearchNote,
+    });
     return {
       priority: "review",
       kind: "dated_snapshot",
       product,
       analysisKo:
-        `${provider}의 최신 모델 API에서 확인되는 날짜·리비전 고정 스냅샷입니다. ` +
-        "같은 패밀리의 안정 버전과 묶어 재현성 또는 호환성 필요가 있을 때만 편입할 가치가 있습니다." +
-        googleBraveSearchNote,
+        `${provider}의 날짜·리비전 고정 스냅샷이므로 재현성 요구가 있을 때만 기본 alias 대신 선택해야 합니다. ` +
+        portfolio.analysisKo,
     };
   }
   if (isPreviewModel(input.apiModel)) {
@@ -564,13 +1021,12 @@ export const assessModelLifecycleItem = (input: {
         "Tomverse Chat의 일반 대화 수요와 별개로 코딩 제품 범위가 확정될 때 편입 가치가 있습니다.",
     };
   }
-  return {
-    priority: "recommended",
-    kind: "general_chat",
-    product,
-    analysisKo:
-      `${provider}의 최신 모델 API에서 현재 확인되며 Tomverse가 아직 제공하지 않는 일반 대화 모델입니다. ` +
-      "기존 모델 대비 품질·가격·컨텍스트 이점이 확인되면 편입 가치가 있습니다." +
-      googleBraveSearchNote,
-  };
+  return smartChatAssessment({
+    apiModel: input.apiModel,
+    provider,
+    providers: input.providers,
+    candidateEvidence: input.candidateEvidence,
+    servedModels: input.servedModels,
+    googleBraveSearchNote,
+  });
 };
