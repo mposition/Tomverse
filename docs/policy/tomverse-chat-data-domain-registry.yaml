@@ -208,6 +208,42 @@ domains:
     implementationStatus: implemented
     inUnifiedExport: included
 
+  - domain: chatComposerDraft
+    prismaModel: ChatComposerDraft
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Authenticated Chat's unsent composer text and ordered opaque attachment
+      handles. The row cascades both from the account and, for a stored scope,
+      from its conversation. Unified export includes the user's text, scopeKey
+      (which is the conversation id for a stored scope), revision and timestamps
+      while withholding the duplicate conversation foreign key, internal row id
+      and attachment identifiers. Deleting this row never deletes the referenced
+      upload or attachment; their existing lifecycle remains authoritative.
+
+  - domain: chatResponseAttempt
+    prismaModel: ChatResponseAttempt
+    userLinkageRole: subject
+    owner: backend-ai
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included_filtered
+    note: >-
+      Durable recovery state for one authenticated stored-Chat assistant
+      response. The user-visible committed response prefix, status, attribution
+      and terminal metadata are exported. Fingerprint, worker owner and lease
+      are withheld concurrency internals. User, conversation and source-message
+      cascades all remove the row; the assistant id is deliberately not a
+      foreign key because the attempt must be claimed before an assistant
+      Message exists.
+
   - domain: comparisonReview
     prismaModel: ComparisonReview
     userLinkageRole: subject

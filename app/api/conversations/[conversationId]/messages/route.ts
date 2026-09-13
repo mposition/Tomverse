@@ -15,6 +15,7 @@ import {
   readLimitedJson,
 } from "@/lib/apiSecurity";
 import { enqueueArtifactCleanupForMessages } from "@/lib/generatedArtifactStorage";
+import { deleteChatResponseAttemptsForModelHistory } from "@/lib/chatResponseAttemptDeletion";
 import {
   PUBLIC_MESSAGE_ATTACHMENT_SELECT,
   toPublicMessageAttachment,
@@ -319,6 +320,11 @@ export async function DELETE(
                 conversationId,
                 modelId: parsedModelId.data,
                 role: "assistant",
+            });
+            await deleteChatResponseAttemptsForModelHistory(tx, {
+                userId,
+                conversationId,
+                modelId: parsedModelId.data,
             });
             const deletedSources = await tx.message.deleteMany({
                 where: {

@@ -231,6 +231,43 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  chatComposerDraft: (userId) =>
+    prisma.chatComposerDraft.findMany({
+      where: { userId },
+      select: {
+        scopeKey: true,
+        text: true,
+        revision: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
+  chatResponseAttempt: (userId) =>
+    prisma.chatResponseAttempt.findMany({
+      where: { userId },
+      select: {
+        assistantMessageId: true,
+        conversationId: true,
+        sourceUserMessageId: true,
+        requestedModelId: true,
+        actualModelId: true,
+        provider: true,
+        status: true,
+        partialContent: true,
+        checkpointRevision: true,
+        finishReason: true,
+        failureCode: true,
+        terminalAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { updatedAt: "asc" },
+      take: EXPORT_ROW_CAP,
+    }),
+
   imageCreditReservation: (userId) =>
     prisma.imageCreditReservation.findMany({
       where: { userId },

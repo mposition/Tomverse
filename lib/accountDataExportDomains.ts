@@ -191,6 +191,22 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
       "The model, outcome, credits charged and timings are the user's own usage record. Tomverse's provider cost basis -- pricingSnapshot, the micro-USD cost fields, provider request identifiers and internal error text -- is withheld.",
   },
   {
+    domain: "chatComposerDraft",
+    publicName: "chat_composer_drafts",
+    prismaModel: "ChatComposerDraft",
+    state: "included_filtered",
+    withheldReason:
+      "The unsent draft text, scope, revision and timestamps are the user's own data. For a stored conversation the exported scopeKey is that conversation id; only the duplicate conversationId foreign-key column and internal row id are withheld. The ordered opaque attachment handles are also withheld because they are storage protocol identifiers rather than attachment content. Attachments remain covered by their existing data domain and lifecycle.",
+  },
+  {
+    domain: "chatResponseAttempt",
+    publicName: "chat_response_attempts",
+    prismaModel: "ChatResponseAttempt",
+    state: "included_filtered",
+    withheldReason:
+      "The visible partial response, model and provider attribution, status, revision and terminal metadata are the user's recovery record. Held back: the request fingerprint and the worker owner and lease fields, which are concurrency and execution internals rather than user content.",
+  },
+  {
     domain: "imageCreditReservation",
     publicName: "image_credit_usage",
     prismaModel: "ImageCreditReservation",

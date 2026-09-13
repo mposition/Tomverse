@@ -189,6 +189,27 @@ const REGISTRY = {
     reason:
       "The seven shipped locales. Adding a locale without recreating this constraint would drop that locale's analytics on the floor at insert time.",
   },
+  ChatResponseAttempt_status_check: {
+    owner: "list",
+    module: "lib/chatResponseAttemptCore.ts",
+    list: "CHAT_RESPONSE_ATTEMPT_STATUSES",
+    reason:
+      "The claimed/streaming/terminal lifecycle used by claim, checkpoint and terminal CAS. A database-only state would evade the terminal immutability checks, while a code-only state would turn a controlled recovery transition into a write-time 500.",
+  },
+  ChatResponseAttempt_finish_reason_check: {
+    owner: "list",
+    module: "lib/chatResponseAttemptCore.ts",
+    list: "CHAT_RESPONSE_ATTEMPT_FINISH_REASONS",
+    reason:
+      "Public-safe terminal classifications only. Raw provider finish text is never stored; this list is shared by runtime parsing, public recovery output and the filtered account export.",
+  },
+  ChatResponseAttempt_failure_code_check: {
+    owner: "list",
+    module: "lib/chatResponseAttemptCore.ts",
+    list: "CHAT_RESPONSE_ATTEMPT_FAILURE_CODES",
+    reason:
+      "A deliberately coarse public-safe failure vocabulary. It prevents provider messages, exception text, credentials or request fragments from entering durable recovery state and later leaving through GET or account export.",
+  },
 
   // --- the union exists, but only at compile time -------------------------
   AccountDataExportRequest_refusalReason_check: {
