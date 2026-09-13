@@ -694,6 +694,7 @@ test("an unparseable refresh token writes no row, and the endpoint is rate limit
   // MobileAuthEvent with no subject and nothing bounding the rate, on a path
   // that is a mutation-origin exception and therefore reachable by anyone.
   const { rotateMobileSession } = await service();
+  const { MOBILE_AUTH_PRE_AUTH_RATE_LIMIT } = await import("@/lib/mobileAuthContract");
   const { POST } = await import("@/app/api/auth/mobile/refresh/route");
 
   for (const bad of ["", "no-dot", "a.b.c", "..", "x."]) {
@@ -714,7 +715,11 @@ test("an unparseable refresh token writes no row, and the endpoint is rate limit
     );
 
   let limited: Response | null = null;
-  for (let attempt = 0; attempt < 80 && !limited; attempt += 1) {
+  // A burst can begin just before a UTC minute boundary. Use two complete
+  // minute allowances plus one request so one of the at-most-two buckets must
+  // cross the limit; 80 allowed a 22:16:59 -> 22:17:00 split to evade it.
+  const burstAttempts = MOBILE_AUTH_PRE_AUTH_RATE_LIMIT.minute * 2 + 1;
+  for (let attempt = 0; attempt < burstAttempts && !limited; attempt += 1) {
     const response = await send();
     if (response.status === 429) limited = response;
   }
@@ -734,7 +739,9 @@ test("every client-facing code in the contract is one a route actually returns",
   // reached execution, because the shared responder returned its own code.
   // A constant nothing emits is a contract nobody keeps, so each of the four
   // is taken off the wire here rather than read out of the source.
-  const { MOBILE_AUTH_ERROR_CODES } = await import("@/lib/mobileAuthContract");
+  const { MOBILE_AUTH_ERROR_CODES, MOBILE_AUTH_PRE_AUTH_RATE_LIMIT } = await import(
+    "@/lib/mobileAuthContract"
+  );
   const refresh = (await import("@/app/api/auth/mobile/refresh/route")).POST;
   const devices = (await import("@/app/api/auth/mobile/devices/route")).GET;
   const seen = new Set<string>();
@@ -791,7 +798,10 @@ test("every client-facing code in the contract is one a route actually returns",
       })
     );
   let limited: Response | null = null;
-  for (let attempt = 0; attempt < 80 && !limited; attempt += 1) {
+  // Keep this proof stable when the burst straddles a UTC minute boundary.
+  // The admission ceiling is 60, so 121 requests cannot fit into two buckets.
+  const burstAttempts = MOBILE_AUTH_PRE_AUTH_RATE_LIMIT.minute * 2 + 1;
+  for (let attempt = 0; attempt < burstAttempts && !limited; attempt += 1) {
     const response = await spend();
     if (response.status === 429) limited = response;
   }
