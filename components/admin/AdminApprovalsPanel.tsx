@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminWorkQueueMessages } from "@/lib/adminMessages/workQueue";
 
 export type AdminApprovalRow = {
   id: string;
@@ -36,9 +38,11 @@ const statusClass = (status: string) => {
 };
 
 export function AdminApprovalsPanel() {
+  const { approvals: m } = useAdminMessages(adminWorkQueueMessages);
   const [rows, setRows] = useState<AdminApprovalRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const loadFailed = m.loadFailed;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,18 +52,18 @@ export function AdminApprovalsPanel() {
         | { approvals?: AdminApprovalRow[]; error?: string }
         | null;
       if (!response.ok || !data?.approvals) {
-        throw new Error(data?.error || "Could not load approval queue.");
+        throw new Error(data?.error || loadFailed);
       }
       setRows(data.approvals);
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not load approval queue.",
+        error instanceof Error ? error.message : loadFailed,
         "error"
       );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadFailed]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -82,21 +86,27 @@ export function AdminApprovalsPanel() {
         | { approval?: AdminApprovalRow; error?: string }
         | null;
       if (!response.ok || !data?.approval) {
-        throw new Error(data?.error || "Could not update approval.");
+        throw new Error(data?.error || m.updateFailed);
       }
       setRows((current) =>
         current.map((row) => (row.id === data.approval?.id ? data.approval : row))
       );
-      dispatchAppToast(`Approval ${status}.`, "success");
+      dispatchAppToast(
+        status === "approved" ? m.approvedToast : m.rejectedToast,
+        "success"
+      );
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not update approval.",
+        error instanceof Error ? error.message : m.updateFailed,
         "error"
       );
     } finally {
       setBusyId(null);
     }
   };
+
+  const statusLabel = (status: string) =>
+    (m.status as Readonly<Record<string, string>>)[status] ?? status;
 
   const pendingCount = rows.filter((row) => row.status === "pending").length;
   const visibleRows = [
@@ -109,17 +119,16 @@ export function AdminApprovalsPanel() {
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Approval workflow
+            {m.eyebrow}
           </p>
-          <h2 className="mt-2 text-2xl font-black text-white">High-risk admin approvals</h2>
+          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            A second authorized administrator reviews each exact target and payload. After approval,
-            the original requester must retry the same action before expiry; successful execution consumes it once.
+            {m.description}
           </p>
         </div>
         <span className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <ShieldCheck className="h-3.5 w-3.5" />
-          {pendingCount} pending
+          {m.pendingCount(pendingCount)}
         </span>
       </div>
 
@@ -127,11 +136,11 @@ export function AdminApprovalsPanel() {
         {loading ? (
           <div className="flex items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4 text-sm text-zinc-400">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading approvals...
+            {m.loading}
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 text-sm text-zinc-400">
-            No approval requests yet.
+            {m.empty}
           </div>
         ) : (
           visibleRows.map((row) => (
@@ -140,22 +149,29 @@ export function AdminApprovalsPanel() {
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${statusClass(row.status)}`}>
-                      {row.status}
+                      {statusLabel(row.status)}
                     </span>
                     <span className="font-black text-white">{row.action}</span>
                     <span className="text-xs text-zinc-500">{dateLabel(row.createdAt)} UTC</span>
                   </div>
-                  <p className="mt-2 text-sm text-zinc-300">{row.reason || "No reason provided."}</p>
+                  <p className="mt-2 text-sm text-zinc-300">{row.reason || m.noReason}</p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    Target: {row.targetType} {row.targetId || ""} / Requested by {row.requestedByEmail || "admin"}
+                    {m.target(
+                      row.targetType,
+                      row.targetId || "",
+                      row.requestedByEmail || m.fallbackAdmin
+                    )}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">
-                    Expires {dateLabel(row.expiresAt)} UTC
-                    {row.consumedAt ? ` / Consumed ${dateLabel(row.consumedAt)} UTC` : ""}
+                    {m.expires(dateLabel(row.expiresAt))}
+                    {row.consumedAt ? m.consumed(dateLabel(row.consumedAt)) : ""}
                   </p>
                   {row.reviewedAt ? (
                     <p className="mt-1 text-xs text-zinc-500">
-                      Reviewed {dateLabel(row.reviewedAt)} by {row.reviewedByEmail || "admin"}
+                      {m.reviewed(
+                        dateLabel(row.reviewedAt),
+                        row.reviewedByEmail || m.fallbackAdmin
+                      )}
                     </p>
                   ) : null}
                 </div>
@@ -168,7 +184,7 @@ export function AdminApprovalsPanel() {
                       className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {busyId === row.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                      Approve
+                      {m.approve}
                     </button>
                     <button
                       type="button"
@@ -177,16 +193,16 @@ export function AdminApprovalsPanel() {
                       className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-bold text-red-100 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <XCircle className="h-3.5 w-3.5" />
-                      Reject
+                      {m.reject}
                     </button>
                   </div>
                 ) : row.status === "pending" ? (
                   <span className="rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-400">
-                    Awaiting another authorized administrator
+                    {m.awaitingReviewer}
                   </span>
                 ) : row.status === "approved" ? (
                   <span className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-200">
-                    Approved · original requester must retry exact action
+                    {m.approvedRetry}
                   </span>
                 ) : null}
               </div>

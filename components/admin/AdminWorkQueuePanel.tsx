@@ -1,11 +1,18 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import type { AdminMessageShape } from "@/lib/adminLocale";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminWorkQueueMessages } from "@/lib/adminMessages/workQueue";
 import {
   WORK_QUEUE_SOURCE_LIMIT,
   workQueueAgeHours,
   type AdminWorkQueue,
   type WorkQueueSeverity,
 } from "@/lib/adminWorkQueue";
+
+type QueueMessages = AdminMessageShape<
+  (typeof adminWorkQueueMessages)["en"]["queue"]
+>;
 
 const severityClass = (severity: WorkQueueSeverity) =>
   severity === "critical"
@@ -14,52 +21,54 @@ const severityClass = (severity: WorkQueueSeverity) =>
       ? "border-amber-500/30 bg-amber-500/10 text-amber-100"
       : "border-zinc-800 bg-zinc-900/70 text-zinc-200";
 
-const ageLabel = (hours: number | null) => {
-  if (hours === null) return "no start time";
-  if (hours < 1) return "under an hour";
-  if (hours < 48) return `${hours}h open`;
-  return `${Math.floor(hours / 24)}d open`;
+const ageLabel = (hours: number | null, m: QueueMessages["age"]) => {
+  if (hours === null) return m.noStartTime;
+  if (hours < 1) return m.underAnHour;
+  if (hours < 48) return m.hours(hours);
+  return m.days(Math.floor(hours / 24));
 };
 
-export function AdminWorkQueuePanel({
+/** A category the queue does not know is shown as it arrives. */
+const categoryLabel = (category: string, m: QueueMessages) =>
+  (m.categories as Readonly<Record<string, string>>)[category] ?? category;
+
+export async function AdminWorkQueuePanel({
   queue,
   now,
 }: {
   queue: AdminWorkQueue;
   now: Date;
 }) {
+  const { queue: m } = await getAdminMessages(adminWorkQueueMessages);
+  const categoryList = (categories: readonly string[]) =>
+    categories.map((category) => categoryLabel(category, m)).join(", ");
+
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-xl font-black text-white">Open work, oldest first</h2>
-        <p className="text-sm text-zinc-400">
-          {queue.items.length} item{queue.items.length === 1 ? "" : "s"}
-        </p>
+        <h2 className="text-xl font-black text-white">{m.title}</h2>
+        <p className="text-sm text-zinc-400">{m.itemCount(queue.items.length)}</p>
       </div>
-      <p className="mt-1 text-sm leading-6 text-zinc-400">
-        Approvals, refunds, incidents, support, privacy requests, webhooks, alerts
-        and scheduled jobs, ranked by severity and then by age. Each row opens the
-        page that owns the action.
-      </p>
+      <p className="mt-1 text-sm leading-6 text-zinc-400">{m.description}</p>
 
       {queue.failedCategories.length > 0 ? (
         <p className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-100">
-          Could not load {queue.failedCategories.join(", ")}. This queue is
-          incomplete — do not read it as clear.
+          {m.failed(categoryList(queue.failedCategories))}
         </p>
       ) : null}
       {queue.truncatedCategories.length > 0 ? (
         <p className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
-          Showing the {WORK_QUEUE_SOURCE_LIMIT} oldest of{" "}
-          {queue.truncatedCategories.join(", ")}. Open the owning page for the full
-          list.
+          {m.truncated(
+            WORK_QUEUE_SOURCE_LIMIT,
+            categoryList(queue.truncatedCategories)
+          )}
         </p>
       ) : null}
 
       <div className="mt-5 grid gap-2">
         {queue.items.length === 0 ? (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-            Nothing is waiting on an operator.
+            {m.empty}
           </div>
         ) : (
           queue.items.map((item) => (
@@ -73,13 +82,13 @@ export function AdminWorkQueuePanel({
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full border border-current/30 px-2 py-0.5 text-xs font-black uppercase tracking-wide">
-                    {item.category}
+                    {categoryLabel(item.category, m)}
                   </span>
                   <span className="text-xs font-bold uppercase tracking-wide opacity-80">
-                    {item.severity}
+                    {m.severity[item.severity]}
                   </span>
                   <span className="text-xs opacity-80">
-                    {ageLabel(workQueueAgeHours(item.openedAt, now))}
+                    {ageLabel(workQueueAgeHours(item.openedAt, now), m.age)}
                   </span>
                 </span>
                 <span className="mt-1.5 block truncate text-sm font-black text-white">

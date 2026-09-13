@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
+import { adminIntlLocale } from "@/lib/adminLocale";
+import { adminImageGenerationMessages } from "@/lib/adminMessages/imageGeneration";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 // The operations view over GET /api/admin/image-generation (PR 4): budget
 // configuration vs enforcement vs usage, reservation vs settlement, failure
@@ -104,7 +107,8 @@ type AdminImageGenerationReport = {
 };
 
 const usd = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
-const micro = (microUsd: number) => `${microUsd.toLocaleString()}µ`;
+const micro = (microUsd: number, intlLocale: string) =>
+  `${microUsd.toLocaleString(intlLocale)}µ`;
 const bytes = (value: number) => {
   if (value >= 1_073_741_824) return `${(value / 1_073_741_824).toFixed(2)} GB`;
   if (value >= 1_048_576) return `${(value / 1_048_576).toFixed(1)} MB`;
@@ -125,6 +129,9 @@ function Stat({ label, value, detail }: { label: string; value: string; detail?:
 }
 
 export function AdminImageGenerationPanel() {
+  const m = useAdminMessages(adminImageGenerationMessages);
+  const { locale } = useAdminLocale();
+  const intlLocale = adminIntlLocale(locale);
   const [report, setReport] = useState<AdminImageGenerationReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Starts true: the mount effect immediately loads, and setting it there
@@ -142,18 +149,18 @@ export function AdminImageGenerationPanel() {
         | null;
       if (!response.ok || !data || "error" in data || !("budget" in data)) {
         throw new Error(
-          (data && "error" in data && data.error) || "Failed to load the image generation report."
+          (data && "error" in data && data.error) || m.loadFailed
         );
       }
       setReport(data as AdminImageGenerationReport);
     } catch (loadError) {
       setError(
-        loadError instanceof Error ? loadError.message : "Failed to load the image generation report."
+        loadError instanceof Error ? loadError.message : m.loadFailed
       );
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [m]);
 
   useEffect(() => {
     // Deferred a tick so no state write is synchronous within the effect --
@@ -183,12 +190,11 @@ export function AdminImageGenerationPanel() {
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-fuchsia-500/30 bg-fuchsia-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-fuchsia-200">
             <ImageIcon className="h-3.5 w-3.5" />
-            Image generation
+            {m.badge}
           </div>
-          <h2 className="mt-3 text-2xl font-black text-white">Budget, billing and lifecycle</h2>
+          <h2 className="mt-3 text-2xl font-black text-white">{m.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Provider budget enforcement vs usage, reservation vs settlement, failure phases,
-            storage growth, and the maintenance-sweep invariants (docs/policy/image-generation.md).
+            {m.description}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -200,7 +206,7 @@ export function AdminImageGenerationPanel() {
                   : "border-zinc-700 bg-zinc-900 text-zinc-400"
               }`}
             >
-              {report.flagEnabled ? "Flag ON" : "Flag OFF"}
+              {report.flagEnabled ? m.flagOn : m.flagOff}
             </span>
           )}
           <button
@@ -213,7 +219,7 @@ export function AdminImageGenerationPanel() {
             className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Refresh
+            {m.refresh}
           </button>
         </div>
       </div>
@@ -228,40 +234,56 @@ export function AdminImageGenerationPanel() {
         <div className="grid gap-5 p-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Stat
-              label="Budget today"
+              label={m.budgetToday}
               value={`${usd(report.budget.usedTodayMicroUsd)} / ${
-                report.budget.limits ? usd(report.budget.limits.day) : "unconfigured"
+                report.budget.limits ? usd(report.budget.limits.day) : m.unconfigured
               }`}
               detail={
                 percentOf(report.budget.usedTodayMicroUsd, report.budget.limits?.day) !== null
-                  ? `${percentOf(report.budget.usedTodayMicroUsd, report.budget.limits?.day)}% of the daily cap · source: ${report.budget.source}`
-                  : `source: ${report.budget.source}`
+                  ? m.dailyCapDetail(
+                      percentOf(report.budget.usedTodayMicroUsd, report.budget.limits?.day)!,
+                      report.budget.source
+                    )
+                  : m.sourceDetail(report.budget.source)
               }
             />
             <Stat
-              label="Budget this month"
+              label={m.budgetThisMonth}
               value={`${usd(report.budget.usedThisMonthMicroUsd)} / ${
-                report.budget.limits ? usd(report.budget.limits.month) : "unconfigured"
+                report.budget.limits ? usd(report.budget.limits.month) : m.unconfigured
               }`}
-              detail={`floor ${usd(report.budget.floorMicroUsd)}${
+              detail={`${m.floor(usd(report.budget.floorMicroUsd))}${
                 report.budget.advisories.length > 0
                   ? ` · ${report.budget.advisories[0].code}`
                   : ""
               }${
                 report.budget.clamped.length > 0
-                  ? ` · ${report.budget.clamped.length} override(s) raised to the floor`
+                  ? m.overridesRaised(report.budget.clamped.length)
                   : ""
               }`}
             />
             <Stat
-              label="Per-credit cost ceiling"
-              value={`${micro(report.pricing.worstCostMicroUsdPerCredit)} / ${micro(report.pricing.ceilingMicroUsdPerCredit)}`}
-              detail={`${micro(report.pricing.ceilingHeadroomMicroUsd)} headroom · ${report.pricing.pricingVersion} · verified ${report.pricing.priceVerifiedAt.slice(0, 10)}`}
+              label={m.perCreditCeiling}
+              value={`${micro(report.pricing.worstCostMicroUsdPerCredit, intlLocale)} / ${micro(report.pricing.ceilingMicroUsdPerCredit, intlLocale)}`}
+              detail={m.ceilingDetail(
+                micro(report.pricing.ceilingHeadroomMicroUsd, intlLocale),
+                report.pricing.pricingVersion,
+                report.pricing.priceVerifiedAt.slice(0, 10)
+              )}
             />
             <Stat
-              label="Invariants"
-              value={invariantIssues === 0 ? "clean" : `${invariantIssues} issue(s)`}
-              detail={`${report.invariants.emptyImageConversations} empty conversations · ${report.invariants.staleGenerations} stale (${report.invariants.strandedSettlements} stranded mid-settlement) · ${report.invariants.cleanupBacklog} cleanup backlog · ${report.invariants.thumbnailBacklog} thumbnails queued (${report.invariants.thumbnailsExhausted} exhausted) · ${report.invariants.orphanedReservations} orphaned reservations holding ${usd(report.invariants.orphanedReservationCostMicroUsd)}`}
+              label={m.invariants}
+              value={invariantIssues === 0 ? m.clean : m.issues(invariantIssues)}
+              detail={m.invariantsDetail({
+                empty: report.invariants.emptyImageConversations,
+                stale: report.invariants.staleGenerations,
+                stranded: report.invariants.strandedSettlements,
+                cleanup: report.invariants.cleanupBacklog,
+                thumbnailsQueued: report.invariants.thumbnailBacklog,
+                thumbnailsExhausted: report.invariants.thumbnailsExhausted,
+                orphaned: report.invariants.orphanedReservations,
+                orphanedCost: usd(report.invariants.orphanedReservationCostMicroUsd),
+              })}
             />
           </div>
 
@@ -276,20 +298,19 @@ export function AdminImageGenerationPanel() {
           */}
           <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
             <h3 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-400">
-              Provider budgets
+              {m.providerBudgets}
             </h3>
             <p className="mt-1 text-xs leading-5 text-zinc-500">
-              Each provider spends against its own ceiling. A provider with no
-              row has spent nothing today.
+              {m.providerBudgetsNote}
             </p>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[34rem] text-left text-xs">
                 <thead className="text-[11px] uppercase tracking-[0.12em] text-zinc-500">
                   <tr>
-                    <th className="py-1 pr-3 font-bold">Provider</th>
-                    <th className="py-1 pr-3 font-bold">Today</th>
-                    <th className="py-1 pr-3 font-bold">This month</th>
-                    <th className="py-1 font-bold">Source</th>
+                    <th className="py-1 pr-3 font-bold">{m.provider}</th>
+                    <th className="py-1 pr-3 font-bold">{m.today}</th>
+                    <th className="py-1 pr-3 font-bold">{m.thisMonth}</th>
+                    <th className="py-1 font-bold">{m.source}</th>
                   </tr>
                 </thead>
                 <tbody className="text-zinc-300">
@@ -300,7 +321,7 @@ export function AdminImageGenerationPanel() {
                       </td>
                       <td className="py-1.5 pr-3">
                         {usd(entry.usedTodayMicroUsd)}
-                        {entry.limits ? ` / ${usd(entry.limits.day)}` : " / unconfigured"}
+                        {entry.limits ? ` / ${usd(entry.limits.day)}` : ` / ${m.unconfigured}`}
                         {percentOf(entry.usedTodayMicroUsd, entry.limits?.day) !== null && (
                           <span className="text-zinc-500">
                             {" "}
@@ -310,7 +331,7 @@ export function AdminImageGenerationPanel() {
                       </td>
                       <td className="py-1.5 pr-3">
                         {usd(entry.usedThisMonthMicroUsd)}
-                        {entry.limits ? ` / ${usd(entry.limits.month)}` : " / unconfigured"}
+                        {entry.limits ? ` / ${usd(entry.limits.month)}` : ` / ${m.unconfigured}`}
                         {percentOf(entry.usedThisMonthMicroUsd, entry.limits?.month) !== null && (
                           <span className="text-zinc-500">
                             {" "}
@@ -320,10 +341,10 @@ export function AdminImageGenerationPanel() {
                       </td>
                       <td className="py-1.5 text-zinc-500">
                         {entry.source}
-                        {entry.problems.length > 0 && ` · ${entry.problems.length} problem(s)`}
+                        {entry.problems.length > 0 && m.problems(entry.problems.length)}
                         {entry.advisories.length > 0 && ` · ${entry.advisories[0].code}`}
                         {entry.clamped.length > 0 &&
-                          ` · ${entry.clamped.length} raised to floor`}
+                          m.raisedToFloor(entry.clamped.length)}
                       </td>
                     </tr>
                   ))}
@@ -353,11 +374,11 @@ export function AdminImageGenerationPanel() {
           <div className="grid gap-5 xl:grid-cols-2">
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
               <h3 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-400">
-                Generations
+                {m.generations}
               </h3>
               <div className="mt-3 flex flex-wrap gap-2">
                 {Object.entries(report.generations.byStatus).length === 0 && (
-                  <p className="text-sm text-zinc-500">No generations yet.</p>
+                  <p className="text-sm text-zinc-500">{m.noGenerations}</p>
                 )}
                 {Object.entries(report.generations.byStatus).map(([status, count]) => (
                   <span
@@ -386,11 +407,12 @@ export function AdminImageGenerationPanel() {
               )}
               <div className="mt-4 border-t border-zinc-800 pt-3 text-sm text-zinc-400">
                 {Object.entries(report.storage.byRole).length === 0 ? (
-                  <p>No stored assets.</p>
+                  <p>{m.noStoredAssets}</p>
                 ) : (
                   Object.entries(report.storage.byRole).map(([role, row]) => (
                     <p key={role}>
-                      <span className="font-mono text-xs">{role}</span>: {row.count} asset(s) ·{" "}
+                      <span className="font-mono text-xs">{role}</span>
+                      {m.assetCount(row.count)}
                       {bytes(row.byteSize)}
                     </p>
                   ))
@@ -400,27 +422,27 @@ export function AdminImageGenerationPanel() {
 
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
               <h3 className="text-sm font-black uppercase tracking-[0.14em] text-zinc-400">
-                Reservations vs settlement
+                {m.reservationsVsSettlement}
               </h3>
               <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                 <Stat
-                  label="Credits"
+                  label={m.credits}
                   value={`${report.reservations.settledCredits} / ${report.reservations.reservedCredits}`}
-                  detail="settled / reserved"
+                  detail={m.settledReserved}
                 />
                 <Stat
-                  label="Provider cost"
+                  label={m.providerCost}
                   value={`${usd(report.reservations.settledCostMicroUsd)} / ${usd(report.reservations.reservedCostMicroUsd)}`}
-                  detail="settled / reserved"
+                  detail={m.settledReserved}
                 />
               </div>
               {report.reservations.settledByOption.length > 0 && (
                 <table className="mt-4 w-full text-left text-sm">
                   <thead>
                     <tr className="text-[11px] uppercase tracking-[0.12em] text-zinc-500">
-                      <th className="py-1 font-bold">Option</th>
-                      <th className="py-1 text-right font-bold">Count</th>
-                      <th className="py-1 text-right font-bold">Avg settled cost</th>
+                      <th className="py-1 font-bold">{m.option}</th>
+                      <th className="py-1 text-right font-bold">{m.count}</th>
+                      <th className="py-1 text-right font-bold">{m.avgSettledCost}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -431,7 +453,7 @@ export function AdminImageGenerationPanel() {
                         </td>
                         <td className="py-1.5 text-right font-bold text-zinc-200">{row.count}</td>
                         <td className="py-1.5 text-right text-zinc-300">
-                          {micro(row.averageSettledCostMicroUsd)}
+                          {micro(row.averageSettledCostMicroUsd, intlLocale)}
                         </td>
                       </tr>
                     ))}
@@ -454,7 +476,7 @@ export function AdminImageGenerationPanel() {
             has to happen next.
           */}
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-            <h3 className="text-sm font-bold text-zinc-200">Model registry</h3>
+            <h3 className="text-sm font-bold text-zinc-200">{m.modelRegistry}</h3>
             <ul className="mt-3 space-y-3">
               {report.models.map((model) => (
                 <li key={model.id} className="border-t border-zinc-800/60 pt-3 first:border-0 first:pt-0">
@@ -470,15 +492,15 @@ export function AdminImageGenerationPanel() {
                           : "bg-emerald-500/10 text-emerald-400"
                       }`}
                     >
-                      {model.disabledReason ?? "enabled"}
+                      {model.disabledReason ?? m.enabled}
                     </span>
                   </div>
                   <p className="mt-1 font-mono text-[11px] text-zinc-500">
                     {model.pricingVersion} ·{" "}
                     {model.priceVerifiedAt
-                      ? `verified ${model.priceVerifiedAt}`
-                      : "price unverified"}{" "}
-                    · {model.optionCount} priced option(s)
+                      ? m.verified(model.priceVerifiedAt)
+                      : m.priceUnverified}{" "}
+                    {m.pricedOptions(model.optionCount)}
                   </p>
                   {model.disabledNote && (
                     <p className="mt-1 text-xs leading-5 text-zinc-400">
@@ -493,15 +515,15 @@ export function AdminImageGenerationPanel() {
           {report.settledByProviderModel.length > 0 && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
               <h3 className="text-sm font-bold text-zinc-200">
-                Settled spend by provider
+                {m.settledSpendByProvider}
               </h3>
               <table className="mt-3 w-full text-left text-sm">
                 <thead>
                   <tr className="text-[11px] uppercase tracking-[0.12em] text-zinc-500">
-                    <th className="py-1 font-bold">Provider · model</th>
-                    <th className="py-1 text-right font-bold">Settlements</th>
-                    <th className="py-1 text-right font-bold">Credits</th>
-                    <th className="py-1 text-right font-bold">Settled cost</th>
+                    <th className="py-1 font-bold">{m.providerModel}</th>
+                    <th className="py-1 text-right font-bold">{m.settlements}</th>
+                    <th className="py-1 text-right font-bold">{m.credits}</th>
+                    <th className="py-1 text-right font-bold">{m.settledCost}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -537,7 +559,7 @@ export function AdminImageGenerationPanel() {
           {report.dimensionCoverage.length > 0 && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
               <h3 className="text-sm font-bold text-zinc-200">
-                Measured output dimensions
+                {m.measuredDimensions}
               </h3>
               <ul className="mt-3 space-y-1.5 text-sm">
                 {report.dimensionCoverage.map((row) => {
@@ -557,8 +579,8 @@ export function AdminImageGenerationPanel() {
                             : "text-zinc-300"
                         }
                       >
-                        {row.measured}/{row.succeeded} measured
-                        {missing > 0 ? ` · ${missing} unreadable` : ""}
+                        {m.measured(row.measured, row.succeeded)}
+                        {missing > 0 ? m.unreadable(missing) : ""}
                       </span>
                     </li>
                   );

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, PackageSearch, RefreshCw } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminModelDiscoveryMessages } from "@/lib/adminMessages/modelDiscovery";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type ReviewPriority =
@@ -67,25 +69,11 @@ const PRIORITY_ORDER: Record<ReviewPriority, number> = {
   no_action: 4,
 };
 
-const PRIORITY_LABELS: Record<ReviewPriority, string> = {
-  recommended: "권장 검토",
-  review: "패밀리 검토",
-  needs_evidence: "근거 확인 필요",
-  low: "낮은 우선순위",
-  no_action: "조치 비권장",
-};
+const PRIORITY_VALUES = Object.keys(PRIORITY_ORDER) as ReviewPriority[];
 
-const AVAILABILITY_LABELS: Record<Availability, string> = {
-  current: "최신 API 확인",
-  stale: "최신 API 미확인",
-  unknown: "확인 불가",
-};
+const AVAILABILITY_VALUES: Availability[] = ["current", "stale", "unknown"];
 
-const PRODUCT_LABELS: Record<ModelProduct, string> = {
-  chat: "Chat",
-  image_generation: "이미지 생성",
-  unsupported: "미지원 제품",
-};
+const PRODUCT_VALUES: ModelProduct[] = ["chat", "image_generation", "unsupported"];
 
 const ageDays = (firstSeenAt: string) => {
   const seen = new Date(firstSeenAt).getTime();
@@ -195,6 +183,7 @@ const selectClass =
   "rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-500";
 
 export function AdminModelDiscoveryPanel() {
+  const m = useAdminMessages(adminModelDiscoveryMessages);
   const [rows, setRows] = useState<ModelWorkItemRow[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
@@ -299,18 +288,16 @@ export function AdminModelDiscoveryPanel() {
   const move = useCallback(
     async (workItemIds: string[], to: string, note: string) => {
       if (workItemIds.length === 0) {
-        dispatchAppToast("선택한 그룹에 적용 가능한 항목이 없습니다.", "error");
+        dispatchAppToast(m.toast.noApplicableItems, "error");
         return;
       }
       if (workItemIds.length > MAX_BULK_ITEMS) {
-        dispatchAppToast("한 번에 최대 200개 항목까지 처리할 수 있습니다.", "error");
+        dispatchAppToast(m.toast.tooManyItems(MAX_BULK_ITEMS), "error");
         return;
       }
       if (
         to === "closed_no_action" &&
-        !window.confirm(
-          `${workItemIds.length}개 항목을 'No action'으로 종료할까요? 이 상태는 되돌릴 수 없습니다.`
-        )
+        !window.confirm(m.toast.closeConfirm(workItemIds.length))
       ) {
         return;
       }
@@ -327,7 +314,7 @@ export function AdminModelDiscoveryPanel() {
         } | null;
         if (!response.ok) {
           dispatchAppToast(
-            data?.message || "The queue refused that transition.",
+            data?.message || m.toast.transitionRefused,
             "error"
           );
           return;
@@ -345,14 +332,14 @@ export function AdminModelDiscoveryPanel() {
           setTotal((current) => Math.max(0, current - workItemIds.length));
         }
         setSelectedFamilies(new Set());
-        dispatchAppToast(`${workItemIds.length}개 항목을 업데이트했습니다.`, "success");
+        dispatchAppToast(m.toast.updated(workItemIds.length), "success");
       } catch {
-        dispatchAppToast("The request did not reach the server.", "error");
+        dispatchAppToast(m.toast.unreachable, "error");
       } finally {
         setBusyIds(new Set());
       }
     },
-    []
+    [m]
   );
 
   /**
@@ -365,9 +352,7 @@ export function AdminModelDiscoveryPanel() {
    */
   const clearValidation = useCallback(
     async (row: ModelWorkItemRow, validation: string) => {
-      const note = window.prompt(
-        `'${validation}' 검증을 완료로 기록합니다. 무엇을 확인했는지 적어 주세요.`
-      );
+      const note = window.prompt(m.toast.validationPrompt(validation));
       if (!note?.trim()) return;
       setBusyIds(new Set([row.id]));
       try {
@@ -385,7 +370,7 @@ export function AdminModelDiscoveryPanel() {
           error?: string;
         } | null;
         if (!response.ok || !data?.pendingValidations) {
-          dispatchAppToast(data?.error || "검증을 기록하지 못했습니다.", "error");
+          dispatchAppToast(data?.error || m.toast.validationFailed, "error");
           return;
         }
         const remaining = data.pendingValidations;
@@ -396,17 +381,17 @@ export function AdminModelDiscoveryPanel() {
         );
         dispatchAppToast(
           remaining.length
-            ? `'${validation}' 완료. 남은 검증 ${remaining.length}건.`
-            : `'${validation}' 완료. 남은 검증이 없습니다.`,
+            ? m.toast.validationRemaining(validation, remaining.length)
+            : m.toast.validationNoneRemaining(validation),
           "success"
         );
       } catch {
-        dispatchAppToast("The request did not reach the server.", "error");
+        dispatchAppToast(m.toast.unreachable, "error");
       } finally {
         setBusyIds(new Set());
       }
     },
-    []
+    [m]
   );
 
   const moveGroup = (group: ModelFamilyGroup, to: string) => {
@@ -420,7 +405,7 @@ export function AdminModelDiscoveryPanel() {
   const moveSelected = (to: string) => {
     const note = bulkNote.trim();
     if (!note) {
-      dispatchAppToast("벌크 검토 사유를 먼저 입력해 주세요.", "error");
+      dispatchAppToast(m.toast.bulkReasonRequired, "error");
       return;
     }
     const ids = Array.from(
@@ -450,43 +435,41 @@ export function AdminModelDiscoveryPanel() {
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
       <header className="mb-3 flex flex-wrap items-center gap-2">
         <PackageSearch className="h-4 w-4 text-zinc-400" aria-hidden />
-        <h2 className="text-sm font-semibold text-zinc-100">Awaiting review</h2>
+        <h2 className="text-sm font-semibold text-zinc-100">{m.header.title}</h2>
         <span className="text-xs text-zinc-500">
-          {loading ? "loading" : `${total} items · ${groups.length} families`}
+          {loading ? m.header.loading : m.header.counts(total, groups.length)}
         </span>
         {refreshing && !loading ? (
-          <Loader2 className="h-3 w-3 animate-spin text-zinc-500" aria-label="Refreshing" />
+          <Loader2 className="h-3 w-3 animate-spin text-zinc-500" aria-label={m.header.refreshing} />
         ) : null}
       </header>
 
       <p className="mb-4 text-xs leading-relaxed text-zinc-500">
-        공급자의 최신 모델 API 증거와 Tomverse 제품별 편입 가치를 분리해 보여줍니다.
-        이미지 모델은 Studio 후보로, Google 채팅 모델은 Brave 웹검색 경로까지 검토합니다.
-        날짜별 버전과 별칭은 한 패밀리로 묶이며, 추천은 자동 결정이 아닙니다.
+        {m.header.intro}
       </p>
 
       {failed ? (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
-          <span>큐를 읽지 못했습니다. 현재 목록이 최신이라는 뜻이 아닙니다.</span>
+          <span>{m.failed}</span>
           <button type="button" onClick={() => void load()} className="flex items-center gap-1">
-            <RefreshCw className="h-3 w-3" /> 다시 시도
+            <RefreshCw className="h-3 w-3" /> {m.retry}
           </button>
         </div>
       ) : null}
 
       {truncated ? (
         <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
-          안전 한도인 1,000개까지만 불러왔습니다. 필터 집계는 로드된 항목 기준입니다.
+          {m.truncated}
         </p>
       ) : null}
 
       {loading ? (
         <p className="flex items-center gap-2 text-xs text-zinc-400">
-          <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Loading the backlog…
+          <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> {m.loadingBacklog}
         </p>
       ) : rows.length === 0 && !failed ? (
         <p className="text-xs text-zinc-400">
-          Nothing is waiting. Discovery runs daily at 10:00 Australia/Brisbane.
+          {m.empty}
         </p>
       ) : (
         <>
@@ -498,8 +481,8 @@ export function AdminModelDiscoveryPanel() {
                 setSearch(event.target.value);
                 setPage(1);
               }}
-              placeholder="모델·공급자·분석 검색"
-              aria-label="Search model review queue"
+              placeholder={m.filters.searchPlaceholder}
+              aria-label={m.filters.searchLabel}
               className={`${selectClass} md:col-span-2`}
             />
             <select
@@ -508,13 +491,13 @@ export function AdminModelDiscoveryPanel() {
                 setPriority(event.target.value as ReviewPriority | "all");
                 setPage(1);
               }}
-              aria-label="Filter by review priority"
+              aria-label={m.filters.priorityLabel}
               className={selectClass}
             >
-              <option value="all">모든 우선순위 ({groups.length})</option>
-              {(Object.keys(PRIORITY_LABELS) as ReviewPriority[]).map((value) => (
+              <option value="all">{m.filters.allPriorities(groups.length)}</option>
+              {PRIORITY_VALUES.map((value) => (
                 <option key={value} value={value}>
-                  {PRIORITY_LABELS[value]} ({priorityCounts.get(value) ?? 0})
+                  {m.priority[value]} ({priorityCounts.get(value) ?? 0})
                 </option>
               ))}
             </select>
@@ -524,12 +507,12 @@ export function AdminModelDiscoveryPanel() {
                 setProduct(event.target.value as ModelProduct | "all");
                 setPage(1);
               }}
-              aria-label="Filter by Tomverse product"
+              aria-label={m.filters.productLabel}
               className={selectClass}
             >
-              <option value="all">모든 제품</option>
-              {(Object.keys(PRODUCT_LABELS) as ModelProduct[]).map((value) => (
-                <option key={value} value={value}>{PRODUCT_LABELS[value]}</option>
+              <option value="all">{m.filters.allProducts}</option>
+              {PRODUCT_VALUES.map((value) => (
+                <option key={value} value={value}>{m.product[value]}</option>
               ))}
             </select>
             <select
@@ -538,10 +521,10 @@ export function AdminModelDiscoveryPanel() {
                 setProvider(event.target.value);
                 setPage(1);
               }}
-              aria-label="Filter by provider"
+              aria-label={m.filters.providerLabel}
               className={selectClass}
             >
-              <option value="all">모든 공급자</option>
+              <option value="all">{m.filters.allProviders}</option>
               {providers.map((value) => (
                 <option key={value} value={value}>{value}</option>
               ))}
@@ -552,12 +535,12 @@ export function AdminModelDiscoveryPanel() {
                 setAvailability(event.target.value as Availability | "all");
                 setPage(1);
               }}
-              aria-label="Filter by provider availability"
+              aria-label={m.filters.availabilityLabel}
               className={selectClass}
             >
-              <option value="all">모든 제공 상태</option>
-              {(Object.keys(AVAILABILITY_LABELS) as Availability[]).map((value) => (
-                <option key={value} value={value}>{AVAILABILITY_LABELS[value]}</option>
+              <option value="all">{m.filters.allAvailability}</option>
+              {AVAILABILITY_VALUES.map((value) => (
+                <option key={value} value={value}>{m.availability[value]}</option>
               ))}
             </select>
           </div>
@@ -569,10 +552,10 @@ export function AdminModelDiscoveryPanel() {
                 setStatus(event.target.value);
                 setPage(1);
               }}
-              aria-label="Filter by workflow status"
+              aria-label={m.filters.statusLabel}
               className={selectClass}
             >
-              <option value="all">모든 워크플로 상태</option>
+              <option value="all">{m.filters.allStatuses}</option>
               <option value="discovered">discovered</option>
               <option value="awaiting_decision">awaiting decision</option>
               <option value="deferred">deferred</option>
@@ -586,17 +569,17 @@ export function AdminModelDiscoveryPanel() {
               value={bulkNote}
               onChange={(event) => setBulkNote(event.target.value)}
               maxLength={1_000}
-              placeholder="벌크 검토 사유 (필수, 선택 항목에 공통 기록)"
-              aria-label="Bulk review reason"
+              placeholder={m.bulk.reasonPlaceholder}
+              aria-label={m.bulk.reasonLabel}
               className={`${selectClass} min-w-[18rem] flex-1`}
             />
             <span className="text-xs text-zinc-500">
-              {selectedFamilies.size} families selected
+              {m.bulk.selected(selectedFamilies.size)}
             </span>
             {[
-              ["awaiting_decision", "Needs decision"],
-              ["deferred", "Not yet"],
-              ["closed_no_action", "No action"],
+              ["awaiting_decision", m.transitions.needsDecision],
+              ["deferred", m.transitions.notYet],
+              ["closed_no_action", m.transitions.noAction],
             ].map(([to, label]) => (
               <button
                 key={to}
@@ -619,15 +602,15 @@ export function AdminModelDiscoveryPanel() {
                       type="checkbox"
                       checked={allPageSelected}
                       onChange={togglePage}
-                      aria-label="Select all families on this page"
+                      aria-label={m.table.selectPage}
                     />
                   </th>
-                  <th className="py-2 pr-3 font-medium">Model family</th>
-                  <th className="py-2 pr-3 font-medium">Evidence</th>
-                  <th className="w-[32rem] py-2 pr-3 font-medium">Tomverse 분석</th>
-                  <th className="py-2 pr-3 font-medium">Workflow</th>
-                  <th className="py-2 pr-3 font-medium">Waiting</th>
-                  <th className="py-2 pr-3 font-medium">Triage</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.modelFamily}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.evidence}</th>
+                  <th className="w-[32rem] py-2 pr-3 font-medium">{m.table.analysis}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.workflow}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.waiting}</th>
+                  <th className="py-2 pr-3 font-medium">{m.table.triage}</th>
                 </tr>
               </thead>
               <tbody className="text-zinc-300">
@@ -649,7 +632,7 @@ export function AdminModelDiscoveryPanel() {
                               return next;
                             })
                           }
-                          aria-label={`Select ${group.key}`}
+                          aria-label={m.table.selectFamily(group.key)}
                         />
                       </td>
                       <td className="py-3 pr-3">
@@ -659,7 +642,7 @@ export function AdminModelDiscoveryPanel() {
                         {group.members.length > 1 ? (
                           <details className="mt-1 text-[11px] text-zinc-500">
                             <summary className="cursor-pointer">
-                              +{group.members.length - 1} related IDs
+                              {m.table.relatedIds(group.members.length - 1)}
                             </summary>
                             <ul className="mt-1 space-y-1 pl-3">
                               {group.members.map((member) => (
@@ -674,10 +657,10 @@ export function AdminModelDiscoveryPanel() {
                       <td className="py-3 pr-3">
                         <div className="mb-1 flex flex-wrap gap-1">
                           <span className={`rounded border px-1.5 py-0.5 text-[10px] ${priorityClass(group.priority)}`}>
-                            {PRIORITY_LABELS[group.priority]}
+                            {m.priority[group.priority]}
                           </span>
                           <span className={`rounded border px-1.5 py-0.5 text-[10px] ${availabilityClass(row.availability)}`}>
-                            {AVAILABILITY_LABELS[row.availability]}
+                            {m.availability[row.availability]}
                           </span>
                           <span
                             className={
@@ -686,11 +669,11 @@ export function AdminModelDiscoveryPanel() {
                                 : "rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300"
                             }
                           >
-                            {PRODUCT_LABELS[row.product]}
+                            {m.product[row.product]}
                           </span>
                           {row.product === "chat" && group.providers.includes("google") ? (
                             <span className="rounded border border-accent-web-search-500/30 bg-accent-web-search-500/10 px-1.5 py-0.5 text-[10px] text-accent-web-search-200">
-                              Brave 웹검색 검토
+                              {m.table.braveReview}
                             </span>
                           ) : null}
                         </div>
@@ -702,7 +685,7 @@ export function AdminModelDiscoveryPanel() {
                         ) : null}
                         {row.supersededBy ? (
                           <p className="mt-1 text-[10px] text-zinc-500">
-                            상위 버전 서비스 중: {row.supersededBy}
+                            {m.table.supersededBy(row.supersededBy)}
                           </p>
                         ) : null}
                       </td>
@@ -715,14 +698,14 @@ export function AdminModelDiscoveryPanel() {
                           .replace(/_/g, " ")}
                       </td>
                       <td className="py-3 pr-3 text-zinc-400">
-                        {days === null ? "—" : `${days}d`}
+                        {days === null ? "—" : m.table.days(days)}
                       </td>
                       <td className="py-3 pr-3">
                         <div className="flex max-w-[12rem] flex-wrap gap-1">
                           {[
-                            ["awaiting_decision", "Needs decision"],
-                            ["deferred", "Not yet"],
-                            ["closed_no_action", "No action"],
+                            ["awaiting_decision", m.transitions.needsDecision],
+                            ["deferred", m.transitions.notYet],
+                            ["closed_no_action", m.transitions.noAction],
                           ].map(([to, label]) => (
                             <button
                               key={to}
@@ -743,7 +726,7 @@ export function AdminModelDiscoveryPanel() {
                                 void clearValidation(group.representative, validation)
                               }
                               className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-[11px] text-emerald-200 disabled:opacity-40"
-                              title="이 검증을 완료로 기록합니다"
+                              title={m.table.recordValidationTitle}
                             >
                               ✓ {validation}
                             </button>
@@ -755,7 +738,7 @@ export function AdminModelDiscoveryPanel() {
                               )}`}
                               className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
                             >
-                              채택
+                              {m.table.adopt}
                             </a>
                           ) : null}
                         </div>
@@ -767,13 +750,13 @@ export function AdminModelDiscoveryPanel() {
             </table>
             {visibleGroups.length === 0 ? (
               <p className="p-6 text-center text-xs text-zinc-500">
-                현재 필터에 맞는 모델 패밀리가 없습니다.
+                {m.table.noMatches}
               </p>
             ) : null}
           </div>
 
           <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
-            <span>{filtered.length} families · page {currentPage} / {pageCount}</span>
+            <span>{m.pagination.summary(filtered.length, currentPage, pageCount)}</span>
             <div className="flex gap-1">
               <button
                 type="button"
@@ -781,7 +764,7 @@ export function AdminModelDiscoveryPanel() {
                 onClick={() => setPage(Math.max(1, currentPage - 1))}
                 className="rounded border border-zinc-700 px-2 py-1 disabled:opacity-40"
               >
-                Previous
+                {m.pagination.previous}
               </button>
               <button
                 type="button"
@@ -789,7 +772,7 @@ export function AdminModelDiscoveryPanel() {
                 onClick={() => setPage(Math.min(pageCount, currentPage + 1))}
                 className="rounded border border-zinc-700 px-2 py-1 disabled:opacity-40"
               >
-                Next
+                {m.pagination.next}
               </button>
             </div>
           </div>

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { Clipboard, FileText, Loader2 } from "lucide-react";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
+import { adminReportsMessages } from "@/lib/adminMessages/reports";
 
 type ReportRow = {
   id: string;
@@ -20,6 +22,7 @@ const dateLabel = (value: string) => {
 };
 
 export function AdminReportsPanel() {
+  const m = useAdminMessages(adminReportsMessages);
   const [busy, setBusy] = useState(false);
   const [reports, setReports] = useState<ReportRow[]>([]);
 
@@ -36,14 +39,14 @@ export function AdminReportsPanel() {
         | { report?: ReportRow; error?: string }
         | null;
       if (!response.ok || !data?.report) {
-        throw new Error(data?.error || "Could not create report.");
+        throw new Error(data?.error || m.createFailed);
       }
       setReports((current) => [data.report!, ...current]);
       await navigator.clipboard.writeText(data.report.body).catch(() => undefined);
-      dispatchAppToast("Operations report created and copied.", "success");
+      dispatchAppToast(m.created, "success");
     } catch (error) {
       dispatchAppToast(
-        error instanceof Error ? error.message : "Could not create report.",
+        error instanceof Error ? error.message : m.createFailed,
         "error"
       );
     } finally {
@@ -56,11 +59,11 @@ export function AdminReportsPanel() {
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Reports
+            {m.eyebrow}
           </p>
-          <h2 className="mt-2 text-2xl font-black text-white">Operations report</h2>
+          <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Generate a compact weekly status report for users, paid accounts, feedback, refunds, alerts, and Stripe webhooks.
+            {m.description}
           </p>
         </div>
         <button
@@ -70,7 +73,7 @@ export function AdminReportsPanel() {
           className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-          Generate report
+          {m.generate}
         </button>
       </div>
       <div className="mt-5 grid gap-2">
@@ -87,12 +90,12 @@ export function AdminReportsPanel() {
                 type="button"
                 onClick={() => {
                   void navigator.clipboard.writeText(report.body);
-                  dispatchAppToast("Report copied.", "success");
+                  dispatchAppToast(m.copied, "success");
                 }}
                 className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-zinc-700 px-3 py-2 text-xs font-bold text-zinc-200 transition hover:bg-zinc-800"
               >
                 <Clipboard className="h-3.5 w-3.5" />
-                Copy
+                {m.copy}
               </button>
             </div>
             <pre className="mt-3 whitespace-pre-wrap rounded-xl bg-zinc-950 p-3 text-xs leading-5 text-zinc-300">

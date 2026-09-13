@@ -1,6 +1,8 @@
 import Link from "next/link";
 
 import type { AdminCampaignWaveRow } from "@/lib/adminEmailCampaigns";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 
 /**
  * Waves by the time they are due.
@@ -35,13 +37,15 @@ const WAVE_STATUS_TONE: Record<string, string> = {
 const when = (value: Date | null) =>
   value ? value.toISOString().replace("T", " ").slice(0, 16) : "—";
 
-export function AdminCampaignSchedulePanel({
+export async function AdminCampaignSchedulePanel({
   rows,
   limit,
 }: {
   rows: AdminCampaignWaveRow[];
   limit: number;
 }) {
+  const messages = await getAdminMessages(adminEmailCampaignsMessages);
+  const m = messages.schedule;
   const overdue = rows.filter((row) => row.overdue);
   const upcoming = rows.filter((row) => !row.overdue);
 
@@ -51,22 +55,22 @@ export function AdminCampaignSchedulePanel({
         <thead>
           <tr className="border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-500">
             <th scope="col" className="py-2 pr-4 font-bold">
-              Due
+              {m.columns.due}
             </th>
             <th scope="col" className="py-2 pr-4 font-bold">
-              Campaign
+              {m.columns.campaign}
             </th>
             <th scope="col" className="py-2 pr-4 font-bold">
-              Wave
+              {m.columns.wave}
             </th>
             <th scope="col" className="py-2 pr-4 font-bold">
-              Status
+              {m.columns.status}
             </th>
             <th scope="col" className="py-2 pr-4 font-bold">
-              Trigger
+              {m.columns.trigger}
             </th>
             <th scope="col" className="py-2 font-bold">
-              Expanded
+              {m.columns.expanded}
             </th>
           </tr>
         </thead>
@@ -88,7 +92,7 @@ export function AdminCampaignSchedulePanel({
                   {row.campaignTemplateKey}
                 </Link>
                 <p className="mt-1 text-xs text-zinc-500">
-                  campaign {row.campaignStatus}
+                  {m.campaignStatus(row.campaignStatus)}
                 </p>
               </td>
               <td className="py-3 pr-4 text-xs text-zinc-300">
@@ -96,7 +100,7 @@ export function AdminCampaignSchedulePanel({
                 {row.sequence > 1 ? ` #${row.sequence}` : ""}
                 {row.dryRun ? (
                   <span className="ml-2 inline-flex rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 font-bold text-zinc-300">
-                    dry run
+                    {m.dryRun}
                   </span>
                 ) : null}
               </td>
@@ -115,7 +119,7 @@ export function AdminCampaignSchedulePanel({
               </td>
               <td className="py-3 text-xs text-zinc-300">
                 {row.expandedCount}
-                {row.recipientCap === null ? "" : ` / cap ${row.recipientCap}`}
+                {row.recipientCap === null ? "" : m.cap(row.recipientCap)}
               </td>
             </tr>
           ))}
@@ -127,21 +131,19 @@ export function AdminCampaignSchedulePanel({
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
       <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-        Email
+        {messages.eyebrow}
       </p>
-      <h2 className="mt-2 text-2xl font-black text-white">Wave schedule</h2>
+      <h2 className="mt-2 text-2xl font-black text-white">{m.title}</h2>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-        Waves that have a time, across every campaign. Waves an operator starts
-        by hand have no time and are not listed here — they are not late and
-        never will be.
+        {m.intro}
       </p>
       <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-500">
-        Showing the {limit} soonest.
+        {m.showingSoonest(limit)}
       </p>
 
       <div className="mt-5">
         <h3 className="text-sm font-black text-white">
-          Due and not sent{" "}
+          {m.overdueHeading}{" "}
           <span className="text-zinc-500">({overdue.length})</span>
         </h3>
         {overdue.length === 0 ? (
@@ -149,19 +151,16 @@ export function AdminCampaignSchedulePanel({
             className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400"
             data-testid="admin-campaign-schedule-clear"
           >
-            Nothing is past its scheduled time.
+            {m.overdueClear}
           </p>
         ) : (
           <>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-200">
-              The scheduler reached these and did not send them. Why is not
-              stored on the wave: it is raised as a{" "}
+              {m.overdueExplanationBefore}{" "}
               <code className="text-amber-100">
                 CAMPAIGN_WAVE_REFUSED_AT_SCHEDULE
               </code>{" "}
-              incident, which goes to Sentry and the operational alert channels
-              and not to any page in this console. Open the campaign to see what
-              its send gate refuses now.
+              {m.overdueExplanationAfter}
             </p>
             {table(overdue, "admin-campaign-wave-overdue")}
           </>
@@ -170,11 +169,12 @@ export function AdminCampaignSchedulePanel({
 
       <div className="mt-6">
         <h3 className="text-sm font-black text-white">
-          Upcoming <span className="text-zinc-500">({upcoming.length})</span>
+          {m.upcomingHeading}{" "}
+          <span className="text-zinc-500">({upcoming.length})</span>
         </h3>
         {upcoming.length === 0 ? (
           <p className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 text-sm text-zinc-400">
-            Nothing is scheduled.
+            {m.upcomingEmpty}
           </p>
         ) : (
           table(upcoming, "admin-campaign-wave-upcoming")

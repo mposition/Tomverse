@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, Play, RotateCcw, ShieldAlert } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import type { AiModel, AiProvider } from "@/lib/models";
+import { adminProviderOpsMessages } from "@/lib/adminMessages/providerOps";
+import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 
 export type AdminProviderIncidentRow = {
   id: string;
@@ -82,6 +84,7 @@ const statusClass = (status: string) => {
 };
 
 export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
+  const m = useAdminMessages(adminProviderOpsMessages);
   const [incidentItems, setIncidentItems] = useState(incidents);
   const [checkItems, setCheckItems] = useState(checks);
   const [busy, setBusy] = useState<string | null>(null);
@@ -111,15 +114,15 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
         error?: string;
       } | null;
       if (!response.ok || !data?.check) {
-        throw new Error(data?.error || "Provider test failed.");
+        throw new Error(data?.error || m.testFailed);
       }
       setCheckItems((current) => [data.check!, ...current].slice(0, 50));
       dispatchAppToast(
-        data.check.status === "ok" ? "Provider readiness test passed." : data.check.message || "Provider readiness test failed.",
+        data.check.status === "ok" ? m.readinessPassed : data.check.message || m.readinessFailed,
         data.check.status === "ok" ? "success" : "error"
       );
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Provider test failed.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.testFailed, "error");
     } finally {
       setBusy(null);
     }
@@ -145,15 +148,15 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
         error?: string;
       } | null;
       if (!response.ok || !data?.incident) {
-        throw new Error(data?.error || "Incident creation failed.");
+        throw new Error(data?.error || m.incidentCreateFailed);
       }
       setIncidentItems((current) => [data.incident!, ...current].slice(0, 50));
       setTitle("");
       setMessage("");
       setModelId("");
-      dispatchAppToast("Incident mode enabled.", "success");
+      dispatchAppToast(m.incidentEnabled, "success");
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Incident creation failed.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.incidentCreateFailed, "error");
     } finally {
       setBusy(null);
     }
@@ -173,14 +176,14 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
         error?: string;
       } | null;
       if (!response.ok || !data?.incident) {
-        throw new Error(data?.error || "Could not resolve incident.");
+        throw new Error(data?.error || m.resolveFailed);
       }
       setIncidentItems((current) =>
         current.map((item) => (item.id === incidentId ? data.incident! : item))
       );
-      dispatchAppToast("Incident resolved.", "success");
+      dispatchAppToast(m.incidentResolved, "success");
     } catch (error) {
-      dispatchAppToast(error instanceof Error ? error.message : "Could not resolve incident.", "error");
+      dispatchAppToast(error instanceof Error ? error.message : m.resolveFailed, "error");
     } finally {
       setBusy(null);
     }
@@ -191,30 +194,30 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">
-            Provider operations
+            {m.eyebrow}
           </p>
           <h2 className="mt-2 text-2xl font-black text-white">
-            Tests, incidents, and fallback control
+            {m.title}
           </h2>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-            Run readiness checks, limit or disable an affected provider or model, and resolve incidents when traffic can resume.
+            {m.description}
           </p>
         </div>
         <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-200">
           <ShieldAlert className="h-3.5 w-3.5" />
-          {activeIncidents.length} active incidents
+          {m.activeIncidents(activeIncidents.length)}
         </div>
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[0.95fr_1.05fr]">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
           <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-zinc-300">
-            Incident mode
+            {m.incidentMode}
           </h3>
           <div className="mt-4 grid gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="grid gap-1 text-xs font-bold text-zinc-400">
-                Provider
+                {m.provider}
                 <select
                   value={provider}
                   onChange={(event) => {
@@ -231,13 +234,13 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-bold text-zinc-400">
-                Scope
+                {m.scope}
                 <select
                   value={modelId}
                   onChange={(event) => setModelId(event.target.value)}
                   className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
                 >
-                  <option value="">All provider models</option>
+                  <option value="">{m.allProviderModels}</option>
                   {providerModels.map((model) => (
                     <option key={model.id} value={model.id}>
                       {model.name}
@@ -248,22 +251,22 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
             </div>
             <div className="grid gap-3 sm:grid-cols-[12rem_1fr]">
               <label className="grid gap-1 text-xs font-bold text-zinc-400">
-                Status
+                {m.status}
                 <select
                   value={status}
                   onChange={(event) => setStatus(event.target.value as "limited" | "disabled")}
                   className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
                 >
-                  <option value="limited">Limited</option>
-                  <option value="disabled">Disabled</option>
+                  <option value="limited">{m.limited}</option>
+                  <option value="disabled">{m.disabled}</option>
                 </select>
               </label>
               <label className="grid gap-1 text-xs font-bold text-zinc-400">
-                Title
+                {m.titleLabel}
                 <input
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
-                  placeholder="Provider outage, quota issue, degraded model..."
+                  placeholder={m.titlePlaceholder}
                   className="h-11 rounded-xl border border-zinc-800 bg-zinc-950 px-3 text-sm text-white outline-none focus:border-blue-500"
                 />
               </label>
@@ -271,7 +274,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
-              placeholder="User-facing note shown in the model selector."
+              placeholder={m.messagePlaceholder}
               className="min-h-24 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm text-white outline-none focus:border-blue-500"
             />
             <button
@@ -281,14 +284,14 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
               className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
-              Enable incident mode
+              {m.enableIncidentMode}
             </button>
           </div>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
           <h3 className="text-sm font-bold uppercase tracking-[0.16em] text-zinc-300">
-            Provider readiness tests
+            {m.readinessTests}
           </h3>
           <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {providers.map((item) => (
@@ -313,7 +316,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
                     {check.status}
                   </span>
                 </div>
-                <p className="mt-1 text-zinc-400">{check.message || check.errorCode || "No details"}</p>
+                <p className="mt-1 text-zinc-400">{check.message || check.errorCode || m.noDetails}</p>
                 <p className="mt-1 text-zinc-600">
                   {dateLabel(check.createdAt)} UTC / {check.latencyMs ?? "-"} ms
                 </p>
@@ -326,7 +329,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
       <div className="mt-5 grid gap-3">
         {incidentItems.length === 0 ? (
           <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-            No incident records yet.
+            {m.noIncidents}
           </div>
         ) : (
           incidentItems.slice(0, 8).map((incident) => (
@@ -338,13 +341,13 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
                       {incident.status}
                     </span>
                     <span className="text-xs text-zinc-500">
-                      {incident.provider || incident.modelId || "unknown target"}
+                      {incident.provider || incident.modelId || m.unknownTarget}
                     </span>
                   </div>
                   <h3 className="mt-2 text-base font-bold text-white">{incident.title}</h3>
-                  <p className="mt-1 text-sm leading-6 text-zinc-400">{incident.message || "No operator note."}</p>
+                  <p className="mt-1 text-sm leading-6 text-zinc-400">{incident.message || m.noOperatorNote}</p>
                   <p className="mt-2 text-xs text-zinc-600">
-                    Created {dateLabel(incident.createdAt)} UTC by {incident.createdByEmail || "unknown admin"}
+                    {m.created(dateLabel(incident.createdAt), incident.createdByEmail || m.unknownAdmin)}
                   </p>
                 </div>
                 {incident.status !== "resolved" ? (
@@ -355,12 +358,12 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
                     className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-100 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {busy === `resolve-${incident.id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-                    Resolve
+                    {m.resolve}
                   </button>
                 ) : (
                   <span className="inline-flex items-center gap-2 rounded-xl border border-zinc-800 px-3 py-2 text-xs font-bold text-zinc-500">
                     <RotateCcw className="h-3.5 w-3.5" />
-                    Resolved {dateLabel(incident.resolvedAt)}
+                    {m.resolvedAt(dateLabel(incident.resolvedAt))}
                   </span>
                 )}
               </div>

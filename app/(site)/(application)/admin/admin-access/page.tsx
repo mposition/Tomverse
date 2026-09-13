@@ -6,6 +6,8 @@ import { AdminOperationalReadinessPanel } from "@/components/admin/AdminOperatio
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { getConfiguredAdminAccessWithActivity } from "@/lib/adminAuth";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
+import { getAdminMessages } from "@/lib/adminLocaleServer";
+import { adminAccessMessages } from "@/lib/adminMessages/adminAccess";
 
 const TABS = adminNavItemTabs("admin-access");
 
@@ -14,6 +16,7 @@ export default async function AdminAccessPage({
 }: PageProps<"/admin/admin-access">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
+  const m = await getAdminMessages(adminAccessMessages);
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -21,7 +24,7 @@ export default async function AdminAccessPage({
         basePath="/admin/admin-access"
         tabs={TABS}
         activeTabId={tab.id}
-        label="Admin access sections"
+        label={m.tabsLabel}
         query={query}
       />
       {tab.id === "readiness" ? <AdminOperationalReadinessPanel /> : null}
