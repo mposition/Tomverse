@@ -123,6 +123,50 @@ never its own `tab`, which the lookup has already consumed.
    exception to this: *whether* to refuse is that policy's decision, and what
    the screen owes the operator once refused is this contract's.
 
+## Language
+
+The console is written in **English and Korean**, and in nothing else. It is an
+internal tool; a half-translated console is worse than an English one, because
+an operator acting on a refund or a kill switch has to trust that every label
+on the screen says the same thing in the same language. Any product locale the
+console has no copy for (French, German, …) reads English.
+
+1. **The server decides the language, once per request.** `getAdminLocale()`
+   (`lib/adminLocaleServer.ts`) resolves, most specific first: the console
+   cookie `tomverse_admin_lang`, an explicit `?lang=`, the product cookie
+   `tomverse_lang`, then `Accept-Language`. The layout passes the answer to
+   `AdminLocaleProvider`; server components (`AdminPageTabs`, pages) call
+   the same function. Nothing in the console restores a language in the browser
+   after hydration — that is what would leave a server-rendered tab strip in one
+   language beside a client-rendered panel in the other.
+2. **Copy lives in `lib/adminMessages/<namespace>.ts`, declared with
+   `defineAdminMessages({ en, ko })`.** English is the shape; the Korean
+   dictionary is type-checked against it, and `tests/adminLocale.test.mjs`
+   fails on a missing key, an empty string or a formatter with a different
+   arity. Client components read it with `useAdminMessages()`, server
+   components with `getAdminMessages()`. No panel compares
+   `locale === "ko"` to choose a string.
+3. **The route table stays English.** `lib/adminNavigation.ts` owns ids, hrefs,
+   roles, badges and redirects, and its labels are what runbooks and the E2E
+   suite name. Korean labels live in `lib/adminNavigationLocale.ts`, keyed by
+   the same ids; adding an entry, tab or detail route without Korean copy fails
+   the test above. The command palette matches both languages in both consoles.
+4. **Identifiers are not translated.** Role names, status codes, model and
+   provider ids, error codes, environment names, trace ids and product names
+   (Stripe, Railway, R2, AI Review) render as they are stored, because they are
+   what an operator searches the logs and the database for.
+5. **The switch is in the account menu**, each language named in its own
+   language, and choosing one writes the console cookie and refreshes the route.
+   It never writes the product cookie: the console choice must not move an
+   operator's customer-facing language.
+6. **The console root carries `lang`**, so `:lang(ko)` selects the Korean
+   typeface for the console subtree (docs/ui-contracts/typography.md) and
+   assistive technology announces Korean copy as Korean.
+7. **Server-generated text is not yet translated.** API error messages, audit
+   summaries and diagnostic sentences built in `lib/**` and `/api/admin/**`
+   arrive in English and are shown as they arrive. Translating them means
+   returning codes the client renders, not translating strings on the server.
+
 ## What was removed, and what replaced it
 
 | Removed | Replacement |

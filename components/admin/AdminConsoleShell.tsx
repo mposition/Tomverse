@@ -11,12 +11,11 @@ import {
   useAdminConsolePreferences,
 } from "@/components/admin/AdminConsolePreferences";
 import { AdminCommandPalette } from "@/components/admin/AdminCommandPalette";
+import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
-import {
-  adminItemIsWritable,
-  findAdminNavItem,
-  resolveAdminPageMeta,
-} from "@/lib/adminNavigation";
+import { adminItemIsWritable, findAdminNavItem } from "@/lib/adminNavigation";
+import { localizeAdminPageMeta } from "@/lib/adminNavigationLocale";
+import { adminShellMessages } from "@/lib/adminMessages/shell";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import type { AdminRole } from "@/lib/adminAuthCore";
 
@@ -29,9 +28,9 @@ import type { AdminRole } from "@/lib/adminAuthCore";
  * drift apart again.
  */
 export const ADMIN_AUTO_REFRESH_INTERVAL_MS = 180_000;
-export const ADMIN_AUTO_REFRESH_LABEL = `Auto ${Math.round(
-  ADMIN_AUTO_REFRESH_INTERVAL_MS / 60_000
-)}m`;
+const ADMIN_AUTO_REFRESH_MINUTES = Math.round(ADMIN_AUTO_REFRESH_INTERVAL_MS / 60_000);
+export const ADMIN_AUTO_REFRESH_LABEL =
+  adminShellMessages.en.autoRefresh(ADMIN_AUTO_REFRESH_MINUTES);
 
 type NotificationRow = {
   id: string;
@@ -78,6 +77,8 @@ function AdminConsoleChrome({
   const pathname = usePathname();
   const router = useRouter();
   const { isPinned, togglePin } = useAdminConsolePreferences();
+  const { locale } = useAdminLocale();
+  const m = useAdminMessages(adminShellMessages);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [drawerOpenCount, setDrawerOpenCount] = useState(0);
   const [commandOpen, setCommandOpen] = useState(false);
@@ -96,7 +97,7 @@ function AdminConsoleChrome({
   // browser last refreshed", which the server cannot know.
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const page = resolveAdminPageMeta(pathname);
+  const page = localizeAdminPageMeta(pathname, locale);
   const activeItem = findAdminNavItem(pathname);
   const pageWritable = activeItem
     ? adminItemIsWritable(role, activeItem)
@@ -201,7 +202,7 @@ function AdminConsoleChrome({
           <button
             type="button"
             className="absolute inset-0 bg-black/70"
-            aria-label="Close navigation"
+            aria-label={m.closeNavigation}
             onClick={() => setMobileNavOpen(false)}
           />
           <aside className="relative h-full w-[min(20rem,88vw)] border-r border-zinc-800 shadow-2xl">
@@ -231,7 +232,7 @@ function AdminConsoleChrome({
               type="button"
               onClick={openDrawer}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 lg:hidden"
-              aria-label="Open admin navigation"
+              aria-label={m.openNavigation}
             >
               <Menu className="h-4 w-4" aria-hidden />
             </button>
@@ -239,14 +240,14 @@ function AdminConsoleChrome({
               type="button"
               onClick={() => setCommandOpen(true)}
               className="flex min-w-0 max-w-xl flex-1 items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 px-3 py-2 text-left text-sm text-zinc-400 hover:border-zinc-700"
-              aria-label="Open global search and command palette"
+              aria-label={m.openSearch}
             >
               <Search className="h-4 w-4" aria-hidden />
               <span className="min-w-0 flex-1 truncate">
-                Search customers, refunds, traces, or commands
+                {m.searchPlaceholder}
               </span>
               <kbd className="hidden rounded border border-zinc-700 px-1.5 py-0.5 text-xs font-bold text-zinc-400 sm:inline">
-                Ctrl K
+                {m.searchShortcut}
               </kbd>
             </button>
             <span
@@ -263,7 +264,7 @@ function AdminConsoleChrome({
                 type="button"
                 onClick={() => void loadAlerts()}
                 className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-800 hover:bg-zinc-900"
-                aria-label="Open notification center"
+                aria-label={m.openNotifications}
                 aria-expanded={alertsOpen}
               >
                 <Bell className="h-4 w-4" aria-hidden />
@@ -274,20 +275,20 @@ function AdminConsoleChrome({
               {alertsOpen ? (
                 <div className="absolute right-0 top-12 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-2xl border border-zinc-800 bg-zinc-950 p-3 shadow-2xl">
                   <div className="flex items-center justify-between px-1 pb-2">
-                    <p className="text-sm font-bold text-white">Notification center</p>
+                    <p className="text-sm font-bold text-white">{m.notificationCenter}</p>
                     <Link
                       href="/admin/alerts?tab=deliveries"
                       onClick={() => setAlertsOpen(false)}
                       className="text-xs font-bold text-blue-300"
                     >
-                      View all
+                      {m.viewAll}
                     </Link>
                   </div>
                   {loadingAlerts ? (
                     <Loader2 className="mx-auto my-6 h-5 w-5 animate-spin text-zinc-500" />
                   ) : notificationRows.length === 0 ? (
                     <p className="rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-400">
-                      No notification records.
+                      {m.noNotifications}
                     </p>
                   ) : (
                     notificationRows.map((item) => (
@@ -339,7 +340,7 @@ function AdminConsoleChrome({
               <div>
                 <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-zinc-500">
                   <Link href="/admin/overview" className="hover:text-zinc-300">
-                    Admin Console
+                    {m.breadcrumbRoot}
                   </Link>
                   <span aria-hidden>/</span>
                   {page.parentLabel && page.parentHref ? (
@@ -360,7 +361,7 @@ function AdminConsoleChrome({
               <div className="flex flex-wrap items-center gap-2">
                 {!pageWritable ? (
                   <span className="rounded-full border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs font-bold text-zinc-300">
-                    Read-only for {role}
+                    {m.readOnlyFor(role)}
                   </span>
                 ) : null}
                 {pinnable ? (
@@ -374,7 +375,7 @@ function AdminConsoleChrome({
                         : "border-zinc-800 text-zinc-300 hover:bg-zinc-900"
                     }`}
                   >
-                    {pinnedNow ? "Pinned" : "Pin page"}
+                    {pinnedNow ? m.pinned : m.pinPage}
                   </button>
                 ) : null}
                 <button
@@ -387,7 +388,9 @@ function AdminConsoleChrome({
                   }`}
                   aria-pressed={autoRefresh}
                 >
-                  {autoRefresh ? ADMIN_AUTO_REFRESH_LABEL : "Manual refresh"}
+                  {autoRefresh
+                    ? m.autoRefresh(ADMIN_AUTO_REFRESH_MINUTES)
+                    : m.manualRefresh}
                 </button>
                 <button
                   type="button"
@@ -398,10 +401,10 @@ function AdminConsoleChrome({
                     className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
                     aria-hidden
                   />{" "}
-                  Refresh
+                  {m.refresh}
                 </button>
                 <span className="text-xs text-zinc-500">
-                  Updated{" "}
+                  {m.updated}{" "}
                   {lastUpdated
                     ? `${lastUpdated.toISOString().slice(11, 19)} UTC`
                     : "--:--:-- UTC"}
@@ -424,16 +427,16 @@ function AdminConsoleChrome({
                   : "text-emerald-300"
               }
             >
-              Job health:{" "}
+              {m.jobHealth}{" "}
               {counts.delayedJobs === null
-                ? "Unknown"
+                ? m.jobHealthUnknown
                 : counts.delayedJobs > 0
-                  ? `${counts.delayedJobs} delayed`
-                  : "Healthy"}
+                  ? m.jobHealthDelayed(counts.delayedJobs)
+                  : m.jobHealthHealthy}
             </span>
-            <span className={statusTone(apiStatus)}>API/DB: {apiStatus}</span>
-            <span>Version {version}</span>
-            <span className="ml-auto">Role: {role}</span>
+            <span className={statusTone(apiStatus)}>{m.apiDb(apiStatus)}</span>
+            <span>{m.version(version)}</span>
+            <span className="ml-auto">{m.role(role)}</span>
           </div>
         </footer>
       </div>
