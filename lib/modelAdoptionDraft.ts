@@ -24,6 +24,11 @@
  * The last category is the point. A draft that silently filled in a plan tier
  * or a sale price would be this module deciding what it is not allowed to
  * decide, and the operator would be approving a number nobody chose.
+ *
+ * One field sits between the last two: reasoning is *proposed* from what the
+ * provider says about thinking, and listed in `suggestions` so the panel will
+ * not save it until somebody confirms it. A proposal the save cannot skip is
+ * not a guess; it is the operator not having to find out the model thinks.
  */
 
 import {
@@ -206,7 +211,141 @@ export type AdoptionObservation = {
      * Tomverse sells a model at is a product decision.
      */
     effortLevels?: string | null;
+    /** Anthropic's `capabilities.pdf_input.supported`. */
+    pdfInput?: boolean | null;
   } | null;
+};
+
+/** The registry's reasoning values, `none` included because the form holds it. */
+export type AdoptionReasoning = "none" | "low" | "medium" | "high";
+
+/** Every sale class, in the order the registry form lists them. */
+export const ADOPTION_USAGE_CLASSES = [
+  "standard",
+  "advanced",
+  "premium",
+  "reasoning",
+  "premium-reasoning",
+  "research",
+  "deep-research",
+] as const satisfies readonly ModelUsageClass[];
+
+/**
+ * The reasoning value to *propose*, from what the provider says about thinking.
+ *
+ * A proposal, not a setting: the panel refuses to save it until somebody has
+ * confirmed it, the same way it treats the sale class. Which depth Tomverse
+ * sells a model at is a product decision; what this removes is having to know
+ * the model thinks at all before making it.
+ *
+ * `high` unless the provider listed its effort levels and `high` is not among
+ * them. That check is not cosmetic. Anthropic requests carry this value
+ * verbatim as `effort` (lib/modelGenerationCompatibility.ts), so proposing a
+ * level the model does not accept is a proposal that fails every request.
+ * When the listed levels share nothing with the registry's three, nothing is
+ * proposed and the panel says why.
+ */
+export const suggestReasoning = (
+  metadata: AdoptionObservation["metadata"]
+): { value: Exclude<AdoptionReasoning, "none"> | null; levels: string[] } => {
+  const levels = (metadata?.effortLevels ?? "")
+    .split(",")
+    .map((level) => level.trim().toLowerCase())
+    .filter(Boolean);
+  if (metadata?.thinking !== true) return { value: null, levels };
+  if (levels.length === 0) return { value: "high", levels };
+  const value = (["high", "medium", "low"] as const).find((level) =>
+    levels.includes(level)
+  );
+  return { value: value ?? null, levels };
+};
+
+/**
+ * The provider's output ceiling as a request cap, when it is safe to be one.
+ *
+ * The ceiling is a capability and the column is what every request asks for.
+ * They are the same number only when asking for all of it still leaves room
+ * for the largest prompt this deployment accepts. Kimi K3 is the case that
+ * fails: its ceiling equals its whole context window, and as a request cap it
+ * left no room for input, so every request was refused at every size. The
+ * guard is that failure written as arithmetic, rather than a rule that never
+ * copies.
+ *
+ * Never copying had a cost of its own, which is why this exists. An adoption
+ * of a model no pricing profile covers cannot be saved with this field blank --
+ * the credit floor has no output to price -- so "never copy" meant every such
+ * operator retyping a number the scan already held, and a small number typed
+ * into a reasoning model's cap is `claude-sonnet-5`'s 4,096 fossil again.
+ *
+ * The window may be the provider's input limit when it publishes no total
+ * (Anthropic's `max_input_tokens`). That is a lower bound on the real window,
+ * never above it -- the largest accepted input has to fit inside it -- so a
+ * cap that passes against it passes against the real window too. On that
+ * figure the guard can only be stricter than necessary, never looser.
+ *
+ * No window at all, no copy: the arithmetic cannot be done.
+ */
+export const requestOutputCapFromProvider = (input: {
+  providerMaxOutputTokens: number | null;
+  contextWindowTokens: number | null;
+  worstCaseInputTokens: number;
+}):
+  | { value: number; reason: "fits_with_worst_case_input" }
+  | {
+      value: null;
+      reason: "no_provider_capability" | "no_context_window" | "leaves_no_room_for_input";
+    } => {
+  const cap = positive(input.providerMaxOutputTokens);
+  if (cap === null) return { value: null, reason: "no_provider_capability" };
+  const context = positive(input.contextWindowTokens);
+  if (context === null) return { value: null, reason: "no_context_window" };
+  if (cap + input.worstCaseInputTokens > context) {
+    return { value: null, reason: "leaves_no_room_for_input" };
+  }
+  return { value: Math.floor(cap), reason: "fits_with_worst_case_input" };
+};
+
+/**
+ * What an empty token field on the adoption form will save as.
+ *
+ * The panel greys these into the blank fields, so each has to be the value the
+ * save actually produces -- a hint describing a different outcome is worse
+ * than no hint.
+ *
+ * `maxOutputTokens` is `"required"` when no pricing profile covers the model:
+ * the adoption preflight refuses a blank cap there, since the credit floor has
+ * no output to price, and the class fallback a live request would otherwise
+ * use is never reached. When whether a profile covers it is not yet known --
+ * the lookup for a corrected id is pending or failed -- it is `null`: the
+ * save's outcome turns on that profile, and a hint either way would be a guess.
+ *
+ * The reservation is clamped to the cap the operator typed when there is one,
+ * the way a live request clamps it, and from the reservation *before* any cap
+ * -- a figure already cut to the default cap cannot be un-cut.
+ */
+export const blankTokenFieldValues = (input: {
+  /** `null` while unknown. */
+  hasPricingProfile: boolean | null;
+  formMaxOutputTokens: number | null;
+  effective: { maxOutputTokens: number; reservationBeforeCap: number } | null;
+}): {
+  maxOutputTokens: number | "required" | null;
+  reservationOutputTokens: number | null;
+} => {
+  const maxOutputTokens =
+    input.hasPricingProfile === null
+      ? null
+      : input.hasPricingProfile
+        ? input.effective?.maxOutputTokens ?? null
+        : "required";
+  if (!input.effective) return { maxOutputTokens, reservationOutputTokens: null };
+  return {
+    maxOutputTokens,
+    reservationOutputTokens: Math.min(
+      input.formMaxOutputTokens ?? input.effective.maxOutputTokens,
+      input.effective.reservationBeforeCap
+    ),
+  };
 };
 
 export type AdoptionFieldSource =
@@ -232,18 +371,27 @@ export type ModelAdoptionDraft = {
     provider: string;
     contextWindowTokens: number | null;
     /**
-     * Never prefilled. The provider's `outputTokenLimit` is a *capability*;
-     * this column is what every request asks for. Copying one into the other is
-     * the mistake `providerMaxOutputTokens` exists to record: Kimi K3's ceiling
-     * equals its whole context window, and using it as the request cap left no
-     * room for input at all, so every request was refused at every size.
+     * The provider's ceiling, only when `requestOutputCapFromProvider` finds it
+     * leaves room for the largest prompt, and only when no pricing profile
+     * covers the model. With a profile the null is the answer: the column
+     * inherits the profile's cap, and a typed number would override it for
+     * good.
      */
-    maxOutputTokens: null;
+    maxOutputTokens: number | null;
+    /**
+     * Always null, and shown rather than written. A null reservation already
+     * resolves to the profile's or the sale class's conservative default at
+     * request time; writing that same number here would change nothing today
+     * and leave a fossil that no longer follows the policy tomorrow.
+     */
     reservationOutputTokens: null;
     inputUsdPerMillionTokens: null;
     outputUsdPerMillionTokens: null;
     cachedInputPriceMultiplier: null;
     supportsImage: boolean;
+    supportsNativePdf: boolean;
+    /** A proposal while `suggestions.reasoning` is set; the panel makes it confirmed. */
+    reasoning: AdoptionReasoning;
     /** The most restrictive tier, so an unmade decision cannot open a model up. */
     minimumPlan: "Pro";
     status: "coming-soon";
@@ -255,6 +403,13 @@ export type ModelAdoptionDraft = {
    */
   observedCapabilities: {
     providerMaxOutputTokens: number | null;
+  };
+  /**
+   * Values placed in `fields` that a person still has to confirm before the
+   * save. Separate from `sources` because the panel gates on it.
+   */
+  suggestions: {
+    reasoning: Exclude<AdoptionReasoning, "none"> | null;
   };
   sources: Record<string, AdoptionFieldSource>;
   /** Fields a person still has to answer, in the words the panel shows. */
@@ -296,12 +451,24 @@ export const buildAdoptionDraft = (input: {
   takenIds?: readonly string[];
   /** Whether lib/modelPricing.ts already prices the id this draft proposes. */
   hasPricingProfile?: boolean;
+  /** `CHAT_USER_MAX_INPUT_TOKENS`, for whether the output ceiling leaves room. */
+  worstCaseInputTokens?: number;
 }): ModelAdoptionDraft => {
   const metadata = input.observation?.metadata ?? null;
   const contextWindowTokens =
     positive(metadata?.contextLength) ?? positive(metadata?.inputTokenLimit);
   const providerMaxOutputTokens = positive(metadata?.outputTokenLimit);
   const supportsImage = metadata?.vision === true;
+  const supportsNativePdf = metadata?.pdfInput === true;
+  const worstCaseInputTokens =
+    positive(input.worstCaseInputTokens) ?? WORST_CASE_INPUT_TOKENS;
+  const outputCap = requestOutputCapFromProvider({
+    providerMaxOutputTokens,
+    contextWindowTokens,
+    worstCaseInputTokens,
+  });
+  const maxOutputTokens = input.hasPricingProfile ? null : outputCap.value;
+  const reasoning = suggestReasoning(metadata);
 
   const sources: Record<string, AdoptionFieldSource> = {
     id: "derived",
@@ -354,20 +521,53 @@ export const buildAdoptionDraft = (input: {
     unknowns.push("판매 등급과 크레딧 — 최소 등급은 가격을 넣으면 계산됩니다.");
   }
   unknowns.push("최소 플랜 — Pro로 두었습니다. 더 열려면 제품 결정이 필요합니다.");
-  unknowns.push(
-    providerMaxOutputTokens === null
-      ? "최대 출력 토큰 — 요청마다 요구할 출력 상한을 정해야 합니다."
-      : `최대 출력 토큰 — 공급자가 알린 능력 상한은 ${providerMaxOutputTokens.toLocaleString()}이지만, 요청 상한은 별개 결정입니다.`
-  );
-  unknowns.push(
-    "예약 출력 토큰 — 능력이 아니라 entitlement이므로 출력 한도에서 유도하지 않습니다."
-  );
-  if (metadata?.thinking === true) {
-    const levels = metadata.effortLevels?.trim();
+
+  if (typeof metadata?.pdfInput === "boolean") {
+    sources.supportsNativePdf = "provider_catalogue";
+  } else {
+    // Same distinction as image input: absent is not "no".
+    unknowns.push("Native PDF — 공급자 목록이 말하지 않았습니다. 미지원으로 두었습니다.");
+  }
+
+  const numberText = (value: number) => value.toLocaleString("en-US");
+  if (input.hasPricingProfile) {
+    sources.maxOutputTokens = "derived";
+    notes.push(
+      "최대 출력 토큰 — lib/modelPricing.ts의 profile 상한을 상속합니다. 비워 두세요. 숫자를 넣으면 profile이 바뀌어도 따라가지 않습니다."
+    );
+  } else if (outputCap.value !== null) {
+    sources.maxOutputTokens = "provider_catalogue";
+    notes.push(
+      `최대 출력 토큰 — 공급자 상한 ${numberText(outputCap.value)}을 채웠습니다. 최대 입력 ${numberText(worstCaseInputTokens)}을 더해도 컨텍스트 ${numberText(contextWindowTokens ?? 0)} 안에 들어갑니다. profile이 없어 비우면 저장되지 않습니다.`
+    );
+  } else if (outputCap.reason === "leaves_no_room_for_input") {
     unknowns.push(
-      levels
-        ? `추론 강도 — 공급자가 알린 단계는 ${levels}입니다. 어느 단계로 판매할지는 제품 결정입니다.`
-        : "추론 강도 — 공급자가 thinking 지원을 알렸을 뿐 등급은 알리지 않습니다."
+      `최대 출력 토큰 — 공급자 상한 ${numberText(providerMaxOutputTokens ?? 0)}에 최대 입력 ${numberText(worstCaseInputTokens)}을 더하면 컨텍스트 ${numberText(contextWindowTokens ?? 0)}를 넘어 채우지 않았습니다. 그대로 쓰면 입력 자리가 남지 않습니다. 요청 상한을 정해야 합니다.`
+    );
+  } else if (outputCap.reason === "no_context_window") {
+    unknowns.push(
+      `최대 출력 토큰 — 공급자 상한은 ${numberText(providerMaxOutputTokens ?? 0)}이지만 컨텍스트 윈도우를 몰라 입력 자리를 확인할 수 없어 채우지 않았습니다. 요청 상한을 정해야 합니다.`
+    );
+  } else {
+    unknowns.push("최대 출력 토큰 — 공급자가 알리지 않았습니다. 요청 상한을 정해야 합니다.");
+  }
+
+  // Shown, not written: the panel greys in the value a null resolves to.
+  sources.reservationOutputTokens = "derived";
+  notes.push(
+    "예약 출력 토큰 — 비워 두면 profile 또는 판매 등급의 정책 기본값이 적용되고, 칸에 흐리게 표시됩니다. 숫자를 넣으면 고정값이 되어 정책이 바뀌어도 따라가지 않습니다."
+  );
+
+  if (reasoning.value) {
+    sources.reasoning = "needs_decision";
+    unknowns.push(
+      reasoning.levels.length
+        ? `추론 강도 — 공급자가 알린 단계(${reasoning.levels.join(", ")}) 중 ${reasoning.value}를 제안했습니다. 확정해야 저장됩니다.`
+        : `추론 강도 — 공급자가 thinking 지원을 알려 ${reasoning.value}를 제안했습니다. 단계 목록은 알리지 않았습니다. 확정해야 저장됩니다.`
+    );
+  } else if (metadata?.thinking === true) {
+    unknowns.push(
+      `추론 강도 — 공급자가 알린 단계(${reasoning.levels.join(", ")})가 레지스트리 값(low, medium, high)과 겹치지 않아 제안하지 않았습니다.`
     );
   }
 
@@ -378,12 +578,14 @@ export const buildAdoptionDraft = (input: {
       apiModel: input.apiModel,
       provider: input.provider,
       contextWindowTokens,
-      maxOutputTokens: null,
+      maxOutputTokens,
       reservationOutputTokens: null,
       inputUsdPerMillionTokens: null,
       outputUsdPerMillionTokens: null,
       cachedInputPriceMultiplier: null,
       supportsImage,
+      supportsNativePdf,
+      reasoning: reasoning.value ?? "none",
       minimumPlan: "Pro",
       // Born switched off. The operator turns it on once the price is in and
       // the validations are clear, through the same guard every other enable
@@ -392,6 +594,7 @@ export const buildAdoptionDraft = (input: {
       publiclyListed: false,
     },
     observedCapabilities: { providerMaxOutputTokens },
+    suggestions: { reasoning: reasoning.value },
     sources,
     unknowns,
     notes,
