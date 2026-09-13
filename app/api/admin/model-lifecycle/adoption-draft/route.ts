@@ -15,6 +15,8 @@ import {
 import { modelProductSurface } from "@/lib/modelLifecycleTriage";
 import { chatUserMaxInputTokens } from "@/lib/chatInputLimits";
 import { getModelPricingProfile, resolveModelPricing } from "@/lib/modelPricing";
+import { docParseFromStored, docSourcesFromStored } from "@/lib/providerModelDocsCore";
+import { observedPairsOf } from "@/lib/modelLifecycleWorkItemCore";
 import type { AiModel } from "@/lib/models";
 
 /**
@@ -59,10 +61,18 @@ export async function GET(req: Request) {
     // keeps the first answer: it tells them to type a price they are actually
     // inheriting, and refuses to save the inheritance.
     const requestedModelId = requestUrl.searchParams.get("modelId")?.trim() || null;
+    // The (provider, api model) pair currently in the form, when the operator
+    // has changed it. Every provider-dependent fact in the draft -- the scan's
+    // observation, the documentation evidence, and the price and cap copied
+    // from them -- belongs to one exact pair, so a draft for a different pair
+    // has to be answered for that pair, not for the one the item was filed
+    // under.
+    const requestedProvider = requestUrl.searchParams.get("provider")?.trim() || null;
+    const requestedApiModel = requestUrl.searchParams.get("apiModel")?.trim() || null;
 
     const workItem = await prisma.modelLifecycleWorkItem.findUnique({
       where: { id: workItemId },
-      select: { id: true, provider: true, apiModel: true, action: true, status: true },
+      select: { id: true, provider: true, apiModel: true, action: true, status: true, evidence: true },
     });
     if (!workItem) {
       return NextResponse.json({ error: "No such work item." }, { status: 404 });
@@ -89,18 +99,44 @@ export async function GET(req: Request) {
       );
     }
 
-    const [observation, taken] = await Promise.all([
-      prisma.providerModelCatalogEntry.findUnique({
-        where: {
-          provider_apiModel: {
-            provider: workItem.provider,
-            apiModel: workItem.apiModel,
-          },
-        },
-        select: { displayName: true, metadata: true },
-      }),
+    // Only a pair the scan actually saw has an observation or evidence worth
+    // reading. Any other pair gets a draft with nothing provider-dependent
+    // filled in -- and the adoption preflight refuses to save it anyway.
+    const pair =
+      requestedProvider && requestedApiModel
+        ? { provider: requestedProvider, apiModel: requestedApiModel }
+        : { provider: workItem.provider, apiModel: workItem.apiModel };
+    const pairObserved = observedPairsOf(workItem).some(
+      (sighting) => sighting.provider === pair.provider && sighting.apiModel === pair.apiModel
+    );
+    const [observation, taken, docRow] = await Promise.all([
+      pairObserved
+        ? prisma.providerModelCatalogEntry.findUnique({
+            where: { provider_apiModel: pair },
+            select: { displayName: true, metadata: true },
+          })
+        : null,
       prisma.modelRegistryEntry.findMany({ select: { id: true } }),
+      // What the daily documentation read found for the same exact pair. Read,
+      // never fetched here: the form must not depend on a documentation host
+      // answering while somebody has it open.
+      pairObserved
+        ? prisma.providerModelDocEvidence.findUnique({
+            where: { provider_apiModel: pair },
+            select: {
+              status: true,
+              parserVersion: true,
+              fields: true,
+              problems: true,
+              sources: true,
+              fetchedAt: true,
+            },
+          })
+        : null,
     ]);
+    // A row whose sources are not the shape this code writes is not evidence:
+    // the operator could not open what the numbers came from.
+    const docSources = docRow ? docSourcesFromStored(docRow.sources) : null;
 
     const metadata =
       observation?.metadata &&
@@ -109,14 +145,29 @@ export async function GET(req: Request) {
         ? (observation.metadata as Record<string, unknown>)
         : null;
 
-    const proposedId = registryIdFromApiModel(workItem.apiModel, taken.map((row) => row.id));
+    const proposedId = registryIdFromApiModel(pair.apiModel, taken.map((row) => row.id));
     // What the price is being judged for: the id in the form if the operator has
     // changed it, the proposed one otherwise.
     const pricedModelId = requestedModelId || proposedId;
+    // A profile covers this adoption only when it is for this exact pair. The
+    // runtime resolves a profile by registry id alone, so a profile under the
+    // id for another provider or api model is not an inheritance, it is a
+    // mismatch the save refuses.
+    const profileFor = (id: string) => {
+      const profile = getModelPricingProfile(id);
+      if (!profile) return { covers: false, other: null };
+      const covers = profile.provider === pair.provider && profile.apiModelId === pair.apiModel;
+      return {
+        covers,
+        other: covers ? null : { provider: profile.provider, apiModelId: profile.apiModelId },
+      };
+    };
+    const pricedProfile = profileFor(pricedModelId);
     const draft = buildAdoptionDraft({
-      provider: workItem.provider,
-      apiModel: workItem.apiModel,
-      hasPricingProfile: Boolean(getModelPricingProfile(pricedModelId)),
+      provider: pair.provider,
+      apiModel: pair.apiModel,
+      hasPricingProfile: pricedProfile.covers,
+      profileForOtherPair: pricedProfile.other,
       observation: {
         displayName: observation?.displayName ?? null,
         metadata: metadata
@@ -142,6 +193,15 @@ export async function GET(req: Request) {
       // model is a 409 the operator meets after filling the whole form in.
       takenIds: taken.map((row) => row.id),
       worstCaseInputTokens: chatUserMaxInputTokens(),
+      registryModelId: pricedModelId,
+      docEvidence:
+        docRow && docSources
+          ? {
+              parse: docParseFromStored(docRow),
+              sources: docSources,
+              fetchedAt: docRow.fetchedAt,
+            }
+          : null,
     });
 
     const draftModelId = requestedModelId || draft.fields.id;
@@ -158,8 +218,8 @@ export async function GET(req: Request) {
           ADOPTION_USAGE_CLASSES.map((usageClass) => {
             const base = {
               id: draftModelId,
-              apiModel: workItem.apiModel,
-              provider: workItem.provider as AiModel["provider"],
+              apiModel: pair.apiModel,
+              provider: pair.provider as AiModel["provider"],
               usageClass,
             };
             const resolved = resolveModelPricing(base);
@@ -193,13 +253,13 @@ export async function GET(req: Request) {
       // profile already covers it. The panel computes the same floor the save
       // will be judged by; without this it reads empty price fields as "no
       // price" and refuses to save an adoption the server would accept.
-      profilePrice: getModelPricingProfile(draftModelId)
+      profilePrice: profileFor(draftModelId).covers
         ? (() => {
             const resolved = resolveModelPricing(
               {
                 id: draftModelId,
-                apiModel: workItem.apiModel,
-                provider: workItem.provider as AiModel["provider"],
+                apiModel: pair.apiModel,
+                provider: pair.provider as AiModel["provider"],
                 // The class is still the operator's to choose; it only selects
                 // a fallback here, and a profile exists or this branch is not
                 // reached.

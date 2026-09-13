@@ -50,6 +50,13 @@ const REGISTRY = {
     reason:
       "aged, memory_deleted, memory_superseded. Account deletion is deliberately absent: it removes the row through the cascade rather than compacting it, so no compacted manifest can carry it, and a fourth value would be a report category that is always zero for a reason nobody could work out from the data.",
   },
+  ProviderModelDocEvidence_status_check: {
+    owner: "list",
+    module: "lib/providerModelDocsCore.ts",
+    list: "PROVIDER_MODEL_DOC_EVIDENCE_STATUSES",
+    reason:
+      "How a documentation read ended: parsed, not_found (the page or the table row is not there), fetch_failed, parse_failed (the document's structure moved). The adoption draft reads only 'parsed', so a status the list does not know would be evidence silently ignored rather than a write refused.",
+  },
   Conversation_selectionMode_check: {
     owner: "list",
     module: "lib/conversationSelectionMode.ts",

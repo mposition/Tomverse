@@ -160,6 +160,55 @@ const numericValue = (value: string) => (value === "" ? null : Number(value));
  */
 const ADOPTION_DRAFT_PATH = "/api/admin/model-lifecycle/adoption-draft";
 
+/**
+ * The prefilled fields that depend on the registry id through its pricing
+ * profile: the output cap, and the three price columns. Each is copied only
+ * when no profile covers the id, and each would override a profile if it
+ * stayed once the id became one that has one.
+ */
+const DRAFT_FOLLOWED_FIELDS = [
+  "maxOutputTokens",
+  "inputUsdPerMillionTokens",
+  "outputUsdPerMillionTokens",
+  "cachedInputPriceMultiplier",
+  // Provider-dependent too: read from one pair's observation and evidence. A
+  // context window or an image flag copied for one provider pair is not a fact
+  // about another.
+  "contextWindowTokens",
+  "supportsImage",
+  "supportsNativePdf",
+  "reasoning",
+] as const;
+type DraftFollowedField = (typeof DRAFT_FOLLOWED_FIELDS)[number];
+
+/** The three price columns: confirmed together, because they are read from one price table. */
+const PRICE_FIELDS = ["inputUsdPerMillionTokens", "outputUsdPerMillionTokens", "cachedInputPriceMultiplier"] as const;
+const priceFieldsTouched = (touched: ReadonlySet<string>) =>
+  PRICE_FIELDS.some((field) => touched.has(field));
+
+/** What a followed field holds when no pair has proposed anything for it. */
+const DRAFT_FIELD_BLANK: { [Field in DraftFollowedField]: FormState[Field] } = {
+  maxOutputTokens: null,
+  inputUsdPerMillionTokens: null,
+  outputUsdPerMillionTokens: null,
+  cachedInputPriceMultiplier: null,
+  contextWindowTokens: null,
+  supportsImage: false,
+  supportsNativePdf: false,
+  reasoning: "none",
+};
+
+/** The provider-dependent half of the key: which model, regardless of the id it is saved under. */
+const adoptionPairKey = (provider: string | undefined, apiModel: string | undefined) =>
+  JSON.stringify([provider ?? "", (apiModel ?? "").trim()]);
+
+/** One lookup's identity: the trimmed registry id and the exact provider pair. */
+const adoptionLookupKey = (
+  id: string | undefined,
+  provider: string | undefined,
+  apiModel: string | undefined
+) => JSON.stringify([(id ?? "").trim(), provider ?? "", (apiModel ?? "").trim()]);
+
 const duplicateRegistryId = (sourceId: string, models: AdminModel[]) => {
   const base = `${sourceId}-copy`;
   const existing = new Set(models.map((model) => model.id));
@@ -205,7 +254,7 @@ export function AdminModelRegistryPanel() {
   // a failure is a fact about one lookup: an operator who moves to an id that
   // failed and back to one already priced is looking at a known profile, and a
   // leftover flag would hide its hints and skip its floor check.
-  const [profileLookupFailedForId, setProfileLookupFailedForId] = useState<string | null>(null);
+  const [profileLookupFailedForKey, setProfileLookupFailedForKey] = useState<string | null>(null);
   const [adoptReason, setAdoptReason] = useState("");
   // Whether the operator has actually chosen a sale class while adopting.
   // `usageClass` and `creditWeight` cannot hold "undecided" -- they are
@@ -227,6 +276,12 @@ export function AdminModelRegistryPanel() {
   // could skip would be the draft choosing how hard a model thinks.
   const [adoptReasoningSuggested, setAdoptReasoningSuggested] = useState(false);
   const [adoptReasoningConfirmed, setAdoptReasoningConfirmed] = useState(false);
+  // Prices the draft copied from provider documentation, and whether the
+  // operator has checked them against the source. Required before the save:
+  // temporary pricing is only sometimes recognisable by its wording, and a
+  // price nobody looked at becomes an override that bills every request.
+  const [adoptPriceSuggested, setAdoptPriceSuggested] = useState(false);
+  const [adoptPriceConfirmed, setAdoptPriceConfirmed] = useState(false);
   // What the two token columns resolve to when left empty, per sale class, for
   // one registry id. Shown greyed in the empty fields so an operator sees the
   // number a blank saves as -- a blank here is not "no limit", it is a policy
@@ -235,22 +290,40 @@ export function AdminModelRegistryPanel() {
     modelId: string;
     byClass: Partial<Record<ModelUsageClass, { maxOutputTokens: number; reservationBeforeCap: number }>>;
   } | null>(null);
-  // Whether the operator has typed in the output cap since the draft arrived.
-  // An explicit flag, set in the input's own handler, rather than a comparison
-  // with the prefilled number: typing 64,000 and then 128,000 again is the
-  // operator's value even though it equals the prefill, and a comparison would
-  // hand it back to the draft. Set synchronously, so a lookup answering between
-  // a keystroke and the next render cannot overwrite it either.
-  const maxOutputTouchedRef = useRef(false);
-  // The registry id the cap in the form was proposed for. A cap is a fact about
-  // one id -- copied because *that* id has no profile -- so once the id moves
-  // it is no longer a proposal for anything and must not ride along into a
-  // save while the new id is still being looked up, or after that lookup fails.
-  const capProposedForIdRef = useRef<string | null>(null);
+  // Which of the id-dependent prefilled fields the operator has typed in since
+  // the draft arrived. An explicit record, set in each input's own handler,
+  // rather than a comparison with the prefilled number: typing 64,000 and then
+  // 128,000 again is the operator's value even though it equals the prefill,
+  // and a comparison would hand it back to the draft. Set synchronously, so a
+  // lookup answering between a keystroke and the next render cannot overwrite
+  // it either.
+  const touchedDraftFieldsRef = useRef(new Set<DraftFollowedField>());
+  // The registry id those prefilled fields were proposed for. A copied cap and
+  // a copied price are facts about one id -- written because *that* id has no
+  // pricing profile -- so once the id moves they are no longer proposals for
+  // anything and must not ride along into a save while the new id is still
+  // being looked up, or after that lookup fails. On a profiled id each of them
+  // would be a permanent override flattening the profile.
+  const draftProposedForKeyRef = useRef<string | null>(null);
+  // The (provider, api model) pair the form's provider-dependent values were
+  // proposed for. Kept apart from the key because a pair change resets more
+  // than an id change: even values the operator typed were typed about the
+  // previous model, and a reasoning level confirmed for it is not confirmed
+  // for this one.
+  const draftPairRef = useRef<string | null>(null);
+  // The lookup key the notes, unknowns and profile proposal on screen were
+  // written for. Anything written for another key is hidden at once, not
+  // after the debounce: a proposal for the model the operator just moved away
+  // from is one click from being copied into a pull request.
+  const [guidanceKey, setGuidanceKey] = useState<string | null>(null);
+  // A lib/modelPricing.ts entry written from the provider's documentation, for
+  // a model whose price the override columns cannot hold. Shown to copy into a
+  // pull request; nothing in this panel applies it.
+  const [pricingProfileProposal, setPricingProfileProposal] = useState<string | null>(null);
   // The last id a profile lookup settled for, success or failure. Until the id
   // in the form has settled, nothing about its profile is known: the save
   // waits, and the blank fields make no claim.
-  const [lookupSettledForId, setLookupSettledForId] = useState<string | null>(null);
+  const [lookupSettledForKey, setLookupSettledForKey] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -299,7 +372,8 @@ export function AdminModelRegistryPanel() {
           fields?: Partial<FormState>;
           unknowns?: string[];
           notes?: string[];
-          suggestions?: { reasoning?: string | null };
+          suggestions?: { reasoning?: string | null; price?: boolean };
+          pricingProfileProposal?: string | null;
           effectiveTokenLimits?: typeof effectiveTokenLimits;
           worstCaseInputTokens?: number;
           profilePrice?: {
@@ -317,16 +391,24 @@ export function AdminModelRegistryPanel() {
         setForm({ ...emptyForm(), ...data.fields });
         setAdoptUnknowns(data.unknowns || []);
         setAdoptNotes(data.notes || []);
-        setProfileLookupFailedForId(null);
+        setProfileLookupFailedForKey(null);
         setAdoptWorkItemId(adoptParam);
         setAdoptReason("");
         setAdoptClassChosen(false);
         setAdoptReasoningSuggested(Boolean(data.suggestions?.reasoning));
+        setAdoptPriceSuggested(Boolean(data.suggestions?.price));
+        setAdoptPriceConfirmed(false);
+        setPricingProfileProposal(data.pricingProfileProposal ?? null);
         setAdoptReasoningConfirmed(false);
         setEffectiveTokenLimits(data.effectiveTokenLimits ?? null);
-        maxOutputTouchedRef.current = false;
-        capProposedForIdRef.current = data.fields.id ?? null;
-        setLookupSettledForId(data.fields.id ?? null);
+        touchedDraftFieldsRef.current = new Set();
+        {
+          const loadedKey = adoptionLookupKey(data.fields.id, data.fields.provider, data.fields.apiModel);
+          draftProposedForKeyRef.current = loadedKey;
+          draftPairRef.current = adoptionPairKey(data.fields.provider, data.fields.apiModel);
+          setGuidanceKey(loadedKey);
+          setLookupSettledForKey(loadedKey);
+        }
         setWorstCaseInputTokens(data.worstCaseInputTokens ?? null);
         setProfilePrice(data.profilePrice ?? null);
         setCopySourceId(null);
@@ -397,20 +479,28 @@ export function AdminModelRegistryPanel() {
   // corrects it. Keeping the first answer told them to type a price they were
   // actually inheriting, and refused to save the inheritance.
   const adoptedModelId = adoptWorkItemId ? form.id.trim() : null;
-  const profileLookupFailed =
-    Boolean(adoptedModelId) && profileLookupFailedForId === adoptedModelId;
+  // What the provider-dependent prefills are a fact about: the registry id
+  // (through its pricing profile) *and* the exact provider and api model
+  // (through the scan's observation and the documentation evidence). A price
+  // read for one pair is not a price for another, so changing either half of
+  // the pair is a new lookup exactly like changing the id.
+  const lookupKey =
+    adoptWorkItemId && adoptedModelId
+      ? adoptionLookupKey(adoptedModelId, form.provider, form.apiModel)
+      : null;
+  const profileLookupFailed = Boolean(lookupKey) && profileLookupFailedForKey === lookupKey;
   useEffect(() => {
-    if (!adoptWorkItemId || !adoptedModelId) return;
-    if (profilePrice?.modelId === adoptedModelId) return;
-    // Already answered for this id -- by the draft itself on load, or by an
+    if (!adoptWorkItemId || !adoptedModelId || !lookupKey) return;
+    // Already answered for this key -- by the draft itself on load, or by an
     // earlier lookup. Asking again could only turn a known answer into a
-    // failure. A failed id is asked again, and so is one whose untouched cap
-    // was cleared by a detour: leaving A for B clears A's prefill, and coming
-    // back to A before B answers must bring it back, not skip on A's old answer.
+    // failure. A failed key is asked again once, and so is one whose untouched
+    // prefills were cleared by a detour: leaving A for B clears A's, and coming
+    // back to A before B answers must bring them back, not skip on A's old answer.
     if (
-      lookupSettledForId === adoptedModelId &&
-      profileLookupFailedForId !== adoptedModelId &&
-      (maxOutputTouchedRef.current || capProposedForIdRef.current === adoptedModelId)
+      lookupSettledForKey === lookupKey &&
+      profileLookupFailedForKey !== lookupKey &&
+      (draftProposedForKeyRef.current === lookupKey ||
+        DRAFT_FOLLOWED_FIELDS.every((field) => touchedDraftFieldsRef.current.has(field)))
     ) {
       return;
     }
@@ -418,36 +508,61 @@ export function AdminModelRegistryPanel() {
     // Debounced: the id is typed, and a request per keystroke would be one per
     // character of a name the operator has not finished writing.
     const timer = setTimeout(() => {
-      // A prefilled cap for a different id stops being a proposal now, not
-      // when the answer arrives. If the lookup then fails, the save carries no
-      // cap at all: the server accepts that for an id a profile covers and
-      // refuses it for one that is not, and neither outcome is an override
-      // nobody chose.
-      if (!maxOutputTouchedRef.current && capProposedForIdRef.current !== adoptedModelId) {
-        capProposedForIdRef.current = null;
-        setForm((current) => ({ ...current, maxOutputTokens: null }));
+      // Prefills for a different key stop being proposals now, not when the
+      // answer arrives. If the lookup then fails, the save carries none of them:
+      // the server accepts that for an id a profile covers and refuses it for
+      // one that is not, and neither outcome is an override nobody chose.
+      const requestedPair = adoptionPairKey(form.provider, form.apiModel);
+      // A pair change already cleared everything in its own handler
+      // (`startNewPair`), at the moment of the change -- so a value typed for
+      // the new pair while this timer waited is the operator's and is kept.
+      // What is left here is the id-only case.
+      if (draftProposedForKeyRef.current !== lookupKey) {
+        // Same model, corrected id. What the operator typed still describes
+        // this model and stays; only the untouched prefills follow the id.
+        draftProposedForKeyRef.current = null;
+        const untouched = DRAFT_FOLLOWED_FIELDS.filter(
+          (field) => !touchedDraftFieldsRef.current.has(field)
+        );
+        if (untouched.length) {
+          setForm((current) => ({
+            ...current,
+            ...Object.fromEntries(untouched.map((field) => [field, DRAFT_FIELD_BLANK[field]])),
+          }));
+        }
+        if (!touchedDraftFieldsRef.current.has("reasoning")) {
+          setAdoptReasoningSuggested(false);
+          setAdoptReasoningConfirmed(false);
+        }
+        if (!priceFieldsTouched(touchedDraftFieldsRef.current)) {
+          setAdoptPriceSuggested(false);
+          setAdoptPriceConfirmed(false);
+        }
       }
+      const settleFailed = () => {
+        setProfileLookupFailedForKey(lookupKey);
+        setLookupSettledForKey(lookupKey);
+      };
       void (async () => {
         try {
           const response = await fetch(
             `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({
               workItemId: adoptWorkItemId,
               modelId: adoptedModelId,
+              provider: form.provider,
+              apiModel: form.apiModel.trim(),
             })}`,
             // Bounded, so a request that never answers still settles as a
-            // failure: the save waits on this id's lookup, and an unbounded
+            // failure: the save waits on this key's lookup, and an unbounded
             // wait is a Save button that never comes back.
             { cache: "no-store", signal: AbortSignal.timeout(10_000) }
           );
           if (!response.ok) {
             await discardResponseBody(response);
-            // Guarded, like every other write here. A refusal for an id the
+            // Guarded, like every other write here. A refusal for a key the
             // operator has already moved on from would otherwise arrive late
-            // and turn the current id's success back into a failure.
-            if (!cancelled) {
-              setProfileLookupFailedForId(adoptedModelId);
-              setLookupSettledForId(adoptedModelId);
-            }
+            // and turn the current key's success back into a failure.
+            if (!cancelled) settleFailed();
             return;
           }
           const data = (await response.json().catch(() => null)) as {
@@ -456,37 +571,69 @@ export function AdminModelRegistryPanel() {
             notes?: string[];
             fields?: Partial<FormState>;
             effectiveTokenLimits?: typeof effectiveTokenLimits;
+            pricingProfileProposal?: string | null;
+            suggestions?: { reasoning?: string | null; price?: boolean };
           } | null;
           if (cancelled) return;
           if (!data) {
             // A 200 whose body will not parse is a lookup that did not happen.
             // Treating it as silence left the operator with a Save button that
             // would never enable.
-            setProfileLookupFailedForId(adoptedModelId);
-            setLookupSettledForId(adoptedModelId);
+            settleFailed();
             return;
           }
           setProfilePrice(data.profilePrice ?? null);
-          setProfileLookupFailedForId(null);
+          setProfileLookupFailedForKey(null);
           setEffectiveTokenLimits(data.effectiveTokenLimits ?? null);
-          // Only an untouched prefill follows the id. A number the operator
+          // Only an untouched prefill follows the key. A number the operator
           // typed is theirs and stays.
-          if (data.fields && !maxOutputTouchedRef.current) {
-            const nextCap = data.fields.maxOutputTokens ?? null;
-            capProposedForIdRef.current = adoptedModelId;
-            setForm((current) => ({ ...current, maxOutputTokens: nextCap }));
+          if (data.fields) {
+            const fields = data.fields;
+            const untouched = DRAFT_FOLLOWED_FIELDS.filter(
+              (field) => !touchedDraftFieldsRef.current.has(field)
+            );
+            draftProposedForKeyRef.current = lookupKey;
+            draftPairRef.current = requestedPair;
+            setForm((current) => ({
+              ...current,
+              ...Object.fromEntries(
+                untouched.map((field) => [field, fields[field] ?? DRAFT_FIELD_BLANK[field]])
+              ),
+            }));
+            if (!touchedDraftFieldsRef.current.has("reasoning")) {
+              setAdoptReasoningSuggested(Boolean(data.suggestions?.reasoning));
+              setAdoptReasoningConfirmed(false);
+            }
+            // Asked again whenever this response writes a documented price into
+            // any price field -- not only when none was touched. Typing one
+            // price and then having the draft fill the other two from the
+            // documentation is exactly the order in which an unchecked price
+            // would otherwise reach the save.
+            const priceFilledFromDocs =
+              Boolean(data.suggestions?.price) &&
+              PRICE_FIELDS.some(
+                (field) =>
+                  !touchedDraftFieldsRef.current.has(field) &&
+                  typeof fields[field] === "number"
+              );
+            if (priceFilledFromDocs) {
+              setAdoptPriceSuggested(true);
+              setAdoptPriceConfirmed(false);
+            } else if (!priceFieldsTouched(touchedDraftFieldsRef.current)) {
+              setAdoptPriceSuggested(false);
+              setAdoptPriceConfirmed(false);
+            }
           }
-          setLookupSettledForId(adoptedModelId);
+          setPricingProfileProposal(data.pricingProfileProposal ?? null);
+          setGuidanceKey(lookupKey);
+          setLookupSettledForKey(lookupKey);
           if (data.unknowns) setAdoptUnknowns(data.unknowns);
           if (data.notes) setAdoptNotes(data.notes);
         } catch {
           // A failed re-resolution must not leave the operator stuck. The save is
           // judged by the server, which resolves the profile itself, so the
           // panel stops gating rather than locking the screen.
-          if (!cancelled) {
-            setProfileLookupFailedForId(adoptedModelId);
-            setLookupSettledForId(adoptedModelId);
-          }
+          if (!cancelled) settleFailed();
         }
       })();
     }, 400);
@@ -494,7 +641,9 @@ export function AdminModelRegistryPanel() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [adoptWorkItemId, adoptedModelId, profilePrice?.modelId, lookupSettledForId, profileLookupFailedForId]);
+    // `form.provider` and `form.apiModel` reach this effect through `lookupKey`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adoptWorkItemId, adoptedModelId, lookupKey, lookupSettledForKey, profileLookupFailedForKey]);
   // The values an empty token field saves as, for the class currently chosen
   // and the id currently in the form. Absent for any other id: a default
   // resolved for the proposed id says nothing about a corrected one.
@@ -508,12 +657,10 @@ export function AdminModelRegistryPanel() {
   // Settled for the id in the form, or already priced for it. Derived rather
   // than stored so no effect has to flip it back, and so an id typed after a
   // lookup started is pending again the moment it changes.
-  const profileLookupPending = Boolean(
-    adoptWorkItemId &&
-      adoptedModelId &&
-      profilePrice?.modelId !== adoptedModelId &&
-      lookupSettledForId !== adoptedModelId
-  );
+  const profileLookupPending = Boolean(lookupKey && lookupSettledForKey !== lookupKey);
+  // Not current without a key: an emptied id is not the id the guidance was
+  // written for, and showing it would put the previous proposal back on screen.
+  const guidanceIsCurrent = !adoptWorkItemId || (lookupKey !== null && guidanceKey === lookupKey);
   const blankTokens = adoptWorkItemId
     ? blankTokenFieldValues({
         // Unknown while the lookup is pending or has failed: whether a blank
@@ -588,7 +735,28 @@ export function AdminModelRegistryPanel() {
     setValidation(null);
   };
 
+  // A different model, at the moment the operator picks it. Everything the
+  // previous pair proposed or the operator typed about it goes, and so do the
+  // reasoning and price confirmations: the server checks that the pair was
+  // observed, not that these numbers describe it. Done here rather than in the
+  // lookup's debounce, so a value typed for the new pair while the lookup
+  // waits is not wiped when it fires.
+  // Called only when the pair the lookup key is built from actually changes --
+  // the same trimmed comparison the key makes -- so a stray space does not wipe
+  // the form without the lookup that would refill it.
+  function startNewPair() {
+    draftPairRef.current = null;
+    draftProposedForKeyRef.current = null;
+    touchedDraftFieldsRef.current = new Set();
+    setForm((current) => ({ ...current, ...DRAFT_FIELD_BLANK }));
+    setAdoptReasoningSuggested(false);
+    setAdoptReasoningConfirmed(false);
+    setAdoptPriceSuggested(false);
+    setAdoptPriceConfirmed(false);
+  }
+
   const selectProvider = (nextProvider: AiProvider) => {
+    if (adoptWorkItemId && nextProvider !== form.provider) startNewPair();
     setForm((current) => ({
       ...current,
       provider: nextProvider,
@@ -892,11 +1060,17 @@ export function AdminModelRegistryPanel() {
                     {m.adopt.unknownsTitle}
                   </p>
                   <ul className="mt-2 grid gap-1 text-xs text-zinc-300">
-                    {adoptUnknowns.map((item) => (
-                      <li key={item}>· {item}</li>
-                    ))}
+                    {guidanceIsCurrent ? (
+                      adoptUnknowns.map((item) => <li key={item}>· {item}</li>)
+                    ) : !lookupKey ? (
+                      <li>· {m.adopt.draftNeedsId}</li>
+                    ) : profileLookupFailed ? (
+                      <li>· {m.adopt.draftFailed}</li>
+                    ) : (
+                      <li>· {m.adopt.draftReloading}</li>
+                    )}
                   </ul>
-                  {adoptNotes.length ? (
+                  {guidanceIsCurrent && adoptNotes.length ? (
                     <>
                       <p className="mt-4 text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
                         {m.adopt.notesTitle}
@@ -907,6 +1081,32 @@ export function AdminModelRegistryPanel() {
                         ))}
                       </ul>
                     </>
+                  ) : null}
+                  {guidanceIsCurrent && pricingProfileProposal ? (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase tracking-[0.12em] text-zinc-400">
+                          {m.adopt.profileProposalTitle}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void navigator.clipboard
+                              ?.writeText(pricingProfileProposal)
+                              .then(
+                                () => dispatchAppToast(m.adopt.proposalCopied, "success"),
+                                () => dispatchAppToast(m.adopt.proposalCopyFailed, "error")
+                              );
+                          }}
+                          className="rounded-md border border-zinc-700 px-2 py-0.5 text-[11px] font-bold text-zinc-200 hover:bg-zinc-800"
+                        >
+                          {m.adopt.copyProposal}
+                        </button>
+                      </div>
+                      <pre className="mt-2 max-h-64 overflow-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
+                        {pricingProfileProposal}
+                      </pre>
+                    </div>
                   ) : null}
                   {profileLookupFailed ? (
                     <p className="mt-3 text-xs text-amber-200">
@@ -970,7 +1170,7 @@ export function AdminModelRegistryPanel() {
                 <label className={labelClass}>{m.identity.registryId}<input disabled={editingId !== "new"} value={form.id} onChange={(e) => setField("id", e.target.value)} className={`${inputClass} disabled:opacity-60`} placeholder="provider/model-name" /></label>
                 <label className={labelClass}>{m.identity.displayName}<input value={form.name} onChange={(e) => setField("name", e.target.value)} className={inputClass} /></label>
                 <label className={labelClass}>{m.identity.provider}<select value={form.provider} onChange={(e) => selectProvider(e.target.value as AiProvider)} className={inputClass}>{AI_PROVIDERS.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-                <label className={labelClass}>{m.identity.apiModel}<input value={form.apiModel} onChange={(e) => setField("apiModel", e.target.value)} className={inputClass} placeholder={m.identity.apiModelPlaceholder} /></label>
+                <label className={labelClass}>{m.identity.apiModel}<input value={form.apiModel} onChange={(e) => { if (adoptWorkItemId && e.target.value.trim() !== form.apiModel.trim()) startNewPair(); setField("apiModel", e.target.value); }} className={inputClass} placeholder={m.identity.apiModelPlaceholder} /></label>
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-3 md:col-span-2">
                   <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-200">{m.identity.connectionTitle}</p>
                   <p className="mt-2 break-all font-mono text-xs text-zinc-300">{PROVIDER_API_CONFIGURATION[form.provider].baseUrl}</p>
@@ -996,21 +1196,27 @@ export function AdminModelRegistryPanel() {
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-4">
                 <legend className="px-2 text-sm font-bold text-white">{m.capabilities.legend}</legend>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => setField("supportsImage", e.target.checked)} /> {m.capabilities.imageInput}</label>
-                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => setField("supportsNativePdf", e.target.checked)} /> {m.capabilities.nativePdf}</label>
-                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button></span> : null}</label>
-                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => setField("contextWindowTokens", numericValue(e.target.value))} className={inputClass} /></label>
+                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsImage} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsImage"); setField("supportsImage", e.target.checked); }} /> {m.capabilities.imageInput}</label>
+                <label className="flex items-center gap-2 text-sm font-bold text-zinc-300"><input type="checkbox" checked={form.supportsNativePdf} onChange={(e) => { touchedDraftFieldsRef.current.add("supportsNativePdf"); setField("supportsNativePdf", e.target.checked); }} /> {m.capabilities.nativePdf}</label>
+                <label className={labelClass}>{m.capabilities.reasoning}<select value={form.reasoning} onChange={(e) => { touchedDraftFieldsRef.current.add("reasoning"); setField("reasoning", e.target.value as FormState["reasoning"]); setAdoptReasoningConfirmed(true); }} className={inputClass}><option value="none">{m.capabilities.reasoningLevels.none}</option><option value="low">{m.capabilities.reasoningLevels.low}</option><option value="medium">{m.capabilities.reasoningLevels.medium}</option><option value="high">{m.capabilities.reasoningLevels.high}</option></select>{adoptWorkItemId && adoptReasoningSuggested && !adoptReasoningConfirmed ? <span className="flex flex-wrap items-center gap-2 text-[11px] font-normal normal-case tracking-normal text-amber-200">{m.adopt.reasoningSuggested}<button type="button" onClick={() => setAdoptReasoningConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.reasoningConfirm}</button></span> : null}</label>
+                <label className={labelClass}>{m.capabilities.contextWindow}<input type="number" value={form.contextWindowTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("contextWindowTokens"); setField("contextWindowTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
                 <label className={labelClass}>{m.capabilities.maxImages}<input type="number" value={form.maxImages ?? ""} onChange={(e) => setField("maxImages", numericValue(e.target.value))} className={inputClass} /></label>
                 <label className={labelClass}>{m.capabilities.maxBase64ImageBytes}<input type="number" value={form.maxBase64ImagePayloadBytes ?? ""} onChange={(e) => setField("maxBase64ImagePayloadBytes", numericValue(e.target.value))} className={inputClass} /></label>
               </fieldset>
 
               <fieldset className="grid gap-4 rounded-2xl border border-zinc-800 p-4 md:grid-cols-3">
                 <legend className="px-2 text-sm font-bold text-white">{m.tokens.legend}</legend>
-                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { maxOutputTouchedRef.current = true; setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} /></label>
+                <label className={labelClass}>{m.tokens.maxOutputTokens}<input type="number" value={form.maxOutputTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("maxOutputTokens"); setField("maxOutputTokens", numericValue(e.target.value)); }} className={inputClass} placeholder={blankSavesAs(blankTokens?.maxOutputTokens)} /></label>
                 <label className={labelClass}>{m.tokens.reservationOutputTokens}<input type="number" value={form.reservationOutputTokens ?? ""} onChange={(e) => setField("reservationOutputTokens", numericValue(e.target.value))} className={inputClass} placeholder={blankSavesAs(blankTokens?.reservationOutputTokens)} /></label>
-                <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => setField("cachedInputPriceMultiplier", numericValue(e.target.value))} className={inputClass} /></label>
-                <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => setField("inputUsdPerMillionTokens", numericValue(e.target.value))} className={inputClass} /></label>
-                <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => setField("outputUsdPerMillionTokens", numericValue(e.target.value))} className={inputClass} /></label>
+                <label className={labelClass}>{m.tokens.cachedInputMultiplier}<input type="number" min={0} max={1} step="0.01" value={form.cachedInputPriceMultiplier ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("cachedInputPriceMultiplier"); setAdoptPriceConfirmed(true); setField("cachedInputPriceMultiplier", numericValue(e.target.value)); }} className={inputClass} /></label>
+                {adoptWorkItemId && adoptPriceSuggested && !adoptPriceConfirmed ? (
+                  <div className="md:col-span-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-200">
+                    {m.adopt.priceFromDocs}
+                    <button type="button" onClick={() => setAdoptPriceConfirmed(true)} className="rounded-md border border-amber-300/40 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-300/10">{m.adopt.confirmPrice}</button>
+                  </div>
+                ) : null}
+                <label className={labelClass}>{m.tokens.inputUsd}<input type="number" min={0} step="0.000001" value={form.inputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("inputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("inputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
+                <label className={labelClass}>{m.tokens.outputUsd}<input type="number" min={0} step="0.000001" value={form.outputUsdPerMillionTokens ?? ""} onChange={(e) => { touchedDraftFieldsRef.current.add("outputUsdPerMillionTokens"); setAdoptPriceConfirmed(true); setField("outputUsdPerMillionTokens", numericValue(e.target.value)); }} className={inputClass} /></label>
               </fieldset>
 
               {validation ? (
@@ -1030,7 +1236,7 @@ export function AdminModelRegistryPanel() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={() => void validate()} disabled={saving} className="inline-flex items-center gap-2 rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900 disabled:opacity-50"><CheckCircle2 className="h-4 w-4" /> {m.actions.validate}</button>
-                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || profileLookupPending || (adoptReasoningSuggested && !adoptReasoningConfirmed) || (!profileLookupFailed && (!isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
+                <button type="button" onClick={() => void save()} disabled={saving || (Boolean(adoptWorkItemId) && (adoptReason.trim().length < 4 || !adoptClassChosen || profileLookupPending || (adoptReasoningSuggested && !adoptReasoningConfirmed) || (adoptPriceSuggested && !adoptPriceConfirmed) || (!profileLookupFailed && (!isCreditFloor(creditFloor) || form.creditWeight < creditFloor.credits))))} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-sm font-bold text-white hover:bg-blue-500 disabled:opacity-50">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {form.id && models.find((model) => model.id === form.id)?.catalogDeleted ? m.actions.restoreAndSave : m.actions.saveModel}</button>
               </div>
             </div>
           </div>

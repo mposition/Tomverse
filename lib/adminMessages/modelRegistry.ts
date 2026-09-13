@@ -91,6 +91,17 @@ export const adminModelRegistryMessages = defineAdminMessages({
       reasoningSuggested:
         "Proposed from the provider's information, not set — confirm it before saving.",
       reasoningConfirm: "Confirm this value",
+      priceFromDocs:
+        "Prices were filled from the provider's documentation. Compare them with the source documents named above before confirming — a temporary price cannot always be recognised from its wording.",
+      confirmPrice: "Checked against the source",
+      draftNeedsId: "Enter a Registry ID to load the draft again.",
+      draftFailed:
+        "Could not load the draft for the chosen provider, model and ID. Check the provider's values and enter them yourself.",
+      draftReloading: "Loading the draft again for the chosen provider, model and ID.",
+      profileProposalTitle: "lib/modelPricing.ts profile proposal — review, then register it in a PR",
+      copyProposal: "Copy",
+      proposalCopied: "Copied the profile proposal.",
+      proposalCopyFailed: "Could not copy. Select the text and copy it yourself.",
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -271,6 +282,17 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "판매 등급을 직접 선택해야 저장됩니다 — 기본값은 아무도 정하지 않은 값입니다.",
       reasoningSuggested: "공급자 정보로 제안한 값입니다 — 확정해야 저장됩니다.",
       reasoningConfirm: "이 값으로 확정",
+      priceFromDocs:
+        "가격이 공급자 문서에서 채워졌습니다. 위 안내의 출처 문서와 대조한 뒤 확정해야 저장됩니다 — 임시 가격은 문구로 항상 알아볼 수 있지 않습니다.",
+      confirmPrice: "출처와 대조했습니다",
+      draftNeedsId: "Registry ID를 입력하면 초안을 다시 불러옵니다.",
+      draftFailed:
+        "선택한 공급자·모델·ID의 초안을 불러오지 못했습니다. 공급자가 제공한 값을 직접 확인해 입력하세요.",
+      draftReloading: "선택한 공급자·모델·ID에 대한 초안을 다시 불러오는 중입니다.",
+      profileProposalTitle: "lib/modelPricing.ts profile 제안 — 검토 후 PR로 등록",
+      copyProposal: "복사",
+      proposalCopied: "Profile 제안을 복사했습니다.",
+      proposalCopyFailed: "복사하지 못했습니다. 직접 선택해 복사하세요.",
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",

@@ -82,7 +82,11 @@ const effectiveProfilePrice = (
   body: Parameters<typeof adoptionPreflightRefusal>[0]["body"],
   worstCaseInputTokens: number
 ) => {
-  if (!getModelPricingProfile(body.id)) return null;
+  const profile = getModelPricingProfile(body.id);
+  // Only a profile for this exact pair is an inheritance. See profileForOtherPair.
+  if (!profile || profile.provider !== body.provider || profile.apiModelId !== body.apiModel) {
+    return null;
+  }
   const resolved = resolveModelPricing(
     {
       id: body.id,
@@ -179,6 +183,12 @@ const readAdoptionContext = async (
     }),
     providerPairRegistered,
     profilePrice: effectiveProfilePrice(body, worstCaseInputTokens),
+    profileForOtherPair: (() => {
+      const profile = getModelPricingProfile(body.id);
+      return profile && (profile.provider !== body.provider || profile.apiModelId !== body.apiModel)
+        ? { provider: profile.provider, apiModelId: profile.apiModelId }
+        : null;
+    })(),
     // The limit the runtime actually enforces, not the one this module would
     // assume. A deployment that raised it is shown a floor that covers it.
     worstCaseInputTokens,

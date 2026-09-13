@@ -42,6 +42,15 @@ import {
   modelProductSurface,
 } from "@/lib/modelLifecycleTriage";
 import { adoptionTransitionPath } from "@/lib/modelLifecycleWorkItemCore";
+import {
+  buildPricingProfileProposal,
+  docEvidenceIsFresh,
+  docPricePrefill,
+  type DocEvidenceSource,
+  type DocPriceRefusal,
+  type ProviderModelDocParse,
+  type ProviderModelDocProvider,
+} from "@/lib/providerModelDocsCore";
 
 /**
  * The largest prompt a user can send, from `CHAT_USER_MAX_INPUT_TOKENS`.
@@ -350,8 +359,32 @@ export const blankTokenFieldValues = (input: {
 
 export type AdoptionFieldSource =
   | "provider_catalogue"
+  /** The provider's documentation, read by the daily enrichment. See lib/providerModelDocsCore.ts. */
+  | "provider_docs"
   | "derived"
   | "needs_decision";
+
+/** What the daily documentation read left for this model, as the draft consumes it. */
+export type AdoptionDocEvidence = {
+  parse: ProviderModelDocParse | null;
+  /** Every document the parse read, first the one its fields came from, for the operator to open and check. */
+  sources: readonly DocEvidenceSource[];
+  fetchedAt: Date | null;
+};
+
+const DOC_PRICE_REFUSAL_TEXT: Record<Exclude<DocPriceRefusal, "profile_covers">, string> = {
+  no_evidence: "공급자 문서에서 읽은 가격이 없습니다. 공식 가격표에서 확인해 입력합니다.",
+  stale:
+    "문서 증거가 오래돼 채우지 않았습니다. 그 사이 가격이 바뀌었을 수 있고, 오래된 낮은 가격이 override로 들어가면 모든 요청이 그 가격으로 과금됩니다. 공식 가격표에서 확인해 입력합니다.",
+  problems: "문서를 읽었지만 구조가 예상과 달라 가격을 신뢰하지 않았습니다. 공식 가격표에서 확인해 입력합니다.",
+  incomplete: "문서에 입력·출력 단가가 모두 있지 않아 채우지 않았습니다.",
+  tiered:
+    "문서에 장문 구간 가격이 있어 채우지 않았습니다. 이 칸은 구간을 담지 못해, 숫자를 넣으면 임계값을 넘는 요청이 모두 짧은 문맥 가격으로 과금됩니다. 아래 profile 제안으로 lib/modelPricing.ts에 등록하는 것을 권합니다.",
+  long_context_unknown:
+    "문서가 장문 구간 과금 여부를 말하지 않아 채우지 않았습니다. 이 칸은 구간을 담지 못하므로, 확인되지 않은 채 넣으면 과소 과금될 수 있습니다.",
+  promotional:
+    "문서의 가격이 프로모션 가격이라 채우지 않았습니다. 기간이 끝나면 바뀌는 가격을 고정 override로 넣지 않습니다.",
+};
 
 export type ModelAdoptionDraft = {
   /**
@@ -385,9 +418,15 @@ export type ModelAdoptionDraft = {
      * and leave a fossil that no longer follows the policy tomorrow.
      */
     reservationOutputTokens: null;
-    inputUsdPerMillionTokens: null;
-    outputUsdPerMillionTokens: null;
-    cachedInputPriceMultiplier: null;
+    /**
+     * From the provider's documentation, only when `docPricePrefill` finds the
+     * price flat, complete, not promotional and uncontested, and no profile
+     * covers the model. Anything else stays null and is named in `unknowns`:
+     * a number here is a permanent override that flattens tiers.
+     */
+    inputUsdPerMillionTokens: number | null;
+    outputUsdPerMillionTokens: number | null;
+    cachedInputPriceMultiplier: number | null;
     supportsImage: boolean;
     supportsNativePdf: boolean;
     /** A proposal while `suggestions.reasoning` is set; the panel makes it confirmed. */
@@ -410,8 +449,21 @@ export type ModelAdoptionDraft = {
    */
   suggestions: {
     reasoning: Exclude<AdoptionReasoning, "none"> | null;
+    /**
+     * The price columns were filled from provider documentation. The panel
+     * will not save them until the operator confirms them against the source:
+     * recognising temporary pricing by its wording is a warning, not a
+     * guarantee, and the person reading the page is the check that is.
+     */
+    price: boolean;
   };
   sources: Record<string, AdoptionFieldSource>;
+  /**
+   * A `lib/modelPricing.ts` entry written from the documentation, for a person
+   * to review and commit. Present above all for tiered models, whose price the
+   * registry's columns cannot hold. Never applied by anything.
+   */
+  pricingProfileProposal: string | null;
   /** Fields a person still has to answer, in the words the panel shows. */
   unknowns: string[];
   /** Values already settled, in the words the panel shows. */
@@ -453,12 +505,53 @@ export const buildAdoptionDraft = (input: {
   hasPricingProfile?: boolean;
   /** `CHAT_USER_MAX_INPUT_TOKENS`, for whether the output ceiling leaves room. */
   worstCaseInputTokens?: number;
+  /** What the daily documentation read found, if the provider is one it reads. */
+  docEvidence?: AdoptionDocEvidence | null;
+  /** The instant the draft is built for, for how old the evidence may be. */
+  now?: Date;
+  /**
+   * The registry id the operator currently has in the form. The profile
+   * proposal is keyed on it: a profile committed under the id this draft first
+   * suggested does nothing for a model saved under a corrected one.
+   */
+  registryModelId?: string | null;
+  /**
+   * A pricing profile exists for the registry id but describes a different
+   * provider or api model. A null price column would inherit it, and the
+   * runtime picks a profile by id alone -- so saving under this id would bill
+   * this model at another model's price.
+   */
+  profileForOtherPair?: { provider: string; apiModelId: string } | null;
 }): ModelAdoptionDraft => {
   const metadata = input.observation?.metadata ?? null;
-  const contextWindowTokens =
+  const now = input.now ?? new Date();
+  const evidenceFetchedAt = input.docEvidence?.fetchedAt ?? null;
+  // Stale evidence fills nothing -- not the price, and not the capability
+  // fields either. A page read weeks ago describes a model as it was then.
+  const evidenceFresh = docEvidenceIsFresh(evidenceFetchedAt, now);
+  const doc =
+    evidenceFresh && input.docEvidence?.parse?.status === "parsed"
+      ? input.docEvidence.parse.fields
+      : null;
+  const docSourceUrl = input.docEvidence?.sources[0]?.url ?? null;
+  const docSource = docSourceUrl
+    ? `${docSourceUrl}${
+        evidenceFetchedAt
+          ? ` (${evidenceFetchedAt.toISOString().slice(0, 10)} 조회)`
+          : ""
+      }`
+    : "공급자 문서";
+  // The models API first, the documentation where the API is silent. Where
+  // both speak and disagree, the API wins -- it answers for this account, the
+  // page for everybody -- and the disagreement is named rather than resolved
+  // quietly in either direction.
+  const apiContextWindow =
     positive(metadata?.contextLength) ?? positive(metadata?.inputTokenLimit);
-  const providerMaxOutputTokens = positive(metadata?.outputTokenLimit);
-  const supportsImage = metadata?.vision === true;
+  const contextWindowTokens = apiContextWindow ?? positive(doc?.contextWindowTokens);
+  const apiMaxOutput = positive(metadata?.outputTokenLimit);
+  const providerMaxOutputTokens = apiMaxOutput ?? positive(doc?.maxOutputTokens);
+  const imageFromApi = typeof metadata?.vision === "boolean";
+  const supportsImage = imageFromApi ? metadata?.vision === true : doc?.imageInput === true;
   const supportsNativePdf = metadata?.pdfInput === true;
   const worstCaseInputTokens =
     positive(input.worstCaseInputTokens) ?? WORST_CASE_INPUT_TOKENS;
@@ -488,15 +581,55 @@ export const buildAdoptionDraft = (input: {
   // Kept apart from  because the two ask for opposite actions.
   const notes: string[] = [];
 
-  if (contextWindowTokens !== null) sources.contextWindowTokens = "provider_catalogue";
-  else unknowns.push("컨텍스트 윈도우 — 공급자 목록에 없습니다.");
+  const numberText = (value: number) => value.toLocaleString("en-US");
+  if (apiContextWindow !== null) {
+    sources.contextWindowTokens = "provider_catalogue";
+    const documented = positive(doc?.contextWindowTokens);
+    if (documented !== null && documented !== apiContextWindow) {
+      unknowns.push(
+        `컨텍스트 윈도우 — 공급자 API는 ${numberText(apiContextWindow)}, 문서는 ${numberText(documented)}입니다. API 값을 채웠습니다.`
+      );
+    }
+  } else if (contextWindowTokens !== null) {
+    sources.contextWindowTokens = "provider_docs";
+    notes.push(`컨텍스트 윈도우 — ${docSource}에서 채웠습니다.`);
+  } else {
+    unknowns.push("컨텍스트 윈도우 — 공급자 목록과 문서 어디에도 없습니다.");
+  }
 
-  if (metadata?.vision === true) sources.supportsImage = "provider_catalogue";
-  else if (typeof metadata?.vision !== "boolean") {
+  if (imageFromApi) {
+    if (metadata?.vision === true) sources.supportsImage = "provider_catalogue";
+    if (typeof doc?.imageInput === "boolean" && doc.imageInput !== metadata?.vision) {
+      unknowns.push(
+        `이미지 입력 지원 — 공급자 API는 ${metadata?.vision ? "지원" : "미지원"}, 문서는 ${doc.imageInput ? "지원" : "미지원"}입니다. API 값을 채웠습니다.`
+      );
+    }
+  } else if (typeof doc?.imageInput === "boolean") {
+    sources.supportsImage = "provider_docs";
+    notes.push(`이미지 입력 지원 — ${docSource}의 입력 modality에서 채웠습니다.`);
+  } else {
     // The parser keeps "the provider did not say" apart from "the provider said
     // no", and collapsing the two here would save a model as explicitly
     // image-blind on the strength of a field that was simply absent.
     unknowns.push("이미지 입력 지원 — 공급자 목록이 말하지 않았습니다. 미지원으로 두었습니다.");
+  }
+
+  const docPrice = docPricePrefill({
+    parse: input.docEvidence?.parse ?? null,
+    hasPricingProfile: Boolean(input.hasPricingProfile),
+    fetchedAt: evidenceFetchedAt,
+    now,
+  });
+  if (input.docEvidence?.parse?.status === "parsed" && !evidenceFresh) {
+    unknowns.push(
+      `공급자 문서 — ${evidenceFetchedAt ? `${evidenceFetchedAt.toISOString().slice(0, 10)}에 읽은` : "읽은 시각을 알 수 없는"} 증거라 어떤 값도 채우지 않았습니다.`
+    );
+  }
+  const documentedMaxOutput = positive(doc?.maxOutputTokens);
+  if (apiMaxOutput !== null && documentedMaxOutput !== null && documentedMaxOutput !== apiMaxOutput) {
+    unknowns.push(
+      `최대 출력 상한 — 공급자 API는 ${numberText(apiMaxOutput)}, 문서는 ${numberText(documentedMaxOutput)}입니다. API 값으로 판단했습니다.`
+    );
   }
 
   // Named rather than guessed. Each of these is somebody's decision, and a
@@ -516,11 +649,40 @@ export const buildAdoptionDraft = (input: {
       "입력·출력 단가 — lib/modelPricing.ts의 profile을 상속합니다. 비워 두세요. 숫자를 넣으면 tier와 예정 가격이 영구 override 됩니다."
     );
     unknowns.push("판매 등급과 크레딧 — 최소 등급은 상속 가격으로 계산됩니다.");
+  } else if (docPrice.value) {
+    sources.inputUsdPerMillionTokens = "provider_docs";
+    sources.outputUsdPerMillionTokens = "provider_docs";
+    if (docPrice.value.cachedInputPriceMultiplier !== null) {
+      sources.cachedInputPriceMultiplier = "provider_docs";
+    }
+    // A note, but not one to leave alone: these are the override columns, and
+    // the lifecycle still owes a pricing validation before rollout.
+    notes.push(
+      `입력·출력 단가 — ${docSource}에서 US$${docPrice.value.inputUsdPerMillionTokens} / US$${docPrice.value.outputUsdPerMillionTokens}${
+        docPrice.value.cachedInputPriceMultiplier !== null
+          ? `, 캐시 입력 배수 ${docPrice.value.cachedInputPriceMultiplier}`
+          : ""
+      }을 채웠습니다. 단일 요율로 확인된 가격이며, 저장하면 관리자 override가 됩니다. 채택 뒤 pricing 검증은 그대로 남습니다.`
+    );
+    unknowns.push("판매 등급과 크레딧 — 채운 가격으로 최소 등급이 계산됩니다.");
   } else {
-    unknowns.push("입력·출력 단가 — 공급자 공식 가격표에서 확인해 입력합니다.");
+    unknowns.push(
+      `입력·출력 단가 — ${DOC_PRICE_REFUSAL_TEXT[docPrice.refusal === "profile_covers" ? "no_evidence" : docPrice.refusal]}`
+    );
+    if (doc?.promotional) unknowns.push(`프로모션 문구 — ${doc.promotional.note}`);
+    if (doc?.longContext.kind === "tiered") {
+      unknowns.push(
+        `장문 구간 — 문서 기준 ${numberText(doc.longContext.thresholdTokens)} 입력 토큰 초과 시 입력 ${doc.longContext.inputMultiplier}배, 출력 ${doc.longContext.outputMultiplier}배입니다.`
+      );
+    }
     unknowns.push("판매 등급과 크레딧 — 최소 등급은 가격을 넣으면 계산됩니다.");
   }
   unknowns.push("최소 플랜 — Pro로 두었습니다. 더 열려면 제품 결정이 필요합니다.");
+  if (input.profileForOtherPair) {
+    unknowns.push(
+      `Registry ID — 이 ID의 pricing profile은 다른 모델(${input.profileForOtherPair.provider} / ${input.profileForOtherPair.apiModelId})의 것입니다. 이 ID로는 저장되지 않습니다. 다른 ID를 쓰세요.`
+    );
+  }
 
   if (typeof metadata?.pdfInput === "boolean") {
     sources.supportsNativePdf = "provider_catalogue";
@@ -529,14 +691,13 @@ export const buildAdoptionDraft = (input: {
     unknowns.push("Native PDF — 공급자 목록이 말하지 않았습니다. 미지원으로 두었습니다.");
   }
 
-  const numberText = (value: number) => value.toLocaleString("en-US");
   if (input.hasPricingProfile) {
     sources.maxOutputTokens = "derived";
     notes.push(
       "최대 출력 토큰 — lib/modelPricing.ts의 profile 상한을 상속합니다. 비워 두세요. 숫자를 넣으면 profile이 바뀌어도 따라가지 않습니다."
     );
   } else if (outputCap.value !== null) {
-    sources.maxOutputTokens = "provider_catalogue";
+    sources.maxOutputTokens = apiMaxOutput !== null ? "provider_catalogue" : "provider_docs";
     notes.push(
       `최대 출력 토큰 — 공급자 상한 ${numberText(outputCap.value)}을 채웠습니다. 최대 입력 ${numberText(worstCaseInputTokens)}을 더해도 컨텍스트 ${numberText(contextWindowTokens ?? 0)} 안에 들어갑니다. profile이 없어 비우면 저장되지 않습니다.`
     );
@@ -580,9 +741,9 @@ export const buildAdoptionDraft = (input: {
       contextWindowTokens,
       maxOutputTokens,
       reservationOutputTokens: null,
-      inputUsdPerMillionTokens: null,
-      outputUsdPerMillionTokens: null,
-      cachedInputPriceMultiplier: null,
+      inputUsdPerMillionTokens: docPrice.value?.inputUsdPerMillionTokens ?? null,
+      outputUsdPerMillionTokens: docPrice.value?.outputUsdPerMillionTokens ?? null,
+      cachedInputPriceMultiplier: docPrice.value?.cachedInputPriceMultiplier ?? null,
       supportsImage,
       supportsNativePdf,
       reasoning: reasoning.value ?? "none",
@@ -594,7 +755,26 @@ export const buildAdoptionDraft = (input: {
       publiclyListed: false,
     },
     observedCapabilities: { providerMaxOutputTokens },
-    suggestions: { reasoning: reasoning.value },
+    suggestions: { reasoning: reasoning.value, price: Boolean(docPrice.value) },
+    pricingProfileProposal:
+      input.hasPricingProfile ||
+      !input.docEvidence ||
+      !input.docEvidence.fetchedAt ||
+      (input.provider !== "openai" && input.provider !== "anthropic")
+        ? null
+        : buildPricingProfileProposal({
+            modelId:
+              input.registryModelId?.trim() ||
+              registryIdFromApiModel(input.apiModel, input.takenIds ?? []),
+            provider: input.provider as ProviderModelDocProvider,
+            apiModel: input.apiModel,
+            parse: input.docEvidence.parse,
+            sources: input.docEvidence.sources,
+            fetchedAt: input.docEvidence.fetchedAt,
+            now,
+            // The cap the form's guard accepted, never the documented ceiling.
+            requestOutputCapTokens: outputCap.value,
+          }),
     sources,
     unknowns,
     notes,
@@ -692,6 +872,8 @@ export const adoptionPreflightRefusal = (input: {
   worstCaseInputTokens?: number;
   /** The costliest input token relative to list price, for the floor. */
   inputPriceMultiplier?: number;
+  /** A profile registered under the saved id for a different provider or api model. */
+  profileForOtherPair?: { provider: string; apiModelId: string } | null;
 }): { status: number; message: string } | null => {
   const { workItem } = input;
   if (!workItem) return { status: 404, message: "No such work item." };
@@ -711,6 +893,12 @@ export const adoptionPreflightRefusal = (input: {
   // is `lib/imageModelRegistry.ts`, `supportsImage` on this row means image
   // *input*, and a generation model saved here would be priced and routed as a
   // chat model.
+  if (input.profileForOtherPair) {
+    return {
+      status: 409,
+      message: `The pricing profile for ${input.body.id} describes ${input.profileForOtherPair.provider}/${input.profileForOtherPair.apiModelId}, not ${input.body.provider}/${input.body.apiModel}. Prices resolve by id, so this model would bill at that one's price. Save it under a different id.`,
+    };
+  }
   if (modelProductSurface(workItem.apiModel) !== "chat") {
     return {
       status: 409,
