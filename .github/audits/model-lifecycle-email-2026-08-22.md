@@ -991,6 +991,8 @@ ModelLifecycleWorkItemEvent   -- append-only
 - `pendingValidations`가 남아 있으면 `rollout_pending` 불가
 - `communicationRequired`면 `communication_pending`을 거치지 않고 종료 불가
 - 종단 상태는 재개봉 불가 — `completed` 포함. 재개는 새 item입니다
+  (**2026-09-13 개정, §51**: `closed_no_action`(운영 화면의 "제외")만 사람이 서면 사유와
+  함께 `discovered`로 되돌릴 수 있습니다. `rejected`·`completed`는 그대로 종단입니다)
 - 자동화는 생성만, 결정은 사람만 (`actor_required`)
 - 종단 timestamp는 정확히 하나 (`completed_at_check` / `closed_at_check`)
 
@@ -3832,3 +3834,71 @@ under."* version은 pin된 snapshot이고, 그것을 고쳐 쓰는 것은 과거
 이 셋이 정해지기 전에는 구현하지 않습니다. 지금 조용히 추가하면 **잘못된 문구를
 보내게 되고, 발송은 회수되지 않습니다.**
 
+## 51. 발견 대기열 결정 단순화 — 채택·제외와 재검토 (2026-09-13 · 완료)
+
+**운영자 결정(2026-09-13).** 발견 대기열의 운영 화면은 `채택`과 `제외` 두 결정만 둡니다.
+
+- **`결정 필요` 버튼 제거.** 대기열에 있다는 사실이 이미 결정이 필요하다는 뜻입니다.
+  `awaiting_decision` 상태와 채택 경로의 자동 전이 기록은 유지합니다.
+- **`보류` 버튼 제거.** 보류 뒤에도 같은 목록에 남고 대기 일수가 늘며 채택·제외 가능
+  여부가 같아, 아무것도 누르지 않은 것과 구분되지 않았습니다. 판단을 미루려면 누르지
+  않습니다. 실제 보류가 필요해지면 조건부로 목록에서 숨겼다가 복귀하는 snooze로 새로
+  설계합니다.
+- **`조치 없음` → `제외`, 그리고 재검토 가능.** 제외된 패밀리는 이후 자동 스캔이 다시
+  제안하지 않습니다(`workItemForObservation`은 상태와 무관하게 기존 item을 건드리지
+  않음). 기존 stage 정책은 그대로입니다 — prerelease로 기록된 결정은 같은 패밀리의 stable
+  release를 억제하지 않으므로(`decisionSuppressesCandidateIdentity`), 프리뷰·베타를 제외해도 정식
+  출시 버전은 새로 제안될 수 있고 확인 문구도 이를 밝힙니다. 그러나 가격·기능·제품 구성은 바뀔 수 있으므로 영구히 닫힌 상태는 위험합니다.
+  `(provider, apiModel, action)`이 unique라 §9.2의 "재개는 새 item"은 같은 모델에 대해
+  성립할 수 없었습니다. 그래서 **`closed_no_action → discovered` 한 전이만** 허용하고,
+  사람의 이름과 서면 사유를 이력에 남깁니다. `rejected`·`completed`는 종단으로 둡니다.
+
+### 51.1 감사 기록의 분리
+
+이전 패널은 행의 자동 분석 문장을 전이 `note`에 적어, AI 분석이 사람의 결정 사유처럼
+남았습니다. `ModelLifecycleWorkItemEvent`에 네 컬럼을 추가합니다(migration
+`20260913150000_model_lifecycle_decision_record`).
+
+| 컬럼 | 내용 |
+|---|---|
+| `decision` | `adopt` · `exclude` · `reopen` |
+| `reasonCode` | 제외 사유 선택지 6개(`WORK_ITEM_EXCLUSION_REASONS`) |
+| `operatorReason` | 운영자가 쓴 사유. 재검토와 `other`에는 필수 |
+| `analysisSnapshot` | 결정 시점에 대기열이 보여 준 분석. **서버가 계산**하며 요청에서 받지 않음. 제외는 패밀리 대표 행의 분석을 모든 구성원 이벤트에 기록 |
+
+행위자와 시각은 기존 `actorEmail`·`occurredAt`입니다. **채택**은 채택 경로의 마지막 상태에서
+`fromStatus = toStatus`인 별도 기록 이벤트(`recordAdoptionDecision`)로 남깁니다 — 이미 `approved`를
+지난 item도 같은 기록을 갖게 하기 위해서이며, 이 이벤트는 상태를 옮기지 않으므로 일일 요약의
+전이 수에서 뺍니다. 채택 분석을 계산하지 못하면 registry 생성 전에 503으로 거부합니다. 제외하면 item에
+`decision=reject`·`decisionReason`·`decidedAt`·`reviewerEmail`을 적고, 재검토하면 이 네
+값과 `closedAt`을 비웁니다(과거 결정은 이력에 남음). CHECK
+`ModelLifecycleWorkItemEvent_decision_shape_check`가 사유 없는 제외, 제외가 아닌 이벤트의
+사유 코드, 서면 사유 없는 재검토, 목표 상태가 맞지 않는 결정을 거부합니다.
+
+API: `PATCH /api/admin/model-lifecycle`에 두 형태를 추가했습니다.
+
+- `{decision: "exclude", reasonCode, operatorReason?, families: [{representativeId, workItemIds,
+  shownAnalysisFingerprint}]}` — 운영자가 읽은 행(대표)과 그 분석의 fingerprint를 보냅니다. 서버는
+  대표의 분석을 다시 계산해 fingerprint가 다르면 409 `ANALYSIS_CHANGED`, `workItemIds`가 서버가 지금
+  읽은 그 패밀리의 미결정 구성원 전체와 정확히 같지 않으면 409 `FAMILY_MISMATCH`, 미결정 대기열을
+  한 번에 다 읽지 못하면 503 `QUEUE_TOO_LARGE`로 아무것도 쓰지 않습니다. 쓰기 트랜잭션 안에서 미결정 id 집합을 다시
+  읽어, 확인 이후 새로 생기거나 되돌아온 item이 있으면 같은 409로 거부합니다. 결정 이벤트는 행위자가 없거나, 제외가 미결정 상태에서
+  출발하지 않으면 DB가 거부합니다. 제외·채택 이벤트는
+  분석 스냅샷이 없으면 서비스와 DB 양쪽에서 거부됩니다. 문장 대신 16자리 fingerprint를
+  보내므로 200건 벌크도 64 KiB 요청 한도 안에 들어갑니다.
+- `{decision: "reopen", operatorReason, families: [{representativeId, workItemIds}]}` — 재검토도 패밀리
+  단위입니다. 제외된 구성원 전체와 정확히 같아야 하며, 제외와 같은 409·503 규칙을 따릅니다.
+
+**잔여 위험(수용).** 패밀리 검사는 분석을 계산하느라 트랜잭션 밖에서 읽고, 트랜잭션 안의 재확인은
+테이블 잠금을 걸지 않습니다 — 채택 트랜잭션(행 잠금 뒤 UPDATE)과 교착했기 때문입니다. 따라서 재확인과
+commit 사이의 좁은 틈, 또는 대기열 테이블을 건드리지 않는 catalogue alias 변경으로 패밀리가 다시
+묶이는 경우에는 구성원 하나가 원래 보기에 남을 수 있습니다. 그 결과는 되돌릴 수 있고 화면에 보이며
+따로 결정할 수 있으므로, 직렬화 대신 검사로 둡니다.
+
+일반 전이 형태로 `closed_no_action`·`discovered`·`approved`에 가는 요청은 400으로 거부합니다. 승인은
+채택으로만 일어납니다.
+`GET ?view=excluded`가 제외된 item과 마지막 제외 기록을 돌려줍니다.
+
+**남는 것.** `scripts/close-filtered-model-lifecycle-items.mjs`는 계속 사유 코드 없이
+`note`만으로 닫습니다(제외됨 보기에 "사유 기록 없이 종료됨"으로 표시). 재검토한
+prerelease item은 그 스크립트를 다시 `--apply`하면 다시 닫힐 수 있습니다.

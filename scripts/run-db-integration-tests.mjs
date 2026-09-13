@@ -290,6 +290,10 @@ run(
     // What an automatic disable leaves behind: the queue row, its notice
     // requirement, and the account count that decides it.
     "tests/integration/model-lifecycle-auto-disable.db.test.ts",
+    // Excluding a discovered model and reviewing it again: the structured
+    // decision record, a rescan that leaves the exclusion alone, and the
+    // history constraints that refuse a decision without its record.
+    "tests/integration/model-lifecycle-exclusion.db.test.ts",
     // The reconciliation script's preconditions, run through the real command:
     // the rules have unit coverage, but only this shows --apply actually
     // reaches them before it touches a row.

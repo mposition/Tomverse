@@ -1118,6 +1118,7 @@ export function AdminModelRegistryPanel() {
                     <input
                       value={adoptReason}
                       onChange={(e) => setAdoptReason(e.target.value)}
+                      maxLength={1_000}
                       className={inputClass}
                       placeholder={m.adopt.reasonPlaceholder}
                     />
