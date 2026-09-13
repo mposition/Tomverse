@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, PackageSearch, RefreshCw } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminModelDiscoveryMessages } from "@/lib/adminMessages/modelDiscovery";
+import {
+  WORK_ITEM_EXCLUSION_REASONS,
+  analysisFingerprint,
+  type WorkItemExclusionReason,
+} from "@/lib/modelLifecycleWorkItemCore";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
@@ -41,6 +46,31 @@ export type ModelWorkItemRow = {
   reviewKind: string;
   product: ModelProduct;
   analysisKo: string;
+  /** Present only in the excluded view: what closed the item, and who. */
+  exclusion?: {
+    reasonCode: string | null;
+    operatorReason: string | null;
+    analysisSnapshot: string | null;
+    note: string | null;
+    actorEmail: string | null;
+    excludedAt: string;
+  } | null;
+};
+
+type QueueView = "open" | "excluded";
+
+type DecisionDialog = {
+  decision: "exclude" | "reopen";
+  /**
+   * One entry per family the operator chose: the row they read (its
+   * representative), the members the decision applies to, and a fingerprint
+   * of the sentence that row showed.
+   */
+  families: Array<{
+    representativeId: string;
+    workItemIds: string[];
+    shownAnalysisFingerprint: string;
+  }>;
 };
 
 type QueueResponse = {
@@ -104,17 +134,24 @@ const availabilityClass = (availability: Availability) => {
   return "border-zinc-700 bg-zinc-800 text-zinc-400";
 };
 
-const transitionableIds = (group: ModelFamilyGroup, to: string) => {
-  const allowedFrom =
-    to === "awaiting_decision"
-      ? new Set(["discovered", "deferred"])
-      : to === "deferred"
-        ? new Set(["discovered", "awaiting_decision"])
-        : new Set(["discovered", "awaiting_decision", "deferred"]);
-  return group.members
-    .filter((member) => allowedFrom.has(member.status))
+/**
+ * The members a decision applies to.
+ *
+ * Exclusion takes the members still undecided -- including any left in the two
+ * internal states the panel no longer offers as buttons -- and never an item
+ * somebody has already adopted and is walking to rollout. Reopening takes only
+ * excluded members.
+ */
+const EXCLUDABLE_STATUSES = new Set(["discovered", "awaiting_decision", "deferred"]);
+
+const decisionIds = (group: ModelFamilyGroup, decision: DecisionDialog["decision"]) =>
+  group.members
+    .filter((member) =>
+      decision === "exclude"
+        ? EXCLUDABLE_STATUSES.has(member.status)
+        : member.status === "closed_no_action"
+    )
     .map((member) => member.id);
-};
 
 /**
  * The member of a family an adoption would register, or null.
@@ -126,8 +163,9 @@ const transitionableIds = (group: ModelFamilyGroup, to: string) => {
  * reason.
  *
  * Only `add` items, and only ones the queue can still move. A retirement is
- * about a model the registry already has, and a closed item is a decision
- * somebody made: reopening it is a new work item, not a button.
+ * about a model the registry already has, and an excluded item is reopened
+ * first -- from the excluded view -- so the reopen is recorded with its reason
+ * before anything is adopted.
  */
 const adoptableMember = (group: ModelFamilyGroup) => {
   const candidate = group.representative;
@@ -202,31 +240,47 @@ export function AdminModelDiscoveryPanel() {
   const [availability, setAvailability] = useState<Availability | "all">("all");
   const [product, setProduct] = useState<ModelProduct | "all">("all");
   const [status, setStatus] = useState("all");
-  const [bulkNote, setBulkNote] = useState("");
   const [page, setPage] = useState(1);
+  const [view, setView] = useState<QueueView>("open");
+  const [dialog, setDialog] = useState<DecisionDialog | null>(null);
+  const [reasonCode, setReasonCode] = useState<WorkItemExclusionReason | "">("");
+  const [operatorReason, setOperatorReason] = useState("");
+
+  // Which load is current. A response from an earlier load -- the other view,
+  // or a refresh overtaken by a decision -- is dropped instead of replacing
+  // rows the operator is now looking at.
+  const loadGenerationRef = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++loadGenerationRef.current;
+    const current = () => generation === loadGenerationRef.current;
     setRefreshing(true);
     try {
-      const response = await fetch("/api/admin/model-lifecycle", {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        view === "excluded"
+          ? "/api/admin/model-lifecycle?view=excluded"
+          : "/api/admin/model-lifecycle",
+        { cache: "no-store" }
+      );
       if (!response.ok) {
         await discardResponseBody(response);
         throw new Error(String(response.status));
       }
       const data = (await response.json()) as QueueResponse;
+      if (!current()) return;
       setRows(data.items);
       setTotal(data.total);
       setTruncated(data.truncated);
       setFailed(false);
     } catch {
-      setFailed(true);
+      if (current()) setFailed(true);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (current()) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     queueMicrotask(() => void load());
@@ -285,8 +339,16 @@ export function AdminModelDiscoveryPanel() {
     currentPage * PAGE_SIZE
   );
 
-  const move = useCallback(
-    async (workItemIds: string[], to: string, note: string) => {
+  const openDecision = useCallback(
+    (decision: DecisionDialog["decision"], chosen: readonly ModelFamilyGroup[]) => {
+      const families = chosen
+        .map((group) => ({
+          representativeId: group.representative.id,
+          workItemIds: decisionIds(group, decision),
+          shownAnalysisFingerprint: analysisFingerprint(group.representative.analysisKo),
+        }))
+        .filter((family) => family.workItemIds.length > 0);
+      const workItemIds = families.flatMap((family) => family.workItemIds);
       if (workItemIds.length === 0) {
         dispatchAppToast(m.toast.noApplicableItems, "error");
         return;
@@ -295,52 +357,109 @@ export function AdminModelDiscoveryPanel() {
         dispatchAppToast(m.toast.tooManyItems(MAX_BULK_ITEMS), "error");
         return;
       }
-      if (
-        to === "closed_no_action" &&
-        !window.confirm(m.toast.closeConfirm(workItemIds.length))
-      ) {
+      setReasonCode("");
+      setOperatorReason("");
+      // Either decision is checked against the row the operator read, so the
+      // representative must be one of the members it covers.
+      if (families.some((family) => !family.workItemIds.includes(family.representativeId))) {
+        dispatchAppToast(m.toast.representativeNotExcludable, "error");
         return;
       }
-
-      setBusyIds(new Set(workItemIds));
-      try {
-        const response = await fetch("/api/admin/model-lifecycle", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workItemIds, to, note }),
-        });
-        const data = (await response.json().catch(() => null)) as {
-          message?: string;
-        } | null;
-        if (!response.ok) {
-          dispatchAppToast(
-            data?.message || m.toast.transitionRefused,
-            "error"
-          );
-          return;
-        }
-
-        const changed = new Set(workItemIds);
-        setRows((current) =>
-          to === "closed_no_action"
-            ? current.filter((row) => !changed.has(row.id))
-            : current.map((row) =>
-                changed.has(row.id) ? { ...row, status: to } : row
-              )
-        );
-        if (to === "closed_no_action") {
-          setTotal((current) => Math.max(0, current - workItemIds.length));
-        }
-        setSelectedFamilies(new Set());
-        dispatchAppToast(m.toast.updated(workItemIds.length), "success");
-      } catch {
-        dispatchAppToast(m.toast.unreachable, "error");
-      } finally {
-        setBusyIds(new Set());
-      }
+      setDialog({ decision, families });
     },
     [m]
   );
+
+  const dialogItemCount = dialog
+    ? dialog.families.reduce((sum, family) => sum + family.workItemIds.length, 0)
+    : 0;
+
+  const dialogReasonMissing =
+    dialog?.decision === "exclude"
+      ? !reasonCode || (reasonCode === "other" && !operatorReason.trim())
+      : !operatorReason.trim();
+
+  /**
+   * Sends the decision in the dialog.
+   *
+   * The body names the decision and the operator's own reason only. The
+   * analysis the row was showing is added by the server, so the record keeps
+   * what the queue said apart from what the person said.
+   */
+  const submitDecision = useCallback(async () => {
+    if (!dialog || dialogReasonMissing) return;
+    const { decision, families } = dialog;
+    const workItemIds = families.flatMap((family) => family.workItemIds);
+    setBusyIds(new Set(workItemIds));
+    try {
+      const response = await fetch("/api/admin/model-lifecycle", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          decision === "exclude"
+            ? {
+                decision,
+                reasonCode,
+                ...(operatorReason.trim() ? { operatorReason: operatorReason.trim() } : {}),
+                families,
+              }
+            : {
+                decision,
+                operatorReason: operatorReason.trim(),
+                families: families.map(({ representativeId, workItemIds: ids }) => ({
+                  representativeId,
+                  workItemIds: ids,
+                })),
+              }
+        ),
+      });
+      const data = (await response.json().catch(() => null)) as {
+        error?: string;
+        message?: string;
+      } | null;
+      if (!response.ok) {
+        if (
+          data?.error === "ANALYSIS_CHANGED" ||
+          data?.error === "FAMILY_MISMATCH" ||
+          data?.error === "QUEUE_TOO_LARGE"
+        ) {
+          setDialog(null);
+          dispatchAppToast(
+            data.error === "ANALYSIS_CHANGED"
+              ? m.toast.analysisChanged
+              : data.error === "FAMILY_MISMATCH"
+                ? m.toast.familyChanged
+                : m.toast.queueTooLarge,
+            "error"
+          );
+          void load();
+          return;
+        }
+        dispatchAppToast(data?.message || m.toast.transitionRefused, "error");
+        return;
+      }
+      // Any load already in flight read the queue before this decision; its
+      // answer would put the decided rows back.
+      loadGenerationRef.current += 1;
+      setRefreshing(false);
+      // Either decision moves the items to the other view.
+      const changed = new Set(workItemIds);
+      setRows((current) => current.filter((row) => !changed.has(row.id)));
+      setTotal((current) => Math.max(0, current - workItemIds.length));
+      setSelectedFamilies(new Set());
+      setDialog(null);
+      dispatchAppToast(
+        decision === "exclude"
+          ? m.toast.excluded(workItemIds.length)
+          : m.toast.reopened(workItemIds.length),
+        "success"
+      );
+    } catch {
+      dispatchAppToast(m.toast.unreachable, "error");
+    } finally {
+      setBusyIds(new Set());
+    }
+  }, [dialog, dialogReasonMissing, load, m, operatorReason, reasonCode]);
 
   /**
    * Marks one validation satisfied on an item that owes it.
@@ -394,29 +513,31 @@ export function AdminModelDiscoveryPanel() {
     [m]
   );
 
-  const moveGroup = (group: ModelFamilyGroup, to: string) => {
-    void move(
-      transitionableIds(group, to),
-      to,
-      `${group.representative.analysisKo} 관리자 패밀리 검토.`
+  const decideSelected = (decision: DecisionDialog["decision"]) => {
+    openDecision(
+      decision,
+      groups.filter((group) => selectedFamilies.has(group.key))
     );
   };
 
-  const moveSelected = (to: string) => {
-    const note = bulkNote.trim();
-    if (!note) {
-      dispatchAppToast(m.toast.bulkReasonRequired, "error");
-      return;
-    }
-    const ids = Array.from(
-      new Set(
-        groups
-          .filter((group) => selectedFamilies.has(group.key))
-          .flatMap((group) => transitionableIds(group, to))
-      )
-    );
-    void move(ids, to, note);
+  const switchView = (next: QueueView) => {
+    if (next === view || dialog !== null || busyIds.size > 0) return;
+    // Retire any load in flight now, not when the next one starts: that one
+    // is only scheduled, and an answer arriving in between is the other view's.
+    loadGenerationRef.current += 1;
+    setView(next);
+    setRows([]);
+    setTotal(0);
+    setLoading(true);
+    setSelectedFamilies(new Set());
+    setStatus("all");
+    setPage(1);
   };
+
+  const excludeReasonLabel = (code: string | null) =>
+    code && (WORK_ITEM_EXCLUSION_REASONS as readonly string[]).includes(code)
+      ? m.exclusionReasons[code as WorkItemExclusionReason]
+      : m.excluded.noReasonCode;
 
   const pageFamilyKeys = visibleGroups.map((group) => group.key);
   const allPageSelected =
@@ -433,20 +554,48 @@ export function AdminModelDiscoveryPanel() {
 
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+      {/*
+        Inert while a decision is open or being sent. The decision was made in
+        one view about that view's rows; letting focus reach the view switch or
+        another row's button would let the answer land on a different list.
+      */}
+      <div inert={dialog !== null || busyIds.size > 0}>
       <header className="mb-3 flex flex-wrap items-center gap-2">
         <PackageSearch className="h-4 w-4 text-zinc-400" aria-hidden />
         <h2 className="text-sm font-semibold text-zinc-100">{m.header.title}</h2>
         <span className="text-xs text-zinc-500">
-          {loading ? m.header.loading : m.header.counts(total, groups.length)}
+          {loading
+            ? m.header.loading
+            : view === "excluded"
+              ? m.header.excludedCounts(total, groups.length)
+              : m.header.counts(total, groups.length)}
         </span>
         {refreshing && !loading ? (
           <Loader2 className="h-3 w-3 animate-spin text-zinc-500" aria-label={m.header.refreshing} />
         ) : null}
       </header>
 
-      <p className="mb-4 text-xs leading-relaxed text-zinc-500">
+      <p className="mb-3 text-xs leading-relaxed text-zinc-500">
         {m.header.intro}
       </p>
+
+      <div className="mb-4 flex gap-1" role="group" aria-label={m.views.label}>
+        {(["open", "excluded"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={view === value}
+            onClick={() => switchView(value)}
+            className={
+              view === value
+                ? "rounded-md border border-zinc-500 bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-100"
+                : "rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+            }
+          >
+            {value === "open" ? m.views.open : m.views.excluded}
+          </button>
+        ))}
+      </div>
 
       {failed ? (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
@@ -469,7 +618,7 @@ export function AdminModelDiscoveryPanel() {
         </p>
       ) : rows.length === 0 && !failed ? (
         <p className="text-xs text-zinc-400">
-          {m.empty}
+          {view === "excluded" ? m.excluded.empty : m.empty}
         </p>
       ) : (
         <>
@@ -546,51 +695,38 @@ export function AdminModelDiscoveryPanel() {
           </div>
 
           <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-2">
-            <select
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                setPage(1);
-              }}
-              aria-label={m.filters.statusLabel}
-              className={selectClass}
-            >
-              <option value="all">{m.filters.allStatuses}</option>
-              <option value="discovered">discovered</option>
-              <option value="awaiting_decision">awaiting decision</option>
-              <option value="deferred">deferred</option>
-              <option value="approved">approved</option>
-              <option value="implementation_pending">implementation pending</option>
-              <option value="validation_pending">validation pending</option>
-              <option value="rollout_pending">rollout pending</option>
-              <option value="communication_pending">communication pending</option>
-            </select>
-            <input
-              value={bulkNote}
-              onChange={(event) => setBulkNote(event.target.value)}
-              maxLength={1_000}
-              placeholder={m.bulk.reasonPlaceholder}
-              aria-label={m.bulk.reasonLabel}
-              className={`${selectClass} min-w-[18rem] flex-1`}
-            />
-            <span className="text-xs text-zinc-500">
+            {view === "open" ? (
+              <select
+                value={status}
+                onChange={(event) => {
+                  setStatus(event.target.value);
+                  setPage(1);
+                }}
+                aria-label={m.filters.statusLabel}
+                className={selectClass}
+              >
+                <option value="all">{m.filters.allStatuses}</option>
+                <option value="discovered">discovered</option>
+                <option value="awaiting_decision">awaiting decision</option>
+                <option value="deferred">deferred</option>
+                <option value="approved">approved</option>
+                <option value="implementation_pending">implementation pending</option>
+                <option value="validation_pending">validation pending</option>
+                <option value="rollout_pending">rollout pending</option>
+                <option value="communication_pending">communication pending</option>
+              </select>
+            ) : null}
+            <span className="flex-1 text-xs text-zinc-500">
               {m.bulk.selected(selectedFamilies.size)}
             </span>
-            {[
-              ["awaiting_decision", m.transitions.needsDecision],
-              ["deferred", m.transitions.notYet],
-              ["closed_no_action", m.transitions.noAction],
-            ].map(([to, label]) => (
-              <button
-                key={to}
-                type="button"
-                disabled={selectedFamilies.size === 0 || busyIds.size > 0}
-                onClick={() => moveSelected(to)}
-                className="rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-200 disabled:opacity-40"
-              >
-                {label}
-              </button>
-            ))}
+            <button
+              type="button"
+              disabled={selectedFamilies.size === 0 || busyIds.size > 0}
+              onClick={() => decideSelected(view === "open" ? "exclude" : "reopen")}
+              className="rounded border border-zinc-600 px-2 py-1.5 text-xs text-zinc-200 disabled:opacity-40"
+            >
+              {view === "open" ? m.bulk.excludeSelected : m.bulk.reopenSelected}
+            </button>
           </div>
 
           <div className="max-h-[42rem] overflow-auto rounded-lg border border-zinc-800">
@@ -693,31 +829,69 @@ export function AdminModelDiscoveryPanel() {
                         {row.analysisKo}
                       </td>
                       <td className="py-3 pr-3 text-zinc-400">
-                        {Array.from(new Set(group.members.map((member) => member.status)))
-                          .join(", ")
-                          .replace(/_/g, " ")}
+                        {view === "excluded" && row.exclusion ? (
+                          <div className="max-w-[16rem] space-y-1">
+                            <p className="text-zinc-200">{excludeReasonLabel(row.exclusion.reasonCode)}</p>
+                            {row.exclusion.operatorReason || row.exclusion.note ? (
+                              <p className="text-[11px] text-zinc-400">
+                                {row.exclusion.operatorReason ?? row.exclusion.note}
+                              </p>
+                            ) : null}
+                            <p className="text-[10px] text-zinc-500">
+                              {m.excluded.by(
+                                row.exclusion.actorEmail ?? "—",
+                                row.exclusion.excludedAt.slice(0, 10)
+                              )}
+                            </p>
+                            {row.exclusion.analysisSnapshot ? (
+                              <details className="text-[10px] text-zinc-500">
+                                <summary className="cursor-pointer">{m.excluded.analysisAtDecision}</summary>
+                                <p className="mt-1 leading-relaxed">{row.exclusion.analysisSnapshot}</p>
+                              </details>
+                            ) : null}
+                          </div>
+                        ) : (
+                          Array.from(new Set(group.members.map((member) => member.status)))
+                            .join(", ")
+                            .replace(/_/g, " ")
+                        )}
                       </td>
                       <td className="py-3 pr-3 text-zinc-400">
                         {days === null ? "—" : m.table.days(days)}
                       </td>
                       <td className="py-3 pr-3">
                         <div className="flex max-w-[12rem] flex-wrap gap-1">
-                          {[
-                            ["awaiting_decision", m.transitions.needsDecision],
-                            ["deferred", m.transitions.notYet],
-                            ["closed_no_action", m.transitions.noAction],
-                          ].map(([to, label]) => (
+                          {view === "open" && adoptableMember(group) ? (
+                            <a
+                              href={`/admin/models?tab=registry&adopt=${encodeURIComponent(
+                                adoptableMember(group)!.id
+                              )}`}
+                              className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
+                            >
+                              {m.table.adopt}
+                            </a>
+                          ) : null}
+                          {view === "open" && decisionIds(group, "exclude").length > 0 ? (
                             <button
-                              key={to}
                               type="button"
-                              disabled={busy || transitionableIds(group, to).length === 0}
-                              onClick={() => moveGroup(group, to)}
+                              disabled={busy}
+                              onClick={() => openDecision("exclude", [group])}
                               className="rounded border border-zinc-600 px-2 py-1 text-[11px] text-zinc-200 disabled:opacity-40"
                             >
-                              {label}
+                              {m.table.exclude}
                             </button>
-                          ))}
-                          {group.representative.pendingValidations?.map((validation) => (
+                          ) : null}
+                          {view === "excluded" ? (
+                            <button
+                              type="button"
+                              disabled={busy || decisionIds(group, "reopen").length === 0}
+                              onClick={() => openDecision("reopen", [group])}
+                              className="rounded border border-zinc-600 px-2 py-1 text-[11px] text-zinc-200 disabled:opacity-40"
+                            >
+                              {m.table.reopen}
+                            </button>
+                          ) : null}
+                          {view === "open" && group.representative.pendingValidations?.map((validation) => (
                             <button
                               key={validation}
                               type="button"
@@ -731,16 +905,6 @@ export function AdminModelDiscoveryPanel() {
                               ✓ {validation}
                             </button>
                           ))}
-                          {adoptableMember(group) ? (
-                            <a
-                              href={`/admin/models?tab=registry&adopt=${encodeURIComponent(
-                                adoptableMember(group)!.id
-                              )}`}
-                              className="rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-bold text-blue-200 hover:bg-blue-500/20"
-                            >
-                              {m.table.adopt}
-                            </a>
-                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -778,6 +942,84 @@ export function AdminModelDiscoveryPanel() {
           </div>
         </>
       )}
+
+      </div>
+
+      {dialog ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onKeyDown={(event) => {
+            if (event.key === "Escape" && busyIds.size === 0) setDialog(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="model-discovery-decision-title"
+            className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-950 p-4 text-xs text-zinc-300"
+          >
+            <h3 id="model-discovery-decision-title" className="mb-2 text-sm font-semibold text-zinc-100">
+              {dialog.decision === "exclude"
+                ? m.dialog.excludeTitle(dialog.families.length, dialogItemCount)
+                : m.dialog.reopenTitle(dialog.families.length, dialogItemCount)}
+            </h3>
+            <p className="mb-3 leading-relaxed text-zinc-400">
+              {dialog.decision === "exclude" ? m.dialog.excludeNotice : m.dialog.reopenNotice}
+            </p>
+            {dialog.decision === "exclude" ? (
+              <fieldset className="mb-3 space-y-1">
+                <legend className="mb-1 font-medium text-zinc-200">{m.dialog.reasonLegend}</legend>
+                {WORK_ITEM_EXCLUSION_REASONS.map((code, index) => (
+                  <label key={code} className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="model-discovery-exclusion-reason"
+                      value={code}
+                      checked={reasonCode === code}
+                      onChange={() => setReasonCode(code)}
+                      autoFocus={index === 0}
+                    />
+                    {m.exclusionReasons[code]}
+                  </label>
+                ))}
+              </fieldset>
+            ) : null}
+            <label className="mb-3 block">
+              <span className="mb-1 block font-medium text-zinc-200">
+                {dialog.decision === "reopen" || reasonCode === "other"
+                  ? m.dialog.operatorReasonRequired
+                  : m.dialog.operatorReasonOptional}
+              </span>
+              <textarea
+                value={operatorReason}
+                onChange={(event) => setOperatorReason(event.target.value)}
+                maxLength={1_000}
+                rows={3}
+                autoFocus={dialog.decision === "reopen"}
+                className={`${selectClass} w-full`}
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={busyIds.size > 0}
+                onClick={() => setDialog(null)}
+                className="rounded border border-zinc-700 px-3 py-1.5 text-zinc-300 disabled:opacity-40"
+              >
+                {m.dialog.cancel}
+              </button>
+              <button
+                type="button"
+                disabled={dialogReasonMissing || busyIds.size > 0}
+                onClick={() => void submitDecision()}
+                className="rounded border border-zinc-500 bg-zinc-800 px-3 py-1.5 font-semibold text-zinc-100 disabled:opacity-40"
+              >
+                {dialog.decision === "exclude" ? m.dialog.confirmExclude : m.dialog.confirmReopen}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

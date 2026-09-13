@@ -2350,6 +2350,19 @@ model ModelLifecycleWorkItemEvent {
   note       String?
   evidence   Json?
 
+  /// adopt | exclude | reopen, on an event that records an operator decision.
+  /// Null on the steps between decisions and on the automatic creation event.
+  decision         String?
+  /// The exclusion reason chosen from WORK_ITEM_EXCLUSION_REASONS. Only on an
+  /// exclude, and required there.
+  reasonCode       String?
+  /// What the operator wrote. Required for a reopen and for reasonCode "other".
+  operatorReason   String?
+  /// The queue's automatic analysis as the operator saw it at the decision.
+  /// Kept apart from operatorReason so a suggestion is never recorded as the
+  /// reason a person gave.
+  analysisSnapshot String?
+
   @@index([workItemId, occurredAt])
 }
 

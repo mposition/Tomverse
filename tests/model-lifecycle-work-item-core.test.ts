@@ -7,6 +7,12 @@ import {
   modelDecisionIdentity,
   newCandidatesForQueue,
   observedPairsOf,
+  REOPENABLE_WORK_ITEM_STATUSES,
+  WORK_ITEM_EXCLUSION_REASONS,
+  workItemDecisionRecordRefusal,
+  workItemDecisionTarget,
+  analysisFingerprint,
+  ADOPTION_RECORD_STATUSES,
   observationsForExistingItems,
   selectQueueCandidates,
   trustedModelAliasEvidence,
@@ -123,16 +129,95 @@ test("an item owing nobody a notice closes directly", () => {
   assert.equal(move("rollout_pending", "completed"), null);
 });
 
-test("terminal states are terminal, including completed", () => {
+test("closed states stay closed, except an exclusion reopening to discovered", () => {
   for (const from of TERMINAL_WORK_ITEM_STATUSES) {
     for (const to of WORK_ITEM_STATUSES) {
+      const reopen = from === "closed_no_action" && to === "discovered";
       assert.equal(
-        move(from, to)?.code,
-        "terminal",
-        `${from} -> ${to} must be refused`
+        move(from, to)?.code ?? null,
+        reopen ? null : "terminal",
+        `${from} -> ${to}`
       );
     }
   }
+  assert.deepEqual([...REOPENABLE_WORK_ITEM_STATUSES], ["closed_no_action"]);
+});
+
+test("a reopen still needs the person making it", () => {
+  assert.equal(
+    move("closed_no_action", "discovered", { actorEmail: null })?.code,
+    "actor_required"
+  );
+});
+
+test("an exclusion needs a listed reason, and 'other' needs it written", () => {
+  for (const reasonCode of WORK_ITEM_EXCLUSION_REASONS) {
+    const refusal = workItemDecisionRecordRefusal({
+      decision: "exclude",
+      reasonCode,
+      operatorReason: null,
+    });
+    assert.equal(refusal?.code ?? null, reasonCode === "other" ? "reason_required" : null);
+  }
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "exclude", reasonCode: "other", operatorReason: "  " })?.code,
+    "reason_required"
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "exclude", reasonCode: "other", operatorReason: "launch in Q4" }),
+    null
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({
+      decision: "exclude",
+      reasonCode: "because" as never,
+      operatorReason: null,
+    })?.code,
+    "unknown_reason"
+  );
+});
+
+test("a reopen needs a written reason", () => {
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "reopen", operatorReason: "" })?.code,
+    "reason_required"
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "reopen", operatorReason: "x".repeat(1_001) })?.code,
+    "reason_required"
+  );
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "reopen", operatorReason: "Price dropped" }),
+    null
+  );
+});
+
+test("an adoption record needs a reason and stands where the adoption walk ends", () => {
+  assert.equal(
+    workItemDecisionRecordRefusal({ decision: "adopt", operatorReason: " " })?.code,
+    "reason_required"
+  );
+  assert.equal(workItemDecisionRecordRefusal({ decision: "adopt", operatorReason: "Worth it" }), null);
+  assert.deepEqual(
+    [...ADOPTION_RECORD_STATUSES].sort(),
+    ["communication_pending", "rollout_pending", "validation_pending"]
+  );
+});
+
+test("an analysis fingerprint is stable, fixed-width and sensitive to any change", () => {
+  const sentence = "현재 Tomverse의 같은 제작사 모델은 'Grok 4.5'입니다.";
+  assert.match(analysisFingerprint(sentence), /^[0-9a-f]{16}$/);
+  assert.equal(analysisFingerprint(sentence), analysisFingerprint(sentence));
+  assert.notEqual(analysisFingerprint(sentence), analysisFingerprint(sentence + " "));
+  assert.notEqual(analysisFingerprint(""), analysisFingerprint(" "));
+});
+
+test("each decision moves to the one state it names", () => {
+  assert.equal(workItemDecisionTarget("exclude"), "closed_no_action");
+  assert.equal(workItemDecisionTarget("reopen"), "discovered");
+  assert.equal(move("discovered", "closed_no_action"), null);
+  assert.equal(move("awaiting_decision", "closed_no_action"), null);
+  assert.equal(move("deferred", "closed_no_action"), null);
 });
 
 test("deferring is reversible and rejecting is not", () => {
