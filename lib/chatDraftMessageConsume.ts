@@ -14,6 +14,7 @@ import {
   toPublicMessageAttachment,
   type PublicMessageAttachment,
 } from "@/lib/messageAttachmentCore";
+import { prisma } from "@/lib/prisma";
 import { lockChatRecoveryConversation } from "@/lib/chatResponseAttemptPersistence";
 
 const opaqueId = z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/);
@@ -212,7 +213,6 @@ export async function preflightChatDraftForMessage(input: {
   draftConsume: ChatDraftConsume;
   message: DraftMessage;
 }): Promise<{ replay: boolean }> {
-  const { prisma } = await import("@/lib/prisma");
   return inspectChatDraftForMessage(prisma, input);
 }
 
@@ -267,7 +267,6 @@ export async function reconcileChatDraftMessageReceipt(input: {
   conversationId: string;
   receipt: ChatDraftMessageReceiptRequest;
 }): Promise<ChatDraftMessageReceipt> {
-  const { prisma } = await import("@/lib/prisma");
   return prisma.$transaction(async (tx) => {
     await lockChatRecoveryConversation(tx, input.userId, input.conversationId);
     const conversation = await tx.conversation.findFirst({
