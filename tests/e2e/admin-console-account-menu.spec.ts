@@ -65,8 +65,12 @@ test.describe("admin console account menu", () => {
     const menu = page.getByRole("menu", { name: "Administrator account" });
     await expect(menu).toBeVisible();
 
-    // The first item takes focus on open, so the menu is usable without a
-    // pointer at all.
+    // The first item takes focus on open, so the language choices added ahead
+    // of the navigation actions are usable without a pointer too.
+    await expect(page.getByTestId("admin-account-menu-locale-en")).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("admin-account-menu-locale-ko")).toBeFocused();
+    await page.keyboard.press("ArrowDown");
     await expect(page.getByTestId("admin-account-menu-home")).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await expect(page.getByTestId("admin-account-menu-signout")).toBeFocused();
