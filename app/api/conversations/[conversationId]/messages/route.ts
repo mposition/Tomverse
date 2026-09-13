@@ -16,6 +16,17 @@ import {
 } from "@/lib/apiSecurity";
 import { enqueueArtifactCleanupForMessages } from "@/lib/generatedArtifactStorage";
 import {
+  ActiveChatResponseAttemptError,
+  deleteChatResponseAttemptsForModelHistory,
+} from "@/lib/chatResponseAttemptDeletion";
+import {
+  ChatDraftConsumeConflictError,
+  chatDraftConsumeRequestSchema,
+  consumeChatDraftForMessage,
+  preflightChatDraftForMessage,
+} from "@/lib/chatDraftMessageConsume";
+import { scopedMessageId } from "@/lib/messageRequestIdentity";
+import {
   PUBLIC_MESSAGE_ATTACHMENT_SELECT,
   toPublicMessageAttachment,
 } from "@/lib/messageAttachmentCore";
@@ -25,6 +36,7 @@ import {
   bindMessageAttachments,
 } from "@/lib/messageAttachmentStorage";
 import {
+  exactExistingOwnedMessage,
   MessageAttachmentResendError,
   savedMessageAttachmentReferencesSchema,
   saveMessagesWithAttachmentReferences,
@@ -47,7 +59,11 @@ const attachmentUploadIdSchema = z.string().trim().min(1).max(64);
 
 const userMessageSchema = z
   .object({
-    id: z.string().uuid(),
+    // `id` is the pre-durable browser bundle's spelling. Treat it as an
+    // external request id and still derive the database Message id on the
+    // server; never restore the old trust-in-client-primary-key behaviour.
+    clientRequestId: z.string().uuid().optional(),
+    id: z.string().uuid().optional(),
     role: z.literal("user"),
     /*
       Empty is allowed, and that is the fix rather than an oversight.
@@ -66,6 +82,10 @@ const userMessageSchema = z
     attachmentReferences: savedMessageAttachmentReferencesSchema.optional(),
   })
   .strict()
+  .refine(
+    (message) => Boolean(message.clientRequestId) !== Boolean(message.id),
+    { message: "Provide exactly one message request id." }
+  )
   .refine((message) => !(message.attachmentUploadIds && message.attachmentReferences),
     { message: "Use one attachment reference format per message." })
   .refine(
@@ -74,14 +94,26 @@ const userMessageSchema = z
       (message.attachmentUploadIds?.length ?? 0) > 0 ||
       (message.attachmentReferences?.length ?? 0) > 0,
     { message: "A message must have text or at least one attachment." }
-  );
+  )
+  .transform(({ id, clientRequestId, ...message }) => ({
+    ...message,
+    clientRequestId: (clientRequestId ?? id)!,
+  }));
 const saveMessagesSchema = z
   .object({
     messages: z.array(userMessageSchema).min(1).max(3),
+    draftConsume: chatDraftConsumeRequestSchema.optional(),
   })
   .strict()
-  .refine((body) => new Set(body.messages.map((message) => message.id)).size === body.messages.length,
-    { message: "Message ids must be unique within one save." });
+  .refine((body) => new Set(body.messages.map((message) => message.clientRequestId)).size === body.messages.length,
+    { message: "Message request ids must be unique within one save." })
+  .refine(
+    (body) =>
+      !body.draftConsume ||
+      (body.messages.length === 1 &&
+        body.messages[0]?.clientRequestId === body.draftConsume.requestId),
+    { message: "A draft consumption must name the one message being saved." }
+  );
 
 export async function POST(
   req: Request,
@@ -107,7 +139,7 @@ export async function POST(
       });
       const existingConv = await prisma.conversation.findUnique({
           where: { id: conversationId },
-          select: { userId: true, password: true }
+          select: { userId: true, password: true, kind: true, productKey: true }
       });
 
       if (!existingConv || existingConv.userId !== userId) {
@@ -125,21 +157,49 @@ export async function POST(
       }
 
     const body = await readLimitedJson(req, 160 * 1024, saveMessagesSchema);
+    const messageMappings = body.messages.map((message) => ({
+      requestId: message.clientRequestId,
+      messageId: scopedMessageId(conversationId, message.clientRequestId),
+    }));
+    const internalIdByRequest = new Map(
+      messageMappings.map((mapping) => [mapping.requestId, mapping.messageId])
+    );
+    const messages = body.messages.map(({ clientRequestId, ...message }) => ({
+      ...message,
+      id: internalIdByRequest.get(clientRequestId)!,
+    }));
+    const draftConsume = body.draftConsume
+      ? {
+          scopeKey: body.draftConsume.scopeKey,
+          expectedRevision: body.draftConsume.expectedRevision,
+          messageId: internalIdByRequest.get(body.draftConsume.requestId)!,
+        }
+      : undefined;
+    if (body.draftConsume &&
+        (existingConv.kind !== "chat" || existingConv.productKey !== "chat")) {
+      return NextResponse.json(
+        {
+          error: "This draft cannot be consumed for this conversation.",
+          code: "CHAT_DRAFT_CONSUME_NOT_SUPPORTED",
+        },
+        { status: 409, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
     const requestedModelIds = Array.from(
-      new Set(body.messages.flatMap((message) => (message.modelId ? [message.modelId] : [])))
+      new Set(messages.flatMap((message) => (message.modelId ? [message.modelId] : [])))
     );
     const validModelFlags = await Promise.all(requestedModelIds.map(isEnabledRuntimeModelId));
     if (validModelFlags.some((valid) => !valid)) {
       return NextResponse.json({ error: "Unsupported model." }, { status: 400 });
     }
-    const contentBytes = body.messages.reduce(
+    const contentBytes = messages.reduce(
       (total, message) => total + Buffer.byteLength(message.content, "utf8"),
       0
     );
     const ownPrefix = session.user.email
       ? accountAttachmentPrefix(session.user.email)
       : null;
-    const carriesAttachments = body.messages.some(
+    const carriesAttachments = messages.some(
       (message) => (message.attachmentUploadIds?.length ?? 0) > 0 ||
         (message.attachmentReferences?.length ?? 0) > 0
     );
@@ -160,31 +220,78 @@ export async function POST(
       (messageId, ordinal) is what makes that idempotent rather than merely
       forgiving.
     */
-    const created = body.messages.some((message) => message.attachmentReferences !== undefined)
+    let draftWasConsumed = false;
+    const created = messages.some((message) => message.attachmentReferences !== undefined)
       ? await saveMessagesWithAttachmentReferences({
-          userId, conversationId, ownPrefix: ownPrefix ?? "", messages: body.messages,
-          beforeCreate: (tx) => assertMessageCapacity(tx, userId, conversationId, body.messages.length, contentBytes),
+          userId, conversationId, ownPrefix: ownPrefix ?? "", messages,
+          ...(draftConsume
+            ? {
+                beforePrepare: async () => {
+                  return preflightChatDraftForMessage({
+                    userId,
+                    conversationId,
+                    draftConsume,
+                    message: messages[0]!,
+                  });
+                },
+                beforeCommit: async (tx) => {
+                  const consumption = await consumeChatDraftForMessage(tx, {
+                    userId,
+                    conversationId,
+                    draftConsume,
+                    message: messages[0]!,
+                  });
+                  draftWasConsumed = !consumption.replay;
+                  return consumption;
+                },
+              }
+            : {}),
+          beforeCreate: (tx) => assertMessageCapacity(tx, userId, conversationId, messages.length, contentBytes),
         })
       : await prisma.$transaction(async (tx) => {
+      if (draftConsume) {
+        const consumption = await consumeChatDraftForMessage(tx, {
+          userId,
+          conversationId,
+          draftConsume,
+          message: messages[0]!,
+        });
+        if (consumption.replay) return { count: 0 };
+        draftWasConsumed = true;
+      }
       await assertMessageCapacity(
         tx,
         userId,
         conversationId,
-        body.messages.length,
+        messages.length,
         contentBytes
       );
-      const result = await tx.message.createMany({
-        data: body.messages.map((message) => ({
-          id: message.id,
-          conversationId,
-          role: "user",
-          content: message.content,
-          status: "normal",
-          modelId: message.modelId || null,
-        })),
-        skipDuplicates: true,
-      });
-      for (const message of body.messages) {
+      let count = 0;
+      for (const message of messages) {
+        const inserted = await tx.message.createMany({
+          data: [{
+            id: message.id,
+            conversationId,
+            role: "user",
+            content: message.content,
+            status: "normal",
+            modelId: message.modelId || null,
+          }],
+          skipDuplicates: true,
+        });
+        count += inserted.count;
+        if (!inserted.count) {
+          /*
+            A duplicate primary key proves neither ownership nor an exact
+            replay. Validate text, model and the ordered attachment identity
+            before binding anything. Otherwise a replay could mutate an
+            existing text-only Message by attaching a fresh upload to it.
+          */
+          if (!await exactExistingOwnedMessage(tx, message, userId, conversationId)) {
+            throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
+          }
+          continue;
+        }
         if (!message.attachmentUploadIds?.length || !ownPrefix) continue;
         await bindMessageAttachments(tx, {
           userId,
@@ -194,7 +301,7 @@ export async function POST(
           uploadIds: message.attachmentUploadIds,
         });
       }
-      return result;
+      return { count };
     });
 
     /*
@@ -208,7 +315,7 @@ export async function POST(
     const attachments = carriesAttachments
       ? await prisma.messageAttachment.findMany({
           where: {
-            messageId: { in: body.messages.map((message) => message.id) },
+            messageId: { in: messages.map((message) => message.id) },
             userId,
             conversationId,
           },
@@ -220,6 +327,8 @@ export async function POST(
     return NextResponse.json({
       success: true,
       created: created.count,
+      messageMappings,
+      ...(body.draftConsume && draftWasConsumed ? { draftConsumed: true } : {}),
       ...(carriesAttachments
         ? {
             attachments: attachments.map((attachment) => ({
@@ -238,6 +347,12 @@ export async function POST(
         { status: error.status }
       );
     }
+    if (error instanceof ChatDraftConsumeConflictError) {
+      return NextResponse.json(
+        { error: "This message no longer matches the draft being sent.", code: error.code },
+        { status: error.status, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
     if (error instanceof MessageAttachmentBindError) {
       // One answer for "no such upload" and "somebody else's upload": the
       // caller learns that this save cannot carry that file and nothing more.
@@ -249,7 +364,15 @@ export async function POST(
         })
       );
       return NextResponse.json(
-        { error: "An attachment in this message is not available.", code: error.code },
+        {
+          error: "An attachment in this message is not available.",
+          // Missing, foreign and out-of-prefix opaque upload ids are the same
+          // fact to a caller. Keep the precise reason in the server log above,
+          // but do not turn this endpoint into an upload-id existence oracle.
+          code: error.code === "ATTACHMENT_ALREADY_BOUND"
+            ? error.code
+            : "ATTACHMENT_UNAVAILABLE",
+        },
         { status: 400 }
       );
     }
@@ -320,6 +443,11 @@ export async function DELETE(
                 modelId: parsedModelId.data,
                 role: "assistant",
             });
+            await deleteChatResponseAttemptsForModelHistory(tx, {
+                userId,
+                conversationId,
+                modelId: parsedModelId.data,
+            });
             const deletedSources = await tx.message.deleteMany({
                 where: {
                     conversationId,
@@ -339,9 +467,16 @@ export async function DELETE(
         });
 
         return NextResponse.json({ success: true });
-    } catch (error) {
+  } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+
+    if (error instanceof ActiveChatResponseAttemptError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status, headers: { "Cache-Control": "private, no-store" } }
+      );
+    }
 
     console.error("Failed to delete messages:", error);
     return NextResponse.json({ error: "Failed to delete messages." }, { status: 500 });

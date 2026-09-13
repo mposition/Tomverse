@@ -72,6 +72,8 @@ model User {
   messageArtifacts                     MessageArtifact[]
   messageAttachments                   MessageAttachment[]
   messageAttachmentUploads             MessageAttachmentUpload[]
+  chatComposerDrafts                   ChatComposerDraft[]
+  chatResponseAttempts                 ChatResponseAttempt[]
   imageGenerationGroups                ImageGenerationGroup[]
   imageCreditReservations              ImageCreditReservation[]
   memoryExtractionCreditReservations   MemoryExtractionCreditReservation[]
@@ -317,6 +319,11 @@ model Conversation {
   routerSwitchReason    String?
   routerRecoveryModelId String?
 
+  /// Monotonic fence for Chat recovery claims. A per-model history clear
+  /// increments it under the same advisory lock used by claim, so a request
+  /// prepared before that clear cannot commit an attempt after it.
+  chatRecoveryEpoch Int @default(0)
+
   /// Policy: docs/policy/external-conversation-import-and-memory.md.
   /// The assistant profile version this conversation is pinned to (release C,
   /// policy §14). Set once when the conversation starts and never rewritten by
@@ -362,6 +369,8 @@ model Conversation {
   routingRuns           RoutingRun[]
   messageArtifacts      MessageArtifact[]
   messageAttachments    MessageAttachment[]
+  composerDrafts        ChatComposerDraft[]
+  responseAttempts      ChatResponseAttempt[]
   comparisonReviews     ComparisonReview[]
   imageGenerations      ImageGeneration[]
   imageGenerationGroups ImageGenerationGroup[]
@@ -445,6 +454,11 @@ model Message {
   /// downloadable, an attachment is supplied by the person and is only ever
   /// re-read server-side to build a later prompt.
   attachments MessageAttachment[]
+
+  /// Durable Chat response attempts whose persisted user turn is this row.
+  /// The assistant id is deliberately not a Message relation: the attempt is
+  /// claimed before an assistant Message exists.
+  responseAttempts ChatResponseAttempt[] @relation("ChatResponseAttemptSource")
 
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -600,6 +614,12 @@ model MessageAttachment {
   /// recognisable and so an operator can trace a stored file back to the
   /// request that accepted it.
   uploadId String?
+
+  /// Exact source attachment identity when this row was created by carrying
+  /// a prior conversation attachment forward. Kept as opaque provenance (not
+  /// a relation) so deleting the source turn cannot rewrite an idempotency
+  /// receipt for the saved message.
+  sourceAttachmentId String?
 
   /// When storage confirmed, with a 404, that this object is gone.
   ///
@@ -1004,6 +1024,61 @@ model ProviderProbeResult {
   @@index([provider, createdAt])
   @@index([provider, modelId, createdAt])
   @@index([runId])
+}
+
+// One durable authenticated Chat composer draft per account and logical scope.
+// `scopeKey` is either "new" or the conversation id. Attachment references
+// are ordered opaque ids only; route validation owns their exact JSON shape.
+model ChatComposerDraft {
+  id                   String       @id @default(cuid())
+  userId               String
+  scopeKey             String
+  conversationId       String?
+  text                  String       @default("")
+  attachmentReferences Json
+  revision              Int          @default(1)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scopeKey])
+  @@index([conversationId])
+}
+
+// One durable execution identity for an authenticated Chat answer. The
+// primary key is the assistant id selected before dispatch. It is not an FK to
+// Message because claim must precede provider and reservation work, while the
+// assistant Message is committed only later.
+model ChatResponseAttempt {
+  assistantMessageId  String   @id
+  userId              String
+  conversationId      String
+  sourceUserMessageId String
+  fingerprint         String
+  requestedModelId    String
+  actualModelId       String?
+  provider            String?
+  status              String   @default("claimed")
+  partialContent      String   @default("")
+  checkpointRevision  Int      @default(0)
+  ownerId             String
+  leaseExpiresAt      DateTime
+  finishReason        String?
+  failureCode         String?
+  terminalAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sourceUserMessage Message      @relation("ChatResponseAttemptSource", fields: [sourceUserMessageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([conversationId, updatedAt])
+  @@index([status, leaseExpiresAt])
+  @@index([sourceUserMessageId])
 }
 
 // One in-flight chat response. Counted to enforce concurrency, never to bill.

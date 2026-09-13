@@ -3,6 +3,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import {
     mockAuthenticatedApi,
     prepareGuestPage,
+    qaPersistedMessageId,
 } from "./support/app-fixtures";
 
 /**
@@ -271,11 +272,23 @@ const mockContinuationApi = async (
         `**/api/conversations/${CONVERSATION_ID}/messages`,
         async (route) => {
             const body = route.request().postDataJSON() as {
-                messages: { id: string; role: string; content: string }[];
+                messages: { clientRequestId: string; role: string; content: string }[];
             };
-            state.savedMessages.push(...body.messages);
-            state.tomverseMessages = [...state.tomverseMessages, ...body.messages];
-            await route.fulfill(json({ saved: body.messages.length }));
+            const mappings = body.messages.map((message) => ({
+                requestId: message.clientRequestId,
+                messageId: qaPersistedMessageId(CONVERSATION_ID, message.clientRequestId),
+            }));
+            const persisted = body.messages.map((message, index) => ({
+                ...message,
+                id: mappings[index]!.messageId,
+            }));
+            state.savedMessages.push(...persisted);
+            state.tomverseMessages = [...state.tomverseMessages, ...persisted];
+            await route.fulfill(json({
+                success: true,
+                created: persisted.length,
+                messageMappings: mappings,
+            }));
         }
     );
 

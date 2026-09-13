@@ -6,8 +6,12 @@
 위한 **진행 현황표**다. 구현 완료율, 품질 판정, 출시 승인 또는 현재 production
 상태를 자동 산출하는 registry가 아니다.
 
-- 작성 기준일: 2026-09-12. 아래 선행 benchmark의 고정 기록은 2026-09-11
+- 작성 기준일: 2026-09-13. 아래 선행 benchmark의 고정 기록은 2026-09-11
   당시 관측을 보존하며, 새 Chat 사용자 흐름의 상태는 별도 갱신 구획에서 구분한다.
+- 이번 영속 초안·응답 복구 작업의 base는
+  `c91a7c74a8e00e54fb8aeb73901116604f950cc5`, 로컬 기반 커밋은
+  `021cd04a04223a6b137959ab532a0d012a692d75`다. 아래 새 구획은 이 base 이후의
+  로컬 구현을 설명하며, 아직 Claude 승인·PR 병합·staging 배포를 뜻하지 않는다.
 - 이번 Chat 진입·단일 transcript·복구 작업의 base는
   `14997bcfbfa90c9bc431efcbba7b0a9ae3490859`다. PR #1367 merge
   `409cf20d1225b33958a051d21ea938cb6b62ac6e`와 해당 staging deployment
@@ -36,7 +40,7 @@
 
 ## 전체 웹 Chat 계획 추정 — planning-estimate-v1
 
-**현재 약 60%, 주관적 계획 범위 50–70%. 이전 약 55% 대비 +5%p.**
+**현재 약 65%, 주관적 계획 범위 55–75%. 이전 약 60% 대비 +5%p.**
 사용자가 요청한 대략적인 구현 진척 설명이며, 정식 완료율·품질 인증·출시
 준비도는 아니다. 이번 로컬 사용자 흐름 연결을 반영한 잠정 계획 판단이다.
 대상은 모바일 화면을 포함한 현재 **웹 Chat**의 C01–C20과 C21의 필요한 공용
@@ -46,15 +50,15 @@
 | 중복 없는 기능 그룹 | 계획 가중치 | 주관적 진척 추정 | 근거와 남은 불확실성 |
 | --- | --- | --- | --- |
 | C08–C18 기존 플랫폼 기능 | 40% | 약 80% | 재사용할 구현 기반이 다수 있으나 새 Chat 통합·mode별 회귀·기기 검증 완료율은 아님 |
-| C01–C07 + C21의 웹 공용 연결부 | 40% | 약 60% | gated entry·모델 변경을 가로지르는 transcript·명시적 질문 복구를 로컬 연결; 공개 전환·서버 재개·전체 기기 검증은 남음 |
+| C01–C07 + C21의 웹 공용 연결부 | 40% | 약 75% | gated entry·모델 변경 transcript에 영속 초안, 메시지 저장 확인, 부분 응답 checkpoint와 GET-only 재연결을 로컬 연결; 공개 전환·운영 복구·전체 기기 검증은 남음 |
 | C19–C20 Refiner·Planner·품질 평가 | 20% | 약 25% | 일부 plumbing과 offline 평가 기반은 있으나 정상 Planner 호출·실제 provider 관측·제품 품질 검증이 남음 |
 
-계산은 `0.40 × 80 + 0.40 × 60 + 0.20 × 25 = 61%`이며, 과도한 정밀도를
-피해 5%p 단위로 반올림하여 약 60%로 전달한다. 이전 계산은 동일한 가중치에서
-연결부 40%를 적용한 53% → 약 55%였다. 이번 연결부 20%p 증가 판단만 반영했고
+계산은 `0.40 × 80 + 0.40 × 75 + 0.20 × 25 = 67%`이며, 과도한 정밀도를
+피해 5%p 단위로 반올림하여 약 65%로 전달한다. 이전 계산은 동일한 가중치에서
+연결부 60%를 적용한 61% → 약 60%였다. 이번 연결부 15%p 증가 판단만 반영했고
 기존 플랫폼·Planner 그룹, 웹 범위·분모·산정 방법 버전은 바꾸지 않았다.
 가중치와 그룹 추정은 inventory와 이번 구현 근거를 바탕으로 한 계획 판단이지
-새 전체 코드 감사나 측정값이 아니다. 50–70%는 오래된 inventory와 미확인 통합
+새 전체 코드 감사나 측정값이 아니다. 55–75%는 오래된 inventory와 미확인 통합
 작업량의 불확실성을 드러내는 주관적
 범위이며 통계적 신뢰구간이 아니다. 21행은 같은 작업량의 완료 조건이 아니므로
 행 수·테스트 수·release gate 수를 단순 비율로 바꾸지 않는다. 선행 corpus의
@@ -68,6 +72,142 @@
 작업과 필요한 승인을 함께 보고한다. 정밀 측정이 없다는 이유로 대략적 설명을
 보류하지 않고 범위와 근거의 한계를 제시한다. 범위·가중치를 바꿀 때는 방법
 버전을 올려 이전 수치와의 직접 비교 가능 여부를 기록한다.
+
+## 이번 영속 초안·응답 복구 — 로컬 구현 상태
+
+범위와 경계는
+[영속 복구 정책](../policy/chat-durable-draft-and-attempt-recovery.md)에 있다.
+
+| 축 | 이번 로컬 변경 | 아직 뜻하지 않는 것 |
+| --- | --- | --- |
+| C06 영속 초안 | 계정·대화 scope별 revision CAS, 순서가 있는 불투명 첨부 참조, 전송 Message와 원자적 consume, 다른 탭 충돌 선택 UI | 익명 guest 초안의 서버 저장, 여러 기기의 자동 병합 또는 마지막 쓰기 우선 |
+| C05 응답 attempt | 인증된 Chat의 source Message를 먼저 확인하고 attempt를 claim; lease·소유자 CAS, 최대 100,000자 prefix checkpoint, terminal 상태·정산과 GET-only 재연결 | 중단된 provider 연결 자체의 재개, 서버 측 사용자 cancel, 5분을 넘는 무제한 polling |
+| 메시지 신원·멱등성 | client request UUID를 conversation namespace의 결정적 내부 UUID로 변환; exact text/model/ordered attachment replay만 허용하고 새 행에만 첨부 bind | 임의 client UUID를 DB Message ID로 신뢰하거나 변경된 재전송을 성공으로 간주 |
+| reload·실패 UX | 저장 응답이 불명확하면 민감한 비교 값을 URL에 넣지 않는 read-only receipt POST로 확인; active attempt를 원 질문 바로 뒤에 합성하고 canonical Message가 오면 교체; 저장 준비 중 중복 클릭 직렬화 | 실패를 성공으로 추정, reload가 새 provider 요청을 발생시키는 동작 |
+| 개인정보·수명주기 | draft·attempt를 계정 export/delete와 대화·모델 이력 삭제 경계에 포함; private no-store 응답과 소유권 query 사용 | 운영 retention 정책 변경 또는 저장된 prompt/답변의 분석·학습 목적 확대 |
+| 검증 상태 | production build, typecheck, 관련 lint, 전체 server contract 591건, 격리 PostgreSQL 102개 migration·drift 0, 영속 복구 23건·첨부 재전송 15건, 관련 desktop/mobile 브라우저 235건 통과. 의도된 project skip 9건은 통과에 넣지 않음 | Claude 독립 승인, Linux CI, 운영 DB·실제 R2/provider 검증, 병합·배포·공개 |
+
+이 구현으로 연결부 추정을 60%에서 75%로 올렸지만, 전체 Chat 추정은 가중 합산과
+5%p 반올림 때문에 약 60%에서 **약 65%**로만 이동한다. 구현·내부 검증·Claude
+검토·병합·배포·공개 승인을 서로 다른 상태로 유지한다. 같은 결함을 수정한 횟수나
+테스트 개수만으로 완료율을 추가 상승시키지 않는다.
+
+### 2026-09-13 내부 안정화 회차 기록
+
+최종 내부 검증 중 발견한 결함도 이번 기능 범위에서 닫았다. attempt polling과
+draft GET·PUT·DELETE의 사용하지 않는 응답 body를 모든 분기에서 소비하여 브라우저
+요청 완료 계약을 복구했다. late hydrate 첨부 회귀의 fixture는 production 공개
+계약과 달리 `uploadId`가 아닌 임의 id를 반환하고 있었으므로, 실제 서버와 같이
+불투명 upload 참조를 공개 id로 사용하도록 바로잡았다. 로컬 client-only id가 다른
+조건은 유지되어 원래 경합 검사의 목적을 약화하지 않는다.
+
+이 문구를 쓰기 전 관측은 전체 unit의 server test file 677개와 client 49건,
+server contract 591건, 격리 PostgreSQL 영속 복구 23건·첨부 재전송 15건,
+관련 desktop/mobile 브라우저 235건 통과와 의도된 project skip 9건·실패 0이다.
+production build·typecheck·lint·Prisma validate·migration status·schema drift 0과
+응답 body gate도 통과했다. 이 문서 갱신 뒤의 최종 source manifest 검사는 별도로
+다시 수행한다. 따라서 이 문단은 자기 자신까지 이미 검증됐다고 주장하거나 Claude
+독립 승인·Linux CI·실제 provider/R2·운영 DB·병합·배포를 앞당겨 선언하지 않는다.
+
+이번 회차는 같은 영속 복구 기능의 정확성·회귀 보완이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 최종 manifest 내부 검증과 Claude 읽기 전용 독립 검토, ② PR·통합 CI,
+③ 승인된 gate 안의 무과금 staging DB·복구 흐름 확인, ④ 기존 기능의 Chat 연결
+회귀, ⑤ Refiner·Planner 제안형 UI와 별도 승인된 실제 모델 품질 평가다.
+
+### 2026-09-14 Claude round 0 대응 기록
+
+동결 source `a6ea0837a13e1ea52ce1164792a8beaebb2c2cc3`에 대한 Claude 읽기 전용
+round 0은 `request_changes`와 지적 4건을 반환했다. Review·continuation까지
+전송 중 편집 가능해진 회귀, terminal 전환 뒤 증가한 checkpoint revision 때문에
+빈 사전-dispatch 실패가 보이던 조건, 사라진 첨부를 가진 서버 draft의 무한 GET
+실패, 실제 modal 동작이 없는 `alertdialog`가 각각 지적됐다. 검토 기록은 수정하지
+않고 보존하며, 아래 대응은 새 source로 별도 재검토한다.
+
+수정본은 전송 중 후속 draft 편집을 인증된 durable Chat에만 한정하고 기존 surface의
+single-flight 계약을 복구했다. 빈 사전-dispatch 실패 판정은 terminal transition의
+revision과 분리했다. 사라진 첨부가 있는 draft는 서버가 저장 행을 읽기에서 바꾸지
+않고 text와 CAS revision을 포함한 명시적 409로 돌려주며, 사용자가 어느 초안을
+유지할지 선택한 뒤에만 dangling reference를 제거하는 PUT을 수행한다. 하단 알림은
+focus trap이 없는 실제 동작에 맞춰 비모달 `alert`로 표현했다.
+
+이 문구를 쓰기 전 수정본의 집중 관측은 관련 단위·계약 묶음 **83/83**, draft route
+단독 **14/14**, desktop·compact·mobile Safari·mobile Chromium의 위험 시나리오
+**20/20** 통과다. production build·typecheck·수정 10파일 lint와 diff whitespace도
+통과했다. route 14건은 83건 묶음에 포함되므로 별도 합산하지 않는다. 첫 브라우저
+시도는 source 수정 뒤 build 전의 오래된 `.next`를 읽어 실패했고, 새 production
+build 뒤 같은 네 project를 재실행해 20/20을 확인했다. 이 기록은 아직 Claude
+round 1 승인, Linux CI, PR 병합, staging·production 배포 또는 실제 provider/R2
+검증을 뜻하지 않는다.
+
+같은 기능의 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 새 source의 Claude 재검토와
+기록 봉인, ② PR·통합 CI, ③ 승인된 범위의 무과금 staging DB 복구 흐름 확인,
+④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀, ⑤ Prompt Refiner
+제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 Claude round 1 대응 기록
+
+round 0 대응 source `6c950c2308f6a3577fc3b4421583ab037077f639`과 변경
+digest `sha256:d3dab6e90a1aacbf17d51994a97bb37288ff430e853082fe596cddeb09d71d84`에
+대한 Claude 읽기 전용 round 1은 `request_changes`와 지적 5건을 반환했다.
+비영속 경로의 assistant 저장이 source id 부재 때 임의 user Message를 고를 수 있던
+점, 복구 polling과 live stream 중 후속 draft의 Enter 전송이 parent guard에 닿기 전
+소비될 수 있던 점, context bundle 충돌에 기존 정책 밖 오류 코드를 추가한 점,
+rolling deploy 중 구 browser bundle이 새 필수 source id를 보내지 못하는 점이
+핵심이었다. 원본 verdict와 exchange 상태는 수정하지 않고 보존한다.
+
+수정본은 source id가 없는 비영속 저장에서 `createdAt`, `id` 내림차순으로 최신 user
+Message를 결정한다. 영속 Chat의 후속 draft는 응답 중에도 편집할 수 있지만 Enter와
+Send는 차단하며, live stream과 GET-only 복구 polling 모두 같은 UI 경계를 쓴다.
+context bundle 중복 소비는 기존 `CHAT_CONTEXT_BUNDLE_STALE`와
+`requiresPreflight: true`를 유지하고 세부 사유만 추가해 재시도 분기를 구분한다.
+배포 전에 열려 있던 browser의 `id`는 외부 request id로만 받아 conversation-scoped
+Message id를 서버에서 파생하고, owner·본문·순서가 있는 첨부 검증과 동일 rate limit을
+거친 뒤에만 durable attempt를 claim한다. client가 보낸 값을 DB primary key로 직접
+신뢰하지 않으며 두 request-id 표기를 함께 보내는 요청은 거부한다.
+
+이 문구를 쓰기 전 집중 관측은 관련 단위·서버 계약 **91/91**, desktop Chromium·
+compact·mobile Safari·mobile Chromium 위험 시나리오 **16/16** 통과다. production
+build 88개 route, typecheck, 수정 source·test lint와 diff whitespace도 통과했다.
+아직 최종 round 2의 Claude 판정, Linux 통합 CI, PR 병합, staging·production 배포,
+실제 provider·R2 호출을 뜻하지 않는다.
+
+이번 회차도 동일 기능의 검토 결함을 닫는 안정화 작업이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 마지막 Claude round 2와 검토 기록 봉인, ② PR·통합 CI, ③ 승인된 무과금 staging
+DB 복구 흐름, ④ 첨부·검색·Deep Research·artifact·profile의 Chat 연결 회귀,
+⑤ Prompt Refiner 제안형 UI와 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 최종 Claude 판정과 종료 후 보완 기록
+
+round 2는 commit `3defa1a9f6972a193bef5a44ccff1572a45b6230`, digest
+`sha256:6b7f8382f7e39f14c39d0f6804abe3e8d1bc6d12b6a0f2e4d9cbb2ce04bc9a0a`를
+검토해 `approve`를 반환했다. round 1의 5건은 모두 닫혔고 새 finding 3건은
+warning 1건·nit 2건으로 비차단 판정됐다. 다만 재현 가능한 finding이 수정 라운드
+상한에서 남았으므로 제어 프로그램은 규칙대로 `on_hold / revisions_exhausted`로
+종결됐다. 이 상태를 `passed`로 바꾸거나 같은 exchange를 다시 열지 않는다.
+
+종결 후에는 별도 Claude 호출 없이 실제 동작 결함 두 건을 보완했다. GET-only 복구
+polling에는 서버 취소 계약이 없으므로 아무 일도 하지 못하는 전역 Stop을 숨기고,
+live stream은 transcript 안의 실제 중지 동작만 유지한다. Message exact replay가
+더 새로운 서버 draft를 보존한 경우에는 `draftConsumed: true`를 반환하지 않고 실제
+삭제가 발생한 트랜잭션에만 그 증거를 싣는다. 세 번째 nit인 receipt HTTP method는
+정확한 draft text와 첨부 provenance를 URL에 넣지 않기 위해 read-only POST를
+유지하며, write·provider 호출이 없다는 의미와 이 설계 편차를 정책에 명시했다.
+**이 종결 후 보완 commit은 Claude가 읽은 digest에 포함되지 않는다.**
+
+종결 후 보완의 로컬 관측은 관련 단위·서버 계약 **91/91**, desktop Chromium·
+compact·mobile Safari·mobile Chromium의 recovery/live-stream 시나리오 **12/12**,
+production build 88개 route, typecheck, 수정 파일 lint와 diff whitespace 통과다.
+이는 Linux 통합 CI·병합·staging/production 배포 또는 실제 provider·R2 호출을
+대신하지 않는다.
+
+동일 기능의 안정화이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 이 회차 뒤 권장 순서는 ① PR·Linux 통합 CI,
+② 승인된 무과금 staging DB의 draft CAS·receipt·attempt readback smoke, ③ 첨부·검색·
+Deep Research·artifact·profile의 Chat 연결 회귀, ④ Prompt Refiner 제안형 UI,
+⑤ 별도 승인된 전체 모델 Router 품질 측정이다.
 
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
@@ -330,18 +470,19 @@ candidate=baseline 투영을 거부하며, runtime 소스 변조 후 전체 19�
 
 ## 권장 다음 순서와 필요한 결정
 
-1. **이번 slice의 최종 source 검증·Claude 독립 검토를 마친 뒤 통합한다.**
+1. **영속 초안·응답 복구의 최종 source 검증·Claude 독립 검토를 마친 뒤 통합한다.**
    중간 트리 실행과 최종 동결 실행을 분리한다. 기존 검토 기록은 재개하지 않으며
    실패한 체크나 미해결 지적을 면제하지 않는다. 통합 CI, staging 검증, 공개
    cutover·flag 활성화는 별도 단계다.
-2. **gated staging에서 기존 기능의 Chat 연결을 확인한다.** 첨부·웹 검색·
-   Deep Research·생성 파일·profile·공유/삭제를 위험 순서로 좁혀, 소유권·중복
-   과금·context 보존을 먼저 확인한다. 실 provider turn은 정확한 시나리오와
-   예산을 제시한 뒤 별도 승인을 받고 실행한다.
-3. **서버 재개 계약 후 durable recovery, 이어서 Refiner·Planner를 구현한다.**
-   현재의 명시적 새 전송과 동일 attempt 재개를 구분하고 멱등성·부분 저장·정산
-   경계를 먼저 정한다. Planner는 별도 안전·지연·비용 계약과 Claude 검토를
-   거친다. 새 provider 평가도 동결된 row·호출·중단 규칙과 별도 비용 승인 후에만
+2. **gated staging에서 영속 복구의 무과금 경계를 먼저 확인한다.** draft 저장·
+   reload·다른 탭 충돌·receipt 확인·terminal attempt readback을 실제 staging DB와
+   migration에서 확인하되, provider dispatch·flag 공개는 하지 않는다.
+3. **기존 기능의 Chat 연결 회귀를 위험 순서로 닫는다.** 첨부·웹 검색·Deep
+   Research·생성 파일·profile·공유/삭제를 좁혀 소유권·중복 과금·context 보존을
+   먼저 확인한다. 실 provider turn은 시나리오와 예산을 제시한 뒤 별도 승인받는다.
+4. **그 다음 Refiner·Planner를 제안형 UI부터 연결한다.** 원문 보존·주입 방어·
+   Router 입력 provenance·지연/비용 gate를 계약으로 먼저 고정하고 Claude 검토를
+   거친다. 새 provider 평가는 동결된 row·호출·중단 규칙과 별도 비용 승인 후에만
    진행하며, 과거 60회 승인을 상속하지 않는다.
 
 이 순서의 추천 자체는 신규 자동 착수·유료 실행·병합·배포 승인이 아니다.

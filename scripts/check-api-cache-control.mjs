@@ -16,13 +16,20 @@ import { API_ROUTES_CHOOSING_THEIR_OWN_CACHING } from "../lib/apiCacheControlPol
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-const files = execSync("git ls-files 'app/api/**/route.ts'", {
+// Ask Git for the directory and filter in JavaScript. Single-quoted glob
+// pathspecs are passed literally by Windows' command shell, which made the
+// audit see zero routes and report every exception as stale on that platform.
+const files = execSync(
+  "git ls-files --cached --others --exclude-standard -- app/api",
+  {
   cwd: root,
   encoding: "utf8",
-})
+  }
+)
   .trim()
   .split("\n")
-  .filter(Boolean);
+  .map((file) => file.trim().replaceAll("\\", "/"))
+  .filter((file) => file.endsWith("/route.ts"));
 
 const routes = files.map((file) => ({
   file,

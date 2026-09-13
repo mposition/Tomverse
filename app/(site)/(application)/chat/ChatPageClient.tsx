@@ -58,6 +58,11 @@ import { deriveWebSearchComposerState } from "@/lib/webSearchComposerState";
 import { WEB_SEARCH_COST_UNBOUNDED } from "@/lib/webSearchCostRefusalCode";
 import { Conversation, type ChatAttachment } from "@/components/chat/types";
 import { useConversationDrafts } from "@/components/chat/useConversationDrafts";
+import {
+  parseChatDraftMessageReceipt,
+  parseChatMessageSaveResponse,
+  parseMessageSaveMapping,
+} from "@/components/chat/chatDurableRecoveryClient";
 import { appendVoiceTranscript } from "@/lib/voiceTranscript";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
@@ -239,6 +244,49 @@ const uniqueStrings = (values: string[]) => Array.from(new Set(values));
  */
 const sameStringList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((value, index) => value === b[index]);
+
+const CHAT_MESSAGE_SAVE_TIMEOUT_MS = 30_000;
+const CHAT_MESSAGE_RECEIPT_TIMEOUT_MS = 20_000;
+
+declare global {
+  interface Window {
+    /** Loopback E2E-only deadline seam; deployed hosts use the constants. */
+    __tomverseChatMessageDeadlineMs?: number;
+  }
+}
+
+const chatMessageDeadlineMs = (productionMs: number) =>
+  window.location.hostname === "127.0.0.1" &&
+  Number.isFinite(window.__tomverseChatMessageDeadlineMs) &&
+  (window.__tomverseChatMessageDeadlineMs ?? 0) >= 10
+    ? window.__tomverseChatMessageDeadlineMs!
+    : productionMs;
+
+const fetchJsonWithTimeout = async (
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+) => {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    try {
+      return {
+        response,
+        body: await response.json() as unknown,
+        bodyValid: true as const,
+      };
+    } catch (error) {
+      // Invalid/empty JSON is a completed but unusable response. A body that
+      // stalls until the shared deadline remains a transport ambiguity.
+      if (controller.signal.aborted || !(error instanceof SyntaxError)) throw error;
+      return { response, body: null, bodyValid: false as const };
+    }
+  } finally {
+    window.clearTimeout(timeout);
+  }
+};
 
 /**
  * PATCHes one conversation's model settings and reports the server's
@@ -756,7 +804,20 @@ export function ChatPageClient({
     hasDraft,
     discardDraft,
     migrateDraft,
-  } = useConversationDrafts(currentChatId, identityKey);
+    draftConflict,
+    resolveDraftConflict,
+    draftSyncFailed,
+    retryDraftSync,
+    captureDraftSend,
+    prepareDraftSend,
+    commitDraftSend,
+    abortDraftSend,
+    reconcileDraftSend,
+  } = useConversationDrafts(
+    currentChatId,
+    identityKey,
+    mountedSurface === "chat" && identityKey?.startsWith("account:") === true
+  );
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -771,9 +832,31 @@ export function ChatPageClient({
    * derivation; it changes nothing about credits, preflight, admission,
    * concurrency or message storage.
    */
-  const [pendingSubmission, setPendingSubmission] = useState<{
+  type PendingSubmissionOwner = {
+    token: string;
+    identityKey: string | null;
+    identityEpoch: number;
     originConversationId: string | null;
-  } | null>(null);
+    recovery?: "message-receipt-unknown";
+  };
+  const pendingSubmissionOwnersRef = useRef(
+    new Map<string, PendingSubmissionOwner>()
+  );
+  const [pendingSubmissionOwners, setPendingSubmissionOwners] = useState(
+    () => new Map<string, PendingSubmissionOwner>()
+  );
+  const submitIdentityFenceRef = useRef({ identityKey, epoch: 0 });
+  useLayoutEffect(() => {
+    const current = submitIdentityFenceRef.current;
+    if (current.identityKey === identityKey) return;
+    submitIdentityFenceRef.current = {
+      identityKey,
+      epoch: current.epoch + 1,
+    };
+  }, [identityKey]);
+  const pendingSubmissionOwnerKey = identityKey ?? "unresolved";
+  const pendingSubmission =
+    pendingSubmissionOwners.get(pendingSubmissionOwnerKey) ?? null;
   const [promptPayload, setPromptPayload] = useState<{
     id: string;
     text: string;
@@ -1443,10 +1526,31 @@ export function ChatPageClient({
   // Only the newest selection intent may apply an asynchronous surface read.
   // A new blank/image intent also invalidates reads when the id stays null.
   const conversationSelectionTicketRef = useRef(0);
+  const pendingCreatedChatRef = useRef<{
+    id: string;
+    title: string;
+    identityKey: string;
+    modelIds: string[];
+    disabledIds: string[];
+  } | null>(null);
+  const clearPendingCreatedChatIfOwned = useCallback(
+    (conversationId: string, ownerIdentityKey: string | null) => {
+      const pending = pendingCreatedChatRef.current;
+      if (pending?.id === conversationId &&
+          pending.identityKey === ownerIdentityKey) {
+        pendingCreatedChatRef.current = null;
+      }
+    },
+    []
+  );
 
   useLayoutEffect(() => {
     conversationSelectionTicketRef.current += 1;
-    return () => { conversationSelectionTicketRef.current += 1; };
+    pendingCreatedChatRef.current = null;
+    return () => {
+      conversationSelectionTicketRef.current += 1;
+      pendingCreatedChatRef.current = null;
+    };
   }, [identityKey]);
 
   useEffect(() => {
@@ -1856,7 +1960,7 @@ export function ChatPageClient({
     setInputValue(prompt.text, prompt.targetChatId);
     setDraftAttachments(prompt.attachments, prompt.targetChatId);
     setFocusToken((value) => value + 1);
-  }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setInputValue, showToast, t]);
+  }, [identityKey, mountedSurface, readDraft, setDraftAttachments, setFocusToken, setInputValue, showToast, t]);
 
   useEffect(() => {
     if (mountedSurface !== "chat" || !isInitialConversationResolved || !currentChatId) return;
@@ -2785,6 +2889,7 @@ export function ChatPageClient({
 
     const handleNewChat = () => {
         conversationSelectionTicketRef.current += 1;
+        pendingCreatedChatRef.current = null;
         /*
           A new chat on a continuation's URL has to leave that URL.
 
@@ -3116,7 +3221,12 @@ export function ChatPageClient({
             }
         }
 
+        // Keep the continuation routing prefix closure-independent: its
+        // contract is executed in isolation by the surface-boundary tests.
+        // Cross-surface navigation unmounts this workspace and the identity
+        // cleanup clears the pending create; in-place selection clears it here.
         localComparisonResponsesRef.current.clear();
+        pendingCreatedChatRef.current = null;
         latestLocalComparisonPromptRef.current = null;
 
         if (!isGuestMode && !skipLockCheck) {
@@ -3870,16 +3980,23 @@ export function ChatPageClient({
   // two preflights, two saved user messages, two charges for one intent. One
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
-  const submitInFlightRef = useRef(false);
   const handleGlobalSubmit = async (options?: GlobalSubmitOptions) => {
-    if (submitInFlightRef.current) return;
+    const submitFence = submitIdentityFenceRef.current;
+    const ownerKey = identityKey ?? "unresolved";
+    if (pendingSubmissionOwnersRef.current.has(ownerKey)) return;
     if (mountedSurface === "chat" && currentChatIdRef.current && isChatRuntimeStreaming(chatRuntimeKey({
       identityKey: identityKey ?? "account",
       conversationId: currentChatIdRef.current,
       modelId: latestModelSettingsRef.current.models[0] ?? "",
       transcriptScope: "conversation",
     }))) return;
-    submitInFlightRef.current = true;
+    const owner: PendingSubmissionOwner = {
+      token: crypto.randomUUID(),
+      identityKey,
+      identityEpoch: submitFence.epoch,
+      originConversationId: currentChatIdRef.current,
+    };
+    pendingSubmissionOwnersRef.current.set(ownerKey, owner);
     // Which conversation this send started from, published for the shells.
     // A first send on a brand-new chat creates a conversation and the shell
     // adopts its id mid-flight, so between those two moments the panels'
@@ -3888,25 +4005,55 @@ export function ChatPageClient({
     // panel that then loads the still-empty new conversation reports it empty
     // -- which used to send the user back to the welcome screen they had just
     // left. See lib/chatContentState.ts.
-    setPendingSubmission({ originConversationId: currentChatIdRef.current });
+    setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
     try {
-      await runGlobalSubmit(options);
+      await runGlobalSubmit(options, owner);
     } finally {
-      submitInFlightRef.current = false;
+      // Compare-and-delete, never plain clear: A may finish after B has
+      // acquired its own submit token, and A has no authority to unlock B.
+      const finalOwner = pendingSubmissionOwnersRef.current.get(ownerKey);
+      if (finalOwner?.token === owner.token && !finalOwner.recovery) {
+        pendingSubmissionOwnersRef.current.delete(ownerKey);
+        setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
+      }
       // Whatever this send was, the expansion offer is no longer waiting on
       // it: accepted, refused or thrown, the card's buttons come back. The
       // run's own progress is the deep research chip's to report from here.
-      setIsDeepResearchExpanding(false);
+      const currentFence = submitIdentityFenceRef.current;
+      if (currentFence.identityKey === owner.identityKey &&
+          currentFence.epoch === owner.identityEpoch) {
+        setIsDeepResearchExpanding(false);
+      }
       // Cleared in the same commit as the promptPayload a successful send
       // sets, so there is no frame between "no longer pending" and "accepted".
       // A refused send clears it with no payload, and the conversation goes
       // back to being described by its own panels -- which is correct: it
       // really is still empty.
-      setPendingSubmission(null);
     }
   };
 
-  const runGlobalSubmit = async (options?: GlobalSubmitOptions) => {
+  const runGlobalSubmit = async (
+    options: GlobalSubmitOptions | undefined,
+    submitOwner: PendingSubmissionOwner
+  ) => {
+    const submitOwnerIsCurrent = () => {
+      const current = submitIdentityFenceRef.current;
+      const ownerKey = submitOwner.identityKey ?? "unresolved";
+      return current.identityKey === submitOwner.identityKey &&
+        current.epoch === submitOwner.identityEpoch &&
+        pendingSubmissionOwnersRef.current.get(ownerKey)?.token ===
+          submitOwner.token;
+    };
+    const holdSubmitForReceiptRecovery = () => {
+      const ownerKey = submitOwner.identityKey ?? "unresolved";
+      const current = pendingSubmissionOwnersRef.current.get(ownerKey);
+      if (current?.token !== submitOwner.token) return;
+      pendingSubmissionOwnersRef.current.set(ownerKey, {
+        ...current,
+        recovery: "message-receipt-unknown",
+      });
+      setPendingSubmissionOwners(new Map(pendingSubmissionOwnersRef.current));
+    };
     /*
       `overrideText` is a question this page already has, re-sent on the user's
       behalf -- today, the Deep Research expansion under a finished answer. It
@@ -3932,17 +4079,21 @@ export function ChatPageClient({
     // user is looking somewhere else, and this draft must only ever be
     // cleared once this send has actually been accepted.
     const originScopeId = currentChatId;
+    const draftSendCapture = !isGuestMode && !isOverrideSend && mountedSurface === "chat"
+      ? captureDraftSend({ text: trimmed, attachments }, originScopeId)
+      : null;
     // A new blank draft is a new intent even when its id and model stay equal.
     const preparedSelectionTicket = conversationSelectionTicketRef.current;
     const preparedModels = [...latestModelSettingsRef.current.models];
     const preparedDisabled = [...latestModelSettingsRef.current.disabled];
-    const chatOriginStillCurrent = () => mountedSurface !== "chat" || (
+    const chatOriginStillCurrent = () => submitOwnerIsCurrent() &&
+      (mountedSurface !== "chat" || (
       Boolean(identityKey) && identityKey === identityNamespaceKey(identityNamespaceRef.current) &&
       preparedSelectionTicket === conversationSelectionTicketRef.current &&
       currentChatIdRef.current === originScopeId &&
       sameStringList(preparedModels, latestModelSettingsRef.current.models) &&
       sameStringList(preparedDisabled, latestModelSettingsRef.current.disabled)
-    );
+    ));
     const promptAttachments = isOverrideSend
       ? []
       : await cloneAttachmentPreviews(attachments);
@@ -3957,6 +4108,7 @@ export function ChatPageClient({
     }
 
 	let activeChatId = currentChatId;
+    let pendingCreatedConversationAdoption = false;
     // Captured only when a brand-new conversation is created below, so the
     // first-turn title tracking further down knows the exact interim title
     // string without re-deriving it from state that may not have committed
@@ -3974,6 +4126,24 @@ export function ChatPageClient({
     // same batch as the prompt payload, never before it.
     let pendingScreenModels: string[] | null = null;
     let pendingScreenDisabled: string[] | null = null;
+
+    const pendingCreatedChat = !activeChatId && identityKey
+      ? pendingCreatedChatRef.current
+      : null;
+    if (
+      pendingCreatedChat &&
+      pendingCreatedChat.identityKey === identityKey &&
+      sameStringList(pendingCreatedChat.modelIds, sendSelectedModels) &&
+      sameStringList(pendingCreatedChat.disabledIds, sendDisabledPanels)
+    ) {
+      // A previous Message transaction may have failed after conversation
+      // creation. Reuse that still-empty conversation while the composer stays
+      // on `new`; creating another row would turn a network retry into a second
+      // conversation for the same draft.
+      activeChatId = pendingCreatedChat.id;
+      justCreatedTitle = pendingCreatedChat.title;
+      pendingCreatedConversationAdoption = true;
+    }
 
     if (!activeChatId) {
       if (isGuestMode) {
@@ -4103,12 +4273,26 @@ export function ChatPageClient({
           if (!sameStringList(createdDisabled, disabledPanels)) {
             pendingScreenDisabled = createdDisabled;
           }
-          setCurrentChatId(activeChatId);
-          currentChatIdRef.current = activeChatId;
-          // Same hand-off as the guest branch above: the draft follows the id
-          // the server just issued, so a later abort keeps the question
-          // visible in the conversation it now belongs to.
-          migrateDraft(originScopeId, activeChatId);
+          if (mountedSurface === "chat") {
+            // Keep the composer on its original `new` scope until the Message
+            // transaction consumes that exact server revision. Moving it now
+            // used to copy the draft to the conversation and best-effort
+            // delete the source, allowing a failed delete to resurrect it.
+            pendingCreatedConversationAdoption = true;
+            if (identityKey) {
+              pendingCreatedChatRef.current = {
+                id: data.id,
+                title: newConversationTitle,
+                identityKey,
+                modelIds: [...createdModels],
+                disabledIds: [...createdDisabled],
+              };
+            }
+          } else {
+            setCurrentChatId(activeChatId);
+            currentChatIdRef.current = activeChatId;
+            migrateDraft(originScopeId, activeChatId);
+          }
           fetchConversations();
         } else {
           const refusal = await res.json().catch(() => null);
@@ -4161,11 +4345,13 @@ export function ChatPageClient({
       // unanswered. Abandon instead, leaving the answers already on screen.
       if (!activeModelIds.length) return;
       const chatSendIsCurrent = () => {
+        if (!submitOwnerIsCurrent()) return false;
         if (mountedSurface !== "chat") return true;
         const currentIdentityKey = identityNamespaceKey(identityNamespaceRef.current);
         const current = chatPreparedSendIsCurrent({
           identityKey, currentIdentityKey,
-          conversationId: activeChatId!, currentConversationId: currentChatIdRef.current,
+          conversationId: pendingCreatedConversationAdoption ? originScopeId : activeChatId!,
+          currentConversationId: currentChatIdRef.current,
           selectionTicket: preparedSelectionTicket,
           currentSelectionTicket: conversationSelectionTicketRef.current,
           modelIds: activeModelIds, currentModelIds: latestModelSettingsRef.current.models,
@@ -4205,7 +4391,23 @@ export function ChatPageClient({
               prompt: trimmed,
             });
 	  if (!chatSendIsCurrent()) return;
-	  const userMsgId = crypto.randomUUID();
+	  const userRequestId = crypto.randomUUID();
+      let userMsgId = userRequestId;
+
+      let preparedDraft: Awaited<ReturnType<typeof prepareDraftSend>> = null;
+      if (draftSendCapture) {
+        preparedDraft = await prepareDraftSend(draftSendCapture);
+        if (!preparedDraft) {
+          if (chatSendIsCurrent()) {
+            showToast(t("chat.questionSaveFailed"), "info");
+          }
+          return;
+        }
+        if (!chatSendIsCurrent()) {
+          abortDraftSend(preparedDraft);
+          return;
+        }
+      }
 
       /*
         The user's turn is saved with its files, not with their names.
@@ -4228,80 +4430,273 @@ export function ChatPageClient({
           : attachment.uploadId ? [{ uploadId: attachment.uploadId }] : []
       );
       if (carriesStoredAttachments && promptAttachmentReferences.length !== promptAttachments.length) {
+        if (preparedDraft) abortDraftSend(preparedDraft);
         showToast(t("chat.questionSaveFailed"), "info");
         return;
       }
       let savedAttachments: ChatAttachment[] = promptAttachments;
+      let sendCurrentAfterMessageSave = true;
       if (!isGuestMode) {
-      try {
-        const saveResponse = await fetch(`/api/conversations/${activeChatId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            messages: [{
-              id: userMsgId,
-              role: "user",
-              content: trimmed,
-              ...(carriesStoredAttachments
-                ? { attachmentReferences: promptAttachmentReferences }
-                : promptUploadIds.length
-                ? { attachmentUploadIds: promptUploadIds }
-                : {}),
-            }]
-          }),
-        });
-        if (!saveResponse.ok) {
-          if (carriesStoredAttachments) {
-            const failure = await saveResponse.json().catch(() => null);
-            if (chatSendIsCurrent()) showToast(t(chatAttachmentErrorCopyKey(failure?.code) ?? "chat.questionSaveFailed"), "info");
+        const messageToSave: {
+          clientRequestId: string;
+          role: "user";
+          content: string;
+          attachmentReferences?: Array<{ attachmentId: string } | { uploadId: string }>;
+          attachmentUploadIds?: string[];
+        } = {
+          clientRequestId: userRequestId,
+          role: "user" as const,
+          content: trimmed,
+          ...(carriesStoredAttachments
+            ? { attachmentReferences: promptAttachmentReferences }
+            : promptUploadIds.length
+              ? { attachmentUploadIds: promptUploadIds }
+              : {}),
+        };
+        const draftConsume = preparedDraft
+          ? {
+              scopeKey: preparedDraft.scopeKey,
+              expectedRevision: preparedDraft.revision,
+              requestId: userRequestId,
+            }
+          : null;
+        let saved: Record<string, unknown> | null = null;
+        let deterministicFailure: { code?: string } | null = null;
+        let indeterminate:
+          | "completed-refusal"
+          | "server-5xx"
+          | "invalid-success"
+          | "transport"
+          | null = null;
+        let indeterminateFailureCode: string | undefined;
+        try {
+          const { response: saveResponse, body: saveBody, bodyValid } =
+            await fetchJsonWithTimeout(
+            `/api/conversations/${activeChatId}/messages`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messages: [messageToSave],
+                ...(draftConsume ? { draftConsume } : {}),
+              }),
+            },
+            chatMessageDeadlineMs(CHAT_MESSAGE_SAVE_TIMEOUT_MS)
+          );
+          const saveRecord = saveBody && typeof saveBody === "object" &&
+            !Array.isArray(saveBody) ? saveBody as Record<string, unknown> : null;
+          if (saveResponse.ok && preparedDraft) {
+            const parsed = bodyValid
+              ? parseChatMessageSaveResponse(saveBody, {
+                  requestId: userRequestId,
+                  expectedAttachmentCount: promptAttachments.length,
+                })
+              : null;
+            if (parsed) {
+              userMsgId = parsed.messageId;
+              saved = parsed as unknown as Record<string, unknown>;
+            }
+            else indeterminate = "invalid-success";
+          } else if (saveResponse.ok) {
+            const mapping = bodyValid
+              ? parseMessageSaveMapping(saveBody, userRequestId)
+              : null;
+            if (mapping && saveRecord) {
+              userMsgId = mapping.messageId;
+              saved = saveRecord;
+            } else {
+              deterministicFailure = {};
+            }
+          } else if (preparedDraft) {
+            // Every prepared non-2xx is reconciled against the fresh server
+            // state. A completed 4xx may prove unchanged; an unmarked 5xx
+            // never may, because a gateway can reply while upstream work is
+            // still waiting to take the advisory lock.
+            indeterminate = saveResponse.status >= 500
+              ? "server-5xx"
+              : "completed-refusal";
+            if (typeof saveRecord?.code === "string") {
+              indeterminateFailureCode = saveRecord.code;
+            }
+          } else {
+            deterministicFailure = saveRecord ?? {};
+            if (!preparedDraft && !carriesStoredAttachments) {
+              // Review and continuation preserve their historical text-only
+              // best-effort behavior.
+              console.error("Failed to pre-save user message:", saveResponse.status);
+            }
+          }
+        } catch (error) {
+          console.error("Failed to pre-save user message:", error);
+          indeterminate = preparedDraft ? "transport" : null;
+          if (!preparedDraft && carriesStoredAttachments) {
+            deterministicFailure = {};
+          }
+        }
+
+        if (indeterminate && preparedDraft && draftConsume) {
+          let receipt: ReturnType<typeof parseChatDraftMessageReceipt> = null;
+          try {
+            const { response, body, bodyValid } = await fetchJsonWithTimeout(
+              `/api/conversations/${activeChatId}/messages/receipt`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  draftConsume,
+                  message: {
+                    clientRequestId: messageToSave.clientRequestId,
+                    content: messageToSave.content,
+                    ...(messageToSave.attachmentReferences
+                      ? { attachmentReferences: messageToSave.attachmentReferences }
+                      : messageToSave.attachmentUploadIds
+                        ? { attachmentUploadIds: messageToSave.attachmentUploadIds }
+                        : {}),
+                  },
+                }),
+              },
+              chatMessageDeadlineMs(CHAT_MESSAGE_RECEIPT_TIMEOUT_MS)
+            );
+            if (response.ok && bodyValid) {
+              receipt = parseChatDraftMessageReceipt(
+                body,
+                {
+                  requestId: userRequestId,
+                  expectedAttachmentCount: promptAttachments.length,
+                }
+              );
+            }
+          } catch (error) {
+            console.error("Failed to reconcile user message receipt:", error);
+          }
+          if (receipt?.outcome === "committed") {
+            userMsgId = receipt.messageId;
+            saved = {
+              draftConsumed: true,
+              attachments: receipt.attachments.map((attachment) => ({
+                ...attachment,
+                messageId: userMsgId,
+              })),
+            };
+          } else if (
+            receipt?.outcome === "unchanged" &&
+            indeterminate === "completed-refusal"
+          ) {
+            reconcileDraftSend(preparedDraft, "unchanged");
+            if (chatSendIsCurrent()) {
+              showToast(
+                t(
+                  chatAttachmentErrorCopyKey(indeterminateFailureCode) ??
+                    "chat.questionSaveFailed"
+                ),
+                "info"
+              );
+            }
+            return;
+          } else {
+            // There is no safe guess. Keep the exact server-backed draft
+            // frozen and retain this identity's submit owner, while allowing
+            // another signed-in identity in the same tab to keep working.
+            reconcileDraftSend(preparedDraft, "ambiguous");
+            holdSubmitForReceiptRecovery();
             return;
           }
-          await discardResponseBody(saveResponse);
-          console.error("Failed to pre-save user message:", saveResponse.status);
-        } else {
+        }
+
+        if (deterministicFailure) {
+          if (preparedDraft || carriesStoredAttachments) {
+            if (preparedDraft) abortDraftSend(preparedDraft);
+            if (chatSendIsCurrent()) {
+              showToast(
+                t(
+                  chatAttachmentErrorCopyKey(deterministicFailure.code) ??
+                    "chat.questionSaveFailed"
+                ),
+                "info"
+              );
+            }
+            return;
+          }
+        }
+
+        if (saved) {
           /*
             Swap the composer's upload ids for the durable attachment ids the
             save just wrote, in place, so the cards already on screen are the
             same cards a reload produces -- and so this turn's own request, and
             every later one, names the row rather than the upload.
           */
-          const saved = await saveResponse.json().catch(() => null);
           const bound: Array<{ ordinal: number; id: string }> = Array.isArray(
-            saved?.attachments
+            saved.attachments
           )
             ? saved.attachments.filter(
                 (item: { messageId?: string }) => item?.messageId === userMsgId
-              )
+              ) as Array<{ ordinal: number; id: string }>
             : [];
-          if (carriesStoredAttachments && (bound.length !== promptAttachments.length ||
-            new Set(bound.map((item) => item.ordinal)).size !== promptAttachments.length ||
-            bound.some((item) => !Number.isInteger(item.ordinal) || item.ordinal < 0 || item.ordinal >= promptAttachments.length || typeof item.id !== "string" || !item.id))) {
+          if (promptAttachments.length > 0 &&
+              (bound.length !== promptAttachments.length ||
+              new Set(bound.map((item) => item.ordinal)).size !== promptAttachments.length ||
+              bound.some((item) => !Number.isInteger(item.ordinal) || item.ordinal < 0 ||
+                item.ordinal >= promptAttachments.length || typeof item.id !== "string" || !item.id))) {
+            if (preparedDraft) {
+              reconcileDraftSend(preparedDraft, "ambiguous");
+              holdSubmitForReceiptRecovery();
+            }
             if (chatSendIsCurrent()) showToast(t("chat.questionSaveFailed"), "info");
             return;
           }
           if (bound.length) {
-            const byOrdinal = new Map(
-              bound.map((item) => [item.ordinal, item.id])
-            );
+            const byOrdinal = new Map(bound.map((item) => [item.ordinal, item.id]));
             savedAttachments = promptAttachments.map((attachment, index) => {
               const attachmentId = byOrdinal.get(index);
               return attachmentId ? { ...attachment, attachmentId,
                 ...(carriesStoredAttachments ? { uploadId: undefined } : {}) } : attachment;
             });
           }
+          if (preparedDraft) {
+            // The same transaction wrote the user Message and consumed this
+            // exact revision. Only now may the local snapshot disappear; any
+            // text typed while the request was frozen is retained as a fresh
+            // revision-0 draft by the hook.
+            sendCurrentAfterMessageSave = chatSendIsCurrent();
+            const submittedDraftStillCurrent = commitDraftSend(
+              preparedDraft,
+              originScopeId,
+              promptAttachments
+            );
+            if (!submittedDraftStillCurrent) {
+              // The user edited the composer while Message persistence was
+              // pending. The saved turn remains durable, but dispatching its
+              // provider request now would make the newer draft look sent.
+              // Keep that draft and require an explicit next click.
+              sendCurrentAfterMessageSave = false;
+              if (chatSendIsCurrent()) {
+                showToast(t("chat.sendPreparationChanged"), "info");
+              }
+            }
+            if (pendingCreatedConversationAdoption && sendCurrentAfterMessageSave) {
+              // The source server draft is gone atomically with the Message.
+              // Only now may unsent edits made during preflight follow the URL
+              // to the created conversation as a fresh revision-0 draft.
+              migrateDraft(originScopeId, activeChatId, preparedDraft);
+              setCurrentChatId(activeChatId);
+              currentChatIdRef.current = activeChatId;
+              pendingCreatedConversationAdoption = false;
+              clearPendingCreatedChatIfOwned(activeChatId, identityKey);
+            } else if (pendingCreatedConversationAdoption) {
+              // The Message belongs to the conversation created by this send,
+              // but a later account/conversation selection owns the screen.
+              // Never navigate it back or reinterpret its `new` draft under
+              // the current cookie. A later explicit send can start cleanly.
+              clearPendingCreatedChatIfOwned(activeChatId, identityKey);
+            }
+          }
         }
-      } catch (e) {
-        if (carriesStoredAttachments) {
-          if (chatSendIsCurrent()) showToast(t("chat.questionSaveFailed"), "info");
-          return;
-        }
-        console.error("Failed to pre-save user message:", e);
       }
-    }
 
       // Last await boundary: an intervening model/account/conversation change
       // must not publish a payload to another panel or discard the draft.
-      if (!chatSendIsCurrent()) return;
+      if (!sendCurrentAfterMessageSave || !chatSendIsCurrent()) return;
       const conversation = conversations.find((item) => item.id === activeChatId);
       const previousCount = promptCountsRef.current.get(activeChatId) ??
         (conversation?.messageCount ? 1 : 0);
@@ -4445,7 +4840,7 @@ export function ChatPageClient({
       // other conversation's draft is touched either way.
       // An override send never spent a draft, so it must not clear one: the
       // question it carried came from a finished turn, not from the composer.
-      if (!isOverrideSend) {
+      if (!isOverrideSend && !preparedDraft) {
         const currentDraft = readDraft(activeChatId);
         if (mountedSurface !== "chat" || chatDraftMatchesSubmission({
           submittedText: inputValue,
@@ -6481,6 +6876,11 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
+          durableDraftLocked={
+            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+          }
+          blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
+          allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -6606,6 +7006,11 @@ export function ChatPageClient({
           isModelSelectionReady={isModelSelectionReady}
           isConversationSelectionResolved={isInitialConversationResolved}
           pendingSubmission={pendingSubmission}
+          durableDraftLocked={
+            mountedSurface === "chat" && !isGuestMode && Boolean(pendingSubmission)
+          }
+          blockSubmitWhileVoiceBusy={mountedSurface === "chat" && !isGuestMode}
+          allowEditingWhileSending={mountedSurface === "chat" && !isGuestMode}
           onNewChat={handleNewChat}
           onNewImage={canOfferNewImage ? handleNewImage : null}
           imageLock={imageLock}
@@ -6710,6 +7115,87 @@ export function ChatPageClient({
           onContextBundleStale={handleContextBundleStale}
         />
       )}
+    {pendingSubmission?.recovery === "message-receipt-unknown" && (
+      <section
+        role="alert"
+        aria-labelledby="message-receipt-recovery-title"
+        data-testid="message-receipt-recovery-dialog"
+        className="fixed inset-x-3 bottom-4 z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
+      >
+        <h2
+          id="message-receipt-recovery-title"
+          className="text-sm font-semibold text-zinc-950 dark:text-white"
+        >
+          {t("chat.messageReceiptRecoveryTitle")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {t("chat.messageReceiptRecoveryBody")}
+        </p>
+        <button
+          type="button"
+          data-testid="message-receipt-recovery-reload"
+          onClick={() => window.location.reload()}
+          className="mt-3 min-h-11 w-full rounded-xl bg-amber-600 px-3 text-sm font-bold text-white hover:bg-amber-500"
+        >
+          {t("chat.messageReceiptRecoveryReload")}
+        </button>
+      </section>
+    )}
+    {draftConflict && (
+      <section
+        role="alert"
+        aria-labelledby="draft-conflict-title"
+        data-testid="draft-conflict-dialog"
+        className="fixed inset-x-3 bottom-4 z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
+      >
+        <h2 id="draft-conflict-title" className="text-sm font-semibold text-zinc-950 dark:text-white">
+          {t("chat.draftConflictTitle")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {t("chat.draftConflictBody")}
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            data-testid="draft-conflict-use-server"
+            onClick={() => resolveDraftConflict("use-server")}
+            className="min-h-11 rounded-xl border border-zinc-300 px-3 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            {t("chat.draftConflictUseServer")}
+          </button>
+          <button
+            type="button"
+            data-testid="draft-conflict-overwrite-local"
+            onClick={() => resolveDraftConflict("overwrite-local")}
+            className="min-h-11 rounded-xl bg-amber-600 px-3 text-sm font-bold text-white hover:bg-amber-500"
+          >
+            {t("chat.draftConflictOverwriteLocal")}
+          </button>
+        </div>
+      </section>
+    )}
+    {draftSyncFailed && !draftConflict && (
+      <section
+        role="alert"
+        data-testid="draft-sync-failed"
+        className="fixed inset-x-3 bottom-4 z-[74] mx-auto max-w-lg rounded-2xl border border-rose-300 bg-white p-4 shadow-2xl dark:border-rose-900 dark:bg-zinc-900"
+      >
+        <h2 className="text-sm font-semibold text-zinc-950 dark:text-white">
+          {t("chat.draftSyncFailedTitle")}
+        </h2>
+        <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+          {t("chat.draftSyncFailedBody")}
+        </p>
+        <button
+          type="button"
+          data-testid="draft-sync-retry"
+          onClick={retryDraftSync}
+          className="mt-3 min-h-11 w-full rounded-xl bg-rose-600 px-3 text-sm font-bold text-white hover:bg-rose-500"
+        >
+          {t("chat.draftSyncRetry")}
+        </button>
+      </section>
+    )}
     {showGuestSignInPrompt && isGuestMode && (
       <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section

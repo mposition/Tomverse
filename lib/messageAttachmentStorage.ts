@@ -213,9 +213,39 @@ export const bindMessageAttachments = async (
     conversationId: string;
     messageId: string;
     uploadIds: string[];
+    /** Exact prior attachment identity per upload, null for a fresh upload. */
+    sourceAttachmentIds?: Array<string | null>;
   }
 ): Promise<number> => {
   if (input.uploadIds.length === 0) return 0;
+  if (
+    input.sourceAttachmentIds &&
+    input.sourceAttachmentIds.length !== input.uploadIds.length
+  ) {
+    throw new MessageAttachmentBindError(
+      "UNKNOWN_ATTACHMENT_UPLOAD",
+      "Attachment provenance does not match the attachment list."
+    );
+  }
+
+  // The binder is a security boundary of its own. Callers must not be able to
+  // attach rows to an arbitrary globally named Message even if they bypass or
+  // regress the route-level request-id mapping.
+  const targetMessage = await tx.message.findFirst({
+    where: {
+      id: input.messageId,
+      conversationId: input.conversationId,
+      role: "user",
+      conversation: { userId: input.userId },
+    },
+    select: { id: true },
+  });
+  if (!targetMessage) {
+    throw new MessageAttachmentBindError(
+      "UNKNOWN_ATTACHMENT_UPLOAD",
+      "The target message is not available for attachment binding."
+    );
+  }
 
   const uploads = await tx.messageAttachmentUpload.findMany({
     where: { id: { in: input.uploadIds } },
@@ -265,6 +295,7 @@ export const bindMessageAttachments = async (
       kind: upload.kind,
       objectKey: upload.objectKey,
       uploadId: upload.id,
+      sourceAttachmentId: input.sourceAttachmentIds?.[index] ?? null,
     };
   });
 
@@ -295,6 +326,36 @@ export const bindMessageAttachments = async (
     data: rows,
     skipDuplicates: true,
   });
+  const persisted = await tx.messageAttachment.findMany({
+    where: {
+      messageId: input.messageId,
+      userId: input.userId,
+      conversationId: input.conversationId,
+    },
+    orderBy: { ordinal: "asc" },
+    select: {
+      ordinal: true,
+      objectKey: true,
+      uploadId: true,
+      sourceAttachmentId: true,
+    },
+  });
+  if (
+    persisted.length !== rows.length ||
+    persisted.some((row, index) => {
+      const expected = rows[index];
+      return !expected ||
+        row.ordinal !== expected.ordinal ||
+        row.objectKey !== expected.objectKey ||
+        row.uploadId !== expected.uploadId ||
+        row.sourceAttachmentId !== expected.sourceAttachmentId;
+    })
+  ) {
+    throw new MessageAttachmentBindError(
+      "ATTACHMENT_ALREADY_BOUND",
+      "The stored attachment set does not match this message request."
+    );
+  }
   await tx.messageAttachmentUpload.updateMany({
     where: { id: { in: input.uploadIds }, boundAt: null },
     data: { boundAt: new Date() },

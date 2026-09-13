@@ -45,13 +45,48 @@ type PreparedRef = { uploadId: string } | { sourceId: string; source: Metadata; 
 type Db = Pick<Prisma.TransactionClient, "message" | "messageAttachment" | "messageAttachmentUpload">;
 const unavailable = () => new MessageAttachmentResendError("ATTACHMENT_UNAVAILABLE", 410);
 
-async function existingOwnedMessage(db: Db, messageId: string, userId: string, conversationId: string) {
+export async function exactExistingOwnedMessage(
+  db: Db,
+  message: Message,
+  userId: string,
+  conversationId: string
+) {
   const existing = await db.message.findUnique({
-    where: { id: messageId }, select: { role: true, conversationId: true, conversation: { select: { userId: true } } },
+    where: { id: message.id },
+    select: {
+      role: true,
+      content: true,
+      modelId: true,
+      conversationId: true,
+      conversation: { select: { userId: true } },
+      attachments: {
+        orderBy: { ordinal: "asc" },
+        select: { uploadId: true, sourceAttachmentId: true },
+      },
+    },
   });
   if (!existing) return false;
-  if (existing.role !== "user" || existing.conversationId !== conversationId || existing.conversation.userId !== userId) {
+  if (
+    existing.role !== "user" ||
+    existing.conversationId !== conversationId ||
+    existing.conversation.userId !== userId ||
+    existing.content !== message.content ||
+    existing.modelId !== (message.modelId ?? null)
+  ) {
     throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
+  }
+  const references = message.attachmentReferences ??
+    (message.attachmentUploadIds ?? []).map((uploadId) => ({ uploadId }));
+  if (existing.attachments.length !== references.length) {
+    throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
+  }
+  for (const [index, reference] of references.entries()) {
+    const stored = existing.attachments[index];
+    if (!stored || ("attachmentId" in reference
+      ? stored.sourceAttachmentId !== reference.attachmentId
+      : stored.uploadId !== reference.uploadId)) {
+      throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
+    }
   }
   return true;
 }
@@ -71,7 +106,10 @@ async function readSources(db: Db, refs: SavedMessageAttachmentReference[], inpu
         where: { id: ref.uploadId, userId: input.userId }, select: metadataSelect,
       });
       if (!row || !row.objectKey.startsWith(input.ownPrefix)) throw unavailable();
-      const bound = await db.messageAttachment.findUnique({ where: { objectKey: row.objectKey }, select: { id: true } });
+      const bound = await db.messageAttachment.findFirst({
+        where: { objectKey: row.objectKey, userId: input.userId },
+        select: { id: true },
+      });
       if (bound) throw unavailable();
       result.push({ uploadId: row.id });
     }
@@ -102,6 +140,10 @@ async function enqueueUnboundCopies(keys: string[]) {
 export async function saveMessagesWithAttachmentReferences(input: {
   userId: string; conversationId: string; ownPrefix: string; messages: Message[];
   beforeCreate: (tx: Prisma.TransactionClient) => Promise<void>;
+  beforePrepare?: () => Promise<{ replay: boolean } | void>;
+  beforeCommit?: (
+    tx: Prisma.TransactionClient
+  ) => Promise<{ replay: boolean } | void>;
 }): Promise<{ count: number }> {
   if (new Set(input.messages.map((message) => message.id)).size !== input.messages.length) {
     throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
@@ -111,18 +153,43 @@ export async function saveMessagesWithAttachmentReferences(input: {
       throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
     }
   }
+  // Draft CAS and exact replay identity are cheaper than R2 I/O. This is a
+  // fail-fast read only; `beforeCommit` repeats it under the transaction lock
+  // so a concurrent winner still cannot commit stale state.
+  const prepareGate = await input.beforePrepare?.();
+  if (prepareGate?.replay) return { count: 0 };
   const prepared = new Map<string, PreparedRef[] | null>();
   const freshKeys: string[] = [];
   try {
-    // Validate the whole batch before copying its first byte.
+    // Validate the whole batch before reading or copying its first byte. A
+    // reference in one item selects this helper for the entire batch, so a
+    // changed duplicate text/upload-only sibling must be rejected here too;
+    // discovering it only after preparing the reference would let a caller
+    // induce bounded but needless R2 copy churn with a request that can never
+    // commit.
     for (const message of input.messages) {
-      if (!message.attachmentReferences) continue;
-      prepared.set(message.id, await existingOwnedMessage(prisma, message.id, input.userId, input.conversationId)
-        ? null : await readSources(prisma, message.attachmentReferences, input));
+      const exactReplay = await exactExistingOwnedMessage(
+        prisma,
+        message,
+        input.userId,
+        input.conversationId
+      );
+      if (message.attachmentReferences) {
+        prepared.set(
+          message.id,
+          exactReplay
+            ? null
+            : await readSources(prisma, message.attachmentReferences, input)
+        );
+      }
     }
     // Pure readback of fully persisted, owned reference saves reserves no new
     // quota. A mixed batch and every legacy upload-only save keep their checks.
-    if (prepared.size === input.messages.length && [...prepared.values()].every((refs) => refs === null)) return { count: 0 };
+    if (
+      !input.beforeCommit &&
+      prepared.size === input.messages.length &&
+      [...prepared.values()].every((refs) => refs === null)
+    ) return { count: 0 };
     // A cheap refusal before storage I/O; the authoritative check repeats in
     // the winner transaction because this precheck reserves no capacity.
     await prisma.$transaction(input.beforeCreate);
@@ -144,6 +211,8 @@ export async function saveMessagesWithAttachmentReferences(input: {
       }
     }
     return await prisma.$transaction(async (tx) => {
+      const commitGate = await input.beforeCommit?.(tx);
+      if (commitGate?.replay) return { count: 0 };
       await input.beforeCreate(tx);
       let count = 0;
       for (const message of input.messages) {
@@ -152,11 +221,23 @@ export async function saveMessagesWithAttachmentReferences(input: {
           content: message.content, status: "normal", modelId: message.modelId || null,
         }], skipDuplicates: true });
         count += created.count;
-        if (message.attachmentReferences) {
-          if (!created.count) {
-            if (!await existingOwnedMessage(tx, message.id, input.userId, input.conversationId)) throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
-            continue;
+        if (!created.count) {
+          // `skipDuplicates` says only that some row already owns this PK.
+          // Every message shape must prove that row is this account's exact
+          // replay before the rest of a mixed batch may commit. Restricting
+          // this check to reference messages let a changed text/upload-only
+          // duplicate ride beside one reference message and silently succeed.
+          if (!await exactExistingOwnedMessage(
+            tx,
+            message,
+            input.userId,
+            input.conversationId
+          )) {
+            throw new MessageAttachmentResendError("MESSAGE_SAVE_CONFLICT", 409);
           }
+          continue;
+        }
+        if (message.attachmentReferences) {
           const refs = prepared.get(message.id);
           // A row deleted between the fast readback and this transaction is not
           // recreated without its original attachments. Retry from a fresh save.
@@ -172,7 +253,14 @@ export async function saveMessagesWithAttachmentReferences(input: {
             }, select: { id: true } });
             uploadIds.push(upload.id);
           }
-          await bindMessageAttachments(tx, { ...input, messageId: message.id, uploadIds });
+          await bindMessageAttachments(tx, {
+            ...input,
+            messageId: message.id,
+            uploadIds,
+            sourceAttachmentIds: refs.map((ref) =>
+              "sourceId" in ref ? ref.sourceId : null
+            ),
+          });
         } else if (message.attachmentUploadIds?.length) {
           // Legacy saves retain their existing binder/refusal semantics.
           await bindMessageAttachments(tx, { ...input, messageId: message.id, uploadIds: message.attachmentUploadIds });

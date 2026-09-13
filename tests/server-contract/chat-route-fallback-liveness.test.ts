@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test, { mock } from "node:test";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
@@ -55,6 +56,7 @@ const FAULT_SECRET = "fallback-drill-secret-0123456789";
 const USER_ID = "fallback-user-1";
 const CONVERSATION_ID = "fallback-conversation-1";
 const ASSISTANT_MESSAGE_ID = "33333333-4444-4555-8666-777777777777";
+const SOURCE_USER_MESSAGE_ID = "11111111-2222-4333-8444-555555555555";
 const REQUESTED_MODEL_ID = "claude-haiku-4-5";
 const ANSWER = "The second model finished the answer.";
 
@@ -101,6 +103,89 @@ mock.module("next-auth/next", {
   },
 });
 
+let durableAttemptAdmissionRefused = false;
+let durableAttemptAdmissionCalls = 0;
+class TestApiSecurityError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly retryAfter?: number
+  ) {
+    super(message);
+  }
+}
+mock.module(mod("lib/apiSecurity.ts"), {
+  namedExports: {
+    apiSecurityResponse: (error: unknown) =>
+      error instanceof TestApiSecurityError
+        ? Response.json(
+            { error: error.message, code: error.code },
+            {
+              status: error.status,
+              headers: error.retryAfter
+                ? { "Retry-After": String(error.retryAfter) }
+                : undefined,
+            }
+          )
+        : null,
+    assertMessageCapacity: async () => undefined,
+    consumeApiRateLimit: async (
+      _request: Request,
+      _userId: string,
+      scope: string
+    ) => {
+      if (scope !== "chat-durable-attempt") return;
+      durableAttemptAdmissionCalls += 1;
+      if (durableAttemptAdmissionRefused) {
+        throw new TestApiSecurityError(
+          429,
+          "API_RATE_LIMITED",
+          "Too many requests.",
+          30
+        );
+      }
+    },
+    readLimitedJson: async () => ({}),
+    reserveDailyUploadBytes: async () => undefined,
+  },
+});
+
+let contextConsumeSucceeds = true;
+mock.module(mod("lib/chatTurnContext.ts"), {
+  namedExports: {
+    buildChatTurnContext: async () => ({
+      fingerprint: "verified-context-fingerprint",
+      fingerprintInput: {},
+      systemPrompt: null,
+      memoryTokens: 0,
+      profileTokens: 0,
+      memory: {
+        prompt: { text: null, usedCount: 0 },
+        truncatedByBudget: false,
+      },
+      profile: { knowledgeChunkCount: 0 },
+    }),
+  },
+});
+mock.module(mod("lib/chatContextBundleService.ts"), {
+  namedExports: {
+    verifyChatContextBundle: () => ({
+      ok: true,
+      payload: {
+        bundleId: "context-bundle-one",
+        expiresAtMs: Date.now() + 60_000,
+        memoryTokens: 0,
+        profileTokens: 0,
+      },
+    }),
+    consumeContextBundle: async () =>
+      contextConsumeSucceeds
+        ? { consumed: true }
+        : { consumed: false, reason: "already_consumed" },
+  },
+});
+
 /* -------------------------------------------------------------------------- */
 /* The provider streams these two attempts get                                 */
 /* -------------------------------------------------------------------------- */
@@ -122,6 +207,7 @@ const attempts: Attempt[] = [];
  * spanning the swap.
  */
 let fallbackBehaviour: "answers" | "silent" = "answers";
+let injectPrimaryFault = true;
 
 mock.module("ai", {
   namedExports: {
@@ -142,7 +228,7 @@ mock.module("ai", {
       return {
         textStream: new ReadableStream<string>({
           start(controller) {
-            if (index === 0 || silent) return;
+            if ((index === 0 && injectPrimaryFault) || silent) return;
             controller.enqueue(ANSWER);
             controller.close();
           },
@@ -178,7 +264,9 @@ mock.module("ai", {
 
 const world = {
   messages: [] as Array<{ id: string; status: string; modelId: string }>,
+  terminals: [] as Array<Record<string, unknown>>,
 };
+let failAssistantPersistence = false;
 
 const DEFAULTS: Record<string, () => unknown> = {
   findUnique: () => null,
@@ -204,6 +292,28 @@ const DEFAULTS: Record<string, () => unknown> = {
   ever consulted.
 */
 let conversationSelectionMode: "auto" | "manual" = "auto";
+const attachmentObjectPrefix = `attachments/${createHash("sha256")
+  .update("fallback-qa@tomverse.app")
+  .digest("hex")
+  .slice(0, 20)}/`;
+type MockStoredAttachment = {
+  id: string;
+  uploadId: string | null;
+  userId: string;
+  conversationId: string;
+  name: string;
+  mediaType: string;
+  size: number;
+  kind: "text" | "file";
+  objectKey: string;
+  unavailableAt: null;
+  unavailableReason: null;
+};
+let persistedSourceAttachments: MockStoredAttachment[] = [];
+let resolvedAttachmentRows: MockStoredAttachment[] = [];
+let conversationProductKey: "chat" | "review" = "chat";
+let messageFindFirstArgs: Array<Record<string, unknown>> = [];
+let lastDurableClaimInput: Record<string, unknown> | null = null;
 
 const conversationRow = () => ({
   id: CONVERSATION_ID,
@@ -211,8 +321,9 @@ const conversationRow = () => ({
   password: null,
   selectedModels: JSON.stringify([REQUESTED_MODEL_ID]),
   kind: "chat",
-  productKey: "chat",
+  productKey: conversationProductKey,
   selectionMode: conversationSelectionMode,
+  chatRecoveryEpoch: 0,
 });
 
 const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
@@ -221,10 +332,21 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
     findFirst: () => conversationRow(),
   },
   message: {
-    findFirst: () => ({ id: "user-message-1" }),
+    findFirst: (args: Record<string, unknown>) => {
+      messageFindFirstArgs.push(args);
+      const where = args.where as { id?: string } | undefined;
+      return {
+        id: where?.id ?? SOURCE_USER_MESSAGE_ID,
+        content: "이 질문에 답해 줘",
+        attachments: persistedSourceAttachments,
+      };
+    },
     create: (args: {
       data: { id: string; status: string; modelId: string };
     }) => {
+      if (failAssistantPersistence && args.data.id === ASSISTANT_MESSAGE_ID) {
+        throw new Error("FORCED_ASSISTANT_MESSAGE_TX_FAILURE");
+      }
       world.messages.push({
         id: args.data.id,
         status: args.data.status,
@@ -232,6 +354,9 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       });
       return args.data;
     },
+  },
+  messageAttachment: {
+    findMany: () => resolvedAttachmentRows,
   },
 };
 
@@ -275,6 +400,65 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
 });
 
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaProxy } });
+
+let durableRevision = 0;
+let durableClaimMode: "claimed" | "reattach" | "conflict" = "claimed";
+let durableClaimCalls = 0;
+let durableTerminalFails = false;
+class DurableConflict extends Error {
+  readonly code = "CHAT_ATTEMPT_ID_REUSED";
+}
+mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
+  namedExports: {
+    ChatAttemptCapacityError: class extends Error {
+      readonly code = "CHAT_ATTEMPT_STORAGE_QUOTA_EXCEEDED";
+      readonly status = 409;
+    },
+    ChatAttemptCasError: class extends Error { readonly code = "CHAT_ATTEMPT_REVISION_CONFLICT"; },
+    ChatAttemptIdentityConflictError: DurableConflict,
+    ChatAttemptScopeError: class extends Error { readonly code = "CHAT_ATTEMPT_SCOPE_NOT_FOUND"; },
+    claimChatResponseAttempt: async (input: Record<string, unknown>) => {
+      durableClaimCalls += 1;
+      lastDurableClaimInput = input;
+      if (durableClaimMode === "conflict") throw new DurableConflict();
+      return {
+      disposition: durableClaimMode,
+      attempt: {
+        ...input,
+        fingerprint: "a".repeat(64),
+        actualModelId: null,
+        provider: null,
+        status: "claimed",
+        partialContent: "",
+        checkpointRevision: 0,
+        finishReason: null,
+        failureCode: null,
+        terminalAt: null,
+        createdAt: new Date("2026-09-13T00:00:00.000Z"),
+        updatedAt: new Date("2026-09-13T00:00:00.000Z"),
+      },
+    };
+    },
+    checkpointChatResponseAttempt: async (input: Record<string, unknown>) => ({
+      ...input,
+      fingerprint: "a".repeat(64),
+      requestedModelId: REQUESTED_MODEL_ID,
+      status: "streaming",
+      checkpointRevision: ++durableRevision,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      finishReason: null,
+      failureCode: null,
+      terminalAt: null,
+      createdAt: new Date("2026-09-13T00:00:00.000Z"),
+      updatedAt: new Date("2026-09-13T00:00:00.000Z"),
+    }),
+    terminalChatResponseAttempt: async (input: Record<string, unknown>) => {
+      world.terminals.push(input);
+      if (durableTerminalFails) throw new Error("DURABLE_TERMINAL_TEST_FAILURE");
+      return undefined;
+    },
+  },
+});
 
 /* -------------------------------------------------------------------------- */
 /* The seams that cost money and hold slots                                    */
@@ -335,6 +519,7 @@ const reservation = {
 };
 
 const ledger = {
+  accessAcquisitions: 0,
   settlements: [] as Array<{ outcome: string; attempts: number | null }>,
   releases: [] as Array<{ leaseId: string }>,
   attemptBudgetReservations: 0,
@@ -344,11 +529,14 @@ const ledger = {
 mock.module(mod("lib/chatSecurity.ts"), {
   namedExports: {
     ...realChatSecurity,
-    acquireChatAccess: async () => ({
-      leaseId: "lease-fallback-1",
-      setCookie: undefined,
-      usageReservation: reservation,
-    }),
+    acquireChatAccess: async () => {
+      ledger.accessAcquisitions += 1;
+      return {
+        leaseId: "lease-fallback-1",
+        setCookie: undefined,
+        usageReservation: reservation,
+      };
+    },
     releaseChatAccess: async (leaseId: string) => {
       ledger.releases.push({ leaseId });
     },
@@ -395,7 +583,11 @@ const realBillingEntitlements = require(
 mock.module(mod("lib/billingEntitlements.ts"), {
   namedExports: {
     ...realBillingEntitlements,
-    getUserBillingPlan: async () => ({ tier: "Pro", status: "active" }),
+    getUserBillingPlan: async () => ({
+      tier: "Pro",
+      status: "active",
+      allowAttachments: true,
+    }),
   },
 });
 
@@ -460,15 +652,34 @@ const whileWaiting = async <T,>(read: () => Promise<T>): Promise<T> => {
   }
 };
 
-const ask = async (behaviour: "answers" | "silent") => {
+const ask = async (
+  behaviour: "answers" | "silent",
+  claimMode: "claimed" | "reattach" | "conflict" = "claimed",
+  expectedStatus = 200,
+  withContextBundle = false,
+  requestMessages: Array<Record<string, unknown>> = [
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+  ],
+  includeSourceUserMessageId = true,
+  withInjectedPrimaryFault = true
+) => {
   fallbackBehaviour = behaviour;
+  injectPrimaryFault = withInjectedPrimaryFault;
+  durableClaimMode = claimMode;
   attempts.length = 0;
   world.messages = [];
+  world.terminals = [];
   ledger.settlements = [];
   ledger.releases = [];
   ledger.attemptBudgetReservations = 0;
   ledger.attemptBudgetReleases = 0;
+  ledger.accessAcquisitions = 0;
   warnings.length = 0;
+  durableRevision = 0;
+  durableAttemptAdmissionCalls = 0;
+  durableClaimCalls = 0;
+  lastDurableClaimInput = null;
+  messageFindFirstArgs = [];
 
   const { POST } = await loadRoute();
   const response = await POST(
@@ -478,17 +689,23 @@ const ask = async (behaviour: "answers" | "silent") => {
         "Content-Type": "application/json",
         // Step 4 of the drill: the first provider fails before its first
         // chunk. Also lock 2 of the readiness override -- one credential.
-        "x-tomverse-fault-injection": `${FAULT_SECRET}:attempt_0_pre_token`,
+        ...(withInjectedPrimaryFault
+          ? { "x-tomverse-fault-injection": `${FAULT_SECRET}:attempt_0_pre_token` }
+          : {}),
       },
       body: JSON.stringify({
-        messages: [{ role: "user", content: "이 질문에 답해 줘" }],
+        messages: requestMessages,
         modelId: REQUESTED_MODEL_ID,
         conversationId: CONVERSATION_ID,
         assistantMessageId: ASSISTANT_MESSAGE_ID,
+        ...(includeSourceUserMessageId
+          ? { sourceUserMessageId: SOURCE_USER_MESSAGE_ID }
+          : {}),
+        ...(withContextBundle ? { contextBundle: "signed-test-bundle" } : {}),
       }),
     })
   );
-  if (response.status !== 200) {
+  if (response.status !== expectedStatus) {
     throw new Error(`status ${response.status}: ${await response.text()}`);
   }
   /*
@@ -545,6 +762,200 @@ test("a routed turn whose primary dies pre-token is finished by a second model",
   assert.ok(attempts[0].cancelledWith, "the primary stream was left open");
 });
 
+test("an exact durable replay reattaches without reservation or provider dispatch", async () => {
+  const { response, body } = await ask("answers", "reattach");
+  assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+  assert.equal(attempts.length, 0);
+  assert.equal(ledger.accessAcquisitions, 0);
+  const payload = JSON.parse(body) as { attempt: Record<string, unknown> };
+  assert.equal(payload.attempt.assistantMessageId, ASSISTANT_MESSAGE_ID);
+  assert.equal("fingerprint" in payload.attempt, false);
+  assert.equal("ownerId" in payload.attempt, false);
+  assert.equal("leaseExpiresAt" in payload.attempt, false);
+});
+
+test("durable claim and reattach POSTs are throttled before source or attempt storage", async () => {
+  durableAttemptAdmissionRefused = true;
+  try {
+    const claimed = await ask("answers", "claimed", 429);
+    assert.equal((JSON.parse(claimed.body) as { code?: string }).code, "API_RATE_LIMITED");
+    assert.equal(durableAttemptAdmissionCalls, 1);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+
+    const reattach = await ask("answers", "reattach", 429);
+    assert.equal((JSON.parse(reattach.body) as { code?: string }).code, "API_RATE_LIMITED");
+    assert.equal(durableAttemptAdmissionCalls, 1);
+    assert.equal(durableClaimCalls, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+  } finally {
+    durableAttemptAdmissionRefused = false;
+  }
+});
+
+test("a durable identity mismatch is one generic 409 without dispatch", async () => {
+  const { body } = await ask("answers", "conflict", 409);
+  assert.equal(attempts.length, 0);
+  assert.equal(ledger.accessAcquisitions, 0);
+  const payload = JSON.parse(body) as Record<string, unknown>;
+  assert.equal(payload.code, "CHAT_ATTEMPT_ID_REUSED");
+  assert.equal("fingerprint" in payload, false);
+});
+
+test("a past source id plus a newer user payload is rejected before paid work", async () => {
+  const { body } = await ask("answers", "claimed", 409, false, [
+    { id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" },
+    {
+      id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      role: "user",
+      content: "new payload",
+    },
+  ]);
+  assert.equal(attempts.length, 0);
+  assert.equal(ledger.accessAcquisitions, 0);
+  assert.equal(world.terminals.length, 0);
+  const payload = JSON.parse(body) as Record<string, unknown>;
+  assert.equal(payload.code, "CHAT_SOURCE_MESSAGE_MISMATCH");
+  assert.equal("sourceUserMessageId" in payload, false);
+});
+
+test("a restored client attachment uses the current bound row id, not its provenance id", async () => {
+  const current: MockStoredAttachment = {
+    id: "bound-current-row",
+    uploadId: "original-upload",
+    userId: USER_ID,
+    conversationId: CONVERSATION_ID,
+    name: "same.txt",
+    mediaType: "text/plain",
+    size: 12,
+    kind: "text",
+    objectKey: `${attachmentObjectPrefix}same.txt`,
+    unavailableAt: null,
+    unavailableReason: null,
+  };
+  const sameMetadataOtherRow: MockStoredAttachment = {
+    ...current,
+    id: "other-bound-row",
+    uploadId: "other-upload",
+    objectKey: `${attachmentObjectPrefix}same-copy.txt`,
+  };
+  persistedSourceAttachments = [current];
+  resolvedAttachmentRows = [current, sameMetadataOtherRow];
+  try {
+    const restoredAttachment = {
+      id: "bound-current-row",
+      attachmentId: "bound-current-row",
+      name: "same.txt",
+      mediaType: "text/plain",
+      size: 12,
+      kind: "text",
+    };
+    const exact = await ask("answers", "reattach", 200, false, [{
+      id: SOURCE_USER_MESSAGE_ID,
+      role: "user",
+      content: "이 질문에 답해 줘",
+      attachments: [restoredAttachment],
+    }]);
+    assert.equal(exact.response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+
+    const mismatched = await ask("answers", "claimed", 409, false, [{
+      id: SOURCE_USER_MESSAGE_ID,
+      role: "user",
+      content: "이 질문에 답해 줘",
+      attachments: [{ ...restoredAttachment, id: "other-bound-row", attachmentId: "other-bound-row" }],
+    }]);
+    assert.equal((JSON.parse(mismatched.body) as { code?: string }).code, "CHAT_SOURCE_MESSAGE_MISMATCH");
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(attempts.length, 0);
+  } finally {
+    persistedSourceAttachments = [];
+    resolvedAttachmentRows = [];
+  }
+});
+
+test("a post-claim context consumption collision is terminal and dispatch-free", async () => {
+  contextConsumeSucceeds = false;
+  try {
+    const { response, body } = await ask("answers", "claimed", 409, true);
+    assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+    assert.equal(attempts.length, 0);
+    assert.equal(ledger.accessAcquisitions, 0);
+    assert.equal(world.terminals.length, 1);
+    assert.equal(world.terminals[0]?.status, "failed");
+    assert.equal(world.terminals[0]?.failureCode, "request_refused");
+    const payload = JSON.parse(body) as Record<string, unknown>;
+    assert.equal(payload.code, "CHAT_CONTEXT_BUNDLE_STALE");
+    assert.deepEqual(payload.details, {
+      requiresPreflight: true,
+      refusalReason: "already_consumed",
+    });
+    assert.equal("bundleId" in payload, false);
+  } finally {
+    contextConsumeSucceeds = true;
+  }
+});
+
+test("a pre-durable browser request id derives and verifies one scoped durable source", async () => {
+  const legacyRequestId = "99999999-8888-4777-8666-555555555555";
+  const { scopedMessageId } = require(
+    resolve(ROOT, "lib/messageRequestIdentity.ts")
+  ) as typeof import("../../lib/messageRequestIdentity");
+  const expectedSourceId = scopedMessageId(CONVERSATION_ID, legacyRequestId);
+
+  await ask(
+    "answers",
+    "reattach",
+    200,
+    false,
+    [{ id: legacyRequestId, role: "user", content: "이 질문에 답해 줘" }],
+    false
+  );
+
+  assert.equal(durableAttemptAdmissionCalls, 1);
+  assert.equal(durableClaimCalls, 1);
+  assert.equal(lastDurableClaimInput?.sourceUserMessageId, expectedSourceId);
+  assert.equal(
+    (messageFindFirstArgs[0]?.where as { id?: string } | undefined)?.id,
+    expectedSourceId
+  );
+});
+
+test("a non-durable persisted answer resolves the latest prompt deterministically", async () => {
+  conversationProductKey = "review";
+  try {
+    await ask(
+      "answers",
+      "claimed",
+      200,
+      false,
+      [{ id: SOURCE_USER_MESSAGE_ID, role: "user", content: "이 질문에 답해 줘" }],
+      false,
+      false
+    );
+    const persistenceLookup = messageFindFirstArgs.find((args) =>
+      Array.isArray(args.orderBy)
+    );
+    assert.ok(
+      persistenceLookup,
+      `missing deterministic persistence lookup: ${JSON.stringify(messageFindFirstArgs)}`
+    );
+    assert.deepEqual(persistenceLookup?.orderBy, [
+      { createdAt: "desc" },
+      { id: "desc" },
+    ]);
+    assert.equal(
+      "id" in ((persistenceLookup?.where ?? {}) as Record<string, unknown>),
+      false
+    );
+  } finally {
+    conversationProductKey = "chat";
+  }
+});
+
 test("the answer is persisted against the model that produced it", async () => {
   await ask("answers");
 
@@ -581,6 +992,34 @@ test("a fallback settles once, releases once, and holds once more", async () => 
   // Both provider streams are accounted for: the primary cancelled at the
   // swap, the fallback closed by finishing.
   assert.ok(attempts[0].cancelledWith);
+});
+
+test("assistant Message transaction failure settles once and terminalizes immediately", async () => {
+  failAssistantPersistence = true;
+  try {
+    const { streamError } = await ask("answers");
+    assert.ok(streamError, "the failed local persistence must fail the published stream");
+    assert.equal(ledger.settlements.length, 1);
+    assert.equal(ledger.settlements[0].outcome, "completed");
+    assert.equal(world.messages.length, 0);
+    assert.equal(world.terminals.length, 1);
+    assert.equal(world.terminals[0]?.status, "failed");
+    assert.equal(world.terminals[0]?.failureCode, "internal_error");
+  } finally {
+    failAssistantPersistence = false;
+  }
+});
+
+test("a failed durable terminal write cannot skip financial settlement", async () => {
+  durableTerminalFails = true;
+  try {
+    await ask("silent");
+    assert.equal(world.terminals.length, 1);
+    assert.equal(ledger.settlements.length, 1);
+    assert.equal(ledger.settlements[0].outcome, "failed");
+  } finally {
+    durableTerminalFails = false;
+  }
 });
 
 /* ------------------------------------------- the liveness watch, across both */

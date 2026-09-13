@@ -312,6 +312,27 @@ import {
     consumeContextBundle,
     verifyChatContextBundle,
 } from "@/lib/chatContextBundleService";
+import {
+    chatResponseAttemptRequestPayloadDigest,
+    publicChatResponseAttempt,
+} from "@/lib/chatResponseAttemptCore";
+import {
+    ChatAttemptCapacityError,
+    ChatAttemptCasError,
+    ChatAttemptIdentityConflictError,
+    ChatAttemptScopeError,
+    claimChatResponseAttempt,
+    terminalChatResponseAttempt,
+} from "@/lib/chatResponseAttemptPersistence";
+import {
+    createChatResponseAttemptCheckpointWriter,
+    type ChatResponseAttemptCheckpointWriter,
+} from "@/lib/chatDurableAttemptStream";
+import {
+    ChatSourceMessageMismatchError,
+    verifyDurableChatSourceMessage,
+} from "@/lib/chatDurableSourceMessage";
+import { scopedMessageId } from "@/lib/messageRequestIdentity";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { injectedTokenBucket } from "@/lib/memoryMetricsCore";
 import {
@@ -445,6 +466,7 @@ const tracedJsonError = (
         status,
         headers: {
             "Content-Type": "application/json",
+            "Cache-Control": "private, no-store",
             "X-Request-ID": traceId,
             ...(grant.errorReportToken
                 ? { [ERROR_REPORT_TOKEN_HEADER]: grant.errorReportToken }
@@ -994,6 +1016,19 @@ async function handleChatPost(
     // renewing a lease no request owns any more.
     let stopLeaseHeartbeat: (() => void) | null = null;
     let usageReservation: ChatUsageReservation | null = null;
+    let durableAttempt:
+        | {
+              userId: string;
+              assistantMessageId: string;
+              sourceUserMessageId: string;
+              ownerId: string;
+              revision: number;
+              partialContent: string;
+          }
+        | null = null;
+    let durableCheckpointWriter: ChatResponseAttemptCheckpointWriter | null = null;
+    let durableAttemptAdmissionConsumed = false;
+    let persistenceSourceUserMessageId: string | undefined;
     // Hoisted so the outer catch can close the attempt. A provider that
     // refuses the call leaves an attempt that was prepared and never
     // dispatched, and an attempt stuck at `pending` is one the reliability
@@ -1046,6 +1081,7 @@ async function handleChatPost(
             modelId,
             conversationId,
             assistantMessageId,
+            sourceUserMessageId,
             turnstileToken,
             deepResearchDepth,
             webSearchMode,
@@ -1053,6 +1089,27 @@ async function handleChatPost(
             contextBundle,
             acknowledgedUnavailableAttachmentIds,
         } = validateChatPayload(body);
+        persistenceSourceUserMessageId = sourceUserMessageId;
+        // Durable idempotency has to claim before credit reservation, but it
+        // must not be a way around request admission. This cheap account+IP
+        // bucket runs before source lookup, advisory locks and attempt row
+        // creation, and therefore counts both fresh claims and POST reattach
+        // probes. The ordinary Chat limiter still applies later; this scope
+        // protects only the durable-recovery database boundary.
+        if (
+            session?.user?.id &&
+            conversationId &&
+            assistantMessageId &&
+            sourceUserMessageId
+        ) {
+            await consumeApiRateLimit(
+                req,
+                session.user.id,
+                "chat-durable-attempt",
+                { minute: 60, day: 5_000 }
+            );
+            durableAttemptAdmissionConsumed = true;
+        }
         /*
           Files this request has been told are gone and may proceed without.
 
@@ -1080,6 +1137,7 @@ async function handleChatPost(
         // conversation, which inherits the account default like `inherit`.
         let conversationMemoryMode: string | null = null;
         let conversationProductKey: string | null = null;
+        let conversationRecoveryEpoch: number | null = null;
         // Policy: docs/policy/external-conversation-import-and-memory.md.
         // §10: the conversation's bound profile version. Read from the same
         // row as the memory mode so the context this request builds is the
@@ -1704,6 +1762,7 @@ async function handleChatPost(
                     kind: true,
                     memoryMode: true,
                     productKey: true,
+                    chatRecoveryEpoch: true,
                     assistantProfileVersionId: true,
                 },
             });
@@ -1713,6 +1772,7 @@ async function handleChatPost(
             // once the row exists, its own productKey is the only source --
             // never the surface the request came from.
             conversationProductKey = conversation?.productKey ?? null;
+            conversationRecoveryEpoch = conversation?.chatRecoveryEpoch ?? null;
             conversationProfileVersionId =
                 conversation?.assistantProfileVersionId ?? null;
             if (!conversation || conversation.userId !== session.user.id) {
@@ -1929,6 +1989,24 @@ async function handleChatPost(
             memoryTokens: number;
             knowledgeChunkCount: number;
         } | null = null;
+        let verifiedContext:
+            | {
+                  bundleId: string;
+                  expiresAt: Date;
+                  systemPrompt: string | null;
+                  memoryText: string;
+                  memoryUsedCount: number;
+                  memoryTokens: number;
+                  profileTokens: number;
+                  knowledgeChunkCount: number;
+                  memoryTruncatedByBudget: boolean;
+                  requestIdentity: {
+                      contextFingerprint: string;
+                      memoryTokens: number;
+                      profileTokens: number;
+                  };
+              }
+            | null = null;
         if (session?.user?.id) {
             // §22's injection denominator. Recorded before the bundle branch
             // so it counts every authenticated request, including the ones
@@ -2001,73 +2079,175 @@ async function handleChatPost(
                           traceId
                       );
             }
-            const consumption = await consumeContextBundle({
+            verifiedContext = {
                 bundleId: verification.payload.bundleId,
+                expiresAt: new Date(verification.payload.expiresAtMs),
+                systemPrompt: turnContext.systemPrompt,
+                memoryText: turnContext.memory.prompt.text ?? "",
+                memoryUsedCount: turnContext.memory.prompt.usedCount,
+                memoryTokens: verification.payload.memoryTokens,
+                profileTokens: verification.payload.profileTokens,
+                knowledgeChunkCount: turnContext.profile.knowledgeChunkCount,
+                memoryTruncatedByBudget: turnContext.memory.truncatedByBudget,
+                // The retry identity binds what the signed bundle proved, not
+                // the opaque one-time bearer token or bundle id. A refreshed
+                // token for the same verified context is the same request.
+                requestIdentity: {
+                    contextFingerprint: turnContext.fingerprint,
+                    memoryTokens: verification.payload.memoryTokens,
+                    profileTokens: verification.payload.profileTokens,
+                },
+            };
+        }
+
+        const isDurableStoredChat = Boolean(
+            session?.user?.id &&
+                conversationId &&
+                assistantMessageId &&
+                conversationProductKey === "chat" &&
+                modelConfig.usageClass !== "deep-research"
+        );
+        if (isDurableStoredChat) {
+            if (!persistenceSourceUserMessageId) {
+                // A browser tab left open across the durable-recovery deploy
+                // still names its freshly saved user turn with the old
+                // client request id. Derive the same conversation-scoped id
+                // as the Message endpoint, then make the ordinary owner/text/
+                // ordered-attachment verification prove that row exists.
+                // Missing or malformed legacy identity remains fail-closed.
+                const legacyRequestId = [...messages]
+                    .reverse()
+                    .find((message) => message.role === "user")?.id;
+                if (!legacyRequestId) {
+                    return tracedJsonError(
+                        "Incomplete persistence target.",
+                        "INVALID_PERSISTENCE_TARGET",
+                        400,
+                        traceId
+                    );
+                }
+                persistenceSourceUserMessageId = scopedMessageId(
+                    conversationId!,
+                    legacyRequestId
+                );
+            }
+            if (!durableAttemptAdmissionConsumed) {
+                await consumeApiRateLimit(
+                    req,
+                    session!.user!.id,
+                    "chat-durable-attempt",
+                    { minute: 60, day: 5_000 }
+                );
+                durableAttemptAdmissionConsumed = true;
+            }
+            await verifyDurableChatSourceMessage({
+                userId: session!.user!.id,
+                conversationId: conversationId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
+                messages,
+            });
+            const ownerId = randomUUID();
+            const requestPayloadDigest = chatResponseAttemptRequestPayloadDigest({
+                messages,
+                requestedModelId,
+                webSearchMode: webSearchMode ?? "off",
+                context: verifiedContext?.requestIdentity ?? null,
+                acknowledgedUnavailableAttachmentIds:
+                    acknowledgedUnavailableAttachmentIds ?? [],
+            });
+            const claim = await claimChatResponseAttempt({
+                userId: session!.user!.id,
+                assistantMessageId: assistantMessageId!,
+                conversationId: conversationId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
+                requestedModelId,
+                requestPayloadDigest,
+                expectedRecoveryEpoch: conversationRecoveryEpoch!,
+                ownerId,
+                leaseExpiresAt: new Date(Date.now() + 4 * 60 * 1_000),
+            });
+            if (claim.disposition === "reattach") {
+                return Response.json(
+                    { attempt: publicChatResponseAttempt(claim.attempt) },
+                    {
+                        headers: {
+                            "Cache-Control": "private, no-store",
+                            "X-Request-ID": traceId,
+                            "X-Chat-Response-Mode": "durable-attempt",
+                        },
+                    }
+                );
+            }
+            durableAttempt = {
+                userId: session!.user!.id,
+                assistantMessageId: assistantMessageId!,
+                sourceUserMessageId: persistenceSourceUserMessageId,
+                ownerId,
+                revision: claim.attempt.checkpointRevision,
+                partialContent: claim.attempt.partialContent,
+            };
+            durableCheckpointWriter = createChatResponseAttemptCheckpointWriter({
+                userId: durableAttempt.userId,
+                assistantMessageId: durableAttempt.assistantMessageId,
+                ownerId,
+                initialRevision: durableAttempt.revision,
+                requestedModelId,
+            });
+        }
+
+        if (verifiedContext && session?.user?.id) {
+            const consumption = await consumeContextBundle({
+                bundleId: verifiedContext.bundleId,
                 modelId: requestedModelId,
                 userId: session.user.id,
-                expiresAt: new Date(verification.payload.expiresAtMs),
+                expiresAt: verifiedContext.expiresAt,
             });
             if (!consumption.consumed) {
-                // A replay, not drift — but the recovery is the same one, and
-                // §18's code table is settled: this request cannot establish
-                // that its context was priced, and a fresh preparation is what
-                // fixes it. Reusing the code keeps one client path instead of
-                // adding a second that would do the same thing.
-                //
-                // Counted apart from staleness even so: the user-facing code
-                // is shared, but "the context drifted" and "this bundle was
-                // presented twice" are different operational facts, and only
-                // the first belongs in the stale ratio.
                 await recordMemoryCounter("context_bundle_replayed");
+                if (durableAttempt) {
+                    await terminalChatResponseAttempt({
+                        userId: durableAttempt.userId,
+                        assistantMessageId: durableAttempt.assistantMessageId,
+                        ownerId: durableAttempt.ownerId,
+                        expectedRevision: durableAttempt.revision,
+                        status: "failed",
+                        finalContent: durableAttempt.partialContent,
+                        finishReason: "error",
+                        failureCode: "request_refused",
+                    });
+                    durableAttempt = null;
+                    durableCheckpointWriter = null;
+                }
                 return tracedJsonError(
-                    "The conversation context changed while this message was being sent.",
+                    "This prepared conversation context has already been used.",
                     "CHAT_CONTEXT_BUNDLE_STALE",
                     409,
                     traceId,
-                    { requiresPreflight: true }
+                    {
+                        requiresPreflight: true,
+                        refusalReason: "already_consumed",
+                    }
                 );
             }
-            // Policy: docs/policy/external-conversation-import-and-memory.md.
-            // The whole §9.1 block -- profile instructions, then memory, then
-            // profile knowledge -- assembled as one system message by the
-            // builder that priced it.
-            contextSystemPrompt = turnContext.systemPrompt;
-            memoryUsedCount = turnContext.memory.prompt.usedCount;
-            // §14.3. The builder has always produced this; until now nothing
-            // read it, so an answer assembled from the user's own uploaded
-            // files said nothing about where it came from.
-            knowledgeChunkCount = turnContext.profile.knowledgeChunkCount;
+            contextSystemPrompt = verifiedContext.systemPrompt;
+            memoryUsedCount = verifiedContext.memoryUsedCount;
+            knowledgeChunkCount = verifiedContext.knowledgeChunkCount;
             contextAttribution = {
                 memoryUsedCount,
-                memoryTokens: verification.payload.memoryTokens,
+                memoryTokens: verifiedContext.memoryTokens,
                 knowledgeChunkCount,
             };
-            // Memory's own presence, not the block's: a turn whose system
-            // message carries only a profile's instructions has no memory in
-            // it, and counting it as an injection would report memory as used
-            // on a request the model never saw it in.
-            if (turnContext.memory.prompt.text) {
+            if (verifiedContext.memoryText) {
                 void recordMemoryCounter("chat_memory_injected");
-                if (turnContext.memory.truncatedByBudget) {
+                if (verifiedContext.memoryTruncatedByBudget) {
                     void recordMemoryCounter("injected_context_truncated");
                 }
-                // The priced figure, not a fresh estimate, so the bucket
-                // describes the same block the reservation was taken against.
-                const bucket = injectedTokenBucket(
-                    verification.payload.memoryTokens
-                );
+                const bucket = injectedTokenBucket(verifiedContext.memoryTokens);
                 if (bucket) void recordMemoryCounter(bucket);
             }
-            // The figures that were reserved against, not fresh estimates: the
-            // two agree here by construction, and if they ever stop agreeing
-            // the user should be billed the numbers they were quoted. The
-            // profile's blocks are counted apart from memory's because they
-            // are a different context, priced by the same builder.
             const quotedContextTokens =
-                verification.payload.memoryTokens +
-                verification.payload.profileTokens;
+                verifiedContext.memoryTokens + verifiedContext.profileTokens;
             estimatedInputTokens += quotedContextTokens;
-            // Quoted, not re-estimated -- so it enters as an opaque count.
             inputEstimate.addTokens(quotedContextTokens);
         }
 
@@ -3869,6 +4049,10 @@ async function handleChatPost(
                 pricingVersion: budget.pricingVersion ?? null,
             } satisfies AttemptPriceSnapshot,
         };
+        durableCheckpointWriter?.setAttribution(
+            dispatched.modelId,
+            dispatched.provider
+        );
         /**
          * Attempts that have already ended, oldest first.
          *
@@ -4052,6 +4236,49 @@ async function handleChatPost(
             if (!reservation) return Promise.resolve();
             usageSettlement = (async () => {
                 try {
+                    if (durableAttempt && outcome !== "completed") {
+                        try {
+                            const checkpoint = durableCheckpointWriter
+                                ? await durableCheckpointWriter.flush(generatedText)
+                                : {
+                                      revision: durableAttempt.revision,
+                                      partialContent: durableAttempt.partialContent,
+                                  };
+                            await terminalChatResponseAttempt({
+                                userId: durableAttempt.userId,
+                                assistantMessageId: durableAttempt.assistantMessageId,
+                                ownerId: durableAttempt.ownerId,
+                                expectedRevision: checkpoint.revision,
+                                status:
+                                    outcome === "cancelled" ? "cancelled" : "failed",
+                                finalContent: checkpoint.partialContent,
+                                actualModelId: dispatched.modelId,
+                                provider: dispatched.provider,
+                                finishReason:
+                                    outcome === "cancelled" ? "cancelled" : "error",
+                                failureCode:
+                                    outcome === "cancelled"
+                                        ? null
+                                        : outcome === "empty"
+                                          ? "internal_error"
+                                          : "stream_interrupted",
+                            });
+                            durableAttempt = null;
+                            durableCheckpointWriter = null;
+                        } catch (attemptError) {
+                            // Attempt durability and financial settlement are
+                            // independent obligations. A failed checkpoint or
+                            // terminal CAS is reconciled by the lease expiry;
+                            // it must never skip charging/refunding the provider
+                            // request which already ran.
+                            logRequestError(
+                                "chat_durable_attempt_terminal_failed",
+                                traceId,
+                                attemptError,
+                                dispatched.modelId
+                            );
+                        }
+                    }
                     const providerUsageSnapshot =
                         (await takePerplexityCapture())?.usage ?? null;
                     const settledInputTokens =
@@ -4892,6 +5119,10 @@ async function handleChatPost(
                         : null,
                 pricingVersion: plan.budget.pricingVersion ?? null,
             };
+            durableCheckpointWriter?.setAttribution(
+                dispatched.modelId,
+                dispatched.provider
+            );
             // The next attempt captures under its own key, so the memo from
             // the one it replaced must not answer for it.
             perplexityCapture = null;
@@ -5119,6 +5350,15 @@ async function handleChatPost(
                             searchQueriesObserved: true,
                         };
 
+                        const durableFinalCheckpoint = durableCheckpointWriter
+                            ? await durableCheckpointWriter.flush(generatedText)
+                            : null;
+                        if (durableAttempt && durableFinalCheckpoint) {
+                            durableAttempt.revision = durableFinalCheckpoint.revision;
+                            durableAttempt.partialContent =
+                                durableFinalCheckpoint.partialContent;
+                        }
+
                         if (usageResult.status === "fulfilled") {
                             const usage = usageResult.value;
                             await settleSafely(
@@ -5217,13 +5457,20 @@ async function handleChatPost(
                                     );
                                     const sourcePrompt = await tx.message.findFirst({
                                         where: {
+                                            ...(persistenceSourceUserMessageId
+                                                ? { id: persistenceSourceUserMessageId }
+                                                : {}),
                                             conversationId,
                                             role: "user",
                                         },
-                                        orderBy: [
-                                            { createdAt: "desc" },
-                                            { id: "desc" },
-                                        ],
+                                        ...(persistenceSourceUserMessageId
+                                            ? {}
+                                            : {
+                                                  orderBy: [
+                                                      { createdAt: "desc" as const },
+                                                      { id: "desc" as const },
+                                                  ],
+                                              }),
                                         select: { id: true },
                                     });
                                     if (sourcePrompt) {
@@ -5286,7 +5533,36 @@ async function handleChatPost(
                                             failed: artifactCollector.failed,
                                         });
                                     }
+                                    if (durableAttempt && durableFinalCheckpoint) {
+                                        const normalizedFinishReason =
+                                            completionOutcome.status === "incomplete"
+                                                ? "length"
+                                                : finishReason === "content-filter"
+                                                  ? "content_filter"
+                                                  : finishReason === "tool-calls"
+                                                    ? "tool_call"
+                                                    : "stop";
+                                        await terminalChatResponseAttempt(
+                                            {
+                                                userId: durableAttempt.userId,
+                                                assistantMessageId:
+                                                    durableAttempt.assistantMessageId,
+                                                ownerId: durableAttempt.ownerId,
+                                                expectedRevision:
+                                                    durableFinalCheckpoint.revision,
+                                                status: "completed",
+                                                finalContent:
+                                                    durableFinalCheckpoint.partialContent,
+                                                actualModelId: dispatched.modelId,
+                                                provider: dispatched.provider,
+                                                finishReason: normalizedFinishReason,
+                                            },
+                                            tx
+                                        );
+                                    }
                                 });
+                                durableAttempt = null;
+                                durableCheckpointWriter = null;
                                 if (artifactCollector && !artifactCollector.isEmpty) {
                                     // Read back rather than assumed: the
                                     // failed rows were created without
@@ -5325,6 +5601,32 @@ async function handleChatPost(
                                 */
                                 await artifactCollector?.discard();
                                 artifactsForTrailer = [];
+                                if (durableAttempt && durableFinalCheckpoint) {
+                                    // Billing has already settled above and is
+                                    // intentionally not rolled back with the
+                                    // local Message transaction. Persist the
+                                    // failure immediately outside that aborted
+                                    // transaction so recovery never advertises
+                                    // an active attempt until lease expiry.
+                                    await terminalChatResponseAttempt({
+                                        userId: durableAttempt.userId,
+                                        assistantMessageId:
+                                            durableAttempt.assistantMessageId,
+                                        ownerId: durableAttempt.ownerId,
+                                        expectedRevision:
+                                            durableFinalCheckpoint.revision,
+                                        status: "failed",
+                                        finalContent:
+                                            durableFinalCheckpoint.partialContent,
+                                        actualModelId: dispatched.modelId,
+                                        provider: dispatched.provider,
+                                        finishReason: "error",
+                                        failureCode: "internal_error",
+                                    });
+                                    durableAttempt = null;
+                                    durableCheckpointWriter = null;
+                                    throw error;
+                                }
                             }
                         } else if (artifactCollector?.stored.length) {
                             /*
@@ -5356,6 +5658,29 @@ async function handleChatPost(
                             artifactsForTrailer = [];
                         }
                         const isEmptyResponse = !generatedText.trim();
+                        if (
+                            isEmptyResponse &&
+                            durableAttempt &&
+                            durableFinalCheckpoint
+                        ) {
+                            await terminalChatResponseAttempt({
+                                userId: durableAttempt.userId,
+                                assistantMessageId:
+                                    durableAttempt.assistantMessageId,
+                                ownerId: durableAttempt.ownerId,
+                                expectedRevision: durableFinalCheckpoint.revision,
+                                status: "failed",
+                                finalContent: durableFinalCheckpoint.partialContent,
+                                actualModelId: dispatched.modelId,
+                                provider: dispatched.provider,
+                                finishReason: "error",
+                                failureCode: completionError
+                                    ? "provider_unavailable"
+                                    : "internal_error",
+                            });
+                            durableAttempt = null;
+                            durableCheckpointWriter = null;
+                        }
                         if (isEmptyResponse) {
                             const completionMetadata = safeErrorMetadata(
                                 completionError
@@ -5454,7 +5779,12 @@ async function handleChatPost(
                         await cancelSourceSafely("response stream is no longer open");
                         await settleSafely("cancelled", earlyCancelSearchFields);
                         await releaseSafely();
+                        return;
                     }
+                    // Checkpoint only bytes the browser was successfully
+                    // offered. The writer coalesces chunks and applies owner,
+                    // revision and database-clock lease CAS.
+                    durableCheckpointWriter?.observe(generatedText);
                 } catch (error) {
                     const wasAlreadyCancelled = streamState !== "open";
                     if (
@@ -5576,9 +5906,17 @@ async function handleChatPost(
 
         const headers = new Headers({
             "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
+            // Keep both policy branches literal. The repository cache audit
+            // deliberately reads route source without executing it, so a
+            // conditional expression here hid both declarations from the
+            // guard even though runtime behavior was correct.
+            "Cache-Control": "private, no-store, no-transform",
             "X-Request-ID": traceId,
+            ...(durableAttempt ? { "X-Chat-Response-Mode": "stream" } : {}),
         });
+        if (!durableAttempt) {
+            headers.set("Cache-Control", "no-cache, no-transform");
+        }
         // §13.4: how many memories this answer was given, counted by the
         // server. A header rather than something in the stream, because the
         // stream is the answer itself and the count has to be available
@@ -5673,6 +6011,40 @@ async function handleChatPost(
                 reason: orphanedLease.reason,
             });
         }
+        if (durableAttempt) {
+            try {
+                const checkpoint = durableCheckpointWriter
+                    ? await durableCheckpointWriter.flush("")
+                    : {
+                          revision: durableAttempt.revision,
+                          partialContent: durableAttempt.partialContent,
+                      };
+                await terminalChatResponseAttempt({
+                    userId: durableAttempt.userId,
+                    assistantMessageId: durableAttempt.assistantMessageId,
+                    ownerId: durableAttempt.ownerId,
+                    expectedRevision: checkpoint.revision,
+                    status: "failed",
+                    finalContent: checkpoint.partialContent,
+                    actualModelId: dispatchModelIdForLog ?? null,
+                    provider: dispatchProviderForLog ?? null,
+                    finishReason: "error",
+                    failureCode: providerCall
+                        ? "provider_unavailable"
+                        : "request_refused",
+                });
+            } catch (attemptError) {
+                logRequestError(
+                    "chat_durable_attempt_terminal_failed",
+                    traceId,
+                    attemptError,
+                    dispatchModelIdForLog
+                );
+            } finally {
+                durableAttempt = null;
+                durableCheckpointWriter = null;
+            }
+        }
         // The request failed before the stream owned it, so the attempt was
         // prepared and never produced an answer. `failed_pre_token` rather
         // than `not_dispatched`: this path is reached both before and after
@@ -5727,6 +6099,52 @@ async function handleChatPost(
         if (dispatchProviderForLog === "perplexity") {
             discardPerplexityUsage(traceId);
         }
+        if (error instanceof ChatAttemptIdentityConflictError) {
+            return tracedJsonError(
+                "This response identity is already bound to another request.",
+                error.code,
+                409,
+                traceId
+            );
+        }
+        if (error instanceof ChatAttemptCapacityError) {
+            return tracedJsonError(
+                error.message,
+                error.code,
+                error.status,
+                traceId
+            );
+        }
+        if (error instanceof ChatSourceMessageMismatchError) {
+            return tracedJsonError(
+                "The persisted source message does not match this Chat request.",
+                error.code,
+                error.status,
+                traceId
+            );
+        }
+        if (error instanceof ChatAttemptScopeError) {
+            return tracedJsonError(
+                "The persisted Chat turn could not be found.",
+                error.code,
+                409,
+                traceId
+            );
+        }
+        if (error instanceof ChatAttemptCasError) {
+            return tracedJsonError(
+                "The response attempt changed before dispatch.",
+                error.code,
+                409,
+                traceId
+            );
+        }
+        const securityResponse = apiSecurityResponse(error);
+        if (securityResponse) {
+            securityResponse.headers.set("X-Request-ID", traceId);
+            securityResponse.headers.set("Cache-Control", "private, no-store");
+            return securityResponse;
+        }
         const accessError = chatErrorResponse(error);
         if (accessError) {
             // Its own record, because it qualifies for neither of the two this
@@ -5768,6 +6186,9 @@ async function handleChatPost(
                 );
             }
             accessError.headers.set("X-Request-ID", traceId);
+            // Chat errors can contain account-scoped quota and recovery
+            // state. They are never reusable by a shared cache.
+            accessError.headers.set("Cache-Control", "private, no-store");
             if (error instanceof ChatAccessError) {
                 // Limit/entitlement rejections are reportable too; the grant
                 // signs the trace but records no new evidence row -- the

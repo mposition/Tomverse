@@ -10,6 +10,8 @@ import {
 } from "@/lib/messageAttachmentCore";
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
+import { publicChatResponseAttempt } from "@/lib/chatResponseAttemptCore";
+import { listChatResponseAttempts } from "@/lib/chatResponseAttemptPersistence";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
@@ -129,6 +131,11 @@ type Params = {
   }>;
 };
 
+const privateNoStore = <T extends Response>(response: T): T => {
+  response.headers.set("Cache-Control", "private, no-store");
+  return response;
+};
+
 export async function GET(
   req: Request,
   context: RouteContext<"/api/conversations/[conversationId]">
@@ -136,7 +143,7 @@ export async function GET(
     try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
-        return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+        return privateNoStore(NextResponse.json({ error: "Authentication required." }, { status: 401 }));
     }
     const userId = session.user.id;
     await consumeApiRateLimit(req, userId, "conversation-detail", {
@@ -148,7 +155,7 @@ export async function GET(
     const conversationId = params.conversationId;
 
     if (!conversationId) {
-        return NextResponse.json({ error: "Conversation ID is required." }, { status: 400 });
+        return privateNoStore(NextResponse.json({ error: "Conversation ID is required." }, { status: 400 }));
     }
 
     const existingConv = await prisma.conversation.findUnique({
@@ -157,7 +164,7 @@ export async function GET(
     });
 
     if (!existingConv || existingConv.userId !== userId) {
-        return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
+        return privateNoStore(NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 }));
     }
 
     if (
@@ -168,7 +175,7 @@ export async function GET(
             existingConv.password
         )
     ) {
-        return conversationLockedResponse();
+        return privateNoStore(conversationLockedResponse());
     }
 
     const userSettings = await prisma.userSettings.findUnique({
@@ -180,16 +187,16 @@ export async function GET(
     const cursor = searchParams.get("cursor");
     const requestedModelId = searchParams.get("modelId");
     if (cursor && (cursor.length > 100 || !/^[A-Za-z0-9_-]+$/.test(cursor))) {
-      return NextResponse.json(
+      return privateNoStore(NextResponse.json(
         { error: "Invalid message cursor." },
         { status: 400 }
-      );
+      ));
     }
     if (requestedModelId && !(await isEnabledRuntimeModelId(requestedModelId))) {
-      return NextResponse.json(
+      return privateNoStore(NextResponse.json(
         { error: "Invalid model ID." },
         { status: 400 }
-      );
+      ));
     }
 
     const conversation = await prisma.conversation.findUnique({
@@ -221,13 +228,13 @@ export async function GET(
     });
 
     if (!conversation) {
-      return NextResponse.json(
+      return privateNoStore(NextResponse.json(
         { error: "Conversation not found." },
         { status: 404 }
-      );
+      ));
     }
         if (conversation.userId !== userId) {
-        return NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 });
+        return privateNoStore(NextResponse.json({ error: "You do not have access to this conversation." }, { status: 403 }));
     }
 
     const messagePage = await prisma.message.findMany({
@@ -381,7 +388,17 @@ export async function GET(
     const selectedModels = await clampRuntimeSelectedModels(
       safeParse(conversation.selectedModels, [defaultEngine])
     );
-    return NextResponse.json({
+    const responseAttempts =
+      conversation.productKey === "chat" && conversation.kind === "chat"
+        ? (
+            await listChatResponseAttempts({
+              userId,
+              conversationId,
+              limit: 50,
+            })
+          ).map(publicChatResponseAttempt)
+        : [];
+    return privateNoStore(NextResponse.json({
       ...conversation,
         // Spread above would emit the relation object itself; this replaces it
         // with the one fact the client is owed.
@@ -391,6 +408,7 @@ export async function GET(
           productKey: conversation.productKey,
         }),
         messages,
+        responseAttempts,
         kind:
           conversation.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conversation.projectId || null,
@@ -444,16 +462,16 @@ export async function GET(
         shareToken: undefined,
         shareSnapshot: undefined,
         password: undefined
-    });
+    }));
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
-    if (securityResponse) return securityResponse;
+    if (securityResponse) return privateNoStore(securityResponse);
 
     console.error("Failed to load conversation details:", error);
-    return NextResponse.json(
+    return privateNoStore(NextResponse.json(
       { error: "Failed to load conversation." },
       { status: 500 }
-    );
+    ));
   }
 }
 
