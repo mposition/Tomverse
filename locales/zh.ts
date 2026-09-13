@@ -127,7 +127,15 @@ export const zh = {
         projectDeleteFailed: "无法删除项目。",
     },
     chat: {
-        ...en.chat,
+       ...en.chat,
+        sendPreparationChanged: "准备回答时，对话或模型发生了变化。请检查问题后重新发送。",
+        conversationOpenFailed: "无法打开此对话。您当前的对话保持不变。",
+        questionSaveFailed: "无法连同文件一起保存问题。你的草稿已保留。",
+        restoreQuestion: "恢复问题",
+        restoreQuestionHint: "将问题恢复到输入框。请另行发送以请求新的回答。",
+        singleModelRequired: "Chat 使用一个回答模型。选择模型将替换当前选择。",
+        singleModelProfileRequired: "此助手使用多个模型。请为 Chat 选择单模型助手。",
+        restoreDraftNotEmpty: "已保留您正在编辑的内容。请先发送或清空输入框，再恢复此问题。",
         // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
         // It renders below the (application) layout, so LanguageProvider is
         // mounted; global-error.tsx replaces that layout and stays English.

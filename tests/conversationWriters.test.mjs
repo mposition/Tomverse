@@ -1,4 +1,9 @@
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -18,6 +23,63 @@ import {
  */
 
 const find = (sources) => findDirectConversationWriters({ sources });
+
+// Exercise the actual filesystem walker and CLI, not only the core's already
+// slash-normalized fixture paths. On Windows, join/relative produce backslashes.
+const runFixtureCheck = (t, extraSources = []) => {
+    const temporaryRoot = realpathSync(tmpdir());
+    const fixtureRoot = mkdtempSync(join(temporaryRoot, "conversation-writer-check-"));
+    t.after(() => {
+        assert.equal(dirname(fixtureRoot), temporaryRoot);
+        assert.ok(basename(fixtureRoot).startsWith("conversation-writer-check-"));
+        rmSync(fixtureRoot, { recursive: true, force: true });
+    });
+    const writeFixture = (path, text) => {
+        const destination = join(fixtureRoot, ...path.split("/"));
+        mkdirSync(dirname(destination), { recursive: true });
+        writeFileSync(destination, text);
+    };
+    mkdirSync(join(fixtureRoot, "scripts"));
+    for (const filename of ["check-conversation-writers.mjs", "check-conversation-writers-core.mjs"]) {
+        copyFileSync(
+            fileURLToPath(new URL(`../scripts/${filename}`, import.meta.url)),
+            join(fixtureRoot, "scripts", filename)
+        );
+    }
+    for (const path of [
+        "lib/conversationCreation.ts",
+        "tests/integration/fixture.test.ts",
+        "prisma/generated/prisma/models/Conversation.ts",
+    ]) {
+        writeFixture(path, "tx.conversation.create({ data });\n");
+    }
+    for (const { path, text } of extraSources) writeFixture(path, text);
+    return spawnSync(process.execPath, [join(fixtureRoot, "scripts", "check-conversation-writers.mjs")], {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+        timeout: 10_000,
+        windowsHide: true,
+    });
+};
+
+test("CLI accepts allowlisted service, tests and generated files with native filesystem paths", (t) => {
+    const result = runFixtureCheck(t);
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Conversation writer check passed/);
+});
+
+test("CLI still rejects an unauthorized production create and reports a repository-relative slash path", (t) => {
+    const result = runFixtureCheck(t, [{
+        path: "app/api/unauthorized/route.ts",
+        text: "await tx.conversation.create({ data: { userId, title } });\n",
+    }]);
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^1 direct conversation\.create\(\) call\(s\)/);
+    assert.match(result.stderr, /app\/api\/unauthorized\/route\.ts:1/);
+    assert.doesNotMatch(result.stderr, /tests\/integration\/fixture/);
+});
 
 /* ----------------------------------------------------- true positives */
 

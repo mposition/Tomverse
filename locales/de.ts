@@ -110,7 +110,15 @@ export const de = {
         projectDeleteFailed: "Projekt konnte nicht gelöscht werden.",
     },
     chat: {
-        ...en.chat,
+       ...en.chat,
+        sendPreparationChanged: "Während der Vorbereitung wurde die Unterhaltung oder das Modell geändert. Prüfe deine Frage und sende sie erneut.",
+        conversationOpenFailed: "Diese Unterhaltung konnte nicht geöffnet werden. Deine aktuelle Unterhaltung bleibt unverändert.",
+        questionSaveFailed: "Die Frage konnte nicht mit ihren Dateien gespeichert werden. Dein Entwurf bleibt erhalten.",
+        restoreQuestion: "Frage wiederherstellen",
+        restoreQuestionHint: "Stellt die Frage im Eingabefeld wieder her. Für eine neue Antwort separat senden.",
+        singleModelRequired: "Chat verwendet ein Antwortmodell. Wähle ein Modell, um die aktuelle Auswahl zu ersetzen.",
+        singleModelProfileRequired: "Dieser Assistent verwendet mehrere Modelle. Wähle für Chat einen Assistenten mit einem Modell.",
+        restoreDraftNotEmpty: "Dein Entwurf bleibt erhalten. Sende oder leere ihn, bevor du diese Frage wiederherstellst.",
         // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
         // It renders below the (application) layout, so LanguageProvider is
         // mounted; global-error.tsx replaces that layout and stays English.

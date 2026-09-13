@@ -103,8 +103,9 @@ statement로** 넘깁니다 — docs/policy/conversation-product-key.md §5.2.
 - **bridge는 provenance이지 제품이 아닙니다.** bridge가 있다는 사실이 정하는 것은
   둘 — 이 대화가 어느 snapshot에서 시작됐는가, 그리고 어느 surface에서 열리는가
   (§8.2의 `conversationSurface()`). `productKey`는 그 둘 중 어느 쪽에서도
-  유도되지 않고, 반대로 `productKey`에서 surface를 유도하지도 않습니다. 후자를
-  하면 앞으로의 모든 `review` 대화가 continuation surface로 갑니다.
+  유도되지 않습니다. **continuation 판정에는 bridge가 필요**하며 `review` 값만으로
+  유도하지 않습니다. bridge가 없는 행의 Chat/workspace 구분에는 서버가 저장한
+  제품값을 씁니다(§8.2). 따라서 모든 `review`가 continuation으로 가는 일은 없습니다.
 - **`kind`는 `chat`으로 남습니다.** `kind`는 서버 authorization·modality
   경계이고(`docs/policy/conversation-product-key.md` §1), Chat과 Review는 둘 다
   `chat` modality입니다. `PRODUCT_MODALITY`가 이 조합을 애플리케이션에서 먼저
@@ -396,10 +397,10 @@ timeline, 같은 composer이며, continuation이 더하는 것은 **timeline 위
 패널마다 읽으면 선택한 모델 수만큼 같은 bridge를 조회하게 됩니다. 패널은 받은
 것을 자기 message list 앞에 붙입니다(§5.1).
 
-**그래서 판정 근거가 `productKey`가 아니라는 것이 이 개정 이후 더 중요해졌습니다.**
-`conversationSurface()`가 읽는 것은 bridge row의 존재 하나뿐이고, `productKey`에서
-유도하면 이제 **모든 Review 대화**가 여기로 옵니다 — 개정 전에는 모든 `chat`
-대화였고 그때도 틀렸지만, 오늘은 그 집합이 저장소의 거의 모든 대화입니다.
+**continuation 판정 근거는 여전히 bridge입니다.** `conversationSurface()`는
+bridge를 먼저 읽으며, `productKey`가 `review`라는 이유만으로 이 경로를 고르지
+않습니다. bridge가 없는 대화의 저장된 Chat 제품을 별도 additive route로 보내는
+2026-09-12 개정도 이 우선순위를 바꾸지 않습니다.
 **route가 남는 이유는 이제 화면이 아니라 URL의 의미입니다.** 가져온 원본은 이
 대화가 무엇인지의 일부이고, 사이드바와 검색이 bridge를 근거로 이 경로로
 보냅니다. 옮길 자리는 여전히 `CONTINUATION_SURFACE_PATH` 한 곳입니다.
@@ -411,11 +412,14 @@ timeline, 같은 composer이며, continuation이 더하는 것은 **timeline 위
 대화를 설명하게 됩니다.
 
 **재진입은 서버가 판정합니다.** 대화 목록·상세·검색 응답은 각 대화의
-`surface`(`workspace` | `continuation`)를 싣고, 사이드바와 검색 결과는 그 값에
-따라 `/continuations/[id]`로 이동합니다. 판정은 `lib/continuationRoutes.ts`의
-`conversationSurface()` 하나이며 근거는 bridge row의 존재뿐입니다 —
-`productKey`에서 유도하지 않습니다(그러면 앞으로의 모든 `chat` 대화가 여기로
-옵니다).
+`surface`(`workspace` | `continuation` | `chat`)를 싣고, 사이드바와 검색 결과는
+그 값에 따라 소유 대화의 경로로 이동합니다. 판정은 `lib/continuationRoutes.ts`의
+`conversationSurface()` 하나입니다. **bridge 존재 → `continuation`이 먼저**이고,
+bridge가 없을 때만 저장된 `productKey = "chat"` → `chat`, 나머지
+(Review·Studio·NULL) → `workspace`로 판정합니다. 조회는 서버가 확인한 소유 행을
+쓰며, 제품값을 변경하지 않고 URL·모델 개수·클라이언트 hint에서 권한을 유도하지
+않습니다. 새 Chat route는 `/chat/workspace`이며 기존 `/chat`·`/review`·Studio
+작업 공간과 continuation의 URL·flag rollback·lock 계약을 대체하지 않습니다.
 
 v1에는 이것이 없었고, 그래서 **만든 직후에는 정상으로 보이고 목록에서 다시 열면
 Review workspace로 열려 외부 원문·출처 구획이 사라졌습니다.** 결함이 가질 수 있는
@@ -706,8 +710,9 @@ WHERE b."conversationId" = c."id"
 - `selectionMode` · `title` · `kind` · `disabledPanels` · bridge · `Message`를
   건드리지 않습니다. `kind`는 이미 `chat`이고 Review도 `chat`이므로
   `Conversation_product_modality_check`가 교정 후에도 통과합니다.
-- **surface가 바뀌지 않습니다.** `conversationSurface()`는 bridge만 읽으므로
-  교정 전후로 같은 답을 냅니다. 사용자가 보는 화면은 그대로입니다.
+- **surface가 바뀌지 않습니다.** `conversationSurface()`는 bridge를 먼저 읽으므로
+  bridge가 있는 교정 대상은 제품값 교정 전후로 모두 `continuation`입니다.
+  사용자가 보는 화면은 그대로입니다.
 
 ### 15.4 되돌리기
 

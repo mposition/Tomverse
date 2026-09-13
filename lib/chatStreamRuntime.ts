@@ -73,11 +73,17 @@ export function chatRuntimeKey(input: {
   identityKey: string;
   conversationId: string | null;
   modelId: string;
+  /** Chat owns one transcript; Review retains its separate model panels. */
+  transcriptScope?: "model" | "conversation";
 }): string {
   return [
     input.identityKey,
     input.conversationId || "new",
-    input.modelId,
+    // A fourth segment distinguishes Chat even from a model literally named
+    // "@conversation". Legacy model-scoped keys remain byte-for-byte stable.
+    ...(input.transcriptScope === "conversation"
+      ? ["transcript", "conversation"]
+      : [input.modelId]),
   ].join(KEY_SEPARATOR);
 }
 

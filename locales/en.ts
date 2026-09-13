@@ -107,7 +107,15 @@ export const en = {
         projectDeleteConfirm: "Click again to delete this project. Chats will move to Uncategorized.",
         projectDeleteFailed: "Project could not be deleted.",
     },
-    chat: {
+   chat: {
+        sendPreparationChanged: "The conversation or model changed while preparing the answer. Check your question and send again.",
+        conversationOpenFailed: "This conversation could not be opened. Your current conversation has not changed.",
+        questionSaveFailed: "The question could not be saved with its files. Your draft has been kept.",
+        restoreQuestion: "Restore question",
+        restoreQuestionHint: "Restores the question to the composer. Send separately to request a new answer.",
+        singleModelRequired: "Chat uses one answer model. Select a model to replace the current selection.",
+        singleModelProfileRequired: "This assistant uses multiple models. Choose a single-model assistant for Chat.",
+        restoreDraftNotEmpty: "Your draft was kept. Clear or send it before restoring this question.",
         // The chat workspace error boundary (app/(site)/(application)/chat/error.tsx).
         // It renders below the (application) layout, so LanguageProvider is
         // mounted; global-error.tsx replaces that layout and stays English.

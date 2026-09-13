@@ -24,6 +24,11 @@ import {
   accountAttachmentPrefix,
   bindMessageAttachments,
 } from "@/lib/messageAttachmentStorage";
+import {
+  MessageAttachmentResendError,
+  savedMessageAttachmentReferencesSchema,
+  saveMessagesWithAttachmentReferences,
+} from "@/lib/messageAttachmentResend";
 
 const modelIdSchema = z
   .string()
@@ -58,19 +63,25 @@ const userMessageSchema = z
     status: z.literal("normal").optional().default("normal"),
     modelId: modelIdSchema.optional(),
     attachmentUploadIds: z.array(attachmentUploadIdSchema).max(5).optional(),
+    attachmentReferences: savedMessageAttachmentReferencesSchema.optional(),
   })
   .strict()
+  .refine((message) => !(message.attachmentUploadIds && message.attachmentReferences),
+    { message: "Use one attachment reference format per message." })
   .refine(
     (message) =>
       message.content.length > 0 ||
-      (message.attachmentUploadIds?.length ?? 0) > 0,
+      (message.attachmentUploadIds?.length ?? 0) > 0 ||
+      (message.attachmentReferences?.length ?? 0) > 0,
     { message: "A message must have text or at least one attachment." }
   );
 const saveMessagesSchema = z
   .object({
     messages: z.array(userMessageSchema).min(1).max(3),
   })
-  .strict();
+  .strict()
+  .refine((body) => new Set(body.messages.map((message) => message.id)).size === body.messages.length,
+    { message: "Message ids must be unique within one save." });
 
 export async function POST(
   req: Request,
@@ -129,7 +140,8 @@ export async function POST(
       ? accountAttachmentPrefix(session.user.email)
       : null;
     const carriesAttachments = body.messages.some(
-      (message) => (message.attachmentUploadIds?.length ?? 0) > 0
+      (message) => (message.attachmentUploadIds?.length ?? 0) > 0 ||
+        (message.attachmentReferences?.length ?? 0) > 0
     );
     if (carriesAttachments && !ownPrefix) {
       return NextResponse.json(
@@ -148,7 +160,12 @@ export async function POST(
       (messageId, ordinal) is what makes that idempotent rather than merely
       forgiving.
     */
-    const created = await prisma.$transaction(async (tx) => {
+    const created = body.messages.some((message) => message.attachmentReferences !== undefined)
+      ? await saveMessagesWithAttachmentReferences({
+          userId, conversationId, ownPrefix: ownPrefix ?? "", messages: body.messages,
+          beforeCreate: (tx) => assertMessageCapacity(tx, userId, conversationId, body.messages.length, contentBytes),
+        })
+      : await prisma.$transaction(async (tx) => {
       await assertMessageCapacity(
         tx,
         userId,
@@ -193,6 +210,7 @@ export async function POST(
           where: {
             messageId: { in: body.messages.map((message) => message.id) },
             userId,
+            conversationId,
           },
           orderBy: [{ messageId: "asc" }, { ordinal: "asc" }],
           select: { ...PUBLIC_MESSAGE_ATTACHMENT_SELECT, messageId: true },
@@ -214,6 +232,12 @@ export async function POST(
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;
+    if (error instanceof MessageAttachmentResendError) {
+      return NextResponse.json(
+        { error: "This question could not be saved with its attachments.", code: error.code },
+        { status: error.status }
+      );
+    }
     if (error instanceof MessageAttachmentBindError) {
       // One answer for "no such upload" and "somebody else's upload": the
       // caller learns that this save cannot carry that file and nothing more.

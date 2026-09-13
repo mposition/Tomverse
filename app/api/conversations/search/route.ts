@@ -46,6 +46,7 @@ export async function GET(req: Request) {
         conversation: {
           select: {
             title: true,
+            productKey: true,
             password: true,
             // docs/policy/external-conversation-continuation.md §8.2: a
             // search hit is a way into a conversation too, so it has to say
@@ -74,6 +75,7 @@ export async function GET(req: Request) {
         conversationTitle: message.conversation.title,
         surface: conversationSurface({
           hasContinuationBridge: message.conversation.continuationBridge !== null,
+          productKey: message.conversation.productKey,
         }),
         role: message.role,
         modelId: message.modelId,

@@ -50,6 +50,17 @@ test("the guest localStorage snapshot never carries errorReport", () => {
   assert.equal(JSON.stringify(persisted).includes("errorReportToken"), false);
 });
 
+test("recovery notice stays in memory while partial answer text survives serialization", () => {
+  const partial = { ...errorMessage, content: "First paragraph\n\nSecond paragraph",
+    recoveryNotice: "Connection interrupted\nTrace ID: diagnostic" };
+  for (const serialize of [toChatRequestMessage, toGuestPersistableMessage]) {
+    const serialized = serialize(partial);
+    assert.equal(serialized.content, partial.content);
+    assert.equal("recoveryNotice" in serialized, false);
+    assert.equal(JSON.stringify(serialized).includes("Connection interrupted"), false);
+  }
+});
+
 test("attachment data is stripped only when the bytes live in object storage", () => {
   const withAttachments: Message = {
     id: "m-2",

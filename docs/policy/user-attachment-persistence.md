@@ -86,12 +86,12 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
 | 업로드 완료 | `PATCH /api/chat` `{ key, name, mediaType, size }` | `{ uploadId, name, mediaType, size, kind }` — **key 없음** |
 | Drive 가져오기 | `PUT /api/chat` `{action:"google-drive-import", ...}` | `{ uploadId, name, mediaType, size, kind }` — **key 없음** |
 | 초안에서 제거 | `DELETE /api/chat` `{ uploadId }` | 204, 또는 이미 전송된 파일이면 `{ kept: true }` |
-| 메시지 pre-save | `POST /api/conversations/{id}/messages` `{ messages:[{ id, content, attachmentUploadIds }] }` | `{ success, created, attachments:[{messageId, id, ordinal, name, mediaType, size, kind}] }` |
+| 메시지 pre-save | `POST /api/conversations/{id}/messages` `{ messages:[{ id, content, attachmentUploadIds }] }` 또는 순서 있는 `attachmentReferences:[{uploadId}\|{attachmentId}]` | `{ success, created, attachments:[{messageId, id, ordinal, name, mediaType, size, kind}] }` |
 | 대화 조회 | `GET /api/conversations/{id}` | 각 메시지에 `attachments: [{id, attachmentId, ordinal, name, mediaType, size, kind}]`, 누락된 파일에는 `unavailableAt`·`unavailableReason`(§11) — 없으면 **키 자체가 없다** |
 | 채팅 | `POST /api/chat` | 각 첨부는 `{attachmentId}` 또는 `{uploadId}`. 선택적으로 `acknowledgedUnavailableAttachmentIds`(§11.4) |
 
 - **`content`는 비어 있을 수 있다.** pre-save schema는
-  `content.length > 0 || attachmentUploadIds.length > 0`을 요구한다. 첨부만 있는
+  `content.length > 0 || attachmentUploadIds.length > 0 || attachmentReferences.length > 0`을 요구한다. 첨부만 있는
   메시지는 완전한 메시지이며, 파일명 문자열로 대체하지 않는다.
 - **pre-save 응답은 echo가 아니라 read-back이다.** 이미 존재하던 행도 id를
   돌려줘야 재전송이 카드를 잃지 않는다.
@@ -101,6 +101,11 @@ mediaType, size, kind, objectKey, uploadId, createdAt.
   그 지식은 누군가 옮기기 전까지만 한 곳에 있다.
 - **저장은 한 트랜잭션이다.** 메시지 행과 첨부 행이 함께 commit된다. 저장된 turn이
   나열할 수 없는 파일 수를 보여 주는 상태는 존재하지 않는다.
+- **복원된 질문의 새 전송**은 최대 5개의 순서 있는 opaque reference를 받는다.
+  한 항목은 `uploadId` 또는 `attachmentId` 하나만 가지며, 기존 `attachmentUploadIds`와
+  동시에 쓰지 않는다. 한 메시지 안의 같은 handle 중복과 한 batch 안의 message ID
+  중복은 복사 전에 거부한다. 이름·bytes·storage key를 클라이언트가 지정하지 않는다.
+  기존 upload-only API와 결속 거부 조건은 유지한다.
 
 ## 5. 무엇이 브라우저에 가지 않는가
 
@@ -155,6 +160,18 @@ R2 쓰기와 DB 쓰기는 한 트랜잭션이 아니다. 그래서 `generated-ar
 
 ## 8. 재시도
 
+- **질문 복원 후 명시적으로 새 전송**하면 같은 계정·대화의 저장된 첨부를 서버가
+  해석하고, 기존의 측정된 크기로 제한하여 읽은 뒤 계정 prefix 안의 새 무작위 key에
+  복사한다. 원본 객체·원본 행은 이동·수정·삭제하지 않는다. 파일 복사와 완료 대기는
+  DB 트랜잭션 밖에서 끝내며, 새 message와 새 upload/attachment 행만 짧은 트랜잭션에서
+  함께 결속한다. 기본 트랜잭션 timeout은 늘리지 않는다.
+  이미 존재하는 같은 소유자의 user message ID는 복사 없이 실제 행을 돌려준다.
+  동시 요청의 PK 승자만 결속하고, 패자의 임시 새 객체는 자신의 key에 한해서
+  DB 결속 여부를 확인한 뒤 기존 cleanup tombstone에 넣는다. 실패 경로도 동일하며
+  원본이나 승자의 결속 객체는 cleanup 대상이 아니다. 프로세스 강제 종료·cleanup DB
+  자체 불능은 기존 objects-first의 잔여 위험이지 R2와 DB의 원자성 보장이 아니다.
+  저장/소유권/파일 가용성 확인이 실패하면 답변 요청 전에 멈추고 초안을 보존한다.
+  성공 시 새 `attachmentId` read-back이 카드와 실제 답변 요청 모두에 사용된다.
 - **재시도는 영속화된 첨부를 계속 쓴다.** composer가 들고 있는 참조가 그대로
   다시 실리고, 서버가 다시 해석한다.
 - **"파일 없이 재시도"는 그 재시도에서만 참조를 뺀다.** 원본

@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type MouseEventHandler,
 } from "react";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { Message, type ChatAttachment } from "@/components/chat/types";
@@ -47,6 +48,14 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import type { ChatContentState } from "@/lib/chatContentState";
 import type { ModelRuntimeStatus } from "@/lib/chatRuntimeStatus";
 import { consumeChatStream } from "@/lib/chatStreamConsumer";
+import {
+  answeringModelId,
+  CHAT_WELCOME_MESSAGE_ID as WELCOME_MESSAGE_ID,
+  recoveryPromptForMessage,
+  requestTranscriptForScope,
+  transcriptMessagesForScope,
+  type ChatRecoveryPrompt,
+} from "@/lib/chatTranscriptRecovery";
 import {
   classifyChatAbort,
   createChatLivenessWatchdog,
@@ -88,13 +97,13 @@ const processedPromptKeys = new Set<string>();
 // which Perplexity's async deep-research endpoint rejects outright
 // ("user or tool message(s) should alternate with assistant message(s)")
 // and every other provider merely pays for as a wasted input turn.
-const WELCOME_MESSAGE_ID = "welcome";
-
 const isTranscriptMessage = (message: Message) =>
   message.id !== WELCOME_MESSAGE_ID;
 
 type ChatAppProps = {
   modelId: string;
+  transcriptScope?: "model" | "conversation";
+  onRestorePrompt?: (prompt: ChatRecoveryPrompt) => void;
   initialConversationId?: string | null;
   promptPayload?: {
     id: string;
@@ -242,7 +251,7 @@ type ChatAppProps = {
   ) => void;
   onFollowupSent?: (modelId: string) => void;
   onBeforeSend?: (chatId: string) => Promise<boolean>;
-  onRequestCloseModel?: () => void;
+  onRequestCloseModel?: MouseEventHandler<HTMLButtonElement>;
   hasMultipleActiveModels?: boolean;
   currentPlan?: string | null;
   // Bumped by the parent (e.g. a global "stop all" button) to abort this
@@ -262,6 +271,8 @@ const interpolateModelOnlyLabel = (template: string, modelName: string) =>
 
 function ChatAppComponent({
   modelId,
+  transcriptScope = "model",
+  onRestorePrompt,
   initialConversationId = null,
   promptPayload,
   onContextBundleStale,
@@ -312,6 +323,7 @@ function ChatAppComponent({
     ),
     conversationId: initialConversationId,
     modelId,
+    transcriptScope,
   });
   const subscribeRuntime = useCallback(
     (listener: () => void) => subscribeChatRuntime(runtimeKey, listener),
@@ -578,7 +590,10 @@ function ChatAppComponent({
         if (poll?.status === "completed") {
           const content = poll.content || "";
           setAssistantMessage(jobAssistantMessageId, content, "normal");
-          onResponseComplete?.(analyticsPromptId, modelId, content);
+          const answeringModel = getChatRuntimeSnapshot(key).messages.find(
+            (message) => message.id === jobAssistantMessageId
+          )?.modelId ?? modelId;
+          onResponseComplete?.(analyticsPromptId, answeringModel, content);
           return;
         }
         if (poll?.status === "failed") {
@@ -729,7 +744,9 @@ function ChatAppComponent({
 
       const fetchPastMessages = async () => {
         try {
-          const modelQuery = `modelId=${encodeURIComponent(modelId)}`;
+          const modelQuery = transcriptScope === "conversation"
+            ? ""
+            : `modelId=${encodeURIComponent(modelId)}`;
           const response = await fetch(`/api/conversations/${initialConversationId}?${modelQuery}`, {
             cache: "no-store",
             headers: { 'Cache-Control': 'no-cache' }
@@ -770,19 +787,9 @@ function ChatAppComponent({
             if (isChatRuntimeStreaming(loadKey)) return;
 
           if (data.messages && data.messages.length > 0) {
-            const filteredMessages: Message[] = [];
-            const seenUserIds = new Set();
-            for (const msg of data.messages) {
-                if (msg.role === "user") {
-                    if ((!msg.modelId || msg.modelId === modelId) && !seenUserIds.has(msg.id)) {
-                        seenUserIds.add(msg.id);
-                        filteredMessages.push(msg);
-                    }
-                }
-                else if (msg.role === "assistant" && msg.modelId === modelId) {
-                  filteredMessages.push(msg);
-					      }
-				    }
+            const filteredMessages = transcriptMessagesForScope(
+              data.messages, modelId, transcriptScope
+            );
 
               writeChatRuntimeMessages(loadKey, filteredMessages.length > 0 ? filteredMessages : [{ id: WELCOME_MESSAGE_ID, role: "assistant", content: t("chat.welcome"), status: "normal" }]);
           } else {
@@ -838,6 +845,7 @@ function ChatAppComponent({
     sessionUserId,
     t,
     runtimeKey,
+    transcriptScope,
   ]);
   
   /**
@@ -928,6 +936,7 @@ function ChatAppComponent({
       ),
       conversationId: targetChatId,
       modelId,
+      transcriptScope,
     });
     if ((!text && attachments.length === 0) || isChatRuntimeStreaming(runKey)) {
       return;
@@ -964,7 +973,20 @@ function ChatAppComponent({
           errorMeta?.errorCode ?? "UNKNOWN_ERROR"
         );
       }
-      writeAssistantMessage(id, content, status, errorMeta, extraFields);
+      // In Chat a transport failure does not turn a partial answer into an
+      // error title. Review retains its existing rendering contract.
+      writeAssistantMessage(
+        id,
+        status === "error" && transcriptScope === "conversation" ? assistantText : content,
+        status,
+        errorMeta,
+        {
+          ...extraFields,
+          ...(status === "error" && transcriptScope === "conversation"
+            ? { recoveryNotice: content, isGeneratingArtifact: false }
+            : {}),
+        }
+      );
     };
     /*
       What this one request searches with. The override wins where it is given
@@ -1113,7 +1135,7 @@ function ChatAppComponent({
       const kept = partialText.trim();
       setAssistantMessage(
         assistantMessageId,
-        `${kept ? `${kept}\n\n` : ""}${notice}${
+        `${kept && transcriptScope !== "conversation" ? `${kept}\n\n` : ""}${notice}${
           requestTraceId ? `\n${t("chat.traceId")}: ${requestTraceId}` : ""
         }`,
         "error",
@@ -1154,13 +1176,8 @@ function ChatAppComponent({
             // message is appended exactly once -- `messages` is the pre-send
             // snapshot, and the id filter keeps a re-render or a resend from
             // duplicating it.
-            messages: [
-              ...messages.filter(
-                (message) =>
-                  isTranscriptMessage(message) && message.id !== userMessage.id
-              ),
-              userMessage,
-            ].map(toChatRequestMessage),
+            messages: requestTranscriptForScope(messages, userMessage, transcriptScope)
+              .map(toChatRequestMessage),
             modelId: modelId,
             ...(turnstileToken ? { turnstileToken } : {}),
             ...(!isGuestMode
@@ -1315,6 +1332,15 @@ function ChatAppComponent({
         }
       }
 
+      // Capture the successful dispatch's attribution before a first chunk:
+      // an async job, a missing body or an early transport failure must not
+      // inherit a model the user selected after this request began.
+      writeChatRuntimeMessages(runKey, (previous) => previous.map((message) =>
+        message.id === assistantMessageId
+          ? { ...message, modelId: answeringModelId({ requestedModelId: modelId, routedModelId }) }
+          : message
+      ));
+
       if (response.headers.get("X-Chat-Response-Mode") === "async-job") {
         // Deep research doesn't stream -- the idle-timeout watchdog is
         // meaningless here (there's no single connection for it to guard),
@@ -1353,17 +1379,21 @@ function ChatAppComponent({
             progress.displayText,
             "normal",
             undefined,
-            progress.isGeneratingArtifact
-              ? {
-                  isGeneratingArtifact: true,
+            {
+                  modelId: answeringModelId({ requestedModelId: modelId, routedModelId,
+                    retryingWithModelId: progress.retryingWithModelId }),
+                  routedModelId: routedModelId && !progress.retryingWithModelId
+                    ? routedModelId : undefined,
+                  routedReason: routedModelId && !progress.retryingWithModelId
+                    ? routedReason : undefined,
+                  isGeneratingArtifact: progress.isGeneratingArtifact,
                   ...(progress.generatingArtifactFormat
                     ? {
                         generatingArtifactFormat:
                           progress.generatingArtifactFormat,
                       }
                     : {}),
-                }
-              : undefined
+            }
           );
         },
       });
@@ -1460,12 +1490,12 @@ function ChatAppComponent({
             // answered is not the one this request was sent to. Recording the
             // request's model here would attribute the answer to a model that
             // produced none of it.
-            ...(retryingWithModelId ? { modelId: retryingWithModelId } : {}),
+            modelId: answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           }
         );
         onResponseComplete?.(
           analyticsPromptId,
-          retryingWithModelId ?? modelId,
+          answeringModelId({ requestedModelId: modelId, routedModelId, retryingWithModelId }),
           assistantText,
           searchMetadata
         );
@@ -1723,7 +1753,19 @@ function ChatAppComponent({
     sessionUserId,
     t,
     webSearchMode,
+    transcriptScope,
   ]);
+
+  const handleRestoreQuestion = useCallback((assistantMessageId: string) => {
+    if (transcriptScope !== "conversation" || !onRestorePrompt ||
+        isChatRuntimeStreaming(runtimeKeyRef.current)) return;
+    const prompt = recoveryPromptForMessage(
+      getChatRuntimeSnapshot(runtimeKeyRef.current).messages,
+      assistantMessageId,
+      initialConversationId
+    );
+    if (prompt) onRestorePrompt(prompt);
+  }, [initialConversationId, onRestorePrompt, transcriptScope]);
 
   const handleRetryLast = useCallback(() => {
     const lastPrompt = getChatRuntimeLastPrompt(runtimeKeyRef.current);
@@ -1951,10 +1993,12 @@ function ChatAppComponent({
           ]
         }
         importedTranscript={importedTranscript}
-        onRetryLast={handleRetryLast}
-        onRetryWithoutAttachments={handleRetryWithoutAttachments}
+        onRetryLast={transcriptScope === "model" ? handleRetryLast : undefined}
+        onRestoreQuestion={transcriptScope === "conversation" && onRestorePrompt
+          ? handleRestoreQuestion : undefined}
+        onRetryWithoutAttachments={transcriptScope === "model" ? handleRetryWithoutAttachments : undefined}
         onContinueWithoutUnavailableAttachments={
-          handleContinueWithoutUnavailableAttachments
+          transcriptScope === "model" ? handleContinueWithoutUnavailableAttachments : undefined
         }
         onRequestCloseModel={onRequestCloseModel}
         hasMultipleActiveModels={hasMultipleActiveModels}

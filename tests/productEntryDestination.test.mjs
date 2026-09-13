@@ -46,7 +46,7 @@ test("an ineligible visitor is never sent to Chat", () => {
 test("an eligible visitor gets Chat", () => {
     assert.equal(
         destination({ chatSurfaceAvailable: true }),
-        "/chat?lang=ko"
+        "/chat/workspace?lang=ko"
     );
 });
 
