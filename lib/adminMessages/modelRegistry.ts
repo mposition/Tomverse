@@ -88,6 +88,9 @@ export const adminModelRegistryMessages = defineAdminMessages({
         "Why this model is being adopted now — kept in the approval record",
       classRequired:
         "Choose the sale class yourself before saving — the default is a value nobody decided.",
+      reasoningSuggested:
+        "Proposed from the provider's information, not set — confirm it before saving.",
+      reasoningConfirm: "Confirm this value",
     },
     floor: {
       title: "Credit floor from base token prices",
@@ -164,6 +167,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
       cachedInputMultiplier: "Cached input multiplier",
       inputUsd: "Input USD / 1M",
       outputUsd: "Output USD / 1M",
+      blankRequired: "Required · a blank will not save",
+      blankSavesAs: (value: string) => `${value} · what a blank saves as`,
     },
     validation: {
       title: "Configuration check",
@@ -264,6 +269,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
       reasonPlaceholder: "왜 지금 이 모델을 편입하는지 — 승인 기록에 남습니다",
       classRequired:
         "판매 등급을 직접 선택해야 저장됩니다 — 기본값은 아무도 정하지 않은 값입니다.",
+      reasoningSuggested: "공급자 정보로 제안한 값입니다 — 확정해야 저장됩니다.",
+      reasoningConfirm: "이 값으로 확정",
     },
     floor: {
       title: "기본 토큰 가격 기준 크레딧 하한",
@@ -339,6 +346,8 @@ export const adminModelRegistryMessages = defineAdminMessages({
       cachedInputMultiplier: "캐시 입력 배수",
       inputUsd: "입력 USD / 1M",
       outputUsd: "출력 USD / 1M",
+      blankRequired: "필수 · 비우면 저장되지 않습니다",
+      blankSavesAs: (value: string) => `${value} · 비워 두면 적용`,
     },
     validation: {
       title: "구성 점검",
