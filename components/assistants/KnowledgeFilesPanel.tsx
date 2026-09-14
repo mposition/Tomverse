@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Loader2, Trash2, Upload } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
+import { trackProductEvent } from "@/lib/productAnalyticsClient";
 import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 
@@ -205,6 +206,7 @@ export function KnowledgeFilesPanel({
                     return;
                 }
                 await discardResponseBody(finalized);
+                trackProductEvent("assistant_knowledge_upload_completed");
                 setUpload({ kind: "idle" });
                 await onChanged();
                 await readCapacity();
@@ -243,7 +245,11 @@ export function KnowledgeFilesPanel({
     const unavailable = publishedManifest.filter((entry) => !known.has(entry.fileId));
 
     return (
-        <fieldset className="flex flex-col gap-3" data-testid="knowledge-panel">
+        <fieldset
+            id="assistant-knowledge-panel"
+            className="flex scroll-mt-24 flex-col gap-3"
+            data-testid="knowledge-panel"
+        >
             <legend className="text-sm font-semibold">
                 {t("assistantProfiles.knowledgeLabel")}
             </legend>

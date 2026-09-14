@@ -146,6 +146,16 @@ export const PRODUCT_ANALYTICS_EVENT_NAMES = [
   "assistant_profile_create_started",
   "assistant_profile_create_completed",
   "assistant_profile_applied_to_chat",
+  // Assistant + Knowledge education and activation. These events answer four
+  // distinct questions: whether the public guide was seen, which explanation
+  // was opened, whether a real setup step completed, and whether a Knowledge
+  // upload itself succeeded. Content-free by schema: the only new property is
+  // a closed three-step enum. No profile id, filename, instructions, prompt,
+  // file size or chunk count can travel in it.
+  "assistant_knowledge_guide_viewed",
+  "assistant_knowledge_guide_step_opened",
+  "assistant_knowledge_guide_step_completed",
+  "assistant_knowledge_upload_completed",
   // Importing an assistant package
   // (docs/policy/assistant-package-import.md §9). The four events answer the
   // only questions aggregate data can answer about this feature: where people
@@ -255,7 +265,10 @@ export const analyticsPropertiesSchema = z
     // Where an assistant-profile create began. A closed enum rather than a
     // free string: the two entry points are the whole question, and a free
     // field is where a title eventually gets put "just to see".
-    assistant_profile_entry: z.enum(["settings", "chat"]).optional(),
+    assistant_profile_entry: z.enum(["settings", "chat", "guide"]).optional(),
+    assistant_knowledge_guide_step: z
+      .enum(["create_assistant", "add_knowledge", "start_chat"])
+      .optional(),
     // Which class the shared image-intent classifier returned. A closed enum
     // rather than the draft it was derived from: the draft is the user's
     // prompt, and no analytics event in this product carries one.
