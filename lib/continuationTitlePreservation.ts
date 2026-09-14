@@ -1,9 +1,8 @@
 /**
  * Keeping a continuation's shown name when its source is deleted.
  *
- * Policy: docs/policy/external-conversation-continuation.md §3, §6.
- * Decisions: .github/audits/tomverse-product-idea-backlog.md, CONT-TITLE-01
- * "확정 구현 기준" (D1, D3).
+ * Policy: docs/policy/external-conversation-continuation.md §3, §6.1 (the
+ * reserved title and keeping a name on delete, CONT-TITLE-01 decisions D1, D3).
  *
  * An unnamed continuation shows its source's title without storing it
  * (lib/continuationDisplayTitle.ts), so deleting the source changes the name.
