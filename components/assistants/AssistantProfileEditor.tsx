@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { KnowledgeFilesPanel } from "@/components/assistants/KnowledgeFilesPanel";
+import { AssistantKnowledgeSetupGuide } from "@/components/assistants/AssistantKnowledgeSetupGuide";
 import {
     ModelSelector,
     type ModelMode,
@@ -25,11 +26,15 @@ import {
     ASSISTANT_PROFILE_LIST_PATH,
     assistantProfileHierarchy,
 } from "@/lib/settingsNavigation";
-import { ASSISTANT_PROFILE_CHAT_PATH } from "@/lib/assistantProfileReturn";
+import {
+    ASSISTANT_PROFILE_CHAT_PATH,
+    stashPendingChatProfile,
+} from "@/lib/assistantProfileReturn";
 import { assistantProfileErrorCopyKey } from "@/lib/assistantProfileErrorCopy";
 import { ASSISTANT_PROFILE_LIMITS } from "@/lib/assistantProfileVersioning";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { trackProductEvent } from "@/lib/productAnalyticsClient";
+import { deriveAssistantKnowledgeGuideStage } from "@/lib/assistantKnowledgeGuide";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 // Still needed after the control moved out: the editor seeds the explicit mode
 // with the account default, which is a question about this screen's state
@@ -187,6 +192,8 @@ export function AssistantProfileEditor({
     profileId,
     onCreated,
     knowledgeEnabled = false,
+    creationEntry,
+    assistantKnowledgeGuideActive = false,
 }: {
     profileId?: string;
     /**
@@ -198,6 +205,10 @@ export function AssistantProfileEditor({
      * show the panel claim the feature is on.
      */
     knowledgeEnabled?: boolean;
+    /** The source that owns create copy, navigation and privacy-safe funnel data. */
+    creationEntry?: "settings" | "chat" | "guide";
+    /** Set by the route after comparing the guide query to its one known value. */
+    assistantKnowledgeGuideActive?: boolean;
     /**
      * Where a create should go instead of the profile's own edit page.
      *
@@ -210,6 +221,8 @@ export function AssistantProfileEditor({
     const { t } = useLanguage();
     const router = useRouter();
     const isNew = !profileId;
+    const guideActive =
+        creationEntry === "guide" || assistantKnowledgeGuideActive;
 
     const [loading, setLoading] = useState(!isNew);
     const [disabled, setDisabled] = useState(false);
@@ -278,9 +291,9 @@ export function AssistantProfileEditor({
     // does not have.
     // The same signal the label reads, so the funnel and the button can never
     // disagree about which entry point this is.
-    const analyticsEntry = onCreated ? "chat" : "settings";
+    const analyticsEntry = creationEntry ?? (onCreated ? "chat" : "settings");
 
-    const createActionLabel = onCreated
+    const createActionLabel = analyticsEntry === "chat"
         ? t("assistantProfiles.createAndUseAction")
         : t("assistantProfiles.createAction");
 
@@ -415,6 +428,13 @@ export function AssistantProfileEditor({
             trackProductEvent("assistant_profile_create_completed", 0, {
                 assistant_profile_entry: analyticsEntry,
             });
+            if (analyticsEntry === "guide") {
+                trackProductEvent(
+                    "assistant_knowledge_guide_step_completed",
+                    0,
+                    { assistant_knowledge_guide_step: "create_assistant" }
+                );
+            }
             onCreated?.(data.profile.id);
             if (!onCreated) router.replace(`/settings/assistants/${data.profile.id}`);
         } catch {
@@ -472,6 +492,10 @@ export function AssistantProfileEditor({
             const knowledgeFileIds = (profile?.knowledgeFiles ?? [])
                 .filter((file) => selectedFileIds.includes(file.id))
                 .map((file) => file.id);
+            const completesGuideKnowledgeStep =
+                guideActive &&
+                (profile?.currentVersion?.knowledgeManifest.length ?? 0) === 0 &&
+                knowledgeFileIds.length > 0;
             const response = await fetch(
                 `/api/assistant-profiles/${profileId}/versions`,
                 {
@@ -514,6 +538,13 @@ export function AssistantProfileEditor({
                     ? { kind: "published", revision: data.version.revision }
                     : { kind: "unchanged" }
             );
+            if (completesGuideKnowledgeStep) {
+                trackProductEvent(
+                    "assistant_knowledge_guide_step_completed",
+                    0,
+                    { assistant_knowledge_guide_step: "add_knowledge" }
+                );
+            }
             await load();
         } catch {
             setNotice({ kind: "failed" });
@@ -557,7 +588,7 @@ export function AssistantProfileEditor({
      * compared to a literal and never read as a place to go
      * (lib/assistantProfileReturn.ts).
      */
-    const upwardNav = onCreated ? (
+    const upwardNav = analyticsEntry === "chat" ? (
                 <nav
                     aria-label={t("settingsNav.navLabel")}
                     data-testid="settings-detail-nav"
@@ -602,6 +633,32 @@ export function AssistantProfileEditor({
                     ? t("assistantProfiles.newTitle")
                     : t("assistantProfiles.editTitle")}
             </h1>
+
+            {guideActive && (!loading || isNew) ? (
+                <AssistantKnowledgeSetupGuide
+                    stage={deriveAssistantKnowledgeGuideStage({
+                        isNew,
+                        savedKnowledgeCount:
+                            profile?.currentVersion?.knowledgeManifest.length,
+                    })}
+                    knowledgeEnabled={knowledgeEnabled}
+                    onStartChat={
+                        profileId
+                            ? () => {
+                                  stashPendingChatProfile(profileId);
+                                  trackProductEvent(
+                                      "assistant_knowledge_guide_step_completed",
+                                      0,
+                                      {
+                                          assistant_knowledge_guide_step:
+                                              "start_chat",
+                                      }
+                                  );
+                              }
+                            : undefined
+                    }
+                />
+            ) : null}
 
             {loading ? (
                 <p className="mt-6 flex items-center gap-2 text-sm text-zinc-500">
@@ -996,6 +1053,7 @@ export function AssistantProfileEditor({
                                     onClick={() => void publish()}
                                     disabled={busy}
                                     data-testid="assistant-publish"
+                                    id="assistant-publish"
                                     aria-describedby="assistant-publish-consequence"
                                 >
                                     {busy ? (
