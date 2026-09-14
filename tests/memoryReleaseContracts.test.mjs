@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import ts from "typescript";
 import { formatConversationAsText } from "../lib/exportConversation.ts";
 import {
     isPairRevoked,
@@ -279,16 +280,42 @@ test("the memory count is selected for the owner's read and for no one else", ()
 
     const ownerRead = read("../app/api/conversations/[conversationId]/route.ts");
     const publicChatMessage = read("../lib/publicChatMessage.ts");
+    const publicChatMessageAst = ts.createSourceFile(
+        "lib/publicChatMessage.ts",
+        publicChatMessage,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS
+    );
+    const publicSelect = publicChatMessageAst.statements
+        .filter(ts.isVariableStatement)
+        .flatMap((statement) => statement.declarationList.declarations)
+        .find((declaration) =>
+            ts.isIdentifier(declaration.name) &&
+            declaration.name.text === "PUBLIC_CHAT_MESSAGE_SELECT"
+        );
+    assert.ok(
+        publicSelect && publicSelect.initializer &&
+            ts.isAsExpression(publicSelect.initializer) &&
+            ts.isObjectLiteralExpression(publicSelect.initializer.expression),
+        "PUBLIC_CHAT_MESSAGE_SELECT must remain an object-literal allowlist"
+    );
+    const publicSelectFields = new Set(
+        publicSelect.initializer.expression.properties
+            .filter(ts.isPropertyAssignment)
+            .filter((property) => property.initializer.kind === ts.SyntaxKind.TrueKeyword)
+            .map((property) => property.name.getText(publicChatMessageAst))
+    );
     assert.ok(
         ownerRead.includes("select: PUBLIC_CHAT_MESSAGE_SELECT"),
         "the owner's conversation read must use the shared public-message allowlist"
     );
     assert.ok(
-        publicChatMessage.includes("memoryUsedCount: true"),
+        publicSelectFields.has("memoryUsedCount"),
         "the owner's public-message allowlist must select memoryUsedCount (§13.4)"
     );
     assert.ok(
-        publicChatMessage.includes("knowledgeChunkCount: true"),
+        publicSelectFields.has("knowledgeChunkCount"),
         "the owner's public-message allowlist must select knowledgeChunkCount " +
             "(docs/policy/external-conversation-import-and-memory.md §14.3)"
     );
