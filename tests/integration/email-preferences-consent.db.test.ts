@@ -157,6 +157,43 @@ test("agreeing writes an entry that says when, under which policy, on what", asy
   assert.equal(record.jurisdictionSource, "unresolved");
 });
 
+test("marketing opt-in stores the confirmed country with its consent", async () => {
+  const user = await someone();
+  const now = new Date("2026-09-14T02:00:00.000Z");
+
+  await setPreference({
+    userId: user.id,
+    purpose: "product_updates",
+    enabled: true,
+    capturedVia: "preference_center",
+    source: "preference_center",
+    jurisdiction: "DE",
+    jurisdictionSource: "self_declared",
+    confirmedCountry: "de",
+    now,
+  });
+
+  const [settings, preference, consent] = await Promise.all([
+    prisma.userSettings.findUniqueOrThrow({ where: { userId: user.id } }),
+    prisma.emailPreference.findUniqueOrThrow({
+      where: {
+        userId_purpose: { userId: user.id, purpose: "product_updates" },
+      },
+    }),
+    prisma.consentRecord.findFirstOrThrow({
+      where: { userId: user.id, purpose: "product_updates" },
+    }),
+  ]);
+
+  assert.equal(settings.country, "DE");
+  assert.equal(settings.countrySource, "self_declared");
+  assert.equal(settings.countryUpdatedAt?.toISOString(), now.toISOString());
+  assert.equal(preference.enabled, true);
+  assert.equal(consent.jurisdiction, "DE");
+  assert.equal(consent.jurisdictionSource, "self_declared");
+  assert.equal(consent.occurredAt.toISOString(), now.toISOString());
+});
+
 test("the history is append-only and distinguishes re-agreeing from agreeing", async () => {
   const user = await someone();
   const change = (enabled: boolean) =>
@@ -547,6 +584,35 @@ test("a payment method from elsewhere is a conflict, not a move", async () => {
   // The declaration is preserved, not overwritten: paying with a card
   // registered elsewhere is not moving house.
   assert.equal(resolved.selfDeclaredCountry, "KR");
+});
+
+test("a fresh country confirmation resolves a later billing mismatch", async () => {
+  const user = await someone();
+  await prisma.userSettings.create({
+    data: { userId: user.id, language: "en", timeZone: "UTC" },
+  });
+  await setSelfDeclaredCountry({
+    userId: user.id,
+    country: "KR",
+    now: new Date("2026-09-01T00:00:00.000Z"),
+  });
+  await recordBillingCountry({
+    userId: user.id,
+    country: "SG",
+    now: new Date("2026-09-10T00:00:00.000Z"),
+  });
+
+  const conflicted = await jurisdictionForUser({ userId: user.id });
+  assert.equal(conflicted.confidence, "conflict");
+
+  const confirmedAt = new Date("2026-09-14T00:00:00.000Z");
+  const confirmed = await jurisdictionForUser({
+    userId: user.id,
+    countryConfirmation: { country: "KR", confirmedAt },
+  });
+  assert.equal(confirmed.countryCode, "KR");
+  assert.equal(confirmed.confidence, "high");
+  assert.equal(confirmed.source, "self_declared");
 });
 
 test("an inferred country is never read back as a declaration", async () => {

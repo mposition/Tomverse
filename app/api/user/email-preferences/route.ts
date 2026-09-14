@@ -7,9 +7,13 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
 import { readPreferences, setPreference, withdrawAllMarketing } from "@/lib/emailPreferences";
-import { EMAIL_PURPOSES } from "@/lib/emailPreferenceCore";
+import { EMAIL_PURPOSES, recordsConsent } from "@/lib/emailPreferenceCore";
 import { jurisdictionForUser, setSelfDeclaredCountry } from "@/lib/emailJurisdiction";
-import { needsCountryConfirmation } from "@/lib/emailJurisdictionCore";
+import {
+  marketingOptInCountryDecision,
+  marketingJurisdictionVerdict,
+  needsCountryConfirmation,
+} from "@/lib/emailJurisdictionCore";
 
 /**
  * The preference centre's data.
@@ -28,7 +32,12 @@ const updateSchema = z
     purpose: z.enum(EMAIL_PURPOSES).optional(),
     enabled: z.boolean().optional(),
     withdrawAllMarketing: z.literal(true).optional(),
-    country: z.string().trim().length(2).optional(),
+    country: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/)
+      .transform((value) => value.toUpperCase())
+      .optional(),
   })
   .strict();
 
@@ -48,6 +57,9 @@ const state = async (userId: string) => {
       confidence: jurisdiction.confidence,
       conflicts: jurisdiction.conflicts,
       needsConfirmation: needsCountryConfirmation(jurisdiction),
+      marketingSupported: jurisdiction.selfDeclaredCountry
+        ? marketingOptInCountryDecision(jurisdiction.selfDeclaredCountry).allowed
+        : jurisdiction.profileKey !== "ZZ",
     },
   };
 };
@@ -78,18 +90,84 @@ export async function PATCH(req: Request) {
     const userId = session.user.id;
     const body = await readLimitedJson(req, 2_048, updateSchema);
 
-    if (body.country) {
-      await setSelfDeclaredCountry({ userId, country: body.country });
-    }
+    const isMarketingEnable =
+      body.purpose !== undefined &&
+      body.enabled === true &&
+      recordsConsent(body.purpose);
 
-    if (body.withdrawAllMarketing) {
+    if (isMarketingEnable) {
+      const countryDecision = marketingOptInCountryDecision(body.country);
+      if (!countryDecision.allowed && countryDecision.reason === "country_required") {
+        return NextResponse.json(
+          {
+            error: "Confirm a country before enabling marketing email.",
+            code: "COUNTRY_REQUIRED",
+          },
+          { status: 400 }
+        );
+      }
+      if (!countryDecision.allowed) {
+        return NextResponse.json(
+          {
+            error: "Marketing email is not available for this country yet.",
+            code: "COUNTRY_UNSUPPORTED",
+          },
+          { status: 409 }
+        );
+      }
+
+      const now = new Date();
+      const jurisdiction = await jurisdictionForUser({
+        userId,
+        countryConfirmation: {
+          country: countryDecision.countryCode,
+          confirmedAt: now,
+        },
+      });
+      const verdict = marketingJurisdictionVerdict(jurisdiction);
+      if (!verdict.allowed) {
+        return NextResponse.json(
+          {
+            error: "The country could not be confirmed.",
+            code:
+              verdict.skipReason === "jurisdiction_conflict"
+                ? "COUNTRY_CONFLICT"
+                : "COUNTRY_REQUIRED",
+          },
+          { status: 409 }
+        );
+      }
+
+      await setPreference({
+        userId,
+        purpose: body.purpose!,
+        enabled: true,
+        capturedVia: "preference_center",
+        source: "preference_center",
+        userAgent: req.headers.get("user-agent"),
+        jurisdiction: jurisdiction.countryCode,
+        jurisdictionSource: "self_declared",
+        confirmedCountry: countryDecision.countryCode,
+        now,
+      });
+    } else if (body.withdrawAllMarketing) {
       await withdrawAllMarketing({
         userId,
         capturedVia: "preference_center",
         source: "preference_center",
         userAgent: req.headers.get("user-agent"),
       });
-    } else if (body.purpose && typeof body.enabled === "boolean") {
+    } else {
+      if (body.country) {
+        await setSelfDeclaredCountry({ userId, country: body.country });
+      }
+
+      if (!body.purpose || typeof body.enabled !== "boolean") {
+        return NextResponse.json(await state(userId), {
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
+
       const result = await setPreference({
         userId,
         purpose: body.purpose,
