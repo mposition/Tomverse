@@ -65,3 +65,22 @@ test("claim and model-history deletion statically call the same advisory lock he
   assert.match(deletion, /lockChatRecoveryConversation\(tx, input\.userId, input\.conversationId\)/);
   assert.match(deletion, /CHAT_RESPONSE_IN_PROGRESS/);
 });
+
+test("Deep Research stays on its separate persisted async-job contract", () => {
+  const route = source("app/api/chat/route.ts");
+  const durableDecision = route.indexOf("const isDurableStoredChat = Boolean(");
+  const durableDecisionEnd = route.indexOf(");", durableDecision);
+  const durablePredicate = route.slice(durableDecision, durableDecisionEnd);
+  const deepResearchBranch = route.indexOf(
+    'if (modelConfig.usageClass === "deep-research")',
+    durableDecisionEnd
+  );
+  const asyncJobResponse = route.indexOf(
+    '"X-Chat-Response-Mode": "async-job"',
+    deepResearchBranch
+  );
+  assert.ok(durableDecision > 0);
+  assert.match(durablePredicate, /modelConfig\.usageClass !== "deep-research"/);
+  assert.ok(deepResearchBranch > durableDecisionEnd);
+  assert.ok(asyncJobResponse > deepResearchBranch);
+});

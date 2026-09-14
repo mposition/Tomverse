@@ -6,8 +6,13 @@
 위한 **진행 현황표**다. 구현 완료율, 품질 판정, 출시 승인 또는 현재 production
 상태를 자동 산출하는 registry가 아니다.
 
-- 작성 기준일: 2026-09-13. 아래 선행 benchmark의 고정 기록은 2026-09-11
+- 작성 기준일: 2026-09-14. 아래 선행 benchmark의 고정 기록은 2026-09-11
   당시 관측을 보존하며, 새 Chat 사용자 흐름의 상태는 별도 갱신 구획에서 구분한다.
+- 이번 배포 후 기존 기능 영속 복구 연결 작업의 base는
+  `ec043cf79e3a044973e5f6466483710ef4969ea2`다. 같은 commit의 Railway staging
+  deployment `9f231d3b-84cd-4afe-ad2b-db80d49a513c`가 `SUCCESS`, migration 104개와
+  pending 0, Railway 직접 `/api/health` 200임을 확인했다. 아래 새 연결 변경은
+  이 배포된 base 위의 로컬 작업이며 아직 Claude 승인·PR·배포를 뜻하지 않는다.
 - 이번 영속 초안·응답 복구 작업의 base는
   `c91a7c74a8e00e54fb8aeb73901116604f950cc5`, 로컬 기반 커밋은
   `021cd04a04223a6b137959ab532a0d012a692d75`다. 아래 새 구획은 이 base 이후의
@@ -208,6 +213,40 @@ production build 88개 route, typecheck, 수정 파일 lint와 diff whitespace �
 ② 승인된 무과금 staging DB의 draft CAS·receipt·attempt readback smoke, ③ 첨부·검색·
 Deep Research·artifact·profile의 Chat 연결 회귀, ④ Prompt Refiner 제안형 UI,
 ⑤ 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 배포 확인 후 기존 기능 영속 복구 연결 회차
+
+선행 영속 초안·응답 복구 변경의 staging 배포 상태와 migration·health를 위 기준에
+적은 범위로 확인한 뒤, 완료 attempt가 본문과 상태만 복구하던 연결 공백을 닫았다.
+완료 POST 재연결과 GET polling은 대화 조회와 같은 공개 allowlist로 정확한 canonical
+assistant Message를 묶어 반환한다. 브라우저는 attempt의 id·모델·완료 상태와 결속한
+뒤 검색 출처, 생성 파일, 양수인 Memory·profile knowledge 사용 횟수를 복원한다.
+저장소 object key·provider 내부 상태·lease 같은 비공개 필드는 서버 select와 client
+parser 양쪽에서 허용하지 않는다. canonical Message가 없거나 잘못 결속되면 완료로
+추정하지 않고 polling을 재시도하며 provider를 다시 호출하지 않는다.
+
+Deep Research는 기존 영속 async-job 계약을 유지한다. 일반 Chat attempt로 편입하지
+않고 별도 polling·재진입·정산 경계를 그대로 검사했다. 첨부 입력은 이미 Message
+transaction과 대화 재조회에 영속되므로 이번 회차에서 별도 저장 경로를 만들지 않았다.
+
+로컬 관측은 관련 client·서버 순서 단위 **22/22**, attempt route **16/16**,
+durable POST liveness **18/18**과 전체 server contract **609/609**, system Chrome을
+사용한 핵심 desktop 브라우저 **4/4**, typecheck·수정 파일 lint·production build·
+diff whitespace 통과다.
+Playwright 번들 Chromium이 설치되지 않아 최초 canonical 브라우저 실행은 시작 전에
+실패했고, 설치된 system Chrome 관측은 기능 회귀 근거이지만 Linux canonical/golden을
+대신하지 않는다. 전체 unit 명령에 전달한 이름 필터는 runner가 무시해 범위 밖 기존
+benchmark 실패 1건에서 수동 중단했으며 이를 이번 기능 실패나 전체 통과로 세지 않는다.
+실제 provider·R2 호출과 새 과금은 없고, 새 변경 자체의 staging·production 배포도
+아직 아니다.
+
+이번 회차는 C11·C13·C15의 reload 연결 정확성을 올렸지만 이미 존재하던 기능을 새로
+완성한 것으로 중복 계산하지 않는다. 따라서 전체 웹 Chat 추정은 **약 65%, 주관적
+범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 한 Cycle의 다음 권장 순서는
+① 최종 로컬 회귀와 Claude 읽기 전용 독립 검토, ② PR·Linux 통합 CI, ③ 병합·배포 후
+무과금 staging에서 canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의
+원문 보존·주입 방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router
+품질 측정이다.
 
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 

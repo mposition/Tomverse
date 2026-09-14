@@ -123,6 +123,7 @@ import {
 import { ArtifactToolCallTracker } from "@/lib/generatedArtifactTurnTracker";
 import { persistArtifactRows } from "@/lib/generatedArtifactStorage";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
+import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
 import { splitProviderInstructions } from "@/lib/chatProviderPrompt";
 import { resolveChatCompletionOutcome } from "@tomverse/chat-core";
 import { ERROR_REPORT_TOKEN_HEADER } from "@/lib/errorReportContract";
@@ -2167,8 +2168,25 @@ async function handleChatPost(
                 leaseExpiresAt: new Date(Date.now() + 4 * 60 * 1_000),
             });
             if (claim.disposition === "reattach") {
+                const message = claim.attempt.status === "completed"
+                    ? await readPublicCompletedChatMessage(
+                          session!.user!.id,
+                          claim.attempt
+                      )
+                    : null;
+                if (claim.attempt.status === "completed" && !message) {
+                    return tracedJsonError(
+                        "The completed response could not be recovered.",
+                        "CHAT_ATTEMPT_READ_FAILED",
+                        500,
+                        traceId
+                    );
+                }
                 return Response.json(
-                    { attempt: publicChatResponseAttempt(claim.attempt) },
+                    {
+                        attempt: publicChatResponseAttempt(claim.attempt),
+                        ...(message ? { message } : {}),
+                    },
                     {
                         headers: {
                             "Cache-Control": "private, no-store",

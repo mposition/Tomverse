@@ -1,4 +1,7 @@
 import type { ChatAttachment, Message } from "@/components/chat/types";
+import { parseChatStreamArtifacts } from "@/lib/generatedArtifactCore";
+import { sanitizeWebSearchCitations } from "@/lib/webSearchCitations";
+import type { WebSearchExecution } from "@/lib/webSearchExecutionNormalizer";
 
 export type PublicChatDraft = {
   scopeKey: string;
@@ -379,6 +382,140 @@ export function parsePublicChatResponseAttempt(
     terminalAt,
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+  };
+}
+
+const parseStoredWebSearchExecution = (
+  value: unknown
+): { ok: true; value: WebSearchExecution | null } | { ok: false } => {
+  if (value === null || value === undefined) return { ok: true, value: null };
+  if (
+    !isRecord(value) ||
+    typeof value.requested !== "boolean" ||
+    typeof value.supported !== "boolean" ||
+    typeof value.executed !== "boolean" ||
+    typeof value.provider !== "string" ||
+    !Array.isArray(value.citations)
+  ) {
+    return { ok: false };
+  }
+  const optionalCount = (candidate: unknown) =>
+    candidate === undefined ||
+    (Number.isSafeInteger(candidate) && (candidate as number) >= 0);
+  if (
+    (value.tool !== undefined && typeof value.tool !== "string") ||
+    !optionalCount(value.queryCount) ||
+    (value.failureCode !== undefined && typeof value.failureCode !== "string") ||
+    (value.executionKind !== undefined &&
+      !["provider_native", "search_model", "app_managed"].includes(
+        String(value.executionKind)
+      )) ||
+    (value.searchBackend !== undefined && typeof value.searchBackend !== "string") ||
+    !optionalCount(value.backendRequestCount)
+  ) {
+    return { ok: false };
+  }
+  let costMetadata: Record<string, number> | undefined;
+  if (value.costMetadata !== undefined) {
+    if (!isRecord(value.costMetadata)) return { ok: false };
+    const entries = Object.entries(value.costMetadata);
+    if (entries.some(([, amount]) =>
+      typeof amount !== "number" || !Number.isFinite(amount) || amount < 0
+    )) {
+      return { ok: false };
+    }
+    costMetadata = Object.fromEntries(entries) as Record<string, number>;
+  }
+  return {
+    ok: true,
+    value: {
+      requested: value.requested,
+      supported: value.supported,
+      executed: value.executed,
+      provider: value.provider,
+      citations: sanitizeWebSearchCitations(value.citations),
+      ...(typeof value.tool === "string" ? { tool: value.tool } : {}),
+      ...(typeof value.queryCount === "number" ? { queryCount: value.queryCount } : {}),
+      ...(typeof value.failureCode === "string"
+        ? { failureCode: value.failureCode }
+        : {}),
+      ...(costMetadata ? { costMetadata } : {}),
+      ...(typeof value.executionKind === "string"
+        ? { executionKind: value.executionKind as WebSearchExecution["executionKind"] }
+        : {}),
+      ...(typeof value.searchBackend === "string"
+        ? { searchBackend: value.searchBackend }
+        : {}),
+      ...(typeof value.backendRequestCount === "number"
+        ? { backendRequestCount: value.backendRequestCount }
+        : {}),
+    },
+  };
+};
+
+/**
+ * Accepts the canonical Message bundled with a completed attempt read.
+ *
+ * This is an allowlist, not a cast. A response containing a storage key or
+ * provider-private state may still be valid JSON, but none of those fields can
+ * enter the browser's Message object through this function. Identity, model
+ * attribution and completion status are also bound back to the attempt so a
+ * malformed envelope cannot replace an unrelated transcript row. Content is
+ * deliberately taken from the Message instead of requiring byte equality with
+ * partialContent: the attempt checkpoint has a different storage bound, while
+ * the committed Message is the canonical completed transcript row.
+ */
+export function parseCompletedChatResponseMessage(
+  value: unknown,
+  attempt: PublicChatResponseAttempt
+): Message | null {
+  if (attempt.status !== "completed" || !isRecord(value)) return null;
+  const expectedModelId = attempt.actualModelId ?? attempt.requestedModelId;
+  const expectedStatus = attempt.finishReason === "length" ? "incomplete" : "normal";
+  if (
+    value.id !== attempt.assistantMessageId ||
+    value.role !== "assistant" ||
+    typeof value.content !== "string" ||
+    value.status !== expectedStatus ||
+    value.modelId !== expectedModelId ||
+    typeof value.createdAt !== "string" ||
+    (value.pendingJobId !== undefined && value.pendingJobId !== null)
+  ) {
+    return null;
+  }
+  const searchMetadata = parseStoredWebSearchExecution(value.searchMetadata);
+  if (!searchMetadata.ok) return null;
+  const positiveCount = (candidate: unknown) =>
+    candidate === undefined ||
+    (Number.isSafeInteger(candidate) && (candidate as number) > 0);
+  if (
+    !positiveCount(value.memoryUsedCount) ||
+    !positiveCount(value.knowledgeChunkCount) ||
+    value.attachments !== undefined
+  ) {
+    return null;
+  }
+  let artifacts: ReturnType<typeof parseChatStreamArtifacts> = null;
+  if (value.artifacts !== undefined) {
+    if (!Array.isArray(value.artifacts)) return null;
+    artifacts = parseChatStreamArtifacts(value.artifacts);
+    if (!artifacts || artifacts.length !== value.artifacts.length) return null;
+  }
+  return {
+    id: value.id,
+    role: "assistant",
+    content: value.content,
+    status: expectedStatus,
+    modelId: expectedModelId,
+    createdAt: value.createdAt,
+    searchMetadata: searchMetadata.value,
+    ...(typeof value.memoryUsedCount === "number"
+      ? { memoryUsedCount: value.memoryUsedCount }
+      : {}),
+    ...(typeof value.knowledgeChunkCount === "number"
+      ? { knowledgeChunkCount: value.knowledgeChunkCount }
+      : {}),
+    ...(artifacts ? { artifacts } : {}),
   };
 }
 

@@ -13,6 +13,7 @@ import {
   peekChatResponseAttempt,
   readChatResponseAttempt,
 } from "@/lib/chatResponseAttemptPersistence";
+import { readPublicCompletedChatMessage } from "@/lib/publicChatMessage";
 
 type Params = { params: Promise<{ assistantMessageId: string }> };
 
@@ -72,8 +73,18 @@ export async function GET(request: Request, { params }: Params) {
       return jsonError("Chat response attempt not found.", "CHAT_ATTEMPT_NOT_FOUND", 404);
     }
 
+    const message = reconciled.status === "completed"
+      ? await readPublicCompletedChatMessage(session.user.id, reconciled)
+      : null;
+    if (reconciled.status === "completed" && !message) {
+      throw new Error("CHAT_COMPLETED_ATTEMPT_MESSAGE_MISSING");
+    }
+
     return Response.json(
-      { attempt: publicChatResponseAttempt(reconciled) },
+      {
+        attempt: publicChatResponseAttempt(reconciled),
+        ...(message ? { message } : {}),
+      },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error) {

@@ -184,6 +184,16 @@ function installControlledChatFetch(options: {
           createdAt: "2026-09-13T00:00:00.000Z",
           updatedAt: "2026-09-13T00:00:03.000Z",
         },
+        message: {
+          id: assistantMessageId,
+          role: "assistant",
+          content: "The already-running attempt completed once.",
+          status: "normal",
+          modelId: options.routedModelId ?? requestedModelId,
+          pendingJobId: null,
+          searchMetadata: null,
+          createdAt: "2026-09-13T00:00:00.000Z",
+        },
       }), {
         status: 200,
         headers: {
@@ -417,7 +427,25 @@ async function openChat(page: Page, options: {
     if (!attempt) {
       return route.fulfill({ status: 404, json: { code: "CHAT_ATTEMPT_NOT_FOUND" } });
     }
-    return route.fulfill({ json: { attempt } });
+    const { canonicalMessage, ...publicAttempt } = attempt;
+    const completedMessage = publicAttempt.status === "completed"
+      ? canonicalMessage ?? {
+          id: publicAttempt.assistantMessageId,
+          role: "assistant",
+          content: publicAttempt.partialContent,
+          status: publicAttempt.finishReason === "length" ? "incomplete" : "normal",
+          modelId: publicAttempt.actualModelId ?? publicAttempt.requestedModelId,
+          pendingJobId: null,
+          searchMetadata: null,
+          createdAt: publicAttempt.createdAt,
+        }
+      : null;
+    return route.fulfill({
+      json: {
+        attempt: publicAttempt,
+        ...(completedMessage ? { message: completedMessage } : {}),
+      },
+    });
   });
   await page.route(/\/api\/products\/chat\/drafts\/[^?]+(?:\?.*)?$/, async (route) => {
     const url = new URL(route.request().url());
@@ -1714,6 +1742,78 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     }]);
     await expect(message(page, "Final suffix.")).toBeVisible();
     await expect(page.getByTestId("chat-textarea")).toBeEnabled();
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
+  test("terminal polling hydrates citations, generated files, and context disclosure from the canonical Message", async ({ page }) => {
+    const state = await openChat(page);
+    const active = {
+      assistantMessageId: "durable-metadata-answer",
+      conversationId: CONVERSATION,
+      sourceUserMessageId: "seed-u",
+      requestedModelId: MODEL_A,
+      actualModelId: MODEL_A,
+      provider: "openai",
+      status: "streaming",
+      partialContent: "The answer is still running.",
+      checkpointRevision: 1,
+      finishReason: null,
+      failureCode: null,
+      terminalAt: null,
+      createdAt: "2026-09-13T00:00:00.000Z",
+      updatedAt: "2026-09-13T00:00:01.000Z",
+    };
+    state.setResponseAttempts([active]);
+    await page.reload();
+    await expect(message(page, "still running")).toBeVisible();
+    await expect.poll(state.attemptReadCount).toBeGreaterThan(0);
+
+    state.setResponseAttempts([{
+      ...active,
+      status: "completed",
+      partialContent: "The recovered answer cites its source and includes a file.",
+      checkpointRevision: 2,
+      finishReason: "stop",
+      terminalAt: "2026-09-13T00:00:02.000Z",
+      updatedAt: "2026-09-13T00:00:02.000Z",
+      canonicalMessage: {
+        id: "durable-metadata-answer",
+        role: "assistant",
+        content: "The recovered answer cites its source and includes a file.",
+        status: "normal",
+        modelId: MODEL_A,
+        pendingJobId: null,
+        createdAt: "2026-09-13T00:00:00.000Z",
+        searchMetadata: {
+          requested: true,
+          supported: true,
+          executed: true,
+          provider: "openai",
+          citations: [{
+            url: "https://example.test/recovery-source",
+            title: "Recovery source",
+          }],
+        },
+        memoryUsedCount: 2,
+        knowledgeChunkCount: 1,
+        artifacts: [{
+          id: "artifact-recovered-1",
+          ordinal: 0,
+          format: "csv",
+          filename: "recovered-result.csv",
+          mediaType: "text/csv",
+          byteSize: 42,
+          status: "ready",
+          modelId: MODEL_A,
+        }],
+      },
+    }]);
+
+    await expect(message(page, "recovered answer")).toBeVisible();
+    await expect(page.getByTestId("search-citation-item")).toContainText("Recovery source");
+    await expect(page.getByTestId("generated-artifact-filename")).toHaveText("recovered-result.csv");
+    await expect(page.getByTestId("memory-usage-disclosure")).toContainText("2");
+    await expect(page.getByTestId("memory-usage-disclosure")).toContainText("1");
     expect(await persistentChatPostCount(page)).toBe(0);
   });
 

@@ -6,6 +6,7 @@ import {
   isActiveChatResponseAttempt,
   mergeChatResponseAttempts,
   messageFromChatResponseAttempt,
+  parseCompletedChatResponseMessage,
   parseChatDraftConflict,
   parseChatDraftMessageReceipt,
   parseChatDraftResponse,
@@ -417,4 +418,94 @@ test("poll replacement only changes messages proven to be attempt-backed", () =>
     replaceAttemptBackedMessage([canonical], terminal, new Set(), "Interrupted")[0].content,
     "canonical"
   );
+});
+
+test("completed recovery accepts and allowlists canonical message metadata", () => {
+  const completed = attempt({
+    status: "completed",
+    partialContent: "answer with sources",
+    checkpointRevision: 4,
+    actualModelId: "gpt-5-6-luna",
+    finishReason: "stop",
+    terminalAt: "2026-09-13T00:01:00.000Z",
+  });
+  const parsed = parseCompletedChatResponseMessage({
+    id: "assistant_1",
+    role: "assistant",
+    content: "answer with sources",
+    status: "normal",
+    modelId: "gpt-5-6-luna",
+    pendingJobId: null,
+    createdAt: "2026-09-13T00:00:00.000Z",
+    searchMetadata: {
+      requested: true,
+      supported: true,
+      executed: true,
+      provider: "openai",
+      citations: [
+        { url: "https://example.test/source", title: "Source" },
+        { url: "javascript:alert(1)", title: "unsafe" },
+      ],
+    },
+    memoryUsedCount: 2,
+    knowledgeChunkCount: 1,
+    artifacts: [{
+      id: "artifact_1",
+      ordinal: 0,
+      format: "csv",
+      filename: "result.csv",
+      mediaType: "text/csv",
+      byteSize: 42,
+      status: "ready",
+      modelId: "gpt-5-6-luna",
+      objectKey: "must-not-cross-client-boundary",
+    }],
+    providerContext: { secret: true },
+    objectKey: "must-not-cross-client-boundary",
+  }, completed);
+
+  assert.ok(parsed);
+  assert.equal(parsed.searchMetadata.citations.length, 1);
+  assert.equal(parsed.searchMetadata.citations[0].url, "https://example.test/source");
+  assert.equal(parsed.artifacts.length, 1);
+  assert.equal("objectKey" in parsed.artifacts[0], false);
+  assert.equal("objectKey" in parsed, false);
+  assert.equal("providerContext" in parsed, false);
+  assert.equal(parsed.memoryUsedCount, 2);
+  assert.equal(parsed.knowledgeChunkCount, 1);
+});
+
+test("completed recovery rejects an unbound or malformed canonical message", () => {
+  const completed = attempt({
+    status: "completed",
+    actualModelId: "gpt-5-6-luna",
+    finishReason: "length",
+    terminalAt: "2026-09-13T00:01:00.000Z",
+  });
+  const valid = {
+    id: "assistant_1",
+    role: "assistant",
+    content: "durable partial",
+    status: "incomplete",
+    modelId: "gpt-5-6-luna",
+    pendingJobId: null,
+    createdAt: "2026-09-13T00:00:00.000Z",
+    searchMetadata: null,
+  };
+  assert.ok(parseCompletedChatResponseMessage(valid, completed));
+  for (const malformed of [
+    { ...valid, id: "assistant_2" },
+    { ...valid, role: "user" },
+    { ...valid, status: "normal" },
+    { ...valid, modelId: "other-model" },
+    { ...valid, pendingJobId: "deep-research-job" },
+    { ...valid, memoryUsedCount: 0 },
+    { ...valid, knowledgeChunkCount: -1 },
+    { ...valid, searchMetadata: { citations: [] } },
+    { ...valid, attachments: [] },
+    { ...valid, artifacts: [{ id: "broken" }] },
+  ]) {
+    assert.equal(parseCompletedChatResponseMessage(malformed, completed), null);
+  }
+  assert.equal(parseCompletedChatResponseMessage(valid, attempt()), null);
 });

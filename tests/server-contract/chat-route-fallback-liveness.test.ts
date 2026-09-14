@@ -334,7 +334,24 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
   message: {
     findFirst: (args: Record<string, unknown>) => {
       messageFindFirstArgs.push(args);
-      const where = args.where as { id?: string } | undefined;
+      const where = args.where as { id?: string; role?: string } | undefined;
+      if (where?.role === "assistant") {
+        return {
+          id: ASSISTANT_MESSAGE_ID,
+          role: "assistant",
+          content: "Recovered canonical answer.",
+          status: "normal",
+          modelId: REQUESTED_MODEL_ID,
+          pendingJobId: null,
+          searchMetadata: null,
+          createdAt: new Date("2026-09-13T00:00:00.000Z"),
+          memoryUsedCount: 2,
+          knowledgeChunkCount: 1,
+          artifacts: [],
+          attachments: [],
+          providerContext: { private: true },
+        };
+      }
       return {
         id: where?.id ?? SOURCE_USER_MESSAGE_ID,
         content: "이 질문에 답해 줘",
@@ -402,7 +419,11 @@ const prismaProxy: unknown = new Proxy(prismaFake, {
 mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: prismaProxy } });
 
 let durableRevision = 0;
-let durableClaimMode: "claimed" | "reattach" | "conflict" = "claimed";
+let durableClaimMode:
+  | "claimed"
+  | "reattach"
+  | "reattach-completed"
+  | "conflict" = "claimed";
 let durableClaimCalls = 0;
 let durableTerminalFails = false;
 class DurableConflict extends Error {
@@ -422,18 +443,26 @@ mock.module(mod("lib/chatResponseAttemptPersistence.ts"), {
       lastDurableClaimInput = input;
       if (durableClaimMode === "conflict") throw new DurableConflict();
       return {
-      disposition: durableClaimMode,
+      disposition: durableClaimMode === "reattach-completed"
+        ? "reattach"
+        : durableClaimMode,
       attempt: {
         ...input,
         fingerprint: "a".repeat(64),
-        actualModelId: null,
-        provider: null,
-        status: "claimed",
-        partialContent: "",
-        checkpointRevision: 0,
-        finishReason: null,
+        actualModelId: durableClaimMode === "reattach-completed"
+          ? REQUESTED_MODEL_ID
+          : null,
+        provider: durableClaimMode === "reattach-completed" ? "anthropic" : null,
+        status: durableClaimMode === "reattach-completed" ? "completed" : "claimed",
+        partialContent: durableClaimMode === "reattach-completed"
+          ? "Recovered canonical answer."
+          : "",
+        checkpointRevision: durableClaimMode === "reattach-completed" ? 3 : 0,
+        finishReason: durableClaimMode === "reattach-completed" ? "stop" : null,
         failureCode: null,
-        terminalAt: null,
+        terminalAt: durableClaimMode === "reattach-completed"
+          ? new Date("2026-09-13T00:00:03.000Z")
+          : null,
         createdAt: new Date("2026-09-13T00:00:00.000Z"),
         updatedAt: new Date("2026-09-13T00:00:00.000Z"),
       },
@@ -654,7 +683,7 @@ const whileWaiting = async <T,>(read: () => Promise<T>): Promise<T> => {
 
 const ask = async (
   behaviour: "answers" | "silent",
-  claimMode: "claimed" | "reattach" | "conflict" = "claimed",
+  claimMode: "claimed" | "reattach" | "reattach-completed" | "conflict" = "claimed",
   expectedStatus = 200,
   withContextBundle = false,
   requestMessages: Array<Record<string, unknown>> = [
@@ -772,6 +801,23 @@ test("an exact durable replay reattaches without reservation or provider dispatc
   assert.equal("fingerprint" in payload.attempt, false);
   assert.equal("ownerId" in payload.attempt, false);
   assert.equal("leaseExpiresAt" in payload.attempt, false);
+});
+
+test("a completed durable replay includes its canonical public Message", async () => {
+  const { response, body } = await ask("answers", "reattach-completed");
+  assert.equal(response.headers.get("X-Chat-Response-Mode"), "durable-attempt");
+  assert.equal(attempts.length, 0);
+  assert.equal(ledger.accessAcquisitions, 0);
+  const payload = JSON.parse(body) as {
+    attempt: Record<string, unknown>;
+    message: Record<string, unknown>;
+  };
+  assert.equal(payload.attempt.status, "completed");
+  assert.equal(payload.message.id, ASSISTANT_MESSAGE_ID);
+  assert.equal(payload.message.content, "Recovered canonical answer.");
+  assert.equal(payload.message.memoryUsedCount, 2);
+  assert.equal(payload.message.knowledgeChunkCount, 1);
+  assert.equal(JSON.stringify(payload).includes("providerContext"), false);
 });
 
 test("durable claim and reattach POSTs are throttled before source or attempt storage", async () => {

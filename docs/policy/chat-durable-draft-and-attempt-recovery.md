@@ -198,12 +198,31 @@ These rules preserve what the server has committed; they do not claim that a
 provider stream can resume at an exact token boundary. Reattachment reads the
 committed prefix and current state.
 
+A completed attempt read also returns the exact canonical assistant `Message`
+committed with that terminal transition. The completed POST reattachment and
+the direct attempt GET use the same field-by-field public allowlist as the
+owned conversation read. This restores search citations, generated-artifact
+metadata, and positive Memory or profile-knowledge disclosure counts without
+exposing attachment or artifact object keys, provider-private state, execution
+fingerprints, or lease data. The attempt still supplies identity, model and
+terminal-state bindings; the Message supplies the canonical completed content
+and durable presentation metadata because its storage bound may differ from
+the checkpoint bound. Active, failed and cancelled attempt responses do not
+carry a Message. If a completed attempt has no matching owned canonical
+Message, the server fails closed and the browser keeps bounded GET-only
+recovery instead of accepting a partial envelope or dispatching again.
+
 ## 5. Read and reload are passive, except expired-lease reconciliation
 
 Draft GET and attempt GET are passive with respect to model work. A browser
 reload may call them, but neither route imports or invokes provider dispatch,
 credit reservation, admission, routing, or retry code. They may write ordinary
 security rate-limit bookkeeping.
+
+Deep Research remains outside this response-attempt contract. Its existing
+persisted asynchronous-job status, polling, remount recovery and settlement
+rules remain authoritative; an attempt read cannot turn that job into an
+ordinary completed Chat Message.
 
 There is exactly one recovery-state mutation authorised on an attempt or
 conversation-detail GET: a fail-closed, ownership-scoped conditional update may

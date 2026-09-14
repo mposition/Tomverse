@@ -92,6 +92,7 @@ import {
   isActiveChatResponseAttempt,
   mergeChatResponseAttempts,
   messageFromChatResponseAttempt,
+  parseCompletedChatResponseMessage,
   parseMessageSaveMapping,
   parsePublicChatResponseAttempt,
   replaceAttemptBackedMessage,
@@ -1061,6 +1062,13 @@ function ChatAppComponent({
         );
         const priorRevision =
           durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
+        const completedMessage = attempt.status === "completed"
+          ? parseCompletedChatResponseMessage(payload?.message, attempt)
+          : null;
+        if (attempt.status === "completed" && !completedMessage) {
+          scheduleTransientRetry(assistantMessageId);
+          return;
+        }
         if (attempt.checkpointRevision > priorRevision) {
           durableAttemptRevisionsRef.current.set(
             assistantMessageId,
@@ -1074,6 +1082,16 @@ function ChatAppComponent({
               t("chat.responseError")
             )
           );
+        }
+        if (completedMessage) {
+          writeChatRuntimeMessages(key, (current) => {
+            if (!attemptBackedMessageIdsRef.current.has(assistantMessageId)) {
+              return current;
+            }
+            return current.map((message) =>
+              message.id === assistantMessageId ? completedMessage : message
+            );
+          });
         }
         if (!isActiveChatResponseAttempt(attempt)) {
           terminal.add(assistantMessageId);
@@ -1736,13 +1754,19 @@ function ChatAppComponent({
           assistantMessageId,
           attempt.checkpointRevision
         );
+        const completedMessage = attempt.status === "completed"
+          ? parseCompletedChatResponseMessage(payload?.message, attempt)
+          : null;
+        if (attempt.status === "completed" && !completedMessage) {
+          throw new Error(t("chat.responseBodyMissing"));
+        }
         writeChatRuntimeMessages(runKey, (current) =>
           current.map((message) =>
             message.id === assistantMessageId
-              ? messageFromChatResponseAttempt(
-                  attempt,
-                  t("chat.responseError")
-                )
+              ? completedMessage ?? messageFromChatResponseAttempt(
+                attempt,
+                t("chat.responseError")
+              )
               : message
           )
         );
@@ -1756,7 +1780,8 @@ function ChatAppComponent({
               ? current
               : [...current, assistantMessageId]
           );
-        } else if (attempt.status === "completed") {
+        }
+        if (attempt.status === "completed") {
           onResponseComplete?.(
             analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
