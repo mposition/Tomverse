@@ -69,7 +69,31 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     href: "/admin/overview",
     description: "Operational snapshot, attention queue, and recent activity",
     group: "Command Center",
-    aliases: ["home", "dashboard", "kpi", "status", "health", "snapshot"],
+    aliases: [
+      "home",
+      "dashboard",
+      "kpi",
+      "status",
+      "health",
+      "snapshot",
+      "health score",
+      "score",
+      "environment",
+      "env",
+      "variables",
+    ],
+    tabs: [
+      {
+        id: "summary",
+        label: "Summary",
+        description: "Operational snapshot, attention queue, and recent activity",
+      },
+      {
+        id: "health",
+        label: "Health score",
+        description: "How the score was arrived at, and what to do about each line",
+      },
+    ],
   },
   {
     id: "work-queue",

@@ -1,7 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { getServerSession } from "next-auth/next";
+import { AdminHealthScorePanel } from "@/components/admin/AdminHealthScorePanel";
 import { AdminOverviewSummary, type AttentionItem } from "@/components/admin/AdminOverviewSummary";
+import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminQuickAccessPanel } from "@/components/admin/AdminQuickAccessPanel";
 import { getAdminRole } from "@/lib/adminAuth";
 import {
@@ -11,8 +13,11 @@ import {
 } from "@/lib/adminConsoleData";
 import {
   adminEnvironmentChecks,
-  adminHealthScore,
+  blockingEnvChecks,
+  processStartedAt,
 } from "@/lib/adminEnvironmentChecks";
+import { adminHealthBreakdown } from "@/lib/adminHealthScore";
+import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
 import { adminOverviewMessages } from "@/lib/adminMessages/overview";
 import { getAdminActivePaidWhere, getAdminUserStats } from "@/lib/adminUsers";
@@ -21,6 +26,55 @@ import { getBillingPlans } from "@/lib/billingConfig";
 import { prisma } from "@/lib/prisma";
 
 const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
+
+const TABS = adminNavItemTabs("overview");
+
+/** `2026-09-14T02:31:00.000Z` -> `2026-09-14 02:31`, as the rest of the page does. */
+const minuteLabel = (value: Date) => value.toISOString().replace("T", " ").slice(0, 16);
+
+const settled = <T,>(result: PromiseSettledResult<T>): T | null =>
+  result.status === "fulfilled" ? result.value : null;
+
+/**
+ * The health tab loads the score's own inputs and nothing else.
+ *
+ * `allSettled` rather than `all`, and the nulls are load-bearing. This page
+ * exists to explain a number, so a read that failed has to reach the renderer
+ * as "unknown" -- folding it into zero would produce a confident line item for
+ * a count nobody obtained, on the one screen whose whole purpose is showing
+ * where the number came from.
+ */
+async function healthTabProps() {
+  const [dashboard, alertFailures, pendingRefunds, openFeedback] =
+    await Promise.allSettled([
+      loadProviderHealthDashboard(),
+      prisma.adminNotificationLog.count({
+        where: { status: "failed", acknowledgedAt: null },
+      }),
+      prisma.refundRequest.count({ where: { status: "pending" } }),
+      prisma.feedback.count({ where: { status: "open" } }),
+    ]);
+
+  const providers = settled(dashboard)?.providers ?? null;
+  const envChecks = adminEnvironmentChecks();
+
+  return {
+    envChecks,
+    breakdown: adminHealthBreakdown({
+      outageCount:
+        providers?.filter((provider) => provider.status === "outage").length ??
+        null,
+      limitedCount:
+        providers?.filter((provider) => provider.status === "limited").length ??
+        null,
+      blockingEnvCount: blockingEnvChecks(envChecks).length,
+      alertFailureCount: settled(alertFailures),
+      pendingRefundCount: settled(pendingRefunds),
+      openFeedbackCount: settled(openFeedback),
+    }),
+    processStartedAt: minuteLabel(processStartedAt()),
+  };
+}
 
 /**
  * Overview loads what Overview shows, and nothing else.
@@ -31,7 +85,30 @@ const money = (microUsd: number) => `$${(microUsd / 1_000_000).toFixed(2)}`;
  * analytics rollup were all fetched to draw a KPI strip. This page's reads are
  * the ones its own sections display.
  */
-export default async function AdminOverviewPage() {
+export default async function AdminOverviewPage({
+  searchParams,
+}: PageProps<"/admin/overview">) {
+  const query = await searchParams;
+  const tab = resolveAdminTab(TABS, query.tab);
+  const tabStrip = (
+    <AdminPageTabs
+      basePath="/admin/overview"
+      tabs={TABS}
+      activeTabId={tab.id}
+      label="Overview sections"
+      query={query}
+    />
+  );
+
+  if (tab.id === "health") {
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabStrip}
+        <AdminHealthScorePanel {...(await healthTabProps())} />
+      </div>
+    );
+  }
+
   const m = await getAdminMessages(adminOverviewMessages);
   const now = new Date();
   const dayStart = new Date(
@@ -129,15 +206,18 @@ export default async function AdminOverviewPage() {
   ).toFixed(1)}%`;
 
   const envChecks = adminEnvironmentChecks();
-  const missingEnvCount = envChecks.filter((check) => !check.configured).length;
-  const healthScore = adminHealthScore({
+  // Only the rows whose absence breaks something. Counting every unset
+  // variable made an optional Discord webhook cost more than a provider
+  // running limited, and drove a correctly-configured deployment to zero.
+  const blockingEnvCount = blockingEnvChecks(envChecks).length;
+  const healthScore = adminHealthBreakdown({
     outageCount,
     limitedCount,
     pendingRefundCount,
     openFeedbackCount,
-    missingEnvCount,
+    blockingEnvCount,
     alertFailureCount,
-  });
+  }).score;
 
   const needsAttention: AttentionItem[] = [
     ...dashboard.providers
@@ -191,8 +271,7 @@ export default async function AdminOverviewPage() {
     m.report.openFeedback(openFeedbackCount),
     m.report.pendingRefunds(pendingRefundCount),
     m.report.missingEnv(
-      envChecks
-        .filter((check) => !check.configured)
+      blockingEnvChecks(envChecks)
         .map((check) => check.name)
         .join(", ") || m.report.none
     ),
@@ -203,8 +282,11 @@ export default async function AdminOverviewPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      {tabStrip}
       <AdminQuickAccessPanel />
       <AdminOverviewSummary
+        blockingEnvCount={blockingEnvCount}
+        processStartedAt={minuteLabel(processStartedAt())}
         generatedAt={generatedAtLabel}
         adminRole={adminRole}
         healthScore={healthScore}

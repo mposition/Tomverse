@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { AdminSnapshotActions } from "@/components/admin/AdminSnapshotActions";
 import type { AdminEnvCheck } from "@/lib/adminEnvironmentChecks";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -72,6 +72,8 @@ export async function AdminOverviewSummary({
   commercialKpis,
   needsAttention,
   envChecks,
+  blockingEnvCount,
+  processStartedAt,
   recentActivity,
   recentActivityLimit,
   snapshotReport,
@@ -83,6 +85,10 @@ export async function AdminOverviewSummary({
   commercialKpis: Kpi[];
   needsAttention: AttentionItem[];
   envChecks: AdminEnvCheck[];
+  /** Missing rows that actually deduct. Never every unset variable. */
+  blockingEnvCount: number;
+  /** When the process answering this request started, `YYYY-MM-DD HH:MM`. */
+  processStartedAt: string;
   recentActivity: Array<{
     id: string;
     summary: string;
@@ -110,12 +116,29 @@ export async function AdminOverviewSummary({
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            label={m.healthScore}
-            value={String(healthScore)}
-            detail={m.healthScoreDetail}
-            tone="blue"
-          />
+          {/*
+            A link, not a card. The score is six weighted counts and a table of
+            twenty-nine variables collapsed into one integer, and an operator
+            reading it had nowhere to go to find out which. `?tab=health`
+            renders the arithmetic that produced this number.
+          */}
+          <Link
+            href="/admin/overview?tab=health"
+            data-testid="admin-health-score-link"
+            className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-4 transition hover:border-blue-400/50"
+          >
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
+              {m.healthScore}
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">{healthScore}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">
+              {m.healthScoreDetail}
+            </p>
+            <p className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-300">
+              {m.explainScore}
+              <ArrowRight className="h-3 w-3" aria-hidden />
+            </p>
+          </Link>
           {operationalKpis.map((kpi) => (
             <KpiCard key={kpi.label} {...kpi} />
           ))}
@@ -175,6 +198,26 @@ export async function AdminOverviewSummary({
               ? m.environmentAllConfigured(envChecks.length)
               : m.environmentMissing(missingEnv.length, envChecks.length)}
           </p>
+          {/*
+            "Not configured" and "blocking" were the same sentence here, and
+            they are not the same fact: on 2026-09-14 seven rows were reported
+            missing and two of them were optional notification channels. The
+            count that matters is stated separately, and the grouping that
+            explains it is one link away.
+          */}
+          {missingEnv.length > 0 ? (
+            <p className="mt-1 text-sm leading-6 text-zinc-300">
+              {blockingEnvCount === 0
+                ? m.environmentNoneBlocking
+                : m.environmentBlocking(blockingEnvCount)}{" "}
+              <Link
+                href="/admin/overview?tab=health#admin-health-environment"
+                className="font-bold text-blue-300 underline-offset-2 hover:underline"
+              >
+                {m.explainScore}
+              </Link>
+            </p>
+          ) : null}
           <div className="mt-4 grid gap-2">
             {missingEnv.map((check) => (
               // `min-w-0` on the card, not only on the text beside the icon.
@@ -214,6 +257,19 @@ export async function AdminOverviewSummary({
             checking a specific name still finds it, and the default view stays
             about what is missing.
           */}
+          {/*
+            The panel reads `process.env`, which is fixed at process start, so
+            "not configured" cannot be told apart from "configured after this
+            process started" -- and the refresh control cannot close the gap,
+            because it re-renders inside this same process. Stating the start
+            time is the smallest thing that makes the difference visible.
+          */}
+          <p
+            className="mt-3 text-xs leading-5 text-zinc-500"
+            data-testid="admin-overview-process-window"
+          >
+            {m.processStartedNote(processStartedAt)}
+          </p>
           <details className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50">
             <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-zinc-300">
               {m.showAllVariables(envChecks.length)}

@@ -7,7 +7,7 @@
   per-page section tabs
 - Severity when violated: release blocker for the redirect table; ordinary
   review for everything else
-- Last reviewed: 2026-08-06
+- Last reviewed: 2026-09-14
 
 ## Scope
 
@@ -24,7 +24,9 @@
 | Pinned pages and recents | `components/admin/AdminConsolePreferences.tsx` |
 | Section tabs | `components/admin/AdminPageTabs.tsx` |
 | Per-surface loaders | `lib/adminConsoleData.ts`, `lib/adminWorkQueue.ts`, `lib/adminEnvironmentChecks.ts` |
-| Coverage | `tests/adminNavigation.test.mjs`, `tests/e2e-admin/**` |
+| Health score and its breakdown | `lib/adminHealthScore.ts`, `components/admin/AdminHealthScorePanel.tsx` |
+| Notification drawer state | `lib/adminAlertsDrawer.ts` |
+| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/e2e-admin/**` |
 
 ## The navigation
 
@@ -32,7 +34,7 @@ Six groups, seventeen entries. One page, one job.
 
 | Group | Entry | Route | Sections (`?tab=`) |
 | --- | --- | --- | --- |
-| Command Center | Overview | `/admin/overview` | — |
+| Command Center | Overview | `/admin/overview` | `summary`, `health` |
 | Command Center | Work queue | `/admin/work-queue` | `queue`, `approvals` |
 | Command Center | Analytics | `/admin/analytics` | `product`, `imports` |
 | Customers | Users | `/admin/users` | — |
@@ -115,7 +117,49 @@ never its own `tab`, which the lookup has already consumed.
    raises its existing flag rather than adding a second way to say the same
    thing.
 
-8. **Role, re-authentication, two-person approval, audit, credit/cost and
+8. **The console states only what it read.** Three separate surfaces broke
+   this and each one sent an operator somewhere wrong, so it is a rule rather
+   than three fixes.
+
+   - **A failed read is never an empty result.** A list whose fetch returned
+     403, 500 or nothing at all renders as unread, with the reason and a way
+     to try again — never as the empty state. The alerts drawer said "No
+     notification records." on the strength of a 500, on the surface an
+     operator opens first during an incident. The branch order that prevents
+     it lives in `lib/adminAlertsDrawer.ts` because an ordering is only
+     testable if something can call it. This is the same rule
+     `lib/adminNavigationCounts.ts` states for badges — *zero is a claim and an
+     unknown count is not* — applied to the panel the badge points at.
+   - **A count that could not be read does not score as zero.**
+     `adminHealthBreakdown()` takes `number | null`, prices a null at nothing,
+     and marks the result `incomplete` so the screen can say the score is a
+     ceiling rather than a reading.
+   - **`process.env` is a reading, not the deployment.** It is fixed at process
+     start, so a variable added to the host afterwards is absent here and the
+     refresh control cannot bring it in — it re-renders inside the same
+     process. Any surface reporting a variable as unset states when the
+     process it read started. On 2026-09-14 three variables were set on the
+     host and reported missing, and the panel's wording sent the diagnosis
+     toward generating keys that already existed.
+
+9. **A number an operator is asked to act on can be taken apart.** The health
+   score links to `?tab=health`, which renders every factor — including the
+   ones deducting nothing — with its count, its weight, the arithmetic, and
+   what to do about that line. Weights live once, in `ADMIN_HEALTH_WEIGHTS`,
+   and the card and the breakdown derive from the same function so they cannot
+   drift.
+
+10. **Only `required` environment rows are priced.** Every row in
+    `adminEnvironmentChecks()` carries a severity, and `conditional`,
+    `recommended` and `optional` rows deduct nothing while still being listed.
+    A `conditional` row names its condition and is **not** claimed to be
+    satisfied: whether a KR or AU recipient exists is not a fact an
+    environment holds, which is exactly why `businessIdentityProblems()` keeps
+    those findings at warning severity. Counting every unset variable made an
+    optional Discord webhook dearer than a provider running limited and drove
+    correctly-configured deployments toward zero.
+
+11. **Role, re-authentication, two-person approval, audit, credit/cost and
    provider-budget policy are out of scope for this contract** and were not
    changed by it. `writeRoles` in the route table drives the sidebar's "Read"
    marker only; authorization is still decided server-side by
