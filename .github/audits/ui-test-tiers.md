@@ -42,9 +42,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-13 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **55개 파일, 765 test**를
-선택합니다(두 project 합계 1,530). 2026-08-26의 51개 파일, 1,416 test
+현재 실측: 2026-09-14 기준 `CI=1 --grep=@ui-risk --list`가
+desktop-chromium과 mobile-chromium 각 project에서 **56개 파일, 822 test**를
+선택합니다(두 project 합계 1,644). 2026-08-26의 51개 파일, 1,416 test
 (project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
@@ -98,6 +98,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **55개 파일, 765 test**
 | `assistant-knowledge-upload.spec.ts` |
 | `voice-input-composer.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
+| `prompt-refiner-focus.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
@@ -122,6 +123,15 @@ desktop·mobile 두 project에서 돕니다.
 모두 통과했고, 가장 느린 desktop-chromium 1/2 job은 12분 57초로 25분 예산의
 약 52%를 사용했습니다(desktop 2/2 11분 12초, mobile 1/2 8분 33초,
 mobile 2/2 9분 24초).
+
+`prompt-refiner-focus.spec.ts`가 2026-09-14에 합류해 56개입니다. 제안형
+composer의 focus는 실제 DOM에서만 검증할 수 있고, 같은 요청이 draft 편집 뒤
+재등장할 때 textarea caret를 빼앗으면 한국어 IME와 키보드 입력이 중단됩니다.
+세 case를 desktop·mobile Chromium 양쪽에서 실행하므로 project당 3 test를
+추가합니다. 직전 55개/765 test 수치는 이후 기존 spec에 추가된 case를 반영하지
+못한 낡은 기록이었고, 이번에는 전체 tier를 다시 `--list`해 현재 822를 확인했다.
+이는 provider 호출이나 제품 기능 활성화가 아닌, loopback에서만 열리는 fixture의
+release-blocking 회귀 검사입니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —

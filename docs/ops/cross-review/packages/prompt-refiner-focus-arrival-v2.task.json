@@ -12,6 +12,7 @@
   ],
   "baseCommit": "2ac384933a83e250e081ee9053dec9eb86b8d5df",
   "writableScope": [
+    ".github/audits/ui-test-tiers.md",
     "app/(site)/(application)/e2e/prompt-refiner-fixture/",
     "components/chat/PromptRefinerSuggestionPanel.tsx",
     "docs/ops/cross-review/packages/prompt-refiner-focus-arrival-v2.task.json",

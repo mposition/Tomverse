@@ -61,15 +61,22 @@ export function PromptRefinerSuggestionPanel({
 
   useEffect(() => {
     if (!focusTarget || focusTarget === lastFocusedTargetRef.current) return;
-    lastFocusedTargetRef.current = focusTarget;
+    let focusElement: HTMLElement | null = null;
     if (focusTarget?.startsWith("requesting:")) {
-      requestingRef.current?.focus({ preventScroll: true });
+      focusElement = requestingRef.current;
     } else if (focusTarget?.startsWith("failed:")) {
-      failedRetryRef.current?.focus({ preventScroll: true });
+      focusElement = failedRetryRef.current?.disabled
+        ? null
+        : failedRetryRef.current;
     } else if (focusTarget?.startsWith("ready:")) {
-      readyRef.current?.focus({ preventScroll: true });
+      focusElement = readyRef.current;
     }
-  }, [focusTarget]);
+    if (!focusElement) return;
+    focusElement.focus({ preventScroll: true });
+    if (focusElement.ownerDocument.activeElement === focusElement) {
+      lastFocusedTargetRef.current = focusTarget;
+    }
+  }, [focusTarget, interactionBlockReason]);
 
   if (!offered) return null;
 

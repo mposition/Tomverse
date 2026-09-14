@@ -13,11 +13,12 @@ const SOURCE_PROMPT = "원문 질문";
 
 const suggestionFor = (
   requestId: string,
-  suggestionId: string
+  suggestionId: string,
+  sourcePrompt: string
 ): BoundPromptRefinerSuggestion => ({
   requestId,
   suggestionId,
-  sourcePrompt: SOURCE_PROMPT,
+  sourcePrompt,
   refinedPrompt: "목표와 출력 형식을 포함한 제안 문장",
   refinerVersion: "suggest-v1",
   inputScope: PROMPT_REFINER_INPUT_SCOPE,
@@ -31,9 +32,17 @@ export function PromptRefinerFocusHarness({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const requestSequence = useRef(0);
   const [draft, setDraft] = useState(SOURCE_PROMPT);
+  const [locked, setLocked] = useState(false);
   const [state, setState] = useState<PromptRefinerUiState>(() =>
     initialState === "ready"
-      ? { status: "ready", suggestion: suggestionFor("request_mount", "suggestion_mount") }
+      ? {
+          status: "ready",
+          suggestion: suggestionFor(
+            "request_mount",
+            "suggestion_mount",
+            SOURCE_PROMPT
+          ),
+        }
       : { status: "idle" }
   );
 
@@ -43,7 +52,8 @@ export function PromptRefinerFocusHarness({
       status: "ready",
       suggestion: suggestionFor(
         state.request.requestId,
-        `suggestion_${state.request.requestId}`
+        `suggestion_${state.request.requestId}`,
+        state.request.prompt
       ),
     });
   };
@@ -67,6 +77,7 @@ export function PromptRefinerFocusHarness({
         language="ko"
         currentPrompt={draft}
         state={state}
+        interactionBlockReason={locked ? "composer_locked" : null}
         onRequest={(sourcePrompt) => {
           requestSequence.current += 1;
           setState({
@@ -110,6 +121,15 @@ export function PromptRefinerFocusHarness({
         className="min-h-11 rounded-xl border border-zinc-300 px-3"
       >
         Fail fixture request
+      </button>
+      <button
+        type="button"
+        data-testid="prompt-refiner-fixture-lock"
+        aria-pressed={locked}
+        onClick={() => setLocked((value) => !value)}
+        className="min-h-11 rounded-xl border border-zinc-300 px-3"
+      >
+        {locked ? "Unlock fixture composer" : "Lock fixture composer"}
       </button>
     </main>
   );

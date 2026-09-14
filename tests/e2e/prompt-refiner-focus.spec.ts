@@ -37,4 +37,19 @@ test.describe("Prompt Refiner focus handoff", { tag: "@ui-risk" }, () => {
     await expect(page.getByTestId("prompt-refiner-ready")).toBeVisible();
     await expect(textarea).toBeFocused();
   });
+
+  test("a blocked failed handoff is retried when the composer unlocks", async ({
+    page,
+  }) => {
+    await page.goto(ROUTE);
+
+    await page.getByTestId("prompt-refiner-request").click();
+    await page.getByTestId("prompt-refiner-fixture-lock").click();
+    await page.getByTestId("prompt-refiner-fixture-failed").click();
+    await expect(page.getByTestId("prompt-refiner-retry")).toBeDisabled();
+    await expect(page.getByTestId("prompt-refiner-retry")).not.toBeFocused();
+
+    await page.getByTestId("prompt-refiner-fixture-lock").click();
+    await expect(page.getByTestId("prompt-refiner-retry")).toBeFocused();
+  });
 });
