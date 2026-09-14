@@ -11,7 +11,7 @@
     "신규 core·render 테스트, UI 계약 인덱스, 수정 파일 lint, typecheck, production build, 문서 참조·encoding·policy reference와 diff whitespace 검사가 통과한다.",
     "Claude는 요구사항과 diff를 먼저 읽고 테스트 기록과 작성자 설명을 그 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location, severity, basis와 재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 상한에서 남으면 on_hold다. 읽기 전용 검토 외 provider 호출·과금·push·merge·deploy 권한은 없다."
   ],
-  "baseCommit": "6fbf85990e7ac7135439f30e10da509beab92d5d",
+  "baseCommit": "9172467141da538b292eb87f450a9bf559b78147",
   "writableScope": [
     "AGENTS.md",
     "components/chat/ChatInput.tsx",
