@@ -1,9 +1,14 @@
-# The admin console fixture route
+# Browser-only fixture routes
 
 `app/(site)/(application)/e2e/admin-console-fixture/page.tsx` is a
 Playwright-only mount of the admin console shell and the admin panels that
 carry browser-level contracts. This document records why it exists, what it is
 not allowed to do, and what it would cost to remove it.
+
+`app/(site)/(application)/e2e/prompt-refiner-fixture/page.tsx` is the second
+mount. It renders only the Prompt Refiner panel and a textarea so Playwright can
+observe real focus transitions that static markup tests cannot. It has no
+provider, Router, billing, account or persistence connection.
 
 ## Decision: keep it
 
@@ -30,6 +35,9 @@ What the route buys, and what nothing else buys:
 - **Focus and hit testing.** Which field takes focus after a validation
   failure, and whether a toast covers a control, are measured with
   `elementFromPoint()` on a laid-out page.
+- **Prompt Refiner focus arrival.** The second mount proves that a genuinely
+  new request or proposal receives focus, while editing away from and back to
+  the same source bytes does not steal the textarea caret.
 - **Layout overflow.** The 9px overflow that `min-w-0` fixed was invisible to
   every non-browser check: it comes from `<input type="datetime-local">`'s
   intrinsic width against a grid item's default `min-width: auto`.
@@ -51,7 +59,8 @@ state that the page does not scroll sideways at 320px.
 
 ## Why the gate holds
 
-`isE2EFixtureMode()` requires **both** flags **and** a loopback `NEXTAUTH_URL`.
+Both routes use `isE2EFixtureMode()`, which requires **both** flags **and** a
+loopback `NEXTAUTH_URL`.
 `NODE_ENV` is deliberately not part of it: `next start` sets `NODE_ENV=production`
 on the fixture server too, so a `NODE_ENV` check would be worthless here.
 
@@ -60,7 +69,7 @@ Two independent proofs:
 | Proof | What it covers |
 |---|---|
 | `tests/e2eTestMode.test.mjs` | Executes the helper across the whole matrix: both flags absent, both false, each flag alone, both flags with a missing / blank / unparseable / public `NEXTAUTH_URL`, hostnames that merely *contain* a loopback name, and the four real loopback forms including IPv6 `[::1]`. Every case restores the environment, including keys that were absent. |
-| `scripts/verify-fixture-route-gate.mjs` | Starts the **same production build** three times over real HTTP: public origin with no flags → 404, public origin with both flags set → 404, loopback origin with both flags → 200. |
+| `scripts/verify-fixture-route-gate.mjs` | Starts the **same production build** three times over real HTTP and probes both routes: public origin with no flags → 404, public origin with both flags set → 404, loopback origin with both flags → 200. |
 
 The second is the one that matters for the claim "this is a 404 in production",
 because it is the deployment, not the helper, that is being asserted. A stray
@@ -72,10 +81,10 @@ also fails its health gate rather than serving traffic.
 
 ## Residual risk
 
-- The route's chunk is in the production bundle even though the page 404s. It
-  contains admin navigation labels and hrefs — not secrets, and already shipped
-  to every administrator — but it is a larger client bundle than strictly
-  necessary.
+- The routes' chunks are in the production bundle even though the pages 404.
+  The admin fixture contains navigation labels and hrefs — not secrets, and
+  already shipped to every administrator — but it is a larger client bundle
+  than strictly necessary. The Refiner fixture contains only static test copy.
 - The gate is one function. If `isE2EFixtureMode()` were ever loosened, this
   route loosens with it. That is why the helper has its own executed matrix and
   why the page is in the guarded-files list.
@@ -90,7 +99,7 @@ also fails its health gate rather than serving traffic.
 | **Drop to unit coverage** | Loses toast rendering, live-region semantics, focus order, `elementFromPoint` occlusion checks and every overflow assertion. The 320px overflow this work found would not have been detectable. Cheapest to maintain, and the least honest. |
 | **A separate component-test app** (Storybook, or a second Next app) | Keeps the production build clean, and is the right answer if test routes ever multiply. Costs a second build target, a second dependency set and a second CI job, for one page. Worth revisiting if a third fixture mount is ever needed. |
 | **Make `/admin/**` reachable in fixture mode** | Requires an administrator bypass in the admin layout, the admin pages and the admin APIs. Strictly worse: it puts the bypass on the surface that actually guards customer data. |
-| **Keep the gated fixture route** (chosen) | One page, one gate, two proofs, no change to any admin API. |
+| **Keep the gated fixture routes** (chosen) | Two pages, one gate, two proofs, no change to any admin API or model dispatch path. |
 
 If a third fixture mount is ever proposed, take the component-test app instead
 of adding another route.
