@@ -85,16 +85,33 @@ test("Deep Research stays on its separate persisted async-job contract", () => {
   assert.ok(asyncJobResponse > deepResearchBranch);
 });
 
-test("completed durable reattachment reports the canonical message to analytics", () => {
+test("completed durable polling and POST reattachment report the canonical message to analytics", () => {
   const chatApp = source("components/chat/ChatApp.tsx");
-  const completedGuard = chatApp.indexOf("if (completedMessage) {");
-  const callback = chatApp.indexOf("onResponseComplete?.(", completedGuard);
-  const callbackEnd = chatApp.indexOf(");", callback);
-  const callbackInput = chatApp.slice(callback, callbackEnd);
+  const pollStart = chatApp.indexOf("const pollOne = async");
+  const pollEnd = chatApp.indexOf("const loop = async", pollStart);
+  const poll = chatApp.slice(pollStart, pollEnd);
+  const postStart = chatApp.indexOf(
+    'if (response.headers.get("X-Chat-Response-Mode") === "durable-attempt")'
+  );
+  const postEnd = chatApp.indexOf("if (!response.body)", postStart);
+  const post = chatApp.slice(postStart, postEnd);
 
-  assert.ok(completedGuard > 0);
-  assert.ok(callback > completedGuard);
-  assert.match(callbackInput, /completedMessage\.content/);
-  assert.match(callbackInput, /completedMessage\.searchMetadata/);
-  assert.doesNotMatch(callbackInput, /attempt\.partialContent/);
+  assert.ok(pollStart > 0 && pollEnd > pollStart);
+  assert.match(poll, /onResponseCompleteRef\.current\?\.\(/);
+  assert.match(poll, /expectedIdentity\.analyticsPromptId/);
+  assert.match(poll, /completedMessage\.content/);
+  assert.match(poll, /completedMessage\.searchMetadata/);
+  assert.doesNotMatch(
+    poll,
+    /attempt\.partialContent\s*,\s*completedMessage\.searchMetadata/
+  );
+
+  assert.ok(postStart > 0 && postEnd > postStart);
+  assert.match(post, /onResponseComplete\?\.\(/);
+  assert.match(post, /completedMessage\.content/);
+  assert.match(post, /completedMessage\.searchMetadata/);
+  assert.doesNotMatch(
+    post,
+    /attempt\.partialContent\s*,\s*completedMessage\.searchMetadata/
+  );
 });

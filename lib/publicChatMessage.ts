@@ -72,7 +72,16 @@ type PublicChatMessageRow = {
   attachments: Array<Parameters<typeof toPublicMessageAttachment>[0]>;
 };
 
-/** Field-by-field public serialization; private columns cannot hitch a ride. */
+/**
+ * Field-by-field serialization for an owner-authorized Chat read.
+ *
+ * docs/policy/external-conversation-import-and-memory.md §13.3 keeps Memory
+ * and profile-knowledge counts out of share snapshots and conversation
+ * exports: those paths deliberately use selects which do not name either
+ * column. A caller must prove the Message belongs to the requesting owner and
+ * authorized conversation before using this helper; this serializer is a
+ * field allowlist, not an ownership check.
+ */
 export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
   id: row.id,
   role: row.role,

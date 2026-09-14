@@ -379,6 +379,7 @@ function ChatAppComponent({
       conversationId: string;
       sourceUserMessageId: string;
       requestedModelId: string;
+      analyticsPromptId: string | null;
     }>()
   );
   const attemptBackedMessageIdsRef = useRef(new Set<string>());
@@ -442,10 +443,12 @@ function ChatAppComponent({
     that effect on every render of the page.
   */
   const onTurnErrorRef = useRef(onTurnError);
+  const onResponseCompleteRef = useRef(onResponseComplete);
   useLayoutEffect(() => {
     onBeforeSendRef.current = onBeforeSend;
     panelModelIdRef.current = modelId;
     onTurnErrorRef.current = onTurnError;
+    onResponseCompleteRef.current = onResponseComplete;
   });
 
   // `runtime.isLoaded` is already per (identity, conversation, model): the
@@ -868,6 +871,9 @@ function ChatAppComponent({
                   conversationId: attempt.conversationId,
                   sourceUserMessageId: attempt.sourceUserMessageId,
                   requestedModelId: attempt.requestedModelId,
+                  // A reload can recover the answer, but it cannot recreate
+                  // the page-local comparison id from the earlier send.
+                  analyticsPromptId: null,
                 }])
             );
             const activeAttemptIds = parsedAttempts
@@ -1092,6 +1098,12 @@ function ChatAppComponent({
               message.id === assistantMessageId ? completedMessage : message
             );
           });
+          onResponseCompleteRef.current?.(
+            expectedIdentity.analyticsPromptId,
+            attempt.actualModelId ?? attempt.requestedModelId,
+            completedMessage.content,
+            completedMessage.searchMetadata
+          );
         }
         if (!isActiveChatResponseAttempt(attempt)) {
           terminal.add(assistantMessageId);
@@ -1749,6 +1761,7 @@ function ChatAppComponent({
           conversationId: attempt.conversationId,
           sourceUserMessageId: attempt.sourceUserMessageId,
           requestedModelId: attempt.requestedModelId,
+          analyticsPromptId,
         });
         durableAttemptRevisionsRef.current.set(
           assistantMessageId,

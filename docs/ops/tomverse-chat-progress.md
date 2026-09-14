@@ -276,6 +276,37 @@ provider·R2 호출을 뜻하지 않는다.
 Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인 뒤 전체 모델
 Router 품질 측정이다.
 
+### 2026-09-14 기존 기능 영속 복구 연결 Claude round 1 대응
+
+commit `9e29305ca4f443b7d5406ffe46c0ed06fc75e38a`, 변경 digest
+`sha256:d4c5e3d2218c84f81cf7e1fbb58fc1273f7cfdd4146467b4312712377f3babad`에
+대한 Claude round 1은 `approve`와 judgement nit 2건을 반환했다. round 0의 네
+지적은 모두 닫혔지만 열린 지적이 있으므로 제어 프로그램은 이를 통과로 승격하지
+않고 `awaiting_revision`을 유지했다. 원본 verdict와 exchange는 보존한다.
+
+수정본은 공용 Message serializer를 사용할 수 있는 경계를 소유자 인증이 끝난 Chat
+조회로 명시하고, share snapshot·conversation export는 Memory·profile knowledge
+count를 select하지 않는
+`docs/policy/external-conversation-import-and-memory.md` §13.3 계약을 enforcement
+위치에 복구했다. 같은 탭에서
+진행 중 attempt를 polling으로 완료할 때도 page-local prompt id를 보존해 검증된
+canonical Message의 전체 본문·검색 metadata를 완료 콜백에 정확히 한 번 전달한다.
+새로고침 뒤에는 사라진 page-local id를 만들어내지 않고 `null`로 보고하되, 답변과
+검색 실행 사실은 복원한다.
+
+이 문구를 쓰기 전 마지막 수정본은 집중 단위·서버 계약 **57/57**, 전체 server
+contract **609/609**, system Chrome 핵심 시나리오 **2/2**, typecheck·수정 파일
+lint·production build를 통과했다. 실패·취소·skip·todo는 0이며, system Chrome은
+설치된 대체 browser 관측이라 Linux canonical/golden을 대신하지 않는다. 실제
+provider·R2 호출과 새 과금은 없었다. 이 기록은 아직 마지막 Claude round 2,
+PR·Linux CI, 병합 또는 새 변경의 배포를 뜻하지 않는다.
+
+동일 기능의 마지막 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위
+55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 마지막 Claude
+round 2와 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과금 staging
+canonical Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인
+뒤 전체 모델 Router 품질 측정이다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.
