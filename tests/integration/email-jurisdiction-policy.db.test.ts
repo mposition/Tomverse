@@ -91,7 +91,14 @@ test("the seeded version carries every profile and country", async () => {
   assert.ok(korea.countries.includes("KR"));
   const eu = detail!.profiles.find((profile) => profile.profileKey === "EU")!;
   assert.ok(eu.countries.includes("DE"));
-  assert.ok(eu.countries.includes("CH"));
+  // Switzerland left that profile on 2026-09-14. It is not in the EEA, its rule
+  // is Swiss UWG art. 3(1)(o) rather than the ePrivacy Directive, and the
+  // revFADP applies with its own authority, so it carries its own row even
+  // though the values match -- which is exactly when one row would be wrong.
+  // docs/policy/email-eea-marketing-review-2026-09-14.md section 4.5.
+  assert.equal(eu.countries.includes("CH"), false);
+  const swiss = detail!.profiles.find((profile) => profile.profileKey === "CH")!;
+  assert.deepEqual(swiss.countries, ["CH"]);
 });
 
 test("seeding twice produces one version", async () => {
