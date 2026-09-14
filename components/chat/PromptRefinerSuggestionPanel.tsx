@@ -51,8 +51,17 @@ export function PromptRefinerSuggestionPanel({
         : visible?.status === "ready"
           ? `ready:${visible.suggestion.requestId}:${visible.suggestion.suggestionId}`
           : null;
+  // `visiblePromptRefinerState()` deliberately hides a bound state while the
+  // draft differs from its source. Keep the last target across that temporary
+  // invisibility: if the user edits back to the exact source bytes, the same
+  // request has merely reappeared and must not pull the caret from the
+  // textarea. Initialising from the first render also prevents a remounted
+  // ready/requesting row from stealing focus on mount.
+  const lastFocusedTargetRef = useRef(focusTarget);
 
   useEffect(() => {
+    if (!focusTarget || focusTarget === lastFocusedTargetRef.current) return;
+    lastFocusedTargetRef.current = focusTarget;
     if (focusTarget?.startsWith("requesting:")) {
       requestingRef.current?.focus({ preventScroll: true });
     } else if (focusTarget?.startsWith("failed:")) {

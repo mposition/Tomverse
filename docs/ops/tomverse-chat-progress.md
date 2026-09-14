@@ -681,3 +681,27 @@ candidate=baseline 투영을 거부하며, runtime 소스 변조 후 전체 19�
    진행하며, 과거 60회 승인을 상속하지 않는다.
 
 이 순서의 추천 자체는 신규 자동 착수·유료 실행·병합·배포 승인이 아니다.
+
+## 2026-09-14 Prompt Refiner 포커스 후속 계약
+
+Prompt Refiner 제안형 UI의 최초 exchange는 Claude 최종 round 2에서 기능 계약
+`approve`를 받았지만, 같은 source bytes로 draft를 되돌리면 기존 ready/requesting
+행이 다시 나타나 textarea caret를 빼앗는 재현 가능한 warning 1건이 남았다.
+controller는 수정 라운드 상한을 그대로 적용해
+`on_hold / revisions_exhausted`로 종결했으며 이 기록은 변경하지 않는다.
+
+후속 구현은 포커스 대상을 단순한 현재 visibility가 아니라 마지막으로 실제 focus를
+넘긴 requestId/suggestionId와 비교한다. 따라서 새 요청·새 제안의 첫 도착에는 focus를
+한 번 넘기되, mount 또는 편집 후 같은 상태가 재등장할 때는 textarea를 건드리지
+않는다. production에서 404인 E2E fixture와 Chromium 검사가 이 경계를 실제 DOM에서
+검사하며 provider·Router·billing·Message schema·제품 caller는 연결하지 않는다.
+
+이 작업은 기존 계약의 결함 수정과 검증 강화이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다.
+
+다음 권장 순서는 ① server-owned offered/kill switch와 무과금 fixture adapter로 실제
+`ChatInput` decision focus·IME·320px·200% 조합을 닫고, ② Prompt Refiner를
+PLANNER-03 adversarial report의 명시적 surface로 등록하며, ③ 내부 receipt와
+지연·실패·stale·선택률 계측을 붙이고, ④ 모델·cap·timeout·비용을 별도 승인한 작은
+shadow를 수행한 뒤, ⑤ Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을
+별도 측정하는 것이다.

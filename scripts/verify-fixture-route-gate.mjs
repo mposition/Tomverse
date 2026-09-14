@@ -4,8 +4,8 @@ import { createServer } from "node:net";
 import { resolve } from "node:path";
 
 /**
- * Proves, over real HTTP, that `/e2e/admin-console-fixture` is served only on a
- * Playwright fixture server and is a 404 everywhere else.
+ * Proves, over real HTTP, that browser-only `/e2e` fixture routes are served
+ * only on a Playwright fixture server and are 404 everywhere else.
  *
  * The route is gated on `isE2EFixtureMode()` (lib/e2eTestMode.ts), whose
  * behaviour matrix is unit-tested in `tests/e2eTestMode.test.mjs`. That proves
@@ -22,7 +22,10 @@ import { resolve } from "node:path";
  * Reuses the existing `.next` build. Run `npm run build` first.
  */
 
-const ROUTE = "/e2e/admin-console-fixture";
+const ROUTES = [
+  "/e2e/admin-console-fixture",
+  "/e2e/prompt-refiner-fixture",
+];
 const ROOT = resolve(import.meta.dirname, "..");
 
 const freePort = () =>
@@ -107,8 +110,8 @@ const stopServer = async (server) => {
   });
 };
 
-const statusOf = async (port) => {
-  const response = await fetch(`http://127.0.0.1:${port}${ROUTE}`, {
+const statusOf = async (port, route) => {
+  const response = await fetch(`http://127.0.0.1:${port}${route}`, {
     redirect: "manual",
     signal: AbortSignal.timeout(20_000),
   });
@@ -132,7 +135,9 @@ if (!existsSync(resolve(ROOT, ".next/BUILD_ID"))) {
   process.exit(1);
 }
 
-console.log(`[fixture-route-gate] Probing ${ROUTE} against one shared build.`);
+console.log(
+  `[fixture-route-gate] Probing ${ROUTES.join(", ")} against one shared build.`
+);
 
 let productionLike = null;
 let fixture = null;
@@ -143,11 +148,13 @@ try {
     E2E_AUTH_BYPASS: "",
     E2E_DISABLE_DATABASE: "",
   }));
-  check(
-    "production-like origin, no flags",
-    await statusOf(productionLike.port),
-    404
-  );
+  for (const route of ROUTES) {
+    check(
+      `production-like origin, no flags: ${route}`,
+      await statusOf(productionLike.port, route),
+      404
+    );
+  }
 
   // The flags alone must not open it: a stray or leaked variable on a real
   // deployment still has to fail closed.
@@ -157,11 +164,13 @@ try {
     E2E_AUTH_BYPASS: "true",
     E2E_DISABLE_DATABASE: "true",
   }));
-  check(
-    "production-like origin, both flags set",
-    await statusOf(productionLike.port),
-    404
-  );
+  for (const route of ROUTES) {
+    check(
+      `production-like origin, both flags set: ${route}`,
+      await statusOf(productionLike.port, route),
+      404
+    );
+  }
   await stopServer(productionLike);
   productionLike = null;
 
@@ -172,7 +181,13 @@ try {
     E2E_AUTH_BYPASS: "true",
     E2E_DISABLE_DATABASE: "true",
   }));
-  check("loopback origin, both flags set", await statusOf(fixture.port), 200);
+  for (const route of ROUTES) {
+    check(
+      `loopback origin, both flags set: ${route}`,
+      await statusOf(fixture.port, route),
+      200
+    );
+  }
 } finally {
   await stopServer(productionLike);
   await stopServer(fixture);
@@ -184,4 +199,6 @@ if (failures.length > 0) {
   );
   process.exit(1);
 }
-console.log("\nFixture route gate check passed (3 probes).");
+console.log(
+  `\nFixture route gate check passed (${ROUTES.length * 3} route probes).`
+);
