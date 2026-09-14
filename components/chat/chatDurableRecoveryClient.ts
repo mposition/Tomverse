@@ -395,7 +395,8 @@ const parseStoredWebSearchExecution = (
     typeof value.supported !== "boolean" ||
     typeof value.executed !== "boolean" ||
     typeof value.provider !== "string" ||
-    !Array.isArray(value.citations)
+    !Array.isArray(value.citations) ||
+    value.citations.some((citation) => !isRecord(citation))
   ) {
     return { ok: false };
   }

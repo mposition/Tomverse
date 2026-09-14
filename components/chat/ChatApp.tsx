@@ -1055,11 +1055,6 @@ function ChatAppComponent({
           makeTerminalRecovery(assistantMessageId, "CHAT_ATTEMPT_POLL_INVALID");
           return;
         }
-        transientFailures.delete(assistantMessageId);
-        nextPollAt.set(
-          assistantMessageId,
-          Date.now() + DURABLE_ATTEMPT_POLL_INTERVAL_MS
-        );
         const priorRevision =
           durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
         const completedMessage = attempt.status === "completed"
@@ -1069,6 +1064,11 @@ function ChatAppComponent({
           scheduleTransientRetry(assistantMessageId);
           return;
         }
+        transientFailures.delete(assistantMessageId);
+        nextPollAt.set(
+          assistantMessageId,
+          Date.now() + DURABLE_ATTEMPT_POLL_INTERVAL_MS
+        );
         if (attempt.checkpointRevision > priorRevision) {
           durableAttemptRevisionsRef.current.set(
             assistantMessageId,
@@ -1781,11 +1781,12 @@ function ChatAppComponent({
               : [...current, assistantMessageId]
           );
         }
-        if (attempt.status === "completed") {
+        if (completedMessage) {
           onResponseComplete?.(
             analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
-            attempt.partialContent
+            completedMessage.content,
+            completedMessage.searchMetadata
           );
         }
         return;

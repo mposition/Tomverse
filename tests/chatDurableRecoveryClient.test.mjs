@@ -502,6 +502,16 @@ test("completed recovery rejects an unbound or malformed canonical message", () 
     { ...valid, memoryUsedCount: 0 },
     { ...valid, knowledgeChunkCount: -1 },
     { ...valid, searchMetadata: { citations: [] } },
+    {
+      ...valid,
+      searchMetadata: {
+        requested: true,
+        supported: true,
+        executed: true,
+        provider: "openai",
+        citations: [null],
+      },
+    },
     { ...valid, attachments: [] },
     { ...valid, artifacts: [{ id: "broken" }] },
   ]) {

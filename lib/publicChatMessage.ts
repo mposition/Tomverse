@@ -84,6 +84,10 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
   createdAt: row.createdAt,
   ...(row.attachments.length
     ? {
+        // docs/policy/user-attachment-persistence.md §4: the card keys on
+        // `id`, while the next request names that same public row through
+        // `attachmentId`. Repeating the value here keeps that identity fact
+        // at the server boundary instead of teaching the client DB layout.
         attachments: row.attachments.map((attachment) => ({
           ...toPublicMessageAttachment(attachment),
           attachmentId: attachment.id,
@@ -105,6 +109,10 @@ export const toPublicChatMessage = (row: PublicChatMessageRow) => ({
         })),
       }
     : {}),
+  // docs/policy/external-conversation-import-and-memory.md §13.4 and §14.3:
+  // null means context injection was unavailable and zero means retrieval
+  // selected nothing. Neither is a disclosure the UI may show, so omit the
+  // fields at the serializer rather than asking every renderer to hide them.
   ...(typeof row.memoryUsedCount === "number" && row.memoryUsedCount > 0
     ? { memoryUsedCount: row.memoryUsedCount }
     : {}),

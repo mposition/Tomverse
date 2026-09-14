@@ -84,3 +84,17 @@ test("Deep Research stays on its separate persisted async-job contract", () => {
   assert.ok(deepResearchBranch > durableDecisionEnd);
   assert.ok(asyncJobResponse > deepResearchBranch);
 });
+
+test("completed durable reattachment reports the canonical message to analytics", () => {
+  const chatApp = source("components/chat/ChatApp.tsx");
+  const completedGuard = chatApp.indexOf("if (completedMessage) {");
+  const callback = chatApp.indexOf("onResponseComplete?.(", completedGuard);
+  const callbackEnd = chatApp.indexOf(");", callback);
+  const callbackInput = chatApp.slice(callback, callbackEnd);
+
+  assert.ok(completedGuard > 0);
+  assert.ok(callback > completedGuard);
+  assert.match(callbackInput, /completedMessage\.content/);
+  assert.match(callbackInput, /completedMessage\.searchMetadata/);
+  assert.doesNotMatch(callbackInput, /attempt\.partialContent/);
+});

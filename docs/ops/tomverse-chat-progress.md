@@ -248,6 +248,34 @@ benchmark 실패 1건에서 수동 중단했으며 이를 이번 기능 실패�
 원문 보존·주입 방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router
 품질 측정이다.
 
+### 2026-09-14 기존 기능 영속 복구 연결 Claude round 0 대응
+
+commit `3dce702c855bda776336ddb523859b97f88b5e08`, 변경 digest
+`sha256:3834f50363476b45c8b674bdb52ce04e1854bafa86e33a789be0532a8f29fb50`에
+대한 Claude 읽기 전용 round 0은 `approve`와 finding 4건을 반환했다. 제어
+프로그램은 증거·판단 지적을 모두 `fix_requested`로 기록해
+`awaiting_revision` 상태이며, 원본 verdict와 exchange 기록은 그대로 보존한다.
+
+수정본은 malformed 완료 Message가 반복될 때마다 transient backoff를 초기화하던
+순서를 고쳐 bounded exponential retry를 유지한다. 검색 citation 원소는 object만
+허용해 `null` 같은 값이 sanitizer에서 예외를 일으키지 않게 했다. 완료 POST 재연결의
+분석 콜백은 checkpoint 일부 본문 대신 검증된 canonical Message의 전체 본문과 검색
+metadata를 사용한다. attachment 공개 id 중복과 양수인 Memory·knowledge count만
+노출하는 기존 정책 근거도 공용 serializer에 남겼다.
+
+이 문구를 쓰기 전 수정본의 집중 관측은 client·서버 순서·attempt route·durable POST
+liveness **57/57**, system Chrome의 완료 metadata 복구와 malformed polling
+backoff **2/2**, typecheck·수정 파일 lint·production build 통과다. build에는 로컬
+NextAuth secret 부재 로그만 있었고 종료 코드는 0이었다. 이 기록은 아직 Claude
+round 1 승인, Linux 통합 CI, PR 병합, staging·production 배포 또는 실제
+provider·R2 호출을 뜻하지 않는다.
+
+동일 기능의 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 새 source의 Claude round 1과
+검토 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과금 staging canonical
+Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인 뒤 전체 모델
+Router 품질 측정이다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.

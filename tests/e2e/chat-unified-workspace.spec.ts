@@ -1817,6 +1817,58 @@ test.describe("Chat unified workspace", { tag: "@ui-risk" }, () => {
     expect(await persistentChatPostCount(page)).toBe(0);
   });
 
+  test("malformed completed metadata keeps the bounded exponential polling backoff", async ({ page }) => {
+    const state = await openChat(page);
+    const active = {
+      assistantMessageId: "durable-malformed-metadata",
+      conversationId: CONVERSATION,
+      sourceUserMessageId: "seed-u",
+      requestedModelId: MODEL_A,
+      actualModelId: MODEL_A,
+      provider: "openai",
+      status: "streaming",
+      partialContent: "A committed prefix remains visible.",
+      checkpointRevision: 1,
+      finishReason: null,
+      failureCode: null,
+      terminalAt: null,
+      createdAt: "2026-09-13T00:00:00.000Z",
+      updatedAt: "2026-09-13T00:00:01.000Z",
+    };
+    state.setResponseAttempts([active]);
+    await page.reload();
+    await expect(message(page, "committed prefix")).toBeVisible();
+    await expect.poll(state.attemptReadCount).toBeGreaterThan(0);
+
+    const beforeMalformed = state.attemptReadCount();
+    state.setResponseAttempts([{
+      ...active,
+      status: "completed",
+      checkpointRevision: 2,
+      finishReason: "stop",
+      terminalAt: "2026-09-13T00:00:02.000Z",
+      updatedAt: "2026-09-13T00:00:02.000Z",
+      canonicalMessage: {
+        id: "another-assistant-message",
+        role: "assistant",
+        content: "This malformed replacement must not be accepted.",
+        status: "normal",
+        modelId: MODEL_A,
+        pendingJobId: null,
+        searchMetadata: null,
+        createdAt: "2026-09-13T00:00:00.000Z",
+      },
+    }]);
+    await expect.poll(state.attemptReadCount).toBeGreaterThan(beforeMalformed);
+    const afterFirstMalformed = state.attemptReadCount();
+    await page.waitForTimeout(6_500);
+
+    expect(state.attemptReadCount() - afterFirstMalformed).toBeLessThanOrEqual(3);
+    await expect(message(page, "committed prefix")).toBeVisible();
+    await expect(message(page, "malformed replacement")).toHaveCount(0);
+    expect(await persistentChatPostCount(page)).toBe(0);
+  });
+
   test("reload does not render an empty pre-dispatch request refusal as an assistant message", async ({ page }) => {
     const state = await openChat(page);
     state.setResponseAttempts([{
