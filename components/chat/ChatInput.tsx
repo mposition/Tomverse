@@ -150,6 +150,13 @@ import { useGuestVerification } from "@/components/chat/GuestVerificationProvide
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { useBodyScrollLock } from "@/components/useBodyScrollLock";
+import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
+import {
+  resolvePromptRefinerDecision,
+  type BoundPromptRefinerSuggestion,
+  type PromptRefinerResolution,
+  type PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
 
 /**
  * A stable empty list for the image-intent classifier.
@@ -646,6 +653,16 @@ type ChatInputProps = {
   selectionModePending?: boolean;
   onSelectionModeChange?: (next: boolean) => void;
   /**
+   * Pre-send Prompt Refiner suggestion UI. `offered` is one server-owned
+   * decision; false leaves no disabled teaser. The caller owns the request and
+   * its state so it can bind a response to the exact draft snapshot.
+   */
+  promptRefinerOffered?: boolean;
+  promptRefinerState?: PromptRefinerUiState;
+  onPromptRefinerRequest?: (sourcePrompt: string) => void;
+  /** Called before an accepted proposal changes the controlled textarea. */
+  onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
+  /**
    * The assistant this conversation runs under (§14), or null when it runs
    * under none. Undefined when the control does not apply at all — a guest,
    * or an account with the feature switched off.
@@ -864,6 +881,10 @@ export function ChatInput({
   selectionMode = "manual",
   selectionModePending = false,
   onSelectionModeChange,
+  promptRefinerOffered = false,
+  promptRefinerState,
+  onPromptRefinerRequest,
+  onPromptRefinerDecision,
   assistantProfile,
   assistantProfileRemovedAt,
   assistantProfileOptions = [],
@@ -1293,6 +1314,27 @@ export function ChatInput({
     isUsageLimitReached ||
     (isSending && !allowEditingWhileSending);
   const isDraftMutationDisabled = isDisabled || draftLocked;
+
+  const handlePromptRefinerDecision = useCallback(
+    (
+      suggestion: BoundPromptRefinerSuggestion,
+      decision: "accepted" | "kept_original"
+    ) => {
+      const resolution = resolvePromptRefinerDecision({
+        suggestion,
+        currentPrompt: value,
+        decision,
+      });
+      // The owner records the original/refined split before a controlled input
+      // update can make the ready state stale and remove it from the screen.
+      onPromptRefinerDecision?.(resolution);
+      if (decision === "accepted") {
+        onChange(resolution.displayPrompt);
+        requestAnimationFrame(() => textareaRef.current?.focus());
+      }
+    },
+    [onChange, onPromptRefinerDecision, value]
+  );
 
   /*
     Voice input (docs/policy/voice-input.md §8.3).
@@ -3497,6 +3539,25 @@ export function ChatInput({
             </button>
           </div>
         )}
+        {promptRefinerOffered &&
+        promptRefinerState &&
+        onPromptRefinerRequest &&
+        onPromptRefinerDecision ? (
+          <PromptRefinerSuggestionPanel
+            offered
+            language={lang}
+            currentPrompt={value}
+            state={promptRefinerState}
+            disabled={isDraftMutationDisabled || isComposingDraft}
+            onRequest={onPromptRefinerRequest}
+            onUseSuggestion={(suggestion) =>
+              handlePromptRefinerDecision(suggestion, "accepted")
+            }
+            onKeepOriginal={(suggestion) =>
+              handlePromptRefinerDecision(suggestion, "kept_original")
+            }
+          />
+        ) : null}
         {/*
           Voice input's status gets a row of its own above the textarea, for
           the same reason the tool chips do: it grows (an elapsed timer, a

@@ -1273,3 +1273,34 @@ Non-negotiable requirements:
 - Auto never appears as a row in the model catalogue: it has no context window, price or provider, and the credit estimate would have nothing to show for it.
 - A change that violates this contract is a release blocker.
 <!-- END:auto-model-selection-invariant -->
+
+<!-- BEGIN:prompt-refiner-suggestion-invariant -->
+## Prompt Refiner suggestion invariant
+
+Before changing the Prompt Refiner surface or request boundary in
+`ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
+`lib/promptRefinerSuggestion.ts`, or `lib/promptRefinerModelPrompt.ts`, read:
+
+- `docs/ui-contracts/prompt-refiner-suggestion.md`
+
+Non-negotiable requirements:
+
+- A suggestion is shown before send and requires an explicit use-or-keep
+  decision. It never sends the turn by itself.
+- The durable user Message keeps the user's original bytes. Only an accepted
+  suggestion may become the Router/provider execution prompt.
+- One request is bound to one exact draft snapshot and request id. Editing the
+  draft makes a late response stale; it never overwrites newer user work.
+- The Refiner receives only the current user-turn text as untrusted quoted
+  data. It receives no history, attachment content, Memory, profile knowledge,
+  tool result, Router candidates, provider identity or model identity.
+- Refiner provider/model attribution belongs to an internal receipt and never
+  replaces the answering-model badge.
+- No provider call, billing, automatic offer, Router coupling or rollout is
+  implied by the composer seam. Each requires its own approved server-owned
+  gate and evidence.
+
+Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
+`tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
+contract tests passing when the surface becomes reachable by a product caller.
+<!-- END:prompt-refiner-suggestion-invariant -->

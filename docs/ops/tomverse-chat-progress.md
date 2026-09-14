@@ -359,6 +359,51 @@ Claude `approve`, finding 0건, controller `passed`로 끝났다. 각 package는
 canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의 원문 보존·주입
 방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router 품질 측정이다.
 
+### 2026-09-14 PR #1410 배포 확인과 Prompt Refiner 제안형 계약 회차
+
+PR #1410은 merge commit `480a3305dc5da4835c15a46625066ba243af13b9`로
+병합됐고, Railway staging deployment
+`f4cccb28-d5cb-4603-a84f-5a6b16752789`가 같은 commit에서 `SUCCESS`임을
+확인했다. predeploy는 migration 104개·pending 0으로 끝났고 Railway 직접
+도메인의 `/api/health`는 200과 `{"ok":true}`를 반환했다. custom staging
+도메인의 302는 Cloudflare Access 경계다.
+
+완료 attempt와 canonical assistant Message의 exact id·conversation·owner·model·
+content 결속을 staging DB에서 읽기 전용으로 집계했으나 완료 attempt가 **0건**이었다.
+따라서 불일치는 0건이지만 실제 readback 성공 표본도 0건이며, 이를 staging 기능
+통과로 승격하지 않는다. 인증을 우회하거나 provider 호출로 표본을 만들지 않았고
+검증용 임시 파일은 실행 뒤 삭제했다.
+
+그 다음 C19의 첫 구현 단위로
+[Prompt Refiner 제안형 UI 계약](../ui-contracts/prompt-refiner-suggestion.md)을
+추가했다. 현재 사용자 턴 텍스트만 받는 strict request, 응답 requestId 결속,
+draft exact snapshot이 달라지면 stale 폐기, 채택 후에도 사용자 Message에는 원문을
+남기고 Router/provider 실행 입력만 제안문으로 분리하는 resolution, 7개 언어의
+채택·원문 유지 UI를 구현했다. Refiner provider/model identity는 브라우저와 답변
+badge에 싣지 않고 내부 receipt 책임으로 남긴다. system instruction은 원문을
+비신뢰 JSON 자료로 감싸며 history·첨부·Memory·profile·도구를 입력으로 받을 수
+없다.
+
+이 회차는 실제 caller가 `promptRefinerOffered=true`를 넘기지 않으므로 UI가 사용자에게
+노출되지 않는다. provider 호출·과금·자동 요청·Router 입력 변경·Message schema·
+flag 활성화는 하지 않았다. 따라서 C19 기반은 전진했지만 제품 사용 가능 단계는
+아니며 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를
+유지한다. C19 기반 코드의 완성도는 높아졌지만 실제 caller·server-owned gate·
+provider 관측이 모두 없으므로 C19–C20의 제품 준비도 추정은 약 25%로 유지한다.
+이는 source 구현 후 잠정 계획 판단이며 독립 검토·CI·병합·배포를 미리 주장하지
+않는다.
+
+이 회차를 마치는 권장 순서는 다음과 같다.
+
+1. 신규 core·UI·composer seam과 문서의 전체 로컬 gate를 통과시킨다.
+2. source를 동결하고 Claude 읽기 전용 독립 검토로 원문 보존·주입 방어·stale·
+   개인정보·모바일 경계를 확인한다.
+3. 승인된 source만 PR과 Linux CI로 통합한다.
+4. 다음 회차에서 server-owned offered/kill switch와 무과금 fixture adapter를
+   연결해 실제 composer 상태 전이를 검증한다.
+5. 그 뒤 Refiner 모델·cap·timeout·최대 비용·중단 규칙을 새 승인으로 동결하고,
+   소액 shadow/제안형 관측 뒤에만 Router 입력 결합을 검토한다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.
