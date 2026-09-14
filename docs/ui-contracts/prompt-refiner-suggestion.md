@@ -113,11 +113,11 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 
 - proposal은 textarea와 같은 행에 들어가지 않고 별도 full-width 행을 쓴다.
 - 상태는 `role=status`와 polite live region으로 읽힌다. 요청 버튼이 사라진 뒤
-  **새 requestId 또는 suggestionId가 도착한 경우에만** requesting status,
-  실패 시 retry 버튼, ready status가 스크롤을 움직이지 않고 포커스를
-  이어받는다. 이미 결속된 상태로 처음 mount됐거나 draft 편집 뒤 같은 identity가
-  다시 보이는 경우에는 textarea 포커스를 빼앗지 않는다. 결정을 마치면 textarea로
-  포커스를 돌린다.
+  **새 requesting·failed·ready 상태 identity가 도착한 경우에만** 해당 status나
+  retry 버튼이 스크롤을 움직이지 않고 포커스를 이어받는다. identity는 status와
+  requestId, ready인 경우 suggestionId까지 합친 값이다. 이미 결속된 상태로 처음
+  mount됐거나 draft 편집 뒤 같은 identity가 다시 보이는 경우에는 textarea
+  포커스를 빼앗지 않는다. 결정을 마치면 textarea로 포커스를 돌린다.
 - 채택과 원문 유지가 둘 다 명시적 버튼이며 색만으로 구분하지 않는다.
 - 모든 Refiner 버튼은 데스크톱과 모바일 모두 최소 44px 높이다. 빈 입력, 16,000자
   초과, 32KiB 초과와 composer 잠금은 화면 문구와 접근 가능한 이름으로 이유를

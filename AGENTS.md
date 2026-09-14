@@ -1303,10 +1303,10 @@ Non-negotiable requirements:
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.
 - Every Refiner action keeps a 44px touch target and states why it is disabled.
-  A genuinely new requesting, failed, or ready identity receives focus without
-  scrolling. An initially mounted bound state or the same identity reappearing
-  after a draft edit does not steal focus; a completed decision returns focus
-  to the textarea.
+  Its status is a polite live region. A genuinely new requesting, failed, or
+  ready identity receives focus without scrolling. An initially mounted bound
+  state or the same identity reappearing after a draft edit does not steal
+  focus; a completed decision returns focus to the textarea.
 - The current PLANNER-03 report does not exercise the Refiner builder. A real
   caller or provider adapter is blocked until `prompt-refiner` is registered as
   a report surface and the adversarial corpus runs through it.
