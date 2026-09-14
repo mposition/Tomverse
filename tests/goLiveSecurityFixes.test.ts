@@ -367,10 +367,11 @@ test("every E2E short-circuit is gated on a non-deployable origin, not the flag 
 
   const guardedFiles = [
     "app/(site)/(application)/layout.tsx",
-    // The Playwright-only admin mount. It is the one *route* the flags gate,
-    // so it must go through the same helper as every other short-circuit
-    // rather than reading the environment variables itself.
+    // The Playwright-only browser mounts must go through the same helper as
+    // every other short-circuit rather than reading the environment variables
+    // themselves.
     "app/(site)/(application)/e2e/admin-console-fixture/page.tsx",
+    "app/(site)/(application)/e2e/prompt-refiner-fixture/page.tsx",
     "app/api/billing/config/route.ts",
     "app/api/public/proof-metrics/route.ts",
     "app/api/models/status/route.ts",
