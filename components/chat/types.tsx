@@ -249,6 +249,16 @@ export type Conversation = {
      * snapshot. Absent on every conversation that has no imported half.
      */
     sourceProvider?: string | null;
+    /**
+     * Whether `title` was resolved for display rather than stored on the row.
+     *
+     * True for a continuation nobody has named: the title is the imported
+     * conversation's own name, or a fallback (lib/continuationDisplayTitle.ts),
+     * and neither is on `Conversation.title`. The rename dialog reads this so
+     * that confirming it unchanged saves nothing, and so keeping the displayed
+     * name is an explicit choice (lib/conversationRename.ts).
+     */
+    titleIsDerived?: boolean;
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];

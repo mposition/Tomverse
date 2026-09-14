@@ -80,6 +80,8 @@ export const ko = {
         personalLabelsHelp: "업무·리서치·개인은 현재 브라우저에 저장되는 개인 분류입니다. AI 답변 방식이나 공유 범위를 바꾸지 않습니다.",
         projectsHelp: "프로젝트는 대화를 정리하는 폴더입니다. 같은 프로젝트의 대화가 내용, 파일 또는 AI 메모리를 자동으로 공유하지는 않습니다.",
         chatTitle: "대화 제목",
+        derivedTitleHint: "이 이름은 자동으로 표시되는 이름이며 이 대화에 저장되어 있지 않습니다. 가져온 원문을 삭제하거나 잠그면 바뀔 수 있습니다.",
+        saveDisplayedTitle: "표시된 이름을 대화 이름으로 저장",
         password: "비밀번호",
         currentPlan: "현재 플랜",
         currentUsage: "현재 사용량",

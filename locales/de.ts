@@ -78,6 +78,8 @@ export const de = {
         personalLabelsHelp: "Arbeit, Recherche und Persönlich werden in diesem Browser gespeichert. Sie ändern weder das KI-Verhalten noch die Freigabe.",
         projectsHelp: "Projekte organisieren Chats wie Ordner. Inhalte, Dateien oder KI-Gedächtnis werden darin nicht automatisch geteilt.",
         chatTitle: "Chat-Titel",
+        derivedTitleHint: "Dieser Name wird automatisch angezeigt und ist nicht für diesen Chat gespeichert. Er kann sich ändern, wenn das importierte Original gelöscht oder gesperrt wird.",
+        saveDisplayedTitle: "Angezeigten Namen für diesen Chat speichern",
         password: "Passwort",
         currentPlan: "Aktueller Tarif",
         currentUsage: "Aktuelle Nutzung",

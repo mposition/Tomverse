@@ -95,6 +95,8 @@ export const zh = {
         personalLabelsHelp: "工作、研究和个人标签只保存在当前浏览器中，不会改变 AI 行为或分享范围。",
         projectsHelp: "项目是整理对话的文件夹。同一项目中的对话不会自动共享内容、文件或 AI 记忆。",
         chatTitle: "对话标题",
+        derivedTitleHint: "此名称为自动显示，尚未保存到此对话。删除或锁定导入的原始对话后可能会改变。",
+        saveDisplayedTitle: "将显示的名称保存为对话名称",
         password: "密码",
         currentPlan: "当前方案",
         currentUsage: "当前用量",

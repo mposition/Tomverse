@@ -76,6 +76,8 @@ export const en = {
         personalLabelsHelp: "Work, Research, and Personal are private browser labels. They do not change AI behavior or sharing.",
         projectsHelp: "Projects are folders for organizing chats. Chats in a project do not automatically share content, files, or AI memory.",
         chatTitle: "Chat title",
+        derivedTitleHint: "This name is shown automatically and isn't saved to this chat. It can change if the imported original is deleted or locked.",
+        saveDisplayedTitle: "Save the shown name for this chat",
         password: "Password",
         currentPlan: "Current plan",
         currentUsage: "Current usage",

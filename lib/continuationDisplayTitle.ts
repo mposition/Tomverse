@@ -81,9 +81,25 @@ export function continuationDisplayTitle({
     /** A translated placeholder, for a row with neither a name nor a source. */
     fallback: string;
 }): string {
-    if (!isContinuation || storedTitle !== LEGACY_CONTINUATION_TITLE) {
+    if (!isDerivedContinuationTitle({ storedTitle, isContinuation })) {
         return storedTitle;
     }
     const source = sourceTitle?.trim();
     return source ? source : fallback;
+}
+
+/**
+ * Whether the title shown for this row is resolved rather than stored -- a
+ * continuation still carrying the writer's placeholder. The one rule
+ * `continuationDisplayTitle()` substitutes by, exposed so a surface that has
+ * to know (the rename dialog) cannot restate it differently.
+ */
+export function isDerivedContinuationTitle({
+    storedTitle,
+    isContinuation,
+}: {
+    storedTitle: string;
+    isContinuation: boolean;
+}): boolean {
+    return isContinuation && storedTitle === LEGACY_CONTINUATION_TITLE;
 }
