@@ -1,7 +1,15 @@
 import "server-only";
 
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
+import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
+import {
+    SOURCE_TITLE_PRESERVATION_STALE,
+    judgeTitlePreservation,
+    summarizeTitleImpact,
+    type TitleImpact,
+    type TitlePreservationTarget,
+} from "@/lib/continuationTitlePreservation";
 import {
     ConversationLockError,
     hasResourceUnlockGrant,
@@ -834,16 +842,112 @@ async function lockImportSnapshotsForDeletion(
     await tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE "importId" = ${importId} ORDER BY id FOR UPDATE`;
 }
 
+/**
+ * The continuations of these snapshots, as the title-preservation rules read
+ * them (lib/continuationTitlePreservation.ts). Owner-scoped in the query.
+ */
+async function loadTitlePreservationTargets(
+    client: Prisma.TransactionClient | typeof prisma,
+    userId: string,
+    externalConversationIds: readonly string[]
+): Promise<TitlePreservationTarget[]> {
+    if (externalConversationIds.length === 0) return [];
+    const bridges = await client.conversationContinuationBridge.findMany({
+        where: {
+            userId,
+            externalConversationId: { in: [...externalConversationIds] },
+        },
+        select: {
+            conversationId: true,
+            conversation: { select: { title: true, password: true } },
+            externalConversation: { select: { title: true, password: true } },
+        },
+    });
+    return bridges.map((bridge) => ({
+        conversationId: bridge.conversationId,
+        conversationTitle: bridge.conversation.title,
+        conversationLocked: bridge.conversation.password !== null,
+        sourceTitle: bridge.externalConversation?.title ?? null,
+        sourceLocked: bridge.externalConversation?.password != null,
+    }));
+}
+
+/**
+ * Keeps the names the owner chose to keep, inside a source deletion (D3).
+ *
+ * Called after the deletion's own locks (import, then snapshots), and before
+ * any other write. Locks the requested conversations next, by id -- the last
+ * step of the order `lockSnapshotForDeletion()` documents -- then judges every
+ * one before writing any, so a refusal leaves nothing written. The UPDATE's
+ * `title` condition is a second guard: the row is locked and was judged
+ * unnamed, so a miss means something is wrong and the deletion rolls back.
+ */
+async function preserveContinuationTitles(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    externalConversationIds: readonly string[],
+    requestedConversationIds: readonly string[]
+): Promise<number> {
+    if (requestedConversationIds.length === 0) return 0;
+    const ids = [...new Set(requestedConversationIds)].sort();
+    await tx.$queryRaw`SELECT id FROM "Conversation" WHERE "userId" = ${userId} AND id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
+    const targets = await loadTitlePreservationTargets(tx, userId, externalConversationIds);
+    const judgement = judgeTitlePreservation(ids, targets);
+    if (judgement.kind === "refused") {
+        throw new ApiSecurityError(
+            409,
+            SOURCE_TITLE_PRESERVATION_STALE,
+            "Something changed since the deletion was confirmed. Review it again."
+        );
+    }
+    for (const write of judgement.writes) {
+        const updated = await tx.conversation.updateMany({
+            where: {
+                id: write.conversationId,
+                userId,
+                title: LEGACY_CONTINUATION_TITLE,
+            },
+            data: { title: write.title },
+        });
+        if (updated.count !== 1) {
+            throw new Error("Continuation title preservation lost its row.");
+        }
+    }
+    return judgement.writes.length;
+}
+
+/**
+ * What deleting this source would do to its continuations' shown names, for
+ * the confirmation. Counts and the owner's own conversation ids -- no title.
+ */
+export async function previewContinuationTitleImpact(
+    userId: string,
+    scope: { importId: string } | { conversationId: string }
+): Promise<TitleImpact> {
+    const externalConversationIds = await conversationIdsForScope(prisma, userId, scope);
+    return summarizeTitleImpact(
+        await loadTitlePreservationTargets(prisma, userId, externalConversationIds)
+    );
+}
+
 export async function deleteExternalConversationSnapshot(
     userId: string,
     conversationId: string,
     dispositions: {
         derived?: SourceDeletionDisposition;
         userTouched?: SourceDeletionDisposition;
-    } = {}
+    } = {},
+    /** Continuations whose shown name the owner chose to keep (D3). */
+    preserveTitleConversationIds: readonly string[] = []
 ) {
     return prisma.$transaction(async (tx) => {
         const row = await lockSnapshotForDeletion(tx, userId, conversationId);
+        const titlesPreserved = await preserveContinuationTitles(
+            tx,
+            userId,
+            [row.id],
+            preserveTitleConversationIds
+        );
         const truncatedMessages = await tx.externalMessage.count({
             where: { externalConversationId: row.id, truncated: true },
         });
@@ -873,7 +977,11 @@ export async function deleteExternalConversationSnapshot(
                 truncationCount: { decrement: truncatedMessages },
             },
         });
-        return { outcome: "deleted" as const, memory: memoryImpact };
+        return {
+            outcome: "deleted" as const,
+            memory: memoryImpact,
+            titlesPreserved,
+        };
     });
 }
 
@@ -1577,7 +1685,9 @@ export async function deleteExternalImport(
     dispositions: {
         derived?: SourceDeletionDisposition;
         userTouched?: SourceDeletionDisposition;
-    } = {}
+    } = {},
+    /** Continuations whose shown name the owner chose to keep (D3). */
+    preserveTitleConversationIds: readonly string[] = []
 ) {
     return prisma.$transaction(async (tx) => {
         const row = await loadOwnedImport(tx, userId, importId, {
@@ -1600,7 +1710,11 @@ export async function deleteExternalImport(
             // Reported as zeros rather than omitted: "cancelling touched no
             // memory" is a fact the caller should be able to state, and a
             // uniform shape spares every caller a narrowing branch.
-            return { outcome: "cancelled" as const, memory: NO_MEMORY_IMPACT };
+            return {
+                outcome: "cancelled" as const,
+                memory: NO_MEMORY_IMPACT,
+                titlesPreserved: 0,
+            };
         }
         // Completed (or failed/cancelled) imports delete whole: the FK
         // cascade removes every conversation and message (§13.1). The
@@ -1617,6 +1731,12 @@ export async function deleteExternalImport(
             userId,
             { importId: row.id }
         );
+        const titlesPreserved = await preserveContinuationTitles(
+            tx,
+            userId,
+            doomedConversationIds,
+            preserveTitleConversationIds
+        );
         const memoryImpact = await applySourceDeletionToMemories(
             tx,
             userId,
@@ -1628,7 +1748,11 @@ export async function deleteExternalImport(
         // user continued in Tomverse.
         await markContinuationSourcesDeleted(tx, userId, doomedConversationIds);
         await tx.externalImport.delete({ where: { id: row.id } });
-        return { outcome: "deleted" as const, memory: memoryImpact };
+        return {
+            outcome: "deleted" as const,
+            memory: memoryImpact,
+            titlesPreserved,
+        };
     });
 }
 

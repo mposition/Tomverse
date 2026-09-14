@@ -3698,8 +3698,24 @@ export function ChatPageClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: newTitle }),
         });
+        if (!response.ok) {
+          // A reserved name is the owner's to change, not a transient failure,
+          // so it gets its own sentence (lib/continuationTitlePreservation.ts).
+          const code = await response
+            .json()
+            .then((body: { code?: unknown }) => body?.code)
+            .catch(() => undefined);
+          dispatchAppToast(
+            t(
+              code === "CONVERSATION_TITLE_RESERVED"
+                ? "chat.chatRenameReserved"
+                : "chat.chatRenameFailed"
+            ),
+            "error"
+          );
+          return;
+        }
         await discardResponseBody(response);
-        if (!response.ok) throw new Error(`Rename failed: ${response.status}`);
         fetchConversations();
       } catch (error) {
         console.error("Failed to rename conversation:", error);
