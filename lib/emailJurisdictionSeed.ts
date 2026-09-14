@@ -32,6 +32,7 @@
 import { RENDERABLE_FOOTER_BLOCKS } from "@/lib/emailFooterRenderer";
 import {
   JURISDICTION_PROFILES,
+  MARKETING_SUPPORTED_COUNTRY_CODES,
   profileForCountry,
   type JurisdictionProfileKey,
 } from "@/lib/emailJurisdictionCore";
@@ -278,28 +279,13 @@ export const jurisdictionCountryMapSeed = (): Array<{
   profileKey: JurisdictionProfileKey;
 }> => {
   const rows: Array<{ countryCode: string; profileKey: JurisdictionProfileKey }> = [];
-  for (const country of MAPPED_COUNTRIES) {
+  for (const country of MARKETING_SUPPORTED_COUNTRY_CODES) {
     const profileKey = profileForCountry(country);
     if (profileKey === "ZZ") continue;
     rows.push({ countryCode: country, profileKey });
   }
   return rows;
 };
-
-/**
- * Every country the seed asks `profileForCountry` about.
- *
- * The direct six plus the thirty-one the EU profile covers. Listed rather than
- * generated from an ISO table because a country with no profile must not appear
- * as a row saying `ZZ` -- that would read as a decision about that country
- * rather than the absence of one.
- */
-const MAPPED_COUNTRIES = [
-  "KR", "US", "CA", "AU", "GB", "SG",
-  "AT", "BE", "BG", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR",
-  "GR", "HR", "HU", "IE", "IS", "IT", "LI", "LT", "LU", "LV", "MT", "NL",
-  "NO", "PL", "PT", "RO", "SE", "SI", "SK",
-];
 
 /**
  * What is wrong with the seed, in the same terms the database would use.

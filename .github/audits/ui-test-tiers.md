@@ -42,9 +42,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-14 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **56개 파일, 824 test**를
-선택합니다(두 project 합계 1,648). 2026-08-26의 51개 파일, 1,416 test
+현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
+desktop-chromium과 mobile-chromium 각 project에서 **57개 파일, 825 test**를
+선택합니다(두 project 합계 1,650). 2026-08-26의 51개 파일, 1,416 test
 (project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
@@ -57,6 +57,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **56개 파일, 824 test**
 | `chat-unified-workspace.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
+| `email-notification-settings.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `generated-artifact-card.spec.ts` |
@@ -132,6 +133,14 @@ composer의 focus는 실제 DOM에서만 검증할 수 있고, 같은 요청이 
 못한 낡은 기록이었고, 이번에는 전체 tier를 다시 `--list`해 현재 824를 확인했습니다.
 이는 provider 호출이나 제품 기능 활성화가 아닌, loopback에서만 열리는 fixture의
 release-blocking 회귀 검사입니다.
+
+`email-notification-settings.spec.ts`가 2026-09-15에 합류해 57개입니다.
+마케팅 동의를 켜는 강조 CTA도 세부 토글과 같은 국가 확인을 거치고, 확인한
+국가와 동의가 한 요청에 함께 저장되며, 그 전에는 쓰기 요청이 발생하지 않는지
+확인합니다. 이 경계가 깨지면 관할 규칙을 정하지 않은 채 마케팅 동의가
+기록되므로 PR에서 막습니다. 태그된 test는 한 건이고 desktop·mobile 두
+project에서 실행됩니다. 같은 날 `CI=1 --grep=@ui-risk --list` 실측은 각
+project에서 **57개 파일, 825 test**(두 project 합계 1,650)입니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
