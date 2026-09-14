@@ -92,6 +92,7 @@ import {
   isActiveChatResponseAttempt,
   mergeChatResponseAttempts,
   messageFromChatResponseAttempt,
+  parseCompletedChatResponseMessage,
   parseMessageSaveMapping,
   parsePublicChatResponseAttempt,
   replaceAttemptBackedMessage,
@@ -378,6 +379,7 @@ function ChatAppComponent({
       conversationId: string;
       sourceUserMessageId: string;
       requestedModelId: string;
+      analyticsPromptId: string | null;
     }>()
   );
   const attemptBackedMessageIdsRef = useRef(new Set<string>());
@@ -441,10 +443,12 @@ function ChatAppComponent({
     that effect on every render of the page.
   */
   const onTurnErrorRef = useRef(onTurnError);
+  const onResponseCompleteRef = useRef(onResponseComplete);
   useLayoutEffect(() => {
     onBeforeSendRef.current = onBeforeSend;
     panelModelIdRef.current = modelId;
     onTurnErrorRef.current = onTurnError;
+    onResponseCompleteRef.current = onResponseComplete;
   });
 
   // `runtime.isLoaded` is already per (identity, conversation, model): the
@@ -867,6 +871,9 @@ function ChatAppComponent({
                   conversationId: attempt.conversationId,
                   sourceUserMessageId: attempt.sourceUserMessageId,
                   requestedModelId: attempt.requestedModelId,
+                  // A reload can recover the answer, but it cannot recreate
+                  // the page-local comparison id from the earlier send.
+                  analyticsPromptId: null,
                 }])
             );
             const activeAttemptIds = parsedAttempts
@@ -1054,13 +1061,20 @@ function ChatAppComponent({
           makeTerminalRecovery(assistantMessageId, "CHAT_ATTEMPT_POLL_INVALID");
           return;
         }
+        const priorRevision =
+          durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
+        const completedMessage = attempt.status === "completed"
+          ? parseCompletedChatResponseMessage(payload?.message, attempt)
+          : null;
+        if (attempt.status === "completed" && !completedMessage) {
+          scheduleTransientRetry(assistantMessageId);
+          return;
+        }
         transientFailures.delete(assistantMessageId);
         nextPollAt.set(
           assistantMessageId,
           Date.now() + DURABLE_ATTEMPT_POLL_INTERVAL_MS
         );
-        const priorRevision =
-          durableAttemptRevisionsRef.current.get(assistantMessageId) ?? -1;
         if (attempt.checkpointRevision > priorRevision) {
           durableAttemptRevisionsRef.current.set(
             assistantMessageId,
@@ -1073,6 +1087,22 @@ function ChatAppComponent({
               attemptBackedMessageIdsRef.current,
               t("chat.responseError")
             )
+          );
+        }
+        if (completedMessage) {
+          writeChatRuntimeMessages(key, (current) => {
+            if (!attemptBackedMessageIdsRef.current.has(assistantMessageId)) {
+              return current;
+            }
+            return current.map((message) =>
+              message.id === assistantMessageId ? completedMessage : message
+            );
+          });
+          onResponseCompleteRef.current?.(
+            expectedIdentity.analyticsPromptId,
+            attempt.actualModelId ?? attempt.requestedModelId,
+            completedMessage.content,
+            completedMessage.searchMetadata
           );
         }
         if (!isActiveChatResponseAttempt(attempt)) {
@@ -1731,18 +1761,25 @@ function ChatAppComponent({
           conversationId: attempt.conversationId,
           sourceUserMessageId: attempt.sourceUserMessageId,
           requestedModelId: attempt.requestedModelId,
+          analyticsPromptId,
         });
         durableAttemptRevisionsRef.current.set(
           assistantMessageId,
           attempt.checkpointRevision
         );
+        const completedMessage = attempt.status === "completed"
+          ? parseCompletedChatResponseMessage(payload?.message, attempt)
+          : null;
+        if (attempt.status === "completed" && !completedMessage) {
+          throw new Error(t("chat.responseBodyMissing"));
+        }
         writeChatRuntimeMessages(runKey, (current) =>
           current.map((message) =>
             message.id === assistantMessageId
-              ? messageFromChatResponseAttempt(
-                  attempt,
-                  t("chat.responseError")
-                )
+              ? completedMessage ?? messageFromChatResponseAttempt(
+                attempt,
+                t("chat.responseError")
+              )
               : message
           )
         );
@@ -1756,11 +1793,13 @@ function ChatAppComponent({
               ? current
               : [...current, assistantMessageId]
           );
-        } else if (attempt.status === "completed") {
+        }
+        if (completedMessage) {
           onResponseComplete?.(
             analyticsPromptId,
             attempt.actualModelId ?? attempt.requestedModelId,
-            attempt.partialContent
+            completedMessage.content,
+            completedMessage.searchMetadata
           );
         }
         return;

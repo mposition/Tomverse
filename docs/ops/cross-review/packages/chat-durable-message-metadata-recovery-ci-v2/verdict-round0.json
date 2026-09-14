@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v2",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default)"
+  ],
+  "startedAt": "2026-09-14T09:06:07.701Z",
+  "durationMs": 57229,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 8,
+    "cachedInputTokens": 40982,
+    "outputTokens": 4086,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.251663,
+    "raw": {
+      "input_tokens": 8,
+      "cache_creation_input_tokens": 12599,
+      "cache_read_input_tokens": 40982,
+      "output_tokens": 4086,
+      "output_tokens_details": {
+        "thinking_tokens": 2464
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 12599,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1224,
+          "cache_read_input_tokens": 14834,
+          "cache_creation_input_tokens": 2507,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2507
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-14T09:07:04.986Z",
+  "verdict": {
+    "taskId": "chat-durable-message-metadata-recovery-ci-v2",
+    "round": 0,
+    "reviewedDigest": "sha256:08821021c00ad2633db4e13d863e3a63b4b7c2a44d449ad5f6b7591b56fae820",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/memoryReleaseContracts.test.mjs:297-302",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The shape guard accepts any `as` assertion, not specifically `as const`, so the completion criterion \"object literal의 as const 선언임을 확인\" is only checked as \"object literal behind some type assertion\".",
+        "reproduction": "In lib/publicChatMessage.ts change the trailing `} as const;` to `} as Record<string, unknown>;` and run `node --conditions=react-server --import tsx --test tests/memoryReleaseContracts.test.mjs`: the test still passes, whereas asserting `ts.isTypeReferenceNode(init.type) && init.type.typeName.getText() === \"const\"` would fail it. Harmless for the disclosure property (fields are still read from the literal), so no change is required."
+      },
+      {
+        "location": "tests/memoryReleaseContracts.test.mjs:307",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "`property.name.getText(...)` returns the raw key text, so a string-literal key form of the same allowlist entry would be recorded as `\"memoryUsedCount\"` (with quotes) and fail the assertion.",
+        "reproduction": "In lib/publicChatMessage.ts write `\"memoryUsedCount\": true,` instead of `memoryUsedCount: true,` and run the test file: it fails with \"the owner's public-message allowlist must select memoryUsedCount (§13.4)\". This errs strict (false negative only) and matches current source style, so it is recorded rather than actioned."
+      }
+    ],
+    "nextAction": "Approve as-is: the v1 precision finding is closed (counts are now read only from the direct object-literal properties of PUBLIC_CHAT_MESSAGE_SELECT whose initializer is `true`), the shared-select/serializer and three-count denials on share/export-all/public-share paths are intact, the diff touches only the test file, and the test plus eslint pass."
+  }
+}

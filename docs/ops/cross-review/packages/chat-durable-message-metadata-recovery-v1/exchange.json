@@ -1,0 +1,447 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "chat-durable-message-metadata-recovery-v1",
+  "requirement": "배포된 Chat 영속 초안·응답 복구 기반 위에서, 완료된 ChatResponseAttempt의 재연결과 polling이 canonical assistant Message의 공개 표시 정보를 함께 복구하게 한다. 검색 citation, 생성 artifact, Memory 및 profile knowledge 사용 표시가 새로고침 뒤 사라지지 않아야 하며, 대화 조회와 동일한 서버 allowlist를 사용해 object key·provider 내부 상태·lease·fingerprint가 노출되지 않아야 한다. 클라이언트는 Message를 attempt의 id·모델·완료 상태에 결속하고 잘못되거나 누락된 완료 envelope를 성공으로 추정하거나 provider에 재전송하지 않는다. Deep Research는 기존 persisted async-job 계약을 유지한다. 실제 provider/R2 호출, 과금, Router·가격·quality band, flag, migration, 배포는 변경하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "완료된 durable POST reattachment와 attempt GET은 소유권이 확인된 동일 conversation의 canonical assistant Message를 반환하며, active·failed·cancelled attempt에는 Message를 붙이지 않는다. 완료 attempt와 일치하는 Message가 없으면 fail-closed한다.",
+    "대화 GET과 attempt recovery가 하나의 명시적 public Message select와 field-by-field serializer를 공유한다. Message·attachment·artifact의 object key, provider-private state, attempt fingerprint·owner·lease는 응답에 포함되지 않는다.",
+    "클라이언트 parser는 assistantMessageId, assistant role, 실제 또는 요청 modelId, finish reason에 따른 Message status와 완료 attempt를 결속한다. 검색 metadata와 URL을 검증·정제하고 artifact를 기존 공개 parser로 제한하며, 양수인 Memory·knowledge count만 허용한다.",
+    "polling과 이미 완료된 POST reattachment는 canonical Message로 임시 attempt bubble을 교체해 citation, generated artifact, Memory와 profile knowledge 표시를 복원한다. 누락·malformed 완료 Message는 terminal 성공으로 확정하지 않으며 새 provider POST를 만들지 않는다.",
+    "Deep Research는 ChatResponseAttempt 경로에 들어오지 않고 기존 persisted async-job polling·재진입·정산 계약을 유지한다. 기존 stored attachment와 일반 conversation reload 경로도 별도 저장 경로 없이 유지한다.",
+    "관련 client·server-order·attempt route·durable POST 테스트와 전체 server contract가 실패·취소·skip 없이 통과한다. typecheck, production build, 수정 파일 lint, encoding, 문서·정책 참조와 diff whitespace 검사도 통과해야 한다.",
+    "Claude는 요구사항과 diff를 먼저 읽고 테스트 기록과 작성자 설명을 그 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location, severity, basis와 재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 상한에서 남으면 on_hold다. 실제 provider 호출·과금·push·merge·deploy 권한은 이 task에 없다."
+  ],
+  "baseCommit": "ec043cf79e3a044973e5f6466483710ef4969ea2",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:3834f50363476b45c8b674bdb52ce04e1854bafa86e33a789be0532a8f29fb50",
+      "commit": "3dce702c855bda776336ddb523859b97f88b5e08",
+      "filesChanged": [
+        "app/api/chat/route.ts",
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/products/chat/attempts/[assistantMessageId]/route.ts",
+        "components/chat/ChatApp.tsx",
+        "components/chat/chatDurableRecoveryClient.ts",
+        "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.authorization.md",
+        "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.task.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/chat-durable-draft-and-attempt-recovery.md",
+        "lib/publicChatMessage.ts",
+        "tests/chatDurableRecoveryClient.test.mjs",
+        "tests/chatDurableRecoveryServerOrder.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts",
+        "tests/server-contract/chat-durable-recovery-route.test.ts",
+        "tests/server-contract/chat-route-fallback-liveness.test.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 8696.2037",
+          "durationMs": 8771
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35607
+        },
+        {
+          "rule": "npm run build",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 21920
+        },
+        {
+          "rule": "npx eslint --max-warnings=0 lib/publicChatMessage.ts app/api/chat/route.ts app/api/conversations/[conversationId]/route.ts app/api/products/chat/attempts/[assistantMessageId]/route.ts components/chat/ChatApp.tsx components/chat/chatDurableRecoveryClient.ts tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/e2e/chat-unified-workspace.spec.ts tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 5096
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 202 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 658
+        },
+        {
+          "rule": "npm run check:unconsumed-response-bodies",
+          "passed": true,
+          "detail": "\nUnconsumed response body check over 1722 source file(s): 315 fetch call site(s).\nBlocking scope: runtime in [browser, either], target api_default_no_store, plus any unparsed file in that scope.\n\nNo browser-capable call site leaves an `/api/*` body unread.",
+          "durationMs": 1404
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1202
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 781 referenced path(s) across 95 instruction document(s), and 906 path(s) named by comments across 2776 source file(s), all present.",
+          "durationMs": 1302
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4224 citation(s) against 31 policy document(s). 2585 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1420 and 219 predate this change).",
+          "durationMs": 968
+        },
+        {
+          "rule": "git diff --check ec043cf79e3a044973e5f6466483710ef4969ea2",
+          "passed": true,
+          "detail": "",
+          "durationMs": 62
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "components/chat/ChatApp.tsx:1058-1071 (pollOne)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "The malformed-completed-message retry silently defeats the exponential backoff it calls, because `transientFailures.delete(assistantMessageId)` at line 1058 runs before the new completed-message validation at 1068, so `scheduleTransientRetry` recomputes `failures = 1` on every poll and pins the delay at DURABLE_ATTEMPT_POLL_INTERVAL_MS (1s) for the full DURABLE_ATTEMPT_MAX_POLL_MS (5 min) window.",
+          "reproduction": "Stub `/api/products/chat/attempts/:id` to return `{ attempt: <status:\"completed\">, message: { id: \"other-id\" } }` on every call (the Playwright `openChat` route handler in tests/e2e/chat-unified-workspace.spec.ts is the easiest place) and count requests with `state.attemptReadCount`: ~10 GETs arrive in 10s. The identical scenario routed through the existing backoff (move the `attempt.status === \"completed\" && !completedMessage` check above line 1058, or delete the counter only after validation) yields ~5 GETs over the same window as the delay grows 1s→2s→4s→8s→15s. Compare with the 429 branch at line 1022, which is the only other caller and does not clear the counter first.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/chatDurableRecoveryClient.ts:436 (parseStoredWebSearchExecution → sanitizeWebSearchCitations)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "`citations` is checked only with `Array.isArray`, so a non-object element makes the parser throw a TypeError instead of returning null, which contradicts the function's stated \"allowlist, not a cast\" contract that every other field honours.",
+          "reproduction": "In tests/chatDurableRecoveryClient.test.mjs, add `{ ...valid, searchMetadata: { requested: true, supported: true, executed: true, provider: \"openai\", citations: [null] } }` to the malformed loop in \"completed recovery rejects an unbound or malformed canonical message\". The assertion does not fail with `null` — the test throws `TypeError: Cannot read properties of null (reading 'url')` from lib/webSearchCitations.ts:52. Filtering `value.citations` to records before sanitizing (or rejecting on a non-record entry) restores the null return.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/publicChatMessage.ts:19-48 and 108-113",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The move to the shared serializer kept the object-key rationale but dropped the policy citations that explain the two conditions it still enforces — why `memoryUsedCount`/`knowledgeChunkCount` must be absent rather than 0, and why `attachmentId` repeats the row id — leaving load-bearing conditions unexplained at their only enforcement site, against this file tree's prevailing comment density.",
+          "reproduction": "`git show ec043cf79e3a044973e5f6466483710ef4969ea2:\"app/api/conversations/[conversationId]/route.ts\"` and read lines ~256-390: the §13.4 \"`null` is a request that could not inject at all and `0` is one where retrieval chose nothing, and §13.4 forbids indicating either\" note, the docs/policy/external-conversation-import-and-memory.md §14.3 pair, and the `attachmentId` duplication note all cover conditions that survive verbatim at lib/publicChatMessage.ts:85-113 with no comment. `npm run check:policy-section-references` still passes because it only validates citations that exist, not ones that were removed.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/ChatApp.tsx:1784-1790 (durable-attempt completed reattachment)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "Now that the canonical Message is parsed on this path, `onResponseComplete` is still called with `attempt.partialContent` and without the available `completedMessage.searchMetadata`, so analytics sees a possibly truncated body and the web-search offer is not corrected for a reattached turn that did search.",
+          "reproduction": "`onResponseComplete`'s optional 4th argument is declared at components/chat/ChatApp.tsx:241-246 and consumed at app/(site)/(application)/chat/ChatPageClient.tsx:5106-5127; the streaming path supplies it, this one does not. For the content argument: lib/chatDurableAttemptStream.ts:9 caps `partialContent` at CHAT_DURABLE_PARTIAL_MAX_CHARACTERS = 100_000 via `durablePrefix`, while `completedMessage.content` is the uncapped canonical body the bubble now renders — reattach to a completed attempt over 100k characters and the two arguments disagree with what is on screen. Passing `completedMessage.content` and `completedMessage.searchMetadata` when `completedMessage` is present removes both.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: components/chat/ChatApp.tsx:1058-1071 (pollOne); open finding: components/chat/chatDurableRecoveryClient.ts:436 (parseStoredWebSearchExecution → sanitizeWebSearchCitations); open finding: lib/publicChatMessage.ts:19-48 and 108-113; open finding: components/chat/ChatApp.tsx:1784-1790 (durable-attempt completed reattachment)); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:d4c5e3d2218c84f81cf7e1fbb58fc1273f7cfdd4146467b4312712377f3babad",
+      "commit": "9e29305ca4f443b7d5406ffe46c0ed06fc75e38a",
+      "filesChanged": [
+        "app/api/chat/route.ts",
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/products/chat/attempts/[assistantMessageId]/route.ts",
+        "components/chat/ChatApp.tsx",
+        "components/chat/chatDurableRecoveryClient.ts",
+        "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.authorization.md",
+        "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.task.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/chat-durable-draft-and-attempt-recovery.md",
+        "lib/publicChatMessage.ts",
+        "tests/chatDurableRecoveryClient.test.mjs",
+        "tests/chatDurableRecoveryServerOrder.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts",
+        "tests/server-contract/chat-durable-recovery-route.test.ts",
+        "tests/server-contract/chat-route-fallback-liveness.test.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 8679.6611",
+          "durationMs": 8757
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35369
+        },
+        {
+          "rule": "npm run build",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 22537
+        },
+        {
+          "rule": "npx eslint --max-warnings=0 lib/publicChatMessage.ts app/api/chat/route.ts app/api/conversations/[conversationId]/route.ts app/api/products/chat/attempts/[assistantMessageId]/route.ts components/chat/ChatApp.tsx components/chat/chatDurableRecoveryClient.ts tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/e2e/chat-unified-workspace.spec.ts tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 5181
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 202 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 698
+        },
+        {
+          "rule": "npm run check:unconsumed-response-bodies",
+          "passed": true,
+          "detail": "\nUnconsumed response body check over 1722 source file(s): 315 fetch call site(s).\nBlocking scope: runtime in [browser, either], target api_default_no_store, plus any unparsed file in that scope.\n\nNo browser-capable call site leaves an `/api/*` body unread.",
+          "durationMs": 1440
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1195
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 781 referenced path(s) across 95 instruction document(s), and 906 path(s) named by comments across 2776 source file(s), all present.",
+          "durationMs": 1294
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4227 citation(s) against 31 policy document(s). 2588 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1420 and 219 predate this change).",
+          "durationMs": 970
+        },
+        {
+          "rule": "git diff --check ec043cf79e3a044973e5f6466483710ef4969ea2",
+          "passed": true,
+          "detail": "",
+          "durationMs": 60
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/publicChatMessage.ts:76-122 (toPublicChatMessage)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The moved serializer restored the §13.4/§14.3 absent-vs-zero rationale but dropped the sentence that bounded who may call it — that these counts are admissible only on the owner's own read, and that the share snapshot and conversation export deliberately keep selects which do not name these columns (§13.3) — which now matters more, not less, because the helper is an exported module-level function rather than an inline map in one owner-scoped route.",
+          "reproduction": "`rg -n 'memoryUsedCount|knowledgeChunkCount' app/api` returns only app/api/chat/{route,preflight/route,context/route}.ts, i.e. no share or export route selects these columns today; `git show ec043cf7:app/api/conversations/\\[conversationId\\]/route.ts | rg -n '13.3'` shows the §13.3 boundary note that existed at the old emission site, and `rg -n '13\\.3' lib/publicChatMessage.ts` returns nothing. Expected: the shared serializer's comment states the owner-read scope, so the next caller of an exported helper is told the constraint at the place it is enforced.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "components/chat/ChatApp.tsx:1086-1095 vs 1784-1791",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The completed POST reattachment now reports the canonical body and searchMetadata to `onResponseComplete`, but the polling path that replaces the same bubble with the same validated canonical Message reports nothing, so a turn recovered by polling still leaves the web-search retry offer and the response analytics uncorrected — an asymmetry this change introduced by upgrading only one of the two paths.",
+          "reproduction": "In tests/e2e/chat-unified-workspace.spec.ts, the 'terminal polling hydrates citations...' test drives a streaming→completed transition with `searchMetadata.executed: true`; instrument `onResponseComplete` (app/(site)/(application)/chat/ChatPageClient.tsx:5073) and observe it is never invoked for that turn, while the 'already-running attempt completed once' reattachment fixture in installControlledChatFetch does invoke it. Expected, if the two paths are meant to agree: polling fires the same callback with `completedMessage.content` and `completedMessage.searchMetadata` once it accepts a terminal canonical Message.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/publicChatMessage.ts:76-122 (toPublicChatMessage); open finding: components/chat/ChatApp.tsx:1086-1095 vs 1784-1791); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:2e0575a8d157ac44b3e587452a40fe06038eaef6a16867767ec77340c6c550a5",
+      "commit": "46bbc98dd0cff006c01db209fe9d3afb38ad9499",
+      "filesChanged": [
+        "app/api/chat/route.ts",
+        "app/api/conversations/[conversationId]/route.ts",
+        "app/api/products/chat/attempts/[assistantMessageId]/route.ts",
+        "components/chat/ChatApp.tsx",
+        "components/chat/chatDurableRecoveryClient.ts",
+        "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.authorization.md",
+        "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.task.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/chat-durable-draft-and-attempt-recovery.md",
+        "lib/publicChatMessage.ts",
+        "tests/chatDurableRecoveryClient.test.mjs",
+        "tests/chatDurableRecoveryServerOrder.test.mjs",
+        "tests/e2e/chat-unified-workspace.spec.ts",
+        "tests/server-contract/chat-durable-recovery-route.test.ts",
+        "tests/server-contract/chat-route-fallback-liveness.test.ts"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts && npm run test:server-contract",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 192079.959",
+          "durationMs": 201530
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 37492
+        },
+        {
+          "rule": "npm run build",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 22859
+        },
+        {
+          "rule": "npx eslint --max-warnings=0 lib/publicChatMessage.ts app/api/chat/route.ts app/api/conversations/[conversationId]/route.ts app/api/products/chat/attempts/[assistantMessageId]/route.ts components/chat/ChatApp.tsx components/chat/chatDurableRecoveryClient.ts tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/e2e/chat-unified-workspace.spec.ts tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+          "passed": true,
+          "detail": "",
+          "durationMs": 5258
+        },
+        {
+          "rule": "npm run check:api-cache-control",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 202 route(s), 5 choosing their own caching, every one of them listed.",
+          "durationMs": 730
+        },
+        {
+          "rule": "npm run check:unconsumed-response-bodies",
+          "passed": true,
+          "detail": "\nUnconsumed response body check over 1722 source file(s): 315 fetch call site(s).\nBlocking scope: runtime in [browser, either], target api_default_no_store, plus any unparsed file in that scope.\n\nNo browser-capable call site leaves an `/api/*` body unread.",
+          "durationMs": 1452
+        },
+        {
+          "rule": "npm run check:encoding",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1199
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 781 referenced path(s) across 95 instruction document(s), and 906 path(s) named by comments across 2776 source file(s), all present.",
+          "durationMs": 1281
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4229 citation(s) against 31 policy document(s). 2590 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1420 and 219 predate this change).",
+          "durationMs": 979
+        },
+        {
+          "rule": "git diff --check ec043cf79e3a044973e5f6466483710ef4969ea2",
+          "passed": true,
+          "detail": "",
+          "durationMs": 61
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Both round-1 nits are closed and I found no new actionable defect: lib/publicChatMessage.ts:75-84 restores the §13.3 caller bound (owner-authorized read only; share snapshot and export keep their own selects that omit memoryUsedCount/knowledgeChunkCount), and components/chat/ChatApp.tsx:1092-1107 now reports the validated canonical body and searchMetadata from the polling path with the preserved page-local analyticsPromptId (null after a reload, per ChatApp.tsx:874-877), matching the POST path at 1797-1804. Verified against the requirement: PUBLIC_CHAT_MESSAGE_SELECT/toPublicChatMessage reproduce the prior conversation-GET output field-for-field (same 8 scalars, same attachmentId duplication, same artifacts allowlist without objectKey, same >0-only disclosure counts), readPublicCompletedChatMessage re-asserts id+conversationId+role+modelId+conversation.userId and both routes fail closed when it returns null while active/failed/cancelled attempts carry no message; the client parser's expectedStatus mapping is sound because app/api/chat/route.ts:5510 writes Message.status from completionOutcome and 5554-5562 sets the attempt finishReason to \"length\" on exactly that same outcome, so a raw MAX_TOKENS reason cannot desync them; malformed or missing completed envelopes take scheduleTransientRetry before transientFailures.delete (bounded exponential backoff, terminating at CHAT_ATTEMPT_POLL_EXPIRED) or throw on the POST without a second dispatch; Deep Research stays out via the usageClass predicate at route.ts:2104-2110. Ready to proceed to PR and Linux CI; no provider call, push, merge or deploy was performed or authorized here."
+    }
+  ],
+  "changeDigest": "sha256:2e0575a8d157ac44b3e587452a40fe06038eaef6a16867767ec77340c6c550a5",
+  "commit": "46bbc98dd0cff006c01db209fe9d3afb38ad9499",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --experimental-test-module-mocks --no-warnings=ExperimentalWarning --import tsx --test --test-concurrency=1 tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts && npm run test:server-contract",
+      "passed": true,
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 192079.959",
+      "durationMs": 201530
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 37492
+    },
+    {
+      "rule": "npm run build",
+      "passed": true,
+      "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+      "durationMs": 22859
+    },
+    {
+      "rule": "npx eslint --max-warnings=0 lib/publicChatMessage.ts app/api/chat/route.ts app/api/conversations/[conversationId]/route.ts app/api/products/chat/attempts/[assistantMessageId]/route.ts components/chat/ChatApp.tsx components/chat/chatDurableRecoveryClient.ts tests/chatDurableRecoveryClient.test.mjs tests/chatDurableRecoveryServerOrder.test.mjs tests/e2e/chat-unified-workspace.spec.ts tests/server-contract/chat-durable-recovery-route.test.ts tests/server-contract/chat-route-fallback-liveness.test.ts",
+      "passed": true,
+      "detail": "",
+      "durationMs": 5258
+    },
+    {
+      "rule": "npm run check:api-cache-control",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:api-cache-control\n> node --conditions=react-server --import tsx scripts/check-api-cache-control.mjs\n\nAPI cache-control check passed: 202 route(s), 5 choosing their own caching, every one of them listed.",
+      "durationMs": 730
+    },
+    {
+      "rule": "npm run check:unconsumed-response-bodies",
+      "passed": true,
+      "detail": "\nUnconsumed response body check over 1722 source file(s): 315 fetch call site(s).\nBlocking scope: runtime in [browser, either], target api_default_no_store, plus any unparsed file in that scope.\n\nNo browser-capable call site leaves an `/api/*` body unread.",
+      "durationMs": 1452
+    },
+    {
+      "rule": "npm run check:encoding",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding\n> node scripts/check-text-encoding.mjs\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1199
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 781 referenced path(s) across 95 instruction document(s), and 906 path(s) named by comments across 2776 source file(s), all present.",
+      "durationMs": 1281
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4229 citation(s) against 31 policy document(s). 2590 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1420 and 219 predate this change).",
+      "durationMs": 979
+    },
+    {
+      "rule": "git diff --check ec043cf79e3a044973e5f6466483710ef4969ea2",
+      "passed": true,
+      "detail": "",
+      "durationMs": 61
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Both round-1 nits are closed and I found no new actionable defect: lib/publicChatMessage.ts:75-84 restores the §13.3 caller bound (owner-authorized read only; share snapshot and export keep their own selects that omit memoryUsedCount/knowledgeChunkCount), and components/chat/ChatApp.tsx:1092-1107 now reports the validated canonical body and searchMetadata from the polling path with the preserved page-local analyticsPromptId (null after a reload, per ChatApp.tsx:874-877), matching the POST path at 1797-1804. Verified against the requirement: PUBLIC_CHAT_MESSAGE_SELECT/toPublicChatMessage reproduce the prior conversation-GET output field-for-field (same 8 scalars, same attachmentId duplication, same artifacts allowlist without objectKey, same >0-only disclosure counts), readPublicCompletedChatMessage re-asserts id+conversationId+role+modelId+conversation.userId and both routes fail closed when it returns null while active/failed/cancelled attempts carry no message; the client parser's expectedStatus mapping is sound because app/api/chat/route.ts:5510 writes Message.status from completionOutcome and 5554-5562 sets the attempt finishReason to \"length\" on exactly that same outcome, so a raw MAX_TOKENS reason cannot desync them; malformed or missing completed envelopes take scheduleTransientRetry before transientFailures.delete (bounded exponential backoff, terminating at CHAT_ATTEMPT_POLL_EXPIRED) or throw on the POST without a second dispatch; Deep Research stays out via the usageClass predicate at route.ts:2104-2110. Ready to proceed to PR and Linux CI; no provider call, push, merge or deploy was performed or authorized here.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-14T08:40:18.662Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "46bbc98dd0cff006c01db209fe9d3afb38ad9499",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "app/api/chat/route.ts",
+    "app/api/conversations/[conversationId]/route.ts",
+    "app/api/products/chat/attempts/[assistantMessageId]/route.ts",
+    "components/chat/ChatApp.tsx",
+    "components/chat/chatDurableRecoveryClient.ts",
+    "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.authorization.md",
+    "docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1.task.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/chat-durable-draft-and-attempt-recovery.md",
+    "lib/publicChatMessage.ts",
+    "tests/chatDurableRecoveryClient.test.mjs",
+    "tests/chatDurableRecoveryServerOrder.test.mjs",
+    "tests/e2e/chat-unified-workspace.spec.ts",
+    "tests/server-contract/chat-durable-recovery-route.test.ts",
+    "tests/server-contract/chat-route-fallback-liveness.test.ts"
+  ]
+}

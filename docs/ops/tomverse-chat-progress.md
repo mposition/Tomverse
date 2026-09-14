@@ -6,8 +6,13 @@
 위한 **진행 현황표**다. 구현 완료율, 품질 판정, 출시 승인 또는 현재 production
 상태를 자동 산출하는 registry가 아니다.
 
-- 작성 기준일: 2026-09-13. 아래 선행 benchmark의 고정 기록은 2026-09-11
+- 작성 기준일: 2026-09-14. 아래 선행 benchmark의 고정 기록은 2026-09-11
   당시 관측을 보존하며, 새 Chat 사용자 흐름의 상태는 별도 갱신 구획에서 구분한다.
+- 이번 배포 후 기존 기능 영속 복구 연결 작업의 base는
+  `ec043cf79e3a044973e5f6466483710ef4969ea2`다. 같은 commit의 Railway staging
+  deployment `9f231d3b-84cd-4afe-ad2b-db80d49a513c`가 `SUCCESS`, migration 104개와
+  pending 0, Railway 직접 `/api/health` 200임을 확인했다. 아래 새 연결 변경은
+  이 배포된 base 위의 로컬 작업이며 아직 Claude 승인·PR·배포를 뜻하지 않는다.
 - 이번 영속 초안·응답 복구 작업의 base는
   `c91a7c74a8e00e54fb8aeb73901116604f950cc5`, 로컬 기반 커밋은
   `021cd04a04223a6b137959ab532a0d012a692d75`다. 아래 새 구획은 이 base 이후의
@@ -208,6 +213,151 @@ production build 88개 route, typecheck, 수정 파일 lint와 diff whitespace �
 ② 승인된 무과금 staging DB의 draft CAS·receipt·attempt readback smoke, ③ 첨부·검색·
 Deep Research·artifact·profile의 Chat 연결 회귀, ④ Prompt Refiner 제안형 UI,
 ⑤ 별도 승인된 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 배포 확인 후 기존 기능 영속 복구 연결 회차
+
+선행 영속 초안·응답 복구 변경의 staging 배포 상태와 migration·health를 위 기준에
+적은 범위로 확인한 뒤, 완료 attempt가 본문과 상태만 복구하던 연결 공백을 닫았다.
+완료 POST 재연결과 GET polling은 대화 조회와 같은 공개 allowlist로 정확한 canonical
+assistant Message를 묶어 반환한다. 브라우저는 attempt의 id·모델·완료 상태와 결속한
+뒤 검색 출처, 생성 파일, 양수인 Memory·profile knowledge 사용 횟수를 복원한다.
+저장소 object key·provider 내부 상태·lease 같은 비공개 필드는 서버 select와 client
+parser 양쪽에서 허용하지 않는다. canonical Message가 없거나 잘못 결속되면 완료로
+추정하지 않고 polling을 재시도하며 provider를 다시 호출하지 않는다.
+
+Deep Research는 기존 영속 async-job 계약을 유지한다. 일반 Chat attempt로 편입하지
+않고 별도 polling·재진입·정산 경계를 그대로 검사했다. 첨부 입력은 이미 Message
+transaction과 대화 재조회에 영속되므로 이번 회차에서 별도 저장 경로를 만들지 않았다.
+
+로컬 관측은 관련 client·서버 순서 단위 **22/22**, attempt route **16/16**,
+durable POST liveness **18/18**과 전체 server contract **609/609**, system Chrome을
+사용한 핵심 desktop 브라우저 **4/4**, typecheck·수정 파일 lint·production build·
+diff whitespace 통과다.
+Playwright 번들 Chromium이 설치되지 않아 최초 canonical 브라우저 실행은 시작 전에
+실패했고, 설치된 system Chrome 관측은 기능 회귀 근거이지만 Linux canonical/golden을
+대신하지 않는다. 전체 unit 명령에 전달한 이름 필터는 runner가 무시해 범위 밖 기존
+benchmark 실패 1건에서 수동 중단했으며 이를 이번 기능 실패나 전체 통과로 세지 않는다.
+실제 provider·R2 호출과 새 과금은 없고, 새 변경 자체의 staging·production 배포도
+아직 아니다.
+
+이번 회차는 C11·C13·C15의 reload 연결 정확성을 올렸지만 이미 존재하던 기능을 새로
+완성한 것으로 중복 계산하지 않는다. 따라서 전체 웹 Chat 추정은 **약 65%, 주관적
+범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 한 Cycle의 다음 권장 순서는
+① 최종 로컬 회귀와 Claude 읽기 전용 독립 검토, ② PR·Linux 통합 CI, ③ 병합·배포 후
+무과금 staging에서 canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의
+원문 보존·주입 방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router
+품질 측정이다.
+
+### 2026-09-14 기존 기능 영속 복구 연결 Claude round 0 대응
+
+commit `3dce702c855bda776336ddb523859b97f88b5e08`, 변경 digest
+`sha256:3834f50363476b45c8b674bdb52ce04e1854bafa86e33a789be0532a8f29fb50`에
+대한 Claude 읽기 전용 round 0은 `approve`와 finding 4건을 반환했다. 제어
+프로그램은 증거·판단 지적을 모두 `fix_requested`로 기록해
+`awaiting_revision` 상태이며, 원본 verdict와 exchange 기록은 그대로 보존한다.
+
+수정본은 malformed 완료 Message가 반복될 때마다 transient backoff를 초기화하던
+순서를 고쳐 bounded exponential retry를 유지한다. 검색 citation 원소는 object만
+허용해 `null` 같은 값이 sanitizer에서 예외를 일으키지 않게 했다. 완료 POST 재연결의
+분석 콜백은 checkpoint 일부 본문 대신 검증된 canonical Message의 전체 본문과 검색
+metadata를 사용한다. attachment 공개 id 중복과 양수인 Memory·knowledge count만
+노출하는 기존 정책 근거도 공용 serializer에 남겼다.
+
+이 문구를 쓰기 전 수정본의 집중 관측은 client·서버 순서·attempt route·durable POST
+liveness **57/57**, system Chrome의 완료 metadata 복구와 malformed polling
+backoff **2/2**, typecheck·수정 파일 lint·production build 통과다. build에는 로컬
+NextAuth secret 부재 로그만 있었고 종료 코드는 0이었다. 이 기록은 아직 Claude
+round 1 승인, Linux 통합 CI, PR 병합, staging·production 배포 또는 실제
+provider·R2 호출을 뜻하지 않는다.
+
+동일 기능의 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%,
+직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 새 source의 Claude round 1과
+검토 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과금 staging canonical
+Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인 뒤 전체 모델
+Router 품질 측정이다.
+
+### 2026-09-14 기존 기능 영속 복구 연결 Claude round 1 대응
+
+commit `9e29305ca4f443b7d5406ffe46c0ed06fc75e38a`, 변경 digest
+`sha256:d4c5e3d2218c84f81cf7e1fbb58fc1273f7cfdd4146467b4312712377f3babad`에
+대한 Claude round 1은 `approve`와 judgement nit 2건을 반환했다. round 0의 네
+지적은 모두 닫혔지만 열린 지적이 있으므로 제어 프로그램은 이를 통과로 승격하지
+않고 `awaiting_revision`을 유지했다. 원본 verdict와 exchange는 보존한다.
+
+수정본은 공용 Message serializer를 사용할 수 있는 경계를 소유자 인증이 끝난 Chat
+조회로 명시하고, share snapshot·conversation export는 Memory·profile knowledge
+count를 select하지 않는
+`docs/policy/external-conversation-import-and-memory.md` §13.3 계약을 enforcement
+위치에 복구했다. 같은 탭에서
+진행 중 attempt를 polling으로 완료할 때도 page-local prompt id를 보존해 검증된
+canonical Message의 전체 본문·검색 metadata를 완료 콜백에 정확히 한 번 전달한다.
+새로고침 뒤에는 사라진 page-local id를 만들어내지 않고 `null`로 보고하되, 답변과
+검색 실행 사실은 복원한다.
+
+이 문구를 쓰기 전 마지막 수정본은 집중 단위·서버 계약 **57/57**, 전체 server
+contract **609/609**, system Chrome 핵심 시나리오 **2/2**, typecheck·수정 파일
+lint·production build를 통과했다. 실패·취소·skip·todo는 0이며, system Chrome은
+설치된 대체 browser 관측이라 Linux canonical/golden을 대신하지 않는다. 실제
+provider·R2 호출과 새 과금은 없었다. 이 기록은 아직 마지막 Claude round 2,
+PR·Linux CI, 병합 또는 새 변경의 배포를 뜻하지 않는다.
+
+동일 기능의 마지막 검토 대응이므로 전체 웹 Chat 추정은 **약 65%, 주관적 범위
+55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는 ① 마지막 Claude
+round 2와 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과금 staging
+canonical Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인
+뒤 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 기존 기능 영속 복구 연결 최종 독립 판정
+
+Claude는 commit `46bbc98dd0cff006c01db209fe9d3afb38ad9499`, digest
+`sha256:2e0575a8d157ac44b3e587452a40fe06038eaef6a16867767ec77340c6c550a5`를
+round 2에서 읽기 전용으로 검토해 `approve`, finding 0건을 반환했다. round 1의
+두 nit가 닫혔고 새 actionable defect가 없으므로 제어 프로그램은 `passed`로
+종결했다. `--skip-preflight`는 사용자가 이 작업에 한해 승인한 예외로 verdict에
+기록됐으며, Read·Grep·Glob 이외 도구와 API key fallback·web search/fetch는
+사용하지 않았다.
+
+영구 검토 기록은
+`docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1/`에
+한국어 인계 설명과 함께 보존한다. 이 문단과 기록 사본은 검토 완료 뒤 추가한
+provenance이므로 위 검토 digest의 source에 포함됐다고 주장하지 않는다. 새 변경은
+아직 PR·Linux CI·병합·배포 전이며 실제 provider·R2 호출도 수행하지 않았다.
+
+전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**다.
+이번 사이클의 다음 권장 순서는 ① PR·Linux 통합 CI, ② 병합·배포 뒤 무과금
+staging canonical Message readback, ③ Prompt Refiner 제안형 UI 계약, ④ 별도
+비용 승인 뒤 전체 모델 Router 품질 측정이다.
+
+### 2026-09-14 PR #1410 Linux CI 후속
+
+PR #1410의 최초 Linux 실행에서 빌드·Admin E2E·고위험 UI 4개 project·계정·
+assistant·email·finance·import·memory·routing PostgreSQL 시나리오와 secret scan은
+모두 통과했다. 통합 unit은 9,033개 중 9,031개 통과, 의도된 skip 1개, 실패
+1개였다. 실패는 제품 동작이 아니라 `memoryReleaseContracts`가 owner 대화
+라우트 안의 `memoryUsedCount: true` 직접 선언을 요구해, 이번에 도입한 공유
+`PUBLIC_CHAT_MESSAGE_SELECT`를 인식하지 못한 source-contract 불일치였다.
+
+수정본은 owner 라우트가 공유 allowlist를 실제 select로 쓰는지와 allowlist가 두
+공개 카운트를 직접 `true`로 선택하는지를 나눠 검사한다. share·export·public
+share 경로는 필드명뿐 아니라 공유 select와 serializer도 가져올 수 없게 고정했다.
+whole-file 문자열 오탐을 피하려고 TypeScript AST에서 정확한 `as const` object
+literal과 identifier/string-literal 직접 property만 읽는다.
+
+첫 후속 exchange v1은 세 라운드 모두 Claude `approve`였지만 마지막 source 검사
+정밀도 finding 1건이 남아 규칙대로 `on_hold / revisions_exhausted`로 보존했다.
+그 finding을 계승한 v2는 commit `ab3b35eb`, digest
+`sha256:bf2f781c0b46030ddc1eb5c081a84dff5323eed552af9f684c7fc75bb9175e33`에서
+Claude `approve`, finding 0건, controller `passed`로 끝났다. 각 package는
+정책 테스트 12/12, 수정 파일 ESLint와 diff whitespace를 통과했다. 두 exchange의
+원본 기록은 각각 `docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-ci-v1/`과
+`-ci-v2/`에 보존한다. 이 기록 문구와 사본은 검토 뒤 추가한 provenance이며
+검토 digest에 포함됐다고 주장하지 않는다.
+
+이번 후속은 같은 기능의 통합 검사 정합성 보완이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 수정 commit push와 PR #1410 Linux CI 재확인, ② 병합·배포, ③ 무과금 staging
+canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의 원문 보존·주입
+방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router 품질 측정이다.
 
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 

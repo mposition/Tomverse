@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default)"
+  ],
+  "startedAt": "2026-09-14T08:59:36.063Z",
+  "durationMs": 43534,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 10,
+    "cachedInputTokens": 53185,
+    "outputTokens": 3097,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.22132649999999998,
+    "raw": {
+      "input_tokens": 10,
+      "cache_creation_input_tokens": 11480,
+      "cache_read_input_tokens": 53185,
+      "output_tokens": 3097,
+      "output_tokens_details": {
+        "thinking_tokens": 1166
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 11480,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 847,
+          "cache_read_input_tokens": 15233,
+          "cache_creation_input_tokens": 989,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 989
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-14T09:00:19.651Z",
+  "verdict": {
+    "taskId": "chat-durable-message-metadata-recovery-ci-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:26b5c8db0d1e73536ec0d9e663e9b85140e1429cde3fe7e46392a2c86bcad369",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/memoryReleaseContracts.test.mjs:296-312",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The forbidden-path loop only greps for literal column names, so a share/export/public route that adopted the shared allowlist would leak memoryUsedCount and knowledgeChunkCount while the test still passed — the exact 'copy a select for consistency' mistake the test comment names, now reachable through an import instead of a column name.",
+        "reproduction": "In app/api/conversations/[conversationId]/share/route.ts add `import { PUBLIC_CHAT_MESSAGE_SELECT } from \"@/lib/publicChatMessage\";` and replace the inline `select: { id, role, content, modelId, createdAt }` at line 202 with `select: PUBLIC_CHAT_MESSAGE_SELECT`; run `node --conditions=react-server --import tsx --test tests/memoryReleaseContracts.test.mjs` — it still reports fail 0, although the share snapshot query now reads both §13.3 columns. Fix: add `PUBLIC_CHAT_MESSAGE_SELECT` to the forbidden-token list in the same loop."
+      },
+      {
+        "location": "tests/memoryReleaseContracts.test.mjs:292",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The third assertion now reads lib/publicChatMessage.ts but its message still says \"the owner's conversation read must select knowledgeChunkCount\", so a failure points at the wrong file while the parallel memoryUsedCount message was updated to say \"allowlist\".",
+        "reproduction": "Delete `knowledgeChunkCount: true` from lib/publicChatMessage.ts:29 and rerun the test; the failure text names the owner conversation route, not the allowlist file that actually lost the field."
+      }
+    ],
+    "nextAction": "Land as is; optionally add PUBLIC_CHAT_MESSAGE_SELECT to the forbidden-path token list and align the third assertion's message with the file it now reads."
+  }
+}

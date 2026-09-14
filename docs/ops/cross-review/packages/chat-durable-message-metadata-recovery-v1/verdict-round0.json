@@ -1,0 +1,107 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-message-metadata-recovery-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default)"
+  ],
+  "startedAt": "2026-09-14T07:48:52.856Z",
+  "durationMs": 470405,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 88,
+    "cachedInputTokens": 4216283,
+    "outputTokens": 33245,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 4.295659499999999,
+    "raw": {
+      "input_tokens": 88,
+      "cache_creation_input_tokens": 133295,
+      "cache_read_input_tokens": 4216283,
+      "output_tokens": 33245,
+      "output_tokens_details": {
+        "thinking_tokens": 24016
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 133295,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 10052,
+          "cache_read_input_tokens": 132951,
+          "cache_creation_input_tokens": 3144,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 3144
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-14T07:56:43.320Z",
+  "verdict": {
+    "taskId": "chat-durable-message-metadata-recovery-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:3834f50363476b45c8b674bdb52ce04e1854bafa86e33a789be0532a8f29fb50",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "components/chat/ChatApp.tsx:1058-1071 (pollOne)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The malformed-completed-message retry silently defeats the exponential backoff it calls, because `transientFailures.delete(assistantMessageId)` at line 1058 runs before the new completed-message validation at 1068, so `scheduleTransientRetry` recomputes `failures = 1` on every poll and pins the delay at DURABLE_ATTEMPT_POLL_INTERVAL_MS (1s) for the full DURABLE_ATTEMPT_MAX_POLL_MS (5 min) window.",
+        "reproduction": "Stub `/api/products/chat/attempts/:id` to return `{ attempt: <status:\"completed\">, message: { id: \"other-id\" } }` on every call (the Playwright `openChat` route handler in tests/e2e/chat-unified-workspace.spec.ts is the easiest place) and count requests with `state.attemptReadCount`: ~10 GETs arrive in 10s. The identical scenario routed through the existing backoff (move the `attempt.status === \"completed\" && !completedMessage` check above line 1058, or delete the counter only after validation) yields ~5 GETs over the same window as the delay grows 1s→2s→4s→8s→15s. Compare with the 429 branch at line 1022, which is the only other caller and does not clear the counter first."
+      },
+      {
+        "location": "components/chat/chatDurableRecoveryClient.ts:436 (parseStoredWebSearchExecution → sanitizeWebSearchCitations)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "`citations` is checked only with `Array.isArray`, so a non-object element makes the parser throw a TypeError instead of returning null, which contradicts the function's stated \"allowlist, not a cast\" contract that every other field honours.",
+        "reproduction": "In tests/chatDurableRecoveryClient.test.mjs, add `{ ...valid, searchMetadata: { requested: true, supported: true, executed: true, provider: \"openai\", citations: [null] } }` to the malformed loop in \"completed recovery rejects an unbound or malformed canonical message\". The assertion does not fail with `null` — the test throws `TypeError: Cannot read properties of null (reading 'url')` from lib/webSearchCitations.ts:52. Filtering `value.citations` to records before sanitizing (or rejecting on a non-record entry) restores the null return."
+      },
+      {
+        "location": "lib/publicChatMessage.ts:19-48 and 108-113",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The move to the shared serializer kept the object-key rationale but dropped the policy citations that explain the two conditions it still enforces — why `memoryUsedCount`/`knowledgeChunkCount` must be absent rather than 0, and why `attachmentId` repeats the row id — leaving load-bearing conditions unexplained at their only enforcement site, against this file tree's prevailing comment density.",
+        "reproduction": "`git show ec043cf79e3a044973e5f6466483710ef4969ea2:\"app/api/conversations/[conversationId]/route.ts\"` and read lines ~256-390: the §13.4 \"`null` is a request that could not inject at all and `0` is one where retrieval chose nothing, and §13.4 forbids indicating either\" note, the docs/policy/external-conversation-import-and-memory.md §14.3 pair, and the `attachmentId` duplication note all cover conditions that survive verbatim at lib/publicChatMessage.ts:85-113 with no comment. `npm run check:policy-section-references` still passes because it only validates citations that exist, not ones that were removed."
+      },
+      {
+        "location": "components/chat/ChatApp.tsx:1784-1790 (durable-attempt completed reattachment)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "Now that the canonical Message is parsed on this path, `onResponseComplete` is still called with `attempt.partialContent` and without the available `completedMessage.searchMetadata`, so analytics sees a possibly truncated body and the web-search offer is not corrected for a reattached turn that did search.",
+        "reproduction": "`onResponseComplete`'s optional 4th argument is declared at components/chat/ChatApp.tsx:241-246 and consumed at app/(site)/(application)/chat/ChatPageClient.tsx:5106-5127; the streaming path supplies it, this one does not. For the content argument: lib/chatDurableAttemptStream.ts:9 caps `partialContent` at CHAT_DURABLE_PARTIAL_MAX_CHARACTERS = 100_000 via `durablePrefix`, while `completedMessage.content` is the uncapped canonical body the bubble now renders — reattach to a completed attempt over 100k characters and the two arguments disagree with what is on screen. Passing `completedMessage.content` and `completedMessage.searchMetadata` when `completedMessage` is present removes both."
+      }
+    ],
+    "nextAction": "Approve as meeting every completion criterion — the server allowlist is shared and leaks no object key, provider state, lease or fingerprint; the completed-attempt read is ownership-, conversation- and model-bound and fails closed (and Message deletion cascades attempts in lib/chatResponseAttemptDeletion.ts, so the orphan case really is an invariant break); the client parser binds id, role, model, status and pendingJobId and neither path confirms terminal success nor re-POSTs on a bad envelope; Deep Research stays on the async-job branch. Fold the four findings into the next touch of this area, and note that the control program verified only the four named test files plus the guards — the \"609/609 full server contract\" and the system-Chrome e2e results remain the author's unverified claim."
+  }
+}

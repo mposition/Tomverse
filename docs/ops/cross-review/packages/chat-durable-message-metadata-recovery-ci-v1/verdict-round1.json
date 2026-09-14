@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-durable-integrations-20260914 shell:default)"
+  ],
+  "startedAt": "2026-09-14T09:01:31.119Z",
+  "durationMs": 44481,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 10,
+    "cachedInputTokens": 56689,
+    "outputTokens": 3207,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.23498049999999998,
+    "raw": {
+      "input_tokens": 10,
+      "cache_creation_input_tokens": 12362,
+      "cache_read_input_tokens": 56689,
+      "output_tokens": 3207,
+      "output_tokens_details": {
+        "thinking_tokens": 1358
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 12362,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 878,
+          "cache_read_input_tokens": 16359,
+          "cache_creation_input_tokens": 745,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 745
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-14T09:02:15.654Z",
+  "verdict": {
+    "taskId": "chat-durable-message-metadata-recovery-ci-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:f807ea0c36528e515d067c6b78e40453c29a1dd9f7608cc8b1f533d15e90589f",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/memoryReleaseContracts.test.mjs:302-307",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The forbidden token list now blocks PUBLIC_CHAT_MESSAGE_SELECT but not toPublicChatMessage, which is the other half of the shared boundary and is the thing that actually emits memoryUsedCount/knowledgeChunkCount onto the wire.",
+        "reproduction": "Add `import { toPublicChatMessage } from \"@/lib/publicChatMessage\";` to app/api/public/shares/[shareToken]/route.ts and map its message rows through it while replacing that route's explicit `select` with `include: { artifacts: true, attachments: true }` (Prisma then returns all scalars, so the serializer sees non-null counts). Run `node --conditions=react-server --import tsx --test tests/memoryReleaseContracts.test.mjs` — it still passes, though the public share response now carries both counts. Adding \"toPublicChatMessage\" to the loop's column list makes it fail. Reachability is low because all three forbidden routes currently use explicit column selects, which is why this is a nit."
+      }
+    ],
+    "nextAction": "Approve and merge; the two round-0 findings are both fixed (line 303 adds the shared-select token to the forbidden loop, line 292 now says \"allowlist\"), the owner route really does use `select: PUBLIC_CHAT_MESSAGE_SELECT` (app/api/conversations/[conversationId]/route.ts:256) and lib/publicChatMessage.ts:28-29 really does select both counts, so every assertion matches the implementation."
+  }
+}

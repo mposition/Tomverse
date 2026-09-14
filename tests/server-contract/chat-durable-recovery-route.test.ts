@@ -13,6 +13,8 @@ let attemptRow: Record<string, unknown> | null = null;
 let attemptReconciledRow: Record<string, unknown> | null | undefined;
 let attemptReconcileReads = 0;
 let attemptReadExpectedConversationId: string | undefined;
+let completedMessageRow: Record<string, unknown> | null = null;
+let completedMessageReads = 0;
 let accessAllowed = true;
 let authorizedScopes: string[] = [];
 let deniedAccessScopes = new Set<string>();
@@ -51,6 +53,12 @@ mock.module(mod("lib/prisma.ts"), {
   namedExports: {
     prisma: {
       conversation: { findUnique: async () => receiptConversation },
+      message: {
+        findFirst: async () => {
+          completedMessageReads += 1;
+          return completedMessageRow;
+        },
+      },
     },
   },
 });
@@ -184,6 +192,8 @@ test.beforeEach(() => {
   attemptReconciledRow = undefined;
   attemptReconcileReads = 0;
   attemptReadExpectedConversationId = undefined;
+  completedMessageRow = null;
+  completedMessageReads = 0;
   accessAllowed = true;
   authorizedScopes = [];
   deniedAccessScopes = new Set();
@@ -491,6 +501,109 @@ test("attempt GET returns only the public checkpoint state", async () => {
   assert.equal("ownerId" in body.attempt, false);
   assert.equal("leaseExpiresAt" in body.attempt, false);
   assert.equal(attemptReconcileReads, 1);
+  assert.equal(completedMessageReads, 0);
+});
+
+test("a completed attempt returns its canonical public Message metadata", async () => {
+  const { attemptRoute } = await loadRoutes();
+  attemptRow = {
+    assistantMessageId: "assistant_1",
+    userId: "user_1",
+    conversationId: "conv_1",
+    sourceUserMessageId: "msg_1",
+    fingerprint: "a".repeat(64),
+    requestedModelId: "provider/model",
+    actualModelId: "provider/model",
+    provider: "provider",
+    status: "completed",
+    partialContent: "answer",
+    checkpointRevision: 3,
+    ownerId: "worker-secret",
+    leaseExpiresAt: new Date(0),
+    finishReason: "stop",
+    failureCode: null,
+    terminalAt: new Date("2026-09-13T01:01:00.000Z"),
+    createdAt: new Date("2026-09-13T01:00:00.000Z"),
+    updatedAt: new Date("2026-09-13T01:01:00.000Z"),
+  };
+  completedMessageRow = {
+    id: "assistant_1",
+    role: "assistant",
+    content: "answer",
+    status: "normal",
+    modelId: "provider/model",
+    pendingJobId: null,
+    searchMetadata: {
+      requested: true,
+      supported: true,
+      executed: true,
+      provider: "provider",
+      citations: [{ url: "https://example.test/source", title: "Source" }],
+    },
+    createdAt: new Date("2026-09-13T01:00:00.000Z"),
+    memoryUsedCount: 2,
+    knowledgeChunkCount: 1,
+    artifacts: [{
+      id: "artifact_1",
+      ordinal: 0,
+      format: "csv",
+      filename: "result.csv",
+      mediaType: "text/csv",
+      byteSize: 42,
+      status: "ready",
+      failureCode: null,
+      modelId: "provider/model",
+      objectKey: "must-not-leak",
+    }],
+    attachments: [],
+    providerContext: { secret: true },
+  };
+
+  const response = await attemptRoute.GET(
+    request("/api/products/chat/attempts/assistant_1"),
+    { params: Promise.resolve({ assistantMessageId: "assistant_1" }) }
+  );
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  const body = await response.json();
+  assert.equal(body.message.id, "assistant_1");
+  assert.equal(body.message.memoryUsedCount, 2);
+  assert.equal(body.message.knowledgeChunkCount, 1);
+  assert.equal(body.message.artifacts[0].id, "artifact_1");
+  assert.equal(JSON.stringify(body).includes("must-not-leak"), false);
+  assert.equal(JSON.stringify(body).includes("providerContext"), false);
+  assert.equal(completedMessageReads, 1);
+});
+
+test("a completed attempt without its canonical Message fails closed", async () => {
+  const { attemptRoute } = await loadRoutes();
+  attemptRow = {
+    assistantMessageId: "assistant_1",
+    userId: "user_1",
+    conversationId: "conv_1",
+    sourceUserMessageId: "msg_1",
+    fingerprint: "a".repeat(64),
+    requestedModelId: "provider/model",
+    actualModelId: "provider/model",
+    provider: "provider",
+    status: "completed",
+    partialContent: "answer",
+    checkpointRevision: 3,
+    ownerId: "worker-secret",
+    leaseExpiresAt: new Date(0),
+    finishReason: "stop",
+    failureCode: null,
+    terminalAt: new Date(0),
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  };
+  const response = await attemptRoute.GET(
+    request("/api/products/chat/attempts/assistant_1"),
+    { params: Promise.resolve({ assistantMessageId: "assistant_1" }) }
+  );
+  assert.equal(response.status, 500);
+  assert.equal(response.headers.get("Cache-Control"), "private, no-store");
+  assert.equal((await response.json()).code, "CHAT_ATTEMPT_READ_FAILED");
 });
 
 test("attempt GET performs no lease reconciliation before a locked scope is authorized", async () => {

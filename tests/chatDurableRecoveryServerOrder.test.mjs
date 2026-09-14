@@ -65,3 +65,53 @@ test("claim and model-history deletion statically call the same advisory lock he
   assert.match(deletion, /lockChatRecoveryConversation\(tx, input\.userId, input\.conversationId\)/);
   assert.match(deletion, /CHAT_RESPONSE_IN_PROGRESS/);
 });
+
+test("Deep Research stays on its separate persisted async-job contract", () => {
+  const route = source("app/api/chat/route.ts");
+  const durableDecision = route.indexOf("const isDurableStoredChat = Boolean(");
+  const durableDecisionEnd = route.indexOf(");", durableDecision);
+  const durablePredicate = route.slice(durableDecision, durableDecisionEnd);
+  const deepResearchBranch = route.indexOf(
+    'if (modelConfig.usageClass === "deep-research")',
+    durableDecisionEnd
+  );
+  const asyncJobResponse = route.indexOf(
+    '"X-Chat-Response-Mode": "async-job"',
+    deepResearchBranch
+  );
+  assert.ok(durableDecision > 0);
+  assert.match(durablePredicate, /modelConfig\.usageClass !== "deep-research"/);
+  assert.ok(deepResearchBranch > durableDecisionEnd);
+  assert.ok(asyncJobResponse > deepResearchBranch);
+});
+
+test("completed durable polling and POST reattachment report the canonical message to analytics", () => {
+  const chatApp = source("components/chat/ChatApp.tsx");
+  const pollStart = chatApp.indexOf("const pollOne = async");
+  const pollEnd = chatApp.indexOf("const loop = async", pollStart);
+  const poll = chatApp.slice(pollStart, pollEnd);
+  const postStart = chatApp.indexOf(
+    'if (response.headers.get("X-Chat-Response-Mode") === "durable-attempt")'
+  );
+  const postEnd = chatApp.indexOf("if (!response.body)", postStart);
+  const post = chatApp.slice(postStart, postEnd);
+
+  assert.ok(pollStart > 0 && pollEnd > pollStart);
+  assert.match(poll, /onResponseCompleteRef\.current\?\.\(/);
+  assert.match(poll, /expectedIdentity\.analyticsPromptId/);
+  assert.match(poll, /completedMessage\.content/);
+  assert.match(poll, /completedMessage\.searchMetadata/);
+  assert.doesNotMatch(
+    poll,
+    /attempt\.partialContent\s*,\s*completedMessage\.searchMetadata/
+  );
+
+  assert.ok(postStart > 0 && postEnd > postStart);
+  assert.match(post, /onResponseComplete\?\.\(/);
+  assert.match(post, /completedMessage\.content/);
+  assert.match(post, /completedMessage\.searchMetadata/);
+  assert.doesNotMatch(
+    post,
+    /attempt\.partialContent\s*,\s*completedMessage\.searchMetadata/
+  );
+});
