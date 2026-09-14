@@ -1428,6 +1428,7 @@ export const ko = {
         titleImpactChanging: "이 삭제로 이어진 대화 {count}개의 표시 이름이 바뀝니다. 대화와 메시지는 그대로 남습니다.",
         titleImpactKeep: "원문 제목을 이어진 대화 {count}개의 이름으로 저장",
         titleImpactKeepNote: "저장한 이름은 원문을 삭제한 뒤에도 남고, 대화나 계정을 삭제하면 함께 삭제됩니다.",
+        titleImpactTooMany: "이름을 저장할 수 있는 대화가 {count}개로, 한 번의 삭제에서 저장할 수 있는 수보다 많습니다. 남기고 싶은 대화는 삭제 전에 직접 이름을 정해 주세요.",
         titleImpactManual: "{count}개는 원문이 잠겨 있거나 제목을 가져올 수 없어 이름을 저장할 수 없습니다. 삭제 후 직접 이름을 정해 주세요.",
         titleImpactStale: "확인한 뒤 잠금 등 상태가 바뀌었습니다. 삭제 내용을 다시 확인해 주세요.",
         deleting: "삭제 중…",

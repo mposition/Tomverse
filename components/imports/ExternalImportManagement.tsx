@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     AlertTriangle,
     Clock,
@@ -193,6 +193,12 @@ export function ExternalImportManagement() {
     // The same confirmation's other question (D3): which continuations' shown
     // names change, and whether to keep them. Off by default.
     const [titleImpact, setTitleImpact] = useState<TitleImpact | null>(null);
+    // Which import `titleImpact` describes, and which one a preview is loading
+    // for. A late answer for another import must not become this one's, and
+    // the delete is not confirmable while its own preview is still loading.
+    const [titleImpactFor, setTitleImpactFor] = useState<string | null>(null);
+    const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+    const previewRequestRef = useRef<string | null>(null);
     const [keepTitles, setKeepTitles] = useState(false);
     const [titleImpactStale, setTitleImpactStale] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -340,24 +346,36 @@ export function ExternalImportManagement() {
     }, []);
 
     const loadDeletionPreview = useCallback(async (importId: string) => {
+        previewRequestRef.current = importId;
+        setPreviewLoadingId(importId);
         try {
             const preview = await fetch(
                 `/api/imports/external/${importId}?include=memoryImpact,titleImpact`,
                 { cache: "no-store" }
             );
+            if (previewRequestRef.current !== importId) {
+                await discardResponseBody(preview);
+                return;
+            }
             if (preview.ok) {
                 const body = (await preview.json()) as {
                     memoryImpact?: SourceDeletionImpactView;
                     titleImpact?: TitleImpact;
                 };
+                if (previewRequestRef.current !== importId) return;
                 setMemoryImpact(body.memoryImpact ?? null);
                 setTitleImpact(body.titleImpact ?? null);
+                setTitleImpactFor(importId);
             } else {
                 await discardResponseBody(preview);
             }
         } catch {
-            // No preview is not a reason to block the delete; the server still
-            // applies the §13.1 defaults, and keeps no title unless asked.
+            // A failed preview does not block the delete: the server still
+            // applies the §13.1 memory defaults (policy
+            // docs/policy/external-conversation-import-and-memory.md), and
+            // with no preview nothing offers to keep a title, so none is kept.
+        } finally {
+            if (previewRequestRef.current === importId) setPreviewLoadingId(null);
         }
     }, []);
 
@@ -368,20 +386,24 @@ export function ExternalImportManagement() {
                 setMemoryImpact(null);
                 setKeepMemories(false);
                 setTitleImpact(null);
+                setTitleImpactFor(null);
                 setKeepTitles(false);
                 setTitleImpactStale(false);
                 await loadDeletionPreview(importId);
                 return;
             }
+            // Not confirmable while this import's own preview is loading.
+            if (previewLoadingId === importId) return;
             setDeletingId(importId);
             let stayArmed = false;
             try {
                 const response = await fetch(
                     `/api/imports/external/${importId}?${sourceDeletionQuery({
                         keepMemories,
-                        preserveTitleConversationIds: keepTitles
-                            ? (titleImpact?.preservableConversationIds ?? [])
-                            : [],
+                        preserveTitleConversationIds:
+                            keepTitles && titleImpactFor === importId
+                                ? (titleImpact?.preservableConversationIds ?? [])
+                                : [],
                     })}`,
                     { method: "DELETE" }
                 );
@@ -412,7 +434,9 @@ export function ExternalImportManagement() {
             loadConversations,
             loadDeletionPreview,
             loadHistory,
+            previewLoadingId,
             titleImpact,
+            titleImpactFor,
         ]
     );
 
@@ -552,7 +576,10 @@ export function ExternalImportManagement() {
                                         key={row.id}
                                         row={row}
                                         armed={armedDeleteId === row.id}
-                                        deleting={deletingId === row.id}
+                                        deleting={
+                                            deletingId === row.id ||
+                                            previewLoadingId === row.id
+                                        }
                                         onDelete={() =>
                                             void deleteImportRow(row.id)
                                         }
@@ -764,7 +791,10 @@ export function ExternalImportManagement() {
                                         type="button"
                                         className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
                                         data-testid="external-import-history-delete"
-                                        disabled={deletingId === row.id}
+                                        disabled={
+                                            deletingId === row.id ||
+                                            previewLoadingId === row.id
+                                        }
                                         onClick={() =>
                                             void deleteImportRow(row.id)
                                         }
@@ -788,7 +818,11 @@ export function ExternalImportManagement() {
                                             onKeepDerivedChange={setKeepMemories}
                                         />
                                         <ContinuationTitleImpactNotice
-                                            impact={titleImpact}
+                                            impact={
+                                                titleImpactFor === row.id
+                                                    ? titleImpact
+                                                    : null
+                                            }
                                             keepTitles={keepTitles}
                                             onKeepTitlesChange={setKeepTitles}
                                             stale={titleImpactStale}

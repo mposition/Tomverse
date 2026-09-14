@@ -1693,6 +1693,11 @@ export async function deleteExternalImport(
         const row = await loadOwnedImport(tx, userId, importId, {
             forUpdate: true,
         });
+        // The import row is locked; its snapshots are locked next, by id,
+        // before any write on either branch below -- the order
+        // `lockSnapshotForDeletion()` documents and the single-snapshot delete
+        // takes too.
+        await lockImportSnapshotsForDeletion(tx, row.id);
         // A sealed-but-unfinalized import is cancelled exactly like an
         // unsealed one: seal is a completeness statement about the upload,
         // not a commitment to save anything (§5.5).
@@ -1720,12 +1725,8 @@ export async function deleteExternalImport(
         // cascade removes every conversation and message (§13.1). The
         // memories derived from them are decided first, for the same reason
         // as the single-conversation path — after the cascade there is
-        // nothing left to attribute them to.
-        //
-        // The import row is already locked; its snapshots are locked next,
-        // by id, before any write -- the order `lockSnapshotForDeletion()`
-        // documents and the single-snapshot delete takes too.
-        await lockImportSnapshotsForDeletion(tx, row.id);
+        // nothing left to attribute them to. (Import and snapshots are
+        // already locked above.)
         const doomedConversationIds = await conversationIdsForScope(
             tx,
             userId,

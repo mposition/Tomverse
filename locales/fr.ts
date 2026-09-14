@@ -1425,6 +1425,7 @@ export const fr = {
         titleImpactChanging: "Cette suppression change le nom affiché de {count} conversation(s) poursuivie(s). Les conversations et leurs messages sont conservés.",
         titleImpactKeep: "Enregistrer le titre de l'original comme nom de {count} conversation(s) poursuivie(s)",
         titleImpactKeepNote: "Un nom enregistré reste après la suppression de l'original et est supprimé avec la conversation ou le compte.",
+        titleImpactTooMany: "{count} noms pourraient être conservés, plus qu'une suppression ne peut en garder. Renommez les conversations à conserver avant de supprimer.",
         titleImpactManual: "{count} conversation(s) ne peuvent pas garder le titre de l'original, car il est verrouillé ou indisponible. Nommez-les vous-même après la suppression.",
         titleImpactStale: "Quelque chose a changé après votre confirmation, par exemple un verrouillage. Vérifiez à nouveau la suppression.",
         deleting: "Suppression…",

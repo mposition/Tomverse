@@ -1427,6 +1427,7 @@ export const es = {
         titleImpactChanging: "Al eliminar esto cambia el nombre mostrado de {count} conversación(es) continuada(s). Las conversaciones y sus mensajes se conservan.",
         titleImpactKeep: "Guardar el título del original como nombre de {count} conversación(es) continuada(s)",
         titleImpactKeepNote: "Un nombre guardado se conserva después de eliminar el original y se elimina junto con la conversación o la cuenta.",
+        titleImpactTooMany: "Se podrían conservar {count} nombres, más de los que una eliminación puede conservar. Cambia el nombre de las conversaciones que quieras conservar antes de eliminar.",
         titleImpactManual: "{count} conversación(es) no pueden conservar el título del original porque está bloqueado o no disponible. Asígnales un nombre después de eliminar.",
         titleImpactStale: "Algo cambió después de confirmar, como un bloqueo. Vuelve a revisar la eliminación.",
         deleting: "Eliminando…",

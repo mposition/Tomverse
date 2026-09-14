@@ -2,7 +2,10 @@
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { interpolate } from "@/components/imports/importFormatting";
-import type { TitleImpact } from "@/lib/continuationTitlePreservation";
+import {
+    MAX_PRESERVE_TITLE_IDS,
+    type TitleImpact,
+} from "@/lib/continuationTitlePreservation";
 
 /**
  * What deleting a source does to the shown names of its continuations (D3).
@@ -56,7 +59,15 @@ export function ContinuationTitleImpactNotice({
                     })}
                 </p>
             ) : null}
-            {preservableCount > 0 ? (
+            {preservableCount > MAX_PRESERVE_TITLE_IDS ? (
+                // More than one delete keeps: not offered, rather than keeping
+                // some and silently changing the rest.
+                <p className="mt-2" data-testid="source-deletion-title-too-many">
+                    {interpolate(t("externalImport.titleImpactTooMany"), {
+                        count: preservableCount,
+                    })}
+                </p>
+            ) : preservableCount > 0 ? (
                 <>
                     <label className="mt-2 flex items-start gap-2 font-semibold">
                         <input

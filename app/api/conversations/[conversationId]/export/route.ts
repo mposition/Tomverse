@@ -14,13 +14,12 @@ import {
     continuationExportTitle,
     effectiveDisplayTimeZone,
 } from "@/lib/continuationTitleContext";
-import { providerLabel } from "@/components/imports/importFormatting";
+import { continuationExportCopy } from "@/lib/continuationExportCopy";
 import {
     conversationExportContentDisposition,
     formatConversationHeader,
     formatExportMessage,
 } from "@/lib/exportConversation";
-import { en } from "@/locales/en";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -127,11 +126,9 @@ export async function GET(
                 timeZone: effectiveDisplayTimeZone(
                     req.headers.get(DISPLAY_TIME_ZONE_HEADER)
                 ),
-                copy: {
-                    fallbackTemplate: en.continuation.untitledFrom,
-                    untitled: en.continuation.quickUntitled,
-                    providerLabel,
-                },
+                // The page's words for the title, so the filename is the
+                // name the list shows; the header lines stay English.
+                copy: continuationExportCopy(req),
             });
 
         const encoder = new TextEncoder();

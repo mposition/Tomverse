@@ -110,8 +110,11 @@ export function ExternalConversationViewer({
     const [titleImpact, setTitleImpact] = useState<TitleImpact | null>(null);
     const [keepTitles, setKeepTitles] = useState(false);
     const [titleImpactStale, setTitleImpactStale] = useState(false);
+    // The delete is not confirmable while the preview it depends on loads.
+    const [titleImpactLoading, setTitleImpactLoading] = useState(false);
 
     const loadTitleImpact = useCallback(async () => {
+        setTitleImpactLoading(true);
         try {
             const response = await fetch(
                 `/api/external-conversations/${encodeURIComponent(conversationId)}?offset=0&limit=1&include=titleImpact`,
@@ -125,6 +128,8 @@ export function ExternalConversationViewer({
             setTitleImpact(body.titleImpact ?? null);
         } catch {
             // No preview keeps the delete available; no title is kept unasked.
+        } finally {
+            setTitleImpactLoading(false);
         }
     }, [conversationId]);
 
@@ -232,6 +237,7 @@ export function ExternalConversationViewer({
             await loadTitleImpact();
             return;
         }
+        if (titleImpactLoading) return;
         setIsDeleting(true);
         let stayArmed = false;
         try {
@@ -263,7 +269,7 @@ export function ExternalConversationViewer({
             setIsDeleting(false);
             if (!stayArmed) setDeleteArmed(false);
         }
-    }, [conversationId, deleteArmed, keepMemories, keepTitles, loadTitleImpact, router, titleImpact]);
+    }, [conversationId, deleteArmed, keepMemories, keepTitles, loadTitleImpact, router, titleImpact, titleImpactLoading]);
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
@@ -447,7 +453,7 @@ export function ExternalConversationViewer({
                             type="button"
                             className="mt-3 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/70"
                             data-testid="external-viewer-delete"
-                            disabled={isDeleting}
+                            disabled={isDeleting || titleImpactLoading}
                             onClick={() => void deleteSnapshot()}
                         >
                             <Trash2 className="h-4 w-4" />

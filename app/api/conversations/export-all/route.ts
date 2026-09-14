@@ -16,10 +16,9 @@ import {
     effectiveDisplayTimeZone,
     type ContinuationNamingBridge,
 } from "@/lib/continuationTitleContext";
-import { providerLabel } from "@/components/imports/importFormatting";
+import { continuationExportCopy } from "@/lib/continuationExportCopy";
 import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
 import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
-import { en } from "@/locales/en";
 import {
     apiSecurityResponse,
     consumeApiRateLimit,
@@ -48,18 +47,15 @@ function exportHeader(
         }) | null;
     },
     personalizationNotice: string | undefined,
-    timeZone: string
+    timeZone: string,
+    copy: ReturnType<typeof continuationExportCopy>
 ) {
     const bridge = conversation.continuationBridge;
     const { title, headerLines } = continuationExportTitle({
         storedTitle: conversation.title,
         bridge,
         timeZone,
-        copy: {
-            fallbackTemplate: en.continuation.untitledFrom,
-            untitled: en.continuation.quickUntitled,
-            providerLabel,
-        },
+        copy,
     });
     return formatConversationHeader(
         { title, createdAt: conversation.createdAt },
@@ -134,6 +130,8 @@ export async function GET(req: Request) {
         const displayTimeZone = effectiveDisplayTimeZone(
             req.headers.get(DISPLAY_TIME_ZONE_HEADER)
         );
+        // And the page's words for a continuation's fallback title.
+        const exportCopy = continuationExportCopy(req);
         // §13.3: resolved once for the whole archive, and unconditional
         // while injection is available — every conversation in the file
         // carries it, so the line discloses nothing about which of them
@@ -181,7 +179,7 @@ export async function GET(req: Request) {
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${exportHeader(conversation, personalizationNotice, displayTimeZone)}\n`
+                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${exportHeader(conversation, personalizationNotice, displayTimeZone, exportCopy)}\n`
                         )
                     );
                     return;

@@ -82,6 +82,7 @@ import { isDerivedContinuationTitle } from "@/lib/continuationDisplayTitle";
 import {
   continuationRowTitle,
   displayTimeZoneHeaders,
+  exportNamingHeaders,
   type ContinuationRowNaming,
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
@@ -6027,9 +6028,9 @@ export function ChatPageClient({
         try {
             const response = await fetch(`/api/conversations/${convId}/export`, {
                 cache: "no-store",
-                // The file is named with the date the list shows
+                // The file is named with the date and words the list shows
                 // (lib/continuationTitleContext.ts).
-                headers: displayTimeZoneHeaders(),
+                headers: exportNamingHeaders(lang),
             });
             if (!response.ok) {
                 await discardResponseBody(response);

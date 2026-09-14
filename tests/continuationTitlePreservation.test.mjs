@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { LEGACY_CONTINUATION_TITLE } from "../lib/continuationDisplayTitle.ts";
 import {
+    MAX_PRESERVE_TITLE_IDS,
     PRESERVE_TITLES_PARAM,
     SOURCE_TITLE_PRESERVATION_STALE,
     isReservedContinuationTitle,
@@ -68,17 +69,40 @@ test("the rename API refuses it before writing, and the page says why", () => {
 
 /* --------------------------------------------------------- request shape */
 
-test("preserve ids are parsed, deduplicated, validated and capped", () => {
+test("preserve ids are parsed, deduplicated and validated", () => {
     const url = new URL(
         `https://tomverse.test/x?${PRESERVE_TITLES_PARAM}=b,a,a,,bad%20id&${PRESERVE_TITLES_PARAM}=c`
     );
-    assert.deepEqual(readTitlePreservationRequest(url), ["b", "a", "c"]);
-    const many = Array.from({ length: 150 }, (_, i) => `id${i}`).join(",");
+    assert.deepEqual(readTitlePreservationRequest(url), { ids: ["b", "a", "c"], tooMany: false });
+    assert.deepEqual(readTitlePreservationRequest(new URL("https://tomverse.test/x")), {
+        ids: [],
+        tooMany: false,
+    });
+});
+
+test("more ids than one delete keeps is refused, never cut", () => {
+    const exactly = Array.from({ length: MAX_PRESERVE_TITLE_IDS }, (_, i) => `id${i}`).join(",");
     assert.equal(
-        readTitlePreservationRequest(new URL(`https://tomverse.test/x?${PRESERVE_TITLES_PARAM}=${many}`)).length,
-        100
+        readTitlePreservationRequest(new URL(`https://t.test/x?${PRESERVE_TITLES_PARAM}=${exactly}`)).ids.length,
+        MAX_PRESERVE_TITLE_IDS
     );
-    assert.deepEqual(readTitlePreservationRequest(new URL("https://tomverse.test/x")), []);
+    const over = `${exactly},one-more`;
+    assert.deepEqual(
+        readTitlePreservationRequest(new URL(`https://t.test/x?${PRESERVE_TITLES_PARAM}=${over}`)),
+        { ids: [], tooMany: true }
+    );
+    for (const path of [
+        "app/api/imports/external/[importId]/route.ts",
+        "app/api/external-conversations/[conversationId]/route.ts",
+    ]) {
+        const source = code(path);
+        const refusal = source.indexOf("if (preservation.tooMany)");
+        const deletion = source.indexOf("preservation.ids");
+        assert.ok(refusal > 0 && refusal < deletion, `${path} refuses before deleting`);
+        assert.match(source, /code: SOURCE_TITLE_PRESERVATION_TOO_MANY/);
+    }
+    const notice = code("components/imports/ContinuationTitleImpactNotice.tsx");
+    assert.match(notice, /preservableCount > MAX_PRESERVE_TITLE_IDS \?/);
 });
 
 test("the title preview is opt-in", () => {
@@ -103,7 +127,11 @@ test("both confirmations send the same query", () => {
         assert.match(source, /sourceDeletionQuery\(\{/, path);
         // Keeping titles is off until the owner ticks it.
         assert.match(source, /const \[keepTitles, setKeepTitles\] = useState\(false\)/, path);
-        assert.match(source, /preserveTitleConversationIds: keepTitles\s*\?/, path);
+        assert.match(
+            source,
+            /preserveTitleConversationIds:\s*keepTitles(?: && titleImpactFor === importId)?\s*\?/,
+            path
+        );
         assert.match(source, /isStaleTitlePreservation\(response\)/, path);
     }
 });
@@ -130,27 +158,67 @@ test("preservability names each reason a title cannot be kept", () => {
     assert.equal(titlePreservability(target()), "preservable");
     assert.equal(titlePreservability(target({ conversationTitle: "사업 계획" })), "named");
     assert.equal(titlePreservability(target({ conversationLocked: true })), "conversation_locked");
-    assert.equal(titlePreservability(target({ sourceLocked: true })), "source_locked");
-    for (const sourceTitle of [null, "", "   ", LEGACY_CONTINUATION_TITLE, "x".repeat(121)]) {
+    // A locked or untitled source already shows the fallback, before and after.
+    assert.equal(titlePreservability(target({ sourceLocked: true })), "already_fallback");
+    for (const sourceTitle of [null, "", "   "]) {
+        assert.equal(
+            titlePreservability(target({ sourceTitle })),
+            "already_fallback",
+            JSON.stringify(sourceTitle)
+        );
+    }
+    // Shown today, gone after the delete, and not a title a conversation can take.
+    for (const sourceTitle of [LEGACY_CONTINUATION_TITLE, "x".repeat(121)]) {
         assert.equal(
             titlePreservability(target({ sourceTitle })),
             "source_title_unusable",
-            JSON.stringify(sourceTitle)
+            sourceTitle.slice(0, 20)
         );
     }
     assert.equal(titlePreservability(target({ sourceTitle: "x".repeat(120) })), "preservable");
 });
 
-test("the preview counts changing names and preservable ones separately", () => {
+test("the preview counts only names that actually change", () => {
     const impact = summarizeTitleImpact([
         target({ conversationId: "c3" }),
         target({ conversationId: "c1" }),
         target({ conversationId: "c2", sourceLocked: true }),
+        target({ conversationId: "c5", sourceTitle: "" }),
+        target({ conversationId: "c6", conversationLocked: true }),
         target({ conversationId: "c4", conversationTitle: "이미 이름 있음" }),
     ]);
+    // c2 and c5 already show their fallback; c6 changes but cannot be kept.
     assert.deepEqual(impact, { changingCount: 3, preservableConversationIds: ["c1", "c3"] });
     // No title is part of the preview.
     assert.doesNotMatch(JSON.stringify(impact), /여행/);
+});
+
+test("D1 holds for generated titles and for the explicit keep action", () => {
+    const generate = code("app/api/conversations/[conversationId]/generate-title/route.ts");
+    const refusal = generate.indexOf("isReservedContinuationTitle({");
+    const apply = generate.indexOf("await applyGeneratedTitle({");
+    assert.ok(refusal > 0 && refusal < apply, "a reserved generated title is refused before the write");
+    assert.match(generate, /isContinuation: existingConv\.continuationBridge !== null/);
+    assert.match(generate, /reason: "reserved_title"/);
+
+    const sidebar = code("components/chat/ChatSidebar.tsx");
+    const dialog = sidebar.slice(sidebar.indexOf("{renameTarget && ("), sidebar.indexOf("{shareTarget && ("));
+    const hideReserved = dialog.indexOf("!isReservedContinuationTitle({");
+    const keepButton = dialog.indexOf('data-testid="rename-save-displayed-title"');
+    assert.ok(hideReserved > 0 && hideReserved < keepButton);
+});
+
+test("a confirmation cannot be sent before its own preview has loaded", () => {
+    const list = code("components/imports/ExternalImportManagement.tsx");
+    assert.match(list, /if \(previewLoadingId === importId\) return;/);
+    assert.match(list, /keepTitles && titleImpactFor === importId/);
+    assert.match(list, /if \(previewRequestRef\.current !== importId\)/);
+    assert.match(list, /titleImpactFor === row\.id\s*\?\s*titleImpact/);
+    assert.equal(list.split("previewLoadingId === row.id").length - 1, 2);
+
+    const viewer = code("components/imports/ExternalConversationViewer.tsx");
+    assert.match(viewer, /if \(titleImpactLoading\) return;/);
+    assert.match(viewer, /disabled=\{isDeleting \|\| titleImpactLoading\}/);
 });
 
 test("judging skips what is out of scope or renamed, and refuses what went stale", () => {

@@ -1427,6 +1427,7 @@ export const pt = {
         titleImpactChanging: "Excluir isto muda o nome exibido de {count} conversa(s) continuada(s). As conversas e suas mensagens permanecem.",
         titleImpactKeep: "Salvar o título do original como nome de {count} conversa(s) continuada(s)",
         titleImpactKeepNote: "Um nome salvo permanece depois que o original é excluído e é excluído junto com a conversa ou a conta.",
+        titleImpactTooMany: "{count} nomes poderiam ser mantidos, mais do que uma exclusão consegue manter. Renomeie as conversas que deseja manter antes de excluir.",
         titleImpactManual: "{count} conversa(s) não podem manter o título do original porque ele está bloqueado ou indisponível. Dê um nome a elas depois de excluir.",
         titleImpactStale: "Algo mudou depois da sua confirmação, como um bloqueio. Revise a exclusão novamente.",
         deleting: "Excluindo…",
