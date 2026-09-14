@@ -55,11 +55,22 @@ export function readableContinuationSourceTitle(
 
 export function continuationDisplayTitle({
     storedTitle,
+    isContinuation,
     sourceTitle,
     fallback,
 }: {
     /** `Conversation.title` as stored. */
     storedTitle: string;
+    /**
+     * Whether this row has a continuation bridge.
+     *
+     * Required, not inferred from the title: an ordinary conversation its
+     * owner happened to name exactly like the placeholder is still theirs
+     * (docs/policy/external-conversation-continuation.md §3: a conversation
+     * without a bridge is not affected), and only a bridge says the writer of
+     * that string was the continuation service.
+     */
+    isContinuation: boolean;
     /**
      * The imported conversation's own title, when the server could read it.
      *
@@ -70,7 +81,9 @@ export function continuationDisplayTitle({
     /** A translated placeholder, for a row with neither a name nor a source. */
     fallback: string;
 }): string {
-    if (storedTitle !== LEGACY_CONTINUATION_TITLE) return storedTitle;
+    if (!isContinuation || storedTitle !== LEGACY_CONTINUATION_TITLE) {
+        return storedTitle;
+    }
     const source = sourceTitle?.trim();
     return source ? source : fallback;
 }

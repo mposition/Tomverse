@@ -100,22 +100,32 @@ export function formatExportMessage(message: ExportMessage) {
  * is substituted here.
  */
 function headerLineText(title: string) {
-    return title.replace(/[\r\n\u2028\u2029]+/g, " ");
+    // Every C0 and C1 control (U+0085 NEL is a line break to some readers)
+    // and the Unicode line and paragraph separators.
+    return title.replace(CONTROL_CHARACTERS, " ");
 }
+
+const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f\u2028\u2029]+/g;
+// Bidirectional formatting controls, including U+061C ARABIC LETTER MARK.
+const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+// Characters that draw nothing: a name made only of these is no name.
+const INVISIBLE = /[\p{Cf}\p{Z}\s]/gu;
 
 const FILE_NAME_MAX_CODE_POINTS = 80;
 const FILE_NAME_FALLBACK = "conversation";
 const TEXT_EXTENSION = ".txt";
 
-// Names Windows refuses for a file whatever its extension: "CON.txt" is still
-// the console device.
-const RESERVED_WINDOWS_NAMES = new Set([
+// Device names Windows refuses as the part of a filename before its first
+// dot, whatever follows: "CON.txt" and "LPT1.notes.txt" are both devices.
+// The superscript digits are reserved too.
+const RESERVED_WINDOWS_STEMS = new Set([
     "con",
     "prn",
     "aux",
     "nul",
-    ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
-    ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+    ..."0123456789\u00b9\u00b2\u00b3"
+        .split("")
+        .flatMap((digit) => [`com${digit}`, `lpt${digit}`]),
 ]);
 
 /**
@@ -129,25 +139,33 @@ const RESERVED_WINDOWS_NAMES = new Set([
  * is a header injection), bidirectional controls (an RLO can make "txt.exe"
  * display as "exe.txt"), leading dots (a hidden file) and trailing dots and
  * spaces (Windows drops them, so the name on disk would differ from the one
- * sent). The characters no filesystem accepts become "-".
+ * sent). The characters no filesystem accepts become "-". A name left with
+ * nothing visible is the generic name, and a Windows device stem gets a
+ * suffix on the stem itself, where the reservation is decided.
  */
 export function sanitizeFileName(name: string) {
-    const cleaned = Array.from(
+    const cleaned = trimFileName(
         name
-            .replace(/[\x00-\x1f\x7f]/g, " ")
-            .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
+            .replace(CONTROL_CHARACTERS, " ")
+            .replace(BIDI_CONTROLS, "")
             .replace(/[/\\?%*:|"<>]/g, "-")
-            .trim()
-    )
+    );
+    if (!cleaned.replace(INVISIBLE, "")) return FILE_NAME_FALLBACK;
+
+    const dot = cleaned.indexOf(".");
+    const stem = dot === -1 ? cleaned : cleaned.slice(0, dot);
+    if (!RESERVED_WINDOWS_STEMS.has(stem.trim().toLowerCase())) return cleaned;
+    return trimFileName(
+        `${stem.trim()}-${FILE_NAME_FALLBACK}${dot === -1 ? "" : cleaned.slice(dot)}`
+    );
+}
+
+function trimFileName(value: string) {
+    return Array.from(value.trim())
         .slice(0, FILE_NAME_MAX_CODE_POINTS)
         .join("")
         .replace(/^[.\s]+/, "")
         .replace(/[.\s]+$/, "");
-    if (!cleaned) return FILE_NAME_FALLBACK;
-    const stem = cleaned.split(".")[0].trim().toLowerCase();
-    return RESERVED_WINDOWS_NAMES.has(stem)
-        ? `${cleaned}-${FILE_NAME_FALLBACK}`
-        : cleaned;
 }
 
 /**
