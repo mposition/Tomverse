@@ -28,6 +28,7 @@ import {
 } from "@/lib/feedbackLifecycleCore";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import { adminFetch } from "@/lib/adminFetch";
 
 type FeedbackInboxMessages = AdminMessageShape<
   (typeof adminFeedbackInboxMessages)["en"]
@@ -263,7 +264,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     if (busyId) return false;
     setBusyId(id);
     try {
-      const response = await fetch(`/api/admin/feedback/${id}`, {
+      const response = await adminFetch(`/api/admin/feedback/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

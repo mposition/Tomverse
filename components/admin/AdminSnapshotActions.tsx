@@ -5,6 +5,7 @@ import { Clipboard, Mail } from "lucide-react";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminOverviewMessages } from "@/lib/adminMessages/overview";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The two operator actions that used to live inside `AdminOperationsPanel`.
@@ -31,7 +32,7 @@ export function AdminSnapshotActions({ report }: { report: string }) {
     if (sending) return;
     setSending(true);
     try {
-      const response = await fetch("/api/admin/test-email", { method: "POST" });
+      const response = await adminFetch("/api/admin/test-email", { method: "POST" });
       const data = (await response.json().catch(() => null)) as {
         error?: string;
         id?: string | null;

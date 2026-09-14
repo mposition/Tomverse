@@ -28,6 +28,11 @@ import {
   type InfrastructureDashboard,
   type InfrastructureStatus,
 } from "@/lib/infrastructureTypes";
+import { adminFetch } from "@/lib/adminFetch";
+import {
+  shouldIssueAdminPoll,
+  type AdminPollTrigger,
+} from "@/lib/adminPollTick";
 
 const REFRESH_INTERVAL_MS = 10 * 60_000;
 
@@ -105,11 +110,27 @@ export function AdminInfrastructurePanel({
   const [creditUsd, setCreditUsd] = useState("");
   const [creditNote, setCreditNote] = useState("");
 
-  const load = useCallback(async () => {
+  // Not state: a re-render must not be able to clear it, and nothing renders
+  // from it. Read and written inside one synchronous stretch of `load`.
+  const inFlight = useRef(false);
+
+  const load = useCallback(async (trigger: AdminPollTrigger = "manual") => {
+    if (
+      !shouldIssueAdminPoll({
+        inFlight: inFlight.current,
+        documentVisible:
+          typeof document === "undefined" ||
+          document.visibilityState === "visible",
+        trigger,
+      })
+    ) {
+      return;
+    }
+    inFlight.current = true;
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/admin/infrastructure", {
+      const response = await adminFetch("/api/admin/infrastructure", {
         cache: "no-store",
       });
       const payload = (await response.json().catch(() => null)) as
@@ -137,14 +158,17 @@ export function AdminInfrastructurePanel({
           : messagesRef.current.loadFailed
       );
     } finally {
+      inFlight.current = false;
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    queueMicrotask(() => void load());
-    const timer = window.setInterval(() => void load(), REFRESH_INTERVAL_MS);
-    const refresh = () => void load();
+    queueMicrotask(() => void load("manual"));
+    // Ten minutes, and until now it kept running in a background tab with
+    // nobody reading it. `shouldIssueAdminPoll` decides; the timer only asks.
+    const timer = window.setInterval(() => void load("interval"), REFRESH_INTERVAL_MS);
+    const refresh = () => void load("event");
     window.addEventListener("admin:refresh", refresh);
     return () => {
       window.clearInterval(timer);
@@ -163,7 +187,7 @@ export function AdminInfrastructurePanel({
     if (!creditValid || saving) return;
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/infrastructure", {
+      const response = await adminFetch("/api/admin/infrastructure", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

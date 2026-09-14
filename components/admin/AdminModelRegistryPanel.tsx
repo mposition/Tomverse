@@ -19,6 +19,11 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminModelRegistryMessages } from "@/lib/adminMessages/modelRegistry";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
@@ -37,6 +42,7 @@ import {
 } from "@/lib/adminModelRegistryFilters";
 import { AI_PROVIDERS, PROVIDER_API_CONFIGURATION } from "@/lib/modelRegistryShared";
 import { ModelLogo } from "@/components/chat/ModelLogo";
+import { adminFetch } from "@/lib/adminFetch";
 
 type EnvironmentStatus = {
   compatible: boolean;
@@ -225,6 +231,12 @@ export function AdminModelRegistryPanel() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedProvider = searchParams.get("provider");
+  const { locale: apiLocale } = useAdminLocale();
+  // Disabling a model is a two-person action, so this endpoint answers 409
+  // with an approval id and 428 when the sign-in is stale. Both were read as
+  // `data.error` and thrown, which told the operator to retry a request that
+  // had already been accepted, and named a remedy with no way to reach it.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [models, setModels] = useState<AdminModel[]>([]);
   const [securityFindings, setSecurityFindings] = useState<RegistrySecurityFinding[]>([]);
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
@@ -328,19 +340,26 @@ export function AdminModelRegistryPanel() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [validation, setValidation] = useState<EnvironmentStatus | null>(null);
+  // When the server said it read this list. Sent back on a save so the server
+  // can refuse a write based on a row that has moved since -- usually moved by
+  // catalogue reconciliation rather than by a second operator, which is why
+  // this matters in a one-person organisation at all.
+  const [readAt, setReadAt] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/models", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/models", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as {
         models?: AdminModel[];
         securityFindings?: RegistrySecurityFinding[];
+        readAt?: string;
         error?: string;
       } | null;
       if (!response.ok || !data?.models) throw new Error(data?.error || m.toast.loadFailed);
       setModels(data.models);
       setSecurityFindings(data.securityFindings || []);
+      setReadAt(data.readAt ?? null);
     } catch (error) {
       dispatchAppToast(error instanceof Error ? error.message : m.toast.loadFailed, "error");
     } finally {
@@ -364,7 +383,7 @@ export function AdminModelRegistryPanel() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(
+        const response = await adminFetch(
           `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({ workItemId: adoptParam })}`,
           { cache: "no-store" }
         );
@@ -545,7 +564,7 @@ export function AdminModelRegistryPanel() {
       };
       void (async () => {
         try {
-          const response = await fetch(
+          const response = await adminFetch(
             `${ADOPTION_DRAFT_PATH}?${new URLSearchParams({
               workItemId: adoptWorkItemId,
               modelId: adoptedModelId,
@@ -767,7 +786,7 @@ export function AdminModelRegistryPanel() {
   const validate = async () => {
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/models", {
+      const response = await adminFetch("/api/admin/models", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
@@ -798,20 +817,46 @@ export function AdminModelRegistryPanel() {
               adoptWorkItemId
             )}&reason=${encodeURIComponent(adoptReason.trim())}`
           : "/api/admin/models";
-      const response = await fetch(
-        isNew ? createUrl : `/api/admin/models/${encodeURIComponent(form.id)}`,
+      // Creating cannot be stale -- there is no row yet to have moved.
+      const updateUrl = readAt
+        ? `/api/admin/models/${encodeURIComponent(form.id)}?readAt=${encodeURIComponent(readAt)}`
+        : `/api/admin/models/${encodeURIComponent(form.id)}`;
+      const response = await adminFetch(
+        isNew ? createUrl : updateUrl,
         {
           method: isNew ? "POST" : "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(isNew ? form : updatePayload),
         }
       );
-      const data = (await response.json().catch(() => null)) as { model?: AdminModel; error?: string } | null;
-      if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.saveFailed);
+      const data = (await response.json().catch(() => null)) as
+        | {
+            model?: AdminModel;
+            readAt?: string;
+            error?: string;
+            code?: string;
+            approvalId?: string;
+          }
+        | null;
+      if (!response.ok || !data?.model) {
+        const outcome = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: m.toast.saveFailed,
+          locale: apiLocale,
+        });
+        setApiFailure(outcome);
+        throw new Error(outcome.message);
+      }
       setModels((current) => {
         const next = current.filter((model) => model.id !== data.model!.id);
         return [...next, data.model!].sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
       });
+      // The operator's own write moved the row, so the next save must not be
+      // refused as a conflict with themselves.
+      if (data.readAt) setReadAt(data.readAt);
       setEditingId(null);
       setCopySourceId(null);
       setValidation(null);
@@ -839,9 +884,22 @@ export function AdminModelRegistryPanel() {
     if (!window.confirm(m.toast.archiveConfirm(model.name))) return;
     setSaving(true);
     try {
-      const response = await fetch(`/api/admin/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
-      const data = (await response.json().catch(() => null)) as { model?: AdminModel; error?: string } | null;
-      if (!response.ok || !data?.model) throw new Error(data?.error || m.toast.archiveFailed);
+      const response = await adminFetch(`/api/admin/models/${encodeURIComponent(model.id)}`, { method: "DELETE" });
+      const data = (await response.json().catch(() => null)) as
+        | { model?: AdminModel; error?: string; code?: string; approvalId?: string }
+        | null;
+      if (!response.ok || !data?.model) {
+        const outcome = describeAdminApiFailure({
+          status: response.status,
+          error: data?.error,
+          code: data?.code,
+          approvalId: data?.approvalId,
+          fallback: m.toast.archiveFailed,
+          locale: apiLocale,
+        });
+        setApiFailure(outcome);
+        throw new Error(outcome.message);
+      }
       await load();
       setEditingId(null);
       setCopySourceId(null);
@@ -886,6 +944,7 @@ export function AdminModelRegistryPanel() {
 
   return (
     <section className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80" data-testid="model-registry-panel">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="flex flex-col gap-4 border-b border-zinc-800 bg-zinc-900/50 p-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-blue-300">{m.header.eyebrow}</p>

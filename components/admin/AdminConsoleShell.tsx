@@ -23,6 +23,7 @@ import { localizeAdminPageMeta } from "@/lib/adminNavigationLocale";
 import { adminShellMessages } from "@/lib/adminMessages/shell";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import type { AdminRole } from "@/lib/adminAuthCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The automatic-refresh period, and the only place it is written down.
@@ -159,7 +160,7 @@ function AdminConsoleChrome({
     setLoadingAlerts(true);
     setAlertsFailure(null);
     try {
-      const response = await fetch("/api/admin/notifications?take=5&status=all", {
+      const response = await adminFetch("/api/admin/notifications?take=5&status=all", {
         // Ten seconds, because a drawer that spins forever is the same defect
         // as one that lies: the operator learns nothing either way.
         signal: AbortSignal.timeout(10_000),

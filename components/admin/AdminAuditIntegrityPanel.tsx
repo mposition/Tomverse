@@ -6,6 +6,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
 import { adminAuditIntegrityMessages } from "@/lib/adminMessages/auditIntegrity";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Integrity = {
   configured: boolean;
@@ -176,7 +177,7 @@ export function AdminAuditIntegrityPanel() {
     setEntry(null);
     setDiagnosis(null);
     try {
-      const response = await fetch("/api/admin/audit-integrity", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/audit-integrity", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { integrity?: Integrity; error?: string } | null;
       if (!response.ok || !data?.integrity) throw new Error(data?.error || m.toast.verificationFailed);
       setIntegrity(data.integrity);
@@ -205,7 +206,7 @@ export function AdminAuditIntegrityPanel() {
   const diagnose = async (auditId: string) => {
     setDiagnosing(auditId);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/audit/${encodeURIComponent(auditId)}/diagnose`,
         { cache: "no-store" }
       );
@@ -229,7 +230,7 @@ export function AdminAuditIntegrityPanel() {
   const loadEntry = async (auditId: string) => {
     setEntryLoading(true);
     try {
-      const response = await fetch(`/api/admin/audit/${encodeURIComponent(auditId)}`, { cache: "no-store" });
+      const response = await adminFetch(`/api/admin/audit/${encodeURIComponent(auditId)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { audit?: AuditEntry; error?: string } | null;
       if (!response.ok || !data?.audit) throw new Error(data?.error || m.toast.entryNotFound);
       setEntry(data.audit);

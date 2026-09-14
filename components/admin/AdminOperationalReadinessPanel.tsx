@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Save } from "lucide-re
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminOperationalReadinessMessages } from "@/lib/adminMessages/operationalReadiness";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Checkpoint = {
   key: string;
@@ -37,7 +38,7 @@ function CheckpointCard({ row, onSaved }: { row: Checkpoint; onSaved: (rows: Che
   const save = async () => {
     setSaving(true);
     try {
-      const response = await fetch("/api/admin/operational-checkpoints", {
+      const response = await adminFetch("/api/admin/operational-checkpoints", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -100,7 +101,7 @@ export function AdminOperationalReadinessPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/operational-checkpoints", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/operational-checkpoints", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as { checkpoints?: Checkpoint[]; error?: string } | null;
       if (!response.ok || !data?.checkpoints) throw new Error(data?.error || messagesRef.current.toast.loadFailed);
       setRows(data.checkpoints);

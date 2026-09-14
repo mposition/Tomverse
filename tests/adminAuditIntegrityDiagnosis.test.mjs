@@ -40,7 +40,7 @@ test("the panel can resolve the id it names", () => {
     );
     assert.match(
         panel,
-        /fetch\(\s*`\/api\/admin\/audit\/\$\{/,
+        /adminFetch\(\s*`\/api\/admin\/audit\/\$\{/,
         "naming the failing entry without fetching it is the defect this file exists for"
     );
     assert.ok(

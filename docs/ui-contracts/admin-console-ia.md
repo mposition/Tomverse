@@ -27,7 +27,10 @@
 | Health score and its breakdown | `lib/adminHealthScore.ts`, `components/admin/AdminHealthScorePanel.tsx` |
 | Overview figures, derived from reads that may have failed | `lib/adminOverviewFigures.ts` |
 | Notification drawer state | `lib/adminAlertsDrawer.ts` |
-| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/adminOverviewFigures.test.mjs`, `tests/e2e-admin/**` |
+| Request deadline for every panel | `lib/adminFetch.ts` |
+| Whether a polling panel may issue a request | `lib/adminPollTick.ts` |
+| Refusal copy, and the notice that renders it | `lib/adminApiOutcome.ts`, `components/admin/AdminApiFailureNotice.tsx` |
+| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/adminOverviewFigures.test.mjs`, `tests/adminFetchDeadline.test.mjs`, `tests/adminPollTick.test.mjs`, `tests/adminWriteRouteGuards.test.mjs`, `tests/adminReauthenticationCta.test.mjs`, `tests/e2e-admin/**` |
 
 ## The navigation
 
@@ -127,11 +130,25 @@ never its own `tab`, which the lookup has already consumed.
    remedy and gives no way to reach it, so the screen reads as broken rather
    than gated and the only exit anyone finds is guessing a URL.
 
-   This has been got wrong three times. `tests/adminReauthenticationCta.test.mjs`
-   now fails any panel under `components/admin/` that can see a step-up
-   refusal and cannot render that link. A panel that already has the banner
-   raises its existing flag rather than adding a second way to say the same
-   thing.
+   This has been got wrong three times, and the test written to stop it asked
+   the question from the wrong end. It checked that a panel which *handles* a
+   refusal renders the link -- so a panel that never looked at the status
+   passed for free, carrying none of the markers the sweep searched for. Four
+   panels calling routes that answer 428 were in exactly that state on
+   2026-09-14, invisible to the test written to prevent it, which is worse than
+   having no test.
+
+   `tests/adminReauthenticationCta.test.mjs` now asks from the server end.
+   Which routes can answer 409 or 428 is a fact about the route files --
+   `adminApprovalErrorResponse` is the only thing that produces either -- and
+   which panels reach them is a fact about the paths they name. Every panel in
+   that intersection must read the answer (`readAdminApiFailure`) and must
+   offer the way back, directly or through `<AdminApiFailureNotice>`.
+
+   A refusal may be announced twice: a toast that fades and a notice that does
+   not. That is deliberate and is what `PlatformSettingsPanel` already did for
+   its step-up alert -- the toast announces, the notice is the recovery. A test
+   asserting the copy scopes itself to the notice.
 
 8. **The console states only what it read.** Three separate surfaces broke
    this and each one sent an operator somewhere wrong, so it is a rule rather
@@ -184,7 +201,31 @@ never its own `tab`, which the lookup has already consumed.
     optional Discord webhook dearer than a provider running limited and drove
     correctly-configured deployments toward zero.
 
-11. **Role, re-authentication, two-person approval, audit, credit/cost and
+11. **No admin request may be unable to end.** Every panel fetch goes through
+    `adminFetch()` (`lib/adminFetch.ts`), which is `fetch` with a deadline and
+    nothing else. Thirty-three of thirty-four fetching panels had none: a
+    request with no deadline does not fail, it hangs, and a panel spinning
+    forever teaches an operator no more than one that lies. A bare `fetch(`
+    under `components/admin/` fails `tests/adminFetchDeadline.test.mjs`.
+
+    **And a polling panel issues one request at a time.** `shouldIssueAdminPoll()`
+    decides; the timer only asks. Neither polling panel tracked an in-flight
+    request, so a slow endpoint made ticks stack, an early `finally` cleared the
+    spinner belonging to a request still open, and a late response overwrote
+    newer data -- all silent. Interval ticks also stop in a background tab,
+    which one of the two already did and the other did not.
+
+12. **A write that would revert an unseen change is refused.**
+    `PATCH /api/admin/models/{id}` writes the whole submitted body, so a save
+    from a stale form reverts whatever ran in between -- usually catalogue
+    reconciliation rather than a second operator, which is why this matters in
+    a one-person organisation. The list read is stamped server-side and echoed
+    back as `?readAt=`; `modelRegistryWriteFreshness()` decides, and a stale
+    write answers 409 `MODEL_REGISTRY_STALE_READ` rather than applying. An
+    unparseable `readAt` is refused rather than ignored: a guard that fails
+    open on a malformed value is not one.
+
+13. **Role, re-authentication, two-person approval, audit, credit/cost and
    provider-budget policy are out of scope for this contract** and were not
    changed by it. `writeRoles` in the route table drives the sidebar's "Read"
    marker only; authorization is still decided server-side by

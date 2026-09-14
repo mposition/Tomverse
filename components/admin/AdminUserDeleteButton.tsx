@@ -3,8 +3,17 @@
 import { useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  readAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminUserDeleteMessages } from "@/lib/adminMessages/userDelete";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import {
+  useAdminLocale,
+  useAdminMessages,
+} from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Props = {
   userId: string;
@@ -18,9 +27,15 @@ export function AdminUserDeleteButton({
   label,
 }: Props) {
   const m = useAdminMessages(adminUserDeleteMessages);
+  const { locale: apiLocale } = useAdminLocale();
   const [isArmed, setIsArmed] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  // Deleting an account is the console's most destructive write, and it is
+  // gated on a two-person approval. Reporting the resulting 409 as a plain
+  // failure tells the operator to try again -- the request has already been
+  // accepted and is waiting for a second administrator.
+  const [failure, setFailure] = useState<AdminApiFailure | null>(null);
   const isCurrentAdmin = Boolean(currentUserId && currentUserId === userId);
 
   const handleDelete = async () => {
@@ -41,16 +56,19 @@ export function AdminUserDeleteButton({
 
     setIsDeleting(true);
     try {
-      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      const response = await adminFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm: true, confirmText }),
       });
-      const data = (await response.json().catch(() => null)) as
-        | { error?: string }
-        | null;
       if (!response.ok) {
-        throw new Error(data?.error || m.toast.failed);
+        const outcome = await readAdminApiFailure(response, {
+          fallback: m.toast.failed,
+          locale: apiLocale,
+        });
+        setFailure(outcome);
+        dispatchAppToast(outcome.message, outcome.tone);
+        return;
       }
       dispatchAppToast(m.toast.deleted, "success");
       window.location.reload();
@@ -66,6 +84,7 @@ export function AdminUserDeleteButton({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
+      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
       {isArmed ? (
         <input
           value={confirmText}

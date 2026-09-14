@@ -14,6 +14,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import { adminAddressRevealMessages } from "@/lib/adminMessages/addressReveal";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import type { AddressRevealKind } from "@/lib/emailAddressMaskingCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The reveal, and the cells that answer to it.
@@ -121,7 +122,7 @@ export function AdminRevealAddressesButton({
     if (busy || revealed) return;
     setBusy(true);
     try {
-      const response = await fetch("/api/admin/email-deliveries/reveal", {
+      const response = await adminFetch("/api/admin/email-deliveries/reveal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind, ids }),

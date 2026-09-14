@@ -3,9 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, OctagonX, RefreshCw, ShieldAlert } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminMemoryRevocationMessages } from "@/lib/adminMessages/memoryRevocation";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import {
+  useAdminLocale,
+  useAdminMessages,
+} from "@/components/admin/AdminLocaleProvider";
 import type { AdminMessageShape } from "@/lib/adminLocale";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The §12.1 emergency revocation control.
@@ -63,6 +72,12 @@ export function AdminMemoryRevocationPanel() {
     useEffect(() => {
         messagesRef.current = m;
     }, [m]);
+    const { locale: apiLocale } = useAdminLocale();
+    // The revocation write is gated on a recent sign-in and on a second
+    // administrator. Both answers were being thrown as bare strings, so a
+    // queued approval read as a failure and a stale step-up window offered no
+    // way back -- rule 7 of docs/ui-contracts/admin-console-ia.md.
+    const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
     const [data, setData] = useState<RevocationResponse | null>(null);
     const [selected, setSelected] = useState<string[]>([]);
     const [extraLabels, setExtraLabels] = useState("");
@@ -81,7 +96,7 @@ export function AdminMemoryRevocationPanel() {
 
     const load = useCallback(async () => {
         try {
-            const response = await fetch(
+            const response = await adminFetch(
                 "/api/admin/memory-extraction/revocations",
                 { cache: "no-store" }
             );
@@ -124,7 +139,7 @@ export function AdminMemoryRevocationPanel() {
         setIsSaving(true);
         setProblems([]);
         try {
-            const response = await fetch(
+            const response = await adminFetch(
                 "/api/admin/memory-extraction/revocations",
                 {
                     method: "PUT",
@@ -141,9 +156,19 @@ export function AdminMemoryRevocationPanel() {
                 | null;
             if (!response.ok || !body || body.error) {
                 setProblems(body?.problems ?? []);
-                throw new Error(
-                    body?.error || m.error.saveFailed
-                );
+                const refusal = body as
+                    | { code?: string | null; approvalId?: string | null }
+                    | null;
+                const outcome = describeAdminApiFailure({
+                    status: response.status,
+                    error: body?.error,
+                    code: refusal?.code,
+                    approvalId: refusal?.approvalId,
+                    fallback: m.error.saveFailed,
+                    locale: apiLocale,
+                });
+                setApiFailure(outcome);
+                throw new Error(outcome.message);
             }
             apply(body);
             setExtraLabels("");
@@ -176,6 +201,7 @@ export function AdminMemoryRevocationPanel() {
             data-testid="admin-memory-revocation-panel"
             className="overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950/80 shadow-2xl shadow-black/20"
         >
+            {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900/60 p-5">
                 <div>
                     <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">

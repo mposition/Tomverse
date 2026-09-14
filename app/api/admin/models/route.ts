@@ -219,6 +219,11 @@ export async function GET(req: Request) {
     return NextResponse.json({
       models: models.map(adminModel),
       securityFindings,
+      // When this list was read, stamped by the server so no browser clock is
+      // involved. The panel sends it back on a write, and the write is refused
+      // if the row has moved since -- see the PATCH handler in
+      // `app/api/admin/models/[modelId]/route.ts`.
+      readAt: new Date().toISOString(),
     });
   } catch (error) {
     const response = apiSecurityResponse(error);
