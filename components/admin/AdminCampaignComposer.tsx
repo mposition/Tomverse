@@ -86,6 +86,18 @@ export function AdminCampaignComposer({
     update("features", features);
   };
 
+  const updateMedia = (
+    key: "posterUrl" | "alt" | "badge",
+    value: string
+  ) => {
+    update("media", {
+      posterUrl: current.media?.posterUrl ?? "",
+      alt: current.media?.alt ?? "",
+      badge: current.media?.badge ?? "",
+      [key]: value,
+    });
+  };
+
   const request = async (path: string) => {
     const response = await adminFetch(path, {
       method: "POST",
@@ -252,6 +264,59 @@ export function AdminCampaignComposer({
                 className={inputClass}
               />
             </label>
+            {current.media ? (
+              <fieldset className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4">
+                <legend className="px-1 text-xs font-bold uppercase tracking-wider text-teal-300">
+                  {m.media}
+                </legend>
+                <label className="text-xs font-bold text-zinc-400">
+                  {m.mediaPosterUrl}
+                  <input
+                    type="url"
+                    value={current.media.posterUrl}
+                    onChange={(event) =>
+                      updateMedia("posterUrl", event.target.value)
+                    }
+                    className={inputClass}
+                  />
+                </label>
+                <label className="mt-3 block text-xs font-bold text-zinc-400">
+                  {m.mediaAlt}
+                  <input
+                    value={current.media.alt}
+                    onChange={(event) => updateMedia("alt", event.target.value)}
+                    className={inputClass}
+                  />
+                </label>
+                <label className="mt-3 block text-xs font-bold text-zinc-400">
+                  {m.mediaBadge}
+                  <input
+                    value={current.media.badge}
+                    onChange={(event) =>
+                      updateMedia("badge", event.target.value)
+                    }
+                    className={inputClass}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => update("media", null)}
+                  className="mt-3 text-xs font-bold text-zinc-400 underline underline-offset-4 transition hover:text-zinc-200"
+                >
+                  {m.removeMedia}
+                </button>
+              </fieldset>
+            ) : (
+              <button
+                type="button"
+                onClick={() =>
+                  update("media", { posterUrl: "", alt: "", badge: "" })
+                }
+                className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm font-bold text-zinc-200 transition hover:border-teal-500 hover:text-white"
+              >
+                {m.addMedia}
+              </button>
+            )}
             {current.features.map((feature, index) => (
               <fieldset
                 key={index}
