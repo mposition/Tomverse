@@ -53,11 +53,7 @@ export async function AdminEmailCampaignsPanel({
         {m.intro}
       </p>
       <p className="mt-2 max-w-3xl text-xs leading-5 text-zinc-500">
-        {m.draftingBefore(limit)}{" "}
-        <code className="rounded bg-zinc-900 px-1 py-0.5 text-zinc-300">
-          POST /api/admin/email-campaigns
-        </code>{" "}
-        {m.draftingAfter}
+        {m.draftingBefore(limit)}
       </p>
 
       {rows.length === 0 ? (

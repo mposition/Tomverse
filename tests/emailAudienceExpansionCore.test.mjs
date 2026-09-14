@@ -169,7 +169,11 @@ test("an all_users event still means everybody", () => {
 });
 
 test("a segment with either kind of audience is allowed", () => {
-  for (const spec of [{ userIds: ["u1"] }, { cohort: cohortSpec }]) {
+  for (const spec of [
+    { userIds: ["u1"] },
+    { cohort: cohortSpec },
+    { cohort: { kind: "marketing_consent", purpose: "product_updates" } },
+  ]) {
     assert.equal(
       expansionRefusal({
         audienceKind: "user_segment",
@@ -180,6 +184,21 @@ test("a segment with either kind of audience is allowed", () => {
       JSON.stringify(spec)
     );
   }
+});
+
+test("a marketing cohort requires the exact consent purpose", () => {
+  assert.deepEqual(
+    readExpansionSpec({
+      cohort: { kind: "marketing_consent", purpose: "product_updates" },
+    }).cohort,
+    { kind: "marketing_consent", purpose: "product_updates" }
+  );
+  assert.equal(
+    readExpansionSpec({
+      cohort: { kind: "marketing_consent", purpose: "newsletter" },
+    }).cohort,
+    undefined
+  );
 });
 
 test("an empty userIds list is nobody, not everybody", () => {

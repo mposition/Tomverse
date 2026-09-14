@@ -13,6 +13,11 @@ import {
 import { buildEmailLoginCodeEmail } from "@/lib/emailLoginEmails";
 import { buildModelLaunchEmail } from "@/lib/modelLaunchEmail";
 import type { ModelLaunchPayload } from "@/lib/modelLaunchEmail";
+import {
+  buildProductAnnouncementEmail,
+  PRODUCT_ANNOUNCEMENT_PLACEHOLDER,
+  type ProductAnnouncementPayload,
+} from "@/lib/productAnnouncementEmail";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 import {
@@ -137,6 +142,7 @@ export const BILLING_WELCOME_TEMPLATE = "billing_welcome";
 export const AUTH_LOGIN_CODE_TEMPLATE = "auth_login_code";
 export const OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE = "ops_model_lifecycle_daily";
 export const MODEL_LAUNCH_TEMPLATE = "model_launch";
+export const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
 /**
  * Three keys rather than one with a phase field.
  *
@@ -216,8 +222,18 @@ const definitions: AnyDefinition[] = [
       plans: "{{plans}}",
       highlights: ["{{highlight}}"],
       creditLine: "{{creditLine}}",
-      ctaUrl: "{{ctaUrl}}",
+      ctaUrl: "https://tomverse.app/{{ctaUrl}}",
     },
+  },
+  {
+    key: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+    senderRole: "marketing",
+    classification: "marketing",
+    purpose: "product_updates",
+    requiresUnsubscribe: true,
+    render: (payload: ProductAnnouncementPayload, language) =>
+      buildProductAnnouncementEmail(payload, language),
+    placeholderPayload: PRODUCT_ANNOUNCEMENT_PLACEHOLDER,
   },
   {
     key: OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE,

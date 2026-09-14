@@ -5,9 +5,19 @@ import { after, beforeEach, mock, test } from "node:test";
 import {
   ACCOUNT_WELCOME_TEMPLATE,
   MODEL_LAUNCH_TEMPLATE,
+  PRODUCT_ANNOUNCEMENT_TEMPLATE,
 } from "@/lib/emailTemplateDefinitions";
 import { MARKETING_HALT_SETTING_KEY } from "@/lib/marketingSendHealthCore";
-import { EMAIL_MARKETING_FLAG_KEY } from "@/lib/emailFeatureFlags";
+import {
+  EMAIL_CAMPAIGNS_FLAG_KEY,
+  EMAIL_MARKETING_FLAG_KEY,
+} from "@/lib/emailFeatureFlags";
+import {
+  approveCampaign,
+  createCampaignDraft,
+  runCampaignWave,
+} from "@/lib/emailCampaignService";
+import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import {
   activatePolicyVersion,
   ensureJurisdictionPolicyDraft,
@@ -38,6 +48,7 @@ import { setEmailFeatureFlag } from "../support/emailFeatureFlag";
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
+      "EmailCampaignRecipient", "EmailCampaignWave", "EmailCampaign",
       "EmailDelivery", "EmailEvent", "TemplateVersion", "EmailTemplate",
       "ConsentRecord", "EmailPreference", "SuppressionEntry",
       "JurisdictionCountryMap", "JurisdictionProfile", "EmailPolicyVersion",
@@ -101,6 +112,7 @@ beforeEach(async () => {
   // suite's whole subject is the marketing path, so it has to opt in -- and
   // having to opt in is itself the evidence that the default is off.
   await setEmailFeatureFlag(EMAIL_MARKETING_FLAG_KEY, true);
+  await setEmailFeatureFlag(EMAIL_CAMPAIGNS_FLAG_KEY, true);
 });
 
 after(async () => {
@@ -280,6 +292,47 @@ test("configured, it sends from the marketing domain with one-click headers", as
   const headers = calls[0].body.headers ?? {};
   assert.match(String(headers["List-Unsubscribe"]), /^<https:\/\/.*\/unsubscribe\?t=.+>$/);
   assert.equal(headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+});
+
+test("a consent campaign reaches the provider with its authored content", async () => {
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "US" });
+  const campaign = await createCampaignDraft({
+    category: "other",
+    templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+    locales: ["en"],
+    contentByLocale: { en: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en },
+    audienceSpec: {
+      cohort: { kind: "marketing_consent", purpose: "product_updates" },
+    },
+    createdByEmail: "ops@example.test",
+  });
+  await approveCampaign({
+    campaignId: campaign.id,
+    approvalId: `approval-${randomUUID()}`,
+  });
+  const run = await runCampaignWave({ campaignId: campaign.id, kind: "launch" });
+  assert.ok(!("refused" in run), JSON.stringify(run));
+
+  await drainStandardEmailDeliveries({ limit: 5 });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.subject, ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.subject);
+  assert.ok(calls[0].body.html.includes("Give your AI assistant"));
+  assert.ok(calls[0].body.text.includes("https://tomverse.app/settings/assistants"));
+  assert.match(String(calls[0].body.from), /news@news\.tomverse\.app/);
+  assert.match(
+    String(calls[0].body.headers?.["List-Unsubscribe"]),
+    /^<https:\/\/.*\/unsubscribe\?t=.+>$/
+  );
+  const delivery = await prisma.emailDelivery.findFirstOrThrow({
+    where: { userId: user.id },
+    select: { status: true },
+  });
+  assert.equal(delivery.status, "sent");
 });
 
 test("a Korean subscriber's subject carries the advertising label", async () => {

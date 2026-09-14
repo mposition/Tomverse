@@ -15,6 +15,7 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       default_model: "Their default model",
       new_conversation_lead: "Lead of their new-conversation set",
       conversation_selection: "Selected in a conversation",
+      marketing_consent: "Opted into product updates",
     },
     attestation: {
       differences_stated: "The copy states the capability and credit differences",
@@ -39,6 +40,7 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       started: "Started.",
       measured: "Measured.",
       cancelled: "Cancelled.",
+      testQueued: "Test email queued to your admin address.",
     },
     loading: "Loading the campaign…",
     loadFailed: "This campaign could not be loaded.",
@@ -65,6 +67,18 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       notApproved: "not approved",
     },
     cancelledAt: (when: string, reason: string) => `Cancelled ${when}: ${reason}`,
+    content: {
+      title: "Approved-copy preview",
+      intro:
+        "This is rendered by the same template and campaign payload the delivery lane will use. The sandboxed frame cannot run scripts or navigate the console.",
+      unavailable: "The campaign copy cannot be rendered.",
+      digest: "Copy digest",
+      plainText: "Plain-text alternative",
+      testSend: "Send a test to me",
+      testSending: "Queueing…",
+      testHint:
+        "Uses the real marketing queue. Your admin account must also have product updates enabled, and every normal send-time gate still applies.",
+    },
     gates: {
       title: "What this campaign is waiting on",
       intro:
@@ -135,6 +149,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
         `${count} of them could be moved automatically.`,
       malformed: (count: number) =>
         `${count} could not, because a stored value the parser cannot read is preserved rather than rewritten — promising those accounts an automatic change would be untrue.`,
+      consentBreakdown: (consented: number, active: number, withEmail: number) =>
+        `${consented} have a timestamped opt-in; ${active} are active and ${withEmail} currently have an address. Suppression and jurisdiction are checked at send time.`,
       counting: "Counting…",
       measureAgain: "Measure again",
       measure: "Measure the audience",
@@ -204,6 +220,7 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       default_model: "사용자의 기본 모델",
       new_conversation_lead: "새 대화 기본 조합의 첫 모델",
       conversation_selection: "대화에서 선택된 모델",
+      marketing_consent: "제품 업데이트 수신에 동의함",
     },
     attestation: {
       differences_stated: "문안이 기능 및 크레딧 차이를 명시함",
@@ -229,6 +246,7 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       started: "시작되었습니다.",
       measured: "측정되었습니다.",
       cancelled: "취소되었습니다.",
+      testQueued: "관리자 본인 주소로 테스트 이메일을 대기열에 넣었습니다.",
     },
     loading: "캠페인을 불러오는 중…",
     loadFailed: "이 캠페인을 불러올 수 없습니다.",
@@ -255,6 +273,18 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       notApproved: "승인 안 됨",
     },
     cancelledAt: (when: string, reason: string) => `${when} 취소됨: ${reason}`,
+    content: {
+      title: "승인 문안 미리보기",
+      intro:
+        "실제 발송 lane이 사용할 것과 같은 템플릿과 캠페인 payload로 렌더링한 결과입니다. sandbox 미리보기는 script를 실행하거나 콘솔을 이동할 수 없습니다.",
+      unavailable: "캠페인 문안을 렌더링할 수 없습니다.",
+      digest: "문안 다이제스트",
+      plainText: "텍스트 대체본",
+      testSend: "나에게 테스트 발송",
+      testSending: "대기열에 넣는 중…",
+      testHint:
+        "실제 마케팅 대기열을 사용합니다. 관리자 계정도 제품 업데이트 수신에 동의해야 하며, 일반 발송 시점의 모든 gate가 그대로 적용됩니다.",
+    },
     gates: {
       title: "이 캠페인이 기다리는 것",
       intro:
@@ -323,6 +353,8 @@ export const adminEmailCampaignDetailMessages = defineAdminMessages({
       autoMigratable: (count: number) => `그중 ${count}명은 자동으로 옮길 수 있습니다.`,
       malformed: (count: number) =>
         `${count}명은 옮길 수 없습니다. parser가 읽을 수 없는 저장값은 다시 쓰지 않고 보존하므로, 그 계정들에 자동 변경을 약속하면 사실이 아니게 됩니다.`,
+      consentBreakdown: (consented: number, active: number, withEmail: number) =>
+        `${consented}명이 시각이 기록된 동의를 했고, 그중 ${active}명이 활성 계정이며 ${withEmail}명은 현재 이메일 주소가 있습니다. 수신 차단과 관할권은 발송 시점에 확인합니다.`,
       counting: "세는 중…",
       measureAgain: "다시 측정",
       measure: "audience 측정",

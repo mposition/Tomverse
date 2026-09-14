@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
-import { MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  MODEL_LAUNCH_TEMPLATE,
+  PRODUCT_ANNOUNCEMENT_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import {
+  decryptSnapshot,
+  readSnapshotKeyring,
+} from "@/lib/emailSnapshotCrypto";
+import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import { observeOperationalIncidents } from "@/lib/operationalMonitoring";
 import { prisma } from "@/lib/prisma";
 import {
@@ -168,6 +176,53 @@ test("changing the copy after approval refuses the send", async () => {
   );
 });
 
+test("a campaign sends the authored locale payload that was approved", async () => {
+  const ids = await accounts(2);
+  await prisma.userSettings.createMany({
+    data: [
+      { userId: ids[0], language: "ko" },
+      // French was not authored. It may only fall back to approved English.
+      { userId: ids[1], language: "fr" },
+    ],
+  });
+  const campaign = await createCampaignDraft({
+    category: "other",
+    templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+    locales: ["ko", "en"],
+    contentByLocale: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT,
+    audienceSpec: { userIds: ids },
+    createdByEmail: "ops@example.test",
+  });
+  await approveCampaign({ campaignId: campaign.id, approvalId: "appr-authored" });
+  const run = await runCampaignWave({ campaignId: campaign.id, kind: "launch" });
+  assert.ok(!("refused" in run), JSON.stringify(run));
+
+  const deliveries = await prisma.emailDelivery.findMany({
+    orderBy: { userId: "asc" },
+    select: { language: true, renderDataSnapshot: true },
+  });
+  assert.deepEqual(
+    deliveries.map((delivery) => delivery.language),
+    ["ko", "en"]
+  );
+  const keyring = readSnapshotKeyring(process.env);
+  assert.ok(keyring);
+  assert.equal(
+    decryptSnapshot<{ subject: string }>(
+      deliveries[0].renderDataSnapshot,
+      keyring
+    ).subject,
+    ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.ko.subject
+  );
+  assert.equal(
+    decryptSnapshot<{ subject: string }>(
+      deliveries[1].renderDataSnapshot,
+      keyring
+    ).subject,
+    ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.subject
+  );
+});
+
 test("a locale added after approval is refused rather than sent unapproved", async () => {
   const ids = await accounts(2);
   const campaign = await draft(ids, ["en"]);
@@ -196,6 +251,29 @@ test("running the same wave twice does not send twice", async () => {
 
   assert.equal(await prisma.emailDelivery.count(), after);
   assert.equal(await prisma.emailCampaignWave.count(), 1, "and no second wave row");
+});
+
+test("two concurrent starts create one event and one delivery per recipient", async () => {
+  const ids = await accounts(4);
+  const campaign = await draft(ids);
+  await approveCampaign({ campaignId: campaign.id, approvalId: "appr-concurrent" });
+
+  const [first, second] = await Promise.all([
+    runCampaignWave({ campaignId: campaign.id, kind: "launch" }),
+    runCampaignWave({ campaignId: campaign.id, kind: "launch" }),
+  ]);
+
+  assert.ok(!("refused" in first), JSON.stringify(first));
+  assert.ok(!("refused" in second), JSON.stringify(second));
+  assert.equal(await prisma.emailCampaignWave.count(), 1);
+  assert.equal(
+    await prisma.emailEvent.count({
+      where: { referenceType: "EmailCampaign", referenceId: campaign.id },
+    }),
+    1,
+    "a second event would defeat delivery idempotency"
+  );
+  assert.equal(await prisma.emailDelivery.count(), ids.length);
 });
 
 test("two kinds of wave are two sends", async () => {

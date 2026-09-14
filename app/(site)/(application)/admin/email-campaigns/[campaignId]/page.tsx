@@ -5,7 +5,7 @@ import { getServerSession } from "next-auth/next";
 
 import { AdminCampaignDetailPanel } from "@/components/admin/AdminCampaignDetailPanel";
 import { authOptions } from "@/lib/auth";
-import { getAdminRole } from "@/lib/adminAuth";
+import { getAdminRole, hasAdminPermission } from "@/lib/adminAuth";
 import { roleMayRevealAddresses } from "@/lib/emailAddressMaskingCore";
 import { readAdminCampaign } from "@/lib/adminEmailCampaigns";
 
@@ -33,14 +33,14 @@ export default async function AdminCampaignDetailPage({
   // Resolved here rather than in the client island, for the reason
   // `/admin/email-delivery` gives: a browser deciding whether it may reveal is
   // a browser that can decide it may. The server refuses regardless.
-  const mayRevealAddresses = roleMayRevealAddresses(
-    getAdminRole(await getServerSession(authOptions))
-  );
+  const session = await getServerSession(authOptions);
+  const mayRevealAddresses = roleMayRevealAddresses(getAdminRole(session));
 
   return (
     <AdminCampaignDetailPanel
       campaignId={campaign.id}
       mayRevealAddresses={mayRevealAddresses}
+      mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
     />
   );
 }

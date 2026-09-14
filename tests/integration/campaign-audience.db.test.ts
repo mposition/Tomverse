@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
-import { MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import {
+  MODEL_LAUNCH_TEMPLATE,
+  PRODUCT_ANNOUNCEMENT_TEMPLATE,
+} from "@/lib/emailTemplateDefinitions";
+import { ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT } from "@/lib/productAnnouncementEmail";
 import { prisma } from "@/lib/prisma";
 import {
   approveCampaign,
@@ -335,6 +339,85 @@ test("the ledger answers what EmailDelivery cannot", async () => {
   assert.equal(await prisma.emailDelivery.count(), 0);
   assert.equal(
     (await ledger(campaign.id))[0].excludedReason,
+    "no_email"
+  );
+});
+
+test("the product update cohort reaches only active accounts with recorded consent", async () => {
+  const createSubscriber = async (input: {
+    enabled: boolean;
+    grantedAt: Date | null;
+    accountStatus?: string;
+    email?: string | null;
+  }) => {
+    seq += 1;
+    return prisma.user.create({
+      data: {
+        id: `subscriber-${String(seq).padStart(3, "0")}-${randomUUID().slice(0, 8)}`,
+        email:
+          input.email === null
+            ? null
+            : (input.email ?? `subscriber-${seq}@example.test`),
+        accountStatus: input.accountStatus ?? "active",
+        settings: { create: { language: "ko" } },
+        emailPreferences: {
+          create: {
+            purpose: "product_updates",
+            enabled: input.enabled,
+            source: "preference_center",
+            grantedAt: input.grantedAt,
+          },
+        },
+      },
+      select: { id: true },
+    });
+  };
+
+  const included = await createSubscriber({ enabled: true, grantedAt: new Date() });
+  const noAddress = await createSubscriber({
+    enabled: true,
+    grantedAt: new Date(),
+    email: null,
+  });
+  await createSubscriber({ enabled: false, grantedAt: null });
+  await createSubscriber({ enabled: true, grantedAt: null });
+  await createSubscriber({
+    enabled: true,
+    grantedAt: new Date(),
+    accountStatus: "suspended",
+  });
+
+  const campaign = await createCampaignDraft({
+    category: "other",
+    templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+    locales: ["ko", "en"],
+    contentByLocale: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT,
+    audienceSpec: {
+      cohort: { kind: "marketing_consent", purpose: "product_updates" },
+    },
+    createdByEmail: "ops@example.test",
+  });
+  await approveCampaign({
+    campaignId: campaign.id,
+    approvalId: `appr-${randomUUID()}`,
+  });
+  const run = await runCampaignWave({ campaignId: campaign.id, kind: "launch" });
+  assert.ok(!("refused" in run), JSON.stringify(run));
+
+  assert.deepEqual(
+    await prisma.emailDelivery.findMany({
+      select: { userId: true, language: true },
+    }),
+    [{ userId: included.id, language: "ko" }]
+  );
+  const rows = await ledger(campaign.id);
+  assert.equal(rows.length, 2);
+  assert.equal(
+    rows.find((row) => row.userId === included.id)?.eligibilityReason,
+    "marketing_consent"
+  );
+  assert.equal(
+    rows.find((row) => row.userId === noAddress.id)?.excludedReason,
     "no_email"
   );
 });
