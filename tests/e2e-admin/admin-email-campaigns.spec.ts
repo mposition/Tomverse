@@ -31,6 +31,13 @@ const CAMPAIGNS_FLAG = "feature.emailCampaignsEnabled";
 
 /** A template key that exists, so `createCampaignDraft` does not reject it. */
 const TEMPLATE_KEY = "model_launch";
+const TEMPLATE_PAYLOAD = {
+  modelName: "GPT-5.6 Luna",
+  plans: "Free, Pro and Max",
+  highlights: ["Text and file input"],
+  creditLine: "Credit usage is shown before sending",
+  ctaUrl: "https://tomverse.app/chat",
+};
 
 const draftCampaign = async (
   api: ReturnType<typeof adminApi>,
@@ -40,6 +47,10 @@ const draftCampaign = async (
     category: "model_retirement",
     templateKey: TEMPLATE_KEY,
     locales: ["en"],
+    contentByLocale: {
+      en: TEMPLATE_PAYLOAD,
+      ko: TEMPLATE_PAYLOAD,
+    },
     audienceSpec: {
       cohort: {
         kind: "model_retirement",

@@ -4,14 +4,44 @@ import { defineAdminMessages } from "@/lib/adminLocale";
 export const adminEmailCampaignsMessages = defineAdminMessages({
   en: {
     eyebrow: "Email",
+    composer: {
+      badge: "Product announcement",
+      title: "New product update",
+      intro:
+        "Edit content in structured fields; Tomverse applies the reusable email design, plain-text version and delivery safeguards.",
+      audience:
+        "Audience: active customers with a timestamped product updates opt-in. Consent, suppression and jurisdiction are checked again before delivery.",
+      readOnly: "Your admin role can review campaigns but cannot create one.",
+      disabled:
+        "Campaign actions are still switched off. You can edit and preview the newsletter now; creating, approving and sending remain unavailable until the existing feature flag is enabled.",
+      locale: "Content language",
+      subject: "Subject",
+      preheader: "Preheader",
+      eyebrow: "Eyebrow",
+      headline: "Headline",
+      introLabel: "Introduction",
+      feature: (index: number) => `Feature ${index}`,
+      featureTitle: "Feature title",
+      featureBody: "Feature description",
+      closing: "Closing",
+      ctaLabel: "Button label",
+      ctaUrl: "Button URL",
+      preview: "Refresh preview",
+      previewing: "Rendering…",
+      create: "Create draft",
+      creating: "Creating…",
+      previewTitle: "Email preview",
+      previewEmpty: "Refresh the preview to inspect the exact email before drafting.",
+      digest: "Copy digest",
+      previewFailed: "The email preview could not be rendered.",
+      createFailed: "The campaign draft could not be created.",
+      created: "Campaign draft created.",
+    },
     list: {
       title: "Campaigns",
       intro:
         "Every campaign this console knows about, newest first. A campaign is a set of waves over one piece of copy; approving it is where a person reads that copy, and it is the only two-person action here.",
-      draftingBefore: (limit: number) =>
-        `Showing the newest ${limit}. Drafting a campaign is done through`,
-      draftingAfter:
-        "— the audience spec is a document the expansion layer owns, and a free-text box for it here would be a worse editor than the request that already validates it.",
+      draftingBefore: (limit: number) => `Showing the newest ${limit}.`,
       empty: "No campaigns have been drafted.",
       columns: {
         campaign: "Campaign",
@@ -54,14 +84,44 @@ export const adminEmailCampaignsMessages = defineAdminMessages({
   },
   ko: {
     eyebrow: "이메일",
+    composer: {
+      badge: "제품 안내",
+      title: "새 제품 업데이트",
+      intro:
+        "구조화된 필드에서 콘텐츠만 편집하면 Tomverse 공통 이메일 디자인, 텍스트 버전과 발송 안전장치가 자동으로 적용됩니다.",
+      audience:
+        "대상: 제품 업데이트 수신에 시각이 기록된 명시적 동의를 한 활성 고객. 실제 발송 직전에도 동의·수신거부·관할권을 다시 확인합니다.",
+      readOnly: "현재 관리자 역할은 캠페인을 검토할 수 있지만 새로 만들 수는 없습니다.",
+      disabled:
+        "캠페인 작업은 아직 비활성화되어 있습니다. 지금도 뉴스레터 편집과 미리보기는 가능하지만, 기존 feature flag를 켜기 전에는 작성·승인·발송할 수 없습니다.",
+      locale: "콘텐츠 언어",
+      subject: "제목",
+      preheader: "미리보기 문구",
+      eyebrow: "상단 라벨",
+      headline: "헤드라인",
+      introLabel: "소개",
+      feature: (index: number) => `기능 ${index}`,
+      featureTitle: "기능 제목",
+      featureBody: "기능 설명",
+      closing: "맺음말",
+      ctaLabel: "버튼 문구",
+      ctaUrl: "버튼 주소",
+      preview: "미리보기 갱신",
+      previewing: "렌더링 중…",
+      create: "초안 만들기",
+      creating: "작성 중…",
+      previewTitle: "이메일 미리보기",
+      previewEmpty: "초안을 만들기 전에 미리보기를 갱신해 실제 이메일을 확인하세요.",
+      digest: "문안 다이제스트",
+      previewFailed: "이메일 미리보기를 만들지 못했습니다.",
+      createFailed: "캠페인 초안을 만들지 못했습니다.",
+      created: "캠페인 초안을 만들었습니다.",
+    },
     list: {
       title: "캠페인",
       intro:
         "이 콘솔이 알고 있는 모든 캠페인을 최신순으로 표시합니다. 캠페인은 하나의 문안에 대한 wave 묶음입니다. 승인은 사람이 그 문안을 읽는 단계이며, 이 화면에서 유일하게 두 사람이 필요한 작업입니다.",
-      draftingBefore: (limit: number) =>
-        `최신 ${limit}개를 표시합니다. 캠페인 초안은`,
-      draftingAfter:
-        "요청으로 작성합니다. audience spec은 expansion 계층이 소유하는 문서이므로, 여기에 자유 입력란을 두면 이미 이를 검증하는 요청보다 못한 편집기가 됩니다.",
+      draftingBefore: (limit: number) => `최신 ${limit}개를 표시합니다.`,
       empty: "작성된 캠페인이 없습니다.",
       columns: {
         campaign: "캠페인",

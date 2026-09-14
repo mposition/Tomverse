@@ -10,6 +10,11 @@ import {
 import { AUDIENCE_COHORTS } from "@/lib/modelRetirementAudienceCore";
 import { WAVE_ORDER } from "@/lib/emailCampaignScheduleCore";
 
+const CAMPAIGN_AUDIENCE_REASONS = [
+  ...AUDIENCE_COHORTS,
+  "marketing_consent",
+] as const;
+
 /**
  * What the campaign console reads.
  *
@@ -398,7 +403,7 @@ export const waveAudienceBreakdown = async (
       }
 
       const cohorts: Record<string, number> = {};
-      for (const cohort of AUDIENCE_COHORTS) cohorts[cohort] = 0;
+      for (const cohort of CAMPAIGN_AUDIENCE_REASONS) cohorts[cohort] = 0;
       for (const row of byCohort.filter((entry) => entry.waveId === wave.id)) {
         if (row.eligibilityReason === null) continue;
         cohorts[row.eligibilityReason] =

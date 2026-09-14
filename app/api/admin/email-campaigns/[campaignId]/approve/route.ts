@@ -171,6 +171,17 @@ export async function POST(req: Request, context: Context) {
     // could never send at all. Closed again automatically the moment a second
     // eligible administrator exists -- condition 6 recomputes per request.
     const alone = soleApproverIsAvailable("email_campaign.approve", session);
+    const currentCopyDigest = await campaignDigest(campaignId);
+    if (body.copyDigest && body.copyDigest !== currentCopyDigest) {
+      return NextResponse.json(
+        {
+          error:
+            "The campaign copy changed after the preview you approved. Refresh and read the current copy before approving it.",
+          code: "CAMPAIGN_COPY_CHANGED",
+        },
+        { status: 409 }
+      );
+    }
 
     try {
       const approved = alone
@@ -186,7 +197,7 @@ export async function POST(req: Request, context: Context) {
                 // Read here, not taken from the request: a confirmation
                 // checked against something the requester supplied confirms
                 // nothing.
-                currentDigest: await campaignDigest(campaignId),
+                currentDigest: currentCopyDigest,
                 submittedDigest: body.copyDigest ?? "",
               },
             },
@@ -210,7 +221,11 @@ export async function POST(req: Request, context: Context) {
           targetId: campaignId,
           // The languages are in the payload, so the hash changes when they do
           // and a stale approval cannot be claimed for a different send.
-          payload: { campaignId, locales: body.locales },
+          payload: {
+            campaignId,
+            locales: body.locales,
+            copyDigest: currentCopyDigest,
+          },
           reason: body.reason,
         },
         async () => {

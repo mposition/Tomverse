@@ -104,11 +104,17 @@ export const expansionRefusal = (input: {
  * answer at the moment it was computed -- which is exactly wrong for a reminder
  * wave, whose whole job is to re-ask who is still affected.
  */
-export type AudienceCohortSpec = {
-  kind: "model_retirement";
-  targetModelId: string;
-  replacementModelId: string;
-};
+export type AudienceCohortSpec =
+  | {
+      kind: "model_retirement";
+      targetModelId: string;
+      replacementModelId: string;
+    }
+  | {
+      /** Active accounts that explicitly opted into this marketing purpose. */
+      kind: "marketing_consent";
+      purpose: "product_updates";
+    };
 
 export type ExpansionSpec = {
   /** Explicit recipients, for a cohort computed somewhere else. */
@@ -143,6 +149,11 @@ export type ExpansionSpec = {
 const readCohortSpec = (raw: unknown): AudienceCohortSpec | undefined => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const value = raw as Record<string, unknown>;
+  if (value.kind === "marketing_consent") {
+    return value.purpose === "product_updates"
+      ? { kind: "marketing_consent", purpose: "product_updates" }
+      : undefined;
+  }
   if (value.kind !== "model_retirement") return undefined;
   const target = value.targetModelId;
   const replacement = value.replacementModelId;

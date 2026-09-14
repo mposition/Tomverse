@@ -1,5 +1,6 @@
 import { EMAIL_FONT_STACK } from "@/lib/emailTypography";
 import { isLanguage, type Language } from "@/lib/language";
+import { normalizeTomverseMarketingUrl } from "@/lib/marketingEmailLayout";
 
 /**
  * "A new model is available" — template A of the model lifecycle set.
@@ -38,6 +39,41 @@ export type ModelLaunchPayload = {
   /** What a message costs, e.g. "Premium tier - 12 credits per message". */
   creditLine: string;
   ctaUrl: string;
+};
+
+const requiredText = (value: unknown, field: string, max: number) => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${field} is required.`);
+  }
+  const text = value.trim();
+  if (text.length > max) throw new Error(`${field} is too long.`);
+  return text;
+};
+
+export const parseModelLaunchPayload = (raw: unknown): ModelLaunchPayload => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error("Model launch content must be an object.");
+  }
+  const value = raw as Record<string, unknown>;
+  if (
+    !Array.isArray(value.highlights) ||
+    value.highlights.length < 1 ||
+    value.highlights.length > 6
+  ) {
+    throw new Error("Model launch content needs between one and six highlights.");
+  }
+  const highlights = value.highlights.map((highlight, index) =>
+    requiredText(highlight, `highlights[${index}]`, 240)
+  );
+  const ctaUrl = requiredText(value.ctaUrl, "ctaUrl", 500);
+  const normalizedCtaUrl = normalizeTomverseMarketingUrl(ctaUrl);
+  return {
+    modelName: requiredText(value.modelName, "modelName", 120),
+    plans: requiredText(value.plans, "plans", 160),
+    highlights,
+    creditLine: requiredText(value.creditLine, "creditLine", 240),
+    ctaUrl: normalizedCtaUrl,
+  };
 };
 
 type Copy = {
@@ -123,9 +159,10 @@ const resolve = (value: string): Language => (isLanguage(value) ? value : "en");
  * key from suppressing the duplicate.
  */
 export function buildModelLaunchEmail(
-  payload: ModelLaunchPayload,
+  raw: ModelLaunchPayload,
   language: string
 ) {
+  const payload = parseModelLaunchPayload(raw);
   const copy = COPY[resolve(language)];
   const lines = [...payload.highlights, payload.creditLine];
 
