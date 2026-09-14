@@ -35,13 +35,42 @@
  */
 export const LEGACY_CONTINUATION_TITLE = "Continued from an imported chat";
 
+/**
+ * The imported conversation's title, when it may be shown at all.
+ *
+ * A locked snapshot withholds its transcript, and its title is part of that
+ * transcript, so a locked source yields nothing here -- even for a request
+ * that holds the snapshot's unlock grant. That is deliberate: this is the
+ * title the conversation list shows, and every other place that names the
+ * conversation (the TXT export's filename and header) has to agree with the
+ * list rather than reveal more than it does.
+ *
+ * `source` is null when the row has no bridge or the source was deleted.
+ */
+export function readableContinuationSourceTitle(
+    source: { title: string | null; password: string | null } | null | undefined
+): string | null {
+    return source && source.password === null ? (source.title ?? null) : null;
+}
+
 export function continuationDisplayTitle({
     storedTitle,
+    isContinuation,
     sourceTitle,
     fallback,
 }: {
     /** `Conversation.title` as stored. */
     storedTitle: string;
+    /**
+     * Whether this row has a continuation bridge.
+     *
+     * Required, not inferred from the title: an ordinary conversation its
+     * owner happened to name exactly like the placeholder is still theirs
+     * (docs/policy/external-conversation-continuation.md §3: a conversation
+     * without a bridge is not affected), and only a bridge says the writer of
+     * that string was the continuation service.
+     */
+    isContinuation: boolean;
     /**
      * The imported conversation's own title, when the server could read it.
      *
@@ -52,7 +81,9 @@ export function continuationDisplayTitle({
     /** A translated placeholder, for a row with neither a name nor a source. */
     fallback: string;
 }): string {
-    if (storedTitle !== LEGACY_CONTINUATION_TITLE) return storedTitle;
+    if (!isContinuation || storedTitle !== LEGACY_CONTINUATION_TITLE) {
+        return storedTitle;
+    }
     const source = sourceTitle?.trim();
     return source ? source : fallback;
 }

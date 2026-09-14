@@ -27,7 +27,10 @@ test("assistant and Knowledge starter copy renders in Korean and English", () =>
     assert.equal(rendered.subject, payload.subject);
     assert.match(rendered.html, /Tomverse/);
     assert.match(rendered.html, /role="presentation"/);
+    assert.match(rendered.html, /<img /);
+    assert.match(rendered.html, /guides\/assistant-knowledge\/poster/);
     assert.ok(rendered.text.includes(payload.ctaUrl));
+    assert.ok(rendered.text.includes(payload.media.alt));
     assert.equal(rendered.html.match(/<a /g)?.length, 1);
   }
 });
@@ -77,6 +80,35 @@ test("product announcement links cannot leave Tomverse", () => {
         ),
       /HTTPS Tomverse domain/
     );
+  }
+});
+
+test("tutorial poster URLs cannot leave Tomverse", () => {
+  assert.throws(
+    () =>
+      buildProductAnnouncementEmail(
+        {
+          ...ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en,
+          media: {
+            ...ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.media,
+            posterUrl: "https://images.example.test/tutorial.png",
+          },
+        },
+        "en"
+      ),
+    /media\.posterUrl must use an HTTPS Tomverse domain/
+  );
+});
+
+test("starter copy teaches three concrete steps before its single CTA", () => {
+  for (const language of ["ko", "en"]) {
+    const payload = ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT[language];
+    assert.equal(payload.features.length, 3);
+    assert.deepEqual(
+      payload.features.map((feature) => feature.title.slice(0, 2)),
+      ["1.", "2.", "3."]
+    );
+    assert.match(payload.ctaUrl, /\/guides\/assistant-knowledge/);
   }
 });
 

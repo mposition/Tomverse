@@ -322,9 +322,10 @@ test("a consent campaign reaches the provider with its authored content", async 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.subject, ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.subject);
   assert.ok(calls[0].body.html.includes("Give your AI assistant"));
-  assert.match(
-    calls[0].body.text,
-    /^Create my AI assistant: https:\/\/tomverse\.app\/settings\/assistants$/m
+  assert.ok(
+    calls[0].body.text.includes(
+      `${ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.ctaLabel}: ${ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.ctaUrl}`
+    )
   );
   assert.match(String(calls[0].body.from), /news@news\.tomverse\.app/);
   assert.match(

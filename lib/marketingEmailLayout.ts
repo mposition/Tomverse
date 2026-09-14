@@ -5,12 +5,19 @@ export type MarketingFeature = {
   body: string;
 };
 
+export type MarketingEmailMedia = {
+  posterUrl: string;
+  alt: string;
+  badge: string;
+};
+
 export type MarketingEmailLayoutInput = {
   language: string;
   preheader: string;
   eyebrow: string;
   headline: string;
   intro: string;
+  media?: MarketingEmailMedia | null;
   features: readonly MarketingFeature[];
   closing?: string | null;
   ctaLabel: string;
@@ -26,12 +33,15 @@ export const escapeEmailHtml = (value: string) =>
     .replace(/'/g, "&#39;");
 
 /** Marketing calls to action stay on an HTTPS Tomverse-owned origin. */
-export const normalizeTomverseMarketingUrl = (value: string): string => {
+export const normalizeTomverseMarketingUrl = (
+  value: string,
+  field = "ctaUrl"
+): string => {
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    throw new Error("ctaUrl must be an absolute URL.");
+    throw new Error(`${field} must be an absolute URL.`);
   }
   const host = parsed.hostname.toLowerCase();
   if (
@@ -41,7 +51,7 @@ export const normalizeTomverseMarketingUrl = (value: string): string => {
     parsed.port !== "" ||
     (host !== "tomverse.app" && !host.endsWith(".tomverse.app"))
   ) {
-    throw new Error("ctaUrl must use an HTTPS Tomverse domain.");
+    throw new Error(`${field} must use an HTTPS Tomverse domain.`);
   }
   return parsed.toString();
 };
@@ -81,6 +91,19 @@ export const renderMarketingEmailLayout = (
     ? `<p style="margin:24px 0 0;color:#3f3f46;font-size:15px;line-height:1.75">${escapeEmailHtml(input.closing)}</p>`
     : "";
 
+  const mediaHtml = input.media
+    ? `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:26px;border-collapse:separate;background:#09090b;border:1px solid #27272a;border-radius:18px;overflow:hidden">
+                <tr>
+                  <td style="padding:0">
+                    <img src="${escapeEmailHtml(input.media.posterUrl)}" width="528" height="277" alt="${escapeEmailHtml(input.media.alt)}" style="display:block;width:100%;max-width:528px;height:auto;border:0;outline:none;text-decoration:none" />
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:13px 16px;color:#ccfbf1;font-size:12px;line-height:1.4;font-weight:800;letter-spacing:0.08em;text-transform:uppercase">▶ ${escapeEmailHtml(input.media.badge)}</td>
+                </tr>
+              </table>`
+    : "";
+
   const html = `<div lang="${escapeEmailHtml(input.language)}" style="margin:0;padding:0;background:#f4f4f5">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeEmailHtml(input.preheader)}</div>
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;background:#f4f4f5">
@@ -97,6 +120,7 @@ export const renderMarketingEmailLayout = (
               <p style="margin:0;color:#0f766e;font-size:11px;line-height:1.4;font-weight:800;letter-spacing:0.16em;text-transform:uppercase">${escapeEmailHtml(input.eyebrow)}</p>
               <h1 style="margin:12px 0 0;color:#18181b;font-size:34px;line-height:1.16;font-weight:900;letter-spacing:-0.035em">${escapeEmailHtml(input.headline)}</h1>
               <p style="margin:18px 0 0;color:#52525b;font-size:16px;line-height:1.75">${escapeEmailHtml(input.intro)}</p>
+              ${mediaHtml}
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-top:28px;border-collapse:collapse">${featuresHtml}</table>
               ${closingHtml}
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-top:30px">
@@ -116,6 +140,9 @@ export const renderMarketingEmailLayout = (
     "",
     input.intro,
     "",
+    ...(input.media
+      ? [`${input.media.badge}`, input.media.alt, ""]
+      : []),
     ...input.features.flatMap((feature) => [
       `${feature.title}`,
       feature.body,
