@@ -292,7 +292,15 @@ test.describe("two-person approval", () => {
     const draft = await database.emailPolicyVersion.findFirstOrThrow();
     expect(draft.status).toBe("draft");
     expect(draft.approvedAt).toBeNull();
-    expect(await database.jurisdictionProfile.count()).toBe(8);
+    // Nine since 2026-09-14: Switzerland left the EU profile for its own, on
+    // Swiss UWG art. 3(1)(o) rather than the ePrivacy Directive
+    // (docs/policy/email-eea-marketing-review-2026-09-14.md section 4.5). The
+    // literal is asserted rather than read off the seed, because a test that
+    // reads the same constant the code does cannot notice the count changing.
+    expect(await database.jurisdictionProfile.count()).toBe(9);
+    expect(
+      await database.jurisdictionProfile.count({ where: { profileKey: "CH" } })
+    ).toBe(1);
 
     // 2. Activating it is not. The first attempt records a request and
     //    leaves the draft exactly where it was.

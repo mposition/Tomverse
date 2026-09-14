@@ -149,12 +149,16 @@ test("transactional still sends when the pinned policy has no profile", () => {
 });
 
 test("marketing is refused when a required identity value is unset", () => {
+  // `postalAddress` rather than a registration number: the Korean profile
+  // stopped naming those in 2026-09-14 (the sender is not a Korean mail-order
+  // registrant), and a test that nulls a block no profile names would pass
+  // whatever the composer did.
   const result = compose({
-    identity: { ...IDENTITY, businessRegistrationNumber: null },
+    identity: { ...IDENTITY, postalAddress: null },
   });
   assert.equal(result.ok, false);
   assert.equal(result.skipReason, "jurisdiction_footer_incomplete");
-  assert.deepEqual(result.missing, ["business_registration"]);
+  assert.deepEqual(result.missing, ["postal_address"]);
 });
 
 test("transactional degrades rather than being held for the same gap", () => {
@@ -180,7 +184,7 @@ test("marketing is refused when its unsubscribe link is missing", () => {
 });
 
 test("every seeded profile renders in every supported language", () => {
-  assert.equal(JURISDICTION_PROFILE_SEED.length, 8);
+  assert.equal(JURISDICTION_PROFILE_SEED.length, 9);
   assert.equal(FOOTER_LANGUAGES.length, 7);
   for (const seeded of JURISDICTION_PROFILE_SEED) {
     for (const language of FOOTER_LANGUAGES) {

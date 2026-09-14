@@ -128,8 +128,19 @@ test("the American and Australian footers carry what their statutes require", ()
   // Spam Act s. 17: the sender has to be identifiable, and an ABN is how.
   assert.ok(au.footerBlocks.includes("abn"));
   const kr = JURISDICTION_PROFILE_SEED.find((p) => p.profileKey === "KR");
-  assert.ok(kr.footerBlocks.includes("business_registration"));
-  assert.ok(kr.footerBlocks.includes("mail_order_registration"));
+  // 시행령 별표 6이 요구하는 것은 명칭·연락처·수신거부 방법입니다. 등록번호
+  // 두 개는 전자상거래법상 통신판매업자의 표시 의무에서 온 것이고, 발송 주체가
+  // 한국 통신판매업 신고 대상이 아니어서 존재하지 않습니다(2026-09-14). 값을
+  // 가질 수 없는 block을 이름 대면 renderer가 footer 전체를 버려 한국 수신자
+  // marketing이 영구히 거부되므로, 되살리는 것은 신고 번호가 생긴 뒤입니다.
+  assert.ok(!kr.footerBlocks.includes("business_registration"));
+  assert.ok(!kr.footerBlocks.includes("mail_order_registration"));
+  assert.ok(kr.footerBlocks.includes("legal_name"));
+  assert.ok(kr.footerBlocks.includes("contact_email"));
+  // 제거된 것은 E3의 값 집합뿐입니다. 제50조가 요구하는 나머지는 그대로입니다.
+  assert.equal(kr.subjectPrefix, "(광고)");
+  assert.equal(kr.consentNoticeIntervalMonths, 24);
+  assert.ok(kr.quietHours);
 });
 
 test("every footer block named is one the renderer knows", () => {

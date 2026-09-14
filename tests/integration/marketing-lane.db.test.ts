@@ -358,8 +358,11 @@ test("a Korean subscriber's subject carries the advertising label", async () => 
   assert.ok(calls[0].body.subject.startsWith("(광고)"));
   assert.ok(calls[0].body.subject.includes("Claude Opus 5.1"));
   assert.ok(calls[0].body.text.includes("200K context window"));
-  // The Korean footer blocks, and the unsubscribe link marketing must carry.
-  assert.ok(calls[0].body.text.includes(IDENTITY_ENV.EMAIL_BUSINESS_REGISTRATION_NUMBER));
+  // The Korean footer, and the unsubscribe link marketing must carry. The
+  // registration numbers left that profile on 2026-09-14 -- the sender is an
+  // Australian company and not a Korean mail-order registrant -- so what proves
+  // the footer rendered is the contact address 시행령 별표 6 actually asks for.
+  assert.ok(calls[0].body.text.includes(IDENTITY_ENV.EMAIL_BUSINESS_CONTACT_EMAIL));
   assert.match(calls[0].body.text, /\/unsubscribe\?t=/);
 });
 
@@ -387,9 +390,11 @@ test("an incomplete business identity holds marketing rather than sending it", a
   // stream's reputation.
   process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
   process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
-  // The KR footer names the registration numbers, and an advertisement that
-  // cannot say who sent it cannot be recalled once it has arrived.
-  delete process.env.EMAIL_BUSINESS_REGISTRATION_NUMBER;
+  // An advertisement that cannot say who sent it cannot be recalled once it has
+  // arrived. The contact address rather than a registration number since
+  // 2026-09-14: those left the Korean profile, so deleting one would no longer
+  // hold anything -- every profile names this one.
+  delete process.env.EMAIL_BUSINESS_CONTACT_EMAIL;
   await activatePolicy();
   const calls = stubProvider();
   const user = await subscriber({ country: "KR" });
