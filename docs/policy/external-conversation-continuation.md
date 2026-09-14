@@ -292,8 +292,8 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
 - 이름을 정하지 않은 continuation은 source 제목을 **표시할 때 해석**합니다(§3).
   source를 지우거나 잠그면 표시 이름이 바뀌며, 대화와 메시지는 남습니다. 해석은
   `lib/continuationDisplayTitle.ts`와 `lib/continuationTitleContext.ts` 한 곳이고,
-  목록·메시지 검색·가져오기 목록의 이어진 대화 메뉴·모바일 제목·rename 입력·TXT가
-  같은 함수를 씁니다.
+  목록·메시지 검색·모바일 제목·rename 입력·TXT가 같은 함수를 씁니다. 이름을 표시하는
+  surface를 새로 추가하면(예: 가져오기 목록의 이어진 대화 메뉴) 같은 함수에 연결합니다.
 - source가 이름을 줄 수 없으면 `{provider} · {YYYY-MM-DD}` 기본 이름을 씁니다. 날짜는
   continuation을 만든 날이고 DB에 저장하지 않습니다. 상태(`available`·`locked`·
   `deleted`·`empty`)는 따로 전달하며 "원문 삭제됨"은 `deleted`에서만 표시합니다.
