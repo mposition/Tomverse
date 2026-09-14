@@ -92,6 +92,11 @@ confirmationRequestedAt DateTime?
 
 ### 4.2 토큰은 무상태입니다
 
+> **`lib/emailConsentToken.ts`는 아직 없습니다.** 이 설계안이 제안하는 유일한 신규
+> 파일이고(§11), 만들지 여부는 §12의 첫 번째 승인 항목입니다. 검사기에는
+> `scripts/check-doc-references-core.mjs`의 `PLANNED_REFERENCES`로 등록해 두었으며,
+> 파일이 생기면 그 등록을 지워야 검사가 다시 감시합니다.
+
 `lib/unsubscribeToken.ts`와 같은 형태 — `c1.<version>.<iv>.<ct>.<tag>`, AES-GCM,
 버전 있는 키링. pending 행을 따로 두면 만료 정리 cron이 하나 더 생기고, 그 cron이
 멈추면 만료가 조용히 늘어납니다.
