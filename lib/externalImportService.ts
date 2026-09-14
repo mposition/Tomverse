@@ -755,6 +755,62 @@ async function conversationIdsForScope(
     return rows.map((row) => row.id);
 }
 
+/**
+ * The row locks every source deletion takes, in the one order they all take
+ * them.
+ *
+ *   1. the owning `ExternalImport` row, `FOR UPDATE`
+ *   2. the `ExternalConversation` rows being deleted, `FOR UPDATE`, by id
+ *
+ * The single-snapshot delete used to take none up front: it wrote the memory
+ * rows, the bridges and the snapshot, and only then updated the parent import's
+ * counters -- child before parent -- while the whole-import delete locked the
+ * parent first. Two deletions touching one import could each hold the row the
+ * other needed next. Parent first, children by id, is the order the import's
+ * other writers (batch append, finalize) already use.
+ *
+ * Whatever a caller then writes -- memories, bridges, and the continuation
+ * conversations a title is saved onto -- comes after these, and a caller that
+ * locks conversation rows locks them after these and by id too.
+ *
+ * The snapshot is read again after its locks: between the unlocked lookup
+ * that found its import and the lock, a concurrent deletion may have removed
+ * it, and a delete must not report success for a row it did not find.
+ */
+async function lockSnapshotForDeletion(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    conversationId: string
+) {
+    const located = await tx.externalConversation.findFirst({
+        where: { id: conversationId, userId },
+        select: { importId: true },
+    });
+    if (!located) {
+        throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
+    }
+    // The lock alone, not `loadOwnedImport()`: if a concurrent whole-import
+    // delete got there first, the answer is still "conversation not found",
+    // which the re-read below gives.
+    await tx.$queryRaw`SELECT id FROM "ExternalImport" WHERE id = ${located.importId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE id = ${conversationId} FOR UPDATE`;
+    const row = await tx.externalConversation.findUnique({
+        where: { id: conversationId },
+    });
+    if (!row || row.userId !== userId || !row.finalized) {
+        throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
+    }
+    return row;
+}
+
+/** Step 2 of the order above for a whole import, after its row is locked. */
+async function lockImportSnapshotsForDeletion(
+    tx: Prisma.TransactionClient,
+    importId: string
+) {
+    await tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE "importId" = ${importId} ORDER BY id FOR UPDATE`;
+}
+
 export async function deleteExternalConversationSnapshot(
     userId: string,
     conversationId: string,
@@ -764,16 +820,7 @@ export async function deleteExternalConversationSnapshot(
     } = {}
 ) {
     return prisma.$transaction(async (tx) => {
-        const row = await tx.externalConversation.findUnique({
-            where: { id: conversationId },
-        });
-        if (!row || row.userId !== userId || !row.finalized) {
-            throw new ApiSecurityError(
-                404,
-                "NOT_FOUND",
-                "Conversation not found."
-            );
-        }
+        const row = await lockSnapshotForDeletion(tx, userId, conversationId);
         const truncatedMessages = await tx.externalMessage.count({
             where: { externalConversationId: row.id, truncated: true },
         });
@@ -1537,6 +1584,11 @@ export async function deleteExternalImport(
         // memories derived from them are decided first, for the same reason
         // as the single-conversation path — after the cascade there is
         // nothing left to attribute them to.
+        //
+        // The import row is already locked; its snapshots are locked next,
+        // by id, before any write -- the order `lockSnapshotForDeletion()`
+        // documents and the single-snapshot delete takes too.
+        await lockImportSnapshotsForDeletion(tx, row.id);
         const doomedConversationIds = await conversationIdsForScope(
             tx,
             userId,

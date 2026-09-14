@@ -1237,3 +1237,110 @@ test("the correction moves bridged chat rows and nothing else", async () => {
     // Idempotent: running it again finds nothing left to correct.
     assert.equal(await prisma.$executeRawUnsafe(correctionStatement()), 0);
 });
+
+/* ------------------------------------------ deletion lock order (CONT-TITLE-01) */
+
+/** A second finalized snapshot in an existing import. */
+const seedSiblingSnapshot = (userId: string, importId: string) =>
+    prisma.externalConversation.create({
+        data: {
+            userId,
+            importId,
+            provider: "chatgpt",
+            externalStableId: `stable-${randomUUID()}`,
+            title: "A sibling conversation",
+            conversationDigest: `digest-${randomUUID()}`,
+            digestVersion: 1,
+            messageCount: 0,
+            contentBytes: BigInt(0),
+            finalized: true,
+        },
+    });
+
+const isNotFound = (reason: unknown) =>
+    reason instanceof Error &&
+    "status" in reason &&
+    (reason as { status?: number }).status === 404;
+
+test("a snapshot delete and a whole-import delete racing on one import both settle", async () => {
+    /*
+      Before the shared lock order the single delete locked child rows first
+      and the parent import last, while the import delete locked the parent
+      first -- two transactions that could each hold what the other needed.
+      Whatever the interleaving, each call now either deletes or answers 404,
+      and nothing is left half-deleted.
+    */
+    for (let round = 0; round < 8; round += 1) {
+        const user = await createUser();
+        const { importRow, snapshot } = await seedSnapshot(user.id);
+        const sibling = await seedSiblingSnapshot(user.id, importRow.id);
+        const created = await createExternalContinuation({
+            userId: user.id,
+            externalConversationId: snapshot.id,
+            idempotencyKey: randomUUID(),
+            request: requestWithGrant(),
+        });
+
+        const results = await Promise.allSettled([
+            deleteExternalConversationSnapshot(user.id, snapshot.id),
+            deleteExternalConversationSnapshot(user.id, sibling.id),
+            deleteExternalImport(user.id, importRow.id),
+        ]);
+        for (const result of results) {
+            if (result.status === "rejected") {
+                assert.ok(
+                    isNotFound(result.reason),
+                    `round ${round}: a delete failed with something other than 404: ${String(result.reason)}`
+                );
+            }
+        }
+        assert.equal(
+            results[2].status,
+            "fulfilled",
+            `round ${round}: the whole-import delete must not be refused by a snapshot delete`
+        );
+
+        assert.equal(await prisma.externalImport.count({ where: { id: importRow.id } }), 0);
+        assert.equal(
+            await prisma.externalConversation.count({ where: { importId: importRow.id } }),
+            0
+        );
+        const bridge = await getContinuationBridge(user.id, created.conversationId);
+        assert.ok(bridge, `round ${round}: the continuation survives`);
+        assert.equal(bridge.externalConversationId, null);
+        assert.ok(bridge.sourceDeletedAt instanceof Date);
+    }
+});
+
+test("deleting a snapshot another deletion already removed answers 404", async () => {
+    const user = await createUser();
+    const { importRow, snapshot } = await seedSnapshot(user.id);
+    await deleteExternalImport(user.id, importRow.id);
+    await assert.rejects(
+        deleteExternalConversationSnapshot(user.id, snapshot.id),
+        (error: unknown) => isNotFound(error)
+    );
+});
+
+test("a snapshot delete keeps the parent import's counters exact", async () => {
+    const user = await createUser();
+    const { importRow, snapshot } = await seedSnapshot(user.id, { count: 4 });
+    await prisma.externalImport.update({
+        where: { id: importRow.id },
+        data: {
+            conversationCount: 2,
+            messageCount: 4,
+            normalizedBytes: BigInt(256),
+        },
+    });
+    await seedSiblingSnapshot(user.id, importRow.id);
+
+    await deleteExternalConversationSnapshot(user.id, snapshot.id);
+
+    const after = await prisma.externalImport.findUniqueOrThrow({
+        where: { id: importRow.id },
+    });
+    assert.equal(after.conversationCount, 1);
+    assert.equal(after.messageCount, 0);
+    assert.equal(after.normalizedBytes, BigInt(0));
+});
