@@ -78,7 +78,14 @@ import {
   CONTINUATION_SHARE_REFUSAL_CODE,
   continuationShareRefusal,
 } from "@/lib/continuationSharingPolicy";
-import { continuationDisplayTitle } from "@/lib/continuationDisplayTitle";
+import { isDerivedContinuationTitle } from "@/lib/continuationDisplayTitle";
+import {
+  continuationRowTitle,
+  displayTimeZoneHeaders,
+  exportNamingHeaders,
+  type ContinuationRowNaming,
+} from "@/lib/continuationTitleContext";
+import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
@@ -2677,7 +2684,12 @@ export function ChatPageClient({
     if (!sessionUserId) return;
 
     try {
-	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
+	  const res = await fetch(`/api/conversations`, {
+        cache: "no-store",
+        // The fallback name's date is computed on the server, in this zone
+        // (lib/continuationTitleContext.ts).
+        headers: displayTimeZoneHeaders(),
+      });
       if (res.ok) {
         /*
           Resolve each continuation's displayed name once, here, rather than
@@ -2689,26 +2701,38 @@ export function ChatPageClient({
           source's words out of tables its deletion does not reach. The name is
           therefore resolved when it is shown, from the snapshot -- and when
           the snapshot is deleted or locked the server sends no
-          `sourceTitle`, so the row falls back to a translated placeholder.
-          That is the deletion contract working, not a gap.
+          `sourceTitle`, so the row falls back to a name built from the
+          provider and the day the continuation was made. That is the deletion
+          contract working, not a gap.
 
           Doing it at the boundary means the sidebar row, its accessible name,
-          the mobile header, the rename field and the search results all agree
-          without any of them knowing about continuations.
+          the mobile header and the rename field agree without any of them
+          knowing about continuations. Message search fetches separately and
+          resolves its hits through the same `continuationRowTitle()`.
         */
-        const rows = (await res.json()) as (Conversation & {
-          sourceTitle?: string | null;
-        })[];
+        const rows = (await res.json()) as (Conversation & ContinuationRowNaming)[];
+        const titleCopy = continuationTitleCopy(t);
         setConversations(
-          rows.map(({ sourceTitle, ...conversation }) => ({
-            ...conversation,
-            title: continuationDisplayTitle({
-              storedTitle: conversation.title,
-              isContinuation: surfaceHasContinuationBridge(conversation.surface),
-              sourceTitle,
-              fallback: t("continuation.quickUntitled"),
-            }),
-          }))
+          rows.map(({ sourceTitle, fallbackTitleDate, ...conversation }) => {
+            const isContinuation = surfaceHasContinuationBridge(conversation.surface);
+            return {
+              ...conversation,
+              title: continuationRowTitle(
+                {
+                  storedTitle: conversation.title,
+                  isContinuation,
+                  sourceTitle,
+                  sourceProvider: conversation.sourceProvider,
+                  fallbackTitleDate,
+                },
+                titleCopy
+              ),
+              titleIsDerived: isDerivedContinuationTitle({
+                storedTitle: conversation.title,
+                isContinuation,
+              }),
+            };
+          })
         );
       } else await discardResponseBody(res);
     } catch (error) {
@@ -3675,8 +3699,24 @@ export function ChatPageClient({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ title: newTitle }),
         });
+        if (!response.ok) {
+          // A reserved name is the owner's to change, not a transient failure,
+          // so it gets its own sentence (lib/continuationTitlePreservation.ts).
+          const code = await response
+            .json()
+            .then((body: { code?: unknown }) => body?.code)
+            .catch(() => undefined);
+          dispatchAppToast(
+            t(
+              code === "CONVERSATION_TITLE_RESERVED"
+                ? "chat.chatRenameReserved"
+                : "chat.chatRenameFailed"
+            ),
+            "error"
+          );
+          return;
+        }
         await discardResponseBody(response);
-        if (!response.ok) throw new Error(`Rename failed: ${response.status}`);
         fetchConversations();
       } catch (error) {
         console.error("Failed to rename conversation:", error);
@@ -5988,6 +6028,9 @@ export function ChatPageClient({
         try {
             const response = await fetch(`/api/conversations/${convId}/export`, {
                 cache: "no-store",
+                // The file is named with the date and words the list shows
+                // (lib/continuationTitleContext.ts).
+                headers: exportNamingHeaders(lang),
             });
             if (!response.ok) {
                 await discardResponseBody(response);
