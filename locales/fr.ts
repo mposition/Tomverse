@@ -78,6 +78,8 @@ export const fr = {
         personalLabelsHelp: "Travail, Recherche et Personnel sont stockés dans ce navigateur. Ils ne modifient ni l'IA ni le partage.",
         projectsHelp: "Les projets organisent les conversations comme des dossiers. Ils ne partagent pas automatiquement le contenu, les fichiers ou la mémoire IA.",
         chatTitle: "Titre du chat",
+        derivedTitleHint: "Ce nom est affiché automatiquement et n'est pas enregistré pour ce chat. Il peut changer si l'original importé est supprimé ou verrouillé.",
+        saveDisplayedTitle: "Enregistrer le nom affiché pour ce chat",
         password: "Mot de passe",
         currentPlan: "Offre actuelle",
         currentUsage: "Utilisation actuelle",

@@ -25,6 +25,10 @@ import {
     type ConversationSurface,
 } from "@/lib/continuationRoutes";
 import { continuationShareRefusal } from "@/lib/continuationSharingPolicy";
+import {
+    CONVERSATION_TITLE_MAX_LENGTH,
+    renameDecision,
+} from "@/lib/conversationRename";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -2018,9 +2022,19 @@ export function ChatSidebar({
                 <form
                     onSubmit={(event) => {
                         event.preventDefault();
-                        const nextTitle = renameValue.trim();
-                        if (!nextTitle) return;
-                        onRename(renameTarget.id, nextTitle);
+                        // Saves only what the owner changed. The field opens
+                        // with the title as shown, which for an unnamed
+                        // continuation is not stored anywhere; OK on it
+                        // unchanged must not copy that text onto the row
+                        // (lib/conversationRename.ts).
+                        const decision = renameDecision({
+                            initialValue: renameTarget.title,
+                            nextValue: renameValue,
+                        });
+                        if (decision.action === "invalid") return;
+                        if (decision.action === "save") {
+                            onRename(renameTarget.id, decision.title);
+                        }
                         setRenameTarget(null);
                     }}
                     className="w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
@@ -2036,8 +2050,44 @@ export function ChatSidebar({
                         value={renameValue}
                         onChange={(event) => setRenameValue(event.target.value)}
                         maxLength={80}
+                        aria-describedby={
+                            renameTarget.titleIsDerived
+                                ? "rename-derived-title-hint"
+                                : undefined
+                        }
                         className="mt-2 h-11 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm font-medium text-zinc-900 outline-none focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
                     />
+                    {renameTarget.titleIsDerived && (
+                        <>
+                            <p
+                                id="rename-derived-title-hint"
+                                data-testid="rename-derived-title-hint"
+                                className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                            >
+                                {t("sidebar.derivedTitleHint")}
+                            </p>
+                            {/*
+                              Keeping the shown name is a choice of its own,
+                              never what OK does: this copies text that is
+                              otherwise only displayed onto the conversation,
+                              where the source's deletion will not reach it.
+                              Hidden when the server would refuse the length.
+                            */}
+                            {renameTarget.title.trim().length <= CONVERSATION_TITLE_MAX_LENGTH && (
+                                <button
+                                    type="button"
+                                    data-testid="rename-save-displayed-title"
+                                    onClick={() => {
+                                        onRename(renameTarget.id, renameTarget.title.trim());
+                                        setRenameTarget(null);
+                                    }}
+                                    className="mt-2 text-xs font-semibold text-blue-600 underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-blue-400"
+                                >
+                                    {t("sidebar.saveDisplayedTitle")}
+                                </button>
+                            )}
+                        </>
+                    )}
                     <div className="mt-5 flex justify-end gap-2">
                         <button
                             type="button"

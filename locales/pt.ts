@@ -78,6 +78,8 @@ export const pt = {
         personalLabelsHelp: "Trabalho, Pesquisa e Pessoal ficam neste navegador. Não alteram a IA nem o âmbito da partilha.",
         projectsHelp: "Os projetos organizam conversas como pastas. Não partilham automaticamente conteúdo, ficheiros ou memória de IA.",
         chatTitle: "Título do chat",
+        derivedTitleHint: "Este nome é exibido automaticamente e não está salvo neste chat. Ele pode mudar se o original importado for excluído ou bloqueado.",
+        saveDisplayedTitle: "Salvar o nome exibido para este chat",
         password: "Senha",
         currentPlan: "Plano atual",
         currentUsage: "Uso atual",

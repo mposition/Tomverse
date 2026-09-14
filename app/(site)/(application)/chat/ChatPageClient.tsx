@@ -72,7 +72,10 @@ import {
   CONTINUATION_SHARE_REFUSAL_CODE,
   continuationShareRefusal,
 } from "@/lib/continuationSharingPolicy";
-import { continuationDisplayTitle } from "@/lib/continuationDisplayTitle";
+import {
+  continuationDisplayTitle,
+  isDerivedContinuationTitle,
+} from "@/lib/continuationDisplayTitle";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
@@ -2548,15 +2551,22 @@ export function ChatPageClient({
           sourceTitle?: string | null;
         })[];
         setConversations(
-          rows.map(({ sourceTitle, ...conversation }) => ({
-            ...conversation,
-            title: continuationDisplayTitle({
-              storedTitle: conversation.title,
-              isContinuation: surfaceHasContinuationBridge(conversation.surface),
-              sourceTitle,
-              fallback: t("continuation.quickUntitled"),
-            }),
-          }))
+          rows.map(({ sourceTitle, ...conversation }) => {
+            const isContinuation = surfaceHasContinuationBridge(conversation.surface);
+            return {
+              ...conversation,
+              title: continuationDisplayTitle({
+                storedTitle: conversation.title,
+                isContinuation,
+                sourceTitle,
+                fallback: t("continuation.quickUntitled"),
+              }),
+              titleIsDerived: isDerivedContinuationTitle({
+                storedTitle: conversation.title,
+                isContinuation,
+              }),
+            };
+          })
         );
       } else await discardResponseBody(res);
     } catch (error) {

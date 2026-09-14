@@ -66,11 +66,12 @@ import {
     mayStoreSelectionMode,
 } from "@/lib/autoRoutingUi";
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
+import { CONVERSATION_TITLE_MAX_LENGTH } from "@/lib/conversationRename";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
   .object({
-    title: z.string().trim().min(1).max(120).optional(),
+    title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH).optional(),
     password: z.union([z.string().min(8).max(128), z.null()]).optional(),
     currentPassword: z.string().min(1).max(128).optional(),
     selectedModels: z
