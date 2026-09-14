@@ -12,6 +12,16 @@
 
 ## 0. 개정 이력
 
+### v5 (2026-09-14) — A18 결정, Q8 확보, Q1 내부 검토
+
+| # | 변경 | 근거 |
+|---|---|---|
+| 1 | **A18 결정** — marketing은 **별도 Resend 계정**. transactional 계정과 suppression 목록을 공유하지 않습니다 | 5.3.1, `docs/ops/a18-resend-suppression-boundary.md` |
+| 2 | **Q8 해소** — 사업자 정보 6개 중 필요한 값이 환경변수로 설정됐습니다(ABN 포함) | `docs/ops/email-business-identity.md` |
+| 3 | **한국 profile에서 등록번호 두 블록 제거** — 발송 주체가 호주 법인이고 한국 통신판매업 신고 대상이 아님을 확인 | 5.2 E3 |
+| 4 | **Q1 내부 검토 완료(부분)** — EEA는 단일 strict profile, 스위스는 분리. 외부 자문 항목은 따로 남음 | `docs/policy/email-eea-marketing-review-2026-09-14.md` |
+| 5 | suppression 범위 표현을 **"region 내 계정 전체" → "team/계정 전체"** 로 정정 | 같은 문서 §1.1 |
+
 ### v4 (2026-08-21) — 승인 및 정합성 정리
 
 **승인 판정 (2026-08-21):**
@@ -20,7 +30,7 @@
 |---|---|---|
 | 1 | 전체 아키텍처 (Resend 유지 + 얇은 port, outbox, consent/suppression/jurisdiction 분리) | **승인** |
 | 2 | credential lane은 **방식 B** — 자격증명 미저장, 요청 내 재시도, 사용자 재요청으로 복구 | **승인** |
-| 3 | marketing은 **suppression 경계 결정(A18) 전까지 production 비활성** | **승인** |
+| 3 | marketing은 production 비활성. ~~suppression 경계 결정(A18)~~ **A18은 2026-09-14 해소**(별도 계정). 남은 차단 사유는 Q1 외부 자문·Q2·Q12, DMARC 관측, warm-up, 관할권 정책 version 활성화입니다 | **승인** |
 | 4 | 구현 착수는 아래 정합성 5건 반영 후 | **반영 완료** |
 
 **명칭 변경:** `fast lane` -> **`credential synchronous lane`**.
@@ -604,7 +614,7 @@ C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **
 | **DMARC 정책** | 분리 가능 | 서브도메인별 정책(`sp=`) |
 | **발송 IP** | **분리되지 않음** | 공유 IP 풀에서는 두 스트림이 같은 IP를 쓸 수 있습니다. 전용 IP를 쓰지 않기로 했으므로(8.4) 이 층은 분리되지 않습니다 |
 | **제공자 계정 상태** | **분리되지 않음** | 남용으로 인한 계정 정지, 발송 한도, 계정 수준 억제는 스트림을 가리지 않습니다 |
-| **제공자 억제 목록** | **분리되지 않음 (확인됨)** | Resend의 suppression은 **동일 region의 계정 전체**에 적용되며 도메인을 구분하지 않습니다. `news.*`에서 생긴 complaint가 `mail.*` 발송을 막습니다. 아래 5.3.1 |
+| **제공자 억제 목록** | **분리되지 않음 (확인됨)** | Resend의 suppression은 **team(계정) 전체**에 적용되며 도메인을 구분하지 않습니다. 같은 계정의 `news.*`에서 생긴 complaint가 `mail.*` 발송을 막습니다. 아래 5.3.1 |
 
 따라서 C9는 위험을 **줄이지만 없애지 않습니다.** 13.3과 20절 R4의 완화책 서술을
 이에 맞게 정정했습니다.
@@ -616,7 +626,9 @@ C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **
 근거 둘:
 
 1. 공식 문서 — [Resend, Email Suppressions](https://resend.com/docs/dashboard/emails/email-suppressions):
-   suppression은 동일 region의 **모든 도메인**에 적용됩니다. 확인일 2026-08-21.
+   suppression은 **team 전체**, 즉 그 계정의 **모든 도메인과 서브도메인**에 적용됩니다.
+   확인일 2026-08-21, 표현 재확인 2026-09-14(v5) — region 단위 억제는 SES의 성질이고
+   Resend 문서가 말하는 경계가 아닙니다.
 2. API 표면이 같은 말을 합니다. Resend의 suppression 도구는 `email` 하나만
    받고 domain/stream/audience 인자가 없으며, 동작을 "Suppressed addresses never
    receive emails **from the account**"로 서술합니다. 목록 조회에도 도메인 필터가
@@ -635,7 +647,7 @@ C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **
 | # | 결정 | 시점 |
 |---|---|---|
 | 1 | **MVP에서 Resend를 transactional 전용으로 유지** | 지금. MVP가 애초에 marketing을 포함하지 않으므로(15절) 추가 비용 없음 |
-| 2 | marketing 활성화 **전에** 별도 Resend team/region 또는 별도 provider 사용 여부를 결정 | Phase 2 착수 조건. 22절 A18 |
+| 2 | ~~결정한다~~ **결정됨 (2026-09-14): 별도 Resend 계정.** 같은 계정 안 team 추가는 생성에 유료 플랜이 요구되어 채택하지 않았고, 로그인이 다른 두 번째 계정을 만들었습니다. 결정 시점 transactional 계정의 suppression 등재는 0건이라 옮길 이력이 없었습니다 | 22절 A18, `docs/ops/a18-resend-suppression-boundary.md` |
 | 3 | 동일 suppression 범위를 유지하기로 한다면, **이메일에만 의존하지 않는 계정 복구 수단을 필수화** | 결정 2에서 "유지"를 고르면 즉시 |
 | 4 | hard bounce 억제는 **계속 공유**합니다 | 주소가 없다는 사실은 스트림과 무관 |
 
@@ -818,7 +830,7 @@ AGENTS.md의 accent token 규칙 2번("역할이 다르면 값이 같아도 분�
 | 두 스트림 분리 | 도메인/API 키로 수동 분리 | **제품이 강제**(별도 IP·From 자동) | Configuration set으로 수동 | 수동 | 수동 | 해당 없음 | 해당 없음 |
 | 템플릿 | 있음(사용 안 할 예정) | 있음 | 기본적 | 있음 | 있음 | 강함 | 강함 |
 | 다국어 | 제공자 기능 아님(우리가 렌더) | 동일 | 동일 | 동일 | 동일 | locale 지원 | locale 지원 |
-| suppression | Suppressions API + 대량 처리. **범위는 region 내 계정 전체**(5.3.1) | Stream별 suppression + Subscription Change webhook | account/configuration-set/tenant 3계층 | 있음 | 있음 | 있음 | 있음 |
+| suppression | Suppressions API + 대량 처리. **범위는 team(계정) 전체**(5.3.1) | Stream별 suppression + Subscription Change webhook | account/configuration-set/tenant 3계층 | 있음 | 있음 | 있음 | 있음 |
 | bounce/complaint | webhook | webhook | SNS/EventBridge | webhook | webhook | 있음 | 있음 |
 | webhook 서명 | **Svix 서명** + `svix-id` 중복 제거 | 기본 인증/서명 | SNS 서명 검증 | 서명 | 서명 | 있음 | 있음 |
 | idempotency | **Idempotency-Key 24h(이미 사용 중)** | 없음(직접 구현) | 없음(직접 구현) | 없음 | 없음 | 해당 없음 | 해당 없음 |
@@ -1995,7 +2007,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 **위 표는 우리 gating 계층의 정책이며, 제공자가 그것을 뒤집을 수 있습니다
 (v3 정정).**
 
-5.3.1에서 확인했듯 Resend의 suppression은 **region 내 계정 전체**에 적용됩니다.
+5.3.1에서 확인했듯 Resend의 suppression은 **team(계정) 전체**에 적용됩니다.
 따라서 "marketing 스트림 complaint 후에도 transactional은 발송"이라는 위 표의
 2행은 **marketing과 transactional이 같은 Resend 계정에 있는 동안 실행되지
 않습니다.** 우리는 보내기로 결정하고, Resend가 드롭합니다.
@@ -2622,21 +2634,21 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | # | 질문 | 왜 중요한가 | 막히는 것 |
 |---|---|---|---|
-| Q1 | EU 회원국 중 우리 사용자가 있는 국가에서 ePrivacy 국내법이 추가 요건을 두는가? (특히 독일 UWG, 프랑스 CNIL의 B2B/B2C 구분) | 4.3 EU 주의 참조. 지침이라 국내법이 다름 | EU marketing 활성화 |
+| **Q1 (부분 해소 2026-09-14)** | **내부 검토 완료.** 회원국별 차이는 대부분 C1·C8이 이미 포기한 영역(프랑스의 B2B 완화, 독일 §7(3) 예외)에 있어 EEA 30개국은 **단일 strict profile로 운영 가능**합니다. 스위스는 EEA가 아니고 법령·감독·이전 근거가 달라 **분리**합니다(profile 8→9). 독일은 B2B/B2C를 가르지 않으며 입증책임이 발신자에게 있어 DOI를 **정책으로** 채택합니다(법령상 의무가 아님). DDG §6·L.34-5의 '발신자·상업적 성격 은폐 금지'는 전역 적용. 오스트리아 ECG-Liste는 soft opt-in 경로 조건이라 C8상 해당 없음으로 보되 첫 AT 발송 전 확인. **이 기록은 30개국 현지법 의견서가 아니며**, 실제로 읽은 것은 DE·FR·AT·CH 넷입니다 | [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) | 남은 것: 그 넷 밖 국가의 첫 캠페인 전 국가별 확인, 제27조 대리인(Q18) |
 | Q2 | 전역 opt-in(C1)과 soft opt-in 미사용(C8) 결정을 승인하는가? 사업적으로 감당 가능한가? | 보수적 선택이 마케팅 도달 가능 대상을 크게 줄임 | marketing 전략 |
 | Q3 | 약관/개인정보처리방침/가격 변경 시 **사전 통지 기간**이 관할권별로 얼마인가? | 5번 유형의 발송 시점을 정함 | 정책 변경 프로세스 |
 | Q4 | **정보통신망법 제50조제3항의 야간 전송 제한에서 전자우편이 시행령상 예외 매체에 해당하는가?** | E5의 적용 여부. 확인 전까지 억제 기본값 | 한국 marketing 발송 시간 |
 | Q5 | 일본 특정전자메일법의 **동의 증명 기록 보존 기간**이 우리 사례에 정확히 어떻게 적용되는가? | 13.2 보관 정책 | 일본 진출 시 |
 | Q6 | `ConsentRecord`와 `SuppressionEntry`를 **계정 삭제 후에도 보관**하는 것이 GDPR 제17조(3)와 개인정보보호법 제21조상 정당한가? 보관 기간은? | 13.2. 삭제하면 재발송 위험, 보관하면 삭제권 논점 | 계정 삭제 프로세스, 개인정보처리방침 |
 | Q7 | 영수증에 관할권별 **세무 정보 표시 의무**가 있는가? (한국 부가세, EU VAT) | 3.2의 #3. 이 문서 범위 밖 | 영수증 템플릿 |
-| Q8 | 발신자 정보로 표시할 **법인명, 사업자등록번호, 통신판매업 신고번호, 물리적 주소, ABN**의 실제 값은? | C4, E3. 값이 없으면 marketing 자체가 불가 | 모든 marketing 발송 |
+| ~~Q8~~ | **해소 (2026-09-14).** 발송 주체는 **호주 법인 하나**이고, 한국 수신자도 같은 신원을 받습니다. `EMAIL_BUSINESS_*` 값이 ABN 포함 설정됐습니다. **한국의 사업자등록번호·통신판매업 신고번호는 존재하지 않습니다** — 통신판매업 신고 대상이 아님을 확인했고, KR profile에서 두 블록을 제거했습니다(5.2 E3) | — | 해소 |
 | Q9 | 아동 사용자가 실제로 존재할 수 있는가? 연령 확인을 하는가? **어느 기준값을 쓸 것인가** — GDPR 제8조는 기본 16세(회원국이 13세까지 하향 가능), 한국 14세, 영국·미국 13세 | 5.4. **이메일이 아니라 가입·개인정보 처리 정책의 결정** | 가입 플로우, marketing opt-in UI 제공 여부 |
 | Q10 | 미국 **주별 개인정보법**(CCPA 등) 중 이메일 마케팅에 실제로 영향을 주는 요건이 있는가? GPC 신호를 존중해야 하는가? | 4.3 미국. 2026년 현황 미확인 | 미국 marketing |
 | **Q11 (부분 해소 2026-09-14)** | Resend 공개 문서상 **모든 계정은 가입으로 DPA가 체결**되고 EU SCC Module 2·UK Addendum·Swiss 수정조항이 편입된다. EU–U.S. DPF와 UK Extension의 활성 상태도 직접 확인했다. 계정 Documents에서 받은 PDF는 공식 공개 사전서명본과 SHA-256까지 동일해 별도 Customer 명칭·효력일·Annex가 없었다. EU SCC Annex I.C 관할 감독기관과 UK Addendum Part 1 필수정보도 명시적으로 완성되어 있지 않지만, 현재 활성 DPF가 적용되는 이전의 선행조건은 아니다. Swiss 수정조항은 FDPIC를 지정한다. **Resend 문의는 현재 보류**하고 DPF 중단·기업 감사·감독기관 요구·고위험 처리 시에만 실행한다. 남은 현재 조치는 계정 명의자와 확인 가능한 최초 계정·결제일의 내부 기록, TIA 대표 승인, subprocessor·미국 저장·보관기간의 개인정보처리방침 반영이다. 정확한 Terms 수락일을 찾지 못해도 현재 발송을 차단하지 않는다. 두 발송 domain의 open/click tracking 비활성은 화면으로 확인했다. | [Resend DPA·SCC 검토 기록](../../.github/audits/resend-dpa-scc-review-2026-09-14.md) | 현재의 비민감 transactional 발송은 계속 가능. Resend 문의는 fallback 재검토 조건 발생 전까지 보류. Swiss는 수정 SCC에 의존 |
 | Q12 | 개인정보처리방침에 **이메일 마케팅과 이메일 관련 처리**가 기재되어 있는가? (현재 `PrivacyPolicy` 컴포넌트에 marketing 관련 문구 없음 — 2.5 조사 결과) | 고지 없이 처리 불가 | marketing 활성화 |
 | ~~Q13~~ | **해결(v3).** 시행령상 의무는 수신동의 사실·동의일·유지/철회 방법의 **고지**이며, 무응답 자동 만료 규정은 확인되지 않음. 자동 opt-out 기본 OFF(5.5)가 맞음 | — | 해소 |
 | **Q14** | 확인 고지에 담을 문구가 시행령이 요구하는 사항(전송자 명칭, 수신동의 날짜와 사실, 유지/철회 의사표시 방법)을 충족하는가? 고지 자체가 광고로 읽히지 않는가? | 고지에 판촉이 섞이면 광고성 정보가 되어 `(광고)` 표시 대상 | 확인 고지 템플릿 |
-| ~~Q15~~ | **해결(v3).** suppression은 **region 내 계정 전체**에 적용되며 도메인을 구분하지 않음. 질문이 아니라 **확인된 제약**이 되었고 5.3.1로 옮겼습니다 | — | 해소. 대신 **A18**(계정 분리 결정)이 생김 |
+| ~~Q15~~ | **해결(v3), 표현 정정(v5).** suppression은 **team(계정) 전체**에 적용되며 도메인을 구분하지 않음. region 단위 억제는 SES의 성질이지 Resend 문서가 말하는 경계가 아님. 질문이 아니라 **확인된 제약**이 되었고 5.3.1로 옮겼습니다 | — | 해소. 대신 **A18**(계정 분리 결정)이 생김 |
 | ~~Q17~~ | **해소(v4).** 방식 B가 승인되어 평문 자격증명을 저장하지 않습니다 | — | 해소 |
 | **Q16** | 발송 본문의 개인화 입력(`renderDataSnapshot`)을 90일 보관하는 것이 최소수집 원칙에 부합하는가? legal 분류 7년 보관은? | 10.3, 13.2 | 감사 재현 설계 |
 | **Q18 (검토·사업 결정 완료, 지정 실행 대기 2026-09-14)** | 호주 1인 사업자인 Tomverse에 GDPR 제27조 EU 대리인이 필요한가? **필요성이 매우 높다.** EU 언어·SEO, EUR 시장·결제와 EU 전용 동의 흐름은 제3조 제2항의 의도적 EU 서비스 제공 신호이고, 계정·대화·결제 처리는 통상적인 SaaS 핵심 업무라 `occasional` 예외를 쓰기 어렵다. 직원 수·무료 플랜·소수 이용자는 별도 면제가 아니다. Railway production의 privacy-safe aggregate에서는 저장된 EEA 계정·분석·EUR 거래 신호가 모두 0이었지만, nullable country·opt-in 분석·유한 보관·별도 infrastructure log 때문에 부재 증명은 아니다. **Tomverse 대표는 EU를 출시 지역에 유지하고 EU 대리인을 최대한 빠른 시일 내 지정하기로 2026-09-14 승인했다.** 지정 완료 전 기간은 면제로 간주하지 않고 알려진 일시적 compliance gap으로 기록한다. | [EU 대리인 검토 기록](../../.github/audits/gdpr-article-27-eu-representative-review-2026-09-14.md) | provider·요금제 선택, 서면 위임, privacy notice 반영. 제품 전체 의무이며 marketing에 한정되지 않음 |
@@ -2665,10 +2677,10 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | ~~A13~~ | **확인 완료(2026-08-21).** Route Handler는 기본 비캐시(`GET`만 opt-in), `after()`는 응답 이후 실행이라 credential lane 발송에는 부적합. 9.7에 기록 | `node_modules/next/dist/docs/` | 해소 |
 | **A14** | **동의 무응답 시 자동 opt-out을 하지 않는다**(기본값) | 5.5 — 법적 의무가 아님 | **켜기로 하면 별도 사업 결정이며, 동의한 사용자 일부를 근거 없이 잃습니다. 목록 위생 이득과 저울질 필요** |
 | ~~A15~~ | **폐기(v3).** 가정이 아니라 확인된 사실이며 반대 방향으로 판명. 5.3.1 참조 | — | — |
-| **A18** | **marketing 활성화 시 Resend 계정을 분리한다**(잠정) | 5.3.1. 한 계정 유지는 로그인 도달을 걸고 하는 선택 | **한 계정 유지를 고르면 "이메일 외 로그인 수단 1개 이상"이 권장에서 요구가 되고, 그것을 강제할 수 없는 사용자(OAuth 미연결 + 이메일 로그인만)에 대한 정책이 필요합니다** |
+| ~~A18~~ | **결정됨 (2026-09-14).** marketing은 **별도 Resend 계정**을 쓰고 transactional과 suppression 목록을 공유하지 않습니다 | 5.3.1. 결정 시점 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKETING_RESEND_API_KEY`를 별도로 요구합니다 | 가정이 아니라 결정입니다. **§5.3.1 결정 3(비이메일 복구 수단 의무화)은 따라오지 않습니다.** 결정 4(hard bounce 공유)는 계속 유효하며, 이제 `SuppressionEntry`가 유일한 공유 지점입니다 |
 | ~~A19~~ | **결정됨(v4).** 방식 B 승인. 자격증명은 저장하지 않습니다 | 검토 승인 2026-08-21 | 가정이 아니라 결정입니다 |
 | ~~A16~~ | **완화(v3).** 방식 B에서는 worker가 재발송하지 않고 정리·관측만 하므로 **상시 프로세스가 필요 없습니다.** 1분 주기 cron으로 충분 | 9.4a-3 | 방식 A를 택하면 다시 제약이 됩니다 |
-| **A17** | 관할권 profile 8개로 충분하다 | 5.2의 예외 7개가 profile 8개로 표현됨 | EU 회원국별 분리가 필요해지면(Q1) profile이 늘지만, `JurisdictionCountryMap` 덕분에 **데이터 변경**입니다 |
+| **A17 (갱신 2026-09-14)** | ~~8개로 충분~~ **9개가 필요합니다.** Q1 검토에서 스위스를 `EU`에서 분리하기로 했습니다 | EEA가 아니고 UWG art. 3(1)(o)·revFADP·감독기관·이전 근거가 모두 별개(검토 기록 §4.5) | **구현 대기**: `CH` profile 신설 + country map 분리 + `EU`·`CH` footer에 `abn` 추가. 값이 같아도 근거가 다르면 행을 나눕니다 |
 
 ---
 
@@ -2733,7 +2745,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 ### 제공자 공식 문서 (확인일 2026-08-21)
 
-- [Resend — Email Suppressions](https://resend.com/docs/dashboard/emails/email-suppressions) — **suppression은 동일 region의 전 도메인에 적용.** 확인일 2026-08-21(검토자 제시 + API 표면으로 교차 확인)
+- [Resend — Email Suppressions](https://resend.com/docs/dashboard/emails/email-suppressions) — **suppression은 team(계정) 전체의 전 도메인에 적용.** 확인일 2026-08-21, 표현 재확인 2026-09-14(검토자 제시 + API 표면 + 공개 문서 문구 교차 확인)
 - [Resend — Managing Webhooks](https://resend.com/docs/webhooks/introduction)
 - [Resend — Managing Webhooks via API (changelog)](https://resend.com/changelog/managing-webhooks-via-api)
 - [Resend — Security](https://resend.com/docs/security)
@@ -2829,8 +2841,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 
 ### marketing 활성화 전에 결정할 것 (MVP 착수를 막지 않음)
 
-- **A18** — marketing 시 Resend 계정/region을 분리할 것인가, 한 계정을 유지하고
-  이메일 외 로그인 수단을 요구로 올릴 것인가(5.3.1).
+- ~~**A18**~~ — **결정됨 (2026-09-14): 별도 계정.** 위 22절 참조.
 - **A14**(자동 opt-out 채택), **A2**(EU 리전), **A3**(일본), **A4**(중국),
   **A1**(B2C/B2B), **A5**(opt-in 비용), **A17**(profile 8개).
 
