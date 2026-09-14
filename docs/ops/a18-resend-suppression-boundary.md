@@ -13,24 +13,54 @@
 
 ## 1. 무엇을 정하는가
 
-**transactional 메일과 marketing 메일을 같은 Resend 계정에 둘 것인가.**
+**transactional 메일과 marketing 메일을 같은 Resend team에 둘 것인가.**
 
-Resend의 suppression 목록은 **같은 region의 계정 전체**에 적용되고 도메인을
-구분하지 않습니다(확인일 2026-08-21, `docs/policy/email-notifications.md`
-§5.3.1). 서브도메인을 나누는 것으로는 분리되지 않습니다.
+Resend의 suppression 목록은 **team 전체**에 적용되며 **모든 도메인과
+서브도메인**에 걸칩니다. 서브도메인을 나누는 것으로는 분리되지 않습니다.
 
-따라서 한 계정을 유지하면 이런 일이 성립합니다.
+따라서 두 스트림을 한 team에 두면 이런 일이 성립합니다.
 
 ```
 사용자가 프로모션 메일 하나를 스팸 신고
-  → 그 주소가 계정 suppression 목록에 등재
-  → 같은 계정에서 나가는 로그인 코드가 드롭됨
+  → 그 주소가 team suppression 목록에 등재
+  → 같은 team에서 나가는 로그인 코드가 드롭됨
   → 증상은 "로그인 메일이 안 온다"는 신고로만 나타남
 ```
 
 우리 gating 계층은 "marketing complaint 후에도 transactional은 보낸다"고 말할
 수 있지만, 그 아래 provider가 드롭합니다. **우리가 보내기로 결정해도 도달하지
 않습니다.**
+
+### 1.1 경계는 region이 아니라 team입니다 (2026-09-14 정정)
+
+ADR §5.3.1과 `docs/ops/email-sending-domains.md`는 이 범위를 "**동일 region의
+계정 전체**"로 적고 있습니다. **그 표현은 정확하지 않으며, 결정을 틀리게
+만들 수 있습니다.**
+
+- 오늘 Resend 문서의 문구는 "Suppressions apply to your entire **team** …
+  skipped across all your domains and subdomains"입니다.
+- **region 단위 억제는 SES의 성질**이지 Resend 문서가 말하는 경계가 아닙니다.
+- 따라서 **"`news.`를 다른 region에 만든다"는 분리 수단이 아닐 수 있습니다.**
+  같은 team에 있으면 억제가 그대로 걸리고, 분리했다고 믿으면서 아무것도
+  분리하지 않은 상태가 됩니다. **분리하는 축은 team입니다.**
+
+확인 경로: 웹 검색이 요약한 Resend 자체 문서
+(`resend.com/docs/dashboard/emails/email-suppressions`,
+`resend.com/blog/multiple-teams`). 이 컨테이너는 `resend.com` 직접 접근이
+egress 정책에서 차단되어(`EGRESS_BLOCKED`) 원문을 읽지 못했으므로,
+**결정 전에 대시보드에서 한 번 눈으로 확인**합니다.
+
+결정을 기록할 때(§6) ADR §5.3.1과 ops 문서의 "region" 표현도 **함께**
+"team"으로 정정합니다 — 고치지 않으면 다음 사람이 region 분리를 유효한
+선택지로 읽습니다.
+
+### 1.2 새 계정은 필요하지 않습니다
+
+**기존 로그인으로 team을 추가로 만들 수 있습니다.** 한 이메일 주소가 여러
+team을 소유하고 Team switcher로 전환하며, **각 team은 자기 API 키·청구·사용량을
+갖습니다**(출처: 위 `blog/multiple-teams`). 즉 선택지 A는 "새 Resend 계정 개설"이
+아니라 "기존 계정에 team 추가"입니다.
+
 
 ## 2. 왜 marketing을 켜기 전이어야 하는가
 
@@ -77,9 +107,11 @@ AGENTS.md의 차단 기준 — **틀렸을 때 되돌릴 수 없는가** — 에
 ### 3.3 이 컨테이너가 확인하지 못한 것
 
 - `resend.com`은 이 세션의 egress 정책에서 차단됩니다(`EGRESS_BLOCKED`). 공식
-  문서 원문 재확인과 요금·team 생성 화면은 **사람이 대시보드에서** 봐야 합니다.
-  suppression 범위 자체는 ADR §5.3.1이 2026-08-21에 공식 문서와 API 표면
-  양쪽으로 확인해 두었으므로, 재확인은 선택입니다.
+  문서 원문, 요금, team 생성 화면은 **사람이 대시보드에서** 봐야 합니다.
+- **suppression 범위는 재확인이 선택이 아닙니다.** §1.1대로 ADR의 "region"
+  표현과 오늘 문서의 "team" 문구가 어긋나며, 둘 중 무엇이 맞는지가 선택지
+  A의 실행 방법을 바꿉니다(다른 region으로 나눌 것인가, 다른 team으로 나눌
+  것인가). 대시보드에서 확인하고 결정문에 어느 쪽인지 적습니다.
 
 ## 4. 사람이 구해야 하는 사실 — 두 개뿐
 
@@ -111,28 +143,32 @@ GROUP BY p.purpose ORDER BY p.purpose;
 **판정 기준**: `email_only`가 0이면 선택지 C의 정책 부채가 없습니다. 1명이라도
 있으면 C는 "강제할 수 없는 사용자에 대한 정책"을 반드시 함께 만들어야 합니다.
 
-### F2. 두 번째 Resend team 또는 계정의 조건
+### F2. 두 번째 Resend team의 비용
 
-Resend 대시보드에서 확인합니다.
+**team을 만들 수 있는지는 이미 답이 나왔습니다**(§1.2 — 같은 로그인으로 추가
+생성, 새 계정 불필요). 남은 것은 값입니다. Resend 대시보드의 team 생성 화면에서
+확인합니다.
 
-- 같은 로그인으로 team을 하나 더 만들 수 있는가
-- 그 team의 요금이 별도로 청구되는가 (transactional 발송량이 두 계정으로
-  쪼개지면 각 계정의 무료 구간이 어떻게 되는가)
-- 새 team의 region을 `ap-northeast-1`로 둘지 다른 region으로 둘지
-  — **region이 다르면 기존 suppression과 확실히 분리되지만, 발송 지연과
-  데이터 소재가 함께 바뀝니다**(`docs/ops/email-sending-domains.md` §3.1)
+- **두 번째 team이 Free로 설 수 있는가, 유료 플랜이 강제되는가.**
+  `blog/multiple-teams`는 team 생성 시 "유료 transactional 또는 marketing 플랜
+  선택"을 서술하는 반면, Free 플랜(월 3,000통·도메인 1개)은 공개 가격표에
+  존재합니다. 두 서술이 이 화면에서 갈립니다.
+- 유료라면 최소 얼마인가 (공개 가격표 기준 Pro는 $20/mo부터)
+- 새 team의 `news.` 도메인 region을 무엇으로 둘 것인가 — **region은 분리 수단이
+  아니라 지연·데이터 소재의 문제**입니다(§1.1). 특별한 이유가 없으면 기존과
+  같은 `ap-northeast-1`이 단순합니다.
 
-**F2가 "team 분리 불가 또는 비용 과다"로 나오면 선택지 B(별도 provider)가
-자동으로 앞섭니다.** C로 내려가는 근거는 되지 않습니다 — C의 비용은 돈이 아니라
-로그인 도달이기 때문입니다.
+**F2가 "비용 과다"로 나와도 C로 내려가는 근거는 되지 않습니다** — C의 비용은
+돈이 아니라 로그인 도달이기 때문입니다. 그때 비교 대상은 선택지 B(별도
+provider)입니다.
 
 ## 5. 선택지와 각각의 귀결
 
-### 5.1 선택지 A — 별도 Resend team/region (권고)
+### 5.1 선택지 A — 기존 계정에 marketing 전용 team 추가 (권고)
 
 | | |
 |---|---|
-| 하는 일 | Resend에 marketing 전용 team(또는 region) 생성 → `news.tomverse.app` 등록 → 전용 API 키 발급 |
+| 하는 일 | **기존 로그인으로** marketing 전용 team 생성(새 계정 아님, §1.2) → `news.tomverse.app` 등록 → 그 team의 API 키 발급 |
 | 환경변수 | `MARKETING_RESEND_API_KEY`(새 team 키), `MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>`. transactional은 기존 `RESEND_API_KEY` 유지 또는 `TRANSACTIONAL_RESEND_API_KEY`로 개명 |
 | 코드 변경 | **없음** (§3.2) |
 | suppression | 완전 분리. complaint가 로그인 코드에 닿지 않음 |
@@ -184,10 +220,11 @@ Resend 대시보드에서 확인합니다.
 | 2 | `docs/policy/email-notifications.md` | §5.3.1 결정표 2행 (현재 638행) | "결정한다" → 결정된 값 |
 | 3 | `docs/policy/email-notifications.md` | §0 개정 이력 | v5 항목 추가 (ADR이므로 개정과 재승인이 필요) |
 | 4 | `docs/ops/email-sending-domains.md` | §8.3 (현재 758행) | "막혀 있는 것: 사람의 결정" → 결정 기록. §4의 선행 조건 1 해제 |
+| 5 | `docs/policy/email-notifications.md` · `docs/ops/email-sending-domains.md` | "region 내 계정 전체"가 나오는 모든 곳 (§5.3.1 본문, §1.1의 표, §4, §8.3) | **"team 전체"로 정정**(§1.1). 대시보드 확인 결과와 확인일을 함께 적습니다 — 고치지 않으면 다음 사람이 region 분리를 유효한 선택지로 읽습니다 |
 
 C를 고른 경우에만 추가로:
 
-| 5 | `docs/policy/email-notifications.md` | §5.3.1 결정 3 | 요구로 승격됨을 명시하고, ①~④의 담당과 기한을 적음 |
+| 6 | `docs/policy/email-notifications.md` | §5.3.1 결정 3 | 요구로 승격됨을 명시하고, ①~④의 담당과 기한을 적음 |
 
 ### 6.1 복붙용 결정 기록 (A를 고른 경우)
 
@@ -206,7 +243,7 @@ suppression 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKET
 ```
 | | |
 |---|---|
-| 상태 | **결정됨 (2026-__-__)** — 별도 Resend team |
+| 상태 | **결정됨 (2026-__-__)** — 기존 계정에 marketing 전용 team 추가 |
 | 근거 | ADR §22 A18. 결정 시점 suppression 0건, 도메인 2개 모두 ap-northeast-1 |
 | 다음 | §4의 선행 조건 1 해제. Q8(사업자 정보)만 남으면 `news.tomverse.app` 구성 착수 |
 ```
@@ -217,7 +254,9 @@ suppression 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKET
 바꾸면 도메인은 섰는데 footer가 없어 발송이 거부되는 상태로 warm-up을 시작하게
 됩니다.
 
-1. Resend에 marketing team 생성, region 결정(F2)
+1. **기존 Resend 로그인**으로 marketing 전용 team 생성(§1.2). 도메인 region은
+   특별한 이유가 없으면 기존과 같은 `ap-northeast-1`(§1.1 — region은 분리 수단이
+   아닙니다)
 2. `news.tomverse.app` 등록 → SPF/DKIM 레코드 → DMARC `p=none`
    (`docs/ops/email-sending-domains.md` §3.1~3.3을 `news.` 이름으로 반복)
 3. 환경변수를 **코드보다 먼저** 배포
@@ -253,6 +292,9 @@ suppression 등재 0건이라 이전 비용이 없었고, port가 이미 `MARKET
 - **suppression을 Resend 대시보드에서 손으로 지워 로그인을 복구하기.** 증상은
   사라지고 원인은 남습니다. 우리 `SuppressionEntry`가 판정 근거이므로, 지우는
   행위는 감사 기록 없이 provider 상태만 바꿉니다.
+- **같은 team 안에서 region만 다르게 두고 분리했다고 믿기.** 오늘 문서가 말하는
+  경계는 team이며(§1.1), region은 지연과 데이터 소재의 문제입니다. 이 착각은
+  아무것도 분리하지 않은 상태를 "분리 완료"로 기록하게 만듭니다.
 - **결정을 코드나 환경변수로만 내리기.** A18은 ADR의 가정 행이며, 문서가 갱신되지
   않으면 다음 사람이 같은 조사를 다시 합니다.
 
