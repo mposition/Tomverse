@@ -1053,7 +1053,6 @@ export function AssistantProfileEditor({
                                     onClick={() => void publish()}
                                     disabled={busy}
                                     data-testid="assistant-publish"
-                                    id="assistant-publish"
                                     aria-describedby="assistant-publish-consequence"
                                 >
                                     {busy ? (
