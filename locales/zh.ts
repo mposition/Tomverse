@@ -1399,6 +1399,7 @@ export const zh = {
         titleImpactChanging: "删除后，{count} 个延续对话的显示名称会改变。对话及其消息会保留。",
         titleImpactKeep: "将原始对话的标题保存为 {count} 个延续对话的名称",
         titleImpactKeepNote: "保存的名称在删除原始对话后仍会保留，并会随对话或账户一起删除。",
+        titleImpactTooMany: "可保留名称的对话有 {count} 个，超过单次删除可保留的数量。请在删除前为想保留的对话自行命名。",
         titleImpactManual: "{count} 个对话因原始对话已锁定或标题不可用，无法保留其标题。删除后请自行命名。",
         titleImpactStale: "确认后状态发生了变化（例如设置了锁定）。请重新检查删除内容。",
         deleting: "正在删除…",

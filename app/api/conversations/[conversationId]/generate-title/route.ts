@@ -22,6 +22,7 @@ import {
   recordTitleGenerationUsage,
 } from "@/lib/conversationTitle";
 import { safeErrorMetadata } from "@/lib/providerErrorClassification";
+import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
 
 const requestSchema = z
   .object({
@@ -72,7 +73,14 @@ export async function POST(
 
     const existingConv = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      select: { userId: true, password: true, kind: true },
+      select: {
+        userId: true,
+        password: true,
+        kind: true,
+        // D1 applies to every title writer, not only rename
+        // (lib/continuationTitlePreservation.ts).
+        continuationBridge: { select: { id: true } },
+      },
     });
     if (!existingConv) {
       return NextResponse.json(
@@ -121,6 +129,23 @@ export async function POST(
         })
       );
       return NextResponse.json({ updated: false, reason: generation.reason });
+    }
+
+    // A generated title that is exactly the continuation writer's placeholder
+    // would make a named continuation read as unnamed forever after. Not
+    // stored; the usage below is still recorded, because the call was made.
+    if (
+      isReservedContinuationTitle({
+        title: generation.title,
+        isContinuation: existingConv.continuationBridge !== null,
+      })
+    ) {
+      try {
+        await recordTitleGenerationUsage(generation);
+      } catch (error) {
+        logRouteError("conversation_title_usage_record_failed", traceId, error);
+      }
+      return NextResponse.json({ updated: false, reason: "reserved_title" });
     }
 
     const { updated } = await applyGeneratedTitle({

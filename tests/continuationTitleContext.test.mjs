@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { LEGACY_CONTINUATION_TITLE } from "../lib/continuationDisplayTitle.ts";
+import { continuationExportCopy } from "../lib/continuationExportCopy.ts";
 import {
+    DISPLAY_LANGUAGE_HEADER,
     DISPLAY_TIME_ZONE_HEADER,
     continuationExportTitle,
     continuationRowNaming,
@@ -213,22 +215,55 @@ test("every locale's fallback template carries both placeholders", () => {
 
 test("every request whose response names a continuation sends the zone hint", () => {
     assert.equal(DISPLAY_TIME_ZONE_HEADER, "X-Tomverse-Time-Zone");
-    for (const [path, needle] of [
-        ["app/(site)/(application)/chat/ChatPageClient.tsx", "fetch(`/api/conversations`, {"],
-        ["app/(site)/(application)/chat/ChatPageClient.tsx", "fetch(`/api/conversations/${convId}/export`, {"],
-        ["components/chat/ChatSidebar.tsx", "fetch(`/api/conversations/search?q="],
-        ["components/auth/AuthButton.tsx", 'fetch("/api/conversations/export-all", {'],
+    for (const [path, needle, headers] of [
+        ["app/(site)/(application)/chat/ChatPageClient.tsx", "fetch(`/api/conversations`, {", /headers: displayTimeZoneHeaders\(\)/],
+        ["components/chat/ChatSidebar.tsx", "fetch(`/api/conversations/search?q=", /headers: displayTimeZoneHeaders\(\)/],
+        // A file is worded by the server, so exports also send the language.
+        ["app/(site)/(application)/chat/ChatPageClient.tsx", "fetch(`/api/conversations/${convId}/export`, {", /headers: exportNamingHeaders\(lang\)/],
+        ["components/auth/AuthButton.tsx", 'fetch("/api/conversations/export-all", {', /headers: exportNamingHeaders\(globalLang\)/],
         // main has no imports-page continuation menu, so the imports list names
         // no continuation and does not send the hint.
     ]) {
         const source = code(path);
         const at = source.indexOf(needle);
         assert.ok(at >= 0, `${path}: ${needle}`);
-        assert.match(
-            source.slice(at, at + 400),
-            /headers: displayTimeZoneHeaders\(\)/,
-            `${path} sends the zone with ${needle}`
-        );
+        assert.match(source.slice(at, at + 400), headers, `${path} sends the hint with ${needle}`);
+    }
+});
+
+test("an export words its fallback title in the page's language, validated", () => {
+    const naming = bridge({ externalConversationId: null, externalConversation: null });
+    const exportTitleFor = (language) =>
+        continuationExportTitle({
+            storedTitle: LEGACY_CONTINUATION_TITLE,
+            bridge: naming,
+            timeZone: "Asia/Seoul",
+            copy: continuationExportCopy(
+                new Request("https://t.test/", {
+                    headers: language === undefined ? {} : { [DISPLAY_LANGUAGE_HEADER]: language },
+                })
+            ),
+        }).title;
+    // The same string the Korean list shows for this row.
+    const listTitle = continuationRowTitle(
+        {
+            storedTitle: LEGACY_CONTINUATION_TITLE,
+            isContinuation: true,
+            ...continuationRowNaming(naming, "Asia/Seoul"),
+        },
+        koCopy
+    );
+    assert.equal(exportTitleFor("ko"), listTitle);
+    assert.equal(exportTitleFor("ko"), "ChatGPT에서 이어온 대화 · 2026-09-14");
+    // Anything unsupported is English.
+    for (const hint of [undefined, "", "xx", "ko-KR", "<script>"]) {
+        assert.equal(exportTitleFor(hint), "Continued from ChatGPT · 2026-09-14", String(hint));
+    }
+    for (const path of [
+        "app/api/conversations/[conversationId]/export/route.ts",
+        "app/api/conversations/export-all/route.ts",
+    ]) {
+        assert.match(code(path), /continuationExportCopy\(req\)/, path);
     }
 });
 

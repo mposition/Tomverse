@@ -1396,6 +1396,7 @@ export const de = {
         titleImpactChanging: "Durch das Löschen ändert sich der angezeigte Name von {count} fortgesetzten Unterhaltung(en). Die Unterhaltungen und ihre Nachrichten bleiben erhalten.",
         titleImpactKeep: "Titel des Originals als Namen für {count} fortgesetzte Unterhaltung(en) speichern",
         titleImpactKeepNote: "Ein gespeicherter Name bleibt nach dem Löschen des Originals erhalten und wird mit der Unterhaltung oder dem Konto gelöscht.",
+        titleImpactTooMany: "{count} Namen könnten behalten werden, mehr als ein Löschvorgang behalten kann. Benenne die gewünschten Unterhaltungen vor dem Löschen um.",
         titleImpactManual: "{count} Unterhaltung(en) können den Titel des Originals nicht übernehmen, weil es gesperrt oder nicht verfügbar ist. Benenne sie nach dem Löschen selbst.",
         titleImpactStale: "Nach deiner Bestätigung hat sich etwas geändert, zum Beispiel eine Sperre. Prüfe das Löschen erneut.",
         deleting: "Wird gelöscht…",

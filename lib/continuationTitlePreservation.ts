@@ -41,23 +41,42 @@ export function isReservedContinuationTitle({
 /** The error code for a delete refused because a confirmed choice went stale. */
 export const SOURCE_TITLE_PRESERVATION_STALE = "SOURCE_TITLE_PRESERVATION_STALE";
 
+/** The error code for a delete that asked to keep more names than one request carries. */
+export const SOURCE_TITLE_PRESERVATION_TOO_MANY = "SOURCE_TITLE_PRESERVATION_TOO_MANY";
+
 /** The query parameter carrying the continuation ids whose names to keep. */
 export const PRESERVE_TITLES_PARAM = "preserveTitles";
-const MAX_PRESERVE_TITLE_IDS = 100;
+/**
+ * The most names one delete keeps. A request over it is refused, never cut:
+ * silently keeping the first hundred would delete the source and change the
+ * other names the owner chose to keep. The confirmation does not offer keeping
+ * when more than this many could be kept.
+ */
+export const MAX_PRESERVE_TITLE_IDS = 100;
 const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * The ids a delete request asked to keep names for. Malformed entries are
  * dropped rather than refused: an id is only ever consent for itself, and the
- * server still decides each one against the row.
+ * server still decides each one against the row. More distinct ids than the
+ * limit is reported, so the route refuses before deleting anything.
  */
-export function readTitlePreservationRequest(url: URL): string[] {
-    const ids = url.searchParams
-        .getAll(PRESERVE_TITLES_PARAM)
-        .flatMap((value) => value.split(","))
-        .map((value) => value.trim())
-        .filter((value) => CONVERSATION_ID.test(value));
-    return [...new Set(ids)].slice(0, MAX_PRESERVE_TITLE_IDS);
+export function readTitlePreservationRequest(url: URL): {
+    ids: string[];
+    tooMany: boolean;
+} {
+    const ids = [
+        ...new Set(
+            url.searchParams
+                .getAll(PRESERVE_TITLES_PARAM)
+                .flatMap((value) => value.split(","))
+                .map((value) => value.trim())
+                .filter((value) => CONVERSATION_ID.test(value))
+        ),
+    ];
+    return ids.length > MAX_PRESERVE_TITLE_IDS
+        ? { ids: [], tooMany: true }
+        : { ids, tooMany: false };
 }
 
 /** `?include=titleImpact` -- opt-in, like `memoryImpact`. */
@@ -85,18 +104,24 @@ export type TitlePreservability =
     | "preservable"
     /** Already named: nothing will change, nothing to keep. */
     | "named"
+    /**
+     * The source is locked or has no title, so the row already shows its
+     * fallback name -- and shows the same one after the delete.
+     */
+    | "already_fallback"
+    /** The name changes, but the continuation is locked. */
     | "conversation_locked"
-    | "source_locked"
-    /** Empty, the placeholder itself, or longer than a title may be. */
+    /** The name changes, but the placeholder itself or longer than a title may be. */
     | "source_title_unusable";
 
 export function titlePreservability(target: TitlePreservationTarget): TitlePreservability {
     if (target.conversationTitle !== LEGACY_CONTINUATION_TITLE) return "named";
-    if (target.conversationLocked) return "conversation_locked";
-    if (target.sourceLocked) return "source_locked";
     const title = target.sourceTitle?.trim() ?? "";
+    // What the list shows today (lib/continuationTitleContext.ts): the source's
+    // title only when it is readable and non-empty.
+    if (target.sourceLocked || !title) return "already_fallback";
+    if (target.conversationLocked) return "conversation_locked";
     if (
-        !title ||
         isReservedContinuationTitle({ title, isContinuation: true }) ||
         title.length > CONVERSATION_TITLE_MAX_LENGTH
     ) {
@@ -108,8 +133,10 @@ export function titlePreservability(target: TitlePreservationTarget): TitlePrese
 /**
  * What the confirmation states: how many shown names this delete changes, and
  * which of those can be kept. Counts and the owner's own conversation ids --
- * never a title. The two numbers differ whenever a source is locked, untitled,
- * or its continuation is locked.
+ * never a title. A row whose source is locked or untitled already shows its
+ * fallback and is not counted: deleting the source does not change its name.
+ * The two numbers differ when a continuation is locked or the source's title
+ * cannot be a conversation title.
  */
 export type TitleImpact = {
     changingCount: number;
@@ -121,7 +148,7 @@ export function summarizeTitleImpact(targets: readonly TitlePreservationTarget[]
     const preservableConversationIds: string[] = [];
     for (const target of targets) {
         const state = titlePreservability(target);
-        if (state === "named") continue;
+        if (state === "named" || state === "already_fallback") continue;
         changingCount += 1;
         if (state === "preservable") preservableConversationIds.push(target.conversationId);
     }

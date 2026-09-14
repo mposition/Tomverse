@@ -70,11 +70,18 @@ test("the whole-import delete locks the import, then its snapshots, before its f
     const importLock = indexOfOrFail(body, "forUpdate: true", "import");
     const snapshotLock = indexOfOrFail(body, "lockImportSnapshotsForDeletion(tx, row.id)", "import");
     assert.ok(importLock < snapshotLock);
+    // Every write on both branches, including the open-import cancel branch.
     for (const write of [
+        "tx.externalConversation.deleteMany(",
+        "tx.externalImport.update(",
+        "preserveContinuationTitles(",
         "applySourceDeletionToMemories(",
         "markContinuationSourcesDeleted(",
         "tx.externalImport.delete(",
     ]) {
         assert.ok(snapshotLock < indexOfOrFail(body, write, "import"), `locks precede ${write}`);
     }
+    // And the lock is taken before the branch, not inside one of them.
+    assert.ok(snapshotLock < indexOfOrFail(body, "isOpenImportStatus(row.status)", "import"));
+    assert.equal(body.split("lockImportSnapshotsForDeletion(").length - 1, 1);
 });

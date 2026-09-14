@@ -12,7 +12,10 @@
  *
  * ## The fallback name
  *
- * "{provider} · {date}" in the viewer's language. The provider is the
+ * The `continuation.untitledFrom` template in the viewer's language -- in
+ * Korean "ChatGPT에서 이어온 대화 · 2026-09-14" -- filled with the provider and
+ * the date. A TXT export fills the same template in the page's language
+ * (lib/continuationExportCopy.ts). The provider is the
  * bridge's own column, which outlives the snapshot; the date is the day the
  * continuation was created -- not the day the source was deleted, and not the
  * last time it was used. Nothing here reads the source's words, and nothing
@@ -254,6 +257,22 @@ export function continuationExportTitle({
         title,
         headerLines: datedFallback ? [`Title date timezone: ${timeZone}`] : [],
     };
+}
+
+/**
+ * The request header carrying the page's language, for a response whose words
+ * the server writes itself: a TXT export's fallback title. A list, search or
+ * menu response carries data and the page words it; a file cannot be worded
+ * afterwards. Display only, validated against the supported languages.
+ */
+export const DISPLAY_LANGUAGE_HEADER = "X-Tomverse-Language";
+
+/**
+ * Headers for a TXT export request: the zone for the date and the language for
+ * the words, so the file's fallback name is the one the list shows.
+ */
+export function exportNamingHeaders(language: string): Record<string, string> {
+    return { ...displayTimeZoneHeaders(), [DISPLAY_LANGUAGE_HEADER]: language };
 }
 
 /**

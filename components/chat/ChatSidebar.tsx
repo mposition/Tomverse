@@ -35,6 +35,7 @@ import {
     type ContinuationRowNaming,
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
+import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -2105,9 +2106,14 @@ export function ChatSidebar({
                               never what OK does: this copies text that is
                               otherwise only displayed onto the conversation,
                               where the source's deletion will not reach it.
-                              Hidden when the server would refuse the length.
+                              Hidden when the server would refuse it: too long,
+                              or the reserved placeholder itself.
                             */}
-                            {renameTarget.title.trim().length <= CONVERSATION_TITLE_MAX_LENGTH && (
+                            {renameTarget.title.trim().length <= CONVERSATION_TITLE_MAX_LENGTH &&
+                                !isReservedContinuationTitle({
+                                    title: renameTarget.title,
+                                    isContinuation: true,
+                                }) && (
                                 <button
                                     type="button"
                                     data-testid="rename-save-displayed-title"

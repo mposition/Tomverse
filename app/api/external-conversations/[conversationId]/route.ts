@@ -21,6 +21,7 @@ import {
     wantsMemoryImpact,
 } from "@/lib/externalSourceDeletionRequest";
 import {
+    SOURCE_TITLE_PRESERVATION_TOO_MANY,
     readTitlePreservationRequest,
     wantsTitleImpact,
 } from "@/lib/continuationTitlePreservation";
@@ -131,11 +132,23 @@ export async function DELETE(
 
         const params = await context.params;
         const url = new URL(req.url);
+        const preservation = readTitlePreservationRequest(url);
+        // Refused before anything is deleted: keeping only some of the names
+        // the owner chose would change the rest without saying so.
+        if (preservation.tooMany) {
+            return NextResponse.json(
+                {
+                    error: "Too many names to keep in one deletion.",
+                    code: SOURCE_TITLE_PRESERVATION_TOO_MANY,
+                },
+                { status: 400, headers: { "Cache-Control": "no-store" } }
+            );
+        }
         const result = await deleteExternalConversationSnapshot(
             session.user.id,
             params.conversationId,
             readSourceDeletionDispositions(url),
-            readTitlePreservationRequest(url)
+            preservation.ids
         );
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },

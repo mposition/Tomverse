@@ -1402,6 +1402,7 @@ export const en = {
         titleImpactChanging: "Deleting this changes the shown name of {count} continued conversation(s). The conversations and their messages stay.",
         titleImpactKeep: "Save the original's title as the name of {count} continued conversation(s)",
         titleImpactKeepNote: "A saved name stays after the original is deleted, and is deleted with the conversation or the account.",
+        titleImpactTooMany: "{count} names could be kept, more than one deletion can keep. Rename the conversations you want to keep before deleting.",
         titleImpactManual: "{count} conversation(s) can't keep the original's title because it is locked or unavailable. Name them yourself after deleting.",
         titleImpactStale: "Something changed after you confirmed, such as a lock. Review the deletion again.",
         deleting: "Deleting…",
