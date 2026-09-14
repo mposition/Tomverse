@@ -278,12 +278,17 @@ test("the memory count is selected for the owner's read and for no one else", ()
         readFileSync(new URL(path, import.meta.url), "utf8");
 
     const ownerRead = read("../app/api/conversations/[conversationId]/route.ts");
+    const publicChatMessage = read("../lib/publicChatMessage.ts");
     assert.ok(
-        ownerRead.includes("memoryUsedCount: true"),
-        "the owner's conversation read must select memoryUsedCount (§13.4)"
+        ownerRead.includes("select: PUBLIC_CHAT_MESSAGE_SELECT"),
+        "the owner's conversation read must use the shared public-message allowlist"
     );
     assert.ok(
-        ownerRead.includes("knowledgeChunkCount: true"),
+        publicChatMessage.includes("memoryUsedCount: true"),
+        "the owner's public-message allowlist must select memoryUsedCount (§13.4)"
+    );
+    assert.ok(
+        publicChatMessage.includes("knowledgeChunkCount: true"),
         "the owner's conversation read must select knowledgeChunkCount " +
             "(docs/policy/external-conversation-import-and-memory.md §14.3)"
     );
