@@ -42,9 +42,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-13 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **55개 파일, 765 test**를
-선택합니다(두 project 합계 1,530). 2026-08-26의 51개 파일, 1,416 test
+현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
+desktop-chromium과 mobile-chromium 각 project에서 **56개 파일, 820 test**를
+선택합니다(두 project 합계 1,640). 2026-08-26의 51개 파일, 1,416 test
 (project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
@@ -57,6 +57,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **55개 파일, 765 test**
 | `chat-unified-workspace.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
+| `email-notification-settings.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `generated-artifact-card.spec.ts` |
@@ -122,6 +123,14 @@ desktop·mobile 두 project에서 돕니다.
 모두 통과했고, 가장 느린 desktop-chromium 1/2 job은 12분 57초로 25분 예산의
 약 52%를 사용했습니다(desktop 2/2 11분 12초, mobile 1/2 8분 33초,
 mobile 2/2 9분 24초).
+
+`email-notification-settings.spec.ts`가 2026-09-15에 합류해 56개입니다.
+마케팅 동의를 켜는 강조 CTA도 세부 토글과 같은 국가 확인을 거치고, 확인한
+국가와 동의가 한 요청에 함께 저장되며, 그 전에는 쓰기 요청이 발생하지 않는지
+확인합니다. 이 경계가 깨지면 관할 규칙을 정하지 않은 채 마케팅 동의가
+기록되므로 PR에서 막습니다. 태그된 test는 한 건이고 desktop·mobile 두
+project에서 실행됩니다. 같은 날 `CI=1 --grep=@ui-risk --list` 실측은 각
+project에서 **56개 파일, 820 test**(두 project 합계 1,640)입니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
