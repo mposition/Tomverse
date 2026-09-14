@@ -1281,6 +1281,8 @@ export const ko = {
         unavailable: "가져온 대화 이어가기는 지금 사용할 수 없습니다.",
         openConversation: "이어진 대화 열기",
         quickUntitled: "제목 없는 대화",
+        untitledFrom: "{provider}에서 이어온 대화 · {date}",
+        sourceDeletedBadge: "원문 삭제됨",
         divider: "여기부터 Tomverse에서 이어진 대화",
         importedFrom: "{provider}에서 가져온 대화",
         readOnlyLabel: "읽기 전용",

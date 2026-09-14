@@ -2,6 +2,7 @@
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
+import type { ContinuationSourceState } from "@/lib/continuationTitleContext";
 
 export type ChatAttachment = {
   id: string;
@@ -257,6 +258,12 @@ export type Conversation = {
      * name is an explicit choice (lib/conversationRename.ts).
      */
     titleIsDerived?: boolean;
+    /**
+     * The imported source's state for naming: `"deleted"` is the only one the
+     * row may label as deleted (lib/continuationTitleContext.ts). Absent or
+     * null on a conversation with no imported half.
+     */
+    sourceState?: ContinuationSourceState | null;
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];

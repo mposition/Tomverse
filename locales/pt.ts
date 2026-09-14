@@ -1270,6 +1270,8 @@ export const pt = {
         unavailable: "Continuar uma conversa importada não está disponível neste momento.",
         openConversation: "Abrir a conversa continuada",
         quickUntitled: "Conversa sem título",
+        untitledFrom: "Continuado de {provider} · {date}",
+        sourceDeletedBadge: "Original excluído",
         divider: "A conversa continua no Tomverse a partir daqui",
         importedFrom: "Conversa importada do {provider}",
         readOnlyLabel: "Somente leitura",

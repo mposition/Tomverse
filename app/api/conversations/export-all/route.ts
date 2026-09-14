@@ -10,9 +10,13 @@ import {
 } from "@/lib/exportConversation";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
-    continuationDisplayTitle,
-    readableContinuationSourceTitle,
-} from "@/lib/continuationDisplayTitle";
+    CONTINUATION_NAMING_BRIDGE_SELECT,
+    DISPLAY_TIME_ZONE_HEADER,
+    continuationExportTitle,
+    effectiveDisplayTimeZone,
+    type ContinuationNamingBridge,
+} from "@/lib/continuationTitleContext";
+import { providerLabel } from "@/components/imports/importFormatting";
 import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
 import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
 import { en } from "@/locales/en";
@@ -39,39 +43,37 @@ function exportHeader(
     conversation: {
         title: string;
         createdAt: Date;
-        continuationBridge: {
-            provider: string;
+        continuationBridge: (ContinuationNamingBridge & {
             sourceImportedAt: Date;
-            externalConversationId: string | null;
-            externalConversation: {
-                title: string | null;
-                password: string | null;
-            } | null;
-        } | null;
+        }) | null;
     },
-    personalizationNotice: string | undefined
+    personalizationNotice: string | undefined,
+    timeZone: string
 ) {
     const bridge = conversation.continuationBridge;
-    return formatConversationHeader(
-        {
-            title: continuationDisplayTitle({
-                storedTitle: conversation.title,
-                isContinuation: bridge !== null,
-                sourceTitle: readableContinuationSourceTitle(
-                    bridge?.externalConversation
-                ),
-                fallback: en.continuation.quickUntitled,
-            }),
-            createdAt: conversation.createdAt,
+    const { title, headerLines } = continuationExportTitle({
+        storedTitle: conversation.title,
+        bridge,
+        timeZone,
+        copy: {
+            fallbackTemplate: en.continuation.untitledFrom,
+            untitled: en.continuation.quickUntitled,
+            providerLabel,
         },
+    });
+    return formatConversationHeader(
+        { title, createdAt: conversation.createdAt },
         personalizationNotice,
-        bridge
-            ? continuationExportProvenance({
-                  providerLabel: continuationProviderDisplay(bridge.provider),
-                  importedAt: bridge.sourceImportedAt,
-                  sourceDeleted: bridge.externalConversationId === null,
-              })
-            : []
+        [
+            ...(bridge
+                ? continuationExportProvenance({
+                      providerLabel: continuationProviderDisplay(bridge.provider),
+                      importedAt: bridge.sourceImportedAt,
+                      sourceDeleted: bridge.externalConversationId === null,
+                  })
+                : []),
+            ...headerLines,
+        ]
     );
 }
 
@@ -112,12 +114,8 @@ export async function GET(req: Request) {
                 // rest is the bridge's own provenance, not the source's words.
                 continuationBridge: {
                     select: {
-                        provider: true,
+                        ...CONTINUATION_NAMING_BRIDGE_SELECT,
                         sourceImportedAt: true,
-                        externalConversationId: true,
-                        externalConversation: {
-                            select: { title: true, password: true },
-                        },
                     },
                 },
             },
@@ -131,6 +129,11 @@ export async function GET(req: Request) {
             )
         );
         const lockedCount = conversations.length - exportable.length;
+        // Formatting only: the date in a continuation's fallback title
+        // (lib/continuationTitleContext.ts).
+        const displayTimeZone = effectiveDisplayTimeZone(
+            req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+        );
         // §13.3: resolved once for the whole archive, and unconditional
         // while injection is available — every conversation in the file
         // carries it, so the line discloses nothing about which of them
@@ -178,7 +181,7 @@ export async function GET(req: Request) {
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${exportHeader(conversation, personalizationNotice)}\n`
+                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${exportHeader(conversation, personalizationNotice, displayTimeZone)}\n`
                         )
                     );
                     return;

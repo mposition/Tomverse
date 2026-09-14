@@ -1285,6 +1285,8 @@ export const en = {
         unavailable: "Continuing an imported conversation is not available right now.",
         openConversation: "Open the continued conversation",
         quickUntitled: "Untitled conversation",
+        untitledFrom: "Continued from {provider} · {date}",
+        sourceDeletedBadge: "Original deleted",
         divider: "Continued in Tomverse from here",
         importedFrom: "Imported from {provider}",
         readOnlyLabel: "Read-only",

@@ -1286,6 +1286,8 @@ export const zh = {
         unavailable: "目前无法继续导入的对话。",
         openConversation: "打开继续的对话",
         quickUntitled: "未命名对话",
+        untitledFrom: "从 {provider} 继续的对话 · {date}",
+        sourceDeletedBadge: "原始对话已删除",
         divider: "从这里开始是在 Tomverse 中继续的对话",
         importedFrom: "从 {provider} 导入的对话",
         readOnlyLabel: "只读",

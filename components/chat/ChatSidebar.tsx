@@ -29,6 +29,12 @@ import {
     CONVERSATION_TITLE_MAX_LENGTH,
     renameDecision,
 } from "@/lib/conversationRename";
+import {
+    continuationRowTitle,
+    displayTimeZoneHeaders,
+    type ContinuationRowNaming,
+} from "@/lib/continuationTitleContext";
+import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useSidebarCollapsePreference } from "@/components/chat/useSidebarCollapse";
 import { useShortViewport } from "@/components/chat/useVisualViewport";
 import { BuildInfoMenuItem, BuildStagingBadge } from "@/components/chat/BuildInfoMenu";
@@ -198,6 +204,7 @@ export function ChatSidebar({
     const [messageSearchResults, setMessageSearchResults] = useState<Array<{
         id: string;
         conversationId: string;
+        /** The conversation's stored title; resolved for display below. */
         conversationTitle: string;
         snippet: string;
         /**
@@ -209,7 +216,7 @@ export function ChatSidebar({
          * without the imported half it continues.
          */
         surface?: ConversationSurface;
-    }>>([]);
+    } & Partial<ContinuationRowNaming>>>([]);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
     /**
@@ -374,6 +381,7 @@ export function ChatSidebar({
             void fetch(`/api/conversations/search?q=${encodeURIComponent(searchQuery.trim())}`, {
                 signal: controller.signal,
                 cache: "no-store",
+                headers: displayTimeZoneHeaders(),
             })
                 .then((response) =>
                     response.ok
@@ -1459,7 +1467,21 @@ export function ChatSidebar({
                                 }
                                 className="block w-full rounded-lg px-2 py-1.5 text-left text-zinc-600 hover:bg-white dark:text-zinc-300 dark:hover:bg-zinc-900"
                             >
-                                <span className="block truncate font-bold">{result.conversationTitle}</span>
+                                <span className="block truncate font-bold">
+                                    {/* The name the list gives the same conversation: a hit
+                                        carries the stored title, which for an unnamed
+                                        continuation is the writer's placeholder. */}
+                                    {continuationRowTitle(
+                                        {
+                                            storedTitle: result.conversationTitle,
+                                            isContinuation: surfaceHasContinuationBridge(result.surface),
+                                            sourceTitle: result.sourceTitle,
+                                            sourceProvider: result.sourceProvider,
+                                            fallbackTitleDate: result.fallbackTitleDate,
+                                        },
+                                        continuationTitleCopy(t)
+                                    )}
+                                </span>
                                 <span className="block truncate text-[11px] text-zinc-400">{result.snippet}</span>
                             </button>
                         ))}
@@ -1585,6 +1607,18 @@ export function ChatSidebar({
                                 })()}
                                 <span className="min-w-0 flex flex-col gap-1">
                                     <span className="truncate text-[13px] leading-4">{conv.title}</span>
+                                    {/* Only when the source was deleted -- a locked or
+                                        untitled source also leaves the row on its
+                                        fallback name, and calling that "deleted" would
+                                        be false (lib/continuationTitleContext.ts). */}
+                                    {conv.sourceState === "deleted" && (
+                                        <span
+                                            data-testid="conversation-source-deleted"
+                                            className="inline-flex w-fit items-center rounded-full bg-zinc-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300"
+                                        >
+                                            {t("continuation.sourceDeletedBadge")}
+                                        </span>
+                                    )}
                                     {conversationLabels[conv.id] && (
                                         <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-bold text-blue-500">
                                             <Tag className="h-2.5 w-2.5" />

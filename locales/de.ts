@@ -1270,6 +1270,8 @@ export const de = {
         unavailable: "Das Fortsetzen einer importierten Unterhaltung ist derzeit nicht verfügbar.",
         openConversation: "Fortgesetzte Unterhaltung öffnen",
         quickUntitled: "Unbenannte Unterhaltung",
+        untitledFrom: "Fortgesetzt aus {provider} · {date}",
+        sourceDeletedBadge: "Original gelöscht",
         divider: "Ab hier in Tomverse fortgesetzt",
         importedFrom: "Aus {provider} importiert",
         readOnlyLabel: "Nur lesbar",

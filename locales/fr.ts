@@ -1270,6 +1270,8 @@ export const fr = {
         unavailable: "La reprise d'une conversation importée n'est pas disponible pour le moment.",
         openConversation: "Ouvrir la conversation poursuivie",
         quickUntitled: "Conversation sans titre",
+        untitledFrom: "Suite de {provider} · {date}",
+        sourceDeletedBadge: "Original supprimé",
         divider: "La conversation continue dans Tomverse à partir d'ici",
         importedFrom: "Conversation importée depuis {provider}",
         readOnlyLabel: "Lecture seule",
