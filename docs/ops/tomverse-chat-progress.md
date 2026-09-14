@@ -307,6 +307,27 @@ round 2와 기록 봉인, ② PR·Linux 통합 CI, ③ 병합·배포 후 무과
 canonical Message readback, ④ Prompt Refiner 제안형 UI 계약, ⑤ 별도 비용 승인
 뒤 전체 모델 Router 품질 측정이다.
 
+### 2026-09-14 기존 기능 영속 복구 연결 최종 독립 판정
+
+Claude는 commit `46bbc98dd0cff006c01db209fe9d3afb38ad9499`, digest
+`sha256:2e0575a8d157ac44b3e587452a40fe06038eaef6a16867767ec77340c6c550a5`를
+round 2에서 읽기 전용으로 검토해 `approve`, finding 0건을 반환했다. round 1의
+두 nit가 닫혔고 새 actionable defect가 없으므로 제어 프로그램은 `passed`로
+종결했다. `--skip-preflight`는 사용자가 이 작업에 한해 승인한 예외로 verdict에
+기록됐으며, Read·Grep·Glob 이외 도구와 API key fallback·web search/fetch는
+사용하지 않았다.
+
+영구 검토 기록은
+`docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-v1/`에
+한국어 인계 설명과 함께 보존한다. 이 문단과 기록 사본은 검토 완료 뒤 추가한
+provenance이므로 위 검토 digest의 source에 포함됐다고 주장하지 않는다. 새 변경은
+아직 PR·Linux CI·병합·배포 전이며 실제 provider·R2 호출도 수행하지 않았다.
+
+전체 웹 Chat 추정은 **약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**다.
+이번 사이클의 다음 권장 순서는 ① PR·Linux 통합 CI, ② 병합·배포 뒤 무과금
+staging canonical Message readback, ③ Prompt Refiner 제안형 UI 계약, ④ 별도
+비용 승인 뒤 전체 모델 Router 품질 측정이다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.
