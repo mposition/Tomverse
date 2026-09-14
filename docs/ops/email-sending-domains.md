@@ -28,10 +28,12 @@ Sending domains**.
 | marketing From | 미설정 |
 | DNS | Cloudflare |
 
-`region`이 `ap-northeast-1`이라는 사실은 §5.3.1과 직접 연결됩니다. 제공자의
-suppression은 **같은 region의 계정 전체**에 적용되므로, marketing을 분리하려면
-도메인이 아니라 계정 또는 region을 나눠야 합니다(A18). `mail.tomverse.app`을
-같은 region에 만든 것은 그 결정을 이 작업에서 우연히 내리지 않기 위해서입니다.
+제공자의 suppression은 **team(계정) 전체**에 적용되며 그 계정의 모든 도메인과
+서브도메인에 걸칩니다. 따라서 marketing을 분리하려면 도메인이 아니라 **계정**을
+나눠야 합니다(A18 — §4.0에서 별도 계정으로 결정). `region`은 분리 수단이 아니라
+지연·데이터 소재의 문제입니다. 2026-09-14 이전 이 문단은 범위를 "같은 region의
+계정 전체"로 적고 있었고, 그 표현은 SES의 성질을 옮긴 것이라 정정했습니다
+(`docs/ops/a18-resend-suppression-boundary.md` §1.1).
 
 ### 1.1 확인한 것과 확인하지 못한 것
 
@@ -658,23 +660,115 @@ npm run check:sending-identity -- --env
 
 ## 4. marketing 도메인 (`news.tomverse.app`)
 
-**아직 만들지 않습니다.** 선행 조건이 둘입니다.
+### 4.0 A18 결정 (2026-09-14)
 
-> **2026-08-26 확인**: Resend 계정에 이 도메인은 **없습니다**. 등록된 것은
-> `mail.tomverse.app`과 `tomverse.app` 둘뿐이고 둘 다 region
-> `ap-northeast-1`입니다. "아직 만들지 않습니다"가 문서의 의도 진술이 아니라
-> 조회로 확인된 사실이라는 뜻입니다.
+**별도 Resend 계정을 씁니다.** 같은 계정 안에 team을 추가하는 쪽은 team 생성에
+유료 플랜이 요구되어 채택하지 않았고, 대신 **로그인이 다른 두 번째 계정**을
+만들었습니다. suppression 경계는 **team/계정**이므로(§5.3.1, 표현 정정은
+`docs/ops/a18-resend-suppression-boundary.md` §1.1) 두 스트림의 억제 목록은
+분리됩니다.
 
-1. **A18 결정** — 별도 Resend team/region을 쓸지, 별도 provider를 쓸지, 아니면
-   같은 suppression 범위를 유지할지. 같은 범위를 유지하기로 하면 §5.3.1 결정 3이
-   따라옵니다: 이메일이 아닌 계정 복구 수단이 **권장이 아니라 요구**가 됩니다.
-2. **Q8** — footer에 넣을 법인명·사업자등록번호·통신판매업 신고번호·주소·ABN의
-   실제 값. 값이 없으면 `renderJurisdictionFooter()`가 발송을 거부합니다.
+> **2026-08-26 실측, 2026-09-14 재확인**: transactional 계정에 등록된 도메인은
+> `mail.tomverse.app`과 `tomverse.app` 둘뿐이고 둘 다 region `ap-northeast-1`,
+> suppression 등재 0건입니다. **`news.tomverse.app`은 아직 등록돼 있지
+> 않습니다** — §4.1이 미착수라는 뜻이며, 의도 진술이 아니라 조회 결과입니다.
 
-만들 때는 위 3.1~3.4를 `news.` 이름으로 반복하고, §14.6의 warm-up(4~6주, 주당
-배증, 가장 최근 동의자부터)을 함께 시작합니다.
+따라오지 않는 것: §5.3.1 **결정 3**(이메일 외 로그인 수단 의무화)은 같은 계정을
+유지할 때의 조건이므로 적용되지 않습니다.
 
-설정은 환경변수 하나입니다.
+계속 따라오는 것: §5.3.1 **결정 4** — **hard bounce 억제는 계속 공유합니다.**
+주소가 없다는 사실은 스트림과 무관하며, 이제 provider가 그것을 대신 해 주지
+않으므로 **우리 `SuppressionEntry`가 유일한 공유 지점**입니다
+(`lib/emailSuppression.ts`, `GLOBAL_PURPOSE_KEY`). 어느 계정에서 난 bounce든
+우리 테이블에 기록돼야 양쪽이 같이 멈춥니다.
+
+남은 선행 조건은 **Q8** 하나입니다 — footer에 넣을 법인명·사업자등록번호·
+통신판매업 신고번호·주소·ABN의 실제 값. 값이 없으면
+`renderJurisdictionFooter()`가 발송을 거부하므로, 도메인만 세워 두고 warm-up을
+시작할 수는 없습니다.
+
+### 4.1 실행 순서
+
+> **주의 — 어느 계정에서 하는지.** 저장소 세션의 Resend MCP 연결과
+> `npm run report:email-domains`는 **transactional 계정**을 봅니다. 아래 1~3은
+> **marketing 계정 콘솔에 로그인한 상태에서** 합니다. 도구로 만들면 옛 계정에
+> 도메인이 생깁니다.
+
+1. **도메인 등록** — marketing 계정에서 `news.tomverse.app` 추가. region은
+   특별한 이유가 없으면 기존과 같은 `ap-northeast-1`(§3.1과 같은 이유이며,
+   **region은 억제 분리 수단이 아닙니다** — 계정이 이미 나뉘어 있습니다).
+2. **DNS 3종** — 콘솔이 발급한 값을 그대로 넣습니다(§3.1과 같은 형태).
+
+   | 레코드 | 이름 | 형식 |
+   |---|---|---|
+   | DKIM | `resend._domainkey.news` | TXT, `p=...` |
+   | SPF (Return-Path) | `send.news` | MX, `feedback-smtp.<region>.amazonses.com`, priority 10 |
+   | SPF | `send.news` | TXT, `v=spf1 include:amazonses.com ~all` |
+
+3. **DMARC** — 제공자가 발급하지 않으므로 직접 넣습니다.
+
+   ```
+   _dmarc.news.tomverse.app   TXT   "v=DMARC1; p=none; rua=mailto:dmarc@tomverse.app; fo=1"
+   ```
+
+   `rua`가 `tomverse.app`이고 발송 도메인도 그 아래이므로 **외부 수신 승인
+   레코드는 필요 없습니다.** 루트 레코드는 §3.2에서 이미 넣었으므로 다시 넣지
+   않습니다.
+
+4. **검증** — 콘솔에서 `verified`를 확인하고, DMARC는 직접 조회합니다.
+
+   ```
+   dig TXT _dmarc.news.tomverse.app +short
+   dig TXT resend._domainkey.news.tomverse.app +short
+   ```
+
+   `npm run report:email-domains`는 **transactional 계정만** 보므로 여기서는
+   `news.`가 나오지 않는 것이 정상입니다.
+
+5. **환경변수** — 코드보다 **먼저** 배포합니다(§17.4).
+
+   ```
+   MARKETING_RESEND_API_KEY=<marketing 계정에서 발급한 키>
+   MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>
+   EMAIL_UNSUBSCRIBE_KEYS=v1:<base64 32바이트>
+   EMAIL_BUSINESS_LEGAL_NAME=...            # 이하 Q8
+   EMAIL_BUSINESS_POSTAL_ADDRESS=...
+   EMAIL_BUSINESS_CONTACT_EMAIL=...
+   EMAIL_BUSINESS_REGISTRATION_NUMBER=...             # KR profile
+   EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER=...  # KR profile
+   EMAIL_BUSINESS_ABN=...                             # AU profile
+   ```
+
+   - `MARKETING_RESEND_API_KEY`에는 **fallback이 없습니다.** transactional 키를
+     빌려 쓰지 않습니다(`lib/emailProviderPortCore.ts`).
+   - `EMAIL_UNSUBSCRIBE_KEYS`는 `MARKETING_EMAIL_FROM`이 설정되는 순간
+     `/api/ready`의 **필수** 항목이 됩니다(`lib/emailUnsubscribeReadiness.ts`).
+     형식과 생성법은 `EMAIL_SNAPSHOT_KEYS`와 같습니다 —
+     `docs/ops/email-snapshot-keyring.md` §1~2를 그대로 쓰되 변수 이름만 바꿉니다.
+     키가 하나면 `EMAIL_UNSUBSCRIBE_KEY_VERSION`은 두지 않습니다.
+   - `EMAIL_BUSINESS_*`는 **하나라도 비면 footer 전체가 사라지고** 그 profile의
+     모든 메일이 거부됩니다(`lib/emailBusinessIdentity.ts`).
+
+6. **검증** — 배포 후.
+
+   ```
+   npm run check:sending-identity -- --env
+   npm run check:email-provider-port
+   curl -s https://<host>/api/ready | jq '.checks[] | select(.name|test("email"))'
+   ```
+
+   `STREAMS_SHARE_A_DOMAIN`·`MARKETING_FROM_UNPARSEABLE`·
+   `EMAIL_UNSUBSCRIBE_KEYS_MISSING`이 없어야 합니다.
+
+7. **warm-up** — §14.6(4~6주, 1주차 일 50통, 매주 배증, 가장 최근 동의자부터).
+   **발송 플랜 한도를 먼저 확인합니다**: 무료 구간(월 3,000통·일 100통)은
+   2주차(일 100통)에서 일 한도에 닿고 3주차(일 200통)에서 넘습니다. warm-up을
+   완주하려면 marketing 계정도 그 전에 유료 전환이 필요합니다.
+
+8. `feature.emailMarketingEnabled` 해제는 **그 뒤**입니다. 이 항목은 이 문서가
+   아니라 `docs/policy/email-notifications.md` §15.2의 조건(Q1·Q2·Q8)을 따릅니다.
+
+### 4.2 왜 환경변수가 fallback을 갖지 않는가
 
 ```
 MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>
@@ -710,18 +804,13 @@ IP보다 나쁩니다. 재검토 시점은 marketing 단독 월 10만 통(§14.3
 
 ---
 
-## 8. 다음 작업 — 무엇을 기다리는가 (2026-08-26 갱신)
+## 8. 다음 작업 — 무엇을 기다리는가 (2026-09-14 기준)
 
-> **2026-08-26 확인.** 세 항목 중 **8.2는 해결됐고**, 그 과정에서 이 문서가 틀린
-> 값을 기다리라고 적어 둔 것이 드러났습니다. 8.1은 시간에, 8.3은 사람의 결정에
-> 여전히 막혀 있으나 **8.3의 전제는 이제 추정이 아니라 실측**입니다. 근거는 각
-> 절에 있습니다.
->
-> 이번에 **확인하지 못한 것**도 적어 둡니다 — DMARC TXT 레코드 자체와
-> `dmarc@tomverse.app` 수신 여부입니다. 이 컨테이너에 `dig`이 없고 DNS-over-HTTPS는
-> 프록시가 막습니다(403). 사서함은 애초에 저장소 밖입니다.
+> **이 컨테이너에서 확인하지 못한 것**도 적어 둡니다 — DMARC TXT 레코드 자체와
+> `dmarc@tomverse.app` 수신 여부입니다. `dig`이 없고 DNS-over-HTTPS는 프록시가
+> 막습니다(403). 사서함은 애초에 저장소 밖입니다.
 
-**세 건 모두 착수 대기이지, 안 한 일이 아닙니다.** 각각 저장소가 답할 수 없는
+**8.3(A18)은 결정됐고, 남은 두 건은 착수 대기이지 안 한 일이 아닙니다.** 각각 저장소가 답할 수 없는
 사실을 기다리고 있으므로, 기다리는 대상을 모른 채 시작하면 멈추거나 추측하게
 됩니다. 그래서 항목마다 **무엇에 막혀 있는지**와 **풀렸다는 것을 무엇으로
 아는지**를 함께 적습니다.
@@ -803,31 +892,18 @@ dependencies` 바로 뒤(step 5)로 옮겨 두었으므로, 잘못 설정돼 있
 
 | | |
 |---|---|
-| 막혀 있는 것 | **사람의 결정.** 저장소에서 유도할 수 없고, 코드로 정할 수도 없습니다 |
-| 풀렸다는 신호 | `docs/policy/email-notifications.md` §22의 A18이 잠정에서 확정으로 바뀌고 근거가 기록될 것 |
-| 언제까지 | **marketing을 켜기 전.** 켠 뒤에는 되돌릴 수 없는 쪽이 이미 발생합니다 |
+| 상태 | **결정됨 (2026-09-14)** — 별도 Resend 계정. 실행 순서는 §4.1 |
+| 근거 | 같은 계정 안의 team 추가는 유료 플랜이 요구됨. 결정 시점 transactional 계정의 suppression 등재 0건이라 옮길 이력이 없었음 |
+| 남은 것 | ADR 쪽 기록 — `docs/policy/email-notifications.md` §22 A18 행, §5.3.1 결정표 2행, 개정 이력 v5. 문구는 `docs/ops/a18-resend-suppression-boundary.md` §6에 |
 
-**전제가 실측으로 확인됐습니다 (2026-08-26).** Resend 계정에 도메인이 둘 있고
-(`mail.tomverse.app`, `tomverse.app`) **둘 다 region `ap-northeast-1`, 같은
-계정**입니다. 그리고 **`news.tomverse.app`은 등록돼 있지 않습니다** — §4는
-미착수이며, 이제 추정이 아니라 조회 결과입니다.
+따라오지 않는 것: "이메일 외 로그인 수단 1개 이상"의 **요구 승격**은 같은 계정을
+유지할 때의 조건이므로 적용되지 않습니다(§5.3.1 결정 3).
 
-즉 오늘 marketing을 켜면 그것은 자동으로 "한 계정" 선택지이고, 아래가 그대로
-따라옵니다. 분리를 고르려면 **도메인을 만들기 전에** 정해야 합니다.
+계속 따라오는 것: **hard bounce 억제 공유**(§5.3.1 결정 4). 계정이 나뉘었으므로
+provider가 대신 해 주지 않으며, 우리 `SuppressionEntry`가 유일한 공유 지점입니다.
 
-무엇을 정하는가: transactional과 marketing을 **한 Resend 계정에 둘 것인가.**
-Resend의 suppression은 **region 내 계정 전체**에 적용되고 도메인을 구분하지
-않습니다 — 추정이 아니라 확인된 제약입니다(`docs/policy/email-notifications.md`
-§5.3.1). 그래서 한 계정을 유지하면 **프로모션을 스팸 신고한 사용자가 로그인
-코드를 못 받습니다**(R23).
-
-한 계정을 고르면 따라오는 것: "이메일 외 로그인 수단 1개 이상"이 권장에서
-**요구**가 되고, 그것을 강제할 수 없는 사용자(OAuth 미연결 + 이메일 로그인만)에
-대한 정책이 필요해집니다. 이 조건을 정하지 않은 채 marketing을 켜는 것이
-A18이 막고 있는 일입니다.
-
-marketing이 production에서 비활성인 것은 이 결정 때문이며, 승인된 상태입니다
-(`docs/policy/email-notifications.md` §1 3행).
+marketing이 여전히 production 비활성인 것은 이제 A18이 아니라 Q1·Q2·Q8과 DMARC
+관측·warm-up 때문입니다(`docs/policy/email-notifications.md` §15.2).
 
 ### 8.4 여기 없는 것
 
