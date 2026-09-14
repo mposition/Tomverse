@@ -69,6 +69,7 @@ const NON_SECRETS = [
   // distinct ones. Both are pinned so the pair cannot drift apart again.
   '        "Key sha256:67ad26189fa0, project sha256:35539b590847 (originals in " +',
   '        "Key sha256:1c9f4b0e7a63 (original in the private operations record); " +',
+  '    scopeKey: "conversation_1",',
 ];
 
 // Credential-shaped canaries. None of these is a real secret, but each is
