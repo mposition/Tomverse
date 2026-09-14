@@ -10,6 +10,12 @@ import {
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
+import {
+  CONTINUATION_NAMING_BRIDGE_SELECT,
+  DISPLAY_TIME_ZONE_HEADER,
+  continuationRowNaming,
+  effectiveDisplayTimeZone,
+} from "@/lib/continuationTitleContext";
 
 export async function GET(req: Request) {
   try {
@@ -50,8 +56,11 @@ export async function GET(req: Request) {
             password: true,
             // docs/policy/external-conversation-continuation.md §8.2: a
             // search hit is a way into a conversation too, so it has to say
-            // where that conversation opens.
-            continuationBridge: { select: { id: true } },
+            // where that conversation opens. And it names the conversation,
+            // so it reads the same naming columns the list reads
+            // (lib/continuationTitleContext.ts) -- otherwise an unnamed
+            // continuation's hit showed the writer's internal placeholder.
+            continuationBridge: { select: CONTINUATION_NAMING_BRIDGE_SELECT },
           },
         },
       },
@@ -67,12 +76,19 @@ export async function GET(req: Request) {
         )
       )
       .slice(0, 30);
+    // Formatting only (lib/continuationTitleContext.ts).
+    const displayTimeZone = effectiveDisplayTimeZone(
+      req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+    );
 
     return NextResponse.json({
       results: authorizedMessages.map((message) => ({
         id: message.id,
         conversationId: message.conversationId,
         conversationTitle: message.conversation.title,
+        // The page resolves the shown name from these, exactly as it does for
+        // a list row.
+        ...continuationRowNaming(message.conversation.continuationBridge, displayTimeZone),
         surface: conversationSurface({
           hasContinuationBridge: message.conversation.continuationBridge !== null,
           productKey: message.conversation.productKey,

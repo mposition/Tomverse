@@ -41,29 +41,37 @@ export const JURISDICTION_PROFILES = [
   "GB",
   "SG",
   "EU",
+  "CH",
   "ZZ",
 ] as const;
 
 export type JurisdictionProfileKey = (typeof JURISDICTION_PROFILES)[number];
 
 /**
- * EEA plus the two the contract treats identically.
+ * The EEA thirty.
  *
- * Switzerland because `analyticsConsentPolicy` already puts it in the strict
- * set and Swiss UWG art. 3(1)(o) is opt-in like the ePrivacy Directive; the
- * EEA non-EU three (IS, LI, NO) because the Directive applies there through
- * the EEA Agreement. Grouping them is a profile decision, not a claim that
- * their national implementations are identical -- §4.3 flags the differences as
- * open question Q1, and a member state that needs its own profile becomes one
- * row in the mapping table rather than a code change.
+ * The EEA non-EU three (IS, LI, NO) are here because the Directive applies to
+ * them through the EEA Agreement. The Q1 review (2026-09-14) read Germany,
+ * France and Austria and found their divergence sits in ground C1 and C8
+ * already gave up, so one profile carries all thirty; a member state that later
+ * needs its own becomes one row in the mapping table rather than a code change.
+ *
+ * **Switzerland is not in this set** and stopped being in it on 2026-09-14. It
+ * is not in the EEA, its rule is Swiss UWG art. 3(1)(o) rather than the
+ * Directive, the revFADP applies alongside the GDPR with its own supervisory
+ * authority, and the transfer analysis is separate. The values its profile
+ * carries happen to match the EEA one, which is exactly when two rows matter:
+ * one source can change without dragging the other with it.
  */
 const EU_PROFILE_COUNTRY_CODES = [
-  "AT", "BE", "BG", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR",
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR",
   "GR", "HR", "HU", "IE", "IS", "IT", "LI", "LT", "LU", "LV", "MT", "NL",
   "NO", "PL", "PT", "RO", "SE", "SI", "SK",
 ] as const;
 
-const DIRECT_PROFILE_COUNTRY_CODES = ["KR", "US", "CA", "AU", "GB", "SG"] as const;
+const DIRECT_PROFILE_COUNTRY_CODES = [
+  "KR", "US", "CA", "AU", "GB", "SG", "CH",
+] as const;
 
 const EU_PROFILE_COUNTRIES = new Set<string>(EU_PROFILE_COUNTRY_CODES);
 const DIRECT_PROFILE_COUNTRIES = new Set<string>(DIRECT_PROFILE_COUNTRY_CODES);

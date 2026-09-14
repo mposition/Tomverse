@@ -69,9 +69,19 @@ export const BLOCK_ENV_VARIABLE: Record<string, string | null> = {
  * Which values every footer needs, and which belong to one jurisdiction.
  *
  * Read off `JURISDICTION_PROFILE_SEED` rather than restated from the runbook:
- * `COMMON_FOOTER` is in every profile including `ZZ`, and `KR` and `AU` each
- * add their own. A second hand-written copy of that mapping is the thing this
- * whole module exists to avoid.
+ * `COMMON_FOOTER` is in every profile including `ZZ`, and `AU` adds its own. A
+ * second hand-written copy of that mapping is the thing this whole module
+ * exists to avoid, and `tests/emailBusinessIdentityReadiness.test.mjs` fails
+ * when the two disagree.
+ *
+ * `KR` used to add the two registration numbers and no longer does
+ * (2026-09-14). The sender is an Australian company that is not required to
+ * register as a Korean mail-order seller, so those numbers do not exist, and
+ * naming a block whose value can never be set refuses every Korean marketing
+ * message for good -- the renderer drops the whole footer when one named block
+ * is empty. The blocks themselves stay in `emailFooterRenderer.ts`: if a Korean
+ * registration is ever obtained, restoring them is a seed change and a new
+ * policy version rather than new code.
  */
 export const UNIVERSAL_IDENTITY_BLOCKS = [
   "legal_name",
@@ -80,8 +90,12 @@ export const UNIVERSAL_IDENTITY_BLOCKS = [
 ] as const;
 
 export const JURISDICTION_IDENTITY_BLOCKS: Record<string, readonly string[]> = {
-  KR: ["business_registration", "mail_order_registration"],
   AU: ["abn"],
+  // Not because EU or Swiss law asks for an ABN. Both ask that the sender not
+  // be concealed, and for an Australian company the ABN is the shortest
+  // identifier that makes the name checkable (Q1 review 2026-09-14, section 6.1).
+  EU: ["abn"],
+  CH: ["abn"],
 };
 
 const BLOCK_VALUE: Record<
@@ -163,17 +177,28 @@ export const businessIdentityProblems = (
     });
   }
 
+  // Grouped by block rather than by profile since 2026-09-14. `abn` is named by
+  // three profiles now (AU, EU, CH), and a per-profile loop reported one unset
+  // variable three times over -- an operator sets one value, so the finding says
+  // which recipients it costs rather than repeating itself once per profile.
+  const profilesNeeding = new Map<string, string[]>();
   for (const [profileKey, blocks] of Object.entries(JURISDICTION_IDENTITY_BLOCKS)) {
-    const absent = missing(blocks);
-    if (absent.length === 0) continue;
+    for (const block of blocks) {
+      profilesNeeding.set(block, [...(profilesNeeding.get(block) ?? []), profileKey]);
+    }
+  }
+
+  for (const [block, profileKeys] of profilesNeeding) {
+    if (missing([block]).length === 0) continue;
+    const variable = BLOCK_ENV_VARIABLE[block] ?? block;
     problems.push({
       // Always a warning, even with marketing on: whether this deployment has
-      // recipients in that jurisdiction is not a fact an environment holds.
+      // recipients in those jurisdictions is not a fact an environment holds.
       severity: "warning",
       code: "EMAIL_BUSINESS_IDENTITY_JURISDICTION_INCOMPLETE",
-      blocks: absent,
-      variables: absent.map((block) => BLOCK_ENV_VARIABLE[block] ?? block),
-      message: `${absent.join(", ")} ${absent.length === 1 ? "has" : "have"} no value, so a recipient who resolves to ${profileKey} receives no footer at all. Set ${absent.map((block) => BLOCK_ENV_VARIABLE[block] ?? block).join(", ")}.`,
+      blocks: [block],
+      variables: [variable],
+      message: `${block} has no value, so a recipient who resolves to ${profileKeys.join(", ")} receives no footer at all. Set ${variable}.`,
     });
   }
 

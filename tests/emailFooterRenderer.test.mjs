@@ -39,10 +39,11 @@ const render = (profileKey, overrides = {}) => {
 };
 
 test("every profile renders in every language", () => {
-  // §18.3's acceptance criterion: 8 profiles x 7 languages = 56. The count is
-  // asserted rather than assumed, because the reason it is 56 and not 56-ish
-  // is that a country maps onto a profile and a person carries a language, and
-  // the two axes never multiply out to something else.
+  // §18.3's acceptance criterion, now 9 profiles x 7 languages = 63: Switzerland
+  // left the EU profile on 2026-09-14. The count is asserted rather than assumed,
+  // because the reason it is 63 and not 63-ish is that a country maps onto a
+  // profile and a person carries a language, and the two axes never multiply out
+  // to something else.
   let rendered = 0;
   for (const profile of JURISDICTION_PROFILE_SEED) {
     for (const language of FOOTER_LANGUAGES) {
@@ -57,35 +58,46 @@ test("every profile renders in every language", () => {
       rendered += 1;
     }
   }
-  assert.equal(rendered, 56);
+  assert.equal(rendered, 63);
 });
 
 test("the blocks appear in the order the profile lists them", () => {
-  // The order is a profile decision, not a renderer one: Korea puts the
-  // registration numbers directly under the name, and reordering them would be
+  // The order is a profile decision, not a renderer one: Australia puts the ABN
+  // directly under the name and above the address, and reordering it would be
   // an edit to the profile rather than a deploy (§8.7).
-  const result = render("KR", { language: "ko" });
+  //
+  // Read off Australia rather than Korea since 2026-09-14: Korea's profile no
+  // longer names a jurisdiction-specific block, so its order is the common one
+  // and proves nothing about a profile choosing its own.
+  const result = render("AU", { language: "ko" });
   const lines = result.text.split("\n");
   assert.equal(lines[0], IDENTITY.legalName);
-  assert.ok(lines[1].startsWith("사업자등록번호"));
-  assert.ok(lines[2].startsWith("통신판매업 신고번호"));
+  assert.ok(lines[1].startsWith("ABN"));
+  assert.equal(lines[2], IDENTITY.postalAddress);
 });
 
 test("language and jurisdiction are separate axes", () => {
-  // §8.6. A Korean resident reading in English gets the Korean blocks with
-  // English labels. Collapsing the two would put `ko` = Korea into the code,
+  // §8.6. An Australian resident reading in Korean gets Australia's blocks with
+  // Korean labels. Collapsing the two would put `ko` = Korea into the code,
   // which is wrong for every Korean speaker abroad.
-  const english = render("KR", { language: "en" });
-  const korean = render("KR", { language: "ko" });
+  //
+  // Australia carries this since 2026-09-14 for the reason above: Korea's
+  // profile no longer has a block of its own, so it cannot show that the block
+  // set follows the country while the words follow the reader.
+  const english = render("AU", { language: "en" });
+  const korean = render("AU", { language: "ko" });
 
-  assert.ok(english.text.includes("Business registration number"));
-  assert.ok(korean.text.includes("사업자등록번호"));
+  assert.ok(english.text.includes("Contact:"));
+  assert.ok(korean.text.includes("문의:"));
+  // Same blocks either way -- the jurisdiction picked them, not the language.
+  assert.ok(english.text.includes("ABN"));
+  assert.ok(korean.text.includes("ABN"));
   assert.equal(english.text.split("\n").length, korean.text.split("\n").length);
 
   // And the reverse: an American reading in Korean gets Korean labels and no
-  // Korean registration blocks at all.
+  // Australian block at all.
   const american = render("US", { language: "ko" });
-  assert.equal(american.text.includes("사업자등록번호"), false);
+  assert.equal(american.text.includes("ABN"), false);
   assert.ok(american.text.includes("수신거부"));
 });
 
@@ -104,17 +116,10 @@ test("every missing value is reported at once", () => {
       legalName: "Tomverse Ltd.",
       postalAddress: null,
       contactEmail: null,
-      businessRegistrationNumber: null,
-      mailOrderRegistrationNumber: null,
     },
   });
   assert.equal(result.ok, false);
-  assert.deepEqual(result.missing, [
-    "business_registration",
-    "mail_order_registration",
-    "postal_address",
-    "contact_email",
-  ]);
+  assert.deepEqual(result.missing, ["postal_address", "contact_email"]);
 });
 
 test("a footer that names an unsubscribe link and has no URL is refused", () => {
@@ -175,13 +180,57 @@ test("the reason line is always present, supplied or not", () => {
   assert.ok(fallback.text.includes("You are receiving this because"));
 });
 
+/**
+ * Blocks the renderer can draw that no seeded profile currently names.
+ *
+ * The invariant below exists to catch a dead branch, and a block goes unused
+ * for two very different reasons. If a jurisdiction stopped requiring a value,
+ * the branch really is dead and should go. If *this sender* cannot fill it,
+ * the jurisdiction rule is unchanged and the capability has to stay -- country
+ * rules are data in this system (§12.5, §8.7), so a Korean registration later
+ * must be a seed change and a new policy version, not a code change that
+ * re-adds a renderer branch and an environment variable.
+ *
+ * Both Korean numbers are the second kind, as of 2026-09-14: they come from
+ * 전자상거래법's duty on 통신판매업자, the sender is an Australian company, and it
+ * was confirmed not to be a Korean mail-order registrant. Nothing about
+ * 정보통신망법 changed.
+ *
+ * Anything added here needs that reason written next to it. An entry with no
+ * reason is how this list becomes a way to silence the check.
+ */
+const UNUSED_BY_THIS_SENDER = new Set([
+  "business_registration",
+  "mail_order_registration",
+]);
+
 test("every renderable block is reachable from at least one profile", () => {
   // A block nobody uses is either a missing profile or a dead branch, and both
-  // are worth noticing. `abn` and the two Korean numbers are the narrow ones.
+  // are worth noticing. `abn` is the narrow one.
   const used = new Set(
     JURISDICTION_PROFILE_SEED.flatMap((profile) => profile.footerBlocks)
   );
   for (const block of RENDERABLE_FOOTER_BLOCKS) {
+    if (UNUSED_BY_THIS_SENDER.has(block)) continue;
     assert.ok(used.has(block), `${block} is rendered by nothing`);
+  }
+});
+
+test("a block excused as unusable by this sender is really unused", () => {
+  // The escape hatch above only covers blocks no profile names. If one is
+  // seeded again -- a Korean registration arrives -- the entry is stale and
+  // says a capability is unfillable while the footer is asking for it.
+  const used = new Set(
+    JURISDICTION_PROFILE_SEED.flatMap((profile) => profile.footerBlocks)
+  );
+  for (const block of UNUSED_BY_THIS_SENDER) {
+    assert.ok(
+      RENDERABLE_FOOTER_BLOCKS.includes(block),
+      `${block} is excused but the renderer no longer draws it, so remove the entry`
+    );
+    assert.ok(
+      !used.has(block),
+      `${block} is named by a profile again, so it is no longer unusable by this sender`
+    );
   }
 });

@@ -1,0 +1,24 @@
+{
+  "taskId": "prompt-refiner-focus-review-cleanup-v3",
+  "requirement": "on_hold로 종결된 prompt-refiner-focus-arrival-v2의 최종 독립 검토에서 남은 세 가지 nit를 닫는다. 접근성 규범은 새 focus identity에만 포커스를 넘기고 최초 mount와 동일 identity 재등장에는 포커스를 빼앗지 않는다고 명시한다. UI tier 문서의 55개/765 수치는 현재값이 아니라 합류 당시 관측값으로 바로잡는다. Prompt Refiner E2E page는 sibling fixture처럼 route-bound PageProps를 사용한다. 승인된 제품 경계와 focus 동작은 바꾸지 않고 provider 호출, billing, Router 결합, persistence, 기능 활성화, push, merge, deploy를 하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "docs/ui-contracts/prompt-refiner-suggestion.md와 AGENTS.md가 새 identity 도착과 최초 mount·동일 identity 재등장의 포커스 규칙을 같은 의미로 기록한다.",
+    ".github/audits/ui-test-tiers.md의 55개/765 수치는 chat-unified-workspace 합류 당시 관측으로 표시되고, 56개/824만 현재 실측으로 남는다.",
+    "prompt-refiner-fixture page가 PageProps<\"/e2e/prompt-refiner-fixture\">로 route path에 타입 결속된다.",
+    "타입 검사, 수정 파일 lint, UI tier coverage, 문서·인코딩·정책 참조 검사와 diff whitespace 검사가 통과한다.",
+    "Claude는 승인된 skip-preflight 예외 아래 읽기 전용으로 새 digest를 검토한다. 이전 exchange와 지적은 변경하지 않는다."
+  ],
+  "baseCommit": "45ccc33326d0f82d99ea6029c065ce48e3ce7ed3",
+  "writableScope": [
+    ".github/audits/ui-test-tiers.md",
+    "AGENTS.md",
+    "app/(site)/(application)/e2e/prompt-refiner-fixture/page.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-focus-review-cleanup-v3.task.json",
+    "docs/ui-contracts/prompt-refiner-suggestion.md"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-focus-arrival-v2",
+    "exchange": "artifacts/cross-review/prompt-refiner-focus-arrival-v2-retry/exchange.json"
+  }
+}

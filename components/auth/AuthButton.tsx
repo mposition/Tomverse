@@ -82,6 +82,7 @@ import { listImportableGuestConversations } from "@/lib/guestImport";
 import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { exportNamingHeaders } from "@/lib/continuationTitleContext";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -530,6 +531,9 @@ export function AuthButton({
         try {
             const response = await fetch("/api/conversations/export-all", {
                 cache: "no-store",
+                // Continuation titles carry the date and words the list shows
+                // (lib/continuationTitleContext.ts).
+                headers: exportNamingHeaders(globalLang),
             });
             if (!response.ok) {
                 await discardResponseBody(response);
@@ -540,7 +544,7 @@ export function AuthButton({
         } catch {
             dispatchAppToast(t("auth.downloadAllFailed"), "error");
         }
-    }, [t]);
+    }, [globalLang, t]);
 
     const handleAddOAuthLoginMethod = useCallback((provider: "google" | "azure-ad") => {
         // Not a page navigation: the route answers with a 302 to the identity

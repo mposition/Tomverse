@@ -63,7 +63,7 @@ export function formatConversationHeader(
 ) {
     return [
         "Tomverse Review Export",
-        `Conversation: ${conversation.title}`,
+        `Conversation: ${headerLineText(conversation.title)}`,
         `Created: ${formatDate(conversation.createdAt)}`,
         ...(personalizationNotice ? [personalizationNotice] : []),
         ...continuationProvenance,
@@ -90,6 +90,119 @@ export function formatExportMessage(message: ExportMessage) {
     ].join("\n");
 }
 
+/**
+ * A title as one header line.
+ *
+ * A title may contain line breaks, and written verbatim they would let it
+ * start a line of its own -- a forged `Created:` or provenance line in a file
+ * whose header is otherwise the server's word. The words stay; only the breaks
+ * become spaces. This is the document's title, not a filename, so nothing else
+ * is substituted here.
+ */
+function headerLineText(title: string) {
+    // Every C0 and C1 control (U+0085 NEL is a line break to some readers)
+    // and the Unicode line and paragraph separators.
+    return title.replace(CONTROL_CHARACTERS, " ");
+}
+
+const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f\u2028\u2029]+/g;
+// Bidirectional formatting controls, including U+061C ARABIC LETTER MARK.
+const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+// Characters that draw nothing: a name made only of these is no name.
+// Default-ignorable covers what Cf does not -- variation selectors (U+FE0F,
+// U+E0100) and the combining grapheme joiner (U+034F). Only the emptiness test
+// uses this; a visible name keeps its joiners and selectors.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Z}\s]/gu;
+
+const FILE_NAME_MAX_CODE_POINTS = 80;
+const FILE_NAME_FALLBACK = "conversation";
+const TEXT_EXTENSION = ".txt";
+
+// Device names Windows refuses as the part of a filename before its first
+// dot, whatever follows: "CON.txt" and "LPT1.notes.txt" are both devices.
+// The superscript digits are reserved too.
+const RESERVED_WINDOWS_STEMS = new Set([
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    ..."0123456789\u00b9\u00b2\u00b3"
+        .split("")
+        .flatMap((digit) => [`com${digit}`, `lpt${digit}`]),
+]);
+
+/**
+ * A conversation title as a filename base (no extension).
+ *
+ * Cut by code point, not by UTF-16 unit: `slice()` on a string can split an
+ * emoji's surrogate pair, and the lone half then makes `encodeURIComponent`
+ * throw -- which turned an export of such a title into a 500.
+ *
+ * Removed rather than kept: control characters (a line break in a header value
+ * is a header injection), bidirectional controls (an RLO can make "txt.exe"
+ * display as "exe.txt"), leading dots (a hidden file) and trailing dots and
+ * spaces (Windows drops them, so the name on disk would differ from the one
+ * sent). The characters no filesystem accepts become "-". A name left with
+ * nothing visible is the generic name, and a Windows device stem gets a
+ * suffix on the stem itself, where the reservation is decided.
+ */
 export function sanitizeFileName(name: string) {
-    return name.replace(/[/\\?%*:|"<>]/g, "-").slice(0, 80) || "conversation";
+    const cleaned = trimFileName(
+        name
+            .replace(CONTROL_CHARACTERS, " ")
+            .replace(BIDI_CONTROLS, "")
+            .replace(/[/\\?%*:|"<>]/g, "-")
+    );
+    if (!cleaned.replace(INVISIBLE, "")) return FILE_NAME_FALLBACK;
+
+    const dot = cleaned.indexOf(".");
+    const stem = dot === -1 ? cleaned : cleaned.slice(0, dot);
+    if (!RESERVED_WINDOWS_STEMS.has(stem.trim().toLowerCase())) return cleaned;
+    return trimFileName(
+        `${stem.trim()}-${FILE_NAME_FALLBACK}${dot === -1 ? "" : cleaned.slice(dot)}`
+    );
+}
+
+function trimFileName(value: string) {
+    return Array.from(value.trim())
+        .slice(0, FILE_NAME_MAX_CODE_POINTS)
+        .join("")
+        .replace(/^[.\s]+/, "")
+        .replace(/[.\s]+$/, "");
+}
+
+/**
+ * RFC 5987 `ext-value` encoding. `encodeURIComponent` leaves `'`, `(`, `)` and
+ * `*` alone, and `'` is the delimiter of the `UTF-8''` prefix itself.
+ */
+function encodeRfc5987(value: string) {
+    return encodeURIComponent(value).replace(
+        /['()*]/g,
+        (character) =>
+            `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+    );
+}
+
+/**
+ * `Content-Disposition` for a single conversation's TXT export.
+ *
+ * Two fields, because one cannot do both jobs. A quoted `filename` is literal
+ * and ASCII, so a Korean title percent-encoded into it arrived as the escapes
+ * themselves -- `%ED%95%9C.txt` on disk. RFC 5987's `filename*` carries the
+ * real name, and the quoted one is only the fallback for anything that ignores
+ * it. Stripping a Korean title to ASCII used to leave ".txt", a hidden file
+ * with no name; a fallback with nothing of the title left in it is the generic
+ * name instead, the same rule `asciiArtifactFilename()` settled on.
+ */
+export function conversationExportContentDisposition(title: string) {
+    const fileName = `${sanitizeFileName(title)}${TEXT_EXTENSION}`;
+    // Sanitised again after the strip: removing "한" from "CON한" leaves a
+    // reserved name, and removing a trailing word can leave a trailing dot.
+    const asciiBase = sanitizeFileName(
+        fileName.slice(0, -TEXT_EXTENSION.length).replace(/[^\x20-\x7e]/g, "")
+    );
+    const asciiFileName = /[A-Za-z0-9]/.test(asciiBase)
+        ? `${asciiBase}${TEXT_EXTENSION}`
+        : `${FILE_NAME_FALLBACK}${TEXT_EXTENSION}`;
+    return `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeRfc5987(fileName)}`;
 }

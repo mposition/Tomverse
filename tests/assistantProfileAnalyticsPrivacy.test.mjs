@@ -21,6 +21,10 @@ const ASSISTANT_EVENTS = [
     "assistant_profile_create_started",
     "assistant_profile_create_completed",
     "assistant_profile_applied_to_chat",
+    "assistant_knowledge_guide_viewed",
+    "assistant_knowledge_guide_step_opened",
+    "assistant_knowledge_guide_step_completed",
+    "assistant_knowledge_upload_completed",
 ];
 
 test("the assistant profile events exist and are the only ones added", () => {
@@ -32,8 +36,8 @@ test("the assistant profile events exist and are the only ones added", () => {
     }
 });
 
-test("the entry property is a closed two-value enum", () => {
-    for (const value of ["settings", "chat"]) {
+test("the entry property is a closed three-value enum", () => {
+    for (const value of ["settings", "chat", "guide"]) {
         const parsed = analyticsPropertiesSchema.safeParse({
             assistant_profile_entry: value,
         });
@@ -44,6 +48,24 @@ test("the entry property is a closed two-value enum", () => {
     assert.equal(
         analyticsPropertiesSchema.safeParse({
             assistant_profile_entry: "somewhere else",
+        }).success,
+        false
+    );
+});
+
+test("guide analytics accepts only its closed content-free step names", () => {
+    for (const step of ["create_assistant", "add_knowledge", "start_chat"]) {
+        const parsed = analyticsPropertiesSchema.safeParse({
+            assistant_knowledge_guide_step: step,
+        });
+        assert.equal(parsed.success, true, step);
+        assert.deepEqual(parsed.data, {
+            assistant_knowledge_guide_step: step,
+        });
+    }
+    assert.equal(
+        analyticsPropertiesSchema.safeParse({
+            assistant_knowledge_guide_step: "uploaded-2026-tax-return.pdf",
         }).success,
         false
     );

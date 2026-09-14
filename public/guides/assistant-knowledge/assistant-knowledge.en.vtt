@@ -1,0 +1,16 @@
+WEBVTT
+
+00:00.000 --> 00:06.000
+Create a private AI assistant with a name and clear custom instructions.
+
+00:06.000 --> 00:18.000
+Open the assistant, add your Knowledge file, and wait for processing to finish.
+
+00:18.000 --> 00:30.000
+Select the file this version may use, then save instructions and models.
+
+00:30.000 --> 00:43.000
+Open a conversation, choose AI Assistant in the tools menu, and select your assistant.
+
+00:43.000 --> 00:49.000
+Ask a question. Relevant Knowledge excerpts are used as reference material.
