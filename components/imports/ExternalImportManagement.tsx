@@ -16,6 +16,12 @@ import {
     SourceDeletionNotice,
     type SourceDeletionImpactView,
 } from "@/components/imports/SourceDeletionNotice";
+import { ContinuationTitleImpactNotice } from "@/components/imports/ContinuationTitleImpactNotice";
+import type { TitleImpact } from "@/lib/continuationTitlePreservation";
+import {
+    isStaleTitlePreservation,
+    sourceDeletionQuery,
+} from "@/lib/externalSourceDeletionRequest";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
 import {
     formatBytes,
@@ -152,6 +158,11 @@ export function ExternalImportManagement() {
     const [memoryImpact, setMemoryImpact] =
         useState<SourceDeletionImpactView | null>(null);
     const [keepMemories, setKeepMemories] = useState(false);
+    // The same confirmation's other question (D3): which continuations' shown
+    // names change, and whether to keep them. Off by default.
+    const [titleImpact, setTitleImpact] = useState<TitleImpact | null>(null);
+    const [keepTitles, setKeepTitles] = useState(false);
+    const [titleImpactStale, setTitleImpactStale] = useState(false);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [conversationsState, setConversationsState] =
         useState<ConversationsState>({ kind: "loading" });
@@ -289,40 +300,61 @@ export function ExternalImportManagement() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    const loadDeletionPreview = useCallback(async (importId: string) => {
+        try {
+            const preview = await fetch(
+                `/api/imports/external/${importId}?include=memoryImpact,titleImpact`,
+                { cache: "no-store" }
+            );
+            if (preview.ok) {
+                const body = (await preview.json()) as {
+                    memoryImpact?: SourceDeletionImpactView;
+                    titleImpact?: TitleImpact;
+                };
+                setMemoryImpact(body.memoryImpact ?? null);
+                setTitleImpact(body.titleImpact ?? null);
+            } else {
+                await discardResponseBody(preview);
+            }
+        } catch {
+            // No preview is not a reason to block the delete; the server still
+            // applies the §13.1 defaults, and keeps no title unless asked.
+        }
+    }, []);
+
     const deleteImportRow = useCallback(
         async (importId: string) => {
             if (armedDeleteId !== importId) {
                 setArmedDeleteId(importId);
                 setMemoryImpact(null);
                 setKeepMemories(false);
-                try {
-                    const preview = await fetch(
-                        `/api/imports/external/${importId}?include=memoryImpact`,
-                        { cache: "no-store" }
-                    );
-                    if (preview.ok) {
-                        const body = (await preview.json()) as {
-                            memoryImpact?: SourceDeletionImpactView;
-                        };
-                        setMemoryImpact(body.memoryImpact ?? null);
-                    } else {
-                        await discardResponseBody(preview);
-                    }
-                } catch {
-                    // No preview is not a reason to block the delete; the
-                    // server still applies the §13.1 defaults.
-                }
+                setTitleImpact(null);
+                setKeepTitles(false);
+                setTitleImpactStale(false);
+                await loadDeletionPreview(importId);
                 return;
             }
             setDeletingId(importId);
+            let stayArmed = false;
             try {
                 const response = await fetch(
-                    `/api/imports/external/${importId}?derivedMemories=${
-                        keepMemories ? "suspend" : "delete"
-                    }`,
+                    `/api/imports/external/${importId}?${sourceDeletionQuery({
+                        keepMemories,
+                        preserveTitleConversationIds: keepTitles
+                            ? (titleImpact?.preservableConversationIds ?? [])
+                            : [],
+                    })}`,
                     { method: "DELETE" }
                 );
-                await discardResponseBody(response);
+                if (await isStaleTitlePreservation(response)) {
+                    // Nothing was deleted. Say so, show the current state, and
+                    // let the owner confirm again.
+                    stayArmed = true;
+                    setTitleImpactStale(true);
+                    setKeepTitles(false);
+                    await loadDeletionPreview(importId);
+                    return;
+                }
                 if (response.ok) {
                     void loadCapacity();
                     void loadConversations();
@@ -330,15 +362,18 @@ export function ExternalImportManagement() {
                 }
             } finally {
                 setDeletingId(null);
-                setArmedDeleteId(null);
+                if (!stayArmed) setArmedDeleteId(null);
             }
         },
         [
             armedDeleteId,
             keepMemories,
+            keepTitles,
             loadCapacity,
             loadConversations,
+            loadDeletionPreview,
             loadHistory,
+            titleImpact,
         ]
     );
 
@@ -703,12 +738,20 @@ export function ExternalImportManagement() {
                                     </button>
                                 </div>
                                 {armedDeleteId === row.id ? (
-                                    <SourceDeletionNotice
-                                        impact={memoryImpact}
-                                        scope="import"
-                                        keepDerived={keepMemories}
-                                        onKeepDerivedChange={setKeepMemories}
-                                    />
+                                    <>
+                                        <SourceDeletionNotice
+                                            impact={memoryImpact}
+                                            scope="import"
+                                            keepDerived={keepMemories}
+                                            onKeepDerivedChange={setKeepMemories}
+                                        />
+                                        <ContinuationTitleImpactNotice
+                                            impact={titleImpact}
+                                            keepTitles={keepTitles}
+                                            onKeepTitlesChange={setKeepTitles}
+                                            stale={titleImpactStale}
+                                        />
+                                    </>
                                 ) : null}
                             </li>
                         ))}

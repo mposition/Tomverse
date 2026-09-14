@@ -12,12 +12,17 @@ import { authOptions } from "@/lib/auth";
 import {
     deleteExternalImport,
     getExternalImportStatus,
+    previewContinuationTitleImpact,
     previewExternalSourceDeletion,
 } from "@/lib/externalImportService";
 import {
     readSourceDeletionDispositions,
     wantsMemoryImpact,
 } from "@/lib/externalSourceDeletionRequest";
+import {
+    readTitlePreservationRequest,
+    wantsTitleImpact,
+} from "@/lib/continuationTitlePreservation";
 
 const disabledResponse = (error: ExternalImportDisabledError) =>
     NextResponse.json(
@@ -52,7 +57,15 @@ export async function GET(
                   importId: params.importId,
               })
             : undefined;
-        return NextResponse.json({ ...status, memoryImpact }, {
+        // The same confirmation's other question: which continuations' shown
+        // names this delete changes, and which can be kept. Counts and the
+        // owner's own conversation ids -- never a title.
+        const titleImpact = wantsTitleImpact(new URL(req.url))
+            ? await previewContinuationTitleImpact(session.user.id, {
+                  importId: params.importId,
+              })
+            : undefined;
+        return NextResponse.json({ ...status, memoryImpact, titleImpact }, {
             headers: { "Cache-Control": "no-store" },
         });
     } catch (error) {
@@ -84,10 +97,12 @@ export async function DELETE(
         });
 
         const params = await context.params;
+        const url = new URL(req.url);
         const result = await deleteExternalImport(
             session.user.id,
             params.importId,
-            readSourceDeletionDispositions(new URL(req.url))
+            readSourceDeletionDispositions(url),
+            readTitlePreservationRequest(url)
         );
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },

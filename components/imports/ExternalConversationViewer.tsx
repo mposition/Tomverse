@@ -16,6 +16,12 @@ import {
 } from "@/components/imports/SourceDeletionNotice";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { providerLabel } from "@/components/imports/importFormatting";
+import { ContinuationTitleImpactNotice } from "@/components/imports/ContinuationTitleImpactNotice";
+import type { TitleImpact } from "@/lib/continuationTitlePreservation";
+import {
+    isStaleTitlePreservation,
+    sourceDeletionQuery,
+} from "@/lib/externalSourceDeletionRequest";
 
 /**
  * Account-private read-only viewer for one imported conversation (policy
@@ -99,6 +105,28 @@ export function ExternalConversationViewer({
     const [memoryImpact, setMemoryImpact] =
         useState<SourceDeletionImpactView | null>(null);
     const [keepMemories, setKeepMemories] = useState(false);
+    // Read when the delete is armed, not with the first page: the names at
+    // stake can change while the transcript is open (D3). Off by default.
+    const [titleImpact, setTitleImpact] = useState<TitleImpact | null>(null);
+    const [keepTitles, setKeepTitles] = useState(false);
+    const [titleImpactStale, setTitleImpactStale] = useState(false);
+
+    const loadTitleImpact = useCallback(async () => {
+        try {
+            const response = await fetch(
+                `/api/external-conversations/${encodeURIComponent(conversationId)}?offset=0&limit=1&include=titleImpact`,
+                { cache: "no-store" }
+            );
+            if (!response.ok) {
+                await discardResponseBody(response);
+                return;
+            }
+            const body = (await response.json()) as { titleImpact?: TitleImpact };
+            setTitleImpact(body.titleImpact ?? null);
+        } catch {
+            // No preview keeps the delete available; no title is kept unasked.
+        }
+    }, [conversationId]);
 
     const fetchPage = useCallback(
         async (offset: number): Promise<
@@ -198,17 +226,32 @@ export function ExternalConversationViewer({
     const deleteSnapshot = useCallback(async () => {
         if (!deleteArmed) {
             setDeleteArmed(true);
+            setTitleImpact(null);
+            setKeepTitles(false);
+            setTitleImpactStale(false);
+            await loadTitleImpact();
             return;
         }
         setIsDeleting(true);
+        let stayArmed = false;
         try {
             const response = await fetch(
-                `/api/external-conversations/${encodeURIComponent(conversationId)}?derivedMemories=${
-                    keepMemories ? "suspend" : "delete"
-                }`,
+                `/api/external-conversations/${encodeURIComponent(conversationId)}?${sourceDeletionQuery({
+                    keepMemories,
+                    preserveTitleConversationIds: keepTitles
+                        ? (titleImpact?.preservableConversationIds ?? [])
+                        : [],
+                })}`,
                 { method: "DELETE" }
             );
-            await discardResponseBody(response);
+            if (await isStaleTitlePreservation(response)) {
+                // Nothing was deleted: show what changed and ask again.
+                stayArmed = true;
+                setTitleImpactStale(true);
+                setKeepTitles(false);
+                await loadTitleImpact();
+                return;
+            }
             if (response.ok) {
                 router.push("/settings/imports");
                 return;
@@ -218,9 +261,9 @@ export function ExternalConversationViewer({
             setState({ kind: "error" });
         } finally {
             setIsDeleting(false);
-            setDeleteArmed(false);
+            if (!stayArmed) setDeleteArmed(false);
         }
-    }, [conversationId, deleteArmed, keepMemories, router]);
+    }, [conversationId, deleteArmed, keepMemories, keepTitles, loadTitleImpact, router, titleImpact]);
 
     return (
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8">
@@ -415,12 +458,20 @@ export function ExternalConversationViewer({
                                   : t("externalImport.deleteSnapshot")}
                         </button>
                         {deleteArmed ? (
-                            <SourceDeletionNotice
-                                impact={memoryImpact}
-                                scope="conversation"
-                                keepDerived={keepMemories}
-                                onKeepDerivedChange={setKeepMemories}
-                            />
+                            <>
+                                <SourceDeletionNotice
+                                    impact={memoryImpact}
+                                    scope="conversation"
+                                    keepDerived={keepMemories}
+                                    onKeepDerivedChange={setKeepMemories}
+                                />
+                                <ContinuationTitleImpactNotice
+                                    impact={titleImpact}
+                                    keepTitles={keepTitles}
+                                    onKeepTitlesChange={setKeepTitles}
+                                    stale={titleImpactStale}
+                                />
+                            </>
                         ) : null}
                     </section>
                 </div>

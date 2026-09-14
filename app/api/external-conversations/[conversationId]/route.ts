@@ -13,12 +13,17 @@ import { lockErrorResponse } from "@/lib/conversationLock";
 import {
     deleteExternalConversationSnapshot,
     getExternalConversation,
+    previewContinuationTitleImpact,
     previewExternalSourceDeletion,
 } from "@/lib/externalImportService";
 import {
     readSourceDeletionDispositions,
     wantsMemoryImpact,
 } from "@/lib/externalSourceDeletionRequest";
+import {
+    readTitlePreservationRequest,
+    wantsTitleImpact,
+} from "@/lib/continuationTitlePreservation";
 
 const clampListParam = (
     value: string | null,
@@ -75,7 +80,14 @@ export async function GET(
                   conversationId: params.conversationId,
               })
             : undefined;
-        return NextResponse.json({ ...conversation, memoryImpact }, {
+        // Read after `getExternalConversation()` has applied the snapshot's
+        // lock, like the memory preview. Counts and ids only.
+        const titleImpact = wantsTitleImpact(url)
+            ? await previewContinuationTitleImpact(session.user.id, {
+                  conversationId: params.conversationId,
+              })
+            : undefined;
+        return NextResponse.json({ ...conversation, memoryImpact, titleImpact }, {
             headers: { "Cache-Control": "no-store" },
         });
     } catch (error) {
@@ -118,10 +130,12 @@ export async function DELETE(
         );
 
         const params = await context.params;
+        const url = new URL(req.url);
         const result = await deleteExternalConversationSnapshot(
             session.user.id,
             params.conversationId,
-            readSourceDeletionDispositions(new URL(req.url))
+            readSourceDeletionDispositions(url),
+            readTitlePreservationRequest(url)
         );
         return NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },
