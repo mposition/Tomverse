@@ -1,9 +1,10 @@
 # Prompt Refiner 제안형 UI 계약
 
-- 상태: **composer 연결, 미제공**. `ChatInput`에는 제안 surface와 제어 seam이
-  연결되어 있지만 어떤 제품 caller도 아직 `promptRefinerOffered=true`를 주지
-  않는다. provider 호출, 과금, Router 입력 변경, Message schema 변경은 이
-  회차의 범위가 아니다.
+- 상태: **실제 composer 무과금 검증 연결, 제품 미제공**. 서버는 default-off
+  rollout과 환경 kill switch, adapter readiness를 합쳐 최종 offer를 정한다.
+  현재 준비된 adapter는 loopback Playwright fixture뿐이어서 실제 `ChatInput`의
+  상태 전이는 검증되지만 운영 환경은 항상 `off`다. provider 호출, 과금, Router
+  입력 변경, Message schema 변경은 아직 연결하지 않았다.
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
 - 모델 경계: `lib/promptRefinerModelPrompt.ts`
@@ -42,8 +43,11 @@ Router와 최종 답변 모델이 읽을 `executionPrompt`일 뿐, 사용자의 
 
 request에는 exact `prompt`와 opaque `requestId`만 들어간다. 응답의 requestId가
 다르거나, 응답을 기다리는 동안 사용자가 한 글자라도 바꾸면 그 응답은 stale이다.
-stale 제안은 적용 버튼을 남기지 않고 일반 요청 상태로 돌아간다. 음성 입력, 붙여
-넣기, 대화 전환도 결과적으로 같은 exact-string 검사를 통과해야 한다.
+stale 제안은 적용 버튼을 남기지 않고 일반 요청 상태로 돌아간다. 음성 입력과 붙여
+넣기는 같은 exact-string 검사를 통과해야 한다. 이 문자열 binding과 별도로
+`identity + mounted surface + conversation`이 하나의 scope identity다. 대화·계정·surface
+중 하나라도 바뀌면 draft 문자열이 byte-identical이어도 in-flight·ready 제안을 모두
+폐기하며, 새 scope는 이전 scope의 resolution을 상속하지 않는다.
 
 제안 채택 버튼을 누른 순간에도 draft가 source와 다르면 fail-closed한다. 늦은
 응답이 새 입력을 덮어쓰는 복구나 last-write-wins는 허용하지 않는다.
@@ -107,6 +111,21 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 4. 승인된 품질 증거와 release gate disposition
 5. server-owned offered 결정과 kill switch
 
+5번의 구조는 현재 구현됐다. `feature.promptRefinerEnabled`는 literal `"true"`만
+허용하는 default-off AppSetting이며, `PROMPT_REFINER_KILL_SWITCH`에 공백이 아닌
+값이 하나라도 있으면 rollout보다 먼저 꺼진다. 그러나 rollout 허용만으로는 UI가
+나오지 않는다. 같은 서버 요청에서 실제 adapter readiness까지 참이어야 하며,
+현재 그 조건을 만족하는 것은 `isE2EFixtureMode()` 안의 무과금 fixture뿐이다.
+애플리케이션에는 rollout writer를 두지 않았다. 따라서 이 구조가 생겼다는 사실은
+활성화 승인이나 유료 adapter 승인이 아니다.
+제품 adapter가 하나도 없는 현재는 AppSetting을 매 화면마다 조회하지 않는다.
+`isPromptRefinerEnabled()`는 model-facing adapter가 준비된 뒤 그 readiness 경계
+안에서만 호출할 rollout reader다. `promptRefinerProductAdapterReady()`가 현재 false를
+답하므로 이 reader는 실행되지 않고 DB 왕복도 없다. 이는 등록을 만족시키기 위한
+가짜 활성 경로가 아니라, 제품 adapter가 생길 때 readiness 구현과 함께 바꿀 단일
+서버 seam이다. fixture는 같은 strict default-off·kill switch 해석을 고정된 opt-in
+값에 적용한다.
+
 과거 Router benchmark의 비용 승인은 이 호출에 상속되지 않는다.
 
 ## 7. 접근성·모바일
@@ -133,8 +152,11 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 - `tests/client/promptRefinerSuggestionRender.test.tsx`: 미제공 시 null, 7개 언어,
   두 결정, 44px target, disabled reason, ready live status, 실패 문구,
   내부 모델/우월성 표현 부재
-- 기존 mobile composer·IME·zoom 검사는 실제 caller가 offered를 연결하는 다음
-  회차에서 prompt-refiner-ready fixture를 추가해 다시 실행한다.
+- `tests/e2e/prompt-refiner-chat-input.spec.ts`: `/chat`의 실제 `ChatPageClient` →
+  mobile shell → `ChatInput` 경로에서 default-off, 두 결정 뒤 textarea
+  focus 복귀, accepted fixture의 submit 거부, 편집·새 채팅의 pending response
+  폐기, invalid response 실패·retry, 16,000자 경계, IME 차단, 320px + 200% text,
+  200% zoom 상당 viewport, 44px action과 가로 overflow 부재를 검사한다.
 - `tests/e2e/prompt-refiner-focus.spec.ts`: E2E 전용 fixture에서 초기 mount가
   textarea focus를 빼앗지 않는지, 새 requesting·failed·ready 도착에는 한 번씩
   focus가 이동하는지, draft를 바꿨다가 같은 source로 되돌려도 같은 제안이
@@ -143,11 +165,16 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   desktop·mobile Chromium DOM으로 검사한다. fixture route는
   `isE2EFixtureMode()` 밖에서 404이며 provider·Router·과금 경로가 없다.
 
-static render test 자체는 focus effect를 실행하지 않는다. 새 fixture는 panel의
+static render test 자체는 focus effect를 실행하지 않는다. 격리 fixture는 panel의
 mount·requesting·failed·ready·동일 상태 재등장 focus를 검증한다. 다만 실제 `ChatInput`
-caller가 두 decision 뒤 textarea로 focus를 돌리는 경로와 mobile composer 전체의
-`preventScroll`·IME·320px·200% 조합은 offered caller가 생기는 다음 회차까지
-**미검증**이다. 이 미검증 상태에서도 Refiner 활성화는 허용하지 않는다.
+fixture caller는 두 decision 뒤 textarea로 focus를 돌리는 경로와 mobile composer
+전체의 IME·320px·200% 조합을 검증한다. 이 caller는 서버가 loopback + auth bypass +
+database bypass를 모두 확인하고 전용 cookie를 받은 경우에만 `e2e_fixture` mode를
+내린다. 실제 provider를 쓰는 product mode는 타입에도 없으며, AppSetting row만으로
+그 mode를 만들 수 없다.
+fixture에서 채택한 resolution은 synthetic 문장을 user Message로 오인하지 않도록
+submit을 fail-closed한다. 제품 caller는 원문/실행문 분리와 receipt 영속화를 먼저
+구현해야 이 guard를 제품 mode로 대체할 수 있다.
 
 현재 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·
 profile 등의 기존 surface만 실행하며 `promptRefinerModelMessages()`를 아직

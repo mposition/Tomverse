@@ -64,6 +64,14 @@ import {
   parseMessageSaveMapping,
 } from "@/components/chat/chatDurableRecoveryClient";
 import { appendVoiceTranscript } from "@/lib/voiceTranscript";
+import {
+  bindPromptRefinerSuggestion,
+  isPromptRefinerResolutionCurrent,
+  promptRefinerResponseSchema,
+  type PromptRefinerRequest,
+  type PromptRefinerResolution,
+  type PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
@@ -600,6 +608,7 @@ export function ChatPageClient({
   guestDefaultModelId,
   imageGenerationEnabled = false,
   voiceInputEnabled = false,
+  promptRefinerMode = "off",
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
   initialConversationId = null,
@@ -617,6 +626,13 @@ export function ChatPageClient({
    * after an operator pulled the kill switch.
    */
   voiceInputEnabled?: boolean;
+  /**
+   * The server's final Prompt Refiner mode. The only active value today is a
+   * deterministic, no-cost loopback fixture; there is no product adapter.
+   * Keeping mode and adapter inseparable makes an offered-but-inert state
+   * unrepresentable at this boundary.
+   */
+  promptRefinerMode?: "off" | "e2e_fixture";
   /**
    * How many models one image comparison may fan out to, read from the running
    * server in page.tsx. Passed rather than resolved here: `process.env` in a
@@ -818,6 +834,153 @@ export function ChatPageClient({
     identityKey,
     mountedSurface === "chat" && identityKey?.startsWith("account:") === true
   );
+  /*
+    The first real ChatInput caller is deliberately fixture-only. It proves
+    state ownership, exact-draft binding and decision focus in the complete
+    composer without creating a provider, billing or Router path. The server
+    can only send `e2e_fixture` mode inside loopback fixture mode, so production
+    keeps rendering no Refiner surface even if a rollout row is accidentally
+    added.
+  */
+  const [promptRefinerState, setPromptRefinerState] =
+    useState<PromptRefinerUiState>({ status: "idle" });
+  const [promptRefinerFixtureSettledSequence, setPromptRefinerFixtureSettledSequence] =
+    useState<number | null>(null);
+  const promptRefinerOffered = promptRefinerMode === "e2e_fixture";
+  const promptRefinerRequestSequenceRef = useRef(0);
+  const promptRefinerAbortControllerRef = useRef<AbortController | null>(null);
+  const promptRefinerDraftRef = useRef(inputValue);
+  const promptRefinerBoundDraftRef = useRef<string | null>(null);
+  const promptRefinerResolutionRef = useRef<PromptRefinerResolution | null>(null);
+  const promptRefinerScopeKey = `${identityKey ?? "unresolved"}:${mountedSurface}:${
+    currentChatId ?? "new"
+  }`;
+  const promptRefinerScopeKeyRef = useRef(promptRefinerScopeKey);
+
+  const resetPromptRefinerFixture = useCallback(() => {
+    promptRefinerRequestSequenceRef.current += 1;
+    promptRefinerAbortControllerRef.current?.abort();
+    promptRefinerAbortControllerRef.current = null;
+    promptRefinerBoundDraftRef.current = null;
+    promptRefinerResolutionRef.current = null;
+    setPromptRefinerState({ status: "idle" });
+  }, []);
+
+  useLayoutEffect(() => {
+    promptRefinerDraftRef.current = inputValue;
+    const boundDraft = promptRefinerBoundDraftRef.current;
+    if (boundDraft !== null && boundDraft !== inputValue) {
+      resetPromptRefinerFixture();
+    }
+    const resolution = promptRefinerResolutionRef.current;
+    if (resolution && !isPromptRefinerResolutionCurrent(resolution, inputValue)) {
+      promptRefinerResolutionRef.current = null;
+    }
+  }, [inputValue, resetPromptRefinerFixture]);
+
+  useEffect(
+    () => () => {
+      promptRefinerAbortControllerRef.current?.abort();
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (
+      promptRefinerMode !== "e2e_fixture" ||
+      promptRefinerFixtureSettledSequence === null
+    ) {
+      return;
+    }
+    // Test-only positive synchronization point. This effect runs after React
+    // committed the same fetch continuation's state update, so an absence
+    // assertion made after the event cannot win a race against that update.
+    document.documentElement.dataset.promptRefinerFixtureSettled = String(
+      promptRefinerFixtureSettledSequence
+    );
+  }, [promptRefinerFixtureSettledSequence, promptRefinerMode]);
+
+  useLayoutEffect(() => {
+    if (promptRefinerScopeKeyRef.current === promptRefinerScopeKey) return;
+    promptRefinerScopeKeyRef.current = promptRefinerScopeKey;
+    // Conversation and identity are browser-local binding facts, not model
+    // input. A same-text draft in another conversation must not inherit a
+    // late or already-ready proposal from the one that was left.
+    resetPromptRefinerFixture();
+  }, [promptRefinerScopeKey, resetPromptRefinerFixture]);
+
+  const handlePromptRefinerRequest = useCallback(
+    (sourcePrompt: string) => {
+      if (promptRefinerMode !== "e2e_fixture") return;
+      promptRefinerAbortControllerRef.current?.abort();
+      const requestSequence = ++promptRefinerRequestSequenceRef.current;
+      const request: PromptRefinerRequest = {
+        requestId: `fixture_${requestSequence}`,
+        prompt: sourcePrompt,
+      };
+      const requestScopeKey = promptRefinerScopeKeyRef.current;
+      const controller = new AbortController();
+      promptRefinerAbortControllerRef.current = controller;
+      promptRefinerBoundDraftRef.current = request.prompt;
+      promptRefinerResolutionRef.current = null;
+      setPromptRefinerState({ status: "requesting", request });
+      void fetch("/e2e/prompt-refiner-adapter", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        cache: "no-store",
+        signal: controller.signal,
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("prompt_refiner_fixture_failed");
+          const payload = promptRefinerResponseSchema.parse(await response.json());
+          if (
+            requestSequence !== promptRefinerRequestSequenceRef.current ||
+            requestScopeKey !== promptRefinerScopeKeyRef.current
+          ) {
+            return;
+          }
+          const suggestion = bindPromptRefinerSuggestion({
+            request,
+            currentPrompt: promptRefinerDraftRef.current,
+            response: payload,
+          });
+          setPromptRefinerState(
+            suggestion ? { status: "ready", suggestion } : { status: "idle" }
+          );
+        })
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          if (
+            requestSequence !== promptRefinerRequestSequenceRef.current ||
+            requestScopeKey !== promptRefinerScopeKeyRef.current
+          ) {
+            return;
+          }
+          setPromptRefinerState(
+            promptRefinerDraftRef.current === request.prompt
+              ? { status: "failed", request, failureCode: "fixture_response_invalid" }
+              : { status: "idle" }
+          );
+        })
+        .finally(() => {
+          if (promptRefinerAbortControllerRef.current === controller) {
+            promptRefinerAbortControllerRef.current = null;
+          }
+          setPromptRefinerFixtureSettledSequence(requestSequence);
+        });
+    }, [promptRefinerMode]
+  );
+
+  const handlePromptRefinerDecision = useCallback((resolution: PromptRefinerResolution) => {
+    // The fixture keeps an accepted resolution only to fail closed if a test
+    // tries to submit it. It has no product execution path and persists no
+    // receipt; a model-facing caller must do both before enabling submit.
+    promptRefinerBoundDraftRef.current = null;
+    promptRefinerResolutionRef.current =
+      resolution.decision === "accepted" ? resolution : null;
+    setPromptRefinerState({ status: "idle" });
+  }, []);
   const [personalizedPrompt, setPersonalizedPrompt] = useState<string | null>(null);
   const [isGuestPreviewEntry] = useState(
     () =>
@@ -2888,6 +3051,7 @@ export function ChatPageClient({
     }, [fetchConversations, mountedSurface, sessionUserId, setLang, status]);
 
     const handleNewChat = () => {
+        resetPromptRefinerFixture();
         conversationSelectionTicketRef.current += 1;
         pendingCreatedChatRef.current = null;
         /*
@@ -2983,6 +3147,7 @@ export function ChatPageClient({
         modelId?: string,
         options?: { fromImageRequest?: boolean }
     ) => {
+        resetPromptRefinerFixture();
         conversationSelectionTicketRef.current += 1;
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
@@ -3045,6 +3210,7 @@ export function ChatPageClient({
     };
 
     const handleNewImage = () => {
+        resetPromptRefinerFixture();
         conversationSelectionTicketRef.current += 1;
         localComparisonResponsesRef.current.clear();
         latestLocalComparisonPromptRef.current = null;
@@ -3981,6 +4147,15 @@ export function ChatPageClient({
   // submit at a time, and the flag is released in `finally` so a rejected or
   // aborted attempt can never wedge the composer shut.
   const handleGlobalSubmit = async (options?: GlobalSubmitOptions) => {
+    if (promptRefinerMode === "e2e_fixture" && !options?.overrideText) {
+      const resolution = promptRefinerResolutionRef.current;
+      if (resolution && isPromptRefinerResolutionCurrent(resolution, inputValue)) {
+        // The fixture may prove the pre-send decision but cannot turn its
+        // synthetic text into an authored Message or provider instruction.
+        return;
+      }
+      promptRefinerResolutionRef.current = null;
+    }
     const submitFence = submitIdentityFenceRef.current;
     const ownerKey = identityKey ?? "unresolved";
     if (pendingSubmissionOwnersRef.current.has(ownerKey)) return;
@@ -6976,6 +7151,10 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
+          promptRefinerOffered={promptRefinerOffered}
+          promptRefinerState={promptRefinerState}
+          onPromptRefinerRequest={handlePromptRefinerRequest}
+          onPromptRefinerDecision={handlePromptRefinerDecision}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}
@@ -7106,6 +7285,10 @@ export function ChatPageClient({
           attachmentCapabilities={attachmentCapabilities}
           voiceInputEnabled={voiceInputEnabled}
           onVoiceTranscript={handleVoiceTranscript}
+          promptRefinerOffered={promptRefinerOffered}
+          promptRefinerState={promptRefinerState}
+          onPromptRefinerRequest={handlePromptRefinerRequest}
+          onPromptRefinerDecision={handlePromptRefinerDecision}
           identityKey={identityKey}
           onComparisonReview={handleComparisonReview}
           onGuestSignInPrompt={() => setShowGuestSignInPrompt(true)}

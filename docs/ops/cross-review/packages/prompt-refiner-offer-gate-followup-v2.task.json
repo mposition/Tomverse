@@ -1,0 +1,41 @@
+{
+  "taskId": "prompt-refiner-offer-gate-followup-v2",
+  "requirement": "on_hold로 종결된 prompt-refiner-offer-gate-v1의 최종 Claude 검토에서 남은 세 지적을 닫는다. 새 POST fixture adapter를 배포 fixture-route gate와 E2E short-circuit source registry에 등록하고, 실제 페이지까지 도착한 late response가 편집 뒤 폐기됨을 결정적으로 검증하며, 동일한 draft를 가진 두 대화 사이 전환만으로 ready proposal이 폐기됨을 검증한다. 기존 Prompt Refiner default-off offer gate와 실제 composer 무과금 fixture 범위는 유지한다. provider 호출, billing, Router 결합, Message persistence, 제품 활성화, push, merge, deploy는 하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "POST /e2e/prompt-refiner-adapter가 production-like 두 환경에서는 404이고 loopback fixture에서는 유효한 POST로 200임을 기존 production build gate가 직접 검사한다.",
+    "E2E short-circuit source registry가 prompt-refiner adapter route도 lib/e2eTestMode helper 사용 대상으로 강제한다.",
+    "편집 중 late response 검사는 transport abort를 무력화하고 page response 도착을 기다린 뒤 ready proposal 부재를 확인한다.",
+    "동일 문자열 draft를 가진 두 대화 사이 전환 검사는 문자열 변경이 없어도 이전 대화의 ready proposal이 폐기됨을 실제 /chat 경로에서 확인한다.",
+    "검증 명령은 production build를 먼저 만든 뒤 그 바이트로 관련 unit/E2E와 fixture HTTP gate를 실행하고, typecheck, lint, UI tier coverage, 문서·인코딩·정책 참조와 diff whitespace 검사를 통과한다.",
+    "scope effect와 late-response sequence/scope guard를 각각 제거한 mutation build에서 대응 E2E가 실패하고 복원한 build에서 통과한다.",
+    "제품 adapter가 없는 현재 promptRefinerProductAdapterReady()는 false이고 rollout reader는 실행되지 않는다. 이 의도적인 readiness seam은 DB 왕복 없이 유지되며 제품 adapter 구현 때 별도 검토로 교체한다.",
+    "Claude는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 새 continuation digest를 독립 검토하며 이전 exchange를 변경하지 않는다."
+  ],
+  "baseCommit": "da6fb95d810f1e6b5f12b47566e701a2fb341ab0",
+  "writableScope": [
+    ".github/audits/ui-test-tiers.md",
+    "AGENTS.md",
+    "app/(site)/(application)/chat/ChatPageClient.tsx",
+    "app/(site)/(application)/e2e/prompt-refiner-adapter/route.ts",
+    "components/chat/DesktopChatShell.tsx",
+    "components/chat/MobileChatShell.tsx",
+    "components/chat/ReviewWorkspaceShell.tsx",
+    "docs/ops/cross-review/packages/prompt-refiner-offer-gate-followup-v2.mutation-evidence.md",
+    "docs/ops/cross-review/packages/prompt-refiner-offer-gate-followup-v2.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-offer-gate-v1.task.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/appSettings.ts",
+    "lib/promptRefinerAccess.ts",
+    "scripts/verify-fixture-route-gate.mjs",
+    "tests/appSettingWriters.test.mjs",
+    "tests/e2e/prompt-refiner-chat-input.spec.ts",
+    "tests/goLiveSecurityFixes.test.ts",
+    "tests/promptRefinerAccess.test.mjs"
+  ],
+  "generatedPaths": [],
+  "supersedes": {
+    "taskId": "prompt-refiner-offer-gate-v1",
+    "exchange": "artifacts/cross-review/prompt-refiner-offer-gate-v1/exchange.json"
+  }
+}

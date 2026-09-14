@@ -24,8 +24,14 @@ import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import {
   getPublicAppSettings,
   isImageGenerationEnabled,
+  isPromptRefinerEnabled,
   isVoiceInputEnabled,
 } from "@/lib/appSettings";
+import {
+  promptRefinerAvailable,
+  promptRefinerOfferDecision,
+  promptRefinerProductAdapterReady,
+} from "@/lib/promptRefinerAccess";
 import {
   imageGroupMaxModels,
   resolveImageGroupMaxModels,
@@ -79,6 +85,13 @@ export async function ReviewWorkspaceShell({
     pulled it. A read failure leaves it false, exactly like a missing flag row.
   */
   let voiceInputEnabled = false;
+  // Availability and the final offer are deliberately separate. The stored
+  // flag may authorize a rollout only after an adapter exists; until then the
+  // final server-owned decision remains false and the composer renders no
+  // inert promise. The only adapter in this change is the loopback fixture
+  // below, so production cannot offer or call a Refiner yet.
+  let promptRefinerAvailableToDeployment = false;
+  let promptRefinerFixtureAdapterEnabled = false;
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
     imageGenerationEnabled = await isImageGenerationEnabled();
@@ -88,6 +101,12 @@ export async function ReviewWorkspaceShell({
     // serve -- a composer that offered it to a caller the route refuses is the
     // mismatch this prop exists to prevent.
     voiceInputEnabled = await isVoiceInputEnabled();
+    // There is deliberately no product adapter in this slice. The conditional
+    // caller keeps the AppSetting reader wired to the one readiness boundary
+    // that may use it later while making today's zero-query behavior explicit.
+    if (promptRefinerProductAdapterReady()) {
+      promptRefinerAvailableToDeployment = await isPromptRefinerEnabled();
+    }
   } catch (error) {
     // A settings read failure must not change what the guest sees: the
     // compiled-in default resolves to the same brand trio, so the count and
@@ -132,6 +151,17 @@ export async function ReviewWorkspaceShell({
     if (!voiceInputEnabled) {
       voiceInputEnabled = jar.get("__tomverse_e2e_voice_input")?.value === "1";
     }
+    // A deterministic, no-cost adapter for actual ChatInput browser coverage.
+    // Its cookie is accepted only inside full fixture mode. The pure rollout
+    // helper is still used so PROMPT_REFINER_KILL_SWITCH wins even in tests.
+    promptRefinerFixtureAdapterEnabled =
+      jar.get("__tomverse_e2e_prompt_refiner")?.value === "1";
+    if (promptRefinerFixtureAdapterEnabled) {
+      promptRefinerAvailableToDeployment = promptRefinerAvailable({
+        storedFlagValue: "true",
+        env: process.env,
+      });
+    }
     // The limit comes from an environment variable read at boot, and the e2e
     // suite runs one server for every test, so a spec cannot restart it to
     // exercise both sides of the limit. The override goes through the same
@@ -140,6 +170,11 @@ export async function ReviewWorkspaceShell({
     const overrideRaw = jar.get("__tomverse_e2e_image_group_max_models")?.value;
     if (overrideRaw) maxImageModels = resolveImageGroupMaxModels(overrideRaw);
   }
+
+  const promptRefinerOffered = promptRefinerOfferDecision({
+    available: promptRefinerAvailableToDeployment,
+    adapterReady: promptRefinerFixtureAdapterEnabled,
+  });
 
   // The verification coordinator wraps the page rather than living inside it,
   // so ChatPageClient itself can ask for a token for a user-initiated action
@@ -152,6 +187,7 @@ export async function ReviewWorkspaceShell({
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
         voiceInputEnabled={voiceInputEnabled}
+        promptRefinerMode={promptRefinerOffered ? "e2e_fixture" : "off"}
         // The composer cannot read this itself: `process.env` in a Client
         // Component is substituted at build time, so a client-side copy would
         // keep offering yesterday's limit after a deployment changed it. This

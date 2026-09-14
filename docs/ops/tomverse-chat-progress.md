@@ -705,3 +705,40 @@ PLANNER-03 adversarial report의 명시적 surface로 등록하며, ③ 내부 r
 지연·실패·stale·선택률 계측을 붙이고, ④ 모델·cap·timeout·비용을 별도 승인한 작은
 shadow를 수행한 뒤, ⑤ Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을
 별도 측정하는 것이다.
+
+## 2026-09-15 Prompt Refiner 서버 offer gate·실제 composer 무과금 검증 회차
+
+이번 회차는 위 권장 순서의 1번을 구현한다. 서버가 소유하는
+`feature.promptRefinerEnabled`는 literal `"true"`만 허용하는 default-off rollout이고,
+`PROMPT_REFINER_KILL_SWITCH`의 공백 아닌 값은 데이터베이스 조회 전에 이를 끈다.
+rollout만으로 UI를 노출하지 않고 같은 요청에서 실제 adapter readiness까지 확인한다.
+현재 adapter는 loopback·E2E 환경에서만 선택 가능한 결정적 무과금 fixture뿐이며,
+제품 adapter mode는 타입에 존재하지 않는다. 따라서 AppSetting 행이 생기거나 잘못
+켜져도 production composer는 Refiner를 제안하거나 호출할 수 없다. 애플리케이션 writer,
+provider 호출, billing, Router 입력, Message schema, 제품 flag 활성화는 추가하지 않았다.
+제품 adapter가 없는 동안에는 사용할 수 없는 rollout 값을 얻으려고 화면마다 DB를
+조회하지 않으며, rollout reader는 미래 model-facing adapter readiness 안에서만 쓰인다.
+
+실제 `/chat`의 `ReviewWorkspaceShell` → `ChatPageClient` → mobile shell → `ChatInput`
+경로에서 default-off, 원문 유지·제안 사용 뒤 textarea focus 복귀와 무전송, 요청 중
+편집한 draft의 late result 폐기, 동일 문자열을 가진 두 대화 사이의 scope 격리,
+IME 조합 중 요청 차단, 320px·200% text와 200% zoom 상당 viewport의 overflow 부재 및
+44px action을 검사한다. invalid response 실패·retry, 16,000자 경계, 새 채팅의 pending
+요청 폐기, synthetic 채택문의 submit 거부도 검사한다. POST fixture adapter는 동일한
+production build를 public origin 두 조합과 loopback fixture에서 실행해 각각 404·404·200을
+확인한다. 순수 접근 계약과 writer registry도 함께 검사한다. 이 기록은 로컬 source
+검증의 범위이며 독립 검토, Linux
+통합 CI, 병합, 배포 또는 제품 활성화를 미리 선언하지 않는다.
+
+이번 의미 있는 slice를 반영한 전체 웹 Chat의 대략적 구현 진척은 **약 66%, 주관적
+범위 56–76%, 직전 회차 대비 +1%p**로 본다. C19–C20의 제품 준비도는 약 **30%**다.
+서버 gate와 실제 composer 상태 경로는 생겼지만 실제 Refiner provider, PLANNER-03
+증거, 영속 receipt, 품질·비용·지연 관측 및 Router 결합은 아직 없으므로 이보다 높게
+산정하지 않는다.
+
+이 Cycle 다음 권장 순서는 ① 이 source의 Claude 읽기 전용 검토와 통합 CI,
+② `promptRefinerModelMessages()`를 PLANNER-03 adversarial report의 명시적 surface로
+등록, ③ provider와 분리된 내부 receipt·지연·실패·stale·사용자 선택률 계측 계약,
+④ 모델·output cap·timeout·재시도 0·비용 상한을 사전등록한 소규모 shadow 승인,
+⑤ 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합 및 전체
+카탈로그 선택 품질을 별도 측정하는 것이다.

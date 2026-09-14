@@ -43,6 +43,10 @@ import {
   voiceInputKillSwitchEngaged,
 } from "@/lib/voiceInputAccess";
 import {
+  PROMPT_REFINER_FLAG_KEY,
+  readPromptRefinerAvailability,
+} from "@/lib/promptRefinerAccess";
+import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
@@ -340,6 +344,28 @@ export async function isVoiceInputEnabled(): Promise<boolean> {
     select: { value: true },
   });
   return voiceInputAvailable({ storedFlagValue: row?.value, env: process.env });
+}
+
+/**
+ * Prompt Refiner's default-off rollout flag plus environment kill switch.
+ *
+ * There is intentionally no application writer yet. Enabling the flag would
+ * authorize a paid model call whose fixed model/cap/timeout and PLANNER-03
+ * evidence are not approved. The server shell also requires adapter readiness
+ * before it turns this availability into an offered UI decision.
+ */
+export async function isPromptRefinerEnabled(): Promise<boolean> {
+  return readPromptRefinerAvailability({
+    env: process.env,
+    databaseEnabled: !e2eDatabaseDisabled(),
+    readStoredFlag: async () => {
+      const row = await prisma.appSetting.findUnique({
+        where: { key: PROMPT_REFINER_FLAG_KEY },
+        select: { value: true },
+      });
+      return row?.value;
+    },
+  });
 }
 
 export class VoiceInputDisabledError extends Error {
