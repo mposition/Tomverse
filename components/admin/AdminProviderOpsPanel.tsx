@@ -6,6 +6,7 @@ import { dispatchAppToast } from "@/lib/appToast";
 import type { AiModel, AiProvider } from "@/lib/models";
 import { adminProviderOpsMessages } from "@/lib/adminMessages/providerOps";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 export type AdminProviderIncidentRow = {
   id: string;
@@ -104,7 +105,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
     if (busy) return;
     setBusy(`test-${targetProvider}`);
     try {
-      const response = await fetch("/api/admin/provider-test", {
+      const response = await adminFetch("/api/admin/provider-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: targetProvider }),
@@ -132,7 +133,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
     if (busy) return;
     setBusy("create");
     try {
-      const response = await fetch("/api/admin/incidents", {
+      const response = await adminFetch("/api/admin/incidents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -166,7 +167,7 @@ export function AdminProviderOpsPanel({ models, incidents, checks }: Props) {
     if (busy) return;
     setBusy(`resolve-${incidentId}`);
     try {
-      const response = await fetch("/api/admin/incidents", {
+      const response = await adminFetch("/api/admin/incidents", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ incidentId, action: "resolve" }),

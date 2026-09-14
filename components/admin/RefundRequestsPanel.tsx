@@ -4,12 +4,17 @@ import { useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Download, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
-import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { describeRefundApproval } from "@/lib/adminRefundOutcomeCopy";
 import { formatBillingMinor, normalizeBillingCurrency } from "@/lib/billingMarkets";
 import { adminIntlLocale } from "@/lib/adminLocale";
 import { adminRefundsMessages } from "@/lib/adminMessages/refunds";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 export type RefundRequestRow = {
   id: string;
@@ -99,6 +104,10 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
   )
     ? (requestedStatus as "all" | "pending" | "approved" | "rejected")
     : "pending";
+  // The toast fades; a step-up refusal needs something that does not. The
+  // operator has to leave this screen to renew their sign-in, and a sentence
+  // that named the remedy and then disappeared is the defect rule 7 is about.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [items, setItems] = useState(rows);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -156,7 +165,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
     if (busyId) return;
     setBusyId(id);
     try {
-      const response = await fetch(`/api/admin/refund-requests/${id}`, {
+      const response = await adminFetch(`/api/admin/refund-requests/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -185,6 +194,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
           locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
+        setApiFailure(failure);
         return;
       }
       setItems((current) =>
@@ -216,6 +226,7 @@ export function RefundRequestsPanel({ rows, rowLimit }: Props) {
 
   return (
     <section id="refunds" className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">

@@ -34,6 +34,7 @@ import type {
   DiagnosticStatus,
   PromotionDiagnosticsReport,
 } from "@/lib/promotionDiagnosticsCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * "Promotion diagnostics" -- the read-only answer to a promotion that validates
@@ -229,7 +230,7 @@ export function PromotionDiagnosticsPanel({ promotions }: Props) {
     setIsRunning(true);
     setError(null);
     try {
-      const response = await fetch("/api/admin/billing/promotions/diagnose", {
+      const response = await adminFetch("/api/admin/billing/promotions/diagnose", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

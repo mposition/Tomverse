@@ -227,3 +227,49 @@ export function validateProviderConfiguration(model: AiModel) {
     warnings,
   };
 }
+
+/**
+ * Whether a registry write is based on a row that has since moved.
+ *
+ * `PATCH /api/admin/models/{id}` writes the whole submitted body, so a save
+ * made from a panel opened ten minutes ago reverts everything written in
+ * between. The other writer is usually not a second operator: it is catalogue
+ * reconciliation, which writes `maxOutputTokens` and `creditWeight` onto
+ * existing rows. AGENTS.md records what reverting one of those costs -- a
+ * fossilised output cap is a ceiling on every answer the model gives, and
+ * `claude-sonnet-5` was found capped at 4,096 against a profile of 128,000.
+ *
+ * A function so the boundaries are testable, because all three of them are
+ * places this could be wrong:
+ *
+ * - **No `readAt`** is not stale. A caller that never read the row cannot be
+ *   working from a stale copy, and clients that predate the parameter keep
+ *   working rather than being refused.
+ * - **Equal instants** are not stale. The row's `updatedAt` can equal the
+ *   moment the list was read; refusing that would make the guard fire on a
+ *   write nothing had touched.
+ * - **An unparseable `readAt`** is neither stale nor ignorable. Treating it as
+ *   absent would let a malformed value silently disable the guard, which is
+ *   the failure mode a guard must not have.
+ */
+export type ModelRegistryWriteFreshness =
+  | { verdict: "fresh" }
+  | { verdict: "stale"; changedAt: Date }
+  | { verdict: "unreadable" };
+
+export const modelRegistryWriteFreshness = (input: {
+  /** The instant the server stamped on the list the caller is working from. */
+  readAt: string | null | undefined;
+  /** The row's current `updatedAt`, or null when the row no longer exists. */
+  updatedAt: Date | null;
+}): ModelRegistryWriteFreshness => {
+  if (!input.readAt) return { verdict: "fresh" };
+
+  const readAt = new Date(input.readAt);
+  if (Number.isNaN(readAt.getTime())) return { verdict: "unreadable" };
+
+  if (input.updatedAt && input.updatedAt > readAt) {
+    return { verdict: "stale", changedAt: input.updatedAt };
+  }
+  return { verdict: "fresh" };
+};

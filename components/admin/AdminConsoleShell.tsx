@@ -4,6 +4,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Bell, Loader2, Menu, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import {
+  adminAlertsDrawerView,
+  adminAlertsShouldFetch,
+  type AdminAlertsFailure,
+} from "@/lib/adminAlertsDrawer";
 import { AppToastViewport } from "@/components/AppToastViewport";
 import { AdminAccountMenu } from "@/components/admin/AdminAccountMenu";
 import {
@@ -18,6 +23,7 @@ import { localizeAdminPageMeta } from "@/lib/adminNavigationLocale";
 import { adminShellMessages } from "@/lib/adminMessages/shell";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
 import type { AdminRole } from "@/lib/adminAuthCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The automatic-refresh period, and the only place it is written down.
@@ -85,6 +91,11 @@ function AdminConsoleChrome({
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [notificationRows, setNotificationRows] = useState<NotificationRow[]>([]);
   const [loadingAlerts, setLoadingAlerts] = useState(false);
+  // A failed read is not an empty inbox. The branch order that guarantees it
+  // lives in `lib/adminAlertsDrawer.ts`, where a test can reach it.
+  const [alertsFailure, setAlertsFailure] = useState<AdminAlertsFailure | null>(
+    null
+  );
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // Starts empty rather than at `new Date()`. This component is server-rendered
@@ -145,22 +156,49 @@ function AdminConsoleChrome({
     return () => window.clearInterval(interval);
   }, [autoRefresh, refresh]);
 
-  const loadAlerts = async () => {
-    setAlertsOpen((open) => !open);
-    if (notificationRows.length > 0 || loadingAlerts) return;
+  const fetchAlerts = useCallback(async () => {
     setLoadingAlerts(true);
+    setAlertsFailure(null);
     try {
-      const response = await fetch("/api/admin/notifications?take=5&status=all", {
+      const response = await adminFetch("/api/admin/notifications?take=5&status=all", {
+        // Ten seconds, because a drawer that spins forever is the same defect
+        // as one that lies: the operator learns nothing either way.
+        signal: AbortSignal.timeout(10_000),
         cache: "no-store",
       });
       const data = (await response.json().catch(() => null)) as
-        | { logs?: NotificationRow[] }
+        | { logs?: NotificationRow[]; error?: string }
         | null;
-      if (response.ok) setNotificationRows(data?.logs || []);
+      if (!response.ok) {
+        setAlertsFailure({ reason: "status", status: response.status });
+        return;
+      }
+      setNotificationRows(data?.logs || []);
+    } catch {
+      setAlertsFailure({ reason: "network" });
     } finally {
       setLoadingAlerts(false);
     }
+  }, []);
+
+  const loadAlerts = () => {
+    setAlertsOpen((open) => !open);
+    if (
+      adminAlertsShouldFetch({
+        loading: loadingAlerts,
+        failure: alertsFailure,
+        rowCount: notificationRows.length,
+      })
+    ) {
+      void fetchAlerts();
+    }
   };
+
+  const alertsView = adminAlertsDrawerView({
+    loading: loadingAlerts,
+    failure: alertsFailure,
+    rowCount: notificationRows.length,
+  });
 
   const openDrawer = () => {
     setMobileNavOpen(true);
@@ -284,9 +322,33 @@ function AdminConsoleChrome({
                       {m.viewAll}
                     </Link>
                   </div>
-                  {loadingAlerts ? (
+                  {alertsView.kind === "loading" ? (
                     <Loader2 className="mx-auto my-6 h-5 w-5 animate-spin text-zinc-500" />
-                  ) : notificationRows.length === 0 ? (
+                  ) : alertsView.kind === "unreadable" ? (
+                    <div
+                      className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3"
+                      role="status"
+                      data-testid="admin-alerts-error"
+                    >
+                      <p className="text-xs font-bold text-amber-100">
+                        {m.alerts.title}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-amber-100/80">
+                        {alertsView.failure.reason === "status"
+                          ? m.alerts.unavailable(alertsView.failure.status)
+                          : m.alerts.unreachable}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void fetchAlerts()}
+                        data-testid="admin-alerts-retry"
+                        className="mt-2 inline-flex min-h-11 items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-500/20"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                        {m.alerts.retry}
+                      </button>
+                    </div>
+                  ) : alertsView.kind === "empty" ? (
                     <p className="rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-xs text-zinc-400">
                       {m.noNotifications}
                     </p>

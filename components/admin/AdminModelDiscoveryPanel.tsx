@@ -11,6 +11,7 @@ import {
 } from "@/lib/modelLifecycleWorkItemCore";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { adminFetch } from "@/lib/adminFetch";
 
 type ReviewPriority =
   | "recommended"
@@ -256,7 +257,7 @@ export function AdminModelDiscoveryPanel() {
     const current = () => generation === loadGenerationRef.current;
     setRefreshing(true);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         view === "excluded"
           ? "/api/admin/model-lifecycle?view=excluded"
           : "/api/admin/model-lifecycle",
@@ -392,7 +393,7 @@ export function AdminModelDiscoveryPanel() {
     const workItemIds = families.flatMap((family) => family.workItemIds);
     setBusyIds(new Set(workItemIds));
     try {
-      const response = await fetch("/api/admin/model-lifecycle", {
+      const response = await adminFetch("/api/admin/model-lifecycle", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -475,7 +476,7 @@ export function AdminModelDiscoveryPanel() {
       if (!note?.trim()) return;
       setBusyIds(new Set([row.id]));
       try {
-        const response = await fetch("/api/admin/model-lifecycle/validations", {
+        const response = await adminFetch("/api/admin/model-lifecycle/validations", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

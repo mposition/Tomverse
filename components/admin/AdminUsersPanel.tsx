@@ -15,7 +15,11 @@ import {
   X,
 } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
-import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminDateTimeLabel as dateTimeLabel } from "@/lib/adminDateTime";
 import { buildPlanAdjustPayload } from "@/lib/adminPlanAdjustCore";
 import type {
@@ -33,6 +37,7 @@ import {
   AdminUserSecurityControls,
   toAdminSecurityUser,
 } from "@/components/admin/AdminUserSecurityControls";
+import { adminFetch } from "@/lib/adminFetch";
 
 type Props = {
   rows: AdminUserRow[];
@@ -227,6 +232,10 @@ export function AdminUsersPanel({
   const m = useAdminMessages(adminUsersMessages);
   const { locale: apiLocale } = useAdminLocale();
   const intl = adminIntlLocale(apiLocale);
+  // The toast fades; a step-up refusal needs something that does not. The
+  // operator has to leave this screen to renew their sign-in, and a sentence
+  // that named the remedy and then disappeared is the defect rule 7 is about.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [items, setItems] = useState(rows);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [statsSnapshot, setStatsSnapshot] = useState(stats);
@@ -282,7 +291,7 @@ export function AdminUsersPanel({
       });
       if (cursor) params.set("cursor", cursor);
       if (refreshStats) params.set("includeStats", "1");
-      const response = await fetch(`/api/admin/users?${params.toString()}`, {
+      const response = await adminFetch(`/api/admin/users?${params.toString()}`, {
         cache: "no-store",
       });
       const data = (await response.json().catch(() => null)) as
@@ -382,7 +391,7 @@ export function AdminUsersPanel({
     setDetailError("");
     setLoadingDetailId(userId);
     try {
-      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
+      const response = await adminFetch(`/api/admin/users/${encodeURIComponent(userId)}`, {
         cache: "no-store",
       });
       const data = (await response.json().catch(() => null)) as
@@ -435,7 +444,7 @@ export function AdminUsersPanel({
     if (billingAction) return;
     setBillingAction("resync");
     try {
-      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/billing-resync`, {
+      const response = await adminFetch(`/api/admin/users/${encodeURIComponent(userId)}/billing-resync`, {
         method: "POST",
       });
       const data = (await response.json().catch(() => null)) as
@@ -451,6 +460,7 @@ export function AdminUsersPanel({
           locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
+        setApiFailure(failure);
         return;
       }
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
@@ -471,7 +481,7 @@ export function AdminUsersPanel({
       // Carries no clock-derived value on purpose: a second administrator
       // approves this exact payload, and the requester then has to re-send it
       // byte-for-byte. See buildPlanAdjustPayload.
-      const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/plan-adjust`, {
+      const response = await adminFetch(`/api/admin/users/${encodeURIComponent(userId)}/plan-adjust`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -506,7 +516,7 @@ export function AdminUsersPanel({
     if (billingAction) return;
     setBillingAction("risk");
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/users/${encodeURIComponent(userId)}/billing-risk`,
         {
           method: "PATCH",
@@ -531,6 +541,7 @@ export function AdminUsersPanel({
           locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
+        setApiFailure(failure);
         return;
       }
       setDetailUser((current) => (current ? { ...current, ...data.user } : current));
@@ -551,7 +562,7 @@ export function AdminUsersPanel({
     if (billingAction) return;
     setBillingAction(`refund:${purchase.id}`);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/credit-purchases/${encodeURIComponent(purchase.id)}/refund`,
         {
           method: "POST",
@@ -585,6 +596,7 @@ export function AdminUsersPanel({
           locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
+        setApiFailure(failure);
         return;
       }
       setCreditRefundReasons((current) => ({ ...current, [purchase.id]: "" }));
@@ -609,6 +621,7 @@ export function AdminUsersPanel({
 
   return (
     <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-4 sm:p-5">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       {detailMode !== "page" ? (
       <>
       <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 sm:p-5">

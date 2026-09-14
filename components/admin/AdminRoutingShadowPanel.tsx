@@ -6,6 +6,7 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { adminIntlLocale, type AdminLocale } from "@/lib/adminLocale";
 import { adminRoutingShadowMessages } from "@/lib/adminMessages/routingShadow";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * The reader for `/api/admin/routing-shadow`.
@@ -180,7 +181,7 @@ export function AdminRoutingShadowPanel() {
         try {
             setLoading(true);
             setError(null);
-            const response = await fetch("/api/admin/routing-shadow", {
+            const response = await adminFetch("/api/admin/routing-shadow", {
                 cache: "no-store",
             });
             if (!response.ok) {

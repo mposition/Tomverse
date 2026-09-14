@@ -23,6 +23,7 @@ import {
   type AdminSecurityFailure,
   type AdminSecurityFieldErrors,
 } from "@/lib/adminUserSecurityCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 export type AdminSecurityUser = {
   id: string;
@@ -174,7 +175,7 @@ export function AdminUserSecurityControls({
     setPendingAction(token);
     onBusyChange(true);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/users/${encodeURIComponent(user.id)}/security`,
         {
           method: "POST",

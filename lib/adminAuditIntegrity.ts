@@ -6,6 +6,7 @@ import {
   adminAuditEntryHashVariants,
   adminAuditIntegrityKeys,
 } from "@/lib/adminAuditIntegrityCore";
+import type { AdminAuditLog } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -41,6 +42,35 @@ import { prisma } from "@/lib/prisma";
 /** How many failing ids a response carries. The counts stay exact. */
 const UNVERIFIED_IDS_REPORTED = 25;
 
+/**
+ * Rows read per round trip.
+ *
+ * The walk used to be a single unbounded `findMany`: every hash-chained entry,
+ * with its `metadata`, resident at once, and one HMAC per key per ordering on
+ * top. That is fine at the 116 entries this chain had in August and it is a
+ * cliff rather than a slope -- forty-seven mutating routes each write one or
+ * two rows per action, nothing prunes them (the chain is the point), and the
+ * check has no `maxDuration`, so the failure mode is the audit page timing out
+ * or the container running out of memory during a security review.
+ *
+ * Batching keeps the walk exactly as it was -- ordered, from genesis, every row
+ * -- while bounding what is held. A thousand rows is small enough to stay
+ * cheap and large enough that the round trips do not dominate.
+ */
+export const VERIFY_BATCH_SIZE = 1_000;
+
+/**
+ * How long the walk may run before it reports what it got through.
+ *
+ * Linkage has to be verified from the first entry forward, so there is no
+ * useful way to check "the newest N" -- a truncated walk necessarily leaves the
+ * *newest* rows unchecked. That makes silence the dangerous answer: a run that
+ * stopped early and reported `valid: true` would be claiming the chain is
+ * sound on the strength of the part it read. So the deadline is reported
+ * instead, `valid` is withheld, and the response says where it stopped.
+ */
+const VERIFY_DEADLINE_MS = 60_000;
+
 type Failure = {
   id: string;
   createdAt: string;
@@ -68,14 +98,20 @@ export async function verifyAdminAuditIntegrity() {
       keyEntryCounts: [] as number[],
       legacyOrderEntries: 0,
       unverifiedPrefix: 0,
+      truncated: false,
+      lastCheckedId: null as string | null,
+      lastCheckedAt: null as string | null,
       message: "ADMIN_AUDIT_INTEGRITY_KEY or NEXTAUTH_SECRET is not configured.",
     };
   }
 
-  const rows = await prisma.adminAuditLog.findMany({
-    where: { entryHash: { not: null } },
-    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-  });
+  const deadline = Date.now() + VERIFY_DEADLINE_MS;
+  let truncated = false;
+  let cursorId: string | null = null;
+  let firstCheckedId: string | null = null;
+  let lastCheckedId: string | null = null;
+  let lastCheckedAt: string | null = null;
+  let checked = 0;
 
   let previousEntryHash: string | null = null;
   let verified = 0;
@@ -102,7 +138,20 @@ export async function verifyAdminAuditIntegrity() {
   let unverifiedPrefix = 0;
   let stillInPrefix = true;
 
-  for (const row of rows) {
+  // Ordered by (createdAt, id) with `id` as the tiebreaker, so the cursor is
+  // stable: `cursor`/`skip: 1` continues from the exact row the last batch
+  // ended on rather than from an offset a concurrent insert could shift.
+  for (;;) {
+    const rows: AdminAuditLog[] = await prisma.adminAuditLog.findMany({
+      where: { entryHash: { not: null } },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: VERIFY_BATCH_SIZE,
+      cursor: cursorId === null ? undefined : { id: cursorId },
+      skip: cursorId === null ? 0 : 1,
+    });
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
     const input = {
       previousHash: row.previousHash,
       actorUserId: row.actorUserId,
@@ -159,20 +208,36 @@ export async function verifyAdminAuditIntegrity() {
       });
     }
     previousEntryHash = row.entryHash;
+    checked += 1;
+    if (firstCheckedId === null) firstCheckedId = row.id;
+    lastCheckedId = row.id;
+    lastCheckedAt = row.createdAt.toISOString();
+    }
+
+    const lastRow: AdminAuditLog | undefined = rows[rows.length - 1];
+    cursorId = lastRow === undefined ? null : lastRow.id;
+    if (rows.length < VERIFY_BATCH_SIZE) break;
+    if (Date.now() > deadline) {
+      truncated = true;
+      break;
+    }
   }
 
   const firstInvalid = failures[0] ?? null;
-  const valid = failures.length === 0;
+  // A walk that ran out of time has not shown the chain to be sound; it has
+  // shown a prefix of it to be sound. Reporting `valid: true` from that would
+  // be the loudest possible version of the mistake this module is about.
+  const valid = failures.length === 0 && !truncated;
   const keysUsedCount = keyEntryCounts.filter((count) => count > 0).length;
   return {
     configured: true,
     valid,
-    checkedEntries: rows.length,
+    checkedEntries: checked,
     verifiedEntries: verified,
     invalidEntries: failures.length,
     linkageBreaks,
     firstInvalidId: firstInvalid?.id ?? null,
-    firstCheckedId: rows[0]?.id ?? null,
+    firstCheckedId,
     /**
      * Every entry that did not verify, oldest first, bounded.
      *
@@ -195,15 +260,22 @@ export async function verifyAdminAuditIntegrity() {
     // Kept from the previous shape: the panel reads it to say whether a
     // changed key explains the failure on its own.
     firstInvalidIsOldest: Boolean(
-      firstInvalid && rows[0]?.id === firstInvalid.id
+      firstInvalid && firstCheckedId === firstInvalid.id
     ),
     keysAvailable: keys.length,
     keysUsed: keysUsedCount,
     keyEntryCounts,
     legacyOrderEntries,
     unverifiedPrefix,
-    message: valid
-      ? rows.length === 0
+    /** True when the deadline stopped the walk before the newest entry. */
+    truncated,
+    /** The last entry the walk reached, so a resumed reading has a landmark. */
+    lastCheckedId,
+    lastCheckedAt,
+    message: truncated
+      ? `The walk stopped after ${checked} entries and ${Math.round(VERIFY_DEADLINE_MS / 1_000)} seconds without reaching the newest. Linkage is verified from the first entry forward, so the entries after this point are unchecked rather than sound.`
+      : valid
+      ? checked === 0
         ? "No hash-chained audit entries exist yet."
         : keysUsedCount > 1
           ? `The HMAC audit chain is valid across ${keysUsedCount} signing keys.`

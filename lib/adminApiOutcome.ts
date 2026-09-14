@@ -104,3 +104,55 @@ export const describeAdminApiFailure = ({
     approvalId: null,
   };
 };
+
+/**
+ * Reads a failed `/api/admin/**` response and says what it means.
+ *
+ * `describeAdminApiFailure` takes fields; getting those fields out of a
+ * `Response` was left to each caller, and thirty of the thirty-four fetching
+ * panels never did it -- they read `data.error` and threw. That flattens the
+ * two answers this module exists to distinguish:
+ *
+ *  - **409 with an `approvalId`** is not a failure. The request is queued and a
+ *    second administrator has to approve that exact payload. Reported as an
+ *    error, the operator retries.
+ *  - **428** means their own sign-in is too old. Reported as an error, the
+ *    screen reads as broken rather than gated, and the remedy is never named.
+ *
+ * The body is read once, here, and a body that is not JSON is not an error
+ * about JSON: the status still classifies the answer.
+ */
+export const readAdminApiFailure = async (
+  response: Response,
+  options: { fallback: string; locale?: AdminLocale }
+): Promise<AdminApiFailure> => {
+  const body = (await response.json().catch(() => null)) as
+    | { error?: string | null; code?: string | null; approvalId?: string | null }
+    | null;
+
+  return describeAdminApiFailure({
+    status: response.status,
+    error: body?.error,
+    code: body?.code,
+    approvalId: body?.approvalId,
+    fallback: options.fallback,
+    locale: options.locale,
+  });
+};
+
+/**
+ * The same answer for a request that never reached the server.
+ *
+ * A thrown `fetch` and a 500 are different facts -- one of them means the
+ * request may still be running somewhere -- and a panel that reported the
+ * deadline as "the server said no" would be inventing an answer.
+ */
+export const adminNetworkFailure = (locale: AdminLocale = "en"): AdminApiFailure => ({
+  message:
+    locale === "ko"
+      ? "서버가 응답하기 전에 요청이 실패했습니다. 연결을 확인하고 다시 시도하세요."
+      : ADMIN_NETWORK_FAILURE_MESSAGE,
+  tone: "error",
+  requiresReauthentication: false,
+  approvalId: null,
+});

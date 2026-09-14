@@ -15,6 +15,7 @@ import { adminShellMessages } from "@/lib/adminMessages/shell";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { adminNavIcon } from "@/components/admin/adminNavigationIcons";
 import { useAdminConsolePreferences } from "@/components/admin/AdminConsolePreferences";
+import { adminFetch } from "@/lib/adminFetch";
 
 type SearchResult = {
   type: string;
@@ -108,7 +109,7 @@ export function AdminCommandPalette({ onClose }: { onClose: () => void }) {
     queueMicrotask(() => setSearching(true));
     searchTimer.current = setTimeout(async () => {
       try {
-        const response = await fetch(
+        const response = await adminFetch(
           `/api/admin/search?q=${encodeURIComponent(normalized)}&take=6`,
           { cache: "no-store" }
         );

@@ -6,6 +6,7 @@ import { Clipboard, Eye, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminAuditMessages } from "@/lib/adminMessages/audit";
 import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { adminFetch } from "@/lib/adminFetch";
 
 export type AdminAuditRow = {
   id: string;
@@ -122,7 +123,7 @@ export function AdminAuditPanel({ rows, rowLimit }: Props) {
   const loadDetail = async (row: AdminAuditRow) => {
     setLoadingDetailId(row.id);
     try {
-      const response = await fetch(`/api/admin/audit/${row.id}`);
+      const response = await adminFetch(`/api/admin/audit/${row.id}`);
       const data = (await response.json().catch(() => null)) as {
         audit?: AdminAuditRow;
         error?: string;

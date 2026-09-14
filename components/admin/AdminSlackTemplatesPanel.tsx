@@ -6,6 +6,7 @@ import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
 import { adminSlackTemplatesMessages } from "@/lib/adminMessages/slackTemplates";
 import type { SlackTemplateKey } from "@/lib/slackMessageTemplateCore";
+import { adminFetch } from "@/lib/adminFetch";
 
 type TemplateRow = {
   key: SlackTemplateKey;
@@ -45,7 +46,7 @@ export function AdminSlackTemplatesPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/slack-templates", { cache: "no-store" });
+      const response = await adminFetch("/api/admin/slack-templates", { cache: "no-store" });
       const data = (await response.json().catch(() => null)) as
         | {
             templates?: TemplateRow[];
@@ -90,7 +91,7 @@ export function AdminSlackTemplatesPanel() {
   const save = async (template: TemplateRow) => {
     setSavingKey(template.key);
     try {
-      const response = await fetch("/api/admin/slack-templates", {
+      const response = await adminFetch("/api/admin/slack-templates", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -117,7 +118,7 @@ export function AdminSlackTemplatesPanel() {
   const sendTest = async (key: SlackTemplateKey) => {
     setTestingKey(key);
     try {
-      const response = await fetch("/api/admin/slack-templates", {
+      const response = await adminFetch("/api/admin/slack-templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key }),

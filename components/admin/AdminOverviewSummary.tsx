@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { AdminSnapshotActions } from "@/components/admin/AdminSnapshotActions";
 import type { AdminEnvCheck } from "@/lib/adminEnvironmentChecks";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -27,7 +27,15 @@ export type AttentionItem = {
 
 type Kpi = {
   label: string;
-  value: string;
+  /**
+   * Null when the read behind it failed.
+   *
+   * Not `"0"`, and not an empty string: the page's reads are settled
+   * individually now, and the cheapest way to lose that is a `?? 0` in a
+   * caller. A card that cannot be given a number renders as unread, which is
+   * a different statement from zero and leads somewhere different.
+   */
+  value: string | null;
   detail: string;
   tone?: "zinc" | "blue" | "emerald" | "amber" | "purple";
 };
@@ -52,13 +60,39 @@ const attentionToneClass = (tone: AttentionItem["tone"]) =>
         ? "border-blue-500/30 bg-blue-500/10"
         : "border-zinc-800 bg-zinc-900/70";
 
-function KpiCard({ label, value, detail, tone }: Kpi) {
+function KpiCard({
+  label,
+  value,
+  detail,
+  tone,
+  unreadableLabel,
+}: Kpi & { unreadableLabel: string }) {
+  const unread = value === null;
   return (
-    <div className={`rounded-2xl border p-4 ${toneClass(tone)}`}>
+    <div
+      className={`rounded-2xl border p-4 ${
+        unread ? "border-zinc-700 border-dashed bg-zinc-900/40" : toneClass(tone)
+      }`}
+      data-testid={unread ? "admin-kpi-unreadable" : undefined}
+    >
       <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-black text-white">{value}</p>
+      {/*
+        The unread state is deliberately not a big dash or an empty card. Both
+        read as "nothing here", which is the reading this exists to prevent --
+        it has to say that the figure is unknown, in words, at the size the
+        figure would have been.
+      */}
+      <p
+        className={
+          unread
+            ? "mt-2 text-sm font-bold text-zinc-400"
+            : "mt-2 text-2xl font-black text-white"
+        }
+      >
+        {unread ? unreadableLabel : value}
+      </p>
       <p className="mt-1 text-xs leading-5 text-zinc-400">{detail}</p>
     </div>
   );
@@ -68,10 +102,14 @@ export async function AdminOverviewSummary({
   generatedAt,
   adminRole,
   healthScore,
+  healthScoreIncomplete,
+  unreadableReads,
   operationalKpis,
   commercialKpis,
   needsAttention,
   envChecks,
+  blockingEnvCount,
+  processStartedAt,
   recentActivity,
   recentActivityLimit,
   snapshotReport,
@@ -79,10 +117,18 @@ export async function AdminOverviewSummary({
   generatedAt: string;
   adminRole: string;
   healthScore: number;
+  /** True when a score input could not be read, so the score is a ceiling. */
+  healthScoreIncomplete: boolean;
+  /** Human names of the reads that did not come back, if any. */
+  unreadableReads: string[];
   operationalKpis: Kpi[];
   commercialKpis: Kpi[];
   needsAttention: AttentionItem[];
   envChecks: AdminEnvCheck[];
+  /** Missing rows that actually deduct. Never every unset variable. */
+  blockingEnvCount: number;
+  /** When the process answering this request started, `YYYY-MM-DD HH:MM`. */
+  processStartedAt: string;
   recentActivity: Array<{
     id: string;
     summary: string;
@@ -109,15 +155,62 @@ export async function AdminOverviewSummary({
           <AdminSnapshotActions report={snapshotReport} />
         </div>
 
+        {/*
+          Named, not counted. "Something could not be loaded" tells an operator
+          to distrust the whole screen; naming the read tells them which figure
+          to distrust and leaves the rest usable -- which is the entire point of
+          settling these reads separately rather than failing the page.
+        */}
+        {unreadableReads.length > 0 ? (
+          <div
+            className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4"
+            role="status"
+            data-testid="admin-overview-unreadable-reads"
+          >
+            <p className="flex items-center gap-2 text-sm font-bold text-amber-100">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+              {m.readsFailedTitle(unreadableReads.length)}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-amber-100/80">
+              {m.readsFailedDetail(unreadableReads.join(", "))}
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            label={m.healthScore}
-            value={String(healthScore)}
-            detail={m.healthScoreDetail}
-            tone="blue"
-          />
+          {/*
+            A link, not a card. The score is six weighted counts and a table of
+            twenty-nine variables collapsed into one integer, and an operator
+            reading it had nowhere to go to find out which. `?tab=health`
+            renders the arithmetic that produced this number.
+          */}
+          <Link
+            href="/admin/overview?tab=health"
+            data-testid="admin-health-score-link"
+            className="rounded-2xl border border-blue-500/25 bg-blue-500/10 p-4 transition hover:border-blue-400/50"
+          >
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
+              {m.healthScore}
+            </p>
+            <p className="mt-2 text-2xl font-black text-white">{healthScore}</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">
+              {m.healthScoreDetail}
+            </p>
+            {healthScoreIncomplete ? (
+              <p
+                className="mt-1 text-xs font-bold text-amber-200"
+                data-testid="admin-health-score-incomplete"
+              >
+                {m.healthScoreIncomplete}
+              </p>
+            ) : null}
+            <p className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-300">
+              {m.explainScore}
+              <ArrowRight className="h-3 w-3" aria-hidden />
+            </p>
+          </Link>
           {operationalKpis.map((kpi) => (
-            <KpiCard key={kpi.label} {...kpi} />
+            <KpiCard key={kpi.label} {...kpi} unreadableLabel={m.unreadable} />
           ))}
         </div>
       </section>
@@ -129,7 +222,7 @@ export async function AdminOverviewSummary({
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {commercialKpis.map((kpi) => (
-            <KpiCard key={kpi.label} {...kpi} />
+            <KpiCard key={kpi.label} {...kpi} unreadableLabel={m.unreadable} />
           ))}
         </div>
       </section>
@@ -175,6 +268,26 @@ export async function AdminOverviewSummary({
               ? m.environmentAllConfigured(envChecks.length)
               : m.environmentMissing(missingEnv.length, envChecks.length)}
           </p>
+          {/*
+            "Not configured" and "blocking" were the same sentence here, and
+            they are not the same fact: on 2026-09-14 seven rows were reported
+            missing and two of them were optional notification channels. The
+            count that matters is stated separately, and the grouping that
+            explains it is one link away.
+          */}
+          {missingEnv.length > 0 ? (
+            <p className="mt-1 text-sm leading-6 text-zinc-300">
+              {blockingEnvCount === 0
+                ? m.environmentNoneBlocking
+                : m.environmentBlocking(blockingEnvCount)}{" "}
+              <Link
+                href="/admin/overview?tab=health#admin-health-environment"
+                className="font-bold text-blue-300 underline-offset-2 hover:underline"
+              >
+                {m.explainScore}
+              </Link>
+            </p>
+          ) : null}
           <div className="mt-4 grid gap-2">
             {missingEnv.map((check) => (
               // `min-w-0` on the card, not only on the text beside the icon.
@@ -214,6 +327,19 @@ export async function AdminOverviewSummary({
             checking a specific name still finds it, and the default view stays
             about what is missing.
           */}
+          {/*
+            The panel reads `process.env`, which is fixed at process start, so
+            "not configured" cannot be told apart from "configured after this
+            process started" -- and the refresh control cannot close the gap,
+            because it re-renders inside this same process. Stating the start
+            time is the smallest thing that makes the difference visible.
+          */}
+          <p
+            className="mt-3 text-xs leading-5 text-zinc-500"
+            data-testid="admin-overview-process-window"
+          >
+            {m.processStartedNote(processStartedAt)}
+          </p>
           <details className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/50">
             <summary className="cursor-pointer px-3 py-2 text-xs font-bold text-zinc-300">
               {m.showAllVariables(envChecks.length)}

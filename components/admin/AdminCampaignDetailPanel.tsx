@@ -4,9 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 
 import { dispatchAppToast } from "@/lib/appToast";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { AdminWaveLedger } from "@/components/admin/AdminWaveLedger";
-import { useAdminMessages } from "@/components/admin/AdminLocaleProvider";
+import { useAdminMessages,
+  useAdminLocale,
+} from "@/components/admin/AdminLocaleProvider";
 import { adminEmailCampaignDetailMessages } from "@/lib/adminMessages/emailCampaignDetail";
+import { adminFetch } from "@/lib/adminFetch";
 
 /**
  * One campaign, and every decision an operator makes about it.
@@ -167,6 +175,12 @@ export function AdminCampaignDetailPanel({
   useEffect(() => {
     loadFailedMessage.current = m.toast.loadFailed;
   }, [m.toast.loadFailed]);
+  const { locale: apiLocale } = useAdminLocale();
+  // The approval answer was already handled by code; the step-up one was not,
+  // and every other refusal became a bare thrown string. Classifying here is
+  // what gives a stale sign-in a way back -- rule 7 of
+  // docs/ui-contracts/admin-console-ia.md.
+  const [apiFailure, setApiFailure] = useState<AdminApiFailure | null>(null);
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -180,7 +194,7 @@ export function AdminCampaignDetailPanel({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `/api/admin/email-campaigns/${encodeURIComponent(campaignId)}`,
         { cache: "no-store" }
       );
@@ -217,7 +231,7 @@ export function AdminCampaignDetailPanel({
     method: "POST" | "PATCH" | "DELETE",
     body: Record<string, unknown>
   ) => {
-    const response = await fetch(
+    const response = await adminFetch(
       `/api/admin/email-campaigns/${encodeURIComponent(campaignId)}${path}`,
       {
         method,
@@ -236,8 +250,16 @@ export function AdminCampaignDetailPanel({
         dispatchAppToast(m.toast.approvalRecorded, "success");
         return null;
       }
+      const outcome = describeAdminApiFailure({
+        status: response.status,
+        error: typeof payload?.error === "string" ? payload.error : null,
+        code: typeof payload?.code === "string" ? payload.code : null,
+        fallback: m.toast.refused,
+        locale: apiLocale,
+      });
+      setApiFailure(outcome);
       throw new Error(
-        typeof payload?.error === "string" ? payload.error : m.toast.refused
+        outcome.message
       );
     }
     return payload;
@@ -287,6 +309,7 @@ export function AdminCampaignDetailPanel({
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      {apiFailure ? <AdminApiFailureNotice failure={apiFailure} /> : null}
       <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">

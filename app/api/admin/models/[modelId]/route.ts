@@ -13,7 +13,12 @@ import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
 import { invalidatePublicSnapshot } from "@/lib/publicSnapshotCache";
 import { prisma } from "@/lib/prisma";
-import { updateModelRegistrySchema, registryInputToData, validateProviderConfiguration } from "@/lib/modelRegistryAdmin";
+import {
+  modelRegistryWriteFreshness,
+  registryInputToData,
+  updateModelRegistrySchema,
+  validateProviderConfiguration,
+} from "@/lib/modelRegistryAdmin";
 import { ensureModelRegistrySeeded, registryRowToModel } from "@/lib/modelRegistry";
 import { APP_DEFAULTS } from "@/lib/appDefaults";
 
@@ -40,6 +45,54 @@ export async function PATCH(
     const { modelId } = await context.params;
     const body = await readLimitedJson(req, 24 * 1024, updateModelRegistrySchema);
     await ensureModelRegistrySeeded();
+
+    /**
+     * Refuse a write based on a row that has moved since it was read.
+     *
+     * This handler writes the whole submitted body, so a save made from a
+     * panel opened ten minutes ago silently reverts everything written in
+     * between. The other writer is not usually a second operator -- it is
+     * `STATIC_CATALOG_RECONCILIATION_MODEL_IDS`, which writes `maxOutputTokens`
+     * and `creditWeight` onto existing rows. AGENTS.md records what that costs:
+     * a fossilised output cap is not a stale label, it is a ceiling on every
+     * answer the model gives, and `claude-sonnet-5` was found capped at 4,096
+     * against a profile of 128,000 on 2026-08-23. Reverting the fix that
+     * removed such a cap is exactly the write this refuses.
+     *
+     * `readAt` is the instant the server stamped on the list the panel is
+     * showing, echoed back as a query parameter -- the body schema is
+     * `.strict()` and the timestamp is not part of the model. Absent, nothing
+     * is checked: a caller that never read the row cannot be stale, and the
+     * older clients that predate this parameter keep working.
+     */
+    const readAt = new URL(req.url).searchParams.get("readAt");
+    if (readAt) {
+      const current = await prisma.modelRegistryEntry.findUnique({
+        where: { id: modelId },
+        select: { updatedAt: true },
+      });
+      const freshness = modelRegistryWriteFreshness({
+        readAt,
+        updatedAt: current ? current.updatedAt : null,
+      });
+      if (freshness.verdict === "unreadable") {
+        return NextResponse.json(
+          { error: "readAt is not a timestamp.", code: "MODEL_REGISTRY_READ_AT_INVALID" },
+          { status: 400 }
+        );
+      }
+      if (freshness.verdict === "stale") {
+        return NextResponse.json(
+          {
+            error:
+              "This model was changed after the form was loaded, so saving would overwrite that change. Reload the registry and re-apply the edit.",
+            code: "MODEL_REGISTRY_STALE_READ",
+            changedAt: freshness.changedAt.toISOString(),
+          },
+          { status: 409 }
+        );
+      }
+    }
     if (
       modelId === APP_DEFAULTS.defaultModelId &&
       (body.status !== "enabled" || body.minimumPlan !== "Guest")
@@ -118,7 +171,12 @@ export async function PATCH(
     // lapses.
     invalidatePublicSnapshot("model-catalog");
     const model = registryRowToModel(row);
-    return NextResponse.json({ model: { ...model, environment: validateProviderConfiguration(model) } });
+    return NextResponse.json({
+      model: { ...model, environment: validateProviderConfiguration(model) },
+      // Otherwise the operator's own successful save would make their next one
+      // stale, and the guard would refuse a conflict with themselves.
+      readAt: row.updatedAt.toISOString(),
+    });
   } catch (error) {
     const approvalResponse = adminApprovalErrorResponse(error);
     if (approvalResponse) return approvalResponse;

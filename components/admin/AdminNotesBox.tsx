@@ -4,8 +4,13 @@ import { useEffect, useState } from "react";
 import { Loader2, MessageSquarePlus } from "lucide-react";
 import { useAdminLocale, useAdminMessages } from "@/components/admin/AdminLocaleProvider";
 import { dispatchAppToast } from "@/lib/appToast";
-import { describeAdminApiFailure } from "@/lib/adminApiOutcome";
+import {
+  describeAdminApiFailure,
+  type AdminApiFailure,
+} from "@/lib/adminApiOutcome";
+import { AdminApiFailureNotice } from "@/components/admin/AdminApiFailureNotice";
 import { adminNotesMessages } from "@/lib/adminMessages/notes";
+import { adminFetch } from "@/lib/adminFetch";
 
 type AdminNote = {
   id: string;
@@ -31,6 +36,10 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
   const m = useAdminMessages(adminNotesMessages);
   const { locale: apiLocale } = useAdminLocale();
   const loadFailed = m.loadFailed;
+  // The toast says what happened and then fades. A step-up refusal needs a
+  // control that stays: the operator has to leave the screen to fix it, and a
+  // faded sentence naming the remedy is the defect rule 7 exists for.
+  const [failure, setFailure] = useState<AdminApiFailure | null>(null);
   const [notes, setNotes] = useState<AdminNote[]>([]);
   const [body, setBody] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +51,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
       setIsLoading(true);
       try {
         const params = new URLSearchParams({ targetType, targetId });
-        const response = await fetch(`/api/admin/notes?${params.toString()}`, {
+        const response = await adminFetch(`/api/admin/notes?${params.toString()}`, {
           cache: "no-store",
         });
         const data = (await response.json().catch(() => null)) as
@@ -58,6 +67,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
               locale: apiLocale,
             });
             dispatchAppToast(failure.message, failure.tone);
+            setFailure(failure);
           }
           return;
         }
@@ -81,7 +91,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
     if (!trimmed || isSaving) return;
     setIsSaving(true);
     try {
-      const response = await fetch("/api/admin/notes", {
+      const response = await adminFetch("/api/admin/notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetType, targetId, body: trimmed }),
@@ -102,6 +112,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
           locale: apiLocale,
         });
         dispatchAppToast(failure.message, failure.tone);
+        setFailure(failure);
         return;
       }
       setNotes((current) => [data.note!, ...current]);
@@ -116,6 +127,7 @@ export function AdminNotesBox({ targetType, targetId }: Props) {
 
   return (
     <section className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+      {failure ? <AdminApiFailureNotice failure={failure} /> : null}
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-500">
