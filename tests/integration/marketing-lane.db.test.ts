@@ -322,7 +322,10 @@ test("a consent campaign reaches the provider with its authored content", async 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].body.subject, ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en.subject);
   assert.ok(calls[0].body.html.includes("Give your AI assistant"));
-  assert.ok(calls[0].body.text.includes("https://tomverse.app/settings/assistants"));
+  assert.match(
+    calls[0].body.text,
+    /^Create my AI assistant: https:\/\/tomverse\.app\/settings\/assistants$/m
+  );
   assert.match(String(calls[0].body.from), /news@news\.tomverse\.app/);
   assert.match(
     String(calls[0].body.headers?.["List-Unsubscribe"]),
