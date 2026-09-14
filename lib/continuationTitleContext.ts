@@ -2,9 +2,8 @@
  * What an unnamed continuation is called when its source cannot name it, and
  * which state that source is in.
  *
- * Policy: docs/policy/external-conversation-continuation.md §3, §6.
- * Decisions: .github/audits/tomverse-product-idea-backlog.md, CONT-TITLE-01
- * "확정 구현 기준" (D2 and the time-zone rule).
+ * Policy: docs/policy/external-conversation-continuation.md §3, §6.1 (the
+ * fallback name and the time-zone rule, CONT-TITLE-01 decision D2).
  *
  * Pure and client-safe: the conversation list, message search, the import
  * page's continuation menu and both TXT exports all name a row through these
