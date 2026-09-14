@@ -304,5 +304,7 @@ test("the source's name is resolved for display, never stored on the row", () =>
 test("a locked source withholds its name from the list", () => {
     // Its title is part of the transcript the lock is withholding.
     const route = code("app/api/conversations/route.ts");
-    assert.match(route, /externalConversation\?\.password === null/);
+    assert.match(route, /sourceTitle: readableContinuationSourceTitle\(/);
+    const gate = code("lib/continuationDisplayTitle.ts");
+    assert.match(gate, /source\.password === null/);
 });

@@ -10,6 +10,11 @@ import {
 } from "@/lib/exportConversation";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
+    continuationDisplayTitle,
+    readableContinuationSourceTitle,
+} from "@/lib/continuationDisplayTitle";
+import { en } from "@/locales/en";
+import {
     apiSecurityResponse,
     consumeApiRateLimit,
 } from "@/lib/apiSecurity";
@@ -50,6 +55,15 @@ export async function GET(req: Request) {
                 title: true,
                 createdAt: true,
                 password: true,
+                // Read for the title only, as the single export reads it
+                // (lib/continuationDisplayTitle.ts).
+                continuationBridge: {
+                    select: {
+                        externalConversation: {
+                            select: { title: true, password: true },
+                        },
+                    },
+                },
             },
         });
         const exportable = conversations.filter((conversation) =>
@@ -108,7 +122,21 @@ export async function GET(req: Request) {
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${formatConversationHeader(conversation, personalizationNotice)}\n`
+                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${formatConversationHeader(
+                                {
+                                    title: continuationDisplayTitle({
+                                        storedTitle: conversation.title,
+                                        sourceTitle:
+                                            readableContinuationSourceTitle(
+                                                conversation.continuationBridge
+                                                    ?.externalConversation
+                                            ),
+                                        fallback: en.continuation.quickUntitled,
+                                    }),
+                                    createdAt: conversation.createdAt,
+                                },
+                                personalizationNotice
+                            )}\n`
                         )
                     );
                     return;

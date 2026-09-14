@@ -6,6 +6,7 @@ import { enqueueArtifactCleanupForConversations } from "@/lib/generatedArtifactS
 import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAttachmentStorage";
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { conversationSurface } from "@/lib/continuationRoutes";
+import { readableContinuationSourceTitle } from "@/lib/continuationDisplayTitle";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -182,10 +183,9 @@ export async function GET(req: Request) {
           transcript the lock is withholding, and absent entirely once the
           source is deleted -- both leave the row on its translated fallback.
         */
-        sourceTitle:
-          conv.continuationBridge?.externalConversation?.password === null
-            ? (conv.continuationBridge.externalConversation.title ?? null)
-            : null,
+        sourceTitle: readableContinuationSourceTitle(
+          conv.continuationBridge?.externalConversation
+        ),
         // Unlike the title, this is not withheld for a locked or deleted
         // snapshot: it is the bridge's own provenance, not the transcript's
         // content, and the row has to be identifiable either way.

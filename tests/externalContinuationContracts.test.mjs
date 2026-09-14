@@ -420,18 +420,22 @@ test("every route that can lead into a conversation reports its surface", () => 
     }
 
     /*
-      The one exception, and it is the list's alone: the imported
-      conversation's own title, for a row still carrying the writer's
+      The one exception among these three, and it is the list's alone: the
+      imported conversation's own title, for a row still carrying the writer's
       placeholder (lib/continuationDisplayTitle.ts). Read here rather than
       copied onto the row at creation, because deleting a snapshot leaves the
-      continuation standing and a stored copy would outlive the deletion.
+      continuation standing and a stored copy would outlive the deletion. (The
+      TXT exports read the same two columns, to name the file what the list
+      names the row -- tests/conversationExportFilename.test.mjs.)
 
       Gated on the snapshot having no password: a locked source withholds its
-      transcript, and its title is part of that transcript.
+      transcript, and its title is part of that transcript. The gate is
+      `readableContinuationSourceTitle()`, so the list and the exports cannot
+      decide it differently.
     */
     const list = readFileSync("app/api/conversations/route.ts", "utf8");
     assert.match(list, /externalConversation: \{\s*\n?\s*select: \{ title: true, password: true \}/);
-    assert.match(list, /externalConversation\?\.password === null/);
+    assert.match(list, /sourceTitle: readableContinuationSourceTitle\(/);
     // The password is read to decide, never emitted -- exactly as this query
     // already treats the conversation's own.
     assert.doesNotMatch(list, /password: conv\./);
