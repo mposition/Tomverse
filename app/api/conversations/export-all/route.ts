@@ -10,6 +10,13 @@ import {
 } from "@/lib/exportConversation";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
+    continuationDisplayTitle,
+    readableContinuationSourceTitle,
+} from "@/lib/continuationDisplayTitle";
+import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
+import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
+import { en } from "@/locales/en";
+import {
     apiSecurityResponse,
     consumeApiRateLimit,
 } from "@/lib/apiSecurity";
@@ -20,6 +27,53 @@ import {
 
 const MESSAGE_PAGE_SIZE = 20;
 const MAX_EXPORTED_CONVERSATIONS = 2_000;
+
+/**
+ * One conversation's header, written as the single export writes it: the
+ * title the conversation list shows, and for a continuation the §9 provenance
+ * lines (docs/policy/external-conversation-continuation.md §9). Without them a
+ * continuation in this file reads as if Tomverse had produced every answer
+ * with nothing before it.
+ */
+function exportHeader(
+    conversation: {
+        title: string;
+        createdAt: Date;
+        continuationBridge: {
+            provider: string;
+            sourceImportedAt: Date;
+            externalConversationId: string | null;
+            externalConversation: {
+                title: string | null;
+                password: string | null;
+            } | null;
+        } | null;
+    },
+    personalizationNotice: string | undefined
+) {
+    const bridge = conversation.continuationBridge;
+    return formatConversationHeader(
+        {
+            title: continuationDisplayTitle({
+                storedTitle: conversation.title,
+                isContinuation: bridge !== null,
+                sourceTitle: readableContinuationSourceTitle(
+                    bridge?.externalConversation
+                ),
+                fallback: en.continuation.quickUntitled,
+            }),
+            createdAt: conversation.createdAt,
+        },
+        personalizationNotice,
+        bridge
+            ? continuationExportProvenance({
+                  providerLabel: continuationProviderDisplay(bridge.provider),
+                  importedAt: bridge.sourceImportedAt,
+                  sourceDeleted: bridge.externalConversationId === null,
+              })
+            : []
+    );
+}
 
 export async function GET(req: Request) {
     try {
@@ -50,6 +104,22 @@ export async function GET(req: Request) {
                 title: true,
                 createdAt: true,
                 password: true,
+                // Read for the title and the §9 provenance lines, the two
+                // things the single export also writes for a continuation
+                // (lib/continuationDisplayTitle.ts,
+                // lib/continuationSharingPolicy.ts). The title and password
+                // are the same two columns the conversation list reads; the
+                // rest is the bridge's own provenance, not the source's words.
+                continuationBridge: {
+                    select: {
+                        provider: true,
+                        sourceImportedAt: true,
+                        externalConversationId: true,
+                        externalConversation: {
+                            select: { title: true, password: true },
+                        },
+                    },
+                },
             },
         });
         const exportable = conversations.filter((conversation) =>
@@ -108,7 +178,7 @@ export async function GET(req: Request) {
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${formatConversationHeader(conversation, personalizationNotice)}\n`
+                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${exportHeader(conversation, personalizationNotice)}\n`
                         )
                     );
                     return;
