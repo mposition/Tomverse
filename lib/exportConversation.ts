@@ -63,7 +63,7 @@ export function formatConversationHeader(
 ) {
     return [
         "Tomverse Review Export",
-        `Conversation: ${conversation.title}`,
+        `Conversation: ${headerLineText(conversation.title)}`,
         `Created: ${formatDate(conversation.createdAt)}`,
         ...(personalizationNotice ? [personalizationNotice] : []),
         ...continuationProvenance,
@@ -90,6 +90,98 @@ export function formatExportMessage(message: ExportMessage) {
     ].join("\n");
 }
 
+/**
+ * A title as one header line.
+ *
+ * A title may contain line breaks, and written verbatim they would let it
+ * start a line of its own -- a forged `Created:` or provenance line in a file
+ * whose header is otherwise the server's word. The words stay; only the breaks
+ * become spaces. This is the document's title, not a filename, so nothing else
+ * is substituted here.
+ */
+function headerLineText(title: string) {
+    return title.replace(/[\r\n\u2028\u2029]+/g, " ");
+}
+
+const FILE_NAME_MAX_CODE_POINTS = 80;
+const FILE_NAME_FALLBACK = "conversation";
+const TEXT_EXTENSION = ".txt";
+
+// Names Windows refuses for a file whatever its extension: "CON.txt" is still
+// the console device.
+const RESERVED_WINDOWS_NAMES = new Set([
+    "con",
+    "prn",
+    "aux",
+    "nul",
+    ...Array.from({ length: 9 }, (_, i) => `com${i + 1}`),
+    ...Array.from({ length: 9 }, (_, i) => `lpt${i + 1}`),
+]);
+
+/**
+ * A conversation title as a filename base (no extension).
+ *
+ * Cut by code point, not by UTF-16 unit: `slice()` on a string can split an
+ * emoji's surrogate pair, and the lone half then makes `encodeURIComponent`
+ * throw -- which turned an export of such a title into a 500.
+ *
+ * Removed rather than kept: control characters (a line break in a header value
+ * is a header injection), bidirectional controls (an RLO can make "txt.exe"
+ * display as "exe.txt"), leading dots (a hidden file) and trailing dots and
+ * spaces (Windows drops them, so the name on disk would differ from the one
+ * sent). The characters no filesystem accepts become "-".
+ */
 export function sanitizeFileName(name: string) {
-    return name.replace(/[/\\?%*:|"<>]/g, "-").slice(0, 80) || "conversation";
+    const cleaned = Array.from(
+        name
+            .replace(/[\x00-\x1f\x7f]/g, " ")
+            .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
+            .replace(/[/\\?%*:|"<>]/g, "-")
+            .trim()
+    )
+        .slice(0, FILE_NAME_MAX_CODE_POINTS)
+        .join("")
+        .replace(/^[.\s]+/, "")
+        .replace(/[.\s]+$/, "");
+    if (!cleaned) return FILE_NAME_FALLBACK;
+    const stem = cleaned.split(".")[0].trim().toLowerCase();
+    return RESERVED_WINDOWS_NAMES.has(stem)
+        ? `${cleaned}-${FILE_NAME_FALLBACK}`
+        : cleaned;
+}
+
+/**
+ * RFC 5987 `ext-value` encoding. `encodeURIComponent` leaves `'`, `(`, `)` and
+ * `*` alone, and `'` is the delimiter of the `UTF-8''` prefix itself.
+ */
+function encodeRfc5987(value: string) {
+    return encodeURIComponent(value).replace(
+        /['()*]/g,
+        (character) =>
+            `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+    );
+}
+
+/**
+ * `Content-Disposition` for a single conversation's TXT export.
+ *
+ * Two fields, because one cannot do both jobs. A quoted `filename` is literal
+ * and ASCII, so a Korean title percent-encoded into it arrived as the escapes
+ * themselves -- `%ED%95%9C.txt` on disk. RFC 5987's `filename*` carries the
+ * real name, and the quoted one is only the fallback for anything that ignores
+ * it. Stripping a Korean title to ASCII used to leave ".txt", a hidden file
+ * with no name; a fallback with nothing of the title left in it is the generic
+ * name instead, the same rule `asciiArtifactFilename()` settled on.
+ */
+export function conversationExportContentDisposition(title: string) {
+    const fileName = `${sanitizeFileName(title)}${TEXT_EXTENSION}`;
+    // Sanitised again after the strip: removing "한" from "CON한" leaves a
+    // reserved name, and removing a trailing word can leave a trailing dot.
+    const asciiBase = sanitizeFileName(
+        fileName.slice(0, -TEXT_EXTENSION.length).replace(/[^\x20-\x7e]/g, "")
+    );
+    const asciiFileName = /[A-Za-z0-9]/.test(asciiBase)
+        ? `${asciiBase}${TEXT_EXTENSION}`
+        : `${FILE_NAME_FALLBACK}${TEXT_EXTENSION}`;
+    return `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeRfc5987(fileName)}`;
 }

@@ -35,6 +35,24 @@
  */
 export const LEGACY_CONTINUATION_TITLE = "Continued from an imported chat";
 
+/**
+ * The imported conversation's title, when it may be shown at all.
+ *
+ * A locked snapshot withholds its transcript, and its title is part of that
+ * transcript, so a locked source yields nothing here -- even for a request
+ * that holds the snapshot's unlock grant. That is deliberate: this is the
+ * title the conversation list shows, and every other place that names the
+ * conversation (the TXT export's filename and header) has to agree with the
+ * list rather than reveal more than it does.
+ *
+ * `source` is null when the row has no bridge or the source was deleted.
+ */
+export function readableContinuationSourceTitle(
+    source: { title: string | null; password: string | null } | null | undefined
+): string | null {
+    return source && source.password === null ? (source.title ?? null) : null;
+}
+
 export function continuationDisplayTitle({
     storedTitle,
     sourceTitle,
