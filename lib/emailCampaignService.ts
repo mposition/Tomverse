@@ -5,6 +5,14 @@ import type { Prisma } from "@prisma/client";
 import { emailTemplateDefinition } from "@/lib/emailTemplateDefinitions";
 import { ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
 import {
+  campaignContentHashes,
+  renderCampaignContent,
+  type CampaignEmailPreview,
+} from "@/lib/emailCampaignContent";
+import {
+  localizedCampaignEventPayload,
+} from "@/lib/emailCampaignContentCore";
+import {
   expandEmailEvent,
   type ExpansionOutcome,
 } from "@/lib/emailAudienceExpansion";
@@ -42,6 +50,7 @@ import {
   type CampaignRunRefusalDetail,
   type WaveKind,
 } from "@/lib/emailCampaignCore";
+import { isLanguage } from "@/lib/language";
 
 /**
  * Campaigns: draft, approve, run a wave, cancel.
@@ -85,17 +94,54 @@ export type CampaignDraft = {
   category: CampaignCategory;
   templateKey: string;
   locales: readonly string[];
+  contentByLocale?: Prisma.InputJsonValue;
   audienceSpec: Prisma.InputJsonValue;
   createdByEmail: string;
+  initialWaves?: readonly {
+    kind: WaveKind;
+    sequence: number;
+  }[];
 };
 
 export const createCampaignDraft = async (input: CampaignDraft) => {
   await assertCampaignsEnabled();
   // Reject an unknown template here rather than at send: a draft naming a
   // template that does not exist cannot be approved into anything.
-  emailTemplateDefinition(input.templateKey);
+  const definition = emailTemplateDefinition(input.templateKey);
   if (input.locales.length === 0) {
     throw new Error("A campaign with no locales would send nothing.");
+  }
+  const locales = [...new Set(input.locales)];
+  const unsupported = locales.filter((language) => !isLanguage(language));
+  if (unsupported.length > 0) {
+    throw new Error(`Unsupported campaign locales: ${unsupported.join(", ")}.`);
+  }
+  const submittedContent =
+    input.contentByLocale ??
+    Object.fromEntries(
+      locales.map((language) => [language, definition.placeholderPayload])
+    );
+  const content = renderCampaignContent({
+    templateKey: input.templateKey,
+    locales,
+    contentByLocale: submittedContent,
+  }).contentByLocale;
+  const expansion = readExpansionSpec(input.audienceSpec);
+  if (
+    expansion.cohort?.kind === "marketing_consent" &&
+    definition.purpose !== expansion.cohort.purpose
+  ) {
+    throw new Error(
+      `The ${definition.key} template is gated by ${definition.purpose ?? "no purpose"}, not ${expansion.cohort.purpose}.`
+    );
+  }
+  if (input.initialWaves) {
+    const waveKeys = input.initialWaves.map(
+      (wave) => `${wave.kind}:${wave.sequence}`
+    );
+    if (new Set(waveKeys).size !== waveKeys.length) {
+      throw new Error("A campaign cannot contain the same wave sequence twice.");
+    }
   }
 
   return prisma.emailCampaign.create({
@@ -103,9 +149,21 @@ export const createCampaignDraft = async (input: CampaignDraft) => {
       category: input.category,
       templateKey: input.templateKey,
       status: "draft",
-      locales: [...input.locales],
+      locales,
+      contentByLocale: content as Prisma.InputJsonValue,
       audienceSpec: input.audienceSpec,
       createdByEmail: input.createdByEmail,
+      ...(input.initialWaves && input.initialWaves.length > 0
+        ? {
+            waves: {
+              create: input.initialWaves.map((wave) => ({
+                kind: wave.kind,
+                sequence: wave.sequence,
+                status: "pending",
+              })),
+            },
+          }
+        : {}),
     },
     select: { id: true, status: true },
   });
@@ -130,7 +188,13 @@ export const approveCampaign = async (input: {
   await assertCampaignsEnabled();
   const campaign = await prisma.emailCampaign.findUniqueOrThrow({
     where: { id: input.campaignId },
-    select: { id: true, status: true, templateKey: true, locales: true },
+    select: {
+      id: true,
+      status: true,
+      templateKey: true,
+      locales: true,
+      contentByLocale: true,
+    },
   });
   if (campaign.status !== "draft" && campaign.status !== "pending_approval") {
     throw new Error(
@@ -139,20 +203,21 @@ export const approveCampaign = async (input: {
   }
 
   const locales = readLocales(campaign.locales);
+  const current = campaignContentHashes({
+    templateKey: campaign.templateKey,
+    locales,
+    contentByLocale: campaign.contentByLocale,
+  });
   const pinned = [];
   for (const language of locales) {
     const version = await ensureTemplateVersion({
       templateKey: campaign.templateKey,
       language,
     });
-    const row = await prisma.templateVersion.findUniqueOrThrow({
-      where: { id: version.templateVersionId },
-      select: { id: true, contentHash: true },
-    });
     pinned.push({
       language,
-      templateVersionId: row.id,
-      contentHash: row.contentHash,
+      templateVersionId: version.templateVersionId,
+      contentHash: current[language],
     });
   }
 
@@ -169,17 +234,19 @@ export const approveCampaign = async (input: {
 };
 
 /** What the template would render to right now, per language. */
-const currentHashes = async (templateKey: string, locales: readonly string[]) => {
-  const out: Record<string, string> = {};
-  for (const language of locales) {
-    const version = await ensureTemplateVersion({ templateKey, language });
-    const row = await prisma.templateVersion.findUnique({
-      where: { id: version.templateVersionId },
-      select: { contentHash: true },
-    });
-    if (row) out[language] = row.contentHash;
+const currentHashes = (input: {
+  templateKey: string;
+  locales: readonly string[];
+  contentByLocale: unknown;
+}) => {
+  try {
+    return campaignContentHashes(input);
+  } catch {
+    // Missing or malformed content means no locale can match an approval. The
+    // pure refusal then reports `content_changed`, which is the safe answer for
+    // a legacy approved row whose original body was never stored.
+    return {};
   }
-  return out;
 };
 
 /**
@@ -197,6 +264,7 @@ export const campaignSendRefusal = async (
       status: true,
       templateKey: true,
       locales: true,
+      contentByLocale: true,
       templateVersionIds: true,
       claimsAutomaticTransition: true,
     },
@@ -212,7 +280,11 @@ export const campaignSendRefusal = async (
     status: campaign.status,
     locales,
     pinned: readPinnedVersions(campaign.templateVersionIds),
-    currentHashes: await currentHashes(campaign.templateKey, locales),
+    currentHashes: currentHashes({
+      templateKey: campaign.templateKey,
+      locales,
+      contentByLocale: campaign.contentByLocale,
+    }),
     transitionClaim: {
       claimed: campaign.claimsAutomaticTransition,
       unmet: transition?.unmet ?? [],
@@ -270,13 +342,25 @@ export const runCampaignWave = async (input: {
 
   const campaign = await prisma.emailCampaign.findUniqueOrThrow({
     where: { id: input.campaignId },
-    select: { id: true, templateKey: true, audienceSpec: true, locales: true },
+    select: {
+      id: true,
+      templateKey: true,
+      audienceSpec: true,
+      locales: true,
+      contentByLocale: true,
+    },
   });
   const sequence = input.sequence ?? 1;
+  const locales = readLocales(campaign.locales);
+  const content = renderCampaignContent({
+    templateKey: campaign.templateKey,
+    locales,
+    contentByLocale: campaign.contentByLocale,
+  }).contentByLocale;
 
   const template = await ensureTemplateVersion({
     templateKey: campaign.templateKey,
-    language: readLocales(campaign.locales)[0] ?? "en",
+    language: locales[0] ?? "en",
   });
   const definition = emailTemplateDefinition(campaign.templateKey);
 
@@ -284,6 +368,12 @@ export const runCampaignWave = async (input: {
   // a fan-out nothing will ever resume; an event with no wave is a send nothing
   // will ever account for.
   const wave = await prisma.$transaction(async (tx) => {
+    // The unique wave index prevents two wave rows, but without this lock two
+    // concurrent starts can each create an event before their upserts meet.
+    // The losing upsert would then replace eventId and both callers could fan
+    // out their own event, producing two emails per recipient. Serialise the
+    // decision before either caller creates an event.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-campaign-wave:${campaign.id}:${input.kind}:${sequence}`}))`;
     const existing = await tx.emailCampaignWave.findUnique({
       where: {
         campaignId_kind_sequence: {
@@ -317,7 +407,10 @@ export const runCampaignWave = async (input: {
         templateId: template.templateId,
         referenceType: "EmailCampaign",
         referenceId: campaign.id,
-        payload: { campaignId: campaign.id },
+        payload: localizedCampaignEventPayload({
+          locales,
+          contentByLocale: content,
+        }) as unknown as Prisma.InputJsonValue,
         audienceKind: "user_segment",
         audienceSpec: spec as Prisma.InputJsonValue,
         status: "pending",
@@ -578,11 +671,41 @@ export const runDueCampaignWaves = async (input?: {
 export const campaignDigest = async (campaignId: string) => {
   const campaign = await prisma.emailCampaign.findUniqueOrThrow({
     where: { id: campaignId },
-    select: { templateKey: true, locales: true },
+    select: { templateKey: true, locales: true, contentByLocale: true },
   });
   return campaignContentDigest(
-    await currentHashes(campaign.templateKey, readLocales(campaign.locales))
+    currentHashes({
+      templateKey: campaign.templateKey,
+      locales: readLocales(campaign.locales),
+      contentByLocale: campaign.contentByLocale,
+    })
   );
+};
+
+/** The exact campaign-authored body an administrator is asked to approve. */
+export const campaignEmailPreviews = async (
+  campaignId: string
+): Promise<{ previews: CampaignEmailPreview[]; copyDigest: string | null }> => {
+  const campaign = await prisma.emailCampaign.findUniqueOrThrow({
+    where: { id: campaignId },
+    select: { templateKey: true, locales: true, contentByLocale: true },
+  });
+  const rendered = renderCampaignContent({
+    templateKey: campaign.templateKey,
+    locales: readLocales(campaign.locales),
+    contentByLocale: campaign.contentByLocale,
+  });
+  return {
+    previews: rendered.previews,
+    copyDigest: campaignContentDigest(
+      Object.fromEntries(
+        rendered.previews.map((preview) => [
+          preview.language,
+          preview.contentHash,
+        ])
+      )
+    ),
+  };
 };
 
 /**
@@ -779,6 +902,28 @@ export const ESTIMATE_REFUSAL_MESSAGE: Record<EstimateRefusal, string> = {
     "This campaign is already approved. Its audience is measured again by each wave as it runs, and re-estimating now would overwrite the number the approver read.",
 };
 
+export type MarketingConsentAudienceSummary = {
+  kind: "marketing_consent";
+  purpose: "product_updates";
+  /** Accounts with a current, timestamped opt-in, before account gates. */
+  consented: number;
+  active: number;
+  /** The expansion candidates; send-time gates may reduce this further. */
+  activeWithEmail: number;
+  cohortRows: Record<string, number>;
+  cohortUsers: Record<string, number>;
+  distinctUsers: number;
+  excluded: Record<string, number>;
+  noticeAudience: number;
+  autoMigratable: number;
+  malformed: number;
+  truncated: boolean;
+};
+
+export type CampaignAudienceSummary =
+  | AudienceSummary
+  | MarketingConsentAudienceSummary;
+
 /**
  * Measures the audience and stores the result on the campaign.
  *
@@ -809,7 +954,7 @@ export const estimateCampaignAudience = async (input: {
       estimatedRecipients: number;
       audienceVersion: number;
       estimatedAt: Date;
-      summary: AudienceSummary;
+      summary: CampaignAudienceSummary;
     }
 > => {
   await assertCampaignsEnabled();
@@ -838,6 +983,69 @@ export const estimateCampaignAudience = async (input: {
   const spec = readExpansionSpec(campaign.audienceSpec);
   if (!spec.cohort) {
     return { refused: "no_cohort", message: ESTIMATE_REFUSAL_MESSAGE.no_cohort };
+  }
+
+  if (spec.cohort.kind === "marketing_consent") {
+    const preference = {
+      purpose: spec.cohort.purpose,
+      enabled: true,
+      grantedAt: { not: null },
+    } as const;
+    const [consented, active, activeWithEmail] = await Promise.all([
+      prisma.user.count({
+        where: { emailPreferences: { some: preference } },
+      }),
+      prisma.user.count({
+        where: {
+          accountStatus: "active",
+          emailPreferences: { some: preference },
+        },
+      }),
+      prisma.user.count({
+        where: {
+          accountStatus: "active",
+          email: { not: null },
+          emailPreferences: { some: preference },
+        },
+      }),
+    ]);
+    const summary: MarketingConsentAudienceSummary = {
+      kind: "marketing_consent",
+      purpose: spec.cohort.purpose,
+      consented,
+      active,
+      activeWithEmail,
+      cohortRows: { marketing_consent: consented },
+      cohortUsers: { marketing_consent: consented },
+      distinctUsers: consented,
+      excluded: {
+        no_email: active - activeWithEmail,
+        account_inactive: consented - active,
+        suppressed: 0,
+        plan_incompatible: 0,
+      },
+      noticeAudience: activeWithEmail,
+      autoMigratable: 0,
+      malformed: 0,
+      truncated: false,
+    };
+    const estimatedAt = input.now ?? new Date();
+    await prisma.emailCampaign.update({
+      where: { id: input.campaignId },
+      data: {
+        estimatedRecipients: activeWithEmail,
+        audienceVersion: 1,
+        estimatedAt,
+        estimatedByEmail: input.byEmail,
+        audienceEstimate: summary,
+      },
+    });
+    return {
+      estimatedRecipients: activeWithEmail,
+      audienceVersion: 1,
+      estimatedAt,
+      summary,
+    };
   }
 
   // The template's own classification and purpose, not a guess: suppression

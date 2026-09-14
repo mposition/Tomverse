@@ -91,6 +91,11 @@ type CampaignView = {
 };
 
 type AudienceSummaryView = {
+  kind?: "marketing_consent";
+  purpose?: "product_updates";
+  consented?: number;
+  active?: number;
+  activeWithEmail?: number;
   cohortRows: Record<string, number>;
   cohortUsers: Record<string, number>;
   distinctUsers: number;
@@ -124,6 +129,17 @@ type DetailResponse = {
   attestations: AttestationView[];
   transitionClaim: TransitionClaimView;
   audience: AudienceView[];
+  content: {
+    previews: Array<{
+      language: string;
+      subject: string;
+      html: string;
+      text: string;
+      contentHash: string;
+    }>;
+    copyDigest: string | null;
+    error?: string;
+  };
 };
 
 /** The exclusion reasons an estimate labels; any other key shows as stored. */
@@ -157,9 +173,11 @@ export function AdminCampaignDetailPanel({
    * decide it may. The server refuses regardless.
    */
   mayRevealAddresses,
+  mayWrite,
 }: {
   campaignId: string;
   mayRevealAddresses: boolean;
+  mayWrite: boolean;
 }) {
   const m = useAdminMessages(adminEmailCampaignDetailMessages);
   // Read through a ref so a language switch does not re-run `load`.
@@ -172,6 +190,7 @@ export function AdminCampaignDetailPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  const [previewLocale, setPreviewLocale] = useState("ko");
   // At most one wave's ledger is open. D10 made the screen the unit of a
   // reveal, and several ledgers on one page would leave "which screen"
   // unanswered.
@@ -281,9 +300,13 @@ export function AdminCampaignDetailPanel({
     attestations,
     transitionClaim,
     audience,
+    content,
   } = data;
   const editable =
     campaign.status === "draft" || campaign.status === "pending_approval";
+  const selectedPreview =
+    content.previews.find((preview) => preview.language === previewLocale) ??
+    content.previews[0];
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -362,6 +385,82 @@ export function AdminCampaignDetailPanel({
             {m.cancelledAt(when(campaign.cancelledAt), campaign.cancelReason ?? "")}
           </p>
         ) : null}
+      </section>
+
+      <section className="rounded-3xl border border-zinc-800 bg-zinc-950/70 p-5">
+        <h3 className="text-lg font-black text-white">{m.content.title}</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
+          {m.content.intro}
+        </p>
+        {selectedPreview ? (
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="min-w-0">
+              <div className="mb-3 flex flex-wrap gap-2">
+                {content.previews.map((preview) => (
+                  <button
+                    key={preview.language}
+                    type="button"
+                    onClick={() => setPreviewLocale(preview.language)}
+                    className={`min-h-10 rounded-xl border px-4 text-sm font-bold ${
+                      selectedPreview.language === preview.language
+                        ? "border-teal-500 bg-teal-950 text-teal-100"
+                        : "border-zinc-800 bg-zinc-900 text-zinc-400"
+                    }`}
+                  >
+                    {preview.language.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <p className="mb-3 text-sm font-bold text-zinc-200">
+                {selectedPreview.subject}
+              </p>
+              <iframe
+                title={`${m.content.title} ${selectedPreview.language.toUpperCase()}`}
+                sandbox=""
+                srcDoc={selectedPreview.html}
+                className="h-[720px] w-full rounded-2xl bg-white"
+                data-testid="admin-campaign-email-preview"
+              />
+            </div>
+            <div className="min-w-0">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+                {m.content.plainText}
+              </h4>
+              <pre className="mt-2 max-h-[34rem] overflow-auto whitespace-pre-wrap rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-xs leading-5 text-zinc-300">
+                {selectedPreview.text}
+              </pre>
+              {content.copyDigest ? (
+                <p className="mt-3 break-all font-mono text-[10px] leading-4 text-zinc-500">
+                  {m.content.digest}: {content.copyDigest}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                onClick={() =>
+                  void run(
+                    "test-send",
+                    () => send("/test-send", "POST", {}),
+                    m.toast.testQueued
+                  )
+                }
+                disabled={
+                  busy !== null || !editable || !mayWrite || !content.copyDigest
+                }
+                className="mt-4 inline-flex min-h-11 items-center rounded-xl border border-teal-500/40 bg-teal-500/15 px-4 text-sm font-bold text-white hover:border-teal-400 disabled:opacity-50"
+                data-testid="admin-campaign-test-send"
+              >
+                {busy === "test-send" ? m.content.testSending : m.content.testSend}
+              </button>
+              <p className="mt-2 text-xs leading-5 text-zinc-500">
+                {m.content.testHint}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 rounded-2xl border border-amber-800 bg-amber-950/40 p-4 text-sm text-amber-100">
+            {content.error ?? m.content.unavailable}
+          </p>
+        )}
       </section>
 
       <section
@@ -570,6 +669,9 @@ export function AdminCampaignDetailPanel({
                 send("/approve", "POST", {
                   reason: reason.trim(),
                   locales: campaign.locales,
+                  ...(content.copyDigest
+                    ? { copyDigest: content.copyDigest }
+                    : {}),
                 }),
               m.toast.approved
             )
@@ -691,38 +793,50 @@ export function AdminCampaignDetailPanel({
               </p>
             ) : null}
 
-            <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-              {Object.entries(campaign.audienceEstimate.excluded).map(
-                ([reason, count]) => (
-                  <div
-                    key={reason}
-                    className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
-                  >
-                    <dt className="min-w-0 text-sm text-zinc-400">
-                      {(ESTIMATE_EXCLUDED_REASONS.has(reason)
-                        ? labelFor(m.excluded, reason)
-                        : undefined) ?? reason}
-                    </dt>
-                    <dd
-                      className={`text-sm font-bold ${
-                        count > 0 ? "text-amber-200" : "text-zinc-600"
-                      }`}
-                    >
-                      {count}
-                    </dd>
-                  </div>
-                )
-              )}
-            </dl>
+            {campaign.audienceEstimate.kind === "marketing_consent" ? (
+              <p className="mt-3 text-sm leading-6 text-zinc-300">
+                {m.estimate.consentBreakdown(
+                  campaign.audienceEstimate.consented ?? 0,
+                  campaign.audienceEstimate.active ?? 0,
+                  campaign.audienceEstimate.activeWithEmail ?? 0
+                )}
+              </p>
+            ) : (
+              <>
+                <dl className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                  {Object.entries(campaign.audienceEstimate.excluded).map(
+                    ([reason, count]) => (
+                      <div
+                        key={reason}
+                        className="flex items-baseline justify-between gap-3 border-b border-zinc-900 py-1"
+                      >
+                        <dt className="min-w-0 text-sm text-zinc-400">
+                          {(ESTIMATE_EXCLUDED_REASONS.has(reason)
+                            ? labelFor(m.excluded, reason)
+                            : undefined) ?? reason}
+                        </dt>
+                        <dd
+                          className={`text-sm font-bold ${
+                            count > 0 ? "text-amber-200" : "text-zinc-600"
+                          }`}
+                        >
+                          {count}
+                        </dd>
+                      </div>
+                    )
+                  )}
+                </dl>
 
-            <p className="mt-3 text-sm text-zinc-300">
-              {m.estimate.autoMigratable(
-                campaign.audienceEstimate.autoMigratable
-              )}{" "}
-              {campaign.audienceEstimate.malformed > 0
-                ? m.estimate.malformed(campaign.audienceEstimate.malformed)
-                : ""}
-            </p>
+                <p className="mt-3 text-sm text-zinc-300">
+                  {m.estimate.autoMigratable(
+                    campaign.audienceEstimate.autoMigratable
+                  )}{" "}
+                  {campaign.audienceEstimate.malformed > 0
+                    ? m.estimate.malformed(campaign.audienceEstimate.malformed)
+                    : ""}
+                </p>
+              </>
+            )}
           </div>
         )}
 

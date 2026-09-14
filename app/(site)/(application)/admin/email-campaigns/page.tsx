@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 
 import { AdminCampaignSchedulePanel } from "@/components/admin/AdminCampaignSchedulePanel";
+import { AdminCampaignComposer } from "@/components/admin/AdminCampaignComposer";
 import { AdminEmailCampaignsPanel } from "@/components/admin/AdminEmailCampaignsPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
@@ -8,6 +9,10 @@ import {
   listAdminCampaigns,
   listCampaignSchedule,
 } from "@/lib/adminEmailCampaigns";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import { hasAdminPermission } from "@/lib/adminAuth";
+import { isEmailCampaignsEnabled } from "@/lib/appSettings";
 
 const TABS = adminNavItemTabs("email-campaigns");
 
@@ -33,6 +38,7 @@ export default async function AdminEmailCampaignsPage({
 }: PageProps<"/admin/email-campaigns">) {
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
+  const session = await getServerSession(authOptions);
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -49,10 +55,16 @@ export default async function AdminEmailCampaignsPage({
           limit={LIMIT}
         />
       ) : (
-        <AdminEmailCampaignsPanel
-          rows={await listAdminCampaigns({ limit: LIMIT })}
-          limit={LIMIT}
-        />
+        <>
+          <AdminCampaignComposer
+            mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
+            campaignsEnabled={await isEmailCampaignsEnabled()}
+          />
+          <AdminEmailCampaignsPanel
+            rows={await listAdminCampaigns({ limit: LIMIT })}
+            limit={LIMIT}
+          />
+        </>
       )}
     </div>
   );

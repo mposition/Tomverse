@@ -36,6 +36,7 @@ import {
 } from "@/lib/emailCampaignRecipientCore";
 import { audienceExclusion } from "@/lib/modelRetirementAudienceCore";
 import type { SendClassification } from "@/lib/emailSuppressionCore";
+import { deliveryContentForLanguage } from "@/lib/emailCampaignContentCore";
 
 /**
  * One event, many deliveries, resumably (EM-01).
@@ -130,7 +131,41 @@ const cohortCandidates = async (input: {
    */
   classification: SendClassification;
   purpose: string | null;
-}): Promise<AudienceCandidateWithVerdict[]> => {
+}): Promise<ExpansionCandidate[]> => {
+  if (input.cohort.kind === "marketing_consent") {
+    const rows = await prisma.user.findMany({
+      where: {
+        accountStatus: "active",
+        emailPreferences: {
+          some: {
+            purpose: input.cohort.purpose,
+            enabled: true,
+            grantedAt: { not: null },
+          },
+        },
+        ...(input.after ? { id: { gt: input.after } } : {}),
+      },
+      orderBy: { id: "asc" },
+      take: input.take,
+      select: {
+        id: true,
+        email: true,
+        settings: { select: { language: true } },
+      },
+    });
+    return rows.map((candidate) => ({
+      id: candidate.id,
+      email: candidate.email,
+      language: candidate.settings?.language ?? null,
+      ledger: {
+        cohort: "marketing_consent",
+        excludedReason: candidate.email ? null : "no_email",
+        malformed: false,
+      },
+      inAudience: true,
+    }));
+  }
+
   const candidates = input.recomputes
     ? await audienceCandidatesByIds({
         targetModelId: input.cohort.targetModelId,
@@ -161,20 +196,32 @@ const cohortCandidates = async (input: {
     purpose: input.purpose,
   });
 
-  return candidates.map((candidate: AudienceCandidate, index: number) => ({
-    candidate,
-    verdict: recipientVerdict({
+  return candidates.map((candidate: AudienceCandidate, index: number) => {
+    const verdict = recipientVerdict({
       cohorts: candidate.cohorts,
       exclusion: audienceExclusion(members[index]),
       malformed: candidate.malformed,
       recomputesCohorts: input.recomputes,
-    }),
-  }));
-};
-
-type AudienceCandidateWithVerdict = {
-  candidate: AudienceCandidate;
-  verdict: ReturnType<typeof recipientVerdict>;
+    });
+    return {
+      id: candidate.userId,
+      email: candidate.email,
+      language: candidate.language,
+      // A person the prefilter returned and the cohort rules rejected gets no
+      // ledger row and no delivery. Keeping them in the page still advances
+      // the cursor past a substring near-match.
+      ledger:
+        verdict.outcome === "not_in_audience"
+          ? null
+          : {
+              cohort: verdict.cohort ?? null,
+              excludedReason:
+                verdict.outcome === "exclude" ? verdict.excludedReason : null,
+              malformed: verdict.malformed,
+            },
+      inAudience: verdict.outcome !== "not_in_audience",
+    };
+  });
 };
 
 /**
@@ -354,7 +401,10 @@ export async function expandEmailEvent(input: {
   const wave = await waveForEvent(event.id);
   // Only a campaign wave re-asks the audience question, and only the later
   // waves do. The first notice's audience is the query that produced it.
-  const recomputesCohorts = wave ? waveRecomputesCohorts(wave.kind) : false;
+  const recomputesCohorts =
+    spec.cohort?.kind === "model_retirement" && wave
+      ? waveRecomputesCohorts(wave.kind)
+      : false;
 
   try {
     for (;;) {
@@ -369,38 +419,15 @@ export async function expandEmailEvent(input: {
       }
 
       const candidates: ExpansionCandidate[] = spec.cohort
-        ? (
-            await cohortCandidates({
-              cohort: spec.cohort,
-              campaignId: wave?.campaignId ?? "",
-              recomputes: recomputesCohorts,
-              after: result.cursor,
-              take: plan.take,
-              classification: definition.classification,
-              purpose: definition.purpose ?? null,
-            })
-          ).map(({ candidate, verdict }) => ({
-            id: candidate.userId,
-            email: candidate.email,
-            language: candidate.language,
-            // A person the prefilter returned and the cohort rules rejected
-            // gets no ledger row and no delivery. They are still in the list so
-            // the cursor advances past them -- dropping them here would let a
-            // page of nothing but near-misses look like the end of the
-            // audience, and everybody after it would never be read.
-            ledger:
-              verdict.outcome === "not_in_audience"
-                ? null
-                : {
-                    cohort: verdict.cohort ?? null,
-                    excludedReason:
-                      verdict.outcome === "exclude"
-                        ? verdict.excludedReason
-                        : null,
-                    malformed: verdict.malformed,
-                  },
-            inAudience: verdict.outcome !== "not_in_audience",
-          }))
+        ? await cohortCandidates({
+            cohort: spec.cohort,
+            campaignId: wave?.campaignId ?? "",
+            recomputes: recomputesCohorts,
+            after: result.cursor,
+            take: plan.take,
+            classification: definition.classification,
+            purpose: definition.purpose ?? null,
+          })
         : (
             await nextCandidates({
               ...(spec.userIds ? { userIds: spec.userIds } : {}),
@@ -457,8 +484,15 @@ export async function expandEmailEvent(input: {
           result.skipped += 1;
           continue;
         }
-        const language = isLanguage(candidate.language)
+        const preferredLanguage = isLanguage(candidate.language)
           ? candidate.language
+          : "en";
+        const deliveryContent = deliveryContentForLanguage(
+          event.payload,
+          preferredLanguage
+        );
+        const language = isLanguage(deliveryContent.language)
+          ? deliveryContent.language
           : "en";
         const template = await ensureTemplateVersion({
           templateKey: event.template.key,
@@ -492,7 +526,7 @@ export async function expandEmailEvent(input: {
                 : { status: "pending", nextAttemptAt: new Date() }),
               attempts: 0,
               renderDataSnapshot: encryptSnapshot(
-                event.payload,
+                deliveryContent.payload,
                 snapshotKeyring()
               ) as Prisma.InputJsonValue,
             },
