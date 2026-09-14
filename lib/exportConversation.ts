@@ -109,7 +109,10 @@ const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f\u2028\u2029]+/g;
 // Bidirectional formatting controls, including U+061C ARABIC LETTER MARK.
 const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 // Characters that draw nothing: a name made only of these is no name.
-const INVISIBLE = /[\p{Cf}\p{Z}\s]/gu;
+// Default-ignorable covers what Cf does not -- variation selectors (U+FE0F,
+// U+E0100) and the combining grapheme joiner (U+034F). Only the emptiness test
+// uses this; a visible name keeps its joiners and selectors.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Z}\s]/gu;
 
 const FILE_NAME_MAX_CODE_POINTS = 80;
 const FILE_NAME_FALLBACK = "conversation";

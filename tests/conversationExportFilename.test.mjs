@@ -154,12 +154,23 @@ test("control and bidirectional characters never reach the header or the name", 
 });
 
 test("a title with nothing visible gets the generic name", () => {
-    for (const title of ["\u061C", "\u200B", "\u200B\u00A0\u3000", "\u202E"]) {
+    for (const title of [
+        "\u061C",
+        "\u200B",
+        "\u200B\u00A0\u3000",
+        "\u202E",
+        // Default-ignorable but not Cf: variation selectors, grapheme joiner.
+        "\uFE0F",
+        "\u034F",
+        "\u{E0100}",
+    ]) {
         assert.equal(savedName(title), "conversation.txt", JSON.stringify(title));
     }
     // Invisible joiners inside a visible name are left alone.
     const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
     assert.equal(savedName(family), `${family}.txt`);
+    const heart = "\u2764\uFE0F";
+    assert.equal(savedName(heart), `${heart}.txt`);
 });
 
 test("leading and trailing dots and spaces are removed; empty becomes generic", () => {
