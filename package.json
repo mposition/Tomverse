@@ -146,6 +146,7 @@
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",
     "report:billing-price-catalog": "node --conditions=react-server --import tsx scripts/report-billing-price-catalog.mjs",
     "report:email-domains": "node --conditions=react-server --import tsx scripts/report-email-sending-domains.mjs",
+    "report:email-dns": "node --conditions=react-server --import tsx scripts/report-email-dns.mjs",
     "report:gdpr-article-27-presence": "node --conditions=react-server --import tsx scripts/report-gdpr-article-27-presence.mjs",
     "report:assistant-knowledge-invariants": "node --conditions=react-server --import tsx scripts/report-assistant-knowledge-invariants.mjs",
     "report:credit-lot-invariants": "node --conditions=react-server --import tsx scripts/report-credit-lot-invariants.mjs",

@@ -255,8 +255,15 @@ npm run report:email-domains
 
 `mail.tomverse.app`이 `verified`로 나오고 DKIM·SPF 레코드가 모두 `verified`가
 될 때까지 기다립니다. 이 보고서는 **DMARC를 확인하지 않습니다** — 제공자가 그
-레코드를 발급하지도, 상태를 보고하지도 않기 때문입니다. `dig TXT
-_dmarc.mail.tomverse.app`으로 직접 봅니다(1.1 — 이 환경에서 동작합니다).
+레코드를 발급하지도, 상태를 보고하지도 않기 때문입니다. DNS 쪽은 다음으로
+봅니다.
+
+```
+npm run report:email-dns
+```
+
+`*_EMAIL_FROM`에 설정된 도메인을 기본으로 보고, 아직 설정 전인 도메인은 인자로
+넘깁니다(`-- news.tomverse.app`). DMARC를 포함해 네 레코드를 함께 봅니다.
 
 ### 3.4 2주 관측
 
@@ -694,6 +701,10 @@ npm run check:sending-identity -- --env
 > **marketing 계정 콘솔에 로그인한 상태에서** 합니다. 도구로 만들면 옛 계정에
 > 도메인이 생깁니다.
 
+> **1~3은 완료됐습니다 (2026-09-14).** 네 레코드가 모두 조회되고
+> Return-Path가 `ap-northeast-1`을 가리킵니다 — 근거는 4번의 명령 출력입니다.
+> 남은 것은 4번의 **콘솔 쪽 `verified` 확인**과 5번부터입니다.
+
 1. **도메인 등록** — marketing 계정에서 `news.tomverse.app` 추가. region은
    특별한 이유가 없으면 기존과 같은 `ap-northeast-1`(§3.1과 같은 이유이며,
    **region은 억제 분리 수단이 아닙니다** — 계정이 이미 나뉘어 있습니다).
@@ -715,15 +726,25 @@ npm run check:sending-identity -- --env
    레코드는 필요 없습니다.** 루트 레코드는 §3.2에서 이미 넣었으므로 다시 넣지
    않습니다.
 
-4. **검증** — 콘솔에서 `verified`를 확인하고, DMARC는 직접 조회합니다.
+4. **검증** — DNS 쪽은 명령 하나로 끝나고, 콘솔 쪽은 사람이 봅니다.
+
+   이 컨테이너에서 실행합니다(에이전트가 직접). 자격증명이 필요 없습니다:
 
    ```
-   dig TXT _dmarc.news.tomverse.app +short
-   dig TXT resend._domainkey.news.tomverse.app +short
+   npm run report:email-dns -- news.tomverse.app
    ```
+
+   DKIM·SPF TXT·Return-Path MX·DMARC 넷을 한 번에 보고, 빠진 것을 **한꺼번에**
+   나열합니다. **DMARC를 함께 보는 것이 요점입니다** — 제공자는 그 레코드를
+   발급하지도 않고 없다고 알려 주지도 않으므로, 콘솔의 `verified`만 보면 DMARC가
+   없는 도메인이 준비된 것처럼 보입니다.
 
    `npm run report:email-domains`는 **transactional 계정만** 보므로 여기서는
-   `news.`가 나오지 않는 것이 정상입니다.
+   `news.`가 나오지 않는 것이 정상입니다. 그쪽은 제공자에게 묻고 이쪽은 DNS에
+   물으므로, 두 보고가 어긋나는 것이 이상한 상태가 아닙니다.
+
+   **콘솔에서 `verified` 확인은 사람이 합니다** — marketing 계정은 이 세션의
+   도구가 닿지 않습니다.
 
 5. **환경변수** — 코드보다 **먼저** 배포합니다(§17.4).
 
@@ -806,9 +827,13 @@ IP보다 나쁩니다. 재검토 시점은 marketing 단독 월 10만 통(§14.3
 
 ## 8. 다음 작업 — 무엇을 기다리는가 (2026-09-14 기준)
 
-> **이 컨테이너에서 확인하지 못한 것**도 적어 둡니다 — DMARC TXT 레코드 자체와
-> `dmarc@tomverse.app` 수신 여부입니다. `dig`이 없고 DNS-over-HTTPS는 프록시가
-> 막습니다(403). 사서함은 애초에 저장소 밖입니다.
+> **2026-09-14 정정.** 이 문단은 DMARC TXT 레코드를 이 컨테이너에서 확인할 수
+> 없다고 적고 있었습니다. `dig`이 없는 것도 DNS-over-HTTPS가 프록시에 막히는
+> 것(403)도 사실이지만, **Node의 resolver는 동작하며 아무도 시도하지
+> 않았습니다.** 이제 `npm run report:email-dns`가 확인하고, `mail`·`news` 두
+> 도메인 모두 네 레코드가 제자리에 있습니다. 저장소 밖으로 남는 것은
+> `dmarc@tomverse.app`의 **수신 여부**뿐이며, 그것은 사서함이라 다른 종류의
+> 사실입니다.
 
 **8.3(A18)은 결정됐고, 남은 두 건은 착수 대기이지 안 한 일이 아닙니다.** 각각 저장소가 답할 수 없는
 사실을 기다리고 있으므로, 기다리는 대상을 모른 채 시작하면 멈추거나 추측하게
