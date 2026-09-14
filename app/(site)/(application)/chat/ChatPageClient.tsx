@@ -2552,6 +2552,7 @@ export function ChatPageClient({
             ...conversation,
             title: continuationDisplayTitle({
               storedTitle: conversation.title,
+              isContinuation: surfaceHasContinuationBridge(conversation.surface),
               sourceTitle,
               fallback: t("continuation.quickUntitled"),
             }),

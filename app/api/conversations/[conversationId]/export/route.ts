@@ -9,10 +9,15 @@ import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
 import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
 import { getContinuationBridge } from "@/lib/externalContinuationService";
 import {
+    continuationDisplayTitle,
+    readableContinuationSourceTitle,
+} from "@/lib/continuationDisplayTitle";
+import {
+    conversationExportContentDisposition,
     formatConversationHeader,
     formatExportMessage,
-    sanitizeFileName,
 } from "@/lib/exportConversation";
+import { en } from "@/locales/en";
 import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
@@ -58,6 +63,16 @@ export async function GET(
                 createdAt: true,
                 password: true,
                 kind: true,
+                // The same two columns, read the same way, as the conversation
+                // list reads them: the file has to be named what the list calls
+                // the conversation (lib/continuationDisplayTitle.ts).
+                continuationBridge: {
+                    select: {
+                        externalConversation: {
+                            select: { title: true, password: true },
+                        },
+                    },
+                },
             },
         });
 
@@ -101,6 +116,21 @@ export async function GET(
               })
             : [];
 
+        // What the conversation list calls this conversation, so the filename
+        // and the file's own `Conversation:` line match the row the user
+        // clicked. The stored title alone is the internal placeholder for a
+        // continuation nobody has named. Resolved from this row, never from a
+        // title the request could carry. The file's header lines are English,
+        // so its fallback is too.
+        const displayTitle = continuationDisplayTitle({
+            storedTitle: conversation.title,
+            isContinuation: conversation.continuationBridge !== null,
+            sourceTitle: readableContinuationSourceTitle(
+                conversation.continuationBridge?.externalConversation
+            ),
+            fallback: en.continuation.quickUntitled,
+        });
+
         const encoder = new TextEncoder();
         let cursor: string | undefined;
         let headerPending = true;
@@ -110,7 +140,7 @@ export async function GET(
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${formatConversationHeader(conversation, personalizationNotice, continuationProvenance)}\n`
+                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt }, personalizationNotice, continuationProvenance)}\n`
                         )
                     );
                     return;
@@ -146,18 +176,11 @@ export async function GET(
             },
         });
 
-        const fileName = `${sanitizeFileName(conversation.title)}.txt`;
-        // Two fields, because one cannot do both jobs. A quoted `filename` is
-        // literal and ASCII, so a Korean title percent-encoded into it arrived
-        // as the escapes themselves -- `%ED%95%9C.txt` on disk. RFC 5987's
-        // `filename*` is the field that carries the real name, and the quoted
-        // one stays as the ASCII fallback for anything that ignores it.
-        const asciiFileName =
-            fileName.replace(/[^\x20-\x7e]/g, "").trim() || "conversation.txt";
         return new Response(stream, {
             headers: {
                 "Content-Type": "text/plain; charset=utf-8",
-                "Content-Disposition": `attachment; filename="${asciiFileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+                "Content-Disposition":
+                    conversationExportContentDisposition(displayTitle),
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
             },
