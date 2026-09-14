@@ -298,7 +298,12 @@ export function PlatformSettingsPanel({
           locale: apiLocale,
         });
         setApiFailure(outcome);
-        dispatchAppToast(outcome.message, outcome.tone);
+        dispatchAppToast(
+          data?.error && !outcome.approvalId && !outcome.requiresReauthentication
+            ? m.toast.notSavedWithError(data.error)
+            : outcome.message,
+          outcome.tone
+        );
         return;
       }
       applySettings(
