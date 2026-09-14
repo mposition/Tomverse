@@ -584,7 +584,7 @@ C1~C14를 적용하고 나면 국가별 분기는 일곱 개만 남습니다. **
 |---|---|---|---|
 | E1 | **제목 접두어** `(광고)` | KR | `JurisdictionProfile.subjectPrefix` |
 | E2 | **제목 접두어** `<ADV> ` | SG | 동일 필드 |
-| E3 | **footer에 표시할 사업자 정보 집합** (한국: 사업자등록번호·통신판매업 신고번호 / 호주: ABN / 기타: 법인명+주소) | KR, AU, 기타 | `JurisdictionProfile.footerBlocks[]` |
+| E3 | **footer에 표시할 사업자 정보 집합** (호주: ABN / 기타: 법인명+주소) | AU, 기타 | `JurisdictionProfile.footerBlocks[]`. **한국의 사업자등록번호·통신판매업 신고번호는 2026-09-14에 KR profile에서 제거했습니다** — 시행령 별표 6이 요구하는 것은 명칭·연락처·수신거부 방법이고, 두 번호는 전자상거래법상 통신판매업자의 표시 의무입니다. 발송 주체가 호주 법인이며 한국 통신판매업 신고 대상이 아님을 확인했으므로(2026-09-14) 그 번호가 존재하지 않고, 값을 가질 수 없는 block을 이름 대면 한국 수신자 marketing이 영구히 거부됩니다. renderer는 block을 그대로 들고 있으므로 신고 번호가 생기면 seed 한 줄과 새 policy version으로 되살립니다 |
 | E4 | **수신거부 처리 SLA 표기** (5/10 영업일) | AU=5, US/CA/SG=10 | `JurisdictionProfile.unsubscribeSlaBusinessDays` — 표기용. 실제 처리는 항상 즉시 |
 | E5 | **야간 발송 억제 창** (21:00~08:00 현지) | KR (매체 예외 확인 전까지) | `JurisdictionProfile.quietHours` |
 | E6 | **묵시적 동의 만료 계산** | CA(2년/6개월) | C8로 인해 **미사용**. profile에 필드만 남기고 비활성 |

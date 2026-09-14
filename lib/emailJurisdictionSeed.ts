@@ -88,8 +88,6 @@ export const JURISDICTION_PROFILE_SEED: readonly JurisdictionProfileSeed[] = [
     subjectPrefix: "(광고)",
     footerBlocks: [
       "legal_name",
-      "business_registration",
-      "mail_order_registration",
       "postal_address",
       "contact_email",
       "unsubscribe_link",
@@ -101,6 +99,7 @@ export const JURISDICTION_PROFILE_SEED: readonly JurisdictionProfileSeed[] = [
     impliedConsentDays: null,
     notes: [
       "정보통신망법 제50조. 영리목적 광고성 정보는 사전 동의(제1항), 제목 앞 `(광고)` 표시(제4항 및 시행령 제61조), 수신거부 방법 명시(시행령 별표 6). 확인일 2026-08-21.",
+      "E3 footerBlocks에서 business_registration·mail_order_registration을 뺐습니다(2026-09-14). 시행령 별표 6이 요구하는 것은 전송자의 명칭·연락처·수신거부 방법이고 등록번호는 여기 없습니다. 두 번호는 전자상거래법상 통신판매업자의 표시 의무에서 온 항목인데, 발송 주체는 호주 법인이고 한국 통신판매업 신고 대상이 아님을 확인했으므로(운영 확인 2026-09-14) 그 번호가 존재하지 않습니다. renderJurisdictionFooter()는 이름 붙은 block 중 하나라도 값이 없으면 footer 전체를 버리므로, 존재하지 않는 번호를 계속 이름 대면 한국 수신자 marketing이 영구히 거부됩니다. 신고 대상이 되면 블록을 되살리는 것은 새 EmailPolicyVersion 하나입니다.",
       "E7 consentNoticeIntervalMonths=24: 제50조제8항 + 시행령 제62조의3. 2년마다 수신자에게 동의 사실을 *알릴* 의무이며 동의가 만료되는 것이 아닙니다(§5.5). 답이 없는 수신자의 동의는 그대로 유지됩니다.",
       "E5 quietHours 21:00-08:00: 제50조제3항의 야간 전송 제한. 전자우편이 매체 예외에 해당하는지 확인되기 전까지 보수적으로 적용합니다(§5.2 E5).",
       "unsubscribeSlaBusinessDays=1 is copy only: 법은 즉시 처리와 결과 통지를 요구하고, 실제 처리는 모든 관할권에서 동기적입니다(C3).",

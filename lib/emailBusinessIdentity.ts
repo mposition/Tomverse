@@ -69,9 +69,19 @@ export const BLOCK_ENV_VARIABLE: Record<string, string | null> = {
  * Which values every footer needs, and which belong to one jurisdiction.
  *
  * Read off `JURISDICTION_PROFILE_SEED` rather than restated from the runbook:
- * `COMMON_FOOTER` is in every profile including `ZZ`, and `KR` and `AU` each
- * add their own. A second hand-written copy of that mapping is the thing this
- * whole module exists to avoid.
+ * `COMMON_FOOTER` is in every profile including `ZZ`, and `AU` adds its own. A
+ * second hand-written copy of that mapping is the thing this whole module
+ * exists to avoid, and `tests/emailBusinessIdentityReadiness.test.mjs` fails
+ * when the two disagree.
+ *
+ * `KR` used to add the two registration numbers and no longer does
+ * (2026-09-14). The sender is an Australian company that is not required to
+ * register as a Korean mail-order seller, so those numbers do not exist, and
+ * naming a block whose value can never be set refuses every Korean marketing
+ * message for good -- the renderer drops the whole footer when one named block
+ * is empty. The blocks themselves stay in `emailFooterRenderer.ts`: if a Korean
+ * registration is ever obtained, restoring them is a seed change and a new
+ * policy version rather than new code.
  */
 export const UNIVERSAL_IDENTITY_BLOCKS = [
   "legal_name",
@@ -80,7 +90,6 @@ export const UNIVERSAL_IDENTITY_BLOCKS = [
 ] as const;
 
 export const JURISDICTION_IDENTITY_BLOCKS: Record<string, readonly string[]> = {
-  KR: ["business_registration", "mail_order_registration"],
   AU: ["abn"],
 };
 
