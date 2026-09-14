@@ -116,8 +116,8 @@ desktop·mobile 두 project에서 돕니다.
 않는지, 중단된 답변의 일부와 정확한 질문·첨부 복구 동작이 reload 뒤에도
 사용자에게 명시적으로 보이는지, 320px·390px와 200% text에서 composer가
 동작하는지를 실제 화면으로 확인합니다. 이 경계가 깨지면 대화 신원이나 기존
-답변을 잃거나 잘못된 질문을 다시 보내게 되므로 release를 막습니다. `CI=1`
-`--grep=@ui-risk --list`의 현재 실측은 CI가 쓰는 각 Chromium project에서
+답변을 잃거나 잘못된 질문을 다시 보내게 되므로 release를 막습니다. 합류 당시
+`CI=1 --grep=@ui-risk --list` 실측은 CI가 쓰는 각 Chromium project에서
 **55개 파일, 765 test**(두 project 합계 1,530)이며, 이 spec은 project당
 36 test입니다. PR Fast Gate run 34726247430에서 새 목록을 실행한 네 shard는
 모두 통과했고, 가장 느린 desktop-chromium 1/2 job은 12분 57초로 25분 예산의

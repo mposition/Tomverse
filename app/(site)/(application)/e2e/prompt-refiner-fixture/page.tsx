@@ -15,9 +15,7 @@ const single = (value: string | string[] | undefined) =>
  */
 export default async function PromptRefinerFixturePage({
   searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+}: PageProps<"/e2e/prompt-refiner-fixture">) {
   if (!isE2EFixtureMode()) notFound();
   const params = await searchParams;
   return (
