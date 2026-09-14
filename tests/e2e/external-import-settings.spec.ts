@@ -191,6 +191,11 @@ async function mockImportApi(
       userTouchedCount: number;
       keptCount: number;
     };
+    /** The other half of the same confirmation: which names change (D3). */
+    titleImpact?: {
+      changingCount: number;
+      preservableConversationIds: string[];
+    };
   } = {}
 ): Promise<ImportApiState> {
   const state: ImportApiState = {
@@ -466,17 +471,44 @@ async function mockImportApi(
           json({ outcome: "deleted", memory: { derivedCount: 0 } })
         );
       }
-      // §13.1 preview: only answered when the confirmation asks for it.
-      if (new URL(route.request().url()).searchParams.get("include") === "memoryImpact") {
-        state.memoryImpactReads += 1;
+      // The confirmation's previews: only answered when it asks for them.
+      //
+      // Matched by membership rather than against the whole string, which is
+      // how this broke. The request was `include=memoryImpact` when this was
+      // written; adding the continuation-title choice made it
+      // `include=memoryImpact,titleImpact`, this comparison stopped being
+      // true, and the mock fell through to the 404 below. The notice then
+      // rendered nothing, and two tests failed on a checkbox that was never
+      // there -- in all three projects, saying nothing about the request whose
+      // shape had changed. A third `include` must not cost that again.
+      const include = new Set(
+        (new URL(route.request().url()).searchParams.get("include") ?? "")
+          .split(",")
+          .map((part) => part.trim())
+          .filter(Boolean)
+      );
+      if (include.has("memoryImpact") || include.has("titleImpact")) {
+        // Counts the §13.1 read specifically, which is what the tests assert:
+        // one preview request that asks for both is still one memory read.
+        if (include.has("memoryImpact")) state.memoryImpactReads += 1;
         return route.fulfill(
           json({
             ...(options.importDetail ?? {}),
-            memoryImpact: options.memoryImpact ?? {
-              derivedCount: 0,
-              userTouchedCount: 0,
-              keptCount: 0,
-            },
+            // Each part is answered only when it was asked for. Serving one
+            // the request did not name would hide the next divergence between
+            // what the confirmation asks and what this mock knows about.
+            ...(include.has("memoryImpact")
+              ? {
+                  memoryImpact: options.memoryImpact ?? {
+                    derivedCount: 0,
+                    userTouchedCount: 0,
+                    keptCount: 0,
+                  },
+                }
+              : {}),
+            ...(include.has("titleImpact") && options.titleImpact
+              ? { titleImpact: options.titleImpact }
+              : {}),
           })
         );
       }
