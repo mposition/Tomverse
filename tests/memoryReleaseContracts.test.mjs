@@ -289,7 +289,7 @@ test("the memory count is selected for the owner's read and for no one else", ()
     );
     assert.ok(
         publicChatMessage.includes("knowledgeChunkCount: true"),
-        "the owner's conversation read must select knowledgeChunkCount " +
+        "the owner's public-message allowlist must select knowledgeChunkCount " +
             "(docs/policy/external-conversation-import-and-memory.md §14.3)"
     );
 
@@ -300,6 +300,7 @@ test("the memory count is selected for the owner's read and for no one else", ()
     ]) {
         const source = read(path);
         for (const column of [
+            "PUBLIC_CHAT_MESSAGE_SELECT",
             "memoryUsedCount",
             "memoryTokens",
             "knowledgeChunkCount",
