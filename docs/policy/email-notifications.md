@@ -1464,7 +1464,8 @@ JurisdictionCountryMap
   @@unique([countryCode, policyVersionId])
 ```
 
-- **profile 8개**: `KR`, `US`, `CA`, `AU`, `GB`, `SG`, `EU`, `ZZ`.
+- **profile 9개**: `KR`, `US`, `CA`, `AU`, `GB`, `SG`, `EU`, `CH`, `ZZ`.
+  (v5, 2026-09-14: `CH`가 `EU`에서 분리됐습니다 — 검토 기록 §4.5)
 - 국가 -> profile 매핑은 **데이터**이므로, 회원국 하나를 분리하는 것은 배포가
   아니라 새 `EmailPolicyVersion` 발행입니다(8.7의 "값은 바꾸고 형태는 안 바꾼다"에
   부합).
@@ -2292,7 +2293,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | M4 | `SuppressionEntry` + hard bounce/complaint 자동 억제 | 13.3 표대로 분류별 동작. bounce된 주소로 재발송하지 않음 |
 | M5 | `EmailPreference` (6개 목적) + 잠금 규칙 | security/billing은 API로도 끌 수 없음 |
 | M6 | `ConsentRecord` append-only | 모든 preference 변경이 이력을 남김. 원시 IP 미저장 |
-| M7 | `JurisdictionProfile` + `JurisdictionCountryMap` + `EmailPolicyVersion` + footer renderer | **profile 8개**(`KR`/`US`/`CA`/`AU`/`GB`/`SG`/`EU`/`ZZ`, `ZZ` 포함) + 국가->profile 매핑(EEA 30개국 + CH -> `EU`). 6.3의 보류 동작 |
+| M7 | `JurisdictionProfile` + `JurisdictionCountryMap` + `EmailPolicyVersion` + footer renderer | **profile 9개**(`KR`/`US`/`CA`/`AU`/`GB`/`SG`/`EU`/`CH`/`ZZ`, `ZZ` 포함) + 국가->profile 매핑(EEA 30개국 -> `EU`, CH는 자체 profile). 6.3의 보류 동작. v5(2026-09-14)에서 8개에서 늘었습니다 |
 | M8 | 관할권 판정 (`resolveEmailJurisdiction`) | IP 단독 판정 없음. conflict 기록. `UserSettings.country` 추가 |
 | M9 | unsubscribe token + `/unsubscribe` + One-Click | 로그인 불필요. `GET`이 상태를 바꾸지 않음. 끄기만 가능 |
 | M10 | preference center (`/settings/notifications`) | settings-navigation 계약 준수. desktop/mobile 동일 |
@@ -2523,7 +2524,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
       **이 lane에 eventual delivery 보장은 없습니다 — 그것이 방식 B의 정의입니다**
 - [ ] hard bounce 처리 후 같은 주소로 재발송 시도가 발생하지 않음
 - [ ] marketing flag가 꺼진 상태에서 marketing 발송 시도가 **실패**함(조용한 통과 아님)
-- [ ] **profile 8개 x 언어 7개 = 56 스냅샷**에서 footer가 정상 렌더 (M7과 개수 일치)
+- [ ] **profile 9개 x 언어 7개 = 63 스냅샷**에서 footer가 정상 렌더 (M7과 개수 일치)
 - [ ] unsubscribe가 로그인 없이 1클릭으로 동작하고 5초 내 반영
 - [ ] 모든 관리자 발송 행위가 `AdminAuditLog`에 기록됨
 - [ ] `EmailPolicyVersion`을 새로 활성화해도 진행 중인 발송의 렌더가 바뀌지 않음
@@ -2815,7 +2816,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
 | D4 | **전역 opt-in(C1)**, **soft opt-in 미사용(C8)** | 5.1, 5.6 |
 | D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
-| D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 | 10.2 |
+| D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 (**v5에서 9개** — 데이터 변경이라는 D6의 취지 그대로입니다) | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
 | D8 | `renderedHash`는 **키 있는 HMAC + 키 버전**, 검증 키 보관 하한은 legal 7년 | 10.3-6, 10.3-7 |
 | D9 | **EU를 출시 지역에 유지하고 GDPR 제27조 EU 대리인을 최대한 빠른 시일 내 지정.** 지정 전 기간은 면제가 아니라 알려진 일시적 compliance gap | 21절 Q18, EU 대리인 검토 기록 |
@@ -2843,7 +2844,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 
 - ~~**A18**~~ — **결정됨 (2026-09-14): 별도 계정.** 위 22절 참조.
 - **A14**(자동 opt-out 채택), **A2**(EU 리전), **A3**(일본), **A4**(중국),
-  **A1**(B2C/B2B), **A5**(opt-in 비용), **A17**(profile 8개).
+  **A1**(B2C/B2B), **A5**(opt-in 비용). ~~**A17**~~(profile 개수 — v5에서 9개로 확정).
 
 ### 참고 — v2에서 승인된 항목
 5. **9.4a credential synchronous lane** — 세 행 한 트랜잭션, 만료 코드 미발송,
