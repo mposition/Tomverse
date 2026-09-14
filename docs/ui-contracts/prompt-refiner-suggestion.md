@@ -137,7 +137,8 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   textarea focus를 빼앗지 않는지, 새 requesting·failed·ready 도착에는 한 번씩
   focus가 이동하는지, draft를 바꿨다가 같은 source로 되돌려도 같은 제안이
   textarea caret를 다시 빼앗지 않는지, 잠긴 failed 상태에서 실패한 focus가 잠금
-  해제 후 다시 전달되는지 desktop·mobile Chromium DOM으로 검사한다. fixture route는
+  해제 후 다시 전달되는지, 그 사이 상태가 숨겨졌다면 예약 focus가 만료되는지
+  desktop·mobile Chromium DOM으로 검사한다. fixture route는
   `isE2EFixtureMode()` 밖에서 404이며 provider·Router·과금 경로가 없다.
 
 static render test 자체는 focus effect를 실행하지 않는다. 새 fixture는 panel의

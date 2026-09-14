@@ -42,6 +42,15 @@ export function PromptRefinerSuggestionPanel({
   const readyRef = useRef<HTMLElement>(null);
   const requestingRef = useRef<HTMLDivElement>(null);
   const failedRetryRef = useRef<HTMLButtonElement>(null);
+  const boundFocusTarget = !offered
+    ? null
+    : state.status === "requesting"
+      ? `requesting:${state.request.requestId}`
+      : state.status === "failed"
+        ? `failed:${state.request.requestId}`
+        : state.status === "ready"
+          ? `ready:${state.suggestion.requestId}:${state.suggestion.suggestionId}`
+          : null;
   const focusTarget = !offered
     ? null
     : visible?.status === "requesting"
@@ -51,16 +60,25 @@ export function PromptRefinerSuggestionPanel({
         : visible?.status === "ready"
           ? `ready:${visible.suggestion.requestId}:${visible.suggestion.suggestionId}`
           : null;
-  // `visiblePromptRefinerState()` deliberately hides a bound state while the
-  // draft differs from its source. Keep the last target across that temporary
-  // invisibility: if the user edits back to the exact source bytes, the same
-  // request has merely reappeared and must not pull the caret from the
-  // textarea. Initialising from the first render also prevents a remounted
-  // ready/requesting row from stealing focus on mount.
-  const lastFocusedTargetRef = useRef(focusTarget);
+  // Keep observed identity separate from visibility. A state that arrives
+  // while the draft differs is observed but never queued for later focus; a
+  // queued handoff that becomes hidden expires. Therefore editing back to the
+  // exact source bytes cannot replay focus. Initialising from the first render
+  // also prevents a remounted bound state from stealing focus on mount.
+  const observedFocusTargetRef = useRef(boundFocusTarget);
+  const pendingFocusTargetRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!focusTarget || focusTarget === lastFocusedTargetRef.current) return;
+    if (!focusTarget) {
+      observedFocusTargetRef.current = boundFocusTarget;
+      pendingFocusTargetRef.current = null;
+      return;
+    }
+    if (boundFocusTarget !== observedFocusTargetRef.current) {
+      observedFocusTargetRef.current = boundFocusTarget;
+      pendingFocusTargetRef.current = focusTarget;
+    }
+    if (pendingFocusTargetRef.current !== focusTarget) return;
     let focusElement: HTMLElement | null = null;
     if (focusTarget?.startsWith("requesting:")) {
       focusElement = requestingRef.current;
@@ -74,9 +92,9 @@ export function PromptRefinerSuggestionPanel({
     if (!focusElement) return;
     focusElement.focus({ preventScroll: true });
     if (focusElement.ownerDocument.activeElement === focusElement) {
-      lastFocusedTargetRef.current = focusTarget;
+      pendingFocusTargetRef.current = null;
     }
-  }, [focusTarget, interactionBlockReason]);
+  }, [boundFocusTarget, focusTarget, interactionBlockReason]);
 
   if (!offered) return null;
 

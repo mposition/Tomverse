@@ -43,8 +43,8 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-14 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **56개 파일, 822 test**를
-선택합니다(두 project 합계 1,644). 2026-08-26의 51개 파일, 1,416 test
+desktop-chromium과 mobile-chromium 각 project에서 **56개 파일, 824 test**를
+선택합니다(두 project 합계 1,648). 2026-08-26의 51개 파일, 1,416 test
 (project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
@@ -127,9 +127,9 @@ mobile 2/2 9분 24초).
 `prompt-refiner-focus.spec.ts`가 2026-09-14에 합류해 56개입니다. 제안형
 composer의 focus는 실제 DOM에서만 검증할 수 있고, 같은 요청이 draft 편집 뒤
 재등장할 때 textarea caret를 빼앗으면 한국어 IME와 키보드 입력이 중단됩니다.
-세 case를 desktop·mobile Chromium 양쪽에서 실행하므로 project당 3 test를
+다섯 case를 desktop·mobile Chromium 양쪽에서 실행하므로 project당 5 test를
 추가합니다. 직전 55개/765 test 수치는 이후 기존 spec에 추가된 case를 반영하지
-못한 낡은 기록이었고, 이번에는 전체 tier를 다시 `--list`해 현재 822를 확인했다.
+못한 낡은 기록이었고, 이번에는 전체 tier를 다시 `--list`해 현재 824를 확인했습니다.
 이는 provider 호출이나 제품 기능 활성화가 아닌, loopback에서만 열리는 fixture의
 release-blocking 회귀 검사입니다.
 

@@ -11,6 +11,23 @@ test.describe("Prompt Refiner focus handoff", { tag: "@ui-risk" }, () => {
     await expect(page.getByTestId("prompt-refiner-fixture-textarea")).toBeFocused();
   });
 
+  test("a requesting state does not replay focus after draft reappearance", async ({
+    page,
+  }) => {
+    await page.goto(ROUTE);
+    const textarea = page.getByTestId("prompt-refiner-fixture-textarea");
+
+    await page.getByTestId("prompt-refiner-request").click();
+    await expect(page.getByTestId("prompt-refiner-requesting")).toBeFocused();
+    await textarea.fill(`${SOURCE_PROMPT} x`);
+    await expect(page.getByTestId("prompt-refiner-requesting")).toHaveCount(0);
+    await textarea.press("Backspace");
+    await textarea.press("Backspace");
+
+    await expect(page.getByTestId("prompt-refiner-requesting")).toBeVisible();
+    await expect(textarea).toBeFocused();
+  });
+
   test("focus follows genuine arrivals but not a same-state reappearance", async ({
     page,
   }) => {
@@ -51,5 +68,25 @@ test.describe("Prompt Refiner focus handoff", { tag: "@ui-risk" }, () => {
 
     await page.getByTestId("prompt-refiner-fixture-lock").click();
     await expect(page.getByTestId("prompt-refiner-retry")).toBeFocused();
+  });
+
+  test("a blocked handoff expires if its state becomes hidden", async ({ page }) => {
+    await page.goto(ROUTE);
+    const textarea = page.getByTestId("prompt-refiner-fixture-textarea");
+
+    await page.getByTestId("prompt-refiner-request").click();
+    await page.getByTestId("prompt-refiner-fixture-lock").click();
+    await page.getByTestId("prompt-refiner-fixture-failed").click();
+    await textarea.fill(`${SOURCE_PROMPT} x`);
+    await expect(page.getByTestId("prompt-refiner-retry")).toHaveCount(0);
+    await textarea.press("Backspace");
+    await textarea.press("Backspace");
+    await expect(page.getByTestId("prompt-refiner-retry")).toBeVisible();
+
+    await page.getByTestId("prompt-refiner-fixture-lock").click();
+    await expect(page.getByTestId("prompt-refiner-retry")).not.toBeFocused();
+    await expect(textarea).not.toBeFocused();
+    await textarea.focus();
+    await expect(textarea).toBeFocused();
   });
 });
