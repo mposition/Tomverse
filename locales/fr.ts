@@ -1299,6 +1299,8 @@ export const fr = {
         quickUnlock: "Déverrouiller",
         quickUnlockFor: "Ouvrir {title} pour la déverrouiller",
         quickUntitled: "Conversation sans titre",
+        untitledFrom: "Suite de {provider} · {date}",
+        sourceDeletedBadge: "Original supprimé",
         sourceUnavailable: "Cette conversation importée est introuvable.",
         lockedRefusal: "L’original importé est verrouillé. Déverrouillez-le sur sa propre page.",
         quickStartFailed: "Impossible de démarrer la continuation.",

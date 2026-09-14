@@ -9,9 +9,12 @@ import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
 import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
 import { getContinuationBridge } from "@/lib/externalContinuationService";
 import {
-    continuationDisplayTitle,
-    readableContinuationSourceTitle,
-} from "@/lib/continuationDisplayTitle";
+    CONTINUATION_NAMING_BRIDGE_SELECT,
+    DISPLAY_TIME_ZONE_HEADER,
+    continuationExportTitle,
+    effectiveDisplayTimeZone,
+} from "@/lib/continuationTitleContext";
+import { providerLabel } from "@/components/imports/importFormatting";
 import {
     conversationExportContentDisposition,
     formatConversationHeader,
@@ -63,16 +66,10 @@ export async function GET(
                 createdAt: true,
                 password: true,
                 kind: true,
-                // The same two columns, read the same way, as the conversation
-                // list reads them: the file has to be named what the list calls
-                // the conversation (lib/continuationDisplayTitle.ts).
-                continuationBridge: {
-                    select: {
-                        externalConversation: {
-                            select: { title: true, password: true },
-                        },
-                    },
-                },
+                // The naming columns the conversation list reads, read the
+                // same way: the file has to be named what the list calls the
+                // conversation (lib/continuationTitleContext.ts).
+                continuationBridge: { select: CONTINUATION_NAMING_BRIDGE_SELECT },
             },
         });
 
@@ -121,15 +118,21 @@ export async function GET(
         // clicked. The stored title alone is the internal placeholder for a
         // continuation nobody has named. Resolved from this row, never from a
         // title the request could carry. The file's header lines are English,
-        // so its fallback is too.
-        const displayTitle = continuationDisplayTitle({
-            storedTitle: conversation.title,
-            isContinuation: conversation.continuationBridge !== null,
-            sourceTitle: readableContinuationSourceTitle(
-                conversation.continuationBridge?.externalConversation
-            ),
-            fallback: en.continuation.quickUntitled,
-        });
+        // so its fallback is too; its date is the list's, from the same
+        // display-zone hint (formatting only).
+        const { title: displayTitle, headerLines: titleHeaderLines } =
+            continuationExportTitle({
+                storedTitle: conversation.title,
+                bridge: conversation.continuationBridge,
+                timeZone: effectiveDisplayTimeZone(
+                    req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+                ),
+                copy: {
+                    fallbackTemplate: en.continuation.untitledFrom,
+                    untitled: en.continuation.quickUntitled,
+                    providerLabel,
+                },
+            });
 
         const encoder = new TextEncoder();
         let cursor: string | undefined;
@@ -140,7 +143,7 @@ export async function GET(
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt }, personalizationNotice, continuationProvenance)}\n`
+                            `${formatConversationHeader({ title: displayTitle, createdAt: conversation.createdAt }, personalizationNotice, [...continuationProvenance, ...titleHeaderLines])}\n`
                         )
                     );
                     return;

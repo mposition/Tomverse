@@ -1314,6 +1314,8 @@ export const en = {
         quickUnlock: "Unlock",
         quickUnlockFor: "Open {title} to unlock it",
         quickUntitled: "Untitled conversation",
+        untitledFrom: "Continued from {provider} · {date}",
+        sourceDeletedBadge: "Original deleted",
         sourceUnavailable: "That imported conversation could not be found.",
         lockedRefusal: "The imported original is locked. Unlock it on its own page.",
         quickStartFailed: "Could not start the continuation.",

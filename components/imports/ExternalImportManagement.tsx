@@ -32,6 +32,10 @@ import {
 } from "@/lib/externalConversationLineage";
 import { discardResponseBody } from "@/lib/discardResponseBody";
 import { saveResponseAsFile } from "@/lib/browserDownload";
+import {
+    displayTimeZoneHeaders,
+    type ContinuationRowNaming,
+} from "@/lib/continuationTitleContext";
 
 /**
  * /settings/imports — the management screen.
@@ -136,11 +140,11 @@ export type ViewerConversationRow = {
      */
     continuationCount?: number;
     latestContinuationId?: string | null;
-    continuations?: {
+    continuations?: ({
         conversationId: string;
         title: string | null;
         createdAt: string;
-    }[];
+    } & Partial<ContinuationRowNaming>)[];
 };
 
 /** Hidden covers 401/403: the viewer list is flag-gated, unlike history. */
@@ -273,7 +277,9 @@ export function ExternalImportManagement() {
             try {
                 const response = await fetch(
                     `/api/external-conversations?offset=${offset}&limit=${CONVERSATIONS_PAGE_SIZE}`,
-                    { cache: "no-store" }
+                    // A continuation's fallback name is dated in this zone
+                    // (lib/continuationTitleContext.ts).
+                    { cache: "no-store", headers: displayTimeZoneHeaders() }
                 );
                 if (!response.ok) {
                     await discardResponseBody(response);

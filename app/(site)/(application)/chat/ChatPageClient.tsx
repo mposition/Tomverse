@@ -78,10 +78,13 @@ import {
   CONTINUATION_SHARE_REFUSAL_CODE,
   continuationShareRefusal,
 } from "@/lib/continuationSharingPolicy";
+import { isDerivedContinuationTitle } from "@/lib/continuationDisplayTitle";
 import {
-  continuationDisplayTitle,
-  isDerivedContinuationTitle,
-} from "@/lib/continuationDisplayTitle";
+  continuationRowTitle,
+  displayTimeZoneHeaders,
+  type ContinuationRowNaming,
+} from "@/lib/continuationTitleContext";
+import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
@@ -2680,7 +2683,12 @@ export function ChatPageClient({
     if (!sessionUserId) return;
 
     try {
-	  const res = await fetch(`/api/conversations`, { cache: "no-store" });
+	  const res = await fetch(`/api/conversations`, {
+        cache: "no-store",
+        // The fallback name's date is computed on the server, in this zone
+        // (lib/continuationTitleContext.ts).
+        headers: displayTimeZoneHeaders(),
+      });
       if (res.ok) {
         /*
           Resolve each continuation's displayed name once, here, rather than
@@ -2692,27 +2700,32 @@ export function ChatPageClient({
           source's words out of tables its deletion does not reach. The name is
           therefore resolved when it is shown, from the snapshot -- and when
           the snapshot is deleted or locked the server sends no
-          `sourceTitle`, so the row falls back to a translated placeholder.
-          That is the deletion contract working, not a gap.
+          `sourceTitle`, so the row falls back to a name built from the
+          provider and the day the continuation was made. That is the deletion
+          contract working, not a gap.
 
           Doing it at the boundary means the sidebar row, its accessible name,
-          the mobile header, the rename field and the search results all agree
-          without any of them knowing about continuations.
+          the mobile header and the rename field agree without any of them
+          knowing about continuations. Message search fetches separately and
+          resolves its hits through the same `continuationRowTitle()`.
         */
-        const rows = (await res.json()) as (Conversation & {
-          sourceTitle?: string | null;
-        })[];
+        const rows = (await res.json()) as (Conversation & ContinuationRowNaming)[];
+        const titleCopy = continuationTitleCopy(t);
         setConversations(
-          rows.map(({ sourceTitle, ...conversation }) => {
+          rows.map(({ sourceTitle, fallbackTitleDate, ...conversation }) => {
             const isContinuation = surfaceHasContinuationBridge(conversation.surface);
             return {
               ...conversation,
-              title: continuationDisplayTitle({
-                storedTitle: conversation.title,
-                isContinuation,
-                sourceTitle,
-                fallback: t("continuation.quickUntitled"),
-              }),
+              title: continuationRowTitle(
+                {
+                  storedTitle: conversation.title,
+                  isContinuation,
+                  sourceTitle,
+                  sourceProvider: conversation.sourceProvider,
+                  fallbackTitleDate,
+                },
+                titleCopy
+              ),
               titleIsDerived: isDerivedContinuationTitle({
                 storedTitle: conversation.title,
                 isContinuation,
@@ -5998,6 +6011,9 @@ export function ChatPageClient({
         try {
             const response = await fetch(`/api/conversations/${convId}/export`, {
                 cache: "no-store",
+                // The file is named with the date the list shows
+                // (lib/continuationTitleContext.ts).
+                headers: displayTimeZoneHeaders(),
             });
             if (!response.ok) {
                 await discardResponseBody(response);

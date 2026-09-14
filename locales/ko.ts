@@ -1310,6 +1310,8 @@ export const ko = {
         quickUnlock: "잠금 해제",
         quickUnlockFor: "{title}의 잠금을 풀려면 원본 열기",
         quickUntitled: "제목 없는 대화",
+        untitledFrom: "{provider}에서 이어온 대화 · {date}",
+        sourceDeletedBadge: "원문 삭제됨",
         sourceUnavailable: "가져온 원본을 찾을 수 없습니다.",
         lockedRefusal: "가져온 원본이 잠겨 있습니다. 원본 화면에서 잠금을 풀어 주세요.",
         quickStartFailed: "이어가기를 시작하지 못했습니다.",

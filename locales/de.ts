@@ -1299,6 +1299,8 @@ export const de = {
         quickUnlock: "Entsperren",
         quickUnlockFor: "{title} öffnen, um zu entsperren",
         quickUntitled: "Unbenannte Unterhaltung",
+        untitledFrom: "Fortgesetzt aus {provider} · {date}",
+        sourceDeletedBadge: "Original gelöscht",
         sourceUnavailable: "Diese importierte Unterhaltung wurde nicht gefunden.",
         lockedRefusal: "Das importierte Original ist gesperrt. Entsperren Sie es auf seiner eigenen Seite.",
         quickStartFailed: "Fortsetzung konnte nicht gestartet werden.",

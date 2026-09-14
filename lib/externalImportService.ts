@@ -37,6 +37,11 @@ import {
     type SourceDeletionImpact,
 } from "@/lib/memorySourceDeletion";
 import { markContinuationSourcesDeleted } from "@/lib/externalContinuationService";
+import {
+    CONTINUATION_NAMING_BRIDGE_SELECT,
+    continuationRowNaming,
+    type ContinuationRowNaming,
+} from "@/lib/continuationTitleContext";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -300,7 +305,19 @@ export async function listExternalImports(userId: string) {
  */
 export async function listExternalConversations(
     userId: string,
-    { offset = 0, limit = 50 }: { offset?: number; limit?: number } = {}
+    {
+        offset = 0,
+        limit = 50,
+        timeZone = "UTC",
+    }: {
+        offset?: number;
+        limit?: number;
+        /**
+         * The effective display zone for a continuation's fallback name
+         * (lib/continuationTitleContext.ts). Formatting only.
+         */
+        timeZone?: string;
+    } = {}
 ) {
     const [total, rows] = await Promise.all([
         prisma.externalConversation.count({
@@ -328,7 +345,8 @@ export async function listExternalConversations(
     ]);
     const continuations = await listContinuationsBySource(
         userId,
-        rows.map((row) => row.id)
+        rows.map((row) => row.id),
+        timeZone
     );
 
     return {
@@ -393,13 +411,15 @@ const EMPTY_CONTINUATION_SUMMARY = {
 
 export type ContinuationSummary = {
     conversationId: string;
+    /** The conversation's stored title; the page resolves the shown name. */
     title: string | null;
     createdAt: string;
-};
+} & ContinuationRowNaming;
 
 export async function listContinuationsBySource(
     userId: string,
-    externalConversationIds: readonly string[]
+    externalConversationIds: readonly string[],
+    timeZone = "UTC"
 ): Promise<
     Map<
         string,
@@ -429,8 +449,10 @@ export async function listContinuationsBySource(
         // single-continuation case opens and the multi case lists at the top.
         orderBy: { createdAt: "desc" },
         select: {
-            externalConversationId: true,
-            createdAt: true,
+            // The naming columns every surface that names a continuation
+            // reads (lib/continuationTitleContext.ts); `externalConversationId`
+            // and `createdAt` are among them.
+            ...CONTINUATION_NAMING_BRIDGE_SELECT,
             conversation: { select: { id: true, title: true } },
         },
     });
@@ -452,6 +474,7 @@ export async function listContinuationsBySource(
                 conversationId: bridge.conversation.id,
                 title: bridge.conversation.title,
                 createdAt: bridge.createdAt.toISOString(),
+                ...continuationRowNaming(bridge, timeZone),
             });
         }
         grouped.set(sourceId, entry);

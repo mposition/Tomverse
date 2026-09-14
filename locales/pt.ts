@@ -1299,6 +1299,8 @@ export const pt = {
         quickUnlock: "Desbloquear",
         quickUnlockFor: "Abrir {title} para desbloquear",
         quickUntitled: "Conversa sem título",
+        untitledFrom: "Continuado de {provider} · {date}",
+        sourceDeletedBadge: "Original excluído",
         sourceUnavailable: "Não foi possível encontrar essa conversa importada.",
         lockedRefusal: "O original importado está bloqueado. Desbloqueie-o na página dele.",
         quickStartFailed: "Não foi possível iniciar a continuação.",

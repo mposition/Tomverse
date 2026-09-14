@@ -451,17 +451,37 @@ test("every route that can lead into a conversation reports its surface", () => 
     // already treats the conversation's own.
     assert.doesNotMatch(list, /password: conv\./);
 
-    // The other two routes need only the answer.
-    for (const path of [
-        "app/api/conversations/[conversationId]/route.ts",
-        "app/api/conversations/search/route.ts",
+    // The detail route needs only the answer.
+    assert.match(
+        readFileSync("app/api/conversations/[conversationId]/route.ts", "utf8"),
+        /continuationBridge: \{ select: \{ id: true \} \}/,
+        "the detail route should select the bridge's existence and nothing else"
+    );
+    // Search names the conversation behind each hit, so it reads the shared
+    // naming select (lib/continuationTitleContext.ts): the source's title and
+    // password, the provider, the creation time and whether the source still
+    // exists -- and none of the provenance forbidden above.
+    assert.match(
+        readFileSync("app/api/conversations/search/route.ts", "utf8"),
+        /continuationBridge: \{ select: CONTINUATION_NAMING_BRIDGE_SELECT \}/
+    );
+    const naming = readFileSync("lib/continuationTitleContext.ts", "utf8");
+    const selectStart = naming.indexOf("export const CONTINUATION_NAMING_BRIDGE_SELECT");
+    const selectBody = naming.slice(selectStart, naming.indexOf("} as const;", selectStart));
+    assert.ok(selectStart > 0 && selectBody.length > 0);
+    for (const forbidden of [
+        "sourceConversationDigest",
+        "sourceDigestVersion",
+        "contextSeedVersion",
+        "seedFromOrdinal",
+        "seedToOrdinal",
+        "seedMessageCount",
+        "sourceImportedAt",
     ]) {
-        assert.match(
-            readFileSync(path, "utf8"),
-            /continuationBridge: \{ select: \{ id: true \} \}/,
-            `${path} should select the bridge's existence and nothing else`
-        );
+        assert.ok(!selectBody.includes(forbidden), `the naming select must not read ${forbidden}`);
     }
+    // The source's password decides; it is never emitted.
+    assert.doesNotMatch(naming, /password: bridge\./);
 });
 
 const routingClient = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");

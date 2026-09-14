@@ -1315,6 +1315,8 @@ export const zh = {
         quickUnlock: "解锁",
         quickUnlockFor: "打开 {title} 以解锁",
         quickUntitled: "未命名对话",
+        untitledFrom: "从 {provider} 继续的对话 · {date}",
+        sourceDeletedBadge: "原始对话已删除",
         sourceUnavailable: "找不到该导入的对话。",
         lockedRefusal: "导入的原文已锁定。请在其自身页面解锁。",
         quickStartFailed: "无法开始继续对话。",

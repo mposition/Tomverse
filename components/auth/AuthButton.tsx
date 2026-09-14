@@ -80,6 +80,7 @@ import { listImportableGuestConversations } from "@/lib/guestImport";
 import { openGuestImportModal } from "@/lib/guestImportModalEvents";
 import { useModalDialog } from "@/components/useModalDialog";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { displayTimeZoneHeaders } from "@/lib/continuationTitleContext";
 
 type LoginMethod =
     | { type: "oauth"; provider: "google" | "azure-ad"; linked: boolean }
@@ -528,6 +529,9 @@ export function AuthButton({
         try {
             const response = await fetch("/api/conversations/export-all", {
                 cache: "no-store",
+                // Continuation headers carry the date the list shows
+                // (lib/continuationTitleContext.ts).
+                headers: displayTimeZoneHeaders(),
             });
             if (!response.ok) {
                 await discardResponseBody(response);
