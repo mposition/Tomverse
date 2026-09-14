@@ -148,9 +148,16 @@ test("deployments baseline a pre-existing database before applying migrations", 
   // Order matters: a database that predates the baseline has to be marked
   // before deploy tries to apply it, or deploy fails on `relation "User"
   // already exists` and blocks every later deployment.
+  //
+  // The deploy step is `scripts/run-prisma-migrate-deploy.mjs`, which retries a
+  // database it could not reach; matching either spelling keeps this about the
+  // order rather than about how the step is spelled.
+  const deployStep = migrate.search(
+    /run-prisma-migrate-deploy\.mjs|prisma\s+migrate\s+deploy/
+  );
+  assert.ok(deployStep >= 0, "db:migrate must run the deploy step");
   assert.ok(
-    migrate.indexOf("baseline-existing-database.mjs") <
-      migrate.indexOf("migrate deploy"),
-    "the baseline guard must run before prisma migrate deploy"
+    migrate.indexOf("baseline-existing-database.mjs") < deployStep,
+    "the baseline guard must run before the deploy step"
   );
 });
