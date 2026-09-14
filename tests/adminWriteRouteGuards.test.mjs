@@ -15,7 +15,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -55,10 +55,51 @@ const withoutComments = (source) =>
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-const routes = routeFiles(ADMIN_API_DIR).map((path) => ({
-  name: path.slice(ADMIN_API_DIR.length),
-  source: withoutComments(readFileSync(path, "utf8")),
-}));
+const LIB_DIR = fileURLToPath(new URL("../lib/", import.meta.url));
+
+/**
+ * Whether a file *performs* a call rather than merely containing the name.
+ *
+ * The distinction is the whole reason this is a function. Following a route's
+ * imports one level lets a route audit through a shared service -- which is the
+ * better shape, one place deciding what the row says -- but every route that
+ * calls `writeAdminAuditLog` also imports `lib/adminAudit.ts`, the module that
+ * *defines* it. Counting a mention made that module vouch for the route, and
+ * the sweep passed a handler whose only audit call had been renamed away.
+ * Caught by mutation, which is the only way a weakened guard gets caught.
+ */
+const performs = (source, name) => {
+  const declares = new RegExp(
+    `(?:export\\s+)?(?:async\\s+)?(?:function|const|let)\\s+${name}\\b`
+  ).test(source);
+  return !declares && new RegExp(`\\b${name}\\s*\\(`).test(source);
+};
+
+/** The `@/lib` modules a route imports, as text. One level, not transitive. */
+const importedSources = (routeSource) =>
+  [...routeSource.matchAll(/from "@\/lib\/([A-Za-z0-9/_-]+)"/g)]
+    .map((match) => `${LIB_DIR}${match[1]}.ts`)
+    .filter((path) => existsSync(path))
+    .map((path) => withoutComments(readFileSync(path, "utf8")));
+
+const routes = routeFiles(ADMIN_API_DIR).map((path) => {
+  const source = withoutComments(readFileSync(path, "utf8"));
+  const imported = importedSources(source);
+  return {
+    name: path.slice(ADMIN_API_DIR.length),
+    source,
+    /**
+     * Whether the route, or a service it calls, performs `name`.
+     *
+     * Two levels would accept a helper that merely shares a dependency with
+     * something that audits, and the question is whether the write leaves a
+     * row -- not how far away the writer is.
+     */
+    reaches: (name) =>
+      performs(source, name) ||
+      imported.some((moduleSource) => performs(moduleSource, name)),
+  };
+});
 
 const writeRoutes = routes.filter((route) =>
   WRITE_METHODS.some((method) =>
@@ -102,7 +143,7 @@ test("every admin write route is rate limited", () => {
   // gets one of them wrong should run out of budget rather than run out of
   // rows.
   const unlimited = writeRoutes
-    .filter((route) => !route.source.includes("consumeApiRateLimit"))
+    .filter((route) => !route.reaches("consumeApiRateLimit"))
     .map((route) => route.name);
 
   assert.deepEqual(
@@ -118,7 +159,7 @@ test("every admin write route writes an audit entry", () => {
   // and a write that leaves no row is invisible to `verifyAdminAuditIntegrity`
   // as well -- the chain stays valid because the entry was never in it.
   const unaudited = writeRoutes
-    .filter((route) => !route.source.includes("writeAdminAuditLog"))
+    .filter((route) => !route.reaches("writeAdminAuditLog"))
     .map((route) => route.name);
 
   assert.deepEqual(
