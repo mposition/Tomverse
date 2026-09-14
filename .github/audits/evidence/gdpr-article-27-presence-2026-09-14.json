@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-14T09:19:00.056Z",
+  "source": {
+    "platform": "Railway",
+    "project": "Tomverse",
+    "environment": "production",
+    "service": "Tomverse",
+    "command": "npm run report:gdpr-article-27-presence"
+  },
+  "databaseRead": true,
+  "privacy": "EEA-wide aggregate counts only; no direct identifiers or per-country cells.",
+  "counts": {
+    "eeaAccountSignals": 0,
+    "selfDeclaredEeaAccounts": 0,
+    "billingEeaAccounts": 0,
+    "eeaAnalyticsEvents": 0,
+    "paidEurTransactions": 0
+  },
+  "dateRanges": {
+    "eeaAnalyticsEvents": {
+      "first": null,
+      "last": null
+    },
+    "paidEurTransactions": {
+      "first": null,
+      "last": null
+    }
+  },
+  "verdict": "no_stored_signal_observed_not_proof_of_absence",
+  "limitation": "Zero counts do not prove absence because country fields are nullable, analytics is opt-in, retention is finite, and infrastructure access logs are outside this report. EUR payments are supporting evidence, not a country-by-country census."
+}
