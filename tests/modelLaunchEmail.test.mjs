@@ -110,12 +110,38 @@ test("there is exactly one call to action", () => {
 
 test("interpolated values are escaped", () => {
   const { html } = buildModelLaunchEmail(
-    { ...PAYLOAD, modelName: '<script>alert(1)</script>', ctaUrl: 'https://x/"y' },
+    {
+      ...PAYLOAD,
+      modelName: '<script>alert(1)</script>',
+      ctaUrl: "https://tomverse.app/chat?one=1&two=2",
+    },
     "en"
   );
   assert.doesNotMatch(html, /<script>/i);
   assert.ok(html.includes("&lt;script&gt;"));
-  assert.ok(html.includes("&quot;"));
+  assert.ok(html.includes("&amp;"));
+});
+
+test("a non-web call to action is refused", () => {
+  assert.throws(
+    () =>
+      buildModelLaunchEmail(
+        { ...PAYLOAD, ctaUrl: "javascript:alert(1)" },
+        "en"
+      ),
+    /HTTPS Tomverse domain/
+  );
+});
+
+test("an external web call to action is refused", () => {
+  assert.throws(
+    () =>
+      buildModelLaunchEmail(
+        { ...PAYLOAD, ctaUrl: "https://example.test/chat" },
+        "en"
+      ),
+    /HTTPS Tomverse domain/
+  );
 });
 
 test("the same payload renders the same bytes twice", () => {

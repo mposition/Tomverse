@@ -15,6 +15,7 @@ import {
 import {
   campaignAttestationStates,
   campaignScheduleProblems,
+  campaignEmailPreviews,
   campaignSendRefusal,
   campaignTransitionClaim,
   cancelCampaign,
@@ -112,7 +113,7 @@ export async function GET(req: Request, context: Context) {
     // Everything that decides whether this may send, answered together. Asked
     // one at a time an operator learns of the second problem only after fixing
     // the first.
-    const [refusal, schedule, attestations, transition, audience] =
+    const [refusal, schedule, attestations, transition, audience, content] =
       await Promise.all([
         campaignSendRefusal(campaignId),
         campaignScheduleProblems({ campaignId }),
@@ -123,6 +124,14 @@ export async function GET(req: Request, context: Context) {
         // Who each wave reached and who it did not. Counts only -- the ledger
         // holds addresses, and whether an operator may see them is D10.
         waveAudienceBreakdown(campaignId),
+        campaignEmailPreviews(campaignId).catch((error: unknown) => ({
+          previews: [],
+          copyDigest: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Campaign content cannot be rendered.",
+        })),
       ]);
 
     return NextResponse.json({
@@ -132,6 +141,7 @@ export async function GET(req: Request, context: Context) {
       attestations,
       transitionClaim: transition,
       audience,
+      content,
     });
   } catch (error) {
     const response = apiSecurityResponse(error);

@@ -4115,6 +4115,15 @@ model EmailCampaign {
   /// The languages this campaign sends in.
   locales Json
 
+  /// language -> template payload, captured while the campaign is a draft.
+  ///
+  /// The payload is the copy the approver previews and the outbox later
+  /// snapshots for each recipient. It is deliberately separate from
+  /// `audienceSpec`: one says what to send and the other says who may receive
+  /// it. NULL is kept only for rows created before campaign-authored content
+  /// existed; those rows fail closed at approval and send.
+  contentByLocale Json?
+
   /// Handed to each wave's EmailEvent unchanged.
   audienceSpec Json
 
@@ -4308,6 +4317,7 @@ model EmailCampaignRecipient {
   jurisdictionCountry String?
 
   /// default_model | new_conversation_lead | conversation_selection
+  ///  | marketing_consent
   /// The strongest link when several apply; NULL only when the person is no
   /// longer in any cohort, which is what `already_changed` means.
   eligibilityReason String?

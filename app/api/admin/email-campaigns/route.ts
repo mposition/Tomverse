@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
@@ -15,10 +16,17 @@ import {
 import {
   CAMPAIGN_CATEGORIES,
   type CampaignCategory,
+  WAVE_KINDS,
+  type WaveKind,
 } from "@/lib/emailCampaignCore";
-import { createCampaignDraft } from "@/lib/emailCampaignService";
+import {
+  CampaignsDisabledError,
+  createCampaignDraft,
+} from "@/lib/emailCampaignService";
+import { CampaignContentError } from "@/lib/emailCampaignContentCore";
 import { TRIGGER_MODES } from "@/lib/emailCampaignScheduleCore";
 import { prisma } from "@/lib/prisma";
+import { SUPPORTED_LANGUAGES, type Language } from "@/lib/language";
 
 /**
  * The campaign workspace's list and its create.
@@ -35,7 +43,11 @@ const createSchema = z
   .object({
     category: z.enum(CAMPAIGN_CATEGORIES as unknown as [CampaignCategory, ...CampaignCategory[]]),
     templateKey: z.string().trim().min(1).max(120),
-    locales: z.array(z.string().trim().min(2).max(8)).min(1).max(7),
+    locales: z
+      .array(z.enum(SUPPORTED_LANGUAGES as unknown as [Language, ...Language[]]))
+      .min(1)
+      .max(7),
+    contentByLocale: z.record(z.string(), z.record(z.string(), z.unknown())),
     // Passed through to each wave's EmailEvent unchanged. Not `.strict()`
     // inside, because the audience shapes are the expansion layer's to define
     // and re-declaring them here would be a second list to drift.
@@ -44,6 +56,17 @@ const createSchema = z
     targetModelId: z.string().trim().max(120).optional(),
     replacementModelId: z.string().trim().max(120).optional(),
     workItemId: z.string().trim().max(64).optional(),
+    waves: z
+      .array(
+        z
+          .object({
+            kind: z.enum(WAVE_KINDS as unknown as [WaveKind, ...WaveKind[]]),
+            sequence: z.number().int().min(1).max(20),
+          })
+          .strict()
+      )
+      .max(20)
+      .optional(),
   })
   .strict();
 
@@ -102,14 +125,16 @@ export async function POST(req: Request) {
       day: 300,
     });
 
-    const body = await readLimitedJson(req, 24 * 1024, createSchema);
+    const body = await readLimitedJson(req, 96 * 1024, createSchema);
 
     const draft = await createCampaignDraft({
       category: body.category,
       templateKey: body.templateKey,
       locales: body.locales,
+      contentByLocale: body.contentByLocale as Prisma.InputJsonValue,
       audienceSpec: body.audienceSpec as Record<string, never>,
       createdByEmail: session.user.email || "unknown",
+      initialWaves: body.waves,
     });
 
     // Set on the row rather than taken by createCampaignDraft: these describe
@@ -146,6 +171,7 @@ export async function POST(req: Request) {
         category: body.category,
         templateKey: body.templateKey,
         locales: body.locales,
+        waves: body.waves ?? [],
       },
     });
 
@@ -153,6 +179,18 @@ export async function POST(req: Request) {
   } catch (error) {
     const response = apiSecurityResponse(error);
     if (response) return response;
+    if (error instanceof CampaignContentError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 400 }
+      );
+    }
+    if (error instanceof CampaignsDisabledError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: 409 }
+      );
+    }
     console.error("Failed to draft the campaign.", error);
     return NextResponse.json({ error: "Failed to draft the campaign." }, { status: 500 });
   }
