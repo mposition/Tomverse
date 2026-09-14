@@ -12,6 +12,7 @@ import {
 
 const hasTestId = (markup: string, id: string) =>
   markup.includes(`data-testid="${id}"`);
+const visibleText = (markup: string) => markup.replace(/<[^>]*>/g, " ");
 
 const suggestion: BoundPromptRefinerSuggestion = {
   requestId: "request_1",
@@ -67,6 +68,7 @@ test("requesting and failure copy promise that the original remains unchanged", 
   const requesting = render({ state: { status: "requesting", request } });
   assert.equal(hasTestId(requesting, "prompt-refiner-requesting"), true);
   assert.match(requesting, /원문은 그대로 유지/);
+  assert.match(requesting, /tabindex="-1"/);
   const failed = render({
     state: { status: "failed", request, failureCode: "internal" },
   });
@@ -106,6 +108,22 @@ test("a blocked decision states its reason instead of exposing a dead control", 
   const rendered = render({ interactionBlockReason: "composition_active" });
   assert.ok(rendered.includes(promptRefinerCopy.ko.compositionActive));
   assert.equal((rendered.match(/disabled=""/g) ?? []).length, 2);
+});
+
+test("IME composition keeps the idle row's visible copy stable", () => {
+  const idle = { status: "idle" as const };
+  const ordinary = render({ state: idle });
+  const composing = render({
+    state: idle,
+    interactionBlockReason: "composition_active",
+  });
+  assert.ok(visibleText(ordinary).includes(promptRefinerCopy.ko.actionDescription));
+  assert.ok(visibleText(composing).includes(promptRefinerCopy.ko.actionDescription));
+  assert.equal(
+    visibleText(composing).includes(promptRefinerCopy.ko.compositionActive),
+    false
+  );
+  assert.ok(composing.includes(promptRefinerCopy.ko.compositionActive));
 });
 
 test("rendered copy never names the internal refiner model or makes a superiority claim", () => {

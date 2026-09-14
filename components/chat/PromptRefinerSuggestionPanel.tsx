@@ -40,14 +40,27 @@ export function PromptRefinerSuggestionPanel({
   const copy = promptRefinerCopy[language] ?? promptRefinerCopy.en;
   const visible = visiblePromptRefinerState(state, currentPrompt);
   const readyRef = useRef<HTMLElement>(null);
-  const readyFocusKey =
-    offered && visible?.status === "ready"
-      ? `${visible.suggestion.requestId}:${visible.suggestion.suggestionId}`
-      : null;
+  const requestingRef = useRef<HTMLDivElement>(null);
+  const failedRetryRef = useRef<HTMLButtonElement>(null);
+  const focusTarget = !offered
+    ? null
+    : visible?.status === "requesting"
+      ? `requesting:${visible.request.requestId}`
+      : visible?.status === "failed"
+        ? `failed:${visible.request.requestId}`
+        : visible?.status === "ready"
+          ? `ready:${visible.suggestion.requestId}:${visible.suggestion.suggestionId}`
+          : null;
 
   useEffect(() => {
-    if (readyFocusKey) readyRef.current?.focus({ preventScroll: true });
-  }, [readyFocusKey]);
+    if (focusTarget?.startsWith("requesting:")) {
+      requestingRef.current?.focus({ preventScroll: true });
+    } else if (focusTarget?.startsWith("failed:")) {
+      failedRetryRef.current?.focus({ preventScroll: true });
+    } else if (focusTarget?.startsWith("ready:")) {
+      readyRef.current?.focus({ preventScroll: true });
+    }
+  }, [focusTarget]);
 
   if (!offered) return null;
 
@@ -66,6 +79,13 @@ export function PromptRefinerSuggestionPanel({
       : interactionBlockReason === "composition_active"
         ? copy.compositionActive
         : null;
+  // IME composition flips on every Korean syllable. Keep visible row copy
+  // stable during that transient state while retaining the reason in each
+  // disabled control's accessible name.
+  const visibleInteractionProblemCopy =
+    interactionBlockReason === "composition_active"
+      ? null
+      : interactionProblemCopy;
   const interactionBlocked = interactionBlockReason !== null;
 
   // A changed draft invalidates every non-idle state. Render the ordinary
@@ -79,12 +99,14 @@ export function PromptRefinerSuggestionPanel({
         <span
           data-testid="prompt-refiner-request-description"
           className={`min-w-0 text-xs ${
-            requestProblemCopy || interactionProblemCopy
+            requestProblemCopy || visibleInteractionProblemCopy
               ? "text-amber-700 dark:text-amber-300"
               : "text-zinc-500 dark:text-zinc-400"
           }`}
         >
-          {interactionProblemCopy ?? requestProblemCopy ?? copy.actionDescription}
+          {visibleInteractionProblemCopy ??
+            requestProblemCopy ??
+            copy.actionDescription}
         </span>
         <button
           type="button"
@@ -108,10 +130,12 @@ export function PromptRefinerSuggestionPanel({
   if (visible.status === "requesting") {
     return (
       <div
+        ref={requestingRef}
         data-testid="prompt-refiner-requesting"
         role="status"
         aria-live="polite"
-        className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+        tabIndex={-1}
+        className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
       >
         <Loader2 aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
         <span>{copy.requesting}</span>
@@ -128,6 +152,7 @@ export function PromptRefinerSuggestionPanel({
       >
         <span className="min-w-0 flex-1">{copy.failed}</span>
         <button
+          ref={failedRetryRef}
           type="button"
           data-testid="prompt-refiner-retry"
           disabled={interactionBlocked}
@@ -165,9 +190,9 @@ export function PromptRefinerSuggestionPanel({
       >
         {visible.suggestion.refinedPrompt}
       </p>
-      {interactionProblemCopy ? (
+      {visibleInteractionProblemCopy ? (
         <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-          {interactionProblemCopy}
+          {visibleInteractionProblemCopy}
         </p>
       ) : null}
       <div className="mt-2 flex flex-wrap justify-end gap-2">

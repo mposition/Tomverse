@@ -15,7 +15,8 @@ const promptText = z
     "prompt_refiner_prompt_too_large"
   );
 const opaqueId = z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/);
-const version = z.string().min(1).max(80).regex(/^[A-Za-z0-9._-]+$/);
+// Contract-owned prompt version, never a provider or model identifier.
+const version = z.string().regex(/^suggest-v[1-9][0-9]{0,3}$/);
 
 /**
  * The whole public request. Strictness is the data-minimisation boundary:

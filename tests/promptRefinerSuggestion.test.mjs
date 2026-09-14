@@ -94,6 +94,13 @@ test("request and response limits reject empty, oversized and private identity f
     }).success,
     false
   );
+  assert.equal(
+    promptRefinerResponseSchema.safeParse({
+      ...response,
+      refinerVersion: "gpt-5-mini-2026.01",
+    }).success,
+    false
+  );
 });
 test("model input quotes injection-shaped source text as data and has no other context", () => {
   const prompt =

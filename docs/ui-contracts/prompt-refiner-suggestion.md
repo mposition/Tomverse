@@ -87,6 +87,9 @@ JSON의 `sourceText` 값으로 인코딩되며, system instruction은 이를 실
   표시한다.
 
 Refiner 모델을 답변 badge에 넣거나 Refiner 제안을 최종 답변으로 세는 것은 금지다.
+브라우저의 `refinerVersion`은 `suggest-vN` 형태의 Tomverse prompt-contract
+버전만 허용한다. provider나 model 이름·별칭·release를 이 필드에 인코딩해서
+내부 receipt 경계를 우회하면 안 된다.
 
 ## 6. 지연·비용·품질 경계
 
@@ -109,13 +112,15 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 ## 7. 접근성·모바일
 
 - proposal은 textarea와 같은 행에 들어가지 않고 별도 full-width 행을 쓴다.
-- 상태는 `role=status`와 polite live region으로 읽힌다. ready가 도착하면
-  focusable status가 스크롤을 움직이지 않고 포커스를 받아 새 제안이 생겼음을
-  키보드·스크린리더 사용자에게 알린다. 결정을 마치면 textarea로 포커스를 돌린다.
+- 상태는 `role=status`와 polite live region으로 읽힌다. 요청 버튼이 사라지는
+  순간에는 requesting status, 실패하면 retry 버튼, ready가 도착하면 focusable
+  ready status가 스크롤을 움직이지 않고 포커스를 이어받는다. 결정을 마치면
+  textarea로 포커스를 돌린다.
 - 채택과 원문 유지가 둘 다 명시적 버튼이며 색만으로 구분하지 않는다.
 - 모든 Refiner 버튼은 데스크톱과 모바일 모두 최소 44px 높이다. 빈 입력, 16,000자
-  초과, 32KiB 초과, composer 잠금과 글자 조합 중 상태는 버튼만 비활성화하지 않고
-  화면 문구와 접근 가능한 이름으로 이유를 함께 제공한다.
+  초과, 32KiB 초과와 composer 잠금은 화면 문구와 접근 가능한 이름으로 이유를
+  함께 제공한다. 글자 조합 중에는 매 음절마다 행 높이가 바뀌지 않도록 기본 화면
+  문구를 유지하고, 비활성 control의 접근 가능한 이름에만 조합 중 이유를 넣는다.
 - proposal 본문은 줄바꿈·긴 단어를 감싸고 자체 최대 높이 뒤에서 세로 스크롤한다.
 - 어떤 상태도 textarea 위에 absolute/fixed overlay로 놓이지 않는다.
 
@@ -128,6 +133,11 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   내부 모델/우월성 표현 부재
 - 기존 mobile composer·IME·zoom 검사는 실제 caller가 offered를 연결하는 다음
   회차에서 prompt-refiner-ready fixture를 추가해 다시 실행한다.
+
+현재 static render test는 focus effect를 실행하지 않는다. requesting·failed·ready
+handoff와 두 decision 뒤 textarea focus는 구현돼 있지만, 실제 DOM focus와
+`preventScroll`은 offered caller가 생기는 다음 회차의 Playwright fixture 전까지
+**미검증**이다. 이 미검증 상태에서도 Refiner 활성화는 허용하지 않는다.
 
 현재 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·
 profile 등의 기존 surface만 실행하며 `promptRefinerModelMessages()`를 아직
