@@ -1,0 +1,59 @@
+{
+  "version": "cross-review-package-v4",
+  "taskId": "chat-durable-message-metadata-recovery-ci-v2",
+  "round": 1,
+  "baseCommit": "a2c5960a",
+  "lineage": [
+    "chat-durable-message-metadata-recovery-ci-v1"
+  ],
+  "inheritedFindings": [
+    {
+      "location": "tests/memoryReleaseContracts.test.mjs:286-294",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The two count assertions are whole-file `includes` on lib/publicChatMessage.ts, so they do not actually pin the counts to PUBLIC_CHAT_MESSAGE_SELECT — any occurrence of the literal elsewhere in that file satisfies them.",
+      "reproduction": "In lib/publicChatMessage.ts delete `memoryUsedCount: true` (line 28) from PUBLIC_CHAT_MESSAGE_SELECT and add anywhere else in the file a line such as `// historical: memoryUsedCount: true`, then run `node --conditions=react-server --import tsx --test --test-concurrency=1 tests/memoryReleaseContracts.test.mjs`. Expected for a tight guard: failure, because the owner allowlist no longer selects the column. Actual: the test passes. Slicing the select literal out of the source (e.g. the text between `PUBLIC_CHAT_MESSAGE_SELECT = {` and the `artifacts:` key) before the `includes` would close this."
+    }
+  ],
+  "changeDigest": "sha256:bf2f781c0b46030ddc1eb5c081a84dff5323eed552af9f684c7fc75bb9175e33",
+  "commit": "ab3b35ebd1ca49225eadde3c042e5efed2c816df",
+  "headCommit": "ab3b35ebd1ca49225eadde3c042e5efed2c816df",
+  "worktreeDirty": false,
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "filesChanged": [
+    "tests/memoryReleaseContracts.test.mjs"
+  ],
+  "treeFilesChanged": [
+    "tests/memoryReleaseContracts.test.mjs"
+  ],
+  "diffExcluded": [],
+  "excludedDigests": {},
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/memoryReleaseContracts.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 868.9408",
+      "durationMs": 946
+    }
+  ],
+  "guardCommands": [
+    "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+    "git diff --check a2c5960a...HEAD"
+  ],
+  "guardRuns": [
+    {
+      "rule": "npx eslint --max-warnings=0 tests/memoryReleaseContracts.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2773
+    },
+    {
+      "rule": "git diff --check a2c5960a...HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 48
+    }
+  ],
+  "producedAt": "2026-09-14T09:08:07.371Z",
+  "diff": "diff --git a/tests/memoryReleaseContracts.test.mjs b/tests/memoryReleaseContracts.test.mjs\nindex 46138835..c6d7fdab 100644\n--- a/tests/memoryReleaseContracts.test.mjs\n+++ b/tests/memoryReleaseContracts.test.mjs\n@@ -1,6 +1,7 @@\n import assert from \"node:assert/strict\";\n import { readFileSync } from \"node:fs\";\n import test from \"node:test\";\n+import ts from \"typescript\";\n import { formatConversationAsText } from \"../lib/exportConversation.ts\";\n import {\n     isPairRevoked,\n@@ -279,16 +280,49 @@ test(\"the memory count is selected for the owner's read and for no one else\", ()\n \n     const ownerRead = read(\"../app/api/conversations/[conversationId]/route.ts\");\n     const publicChatMessage = read(\"../lib/publicChatMessage.ts\");\n+    const publicChatMessageAst = ts.createSourceFile(\n+        \"lib/publicChatMessage.ts\",\n+        publicChatMessage,\n+        ts.ScriptTarget.Latest,\n+        true,\n+        ts.ScriptKind.TS\n+    );\n+    const publicSelect = publicChatMessageAst.statements\n+        .filter(ts.isVariableStatement)\n+        .flatMap((statement) => statement.declarationList.declarations)\n+        .find((declaration) =>\n+            ts.isIdentifier(declaration.name) &&\n+            declaration.name.text === \"PUBLIC_CHAT_MESSAGE_SELECT\"\n+        );\n+    assert.ok(\n+        publicSelect && publicSelect.initializer &&\n+            ts.isAsExpression(publicSelect.initializer) &&\n+            ts.isTypeReferenceNode(publicSelect.initializer.type) &&\n+            ts.isIdentifier(publicSelect.initializer.type.typeName) &&\n+            publicSelect.initializer.type.typeName.text === \"const\" &&\n+            ts.isObjectLiteralExpression(publicSelect.initializer.expression),\n+        \"PUBLIC_CHAT_MESSAGE_SELECT must remain an object-literal `as const` allowlist\"\n+    );\n+    const publicSelectFields = new Set(\n+        publicSelect.initializer.expression.properties\n+            .filter(ts.isPropertyAssignment)\n+            .filter((property) => property.initializer.kind === ts.SyntaxKind.TrueKeyword)\n+            .map((property) =>\n+                ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)\n+                    ? property.name.text\n+                    : property.name.getText(publicChatMessageAst)\n+            )\n+    );\n     assert.ok(\n         ownerRead.includes(\"select: PUBLIC_CHAT_MESSAGE_SELECT\"),\n         \"the owner's conversation read must use the shared public-message allowlist\"\n     );\n     assert.ok(\n-        publicChatMessage.includes(\"memoryUsedCount: true\"),\n+        publicSelectFields.has(\"memoryUsedCount\"),\n         \"the owner's public-message allowlist must select memoryUsedCount (§13.4)\"\n     );\n     assert.ok(\n-        publicChatMessage.includes(\"knowledgeChunkCount: true\"),\n+        publicSelectFields.has(\"knowledgeChunkCount\"),\n         \"the owner's public-message allowlist must select knowledgeChunkCount \" +\n             \"(docs/policy/external-conversation-import-and-memory.md §14.3)\"\n     );\n"
+}

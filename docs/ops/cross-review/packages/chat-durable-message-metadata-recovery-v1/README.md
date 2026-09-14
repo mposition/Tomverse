@@ -60,3 +60,8 @@ source 수정·provider/R2/Railway 호출·유료 benchmark·push·merge·deploy
 readback, Prompt Refiner 제안형 UI 계약, 별도 비용 승인 뒤 전체 모델 Router 품질
 측정이다. 현재 전체 웹 Chat 계획 추정은 약 65%, 주관적 범위 55–75%이며 이번
 검토 안정화로 추가 percentage point를 중복 계산하지 않는다.
+
+2026-09-14 최초 PR Linux CI에서 기존 Memory source-contract 테스트가 공유
+allowlist 도입을 이해하지 못한 실패 1건이 확인됐다. 후속 수정과 독립 검토는
+동결된 이 기능 검토를 다시 쓰지 않고 별도
+`chat-durable-message-metadata-recovery-ci-v1/` 및 `-ci-v2/` 기록으로 보존한다.

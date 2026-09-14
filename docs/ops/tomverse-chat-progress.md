@@ -328,6 +328,37 @@ provenance이므로 위 검토 digest의 source에 포함됐다고 주장하지 
 staging canonical Message readback, ③ Prompt Refiner 제안형 UI 계약, ④ 별도
 비용 승인 뒤 전체 모델 Router 품질 측정이다.
 
+### 2026-09-14 PR #1410 Linux CI 후속
+
+PR #1410의 최초 Linux 실행에서 빌드·Admin E2E·고위험 UI 4개 project·계정·
+assistant·email·finance·import·memory·routing PostgreSQL 시나리오와 secret scan은
+모두 통과했다. 통합 unit은 9,033개 중 9,031개 통과, 의도된 skip 1개, 실패
+1개였다. 실패는 제품 동작이 아니라 `memoryReleaseContracts`가 owner 대화
+라우트 안의 `memoryUsedCount: true` 직접 선언을 요구해, 이번에 도입한 공유
+`PUBLIC_CHAT_MESSAGE_SELECT`를 인식하지 못한 source-contract 불일치였다.
+
+수정본은 owner 라우트가 공유 allowlist를 실제 select로 쓰는지와 allowlist가 두
+공개 카운트를 직접 `true`로 선택하는지를 나눠 검사한다. share·export·public
+share 경로는 필드명뿐 아니라 공유 select와 serializer도 가져올 수 없게 고정했다.
+whole-file 문자열 오탐을 피하려고 TypeScript AST에서 정확한 `as const` object
+literal과 identifier/string-literal 직접 property만 읽는다.
+
+첫 후속 exchange v1은 세 라운드 모두 Claude `approve`였지만 마지막 source 검사
+정밀도 finding 1건이 남아 규칙대로 `on_hold / revisions_exhausted`로 보존했다.
+그 finding을 계승한 v2는 commit `ab3b35eb`, digest
+`sha256:bf2f781c0b46030ddc1eb5c081a84dff5323eed552af9f684c7fc75bb9175e33`에서
+Claude `approve`, finding 0건, controller `passed`로 끝났다. 각 package는
+정책 테스트 12/12, 수정 파일 ESLint와 diff whitespace를 통과했다. 두 exchange의
+원본 기록은 각각 `docs/ops/cross-review/packages/chat-durable-message-metadata-recovery-ci-v1/`과
+`-ci-v2/`에 보존한다. 이 기록 문구와 사본은 검토 뒤 추가한 provenance이며
+검토 digest에 포함됐다고 주장하지 않는다.
+
+이번 후속은 같은 기능의 통합 검사 정합성 보완이므로 전체 웹 Chat 추정은
+**약 65%, 주관적 범위 55–75%, 직전 회차 대비 0%p**를 유지한다. 다음 권장 순서는
+① 수정 commit push와 PR #1410 Linux CI 재확인, ② 병합·배포, ③ 무과금 staging
+canonical 완료 Message readback, ④ Prompt Refiner 제안형 UI의 원문 보존·주입
+방어·Router provenance 계약, ⑤ 별도 비용 승인 뒤 전체 모델 Router 품질 측정이다.
+
 ## 이번 Chat 사용자 흐름 — 로컬 구현 상태
 
 범위와 경계는 [이번 구현 계획](chat-entry-transcript-recovery-v1.md)에 있다.
