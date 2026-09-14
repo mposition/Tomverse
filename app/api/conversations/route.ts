@@ -7,6 +7,11 @@ import { enqueueMessageAttachmentCleanupForConversations } from "@/lib/messageAt
 import { deleteDeepResearchJobsForConversations } from "@/lib/deepResearchJobs";
 import { conversationSurface } from "@/lib/continuationRoutes";
 import { readableContinuationSourceTitle } from "@/lib/continuationDisplayTitle";
+import {
+  DISPLAY_TIME_ZONE_HEADER,
+  continuationRowNaming,
+  effectiveDisplayTimeZone,
+} from "@/lib/continuationTitleContext";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
@@ -127,11 +132,25 @@ export async function GET(req: Request) {
             externalConversation: {
               select: { title: true, password: true },
             },
+            /*
+              For the name a row gets when the source cannot give one, and
+              for which state the source is in
+              (lib/continuationTitleContext.ts): the day the continuation was
+              made, and whether the database has nulled the source's key
+              because it was deleted. Neither is the source's words.
+            */
+            createdAt: true,
+            externalConversationId: true,
           },
         },
         _count: { select: { messages: true } },
       },
     });
+    // A display hint for the fallback name's date, validated here and used
+    // for nothing else (lib/continuationTitleContext.ts).
+    const displayTimeZone = effectiveDisplayTimeZone(
+      req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+    );
 
     const runtimeModels = await getRuntimeModels();
     // EXISTING conversations that lost or never had a readable selectedModels
@@ -148,6 +167,7 @@ export async function GET(req: Request) {
         safeParse(conv.selectedModels, [resolvedDefaultEngine]),
         runtimeModels
       );
+      const naming = continuationRowNaming(conv.continuationBridge, displayTimeZone);
       return {
         id: conv.id,
         title: conv.title,
@@ -190,6 +210,11 @@ export async function GET(req: Request) {
         // snapshot: it is the bridge's own provenance, not the transcript's
         // content, and the row has to be identifiable either way.
         sourceProvider: conv.continuationBridge?.provider ?? null,
+        // The fallback name's date and the source's state, so a row whose
+        // source cannot name it is still told apart from its siblings and
+        // says "deleted" only when it was.
+        sourceState: naming.sourceState,
+        fallbackTitleDate: naming.fallbackTitleDate,
       };
     });
 

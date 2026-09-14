@@ -66,11 +66,13 @@ import {
     mayStoreSelectionMode,
 } from "@/lib/autoRoutingUi";
 import { describeAutoCohortRefusal } from "@/lib/autoCohort";
+import { CONVERSATION_TITLE_MAX_LENGTH } from "@/lib/conversationRename";
+import { isReservedContinuationTitle } from "@/lib/continuationTitlePreservation";
 
 const modelSchema = z.string().min(1).max(120);
 const updateConversationSchema = z
   .object({
-    title: z.string().trim().min(1).max(120).optional(),
+    title: z.string().trim().min(1).max(CONVERSATION_TITLE_MAX_LENGTH).optional(),
     password: z.union([z.string().min(8).max(128), z.null()]).optional(),
     currentPassword: z.string().min(1).max(128).optional(),
     selectedModels: z
@@ -502,6 +504,9 @@ export async function PATCH(
                 assistantProfileVersionId: true,
                 assistantProfileRemovedAt: true,
                 assistantProfileVersion: { select: { profileId: true } },
+                // Whether a title is a rename of a continuation, which may not
+                // take the writer's placeholder (lib/continuationTitlePreservation.ts).
+                continuationBridge: { select: { id: true } },
             }
         });
 
@@ -551,8 +556,26 @@ export async function PATCH(
       }
 
     if (title !== undefined) {
+      // D1: equality with the placeholder is how a continuation's stored title
+      // says "nobody has named this", so a continuation cannot be named that --
+      // it would read as unnamed forever after. Refused before any write; rows
+      // that already hold it are left alone.
+      if (
+        isReservedContinuationTitle({
+          title,
+          isContinuation: existingConv.continuationBridge !== null,
+        })
+      ) {
+        return NextResponse.json(
+          {
+            error: "This name is reserved for conversations that have not been named.",
+            code: "CONVERSATION_TITLE_RESERVED",
+          },
+          { status: 400 }
+        );
+      }
       updateData.title = title;
-      } 
+      }
 
       if (password !== undefined) {
           if (password === null) {

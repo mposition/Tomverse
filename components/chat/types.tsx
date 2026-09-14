@@ -2,6 +2,7 @@
 import type { MessageErrorReportContext } from "@/lib/errorReportContract";
 import type { ChatStreamArtifact } from "@/lib/generatedArtifactCore";
 import type { ConversationSurface } from "@/lib/continuationRoutes";
+import type { ContinuationSourceState } from "@/lib/continuationTitleContext";
 
 export type ChatAttachment = {
   id: string;
@@ -247,6 +248,22 @@ export type Conversation = {
      * snapshot. Absent on every conversation that has no imported half.
      */
     sourceProvider?: string | null;
+    /**
+     * Whether `title` was resolved for display rather than stored on the row.
+     *
+     * True for a continuation nobody has named: the title is the imported
+     * conversation's own name, or a fallback (lib/continuationDisplayTitle.ts),
+     * and neither is on `Conversation.title`. The rename dialog reads this so
+     * that confirming it unchanged saves nothing, and so keeping the displayed
+     * name is an explicit choice (lib/conversationRename.ts).
+     */
+    titleIsDerived?: boolean;
+    /**
+     * The imported source's state for naming: `"deleted"` is the only one the
+     * row may label as deleted (lib/continuationTitleContext.ts). Absent or
+     * null on a conversation with no imported half.
+     */
+    sourceState?: ContinuationSourceState | null;
     projectId?: string | null;
     selectedModels?: string[];
     disabledPanels?: string[];

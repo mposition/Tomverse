@@ -287,6 +287,45 @@ seed는 입력 토큰이며 **기존 규칙대로 사용자 크레딧에 반영�
   부작용으로 대화가 사라지지 않습니다.
 - 계정 삭제는 bridge를 포함해 모두 cascade합니다.
 
+### 6.1 이어진 대화의 이름 (CONT-TITLE-01)
+
+- 이름을 정하지 않은 continuation은 source 제목을 **표시할 때 해석**합니다(§3).
+  source를 지우거나 잠그면 표시 이름이 바뀌며, 대화와 메시지는 남습니다. 해석은
+  `lib/continuationDisplayTitle.ts`와 `lib/continuationTitleContext.ts` 한 곳이고,
+  목록·메시지 검색·모바일 제목·rename 입력·TXT가 같은 함수를 씁니다. 이름을 표시하는
+  surface를 새로 추가하면(예: 가져오기 목록의 이어진 대화 메뉴) 같은 함수에 연결합니다.
+- source가 이름을 줄 수 없으면 `{provider} · {YYYY-MM-DD}` 기본 이름을 씁니다. 날짜는
+  continuation을 만든 날이고 DB에 저장하지 않습니다. 상태(`available`·`locked`·
+  `deleted`·`empty`)는 따로 전달하며 "원문 삭제됨"은 `deleted`에서만 표시합니다.
+- 날짜의 시간대는 **표시 전용 힌트**(`X-Tomverse-Time-Zone`)로 받아 서버가 검증·정규화해
+  확정합니다. 누락·빈 값·64자 초과·고정 오프셋·해석 불가 값은 명시적인 `UTC`입니다.
+  화면·TXT 파일명·TXT 내부 제목은 서버가 계산한 같은 날짜 문자열을 쓰며, 저장 시각·
+  메시지 원시 시각·권한·조회·정렬은 바꾸지 않습니다.
+- **rename 입력을 변경 없이 확인하면 저장하지 않습니다.** 표시값이 무심코 저장되면
+  source 문구가 삭제가 닿지 않는 테이블에 남기 때문입니다. 표시 이름을 대화 이름으로
+  남기는 것은 별도로 이름 붙은 동작입니다.
+- **continuation은 writer placeholder와 같은 이름으로 바꿀 수 없습니다**
+  (`CONVERSATION_TITLE_RESERVED`). 그 문자열과의 동일성이 "아직 이름 없음"의 유일한
+  신호이기 때문입니다. 이미 그 값인 과거 행은 분류·덮어쓰지 않습니다.
+- **source 삭제 확인은 이름 영향을 먼저 알립니다** — 표시 이름이 바뀌는 수와 이름을
+  보존할 수 있는 수를 따로 셉니다. 사용자가 명시적으로 선택하여 독립적인 대화 제목으로
+  저장한 문자열은 원문 삭제 후에도 유지됩니다. 원문 본문·seed·접근 권한은 보존되지
+  않으며, 해당 제목은 이어진 대화 또는 계정 삭제 시 삭제됩니다. 선택은 기본 꺼짐이고
+  memory 보존 선택과 독립입니다.
+- 보존은 삭제와 **같은 transaction**에서 합니다. 잠금 순서는 `ExternalImport` →
+  삭제 대상 `ExternalConversation`(id 순) → 대상 `Conversation`(id 순)이며, 모든 대상을
+  판정한 뒤에만 씁니다. 확인 이후 다른 이름으로 바뀐 대화는 그 이름을 유지하고 삭제를
+  진행합니다. 확인 이후 원문·대화 잠금이 생기거나 원문 제목을 쓸 수 없게 되면 어떤
+  쓰기도 하기 전에 `SOURCE_TITLE_PRESERVATION_STALE`(409)로 거절하고 다시 확인을
+  요청합니다. 요청의 id는 그 사용자·그 source의 continuation과의 교집합에만 유효합니다.
+- 원문이 잠겨 있거나 제목이 비어 이미 기본 이름을 보이는 대화는 "바뀌는 이름"에 세지
+  않습니다 — 삭제 전후 이름이 같기 때문입니다. 한 번의 삭제로 보존할 수 있는 이름은
+  100개까지이며, 넘으면 일부만 보존하지 않고 `SOURCE_TITLE_PRESERVATION_TOO_MANY`로
+  거절합니다. 확인 화면은 preview를 불러오는 동안 삭제를 확정할 수 없습니다.
+- 자동 제목 생성도 D1을 따릅니다. continuation에 생성된 제목이 placeholder와 같으면
+  저장하지 않습니다.
+- 이미 삭제된 원문 제목은 캐시·로그·다른 버전·Memory·AI 추정에서 되살리지 않습니다.
+
 ## 7. Feature flag와 rollback
 
 `feature.externalConversationContinuationEnabled` — AppSetting, 기본 `false`,
@@ -566,6 +605,9 @@ composer는 mobile composer 계약의 형태를 따릅니다 — textarea가 전
 |---|---|---|---|
 | `EXTERNAL_CONTINUATION_DISABLED` | 403 | 불가 | flag off, fail-closed |
 | `CONTINUATION_SHARE_NOT_SUPPORTED` | 409 | 불가 | §9 |
+| `CONVERSATION_TITLE_RESERVED` | 400 | 불가 | §6.1, continuation rename |
+| `SOURCE_TITLE_PRESERVATION_STALE` | 409 | 재확인 후 가능 | §6.1, 아무것도 삭제·저장되지 않음 |
+| `SOURCE_TITLE_PRESERVATION_TOO_MANY` | 400 | 불가 | §6.1, 한 번에 보존할 수 있는 이름 수 초과, 아무것도 삭제되지 않음 |
 
 인증(401)·소유권(403/404)·not-found(404)·lock(423)·rate limit(429)은 기존 저장소
 계약을 그대로 따르며 여기서 재정의하지 않습니다. 오류에 외부 원문·digest·내부

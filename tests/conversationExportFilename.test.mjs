@@ -221,27 +221,31 @@ test("both TXT exports resolve the title the list shows, from the row itself", (
         "app/api/conversations/[conversationId]/export/route.ts",
         "utf8"
     );
-    assert.match(single, /readableContinuationSourceTitle\(/);
-    assert.match(single, /continuationDisplayTitle\(/);
+    // Both name the conversation through the function the page's own
+    // resolver sits under (lib/continuationTitleContext.ts), fed the same
+    // naming columns and the same display-zone hint.
+    assert.match(single, /continuationExportTitle\(\{\s*storedTitle: conversation\.title,\s*bridge: conversation\.continuationBridge,/);
     assert.match(single, /conversationExportContentDisposition\(\s*displayTitle\s*\)/);
     assert.match(single, /title: displayTitle/);
+    assert.match(single, /\.\.\.titleHeaderLines/);
     // The stored title is only ever the resolver's input.
     assert.doesNotMatch(single, /sanitizeFileName\(/);
     assert.doesNotMatch(single, /formatConversationHeader\(conversation,/);
-    // Only a bridge makes the stored title a placeholder.
-    assert.match(single, /isContinuation: conversation\.continuationBridge !== null/);
 
     const all = readFileSync("app/api/conversations/export-all/route.ts", "utf8");
-    assert.match(all, /readableContinuationSourceTitle\(/);
-    assert.match(all, /continuationDisplayTitle\(/);
+    assert.match(all, /continuationExportTitle\(\{\s*storedTitle: conversation\.title,\s*bridge,/);
+    assert.match(all, /\.\.\.headerLines/);
     assert.doesNotMatch(all, /formatConversationHeader\(conversation,/);
-    assert.match(all, /isContinuation: bridge !== null/);
 
-    // Neither selects more of the source than the list does.
+    // Neither selects more of the source than the list does: the shared
+    // naming select, whose only source columns are title and password.
     for (const source of [single, all]) {
-        assert.match(
-            source,
-            /externalConversation: \{\s*select: \{ title: true, password: true \},?\s*\}/
-        );
+        assert.match(source, /\.\.\.CONTINUATION_NAMING_BRIDGE_SELECT|select: CONTINUATION_NAMING_BRIDGE_SELECT/);
+        assert.match(source, /effectiveDisplayTimeZone\(\s*req\.headers\.get\(DISPLAY_TIME_ZONE_HEADER\)\s*\)/);
     }
+    const context = readFileSync("lib/continuationTitleContext.ts", "utf8");
+    assert.match(
+        context,
+        /externalConversation: \{ select: \{ title: true, password: true \} \}/
+    );
 });

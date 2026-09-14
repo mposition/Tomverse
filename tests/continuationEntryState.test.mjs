@@ -263,8 +263,9 @@ test("a conversation without a bridge keeps even the placeholder's exact words",
     const client = code("app/(site)/(application)/chat/ChatPageClient.tsx");
     assert.match(
         client,
-        /isContinuation: surfaceHasContinuationBridge\(conversation\.surface\)/
+        /const isContinuation = surfaceHasContinuationBridge\(conversation\.surface\)/
     );
+    assert.match(client, /storedTitle: conversation\.title,\s*isContinuation,/);
 });
 
 test("only the exact placeholder gives way to the source's name", () => {
