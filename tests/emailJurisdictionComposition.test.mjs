@@ -184,7 +184,7 @@ test("marketing is refused when its unsubscribe link is missing", () => {
 });
 
 test("every seeded profile renders in every supported language", () => {
-  assert.equal(JURISDICTION_PROFILE_SEED.length, 8);
+  assert.equal(JURISDICTION_PROFILE_SEED.length, 9);
   assert.equal(FOOTER_LANGUAGES.length, 7);
   for (const seeded of JURISDICTION_PROFILE_SEED) {
     for (const language of FOOTER_LANGUAGES) {

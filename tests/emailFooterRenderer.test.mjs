@@ -39,10 +39,11 @@ const render = (profileKey, overrides = {}) => {
 };
 
 test("every profile renders in every language", () => {
-  // §18.3's acceptance criterion: 8 profiles x 7 languages = 56. The count is
-  // asserted rather than assumed, because the reason it is 56 and not 56-ish
-  // is that a country maps onto a profile and a person carries a language, and
-  // the two axes never multiply out to something else.
+  // §18.3's acceptance criterion, now 9 profiles x 7 languages = 63: Switzerland
+  // left the EU profile on 2026-09-14. The count is asserted rather than assumed,
+  // because the reason it is 63 and not 63-ish is that a country maps onto a
+  // profile and a person carries a language, and the two axes never multiply out
+  // to something else.
   let rendered = 0;
   for (const profile of JURISDICTION_PROFILE_SEED) {
     for (const language of FOOTER_LANGUAGES) {
@@ -57,7 +58,7 @@ test("every profile renders in every language", () => {
       rendered += 1;
     }
   }
-  assert.equal(rendered, 56);
+  assert.equal(rendered, 63);
 });
 
 test("the blocks appear in the order the profile lists them", () => {

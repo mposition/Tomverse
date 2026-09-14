@@ -215,9 +215,9 @@ A1으로 해당 없음, 독일의 §7(3) 예외는 C8로 미사용. 남는 차�
 
 | # | 대상 | 내용 |
 |---|---|---|
-| 1 | `lib/emailJurisdictionSeed.ts` | `CH` profile 신설(9번째), country map에서 `CH`를 `EU`에서 분리 |
-| 2 | 같은 파일 | `EU`·`CH`의 `footerBlocks`에 `abn` 추가 |
-| 3 | `lib/emailFooterRenderer.ts` | **`privacy_link` 신규 block** — 값의 출처(앱 URL인지 환경변수인지)는 구현 시 결정 |
+| 1 | `lib/emailJurisdictionSeed.ts`·`lib/emailJurisdictionCore.ts` | **완료 (2026-09-14).** `CH` profile 신설(9번째), resolver와 country map에서 `EU`로부터 분리 |
+| 2 | `lib/emailJurisdictionSeed.ts`·`lib/emailBusinessIdentity.ts` | **완료 (2026-09-14).** `EU`·`CH`의 `footerBlocks`에 `abn` 추가. 세 profile이 같은 값을 요구하게 되어 readiness 판정을 profile별에서 **block별로** 묶었습니다 — 변수 하나가 비었는데 같은 경고가 세 번 나오지 않도록 |
+| 3 | `lib/emailFooterRenderer.ts` | **보류.** `privacy_link` 신규 block. 값의 출처(앱 URL인지 환경변수인지)가 정해지지 않았고, composer까지 URL을 넘기는 별도 작업입니다. §6.1의 footer 목록에서 이 항목만 미반영 상태입니다 |
 | 4 | `docs/policy/email-notifications.md` | §22 **A17**을 9개로 갱신, §21 **Q1**을 이 기록으로 해소 표시, §4.3 EU 주의 문구에서 이 기록을 가리키도록 |
 | 5 | `docs/policy/email-double-opt-in-draft.md` | §7 정정 (§7 조건 3) |
 | 6 | 테스트 | profile 수 8→9, 언어×profile 조합 수(56→63), `CH` 매핑, footer block 추가 |
