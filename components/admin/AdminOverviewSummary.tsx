@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, XCircle } from "lucide-react";
 import { AdminSnapshotActions } from "@/components/admin/AdminSnapshotActions";
 import type { AdminEnvCheck } from "@/lib/adminEnvironmentChecks";
 import { getAdminMessages } from "@/lib/adminLocaleServer";
@@ -27,7 +27,15 @@ export type AttentionItem = {
 
 type Kpi = {
   label: string;
-  value: string;
+  /**
+   * Null when the read behind it failed.
+   *
+   * Not `"0"`, and not an empty string: the page's reads are settled
+   * individually now, and the cheapest way to lose that is a `?? 0` in a
+   * caller. A card that cannot be given a number renders as unread, which is
+   * a different statement from zero and leads somewhere different.
+   */
+  value: string | null;
   detail: string;
   tone?: "zinc" | "blue" | "emerald" | "amber" | "purple";
 };
@@ -52,13 +60,39 @@ const attentionToneClass = (tone: AttentionItem["tone"]) =>
         ? "border-blue-500/30 bg-blue-500/10"
         : "border-zinc-800 bg-zinc-900/70";
 
-function KpiCard({ label, value, detail, tone }: Kpi) {
+function KpiCard({
+  label,
+  value,
+  detail,
+  tone,
+  unreadableLabel,
+}: Kpi & { unreadableLabel: string }) {
+  const unread = value === null;
   return (
-    <div className={`rounded-2xl border p-4 ${toneClass(tone)}`}>
+    <div
+      className={`rounded-2xl border p-4 ${
+        unread ? "border-zinc-700 border-dashed bg-zinc-900/40" : toneClass(tone)
+      }`}
+      data-testid={unread ? "admin-kpi-unreadable" : undefined}
+    >
       <p className="text-xs font-bold uppercase tracking-[0.16em] text-zinc-400">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-black text-white">{value}</p>
+      {/*
+        The unread state is deliberately not a big dash or an empty card. Both
+        read as "nothing here", which is the reading this exists to prevent --
+        it has to say that the figure is unknown, in words, at the size the
+        figure would have been.
+      */}
+      <p
+        className={
+          unread
+            ? "mt-2 text-sm font-bold text-zinc-400"
+            : "mt-2 text-2xl font-black text-white"
+        }
+      >
+        {unread ? unreadableLabel : value}
+      </p>
       <p className="mt-1 text-xs leading-5 text-zinc-400">{detail}</p>
     </div>
   );
@@ -68,6 +102,8 @@ export async function AdminOverviewSummary({
   generatedAt,
   adminRole,
   healthScore,
+  healthScoreIncomplete,
+  unreadableReads,
   operationalKpis,
   commercialKpis,
   needsAttention,
@@ -81,6 +117,10 @@ export async function AdminOverviewSummary({
   generatedAt: string;
   adminRole: string;
   healthScore: number;
+  /** True when a score input could not be read, so the score is a ceiling. */
+  healthScoreIncomplete: boolean;
+  /** Human names of the reads that did not come back, if any. */
+  unreadableReads: string[];
   operationalKpis: Kpi[];
   commercialKpis: Kpi[];
   needsAttention: AttentionItem[];
@@ -115,6 +155,28 @@ export async function AdminOverviewSummary({
           <AdminSnapshotActions report={snapshotReport} />
         </div>
 
+        {/*
+          Named, not counted. "Something could not be loaded" tells an operator
+          to distrust the whole screen; naming the read tells them which figure
+          to distrust and leaves the rest usable -- which is the entire point of
+          settling these reads separately rather than failing the page.
+        */}
+        {unreadableReads.length > 0 ? (
+          <div
+            className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4"
+            role="status"
+            data-testid="admin-overview-unreadable-reads"
+          >
+            <p className="flex items-center gap-2 text-sm font-bold text-amber-100">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+              {m.readsFailedTitle(unreadableReads.length)}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-amber-100/80">
+              {m.readsFailedDetail(unreadableReads.join(", "))}
+            </p>
+          </div>
+        ) : null}
+
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {/*
             A link, not a card. The score is six weighted counts and a table of
@@ -134,13 +196,21 @@ export async function AdminOverviewSummary({
             <p className="mt-1 text-xs leading-5 text-zinc-400">
               {m.healthScoreDetail}
             </p>
+            {healthScoreIncomplete ? (
+              <p
+                className="mt-1 text-xs font-bold text-amber-200"
+                data-testid="admin-health-score-incomplete"
+              >
+                {m.healthScoreIncomplete}
+              </p>
+            ) : null}
             <p className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-blue-300">
               {m.explainScore}
               <ArrowRight className="h-3 w-3" aria-hidden />
             </p>
           </Link>
           {operationalKpis.map((kpi) => (
-            <KpiCard key={kpi.label} {...kpi} />
+            <KpiCard key={kpi.label} {...kpi} unreadableLabel={m.unreadable} />
           ))}
         </div>
       </section>
@@ -152,7 +222,7 @@ export async function AdminOverviewSummary({
         </p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {commercialKpis.map((kpi) => (
-            <KpiCard key={kpi.label} {...kpi} />
+            <KpiCard key={kpi.label} {...kpi} unreadableLabel={m.unreadable} />
           ))}
         </div>
       </section>

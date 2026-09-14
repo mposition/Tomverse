@@ -114,6 +114,33 @@ test.describe("the console says only what it knows", () => {
     ).toContainText("redeployed");
   });
 
+  test("a healthy Overview shows real figures and no unread cards", async ({
+    page,
+  }) => {
+    // The counterpart to the unit sweep in `tests/adminOverviewFigures.test.mjs`.
+    // That file proves a failed read never becomes a number; this proves the
+    // opposite direction, which a pure test cannot see: with every read
+    // succeeding, nothing renders as unread and no figure is missing.
+    //
+    // Injecting a server-side read failure is deliberately not attempted here.
+    // These reads are Prisma calls inside a server component, so `page.route`
+    // cannot reach them, and the alternatives -- dropping or renaming a table
+    // mid-suite -- would break `resetAndSeedAdminFixtures()` for every test
+    // after it if the restore ever failed to run. The degraded path is covered
+    // exhaustively at the unit level instead.
+    await page.goto("/admin/overview");
+
+    await expect(page.getByTestId("admin-kpi-unreadable")).toHaveCount(0);
+    await expect(
+      page.getByTestId("admin-overview-unreadable-reads")
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("admin-health-score-incomplete")
+    ).toHaveCount(0);
+    // A real figure, from the seeded fixture, rather than merely "not unread".
+    await expect(page.getByText("2 feedback / 1 refund")).toBeVisible();
+  });
+
   test("switching Overview sections keeps the workspace and the sidebar entry", async ({
     page,
   }) => {

@@ -25,8 +25,9 @@
 | Section tabs | `components/admin/AdminPageTabs.tsx` |
 | Per-surface loaders | `lib/adminConsoleData.ts`, `lib/adminWorkQueue.ts`, `lib/adminEnvironmentChecks.ts` |
 | Health score and its breakdown | `lib/adminHealthScore.ts`, `components/admin/AdminHealthScorePanel.tsx` |
+| Overview figures, derived from reads that may have failed | `lib/adminOverviewFigures.ts` |
 | Notification drawer state | `lib/adminAlertsDrawer.ts` |
-| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/e2e-admin/**` |
+| Coverage | `tests/adminNavigation.test.mjs`, `tests/adminHealthScore.test.mjs`, `tests/adminEnvironmentChecks.test.mjs`, `tests/adminAlertsDrawer.test.mjs`, `tests/adminOverviewFigures.test.mjs`, `tests/e2e-admin/**` |
 
 ## The navigation
 
@@ -100,6 +101,21 @@ never its own `tab`, which the lookup has already consumed.
    carry one, and an unknown count renders nothing rather than zero.
 5. **The layout loads counts; a page loads its own data.** Nothing that only one
    workspace displays may move into `admin/layout.tsx`.
+
+   **And a page's reads are settled one at a time.** A workspace that runs
+   several independent reads uses `Promise.allSettled`, degrades the sections
+   that depended on a failed one, and leaves the rest usable. Overview ran
+   thirteen reads inside a single `Promise.all`, so one rejection took the whole
+   workspace to the error boundary -- including the provider health dashboard,
+   which is the read most likely to reject during a provider incident and the
+   reason an operator opened Overview in the first place. The layout has read
+   its badge counts this way since the console was split up; the pages had not
+   caught up.
+
+   A failed read is reported, never absorbed: a `console.warn` carrying
+   `{ event: "admin_overview_read_failed", read }` so the loss is visible in
+   logs, and a banner naming the reads that did not come back so the operator
+   knows which figures to distrust and which are still good.
 6. **Bounded reads say they are bounded.** A panel showing the newest N rows
    states N on screen and does not present its own counters as totals.
 7. **A step-up refusal must offer the way back.** When a control is refused
@@ -134,6 +150,15 @@ never its own `tab`, which the lookup has already consumed.
      `adminHealthBreakdown()` takes `number | null`, prices a null at nothing,
      and marks the result `incomplete` so the screen can say the score is a
      ceiling rather than a reading.
+   - **Nor does a figure derived from one.** Every Overview derivation lives in
+     `lib/adminOverviewFigures.ts` and propagates null, because `null` becomes
+     zero the moment a caller writes `?? 0` to satisfy the compiler — and
+     "Paid conversion 0.0%", "$0 MRR" and "0 open feedback" are all claims an
+     operator would act on, assembled out of an answer that never arrived. A
+     ratio with an unknown side, or a zero denominator, is null rather than
+     `0.0%`. A KPI card given null says so in words at the size the figure
+     would have been; an empty card or a dash reads as "nothing here", which is
+     the reading this exists to prevent.
    - **`process.env` is a reading, not the deployment.** It is fixed at process
      start, so a variable added to the host afterwards is absent here and the
      refresh control cannot bring it in — it re-renders inside the same

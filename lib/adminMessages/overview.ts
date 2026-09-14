@@ -23,14 +23,19 @@ export const adminOverviewMessages = defineAdminMessages({
     },
     report: {
       title: "Tomverse Admin Snapshot",
+      unreadable: "could not be read",
       generated: (at: string) => `Generated: ${at} UTC`,
       users: (total: number, paid: number, active: number) =>
         `Users: ${total} total / ${paid} paid / ${active} active subscriptions`,
       providers: (available: number, total: number) =>
         `Providers: ${available}/${total} available`,
       monthlySpend: (spend: string) => `Estimated monthly spend: ${spend}`,
-      openFeedback: (count: number) => `Open feedback: ${count}`,
-      pendingRefunds: (count: number) => `Pending refunds: ${count}`,
+      // `number | string` so an unread count reaches the pasted report as the
+      // words "could not be read" rather than as a zero somebody will quote.
+      openFeedback: (count: number | string) => `Open feedback: ${count}`,
+      pendingRefunds: (count: number | string) => `Pending refunds: ${count}`,
+      usersUnreadable: "Users: could not be read",
+      providersUnreadable: "Providers: could not be read",
       missingEnv: (names: string) => `Missing environment setup: ${names}`,
       none: "none",
       needsAttention: "Needs attention:",
@@ -98,6 +103,28 @@ export const adminOverviewMessages = defineAdminMessages({
         "None of them are blocking. They are listed so you can see them, and cost nothing.",
       processStartedNote: (at: string) =>
         `Read from the process that started at ${at} UTC. A variable added to the host after that is not visible here until the service is redeployed — refreshing re-renders inside the same process.`,
+      unreadable: "Could not be read",
+      unreadableDetail:
+        "This read failed. The figure is unknown, which is not the same as zero.",
+      readsFailedTitle: (count: number) =>
+        `${count} of this page's reads did not come back`,
+      readsFailedDetail: (names: string) =>
+        `${names}. Every other figure on this page is current; the ones above marked "Could not be read" are the only ones affected. Refresh to try again — a read that keeps failing is worth looking at rather than waiting out.`,
+      healthScoreIncomplete: "Ceiling — some inputs unread",
+      readName: {
+        providerHealth: "Provider health",
+        userStats: "Account statistics",
+        billingPlans: "Plan price list",
+        activePlanGroups: "Active plan mix",
+        todayUsage: "Usage today",
+        monthlyUsage: "Usage this month",
+        openFeedback: "Open feedback",
+        pendingRefunds: "Pending refunds",
+        approvedRefunds: "Approved refunds",
+        promotionRedemptions: "Promotion redemptions",
+        alertFailures: "Alert failures",
+        recentActivity: "Recent administrator activity",
+      },
     },
     health: {
       title: "How this score was worked out",
@@ -190,14 +217,17 @@ export const adminOverviewMessages = defineAdminMessages({
     },
     report: {
       title: "Tomverse 관리자 스냅샷",
+      unreadable: "읽지 못함",
       generated: (at: string) => `생성 시각: ${at} UTC`,
       users: (total: number, paid: number, active: number) =>
         `사용자: 전체 ${total}명 / 유료 ${paid}명 / 활성 구독 ${active}건`,
       providers: (available: number, total: number) =>
         `공급자: ${available}/${total} 정상`,
       monthlySpend: (spend: string) => `예상 월 비용: ${spend}`,
-      openFeedback: (count: number) => `미처리 피드백: ${count}건`,
-      pendingRefunds: (count: number) => `대기 중인 환불: ${count}건`,
+      openFeedback: (count: number | string) => `미처리 피드백: ${count}`,
+      pendingRefunds: (count: number | string) => `대기 중인 환불: ${count}`,
+      usersUnreadable: "사용자: 읽지 못함",
+      providersUnreadable: "공급자: 읽지 못함",
       missingEnv: (names: string) => `누락된 환경 설정: ${names}`,
       none: "없음",
       needsAttention: "확인 필요:",
@@ -265,6 +295,28 @@ export const adminOverviewMessages = defineAdminMessages({
         "조치가 필요한 것은 없습니다. 나머지는 확인하실 수 있도록 함께 적었을 뿐 점수에 반영되지 않습니다.",
       processStartedNote: (at: string) =>
         `${at} UTC에 시작한 프로세스가 읽은 값입니다. 그 이후 호스트에 추가한 변수는 재배포 전까지 여기 보이지 않습니다 — 새로고침은 같은 프로세스 안에서 다시 그릴 뿐입니다.`,
+      unreadable: "읽지 못함",
+      unreadableDetail:
+        "이 값을 읽지 못했습니다. 모르는 것이지 0이 아닙니다.",
+      readsFailedTitle: (count: number) =>
+        `이 화면의 조회 ${count}건이 돌아오지 않았습니다`,
+      readsFailedDetail: (names: string) =>
+        `${names}. 나머지 값은 모두 현재 값이며, 위에서 "읽지 못함"으로 표시된 것만 영향을 받았습니다. 새로고침으로 다시 시도할 수 있습니다 — 계속 실패한다면 기다릴 일이 아니라 확인할 일입니다.`,
+      healthScoreIncomplete: "상한 — 일부 입력 미조회",
+      readName: {
+        providerHealth: "Provider 상태",
+        userStats: "계정 통계",
+        billingPlans: "플랜 가격표",
+        activePlanGroups: "활성 플랜 구성",
+        todayUsage: "오늘 사용량",
+        monthlyUsage: "이번 달 사용량",
+        openFeedback: "미처리 피드백",
+        pendingRefunds: "대기 중인 환불",
+        approvedRefunds: "승인된 환불",
+        promotionRedemptions: "프로모션 상환",
+        alertFailures: "알림 발송 실패",
+        recentActivity: "최근 관리자 활동",
+      },
     },
     health: {
       title: "이 점수가 나온 계산",
