@@ -304,6 +304,15 @@ test("the share route and the export route both read this one module", () => {
         "utf8"
     );
     assert.match(exported, /continuationExportProvenance/);
+    // The account-wide export writes the same lines for each continuation in
+    // it; without them a continuation there reads as if every answer came
+    // from Tomverse with nothing before it.
+    const exportedAll = readFileSync(
+        "app/api/conversations/export-all/route.ts",
+        "utf8"
+    );
+    assert.match(exportedAll, /continuationExportProvenance\(/);
+    assert.match(exportedAll, /sourceDeleted: bridge\.externalConversationId === null/);
 });
 
 /* export: docs/policy/external-conversation-continuation.md §9 */

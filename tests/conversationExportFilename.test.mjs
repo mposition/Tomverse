@@ -36,9 +36,10 @@ const savedName = (title) =>
 const quotedName = (title) =>
     /filename="([^"]*)"/.exec(conversationExportContentDisposition(title))?.[1];
 
-const exportTitle = ({ storedTitle, source }) =>
+const exportTitle = ({ storedTitle, source, isContinuation = true }) =>
     continuationDisplayTitle({
         storedTitle,
+        isContinuation,
         sourceTitle: readableContinuationSourceTitle(source),
         fallback: en.continuation.quickUntitled,
     });
@@ -124,11 +125,22 @@ test("an emoji on the length boundary is kept whole and never throws", () => {
 });
 
 test("reserved Windows names do not become device names", () => {
+    // Windows decides by the part before the first dot, so the suffix goes
+    // there: "lpt1.notes-conversation" would still be the LPT1 device.
     assert.equal(sanitizeFileName("CON"), "CON-conversation");
-    assert.equal(sanitizeFileName("lpt1.notes"), "lpt1.notes-conversation");
+    assert.equal(sanitizeFileName("lpt1.notes"), "lpt1-conversation.notes");
+    assert.equal(sanitizeFileName("com0"), "com0-conversation");
+    assert.equal(sanitizeFileName("COM\u00B9"), "COM\u00B9-conversation");
+    assert.equal(sanitizeFileName("lpt\u00B3.draft"), "lpt\u00B3-conversation.draft");
     assert.equal(sanitizeFileName("Conference"), "Conference");
+    assert.equal(sanitizeFileName("con-call.notes"), "con-call.notes");
     // Stripping the non-ASCII part must not uncover one.
     assert.equal(quotedName("CON한"), "CON-conversation.txt");
+    assert.equal(quotedName("CON한.notes"), "CON-conversation.notes.txt");
+    // The suffix never pushes a name past the limit.
+    const long = sanitizeFileName(`aux.${"x".repeat(100)}`);
+    assert.ok(Array.from(long).length <= 80);
+    assert.ok(long.startsWith("aux-conversation."));
 });
 
 test("control and bidirectional characters never reach the header or the name", () => {
@@ -136,6 +148,18 @@ test("control and bidirectional characters never reach the header or the name", 
     assert.doesNotMatch(header, /[\r\n]/);
     // An RLO would let "txt.exe" display reversed.
     assert.equal(savedName("report\u202Etxt.exe"), "reporttxt.exe.txt");
+    // U+0085 NEL is a C1 control; U+061C is a bidi mark.
+    assert.equal(savedName("a\u0085b"), "a b.txt");
+    assert.equal(savedName("a\u061Cb"), "ab.txt");
+});
+
+test("a title with nothing visible gets the generic name", () => {
+    for (const title of ["\u061C", "\u200B", "\u200B\u00A0\u3000", "\u202E"]) {
+        assert.equal(savedName(title), "conversation.txt", JSON.stringify(title));
+    }
+    // Invisible joiners inside a visible name are left alone.
+    const family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}";
+    assert.equal(savedName(family), `${family}.txt`);
 });
 
 test("leading and trailing dots and spaces are removed; empty becomes generic", () => {
@@ -161,6 +185,22 @@ test("a line break in a title cannot forge a header line in the file", () => {
     const lines = header.split("\n");
     assert.equal(lines.filter((line) => line.startsWith("Created:")).length, 1);
     assert.ok(lines[1].startsWith("Conversation: Plan Created: 1999"));
+    // C1 controls too: U+0085 NEL is a line break to some readers.
+    const nel = formatConversationHeader({ title: "Plan\u0085Imported from: forged" });
+    assert.doesNotMatch(nel, /[\u0080-\u009F\u2028\u2029]/);
+    assert.match(nel, /^Conversation: Plan Imported from: forged$/m);
+});
+
+test("an ordinary conversation named like the placeholder keeps its name", () => {
+    // docs/policy/external-conversation-continuation.md §3: a conversation
+    // without a bridge is not affected by any of this.
+    const title = exportTitle({
+        storedTitle: LEGACY_CONTINUATION_TITLE,
+        source: null,
+        isContinuation: false,
+    });
+    assert.equal(title, LEGACY_CONTINUATION_TITLE);
+    assert.equal(savedName(title), `${LEGACY_CONTINUATION_TITLE}.txt`);
 });
 
 /* ------------------------------------------------------------ route wiring */
@@ -177,11 +217,14 @@ test("both TXT exports resolve the title the list shows, from the row itself", (
     // The stored title is only ever the resolver's input.
     assert.doesNotMatch(single, /sanitizeFileName\(/);
     assert.doesNotMatch(single, /formatConversationHeader\(conversation,/);
+    // Only a bridge makes the stored title a placeholder.
+    assert.match(single, /isContinuation: conversation\.continuationBridge !== null/);
 
     const all = readFileSync("app/api/conversations/export-all/route.ts", "utf8");
     assert.match(all, /readableContinuationSourceTitle\(/);
     assert.match(all, /continuationDisplayTitle\(/);
     assert.doesNotMatch(all, /formatConversationHeader\(conversation,/);
+    assert.match(all, /isContinuation: bridge !== null/);
 
     // Neither selects more of the source than the list does.
     for (const source of [single, all]) {

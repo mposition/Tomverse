@@ -239,6 +239,7 @@ test("a name the owner typed is never replaced", () => {
         assert.equal(
             continuationDisplayTitle({
                 storedTitle,
+                isContinuation: true,
                 sourceTitle: "Something else",
                 fallback: "Untitled",
             }),
@@ -248,10 +249,29 @@ test("a name the owner typed is never replaced", () => {
     }
 });
 
+test("a conversation without a bridge keeps even the placeholder's exact words", () => {
+    // Its owner named it that; only a bridge says the continuation service did.
+    assert.equal(
+        continuationDisplayTitle({
+            storedTitle: LEGACY_CONTINUATION_TITLE,
+            isContinuation: false,
+            sourceTitle: null,
+            fallback: "Untitled",
+        }),
+        LEGACY_CONTINUATION_TITLE
+    );
+    const client = code("app/(site)/(application)/chat/ChatPageClient.tsx");
+    assert.match(
+        client,
+        /isContinuation: surfaceHasContinuationBridge\(conversation\.surface\)/
+    );
+});
+
 test("only the exact placeholder gives way to the source's name", () => {
     assert.equal(
         continuationDisplayTitle({
             storedTitle: LEGACY_CONTINUATION_TITLE,
+            isContinuation: true,
             sourceTitle: "Migration plan review",
             fallback: "Untitled",
         }),
@@ -266,6 +286,7 @@ test("a deleted, locked or unnamed source falls back to the translation", () => 
         assert.equal(
             continuationDisplayTitle({
                 storedTitle: LEGACY_CONTINUATION_TITLE,
+                isContinuation: true,
                 sourceTitle,
                 fallback: "제목 없는 대화",
             }),

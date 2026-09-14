@@ -124,6 +124,7 @@ export async function GET(
         // so its fallback is too.
         const displayTitle = continuationDisplayTitle({
             storedTitle: conversation.title,
+            isContinuation: conversation.continuationBridge !== null,
             sourceTitle: readableContinuationSourceTitle(
                 conversation.continuationBridge?.externalConversation
             ),
