@@ -103,7 +103,10 @@ async function mockSettingsEntryApis(page: Page) {
   );
 }
 
-async function openSettingsTab(page: Page, tab: "data" | "ai" | "assistants") {
+async function openSettingsTab(
+  page: Page,
+  tab: "account" | "data" | "ai" | "assistants"
+) {
   // The panel lives in the sidebar, which on mobile is the drawer -- but only
   // when it is not already mounted. Reaching for the drawer button with the
   // modal open waits forever on mobile: the modal is a full-screen overlay
@@ -148,6 +151,21 @@ test.describe("settings information architecture", () => {
     await expect(group.getByTestId("account-data-entry")).toHaveCount(1);
     await expect(page.getByTestId("memory-entry")).toHaveCount(0);
     await expect(page.getByTestId("assistants-entry")).toHaveCount(0);
+    await expect(page.getByTestId("email-notifications-entry")).toHaveCount(0);
+
+    // Email is a communication choice tied to the signed-in account. It is
+    // visible on the default account tab instead of being buried behind data
+    // management, and it keeps a direct, whole-row path to the granular form.
+    await openSettingsTab(page, "account");
+    const emailGroup = page.getByTestId("settings-account-email");
+    const emailLink = emailGroup.getByTestId("email-notifications-entry-link");
+    await expect(emailLink).toHaveAttribute("href", "/settings/notifications");
+    await expect(emailLink).toHaveAccessibleName(
+      /이메일 알림[\s\S]*이메일 알림 열기/
+    );
+    await expect(emailLink).toHaveAccessibleDescription(
+      /선택 사항 · 언제든 해제/
+    );
 
     await openSettingsTab(page, "ai");
     const aiGroup = page.getByTestId("settings-ai-personalization");

@@ -71,9 +71,9 @@ test("every entry names the tab it is actually in, and stays a separate row", ()
     // Its own tab, which is also where the collection is managed.
     assistants: "assistants",
     "account-data": "data",
-    // Outbound mail, not stored data -- but it is still an account-wide data
-    // decision, so it sits in the same tab as import and export.
-    "email-notifications": "data",
+    // Communication choices sit with the account identity they reach, on the
+    // default tab rather than behind the data-management tab.
+    "email-notifications": "account",
   };
 
   const elementIds = new Set();
@@ -150,6 +150,10 @@ test("the section decides the tab when a hand-edited pair disagrees", () => {
   assert.deepEqual(
     parseSettingsDeepLink("?settings=ai&settingsSection=assistants"),
     { tab: "assistants", section: "assistants" }
+  );
+  assert.deepEqual(
+    parseSettingsDeepLink("?settings=data&settingsSection=email-notifications"),
+    { tab: "account", section: "email-notifications" }
   );
 });
 

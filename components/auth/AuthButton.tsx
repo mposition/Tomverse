@@ -2,6 +2,7 @@
 "use client";
 
 import { signIn, signOut, useSession } from "next-auth/react";
+import Link from "next/link";
 import { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
     getModelUsageProfile,
@@ -13,6 +14,7 @@ import {
     Brain,
     Check,
     ChevronDown,
+    ChevronRight,
     Clock3,
     CreditCard,
     Crown,
@@ -1315,6 +1317,28 @@ export function AuthButton({
               ) : null}
 
               <div className="space-y-1">
+                <Link
+                  href="/settings/notifications"
+                  data-testid="account-email-updates"
+                  onClick={() => setIsAccountMenuOpen(false)}
+                  className="mb-2 flex min-h-14 w-full items-center gap-3 rounded-xl border border-accent-promotion-200 bg-accent-promotion-500/5 px-3 py-2.5 text-left transition hover:bg-accent-promotion-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-promotion-500 dark:border-accent-promotion-700/60 dark:bg-accent-promotion-950/30 dark:hover:bg-accent-promotion-950/50"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-promotion-600 text-white">
+                    <Mail className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                      {t("emailNotifications.marketingCalloutTitle")}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-accent-promotion-700 dark:text-accent-promotion-300">
+                      {t("emailNotifications.marketingOptional")}
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className="h-4 w-4 shrink-0 text-accent-promotion-600 dark:text-accent-promotion-300"
+                    aria-hidden="true"
+                  />
+                </Link>
                 <button
                   type="button"
                   onClick={() => openSettingsTab("plan")}
@@ -1507,6 +1531,24 @@ export function AuthButton({
                                                     <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">{session.user.email}</p>
                                                 </div>
                                             </div>
+                                        </section>
+                                        <section
+                                            aria-label={t("emailNotifications.dataTabTitle")}
+                                            className="rounded-2xl border border-zinc-200 bg-zinc-50 p-1 dark:border-zinc-800 dark:bg-zinc-950/60"
+                                            data-testid="settings-account-email"
+                                        >
+                                            <SettingsEntryRow
+                                                section="email-notifications"
+                                                href="/settings/notifications"
+                                                icon={Mail}
+                                                title={t("emailNotifications.dataTabTitle")}
+                                                description={t("emailNotifications.dataTabDescription")}
+                                                status={t("emailNotifications.marketingOptional")}
+                                                actionLabel={t("emailNotifications.dataTabOpen")}
+                                                onNavigate={closeSettingsModal}
+                                                testId="email-notifications-entry"
+                                                linkTestId="email-notifications-entry-link"
+                                            />
                                         </section>
                                         <section className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950/60">
                                             <div className="flex items-start gap-3">
@@ -2004,26 +2046,6 @@ export function AuthButton({
                                                         linkTestId="external-import-entry-link"
                                                     />
                                                 )}
-                                                {/* What the account receives
-                                                    by email. A row in this
-                                                    group rather than a card
-                                                    beside it, and separate from
-                                                    the import row above: that
-                                                    is about data the account
-                                                    already holds, this is about
-                                                    what leaves. */}
-                                                <SettingsEntryRow
-                                                    section="email-notifications"
-                                                    href="/settings/notifications"
-                                                    icon={Mail}
-                                                    title={t("emailNotifications.dataTabTitle")}
-                                                    description={t("emailNotifications.dataTabDescription")}
-                                                    status={t("emailNotifications.dataTabStatus")}
-                                                    actionLabel={t("emailNotifications.dataTabOpen")}
-                                                    onNavigate={closeSettingsModal}
-                                                    testId="email-notifications-entry"
-                                                    linkTestId="email-notifications-entry-link"
-                                                />
                                                 {/* The unified export. The
                                                     conversations-only download
                                                     below is a different thing
