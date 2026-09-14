@@ -2308,7 +2308,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
-| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 Q1, Q2, Q8 회신 |
+| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1·Q2** 회신. Q8은 2026-09-14 해소 |
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
 | `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
@@ -2826,8 +2826,9 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 1. **`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13). 이 문서에서
    유일하게 남은 미확인 항목입니다. Route Handler 시그니처, `after()` 지원 여부,
    캐시 기본값을 읽고 9.7의 배치를 확정합니다.
-2. **21절 법률 질문 후속.** Q8의 사업자 정보 실제 값은 marketing 활성화 전
-   필요합니다. Q11은 Customer 법적 명칭과 확인 가능한 최초 계정·결제일의 내부 기록,
+2. **21절 법률 질문 후속.** Q8은 해소됐습니다 — 사업자 정보 실제 값이
+   2026-09-14 production에 배포됐고 `/api/ready`의 `emailBusinessIdentity`가
+   `true`입니다(`docs/ops/email-sending-domains.md` §1.3). Q11은 Customer 법적 명칭과 확인 가능한 최초 계정·결제일의 내부 기록,
    TIA 대표 승인, `/privacy` 반영이 남았습니다. SCC/UK Addendum에 대한 Resend 문의는
    DPF 중단·기업 감사·감독기관 요구·고위험 처리 전까지 보류하며, 정확한 Terms
    수락일을 찾지 못하는 것만으로 현재 transactional 발송을 차단하지 않습니다.
@@ -2859,8 +2860,8 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 A15는 확인된 사실로 판명되어 폐기, A16과 A19는 방식 B 확정으로 해소되었습니다.
 남은 항목은 위 "marketing 활성화 전에 결정할 것"에 정리되어 있습니다.
 
-**병렬로 시작할 수 있는 것:** 21절의 법률 질문 후속(Q13·Q15·Q17은 해결). Q8의
-사업자 정보 실제 값은 marketing 활성화 전까지 확정합니다. Q11의 공개 계약·계정
+**병렬로 시작할 수 있는 것:** 21절의 법률 질문 후속(Q8·Q13·Q15·Q17은 해결).
+Q11의 공개 계약·계정
 PDF·tracking 설정 검토는 완료됐고, Customer 내부 기록과 `/privacy` 반영을 이어서
 진행합니다. 이 후속조치는 Resend 회신을 요구하지 않으며 현재 transactional 발송과
 MVP 착수를 차단하지 않습니다. SCC/UK Addendum에 대한 Resend 서면 문의는 정해진
