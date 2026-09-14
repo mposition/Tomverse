@@ -11,6 +11,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { renderCampaignContent } from "@/lib/emailCampaignContent";
 import { CampaignContentError } from "@/lib/emailCampaignContentCore";
 import { campaignContentDigest } from "@/lib/emailCampaignAttestationCore";
@@ -27,7 +28,7 @@ const previewSchema = z
   })
   .strict();
 
-/** Renders draft input without storing it or sending anything. */
+/** Renders draft input without storing a campaign or sending anything. */
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -43,9 +44,22 @@ export async function POST(req: Request) {
     const hashes = Object.fromEntries(
       rendered.previews.map((preview) => [preview.language, preview.contentHash])
     );
+    const copyDigest = campaignContentDigest(hashes);
+    await writeAdminAuditLog({
+      session,
+      request: req,
+      action: "email_campaign.preview",
+      targetType: "EmailCampaignDraft",
+      summary: "Rendered product announcement campaign copy for review.",
+      metadata: {
+        templateKey: body.templateKey,
+        locales: body.locales,
+        copyDigest,
+      },
+    });
     return NextResponse.json({
       previews: rendered.previews,
-      copyDigest: campaignContentDigest(hashes),
+      copyDigest,
     });
   } catch (error) {
     const response = apiSecurityResponse(error);
