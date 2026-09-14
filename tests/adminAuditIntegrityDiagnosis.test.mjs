@@ -69,17 +69,37 @@ test("the verdict says whether the failing entry is the oldest one", () => {
         verifier.includes("firstInvalidIsOldest"),
         "without this the reader cannot tell a changed key from an altered entry"
     );
-    // Computed from the ordered rows the verifier already has, not from a
+    // Computed from the ordered walk the verifier already performs, not from a
     // second query that could disagree with the one being walked.
+    //
+    // This used to pin `rows[0]?.id`, which was the first row of the single
+    // unbounded read. The walk is batched now, so `rows[0]` is the first row of
+    // the *current batch* -- for every batch after the first it is not the
+    // oldest entry at all, and pinning it would have kept the literal while
+    // losing the property. `firstCheckedId` is set once, on the first row the
+    // walk ever sees, and is what the comparison must use.
     assert.match(
         verifier,
-        /rows\[0\]\?\.id === firstInvalid\.id/,
-        "the comparison must be against the first row of the same ordered read"
+        /firstCheckedId === firstInvalid\.id/,
+        "the comparison must be against the first row of the same ordered walk"
+    );
+    assert.match(
+        verifier,
+        /if \(firstCheckedId === null\) firstCheckedId = row\.id;/,
+        "`firstCheckedId` must be the first row seen, not the first row of a batch"
     );
     assert.match(
         verifier,
         /orderBy:\s*\[\{ createdAt: "asc" \}, \{ id: "asc" \}\]/,
-        "`rows[0]` only means `oldest` while the read is ordered ascending"
+        "`firstCheckedId` only means `oldest` while the read is ordered ascending"
+    );
+    // And the batches have to continue from the previous one rather than from
+    // an offset: a cursor that skipped a row would make the walk start
+    // somewhere that is not the oldest entry without changing any of the above.
+    assert.match(
+        verifier,
+        /cursor: cursorId === null \? undefined : \{ id: cursorId \}/,
+        "batches must continue by cursor, from the row the last batch ended on"
     );
 });
 
