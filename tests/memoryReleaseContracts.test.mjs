@@ -297,14 +297,21 @@ test("the memory count is selected for the owner's read and for no one else", ()
     assert.ok(
         publicSelect && publicSelect.initializer &&
             ts.isAsExpression(publicSelect.initializer) &&
+            ts.isTypeReferenceNode(publicSelect.initializer.type) &&
+            ts.isIdentifier(publicSelect.initializer.type.typeName) &&
+            publicSelect.initializer.type.typeName.text === "const" &&
             ts.isObjectLiteralExpression(publicSelect.initializer.expression),
-        "PUBLIC_CHAT_MESSAGE_SELECT must remain an object-literal allowlist"
+        "PUBLIC_CHAT_MESSAGE_SELECT must remain an object-literal `as const` allowlist"
     );
     const publicSelectFields = new Set(
         publicSelect.initializer.expression.properties
             .filter(ts.isPropertyAssignment)
             .filter((property) => property.initializer.kind === ts.SyntaxKind.TrueKeyword)
-            .map((property) => property.name.getText(publicChatMessageAst))
+            .map((property) =>
+                ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
+                    ? property.name.text
+                    : property.name.getText(publicChatMessageAst)
+            )
     );
     assert.ok(
         ownerRead.includes("select: PUBLIC_CHAT_MESSAGE_SELECT"),
