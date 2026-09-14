@@ -83,4 +83,3 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     retry: "Tentar novamente",
   },
 };
-

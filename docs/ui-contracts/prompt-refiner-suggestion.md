@@ -113,4 +113,3 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
   두 결정, 실패 문구, 내부 모델/우월성 표현 부재
 - 기존 mobile composer·IME·zoom 검사는 실제 caller가 offered를 연결하는 다음
   회차에서 prompt-refiner-ready fixture를 추가해 다시 실행한다.
-

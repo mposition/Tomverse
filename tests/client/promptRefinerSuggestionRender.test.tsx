@@ -104,7 +104,6 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
     assert.ok(text.includes(promptRefinerCopy[language].keepOriginal), language);
   }
 });
-
 test("rendered copy never names the internal refiner model or makes a superiority claim", () => {
   const forbidden = [
     "provider",
@@ -126,4 +125,3 @@ test("rendered copy never names the internal refiner model or makes a superiorit
     }
   }
 });
-
