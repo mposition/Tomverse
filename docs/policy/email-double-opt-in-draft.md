@@ -4,7 +4,8 @@
 > 개정으로 들어가고 §15.2의 "만들되 끄는 것" 목록에 항목이 하나 늘어납니다.
 >
 > - 발단: 21절 **Q1**(EU 회원국별 국내법) 조사, 2026-09-14
-> - 관련 계약: §5.1 C1·C8, §10.2 `ConsentRecord`, §11.3, §6.3
+> - 관련 계약: docs/policy/email-notifications.md §5.1, §10.2, §11.3, §6.3
+>   (C1·C8은 §5.1, `ConsentRecord`는 §10.2)
 > - 구현 지점: `lib/emailPreferences.ts`, `lib/emailPreferenceCore.ts`,
 >   `app/api/user/email-preferences/route.ts`
 
@@ -12,7 +13,7 @@
 
 ## 1. 왜 이 문서가 생겼는가
 
-독일 UWG §7(2)(2)는 사전 명시 동의 없는 이메일 광고를 금지하고, 독일 연방대법원은
+독일 UWG 제7조 제2항 제2호는 사전 명시 동의 없는 이메일 광고를 금지하고, 독일 연방대법원은
 **동의의 입증책임을 발신자에게** 둡니다. 웹폼 등록만으로는(single opt-in)
 부족하다고 보며, 실무 표준은 **확인 클릭 + 그 클릭의 로그**입니다. UWG는
 부정경쟁방지법이므로 집행 주체가 규제기관만이 아닙니다 — **경쟁사와 단체가
@@ -131,7 +132,8 @@ payload: `{ kind: "consent", userId, purpose, requestedAt, policyVersionId }`.
 ## 5. 흐름
 
 ```
-1. preference center에서 marketing purpose를 켬 (+ 국가 확인, §6.3 규칙 2)
+1. preference center에서 marketing purpose를 켬
+   (+ 국가 확인, docs/policy/email-notifications.md §6.3 규칙 2)
       ↓  enabled 는 false 그대로
 2. confirmationRequestedAt = now
    ConsentRecord(action="confirmation_requested", capturedVia="preference_center")
@@ -214,7 +216,7 @@ GROUP BY purpose ORDER BY purpose;
 | 재발송 | `confirmationRequestedAt` 기준 rate limit. 기존 `consumeApiRateLimit` 패턴 |
 | suppression | 확인 메일도 transactional 규칙을 따릅니다 — hard bounce된 주소에는 나가지 않습니다 |
 | 취소 후 재구독 | 다시 확인합니다. `confirmedAt`은 `enabled=false`로 갈 때 `NULL`로 되돌립니다 |
-| 국가 미확정 | 확인 메일은 동의 *전에* 나가므로 §6.3의 "marketing 보류"에 걸리지 않습니다. transactional이기 때문입니다 |
+| 국가 미확정 | 확인 메일은 동의 *전에* 나가므로 docs/policy/email-notifications.md §6.3의 "marketing 보류"에 걸리지 않습니다. transactional이기 때문입니다 |
 | footer | 확인 메일은 marketing이 아니므로 관할권 footer가 없어도 발송됩니다(degraded 경고만) |
 
 ## 9. 관할권별로 켤 것인가 — 아니오
@@ -225,7 +227,8 @@ GROUP BY purpose ORDER BY purpose;
 - 관할권 판정이 틀리면 **증거 표준이 틀립니다.** 관할권을 틀려도 안전한 것이 C1을
   전역으로 둔 이유였고, 같은 논리가 여기에 그대로 적용됩니다.
 - 확인 메일은 동의 **전에** 나가는데, 그 시점에는 관할권이 미확정일 수 있습니다
-  (§6.3이 그래서 opt-in 시점에 국가를 필수로 받습니다). 미확정 상태에서 "확인이
+  (docs/policy/email-notifications.md §6.3이 그래서 opt-in 시점에 국가를 필수로
+  받습니다). 미확정 상태에서 "확인이
   필요한 나라인가"를 물으면 답이 없습니다.
 
 **전역 적용.** 규칙이 하나입니다.

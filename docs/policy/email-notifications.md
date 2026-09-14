@@ -20,7 +20,7 @@
 | 2 | **Q8 해소** — 사업자 정보 6개 중 필요한 값이 환경변수로 설정됐습니다(ABN 포함) | `docs/ops/email-business-identity.md` |
 | 3 | **한국 profile에서 등록번호 두 블록 제거** — 발송 주체가 호주 법인이고 한국 통신판매업 신고 대상이 아님을 확인 | 5.2 E3 |
 | 4 | **Q1 내부 검토 완료(부분)** — EEA는 단일 strict profile, 스위스는 분리. 외부 자문 항목은 따로 남음 | `docs/policy/email-eea-marketing-review-2026-09-14.md` |
-| 5 | suppression 범위 표현을 **"region 내 계정 전체" → "team/계정 전체"** 로 정정 | 같은 문서 §1.1 |
+| 5 | suppression 범위 표현을 **"region 내 계정 전체" → "team/계정 전체"** 로 정정 | `docs/ops/a18-resend-suppression-boundary.md` §1.1 |
 
 ### v4 (2026-08-21) — 승인 및 정합성 정리
 
