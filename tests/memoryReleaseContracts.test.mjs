@@ -301,6 +301,7 @@ test("the memory count is selected for the owner's read and for no one else", ()
         const source = read(path);
         for (const column of [
             "PUBLIC_CHAT_MESSAGE_SELECT",
+            "toPublicChatMessage",
             "memoryUsedCount",
             "memoryTokens",
             "knowledgeChunkCount",
