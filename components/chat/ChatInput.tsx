@@ -660,7 +660,11 @@ type ChatInputProps = {
   promptRefinerOffered?: boolean;
   promptRefinerState?: PromptRefinerUiState;
   onPromptRefinerRequest?: (sourcePrompt: string) => void;
-  /** Called before an accepted proposal changes the controlled textarea. */
+  /**
+   * Called before an accepted proposal changes the controlled textarea. The
+   * owner must leave `ready` after either decision and discard a stored
+   * resolution whenever a later draft no longer equals its displayPrompt.
+   */
   onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   /**
    * The assistant this conversation runs under (§14), or null when it runs
@@ -1330,8 +1334,8 @@ export function ChatInput({
       onPromptRefinerDecision?.(resolution);
       if (decision === "accepted") {
         onChange(resolution.displayPrompt);
-        requestAnimationFrame(() => textareaRef.current?.focus());
       }
+      requestAnimationFrame(() => textareaRef.current?.focus());
     },
     [onChange, onPromptRefinerDecision, value]
   );
@@ -3548,7 +3552,13 @@ export function ChatInput({
             language={lang}
             currentPrompt={value}
             state={promptRefinerState}
-            disabled={isDraftMutationDisabled || isComposingDraft}
+            interactionBlockReason={
+              isComposingDraft
+                ? "composition_active"
+                : isDraftMutationDisabled
+                  ? "composer_locked"
+                  : null
+            }
             onRequest={onPromptRefinerRequest}
             onUseSuggestion={(suggestion) =>
               handlePromptRefinerDecision(suggestion, "accepted")

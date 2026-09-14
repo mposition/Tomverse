@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const PROMPT_REFINER_INPUT_SCOPE = "current_user_turn_text_only" as const;
 export const PROMPT_REFINER_MAX_PROMPT_CHARS = 16_000;
-export const PROMPT_REFINER_MAX_PROMPT_BYTES = 64 * 1024;
+export const PROMPT_REFINER_MAX_PROMPT_BYTES = 32 * 1024;
 
 const utf8Bytes = (value: string) => new TextEncoder().encode(value).byteLength;
 const promptText = z
@@ -44,6 +44,25 @@ export const promptRefinerResponseSchema = z
 export type PromptRefinerRequest = z.infer<typeof promptRefinerRequestSchema>;
 export type PromptRefinerResponse = z.infer<typeof promptRefinerResponseSchema>;
 
+export type PromptRefinerPromptProblem =
+  | "empty"
+  | "too_many_characters"
+  | "too_many_bytes";
+
+/** Uses the same bounds as the request schema at the point the UI offers it. */
+export function promptRefinerPromptProblem(
+  prompt: string
+): PromptRefinerPromptProblem | null {
+  if (prompt.trim().length === 0) return "empty";
+  if (prompt.length > PROMPT_REFINER_MAX_PROMPT_CHARS) {
+    return "too_many_characters";
+  }
+  if (utf8Bytes(prompt) > PROMPT_REFINER_MAX_PROMPT_BYTES) {
+    return "too_many_bytes";
+  }
+  return null;
+}
+
 export type BoundPromptRefinerSuggestion = PromptRefinerResponse & {
   /** The exact draft bytes for which the request was made. Browser-local. */
   sourcePrompt: string;
@@ -55,7 +74,8 @@ export type PromptRefinerUiState =
   | { status: "ready"; suggestion: BoundPromptRefinerSuggestion }
   | { status: "failed"; request: PromptRefinerRequest; failureCode: string };
 
-export type PromptRefinerDecision = "accepted" | "kept_original";
+const promptRefinerDecisionSchema = z.enum(["accepted", "kept_original"]);
+export type PromptRefinerDecision = z.infer<typeof promptRefinerDecisionSchema>;
 
 export type PromptRefinerResolution = {
   decision: PromptRefinerDecision;
@@ -73,6 +93,18 @@ export type PromptRefinerResolution = {
     decision: PromptRefinerDecision;
   };
 };
+
+/**
+ * An accepted resolution is valid only while the composer still holds the
+ * exact display bytes produced by that decision. Any later edit makes the
+ * caller discard it and treat the edited draft as newly authored input.
+ */
+export function isPromptRefinerResolutionCurrent(
+  resolution: PromptRefinerResolution,
+  currentPrompt: string
+): boolean {
+  return resolution.displayPrompt === currentPrompt;
+}
 
 const sourceOf = (state: PromptRefinerUiState): string | null => {
   if (state.status === "idle") return null;
@@ -122,6 +154,7 @@ export function resolvePromptRefinerDecision(input: {
   currentPrompt: string;
   decision: PromptRefinerDecision;
 }): PromptRefinerResolution {
+  const decision = promptRefinerDecisionSchema.parse(input.decision);
   const { sourcePrompt: rawSourcePrompt, ...publicResponse } = input.suggestion;
   const suggestion = {
     ...promptRefinerResponseSchema.parse(publicResponse),
@@ -131,11 +164,11 @@ export function resolvePromptRefinerDecision(input: {
     throw new Error("prompt_refiner_decision_stale");
   }
   const executionPrompt =
-    input.decision === "accepted"
+    decision === "accepted"
       ? suggestion.refinedPrompt
       : suggestion.sourcePrompt;
   return {
-    decision: input.decision,
+    decision,
     displayPrompt: executionPrompt,
     persistedUserPrompt: suggestion.sourcePrompt,
     executionPrompt,
@@ -144,7 +177,7 @@ export function resolvePromptRefinerDecision(input: {
       suggestionId: suggestion.suggestionId,
       refinerVersion: suggestion.refinerVersion,
       inputScope: suggestion.inputScope,
-      decision: input.decision,
+      decision,
     },
   };
 }

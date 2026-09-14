@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ReactNode } from "react";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { PromptRefinerSuggestionPanel } from "@/components/chat/PromptRefinerSuggestionPanel";
 import { promptRefinerCopy } from "@/lib/promptRefinerCopy";
@@ -9,31 +10,8 @@ import {
   type BoundPromptRefinerSuggestion,
 } from "@/lib/promptRefinerSuggestion";
 
-const textOf = (node: ReactNode): string => {
-  if (node === null || node === undefined || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(textOf).join(" ");
-  const element = node as { props?: { children?: ReactNode } };
-  return element.props ? textOf(element.props.children) : "";
-};
-
-const propsOf = (node: ReactNode, found: Record<string, unknown>[] = []) => {
-  if (node === null || node === undefined || typeof node === "boolean") return found;
-  if (typeof node === "string" || typeof node === "number") return found;
-  if (Array.isArray(node)) {
-    for (const child of node) propsOf(child, found);
-    return found;
-  }
-  const element = node as { props?: Record<string, unknown> };
-  if (element.props) {
-    found.push(element.props);
-    propsOf(element.props.children as ReactNode, found);
-  }
-  return found;
-};
-
-const findTestId = (node: ReactNode, id: string) =>
-  propsOf(node).find((props) => props["data-testid"] === id);
+const hasTestId = (markup: string, id: string) =>
+  markup.includes(`data-testid="${id}"`);
 
 const suggestion: BoundPromptRefinerSuggestion = {
   requestId: "request_1",
@@ -45,37 +23,40 @@ const suggestion: BoundPromptRefinerSuggestion = {
 };
 
 const render = (overrides: Record<string, unknown> = {}) =>
-  PromptRefinerSuggestionPanel({
-    offered: true,
-    language: "ko",
-    currentPrompt: suggestion.sourcePrompt,
-    state: { status: "ready", suggestion },
-    onRequest: () => {},
-    onUseSuggestion: () => {},
-    onKeepOriginal: () => {},
-    ...overrides,
-  } as Parameters<typeof PromptRefinerSuggestionPanel>[0]);
+  renderToStaticMarkup(
+    createElement(PromptRefinerSuggestionPanel, {
+      offered: true,
+      language: "ko",
+      currentPrompt: suggestion.sourcePrompt,
+      state: { status: "ready", suggestion },
+      onRequest: () => {},
+      onUseSuggestion: () => {},
+      onKeepOriginal: () => {},
+      ...overrides,
+    } as Parameters<typeof PromptRefinerSuggestionPanel>[0])
+  );
 
 test("not offered means no teaser, disabled row or layout cost", () => {
-  assert.equal(render({ offered: false }), null);
+  assert.equal(render({ offered: false }), "");
 });
 
 test("a changed draft cannot render a late proposal", () => {
   const rendered = render({ currentPrompt: "원문 질문과 새 입력" });
-  assert.equal(findTestId(rendered, "prompt-refiner-ready"), undefined);
-  assert.ok(findTestId(rendered, "prompt-refiner-idle"));
+  assert.equal(hasTestId(rendered, "prompt-refiner-ready"), false);
+  assert.equal(hasTestId(rendered, "prompt-refiner-idle"), true);
 });
 
 test("the ready state shows proposal and two explicit choices", () => {
   const rendered = render();
-  assert.ok(findTestId(rendered, "prompt-refiner-ready"));
-  assert.equal(
-    findTestId(rendered, "prompt-refiner-proposal")?.children,
-    suggestion.refinedPrompt
-  );
-  assert.ok(findTestId(rendered, "prompt-refiner-use"));
-  assert.ok(findTestId(rendered, "prompt-refiner-keep-original"));
-  assert.equal(textOf(rendered).includes(suggestion.sourcePrompt), false);
+  assert.equal(hasTestId(rendered, "prompt-refiner-ready"), true);
+  assert.equal(rendered.includes(suggestion.refinedPrompt), true);
+  assert.equal(hasTestId(rendered, "prompt-refiner-use"), true);
+  assert.equal(hasTestId(rendered, "prompt-refiner-keep-original"), true);
+  assert.equal(rendered.includes(suggestion.sourcePrompt), false);
+  assert.match(rendered, /role="status"/);
+  assert.match(rendered, /aria-live="polite"/);
+  assert.match(rendered, /tabindex="-1"/);
+  assert.equal((rendered.match(/min-h-11/g) ?? []).length, 2);
 });
 
 test("requesting and failure copy promise that the original remains unchanged", () => {
@@ -84,14 +65,15 @@ test("requesting and failure copy promise that the original remains unchanged", 
     prompt: suggestion.sourcePrompt,
   };
   const requesting = render({ state: { status: "requesting", request } });
-  assert.ok(findTestId(requesting, "prompt-refiner-requesting"));
-  assert.match(textOf(requesting), /원문은 그대로 유지/);
+  assert.equal(hasTestId(requesting, "prompt-refiner-requesting"), true);
+  assert.match(requesting, /원문은 그대로 유지/);
   const failed = render({
     state: { status: "failed", request, failureCode: "internal" },
   });
-  assert.ok(findTestId(failed, "prompt-refiner-failed"));
-  assert.match(textOf(failed), /원문은 바뀌지 않았/);
-  assert.equal(textOf(failed).includes("internal"), false);
+  assert.equal(hasTestId(failed, "prompt-refiner-failed"), true);
+  assert.match(failed, /원문은 바뀌지 않았/);
+  assert.equal(failed.includes("internal"), false);
+  assert.equal((failed.match(/min-h-11/g) ?? []).length, 1);
 });
 
 test("all seven locales offer explicit accept and keep-original decisions", () => {
@@ -99,11 +81,33 @@ test("all seven locales offer explicit accept and keep-original decisions", () =
     keyof typeof promptRefinerCopy
   >) {
     const rendered = render({ language });
-    const text = textOf(rendered);
-    assert.ok(text.includes(promptRefinerCopy[language].useProposal), language);
-    assert.ok(text.includes(promptRefinerCopy[language].keepOriginal), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].useProposal), language);
+    assert.ok(rendered.includes(promptRefinerCopy[language].keepOriginal), language);
   }
 });
+
+test("request refusal is visible, bounded by the request schema, and has a 44px target", () => {
+  const idle = { status: "idle" as const };
+  const empty = render({ currentPrompt: "", state: idle });
+  assert.match(empty, /disabled=""/);
+  assert.ok(empty.includes(promptRefinerCopy.ko.promptEmpty));
+  assert.equal((empty.match(/min-h-11/g) ?? []).length, 1);
+
+  const tooLong = render({ currentPrompt: "a".repeat(16_001), state: idle });
+  assert.ok(tooLong.includes(promptRefinerCopy.ko.promptTooManyCharacters));
+  assert.match(tooLong, /disabled=""/);
+
+  const tooLarge = render({ currentPrompt: "한".repeat(11_000), state: idle });
+  assert.ok(tooLarge.includes(promptRefinerCopy.ko.promptTooManyBytes));
+  assert.match(tooLarge, /disabled=""/);
+});
+
+test("a blocked decision states its reason instead of exposing a dead control", () => {
+  const rendered = render({ interactionBlockReason: "composition_active" });
+  assert.ok(rendered.includes(promptRefinerCopy.ko.compositionActive));
+  assert.equal((rendered.match(/disabled=""/g) ?? []).length, 2);
+});
+
 test("rendered copy never names the internal refiner model or makes a superiority claim", () => {
   const forbidden = [
     "provider",
@@ -119,7 +123,7 @@ test("rendered copy never names the internal refiner model or makes a superiorit
   for (const language of Object.keys(promptRefinerCopy) as Array<
     keyof typeof promptRefinerCopy
   >) {
-    const text = textOf(render({ language })).toLowerCase();
+    const text = render({ language }).toLowerCase();
     for (const word of forbidden) {
       assert.equal(text.includes(word.toLowerCase()), false, `${language}: ${word}`);
     }

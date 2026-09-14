@@ -1291,6 +1291,9 @@ Non-negotiable requirements:
   suggestion may become the Router/provider execution prompt.
 - One request is bound to one exact draft snapshot and request id. Editing the
   draft makes a late response stale; it never overwrites newer user work.
+- The caller leaves `ready` after either decision. After acceptance, any draft
+  edit that no longer matches the resolution's displayPrompt discards that
+  resolution and restores ordinary user authorship.
 - The Refiner receives only the current user-turn text as untrusted quoted
   data. It receives no history, attachment content, Memory, profile knowledge,
   tool result, Router candidates, provider identity or model identity.
@@ -1299,6 +1302,12 @@ Non-negotiable requirements:
 - No provider call, billing, automatic offer, Router coupling or rollout is
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.
+- Every Refiner action keeps a 44px touch target and states why it is disabled.
+  The ready proposal is a polite live status and receives focus without
+  scrolling; a completed decision returns focus to the textarea.
+- The current PLANNER-03 report does not exercise the Refiner builder. A real
+  caller or provider adapter is blocked until `prompt-refiner` is registered as
+  a report surface and the adversarial corpus runs through it.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer

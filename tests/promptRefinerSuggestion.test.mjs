@@ -3,7 +3,10 @@ import test from "node:test";
 
 import {
   PROMPT_REFINER_INPUT_SCOPE,
+  PROMPT_REFINER_MAX_PROMPT_BYTES,
   bindPromptRefinerSuggestion,
+  isPromptRefinerResolutionCurrent,
+  promptRefinerPromptProblem,
   promptRefinerRequestSchema,
   promptRefinerResponseSchema,
   resolvePromptRefinerDecision,
@@ -54,6 +57,28 @@ test("request and response limits reject empty, oversized and private identity f
       prompt: "한".repeat(16_001),
     }).success,
     false
+  );
+  const byteBoundedPrompt = "한".repeat(11_000);
+  assert.ok(byteBoundedPrompt.length < 16_000);
+  assert.ok(
+    new TextEncoder().encode(byteBoundedPrompt).byteLength >
+      PROMPT_REFINER_MAX_PROMPT_BYTES
+  );
+  assert.equal(
+    promptRefinerRequestSchema.safeParse({
+      ...request,
+      prompt: byteBoundedPrompt,
+    }).success,
+    false
+  );
+  assert.equal(promptRefinerPromptProblem("   "), "empty");
+  assert.equal(
+    promptRefinerPromptProblem("a".repeat(16_001)),
+    "too_many_characters"
+  );
+  assert.equal(
+    promptRefinerPromptProblem(byteBoundedPrompt),
+    "too_many_bytes"
   );
   assert.equal(
     promptRefinerResponseSchema.safeParse({
@@ -149,6 +174,14 @@ test("acceptance preserves authorship while only execution receives the proposal
     inputScope: PROMPT_REFINER_INPUT_SCOPE,
     decision: "accepted",
   });
+  assert.equal(
+    isPromptRefinerResolutionCurrent(accepted, accepted.displayPrompt),
+    true
+  );
+  assert.equal(
+    isPromptRefinerResolutionCurrent(accepted, `${accepted.displayPrompt}!`),
+    false
+  );
 });
 
 test("keeping the original changes neither authorship nor execution text", () => {
@@ -183,5 +216,14 @@ test("a decision made after another edit fails closed", () => {
         decision: "accepted",
       }),
     /prompt_refiner_decision_stale/
+  );
+  assert.throws(
+    () =>
+      resolvePromptRefinerDecision({
+        suggestion,
+        currentPrompt: request.prompt,
+        decision: "unknown",
+      }),
+    /Invalid option/
   );
 });

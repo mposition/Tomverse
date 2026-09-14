@@ -1,21 +1,27 @@
 "use client";
 
 import { Loader2, Sparkles } from "lucide-react";
+import { useEffect, useRef } from "react";
 
 import type { Language } from "@/lib/language";
 import { promptRefinerCopy } from "@/lib/promptRefinerCopy";
 import {
+  promptRefinerPromptProblem,
   visiblePromptRefinerState,
   type BoundPromptRefinerSuggestion,
   type PromptRefinerUiState,
 } from "@/lib/promptRefinerSuggestion";
+
+export type PromptRefinerInteractionBlockReason =
+  | "composer_locked"
+  | "composition_active";
 
 export function PromptRefinerSuggestionPanel({
   offered,
   language,
   currentPrompt,
   state,
-  disabled = false,
+  interactionBlockReason = null,
   onRequest,
   onUseSuggestion,
   onKeepOriginal,
@@ -25,14 +31,42 @@ export function PromptRefinerSuggestionPanel({
   language: Language;
   currentPrompt: string;
   state: PromptRefinerUiState;
-  disabled?: boolean;
+  interactionBlockReason?: PromptRefinerInteractionBlockReason | null;
   onRequest: (sourcePrompt: string) => void;
   onUseSuggestion: (suggestion: BoundPromptRefinerSuggestion) => void;
+  /** The state owner must leave `ready` after either decision. */
   onKeepOriginal: (suggestion: BoundPromptRefinerSuggestion) => void;
 }) {
-  if (!offered) return null;
   const copy = promptRefinerCopy[language] ?? promptRefinerCopy.en;
   const visible = visiblePromptRefinerState(state, currentPrompt);
+  const readyRef = useRef<HTMLElement>(null);
+  const readyFocusKey =
+    offered && visible?.status === "ready"
+      ? `${visible.suggestion.requestId}:${visible.suggestion.suggestionId}`
+      : null;
+
+  useEffect(() => {
+    if (readyFocusKey) readyRef.current?.focus({ preventScroll: true });
+  }, [readyFocusKey]);
+
+  if (!offered) return null;
+
+  const promptProblem = promptRefinerPromptProblem(currentPrompt);
+  const requestProblemCopy =
+    promptProblem === "empty"
+      ? copy.promptEmpty
+      : promptProblem === "too_many_characters"
+        ? copy.promptTooManyCharacters
+        : promptProblem === "too_many_bytes"
+          ? copy.promptTooManyBytes
+          : null;
+  const interactionProblemCopy =
+    interactionBlockReason === "composer_locked"
+      ? copy.composerLocked
+      : interactionBlockReason === "composition_active"
+        ? copy.compositionActive
+        : null;
+  const interactionBlocked = interactionBlockReason !== null;
 
   // A changed draft invalidates every non-idle state. Render the ordinary
   // request action again, never the late proposal for the old bytes.
@@ -42,15 +76,27 @@ export function PromptRefinerSuggestionPanel({
         data-testid="prompt-refiner-idle"
         className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
       >
-        <span className="min-w-0 text-xs text-zinc-500 dark:text-zinc-400">
-          {copy.actionDescription}
+        <span
+          data-testid="prompt-refiner-request-description"
+          className={`min-w-0 text-xs ${
+            requestProblemCopy || interactionProblemCopy
+              ? "text-amber-700 dark:text-amber-300"
+              : "text-zinc-500 dark:text-zinc-400"
+          }`}
+        >
+          {interactionProblemCopy ?? requestProblemCopy ?? copy.actionDescription}
         </span>
         <button
           type="button"
           data-testid="prompt-refiner-request"
-          disabled={disabled || !currentPrompt.trim()}
+          disabled={interactionBlocked || promptProblem !== null}
+          aria-label={
+            interactionProblemCopy || requestProblemCopy
+              ? `${copy.action}. ${interactionProblemCopy ?? requestProblemCopy}`
+              : copy.action
+          }
           onClick={() => onRequest(currentPrompt)}
-          className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
           {copy.action}
@@ -84,9 +130,14 @@ export function PromptRefinerSuggestionPanel({
         <button
           type="button"
           data-testid="prompt-refiner-retry"
-          disabled={disabled}
+          disabled={interactionBlocked}
+          aria-label={
+            interactionProblemCopy
+              ? `${copy.retry}. ${interactionProblemCopy}`
+              : copy.retry
+          }
           onClick={() => onRequest(visible.request.prompt)}
-          className="min-h-9 shrink-0 rounded-full border border-amber-300 bg-white px-3 font-bold transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-zinc-950 dark:hover:bg-amber-950/50"
+          className="min-h-11 shrink-0 rounded-full border border-amber-300 bg-white px-3 font-bold transition hover:bg-amber-100 disabled:opacity-50 dark:border-amber-800 dark:bg-zinc-950 dark:hover:bg-amber-950/50"
         >
           {copy.retry}
         </button>
@@ -96,9 +147,13 @@ export function PromptRefinerSuggestionPanel({
 
   return (
     <section
+      ref={readyRef}
       data-testid="prompt-refiner-ready"
+      role="status"
+      aria-live="polite"
       aria-label={copy.proposalLabel}
-      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+      tabIndex={-1}
+      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
     >
       <div className="mb-1.5 flex items-center gap-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
         <Sparkles aria-hidden="true" className="h-3.5 w-3.5" />
@@ -110,22 +165,37 @@ export function PromptRefinerSuggestionPanel({
       >
         {visible.suggestion.refinedPrompt}
       </p>
+      {interactionProblemCopy ? (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+          {interactionProblemCopy}
+        </p>
+      ) : null}
       <div className="mt-2 flex flex-wrap justify-end gap-2">
         <button
           type="button"
           data-testid="prompt-refiner-keep-original"
-          disabled={disabled}
+          disabled={interactionBlocked}
+          aria-label={
+            interactionProblemCopy
+              ? `${copy.keepOriginal}. ${interactionProblemCopy}`
+              : copy.keepOriginal
+          }
           onClick={() => onKeepOriginal(visible.suggestion)}
-          className="min-h-9 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="min-h-11 rounded-full border border-zinc-300 bg-white px-3 text-xs font-bold text-zinc-700 transition hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           {copy.keepOriginal}
         </button>
         <button
           type="button"
           data-testid="prompt-refiner-use"
-          disabled={disabled}
+          disabled={interactionBlocked}
+          aria-label={
+            interactionProblemCopy
+              ? `${copy.useProposal}. ${interactionProblemCopy}`
+              : copy.useProposal
+          }
           onClick={() => onUseSuggestion(visible.suggestion)}
-          className="min-h-9 rounded-full bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-500 disabled:opacity-50"
+          className="min-h-11 rounded-full bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
           {copy.useProposal}
         </button>

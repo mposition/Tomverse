@@ -48,6 +48,15 @@ stale 제안은 적용 버튼을 남기지 않고 일반 요청 상태로 돌아
 제안 채택 버튼을 누른 순간에도 draft가 source와 다르면 fail-closed한다. 늦은
 응답이 새 입력을 덮어쓰는 복구나 last-write-wins는 허용하지 않는다.
 
+제어 상태는 caller가 소유한다. `onPromptRefinerDecision`을 받은 caller는 채택과
+원문 유지 **모두**에서 `ready`를 즉시 벗어나야 한다. 특히 원문 유지는 textarea
+값을 바꾸지 않으므로 callback 외에 proposal을 닫을 경로가 없다. 채택 뒤에는
+`isPromptRefinerResolutionCurrent()`로 현재 draft가 resolution의
+`displayPrompt`와 같은 동안에만 resolution을 유지한다. 사용자가 한 글자라도 더
+편집하면 기존 resolution을 폐기하고 그 시점의 draft를 새 사용자 입력으로 다룬다.
+이 규칙 없이 예전 `persistedUserPrompt`·`executionPrompt`를 다음 전송에 재사용하면
+계약 위반이다.
+
 ## 4. Refiner가 읽을 수 있는 것은 현재 턴 텍스트뿐이다
 
 `promptRefinerRequestSchema`는 strict object이며 다음 필드를 받지 않는다.
@@ -100,8 +109,13 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 ## 7. 접근성·모바일
 
 - proposal은 textarea와 같은 행에 들어가지 않고 별도 full-width 행을 쓴다.
-- 상태는 `role=status`와 polite live region으로 읽힌다.
+- 상태는 `role=status`와 polite live region으로 읽힌다. ready가 도착하면
+  focusable status가 스크롤을 움직이지 않고 포커스를 받아 새 제안이 생겼음을
+  키보드·스크린리더 사용자에게 알린다. 결정을 마치면 textarea로 포커스를 돌린다.
 - 채택과 원문 유지가 둘 다 명시적 버튼이며 색만으로 구분하지 않는다.
+- 모든 Refiner 버튼은 데스크톱과 모바일 모두 최소 44px 높이다. 빈 입력, 16,000자
+  초과, 32KiB 초과, composer 잠금과 글자 조합 중 상태는 버튼만 비활성화하지 않고
+  화면 문구와 접근 가능한 이름으로 이유를 함께 제공한다.
 - proposal 본문은 줄바꿈·긴 단어를 감싸고 자체 최대 높이 뒤에서 세로 스크롤한다.
 - 어떤 상태도 textarea 위에 absolute/fixed overlay로 놓이지 않는다.
 
@@ -110,6 +124,15 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
 - `tests/promptRefinerSuggestion.test.mjs`: strict 입력, 주입 형태 JSON encoding,
   request 결속, stale 폐기, 원문/실행 분리
 - `tests/client/promptRefinerSuggestionRender.test.tsx`: 미제공 시 null, 7개 언어,
-  두 결정, 실패 문구, 내부 모델/우월성 표현 부재
+  두 결정, 44px target, disabled reason, ready live status, 실패 문구,
+  내부 모델/우월성 표현 부재
 - 기존 mobile composer·IME·zoom 검사는 실제 caller가 offered를 연결하는 다음
   회차에서 prompt-refiner-ready fixture를 추가해 다시 실행한다.
+
+현재 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·
+profile 등의 기존 surface만 실행하며 `promptRefinerModelMessages()`를 아직
+exercise하지 않는다. 따라서 이 회차의 JSON quoting·system instruction은 구조적
+방어이지 PLANNER-03 통과 증거가 아니다. 실제 caller/provider adapter를 추가하는
+다음 회차에서는 `prompt-refiner`를 report의 명시적 surface로 등록하고 adversarial
+corpus를 이 builder에 통과시켜야 한다. 그 전에는 Refiner 활성화나 Router 결합을
+허용하지 않는다.

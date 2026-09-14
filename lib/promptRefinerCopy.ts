@@ -9,6 +9,11 @@ type PromptRefinerCopy = {
   keepOriginal: string;
   failed: string;
   retry: string;
+  promptEmpty: string;
+  promptTooManyCharacters: string;
+  promptTooManyBytes: string;
+  composerLocked: string;
+  compositionActive: string;
 };
 
 export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
@@ -21,6 +26,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "원문 유지",
     failed: "문장을 제안하지 못했습니다. 원문은 바뀌지 않았습니다.",
     retry: "다시 시도",
+    promptEmpty: "다듬을 문장을 먼저 입력하세요.",
+    promptTooManyCharacters: "문장을 16,000자 이하로 줄여 주세요.",
+    promptTooManyBytes: "문장을 32KiB 이하로 줄여 주세요.",
+    composerLocked: "입력창을 편집할 수 있을 때 다시 시도하세요.",
+    compositionActive: "글자 입력 조합을 마친 뒤 다시 시도하세요.",
   },
   en: {
     action: "Improve wording",
@@ -31,6 +41,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "Keep original",
     failed: "A suggestion could not be prepared. Your original was not changed.",
     retry: "Try again",
+    promptEmpty: "Enter wording to improve first.",
+    promptTooManyCharacters: "Shorten the draft to 16,000 characters or fewer.",
+    promptTooManyBytes: "Shorten the draft to 32 KiB or less.",
+    composerLocked: "Try again when the composer can be edited.",
+    compositionActive: "Finish composing the current character, then try again.",
   },
   zh: {
     action: "优化表述",
@@ -41,6 +56,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "保留原文",
     failed: "无法生成建议，原文未被更改。",
     retry: "重试",
+    promptEmpty: "请先输入需要优化的文字。",
+    promptTooManyCharacters: "请将草稿缩短至 16,000 个字符以内。",
+    promptTooManyBytes: "请将草稿缩短至 32 KiB 以内。",
+    composerLocked: "输入框可编辑后再试。",
+    compositionActive: "请先完成当前文字输入，再试一次。",
   },
   fr: {
     action: "Clarifier le texte",
@@ -51,6 +71,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "Garder l’original",
     failed: "Aucune suggestion n’a pu être préparée. L’original est inchangé.",
     retry: "Réessayer",
+    promptEmpty: "Saisissez d’abord le texte à clarifier.",
+    promptTooManyCharacters: "Réduisez le brouillon à 16 000 caractères maximum.",
+    promptTooManyBytes: "Réduisez le brouillon à 32 Kio maximum.",
+    composerLocked: "Réessayez lorsque la zone de saisie est modifiable.",
+    compositionActive: "Terminez la saisie du caractère en cours, puis réessayez.",
   },
   de: {
     action: "Formulierung verbessern",
@@ -61,6 +86,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "Original behalten",
     failed: "Kein Vorschlag möglich. Das Original wurde nicht geändert.",
     retry: "Erneut versuchen",
+    promptEmpty: "Geben Sie zuerst einen Text zum Verbessern ein.",
+    promptTooManyCharacters: "Kürzen Sie den Entwurf auf höchstens 16.000 Zeichen.",
+    promptTooManyBytes: "Kürzen Sie den Entwurf auf höchstens 32 KiB.",
+    composerLocked: "Versuchen Sie es erneut, wenn das Eingabefeld bearbeitbar ist.",
+    compositionActive: "Schließen Sie die aktuelle Zeicheneingabe ab und versuchen Sie es erneut.",
   },
   es: {
     action: "Mejorar redacción",
@@ -71,6 +101,11 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "Conservar original",
     failed: "No se pudo preparar una sugerencia. El original no cambió.",
     retry: "Reintentar",
+    promptEmpty: "Escribe primero el texto que quieres mejorar.",
+    promptTooManyCharacters: "Reduce el borrador a 16.000 caracteres o menos.",
+    promptTooManyBytes: "Reduce el borrador a 32 KiB o menos.",
+    composerLocked: "Inténtalo de nuevo cuando el cuadro de texto se pueda editar.",
+    compositionActive: "Termina de componer el carácter actual y vuelve a intentarlo.",
   },
   pt: {
     action: "Melhorar redação",
@@ -81,5 +116,10 @@ export const promptRefinerCopy: Record<Language, PromptRefinerCopy> = {
     keepOriginal: "Manter original",
     failed: "Não foi possível preparar uma sugestão. O original não mudou.",
     retry: "Tentar novamente",
+    promptEmpty: "Digite primeiro o texto que deseja melhorar.",
+    promptTooManyCharacters: "Reduza o rascunho para no máximo 16.000 caracteres.",
+    promptTooManyBytes: "Reduza o rascunho para no máximo 32 KiB.",
+    composerLocked: "Tente novamente quando o campo de texto puder ser editado.",
+    compositionActive: "Conclua a composição do caractere atual e tente novamente.",
   },
 };
