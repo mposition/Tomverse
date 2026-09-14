@@ -9,15 +9,20 @@ import {
     ASSISTANT_PROFILE_RETURN_PARAM,
     stashPendingChatProfile,
 } from "@/lib/assistantProfileReturn";
+import {
+    assistantKnowledgeProfileHref,
+    isAssistantKnowledgeGuideRequest,
+} from "@/lib/assistantKnowledgeGuide";
+import { isLanguage } from "@/lib/language";
 
 /**
  * The create screen, plus where a finished create goes.
  *
- * Two destinations and no third: the profile's own edit page, or back to the
- * chat. Which one is decided by comparing one query parameter to one literal —
- * the parameter is never read as a URL, so there is nothing here that an
- * attacker-supplied value could point at. `lib/assistantProfileReturn.ts`
- * carries that argument in full.
+ * Three fixed destinations: the profile's own edit page, the Knowledge setup
+ * guide on that page, or back to chat. Query parameters are compared only with
+ * known literals and are never read as URLs, so an attacker-supplied value
+ * cannot choose a destination. `lib/assistantProfileReturn.ts` carries the
+ * chat handoff argument in full.
  *
  * The conversation is not named anywhere in this trip. `/chat` restores the
  * one the visitor left from its own session storage, so a conversation id
@@ -30,11 +35,28 @@ function NewAssistantProfileFlow() {
     const fromChat =
         searchParams.get(ASSISTANT_PROFILE_RETURN_PARAM) ===
         ASSISTANT_PROFILE_RETURN_CHAT;
+    const fromGuide = isAssistantKnowledgeGuideRequest(searchParams);
+    const requestedLanguage = searchParams.get("lang");
+    const language = isLanguage(requestedLanguage) ? requestedLanguage : "en";
+
+    if (fromGuide) {
+        return (
+            <AssistantProfileEditor
+                creationEntry="guide"
+                onCreated={(profileId) => {
+                    router.replace(
+                        assistantKnowledgeProfileHref(profileId, language)
+                    );
+                }}
+            />
+        );
+    }
 
     if (!fromChat) return <AssistantProfileEditor />;
 
     return (
         <AssistantProfileEditor
+            creationEntry="chat"
             onCreated={(profileId) => {
                 // A request the chat will make through the ordinary binding
                 // handler, which re-checks ownership server-side. Stashing it

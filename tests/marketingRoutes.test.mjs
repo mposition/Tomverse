@@ -116,3 +116,15 @@ test("the locale aliases stay routable so a redirect target is never a 404", () 
     assert.equal(isStaticMarketingPathname(path), true, `${path} must be a static marketing route`);
   }
 });
+
+test("the Assistant and Knowledge guide uses the static marketing CSP path", () => {
+  assert.equal(
+    isStaticMarketingPathname("/guides/assistant-knowledge"),
+    true
+  );
+  assert.equal(
+    isStaticMarketingPathname("/guides/assistant-knowledge/poster"),
+    false,
+    "the poster is an image response, not an HTML file with inline hashes"
+  );
+});

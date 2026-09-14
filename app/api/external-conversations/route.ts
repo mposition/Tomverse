@@ -1,4 +1,8 @@
 import { NextResponse } from "next/server";
+import {
+    DISPLAY_TIME_ZONE_HEADER,
+    effectiveDisplayTimeZone,
+} from "@/lib/continuationTitleContext";
 import { getServerSession } from "next-auth";
 import {
     apiSecurityResponse,
@@ -56,6 +60,11 @@ export async function GET(req: Request) {
                 fallback: 50,
                 max: 100,
             }),
+            // Formatting only: the date in a continuation's fallback name
+            // (lib/continuationTitleContext.ts).
+            timeZone: effectiveDisplayTimeZone(
+                req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+            ),
         });
         return NextResponse.json(
             { ...result, continuationEnabled },

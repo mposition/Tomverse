@@ -10,6 +10,16 @@ import {
 } from "@/lib/exportConversation";
 import { hasConversationUnlockGrant } from "@/lib/conversationLock";
 import {
+    CONTINUATION_NAMING_BRIDGE_SELECT,
+    DISPLAY_TIME_ZONE_HEADER,
+    continuationExportTitle,
+    effectiveDisplayTimeZone,
+    type ContinuationNamingBridge,
+} from "@/lib/continuationTitleContext";
+import { continuationExportCopy } from "@/lib/continuationExportCopy";
+import { continuationExportProvenance } from "@/lib/continuationSharingPolicy";
+import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
+import {
     apiSecurityResponse,
     consumeApiRateLimit,
 } from "@/lib/apiSecurity";
@@ -20,6 +30,48 @@ import {
 
 const MESSAGE_PAGE_SIZE = 20;
 const MAX_EXPORTED_CONVERSATIONS = 2_000;
+
+/**
+ * One conversation's header, written as the single export writes it: the
+ * title the conversation list shows, and for a continuation the §9 provenance
+ * lines (docs/policy/external-conversation-continuation.md §9). Without them a
+ * continuation in this file reads as if Tomverse had produced every answer
+ * with nothing before it.
+ */
+function exportHeader(
+    conversation: {
+        title: string;
+        createdAt: Date;
+        continuationBridge: (ContinuationNamingBridge & {
+            sourceImportedAt: Date;
+        }) | null;
+    },
+    personalizationNotice: string | undefined,
+    timeZone: string,
+    copy: ReturnType<typeof continuationExportCopy>
+) {
+    const bridge = conversation.continuationBridge;
+    const { title, headerLines } = continuationExportTitle({
+        storedTitle: conversation.title,
+        bridge,
+        timeZone,
+        copy,
+    });
+    return formatConversationHeader(
+        { title, createdAt: conversation.createdAt },
+        personalizationNotice,
+        [
+            ...(bridge
+                ? continuationExportProvenance({
+                      providerLabel: continuationProviderDisplay(bridge.provider),
+                      importedAt: bridge.sourceImportedAt,
+                      sourceDeleted: bridge.externalConversationId === null,
+                  })
+                : []),
+            ...headerLines,
+        ]
+    );
+}
 
 export async function GET(req: Request) {
     try {
@@ -50,6 +102,18 @@ export async function GET(req: Request) {
                 title: true,
                 createdAt: true,
                 password: true,
+                // Read for the title and the §9 provenance lines, the two
+                // things the single export also writes for a continuation
+                // (lib/continuationDisplayTitle.ts,
+                // lib/continuationSharingPolicy.ts). The title and password
+                // are the same two columns the conversation list reads; the
+                // rest is the bridge's own provenance, not the source's words.
+                continuationBridge: {
+                    select: {
+                        ...CONTINUATION_NAMING_BRIDGE_SELECT,
+                        sourceImportedAt: true,
+                    },
+                },
             },
         });
         const exportable = conversations.filter((conversation) =>
@@ -61,6 +125,13 @@ export async function GET(req: Request) {
             )
         );
         const lockedCount = conversations.length - exportable.length;
+        // Formatting only: the date in a continuation's fallback title
+        // (lib/continuationTitleContext.ts).
+        const displayTimeZone = effectiveDisplayTimeZone(
+            req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+        );
+        // And the page's words for a continuation's fallback title.
+        const exportCopy = continuationExportCopy(req);
         // §13.3: resolved once for the whole archive, and unconditional
         // while injection is available — every conversation in the file
         // carries it, so the line discloses nothing about which of them
@@ -108,7 +179,7 @@ export async function GET(req: Request) {
                     headerPending = false;
                     controller.enqueue(
                         encoder.encode(
-                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${formatConversationHeader(conversation, personalizationNotice)}\n`
+                            `${conversationIndex > 0 ? "\n\n##################################################\n\n\n" : ""}${exportHeader(conversation, personalizationNotice, displayTimeZone, exportCopy)}\n`
                         )
                     );
                     return;

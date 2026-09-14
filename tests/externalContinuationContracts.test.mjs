@@ -306,6 +306,15 @@ test("the share route and the export route both read this one module", () => {
         "utf8"
     );
     assert.match(exported, /continuationExportProvenance/);
+    // The account-wide export writes the same lines for each continuation in
+    // it; without them a continuation there reads as if every answer came
+    // from Tomverse with nothing before it.
+    const exportedAll = readFileSync(
+        "app/api/conversations/export-all/route.ts",
+        "utf8"
+    );
+    assert.match(exportedAll, /continuationExportProvenance\(/);
+    assert.match(exportedAll, /sourceDeleted: bridge\.externalConversationId === null/);
 });
 
 /* ----------------------------------------------------------- export (§9) */
@@ -422,33 +431,57 @@ test("every route that can lead into a conversation reports its surface", () => 
     }
 
     /*
-      The one exception, and it is the list's alone: the imported
-      conversation's own title, for a row still carrying the writer's
+      The one exception among these three, and it is the list's alone: the
+      imported conversation's own title, for a row still carrying the writer's
       placeholder (lib/continuationDisplayTitle.ts). Read here rather than
       copied onto the row at creation, because deleting a snapshot leaves the
-      continuation standing and a stored copy would outlive the deletion.
+      continuation standing and a stored copy would outlive the deletion. (The
+      TXT exports read the same two columns, to name the file what the list
+      names the row -- tests/conversationExportFilename.test.mjs.)
 
       Gated on the snapshot having no password: a locked source withholds its
-      transcript, and its title is part of that transcript.
+      transcript, and its title is part of that transcript. The gate is
+      `readableContinuationSourceTitle()`, so the list and the exports cannot
+      decide it differently.
     */
     const list = readFileSync("app/api/conversations/route.ts", "utf8");
     assert.match(list, /externalConversation: \{\s*\n?\s*select: \{ title: true, password: true \}/);
-    assert.match(list, /externalConversation\?\.password === null/);
+    assert.match(list, /sourceTitle: readableContinuationSourceTitle\(/);
     // The password is read to decide, never emitted -- exactly as this query
     // already treats the conversation's own.
     assert.doesNotMatch(list, /password: conv\./);
 
-    // The other two routes need only the answer.
-    for (const path of [
-        "app/api/conversations/[conversationId]/route.ts",
-        "app/api/conversations/search/route.ts",
+    // The detail route needs only the answer.
+    assert.match(
+        readFileSync("app/api/conversations/[conversationId]/route.ts", "utf8"),
+        /continuationBridge: \{ select: \{ id: true \} \}/,
+        "the detail route should select the bridge's existence and nothing else"
+    );
+    // Search names the conversation behind each hit, so it reads the shared
+    // naming select (lib/continuationTitleContext.ts): the source's title and
+    // password, the provider, the creation time and whether the source still
+    // exists -- and none of the provenance forbidden above.
+    assert.match(
+        readFileSync("app/api/conversations/search/route.ts", "utf8"),
+        /continuationBridge: \{ select: CONTINUATION_NAMING_BRIDGE_SELECT \}/
+    );
+    const naming = readFileSync("lib/continuationTitleContext.ts", "utf8");
+    const selectStart = naming.indexOf("export const CONTINUATION_NAMING_BRIDGE_SELECT");
+    const selectBody = naming.slice(selectStart, naming.indexOf("} as const;", selectStart));
+    assert.ok(selectStart > 0 && selectBody.length > 0);
+    for (const forbidden of [
+        "sourceConversationDigest",
+        "sourceDigestVersion",
+        "contextSeedVersion",
+        "seedFromOrdinal",
+        "seedToOrdinal",
+        "seedMessageCount",
+        "sourceImportedAt",
     ]) {
-        assert.match(
-            readFileSync(path, "utf8"),
-            /continuationBridge: \{ select: \{ id: true \} \}/,
-            `${path} should select the bridge's existence and nothing else`
-        );
+        assert.ok(!selectBody.includes(forbidden), `the naming select must not read ${forbidden}`);
     }
+    // The source's password decides; it is never emitted.
+    assert.doesNotMatch(naming, /password: bridge\./);
 });
 
 const routingClient = readFileSync("app/(site)/(application)/chat/ChatPageClient.tsx", "utf8");

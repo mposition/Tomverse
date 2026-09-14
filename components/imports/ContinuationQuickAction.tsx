@@ -9,6 +9,11 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { useContinuationLauncher } from "@/components/imports/useContinuationLauncher";
 import { continuationPath } from "@/lib/continuationRoutes";
 import {
+    continuationRowTitle,
+    type ContinuationRowNaming,
+} from "@/lib/continuationTitleContext";
+import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
+import {
     interpolate,
     secondaryButtonClass,
 } from "@/components/imports/importFormatting";
@@ -52,11 +57,11 @@ export function ContinuationQuickAction({
     locked: boolean;
     continuationCount: number;
     latestContinuationId: string | null;
-    continuations: {
+    continuations: ({
         conversationId: string;
         title: string | null;
         createdAt: string;
-    }[];
+    } & Partial<ContinuationRowNaming>)[];
 }) {
     const { t } = useLanguage();
     const router = useRouter();
@@ -192,9 +197,20 @@ export function ContinuationQuickAction({
                                 }}
                             >
                                 <span className="block truncate font-semibold">
-                                    {entry.title?.trim()
-                                        ? entry.title
-                                        : t("continuation.quickUntitled")}
+                                    {/* The name the sidebar gives the same
+                                        conversation. The stored title of an
+                                        unnamed continuation is the writer's
+                                        placeholder, which this menu used to show. */}
+                                    {continuationRowTitle(
+                                        {
+                                            storedTitle: entry.title ?? "",
+                                            isContinuation: true,
+                                            sourceTitle: entry.sourceTitle,
+                                            sourceProvider: entry.sourceProvider,
+                                            fallbackTitleDate: entry.fallbackTitleDate,
+                                        },
+                                        continuationTitleCopy(t)
+                                    ) || t("continuation.quickUntitled")}
                                 </span>
                                 <span className="mt-0.5 block text-xs text-zinc-500">
                                     {new Date(

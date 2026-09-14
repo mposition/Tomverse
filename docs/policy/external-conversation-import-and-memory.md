@@ -1409,6 +1409,15 @@ flag를 순서 때문에 되돌리지는 않습니다.
 | B | 선택 source chunk의 extraction provider 전송, 승인 memory/style의 chat provider 전송(비교 시 여러 provider), extraction model·credit, candidate/active 보존, 조회·수정·비활성화·전체 export·delete-all, 민감 후보 검토 정책, source lock·suspension 동작 |
 | C | instructions 저장, knowledge file 저장·분석, knowledge excerpt의 provider 전송, 보존·삭제, private 기본, share snapshot 제외, marketplace·connector 미지원 |
 
+Release C의 사용법·활성화 분석은 기존 analytics 동의 경계를 그대로 따릅니다.
+가이드 조회, 단계 설명 열기, 실제 설정 단계 완료, Knowledge 업로드 성공만 별도
+이벤트로 기록하며 새 속성은 `create_assistant | add_knowledge | start_chat`의 닫힌
+enum 하나입니다. profile id, 이름, description, instructions, 파일명, 파일 크기,
+chunk 수, 질문과 답변은 이벤트 schema에 자리가 없고 strict 검증이 알 수 없는
+속성을 포함한 이벤트 전체를 거절합니다. 이 분석 정보는 기능 제공에 필요한
+Knowledge 저장·provider 전송과 별개이며, analytics에 동의하지 않은 사용자에게는
+전송하지 않습니다.
+
 검증: 신규 key 존재·비어 있지 않음·parity·금지 문구는 **정적 테스트**, E2E는
 ko/en 대표 렌더링만. 7개 locale 전체 privacy E2E matrix를 만들지 않습니다.
 
