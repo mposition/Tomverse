@@ -822,8 +822,8 @@ AGENTS.md의 accent token 규칙 2번("역할이 다르면 값이 같아도 분�
 | bounce/complaint | webhook | webhook | SNS/EventBridge | webhook | webhook | 있음 | 있음 |
 | webhook 서명 | **Svix 서명** + `svix-id` 중복 제거 | 기본 인증/서명 | SNS 서명 검증 | 서명 | 서명 | 있음 | 있음 |
 | idempotency | **Idempotency-Key 24h(이미 사용 중)** | 없음(직접 구현) | 없음(직접 구현) | 없음 | 없음 | 해당 없음 | 해당 없음 |
-| **데이터 리전** | **미국 저장.** domain region은 라우팅·발송 위치일 뿐 저장 위치를 바꾸지 않음. Free/Pro/Scale email·log 기본 30일 | 미국 | **리전 선택 가능**(`ap-northeast-2` 서울, `eu-central-1` 등) | 미국/EU | 미국/EU | 미국/EU | 다중 |
-| 개인정보 조건 | 계정 가입으로 DPA 체결, EU SCC Module 2·UK Addendum·Swiss 수정조항 편입. EU-US DPF + UK Extension은 2026-09-14 현재 `Active - Re-certification under Review`. EU·UK fallback 부속정보 문의는 DPF 중단·감사·고위험 처리 시 실행. 공개 subprocessor 22개, 변경 14일 통지 | SOC 2 | AWS DPA, 다수 인증 | 인증 다수 | 인증 다수 | 인증 다수 | 인증 다수 |
+| **데이터 리전** | **미국 저장. EU 리전 없음.** DPF 인증 + SCC | 미국 | **리전 선택 가능**(`ap-northeast-2` 서울, `eu-central-1` 등) | 미국/EU | 미국/EU | 미국/EU | 다중 |
+| 개인정보 조건 | SOC 2 Type II, GDPR, EU-US DPF + UK Extension, 공개 subprocessor 목록 | SOC 2 | AWS DPA, 다수 인증 | 인증 다수 | 인증 다수 | 인증 다수 | 인증 다수 |
 | deliverability 기능 | 도메인 인증, 전용 IP 옵션 | **평판 관리가 강점**, 엄격한 가입 심사 | 직접 관리 | 있음 | 있음 | 발송은 위탁 | 발송은 위탁 |
 | 전용 IP 필요 시점 | 월 수십만 통 이상 | 동일 | 동일 | 동일 | 동일 | - | - |
 | 개발 복잡도 | **낮음(이미 통합됨)** | 낮음 | **높음** | 보통 | 보통 | 보통 | 높음 |
@@ -2632,14 +2632,13 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | Q8 | 발신자 정보로 표시할 **법인명, 사업자등록번호, 통신판매업 신고번호, 물리적 주소, ABN**의 실제 값은? | C4, E3. 값이 없으면 marketing 자체가 불가 | 모든 marketing 발송 |
 | Q9 | 아동 사용자가 실제로 존재할 수 있는가? 연령 확인을 하는가? **어느 기준값을 쓸 것인가** — GDPR 제8조는 기본 16세(회원국이 13세까지 하향 가능), 한국 14세, 영국·미국 13세 | 5.4. **이메일이 아니라 가입·개인정보 처리 정책의 결정** | 가입 플로우, marketing opt-in UI 제공 여부 |
 | Q10 | 미국 **주별 개인정보법**(CCPA 등) 중 이메일 마케팅에 실제로 영향을 주는 요건이 있는가? GPC 신호를 존중해야 하는가? | 4.3 미국. 2026년 현황 미확인 | 미국 marketing |
-| **Q11 (부분 해소 2026-09-14)** | Resend 공개 문서상 **모든 계정은 가입으로 DPA가 체결**되고 EU SCC Module 2·UK Addendum·Swiss 수정조항이 편입된다. EU–U.S. DPF와 UK Extension의 활성 상태도 직접 확인했다. 계정 Documents에서 받은 PDF는 공식 공개 사전서명본과 SHA-256까지 동일해 별도 Customer 명칭·효력일·Annex가 없었다. EU SCC Annex I.C 관할 감독기관과 UK Addendum Part 1 필수정보도 명시적으로 완성되어 있지 않지만, 현재 활성 DPF가 적용되는 이전의 선행조건은 아니다. Swiss 수정조항은 FDPIC를 지정한다. **Resend 문의는 현재 보류**하고 DPF 중단·기업 감사·감독기관 요구·고위험 처리 시에만 실행한다. 남은 현재 조치는 계정 명의자와 확인 가능한 최초 계정·결제일의 내부 기록, TIA 대표 승인, subprocessor·미국 저장·보관기간의 개인정보처리방침 반영이다. 정확한 Terms 수락일을 찾지 못해도 현재 발송을 차단하지 않는다. 두 발송 domain의 open/click tracking 비활성은 화면으로 확인했다. | [Resend DPA·SCC 검토 기록](../../.github/audits/resend-dpa-scc-review-2026-09-14.md) | 현재의 비민감 transactional 발송은 계속 가능. Resend 문의는 fallback 재검토 조건 발생 전까지 보류. Swiss는 수정 SCC에 의존 |
+| Q11 | Resend의 **DPA를 체결했는가?** subprocessor 목록을 개인정보처리방침에 반영했는가? | GDPR 제28조 처리자 계약 | 모든 발송(현재도!) |
 | Q12 | 개인정보처리방침에 **이메일 마케팅과 이메일 관련 처리**가 기재되어 있는가? (현재 `PrivacyPolicy` 컴포넌트에 marketing 관련 문구 없음 — 2.5 조사 결과) | 고지 없이 처리 불가 | marketing 활성화 |
 | ~~Q13~~ | **해결(v3).** 시행령상 의무는 수신동의 사실·동의일·유지/철회 방법의 **고지**이며, 무응답 자동 만료 규정은 확인되지 않음. 자동 opt-out 기본 OFF(5.5)가 맞음 | — | 해소 |
 | **Q14** | 확인 고지에 담을 문구가 시행령이 요구하는 사항(전송자 명칭, 수신동의 날짜와 사실, 유지/철회 의사표시 방법)을 충족하는가? 고지 자체가 광고로 읽히지 않는가? | 고지에 판촉이 섞이면 광고성 정보가 되어 `(광고)` 표시 대상 | 확인 고지 템플릿 |
 | ~~Q15~~ | **해결(v3).** suppression은 **region 내 계정 전체**에 적용되며 도메인을 구분하지 않음. 질문이 아니라 **확인된 제약**이 되었고 5.3.1로 옮겼습니다 | — | 해소. 대신 **A18**(계정 분리 결정)이 생김 |
 | ~~Q17~~ | **해소(v4).** 방식 B가 승인되어 평문 자격증명을 저장하지 않습니다 | — | 해소 |
 | **Q16** | 발송 본문의 개인화 입력(`renderDataSnapshot`)을 90일 보관하는 것이 최소수집 원칙에 부합하는가? legal 분류 7년 보관은? | 10.3, 13.2 | 감사 재현 설계 |
-| **Q18 (검토·사업 결정 완료, 지정 실행 대기 2026-09-14)** | 호주 1인 사업자인 Tomverse에 GDPR 제27조 EU 대리인이 필요한가? **필요성이 매우 높다.** EU 언어·SEO, EUR 시장·결제와 EU 전용 동의 흐름은 제3조 제2항의 의도적 EU 서비스 제공 신호이고, 계정·대화·결제 처리는 통상적인 SaaS 핵심 업무라 `occasional` 예외를 쓰기 어렵다. 직원 수·무료 플랜·소수 이용자는 별도 면제가 아니다. Railway production의 privacy-safe aggregate에서는 저장된 EEA 계정·분석·EUR 거래 신호가 모두 0이었지만, nullable country·opt-in 분석·유한 보관·별도 infrastructure log 때문에 부재 증명은 아니다. **Tomverse 대표는 EU를 출시 지역에 유지하고 EU 대리인을 최대한 빠른 시일 내 지정하기로 2026-09-14 승인했다.** 지정 완료 전 기간은 면제로 간주하지 않고 알려진 일시적 compliance gap으로 기록한다. | [EU 대리인 검토 기록](../../.github/audits/gdpr-article-27-eu-representative-review-2026-09-14.md) | provider·요금제 선택, 서면 위임, privacy notice 반영. 제품 전체 의무이며 marketing에 한정되지 않음 |
 
 ---
 
@@ -2677,8 +2676,6 @@ marketing 도메인 신설 시 4~6주 warm-up:
 ### 규제 (관할권 / 확인일 2026-08-21)
 
 **EU/EEA**
-- [Regulation (EU) 2016/679 (GDPR) — 제3조·제27조, EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32016R0679)
-- [EDPB Guidelines 3/2018 — GDPR의 영토적 적용범위, 최종본](https://www.edpb.europa.eu/sites/default/files/files/file1/edpb_guidelines_3_2018_territorial_scope_after_public_consultation_en_1.pdf)
 - [Directive 2002/58/EC (ePrivacy Directive), 제13조 — EUR-Lex](https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX:32002L0058)
 - [EDPB Opinion 5/2019 — ePrivacy Directive와 GDPR의 상호작용](https://www.edpb.europa.eu/sites/default/files/files/file1/201905_edpb_opinion_eprivacydir_gdpr_interplay_en_0.pdf)
 - [EDPB Guidelines 1/2024 — legitimate interest](https://www.edpb.europa.eu/system/files/2024-10/edpb_guidelines_202401_legitimateinterest_en.pdf)
@@ -2747,19 +2744,6 @@ marketing 도메인 신설 시 4~6주 warm-up:
 - [Postmark — Best practices for bulk broadcast sending](https://postmarkapp.com/guides/best-practices-for-broadcast-sending)
 - [AWS — Using the Amazon SES account-level suppression list](https://docs.aws.amazon.com/ses/latest/dg/sending-email-suppression-list.html)
 - [AWS — Configuration set-level suppression](https://docs.aws.amazon.com/ses/latest/dg/sending-email-suppression-list-config-level.html)
-
-**2026-09-14 재확인:** Resend DPA·GDPR·region·Documents·message storage·subprocessor
-문서와 미국 상무부 DPF 명부를 다시 확인했다. DPA와 subprocessor 목록의 업데이트일은
-2026-08-27이다. DPF는 EU·UK Non-HR data에 대해 `Active - Re-certification under
-Review`이고 Swiss–U.S. DPF 표시는 없다. 상세 판정과 TIA 초안은
-[Resend DPA·SCC 검토 기록](../../.github/audits/resend-dpa-scc-review-2026-09-14.md)에
-보존한다. 공개 PDF에서 명시적으로 보이지 않는 SCC Annex I.C 관할 감독기관과 UK
-Addendum Part 1 정보는 현재 활성 DPF 이전의 선행조건으로 두지 않는다. Resend 문의는
-DPF 중단·기업 감사·감독기관 요구·고위험 처리 시에만 실행해 서면 답변 또는 보완문서를
-확보한다. 계정 Documents PDF는 공개 사전서명본과 바이너리가 같았다(SHA-256
-`F028A0D8C49850DCA8CA2959ECD6E853095C55017BF72395567B787DD44C42EF`). 두 발송
-domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이며, SMTP TLS는
-`Opportunistic`이다.
 - [AWS — Creating configuration sets in SES](https://docs.aws.amazon.com/ses/latest/dg/creating-configuration-sets.html)
 - [AWS — Regions and Amazon SES](https://docs.aws.amazon.com/ses/latest/dg/regions.html)
 - [AWS — Managing lists and subscriptions in Amazon SES](https://docs.aws.amazon.com/ses/latest/dg/lists-and-subscriptions.html)
@@ -2806,23 +2790,14 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
 | D8 | `renderedHash`는 **키 있는 HMAC + 키 버전**, 검증 키 보관 하한은 legal 7년 | 10.3-6, 10.3-7 |
-| D9 | **EU를 출시 지역에 유지하고 GDPR 제27조 EU 대리인을 최대한 빠른 시일 내 지정.** 지정 전 기간은 면제가 아니라 알려진 일시적 compliance gap | 21절 Q18, EU 대리인 검토 기록 |
 
 ### 착수 전 남은 것
 
 1. **`node_modules` 설치 후 Next 16.3.0 문서 확인**(2.1, A13). 이 문서에서
    유일하게 남은 미확인 항목입니다. Route Handler 시그니처, `after()` 지원 여부,
    캐시 기본값을 읽고 9.7의 배치를 확정합니다.
-2. **21절 법률 질문 후속.** Q8의 사업자 정보 실제 값은 marketing 활성화 전
-   필요합니다. Q11은 Customer 법적 명칭과 확인 가능한 최초 계정·결제일의 내부 기록,
-   TIA 대표 승인, `/privacy` 반영이 남았습니다. SCC/UK Addendum에 대한 Resend 문의는
-   DPF 중단·기업 감사·감독기관 요구·고위험 처리 전까지 보류하며, 정확한 Terms
-   수락일을 찾지 못하는 것만으로 현재 transactional 발송을 차단하지 않습니다.
-   Q18은 production aggregate 확인까지 완료했고 저장된 EEA 신호는 모두 0이었습니다.
-   대표는 2026-09-14 **EU 출시 유지 + EU 대리인을 최대한 빠른 시일 내 지정**을
-   승인했습니다. 사업 경로 결정은 끝났고 provider·요금제 선택, 서면 위임과
-   `/privacy` 반영이 남았습니다. 이 결정은 EU marketing의 Q1·Q8·Q12와 A18을
-   자동 해소하지 않습니다.
+2. **21절 법률 질문 전달.** Q8(사업자 정보 실제 값)과 Q11(Resend DPA)은
+   marketing과 무관하게 지금 진행 중인 발송에 걸립니다.
 3. **브랜치 정책 확인.** 현재 브랜치 `claude/saas-email-notification-architecture-764951`은
    이름에 `to-develop` 경로 조각이 없어 develop 자동 PR 대상이 아닙니다
    (AGENTS.md). 구현은 `claude/to-develop/...` 브랜치에서 진행하는 것을 권고합니다.
@@ -2847,12 +2822,9 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 A15는 확인된 사실로 판명되어 폐기, A16과 A19는 방식 B 확정으로 해소되었습니다.
 남은 항목은 위 "marketing 활성화 전에 결정할 것"에 정리되어 있습니다.
 
-**병렬로 시작할 수 있는 것:** 21절의 법률 질문 후속(Q13·Q15·Q17은 해결). Q8의
-사업자 정보 실제 값은 marketing 활성화 전까지 확정합니다. Q11의 공개 계약·계정
-PDF·tracking 설정 검토는 완료됐고, Customer 내부 기록과 `/privacy` 반영을 이어서
-진행합니다. 이 후속조치는 Resend 회신을 요구하지 않으며 현재 transactional 발송과
-MVP 착수를 차단하지 않습니다. SCC/UK Addendum에 대한 Resend 서면 문의는 정해진
-fallback 재검토 조건이 발생할 때만 실행합니다.
+**병렬로 시작할 수 있는 것:** 21절의 법률 질문 전달(Q13·Q15는 해결, Q17 신규). 특히 **Q8(사업자 정보
+실제 값)과 Q11(Resend DPA 체결 여부)**은 답이 없으면 아무것도 진행할 수 없습니다.
+Q11은 marketing과 무관하게 **지금 이미 발송 중이므로** 가장 급합니다.
 
 **MVP 착수는 위 A/B 결정만 있으면 가능합니다.** 5.3.1의 계정 분리 결정(A18)은
 marketing 활성화의 선행 조건이지 MVP의 선행 조건이 아닙니다 — MVP가 marketing을
