@@ -12,6 +12,43 @@
 
 ## 0. 개정 이력
 
+### v9 (2026-09-15) — double opt-in 설계 승인
+
+- [marketing 동의의 확인 단계](email-double-opt-in.md)를 승인했습니다. 승인자
+  `mposition`, 승인일 2026-09-15. 문서는 `-draft` 접미사를 뗐습니다.
+- **승인된 것은 설계이고 구현이 아닙니다.** 설계 §11의 체크리스트 11항목은 아직
+  하나도 실행되지 않았고, 착수는 별도입니다. §15.2에
+  `feature.emailConsentConfirmationEnabled`가 "만들되 끄는 것"으로 추가됐습니다.
+- 결정된 둘: **도입 시점은 marketing 활성화 전**, 그리고 **관할권별 분기를 두지
+  않는 전역 적용**(설계 §9).
+- **설계 §7이 측정으로 닫혔습니다.** 확인 메일을 돌려야 할 기존 사용자가 0명입니다
+  (v8의 실측). 그 절이 가장 어렵게 다룬 문제 — 동의 없는 상대에게 가는 확인
+  메일은 그 자체가 상업 전자 메시지라 보낼 수 없다는 것 — 의 대상이 없습니다.
+  **금지 자체는 유지됩니다**: 미확인 상태는 앞으로도 생기고 그때 같은 규칙이
+  적용됩니다.
+- 남은 사실 하나: Q1이 "인증된 세션의 동의로 독일 기준 충족"으로 회신되면 이
+  설계는 폐기가 아니라 **재검토** 대상이 됩니다. 승인은 그 회신과 무관하게
+  넣는다는 쪽을 고른 것이며, 근거는 설계 §2의 셋입니다.
+
+### v8 (2026-09-15) — Q2 해소: 전역 opt-in과 soft opt-in 미사용 승인
+
+- 선택지 **A — C1 + C8 현행 유지**를 승인했습니다. 승인자 `mposition`, 효력일
+  2026-09-15. **코드는 바뀌지 않았습니다** — 이미 구현된 상태를 승인한 것입니다.
+- **판정 근거는 운영 실측입니다.** 계정 78개, 세 marketing purpose 모두
+  `enabled` 0 · `provable` 0 · `unprovable` 0 · `sendable` 0
+  (2026-09-15 03:15Z, `GET /api/admin/marketing-reach`).
+- **21절 Q2의 영향란이 전제한 "크게 줄어들 대상"이 존재하지 않았습니다.** 그리고
+  대안 둘 다 소급되지 않습니다 — soft opt-in은 취득 맥락 데이터가 없고,
+  미국·싱가포르 opt-out은 `ensureDefaultPreferences()`가 `skipDuplicates: true`로
+  넣으므로 기존 행에 닿지 않습니다. 어느 쪽을 골라도 오늘 도달 가능한 사람은
+  0명이고, 선택은 과거가 아니라 앞으로 모으는 속도에 대한 것이었습니다.
+- 부수 확인: `unprovable`이 0이므로 **DOI 도입 시 재동의가 필요한 인구가
+  없습니다.** 설계안 §7이 가장 어렵게 다룬 문제(이미 켜 둔 미확인 사용자에게
+  확인 메일을 보낼 수 없음)의 대상이 0입니다.
+- 이로써 `feature.emailMarketingEnabled`의 21절 선행 조건은 **Q1 하나만**
+  남았습니다. 근거는
+  [Q2 도달 범위 결정 기록](../ops/q2-marketing-reach-decision.md) §2.1.
+
 ### v7 (2026-09-14) — Q12 해소: 방침에 이메일 처리 고지
 
 - `/privacy`에 **"보내 드리는 이메일"** section을 추가했습니다. 승인자 `mposition`,
@@ -64,7 +101,7 @@
 |---|---|---|
 | 1 | 전체 아키텍처 (Resend 유지 + 얇은 port, outbox, consent/suppression/jurisdiction 분리) | **승인** |
 | 2 | credential lane은 **방식 B** — 자격증명 미저장, 요청 내 재시도, 사용자 재요청으로 복구 | **승인** |
-| 3 | marketing은 production 비활성. ~~suppression 경계 결정(A18)~~ **A18은 2026-09-14 해소**(별도 계정). 남은 차단 사유는 Q1 외부 자문·Q2, DMARC 관측, warm-up, 관할권 정책 version 활성화입니다(**Q12는 2026-09-14 해소**) | **승인** |
+| 3 | marketing은 production 비활성. ~~suppression 경계 결정(A18)~~ **A18은 2026-09-14 해소**(별도 계정). 남은 차단 사유는 Q1 외부 자문, DMARC 관측, warm-up, 관할권 정책 version 활성화입니다(**Q12는 2026-09-14, Q2는 2026-09-15 해소**) | **승인** |
 | 4 | 구현 착수는 아래 정합성 5건 반영 후 | **반영 완료** |
 
 **명칭 변경:** `fast lane` -> **`credential synchronous lane`**.
@@ -2354,10 +2391,11 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
-| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1·Q2** 회신. Q8·Q12는 2026-09-14 해소 |
+| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1** 회신 하나만 남았습니다. Q8·Q12는 2026-09-14, **Q2는 2026-09-15** 해소 |
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
 | `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
+| **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). 구현은 미착수 — [설계](email-double-opt-in.md) §11. marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
 | quiet hours 억제 | 정책으로 제어 | Q4 |
 
@@ -2682,7 +2720,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | # | 질문 | 왜 중요한가 | 막히는 것 |
 |---|---|---|---|
 | **Q1 (부분 해소 2026-09-14)** | **내부 검토 완료.** 회원국별 차이는 대부분 C1·C8이 이미 포기한 영역(프랑스의 B2B 완화, 독일 §7(3) 예외)에 있어 EEA 30개국은 **단일 strict profile로 운영 가능**합니다. 스위스는 EEA가 아니고 법령·감독·이전 근거가 달라 **분리**합니다(profile 8→9). 독일은 B2B/B2C를 가르지 않으며 입증책임이 발신자에게 있어 DOI를 **정책으로** 채택합니다(법령상 의무가 아님). DDG §6·L.34-5의 '발신자·상업적 성격 은폐 금지'는 전역 적용. 오스트리아 ECG-Liste는 soft opt-in 경로 조건이라 C8상 해당 없음으로 보되 첫 AT 발송 전 확인. **이 기록은 30개국 현지법 의견서가 아니며**, 실제로 읽은 것은 DE·FR·AT·CH 넷입니다 | [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) | 남은 것: 그 넷 밖 국가의 첫 캠페인 전 국가별 확인, 제27조 대리인(Q18) |
-| Q2 | 전역 opt-in(C1)과 soft opt-in 미사용(C8) 결정을 승인하는가? 사업적으로 감당 가능한가? **결정 자료: [Q2 도달 범위 결정 기록](../ops/q2-marketing-reach-decision.md)** — 선택지 셋, 각각 치르는 것, 실제 수를 구하는 `npm run report:marketing-reach` | 영향란의 "크게 줄임"은 줄어들 목록이 있다는 전제이고, **그 전제는 아직 확인되지 않았습니다** — 세 purpose의 기본값이 off이고 가입 동의 수집 화면이 없으므로 현재 켜진 사람은 preference centre에서 직접 켠 사람뿐입니다 | marketing 전략 |
+| ~~Q2~~ | **해소 (2026-09-15 승인, 승인자 `mposition`, 효력일 2026-09-15). 선택지 A — C1 + C8 현행 유지.** 근거는 운영 실측입니다: 계정 78개, 세 marketing purpose 모두 `enabled` **0**, `provable` 0, `unprovable` 0, `sendable` 0(2026-09-15 03:15Z, `GET /api/admin/marketing-reach`). **영향란이 전제한 "크게 줄어들 대상"이 존재하지 않았습니다** — C1·C8이 치르는 것은 지금 잃는 사람이 아니라 앞으로 모으는 속도이고, 대안(soft opt-in, 미국·싱가포르 opt-out)도 소급되지 않아 같은 0에서 시작합니다 | [Q2 도달 범위 결정 기록](../ops/q2-marketing-reach-decision.md) §2.1 | 해소. **코드 변경 없음** — 이미 구현된 상태를 승인한 것입니다. 부수 확인: `unprovable` 0이므로 DOI 도입 시 재동의가 필요한 인구가 없습니다 |
 | Q3 | 약관/개인정보처리방침/가격 변경 시 **사전 통지 기간**이 관할권별로 얼마인가? | 5번 유형의 발송 시점을 정함 | 정책 변경 프로세스 |
 | Q4 | **정보통신망법 제50조제3항의 야간 전송 제한에서 전자우편이 시행령상 예외 매체에 해당하는가?** | E5의 적용 여부. 확인 전까지 억제 기본값 | 한국 marketing 발송 시간 |
 | Q5 | 일본 특정전자메일법의 **동의 증명 기록 보존 기간**이 우리 사례에 정확히 어떻게 적용되는가? | 13.2 보관 정책 | 일본 진출 시 |
@@ -2860,7 +2898,7 @@ domain은 tracking subdomain 미구성으로 open/click tracking이 비활성이
 | D1 | 제공자는 **Resend 유지**, `lib/email.ts` 자리에 얇은 `EmailProviderPort`. 구현체는 하나 | 8.1, 8.2 |
 | D2 | **outbox 도입** — 2.4의 fire-and-forget 경로를 전부 큐로 | 9.1, 15 M1 |
 | D3 | credential은 **방식 B / credential synchronous lane**. 자격증명 미저장, 자동 재발송 없음 | 9.4a-3 |
-| D4 | **전역 opt-in(C1)**, **soft opt-in 미사용(C8)** | 5.1, 5.6 |
+| D4 | **전역 opt-in(C1)**, **soft opt-in 미사용(C8)** | 5.1, 5.6 — **승인됨 (2026-09-15, `mposition`).** 21절 Q2 |
 | D5 | 관할권은 **IP 단독으로 판정하지 않음**. marketing은 확정된 관할권을 요구하고, 미확정이면 보류 | 6.2, 6.3 |
 | D6 | 국가별 규칙은 **`JurisdictionProfile` + `EmailPolicyVersion`** 데이터. profile 8개 + 국가 매핑 (**v5에서 9개** — 데이터 변경이라는 D6의 취지 그대로입니다) | 10.2 |
 | D7 | **MVP는 Resend transactional 전용.** marketing 도메인·API 키를 만들지 않음 | 5.3.1, 15 M1b |
