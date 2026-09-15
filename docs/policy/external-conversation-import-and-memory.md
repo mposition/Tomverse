@@ -1001,6 +1001,15 @@ adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 
   - 삭제 확인은 `?include=memoryImpact`로 영향 건수를 **먼저** 조회합니다.
     선택은 `?derivedMemories=`·`?editedMemories=`(`delete|suspend`)로 전달하며,
     없거나 알 수 없는 값이면 위 기본값을 씁니다.
+  - **삭제의 분류와 추출 저장은 직렬화합니다**(MEM-SOURCE-DELETE-01). 두 삭제
+    경로는 import·snapshot 행 잠금 뒤, memory를 분류하기 **전에** 계정의 memory
+    잠금(`lib/memoryItemLock.ts`의 `lockAccountMemoryItems()`)을 잡습니다. 추출
+    저장·수동 memory 쓰기도 같은 함수를 씁니다. 그러지 않으면 분류와 cascade 사이에
+    커밋된 후보가 분류에서 빠지고 evidence만 지워져, 근거 없는 파생 문장이 남습니다
+    — 그런 행을 찾아 정리하는 sweep은 없습니다. 잠금 순서는 `ExternalImport` →
+    `ExternalConversation`(id 순) → memory 잠금이며, memory 잠금 보유자는 이 행들을
+    기다리지 않습니다(evidence 검증은 잠금 없는 읽기, evidence FK는
+    `ExternalMessage`만 참조).
 - memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.

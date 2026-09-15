@@ -3,6 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import {
     SOURCE_TITLE_PRESERVATION_STALE,
     judgeTitlePreservation,
@@ -792,6 +793,9 @@ async function conversationIdsForScope(
  *
  *   1. the owning `ExternalImport` row, `FOR UPDATE`
  *   2. the `ExternalConversation` rows being deleted, `FOR UPDATE`, by id
+ *   3. the account's memory lock, `lockAccountMemoryItems()` -- taken by the
+ *      callers right after these two, before memories are classified
+ *   4. continuation `Conversation` rows a kept title is written to, by id
  *
  * The single-snapshot delete used to take none up front: it wrote the memory
  * rows, the bridges and the snapshot, and only then updated the parent import's
@@ -942,6 +946,10 @@ export async function deleteExternalConversationSnapshot(
 ) {
     return prisma.$transaction(async (tx) => {
         const row = await lockSnapshotForDeletion(tx, userId, conversationId);
+        // Before the memories are classified: an extraction must not commit a
+        // candidate backed by this snapshot between that classification and
+        // the cascade (lib/memoryItemLock.ts).
+        await lockAccountMemoryItems(tx, userId);
         const titlesPreserved = await preserveContinuationTitles(
             tx,
             userId,
@@ -1698,6 +1706,11 @@ export async function deleteExternalImport(
         // `lockSnapshotForDeletion()` documents and the single-snapshot delete
         // takes too.
         await lockImportSnapshotsForDeletion(tx, row.id);
+        // Then the account's memory lock, before either branch reads or writes
+        // memory-backed rows (lib/memoryItemLock.ts). The open branch touches
+        // no memory, but taking it in one place keeps the order the same for
+        // every source deletion.
+        await lockAccountMemoryItems(tx, userId);
         // A sealed-but-unfinalized import is cancelled exactly like an
         // unsealed one: seal is a completeness statement about the upload,
         // not a commitment to save anything (§5.5).

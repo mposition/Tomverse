@@ -85,3 +85,51 @@ test("the whole-import delete locks the import, then its snapshots, before its f
     assert.ok(snapshotLock < indexOfOrFail(body, "isOpenImportStatus(row.status)", "import"));
     assert.equal(body.split("lockImportSnapshotsForDeletion(").length - 1, 1);
 });
+
+/* ------------------------------------------- memory lock (MEM-SOURCE-DELETE-01) */
+
+test("both deletions take the account's memory lock after their row locks and before any memory read or write", () => {
+    for (const [name, rowLock] of [
+        ["deleteExternalConversationSnapshot", "lockSnapshotForDeletion(tx, userId, conversationId)"],
+        ["deleteExternalImport", "lockImportSnapshotsForDeletion(tx, row.id)"],
+    ]) {
+        const body = functionBody(name);
+        const rows = indexOfOrFail(body, rowLock, name);
+        const memory = indexOfOrFail(body, "lockAccountMemoryItems(tx, userId)", name);
+        assert.ok(rows < memory, `${name}: row locks before the memory lock`);
+        for (const later of [
+            "preserveContinuationTitles(",
+            "applySourceDeletionToMemories(",
+            "markContinuationSourcesDeleted(",
+        ]) {
+            assert.ok(memory < indexOfOrFail(body, later, name), `${name}: memory lock before ${later}`);
+        }
+        assert.equal(body.split("lockAccountMemoryItems(").length - 1, 1, `${name} takes it once`);
+    }
+    // The whole-import delete takes it before its status branch too.
+    const whole = functionBody("deleteExternalImport");
+    assert.ok(
+        whole.indexOf("lockAccountMemoryItems(tx, userId)") <
+            whole.indexOf("isOpenImportStatus(row.status)")
+    );
+});
+
+test("every memory writer uses the one lock function, never its own key string", () => {
+    const helper = readFileSync("lib/memoryItemLock.ts", "utf8");
+    assert.match(helper, /hashtext\(\$\{"memory-items:" \+ userId\}\)/);
+    for (const path of [
+        "lib/memoryService.ts",
+        "lib/memoryExtractionPersistence.ts",
+        "lib/externalImportService.ts",
+    ]) {
+        const code = readFileSync(path, "utf8");
+        assert.match(code, /lockAccountMemoryItems\(/, path);
+        assert.doesNotMatch(code, /"memory-items:"/, `${path} must not spell the key itself`);
+    }
+    // The persistence step still takes it before its first memory read.
+    const persistence = readFileSync("lib/memoryExtractionPersistence.ts", "utf8");
+    assert.ok(
+        persistence.indexOf("await lockAccountMemoryItems(tx, input.userId)") <
+            persistence.indexOf("tx.memoryItem.deleteMany(")
+    );
+});

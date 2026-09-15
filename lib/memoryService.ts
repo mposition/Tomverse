@@ -18,6 +18,7 @@ import {
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -35,11 +36,13 @@ import { prisma } from "@/lib/prisma";
 
 const REVIEWABLE_STATUSES = ["candidate", "manual_review_required"] as const;
 
+// The shared per-account memory lock (lib/memoryItemLock.ts). Imported source
+// deletions take the same one, which is what keeps a deletion's memory
+// classification and an extraction's writes from interleaving.
 const acquireUserMemoryLock = (
     tx: Prisma.TransactionClient,
     userId: string
-) =>
-    tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"memory-items:" + userId}))`;
+) => lockAccountMemoryItems(tx, userId);
 
 type StoredEvidence = {
     id: string;
