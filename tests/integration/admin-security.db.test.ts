@@ -851,3 +851,59 @@ test("an approval already being carried out refuses a sole execution of the same
     );
   });
 });
+
+test("a claim just before the approval lapses keeps blocking a sole execution while it runs", async () => {
+  const admin = await createAdminSession("near-expiry-owner");
+  const reviewer = await createAdminSession("near-expiry-reviewer");
+  const input = planAdjustInput(admin);
+  await prisma.adminActionApproval.create({
+    data: {
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      status: "approved",
+      payload: input.payload,
+      payloadHash: approvalPayloadHash(input.payload),
+      requestedById: admin.session.user?.id,
+      reviewedById: reviewer.session.user?.id,
+      reviewedAt: new Date(),
+      expiresAt: new Date(Date.now() + 2_000),
+    },
+  });
+  let release: () => void = () => undefined;
+  const running = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let ordinaryStarted: () => void = () => undefined;
+  const started = new Promise<void>((resolve) => {
+    ordinaryStarted = resolve;
+  });
+  const ordinary = withSoleAdmin(
+    [admin.session.user?.email as string, reviewer.session.user?.email as string],
+    () =>
+      runWithAdminApproval(input, async () => {
+        ordinaryStarted();
+        await running;
+      })
+  );
+  await started;
+  // Past the approval's original deadline, with the ordinary run still going.
+  await new Promise((resolve) => setTimeout(resolve, 2_500));
+  try {
+    await withSoleAdmin([admin.session.user?.email as string], async () => {
+      let executions = 0;
+      await assert.rejects(
+        () => runWithAdminApproval(input, async () => { executions += 1; }),
+        (error: unknown) => {
+          assert.ok(error instanceof AdminSoleApproverRefusedError);
+          assert.equal(error.reason, "approval_executing");
+          return true;
+        }
+      );
+      assert.equal(executions, 0);
+    });
+  } finally {
+    release();
+    await ordinary.catch(() => undefined);
+  }
+});
