@@ -135,6 +135,41 @@ Max 전체입니다(Pro는 3,000이라 아래에 머뭅니다).
 않습니다.** 값이 남아 있으면 startup에서
 `retired_cost_limit_env_ignored` 경고를 남깁니다.
 
+### 로그인 계정에는 누적 토큰 한도가 없다 (2026-09-15)
+
+`CHAT_USER_TOKENS_PER_DAY`(기본 1,000,000)와 `CHAT_USER_TOKENS_PER_MONTH`
+(기본 20,000,000)는 **더 이상 읽지 않습니다.** 두 값은 플랜과 무관하게 모든
+로그인 계정에 걸린 누적 하드캡이었고, 크레딧과 별개로 사용을 막는 두 번째
+entitlement였습니다. §1의 숨은 USD 한도와 같은 결함입니다.
+
+- **사례.** trace `b0076648`: 크레딧 2,744가 남은 Pro 계정이 `gpt-5-6-luna`
+  약 96K 입력 turn을 열 번 남짓 보낸 뒤 `tokens-day` 993,616에서
+  `CHAT_TOKEN_QUOTA_EXCEEDED`로 거절됐습니다. 그 turn들은 요청당 10크레딧,
+  예약 비용 약 US$0.024였고, 일일 크레딧 300에도 plan guardrail에도 한참
+  못 미쳤습니다. Max는 일일 크레딧 제한이 없는데도 같은 한도에 걸릴 수
+  있었습니다. 월 한도도 같은 turn 약 200회에서 먼저 발동합니다.
+- **한도를 올리는 것은 답이 아닙니다.** 500만이든 1,000만이든 긴 문맥을
+  이어 가는 사용자에게 같은 거절을 뒤로 미룰 뿐입니다.
+- **무엇이 대신 막는가.** 크레딧 entitlement, plan-derived 비용 guardrail
+  (`op-cost-*`), provider 예산, 요청당 입력 상한(`CHAT_USER_MAX_INPUT_TOKENS`),
+  분당 요청 제한, 동시 실행 제한. 이 중 어느 것도 바뀌지 않았습니다.
+- **집계는 남깁니다.** `tokens-day`·`tokens-month` 버킷은 계정에도 계속
+  쓰이며 상한 없이 증가합니다. 운영 관측용이고 판정에 쓰지 않습니다.
+- **게스트는 유지합니다.** 게스트에게는 크레딧 ledger가 없으므로
+  `CHAT_GUEST_TOKENS_PER_{DAY|MONTH}`와 IP 집계(`ip-tokens-*`, 게스트 한도의
+  3배)가 그대로 적용됩니다. 거절 응답은 `scope`·`requiredTokens`·
+  `availableTokens`·`resetAt`·`timeZone`을 함께 싣습니다.
+- **preflight와 예약은 같은 판정을 합니다.** 비교 preflight만 한도를 빼고
+  예약 경로에 남기면, 승인된 비교가 모델별 예약에서 거절됩니다.
+- 값이 남아 있으면 startup에서 `retired_token_limit_env_ignored` 경고를
+  남깁니다. 코드 배포 후 운영 환경변수를 지웁니다.
+- 토큰 처리량 보호가 실제로 필요해지면 누적 한도가 아니라 짧은 시간창의
+  token rate limit으로 따로 설계하고 `limitLayer: operational_admission`으로
+  분류합니다.
+
+판정은 `lib/chatTokenQuotaCore.ts`, 강제는 `npm run security:regression`
+(계정 한도 환경변수를 다시 읽으면 실패)입니다.
+
 ### 버킷 구분
 
 | period | 무엇을 센다 | 한도 |

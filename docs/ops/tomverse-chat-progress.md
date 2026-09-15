@@ -790,7 +790,7 @@ pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProduc
 
 ### 다음 권장 순서
 
-1~3은 끝났다. 1은 진행 중이고 4는 한 번 돌았다.
+1~3은 끝났고 4는 한 번 돌았다.
 
 1. ~~Codex 독립 검토를 받고 지적을 닫는다.~~ v1 교환(on_hold) 뒤 v2 교환이
    round 1에서 `passed`로 끝났다.
@@ -804,3 +804,83 @@ pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProduc
 5. main으로의 병합과 production flag 활성화는 그 뒤다. 되돌릴 수 없는 항목은
    **없는 기능을 약속하는 카드** 하나뿐이고, 그것은 `check:starter-catalog`가
    이미 막는다.
+
+## 2026-09-15 Prompt Refiner 서버 offer gate·실제 composer 무과금 검증 회차
+
+이번 회차는 위 권장 순서의 1번을 구현한다. 서버가 소유하는
+`feature.promptRefinerEnabled`는 literal `"true"`만 허용하는 default-off rollout이고,
+`PROMPT_REFINER_KILL_SWITCH`의 공백 아닌 값은 데이터베이스 조회 전에 이를 끈다.
+rollout만으로 UI를 노출하지 않고 같은 요청에서 실제 adapter readiness까지 확인한다.
+현재 adapter는 loopback·E2E 환경에서만 선택 가능한 결정적 무과금 fixture뿐이며,
+제품 adapter mode는 타입에 존재하지 않는다. 따라서 AppSetting 행이 생기거나 잘못
+켜져도 production composer는 Refiner를 제안하거나 호출할 수 없다. 애플리케이션 writer,
+provider 호출, billing, Router 입력, Message schema, 제품 flag 활성화는 추가하지 않았다.
+제품 adapter가 없는 동안에는 사용할 수 없는 rollout 값을 얻으려고 화면마다 DB를
+조회하지 않으며, rollout reader는 미래 model-facing adapter readiness 안에서만 쓰인다.
+
+실제 `/chat`의 `ReviewWorkspaceShell` → `ChatPageClient` → mobile shell → `ChatInput`
+경로에서 default-off, 원문 유지·제안 사용 뒤 textarea focus 복귀와 무전송, 요청 중
+편집한 draft의 late result 폐기, 동일 문자열을 가진 두 대화 사이의 scope 격리,
+IME 조합 중 요청 차단, 320px·200% text와 200% zoom 상당 viewport의 overflow 부재 및
+44px action을 검사한다. invalid response 실패·retry, 16,000자 경계, 새 채팅의 pending
+요청 폐기, synthetic 채택문의 submit 거부도 검사한다. POST fixture adapter는 동일한
+production build를 public origin 두 조합과 loopback fixture에서 실행해 각각 404·404·200을
+확인한다. 순수 접근 계약과 writer registry도 함께 검사한다. 이 기록은 로컬 source
+검증의 범위이며 독립 검토, Linux
+통합 CI, 병합, 배포 또는 제품 활성화를 미리 선언하지 않는다.
+
+이번 의미 있는 slice를 반영한 전체 웹 Chat의 대략적 구현 진척은 **약 66%, 주관적
+범위 56–76%, 직전 회차 대비 +1%p**로 본다. C19–C20의 제품 준비도는 약 **30%**다.
+서버 gate와 실제 composer 상태 경로는 생겼지만 실제 Refiner provider, PLANNER-03
+증거, 영속 receipt, 품질·비용·지연 관측 및 Router 결합은 아직 없으므로 이보다 높게
+산정하지 않는다.
+
+이 Cycle 다음 권장 순서는 ① 이 source의 Claude 읽기 전용 검토와 통합 CI,
+② `promptRefinerModelMessages()`를 PLANNER-03 adversarial report의 명시적 surface로
+등록, ③ provider와 분리된 내부 receipt·지연·실패·stale·사용자 선택률 계측 계약,
+④ 모델·output cap·timeout·재시도 0·비용 상한을 사전등록한 소규모 shadow 승인,
+⑤ 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합 및 전체
+카탈로그 선택 품질을 별도 측정하는 것이다.
+
+## 2026-09-15 Prompt Refiner PLANNER-03 명시적 surface 회차
+
+앞 회차의 다음 순서 ②를 구현했다. `promptRefinerModelMessages()`를
+`npm run check:prompt-injection`의 `prompt-refiner` surface로 등록하고, 기존 17개에
+JSON role 위조형 1개를 더한 adversarial payload 18개 전부를 실제 builder에
+통과시킨다. 감사기는 다음 구조를
+deterministic하게 확인한다.
+
+- system 규칙이 첫 메시지이며 원문 payload를 포함하지 않고, 별도 모듈에 고정한
+  보안 규칙 여섯 줄만 정확한 순서로 유지한다.
+- provider 경계로 넘어가는 메시지는 정확히 system + user 두 개다.
+- user 메시지는 `inputScope`와 `sourceText`만 가진 canonical JSON이다.
+- JSON을 다시 읽었을 때 입력 scope와 source text bytes가 정확히 복원된다.
+- plaintext 전달, role 역전, 필수 규칙 삭제, 추가 history field·message, system
+  role로의 원문 누출과 builder 입력 거부를 일부러 만든 회귀 사례에서 감사기가 0이
+  아닌 위반을 낸다.
+
+이 검사는 모델 응답을 생성하지 않고 provider·Router·billing·AppSetting writer를
+건드리지 않는다. 따라서 PLANNER-03의 builder 구조 증거는 채웠지만 실제 모델의
+주입 저항성, 제안문의 의미 보존, 비용·지연·실패·사용자 선택률, receipt 영속화,
+제품 adapter 승인과 gate status 승인은 아직 남는다. release gate의 `pending` 상태와
+기존 default-off·kill-switch 경계도 그대로 유지한다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 66%** (주관적 범위 **56–76%**) |
+| 직전 의미 있는 회차 대비 | **0%p** — 보안 증거를 닫았지만 사용자 기능·배포 범위는 늘지 않음 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 32%** (직전 약 30%) |
+| 공개 상태 | 변화 없음 — 제품 adapter 없음, flag default-off, provider 호출 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source를 Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 검증한다.
+2. provider와 분리된 내부 Refiner receipt 및 지연·실패·stale·사용자 선택률 계측
+   계약을 구현한다.
+3. 모델·output cap·timeout·재시도 0·per-request/stage 비용 상한을 사전등록한다.
+4. 별도 과금 승인 뒤 작은 shadow 실행으로 의미 보존·주입 저항·비용·지연을
+   측정한다.
+5. 품질 증거가 승인된 뒤에만 제품 adapter와 제안형 rollout을 열고, Refiner 결과의
+   Router 결합 및 전체 카탈로그 선택 품질은 별도 실험으로 판단한다.

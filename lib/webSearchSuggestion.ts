@@ -6,7 +6,11 @@
 //
 // `hasExplicitSourceOrSearchIntent` asks whether the person *said* they want
 // sources, citations or a search. It has no length floor, because "출처" is a
-// complete request and its length says nothing about how sure we are.
+// complete request and its length says nothing about how sure we are. It reads
+// two vocabularies -- the nouns of asking for sources, and the verbs of asking
+// for a search to be run ("검색해줘", "look it up online") -- because both are
+// the person saying what they want, and reading only the first left the more
+// ordinary of the two as no request at all. See `SEARCH_REQUEST_PATTERN`.
 //
 // `suggestsRecentInformationNeeded` asks the softer question -- does the
 // wording merely suggest the answer has to be fresh -- and keeps a four
@@ -121,15 +125,134 @@ const withoutIncidentalRecencyCues = (text: string): string => {
 };
 
 /**
+ * Wordings that ask for the *act* of searching, as opposed to asking for
+ * sources.
+ *
+ * `RESEARCH_PATTERN` is the model finder's questionnaire vocabulary: source,
+ * citation, research, 출처, 근거, 웹 검색. It was the whole of stated search
+ * intent, and that left the most ordinary way of asking for a search reading
+ * as no request at all -- "검색해서 알려줘", "인터넷에서 찾아봐", "google it",
+ * "can you check online?". None of those contains a noun from that list.
+ *
+ * The consequence was not cosmetic. `needsCurrentInformation` is false for such
+ * a turn, so the Router's web-search hard filter never runs and Auto may answer
+ * a request to search with a model that has no search path; and
+ * `classifyWebSearchTopic` refuses with `no_recency_signal`, so the card that
+ * offers to re-run the question with search on never appears. With the switch
+ * off, `WEB_SEARCH_UNAVAILABLE_PROMPT` then has the answer state that it cannot
+ * reach the web -- and forbids it, correctly, from telling the user how to turn
+ * a search on. The person is told the product cannot search and is shown
+ * nothing that says otherwise.
+ *
+ * Kept here rather than folded into `RESEARCH_PATTERN` for the reason the v3
+ * note above gives: that regex belongs to `getContextualModelSuggestion`, where
+ * matching recommends Perplexity Sonar. "검색해줘" is a request to look
+ * something up, not evidence that this turn wants a research model, and the two
+ * consumers should not be made to share a widened vocabulary.
+ *
+ * Read on the same masked reading as `RESEARCH_PATTERN`, so an incidental
+ * source-order span that has already been blanked cannot match here either.
+ *
+ * ## What is deliberately not here
+ *
+ * A bare 찾아/찾아봐 and a bare "find" -- "이 파일에서 찾아줘" is a request to
+ * read the attachment, not the web. They count only next to a web locus
+ * (인터넷 · 온라인 · 구글 · 네이버 · 웹, online · the web · the internet), which
+ * is what makes them a statement about where to look. `검색` is treated as
+ * unambiguous on its own, but only in request form -- `검색해`, `검색하`,
+ * `검색 좀`, `검색 부탁` -- so that "검색 엔진", "검색어", "검색 결과" stay
+ * ordinary nouns.
+ */
+const SEARCH_REQUEST_PATTERN =
+  // English: the wording names the web itself, or is an idiom that means
+  // "go and find out" on its own.
+  /\bsearch(?:es|ed|ing)?\s+(?:the\s+)?(?:web|internet|online)\b|\b(?:web|internet|online)\s+search(?:es|ing)?\b|\bsearch(?:es|ed|ing)?\s+(?:for|up|it|this|that|them)\b|\b(?:do|run)\s+an?\s+(?:web\s+)?search\b|\bgoogle\s+(?:it|this|that|them|for)\b|\bbrowse\s+(?:the\s+)?(?:web|internet|online)\b|\blook\s+(?:it|this|that|them|these|those)\s+up\b/i;
+
+/**
+ * The second half of the reading: an ordinary lookup verb becomes a search
+ * request when the turn also says *where* to look, near it.
+ *
+ * Near it, not merely somewhere in the same turn. A long closed-book prompt
+ * can easily contain both halves with nothing between them -- the development
+ * corpus has one that names a fictional "온라인목록" and separately forbids
+ * 검색, and a whole-turn pairing read that as a request to search the web. So
+ * the two have to meet: within one clause and a couple of dozen characters in
+ * English, and adjacent (particle, at most one intervening word) in Korean,
+ * which is head-final and puts the locus immediately before its verb.
+ *
+ * A bare "the web" only counts where it ends the phrase, because otherwise it
+ * is a compound noun: "check the web server config" is a question about a
+ * server. That is also why `웹` is kept out of the Korean locus below -- it is
+ * the prefix of ordinary technical nouns (웹 개발, 웹 서버) -- and appears only
+ * in its adjacent form in `SEARCH_REQUEST_PATTERN_KO`.
+ */
+const EN_LOOKUP_VERB = String.raw`(?:look(?:s|ed|ing)?|find(?:s|ing)?|check(?:s|ed|ing)?|verif(?:y|ies|ied)|confirm(?:s|ed|ing)?|browse|search(?:es|ed|ing)?)`;
+const EN_WEB_LOCUS = String.raw`(?:\bonline\b|\bon\s+the\s+(?:web|internet)\b|\bthe\s+(?:web|internet)\b(?=\s*(?:[,.;:!?"')\]]|$|\b(?:and|or|for|to|then|first|instead|please)\b)))`;
+const LOOKUP_NEAR_WEB_PATTERN = new RegExp(
+  `\\b${EN_LOOKUP_VERB}\\b[^.!?;\\n]{0,24}?${EN_WEB_LOCUS}` +
+    `|${EN_WEB_LOCUS}[^.!?;\\n]{0,24}?\\b${EN_LOOKUP_VERB}\\b`,
+  "i"
+);
+
+const SEARCH_REQUEST_PATTERN_KO =
+  /검색\s*(?:해|하|좀|부탁)|웹\s*(?:에서|으로)?\s*(?:검색|찾아)|구글링/;
+const LOOKUP_NEAR_WEB_PATTERN_KO =
+  /(?:인터넷|온라인|구글|네이버)\s*(?:에서|으로|에|을|를|은|는)?\s*(?:[가-힣]{1,5}\s+)?(?:검색|찾아|조회|확인|알아\s*봐)/;
+
+/**
+ * Blank a search verb that is directly forbidden, so a prohibition cannot be
+ * read as the request it names.
+ *
+ * The same shape and the same limits as the recency pass above: only the verb
+ * token of a directly attached prohibition is removed, spaces preserve offsets,
+ * and no attempt is made to resolve negation scope in general. "Do not search
+ * the web, and use today's date." is a prohibition on searching that still
+ * carries an affirmative date instruction, and only the first half is masked
+ * here -- the recency pass decides the second half on its own terms.
+ *
+ * Only the request vocabulary is masked. A prohibition that also asks for
+ * sources ("don't search, but cite the source you used") keeps its source
+ * request, because `RESEARCH_PATTERN` reads the unmasked reading.
+ */
+const withoutProhibitedSearchCues = (reading: string): string => {
+  const blank = (match: string) => " ".repeat(match.length);
+  return reading
+    .replace(
+      /\b(?:do\s+not|don['’]t|never|without)\s+(?:search(?:ing)?|google|browse|look\s+(?:it|this|that|them)?\s*up)\b/gi,
+      blank
+    )
+    .replace(/(?:웹\s*)?(?:검색|조회|구글링|찾아보|찾아)(?:하|해)?지\s*(?:마|말)/g, blank);
+};
+
+/** Whether the turn asks for a search to be run, in either language. */
+const requestsASearch = (raw: string): boolean => {
+  const reading = withoutProhibitedSearchCues(raw);
+  return (
+    SEARCH_REQUEST_PATTERN.test(reading) ||
+    SEARCH_REQUEST_PATTERN_KO.test(reading) ||
+    LOOKUP_NEAR_WEB_PATTERN.test(reading) ||
+    LOOKUP_NEAR_WEB_PATTERN_KO.test(reading)
+  );
+};
+
+/**
  * The person asked for sources, citations, research or a web search.
  *
  * No length floor and no upper bound: this is a statement of intent, not a
  * guess from context, so its strength does not depend on how much else was
  * typed. Used for routing and capability decisions, where treating a short
  * request as no request is a safety hole rather than a quiet UI.
+ *
+ * Two vocabularies, one answer. Asking for sources and asking for a search to
+ * be run are the same kind of claim -- the person said what they want -- and
+ * both have always belonged to this predicate; only the first one was ever
+ * read. See `SEARCH_REQUEST_PATTERN` for why the second is its own pattern
+ * rather than a wider `RESEARCH_PATTERN`.
  */
-export const hasExplicitSourceOrSearchIntent = (text: string): boolean =>
-  RESEARCH_PATTERN.test(withoutIncidentalSourceCues(text.trim()));
+export const hasExplicitSourceOrSearchIntent = (text: string): boolean => {
+  const reading = withoutIncidentalSourceCues(text.trim());
+  return RESEARCH_PATTERN.test(reading) || requestsASearch(reading);
+};
 
 /**
  * Softer wording that only *suggests* the answer needs to be fresh.

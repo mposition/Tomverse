@@ -137,9 +137,26 @@ export async function recordBillingCountry(input: {
   const country = normalizeCountry(input.country);
   if (!country) return { updated: false as const };
 
-  await prisma.userSettings.updateMany({
-    where: { userId: input.userId },
-    data: { billingCountry: country, billingCountryUpdatedAt: input.now ?? new Date() },
-  });
+  // An upsert, not an update. `UserSettings` is created lazily, and an account
+  // that never opened settings has no row -- an update would match nothing,
+  // report success, and drop the signal. Dropping it is not neutral: without a
+  // billing country the resolver falls back to the consent-time country, so an
+  // older consent from an allowlisted country would keep sending after a
+  // payment method said the person lives somewhere marketing may not reach.
+  const at = input.now ?? new Date();
+  try {
+    await prisma.userSettings.upsert({
+      where: { userId: input.userId },
+      create: { userId: input.userId, billingCountry: country, billingCountryUpdatedAt: at },
+      update: { billingCountry: country, billingCountryUpdatedAt: at },
+    });
+  } catch (error) {
+    // The account is gone (a webhook can outlive a deletion). Nothing to record
+    // against, which is the one case where not recording is correct.
+    if ((error as { code?: string })?.code === "P2003") {
+      return { updated: false as const };
+    }
+    throw error;
+  }
   return { updated: true as const, country };
 }

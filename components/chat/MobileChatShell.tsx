@@ -85,6 +85,10 @@ import type {
 import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import type { ConversationMemoryMode } from "@/lib/conversationMemoryMode";
 import type { WebSearchMode } from "@/lib/appDefaults";
+import type {
+  PromptRefinerResolution,
+  PromptRefinerUiState,
+} from "@/lib/promptRefinerSuggestion";
 import {
   Check,
   ChevronDown,
@@ -156,6 +160,11 @@ type MobileChatShellProps = {
   attachmentCapabilities: ChatAttachmentCapabilities;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   voiceInputEnabled?: boolean;
+  /** Server-owned final offer, passed unchanged to the composer. */
+  promptRefinerOffered?: boolean;
+  promptRefinerState?: PromptRefinerUiState;
+  onPromptRefinerRequest?: (sourcePrompt: string) => void;
+  onPromptRefinerDecision?: (resolution: PromptRefinerResolution) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
   onVoiceTranscript?: (transcript: string, scopeId: string | null) => void;
   /** Passed straight through to the composer; see ChatInput's own prop. */
@@ -402,6 +411,10 @@ export function MobileChatShell({
   aiReviewAccess,
   attachmentCapabilities,
   voiceInputEnabled = false,
+  promptRefinerOffered = false,
+  promptRefinerState,
+  onPromptRefinerRequest,
+  onPromptRefinerDecision,
   onVoiceTranscript,
   identityKey,
   guestPreviewMode = false,
@@ -1742,6 +1755,10 @@ export function MobileChatShell({
             attachmentCapabilities={attachmentCapabilities}
             voiceInputEnabled={voiceInputEnabled}
             onVoiceTranscript={onVoiceTranscript}
+            promptRefinerOffered={promptRefinerOffered}
+            promptRefinerState={promptRefinerState}
+            onPromptRefinerRequest={onPromptRefinerRequest}
+            onPromptRefinerDecision={onPromptRefinerDecision}
             identityKey={identityKey}
             onGuestSignInPrompt={onGuestSignInPrompt}
             isGuestMode={isGuestMode}

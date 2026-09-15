@@ -2073,6 +2073,7 @@ export const fr = {
         countryConflictBody: "Votre pays de facturation et le pays précédemment confirmé diffèrent ({countries}). Confirmez ci-dessus votre résidence actuelle.",
         countryUnsupportedBody: "Les e-mails marketing ne sont pas encore proposés dans le pays enregistré. Ne choisissez un autre pays que si vous y résidez désormais.",
         needsCountryNote: "Confirmez ci-dessus votre pays de résidence avant cet envoi.",
+        countryUnsupportedNote: "Les e-mails marketing ne sont pas disponibles pour votre pays actuel.",
         countryLabel: "Pays de résidence",
         countryDescription: "Utilisé uniquement pour appliquer les mentions publicitaires, les informations d'expéditeur et les règles de désabonnement appropriées. L'activation du marketing l'enregistre avec ce consentement.",
         countryPlaceholder: "Sélectionnez votre pays",

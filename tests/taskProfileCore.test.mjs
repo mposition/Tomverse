@@ -264,7 +264,7 @@ test("the two axes are read from one definition without becoming one axis", () =
 });
 
 test("v3 ignores incidental data cues on both the search and research axes", () => {
-    assert.equal(TASK_PROFILE_VERSION, "task-profile-v3");
+    assert.equal(TASK_PROFILE_VERSION, "task-profile-v4");
     for (const text of [
         "Keep the names in source order.",
         "Given records: current yes. Extract the current record.",
@@ -293,7 +293,11 @@ test("independent source requests and independent recency remain different axes"
     }
     for (const text of [
         "Given records: current yes. Extract the current record; check the current law.",
-        "오늘 날짜를 쓰지 마세요. 최신 통계를 검색해 주세요.",
+        // Recency on its own: a date prohibition followed by a freshness cue
+        // that asks for nothing to be looked up. The same sentence ending in
+        // "검색해 주세요" is a stated search request and belongs to the other
+        // axis -- see the v4 test below.
+        "오늘 날짜를 쓰지 마세요. 최신 통계를 알려 주세요.",
     ]) {
         const built = profile(text);
         assert.equal(built.needsCurrentInformation, true, text);
@@ -354,7 +358,7 @@ test("comma-and coordination cannot remove the profile recency boundary", () => 
         assert.equal(built.needsCurrentInformation, recent, text);
         assert.equal(built.kind, "general", text);
         assert.equal(built.kindConfidence, "none", text);
-        assert.equal(built.version, "task-profile-v3", text);
+        assert.equal(built.version, "task-profile-v4", text);
         assert.deepEqual(built.signals, recent ? ["search:recency-heuristic"] : [], text);
         const requested = profile(text, { webSearchRequested: true });
         assert.equal(requested.needsCurrentInformation, true, text);
@@ -362,4 +366,79 @@ test("comma-and coordination cannot remove the profile recency boundary", () => 
         assert.ok(requested.signals.includes("search:requested"), text);
         assert.ok(!requested.signals.includes("search:recency-heuristic"), text);
     }
+});
+
+test("v4 reads a request to run a search as stated intent", () => {
+    // The failure this closes: only the model finder's source vocabulary was
+    // read, so the ordinary way of asking for a search -- naming the act
+    // rather than the sources -- recorded `needsCurrentInformation: false`.
+    // The Router's web-search hard filter never ran for those turns, so Auto
+    // could answer "검색해서 알려줘" with a model that has no search path.
+    for (const text of [
+        "이 내용 검색해서 확인해줘",
+        "구글에 검색해봐",
+        "인터넷에서 찾아봐",
+        "웹에서 찾아줘",
+        "search the web for the election results",
+        "can you search for this?",
+        "please look this up online",
+        "google it for me",
+        "can you check online?",
+        "오늘 날짜를 쓰지 마세요. 최신 통계를 검색해 주세요.",
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, true, text);
+        assert.ok(built.signals.includes("search:source-intent"), text);
+        assert.ok(built.signals.includes("research:vocabulary"), text);
+        // Stated intent, so the softer reading must not also be recorded --
+        // the two are different claims and the decision has to say which fired.
+        assert.ok(!built.signals.includes("search:recency-heuristic"), text);
+    }
+});
+
+test("v4 leaves reading the turn's own material alone", () => {
+    // A lookup verb is a web search only where the turn says to look at the
+    // web. Without that, "찾아줘" and "check" are instructions about the
+    // attachment or the text in front of the model.
+    for (const text of [
+        "이 파일에서 오타 찾아줘",
+        "첨부한 엑셀에서 합계 확인해줘",
+        "검색 엔진 최적화가 뭐야?",
+        "검색어 추천해줘",
+        "웹 서버 설정 확인 좀 해줘",
+        "Find the bug in this function.",
+        "Check my grammar in the paragraph below.",
+        "Look at the attached spreadsheet and find the total.",
+    ]) {
+        const built = profile(text);
+        assert.equal(built.needsCurrentInformation, false, text);
+        assert.ok(!built.signals.includes("search:source-intent"), text);
+        assert.ok(!built.signals.includes("research:vocabulary"), text);
+    }
+});
+
+test("v4 does not read a forbidden search as a requested one", () => {
+    // The prohibition names the verb, which is exactly what the request
+    // vocabulary matches on. Masking only the forbidden verb keeps the rest of
+    // the turn readable: an affirmative request after the prohibition stands.
+    for (const text of [
+        "Do not search the web. Answer from what you know.",
+        "인터넷 검색하지 마세요",
+        "구글에 검색하지 말고 아는 대로 답해줘",
+    ]) {
+        const built = profile(text);
+        assert.ok(!built.signals.includes("search:source-intent"), text);
+        assert.ok(!built.signals.includes("research:vocabulary"), text);
+    }
+    // The mask covers the request vocabulary only. "웹 검색하지 말고" still
+    // reads as source intent, because `RESEARCH_PATTERN` matches the noun
+    // "웹 검색" inside it -- that was true before the request forms existed and
+    // is the model finder's regex to change, not this one's. Pinned here so a
+    // later attempt to mask negation across both vocabularies is a deliberate
+    // decision with its own evidence rather than a side effect.
+    assert.ok(
+        profile("웹 검색하지 말고 답해줘").signals.includes("search:source-intent")
+    );
+    const mixed = profile("Do not search the web, but cite the sources you use.");
+    assert.ok(mixed.signals.includes("search:source-intent"));
 });

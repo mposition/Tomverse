@@ -1,6 +1,7 @@
 import "server-only";
 
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -57,24 +58,39 @@ export async function reconcileExpiredMemories(now = new Date()): Promise<{
                 status: { in: [...EXPIRABLE_STATUSES] },
                 expiresAt: { not: null, lte: now },
             },
-            select: { id: true },
+            select: { id: true, userId: true },
             orderBy: { id: "asc" },
             take: BATCH_SIZE,
         });
         if (due.length === 0) break;
 
-        // Re-stated in the update rather than trusting the ids alone: another
-        // request may have rejected or deleted one of these between the read
-        // and the write, and expiry must not resurrect a decision.
-        const updated = await prisma.memoryItem.updateMany({
-            where: {
-                id: { in: due.map((row) => row.id) },
-                status: { in: [...EXPIRABLE_STATUSES] },
-                expiresAt: { not: null, lte: now },
-            },
-            data: { status: EXPIRED_STATUS },
-        });
-        expiredMemories += updated.count;
+        // One transaction per owner, each under that account's memory lock
+        // (lib/memoryItemLock.ts). A source deletion classifies an account's
+        // memories and then acts on that classification; an expiry landing in
+        // between would be overwritten by a stale plan.
+        const byUser = new Map<string, string[]>();
+        for (const row of due) {
+            byUser.set(row.userId, [...(byUser.get(row.userId) ?? []), row.id]);
+        }
+        for (const [userId, ids] of byUser) {
+            const updated = await prisma.$transaction(async (tx) => {
+                await lockAccountMemoryItems(tx, userId);
+                // Re-stated in the update rather than trusting the ids alone:
+                // another request may have rejected or deleted one of these
+                // between the read and the write, and expiry must not
+                // resurrect a decision.
+                return tx.memoryItem.updateMany({
+                    where: {
+                        id: { in: ids },
+                        userId,
+                        status: { in: [...EXPIRABLE_STATUSES] },
+                        expiresAt: { not: null, lte: now },
+                    },
+                    data: { status: EXPIRED_STATUS },
+                });
+            });
+            expiredMemories += updated.count;
+        }
 
         if (due.length < BATCH_SIZE) break;
         if (batch === MAX_BATCHES - 1) truncated = true;

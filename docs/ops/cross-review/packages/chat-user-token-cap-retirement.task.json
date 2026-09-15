@@ -1,0 +1,32 @@
+{
+  "taskId": "chat-user-token-cap-retirement",
+  "requirement": "Retire the cumulative token hard caps on signed-in chat accounts (CHAT_USER_TOKENS_PER_DAY default 1,000,000 and CHAT_USER_TOKENS_PER_MONTH default 20,000,000). Production trace b0076648 shows a Pro account with 2,744 credits left refused CHAT_TOKEN_QUOTA_EXCEEDED at 993,616 of 1,000,000 daily tokens after about ten ~96K-input gpt-5-6-luna turns; the caps apply to every signed-in plan alike (Max has no daily credit limit) and act as a second, hidden entitlement, contrary to docs/policy/credit-and-cost-limits.md (entitlement is credits). Raising the numbers is explicitly not the fix. Scope decided by the owner: (1) remove the account token refusal from both the comparison preflight (preflightChatComparisonAccess) and the per-model reservation (acquireChatAccess) so the two cannot disagree; (2) keep writing the tokens-day and tokens-month ChatUsageBucket rows for accounts, uncapped, for operational observation, and keep them in the reservation entries that settlement adjusts; (3) keep the guest day/month token quota and the guest IP aggregate (three times the guest quota) unchanged, since guests have no credit ledger; (4) keep the per-request input cap, credit entitlement, per-minute rate limits, concurrency limits, the plan-derived cost guardrail and provider budgets unchanged; (5) /api/user/usage returns limits.tokensDay and limits.tokensMonth as null to state no limit; (6) the two environment variables are no longer read anywhere, and a leftover setting is named by a startup warning (retired_token_limit_env_ignored, alongside the existing retired_cost_limit_env_ignored); (7) the guest token refusals that remain (CHAT_TOKEN_QUOTA_EXCEEDED and CHAT_IP_TOKEN_QUOTA_EXCEEDED) carry scope, requiredTokens, availableTokens, resetAt and timeZone consistently; (8) the security regression check fails if the account token variables are read again; (9) the policy document records the decision. No migration, no billing or credit change, no flag, no deploy, no push.",
+  "completionCriteria": [
+    "lib/chatSecurity.ts reads neither process.env.CHAT_USER_TOKENS_PER_DAY nor process.env.CHAT_USER_TOKENS_PER_MONTH; preflightChatComparisonAccess performs no cumulative token check for an account, and acquireChatAccess records the account's tokens-day and tokens-month usage with no ceiling while still pushing them into reservationEntries.",
+    "A guest's tokens-day/tokens-month quota and its ip-tokens-* aggregate (3x) are enforced exactly as before, and both refusals carry scope, requiredTokens, availableTokens (never negative), a future resetAt and timeZone; publicChatErrorDetails keeps them.",
+    "Credit entitlement, CHAT_USER_MAX_INPUT_TOKENS, per-minute and concurrency limits, the cost guardrail buckets (cost-*, op-cost-*) and provider budgets are not changed by the diff.",
+    "/api/user/usage returns limits.tokensDay and limits.tokensMonth as null, usage.tokensDay/tokensMonth still report the bucket counts, and the client type matches.",
+    "instrumentation.ts warns retired_token_limit_env_ignored when either retired variable is set; scripts/security-regression-check.mjs fails if chatSecurity.ts reads them again.",
+    "tests/chatTokenQuotaCore.test.mjs passes; tests/integration/chat-token-quota.db.test.ts is registered in scripts/run-db-integration-tests.mjs and classified by scripts/db-integration-groups.mjs (tests/dbIntegrationGroups.test.mjs passes); the DB suite itself needs PostgreSQL and runs in CI.",
+    "docs/policy/credit-and-cost-limits.md records the retirement, what still bounds an account, the guest exception, and that a future throughput limit would be a short-window token rate limit classified operational_admission.",
+    "Codex reviews read-only. No provider call other than the review and its preflight, no push, merge, deploy or production write."
+  ],
+  "baseCommit": "2d71a50e56bd9e964cd726ca149cae90c91b3ab5",
+  "writableScope": [
+    "lib/chatSecurity.ts",
+    "lib/chatTokenQuotaCore.ts",
+    "app/api/user/usage/route.ts",
+    "components/chat/useUserUsage.ts",
+    "instrumentation.ts",
+    "scripts/security-regression-check.mjs",
+    "scripts/run-db-integration-tests.mjs",
+    "scripts/db-integration-groups.mjs",
+    "tests/chatTokenQuotaCore.test.mjs",
+    "tests/integration/chat-token-quota.db.test.ts",
+    "docs/policy/credit-and-cost-limits.md",
+    "README.md",
+    "docs/ops/cross-review/packages/chat-user-token-cap-retirement.task.json",
+    "docs/ops/cross-review/packages/chat-user-token-cap-retirement.authorization.md"
+  ],
+  "generatedPaths": []
+}

@@ -2072,6 +2072,7 @@ export const ko = {
         countryConflictBody: "결제 국가와 이전에 확인한 국가가 다릅니다({countries}). 위에서 현재 거주 국가를 다시 확인해 주세요.",
         countryUnsupportedBody: "저장된 국가에는 아직 마케팅 이메일을 제공하지 않습니다. 실제 거주 국가가 바뀐 경우에만 다른 국가를 선택해 주세요.",
         needsCountryNote: "위에서 거주 국가를 확인해야 발송할 수 있습니다.",
+        countryUnsupportedNote: "현재 거주 국가에서는 마케팅 이메일을 받을 수 없습니다.",
         countryLabel: "거주 국가",
         countryDescription: "국가별 광고 표시, 발신자 정보, 수신 거부 규칙을 적용하는 데만 사용합니다. 마케팅을 켜면 해당 동의와 함께 저장됩니다.",
         countryPlaceholder: "거주 국가 선택",

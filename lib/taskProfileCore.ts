@@ -64,8 +64,18 @@ import {
  * source/recency requests and the explicit search setting keep their priority.
  * Source intent and the research kind reuse one contextual reading. The model
  * finder's separate recommendation regex and the recency length rules stay put.
+ *
+ * v4: asking for a search to be *run* is stated intent, the same as asking for
+ * sources. Until now the only vocabulary read was the model finder's -- source,
+ * citation, research, 출처, 근거, 웹 검색 -- so "검색해서 알려줘",
+ * "인터넷에서 찾아봐", "google it" and "can you check online?" all recorded
+ * `needsCurrentInformation: false`, the web-search hard filter never ran for
+ * them, and the retry offer refused them as having no recency signal. The
+ * request forms are added in `lib/webSearchSuggestion.ts`; that module's
+ * contextual masking, the recency reading and its floor, the priority of the
+ * explicit setting, and the model finder's own regex are all unchanged.
  */
-export const TASK_PROFILE_VERSION = "task-profile-v3";
+export const TASK_PROFILE_VERSION = "task-profile-v4";
 
 /**
  * The dominant shape of the turn.

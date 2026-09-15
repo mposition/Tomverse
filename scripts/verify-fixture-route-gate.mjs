@@ -23,8 +23,13 @@ import { resolve } from "node:path";
  */
 
 const ROUTES = [
-  "/e2e/admin-console-fixture",
-  "/e2e/prompt-refiner-fixture",
+  { path: "/e2e/admin-console-fixture", method: "GET" },
+  { path: "/e2e/prompt-refiner-fixture", method: "GET" },
+  {
+    path: "/e2e/prompt-refiner-adapter",
+    method: "POST",
+    body: JSON.stringify({ requestId: "fixture_gate", prompt: "gate probe" }),
+  },
 ];
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -111,7 +116,14 @@ const stopServer = async (server) => {
 };
 
 const statusOf = async (port, route) => {
-  const response = await fetch(`http://127.0.0.1:${port}${route}`, {
+  const response = await fetch(`http://127.0.0.1:${port}${route.path}`, {
+    method: route.method,
+    ...(route.body
+      ? {
+          headers: { "Content-Type": "application/json" },
+          body: route.body,
+        }
+      : {}),
     redirect: "manual",
     signal: AbortSignal.timeout(20_000),
   });
@@ -136,7 +148,7 @@ if (!existsSync(resolve(ROOT, ".next/BUILD_ID"))) {
 }
 
 console.log(
-  `[fixture-route-gate] Probing ${ROUTES.join(", ")} against one shared build.`
+  `[fixture-route-gate] Probing ${ROUTES.map(({ method, path }) => `${method} ${path}`).join(", ")} against one shared build.`
 );
 
 let productionLike = null;
@@ -150,7 +162,7 @@ try {
   }));
   for (const route of ROUTES) {
     check(
-      `production-like origin, no flags: ${route}`,
+      `production-like origin, no flags: ${route.method} ${route.path}`,
       await statusOf(productionLike.port, route),
       404
     );
@@ -166,7 +178,7 @@ try {
   }));
   for (const route of ROUTES) {
     check(
-      `production-like origin, both flags set: ${route}`,
+      `production-like origin, both flags set: ${route.method} ${route.path}`,
       await statusOf(productionLike.port, route),
       404
     );
@@ -183,7 +195,7 @@ try {
   }));
   for (const route of ROUTES) {
     check(
-      `loopback origin, both flags set: ${route}`,
+      `loopback origin, both flags set: ${route.method} ${route.path}`,
       await statusOf(fixture.port, route),
       200
     );

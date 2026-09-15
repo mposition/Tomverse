@@ -372,6 +372,7 @@ test("every E2E short-circuit is gated on a non-deployable origin, not the flag 
     // themselves.
     "app/(site)/(application)/e2e/admin-console-fixture/page.tsx",
     "app/(site)/(application)/e2e/prompt-refiner-fixture/page.tsx",
+    "app/(site)/(application)/e2e/prompt-refiner-adapter/route.ts",
     "app/api/billing/config/route.ts",
     "app/api/public/proof-metrics/route.ts",
     "app/api/models/status/route.ts",

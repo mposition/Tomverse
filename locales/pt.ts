@@ -2072,6 +2072,7 @@ export const pt = {
         countryConflictBody: "Seu país de cobrança e o país confirmado anteriormente não coincidem ({countries}). Confirme acima onde você mora agora.",
         countryUnsupportedBody: "E-mails de marketing ainda não estão disponíveis para o país salvo. Escolha outro país somente se você agora morar nele.",
         needsCountryNote: "Confirme acima seu país de residência antes que isto possa ser enviado.",
+        countryUnsupportedNote: "E-mails de marketing não estão disponíveis para o seu país atual.",
         countryLabel: "País de residência",
         countryDescription: "Usado somente para aplicar a identificação publicitária, os dados do remetente e as regras de descadastro corretos. Ao ativar marketing, ele é salvo junto com esse consentimento.",
         countryPlaceholder: "Selecione seu país",

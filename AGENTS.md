@@ -1,7 +1,11 @@
 <!-- BEGIN:nextjs-agent-rules -->
+
 # This is NOT the Next.js you know
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
 <!-- END:nextjs-agent-rules -->
 
 # 소통 언어
@@ -1302,18 +1306,31 @@ Non-negotiable requirements:
 - No provider call, billing, automatic offer, Router coupling or rollout is
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.
+- The current server gate folds the default-off AppSetting, environment kill
+  switch and adapter readiness into one mode. The only active mode is the
+  loopback E2E fixture; a stored flag alone must never expose an inert product
+  control, and there is no product/provider mode yet.
+- A Refiner request, ready proposal and accepted resolution are bound to both
+  the exact draft bytes and the `identity + mounted surface + conversation`
+  scope. Changing any scope member discards them even when the next draft has
+  identical text; text equality never transfers Refiner state across scopes.
 - Every Refiner action keeps a 44px touch target and states why it is disabled.
 - The requesting, failed, and ready state regions are polite live statuses. A
   genuinely new state identity receives focus without scrolling. An initially
   mounted bound state or the same identity reappearing after a draft edit does
   not steal focus; a completed decision returns focus to the textarea.
-- The current PLANNER-03 report does not exercise the Refiner builder. A real
-  caller or provider adapter is blocked until `prompt-refiner` is registered as
-  a report surface and the adversarial corpus runs through it.
+- `promptRefinerModelMessages()` is the explicit `prompt-refiner` surface in
+  the PLANNER-03 report. Every adversarial corpus item must retain the exact
+  two-message boundary: system rules first, then only the canonical
+  `inputScope + sourceText` JSON user message. A model-facing caller or
+  provider adapter must use this builder and keep that report green. The
+  loopback fixture caller still reaches only its no-cost E2E route and is not
+  a model-facing path.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
-contract tests passing when the surface becomes reachable by a product caller.
+contract tests passing. `tests/e2e/prompt-refiner-chat-input.spec.ts` is the
+actual ChatInput fixture gate for focus, IME, narrow width and text scaling.
 <!-- END:prompt-refiner-suggestion-invariant -->
 <!-- BEGIN:chat-starter-catalog-invariant -->
 ## Chat starter catalogue invariant

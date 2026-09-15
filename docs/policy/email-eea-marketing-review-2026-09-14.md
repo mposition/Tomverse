@@ -127,6 +127,11 @@ ePrivacy Directive 2002/58/EC 제13조 + GDPR. 자연인 대상 직접 마케팅
 26개국은 개별 확인이 아니라 **공통 baseline이 각국의 최저선을 넘는다는 판단**으로
 덮었습니다.
 
+> **2026-09-15 정정.** 위 "26개국"은 **27개국**이 맞습니다. EEA는 30개국이고 그중
+> 이 검토가 읽은 곳은 DE·FR·AT 셋이며, 스위스는 EEA가 아닙니다(30 − 3 = 27). 원문은
+> 기록으로 두고 이 정정을 덧붙입니다. 아래 §7의 "결정 전 기록"에 남은 "26개국"도
+> 같은 뜻입니다.
+
 그래서 두 가지를 규칙으로 둡니다.
 
 1. **새 국가에 처음 보내기 전에 국가별 확인을 기록**합니다. 기록이 없으면 그
@@ -173,15 +178,71 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 
 ## 7. 착수 전 조건 (7건)
 
-| # | 조건 | 상태 |
-|---|---|---|
-| 1 | **DOI 구현과 기록** — `docs/policy/email-double-opt-in-draft.md` | 설계안 있음, 미구현 |
-| 2 | **동의 시점 국가 필수 수집**, 불명·충돌이면 보류(docs/policy/email-notifications.md §6.3) | 수집 UI 있음, 보류 로직 있음 |
-| 3 | **재동의 요청 메일을 보내지 않습니다** — 아래 | **설계안 정정 필요** |
-| 4 | footer 사업자 정보 실제 값 (Q8) | **완료** (ABN 포함) |
-| 5 | 개인정보처리방침에 마케팅 처리 기재 + Resend DPA(Q11) + 이전 근거(SCC/DPF) | 미완 |
-| 6 | **GDPR 제27조 EU 대리인** 필요 여부 결정, 스위스 대리인은 별도 판단 | 미결 — §8 |
-| 7 | 대상 국가 allowlist 확정 및 국가별 확인 기록(§5) | 미완 |
+> **2026-09-15 재확인.** 아래 상태는 이 검토가 쓰인 2026-09-14 이후 실제로 움직인
+> 것을 다시 읽은 결과입니다. **7건 중 4건(2·3·4·7)이 닫혔고, 3건(1·5·6)이
+> 남았습니다.** 상태 칸은 판단이 아니라 확인한 사실과 그 근거입니다. 조건 7은 같은
+> 날 결정·구현으로 닫혔습니다.
+
+| # | 조건 | 상태 (2026-09-15) | 근거 |
+|---|---|---|---|
+| 1 | **DOI 구현과 기록** | 🟡 **설계 승인됨, 구현 미착수** | [설계](email-double-opt-in.md) 승인 2026-09-15 `mposition`. §11의 11항목 미실행. `feature.emailConsentConfirmationEnabled`가 docs/policy/email-notifications.md §15.2에 등록 |
+| 2 | **동의 시점 국가 필수 수집**, 불명·충돌이면 보류 | ✅ **완료** | `marketingOptInCountryDecision()`이 국가 없는 요청을 `country_required`로, profile 없는 국가를 `country_unsupported`로 거부하고, `marketingJurisdictionVerdict()`가 충돌을 `COUNTRY_CONFLICT`로 보류합니다 (`app/api/user/email-preferences/route.ts`, `lib/emailJurisdictionCore.ts`) |
+| 3 | **재동의 요청 메일을 보내지 않습니다** | ✅ **완료 — 그리고 대상이 0명입니다** | 설계 §7이 정정됐고, 2026-09-15 실측에서 확인 메일을 돌려야 할 사용자가 **0명**입니다(`docs/ops/q2-marketing-reach-decision.md` §2.1). 금지 자체는 유지됩니다 — 미확인 상태는 앞으로도 생깁니다 |
+| 4 | footer 사업자 정보 실제 값 (Q8) | ✅ **완료·배포됨** | `EMAIL_BUSINESS_*` production 설정, `/api/ready`의 `emailBusinessIdentity` `true` |
+| 5 | 개인정보처리방침 기재 + Resend DPA(Q11) + 이전 근거 | 🟡 **방침 기재 완료, Q11 잔여** | 방침의 이메일 고지는 2026-09-15 03:07Z production 배포(Q12). **남은 것**: 계정 명의자·최초 결제일 내부 기록, TIA 대표 승인, 수신 국가·subprocessor의 방침 반영(제28조의8제2항 8개 항목) |
+| 6 | **GDPR 제27조 EU 대리인** | 🟡 **사업 결정 완료, 실행 미착수** | 대표가 2026-09-14 "EU 출시 유지 + 대리인 최대한 빠른 시일 내 지정" 승인. **남은 것**: provider·요금제 선택, 서면 위임, `/privacy` 반영. 스위스 대리인 요건은 별개 판단(§8) |
+| 7 | 대상 국가 allowlist 확정 및 국가별 확인 기록 | ✅ **결정·구현 (2026-09-15)** — 10개국 | 아래 "결정". `MARKETING_ALLOWED_COUNTRY_CODES`(`lib/emailJurisdictionCore.ts`)가 opt-in 경계와 발송 시점 양쪽에서 검사합니다 |
+
+### 조건 7 — 결정 (2026-09-15, `mposition`)
+
+**좁히기를 택했습니다. marketing 허용 국가는 KR·US·CA·AU·GB·SG·DE·FR·AT·CH
+10개국입니다.**
+
+| 항목 | 결정 |
+|---|---|
+| 발송 profile 매핑 | **37개국 그대로.** `JURISDICTION_MAPPED_COUNTRY_CODES`. transactional·legal footer와 관할권 정책 version의 정답지(profile 9개, 국가 37개)는 바뀌지 않습니다 |
+| marketing allowlist | **10개국.** `MARKETING_ALLOWED_COUNTRY_CODES`. 매핑 목록과 **별도 상수**입니다 — 한쪽을 고쳐도 다른 쪽이 따라 움직이지 않습니다 |
+| 신규 opt-in | allowlist 밖 국가는 `COUNTRY_UNSUPPORTED`(409)로 거부, 설정 화면의 국가 목록도 10개국만 제시 |
+| 기존 동의 | **발송 시점에 같은 allowlist로 다시 검사**합니다. 확정된 관할권이 allowlist 밖이면 `marketing_country_not_allowed`로 skip — 목록 이전에 저장된 동의가 우회로가 되지 않습니다 |
+| 나머지 EEA 27개국 | 국가별 확인 기록이 승인될 때까지 marketing 동의 UI와 발송 대상에서 제외. **서비스 이용·결제·transactional/legal 이메일에는 영향 없음** |
+| 오스트리아 | 명시적 opt-in만 사용하고 soft opt-in은 쓰지 않습니다(C8). §4.4의 첫 AT 발송 전 ECG-Liste 확인은 그대로 남습니다 |
+
+KR·US·CA·AU·GB·SG를 넣은 근거: 각 profile이 **자기 나라 하나만** 덮고 그 나라의
+출처(docs/policy/email-notifications.md §4.3)로 작성됐으므로, §5가 문제 삼은 "개별
+확인 없이 덮은 국가"가 없습니다.
+
+국가를 추가하려면 **국가별 확인 기록을 먼저** 남기고, 그 다음 상수 한 줄과
+`tests/emailJurisdictionCore.test.mjs`의 고정 목록을 함께 고칩니다.
+
+아래는 결정 전 상태의 기록입니다.
+
+### 조건 7 — 결정 전 기록: allowlist가 이 문서의 규칙보다 넓었습니다
+
+**코드의 허용 조건은 "profile이 있는 국가"이고, 이 문서 §5의 규칙은 "국가별 확인
+기록이 있는 국가"입니다. 두 집합이 다릅니다.**
+
+`marketingOptInCountryDecision()`은 `profileForCountry()`가 `ZZ`가 아닌 국가를
+전부 통과시킵니다. 그 집합은 seed의 country map 전체 — 8개 profile이 덮는 모든
+국가 — 이고, 여기에는 **이 검토가 읽지 않은 EEA 26개국이 포함됩니다.**
+
+§5는 그 반대를 규칙으로 두었습니다.
+
+> 1. 새 국가에 처음 보내기 전에 국가별 확인을 기록합니다. **기록이 없으면 그
+>    국가는 대상이 아닙니다.**
+
+**지금 이것이 사고를 만들지는 않습니다** — marketing flag가 꺼져 있고 opt-in한
+사람이 0명이므로, 그 26개국에서 동의를 켤 수 있다는 사실이 아직 발송으로
+이어지지 않습니다. **flag를 켜기 전에 둘 중 하나를 해야 합니다.**
+
+- **좁히기** — 허용 국가를 "확인 기록이 있는 국가"로 줄입니다. 오늘 그 집합은
+  DE·FR·AT·CH 넷이고, 여기에 profile이 자기 나라 하나만 덮는 KR·US·CA·AU·GB·SG를
+  더할지는 별도 판단입니다(그 여섯은 EEA 밖이라 §5의 26개국 문제와 다릅니다).
+- **넓히기** — 26개국의 국가별 확인을 기록해 allowlist를 정당화합니다. §8이 그
+  작업을 외부 자문 항목으로 지목합니다.
+
+**어느 쪽도 이 문서가 혼자 정할 수 없습니다.** 앞은 제품 범위를 줄이는 결정이고
+뒤는 비용이 드는 자문입니다. 다만 **지금 상태를 "확정된 allowlist"라고 부를 수는
+없습니다** — 그것이 이 조건이 아직 빨간 이유입니다.
 
 ### 조건 3을 따로 설명합니다
 
@@ -195,7 +256,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 **대신 제품 안에서 다시 받습니다** — 로그인한 사용자에게 설정 화면이나 배너로
 확인을 요청하고, 확인 메일은 그 사람이 **그 자리에서 요청했을 때만** 나갑니다.
 
-이는 `docs/policy/email-double-opt-in-draft.md` §7의 "첫 캠페인 전에 확인 메일을 한
+이는 `docs/policy/email-double-opt-in.md` §7의 "첫 캠페인 전에 확인 메일을 한
 번 돌리면 됩니다"를 **정정**합니다.
 
 ## 8. 외부 자문이 필요한 것
@@ -219,8 +280,9 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 | 2 | `lib/emailJurisdictionSeed.ts`·`lib/emailBusinessIdentity.ts` | **완료 (2026-09-14).** `EU`·`CH`의 `footerBlocks`에 `abn` 추가. 세 profile이 같은 값을 요구하게 되어 readiness 판정을 profile별에서 **block별로** 묶었습니다 — 변수 하나가 비었는데 같은 경고가 세 번 나오지 않도록 |
 | 3 | `lib/emailFooterRenderer.ts` | **보류.** `privacy_link` 신규 block. 값의 출처(앱 URL인지 환경변수인지)가 정해지지 않았고, composer까지 URL을 넘기는 별도 작업입니다. §6.1의 footer 목록에서 이 항목만 미반영 상태입니다 |
 | 4 | `docs/policy/email-notifications.md` | §22 **A17**을 9개로 갱신, §21 **Q1**을 이 기록으로 해소 표시, §4.3 EU 주의 문구에서 이 기록을 가리키도록 |
-| 5 | `docs/policy/email-double-opt-in-draft.md` | §7 정정 (§7 조건 3) |
+| 5 | `docs/policy/email-double-opt-in.md` | §7 정정 (§7 조건 3) |
 | 6 | 테스트 | profile 수 8→9, 언어×profile 조합 수(56→63), `CH` 매핑, footer block 추가 |
+| 7 | `lib/emailJurisdictionSeed.ts`·`tests/emailJurisdictionSeed.test.mjs` | **완료 (2026-09-15).** 항목 1·2가 `main`에 있는데도 **행에는 닿지 않은 상태**였습니다 — `/admin/email-policy` 확인 결과 활성 version이 bootstrap `2026-08-21.1`(프로필 0개)이었고 `2026-08-21.jurisdictions.1`은 만들어진 적이 없습니다. 증상은 한국 수신자가 아니라 **모든 수신자**의 transactional footer 누락이었고, marketing은 `jurisdiction_profile_missing`으로 전량 거부되는 상태였습니다. 코드 수정은 불필요했고(`main`에 9개 profile이 이미 정확), **`초안 생성` + 활성화**가 남은 전부입니다. 재발 방지로 profile 내용 digest를 test에 기록했고, seed version을 언제 올리고 언제 올리지 않는지를 상수 주석에 적었습니다 |
 
 ## 10. 다음 검토
 

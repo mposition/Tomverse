@@ -2052,6 +2052,7 @@ export const zh = {
         countryConflictBody: "你的账单国家与之前确认的国家不一致（{countries}）。请在上方确认你目前的居住国家。",
         countryUnsupportedBody: "营销邮件尚未向已保存的国家开放。只有在你的居住国家确实发生变化时才选择其他国家。",
         needsCountryNote: "请先在上方确认居住国家，然后才能发送。",
+        countryUnsupportedNote: "你当前的居住国家暂不提供营销邮件。",
         countryLabel: "居住国家",
         countryDescription: "仅用于应用正确的广告标识、发件人信息和退订规则。开启营销邮件时，此国家会与该次同意一并保存。",
         countryPlaceholder: "选择居住国家",

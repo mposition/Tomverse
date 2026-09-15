@@ -32,16 +32,40 @@
 import { RENDERABLE_FOOTER_BLOCKS } from "@/lib/emailFooterRenderer";
 import {
   JURISDICTION_PROFILES,
-  MARKETING_SUPPORTED_COUNTRY_CODES,
+  JURISDICTION_MAPPED_COUNTRY_CODES,
   profileForCountry,
   type JurisdictionProfileKey,
 } from "@/lib/emailJurisdictionCore";
 
-/** The version string of the first seeded policy. */
+/**
+ * The version string the seed currently describes.
+ *
+ * This is the idempotency key of `ensureJurisdictionPolicyDraft()`: a policy
+ * version row already carrying it is returned as it stands and never edited,
+ * because an active version is what some delivery was already rendered under.
+ *
+ * So editing a profile below reaches nobody until this string moves. The send
+ * path reads the `JurisdictionProfile` row (`lib/standardEmailLane.ts`), not
+ * this file, and a tree that names one set of footer blocks while the row
+ * names another is the failure this constant exists to prevent -- the symptom
+ * is a footer that is silently dropped, or a marketing message held, for a
+ * rule nobody can find in the source.
+ *
+ * Bump it in the same commit as any profile edit that has already been
+ * created as a row, and say what moved in the summary. While no row carries it
+ * yet -- which was true in production until 2026-09-15, where the only active
+ * version was the bootstrap one with no profiles at all -- editing a profile
+ * in place is correct and bumping would mint a second version describing the
+ * same thing.
+ *
+ * Either way the deploy is only half of it: somebody still creates the draft
+ * and activates it (docs/policy/email-notifications.md §12.3,
+ * `/admin/email-policy`). Old versions stay where they are.
+ */
 export const JURISDICTION_POLICY_SEED_VERSION = "2026-08-21.jurisdictions.1";
 
 export const JURISDICTION_POLICY_SEED_SUMMARY =
-  "Initial jurisdiction profiles for KR, US, CA, AU, GB, SG, EU and the ZZ fallback, from the sources confirmed on 2026-08-21.";
+  "Jurisdiction profiles for KR, US, CA, AU, GB, SG, EU, CH and the ZZ fallback, from the sources confirmed on 2026-08-21 and the EEA/Swiss review of 2026-09-14. KR names no registration numbers: the sender is not a Korean 통신판매업자, so those values do not exist and naming them would discard the whole footer. CH is its own profile rather than resolving through EU. EU and CH footers name abn.";
 
 /**
  * A footer block identifier.
@@ -279,7 +303,7 @@ export const jurisdictionCountryMapSeed = (): Array<{
   profileKey: JurisdictionProfileKey;
 }> => {
   const rows: Array<{ countryCode: string; profileKey: JurisdictionProfileKey }> = [];
-  for (const country of MARKETING_SUPPORTED_COUNTRY_CODES) {
+  for (const country of JURISDICTION_MAPPED_COUNTRY_CODES) {
     const profileKey = profileForCountry(country);
     if (profileKey === "ZZ") continue;
     rows.push({ countryCode: country, profileKey });
