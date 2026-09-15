@@ -1450,6 +1450,7 @@ export const ko = {
         viewerMessagesShown: "메시지 {total}개 중 {shown}개 표시",
         deleteSnapshot: "이 버전 삭제",
         lockedBadge: "잠김",
+        lockedTitle: "잠긴 대화 ({provider}, {date})",
         lockGateTitle: "잠긴 대화입니다",
         lockGateDescription: "이 대화를 보려면 설정한 비밀번호를 입력하세요.",
         lockPasswordLabel: "비밀번호",

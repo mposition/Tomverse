@@ -559,6 +559,48 @@ test("the viewer lists finalized conversations only, in import order", async () 
     assert.equal(paged.conversations.length, 1);
 });
 
+test("a locked snapshot's title is withheld from the list and the import status", async () => {
+    // IMPORT-LOCK-TITLE-01: the title is part of what the lock withholds, so
+    // neither list-shaped response carries it -- whatever grant the browser holds.
+    const user = await createUser();
+    const { importId, conversationIds } = await finalizeImport(user.id, [
+        conversationPayload("conv-open"),
+        conversationPayload("conv-locked"),
+    ]);
+    const locked = await prisma.externalConversation.findFirstOrThrow({
+        where: { id: { in: conversationIds }, title: "conversation conv-locked" },
+    });
+    await prisma.externalConversation.update({
+        where: { id: locked.id },
+        data: { password: "scrypt-hash-placeholder" },
+    });
+
+    const listed = await listExternalConversations(user.id, {});
+    const listedLocked = listed.conversations.find((row) => row.id === locked.id)!;
+    const listedOpen = listed.conversations.find((row) => row.id !== locked.id)!;
+    assert.equal(listedLocked.title, null);
+    assert.equal(listedLocked.titleWithheld, true);
+    assert.equal(listedLocked.locked, true);
+    assert.equal(listedOpen.title, "conversation conv-open");
+    assert.equal(listedOpen.titleWithheld, false);
+
+    const status = await getExternalImportStatus(user.id, importId);
+    const statusLocked = status.conversations.find((row) => row.id === locked.id)!;
+    assert.equal(statusLocked.title, null);
+    assert.equal(statusLocked.titleWithheld, true);
+    // The date the screen names a withheld title by.
+    assert.ok(Date.parse(statusLocked.importedAt) > 0);
+    assert.ok(!JSON.stringify({ listed, status }).includes("conv-locked"));
+
+    // Unlocking brings it back on the next read; nothing was copied or lost.
+    await prisma.externalConversation.update({ where: { id: locked.id }, data: { password: null } });
+    const relisted = await listExternalConversations(user.id, {});
+    assert.equal(
+        relisted.conversations.find((row) => row.id === locked.id)!.title,
+        "conversation conv-locked"
+    );
+});
+
 test("the viewer reads one conversation with message pages, owner-scoped", async () => {
     const user = await createUser();
     const other = await createUser();
@@ -1140,10 +1182,10 @@ test("the status endpoint gives a resumed screen what the wizard's review had", 
     // Per-conversation truncation counts, so the resumed confirmation can
     // name the shortened conversations exactly as the wizard's review did.
     const plain = status.conversations.find((row) =>
-        row.title.includes("resume-plain")
+        row.title?.includes("resume-plain")
     )!;
     const long = status.conversations.find((row) =>
-        row.title.includes("resume-long")
+        row.title?.includes("resume-long")
     )!;
     assert.equal(plain.truncatedMessageCount, 0);
     assert.equal(long.truncatedMessageCount, 1);

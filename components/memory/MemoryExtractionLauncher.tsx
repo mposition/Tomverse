@@ -22,6 +22,7 @@ import {
     type LaunchEstimate,
 } from "@/lib/memoryExtractionLaunch";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { importedConversationTitle } from "@/components/imports/importedConversationTitle";
 
 /**
  * The §11 pre-run confirmation, as a screen (policy §21, slice B4).
@@ -59,7 +60,9 @@ const smallButtonClass =
 type ConversationRow = {
     id: string;
     provider: string;
-    title: string;
+    /** `null` for a locked snapshot: the server does not send its title. */
+    title: string | null;
+    importedAt?: string;
     messageCount: number;
     contentBytes: number;
 };
@@ -511,7 +514,7 @@ export function MemoryExtractionLauncher() {
                                                 />
                                                 <span className="min-w-0">
                                                     <span className="block truncate font-medium">
-                                                        {row.title}
+                                                        {importedConversationTitle(row, t)}
                                                     </span>
                                                     <span className="block text-xs text-zinc-500 dark:text-zinc-400">
                                                         {providerLabel(row.provider)}

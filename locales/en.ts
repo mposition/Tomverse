@@ -1456,6 +1456,7 @@ export const en = {
         viewerMessagesShown: "{shown} of {total} messages shown",
         deleteSnapshot: "Delete this version",
         lockedBadge: "Locked",
+        lockedTitle: "Locked conversation ({provider}, {date})",
         lockGateTitle: "This conversation is locked",
         lockGateDescription: "Enter the password you set to read it.",
         lockPasswordLabel: "Password",

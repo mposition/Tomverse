@@ -1452,6 +1452,7 @@ export const zh = {
         viewerMessagesShown: "共 {total} 条消息，已显示 {shown} 条",
         deleteSnapshot: "删除此版本",
         lockedBadge: "已锁定",
+        lockedTitle: "已锁定的对话（{provider}，{date}）",
         lockGateTitle: "此对话已锁定",
         lockGateDescription: "请输入你设置的密码以查看内容。",
         lockPasswordLabel: "密码",
