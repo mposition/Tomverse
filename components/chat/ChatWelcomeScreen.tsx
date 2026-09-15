@@ -4,26 +4,24 @@ import type { ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { displayHeadingClass } from "@/lib/displayHeading";
-import { Bot, History } from "lucide-react";
+import { History } from "lucide-react";
 
 type ChatWelcomeScreenProps = {
-  recentConversations: { id: string; title: string }[];
-  onSelectConversation?: (id: string) => void;
-  inputSlotRef?: (node: HTMLDivElement | null) => void;
-  consentSlotRef?: (node: HTMLDivElement | null) => void;
   /**
-   * How recent chats are offered on this shell.
+   * Recent conversations, counted rather than listed.
    *
-   * "cards" is the desktop treatment: there is room for three titles and the
-   * sidebar is already on screen next to them.
+   * Only the mobile shell passes these, together with
+   * `onOpenRecentConversations`. Three title cards were both the tallest thing
+   * on a 320x568 new-chat screen *and* a privacy leak, since a shared or
+   * borrowed phone showed real conversation titles before anyone asked for
+   * them; one row that only says how many there are keeps the access path
+   * without printing the titles.
    *
-   * "disclosure" is the mobile treatment: three title cards were both the
-   * tallest thing on a 320x568 new-chat screen *and* a privacy leak, since a
-   * shared or borrowed phone showed real conversation titles before anyone
-   * asked for them. One row that only says how many there are keeps the
-   * access path without printing the titles.
+   * The desktop shell passes nothing: the sidebar beside this screen already
+   * lists the same conversations, so a second list in the middle of the screen
+   * was the same information twice.
    */
-  recentAccess?: "cards" | "disclosure";
+  recentConversations?: readonly { id: string }[];
   onOpenRecentConversations?: () => void;
   recentDisclosureRef?: (node: HTMLButtonElement | null) => void;
   /**
@@ -41,12 +39,18 @@ type ChatWelcomeScreenProps = {
   starterGallery?: ReactNode;
 };
 
+/**
+ * The new-chat screen above the composer.
+ *
+ * The composer is not in here. It sits in the shell's bottom dock in every
+ * state, so a new chat and an ongoing one put it in the same place and the
+ * first send does not move it (docs/ui-contracts/chat-starter-catalog.md
+ * section 6). What is left -- the greeting, the mobile recent-chats row and
+ * the starters -- is one group, centred vertically in the space between the
+ * header and the dock.
+ */
 export function ChatWelcomeScreen({
-  recentConversations,
-  onSelectConversation,
-  inputSlotRef,
-  consentSlotRef,
-  recentAccess = "cards",
+  recentConversations = [],
   onOpenRecentConversations,
   recentDisclosureRef,
   starterGallery,
@@ -66,67 +70,39 @@ export function ChatWelcomeScreen({
   return (
     <div
       data-testid="chat-empty-state"
-      // `min-h-full`, not `h-full`: with a fixed height a centred column whose
-      // content outgrows it overflows in both directions, so the composer
-      // portalled into this screen painted below the section and under the AI
-      // disclaimer (REAUDIT-P1-04, 1166px^2 at 320x568/200% text). A minimum
-      // keeps the centred look whenever there is room and lets the column grow
-      // downwards -- into its scroll container -- when there is not.
-      className="flex min-h-full flex-col items-center justify-center px-6 text-center"
+      // `min-h-full` + `grow`, never a fixed height: the group below centres
+      // itself with auto margins, which collapse to zero when the content is
+      // taller than the space. `justify-content: center` on a box of fixed
+      // height would instead overflow in both directions and put the top of
+      // the group where no scroll can reach it.
+      className="flex min-h-full w-full grow flex-col items-center px-4 text-center sm:px-6"
     >
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-blue-500/10 text-blue-500">
-        <Bot className="h-6 w-6" />
-      </div>
-      <p
-        data-testid="chat-welcome-greeting"
-        className={`text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl ${displayHeadingClass(lang)}`}
+      <div
+        data-testid="chat-welcome-group"
+        className="my-auto flex w-full max-w-2xl flex-col items-center py-6"
       >
-        {welcomeGreeting}
-      </p>
-      <div ref={inputSlotRef} className="mt-5 w-full max-w-xl" />
-      <div ref={consentSlotRef} className="w-full max-w-xl empty:mt-0 [&:not(:empty)]:mt-3" />
-      {/*
-        Below the composer, in normal flow, in a row of its own. The mobile
-        composer contract gives the textarea a dedicated full-width row, so the
-        gallery may follow it but may never share it, overlap it or float above
-        it (docs/ui-contracts/mobile-chat-composer.md).
-      */}
-      {starterGallery}
-      {recentCount > 0 &&
-        (recentAccess === "disclosure" ? (
+        <p
+          data-testid="chat-welcome-greeting"
+          className={`text-balance text-xl font-bold text-zinc-800 dark:text-zinc-100 sm:text-2xl ${displayHeadingClass(lang)}`}
+        >
+          {welcomeGreeting}
+        </p>
+        {recentCount > 0 && onOpenRecentConversations && (
           <button
             ref={recentDisclosureRef}
             type="button"
             data-testid="recent-conversations-disclosure"
             data-recent-count={recentCount}
-            onClick={() => onOpenRecentConversations?.()}
+            onClick={() => onOpenRecentConversations()}
             aria-label={disclosureLabel}
-            className="mt-4 flex min-h-11 w-full max-w-xs items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 text-[13px] font-semibold text-zinc-600 shadow-sm transition hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="mt-2 flex min-h-11 max-w-full items-center justify-center gap-2 rounded-xl px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-300 dark:hover:bg-zinc-900"
           >
-            <History className="h-4 w-4 shrink-0 text-zinc-400" aria-hidden="true" />
+            <History className="h-4 w-4 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden="true" />
             <span className="min-w-0 truncate">{disclosureLabel}</span>
           </button>
-        ) : (
-          <div className="mt-5 flex w-full max-w-xs flex-col gap-2">
-            <p className="text-left text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-              {t("chat.recentConversationsLabel")}
-            </p>
-            {recentConversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                type="button"
-                data-testid="recent-conversation-card"
-                onClick={() => onSelectConversation?.(conversation.id)}
-                className="flex items-center gap-2.5 rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left text-sm text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              >
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500">
-                  <Bot className="h-3.5 w-3.5" />
-                </span>
-                <span className="min-w-0 flex-1 truncate font-medium">{conversation.title}</span>
-              </button>
-            ))}
-          </div>
-        ))}
+        )}
+        {starterGallery}
+      </div>
     </div>
   );
 }

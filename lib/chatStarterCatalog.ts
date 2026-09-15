@@ -161,7 +161,19 @@ export type ChatStarterEntry = {
   /** Stable identifier. Appears in `data-starter-id`, never in user copy. */
   id: string;
   /**
-   * Locale key of the sentence on the card.
+   * Locale key of the short label the card shows.
+   *
+   * The label *is* the promise wherever the full sentence is not on screen --
+   * a touch device has no hover, and the narrow tile grid shows the label
+   * alone -- so it obeys every rule `outcomeKey` obeys: an outcome, not a
+   * feature name, no superiority claim, no em or en dash. The full sentence
+   * stays one focus or hover away where a pointer can hover, and is the
+   * card's accessible description everywhere
+   * (docs/ui-contracts/chat-starter-catalog.md section 1).
+   */
+  labelKey: string;
+  /**
+   * Locale key of the full outcome sentence behind the label.
    *
    * An **outcome**, not a feature name. "Ask three models the same question
    * about an 18-page PDF" is an outcome; "file attachment supported" is a
@@ -205,6 +217,7 @@ export type ChatStarterEntry = {
 export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   {
     id: "compare-answers",
+    labelKey: "chatStarter.cards.compareAnswers.label",
     outcomeKey: "chatStarter.cards.compareAnswers.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
     requires: {},
@@ -217,6 +230,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "document-questions",
+    labelKey: "chatStarter.cards.documentQuestions.label",
     outcomeKey: "chatStarter.cards.documentQuestions.outcome",
     taskProfile: { kind: "documents", needsCurrentInformation: false },
     requires: { capabilities: ["document-attachment"] },
@@ -230,6 +244,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "sourced-answer",
+    labelKey: "chatStarter.cards.sourcedAnswer.label",
     outcomeKey: "chatStarter.cards.sourcedAnswer.outcome",
     taskProfile: { kind: "research", needsCurrentInformation: true },
     requires: { capabilities: ["web-search"] },
@@ -243,6 +258,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "debug-stack-trace",
+    labelKey: "chatStarter.cards.debugStackTrace.label",
     outcomeKey: "chatStarter.cards.debugStackTrace.outcome",
     taskProfile: { kind: "coding", needsCurrentInformation: false },
     requires: {},
@@ -255,6 +271,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "spreadsheet-from-answer",
+    labelKey: "chatStarter.cards.spreadsheetFromAnswer.label",
     outcomeKey: "chatStarter.cards.spreadsheetFromAnswer.outcome",
     taskProfile: { kind: "documents", needsCurrentInformation: false },
     // Guests cannot create files at all (docs/policy/generated-artifacts.md):
@@ -270,6 +287,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "read-a-screenshot",
+    labelKey: "chatStarter.cards.readAScreenshot.label",
     outcomeKey: "chatStarter.cards.readAScreenshot.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
     requires: { capabilities: ["image-input"] },
@@ -283,6 +301,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "translate-and-compare",
+    labelKey: "chatStarter.cards.translateAndCompare.label",
     outcomeKey: "chatStarter.cards.translateAndCompare.outcome",
     taskProfile: { kind: "multilingual", needsCurrentInformation: false },
     requires: {},
@@ -295,6 +314,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "compare-image-models",
+    labelKey: "chatStarter.cards.compareImageModels.label",
     outcomeKey: "chatStarter.cards.compareImageModels.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
     requires: {
@@ -311,6 +331,7 @@ export const CHAT_STARTER_CATALOG: readonly ChatStarterEntry[] = [
   },
   {
     id: "speak-a-question",
+    labelKey: "chatStarter.cards.speakAQuestion.label",
     outcomeKey: "chatStarter.cards.speakAQuestion.outcome",
     taskProfile: { kind: "general", needsCurrentInformation: false },
     requires: { flagKeys: [VOICE_INPUT_FLAG_KEY] },
