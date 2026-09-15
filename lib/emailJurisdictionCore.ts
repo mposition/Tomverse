@@ -93,20 +93,22 @@ export const JURISDICTION_MAPPED_COUNTRY_CODES = [
 
 /**
  * The countries where marketing may be consented to and sent. Decided
- * 2026-09-15 (EEA review, docs/policy/email-eea-marketing-review-2026-09-14.md
- * §7 condition 7).
+ * 2026-09-15: docs/policy/email-eea-marketing-review-2026-09-14.md §7 condition 7.
  *
  * A profile answers "which rules would apply"; this list answers "has anybody
  * checked that those rules are enough for this country". The EEA review read
- * DE, FR, AT and CH country by country and covered the other twenty-six EEA
- * states with a judgement that the common baseline exceeds their floor. Its §5
- * makes that judgement insufficient on its own: a country with no country-level
- * record is not a marketing destination. So the twenty-six keep the `EU` profile
- * -- their transactional footer is unchanged -- and are simply not here.
+ * DE, FR and AT (and Switzerland, which is not in the EEA) country by country,
+ * and covered the other twenty-seven EEA states with a judgement that the
+ * common baseline exceeds their floor. Its own limits section
+ * (docs/policy/email-eea-marketing-review-2026-09-14.md §5) makes that judgement
+ * insufficient on its own: a country with no country-level record is not a marketing
+ * destination. So the twenty-seven keep the `EU` profile -- their transactional
+ * footer is unchanged -- and are simply not here.
  *
  * KR, US, CA, AU, GB and SG are here because each profile covers exactly its own
- * country and was written from that country's sources (§4.3), so there is no
- * wider set being stood in for.
+ * country and was written from that country's sources
+ * (docs/policy/email-notifications.md §4.3), so there is no wider set being
+ * stood in for.
  *
  * Checked at the opt-in boundary *and* at send time. The send-time check is the
  * one that matters for consent stored before this list existed: a person who
@@ -253,14 +255,16 @@ export const resolveEmailJurisdiction = (
   // Both high-confidence signals present and disagreeing. A declaration made
   // after the billing signal is the person's explicit resolution of that
   // conflict. Without that temporal evidence, neither is adopted: picking one
-  // would be the ordering this contract says does not exist.
+  // would be the ordering this contract says does not exist. Strictly after:
+  // two different countries stamped at the same instant say nothing about
+  // which came second, so they stay a conflict.
   if (billing && declared && billing !== declared) {
     const billingAt = signals.billingCountryUpdatedAt?.getTime();
     const declaredAt = signals.selfDeclaredCountryUpdatedAt?.getTime();
     if (
       declaredAt !== undefined &&
       Number.isFinite(declaredAt) &&
-      (billingAt === undefined || !Number.isFinite(billingAt) || declaredAt >= billingAt)
+      (billingAt === undefined || !Number.isFinite(billingAt) || declaredAt > billingAt)
     ) {
       return {
         countryCode: declared,

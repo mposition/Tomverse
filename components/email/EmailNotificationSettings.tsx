@@ -204,6 +204,16 @@ export function EmailNotificationSettings() {
     );
     const savedCountryIsUnsupported =
         Boolean(country) && !SUPPORTED_COUNTRIES.has(country);
+    // A country we know -- declared or from billing -- that marketing does not
+    // reach. Told apart from "no country yet" so the screen never suggests that
+    // confirming a country would make marketing arrive where it cannot.
+    const countryIsUnsupported = Boolean(
+        state &&
+            !state.country.marketingSupported &&
+            (state.country.selfDeclared ||
+                (state.country.confidence === "high" &&
+                    state.country.resolved !== "ZZ"))
+    );
 
     const errorMessage = saveError
         ? t(`emailNotifications.error.${saveError}`)
@@ -303,8 +313,7 @@ export function EmailNotificationSettings() {
                                 {t("emailNotifications.countryNeededTitle")}
                             </h2>
                             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                                {!state.country.marketingSupported &&
-                                state.country.selfDeclared
+                                {countryIsUnsupported
                                     ? t("emailNotifications.countryUnsupportedBody")
                                     : state.country.confidence === "conflict"
                                       ? t(
@@ -367,10 +376,17 @@ export function EmailNotificationSettings() {
                                     {!preference.locked &&
                                     MARKETING_PURPOSES.has(preference.purpose) &&
                                     state.country.needsConfirmation ? (
-                                        <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-500">
-                                            {t(
-                                                "emailNotifications.needsCountryNote"
-                                            )}
+                                        <p
+                                            className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-500"
+                                            data-testid={`email-preference-${preference.purpose}-country-note`}
+                                        >
+                                            {countryIsUnsupported
+                                                ? t(
+                                                      "emailNotifications.countryUnsupportedNote"
+                                                  )
+                                                : t(
+                                                      "emailNotifications.needsCountryNote"
+                                                  )}
                                         </p>
                                     ) : null}
                                 </div>

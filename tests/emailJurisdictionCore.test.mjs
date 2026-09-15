@@ -184,10 +184,14 @@ test("every allowlisted country has a real profile", () => {
 
 test("the rendering map still covers all thirty-seven countries", () => {
   // The allowlist narrows marketing only. Transactional and legal mail keep
-  // rendering under the EU profile for the twenty-six EEA states outside it,
+  // rendering under the EU profile for the twenty-seven EEA states outside it,
   // and the activation runbook's answer sheet counts thirty-seven.
   assert.equal(JURISDICTION_MAPPED_COUNTRY_CODES.length, 37);
   assert.equal(profileForCountry("NL"), "EU");
+  const excludedEea = JURISDICTION_MAPPED_COUNTRY_CODES.filter(
+    (country) => profileForCountry(country) === "EU" && !isMarketingAllowedCountry(country)
+  );
+  assert.equal(excludedEea.length, 27);
 });
 
 test("a mapped EEA country outside the allowlist is refused at opt-in and at send", () => {
@@ -232,6 +236,19 @@ test("a declared allowlisted country resolves a conflict with a later billing si
     selfDeclaredCountryUpdatedAt: new Date("2026-09-15T00:00:00Z"),
   });
   assert.equal(marketingJurisdictionVerdict(stale).allowed, false);
+
+  // The same instant says nothing about which came second, so two different
+  // countries stamped together remain a conflict rather than the declaration.
+  const simultaneous = resolveEmailJurisdiction({
+    billingCountry: "NL",
+    billingCountryUpdatedAt: new Date("2026-09-15T00:00:00Z"),
+    selfDeclaredCountry: "DE",
+    selfDeclaredCountryUpdatedAt: new Date("2026-09-15T00:00:00Z"),
+  });
+  assert.deepEqual(marketingJurisdictionVerdict(simultaneous), {
+    allowed: false,
+    skipReason: "jurisdiction_conflict",
+  });
 });
 
 test("only a confirmed jurisdiction lets marketing go out", () => {

@@ -2083,6 +2083,7 @@ export const en = {
         countryConflictBody: "Your billing country and previously confirmed country do not match ({countries}). Confirm where you live now above.",
         countryUnsupportedBody: "Marketing email is not available for the saved country yet. Choose another country only if you now live there.",
         needsCountryNote: "Confirm your country above before this can be sent.",
+        countryUnsupportedNote: "Marketing email is not available for your current country.",
         countryLabel: "Country of residence",
         countryDescription: "Used only to apply the right advertising labels, sender details and unsubscribe rules. Turning on marketing saves it with that consent.",
         countryPlaceholder: "Select your country",

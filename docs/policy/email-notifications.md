@@ -19,8 +19,13 @@
 - **profile 매핑(37개국)과 marketing allowlist(10개국)는 별도 상수입니다**
   (`JURISDICTION_MAPPED_COUNTRY_CODES`, `MARKETING_ALLOWED_COUNTRY_CODES`).
   매핑은 어떤 규칙으로 렌더링하는가이고, allowlist는 그 규칙이 그 나라에서 충분한지
-  누군가 확인했는가입니다. 나머지 EEA 26개국의 transactional·legal footer는 그대로
-  `EU` profile입니다.
+  누군가 확인했는가입니다. 제외되는 EEA **27개국**(30개국 − DE·FR·AT)의
+  transactional·legal footer는 그대로 `EU` profile입니다. CH는 EEA가 아니고 자기
+  profile을 가지므로 이 셈에 들어가지 않습니다.
+- `recordBillingCountry()`를 update에서 **upsert**로 바꿨습니다. `UserSettings` 행이
+  없는 계정의 결제 국가가 조용히 버려지면 resolver가 동의 시점 국가로 떨어져, allowlist
+  밖으로 옮긴 사람에게 이전 동의로 발송될 수 있었습니다. 결제 신호와 자기신고가 **같은
+  시각**이면 이제 충돌로 남습니다(엄격히 나중일 때만 자기신고 채택).
 - 검사는 **두 곳**입니다. opt-in 경계(`marketingOptInCountryDecision()`)가 새 동의를
   거부하고, 발송 lane(`marketingJurisdictionVerdict()`)이 **이미 저장된 동의까지**
   같은 목록으로 다시 봅니다. 새 skip 사유 `marketing_country_not_allowed`.
