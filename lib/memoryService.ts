@@ -502,41 +502,50 @@ export async function deleteMemory(userId: string, memoryId: string) {
  * silently included.
  */
 export async function bulkApproveMemories(userId: string) {
+    // Ids only. Everything the decision rests on -- status, statement,
+    // evidence -- is read again under the account's memory lock: a source
+    // deletion that removes a candidate's user-role evidence between an
+    // unlocked read and this approval would otherwise leave an assistant-only
+    // factual memory active (lib/memoryItemLock.ts).
     const candidates = await prisma.memoryItem.findMany({
         where: { userId, status: "candidate", sensitivity: "standard" },
-        include: {
-            evidences: {
-                select: {
-                    id: true,
-                    sourceType: true,
-                    manualContent: true,
-                    externalMessage: {
-                        select: { role: true, externalConversationId: true },
-                    },
-                },
-            },
-        },
+        select: { id: true },
         orderBy: { createdAt: "asc" },
     });
 
     let approved = 0;
     let skipped = 0;
-    for (const item of candidates) {
-        const result = validateMemoryCandidate({
-            kind: item.kind,
-            statement: item.statement,
-            confidence: item.confidence,
-            sensitivity: "standard",
-            expiresAt: item.expiresAt?.toISOString() ?? null,
-            evidence: evidenceInputs(item.evidences),
-        });
-        if (result.disposition !== "accepted" || !result.bulkSafe) {
-            skipped += 1;
-            continue;
-        }
+    for (const { id } of candidates) {
         try {
-            await prisma.$transaction(async (tx) => {
+            const outcome = await prisma.$transaction(async (tx) => {
                 await acquireUserMemoryLock(tx, userId);
+                const item = await tx.memoryItem.findFirst({
+                    where: { id, userId, status: "candidate", sensitivity: "standard" },
+                    include: {
+                        evidences: {
+                            select: {
+                                id: true,
+                                sourceType: true,
+                                manualContent: true,
+                                externalMessage: {
+                                    select: { role: true, externalConversationId: true },
+                                },
+                            },
+                        },
+                    },
+                });
+                if (!item) return "skipped" as const;
+                const result = validateMemoryCandidate({
+                    kind: item.kind,
+                    statement: item.statement,
+                    confidence: item.confidence,
+                    sensitivity: "standard",
+                    expiresAt: item.expiresAt?.toISOString() ?? null,
+                    evidence: evidenceInputs(item.evidences),
+                });
+                if (result.disposition !== "accepted" || !result.bulkSafe) {
+                    return "skipped" as const;
+                }
                 await assertNoActiveConflict(
                     tx,
                     userId,
@@ -544,12 +553,14 @@ export async function bulkApproveMemories(userId: string) {
                     item.id,
                     undefined
                 );
-                await tx.memoryItem.updateMany({
+                const updated = await tx.memoryItem.updateMany({
                     where: { id: item.id, status: "candidate" },
                     data: { status: "active", approvedAt: new Date() },
                 });
+                return updated.count === 1 ? ("approved" as const) : ("skipped" as const);
             });
-            approved += 1;
+            if (outcome === "approved") approved += 1;
+            else skipped += 1;
         } catch (error) {
             if (
                 error instanceof ApiSecurityError &&

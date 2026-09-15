@@ -116,13 +116,16 @@ test("both deletions take the account's memory lock after their row locks and be
 });
 
 /**
- * Every MemoryItem write happens under the account's memory lock.
+ * Every memory write happens under the account's memory lock, and every read a
+ * write decides on happens after it.
  *
- * Checked per function, not per file: for each write, the enclosing function
- * must take the lock before that write, or be a helper whose every call site
- * takes it first. A file that merely mentions the lock somewhere proves
- * nothing -- that is how edit, reject, expiry and the source-lock paths were
- * missed before.
+ * Checked per function, not per file: for each write to MemoryItem or
+ * MemoryEvidence, the enclosing function must take the lock before that write,
+ * or be a helper whose every call site takes it first. A file that merely
+ * mentions the lock somewhere proves nothing -- that is how edit, reject,
+ * expiry and the source-lock paths were missed before. And a lock taken after
+ * the decision was read proves nothing either -- that is how bulk approval
+ * validated evidence a source deletion then removed.
  */
 const MEMORY_WRITER_FILES = [
   "lib/memoryService.ts",
@@ -130,9 +133,29 @@ const MEMORY_WRITER_FILES = [
   "lib/externalImportService.ts",
   "lib/externalConversationLockService.ts",
   "lib/memoryExpiryService.ts",
+  "scripts/backfill-memory-search-terms.mjs",
 ];
-const WRITE = /\b(?:tx|client|prisma)\.memoryItem\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/g;
+const WRITE_VERBS = "create|createMany|update|updateMany|upsert|delete|deleteMany";
+const READ_VERBS = "findMany|findFirst|findFirstOrThrow|findUnique|findUniqueOrThrow|count|aggregate|groupBy";
+const WRITE = new RegExp(`\\b(?:tx|client|prisma)\\.(?:memoryItem|memoryEvidence)\\.(?:${WRITE_VERBS})\\(`, "g");
+const READ = new RegExp(`\\b(tx|client|prisma)\\.(?:memoryItem|memoryEvidence)\\.(?:${READ_VERBS})\\(`, "g");
 const LOCK = /\b(?:lockAccountMemoryItems|acquireUserMemoryLock)\(/;
+
+/**
+ * Functions allowed an unlocked read before their lock, because that read only
+ * enumerates work and the decision is made again under the lock. Each names
+ * what, after the lock, re-establishes the facts.
+ */
+const UNLOCKED_ENUMERATIONS = new Map([
+  // Ids only; the candidate and its evidence are re-read and re-validated.
+  ["lib/memoryService.ts#bulkApproveMemories", /tx\.memoryItem\.findFirst\(/],
+  // The update re-states status and expiry in its where clause.
+  ["lib/memoryExpiryService.ts#reconcileExpiredMemories", /tx\.memoryItem\.updateMany\(\{\s*where: \{[\s\S]*?status:[\s\S]*?expiresAt:/],
+  // Ids and owners only; the lock facts are re-read for those ids.
+  ["lib/externalConversationLockService.ts#reconcileSourceLockedMemories", /memoryLockFacts\(tx, userId, memoryIds\)/],
+  // The row is re-read before its terms are computed.
+  ["scripts/backfill-memory-search-terms.mjs#main", /tx\.memoryItem\.findUnique\(/],
+]);
 
 /** Top-level function bodies, by name. Good enough for these files' style. */
 const topLevelFunctions = (code) => {
@@ -144,22 +167,23 @@ const topLevelFunctions = (code) => {
   }));
 };
 
-test("every MemoryItem write is preceded by the account memory lock in its own function or all its callers", () => {
+const enclosing = (functions, index) => functions.find((fn) => fn.start <= index && index < fn.end);
+
+test("every memory write is preceded by the account memory lock in its own function or all its callers", () => {
   const helpersNeedingLockedCallers = new Map();
   for (const path of MEMORY_WRITER_FILES) {
     const code = readFileSync(path, "utf8");
     assert.doesNotMatch(code, /"memory-items:"/, `${path} must use lockAccountMemoryItems(), not spell the key`);
     assert.doesNotMatch(
       code,
-      /\bprisma\.memoryItem\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/,
+      new RegExp(`\\bprisma\\.(?:memoryItem|memoryEvidence)\\.(?:${WRITE_VERBS})\\(`),
       `${path}: a memory write outside a transaction cannot hold the lock`
     );
     const functions = topLevelFunctions(code);
     for (const write of code.matchAll(WRITE)) {
-      const fn = functions.find((candidate) => candidate.start <= write.index && write.index < candidate.end);
+      const fn = enclosing(functions, write.index);
       assert.ok(fn, `${path}: a write outside any function`);
-      const before = code.slice(fn.start, write.index);
-      if (LOCK.test(before)) continue;
+      if (LOCK.test(code.slice(fn.start, write.index))) continue;
       helpersNeedingLockedCallers.set(`${path}#${fn.name}`, { path, name: fn.name });
     }
   }
@@ -178,7 +202,7 @@ test("every MemoryItem write is preceded by the account memory lock in its own f
     );
     let callSites = 0;
     for (const call of calls) {
-      const caller = functions.find((fn) => fn.start <= call.index && call.index < fn.end);
+      const caller = enclosing(functions, call.index);
       if (!caller || caller.name === name) continue;
       callSites += 1;
       assert.match(
@@ -191,14 +215,57 @@ test("every MemoryItem write is preceded by the account memory lock in its own f
   }
 });
 
-test("no other module writes MemoryItem rows", () => {
+test("in a function that takes the memory lock, every memory read it decides on comes after the lock", () => {
+  const allowedSeen = new Set();
+  for (const path of MEMORY_WRITER_FILES) {
+    const code = readFileSync(path, "utf8");
+    const functions = topLevelFunctions(code);
+    // Same-file helpers that read memory rows count as reads where they are
+    // called (loadOwnedMemory, for one).
+    const readingHelpers = functions
+      .filter((fn) => new RegExp(READ.source).test(code.slice(fn.start, fn.end)))
+      .map((fn) => fn.name);
+    const helperCall = readingHelpers.length
+      ? new RegExp(`(?<![\\w.])(?:${readingHelpers.join("|")})\\(`, "g")
+      : null;
+    for (const fn of functions) {
+      const body = code.slice(fn.start, fn.end);
+      const lock = body.search(LOCK);
+      if (lock < 0) continue;
+      const reads = [
+        ...[...body.matchAll(READ)].map((read) => ({ index: read.index, text: read[0], client: read[1] })),
+        ...(helperCall ? [...body.matchAll(helperCall)] : [])
+          .filter((call) => call.index > 0 && !/function\*?\s+$/.test(body.slice(Math.max(0, call.index - 12), call.index)))
+          .map((call) => ({ index: call.index, text: call[0], client: "helper" })),
+      ];
+      const key = `${path}#${fn.name}`;
+      for (const read of reads) {
+        if (read.index > lock) continue;
+        const reestablished = UNLOCKED_ENUMERATIONS.get(key);
+        assert.ok(
+          reestablished && read.client === "prisma",
+          `${key}: ${read.text} is read before the memory lock, so the write decides on a stale row`
+        );
+        assert.match(body.slice(lock), reestablished, `${key}: the facts must be re-read under the lock`);
+        allowedSeen.add(key);
+      }
+    }
+  }
+  assert.deepEqual([...allowedSeen].sort(), [...UNLOCKED_ENUMERATIONS.keys()].sort(), "every allowance is still needed");
+  // The bulk enumeration reads ids and nothing a decision could use.
+  const service = readFileSync("lib/memoryService.ts", "utf8");
+  const bulk = service.slice(service.indexOf("export async function bulkApproveMemories("));
+  assert.match(bulk.slice(0, bulk.search(LOCK)), /select: \{ id: true \}/);
+});
+
+test("no other module writes MemoryItem or MemoryEvidence rows", () => {
   // A new writer elsewhere must join the list above, and therefore the lock.
-  const listed = execSync("git ls-files lib app", { encoding: "utf8" })
+  const listed = execSync("git ls-files lib app scripts", { encoding: "utf8" })
     .split("\n")
-    .filter((file) => /\.(ts|tsx)$/.test(file));
+    .filter((file) => /\.(ts|tsx|mts|cts|js|mjs|cjs)$/.test(file));
   const writers = listed.filter((file) => {
     try {
-      return /memoryItem\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/.test(readFileSync(file, "utf8"));
+      return new RegExp(`(?:memoryItem|memoryEvidence)\\.(?:${WRITE_VERBS})\\(`).test(readFileSync(file, "utf8"));
     } catch {
       return false;
     }

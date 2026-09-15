@@ -9,6 +9,9 @@ import {
 } from "@/lib/externalImportService";
 import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
 import {
+    approveMemory,
+    bulkApproveMemories,
+    createManualMemory,
     deleteMemory,
     editMemory,
     rejectMemory,
@@ -378,23 +381,39 @@ test("cancelling an unfinished import touches no memory", async () => {
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Resolves once some session is waiting for an advisory lock, and fails if none
- * does within the deadline. A barrier on the database's own state, not a sleep:
- * the transaction under test has provably reached the lock, and without the
- * lock it never waits, so the test fails rather than passing by timing.
+ * Resolves once some session is waiting for THIS account's memory lock, and
+ * fails if none does within the deadline. A barrier on the database's own
+ * state, not a sleep: the transaction under test has provably reached the lock,
+ * and without the lock it never waits, so the test fails rather than passing by
+ * timing.
+ *
+ * The key is matched exactly. A bigint advisory key shows its high half in
+ * `classid` and its low half in `objid`, with `objsubid` 1; any other
+ * session waiting on any other advisory lock (credit account, import) is not
+ * evidence that this one arrived.
+ *
+ * The deadline is under Prisma's default interactive-transaction timeout of
+ * five seconds, which the writers under test run with: if the barrier cannot
+ * see the waiter, it says so before the waiter is rolled back for a reason that
+ * has nothing to do with the lock.
  */
-const untilAnAdvisoryLockIsAwaited = async (deadlineMs = 10_000) => {
+const untilTheMemoryLockIsAwaited = async (userId: string, deadlineMs = 4_000) => {
+    const key = "memory-items:" + userId;
     const deadline = Date.now() + deadlineMs;
     while (Date.now() < deadline) {
         const rows = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
             SELECT count(*)::bigint AS waiting
             FROM pg_locks
-            WHERE locktype = 'advisory' AND NOT granted
+            WHERE locktype = 'advisory'
+              AND NOT granted
+              AND objsubid = 1
+              AND classid = ((hashtext(${key})::bigint >> 32) & 4294967295)::oid
+              AND objid = (hashtext(${key})::bigint & 4294967295)::oid
         `;
         if (Number(rows[0]?.waiting ?? 0) > 0) return;
         await pause(20);
     }
-    assert.fail("no transaction waited for the account memory lock");
+    assert.fail("no transaction waited for this account's memory lock");
 };
 
 /**
@@ -487,7 +506,7 @@ for (const [label, runDelete] of [
         const candidateId = await extraction.held;
 
         const deletion = runDelete(user.id, importRow.id, conversation.id);
-        await untilAnAdvisoryLockIsAwaited();
+        await untilTheMemoryLockIsAwaited(user.id);
 
         extraction.release();
         await extraction.committed;
@@ -522,7 +541,7 @@ test("an edit committed while a deletion waits is seen as user-touched and suspe
     );
     await edit.held;
     const deletion = deleteExternalConversationSnapshot(user.id, conversation.id);
-    await untilAnAdvisoryLockIsAwaited();
+    await untilTheMemoryLockIsAwaited(user.id);
     edit.release();
     await edit.committed;
     const result = await deletion;
@@ -541,10 +560,27 @@ for (const [label, runWriter] of [
     ["setMemoryPinned", (userId: string, memoryId: string) => setMemoryPinned(userId, memoryId, true)],
     ["deleteMemory", (userId: string, memoryId: string) => deleteMemory(userId, memoryId)],
     ["reconcileExpiredMemories", () => reconcileExpiredMemories(new Date("2030-01-01T00:00:00.000Z"))],
+    ["approveMemory", (userId: string, memoryId: string) => approveMemory({ userId, memoryId })],
+    ["bulkApproveMemories", (userId: string) => bulkApproveMemories(userId)],
+    [
+        "createManualMemory",
+        (userId: string) =>
+            createManualMemory({
+                userId,
+                kind: "preference",
+                statement: "사용자는 녹차를 좋아한다",
+                groundsText: "사용자가 직접 말함",
+            }),
+    ],
+    ["reconcileSourceLockedMemories", () => reconcileSourceLockedMemories()],
 ] as const) {
     test(`${label} waits for the account memory lock`, async () => {
         const user = await createUser();
-        const status = label === "rejectMemory" ? "candidate" : "active";
+        const status = ["rejectMemory", "approveMemory", "bulkApproveMemories"].includes(label)
+            ? "candidate"
+            : label === "reconcileSourceLockedMemories"
+              ? "suspended_by_source_lock"
+              : "active";
         const memory = await seedMemory(user.id, "사용자는 커피를 좋아한다", {
             manualGrounds: "사용자가 직접 말함",
             status,
@@ -558,12 +594,40 @@ for (const [label, runWriter] of [
         const holder = holdMemoryLock(user.id, async () => null);
         await holder.held;
         const writer = runWriter(user.id, memory.id);
-        await untilAnAdvisoryLockIsAwaited();
+        await untilTheMemoryLockIsAwaited(user.id);
         holder.release();
         await holder.committed;
         await writer;
     });
 }
+
+test("bulk approval decides on the evidence as it is after the lock, not as it was before", async () => {
+    // The race the confirmation review found: bulk approval validated a
+    // candidate's evidence without the lock, a source deletion then removed
+    // that evidence, and the approval committed anyway on its stale reading.
+    // Here the holder removes the evidence while bulk approval waits.
+    const user = await createUser();
+    const importRow = await seedImport(user.id);
+    const conversation = await seedConversation(user.id, importRow.id);
+    const message = await seedMessage(user.id, conversation.id, 0);
+    const memory = await seedMemory(user.id, "사용자는 커피를 좋아한다", {
+        messageIds: [message.id],
+        status: "candidate",
+    });
+
+    const holder = holdMemoryLock(user.id, (tx) =>
+        tx.memoryEvidence.deleteMany({ where: { memoryItemId: memory.id } })
+    );
+    await holder.held;
+    const approval = bulkApproveMemories(user.id);
+    await untilTheMemoryLockIsAwaited(user.id);
+    holder.release();
+    await holder.committed;
+    const result = await approval;
+
+    assert.deepEqual(result, { approved: 0, skipped: 1 });
+    assert.equal(await statusOf(memory.id), "candidate", "no evidence, so not approved");
+});
 
 test("setExternalConversationLock waits for the account memory lock", async () => {
     const user = await createUser();
@@ -576,7 +640,7 @@ test("setExternalConversationLock waits for the account memory lock", async () =
         conversationId: conversation.id,
         passwordHash: "hash-for-test",
     });
-    await untilAnAdvisoryLockIsAwaited();
+    await untilTheMemoryLockIsAwaited(user.id);
     holder.release();
     await holder.committed;
     const result = await locking;

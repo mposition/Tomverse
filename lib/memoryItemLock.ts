@@ -15,6 +15,12 @@ import type { Prisma } from "@prisma/client";
  *   - the source lock and its reconciliation
  *     (lib/externalConversationLockService.ts)
  *   - the expiry sweep, per account (lib/memoryExpiryService.ts)
+ *   - the search-term backfill (scripts/backfill-memory-search-terms.mjs)
+ *
+ * A path may enumerate which rows to work on without the lock, but the status,
+ * statement and evidence it decides on are read again after taking it -- or,
+ * for the expiry sweep, re-stated in the update's where clause.
+ * tests/sourceDeletionLockOrder.test.mjs holds each writer to that.
  *
  * The deletions are why this is one function rather than a key string written
  * in several places. A deletion classifies the memories its source backs and
