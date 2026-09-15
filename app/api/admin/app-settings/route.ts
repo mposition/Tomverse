@@ -23,6 +23,8 @@ import {
   setAssistantProfilesEnabled,
   setExternalContinuationEnabled,
   setExternalImportEnabled,
+  isChatStarterEnabled,
+  setChatStarterEnabled,
   setImageGenerationEnabled,
   updatePublicAppSettings,
 } from "@/lib/appSettings";
@@ -57,6 +59,14 @@ const updateAppSettingsSchema = z
     // docs/policy/external-conversation-import-and-memory.md §12.4 that the
     // memory flags' absence protects.
     externalConversationContinuationEnabled: z.boolean(),
+    // The Chat welcome screen's starter catalogue
+    // (docs/ui-contracts/chat-starter-catalog.md). Same default-off opt-in
+    // shape as the flags above, and it IS here rather than registered
+    // read-only: turning it on calls no provider and spends no credit, and
+    // the only claim a card can make has already been proved by
+    // `npm run check:starter-catalog`. There is no activation procedure for a
+    // checkbox to skip past.
+    chatStarterEnabled: z.boolean(),
     // Release C rollout flags (lib/assistantProfileAccess.ts). Two switches
     // and not one: policy §15 enables profiles before knowledge, and the
     // knowledge flag reads as off on its own while profiles are off.
@@ -120,6 +130,7 @@ export async function GET(req: Request) {
         await isExternalContinuationEnabled(),
       assistantProfilesEnabled: await isAssistantProfilesEnabled(),
       assistantKnowledgeEnabled: await isAssistantKnowledgeEnabled(),
+      chatStarterEnabled: await isChatStarterEnabled(),
       ...(await memoryReleaseStatus()),
     });
   } catch (error) {
@@ -166,6 +177,7 @@ export async function PATCH(req: Request) {
       metadata: body,
     });
     const {
+      chatStarterEnabled,
       imageGenerationEnabled,
       externalConversationImportEnabled,
       externalConversationContinuationEnabled,
@@ -181,6 +193,7 @@ export async function PATCH(req: Request) {
     );
     await setAssistantProfilesEnabled(assistantProfilesEnabled);
     await setAssistantKnowledgeEnabled(assistantKnowledgeEnabled);
+    await setChatStarterEnabled(chatStarterEnabled);
     await writeAdminAuditLog({
       session,
       request: req,
@@ -206,6 +219,7 @@ export async function PATCH(req: Request) {
         await isExternalContinuationEnabled(),
       assistantProfilesEnabled: await isAssistantProfilesEnabled(),
       assistantKnowledgeEnabled: await isAssistantKnowledgeEnabled(),
+      chatStarterEnabled: await isChatStarterEnabled(),
       // Unchanged by this request -- nothing above writes them -- and returned
       // anyway so the panel's read-only card is not left showing what it read
       // on page open while every field beside it has been refreshed.

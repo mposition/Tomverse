@@ -2148,4 +2148,48 @@ export const de = {
         changes: "Wir können diese Richtlinie aktualisieren, wenn sich der Dienst oder rechtliche Anforderungen ändern, und zeigen das geänderte Datum an.",
         back: "Zurück zu Tomverse",
     },
+    chatStarter: {
+        title: "Was hier möglich ist",
+        hint: "Wählen Sie eine Karte, um das Feld unten zu füllen. Gesendet wird erst, wenn Sie auf Senden klicken.",
+        lockedSignIn: "Zum Verwenden anmelden",
+        lockedPlan: "Erfordert den Tarif {plan}",
+        cards: {
+            compareAnswers: {
+                outcome: "Eine Frage stellen und die Antworten von drei Modellen nebeneinander lesen",
+                seed: "Erklären Sie in einfachen Worten, wofür eine Vektordatenbank gedacht ist, in etwa 200 Wörtern.",
+            },
+            documentQuestions: {
+                outcome: "Ein PDF mit 18 Seiten anhängen und mehreren Modellen dieselbe Frage dazu stellen",
+                seed: "Ich habe ein Dokument angehängt. Fassen Sie zusammen, worüber ich entscheiden soll, und nennen Sie alle Fristen darin.",
+            },
+            sourcedAnswer: {
+                outcome: "Eine Antwort mit den Quellenlinks erhalten, auf denen sie beruht",
+                seed: "Was hat sich dieses Jahr bei der Durchsetzung des EU-KI-Gesetzes geändert? Nennen Sie die verwendeten Quellen.",
+            },
+            debugStackTrace: {
+                outcome: "Einen Stacktrace einfügen und die fehlerhafte Zeile samt Lösungsvorschlag erhalten",
+                seed: "Hier ist ein Stacktrace aus meinem Build. Sagen Sie mir, welche Zeile fehlgeschlagen ist und was ich ändern soll.",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "Eine Antwort in eine herunterladbare .xlsx-Datei verwandeln",
+                seed: "Erstellen Sie eine Monatsbudget-Tabelle mit Kategorie, geplantem Betrag und tatsächlichem Betrag und speichern Sie sie als Tabellendatei.",
+            },
+            readAScreenshot: {
+                outcome: "Einen Screenshot anhängen und fragen, was die Fehlermeldung bedeutet",
+                seed: "Ich habe einen Screenshot eines Fehlerdialogs angehängt. Sagen Sie mir, was er bedeutet und was ich als Nächstes tun soll.",
+            },
+            translateAndCompare: {
+                outcome: "Einen Entwurf übersetzen und die Fassungen zweier Modelle vergleichen",
+                seed: "Übersetzen Sie den folgenden Text ins Englische und behalten Sie einen förmlichen Ton bei:",
+            },
+            compareImageModels: {
+                outcome: "Einen Satz an mehrere Bildmodelle schicken und die Ergebnisse vergleichen",
+                seed: "Ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
+            },
+            speakAQuestion: {
+                outcome: "Eine lange Frage diktieren statt tippen und den Text vor dem Senden bearbeiten",
+                seed: "Verwandeln Sie das, was ich gleich sage, in eine kurze und klare Anleitung.",
+            },
+        },
+    },
 } satisfies typeof en;

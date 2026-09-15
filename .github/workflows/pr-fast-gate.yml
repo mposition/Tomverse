@@ -471,6 +471,16 @@ jobs:
         timeout-minutes: 5
         run: npm run check:default-models
 
+      # The starter gallery is the first screen a new account sees, and every
+      # card on it claims the product does a thing. A feature that is removed
+      # or renamed does not break the build -- it leaves its card behind,
+      # promising something that is gone, on the one screen that introduces
+      # the product. This proves every card's flag constant, capability
+      # resolver, evidence file and seven translations still resolve.
+      - name: Chat starter catalogue truthfulness
+        timeout-minutes: 5
+        run: npm run check:starter-catalog
+
       - name: Strict encoding validation
         timeout-minutes: 5
         run: npm run check:encoding:strict

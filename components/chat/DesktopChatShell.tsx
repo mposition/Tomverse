@@ -185,6 +185,15 @@ type DesktopChatShellProps = {
    */
   hasConversationPrelude?: boolean;
   onSelectConversation: (id: string) => void;
+  /**
+   * The Chat starter catalogue, already resolved for this viewer.
+   *
+   * A node, not a flag: `ChatPageClient` owns the plan, the deployment flags
+   * and this request's capabilities, and the shells own layout. `undefined`
+   * renders nothing, which is the whole of the flag-off state
+   * (docs/ui-contracts/chat-starter-catalog.md).
+   */
+  starterGallery?: React.ReactNode;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onLock: (id: string, password: string) => void;
@@ -355,6 +364,7 @@ export function DesktopChatShell({
   importedTranscript,
   hasConversationPrelude = false,
   onSelectConversation,
+  starterGallery,
   onRename,
   onDelete,
   onLock,
@@ -938,12 +948,22 @@ export function DesktopChatShell({
             // Matching the light alpha is the smallest change that restores
             // it; the welcome text sits on its own surfaces inside
             // ChatWelcomeScreen, so its contrast is unaffected either way.
-            <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950/80">
+            // `overflow-y-auto`: the overlay is `inset-0`, so its height is
+            // the surface's and nothing inside it could scroll. That was
+            // survivable while the screen held a greeting and a composer; the
+            // starter gallery adds rows, and at 200% text scaling on a short
+            // desktop window the bottom of the column would simply be
+            // unreachable. Desktop only -- the mobile shell draws this screen
+            // in normal flow precisely so it has one scroll owner
+            // (REFLOW-P1-01), and a second one there is the defect that
+            // removed.
+            <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
               <ChatWelcomeScreen
                 recentConversations={recentConversations}
                 onSelectConversation={onSelectConversation}
                 inputSlotRef={setWelcomeInputSlot}
                 consentSlotRef={setWelcomeConsentSlot}
+                starterGallery={starterGallery}
               />
             </div>
           )}
