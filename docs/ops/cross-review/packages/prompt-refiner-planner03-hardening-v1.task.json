@@ -14,6 +14,7 @@
     "docs/ops/tomverse-chat-progress.md",
     "docs/ui-contracts/prompt-refiner-suggestion.md",
     "lib/promptInjectionAudit.ts",
+    "scripts/report-prompt-injection.mjs",
     "tests/fixtures/promptInjectionCorpus.mjs",
     "tests/promptInjectionAudit.test.mjs"
   ],
