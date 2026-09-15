@@ -2069,12 +2069,24 @@ export const fr = {
         alwaysOn: "Toujours activé",
         withdrawAll: "Désactiver tous les e-mails marketing",
         countryNeededTitle: "Confirmez votre pays",
-        countryNeededBody: "Nous devons savoir quelles règles nationales s'appliquent avant de vous envoyer des e-mails marketing. Indiquez-le ci-dessous.",
-        countryConflictBody: "Votre pays de facturation et celui de votre profil diffèrent ({countries}). Choisissez ci-dessous celui qui s'applique.",
-        needsCountryNote: "Indiquez votre pays ci-dessous pour que cet envoi soit possible.",
-        countryLabel: "Pays",
-        countryDescription: "Code à deux lettres. Sert à appliquer le bon étiquetage publicitaire, les mentions d'expéditeur et les règles de désabonnement, pas à la tarification.",
-        countrySave: "Enregistrer",
+        countryNeededBody: "Sélectionnez ci-dessus votre pays de résidence. Cette information n'est requise que si vous choisissez des e-mails marketing.",
+        countryConflictBody: "Votre pays de facturation et le pays précédemment confirmé diffèrent ({countries}). Confirmez ci-dessus votre résidence actuelle.",
+        countryUnsupportedBody: "Les e-mails marketing ne sont pas encore proposés dans le pays enregistré. Ne choisissez un autre pays que si vous y résidez désormais.",
+        needsCountryNote: "Confirmez ci-dessus votre pays de résidence avant cet envoi.",
+        countryLabel: "Pays de résidence",
+        countryDescription: "Utilisé uniquement pour appliquer les mentions publicitaires, les informations d'expéditeur et les règles de désabonnement appropriées. L'activation du marketing l'enregistre avec ce consentement.",
+        countryPlaceholder: "Sélectionnez votre pays",
+        countrySave: "Confirmer le pays",
+        marketingOptional: "Facultatif · désactivable à tout moment",
+        marketingCalloutTitle: "Découvrez les nouvelles fonctionnalités utiles",
+        marketingCalloutBody: "Recevez occasionnellement des e-mails sur les fonctionnalités importantes de Tomverse et des conseils pratiques. Rien n'est présélectionné et vous pouvez vous désinscrire à tout moment.",
+        marketingCalloutAction: "Recevoir les nouveautés produit",
+        error: {
+            COUNTRY_REQUIRED: "Sélectionnez votre pays de résidence avant d'activer les e-mails marketing.",
+            COUNTRY_CONFLICT: "Le pays n'a pas pu être confirmé. Sélectionnez votre résidence actuelle et réessayez.",
+            COUNTRY_UNSUPPORTED: "Les e-mails marketing ne sont pas encore disponibles dans ce pays.",
+            SAVE_FAILED: "Impossible d'enregistrer vos réglages e-mail. Réessayez dans un instant.",
+        },
         purpose: {
             security: {
                 title: "Sécurité et compte",
@@ -2115,7 +2127,7 @@ export const fr = {
     },
     privacyPolicy: {
         title: "Politique de confidentialité",
-        effective: "En vigueur : 16 juillet 2026",
+        effective: "En vigueur : 14 septembre 2026",
         intro: "Tomverse traite les informations personnelles et les données de chat uniquement lorsque cela est nécessaire pour fournir le service.",
         collectedTitle: "Informations traitées",
         collected: "Nous pouvons traiter les identifiants de compte, l'e-mail et les données de profil fournis par les fournisseurs de connexion, les paramètres utilisateur, les chats et messages standard, les pièces jointes, les paramètres de partage, les données d'utilisation et les journaux de sécurité. Pour prévenir l'abus des promotions, nous traitons des hachages à clé dérivés d'une IP client fiable et d'une empreinte de moyen de paiement Stripe. Tomverse ne stocke pas les données brutes de carte ou de compte bancaire.",
@@ -2142,10 +2154,12 @@ export const fr = {
         memory: "Si vous choisissez d'utiliser la fonction de mémoire, Tomverse envoie les parties de vos conversations importées que vous sélectionnez au fournisseur d'IA que vous confirmez, afin d'en extraire des souvenirs candidats. L'extraction utilise le modèle et le montant de crédits qui vous sont indiqués avant son exécution. Les candidats extraits ne servent pas à générer des réponses tant que vous ne les avez pas examinés et approuvés. Les candidats classés comme sensibles et ceux nécessitant un examen individuel sont exclus de l'approbation groupée et doivent être confirmés un par un. Les candidats, les souvenirs approuvés et leurs justifications sont conservés dans votre compte jusqu'à ce que vous les supprimiez ou que les données de votre compte soient supprimées. Les souvenirs approuvés et les préférences de style de réponse sont transmis comme références au fournisseur d'IA qui génère chaque nouvelle réponse, donc au fournisseur de chaque modèle lorsque vous en comparez plusieurs. Vous pouvez consulter, modifier et désactiver les souvenirs enregistrés à tout moment, télécharger la liste complète sous forme de fichier, ou tout supprimer en une fois. Si vous désactivez la mémoire, elle n'est plus utilisée dans les nouvelles discussions.",
         assistantProfilesTitle: "Assistants IA personnalisés et fichiers de connaissances",
         assistantProfiles: "Si vous créez un assistant IA, Tomverse conserve le nom, la description, les instructions, le choix de modèle et les amorces de conversation que vous saisissez, ainsi que chaque révision publiée, afin qu'une conversation puisse indiquer celle avec laquelle elle s'est réellement déroulée. Les fichiers de connaissances que vous joignez sont conservés en privé pour votre compte ; Tomverse en extrait le texte, le découpe en passages et construit un index de recherche afin de retrouver les extraits pertinents. Lorsque vous discutez avec un assistant, ses instructions et les extraits correspondant à votre message sont transmis comme documentation de référence au fournisseur d'IA qui génère la réponse. Les extraits sont traités comme de la documentation de référence et jamais comme des instructions adressées à l'assistant. Les assistants sont privés : ils ne sont pas partagés, pas répertoriés publiquement et pas vendus. Supprimer un assistant supprime ses révisions et ses fichiers de connaissances, et les fichiers stockés sont effacés peu après ; les conversations qui l'ont utilisé restent lisibles dans votre compte. Désactiver un assistant ou le supprimer met fin à son utilisation dans les nouvelles conversations. Si vous créez un assistant en important un paquet, Tomverse conserve aussi ce que vous avez composé avant de le publier, la provenance déclarée par le paquet ou par vous, et le moment où vous l'avez confirmé. Tomverse n'ouvre jamais une adresse indiquée par un paquet. Un import que vous abandonnez expire de lui-même, et les fichiers préparés pour lui disparaissent avec.",
+        emailTitle: "Les e-mails que nous vous envoyons",
+        email: "Tomverse vous envoie des e-mails à l'adresse enregistrée sur votre compte : codes de connexion et avis de sécurité, reçus de facturation, avis d'état du service et -- uniquement si vous le demandez -- actualités produit, infolettres et promotions. Les trois premiers font partie de la fourniture du service et ne peuvent pas être désactivés ; les trois derniers ne sont envoyés qu'après que vous les avez activés, et vous pouvez les désactiver à tout moment dans vos paramètres d'e-mail ou via le lien de désabonnement en un clic présent dans ce type de message, sans vous connecter. Pour cela, Tomverse conserve les paramètres que vous avez choisis et la date de ce choix, un historique en ajout seul de chaque activation et désactivation -- y compris le libellé qui vous a été présenté et les règles nationales appliquées -- ainsi qu'un enregistrement de chaque message qui vous a été envoyé, avec l'adresse, la langue et le résultat de la remise. L'enregistrement d'un consentement conserve une empreinte à sens unique et salée de l'adresse IP et de l'identifiant du navigateur à cet instant, et non les valeurs elles-mêmes. Les messages sont remis par Resend, et le suivi des ouvertures et des clics est désactivé sur les deux domaines d'envoi utilisés par Tomverse. Si vous vous désabonnez, ou si un message qui vous est destiné est rejeté comme non distribuable, cette adresse est enregistrée comme exclue et le reste après la suppression de votre compte -- cet enregistrement existe pour que la suppression d'un compte ne puisse pas relancer les envois, et il ne contient que l'adresse et le motif.",
         analyticsTitle: "Analyse produit et attribution des campagnes",
         analytics: "Tomverse utilise toujours le stockage essentiel de session, sécurité, langue et préférences nécessaire au service. Pour l’analyse produit, les visiteurs de l’UE/EEE, du Royaume-Uni, de Suisse ou d’une région non vérifiée doivent consentir avant le démarrage de Google Analytics 4. En Australie et dans toute région ajoutée après examen juridique, l’analyse minimisée démarre après un avis clair et peut être désactivée immédiatement ou plus tard. Nous enregistrons des événements approuvés et des métadonnées comme la source UTM, la langue, le pays, le nombre de modèles et le forfait. Google peut aussi traiter l’adresse IP, le navigateur, l’URL de page et la localisation approximative hors du pays du visiteur. Prompts, réponses, noms et contenus de fichiers, e-mails et noms de profil ne sont jamais inclus. Le stockage publicitaire et la personnalisation restent désactivés.",
         retentionTitle: "Conservation et suppression",
-        retention: "Les chats standard peuvent rester jusqu'à leur suppression par l'utilisateur ou la suppression des données du compte. Les hachages IP et d'empreinte de paiement liés à la sécurité des promotions sont supprimés après 90 jours ; des données minimales de facturation, légales, de sécurité ou d'incident peuvent être conservées séparément.",
+        retention: "Les chats standard peuvent rester jusqu'à leur suppression par l'utilisateur ou la suppression des données du compte. Les hachages IP et d'empreinte de paiement liés à la sécurité des promotions sont supprimés après 90 jours ; des données minimales de facturation, légales, de sécurité ou d'incident peuvent être conservées séparément. Une exception : une adresse enregistrée comme exclue -- parce que vous vous êtes désabonné ou parce qu'un message a été rejeté comme non distribuable -- est conservée après la suppression du compte, afin que la suppression d'un compte ne puisse pas relancer les envois.",
         sharingTitle: "Liens de partage",
         sharing: "Lorsque le partage est activé, toute personne disposant du lien peut lire la conversation partagée. Supprimez les informations sensibles avant de partager.",
         rightsTitle: "Choix et droits de l'utilisateur",
@@ -2155,5 +2169,49 @@ export const fr = {
         changesTitle: "Modifications de cette politique",
         changes: "Nous pouvons mettre à jour cette politique lorsque le service ou les exigences légales changent et afficherons la nouvelle date d'entrée en vigueur.",
         back: "Retour à Tomverse",
+    },
+    chatStarter: {
+        title: "Ce que vous pouvez faire ici",
+        hint: "Choisissez une carte pour remplir le champ ci-dessous. Rien n'est envoyé tant que vous n'appuyez pas sur envoyer.",
+        lockedSignIn: "Connectez-vous pour l'utiliser",
+        lockedPlan: "Nécessite le forfait {plan}",
+        cards: {
+            compareAnswers: {
+                outcome: "Posez une question et lisez la réponse de trois modèles côte à côte",
+                seed: "Expliquez simplement à quoi sert une base de données vectorielle, en 200 mots environ.",
+            },
+            documentQuestions: {
+                outcome: "Joignez un PDF de 18 pages et posez la même question à plusieurs modèles",
+                seed: "J'ai joint un document. Résumez ce qu'il me demande de décider et listez toutes les échéances qu'il cite.",
+            },
+            sourcedAnswer: {
+                outcome: "Obtenez une réponse accompagnée des liens sources utilisés",
+                seed: "Qu'est-ce qui a changé cette année dans l'application du règlement européen sur l'IA ? Indiquez les sources utilisées.",
+            },
+            debugStackTrace: {
+                outcome: "Collez une trace d'erreur et obtenez la ligne fautive et un correctif à tester",
+                seed: "Voici une trace d'erreur de mon build. Dites-moi quelle ligne a échoué et quoi changer.",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "Transformez une réponse en fichier .xlsx téléchargeable",
+                seed: "Créez un budget mensuel avec catégorie, montant prévu et montant réel, puis enregistrez-le comme fichier tableur.",
+            },
+            readAScreenshot: {
+                outcome: "Joignez une capture d'écran et demandez ce que signifie l'erreur",
+                seed: "J'ai joint la capture d'une boîte de dialogue d'erreur. Dites-moi ce qu'elle signifie et quoi faire ensuite.",
+            },
+            translateAndCompare: {
+                outcome: "Traduisez un brouillon et comparez les versions de deux modèles",
+                seed: "Traduisez le texte ci-dessous en anglais en gardant un ton formel :",
+            },
+            compareImageModels: {
+                outcome: "Envoyez une phrase à plusieurs modèles d'image et comparez leurs rendus",
+                seed: "Une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
+            },
+            speakAQuestion: {
+                outcome: "Dictez une longue question au lieu de la taper, et corrigez le texte avant l'envoi",
+                seed: "Transformez ce que je vais dire en une liste d'instructions courte et claire.",
+            },
+        },
     },
 } satisfies typeof en;

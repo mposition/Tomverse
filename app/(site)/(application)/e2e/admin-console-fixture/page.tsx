@@ -181,6 +181,7 @@ export default async function AdminConsoleFixturePage({
         externalConversationContinuationEnabled={false}
             assistantProfilesEnabled={false}
             assistantKnowledgeEnabled={false}
+            chatStarterEnabled={false}
             /*
               Release B, reported and not editable. The values are the real
               ones rather than placeholders: both flags are off and no

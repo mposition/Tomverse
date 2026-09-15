@@ -24,6 +24,10 @@ const GUARDED_FILES = [
   "components/chat/AutoRoutedByBadge.tsx",
   "components/chat/AutoRoutingToggle.tsx",
   "components/chat/ComparisonActionRail.tsx",
+  // The starter gallery borrows each feature's existing role and adds none of
+  // its own. Guarded so the reserved gradient cannot arrive here either -- a
+  // card that describes AI Review is still not AI Review.
+  "components/chat/ChatStarterGallery.tsx",
   "components/chat/ComparisonReviewDialog.tsx",
   "components/chat/DeepResearchSetupSheet.tsx",
   "components/chat/DeepResearchSuggestionCard.tsx",

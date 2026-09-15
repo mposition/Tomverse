@@ -186,15 +186,46 @@ purelymail(사람이 쓰는 메일함)이 계속 `tomverse.app`에서 보냅니�
 존재하지 않습니다(2026-09-14 확인). 한국 profile이 두 block을 더 이상 이름 대지
 않도록 고치는 변경은 `claude/to-develop/email-marketing-activation`에 있습니다.
 
-> **아직 production 코드에 닿지 않은 결함.** 그 수정이 `main`에 오기 전까지
-> **한국 profile로 해석되는 수신자의 transactional 메일에는 footer가 통째로
-> 빠집니다.** `renderJurisdictionFooter()`가 이름 붙은 block 중 하나라도 비면
-> footer 전체를 버리기 때문이고, 두 등록번호가 바로 그 경우입니다. 이것은
-> 2026-09-14의 환경변수 설정이 만든 상태가 아니라 **그 전부터 있던 상태**이며
-> (두 변수는 설정된 적이 없습니다), `/api/ready`는 이것을 error가 아니라
-> warning으로 보므로 계속 `true`로 답합니다. 유일한 신호는 발송마다 남는
-> `email_jurisdiction_footer_degraded`입니다. marketing 쪽은 거부되는 방향이라
-> 안전하지만, transactional은 보내집니다.
+> **footer가 모든 수신자에게서 빠져 있었습니다 (2026-08-23 ~ 2026-09-15).**
+> 2026-09-14에 이 자리에 적었던 진단 — "한국 profile이 이름 댄 등록번호 두 개가
+> 비어서 한국 수신자의 footer가 빠진다" — 은 **틀렸습니다.** 증상은 더 넓었고
+> 원인은 다른 것이었습니다.
+>
+> `/admin/email-policy` 확인 결과(2026-09-15), 활성 policy version은
+> `2026-08-21.1`이고 **프로필 0개 · 국가 0개**였습니다. 이것은 사람이 만든 것이
+> 아니라 첫 발송 때 `ensureBootstrapPolicyVersion()`
+> (`lib/emailTemplateRegistry.ts`)이 자동으로 만들어 `active`로 올린 bootstrap
+> version이고, 생성·활성화 시각이 둘 다 2026-08-23 11:06입니다. 그리고 목록에
+> 그 version 하나뿐이었습니다 — `2026-08-21.jurisdictions.1`은 **만들어진 적이
+> 없습니다.**
+>
+> 발송 경로는 seed 상수가 아니라 `JurisdictionProfile` 행을 읽으므로
+> (`lib/standardEmailLane.ts`), 행이 없으면 `composeJurisdictionalMessage()`가
+> `profile_missing`으로 갈라집니다(`lib/emailJurisdictionComposition.ts`).
+> 그 갈래는 관할권을 가리지 않습니다.
+>
+> | | |
+> |---|---|
+> | transactional | **모든 수신자**에게 사업자 footer 없이 발송됩니다 |
+> | marketing | `jurisdiction_profile_missing`으로 **전량 거부**됩니다 |
+> | `/api/ready` | 계속 `true`. 이 검사는 환경변수 값을 보고 행을 보지 않습니다 |
+> | 유일한 신호 | 발송마다 남는 `email_jurisdiction_footer_degraded` |
+>
+> **고치는 데 배포가 필요 없었습니다.** `main`에는 9개 profile이 이미 전부
+> 올바르게 들어 있었고(KR의 수정된 blocks, CH, EU·CH의 `abn`), 빠진 것은 그
+> 코드로 행을 만드는 행위 하나였습니다 — `/admin/email-policy`의 `초안 생성`과
+> 활성화(§12.3 2인 승인). 이미 발송된 delivery는 렌더링 당시 version을
+> 유지하므로 소급되지 않습니다.
+>
+> **재발 방지는 두 곳입니다.** `tests/emailJurisdictionSeed.test.mjs`가 profile
+> 내용의 digest를 기록해, 내용이 바뀌었는데 version이 그대로면 실패합니다.
+> 그리고 `JURISDICTION_POLICY_SEED_VERSION`의 주석이 "언제 올리고 언제 올리지
+> 않는가"를 적습니다 — 행이 아직 없는 동안의 수정은 제자리 편집이 맞고, 그때
+> version을 올리면 내용이 같은 version이 둘 생깁니다.
+>
+> **남는 공백 하나.** 행이 하나도 없는 상태를 `/api/ready`도 다른 어떤 검사도
+> 보지 않습니다. 3주 동안 이것을 말해 준 것은 구조화 이벤트뿐이었고, 아무도
+> 그것을 세고 있지 않았습니다.
 
 ## 2. 목표 상태
 

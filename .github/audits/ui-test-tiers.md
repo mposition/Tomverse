@@ -43,9 +43,12 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **57개 파일, 834 test**를
-선택합니다(두 project 합계 1,668). 2026-08-26의 51개 파일, 1,416 test
-(project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
+desktop-chromium과 mobile-chromium 각 project에서 **59개 파일, 843 test**를
+선택합니다(두 project 합계 1,686). 같은 날 `chat-starter-catalog.spec.ts`와
+`prompt-refiner-chat-input.spec.ts`가 병렬로 합류하기 전 값은 57개 파일,
+825 test(project당)였고 두 spec은 각각 +8, +10입니다. 2026-08-26의
+51개 파일, 1,416 test(project당 708)는 아래 증가 이력과 shard 결정의
+기준값으로 남깁니다.
 
 | Spec |
 |---|
@@ -57,6 +60,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **57개 파일, 834 test**
 | `chat-unified-workspace.spec.ts` |
 | `comparison-panel-controls.spec.ts` |
 | `csp-eval-free.spec.ts` |
+| `email-notification-settings.spec.ts` |
 | `external-import-settings.spec.ts` |
 | `feedback-modal.spec.ts` |
 | `generated-artifact-card.spec.ts` |
@@ -100,10 +104,21 @@ desktop-chromium과 mobile-chromium 각 project에서 **57개 파일, 834 test**
 | `conversation-draft-identity.spec.ts` |
 | `prompt-refiner-focus.spec.ts` |
 | `prompt-refiner-chat-input.spec.ts` |
+| `chat-starter-catalog.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
 파일 수는 2026-08-31 현재 53개입니다.
+
+`chat-starter-catalog.spec.ts`가 2026-09-15에 합류해 58개입니다
+(project당 +8). 시작 카탈로그는 신규 계정이 처음 보는 화면이고, 이 tier가
+막아야 하는 것은 그 화면이 **없는 기능을 약속하는 상태**입니다. flag가 꺼진
+배포에서 아무것도 렌더하지 않는다는 것, 잠긴 카드가 클릭 전에 요구사항을
+말한다는 것, 클릭이 초안만 채우고 전송하지 않는다는 것은 정적 검사가 답할 수
+없고 화면에서만 확인됩니다. 320px·200% 배율에서 갤러리가 composer의 textarea
+행을 침범하지 않는다는 것도 같습니다 — 모바일 composer 계약의 불변식이고,
+두 shell이 환영 화면을 서로 다르게(overlay와 일반 flow) 그리므로
+desktop·mobile 양쪽에서 돌립니다.
 
 `conversation-draft-identity.spec.ts`가 2026-09-02에 합류해 54개입니다.
 같은 방식으로 막혔고, 같은 이유로 이 tier에 있습니다 — 초안이 신원별로
@@ -134,13 +149,20 @@ composer의 focus는 실제 DOM에서만 검증할 수 있고, 같은 요청이 
 이는 provider 호출이나 제품 기능 활성화가 아닌, loopback에서만 열리는 fixture의
 release-blocking 회귀 검사입니다.
 
-`prompt-refiner-chat-input.spec.ts`가 2026-09-15에 합류해 57개입니다. 격리 panel이
+`email-notification-settings.spec.ts`가 2026-09-15에 합류해 57개입니다.
+마케팅 동의를 켜는 강조 CTA도 세부 토글과 같은 국가 확인을 거치고, 확인한
+국가와 동의가 한 요청에 함께 저장되며, 그 전에는 쓰기 요청이 발생하지 않는지
+확인합니다. 이 경계가 깨지면 관할 규칙을 정하지 않은 채 마케팅 동의가
+기록되므로 PR에서 막습니다. 태그된 test는 한 건이고 desktop·mobile 두
+project에서 실행됩니다. 같은 날 `CI=1 --grep=@ui-risk --list` 실측은 각
+project에서 **57개 파일, 825 test**(두 project 합계 1,650)입니다.
+
+`prompt-refiner-chat-input.spec.ts`도 2026-09-15에 합류했습니다. 격리 panel이
 아니라 실제 `/chat`의 mobile composer에서 server default-off, 두 decision 뒤 focus
 복귀와 무전송, 요청 중 편집의 late result 폐기, invalid response 실패·재시도,
 최대 길이 입력, IME, 320px·200% text/zoom과 44px action을 검증합니다. 이 경계가
 깨지면 사용자의 작성 중 원문을 덮거나 전송 의사 없이 요청을 보낼 수 있어 release를
-막습니다. `CI=1 --grep=@ui-risk --list` 재실측은 **57개 파일**이고 두 Chromium
-project 합계 **1,668 test**(project당 834)이며, 이 spec은 project당 10 test입니다.
+막습니다. 이 spec은 project당 10 test입니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —

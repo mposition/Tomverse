@@ -247,6 +247,15 @@ type MobileChatShellProps = {
    */
   hasConversationPrelude?: boolean;
   onSelectConversation: (id: string) => void;
+  /**
+   * The Chat starter catalogue, already resolved for this viewer.
+   *
+   * A node, not a flag: `ChatPageClient` owns the plan, the deployment flags
+   * and this request's capabilities, and the shells own layout. `undefined`
+   * renders nothing, which is the whole of the flag-off state
+   * (docs/ui-contracts/chat-starter-catalog.md).
+   */
+  starterGallery?: ReactNode;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onLock: (id: string, password: string) => void;
@@ -428,6 +437,7 @@ export function MobileChatShell({
   importedTranscript,
   hasConversationPrelude = false,
   onSelectConversation,
+  starterGallery,
   onRename,
   onDelete,
   onLock,
@@ -1510,6 +1520,7 @@ export function MobileChatShell({
             onSelectConversation={onSelectConversation}
             inputSlotRef={setWelcomeInputSlot}
             consentSlotRef={setWelcomeConsentSlot}
+            starterGallery={starterGallery}
             recentAccess="disclosure"
             recentDisclosureRef={(node) => {
               recentDisclosureRef.current = node;

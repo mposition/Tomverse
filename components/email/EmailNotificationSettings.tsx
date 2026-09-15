@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
+import { MARKETING_SUPPORTED_COUNTRY_CODES } from "@/lib/emailJurisdictionCore";
 
 /**
  * The preference centre.
@@ -16,10 +17,10 @@ import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
  *    receipts cannot be switched off, and saying so is the point. "There is no
  *    setting for it" is a common reason people reach for the spam button, and a
  *    complaint costs the sending domain far more than the honest sentence does.
- *  - **The country sits with the toggles.** Marketing needs a confirmed
- *    jurisdiction before it will send, so a screen that offered the switches
- *    without it would let somebody turn something on and then quietly receive
- *    nothing (§6.3 rule 2).
+ *  - **Country confirmation and opt-in are one action.** Marketing needs a
+ *    confirmed jurisdiction before it will send. The API stores the country
+ *    and the consent record in the same transaction, so the interface cannot
+ *    show an enabled switch whose legal profile was never captured.
  *  - **No confirmation dialog on switching something off.** Making a person
  *    argue with a modal about leaving is the friction the Australian rules
  *    exist to prevent, and it does not change the outcome -- it changes which
@@ -38,19 +39,55 @@ type CountryState = {
     confidence: "high" | "conflict" | "low" | "unknown";
     conflicts: string[];
     needsConfirmation: boolean;
+    marketingSupported: boolean;
 };
 
 type PreferenceState = { preferences: Preference[]; country: CountryState };
 
-const MARKETING_PURPOSES = new Set(["product_updates", "newsletter", "promotions"]);
+type SaveError =
+    | "COUNTRY_REQUIRED"
+    | "COUNTRY_CONFLICT"
+    | "COUNTRY_UNSUPPORTED"
+    | "SAVE_FAILED";
+
+const MARKETING_PURPOSES = new Set([
+    "product_updates",
+    "newsletter",
+    "promotions",
+]);
+const SUPPORTED_COUNTRIES = new Set<string>(MARKETING_SUPPORTED_COUNTRY_CODES);
+
+const countryValueFrom = (next: PreferenceState) => {
+    if (next.country.selfDeclared) return next.country.selfDeclared;
+    if (
+        next.country.confidence === "high" &&
+        next.country.resolved !== "ZZ"
+    ) {
+        // A billing country is high-confidence and useful as a proposed value,
+        // but it is not silently persisted. Pressing the opt-in button is the
+        // affirmative confirmation that turns it into a declaration.
+        return next.country.resolved;
+    }
+    return "";
+};
 
 export function EmailNotificationSettings() {
-    const { t } = useLanguage();
+    const { lang, t } = useLanguage();
     const [state, setState] = useState<PreferenceState | null>(null);
-    const [status, setStatus] = useState<"loading" | "ready" | "saving" | "failed">(
-        "loading"
-    );
+    const [status, setStatus] = useState<
+        "loading" | "ready" | "saving" | "failed"
+    >("loading");
     const [country, setCountry] = useState("");
+    const [saveError, setSaveError] = useState<SaveError | null>(null);
+    const countryRef = useRef<HTMLSelectElement>(null);
+
+    const countryOptions = useMemo(() => {
+        const displayNames = new Intl.DisplayNames([lang], { type: "region" });
+        return MARKETING_SUPPORTED_COUNTRY_CODES.map((code) => ({
+            code,
+            name: displayNames.of(code) ?? code,
+        })).sort((left, right) => left.name.localeCompare(right.name, lang));
+    }, [lang]);
 
     // The fetch is what the effect synchronises with; state is set from its
     // callback rather than in the effect body, which is both what the React 19
@@ -76,7 +113,7 @@ export function EmailNotificationSettings() {
             .then((body) => {
                 if (cancelled) return;
                 setState(body);
-                setCountry(body.country.selfDeclared ?? "");
+                setCountry(countryValueFrom(body));
                 setStatus("ready");
             })
             .catch((error: unknown) => {
@@ -96,6 +133,7 @@ export function EmailNotificationSettings() {
     }, []);
 
     const save = async (body: Record<string, unknown>) => {
+        setSaveError(null);
         setStatus("saving");
         try {
             const response = await fetch("/api/user/email-preferences", {
@@ -104,23 +142,72 @@ export function EmailNotificationSettings() {
                 body: JSON.stringify(body),
             });
             if (!response.ok) {
-                await response.text().catch(() => "");
+                const errorBody = (await response.json().catch(() => null)) as {
+                    code?: string;
+                } | null;
+                const code = errorBody?.code;
+                setSaveError(
+                    code === "COUNTRY_REQUIRED" ||
+                        code === "COUNTRY_CONFLICT" ||
+                        code === "COUNTRY_UNSUPPORTED"
+                        ? code
+                        : "SAVE_FAILED"
+                );
                 setStatus("failed");
-                return;
+                return false;
             }
             // The saved state read back from the server, never the request
             // echoed: a screen built from what was asked for would show a
             // change a constraint refused.
             const next = (await response.json()) as PreferenceState;
             setState(next);
-            setCountry(next.country.selfDeclared ?? "");
+            setCountry(countryValueFrom(next));
             setStatus("ready");
+            return true;
         } catch {
+            setSaveError("SAVE_FAILED");
             setStatus("failed");
+            return false;
         }
     };
 
+    const enableMarketing = (purpose: string) => {
+        if (!country) {
+            setSaveError("COUNTRY_REQUIRED");
+            countryRef.current?.focus();
+            return;
+        }
+        void save({ purpose, enabled: true, country });
+    };
+
+    const togglePreference = (preference: Preference) => {
+        if (
+            MARKETING_PURPOSES.has(preference.purpose) &&
+            !preference.enabled
+        ) {
+            enableMarketing(preference.purpose);
+            return;
+        }
+        void save({
+            purpose: preference.purpose,
+            enabled: !preference.enabled,
+        });
+    };
+
     const busy = status === "loading" || status === "saving";
+    const productUpdates = state?.preferences.find(
+        (preference) => preference.purpose === "product_updates"
+    );
+    const hasMarketingEnabled = state?.preferences.some(
+        (preference) =>
+            MARKETING_PURPOSES.has(preference.purpose) && preference.enabled
+    );
+    const savedCountryIsUnsupported =
+        Boolean(country) && !SUPPORTED_COUNTRIES.has(country);
+
+    const errorMessage = saveError
+        ? t(`emailNotifications.error.${saveError}`)
+        : null;
 
     return (
         <div className="mx-auto w-full max-w-2xl px-6 py-10">
@@ -145,22 +232,112 @@ export function EmailNotificationSettings() {
 
             {state ? (
                 <>
+                    <section className="mt-8 rounded-2xl border border-zinc-200 p-4 dark:border-zinc-800">
+                        <label
+                            htmlFor="email-country"
+                            className="text-sm font-semibold"
+                        >
+                            {t("emailNotifications.countryLabel")}
+                        </label>
+                        <p
+                            id="email-country-description"
+                            className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400"
+                        >
+                            {t("emailNotifications.countryDescription")}
+                        </p>
+                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                            <select
+                                ref={countryRef}
+                                id="email-country"
+                                value={country}
+                                aria-describedby="email-country-description email-country-error"
+                                aria-invalid={
+                                    saveError === "COUNTRY_REQUIRED" ||
+                                    saveError === "COUNTRY_CONFLICT" ||
+                                    saveError === "COUNTRY_UNSUPPORTED"
+                                }
+                                onChange={(event) => {
+                                    setCountry(event.target.value);
+                                    setSaveError(null);
+                                }}
+                                data-testid="email-country-select"
+                                className="min-h-11 min-w-0 flex-1 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                            >
+                                <option value="">
+                                    {t("emailNotifications.countryPlaceholder")}
+                                </option>
+                                {savedCountryIsUnsupported ? (
+                                    <option value={country}>{country}</option>
+                                ) : null}
+                                {countryOptions.map((option) => (
+                                    <option key={option.code} value={option.code}>
+                                        {option.name} ({option.code})
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                disabled={busy || !country}
+                                onClick={() => void save({ country })}
+                                data-testid="email-country-save"
+                                className="min-h-11 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                            >
+                                {t("emailNotifications.countrySave")}
+                            </button>
+                        </div>
+                        <p
+                            id="email-country-error"
+                            className="mt-2 min-h-5 text-sm text-red-600 dark:text-red-400"
+                            aria-live="polite"
+                        >
+                            {errorMessage}
+                        </p>
+                    </section>
+
                     {state.country.needsConfirmation ? (
                         <section
-                            className="mt-8 rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/40"
+                            className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/40"
                             data-testid="email-country-confirmation"
                         >
                             <h2 className="text-sm font-bold">
                                 {t("emailNotifications.countryNeededTitle")}
                             </h2>
                             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                                {state.country.confidence === "conflict"
-                                    ? t("emailNotifications.countryConflictBody").replace(
-                                          "{countries}",
-                                          state.country.conflicts.join(", ")
-                                      )
-                                    : t("emailNotifications.countryNeededBody")}
+                                {!state.country.marketingSupported &&
+                                state.country.selfDeclared
+                                    ? t("emailNotifications.countryUnsupportedBody")
+                                    : state.country.confidence === "conflict"
+                                      ? t(
+                                            "emailNotifications.countryConflictBody"
+                                        ).replace(
+                                            "{countries}",
+                                            state.country.conflicts.join(", ")
+                                        )
+                                      : t("emailNotifications.countryNeededBody")}
                             </p>
+                        </section>
+                    ) : null}
+
+                    {productUpdates && !productUpdates.enabled ? (
+                        <section className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950/30">
+                            <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700 dark:text-blue-300">
+                                {t("emailNotifications.marketingOptional")}
+                            </p>
+                            <h2 className="mt-2 text-lg font-black">
+                                {t("emailNotifications.marketingCalloutTitle")}
+                            </h2>
+                            <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
+                                {t("emailNotifications.marketingCalloutBody")}
+                            </p>
+                            <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => enableMarketing("product_updates")}
+                                data-testid="email-product-updates-opt-in"
+                                className="mt-4 min-h-11 w-full rounded-xl bg-blue-700 px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-blue-600 disabled:opacity-50 sm:w-auto"
+                            >
+                                {t("emailNotifications.marketingCalloutAction")}
+                            </button>
                         </section>
                     ) : null}
 
@@ -173,7 +350,9 @@ export function EmailNotificationSettings() {
                             >
                                 <div className="min-w-0">
                                     <p className="text-sm font-semibold">
-                                        {t(`emailNotifications.purpose.${preference.purpose}.title`)}
+                                        {t(
+                                            `emailNotifications.purpose.${preference.purpose}.title`
+                                        )}
                                     </p>
                                     <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">
                                         {t(
@@ -189,7 +368,9 @@ export function EmailNotificationSettings() {
                                     MARKETING_PURPOSES.has(preference.purpose) &&
                                     state.country.needsConfirmation ? (
                                         <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-500">
-                                            {t("emailNotifications.needsCountryNote")}
+                                            {t(
+                                                "emailNotifications.needsCountryNote"
+                                            )}
                                         </p>
                                     ) : null}
                                 </div>
@@ -211,10 +392,7 @@ export function EmailNotificationSettings() {
                                         )}
                                         disabled={busy}
                                         onClick={() =>
-                                            save({
-                                                purpose: preference.purpose,
-                                                enabled: !preference.enabled,
-                                            })
+                                            togglePreference(preference)
                                         }
                                         data-testid={`email-preference-${preference.purpose}-toggle`}
                                         className={`relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
@@ -236,56 +414,19 @@ export function EmailNotificationSettings() {
                         ))}
                     </ul>
 
-                    <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => save({ withdrawAllMarketing: true })}
-                        data-testid="email-withdraw-all"
-                        className="mt-6 w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm font-semibold transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                    >
-                        {t("emailNotifications.withdrawAll")}
-                    </button>
-
-                    <section className="mt-10 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-                        <label
-                            htmlFor="email-country"
-                            className="text-sm font-semibold"
+                    {hasMarketingEnabled ? (
+                        <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                                void save({ withdrawAllMarketing: true })
+                            }
+                            data-testid="email-withdraw-all"
+                            className="mt-6 w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm font-semibold transition-colors hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
                         >
-                            {t("emailNotifications.countryLabel")}
-                        </label>
-                        <p
-                            id="email-country-description"
-                            className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400"
-                        >
-                            {t("emailNotifications.countryDescription")}
-                        </p>
-                        <div className="mt-3 flex gap-2">
-                            <input
-                                id="email-country"
-                                value={country}
-                                aria-describedby="email-country-description"
-                                onChange={(event) =>
-                                    setCountry(
-                                        event.target.value
-                                            .replace(/[^a-zA-Z]/g, "")
-                                            .slice(0, 2)
-                                            .toUpperCase()
-                                    )
-                                }
-                                placeholder="KR"
-                                className="w-24 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-center font-mono text-sm uppercase dark:border-zinc-700 dark:bg-zinc-950"
-                            />
-                            <button
-                                type="button"
-                                disabled={busy || country.length !== 2}
-                                onClick={() => save({ country })}
-                                data-testid="email-country-save"
-                                className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-zinc-950"
-                            >
-                                {t("emailNotifications.countrySave")}
-                            </button>
-                        </div>
-                    </section>
+                            {t("emailNotifications.withdrawAll")}
+                        </button>
+                    ) : null}
                 </>
             ) : null}
         </div>

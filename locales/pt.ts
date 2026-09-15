@@ -2068,12 +2068,24 @@ export const pt = {
         alwaysOn: "Sempre ativo",
         withdrawAll: "Desligar todos os e-mails de marketing",
         countryNeededTitle: "Confirme seu país",
-        countryNeededBody: "Precisamos saber quais regras nacionais se aplicam antes de enviar e-mails de marketing. Defina abaixo.",
-        countryConflictBody: "Seu país de cobrança e o do seu perfil não coincidem ({countries}). Escolha abaixo o que se aplica.",
-        needsCountryNote: "Defina seu país abaixo para que isto possa ser enviado.",
-        countryLabel: "País",
-        countryDescription: "Código de duas letras. Usado para aplicar a identificação publicitária, os dados do remetente e as regras de descadastro corretos -- não para preços.",
-        countrySave: "Salvar",
+        countryNeededBody: "Selecione acima seu país de residência. Essa informação só é necessária se você escolher e-mails de marketing.",
+        countryConflictBody: "Seu país de cobrança e o país confirmado anteriormente não coincidem ({countries}). Confirme acima onde você mora agora.",
+        countryUnsupportedBody: "E-mails de marketing ainda não estão disponíveis para o país salvo. Escolha outro país somente se você agora morar nele.",
+        needsCountryNote: "Confirme acima seu país de residência antes que isto possa ser enviado.",
+        countryLabel: "País de residência",
+        countryDescription: "Usado somente para aplicar a identificação publicitária, os dados do remetente e as regras de descadastro corretos. Ao ativar marketing, ele é salvo junto com esse consentimento.",
+        countryPlaceholder: "Selecione seu país",
+        countrySave: "Confirmar país",
+        marketingOptional: "Opcional · desative quando quiser",
+        marketingCalloutTitle: "Conheça novos recursos úteis",
+        marketingCalloutBody: "Receba ocasionalmente e-mails sobre recursos importantes da Tomverse e dicas práticas. Nada vem pré-selecionado e você pode desativar quando quiser.",
+        marketingCalloutAction: "Receber novidades do produto",
+        error: {
+            COUNTRY_REQUIRED: "Selecione seu país de residência antes de ativar e-mails de marketing.",
+            COUNTRY_CONFLICT: "Não foi possível confirmar o país. Selecione onde você mora agora e tente novamente.",
+            COUNTRY_UNSUPPORTED: "E-mails de marketing ainda não estão disponíveis neste país.",
+            SAVE_FAILED: "Não foi possível salvar suas configurações de e-mail. Tente novamente em instantes.",
+        },
         purpose: {
             security: {
                 title: "Segurança e conta",
@@ -2114,7 +2126,7 @@ export const pt = {
     },
     privacyPolicy: {
         title: "Política de privacidade",
-        effective: "Em vigor: 16 de julho de 2026",
+        effective: "Em vigor: 14 de setembro de 2026",
         intro: "O Tomverse processa informações pessoais e dados de chat apenas quando necessário para fornecer o serviço.",
         collectedTitle: "Informações que processamos",
         collected: "Podemos processar identificadores de conta, e-mail e dados de perfil fornecidos por provedores de login, configurações do usuário, chats e mensagens padrão, anexos, configurações de compartilhamento, dados de uso e logs de segurança. Para prevenir abuso de promoções, processamos hashes com chave derivados de um IP de cliente confiável e da impressão digital de um meio de pagamento Stripe. O Tomverse não armazena dados brutos de cartão ou conta bancária.",
@@ -2141,10 +2153,12 @@ export const pt = {
         memory: "Se você optar por usar o recurso de memória, a Tomverse envia as partes das suas conversas importadas que você selecionar ao provedor de IA que você confirmar, para extrair memórias candidatas. A extração usa o modelo e a quantidade de créditos exibidos a você antes da execução. As candidatas extraídas não são usadas para gerar respostas até que você as revise e aprove. Candidatas classificadas como sensíveis e as que exigem revisão individual ficam fora da aprovação em massa e precisam ser confirmadas uma a uma. Candidatas, memórias aprovadas e seus fundamentos permanecem na sua conta até que você as exclua ou os dados da sua conta sejam excluídos. As memórias aprovadas e as preferências de estilo de resposta são enviadas como material de referência ao provedor de IA que gera cada nova resposta — ou seja, ao provedor de cada modelo quando você compara vários. Você pode consultar, editar e desativar as memórias salvas a qualquer momento, baixar a lista completa como arquivo ou excluir todas de uma vez. Ao desativar a memória, ela deixa de ser usada em novos chats.",
         assistantProfilesTitle: "Assistentes de IA personalizados e arquivos de conhecimento",
         assistantProfiles: "Se você criar um assistente de IA, a Tomverse guarda o nome, a descrição, as instruções, a escolha de modelo e as frases de início que você digita, além de manter cada revisão publicada para que uma conversa possa mostrar sob qual ela realmente rodou. Os arquivos de conhecimento que você anexa ficam guardados de forma privada na sua conta; a Tomverse extrai o texto deles, divide em trechos e monta um índice de busca para encontrar os excertos relevantes. Quando você conversa com um assistente, as instruções dele e os excertos que correspondem à sua mensagem são enviados como material de referência ao provedor de IA que gera a resposta. Os excertos são tratados como material de referência e nunca como instruções ao assistente. Assistentes são privados: não são compartilhados com outras pessoas, não aparecem em listas públicas e não são vendidos. Excluir um assistente remove suas revisões e seus arquivos de conhecimento, e os arquivos guardados são apagados logo depois; as conversas que o usaram continuam legíveis na sua conta. Desativar ou excluir um assistente faz com que ele deixe de ser usado em novas conversas. Se criar um assistente importando um pacote, o Tomverse guarda também o que compôs antes de publicar, a origem declarada pelo pacote ou por si, e quando confirmou. O Tomverse nunca abre um endereço indicado por um pacote. Uma importação que abandone expira por si mesma, e os ficheiros preparados para ela vão com ela.",
+        emailTitle: "E-mails que enviamos a você",
+        email: "A Tomverse envia e-mails para o endereço registrado na sua conta: códigos de acesso e avisos de segurança, recibos de cobrança, avisos sobre o estado do serviço e -- somente se você solicitar -- novidades do produto, newsletters e promoções. Os três primeiros fazem parte da prestação do serviço e não podem ser desativados; os três últimos são enviados apenas depois que você os ativa, e você pode desativá-los a qualquer momento nas configurações de e-mail ou pelo link de cancelamento em um clique presente nessas mensagens, sem precisar entrar na conta. Para isso, a Tomverse guarda quais configurações você escolheu e quando, um histórico somente de acréscimo de cada vez que você ativou ou desativou uma delas -- incluindo o texto que lhe foi exibido e as regras do país aplicadas -- e um registro de cada mensagem enviada a você, com o endereço, o idioma e o resultado da entrega. O registro de um consentimento guarda um hash unidirecional com sal do endereço IP e do identificador do navegador naquele momento, e não os valores em si. As mensagens são entregues pela Resend, e o rastreamento de aberturas e cliques está desativado nos dois domínios de envio que a Tomverse utiliza. Se você cancelar a inscrição, ou se uma mensagem destinada a você for recusada como não entregável, esse endereço fica registrado como excluído do envio e permanece assim depois que sua conta for apagada -- o registro existe para que apagar uma conta não possa reiniciar os envios, e contém apenas o endereço e o motivo.",
         analyticsTitle: "Análise de produto e atribuição de campanhas",
         analytics: "O Tomverse utiliza sempre o armazenamento essencial de sessão, segurança, idioma e preferências necessário ao serviço. Para análise de produto, visitantes da UE/EEE, Reino Unido, Suíça ou região não verificada têm de aceitar antes de iniciar o Google Analytics 4. Na Austrália e em regiões adicionadas após análise jurídica, a análise minimizada começa após um aviso claro e pode ser desativada de imediato ou mais tarde. Registamos eventos aprovados e metadados como origem UTM, idioma, país, número de modelos e plano. A Google também pode tratar endereço IP, navegador, URL da página e localização aproximada fora do país do visitante. Prompts, respostas, nomes ou conteúdos de ficheiros, e-mails e nomes de perfil nunca são incluídos. O armazenamento publicitário e a personalização permanecem desativados.",
         retentionTitle: "Retenção e exclusão",
-        retention: "Chats padrão podem permanecer até serem excluídos pelo usuário ou até a remoção dos dados da conta. Os hashes de IP e impressão digital de pagamento para segurança de promoções são removidos após 90 dias; registros mínimos de cobrança, legais, de segurança ou resposta a incidentes podem ser retidos separadamente.",
+        retention: "Chats padrão podem permanecer até serem excluídos pelo usuário ou até a remoção dos dados da conta. Os hashes de IP e impressão digital de pagamento para segurança de promoções são removidos após 90 dias; registros mínimos de cobrança, legais, de segurança ou resposta a incidentes podem ser retidos separadamente. Uma exceção: um endereço registrado como excluído do envio -- porque você cancelou a inscrição ou porque uma mensagem foi recusada como não entregável -- é mantido depois que a conta é apagada, para que apagar uma conta não possa reiniciar os envios.",
         sharingTitle: "Links de compartilhamento",
         sharing: "Quando o compartilhamento está ativo, qualquer pessoa com o link pode ler a conversa compartilhada. Remova informações sensíveis antes de compartilhar.",
         rightsTitle: "Escolhas e direitos do usuário",
@@ -2154,5 +2168,49 @@ export const pt = {
         changesTitle: "Alterações nesta política",
         changes: "Podemos atualizar esta política quando o serviço ou requisitos legais mudarem e exibiremos a data revisada.",
         back: "Voltar para Tomverse",
+    },
+    chatStarter: {
+        title: "O que você pode fazer aqui",
+        hint: "Escolha um cartão para preencher o campo abaixo. Nada é enviado até você tocar em enviar.",
+        lockedSignIn: "Entre na conta para usar",
+        lockedPlan: "Requer o plano {plan}",
+        cards: {
+            compareAnswers: {
+                outcome: "Faça uma pergunta e leia três modelos respondendo lado a lado",
+                seed: "Explique em linguagem simples para que serve um banco de dados vetorial, em cerca de 200 palavras.",
+            },
+            documentQuestions: {
+                outcome: "Anexe um PDF de 18 páginas e faça a mesma pergunta a vários modelos",
+                seed: "Anexei um documento. Resuma o que ele pede que eu decida e liste todos os prazos citados.",
+            },
+            sourcedAnswer: {
+                outcome: "Receba uma resposta com os links das fontes usadas",
+                seed: "O que mudou neste ano na aplicação do regulamento europeu de IA? Inclua as fontes usadas.",
+            },
+            debugStackTrace: {
+                outcome: "Cole um stack trace e receba a linha que falhou e uma correção para testar",
+                seed: "Este é um stack trace da minha compilação. Diga qual linha falhou e o que devo mudar.",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "Transforme uma resposta em um arquivo .xlsx para baixar",
+                seed: "Crie uma planilha de orçamento mensal com categoria, valor previsto e valor real, e salve como arquivo de planilha.",
+            },
+            readAScreenshot: {
+                outcome: "Anexe uma captura de tela e pergunte o que o erro significa",
+                seed: "Anexei a captura de uma caixa de diálogo de erro. Diga o que significa e o que fazer em seguida.",
+            },
+            translateAndCompare: {
+                outcome: "Traduza um rascunho e compare as versões de dois modelos",
+                seed: "Traduza o texto abaixo para o inglês mantendo um tom formal:",
+            },
+            compareImageModels: {
+                outcome: "Envie uma frase para vários modelos de imagem e compare o que cada um devolve",
+                seed: "Uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
+            },
+            speakAQuestion: {
+                outcome: "Dite uma pergunta longa em vez de digitar e edite o texto antes do envio",
+                seed: "Transforme o que eu disser a seguir em uma lista de instruções curta e clara.",
+            },
+        },
     },
 } satisfies typeof en;

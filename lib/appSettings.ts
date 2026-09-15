@@ -47,6 +47,11 @@ import {
   readPromptRefinerAvailability,
 } from "@/lib/promptRefinerAccess";
 import {
+  CHAT_STARTER_FLAG_KEY,
+  chatStarterAvailable,
+  chatStarterKillSwitchEngaged,
+} from "@/lib/chatStarterAccess";
+import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
@@ -365,6 +370,56 @@ export async function isPromptRefinerEnabled(): Promise<boolean> {
       });
       return row?.value;
     },
+  });
+}
+
+/**
+ * `feature.chatStarterEnabled` (docs/ui-contracts/chat-starter-catalog.md).
+ *
+ * Same shape as `isVoiceInputEnabled` above and for the same reasons: the kill
+ * switch is consulted first so the answer survives an unwell database, and the
+ * stored value is read through the module that owns its interpretation so a
+ * missing row can never read as on.
+ *
+ * No `assert` twin and no cached variant. Nothing on a chat turn reads this --
+ * the starter gallery is a welcome-screen surface, resolved once per page
+ * render, and it dispatches nothing of its own for a route to have to refuse.
+ */
+export async function isChatStarterEnabled(): Promise<boolean> {
+  if (chatStarterKillSwitchEngaged(process.env)) return false;
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: CHAT_STARTER_FLAG_KEY },
+    select: { value: true },
+  });
+  return chatStarterAvailable({ storedFlagValue: row?.value, env: process.env });
+}
+
+/**
+ * The admin write path for the starter catalogue.
+ *
+ * It exists, unlike `setVoiceInputEnabled`, because the two flags protect
+ * different things. Turning voice input on commits this product to a
+ * per-second provider bill whose user-facing price is unsettled, so its
+ * activation is a procedure and a checkbox would be that procedure's last step
+ * offered without its first three. Turning the starter catalogue on calls no
+ * provider, reserves no credit and writes no row: it changes which cards a
+ * welcome screen paints, and every card on it has already been proved true by
+ * `npm run check:starter-catalog` before the commit existed.
+ *
+ * So the absence of a writer here would not be a decision, it would be a flag
+ * only a deploy can move -- which is the defect `tests/appSettingWriters.test.mjs`
+ * was written about.
+ *
+ * "true"/"false" are the only stored values; a missing row and "false" are
+ * equally off, so disabling never needs a delete. No snapshot to invalidate:
+ * nothing on a chat turn reads this.
+ */
+export async function setChatStarterEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: CHAT_STARTER_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: { key: CHAT_STARTER_FLAG_KEY, value: enabled ? "true" : "false" },
   });
 }
 

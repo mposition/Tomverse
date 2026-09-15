@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
+import { ArrowLeft, BarChart3, Bot, Database, FileUp, Mail, Mic, Scale, Send, ShieldCheck, Share2, UserRound } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
     MarketingFooter,
@@ -42,6 +42,14 @@ const sections = [
     ["externalImportTitle", "externalImport", FileUp],
     ["memoryTitle", "memory", Database],
     ["assistantProfilesTitle", "assistantProfiles", Bot],
+    // Its own section rather than a line inside "Retention": what a reader
+    // needs to know is which mail they can switch off and what is stored to
+    // honour that, and the one record that outlives the account is the part a
+    // retention sentence would bury (Q12, docs/ops/q12-privacy-email-disclosure-draft.md).
+    //
+    // Above analytics because a mail preference is a processing purpose rather
+    // than a measurement one, and below the features whose data it describes.
+    ["emailTitle", "email", Mail],
     ["analyticsTitle", "analytics", BarChart3],
     ["retentionTitle", "retention", Database],
     ["sharingTitle", "sharing", Share2],

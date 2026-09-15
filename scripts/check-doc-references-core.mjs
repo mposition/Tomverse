@@ -130,7 +130,7 @@ export const PLANNED_REFERENCES = {
     // docs/policy/external-conversation-import-and-memory.md §17 is guarded by
     // the check again rather than exempt from it.
     "lib/emailConsentToken.ts": {
-        document: "docs/policy/email-double-opt-in-draft.md",
+        document: "docs/policy/email-double-opt-in.md",
         reason:
             "A design proposal names the module it proposes. The draft is explicit that the file does not exist -- section 4.2 says so where the token format is described, and section 11 lists it as the one new file -- and whether it is ever written is the first of the approvals section 12 asks for. Building an empty module to satisfy this check would put a file in the tree that no decision has authorised.",
     },

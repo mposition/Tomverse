@@ -1,5 +1,33 @@
 # Router search-intent v1
 
+> **The live profile version is now `task-profile-v4`.** Everything below
+> records `task-profile-v3` and is unchanged by that bump: the v3 masking
+> passes, their evidence and their limits all still stand exactly as written.
+> v4 adds a second vocabulary to `hasExplicitSourceOrSearchIntent` — the verbs
+> of asking for a search to be *run* ("검색해서 알려줘", "look it up online"),
+> which the model finder's noun list never covered, so those turns recorded
+> `needsCurrentInformation: false` and the retry offer refused them as having
+> no recency signal. It is a separate pattern in `lib/webSearchSuggestion.ts`;
+> `RESEARCH_PATTERN`, the recency reading and its floor, the masking passes
+> below and the priority of the explicit setting are all untouched. The
+> rationale is in that module and in `lib/taskProfileCore.ts`'s version note;
+> the boundaries are pinned by `tests/webSearchSuggestion.test.mjs` and
+> `tests/taskProfileCore.test.mjs`.
+>
+> Two things about its limits are worth recording here, because both were
+> found against this document's own corpus rather than reasoned about. A
+> lookup verb counts only *near* a web locus, not merely somewhere in the same
+> turn: `v2-ko-extract-advanced-05` names a fictional "온라인목록" and
+> separately forbids 검색, and a whole-turn pairing read that closed-book case
+> as a request to search. With the proximity rule, no case in
+> `development-v1.json` or `development-v2.json` changes profile, and the v2
+> bridge report's selection counts are unchanged. On the branch that carries
+> the router-development benchmark harness, its pinned v1 plan digests were
+> re-baselined all the same, because the plan records the Router's version
+> block: substituting `task-profile-v4` back to `task-profile-v3` in the plan
+> body and re-deriving reproduces the previous digests exactly, so the version
+> string is the whole of that difference.
+
 This development change addresses identified incidental source/search-intent and
 recency cues used by the deterministic task profiler, web-search retry topic
 classifier and DeepResearch topic classifier. It is not a new model ranker,

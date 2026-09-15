@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   JURISDICTION_PROFILES,
+  MARKETING_SUPPORTED_COUNTRY_CODES,
+  marketingOptInCountryDecision,
   marketingJurisdictionVerdict,
   needsCountryConfirmation,
   profileForCountry,
@@ -37,6 +39,22 @@ test("high-confidence signals that disagree are held, not ordered", () => {
   assert.equal(resolved.source, "conflict");
   assert.deepEqual(resolved.conflicts.sort(), ["KR", "SG"]);
   assert.equal(resolved.countryCode, "ZZ");
+});
+
+test("a later declaration resolves an earlier billing-country conflict", () => {
+  const resolved = resolveEmailJurisdiction({
+    billingCountry: "SG",
+    billingCountryUpdatedAt: new Date("2026-09-01T00:00:00.000Z"),
+    selfDeclaredCountry: "KR",
+    selfDeclaredCountryUpdatedAt: new Date("2026-09-14T00:00:00.000Z"),
+  });
+
+  // The person has just answered where they live now. A card remaining
+  // registered in Singapore does not make that answer ambiguous forever.
+  assert.equal(resolved.countryCode, "KR");
+  assert.equal(resolved.confidence, "high");
+  assert.equal(resolved.source, "self_declared");
+  assert.deepEqual(resolved.conflicts, []);
 });
 
 test("IP is recorded and never decides", () => {
@@ -124,6 +142,26 @@ test("a country with no profile falls back rather than guessing", () => {
   }
 });
 
+test("new marketing consent accepts only a country with a reviewed profile", () => {
+  assert.deepEqual(marketingOptInCountryDecision(null), {
+    allowed: false,
+    reason: "country_required",
+  });
+  assert.deepEqual(marketingOptInCountryDecision("JP"), {
+    allowed: false,
+    reason: "country_unsupported",
+  });
+  assert.deepEqual(marketingOptInCountryDecision("de"), {
+    allowed: true,
+    countryCode: "DE",
+    profileKey: "EU",
+  });
+
+  for (const country of MARKETING_SUPPORTED_COUNTRY_CODES) {
+    assert.equal(marketingOptInCountryDecision(country).allowed, true, country);
+  }
+});
+
 test("only a confirmed jurisdiction lets marketing go out", () => {
   const confirmed = resolveEmailJurisdiction({ selfDeclaredCountry: "KR" });
   assert.deepEqual(marketingJurisdictionVerdict(confirmed), { allowed: true });
@@ -139,6 +177,15 @@ test("only a confirmed jurisdiction lets marketing go out", () => {
 
   const nothing = resolveEmailJurisdiction({});
   assert.deepEqual(marketingJurisdictionVerdict(nothing), {
+    allowed: false,
+    skipReason: "jurisdiction_unconfirmed",
+  });
+
+  const unsupported = resolveEmailJurisdiction({
+    selfDeclaredCountry: "JP",
+  });
+  assert.equal(unsupported.confidence, "high");
+  assert.deepEqual(marketingJurisdictionVerdict(unsupported), {
     allowed: false,
     skipReason: "jurisdiction_unconfirmed",
   });
@@ -167,6 +214,7 @@ test("the preference centre asks whenever marketing could not send", () => {
     {},
     { language: "ko", timeZone: "Asia/Seoul" },
     { billingCountry: "KR", selfDeclaredCountry: "SG" },
+    { selfDeclaredCountry: "JP" },
   ]) {
     const resolved = resolveEmailJurisdiction(signals);
     assert.equal(

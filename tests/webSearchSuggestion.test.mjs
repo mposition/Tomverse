@@ -265,3 +265,98 @@ test("the retry topic consumer distinguishes incidental data from genuine search
     assert.deepEqual(classifyWebSearchTopic({ text }), { suggested: true, signals: ["explicit_search_request", "recency"], refusal: null }, text);
   }
 });
+
+// The customer-visible failure this closes. Asking for a search in the
+// ordinary way -- naming the act rather than the sources -- was not read as a
+// request at all, so `needsCurrentInformation` was false, the retry card
+// refused the turn as having no recency signal, and the answer (with the
+// switch off) said only that it could not reach the web.
+
+test("asking for a search to be run is stated intent, in both languages", () => {
+  for (const text of [
+    "이 내용 검색해서 확인해줘",
+    "검색해서 알려줘",
+    "구글에 검색해봐",
+    "인터넷에서 찾아봐",
+    "인터넷으로 확인해줘",
+    "웹에서 찾아줘",
+    "구글링해서 알려줘",
+    "search the web for the election results",
+    "can you search for this?",
+    "please look this up online",
+    "google it for me",
+    "look it up on the internet",
+    "browse the web and tell me",
+    "can you check online?",
+    "do a web search",
+  ]) {
+    assert.equal(hasExplicitSourceOrSearchIntent(text), true, text);
+  }
+});
+
+test("a lookup verb is a search request only where the turn names the web", () => {
+  // "찾아줘" and "check" are ordinary instructions about the material already
+  // in front of the model. Reading them as web searches would put a card under
+  // every request to read an attachment.
+  for (const text of [
+    "이 파일에서 오타 찾아줘",
+    "첨부한 엑셀에서 합계 확인해줘",
+    "찾아봐 줄 수 있어?",
+    "Find the bug in this function.",
+    "Check my grammar in the paragraph below.",
+    "Look at the attached spreadsheet and find the total.",
+    // A bare "the web" mid-phrase is a compound noun, not a place to look.
+    "Check the web server config for me.",
+  ]) {
+    assert.equal(hasExplicitSourceOrSearchIntent(text), false, text);
+  }
+  for (const text of ["check the web, please", "find it on the web."]) {
+    assert.equal(hasExplicitSourceOrSearchIntent(text), true, text);
+  }
+});
+
+test("search nouns that are not requests stay nouns", () => {
+  for (const text of [
+    "검색 엔진 최적화가 뭐야?",
+    "검색어 추천해줘",
+    "검색 결과 화면을 어떻게 만들지?",
+    "웹 개발 로드맵 알려줘",
+    "웹 서버 설정 확인 좀 해줘",
+  ]) {
+    assert.equal(hasExplicitSourceOrSearchIntent(text), false, text);
+  }
+});
+
+test("a forbidden search is not a requested one", () => {
+  for (const text of [
+    "Do not search the web. Answer from what you know.",
+    "Never google this; answer from memory.",
+    "인터넷 검색하지 마세요",
+    "구글에 검색하지 말고 아는 대로 답해줘",
+  ]) {
+    assert.equal(hasExplicitSourceOrSearchIntent(text), false, text);
+  }
+  // Only the request vocabulary is masked: a prohibition that still asks for
+  // sources keeps its source request.
+  assert.equal(
+    hasExplicitSourceOrSearchIntent(
+      "Do not search the web, but cite the sources you use."
+    ),
+    true
+  );
+});
+
+test("the retry offer appears for a plain request to search", () => {
+  // The whole point of the fix: with the switch off, this is the turn whose
+  // answer says it cannot reach the web, and the card is the only thing on
+  // screen that says a search is available.
+  for (const text of [
+    "이 내용 검색해서 확인해줘",
+    "인터넷에서 찾아봐 줄래?",
+    "can you look this up online?",
+  ]) {
+    const decision = classifyWebSearchTopic({ text });
+    assert.equal(decision.suggested, true, text);
+    assert.ok(decision.signals.includes("explicit_search_request"), text);
+  }
+});

@@ -2069,12 +2069,24 @@ export const es = {
         alwaysOn: "Siempre activo",
         withdrawAll: "Desactivar todo el correo de marketing",
         countryNeededTitle: "Confirma tu país",
-        countryNeededBody: "Necesitamos saber qué normas nacionales se aplican antes de enviarte correo de marketing. Indícalo abajo.",
-        countryConflictBody: "Tu país de facturación y el de tu perfil no coinciden ({countries}). Elige abajo el que corresponde.",
-        needsCountryNote: "Indica tu país abajo para que esto pueda enviarse.",
-        countryLabel: "País",
-        countryDescription: "Código de dos letras. Se usa para aplicar el etiquetado publicitario, los datos del remitente y las reglas de baja correctos, no para el precio.",
-        countrySave: "Guardar",
+        countryNeededBody: "Selecciona arriba tu país de residencia. Solo es necesario si eliges recibir correo de marketing.",
+        countryConflictBody: "Tu país de facturación y el país confirmado anteriormente no coinciden ({countries}). Confirma arriba dónde resides ahora.",
+        countryUnsupportedBody: "El correo de marketing aún no está disponible para el país guardado. Elige otro país solo si ahora resides allí.",
+        needsCountryNote: "Confirma arriba tu país de residencia antes de que esto pueda enviarse.",
+        countryLabel: "País de residencia",
+        countryDescription: "Se usa únicamente para aplicar el etiquetado publicitario, los datos del remitente y las reglas de baja correctos. Al activar marketing se guarda junto con ese consentimiento.",
+        countryPlaceholder: "Selecciona tu país",
+        countrySave: "Confirmar país",
+        marketingOptional: "Opcional · desactívalo cuando quieras",
+        marketingCalloutTitle: "Conoce las nuevas funciones útiles",
+        marketingCalloutBody: "Recibe ocasionalmente correos sobre funciones importantes de Tomverse y consejos prácticos. Nada está preseleccionado y puedes desactivarlo cuando quieras.",
+        marketingCalloutAction: "Recibir novedades del producto",
+        error: {
+            COUNTRY_REQUIRED: "Selecciona tu país de residencia antes de activar el correo de marketing.",
+            COUNTRY_CONFLICT: "No pudimos confirmar el país. Selecciona dónde resides ahora e inténtalo de nuevo.",
+            COUNTRY_UNSUPPORTED: "El correo de marketing aún no está disponible en este país.",
+            SAVE_FAILED: "No se pudieron guardar tus ajustes de correo. Inténtalo de nuevo en un momento.",
+        },
         purpose: {
             security: {
                 title: "Seguridad y cuenta",
@@ -2115,7 +2127,7 @@ export const es = {
     },
     privacyPolicy: {
         title: "Política de privacidad",
-        effective: "Vigente desde: 16 de julio de 2026",
+        effective: "Vigente desde: 14 de septiembre de 2026",
         intro: "Tomverse procesa información personal y datos de chat solo cuando es necesario para prestar el servicio.",
         collectedTitle: "Información que procesamos",
         collected: "Podemos procesar identificadores de cuenta, correo y datos de perfil proporcionados por proveedores de inicio de sesión, ajustes de usuario, chats y mensajes estándar, adjuntos, ajustes de compartición, datos de uso y registros de seguridad. Para evitar el abuso de promociones, procesamos hashes con clave derivados de una IP de cliente fiable y de la huella de un método de pago de Stripe. Tomverse no almacena datos brutos de tarjetas o cuentas bancarias.",
@@ -2142,10 +2154,12 @@ export const es = {
         memory: "Si decides usar la función de memoria, Tomverse envía las partes de tus conversaciones importadas que selecciones al proveedor de IA que confirmes, con el fin de extraer recuerdos candidatos. La extracción utiliza el modelo y la cantidad de créditos que se te muestran antes de ejecutarla. Los candidatos extraídos no se usan para generar respuestas hasta que los revisas y apruebas. Los candidatos clasificados como sensibles y los que requieren revisión individual quedan excluidos de la aprobación masiva y deben confirmarse uno a uno. Los candidatos, los recuerdos aprobados y sus fundamentos se conservan en tu cuenta hasta que los elimines o se eliminen los datos de tu cuenta. Los recuerdos aprobados y las preferencias de estilo de respuesta se envían como material de referencia al proveedor de IA que genera cada nueva respuesta, es decir, al proveedor de cada modelo cuando comparas varios. Puedes consultar, editar y desactivar los recuerdos guardados en cualquier momento, descargar la lista completa como archivo o eliminarlos todos de una vez. Si desactivas la memoria, deja de usarse en los chats nuevos.",
         assistantProfilesTitle: "Asistentes de IA personalizados y archivos de conocimiento",
         assistantProfiles: "Si creas un asistente de IA, Tomverse guarda el nombre, la descripción, las instrucciones, la elección de modelo y las frases de inicio que introduces, y conserva cada revisión publicada para que una conversación pueda mostrar con cuál se ejecutó realmente. Los archivos de conocimiento que adjuntas se guardan de forma privada para tu cuenta; Tomverse extrae su texto, lo divide en pasajes y crea un índice de búsqueda para encontrar los fragmentos pertinentes. Cuando conversas con un asistente, sus instrucciones y los fragmentos que coinciden con tu mensaje se envían como material de referencia al proveedor de IA que genera la respuesta. Los fragmentos se tratan como material de referencia y nunca como instrucciones para el asistente. Los asistentes son privados: no se comparten con otras personas, no aparecen en listados públicos y no se venden. Al eliminar un asistente se eliminan sus revisiones y sus archivos de conocimiento, y los archivos guardados se borran poco después; las conversaciones que lo usaron siguen siendo legibles en tu cuenta. Desactivar o eliminar un asistente hace que deje de usarse en conversaciones nuevas. Si crea un asistente importando un paquete, Tomverse guarda además lo que usted compuso antes de publicarlo, el origen declarado por el paquete o por usted, y cuándo lo confirmó. Tomverse nunca abre una dirección que nombre un paquete. Una importación que abandone caduca por sí sola, y los archivos preparados para ella se van con ella.",
+        emailTitle: "Correos que le enviamos",
+        email: "Tomverse le envía correos a la dirección de su cuenta: códigos de inicio de sesión y avisos de seguridad, recibos de facturación, avisos sobre el estado del servicio y -- solo si los solicita -- novedades de producto, boletines y promociones. Los tres primeros forman parte de la prestación del servicio y no pueden desactivarse; los tres últimos se envían únicamente después de que usted los active, y puede desactivarlos en cualquier momento en sus ajustes de correo o con el enlace de baja de un clic incluido en ese tipo de mensajes, sin iniciar sesión. Para ello, Tomverse guarda qué ajustes ha elegido y cuándo, un registro que solo se añade de cada vez que activó o desactivó uno -- incluido el texto que se le mostró y las reglas del país aplicadas -- y un registro de cada mensaje enviado, con la dirección, el idioma y el resultado de la entrega. El registro de un consentimiento conserva un hash unidireccional con sal de la dirección IP y del identificador del navegador en ese momento, no los valores en sí. Los mensajes los entrega Resend, y el seguimiento de aperturas y clics está desactivado en los dos dominios de envío que utiliza Tomverse. Si se da de baja, o un mensaje dirigido a usted se rechaza por no poder entregarse, esa dirección queda registrada como excluida y sigue excluida después de eliminar su cuenta -- el registro existe para que eliminar una cuenta no pueda reanudar los envíos, y solo contiene la dirección y el motivo.",
         analyticsTitle: "Analítica de producto y atribución de campañas",
         analytics: "Tomverse siempre usa el almacenamiento esencial de sesión, seguridad, idioma y preferencias necesario para prestar el servicio. Para analítica, los visitantes de la UE/EEE, Reino Unido, Suiza o una región no verificada deben aceptar antes de iniciar Google Analytics 4. En Australia y regiones añadidas tras revisión legal, la analítica minimizada comienza después de un aviso claro y puede desactivarse de inmediato o más tarde. Registramos eventos aprobados y metadatos como fuente UTM, idioma, país, número de modelos y plan. Google también puede procesar la dirección IP, datos del navegador, URL de página y ubicación aproximada fuera del país del visitante. Nunca se incluyen prompts, respuestas, nombres o contenidos de archivos, correos ni nombres de perfil. El almacenamiento publicitario y la personalización permanecen desactivados.",
         retentionTitle: "Retención y eliminación",
-        retention: "Los chats estándar pueden permanecer hasta que el usuario los elimine o se borren los datos de la cuenta. Los hashes de IP y huella de pago para seguridad de promociones se eliminan tras 90 días; pueden conservarse por separado registros mínimos de facturación, legales, de seguridad o respuesta a incidentes.",
+        retention: "Los chats estándar pueden permanecer hasta que el usuario los elimine o se borren los datos de la cuenta. Los hashes de IP y huella de pago para seguridad de promociones se eliminan tras 90 días; pueden conservarse por separado registros mínimos de facturación, legales, de seguridad o respuesta a incidentes. Una excepción: una dirección registrada como excluida -- porque se dio de baja o porque un correo se rechazó por no poder entregarse -- se conserva tras eliminar la cuenta, para que eliminar una cuenta no pueda reanudar los envíos.",
         sharingTitle: "Enlaces compartidos",
         sharing: "Cuando se activa el uso compartido, cualquiera con el enlace puede leer la conversación compartida. Elimina información sensible antes de compartir.",
         rightsTitle: "Opciones y derechos del usuario",
@@ -2155,5 +2169,49 @@ export const es = {
         changesTitle: "Cambios en esta política",
         changes: "Podemos actualizar esta política cuando cambien el servicio o los requisitos legales y mostraremos la fecha revisada.",
         back: "Volver a Tomverse",
+    },
+    chatStarter: {
+        title: "Lo que puedes hacer aquí",
+        hint: "Elige una tarjeta para rellenar el campo de abajo. No se envía nada hasta que pulses enviar.",
+        lockedSignIn: "Inicia sesión para usarlo",
+        lockedPlan: "Requiere el plan {plan}",
+        cards: {
+            compareAnswers: {
+                outcome: "Haz una pregunta y lee cómo la responden tres modelos en paralelo",
+                seed: "Explica en lenguaje sencillo para qué sirve una base de datos vectorial, en unas 200 palabras.",
+            },
+            documentQuestions: {
+                outcome: "Adjunta un PDF de 18 páginas y haz la misma pregunta a varios modelos",
+                seed: "He adjuntado un documento. Resume qué me pide decidir y enumera todos los plazos que menciona.",
+            },
+            sourcedAnswer: {
+                outcome: "Recibe una respuesta con los enlaces de las fuentes que usó",
+                seed: "¿Qué ha cambiado este año en la aplicación del reglamento europeo de IA? Incluye las fuentes que uses.",
+            },
+            debugStackTrace: {
+                outcome: "Pega una traza de error y obtén la línea que falló y un arreglo que probar",
+                seed: "Esta es una traza de error de mi compilación. Dime qué línea falló y qué debo cambiar.",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "Convierte una respuesta en un archivo .xlsx que puedes descargar",
+                seed: "Crea una hoja de presupuesto mensual con categoría, importe previsto e importe real, y guárdala como archivo de hoja de cálculo.",
+            },
+            readAScreenshot: {
+                outcome: "Adjunta una captura de pantalla y pregunta qué significa el error",
+                seed: "He adjuntado la captura de un cuadro de diálogo de error. Dime qué significa y qué hacer a continuación.",
+            },
+            translateAndCompare: {
+                outcome: "Traduce un borrador y compara las versiones de dos modelos",
+                seed: "Traduce el texto de abajo al inglés y mantén un tono formal:",
+            },
+            compareImageModels: {
+                outcome: "Envía una frase a varios modelos de imagen y compara lo que devuelve cada uno",
+                seed: "Una sala de lectura tranquila al amanecer, luz cálida por ventanales altos, estilo fotográfico.",
+            },
+            speakAQuestion: {
+                outcome: "Dicta una pregunta larga en vez de escribirla y edita el texto antes de enviarlo",
+                seed: "Convierte lo que voy a decir en una lista de instrucciones corta y clara.",
+            },
+        },
     },
 } satisfies typeof en;

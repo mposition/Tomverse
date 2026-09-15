@@ -706,6 +706,87 @@ PLANNER-03 adversarial report의 명시적 surface로 등록하며, ③ 내부 r
 shadow를 수행한 뒤, ⑤ Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을
 별도 측정하는 것이다.
 
+## 2026-09-15 Chat 시작 카탈로그 (Starter Catalog) slice 1
+
+### 무엇을 만들었는가
+
+신규 계정이 처음 보는 화면은 최근 대화 목록이었고, 신규 계정에게 그 목록은
+비어 있다. 이 slice는 그 자리에 **"여기서 무엇을 얻을 수 있는가"**를 말하는
+진입점을 넣는다. 산출물의 핵심은 카드가 아니라 **표 하나 + 판정 하나 + gate
+하나**의 구조다.
+
+- `lib/chatStarterCatalog.ts` — 표 하나(9개 항목). `outcomeKey`는 결과 문장,
+  `requires.flagKeys`는 **기존 모듈이 export하는 상수를 import**한 것,
+  `taskProfile`은 `lib/taskProfileCore.ts`의 기존 축, `evidence`는 그 약속을
+  수행하는 모듈 경로다.
+- `lib/chatStarterAvailability.ts` — `available` / `locked` / `hidden` 판정 하나.
+  모르는 flag·해석 안 된 capability·미로드 플랜은 전부 `hidden`(fail-closed).
+  화면 상한(`CHAT_STARTER_MAX_VISIBLE = 6`)과 선택 순서를 이 모듈이 소유한다.
+- `lib/chatStarterAccess.ts` — default-off `feature.chatStarterEnabled` +
+  `CHAT_STARTER_KILL_SWITCH` 하나. 기존 image·voice flag 모듈과 같은 해석.
+- `lib/chatStarterCapabilityResolution.ts` — capability를 **서버에서** 해석해
+  id 목록만 클라이언트로 보낸다.
+- `scripts/check-starter-catalog.mjs` (`npm run check:starter-catalog`,
+  PR Fast Gate static 단계) — **이 회차의 핵심 산출물.** flag 상수 실재 여부,
+  catalog 안의 `"feature.…"` 리터럴 금지, capability 해석기 실재, `evidence`
+  경로 실재, 7개 locale 전수, 우월성 주장·em/en dash 금지, 화면 상한 범위를
+  fail-closed로 검사한다.
+- `components/chat/ChatStarterGallery.tsx` + `ChatWelcomeScreen` 연결 —
+  클릭은 기존 초안 경로(`setInputValue`)로 씨앗만 채우고 전송하지 않는다.
+- `docs/ui-contracts/chat-starter-catalog.md` — 계약.
+
+Prompt Refiner와 Deep Research는 **일부러 카드가 없다.** 이름 댈 flag 상수가
+저장소에 없고, 요구사항을 적을 수 없는 카드는 무조건 제공되는 카드가 된다.
+flag key를 리터럴로 적으면 gate는 통과하고 약속은 거짓이 되므로, gate가 그
+리터럴을 거절한다.
+
+### 상태 구분
+
+| 상태 | 값 |
+| --- | --- |
+| 구현 | 완료 (worktree `claude/to-develop/chat-starter-catalog`) |
+| 내부 검증 | typecheck · lint · `check:starter-catalog` · `check:accent-tokens` · `check:locale-translation` · `check:doc-references` · `check:policy-section-references` · `check:encoding:strict` · `check:e2e-copy-selectors` 통과, 신규 unit 24개 통과 |
+| 독립 검토 | cross-review round 0 package 생성 (Codex reviewer). 검토 실행은 이 컨테이너 밖 |
+| 병합 | 없음 |
+| 배포 | 없음 |
+| 공개 | 없음 — `feature.chatStarterEnabled`는 어느 환경에서도 켜지지 않았다 |
+
+### C01–C21 중 어디인가
+
+**C01(Chat 제품 진입·새 대화)에 해당한다.** C01의 "남은 것"으로 적혀 있던
+gated Chat entry의 *진입 화면* 쪽 한 조각이며, productKey reader/cutover와
+legacy link 보존은 이 slice가 건드리지 않았다.
+
+C03(Auto)과는 인접하지만 별개다. Auto가 모델 피커를 걷어낼 때 첫 화면에서
+함께 사라지는 차별점의 자리를 채우는 것이 동기이지만, 이 slice는
+`lib/autoRolloutReadiness.ts`의 어떤 값도 읽거나 바꾸지 않는다.
+
+### 전체 추정
+
+**약 65%, 주관적 범위 55–75%를 유지한다. 직전 회차 대비 0%p.**
+
+진입 화면 한 조각이고 provider를 부르지 않으며 어떤 release gate도 통과시키지
+않는다. C01의 남은 항목(공개 cutover, flag 활성화, 기존 데이터 일괄 변경)은
+그대로 남아 있다.
+
+### 하지 않은 것
+
+provider 호출, 크레딧 예약·정산, 과금 경로 변경, `lib/autoRolloutReadiness.ts`의
+status·attestedBy, release gate registry의 status·approvedBy·approvedAt·
+evidenceRefs, `ARTIFACT_FORMAT_TABLE`·`CHAT_ATTACHMENT_FORMATS`·모델 registry·
+pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProductAdapterReady()`,
+새 accent 역할 추가.
+
+### 다음 권장 순서
+
+1. Codex 독립 검토를 받고 지적을 닫는다.
+2. `npm run test:e2e` 전체(desktop·mobile)와 모바일 composer·drawer spec
+   재실행을 CI에서 확인한다.
+3. flag를 켜지 않은 채 병합한다. 이 표면은 default-off이므로 병합이 곧 공개가
+   아니다.
+4. staging에서 flag를 켜고 첫 화면을 실기기로 확인한 뒤 공개 여부를 판정한다.
+   되돌릴 수 없는 항목은 **없는 기능을 약속하는 카드** 하나뿐이고, 그것은
+   `check:starter-catalog`가 이미 막는다.
 ## 2026-09-15 Prompt Refiner 서버 offer gate·실제 composer 무과금 검증 회차
 
 이번 회차는 위 권장 순서의 1번을 구현한다. 서버가 소유하는

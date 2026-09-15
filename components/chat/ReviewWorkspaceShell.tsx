@@ -23,10 +23,15 @@ import { APP_DEFAULTS } from "@/lib/appDefaults";
 import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import {
   getPublicAppSettings,
+  isChatStarterEnabled,
   isImageGenerationEnabled,
   isPromptRefinerEnabled,
   isVoiceInputEnabled,
 } from "@/lib/appSettings";
+import { IMAGE_GENERATION_FLAG_KEY } from "@/lib/imageGenerationAccess";
+import { VOICE_INPUT_FLAG_KEY } from "@/lib/voiceInputAccess";
+import { CHAT_STARTER_FLAG_KEYS } from "@/lib/chatStarterCatalog";
+import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import {
   promptRefinerAvailable,
   promptRefinerOfferDecision,
@@ -92,6 +97,16 @@ export async function ReviewWorkspaceShell({
   // below, so production cannot offer or call a Refiner yet.
   let promptRefinerAvailableToDeployment = false;
   let promptRefinerFixtureAdapterEnabled = false;
+  /*
+    Whether the welcome screen offers the starter catalogue at all
+    (docs/ui-contracts/chat-starter-catalog.md section 5).
+
+    Default-off opt-in with a kill switch, read here rather than in the client
+    for the reason `voiceInputEnabled` is: a Client Component cannot read the
+    process environment, so a client-side copy would keep painting the gallery
+    after an operator pulled the switch. A read failure leaves it false.
+  */
+  let chatStarterEnabled = false;
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
     imageGenerationEnabled = await isImageGenerationEnabled();
@@ -107,6 +122,7 @@ export async function ReviewWorkspaceShell({
     if (promptRefinerProductAdapterReady()) {
       promptRefinerAvailableToDeployment = await isPromptRefinerEnabled();
     }
+    chatStarterEnabled = await isChatStarterEnabled();
   } catch (error) {
     // A settings read failure must not change what the guest sees: the
     // compiled-in default resolves to the same brand trio, so the count and
@@ -169,11 +185,43 @@ export async function ReviewWorkspaceShell({
     // to reach a value a deployment could not.
     const overrideRaw = jar.get("__tomverse_e2e_image_group_max_models")?.value;
     if (overrideRaw) maxImageModels = resolveImageGroupMaxModels(overrideRaw);
+    // Same shape and same guard as the two above. The starter gallery's own
+    // specs need the surface without a database, and a spec must not be able
+    // to reach a state a deployment could not: the cookie only stands in for
+    // the stored flag, and the kill switch above still wins.
+    if (!chatStarterEnabled) {
+      chatStarterEnabled = jar.get("__tomverse_e2e_chat_starter")?.value === "1";
+    }
   }
 
   const promptRefinerOffered = promptRefinerOfferDecision({
     available: promptRefinerAvailableToDeployment,
     adapterReady: promptRefinerFixtureAdapterEnabled,
+  });
+
+  /*
+    What the starter catalogue is allowed to promise on this request.
+
+    Two lists rather than one, because "this flag is off" and "nobody here
+    reads that flag" are different answers and only the first is a rollout
+    state (`StarterViewer.knownFlags`). `CHAT_STARTER_FLAG_KEYS` is derived
+    from the catalogue itself, so a card that starts naming a third flag makes
+    this resolver's omission visible as a hidden card rather than as a card
+    that quietly stopped being gated.
+  */
+  const starterFlagAnswers: Record<string, boolean> = {
+    [IMAGE_GENERATION_FLAG_KEY]: imageGenerationEnabled,
+    [VOICE_INPUT_FLAG_KEY]: voiceInputEnabled,
+  };
+  const starterKnownFlagKeys = CHAT_STARTER_FLAG_KEYS.filter((key) =>
+    Object.prototype.hasOwnProperty.call(starterFlagAnswers, key)
+  );
+  const starterEnabledFlagKeys = starterKnownFlagKeys.filter(
+    (key) => starterFlagAnswers[key]
+  );
+  // Capabilities cross as ids only -- never a key, a backend name or a budget.
+  const starterCapabilities = resolveChatStarterCapabilities({
+    webSearchBackendReadiness,
   });
 
   // The verification coordinator wraps the page rather than living inside it,
@@ -194,6 +242,10 @@ export async function ReviewWorkspaceShell({
         // page is `force-dynamic`, so the value is the running process's.
         imageGroupMaxModels={maxImageModels}
         webSearchBackendReadiness={webSearchBackendReadiness}
+        chatStarterEnabled={chatStarterEnabled}
+        chatStarterKnownFlagKeys={starterKnownFlagKeys}
+        chatStarterEnabledFlagKeys={starterEnabledFlagKeys}
+        chatStarterCapabilities={starterCapabilities}
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
       />

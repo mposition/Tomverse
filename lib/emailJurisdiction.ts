@@ -27,13 +27,22 @@ export async function jurisdictionForUser(input: {
   userId: string;
   /** Observed for measurement only. Never reaches the decision. */
   ipCountry?: string | null;
+  /**
+   * A declaration being made in this request, before it is persisted.
+   *
+   * The preference route uses this to validate the exact country that will be
+   * committed with consent in the same transaction.
+   */
+  countryConfirmation?: { country: string; confirmedAt: Date };
 }): Promise<JurisdictionForUser> {
   const settings = await prisma.userSettings.findUnique({
     where: { userId: input.userId },
     select: {
       country: true,
       countrySource: true,
+      countryUpdatedAt: true,
       billingCountry: true,
+      billingCountryUpdatedAt: true,
       language: true,
       timeZone: true,
     },
@@ -48,13 +57,24 @@ export async function jurisdictionForUser(input: {
     select: { jurisdiction: true },
   });
 
+  const confirmedCountry = normalizeCountry(input.countryConfirmation?.country);
+  const confirmedAt = input.countryConfirmation?.confirmedAt;
+  const storedSelfDeclaredCountry =
+    settings?.countrySource === "self_declared"
+      ? normalizeCountry(settings.country)
+      : null;
+  const selfDeclaredCountry = confirmedCountry ?? storedSelfDeclaredCountry;
+
   const resolved = resolveEmailJurisdiction({
     billingCountry: settings?.billingCountry ?? null,
+    billingCountryUpdatedAt: settings?.billingCountryUpdatedAt ?? null,
     // Only a country the person entered is a declaration. One this system
     // inferred and wrote back would otherwise be read as high confidence on
     // the next pass -- a guess laundered into a fact by a round trip.
-    selfDeclaredCountry:
-      settings?.countrySource === "self_declared" ? settings.country : null,
+    selfDeclaredCountry,
+    selfDeclaredCountryUpdatedAt: confirmedCountry
+      ? confirmedAt
+      : settings?.countryUpdatedAt ?? null,
     consentCountry:
       lastConsent?.jurisdiction && lastConsent.jurisdiction !== "ZZ"
         ? lastConsent.jurisdiction
@@ -66,10 +86,7 @@ export async function jurisdictionForUser(input: {
 
   return {
     ...resolved,
-    selfDeclaredCountry:
-      settings?.countrySource === "self_declared"
-        ? normalizeCountry(settings.country)
-        : null,
+    selfDeclaredCountry,
   };
 }
 
@@ -87,9 +104,15 @@ export async function setSelfDeclaredCountry(input: {
   const country = normalizeCountry(input.country);
   if (!country) return { updated: false as const };
 
-  await prisma.userSettings.update({
+  await prisma.userSettings.upsert({
     where: { userId: input.userId },
-    data: {
+    create: {
+      userId: input.userId,
+      country,
+      countrySource: "self_declared",
+      countryUpdatedAt: input.now ?? new Date(),
+    },
+    update: {
       country,
       countrySource: "self_declared",
       countryUpdatedAt: input.now ?? new Date(),

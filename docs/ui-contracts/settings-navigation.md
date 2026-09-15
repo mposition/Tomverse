@@ -1,6 +1,6 @@
 # Settings navigation contract
 
-Scope: the settings list (the Data tab inside `components/auth/AuthButton.tsx`),
+Scope: the settings list (the tabbed panel inside `components/auth/AuthButton.tsx`),
 the entries that own a detail page — external conversation import, account
 memory, assistant profiles, account data and email notifications — the upward
 navigation on those detail pages, and the control that leaves the settings
@@ -88,6 +88,13 @@ which tab happened to exist first:
 | `memory` | `ai` | `settingsNav.aiPersonalization` | `settingsNav.profilesAndMemory` |
 | `external-import` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
 | `account-data` | `data` | `auth.dataTab` | `settingsNav.dataAndPersonalization` |
+| `email-notifications` | `account` | `auth.accountTab` | its account communication row |
+
+Email notifications live on the default Account tab because they are choices
+about communication to the signed-in identity, not stored-data operations.
+The account quick menu also links directly to the same detail page. That entry
+states both the benefit and that marketing email is optional and can be turned
+off at any time; it never changes consent by navigation alone.
 
 **A tab is a home, not a signpost.** The assistants tab renders the collection
 — its list, its states and its create action — rather than one row linking to a

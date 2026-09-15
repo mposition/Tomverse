@@ -3,10 +3,12 @@
 //   npm run report:marketing-reach
 //   npm run report:marketing-reach -- --json
 //
-// Reads EmailPreference, ConsentRecord and SuppressionEntry and reports counts
-// only. No address, no user id and no name is selected by any query here --
-// the output is meant to be safe to paste into a decision record, and the way
-// to keep that true is for the rows never to contain one.
+// The same counts the Admin Console serves at `GET /api/admin/marketing-reach`,
+// through the same function -- this is the shell-shaped way in, for a host that
+// has a DATABASE_URL and no browser session.
+//
+// Reports counts only. No query behind it selects an address, a user id or a
+// name, so the output is safe to paste into a decision record.
 //
 // Writes nothing. Exits 0 whatever it finds: divergence between a switched-on
 // preference and a missing consent record is a question for a person, not a
@@ -18,12 +20,7 @@
 //
 // Decision this feeds: docs/ops/q2-marketing-reach-decision.md.
 
-import {
-  MARKETING_PURPOSES,
-  formatMarketingReachRow,
-  marketingReachFindings,
-  marketingReachRows,
-} from "./report-marketing-reach-core.mjs";
+import { formatMarketingReachRow } from "../lib/marketingReachCore.ts";
 
 const json = process.argv.includes("--json");
 const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -40,74 +37,14 @@ const redact = (error) =>
 
 let payload;
 try {
+  const { marketingReachReport } = await import("../lib/marketingReach.ts");
   const { prisma } = await import("../lib/prisma.ts");
-
-  const accounts = await prisma.user.count();
-
-  const preferenceGroups = await prisma.emailPreference.groupBy({
-    by: ["purpose", "enabled", "source"],
-    where: { purpose: { in: MARKETING_PURPOSES } },
-    _count: { _all: true },
-  });
-  const preferences = preferenceGroups.map((group) => ({
-    purpose: group.purpose,
-    enabled: group.enabled,
-    source: group.source,
-    count: group._count._all,
-  }));
-
-  // Distinct people whose latest consent action for the purpose is a grant.
-  //
-  // `ConsentRecord` is append-only, so a person who granted and then withdrew
-  // has both rows and counting grants would count them as consenting. The
-  // window function takes the newest row per (user, purpose) and only then
-  // asks what it says.
-  const provableRows = await prisma.$queryRaw`
-    SELECT purpose, COUNT(*)::int AS count
-    FROM (
-      SELECT DISTINCT ON ("userId", purpose) "userId", purpose, action
-      FROM "ConsentRecord"
-      WHERE "userId" IS NOT NULL
-        AND purpose = ANY(${MARKETING_PURPOSES}::text[])
-      ORDER BY "userId", purpose, "occurredAt" DESC, "createdAt" DESC
-    ) latest
-    WHERE action IN ('granted', 'reconfirmed')
-    GROUP BY purpose
-  `;
-  const provableByPurpose = Object.fromEntries(
-    provableRows.map((row) => [row.purpose, Number(row.count)])
-  );
-
-  // Switched on and suppressed at the same time. Global suppression ('*')
-  // counts for every purpose; a purpose-scoped one counts for its own.
-  const suppressedRows = await prisma.$queryRaw`
-    SELECT p.purpose, COUNT(DISTINCT p."userId")::int AS count
-    FROM "EmailPreference" p
-    JOIN "User" u ON u.id = p."userId"
-    JOIN "SuppressionEntry" s
-      ON lower(s."emailAddress") = lower(u.email)
-     AND (s."purposeKey" = '*' OR s."purposeKey" = p.purpose)
-    WHERE p.enabled = true
-      AND p.purpose = ANY(${MARKETING_PURPOSES}::text[])
-    GROUP BY p.purpose
-  `;
-  const suppressedEnabledByPurpose = Object.fromEntries(
-    suppressedRows.map((row) => [row.purpose, Number(row.count)])
-  );
-
+  const report = await marketingReachReport();
   await prisma.$disconnect().catch(() => undefined);
-
-  const rows = marketingReachRows({
-    accounts,
-    preferences,
-    provableByPurpose,
-    suppressedEnabledByPurpose,
-  });
   payload = {
     source: "database",
-    note: `Read ${accounts} account(s) and ${preferences.length} preference group(s).`,
-    rows,
-    findings: marketingReachFindings(rows),
+    note: `Read ${report.accounts} account(s) at ${report.readAt}.`,
+    ...report,
   };
 } catch (error) {
   const note = `DATABASE_URL was set but the counts could not be read, so nothing is reported: ${redact(error)}`;
@@ -130,6 +67,6 @@ if (json) {
     console.log(`\n  ${finding.code}${finding.purpose ? ` (${finding.purpose})` : ""}\n    ${finding.message}`);
   }
   console.log(
-    "\n  Counts only. No address, user id or name is selected by any query in this report."
+    "\n  Counts only. No address, user id or name is selected by any query behind this report."
   );
 }

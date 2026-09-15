@@ -131,6 +131,23 @@ test("authenticated user opens settings", { tag: "@smoke" }, async ({ page }) =>
   await expect(settingsDialog).toBeHidden();
 });
 
+test("account menu exposes optional product email without burying it in settings", async ({
+  page,
+}) => {
+  await openAccountMenu(page);
+  const link = page.getByTestId("account-email-updates");
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute("href", "/settings/notifications");
+  await expect(link).toContainText("유용한 새 기능을 놓치지 마세요");
+  await expect(link).toContainText("선택 사항 · 언제든 해제");
+
+  await link.click();
+  await expect(page).toHaveURL(/\/settings\/notifications$/);
+  await expect(
+    page.getByRole("heading", { name: "이메일 알림", exact: true })
+  ).toBeVisible();
+});
+
 test("Private Mode has been removed: no entry points, and New Chat starts a normal conversation immediately", async ({ page }) => {
   // No trace of the removed feature anywhere in the loaded UI.
   await expect(page.getByText(/Private Mode/i)).toHaveCount(0);
