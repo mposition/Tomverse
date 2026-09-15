@@ -2040,12 +2040,23 @@ export function ChatInput({
     if (!isMenuOpen) return;
 
     const animationFrame = requestAnimationFrame(() => {
+      const popover = menuPopoverRef.current;
+      if (!popover) return;
+
+      // This is fallback focus for a newly rendered view, not an instruction
+      // to override focus that already reached one of its controls. On a slow
+      // frame, Playwright exposed the same race a person using a hardware
+      // keyboard can hit: the Web search switch (or the model picker's Done
+      // button) receives focus before this callback runs, then the delayed
+      // initializer steals it back to the dialog/search field.
+      if (popover.contains(document.activeElement)) return;
+
       const isTouchLikeDevice =
         typeof window !== "undefined" &&
         window.matchMedia("(pointer: coarse)").matches;
 
       if (isTouchLikeDevice) {
-        menuPopoverRef.current?.focus({ preventScroll: true });
+        popover.focus({ preventScroll: true });
         return;
       }
 
