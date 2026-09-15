@@ -661,3 +661,108 @@ test("the general path never stands in for a bound one", async () => {
     assert.equal(executions, 0);
   });
 });
+
+test("an administrator admitted by user id is counted, so the sole path fails closed", async () => {
+  // Codex review, 2026-09-15. An ADMIN_USER_IDS administrator takes their role
+  // from a session email the configuration cannot see, so their row reads as
+  // readonly. Leaving them out would count one approver where there are two.
+  const admin = await createAdminSession("email-owner");
+  const other = await createAdminSession("id-owner");
+  const previousIds = process.env.ADMIN_USER_IDS;
+  process.env.ADMIN_USER_IDS = other.session.user?.id as string;
+  try {
+    await withSoleAdmin([admin.session.user?.email as string], async () => {
+      let executions = 0;
+      await assert.rejects(
+        () =>
+          runWithAdminApproval(planAdjustInput(admin), async () => {
+            executions += 1;
+          }),
+        AdminApprovalRequiredError
+      );
+      assert.equal(executions, 0);
+
+      // The requester's own id is the requester, not a second person.
+      process.env.ADMIN_USER_IDS = admin.session.user?.id as string;
+      await runWithAdminApproval(planAdjustInput(admin), async () => {
+        executions += 1;
+      });
+      assert.equal(executions, 1);
+    });
+  } finally {
+    if (previousIds === undefined) delete process.env.ADMIN_USER_IDS;
+    else process.env.ADMIN_USER_IDS = previousIds;
+  }
+});
+
+test("a request already approved by a second administrator is consumed, not left claimable", async () => {
+  const admin = await createAdminSession("returning-owner");
+  const reviewer = await createAdminSession("departed-reviewer");
+  const input = planAdjustInput(admin);
+  await withSoleAdmin(
+    [admin.session.user?.email as string, reviewer.session.user?.email as string],
+    async () => {
+      await assert.rejects(
+        () => runWithAdminApproval(input, async () => undefined),
+        AdminApprovalRequiredError
+      );
+    }
+  );
+  const pending = await prisma.adminActionApproval.findFirstOrThrow({
+    where: { status: "pending" },
+  });
+  await prisma.adminActionApproval.update({
+    where: { id: pending.id },
+    data: {
+      status: "approved",
+      reviewedAt: new Date(),
+      reviewedById: reviewer.session.user?.id,
+      reviewedByEmail: reviewer.session.user?.email,
+    },
+  });
+
+  // The reviewer has left the configuration; the requester is now alone.
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    let executions = 0;
+    await runWithAdminApproval(input, async () => {
+      executions += 1;
+    });
+    assert.equal(executions, 1);
+    assert.equal(
+      (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
+      "consumed"
+    );
+  });
+});
+
+test("a pending request is expired by the sole execution that carries it out", async () => {
+  const admin = await createAdminSession("queued-owner");
+  const other = await createAdminSession("queued-other");
+  const input = planAdjustInput(admin);
+  await withSoleAdmin(
+    [admin.session.user?.email as string, other.session.user?.email as string],
+    async () => {
+      await assert.rejects(
+        () => runWithAdminApproval(input, async () => undefined),
+        AdminApprovalRequiredError
+      );
+    }
+  );
+  const pending = await prisma.adminActionApproval.findFirstOrThrow({
+    where: { status: "pending" },
+  });
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    await runWithAdminApproval(input, async () => undefined);
+  });
+  assert.equal(
+    (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
+    "expired"
+  );
+  const started = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "admin_sole_approver.execution_started" },
+  });
+  assert.deepEqual(
+    (started.metadata as Record<string, unknown>).supersededApprovalIds,
+    [pending.id]
+  );
+});

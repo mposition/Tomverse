@@ -127,6 +127,51 @@ const claimApproval = async (input: ApprovalInput) => {
   });
 };
 
+/**
+ * Before a sole execution: requests for this exact action, target and payload
+ * that are still open from the two-person path.
+ *
+ * A pending one can no longer be granted by anyone and is about to be carried
+ * out, so it is expired now rather than left to be approved and re-sent later
+ * as a second execution. An approved one is reported so the caller consumes it.
+ */
+const settleOutstandingRequests = async (input: ApprovalInput) => {
+  const actorId = input.session.user?.id;
+  if (!actorId) throw new Error("An authenticated administrator is required.");
+  const payloadHash = approvalPayloadHash(
+    canonicalizeApprovalPayload(input.payload)
+  );
+  const now = new Date();
+  return prisma.$transaction(async (tx) => {
+    const open = await tx.adminActionApproval.findMany({
+      where: {
+        action: input.action,
+        targetType: input.targetType,
+        targetId: input.targetId || null,
+        payloadHash,
+        requestedById: actorId,
+        status: { in: ["pending", "approved"] },
+        expiresAt: { gt: now },
+      },
+      select: { id: true, status: true },
+    });
+    const pendingIds = open
+      .filter((row) => row.status === "pending")
+      .map((row) => row.id);
+    const approvedExists = open.some((row) => row.status === "approved");
+    if (!approvedExists && pendingIds.length > 0) {
+      await tx.adminActionApproval.updateMany({
+        where: { id: { in: pendingIds }, status: "pending" },
+        data: { status: "expired", expiresAt: now },
+      });
+    }
+    return {
+      approvedExists,
+      supersededIds: approvedExists ? [] : pendingIds,
+    };
+  });
+};
+
 export async function runWithAdminApproval<T>(
   input: ApprovalInput,
   operation: () => Promise<T>
@@ -144,7 +189,17 @@ export async function runWithAdminApproval<T>(
     input.session
   );
   if (soleApproval.allowed) {
-    return runAsSoleAdministrator(input, operation);
+    const outstanding = await settleOutstandingRequests(input);
+    // An approval a second administrator already granted for this exact
+    // request is consumed through the ordinary path below, never left beside a
+    // sole execution: otherwise it would stay claimable, and the same request
+    // could run again once a second administrator is back.
+    if (!outstanding.approvedExists) {
+      return runAsSoleAdministrator(
+        { ...input, supersededApprovalIds: outstanding.supersededIds },
+        operation
+      );
+    }
   }
 
   const claim = await claimApproval(input);
@@ -168,7 +223,7 @@ export async function runWithAdminApproval<T>(
     throw new AdminApprovalRequiredError(
       claim.approval.id,
       claim.approval.status,
-      soleApproval.reason === "action_has_bound_path"
+      soleApproval.allowed || soleApproval.reason === "action_has_bound_path"
         ? undefined
         : soleApproval.reason
     );
