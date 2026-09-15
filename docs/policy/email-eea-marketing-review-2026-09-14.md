@@ -175,7 +175,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 
 | # | 조건 | 상태 |
 |---|---|---|
-| 1 | **DOI 구현과 기록** — `docs/policy/email-double-opt-in-draft.md` | 설계안 있음, 미구현 |
+| 1 | **DOI 구현과 기록** — `docs/policy/email-double-opt-in.md` | 설계안 있음, 미구현 |
 | 2 | **동의 시점 국가 필수 수집**, 불명·충돌이면 보류(docs/policy/email-notifications.md §6.3) | 수집 UI 있음, 보류 로직 있음 |
 | 3 | **재동의 요청 메일을 보내지 않습니다** — 아래 | **설계안 정정 필요** |
 | 4 | footer 사업자 정보 실제 값 (Q8) | **완료** (ABN 포함) |
@@ -195,7 +195,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 **대신 제품 안에서 다시 받습니다** — 로그인한 사용자에게 설정 화면이나 배너로
 확인을 요청하고, 확인 메일은 그 사람이 **그 자리에서 요청했을 때만** 나갑니다.
 
-이는 `docs/policy/email-double-opt-in-draft.md` §7의 "첫 캠페인 전에 확인 메일을 한
+이는 `docs/policy/email-double-opt-in.md` §7의 "첫 캠페인 전에 확인 메일을 한
 번 돌리면 됩니다"를 **정정**합니다.
 
 ## 8. 외부 자문이 필요한 것
@@ -219,7 +219,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 | 2 | `lib/emailJurisdictionSeed.ts`·`lib/emailBusinessIdentity.ts` | **완료 (2026-09-14).** `EU`·`CH`의 `footerBlocks`에 `abn` 추가. 세 profile이 같은 값을 요구하게 되어 readiness 판정을 profile별에서 **block별로** 묶었습니다 — 변수 하나가 비었는데 같은 경고가 세 번 나오지 않도록 |
 | 3 | `lib/emailFooterRenderer.ts` | **보류.** `privacy_link` 신규 block. 값의 출처(앱 URL인지 환경변수인지)가 정해지지 않았고, composer까지 URL을 넘기는 별도 작업입니다. §6.1의 footer 목록에서 이 항목만 미반영 상태입니다 |
 | 4 | `docs/policy/email-notifications.md` | §22 **A17**을 9개로 갱신, §21 **Q1**을 이 기록으로 해소 표시, §4.3 EU 주의 문구에서 이 기록을 가리키도록 |
-| 5 | `docs/policy/email-double-opt-in-draft.md` | §7 정정 (§7 조건 3) |
+| 5 | `docs/policy/email-double-opt-in.md` | §7 정정 (§7 조건 3) |
 | 6 | 테스트 | profile 수 8→9, 언어×profile 조합 수(56→63), `CH` 매핑, footer block 추가 |
 
 ## 10. 다음 검토

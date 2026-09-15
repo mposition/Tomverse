@@ -12,6 +12,24 @@
 
 ## 0. 개정 이력
 
+### v9 (2026-09-15) — double opt-in 설계 승인
+
+- [marketing 동의의 확인 단계](email-double-opt-in.md)를 승인했습니다. 승인자
+  `mposition`, 승인일 2026-09-15. 문서는 `-draft` 접미사를 뗐습니다.
+- **승인된 것은 설계이고 구현이 아닙니다.** 설계 §11의 체크리스트 11항목은 아직
+  하나도 실행되지 않았고, 착수는 별도입니다. §15.2에
+  `feature.emailConsentConfirmationEnabled`가 "만들되 끄는 것"으로 추가됐습니다.
+- 결정된 둘: **도입 시점은 marketing 활성화 전**, 그리고 **관할권별 분기를 두지
+  않는 전역 적용**(설계 §9).
+- **설계 §7이 측정으로 닫혔습니다.** 확인 메일을 돌려야 할 기존 사용자가 0명입니다
+  (v8의 실측). 그 절이 가장 어렵게 다룬 문제 — 동의 없는 상대에게 가는 확인
+  메일은 그 자체가 상업 전자 메시지라 보낼 수 없다는 것 — 의 대상이 없습니다.
+  **금지 자체는 유지됩니다**: 미확인 상태는 앞으로도 생기고 그때 같은 규칙이
+  적용됩니다.
+- 남은 사실 하나: Q1이 "인증된 세션의 동의로 독일 기준 충족"으로 회신되면 이
+  설계는 폐기가 아니라 **재검토** 대상이 됩니다. 승인은 그 회신과 무관하게
+  넣는다는 쪽을 고른 것이며, 근거는 설계 §2의 셋입니다.
+
 ### v8 (2026-09-15) — Q2 해소: 전역 opt-in과 soft opt-in 미사용 승인
 
 - 선택지 **A — C1 + C8 현행 유지**를 승인했습니다. 승인자 `mposition`, 효력일
@@ -2377,6 +2395,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
 | `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
+| **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). 구현은 미착수 — [설계](email-double-opt-in.md) §11. marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
 | quiet hours 억제 | 정책으로 제어 | Q4 |
 
