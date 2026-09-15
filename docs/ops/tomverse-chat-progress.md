@@ -742,14 +742,25 @@ flag key를 리터럴로 적으면 gate는 통과하고 약속은 거짓이 되�
 
 ### 상태 구분
 
+이 표는 **지금 이 시점**의 상태이며, 처음 작성 당시의 "병합 없음 · 배포 없음 ·
+어느 환경에서도 켜지지 않았다"를 대체한다. 그 세 줄은 회차가 진행되는 동안
+사실이 아니게 되었는데 갱신되지 않았고, cross review round 1(2026-09-15)이
+요구사항이 이름 댄 staging 배포 SHA와 그 줄들의 모순을 지적했다.
+**한 회차의 기록은 그 회차가 끝날 때까지 살아 있는 문서다.**
+
 | 상태 | 값 |
 | --- | --- |
-| 구현 | 완료 (worktree `claude/to-develop/chat-starter-catalog`) |
-| 내부 검증 | typecheck · lint · `check:starter-catalog` · `check:accent-tokens` · `check:locale-translation` · `check:doc-references` · `check:policy-section-references` · `check:encoding:strict` · `check:e2e-copy-selectors` 통과, 신규 unit 24개 통과 |
-| 독립 검토 | cross-review round 0 package 생성 (Codex reviewer). 검토 실행은 이 컨테이너 밖 |
-| 병합 | 없음 |
-| 배포 | 없음 |
-| 공개 | 없음 — `feature.chatStarterEnabled`는 어느 환경에서도 켜지지 않았다 |
+| 구현 | 완료. 브랜치 `claude/to-develop/chat-starter-staging-checklist`, 최신 commit `31407335` |
+| 내부 검증 | PR Fast Gate static 검사 50개(workflow에서 추출), typecheck, eslint, unit 42개, e2e 22개(desktop·mobile), 이웃 계약 spec(image workspace · image intent handoff · mobile composer · comparison action rail) 158개 통과 |
+| 독립 검토 | **미완.** round 0 `request_changes` 1건(수정 완료) → round 1 `request_changes` 2건(이 회차에서 수정) → round 2 미검토 |
+| 병합 | **부분.** `bba20780`까지 develop에 병합됨(PR #1433 · #1434 · #1439 · #1441). round 1 수정 `31407335`은 미병합. **main에는 없다** |
+| 배포 | **staging에 배포됨** — `4f300e21a959`(= PR #1433 병합 commit). 그 배포에는 씨앗 소유권 수정(`8f23694e`, 이후 develop 병합)도 round 1 수정(`31407335`)도 **없다**. production 배포 없음 |
+| 공개 | **production 공개 없음.** staging에서는 검증을 위해 운영자가 `feature.chatStarterEnabled`를 켰고, kill switch로 다시 사라지는 것까지 확인했다(A-2). 현재 staging의 flag 상태는 이 저장소가 답할 수 없다 |
+| staging 검증 | 차단 구획 A·B·C 실행됨. **기록의 판정·서명은 미완** — 초안은 실행자에게 전달했고 commit되지 않았다. 비차단 소견 4건 미결 |
+
+배포와 공개를 한 줄로 적지 않는다. 이 표면은 default-off이므로 **병합도 배포도
+공개가 아니고**, staging에서 flag를 켠 것은 검증 행위이지 출시가 아니다. 셋을
+하나로 접으면 "배포됐다"가 "사람들이 보고 있다"로 읽힌다.
 
 ### C01–C21 중 어디인가
 
@@ -779,11 +790,17 @@ pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProduc
 
 ### 다음 권장 순서
 
-1. Codex 독립 검토를 받고 지적을 닫는다.
-2. `npm run test:e2e` 전체(desktop·mobile)와 모바일 composer·drawer spec
-   재실행을 CI에서 확인한다.
-3. flag를 켜지 않은 채 병합한다. 이 표면은 default-off이므로 병합이 곧 공개가
-   아니다.
-4. staging에서 flag를 켜고 첫 화면을 실기기로 확인한 뒤 공개 여부를 판정한다.
-   되돌릴 수 없는 항목은 **없는 기능을 약속하는 카드** 하나뿐이고, 그것은
-   `check:starter-catalog`가 이미 막는다.
+1~3은 끝났다. 1은 진행 중이고 4는 한 번 돌았다.
+
+1. **Codex 독립 검토를 받고 지적을 닫는다.** round 0과 round 1을 받았고 둘 다
+   `request_changes`였다. round 2 패키징이 다음이며, 수정 회차 상한은 2다.
+2. ~~`npm run test:e2e` 전체 재실행을 CI에서 확인한다.~~ 병합된 PR들에서
+   확인됐다.
+3. ~~flag를 켜지 않은 채 병합한다.~~ `bba20780`까지 develop에 들어갔다.
+4. **staging 검증을 마무리한다.** 한 회차가 `4f300e21a959`에서 돌아 차단 구획
+   A·B·C를 닫았으나, 그 회차가 찾아낸 씨앗 소유권 결함의 수정은 그 배포에
+   없었다. 수정이 실린 배포에서 **B·C를 다시 확인**하고 기록의 판정·서명을
+   채운다. 비차단 소견 4건도 이때 판정한다.
+5. main으로의 병합과 production flag 활성화는 그 뒤다. 되돌릴 수 없는 항목은
+   **없는 기능을 약속하는 카드** 하나뿐이고, 그것은 `check:starter-catalog`가
+   이미 막는다.

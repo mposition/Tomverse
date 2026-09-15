@@ -21,6 +21,7 @@ import {
   CHAT_STARTER_KILL_SWITCH_ENV,
   chatStarterAvailable,
   chatStarterEnabledFromValue,
+  chatStarterEnabledWithFixtureOverride,
   chatStarterKillSwitchEngaged,
 } from "../lib/chatStarterAccess.ts";
 import { resolveChatStarterCapabilities } from "../lib/chatStarterCapabilityResolution.ts";
@@ -62,6 +63,59 @@ test("the kill switch wins over any stored value", () => {
     chatStarterKillSwitchEngaged({ [CHAT_STARTER_KILL_SWITCH_ENV]: "  " }),
     false
   );
+});
+
+test("the kill switch wins over the e2e fixture cookie too", () => {
+  // Cross review round 1, 2026-09-15. The shell tested `!enabled` before
+  // letting the cookie speak, and `enabled` is false both when the row says
+  // off and when an operator pulled the switch -- so the cookie turned the
+  // gallery back on against a pulled switch, under a comment saying it could
+  // not. The cookie stands in for the stored flag and for nothing else.
+  const cookie = { fixtureCookieValue: "1" };
+  assert.equal(
+    chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: false,
+      ...cookie,
+      env: {},
+    }),
+    true,
+    "with no switch engaged the cookie is the whole point of the override"
+  );
+  assert.equal(
+    chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: false,
+      ...cookie,
+      env: { [CHAT_STARTER_KILL_SWITCH_ENV]: "1" },
+    }),
+    false,
+    "an engaged switch is not something a cookie may overrule"
+  );
+  // And a switch pulled while the stored flag reads true is still a refusal:
+  // `enabledFromSettings` already folds it in, so this asserts the override
+  // adds nothing that the settings answer had removed.
+  assert.equal(
+    chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: chatStarterAvailable({
+        storedFlagValue: "true",
+        env: { [CHAT_STARTER_KILL_SWITCH_ENV]: "1" },
+      }),
+      ...cookie,
+      env: { [CHAT_STARTER_KILL_SWITCH_ENV]: "1" },
+    }),
+    false
+  );
+  // No cookie is no override, whatever the value looks like.
+  for (const value of [undefined, null, "", "0", "true", "yes"]) {
+    assert.equal(
+      chatStarterEnabledWithFixtureOverride({
+        enabledFromSettings: false,
+        fixtureCookieValue: value,
+        env: {},
+      }),
+      value === "1",
+      `${JSON.stringify(value)} must not be read as an opt-in`
+    );
+  }
 });
 
 // --- the table --------------------------------------------------------------
