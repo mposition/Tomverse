@@ -43,16 +43,32 @@ purpose를 기본 off로 두고(`lib/emailPreferenceCore.ts`), `impliedConsentDa
 
 ### 실제 수를 구하는 법
 
-이 컨테이너는 운영 DB에 닿지 않습니다. **Railway 서비스 shell** 또는
-`DATABASE_URL`을 가진 환경에서 실행합니다. **읽기 전용이며 아무것도 쓰지
-않습니다.** Node 22와 `npm ci`가 끝나 있어야 합니다.
+이 컨테이너는 운영 DB에 닿지 않습니다. 길은 둘이고 **같은 함수**
+(`marketingReachReport()`)를 씁니다 — 두 번째 사본을 두면 콘솔과 CLI가 "도달
+가능"의 뜻을 두고 갈라집니다.
+
+**1. 브라우저 (권장).** 관리자로 로그인한 상태에서 엽니다. 자격증명을 어디에도
+옮기지 않고, shell도 Node도 필요 없습니다.
+
+```
+https://tomverse.app/api/admin/marketing-reach
+```
+
+**2. shell.** `DATABASE_URL`이 있는 환경에서 실행합니다. Node 22와 `npm ci`가
+끝나 있어야 합니다.
 
 ```
 npm run report:marketing-reach
 ```
 
-출력은 **개수뿐**입니다 — 어떤 query도 주소·user id·이름을 select하지 않으므로
-**결과는 그대로 붙여도 안전합니다.** JSON이 필요하면 `-- --json`을 붙입니다.
+둘 다 **읽기 전용이고 아무것도 쓰지 않습니다.** 출력은 **개수뿐**입니다 — 어떤
+query도 주소·user id·이름을 select하지 않으므로 **결과는 그대로 붙여도
+안전합니다.** CLI에서 JSON이 필요하면 `-- --json`을 붙입니다.
+
+> **1번이 배포에 달려 있다는 것.** endpoint는 production이 빌드하는 branch에
+> 들어간 뒤에야 존재합니다. 그 전에는 2번뿐이고, 2번도 script가 그 branch에
+> 있어야 합니다 — 없는 `npm run`은 실행 위치를 아무리 정확히 적어도 실행되지
+> 않습니다.
 
 보고하는 네 숫자가 서로 다른 질문의 답입니다.
 
