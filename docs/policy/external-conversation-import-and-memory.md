@@ -1001,6 +1001,26 @@ adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 
   - 삭제 확인은 `?include=memoryImpact`로 영향 건수를 **먼저** 조회합니다.
     선택은 `?derivedMemories=`·`?editedMemories=`(`delete|suspend`)로 전달하며,
     없거나 알 수 없는 값이면 위 기본값을 씁니다.
+  - **삭제의 분류와 모든 memory 쓰기는 직렬화합니다**(MEM-SOURCE-DELETE-01). 두 삭제
+    경로는 import·snapshot 행 잠금 뒤, memory를 분류하기 **전에** 계정의 memory
+    잠금(`lib/memoryItemLock.ts`의 `lockAccountMemoryItems()`)을 잡습니다.
+    `MemoryItem`을 쓰는 모든 경로 — 추출 저장, 생성·승인·일괄 승인·거절·편집·고정·
+    삭제·전체 삭제, source 잠금과 그 reconciliation, 만료 sweep(계정별), 검색어
+    backfill 유지보수 script — 가 같은 함수를 쓰고, 결정의 근거가 되는 행을 잠금
+    **뒤에** 읽습니다. 잠금 없이 읽어도 되는 것은 처리할 id 목록뿐이며, 그 행의
+    상태·본문·evidence는 잠금 뒤에 다시 읽거나 쓰기 조건에 다시 적습니다. 그러지 않으면
+    분류와 적용 사이에 끼어든 쓰기가 계획을 낡게 만듭니다: 커밋된 후보가 분류에서
+    빠진 채 evidence만 지워지거나(그런 행을 찾는 sweep은 없습니다), 파생으로 분류된
+    memory의 사용자 편집이 삭제되거나, 잠금 전이가 덮어써집니다.
+  - 잠금 순서는 행 잠금 먼저, memory 잠금 나중입니다: source 삭제는 `ExternalImport`
+    → `ExternalConversation`(id 순) → memory 잠금 → (제목 보존 시) `Conversation`
+    (id 순), 추출 commit과 전체 삭제는 `MemoryExtractionRun` → memory 잠금, source
+    잠금은 snapshot 행 → memory 잠금. memory 잠금 보유자는 그 행들을 기다리지
+    않습니다(evidence 검증은 잠금 없는 읽기, evidence FK는 `ExternalMessage`만 참조).
+  - source 잠금으로 정지된(`suspended_by_source_lock`) memory의 source가 삭제되면
+    `suspended_by_source_delete`(또는 삭제 선택 시 삭제)로 전환합니다. 그대로 두면
+    evidence가 없어 잠금 reconciliation이 차단되지 않은 것으로 보고 `active`로
+    복원합니다.
 - memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.
