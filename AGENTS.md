@@ -1332,8 +1332,12 @@ Non-negotiable requirements:
   gate and evidence.
 - The execution preregistration is pure and fail-closed. Exact contract,
   refiner, model/catalog/pricing identity, output cap, timeout, retry zero and
-  request/stage cost ceilings are frozen, but no reservation authority exists.
-  Admission therefore always refuses before dispatch with
+  request/stage cost ceilings are frozen. The gate also resolves the effective
+  input/output rates through `resolveModelPricing()` so a per-model environment
+  or runtime registry override cannot bypass the 0.2/1.2 pin. A future authority
+  must pass its runtime model row through this gate in the same critical path
+  before reservation and dispatch. No reservation authority exists today, so
+  admission always refuses before dispatch with
   `reservation_authority_unavailable` after earlier checks pass. A caller-made
   lease or atomic boolean is never proof. Only a future authority with atomic
   requestId binding, expiry and one-time consume may introduce `admitted: true`

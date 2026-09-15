@@ -8,12 +8,18 @@ provider adapter, API route, Prisma table, browser event writer, 비용 예약·
 Router 결합과 rollout 활성화는 없다. `lib/promptRefinerExecutionContract.ts`는 정확한
 model/catalog/pricing identity와 4,096 output tokens, 15초 timeout, retry 0,
 요청당 24,916 microUSD, 최대 100 dispatch의 단계 2,491,600 microUSD를 동결하지만
-그 자체로 실행을 승인하거나 비용을 예약하지 않는다.
+그 자체로 실행을 승인하거나 비용을 예약하지 않는다. 정적 pricing profile만
+대조하지 않고 실제 비용 경로와 같은 `resolveModelPricing()`으로 100,000-token
+요청의 effective input/output rate도 각각 0.2/1.2인지 다시 확인한다. 따라서
+`CHAT_MODEL_GPT_5_6_LUNA_*_USD_PER_MILLION` 환경 override나 미래 runtime registry
+row가 어느 rate든 바꾸면 `execution_contract_mismatch`로 fail-closed한다.
 현재는 원자 예약 authority가 없으므로 모든 다른 조건이 맞아도
 `reservation_authority_unavailable`로 dispatch 전에 거절한다. caller가 전달한 lease나
 atomic 여부 boolean을 성공 증거로 받는 입력과 `admitted: true` 경로는 없다. 후속
 authority가 requestId 결속·만료·1회 consume·비용과 stage slot의 원자 예약을 실제로
-구현한 뒤에만 새 계약 버전으로 성공 admission을 추가할 수 있다.
+구현한 뒤에만 새 계약 버전으로 성공 admission을 추가할 수 있다. 그 authority는
+runtime model row를 이 gate에 전달하고 원자 예약·dispatch 전에 같은 critical path에서
+통과시켜야 한다. 정적 profile 검사 결과를 과거에 캐시한 값으로 대신할 수 없다.
 
 ## 1. 하나의 변경 가능한 행 대신 두 개의 불변 사실
 

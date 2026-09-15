@@ -4,6 +4,7 @@ import {
 } from "@/lib/models";
 import {
     getModelPricingProfile,
+    resolveModelPricing,
     type ModelPricingProfile,
 } from "@/lib/modelPricing";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
@@ -136,6 +137,12 @@ type ContractModel = Pick<
     | "status"
     | "reasoning"
     | "contextWindowTokens"
+    | "usageClass"
+    | "maxOutputTokens"
+    | "reservationOutputTokens"
+    | "inputUsdPerMillionTokens"
+    | "outputUsdPerMillionTokens"
+    | "cachedInputPriceMultiplier"
 >;
 
 /**
@@ -185,6 +192,27 @@ export const promptRefinerExecutionContractProblems = (input?: {
         }
         if (!model.enabled || model.status !== "enabled") {
             problems.push("model_not_enabled");
+        }
+
+        // This is deliberately the same resolver used by reservation and cost
+        // settlement paths. Static profile checks below are necessary but not
+        // sufficient: DB/admin fields and per-model environment variables have
+        // higher precedence and must not silently move the effective price
+        // above or below the frozen ceiling.
+        const effectivePricing = resolveModelPricing(model, {
+            estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+        });
+        if (
+            effectivePricing.inputUsdPerMillionTokens !==
+            PROMPT_REFINER_EXECUTION_MODEL_PIN.inputUsdPerMillionTokens
+        ) {
+            problems.push("effective_input_price_mismatch");
+        }
+        if (
+            effectivePricing.outputUsdPerMillionTokens !==
+            PROMPT_REFINER_EXECUTION_MODEL_PIN.outputUsdPerMillionTokens
+        ) {
+            problems.push("effective_output_price_mismatch");
         }
     }
 

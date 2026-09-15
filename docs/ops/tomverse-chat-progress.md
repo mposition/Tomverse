@@ -938,7 +938,11 @@ AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않�
 contract/refiner/model/catalog/pricing identity를 정확히 고정하고, 입력 100,000 tokens,
 출력 4,096 tokens, timeout 15초, retry 0을 요구한다. 고정 standard 가격으로 계산한
 요청당 최악 비용은 24,916 microUSD이며, 최대 100 dispatch의 단계 상한은
-2,491,600 microUSD다. 다만 requestId 결속·만료·1회 consume을 갖춘 원자 예약
+2,491,600 microUSD다. 후속 결함 수정은 정적 profile에 더해 실제 비용 경로와 같은
+`resolveModelPricing()` 결과의 input/output rate도 0.2/1.2와 정확히 비교한다. 따라서
+per-model 환경 override나 전달된 runtime registry row가 가격을 바꾸면 계약 drift로
+거절한다. 미래 예약 authority도 이 gate를 예약·dispatch 전 같은 critical path에서
+호출해야 한다. 다만 requestId 결속·만료·1회 consume을 갖춘 원자 예약
 authority는 아직 없다. caller가 만든 lease/boolean은 받지 않고, eligibility·별도 단계
 승인·adapter readiness·계약이 모두 맞아도 `reservation_authority_unavailable`로
 dispatch 전에 거절한다. 따라서 현재 성공 admission 경로는 구조적으로 없다.
@@ -957,14 +961,14 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
 | 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
 | 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
 | C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
-| 구현 | 순수 실행 사전등록·authority 부재 fail-closed·terminal mapping·핵심 단위 테스트 완료 |
-| 로컬 검증 | focused 26/26, 전체 lint·typecheck 통과 |
-| 독립 검토·통합 CI | 대기 — 이 회차에서는 독립 Claude 호출을 하지 않음 |
+| 구현 | 순수 실행 사전등록·effective 가격 drift·authority 부재 fail-closed·terminal mapping 구현 |
+| 로컬 검증 | focused 28/28, 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
+| 독립 검토·통합 CI | 기존 exchange round 2는 approve+재현 nit 1건, controller는 `on_hold / revisions_exhausted`; 이 후속 diff는 미검토 |
 | 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
 
 ### 이 Cycle 다음 권장 순서
 
-1. 이 source의 좁은 diff를 독립 읽기 전용 검토와 Linux 통합 CI로 검증한다.
+1. 종료 exchange 기록은 바꾸지 말고 이 후속 좁은 diff를 새 내부 검토와 Linux 통합 CI로 검증한다.
 2. provider 호출이 없는 동결 corpus·output parser·중단 규칙의 shadow harness를 만든다.
 3. 별도 과금 승인과 원자적 단계 budget reservation이 준비된 뒤에만 작은 shadow를
    실행해 의미 보존·주입 저항·비용·지연을 측정한다.

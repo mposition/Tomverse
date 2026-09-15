@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { getModel } from "../lib/models.ts";
-import { getModelPricingProfile } from "../lib/modelPricing.ts";
+import {
+    getModelPricingProfile,
+    resolveModelPricing,
+} from "../lib/modelPricing.ts";
 import {
     PROMPT_REFINER_ADMISSION_REFUSAL_REASONS,
     PROMPT_REFINER_EXECUTION_CONTRACT,
@@ -46,6 +49,46 @@ const candidate = (overrides = {}) => ({
     inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS,
     ...overrides,
 });
+
+const INPUT_PRICE_ENV =
+    "CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION";
+const OUTPUT_PRICE_ENV =
+    "CHAT_MODEL_GPT_5_6_LUNA_OUTPUT_USD_PER_MILLION";
+
+const envSnapshot = (keys) =>
+    Object.fromEntries(
+        keys.map((key) => [
+            key,
+            {
+                present: Object.prototype.hasOwnProperty.call(process.env, key),
+                value: process.env[key],
+            },
+        ])
+    );
+
+const withIsolatedPriceEnv = (overrides, callback) => {
+    const keys = Object.keys(overrides);
+    const before = envSnapshot(keys);
+    try {
+        for (const [key, value] of Object.entries(overrides)) {
+            if (value === undefined) {
+                delete process.env[key];
+            } else {
+                process.env[key] = value;
+            }
+        }
+        return callback();
+    } finally {
+        for (const key of keys) {
+            const prior = before[key];
+            if (prior.present) {
+                process.env[key] = prior.value;
+            } else {
+                delete process.env[key];
+            }
+        }
+    }
+};
 
 test("execution contract freezes the shadow limits and worst-case cost", () => {
     assert.equal(PROMPT_REFINER_EXECUTION_CONTRACT.mode, "shadow");
@@ -138,6 +181,86 @@ test("the checked-in catalogue and pricing must match the exact pin", () => {
             pricing: { ...pricing, reasoningTokenBilling: "not_billed" },
         }).includes("reasoning_token_billing_mismatch")
     );
+});
+
+test("effective input price env drift fails closed without leaking env", { concurrency: false }, () => {
+    const keys = [INPUT_PRICE_ENV, OUTPUT_PRICE_ENV];
+    const before = envSnapshot(keys);
+    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+    assert.ok(model);
+
+    withIsolatedPriceEnv(
+        {
+            [INPUT_PRICE_ENV]: "99",
+            [OUTPUT_PRICE_ENV]: String(
+                PROMPT_REFINER_EXECUTION_MODEL_PIN.outputUsdPerMillionTokens
+            ),
+        },
+        () => {
+            const effective = resolveModelPricing(model, {
+                estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+            });
+            assert.equal(effective.inputUsdPerMillionTokens, 99);
+            assert.equal(effective.outputUsdPerMillionTokens, 1.2);
+            assert.ok(
+                promptRefinerExecutionContractProblems().includes(
+                    "effective_input_price_mismatch"
+                )
+            );
+            assert.equal(
+                promptRefinerExecutionContractProblems().includes(
+                    "effective_output_price_mismatch"
+                ),
+                false
+            );
+            assert.deepEqual(admitPromptRefinerExecution(candidate()), {
+                admitted: false,
+                reason: "execution_contract_mismatch",
+            });
+        }
+    );
+
+    assert.deepEqual(envSnapshot(keys), before);
+});
+
+test("effective output price env drift fails closed without leaking env", { concurrency: false }, () => {
+    const keys = [INPUT_PRICE_ENV, OUTPUT_PRICE_ENV];
+    const before = envSnapshot(keys);
+    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+    assert.ok(model);
+
+    withIsolatedPriceEnv(
+        {
+            [INPUT_PRICE_ENV]: String(
+                PROMPT_REFINER_EXECUTION_MODEL_PIN.inputUsdPerMillionTokens
+            ),
+            [OUTPUT_PRICE_ENV]: "99",
+        },
+        () => {
+            const effective = resolveModelPricing(model, {
+                estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+            });
+            assert.equal(effective.inputUsdPerMillionTokens, 0.2);
+            assert.equal(effective.outputUsdPerMillionTokens, 99);
+            assert.ok(
+                promptRefinerExecutionContractProblems().includes(
+                    "effective_output_price_mismatch"
+                )
+            );
+            assert.equal(
+                promptRefinerExecutionContractProblems().includes(
+                    "effective_input_price_mismatch"
+                ),
+                false
+            );
+            assert.deepEqual(admitPromptRefinerExecution(candidate()), {
+                admitted: false,
+                reason: "execution_contract_mismatch",
+            });
+        }
+    );
+
+    assert.deepEqual(envSnapshot(keys), before);
 });
 
 test("an otherwise eligible request cannot fabricate successful admission", () => {

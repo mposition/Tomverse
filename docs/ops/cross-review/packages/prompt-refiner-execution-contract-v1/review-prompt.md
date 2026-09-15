@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-execution-contract-v1, round 1
+# Independent review — task prompt-refiner-execution-contract-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -18,7 +18,7 @@ Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않�
 - 관련 unit, 전체 typecheck, lint, model-pricing, 문서·정책 참조, strict encoding과 diff whitespace 검사가 통과한다.
 - Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다.
 
-## Change under review — digest sha256:ca9d7a2aa1a27fe5241c404815c985921d69dd809708a83a8d7212432df92618, commit b87863d325eb24b43b3e12248ad0d593b5be86c3
+## Change under review — digest sha256:5472b12ce5eb652338dfe0810b5d6581014d0cd39629d9806228a118129ad6b3, commit 96e20b351335a802f53a33e9f2af96572c989705
 
 ```diff
 diff --git a/AGENTS.md b/AGENTS.md
@@ -87,7 +87,7 @@ index 00000000..fa852e86
 +  "generatedPaths": []
 +}
 diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
-index 56663170..91538fe8 100644
+index 56663170..0fc988bb 100644
 --- a/docs/ops/tomverse-chat-progress.md
 +++ b/docs/ops/tomverse-chat-progress.md
 @@ -931,3 +931,43 @@ AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않
@@ -121,7 +121,7 @@ index 56663170..91538fe8 100644
 +| 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
 +| C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
 +| 구현 | 순수 실행 사전등록·authority 부재 fail-closed·terminal mapping·핵심 단위 테스트 완료 |
-+| 로컬 검증 | focused 30/30, 대상 lint, 전체 typecheck 통과 |
++| 로컬 검증 | focused 26/26, 전체 lint·typecheck 통과 |
 +| 독립 검토·통합 CI | 대기 — 이 회차에서는 독립 Claude 호출을 하지 않음 |
 +| 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
 +
@@ -224,10 +224,10 @@ index cdf2695c..9272e3e3 100644
  3. 원문 대비 제안문 주입·의미 보존 평가
 diff --git a/lib/promptRefinerExecutionContract.ts b/lib/promptRefinerExecutionContract.ts
 new file mode 100644
-index 00000000..b007ee88
+index 00000000..477cd0e1
 --- /dev/null
 +++ b/lib/promptRefinerExecutionContract.ts
-@@ -0,0 +1,516 @@
+@@ -0,0 +1,526 @@
 +import {
 +    getModel,
 +    type AiModel,
@@ -281,10 +281,20 @@ index 00000000..b007ee88
 + *
 + * The public request accepts at most 16,000 UTF-16 code units and 32 KiB of
 + * UTF-8 source. JSON escaping can expand one control character to six ASCII
-+ * bytes, so the source alone can render to 96,000 bytes. 100,000 tokens keeps
-+ * that worst case, the fixed system instruction, the canonical JSON envelope
-+ * and message framing inside the priced short-context tier. A future adapter
-+ * must prove a request-specific upper bound no larger than this before call.
++ * bytes, so the source alone can render to 96,000 bytes.
++ *
++ * Offline proof lemma: for the target OpenAI byte-level BPE family assumed by
++ * this preregistration, every emitted token covers at least one UTF-8 byte, so
++ * rendered content tokens are bounded above by rendered UTF-8 bytes. The
++ * repository does not catalogue the exact upstream tokenizer, so this is a
++ * conservative family-level proof assumption, not a claim about its merges or
++ * a runtime tokenizer result. A future adapter must still identify/count with
++ * its actual tokenizer and fail closed above this ceiling before any call.
++ *
++ * The framing allowance is an offline contract-proof constant for the fixed
++ * system instruction, canonical JSON envelope and message framing. No runtime
++ * adapter consumes it. Applying the lemma first and then adding that allowance
++ * keeps the worst rendered request inside the 100,000-token priced tier.
 + */
 +export const PROMPT_REFINER_MAX_INPUT_TOKENS = 100_000;
 +export const PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE = 2_048;
@@ -745,7 +755,7 @@ index 00000000..b007ee88
 +    }
 +};
 diff --git a/lib/promptRefinerReceiptCore.ts b/lib/promptRefinerReceiptCore.ts
-index ef34d345..efd64178 100644
+index ef34d345..5049bf0e 100644
 --- a/lib/promptRefinerReceiptCore.ts
 +++ b/lib/promptRefinerReceiptCore.ts
 @@ -32,9 +32,14 @@ export const PROMPT_REFINER_FAILURE_LAYERS = [
@@ -819,6 +829,15 @@ index ef34d345..efd64178 100644
      })
      .strict();
  
+@@ -192,7 +212,7 @@ export const promptRefinerExecutionReceiptSchema =
+         }
+ 
+         if (receipt.outcome === "refused_before_dispatch") {
+-            if (dispatchedAt !== null || hasAnyTelemetry || receipt.retryCount !== 0) {
++            if (dispatchedAt !== null || hasAnyTelemetry) {
+                 issue("prompt_refiner_refusal_cannot_claim_provider_work", [
+                     "outcome",
+                 ]);
 @@ -227,23 +247,29 @@ export const promptRefinerExecutionReceiptSchema =
                  "inputTokens",
              ]);
@@ -880,10 +899,10 @@ index 950a0a31..8c94cb2a 100644
  
 diff --git a/tests/promptRefinerExecutionContract.test.mjs b/tests/promptRefinerExecutionContract.test.mjs
 new file mode 100644
-index 00000000..ac6c9e05
+index 00000000..8ebf8f78
 --- /dev/null
 +++ b/tests/promptRefinerExecutionContract.test.mjs
-@@ -0,0 +1,324 @@
+@@ -0,0 +1,328 @@
 +import assert from "node:assert/strict";
 +import test from "node:test";
 +
@@ -954,22 +973,26 @@ index 00000000..ac6c9e05
 +    assert.equal(Object.isFrozen(PROMPT_REFINER_TERMINAL_REASONS), true);
 +});
 +
-+test("the maximum escaped request fits the conservative input-token ceiling", () => {
++test("the maximum escaped request fits the offline token upper bound", () => {
 +    const messages = promptRefinerModelMessages({
 +        requestId: "request_max_escaped",
 +        prompt: "\0".repeat(16_000),
 +    });
-+    const renderedBytes = messages.reduce(
++    const renderedUtf8Bytes = messages.reduce(
 +        (total, message) => total + new TextEncoder().encode(message.content).length,
 +        0
 +    );
++    // Apply the documented byte-level-BPE lemma before adding the separate
++    // token-denominated offline framing allowance.
++    const maxRenderedContentTokenUpperBound = renderedUtf8Bytes;
++    const maxRenderedRequestTokenUpperBound =
++        maxRenderedContentTokenUpperBound +
++        PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE;
 +
 +    assert.equal(messages.length, 2);
-+    assert.equal(renderedBytes, 96_848);
-+    assert.ok(
-+        renderedBytes + PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE <=
-+            PROMPT_REFINER_MAX_INPUT_TOKENS
-+    );
++    assert.equal(renderedUtf8Bytes, 96_848);
++    assert.equal(maxRenderedContentTokenUpperBound, 96_848);
++    assert.ok(maxRenderedRequestTokenUpperBound <= PROMPT_REFINER_MAX_INPUT_TOKENS);
 +});
 +
 +test("the checked-in catalogue and pricing must match the exact pin", () => {
@@ -1311,58 +1334,55 @@ index 72f4a9c7..70828c7c 100644
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1139ms)
+- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1122ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 1063.4925
+  # duration_ms 1050.3135
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck` (35800ms)
+- PASS `npm run typecheck` (35237ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npm run lint -- --quiet` (47715ms)
+- PASS `npm run lint -- --quiet` (46199ms)
   > ai-chat-hub@0.1.0 lint
   > eslint --quiet
-- PASS `npm run check:model-pricing` (672ms)
+- PASS `npm run check:model-pricing` (687ms)
   > ai-chat-hub@0.1.0 check:model-pricing
   > node --import tsx scripts/check-model-pricing.mjs
   
   
   Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.
-- PASS `npm run check:doc-references` (1278ms)
+- PASS `npm run check:doc-references` (1280ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 854 referenced path(s) across 108 instruction document(s), and 954 path(s) named by comments across 2898 source file(s), all present.
-- PASS `npm run check:policy-section-references` (946ms)
+- PASS `npm run check:policy-section-references` (964ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4428 citation(s) against 35 policy document(s). 2788 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1414 and 226 predate this change).
-- PASS `npm run check:encoding:strict` (1235ms)
+- PASS `npm run check:encoding:strict` (1243ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `git diff --check 7f0fe682b11ac9529fdd7bf7acc968edecf36a9c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1'` (46ms)
+- PASS `git diff --check 7f0fe682b11ac9529fdd7bf7acc968edecf36a9c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1'` (47ms)
 
 ## Findings from the previous round (check each was addressed)
 
-- [warning/evidence] lib/promptRefinerReceiptCore.ts:64 and :274 (FAILURE_LAYER_BY_CODE / expectedFailureLayer !== undefined): The new failure-code/layer invariant is fail-open on drift: the table is typed `Map<string, string>` and an unmapped code silently skips the check, so a failure code added to `PROMPT_REFINER_FAILURE_CODES` but omitted from the table accepts any `failureLayer`, which is exactly the combination criterion 5 asks the strict schema to validate.
-- [nit/evidence] lib/promptRefinerExecutionContract.ts:397 (PROMPT_REFINER_TERMINAL_REASONS): `as const satisfies readonly PromptRefinerTerminalReason[]` only checks that each listed element is a valid reason, not that every reason is listed, so the exported list and the bijection test can silently miss a reason even though the switch is exhaustiveness-checked.
-- [nit/evidence] lib/promptRefinerExecutionContract.ts:426 (PromptRefinerTerminalReceiptFacts.failureCode): The failure-code union here hand-duplicates `PROMPT_REFINER_FAILURE_CODES` in lib/promptRefinerReceiptCore.ts with no type-level link, so the two can diverge without a compile error even though the mapping is the thing that must agree with the receipt schema.
-- [nit/judgement] docs/policy/prompt-refiner-observability.md:24: Section 1 still describes the execution receipt as recording a "retry 수" without stating that the schema now pins `retryCount` to literal 0, so the policy document is less precise than AGENTS.md and the progress note on the retry-zero freeze.
-- [nit/judgement] AGENTS.md:1295-1299: The file list now reads "..., `lib/promptRefinerModelPrompt.ts`, or `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or their tests", carrying two `or`s in one list.
+- [nit/judgement] tests/promptRefinerExecutionContract.test.mjs:78-86 and lib/promptRefinerExecutionContract.ts:60 (PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE): The only evidence that the 100,000-token input ceiling covers the worst-case request compares a UTF-8 byte count against a token constant and adds a token-denominated framing allowance to it, and the unstated lemma that makes this sound (a byte-level BPE token spans at least one UTF-8 byte) appears in neither the assertion nor the constant's comment, while the exported allowance is consumed by no contract check.
+- [nit/evidence] lib/promptRefinerReceiptCore.ts:215: The refusal rule still tests `receipt.retryCount !== 0`, which can never be true now that the base schema pins `retryCount: z.literal(0)` at line 131, so that disjunct is unreachable and no test can distinguish its removal.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Close all five Claude round-0 findings: make failure-code/layer and terminal-reason coverage type-exhaustive, derive the execution failure-code type from receipt core without a runtime cycle, document literal retry zero, and fix the AGENTS file-list grammar. No provider/API/model call or runtime activation.
+Summary: Close round 1 nits by documenting the conditional byte-level-BPE UTF-8 upper-bound lemma and offline-only framing allowance without claiming an exact tokenizer identity, making the boundary test dimensionally explicit, removing the unreachable retryCount defense already enforced by the literal-zero receipt schema, and correcting the recorded focused-test count to the observed 26/26.
 
 ## Answer format
 
@@ -1371,8 +1391,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-execution-contract-v1",
-  "round": 1,
-  "reviewedDigest": "sha256:ca9d7a2aa1a27fe5241c404815c985921d69dd809708a83a8d7212432df92618",
+  "round": 2,
+  "reviewedDigest": "sha256:5472b12ce5eb652338dfe0810b5d6581014d0cd39629d9806228a118129ad6b3",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {

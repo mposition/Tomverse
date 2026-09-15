@@ -233,17 +233,112 @@
         }
       ],
       "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerExecutionContract.test.mjs:78-86 and lib/promptRefinerExecutionContract.ts:60 (PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE); open finding: lib/promptRefinerReceiptCore.ts:215); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:5472b12ce5eb652338dfe0810b5d6581014d0cd39629d9806228a118129ad6b3",
+      "commit": "96e20b351335a802f53a33e9f2af96572c989705",
+      "filesChanged": [
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/change-round1.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/package-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/verdict-round1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerExecutionContract.ts",
+        "lib/promptRefinerReceiptCore.ts",
+        "lib/promptRefinerSuggestion.ts",
+        "tests/promptRefinerExecutionContract.test.mjs",
+        "tests/promptRefinerReceiptCore.test.mjs"
+      ],
+      "changeSummary": "Close round 1 nits by documenting the conditional byte-level-BPE UTF-8 upper-bound lemma and offline-only framing allowance without claiming an exact tokenizer identity, making the boundary test dimensionally explicit, removing the unreachable retryCount defense already enforced by the literal-zero receipt schema, and correcting the recorded focused-test count to the observed 26/26.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1050.3135",
+          "durationMs": 1122
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 35237
+        },
+        {
+          "rule": "npm run lint -- --quiet",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint --quiet",
+          "durationMs": 46199
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 687
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 854 referenced path(s) across 108 instruction document(s), and 954 path(s) named by comments across 2898 source file(s), all present.",
+          "durationMs": 1280
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4428 citation(s) against 35 policy document(s). 2788 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1414 and 226 predate this change).",
+          "durationMs": 964
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1243
+        },
+        {
+          "rule": "git diff --check 7f0fe682b11ac9529fdd7bf7acc968edecf36a9c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 47
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerExecutionContract.ts:145-257 (promptRefinerExecutionContractProblems)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The drift check reads only the static checked-in profile via getModelPricingProfile, so a per-model env price override (the same override that lib/modelPricing.ts resolveModelPricing honours at cost-resolution time) can raise the effective input/output rate far above the pinned 0.2/1.2 while the preregistration still reports no drift and keeps the frozen 24,916 microUSD per-request ceiling.",
+          "reproduction": "node --import tsx -e \"process.env.CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION='99'; const c=await import('./lib/promptRefinerExecutionContract.ts'); const p=await import('./lib/modelPricing.ts'); const m=await import('./lib/models.ts'); console.log(c.promptRefinerExecutionContractProblems(), p.resolveModelPricing(m.getModel('gpt-5-6-luna')).inputUsdPerMillionTokens, c.PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD)\" -- expected today: [] alongside an effective rate of 99 and an unchanged 24916 ceiling; a contract that refuses this drift would list a problem instead (or the boundary that only checked-in facts are frozen would be stated in lib/promptRefinerExecutionContract.ts and docs/policy/prompt-refiner-observability.md, so the future reservation authority must re-verify the resolved rate before dispatch).",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerExecutionContract.ts:145-257 (promptRefinerExecutionContractProblems)) and no revision remains"
     }
   ],
-  "changeDigest": "sha256:ca9d7a2aa1a27fe5241c404815c985921d69dd809708a83a8d7212432df92618",
-  "commit": "b87863d325eb24b43b3e12248ad0d593b5be86c3",
-  "changeSummary": "Close all five Claude round-0 findings: make failure-code/layer and terminal-reason coverage type-exhaustive, derive the execution failure-code type from receipt core without a runtime cycle, document literal retry zero, and fix the AGENTS file-list grammar. No provider/API/model call or runtime activation.",
+  "changeDigest": "sha256:5472b12ce5eb652338dfe0810b5d6581014d0cd39629d9806228a118129ad6b3",
+  "commit": "96e20b351335a802f53a33e9f2af96572c989705",
+  "changeSummary": "Close round 1 nits by documenting the conditional byte-level-BPE UTF-8 upper-bound lemma and offline-only framing allowance without claiming an exact tokenizer identity, making the boundary test dimensionally explicit, removing the unreachable retryCount defense already enforced by the literal-zero receipt schema, and correcting the recorded focused-test count to the observed 26/26.",
   "testResults": [
     {
       "command": "node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
       "passed": true,
-      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1063.4925",
-      "durationMs": 1139
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1050.3135",
+      "durationMs": 1122
     }
   ],
   "guardRuns": [
@@ -251,43 +346,43 @@
       "rule": "npm run typecheck",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
-      "durationMs": 35800
+      "durationMs": 35237
     },
     {
       "rule": "npm run lint -- --quiet",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 lint\n> eslint --quiet",
-      "durationMs": 47715
+      "durationMs": 46199
     },
     {
       "rule": "npm run check:model-pricing",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
-      "durationMs": 672
+      "durationMs": 687
     },
     {
       "rule": "npm run check:doc-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 854 referenced path(s) across 108 instruction document(s), and 954 path(s) named by comments across 2898 source file(s), all present.",
-      "durationMs": 1278
+      "durationMs": 1280
     },
     {
       "rule": "npm run check:policy-section-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4428 citation(s) against 35 policy document(s). 2788 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1414 and 226 predate this change).",
-      "durationMs": 946
+      "durationMs": 964
     },
     {
       "rule": "npm run check:encoding:strict",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
-      "durationMs": 1235
+      "durationMs": 1243
     },
     {
       "rule": "git diff --check 7f0fe682b11ac9529fdd7bf7acc968edecf36a9c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1'",
       "passed": true,
       "detail": "",
-      "durationMs": 46
+      "durationMs": 47
     }
   ],
   "guardViolations": [],
@@ -295,43 +390,39 @@
   "reviewConclusion": "approve",
   "findings": [
     {
-      "location": "tests/promptRefinerExecutionContract.test.mjs:78-86 and lib/promptRefinerExecutionContract.ts:60 (PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE)",
-      "severity": "nit",
-      "basis": "judgement",
-      "claim": "The only evidence that the 100,000-token input ceiling covers the worst-case request compares a UTF-8 byte count against a token constant and adds a token-denominated framing allowance to it, and the unstated lemma that makes this sound (a byte-level BPE token spans at least one UTF-8 byte) appears in neither the assertion nor the constant's comment, while the exported allowance is consumed by no contract check.",
-      "reproduction": "Read tests/promptRefinerExecutionContract.test.mjs:78-86: renderedBytes is computed with new TextEncoder().encode(...).length (96,848 bytes) and asserted as renderedBytes + PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE <= PROMPT_REFINER_MAX_INPUT_TOKENS, i.e. bytes + tokens <= tokens; then `rg -n \"MESSAGE_FRAMING_TOKEN_ALLOWANCE\" lib scripts app components` returns only the declaration at lib/promptRefinerExecutionContract.ts:60, so no production path uses it. Adding one sentence to the doc comment stating tokens <= UTF-8 bytes for this tokenizer family would make the bound auditable without changing any number.",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "lib/promptRefinerReceiptCore.ts:215",
+      "location": "lib/promptRefinerExecutionContract.ts:145-257 (promptRefinerExecutionContractProblems)",
       "severity": "nit",
       "basis": "evidence",
-      "claim": "The refusal rule still tests `receipt.retryCount !== 0`, which can never be true now that the base schema pins `retryCount: z.literal(0)` at line 131, so that disjunct is unreachable and no test can distinguish its removal.",
-      "reproduction": "Delete `|| receipt.retryCount !== 0` from lib/promptRefinerReceiptCore.ts:215 and run `node --conditions=react-server --import tsx --test tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerExecutionContract.test.mjs`: it still passes, because any input with retryCount != 0 is rejected by the literal before superRefine runs. Keeping it as defence in depth is a defensible choice; if kept, a one-line comment saying so would stop a later reader from reading it as a live branch.",
-      "disposition": "fix_requested"
+      "claim": "The drift check reads only the static checked-in profile via getModelPricingProfile, so a per-model env price override (the same override that lib/modelPricing.ts resolveModelPricing honours at cost-resolution time) can raise the effective input/output rate far above the pinned 0.2/1.2 while the preregistration still reports no drift and keeps the frozen 24,916 microUSD per-request ceiling.",
+      "reproduction": "node --import tsx -e \"process.env.CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION='99'; const c=await import('./lib/promptRefinerExecutionContract.ts'); const p=await import('./lib/modelPricing.ts'); const m=await import('./lib/models.ts'); console.log(c.promptRefinerExecutionContractProblems(), p.resolveModelPricing(m.getModel('gpt-5-6-luna')).inputUsdPerMillionTokens, c.PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD)\" -- expected today: [] alongside an effective rate of 99 and an unchanged 24916 ceiling; a contract that refuses this drift would list a problem instead (or the boundary that only checked-in facts are frozen would be stated in lib/promptRefinerExecutionContract.ts and docs/policy/prompt-refiner-observability.md, so the future reservation authority must re-verify the resolved rate before dispatch).",
+      "disposition": "unresolved_on_hold"
     }
   ],
-  "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerExecutionContract.test.mjs:78-86 and lib/promptRefinerExecutionContract.ts:60 (PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE); open finding: lib/promptRefinerReceiptCore.ts:215); the author fixes it and the change is re-reviewed; package round 2 once the change is revised",
-  "status": "awaiting_revision",
+  "nextAction": "approved by the reviewer with 1 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
   "failure": null,
-  "holdReason": null,
-  "producedAt": "2026-09-15T22:26:53.752Z",
-  "packagedRounds": 2,
-  "concludedAtRound": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-15T22:39:29.931Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
   "lineage": [],
   "inheritedFindings": [],
-  "headCommit": "b87863d325eb24b43b3e12248ad0d593b5be86c3",
+  "headCommit": "96e20b351335a802f53a33e9f2af96572c989705",
   "worktreeDirty": false,
   "filesChanged": [
     "AGENTS.md",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1.task.json",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/change-round1.diff",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/change.diff",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/exchange.json",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/package-round1.json",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/review-prompt.md",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/review-round1.events.jsonl",
     "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1/verdict-round1.json",
     "docs/ops/tomverse-chat-progress.md",
     "docs/policy/prompt-refiner-observability.md",
     "docs/ui-contracts/prompt-refiner-suggestion.md",
