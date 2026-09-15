@@ -965,8 +965,8 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
 | 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
 | C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
 | 구현 | 순수 실행 사전등록·effective 가격/output-cap drift·authority 부재 fail-closed·terminal mapping 구현 |
-| 로컬 검증 | output-cap/env 격리 테스트 포함 focused 30/30; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
-| 독립 검토·통합 CI | continuation round 0은 approve+재현 nit 2건으로 수정 대기; 이 revision은 아직 미검토 |
+| 로컬 검증 | env·registry-row 가격/output-cap 격리 테스트 포함 focused 32/32 및 hostile-env 32/32; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
+| 독립 검토·통합 CI | continuation round 1은 approve+재현 가능한 test-design nit 2건으로 수정 대기; 이 final revision은 아직 미검토 |
 | 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
 
 ### 이 Cycle 다음 권장 순서

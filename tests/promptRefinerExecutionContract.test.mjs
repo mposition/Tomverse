@@ -79,6 +79,12 @@ const envSnapshot = (keys) =>
         ])
     );
 
+// These callbacks and their restoration are synchronous: no promise or timer
+// can outlive the `finally`. Top-level tests in this file use node:test's
+// default sequential scheduling, and the repository unit runner additionally
+// pins `--test-concurrency=1` in scripts/run-unit-tests.mjs. A leaf test's
+// `concurrency` option only limits its own subtests, so it would not add an
+// isolation guarantee here.
 const withIsolatedPriceEnv = (overrides, callback) => {
     const keys = PROMPT_REFINER_PRICING_ENV_KEYS;
     const before = envSnapshot(keys);
@@ -148,7 +154,7 @@ test("the maximum escaped request fits the offline token upper bound", () => {
     assert.ok(maxRenderedRequestTokenUpperBound <= PROMPT_REFINER_MAX_INPUT_TOKENS);
 });
 
-test("the checked-in catalogue and pricing must match the exact pin", { concurrency: false }, () => {
+test("the checked-in catalogue and pricing must match the exact pin", () => {
     withIsolatedPriceEnv({}, () => {
         assert.deepEqual(promptRefinerExecutionContractProblems(), []);
         assert.deepEqual(
@@ -200,7 +206,7 @@ test("the checked-in catalogue and pricing must match the exact pin", { concurre
     });
 });
 
-test("effective input price env drift fails closed without leaking env", { concurrency: false }, () => {
+test("effective input price env drift fails closed without leaking env", () => {
     const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
     assert.ok(model);
 
@@ -233,7 +239,7 @@ test("effective input price env drift fails closed without leaking env", { concu
     );
 });
 
-test("effective output price env drift fails closed without leaking env", { concurrency: false }, () => {
+test("effective output price env drift fails closed without leaking env", () => {
     const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
     assert.ok(model);
 
@@ -266,7 +272,7 @@ test("effective output price env drift fails closed without leaking env", { conc
     );
 });
 
-test("effective output cap below 4096 fails closed without leaking env", { concurrency: false }, () => {
+test("effective output cap below 4096 fails closed without leaking env", () => {
     const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
     assert.ok(model);
 
@@ -287,7 +293,7 @@ test("effective output cap below 4096 fails closed without leaking env", { concu
     });
 });
 
-test("effective output cap at or above 4096 keeps the fixed request cap", { concurrency: false }, () => {
+test("effective output cap at or above 4096 keeps the fixed request cap", () => {
     const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
     assert.ok(model);
 
@@ -317,7 +323,88 @@ test("effective output cap at or above 4096 keeps the fixed request cap", { conc
     }
 });
 
-test("an otherwise eligible request cannot fabricate successful admission", { concurrency: false }, () => {
+test("runtime registry row prices must match both effective rate pins", () => {
+    withIsolatedPriceEnv({}, () => {
+        const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+        const pricing = getModelPricingProfile(
+            PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId
+        );
+        assert.ok(model);
+        assert.ok(pricing);
+
+        const inputOverride = {
+            ...model,
+            inputUsdPerMillionTokens: 99,
+        };
+        const inputEffective = resolveModelPricing(inputOverride, {
+            estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+        });
+        assert.equal(inputEffective.costSource, "model_registry_override");
+        assert.equal(inputEffective.inputUsdPerMillionTokens, 99);
+        const inputProblems = promptRefinerExecutionContractProblems({
+            model: inputOverride,
+            pricing,
+        });
+        assert.ok(inputProblems.includes("effective_input_price_mismatch"));
+        assert.equal(inputProblems.includes("input_price_mismatch"), false);
+
+        const outputOverride = {
+            ...model,
+            outputUsdPerMillionTokens: 99,
+        };
+        const outputEffective = resolveModelPricing(outputOverride, {
+            estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+        });
+        assert.equal(outputEffective.costSource, "model_registry_override");
+        assert.equal(outputEffective.outputUsdPerMillionTokens, 99);
+        const outputProblems = promptRefinerExecutionContractProblems({
+            model: outputOverride,
+            pricing,
+        });
+        assert.ok(outputProblems.includes("effective_output_price_mismatch"));
+        assert.equal(outputProblems.includes("output_price_mismatch"), false);
+    });
+});
+
+test("runtime registry row output cap enforces the 4096 boundary", () => {
+    withIsolatedPriceEnv({}, () => {
+        const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+        const pricing = getModelPricingProfile(
+            PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId
+        );
+        assert.ok(model);
+        assert.ok(pricing);
+
+        for (const [effectiveCap, rejected] of [
+            [100, true],
+            [PROMPT_REFINER_MAX_OUTPUT_TOKENS, false],
+            [PROMPT_REFINER_MAX_OUTPUT_TOKENS + 1, false],
+        ]) {
+            const rowModel = { ...model, maxOutputTokens: effectiveCap };
+            const effective = resolveModelPricing(rowModel, {
+                estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+            });
+            assert.equal(effective.costSource, "registry");
+            assert.equal(effective.maxOutputTokens, effectiveCap);
+            const problems = promptRefinerExecutionContractProblems({
+                model: rowModel,
+                pricing,
+            });
+            assert.equal(
+                problems.includes("effective_output_cap_below_contract"),
+                rejected,
+                String(effectiveCap)
+            );
+            assert.equal(
+                problems.includes("output_cap_exceeds_model_profile"),
+                false,
+                String(effectiveCap)
+            );
+        }
+    });
+});
+
+test("an otherwise eligible request cannot fabricate successful admission", () => {
     withIsolatedPriceEnv({}, () => {
         assert.deepEqual(admitPromptRefinerExecution(candidate()), {
             admitted: false,
@@ -340,7 +427,7 @@ test("an otherwise eligible request cannot fabricate successful admission", { co
     });
 });
 
-test("unknown, unapproved, drifted and authority-less candidates fail closed", { concurrency: false }, () => {
+test("unknown, unapproved, drifted and authority-less candidates fail closed", () => {
     withIsolatedPriceEnv({}, () => {
         const cases = [
             [candidate({ eligible: null }), "eligibility_refused"],
