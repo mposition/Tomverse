@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { cleanupExpiredData } from "@/lib/maintenance";
 import { summarizeMaintenanceStepFailures } from "@/lib/maintenanceStepsCore";
 import { runFeedbackAutoFixShadowWorker } from "@/lib/feedbackAutoFixShadow";
+import { runPromotionObserver } from "@/lib/feedbackAutoFixPromotion";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -54,6 +55,28 @@ export async function POST(request: Request) {
         JSON.stringify({
           event: "autofix_shadow_worker_run",
           ...shadow,
+          at: new Date().toISOString(),
+        })
+      );
+    }
+    // Owner-approved promotion is observed on the same cadence: reads only
+    // (GitHub, Railway, the environments' public endpoints), and like the
+    // shadow worker it never fails the retention job.
+    const promotion = await runPromotionObserver().catch((error) => {
+      console.warn(
+        JSON.stringify({
+          event: "autofix_promotion_observer_failed",
+          reason: error instanceof Error ? error.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+      return null;
+    });
+    if (promotion?.enabled) {
+      console.info(
+        JSON.stringify({
+          event: "autofix_promotion_observer_run",
+          ...promotion,
           at: new Date().toISOString(),
         })
       );

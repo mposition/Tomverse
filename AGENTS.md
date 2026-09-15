@@ -990,10 +990,21 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **Phase 3(자동 수정)은 인프라만 존재하고 운영은 비활성입니다**
   (`FEEDBACK_AUTOFIX_ENABLED` + sync secret + 수동 dispatch 3중 잠금,
   정책 문서 §9.1). LLM confidence를 자동 게이트로 쓰지 않고, 결정적
-  Red→Green 증명 없는 자동 수정을 금지하며, 자동 생성 수정의 target은
-  `develop`뿐이고 auto-merge는 켜지 않습니다. change policy는
+  Red→Green 증명 없는 자동 수정을 금지하며, 자동 생성 수정이 만드는 것은
+  `develop` PR뿐이고 auto-merge는 켜지 않습니다. change policy는
   `lib/feedbackAutoFixPolicy.ts`가 정의하며 파이프라인 자기 자신을 수정
   대상에서 제외합니다. staging 배포를 production 해결로 표시하지 않습니다.
+- **승격은 소유자 승인 + 사람의 GitHub 병합 + 서버 관측입니다**
+  (docs/policy/trace-feedback-automation.md §9.3). **자동화는 어떤 PR도 병합하지 않고 `--admin`도 쓰지 않습니다.**
+  승인은 PR head와 change manifest(경로별 before/after blob)에 묶이고, main
+  승격 PR은 manifest가 승인과 완전히 같을 때만 인정합니다. GitHub·배포 사실은
+  workflow 보고가 아니라 서버가 **읽기 전용** 자격증명으로 직접 읽으며, 배포는
+  Railway control plane의 단일 live deployment + 다중 표본 + 10분 안정화 창으로만
+  판정합니다. 서버에 GitHub 쓰기 토큰을 두지 않습니다.
+- **검증된 Trace 신고는 `reviewing`으로 접수됩니다.** 사용자 입력 Trace는
+  `open`에 남고, 자동 전환은 사용자에게 메일을 보내지 않으며 운영자 메일은
+  `support_feedback` 한 통입니다. `Feedback.status`를 `resolved`로 바꾸는 것은
+  운영자뿐입니다.
 
 # 이메일 알림
 

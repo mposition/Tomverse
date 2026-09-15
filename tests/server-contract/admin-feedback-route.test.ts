@@ -50,6 +50,8 @@ type World = {
   emailShouldFail: boolean;
   logs: string[];
   txActive: boolean;
+  /** The report's auto-fix case, when it has one. */
+  autoFixCase: (Record<string, unknown> & { state: string; inTxClose?: boolean }) | null;
 };
 
 const reporterFeedback = (): FeedbackRecord => ({
@@ -78,6 +80,7 @@ const freshWorld = (): World => ({
   emailShouldFail: false,
   logs: [],
   txActive: false,
+  autoFixCase: null,
 });
 
 let world = freshWorld();
@@ -224,6 +227,22 @@ async function loadRoute(): Promise<{
               language: world.feedback.language ?? "en",
             },
           };
+        },
+      },
+      feedbackAutoFixCase: {
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: { feedbackId: string; state: string };
+          data: Record<string, unknown>;
+        }) => {
+          const row = world.autoFixCase;
+          if (!row || row.feedbackId !== where.feedbackId || row.state !== where.state) {
+            return { count: 0 };
+          }
+          Object.assign(row, data, { inTxClose: world.txActive });
+          return { count: 1 };
         },
       },
       notificationDelivery: {
@@ -578,4 +597,48 @@ test("an unknown feedback id is a 404 after validation", async () => {
   const response = await withCapturedLogs(() => PATCH(request, context));
 
   assert.equal(response.status, 404);
+});
+
+// --- auto-fix case closure ---------------------------------------------------
+
+test("resolving a report whose fix is live in production closes its case in the same transaction", async () => {
+  const { PATCH } = await loadRoute();
+  world.autoFixCase = { feedbackId: world.feedback!.id, state: "production_verified" };
+  const { request, context } = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "We found the cause, fixed it, and the fix is now live.",
+  });
+  const response = await withCapturedLogs(() => PATCH(request, context));
+  const body = await readJson(response);
+  assert.equal(response.status, 200);
+  assert.equal(body.autoFixCaseClosed, true);
+  assert.equal(world.autoFixCase.state, "closed");
+  assert.equal(world.autoFixCase.inTxClose, true);
+  assert.ok(world.autoFixCase.closedAt instanceof Date);
+});
+
+test("a case not yet verified in production is never closed by a resolve", async () => {
+  for (const state of ["pr_open", "approved", "merged", "staging_verified", "production_merged"]) {
+    world = freshWorld();
+    const { PATCH } = await loadRoute();
+    world.autoFixCase = { feedbackId: world.feedback!.id, state };
+    const { request, context } = patch(world.feedback!.id, {
+      status: "resolved",
+      outcomeCode: "answered",
+    });
+    const response = await withCapturedLogs(() => PATCH(request, context));
+    const body = await readJson(response);
+    assert.equal(response.status, 200, state);
+    assert.equal(body.autoFixCaseClosed, false, state);
+    assert.equal(world.autoFixCase.state, state, state);
+  }
+});
+
+test("a non-terminal status change never touches the case", async () => {
+  const { PATCH } = await loadRoute();
+  world.autoFixCase = { feedbackId: world.feedback!.id, state: "production_verified" };
+  const { request, context } = patch(world.feedback!.id, { status: "reviewing" });
+  await withCapturedLogs(() => PATCH(request, context));
+  assert.equal(world.autoFixCase.state, "production_verified");
 });

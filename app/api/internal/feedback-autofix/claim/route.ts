@@ -24,7 +24,9 @@ export async function POST(request: Request) {
     const body = await readLimitedJson(request, 1_024, requestSchema);
     const claim = await claimCaseForFix(body.caseId);
     return Response.json(
-      claim ? { claimed: true, branch: claim.branch } : { claimed: false },
+      claim
+        ? { claimed: true, branch: claim.branch, attemptId: claim.attemptId }
+        : { claimed: false },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch {

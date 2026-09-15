@@ -1931,6 +1931,10 @@ model FeedbackAutoFixCase {
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
   fixBranch           String?
+  /// The running fix attempt's server-minted id. Every heartbeat and result
+  /// must present it; a claim replaces it and a reclaim or a terminal result
+  /// clears it, so a late callback from an expired run matches nothing.
+  fixAttemptId        String?
   fixPrNumber         Int?
   fixPrUrl            String?
   /// Read back from GitHub after the human-approved merge; never inferred
@@ -1939,6 +1943,38 @@ model FeedbackAutoFixCase {
   stagingSha          String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
   redGreenProof       Json?
+  /// --- Review request (docs/policy/trace-feedback-automation.md §9.3) ------
+  /// The develop PR head and its change manifest digest, read from GitHub by
+  /// the server (lib/feedbackAutoFixChangeManifest.ts).
+  fixHeadSha          String?
+  fixManifestDigest   String?
+  /// The manifest itself: path, base blob and head blob per changed file.
+  fixManifest         Json?
+  /// Root cause, fix and test summaries from the fix run: bounded, technical,
+  /// derived only from the diagnostic summary -- never the report body.
+  fixReport           Json?
+  /// --- Owner approval, bound to one head and one manifest --------------------
+  /// Who approved is recorded in AdminAuditLog (feedback_autofix.approved), not
+  /// here: the case keeps no account identifier of its own.
+  approvedAt          DateTime?
+  approvedHeadSha     String?
+  approvedManifestDigest String?
+  /// --- Promotion: every value observed by the server itself -----------------
+  stagingDeploymentId String?
+  stagingFirstSeenAt  DateTime?
+  stagingVerifiedAt   DateTime?
+  productionBranch    String?
+  productionPrNumber  Int?
+  productionPrUrl     String?
+  productionPrHeadSha String?
+  productionMergeSha  String?
+  productionDeploymentId String?
+  productionFirstSeenAt  DateTime?
+  productionVerifiedAt   DateTime?
+  /// The last observer pass that read this case and why it did not advance:
+  /// what the console shows as "observation delayed".
+  promotionObservedAt DateTime?
+  promotionObservation String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

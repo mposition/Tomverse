@@ -16,8 +16,11 @@
 #     PAT; the sync secret never appears in either of those steps;
 #   - the diagnosis evidence is data, not instructions -- and it contains no
 #     user text by construction (server-side allowlist);
-#   - the PR is opened against develop with NO auto-merge: a human approves
-#     every auto-fix PR in the initial operating period;
+#   - the PR is opened against develop with NO auto-merge: an owner approves
+#     it in the Admin Console and a person merges it in GitHub; everything
+#     after the PR is observed by the server, never reported from here
+#     (docs/policy/trace-feedback-automation.md §9.3,
+#     .github/workflows/feedback-autofix-promotion-pr.yml);
 #   - the branch name is feedback-autofix/<case-id> -- a server-minted case
 #     id, never a trace ID or any user-influenced string.
 name: Feedback Auto-Fix (Phase 3)
@@ -96,6 +99,9 @@ jobs:
           fi
           echo "claimed=true" >> "$GITHUB_OUTPUT"
           echo "branch=$(echo "$response" | jq -r '.branch')" >> "$GITHUB_OUTPUT"
+          # Every heartbeat and result must carry this run's attempt id; once
+          # the lease is reclaimed it matches nothing (docs/policy/trace-feedback-automation.md §9.3).
+          echo "ATTEMPT_ID=$(echo "$response" | jq -r '.attemptId')" >> "$GITHUB_ENV"
 
       - name: Checkout develop
         if: steps.claim.outputs.claimed == 'true'
@@ -127,7 +133,7 @@ jobs:
               curl -sS -X POST \
                 -H "Authorization: Bearer ${FEEDBACK_AUTOFIX_SYNC_SECRET}" \
                 -H "Content-Type: application/json" \
-                -d "$(jq -cn --arg id "$CASE_ID" '{caseId:$id}')" \
+                -d "$(jq -cn --arg id "$CASE_ID" --arg attempt "$ATTEMPT_ID" '{caseId:$id, attemptId:$attempt}')" \
                 "${TOMVERSE_APP_URL}/api/internal/feedback-autofix/heartbeat" \
                 > /dev/null || true
             done
@@ -154,6 +160,9 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.FEEDBACK_AUTOFIX_ANTHROPIC_API_KEY }}
           EVIDENCE_JSON: ${{ toJson(matrix.case.diagnosticSummary) }}
+          # Outside the checkout, so the report can never become part of the
+          # change the policy check and the proof are about.
+          FIX_REPORT_PATH: ${{ runner.temp }}/fix-report.json
         run: |
           # The evidence is server-built from the technical allowlist: it
           # contains no user text. It is presented to the agent as data.
@@ -178,6 +187,15 @@ jobs:
           passes with your fix. Never delete or skip tests, never touch
           snapshots, never modify more than 5 files or 300 lines, and never
           edit files outside lib/, app/, components/, tests/.
+
+          Step 3 (report): if you made a fix, write a JSON object to the
+          file named by the FIX_REPORT_PATH environment variable (it is
+          outside the repository; do not write it anywhere else) with three
+          string fields for the operator who will review the PR:
+          "rootCause" (what was wrong, at most 1000 characters), "fixSummary"
+          (what you changed and why it fixes it, at most 1000 characters)
+          and "testSummary" (what the new test proves, at most 500
+          characters). Plain technical English; describe code, not users.
           PROMPT
           )
           claude --print --dangerously-skip-permissions -- "$prompt" || true
@@ -263,10 +281,10 @@ jobs:
         env:
           FEEDBACK_AUTOFIX_SYNC_SECRET: ${{ secrets.FEEDBACK_AUTOFIX_SYNC_SECRET }}
         run: |
-          payload=$(jq -cn --arg id "$CASE_ID" \
+          payload=$(jq -cn --arg id "$CASE_ID" --arg attempt "$ATTEMPT_ID" \
             --argjson manifest '${{ steps.policy.outputs.manifest }}' \
             --argjson proof '${{ steps.proof.outputs.proof }}' \
-            '{caseId:$id, result:{outcome:"red_green_proven",
+            '{caseId:$id, attemptId:$attempt, result:{outcome:"red_green_proven",
               changedFiles:$manifest.changedFiles, proof:$proof}}')
           applied=$(curl -sS -f -X POST \
             -H "Authorization: Bearer ${FEEDBACK_AUTOFIX_SYNC_SECRET}" \
@@ -299,28 +317,48 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "number=$(gh pr view "$url" --json number -q .number)" >> "$GITHUB_OUTPUT"
 
-      - name: Report the PR
+      - name: Report the PR and request the owner's review
         if: steps.claim.outputs.claimed == 'true' && steps.pr.outputs.number != ''
         env:
           FEEDBACK_AUTOFIX_SYNC_SECRET: ${{ secrets.FEEDBACK_AUTOFIX_SYNC_SECRET }}
+          FIX_REPORT_PATH: ${{ runner.temp }}/fix-report.json
         run: |
-          payload=$(jq -cn --arg id "$CASE_ID" \
+          # Only the PR number and the run's own account of the cause and fix
+          # are sent. The server reads the PR itself from GitHub -- its
+          # repository, base, branch, head and changed files -- and records
+          # what GitHub says, not what this run says
+          # (docs/policy/trace-feedback-automation.md §9.3).
+          fallback="Not reported by the fix run; read the PR diff."
+          report='{}'
+          if [ -f "$FIX_REPORT_PATH" ] && jq -e 'type == "object"' "$FIX_REPORT_PATH" > /dev/null 2>&1; then
+            report=$(cat "$FIX_REPORT_PATH")
+          fi
+          payload=$(jq -cn --arg id "$CASE_ID" --arg attempt "$ATTEMPT_ID" \
             --argjson number "${{ steps.pr.outputs.number }}" \
-            --arg url "${{ steps.pr.outputs.url }}" \
-            '{caseId:$id, result:{outcome:"pr_open", prNumber:$number, prUrl:$url}}')
-          curl -sS -f -X POST \
+            --argjson report "$report" \
+            --arg fallback "$fallback" \
+            'def field($name; $max): ($report[$name] | if type == "string" and length > 0 then .[0:$max] else $fallback end);
+             {caseId:$id, attemptId:$attempt, result:{outcome:"pr_open", prNumber:$number,
+              fixReport:{rootCause:field("rootCause"; 1000),
+                         fixSummary:field("fixSummary"; 1000),
+                         testSummary:field("testSummary"; 500)}}}')
+          applied=$(curl -sS -f -X POST \
             -H "Authorization: Bearer ${FEEDBACK_AUTOFIX_SYNC_SECRET}" \
             -H "Content-Type: application/json" \
             -d "$payload" \
-            "${TOMVERSE_APP_URL}/api/internal/feedback-autofix/result" > /dev/null
+            "${TOMVERSE_APP_URL}/api/internal/feedback-autofix/result" | jq -r '.applied')
+          if [ "$applied" != "true" ]; then
+            echo "The server did not record the PR; the review request was not sent."
+            exit 1
+          fi
 
       - name: Report a failed attempt
         if: failure() && steps.claim.outputs.claimed == 'true'
         env:
           FEEDBACK_AUTOFIX_SYNC_SECRET: ${{ secrets.FEEDBACK_AUTOFIX_SYNC_SECRET }}
         run: |
-          payload=$(jq -cn --arg id "$CASE_ID" \
-            '{caseId:$id, result:{outcome:"fix_failed",
+          payload=$(jq -cn --arg id "$CASE_ID" --arg attempt "${ATTEMPT_ID:-}" \
+            '{caseId:$id, attemptId:$attempt, result:{outcome:"fix_failed",
               reason:"workflow attempt failed before a validated PR"}}')
           curl -sS -X POST \
             -H "Authorization: Bearer ${FEEDBACK_AUTOFIX_SYNC_SECRET}" \

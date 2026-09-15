@@ -4,6 +4,7 @@ import { abandonedLegalEmailCount } from "@/lib/adminEmailDeliveries";
 import { countOpenWorkItems } from "@/lib/modelLifecycleWorkItems";
 import { overdueCampaignWaveCount } from "@/lib/adminEmailCampaigns";
 import type { AdminNavigationCounts } from "@/lib/adminNavigationBadges";
+import { AUTOFIX_OPERATOR_ACTION_STATES } from "@/lib/feedbackAutoFixCore";
 
 export {
   EMPTY_ADMIN_NAVIGATION_COUNTS,
@@ -36,6 +37,7 @@ export async function getAdminNavigationCounts(): Promise<{
   const now = new Date();
   const [
     openFeedback,
+    autoFixActionCases,
     openPrivacyRequests,
     pendingRefunds,
     pendingApprovals,
@@ -48,6 +50,9 @@ export async function getAdminNavigationCounts(): Promise<{
     overdueCampaignWaves,
   ] = await Promise.allSettled([
     prisma.feedback.count({ where: { status: "open" } }),
+    prisma.feedbackAutoFixCase.count({
+      where: { state: { in: [...AUTOFIX_OPERATOR_ACTION_STATES] } },
+    }),
     prisma.privacyRequest.count({ where: { status: "open" } }),
     prisma.refundRequest.count({ where: { status: "pending" } }),
     prisma.adminActionApproval.count({
@@ -67,6 +72,7 @@ export async function getAdminNavigationCounts(): Promise<{
   const jobsValue = settled(jobs);
   const counts: AdminNavigationCounts = {
     openFeedback: settled(openFeedback),
+    autoFixActionCases: settled(autoFixActionCases),
     openPrivacyRequests: settled(openPrivacyRequests),
     pendingRefunds: settled(pendingRefunds),
     pendingApprovals: settled(pendingApprovals),

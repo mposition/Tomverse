@@ -181,7 +181,8 @@ async function loadRoute(): Promise<{
           const record = {
             ...data,
             id: `clzfeedback000${String(nextId).padStart(4, "0")}abcd`,
-            status: "open",
+            // The column default, unless the route chose a status itself.
+            status: data.status ?? "open",
             createdAt: new Date("2099-01-01T00:00:00.000Z"),
           } as StoredFeedback;
           world.stored.push(record);
@@ -993,6 +994,8 @@ test("a token for a different trace stores as payload_mismatch", async () => {
     assert.equal(response.status, 200);
     assert.equal(world.stored[0].errorReportVerification, "payload_mismatch");
     assert.equal(world.stored[0].traceEvidenceId, null);
+    // Not verified, so not moved to review.
+    assert.equal(world.stored[0].status, "open");
   });
 });
 
@@ -1016,6 +1019,7 @@ test("a forged token stores as invalid_signature and still stores the report", a
     assert.equal(response.status, 200);
     assert.equal(world.stored.length, 1);
     assert.equal(world.stored[0].errorReportVerification, "invalid_signature");
+    assert.equal(world.stored[0].status, "open");
   });
 });
 
@@ -1203,5 +1207,90 @@ test("no shadow case without the flag, for non-bug types, or unverified traces",
       );
       assert.equal(world.autoFixCases.length, 0);
     });
+  });
+});
+
+// --- trace auto-review --------------------------------------------------------
+//
+// A report backed by a server-verified trace is stored already in review, with
+// both lifecycle stages recorded in the same transaction and exactly one
+// operator mail that says why. Nothing short of a verified token qualifies: a
+// trace the reporter typed, or a token for another trace, stays open.
+
+test("a verified trace report is stored in review and the operator mail says why", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const traceId = "bbbb1111-2222-4333-8444-555555555555";
+    const token = await issueToken({ traceId, errorCode: "AI_PROVIDER_ERROR" });
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "support",
+          message: "the answer failed with an error",
+          traceId,
+          errorReportToken: token!,
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored[0].status, "reviewing");
+
+    const stages = world.lifecycleEvents.map((row) => [
+      row.stage,
+      row.previousStatus,
+      row.newStatus,
+      row.inTx,
+    ]);
+    assert.deepEqual(stages, [
+      ["received", null, "open", true],
+      ["reviewing", "open", "reviewing", true],
+    ]);
+    // No person moved it: the automatic reviewing event names no actor.
+    assert.equal(world.lifecycleEvents[1].actorUserId, undefined);
+
+    // One operator notification, not a second one for the status change.
+    const operatorDeliveries = world.deliveries.filter(
+      (row) => row.kind === "support_feedback"
+    );
+    assert.equal(operatorDeliveries.length, 1);
+    assert.equal(
+      world.deliveries.some((row) => row.kind === "feedback_user_reviewing"),
+      false,
+      "an automatic review must not mail the reporter a second time"
+    );
+    const operatorMail = world.emails.find(
+      (mail) => mail.to === "support@tomverse.app"
+    );
+    assert.ok(operatorMail, "the operator mail was sent inline");
+    assert.match(operatorMail!.subject, /moved to review/);
+    assert.match(operatorMail!.text, /moved to Reviewing automatically/);
+  });
+});
+
+test("an unverified trace report stays open with an ordinary operator mail", async () => {
+  await withSigningSecret(async () => {
+    const { POST } = await loadRoute();
+    const response = await withCapturedLogs(() =>
+      POST(
+        post({
+          type: "bug",
+          message: "I pasted a trace id myself",
+          traceId: "cccc1111-2222-4333-8444-555555555555",
+          traceProvenance: "server_generated",
+        })
+      )
+    );
+    assert.equal(response.status, 200);
+    assert.equal(world.stored[0].errorReportVerification, "missing_token");
+    assert.equal(world.stored[0].status, "open");
+    assert.deepEqual(
+      world.lifecycleEvents.map((row) => row.stage),
+      ["received"]
+    );
+    const operatorMail = world.emails.find(
+      (mail) => mail.to === "support@tomverse.app"
+    );
+    assert.ok(operatorMail);
+    assert.doesNotMatch(operatorMail!.subject, /moved to review/);
   });
 });

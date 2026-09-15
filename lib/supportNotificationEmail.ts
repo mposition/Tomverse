@@ -32,6 +32,13 @@ export type SupportNotificationInput = {
   plan?: string | null;
   attachmentCount?: number | null;
   path?: string | null;
+  /**
+   * The report carried a server-verified trace and was stored already in
+   * review (lib/feedbackTraceAutoReview.ts). Derived from the stored
+   * verification outcome, which never changes after the write -- not from the
+   * report's current status, which would make a retry render a different mail.
+   */
+  autoReviewed?: boolean;
 };
 
 export const buildSupportNotificationEmail = (
@@ -40,9 +47,14 @@ export const buildSupportNotificationEmail = (
   const dash = (value: unknown) => (value ? String(value) : "-");
   const attachments = input.attachmentCount || 0;
 
-  const subject = `Tomverse support request: ${input.type}`;
+  const subject = input.autoReviewed
+    ? `Tomverse support request moved to review: ${input.type} (verified trace)`
+    : `Tomverse support request: ${input.type}`;
+  const autoReviewSentence =
+    "This report carries a server-verified trace, so it was moved to Reviewing automatically. Open the support inbox to look at the trace evidence.";
 
   const text = [
+    ...(input.autoReviewed ? [autoReviewSentence, ""] : []),
     `Feedback ID: ${input.feedbackId}`,
     `Type: ${input.type}`,
     `Email: ${input.email || "guest"}`,
@@ -57,7 +69,8 @@ export const buildSupportNotificationEmail = (
 
   const html = `
             <div style="font-family:${EMAIL_FONT_STACK};color:#111827;line-height:1.6">
-              <h2>New Tomverse support request</h2>
+              <h2>${input.autoReviewed ? "Tomverse support request moved to review" : "New Tomverse support request"}</h2>
+              ${input.autoReviewed ? `<p><strong>${escapeHtml(autoReviewSentence)}</strong></p>` : ""}
               <p><strong>Feedback ID:</strong> ${escapeHtml(input.feedbackId)}</p>
               <p><strong>Type:</strong> ${escapeHtml(input.type)}</p>
               <p><strong>Email:</strong> ${escapeHtml(input.email || "guest")}</p>

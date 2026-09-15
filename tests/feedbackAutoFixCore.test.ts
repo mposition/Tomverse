@@ -213,8 +213,11 @@ test("the Phase 3 happy path is allowed, and only via the graph", () => {
     AUTOFIX_CASE_STATE.fixAttempting,
     AUTOFIX_CASE_STATE.redGreenProven,
     AUTOFIX_CASE_STATE.prOpen,
+    AUTOFIX_CASE_STATE.approved,
     AUTOFIX_CASE_STATE.merged,
     AUTOFIX_CASE_STATE.stagingVerified,
+    AUTOFIX_CASE_STATE.productionMerged,
+    AUTOFIX_CASE_STATE.productionVerified,
     AUTOFIX_CASE_STATE.closed,
   ];
   for (let i = 0; i < path.length - 1; i += 1) {
@@ -243,6 +246,51 @@ test("the Phase 3 happy path is allowed, and only via the graph", () => {
       AUTOFIX_CASE_STATE.stagingVerified
     )
   );
+});
+
+test("promotion has no path that skips the owner's approval or production", () => {
+  // An open PR moves forward only through approval: a PR merged without one
+  // is never promoted.
+  assert.ok(
+    !canTransitionAutoFixCase(AUTOFIX_CASE_STATE.prOpen, AUTOFIX_CASE_STATE.merged)
+  );
+  // Staging is not production: nothing verified only on staging may close.
+  assert.ok(
+    !canTransitionAutoFixCase(
+      AUTOFIX_CASE_STATE.stagingVerified,
+      AUTOFIX_CASE_STATE.closed
+    )
+  );
+  // Every state before production_verified refuses closed and resolved-like
+  // jumps; only production_verified and the two failure states close.
+  const closable = new Set<string>([
+    AUTOFIX_CASE_STATE.awaitingHumanReview,
+    AUTOFIX_CASE_STATE.ineligible,
+    AUTOFIX_CASE_STATE.fixFailed,
+    AUTOFIX_CASE_STATE.productionVerified,
+    AUTOFIX_CASE_STATE.promotionFailed,
+  ]);
+  for (const state of Object.values(AUTOFIX_CASE_STATE)) {
+    assert.equal(
+      canTransitionAutoFixCase(state, AUTOFIX_CASE_STATE.closed),
+      closable.has(state),
+      `${state} -> closed`
+    );
+  }
+  // Exhaustive: the only edge into approved starts at pr_open, and the only
+  // edge into production_verified starts at production_merged.
+  for (const state of Object.values(AUTOFIX_CASE_STATE)) {
+    assert.equal(
+      canTransitionAutoFixCase(state, AUTOFIX_CASE_STATE.approved),
+      state === AUTOFIX_CASE_STATE.prOpen,
+      `${state} -> approved`
+    );
+    assert.equal(
+      canTransitionAutoFixCase(state, AUTOFIX_CASE_STATE.productionVerified),
+      state === AUTOFIX_CASE_STATE.productionMerged,
+      `${state} -> production_verified`
+    );
+  }
 });
 
 test("a died fix runner returns to the review pool, never forward", () => {
