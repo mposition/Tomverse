@@ -166,6 +166,29 @@ test.describe("Chat starter catalogue", () => {
     await expect(textarea).toHaveValue("my own half finished question");
   });
 
+  test("a card that does not want search puts the toggle back", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Staging, 2026-09-15: picking the sourced-answer card and then changing
+    // your mind left web search armed, so the next send was priced at 9
+    // credits instead of 1. The seed now owns the toggle on the same terms it
+    // owns the text -- it may put back what it put there.
+    await enableStarterFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await openWelcome(page);
+
+    const sourced = page.locator('[data-starter-id="sourced-answer"]');
+    await expect(sourced).toBeVisible();
+    await sourced.click();
+    await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+
+    const plain = page.locator('[data-starter-id="compare-answers"]');
+    await expect(plain).toBeVisible();
+    await plain.click();
+    await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+  });
+
   test("the gallery never takes the textarea's row, at 320px and at 200% text", { tag: "@ui-risk" }, async ({
     page,
   }) => {
