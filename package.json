@@ -148,6 +148,7 @@
     "report:model-credit-weights": "node --conditions=react-server --import tsx scripts/report-model-credit-weights.mjs",
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",
     "report:continuation-seed": "node --import tsx scripts/report-continuation-seed.mjs",
+    "measure:continuation-source-search": "node --conditions=react-server --import tsx scripts/measure-continuation-source-search.mjs",
     "report:billing-price-catalog": "node --conditions=react-server --import tsx scripts/report-billing-price-catalog.mjs",
     "report:email-domains": "node --conditions=react-server --import tsx scripts/report-email-sending-domains.mjs",
     "report:email-dns": "node --conditions=react-server --import tsx scripts/report-email-dns.mjs",

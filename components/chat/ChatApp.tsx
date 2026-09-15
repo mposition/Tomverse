@@ -214,6 +214,14 @@ type ChatAppProps = {
     olderCount: number;
     onLoadOlder?: () => void;
     loadingOlder?: boolean;
+    /** Imported turns below the loaded window (after opening at a search hit). */
+    newerCount?: number;
+    onLoadNewer?: () => void;
+    loadingNewer?: boolean;
+    /** Scroll to and focus this `imported:` message once it is rendered. */
+    focusRequest?: { messageId: string; nonce: number } | null;
+    /** Called once the requested message has been scrolled to and focused. */
+    onFocusApplied?: (nonce: number) => void;
   };
   useCenteredWelcome?: boolean;
   /**

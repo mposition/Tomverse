@@ -459,6 +459,12 @@ export type ContinuationTimeline = {
         // brings the transcript back.
         | { status: "deleted"; deletedAt: string | null }
         | { status: "locked" };
+    /**
+     * Present only when the read asked for a message by id (`around`).
+     * `found: false` answers an id that is not in this snapshot, not this
+     * account's, or not a message at all -- the three are one answer.
+     */
+    focus?: { found: boolean };
 };
 
 /**
@@ -492,6 +498,15 @@ export async function getContinuationTimeline(
          * ordinary offset walk.
          */
         fromEnd?: boolean;
+        /**
+         * Centre the page on this `ExternalMessage.id` (a search hit).
+         *
+         * Resolved only after both locks and the snapshot's ownership have
+         * passed, and only inside the exact snapshot this bridge names -- so
+         * it is a scroll position, never a way to read anything. When it
+         * does not resolve, the read falls back to the end page.
+         */
+        aroundMessageId?: string;
     }
 ): Promise<ContinuationTimeline | null> {
     const bridge = await getContinuationBridge(userId, conversationId);
@@ -557,12 +572,44 @@ export async function getContinuationTimeline(
     }
 
     const limit = clampTimelinePageSize(options.limit);
-    const offset =
+    let offset =
         options.offset === undefined && options.fromEnd
             ? Math.max(0, snapshot.messageCount - limit)
             : Math.max(0, options.offset ?? 0);
+    let focus: ContinuationTimeline["focus"];
+    if (options.aroundMessageId !== undefined) {
+        const target = await prisma.externalMessage.findFirst({
+            where: {
+                id: options.aroundMessageId,
+                userId,
+                externalConversationId: snapshot.id,
+            },
+            select: { ordinal: true },
+        });
+        if (target) {
+            // Ordinals are unique per snapshot but not contiguous, so the
+            // position is a count, not the ordinal itself.
+            const before = await prisma.externalMessage.count({
+                where: {
+                    userId,
+                    externalConversationId: snapshot.id,
+                    ordinal: { lt: target.ordinal },
+                },
+            });
+            offset = Math.min(
+                Math.max(0, before - Math.floor(limit / 2)),
+                Math.max(0, snapshot.messageCount - limit)
+            );
+            focus = { found: true };
+        } else {
+            offset = Math.max(0, snapshot.messageCount - limit);
+            focus = { found: false };
+        }
+    }
     const messages = await prisma.externalMessage.findMany({
-        where: { externalConversationId: snapshot.id },
+        // Owner-scoped as well as snapshot-scoped: the snapshot row was, and
+        // the messages are read by the same rule rather than through it.
+        where: { userId, externalConversationId: snapshot.id },
         orderBy: { ordinal: "asc" },
         skip: offset,
         take: limit,
@@ -596,6 +643,7 @@ export async function getContinuationTimeline(
                 truncated: message.truncated,
             })),
         },
+        ...(focus ? { focus } : {}),
     };
 }
 

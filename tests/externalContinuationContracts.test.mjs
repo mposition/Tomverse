@@ -401,7 +401,8 @@ test("every route that can lead into a conversation reports its surface", () => 
     for (const path of [
         "app/api/conversations/route.ts",
         "app/api/conversations/[conversationId]/route.ts",
-        "app/api/conversations/search/route.ts",
+        // Search moved its query and naming into the service the route calls.
+        "lib/conversationSearch.ts",
     ]) {
         const source = readFileSync(path, "utf8");
         assert.match(
@@ -462,8 +463,8 @@ test("every route that can lead into a conversation reports its surface", () => 
     // password, the provider, the creation time and whether the source still
     // exists -- and none of the provenance forbidden above.
     assert.match(
-        readFileSync("app/api/conversations/search/route.ts", "utf8"),
-        /continuationBridge: \{ select: CONTINUATION_NAMING_BRIDGE_SELECT \}/
+        readFileSync("lib/conversationSearch.ts", "utf8"),
+        /continuationBridge: \{\s*select: \{\s*\.\.\.CONTINUATION_NAMING_BRIDGE_SELECT,/
     );
     const naming = readFileSync("lib/continuationTitleContext.ts", "utf8");
     const selectStart = naming.indexOf("export const CONTINUATION_NAMING_BRIDGE_SELECT");

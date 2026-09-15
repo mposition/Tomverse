@@ -213,7 +213,7 @@ test("the workspace reads the imported half once, for the open conversation", ()
     // an ordinary conversation spends no request at all.
     assert.match(
         source,
-        /useContinuationSource\(\s*\n?\s*hasConversationPrelude \? shellConversationId : null\s*\n?\s*\)/
+        /useContinuationSource\(\s*\n?\s*hasConversationPrelude \? shellConversationId : null\s*[,)]/
     );
     assert.equal(
         (source.match(/importedMessages=\{importedMessages\}/g) ?? []).length,

@@ -9,6 +9,7 @@ import {
     conversationLockedResponse,
     hasConversationUnlockGrant,
 } from "@/lib/conversationLock";
+import { parseAroundMessageId } from "@/lib/continuationFocus";
 import { getContinuationTimeline } from "@/lib/externalContinuationService";
 import { prisma } from "@/lib/prisma";
 
@@ -88,15 +89,31 @@ export async function GET(
         // divider are the ones that have to load first -- and their offset
         // depends on a total only the server knows.
         const wantsEnd = offsetParam === "end";
+        // `around` centres the page on one imported message (a search hit).
+        // It replaces the offset rather than combining with it, so asking for
+        // both is refused instead of silently preferring one.
+        const aroundParam = url.searchParams.get("around");
+        if (aroundParam !== null && offsetParam !== null) {
+            return NextResponse.json(
+                { error: "Use either offset or around." },
+                { status: 400 }
+            );
+        }
+        const aroundMessageId =
+            aroundParam === null ? undefined : parseAroundMessageId(aroundParam);
+        if (aroundMessageId === null) {
+            return NextResponse.json({ error: "Invalid around." }, { status: 400 });
+        }
         const timeline = await getContinuationTimeline(userId, conversationId, {
             request: req,
             offset:
-                wantsEnd
+                wantsEnd || aroundMessageId !== undefined
                     ? undefined
                     : Number.isSafeInteger(offsetRaw) && offsetRaw >= 0
                       ? offsetRaw
                       : 0,
             fromEnd: wantsEnd,
+            aroundMessageId,
             limit: Number.isSafeInteger(limitRaw) ? limitRaw : undefined,
         });
         // An ordinary conversation is not an error state, but it has no

@@ -1942,3 +1942,254 @@ test.describe("sharing a continuation", () => {
         ).toHaveCount(0);
     });
 });
+
+test.describe("searching an imported original @ui-risk", () => {
+    /*
+      CONT-SEARCH-01 (docs/policy/external-conversation-continuation.md §8.2.1).
+
+      The search route and the timeline read are both mocked here: what the
+      server searches and authorises is settled by
+      tests/integration/conversation-search.db.test.ts. This spec is about the
+      screen -- that a hit in the original says so, that pressing it opens the
+      continuation at that message even when it is far from the end, and that
+      a timed-out original is stated rather than read as "no results".
+    */
+    const SOURCE_TOTAL = 300;
+    const TARGET_INDEX = 120;
+    const sourceMessage = (index: number) => ({
+        id: `ext${index}`,
+        role: index % 2 === 0 ? "user" : "assistant",
+        ordinal: index * 2,
+        content: index === TARGET_INDEX ? "The narwhal budget was approved." : `Imported turn ${index}`,
+        sourceModelLabel: null,
+        sourceTimestamp: null,
+        truncated: false,
+    });
+
+    const openWithLongSource = async (page: Page) => {
+        await mockAuthenticatedApi(page);
+        await mockContinuationApi(page);
+        await mockConversationList(page, [
+            {
+                id: CONVERSATION_ID,
+                title: "Continued from an imported chat",
+                surface: "continuation",
+                sourceTitle: SOURCE_CONVERSATION_TITLE,
+            },
+            { id: "qa-ordinary", title: "An ordinary conversation" },
+        ]);
+        const reads: string[] = [];
+        // Registered after mockContinuationApi, so it answers first.
+        await page.route(`**/api/conversations/${CONVERSATION_ID}/continuation*`, (route) => {
+            const url = new URL(route.request().url());
+            reads.push(url.search);
+            const limit = Number(url.searchParams.get("limit") ?? 100);
+            const around = url.searchParams.get("around");
+            const offsetParam = url.searchParams.get("offset");
+            let offset =
+                offsetParam === "end" || offsetParam === null
+                    ? SOURCE_TOTAL - limit
+                    : Number(offsetParam);
+            let focus: { found: boolean } | undefined;
+            if (around !== null) {
+                const index = Number(around.replace(/^ext/, ""));
+                focus = { found: /^ext\d+$/.test(around) && index < SOURCE_TOTAL };
+                offset = focus.found
+                    ? Math.min(Math.max(0, index - Math.floor(limit / 2)), SOURCE_TOTAL - limit)
+                    : SOURCE_TOTAL - limit;
+            }
+            return route.fulfill(
+                json({
+                    conversationId: CONVERSATION_ID,
+                    provider: "chatgpt",
+                    importedAt: "2026-07-02T00:00:00.000Z",
+                    contextSeedVersion: "ext-seed-v1",
+                    seed: {
+                        messageCount: 2,
+                        truncatedMessageCount: 0,
+                        omittedMessageCount: 0,
+                        fromOrdinal: 0,
+                        toOrdinal: 1,
+                    },
+                    source: {
+                        status: "available",
+                        externalConversationId: EXTERNAL_ID,
+                        title: SOURCE_CONVERSATION_TITLE,
+                        messageTotal: SOURCE_TOTAL,
+                        offset,
+                        limit,
+                        messages: Array.from(
+                            { length: Math.max(0, Math.min(limit, SOURCE_TOTAL - offset)) },
+                            (_, i) => sourceMessage(offset + i)
+                        ),
+                    },
+                    ...(focus ? { focus } : {}),
+                })
+            );
+        });
+        return reads;
+    };
+
+    const mockSearch = (
+        page: Page,
+        answer: { results: unknown[]; truncated?: boolean; sourceSearch?: "ok" | "timed_out" }
+    ) =>
+        page.route("**/api/conversations/search?*", (route) =>
+            route.fulfill(json({ truncated: false, sourceSearch: "ok", ...answer }))
+        );
+
+    const importedHit = (externalMessageId: string) => ({
+        kind: "imported",
+        id: `imported:${externalMessageId}:${CONVERSATION_ID}`,
+        externalMessageId,
+        conversationId: CONVERSATION_ID,
+        conversationTitle: "Continued from an imported chat",
+        sourceTitle: SOURCE_CONVERSATION_TITLE,
+        sourceProvider: "chatgpt",
+        sourceState: "available",
+        fallbackTitleDate: "2026-07-02",
+        surface: "continuation",
+        role: "assistant",
+        sourceModelLabel: null,
+        snippet: "The narwhal budget was approved.",
+        snippetHighlight: { start: 4, end: 11 },
+    });
+
+    const searchFor = async (page: Page, query: string) => {
+        const list = await openConversationList(page);
+        await list.getByRole("textbox", { name: /검색|Search/ }).first().fill(query);
+        const results = list.getByTestId("message-search-results");
+        await expect(results).toBeVisible();
+        return results;
+    };
+
+    test("a hit in the original opens the continuation at that message", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        const reads = await openWithLongSource(page);
+        await mockSearch(page, { results: [importedHit(`ext${TARGET_INDEX}`)] });
+
+        await page.goto("/chat");
+        const results = await searchFor(page, "narwhal");
+        const hit = results.getByTestId("message-search-result");
+        await expect(hit).toHaveAttribute("data-result-kind", "imported");
+        await expect(results.getByTestId("message-search-imported-badge")).toContainText("ChatGPT");
+        await expect(hit.locator("mark")).toHaveText("narwhal");
+        await hit.click();
+
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+        const target = page.locator(`[data-message-id="imported:ext${TARGET_INDEX}"]`).first();
+        await expect(target).toBeVisible();
+        await expect(target).toHaveAttribute("data-search-focused", "true");
+        expect(reads.some((search) => search.includes(`around=ext${TARGET_INDEX}`))).toBe(true);
+        // Mid-transcript, so both directions still have turns to load.
+        await expect(page.getByTestId("imported-load-older").first()).toBeVisible();
+        const newer = page.getByTestId("imported-load-newer").first();
+        await expect(newer).toBeVisible();
+        await newer.click();
+        await expect(
+            page.locator(`[data-message-id="imported:ext${TARGET_INDEX + 60}"]`).first()
+        ).toBeAttached();
+    });
+
+    test("a hit that no longer resolves says so and opens at the end", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openWithLongSource(page);
+        await mockSearch(page, { results: [importedHit("gone")] });
+
+        await page.goto("/chat");
+        const results = await searchFor(page, "narwhal");
+        await results.getByTestId("message-search-result").click();
+
+        await page.waitForURL(`**/continuations/${CONVERSATION_ID}`);
+        await expect(page.getByText("이 결과는 더 이상 열 수 없습니다.")).toBeVisible();
+        await expect(
+            page.locator(`[data-message-id="imported:ext${SOURCE_TOTAL - 1}"]`).first()
+        ).toBeAttached();
+    });
+
+    test("a timed-out original is stated, and never reads as no results", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openWithLongSource(page);
+        await mockSearch(page, { results: [], sourceSearch: "timed_out" });
+
+        await page.goto("/chat");
+        const results = await searchFor(page, "narwhal");
+        await expect(results.getByTestId("message-search-source-timeout")).toHaveText(
+            "원문 검색 시간이 초과되어 Tomverse 메시지 결과만 표시합니다"
+        );
+    });
+
+    test("an answer that relied on an unlock grant is hidden when the grant lapses", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openWithLongSource(page);
+        let searches = 0;
+        await page.route("**/api/conversations/search?*", (route) => {
+            searches += 1;
+            return route.fulfill(
+                json(
+                    searches === 1
+                        ? {
+                              results: [importedHit(`ext${TARGET_INDEX}`)],
+                              truncated: false,
+                              sourceSearch: "ok",
+                              // Past the sidebar's five-second margin, so it is drawn first.
+                              validUntil: new Date(Date.now() + 7_000).toISOString(),
+                          }
+                        : { results: [], truncated: false, sourceSearch: "ok", validUntil: null }
+                )
+            );
+        });
+
+        await page.goto("/chat");
+        const results = await searchFor(page, "narwhal");
+        await expect(results.getByTestId("message-search-result")).toHaveCount(1);
+        // Gone at the lapse, and asked again rather than left blank forever.
+        await expect(results.getByTestId("message-search-result")).toHaveCount(0, { timeout: 10_000 });
+        // Asked again once, a second after the lapse -- not in a loop before it.
+        await expect.poll(() => searches, { timeout: 12_000 }).toBe(2);
+    });
+
+    test("an answer whose grant has already lapsed is never drawn", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openWithLongSource(page);
+        let searches = 0;
+        await page.route("**/api/conversations/search?*", (route) => {
+            searches += 1;
+            return route.fulfill(
+                json({
+                    results: [importedHit(`ext${TARGET_INDEX}`)],
+                    truncated: false,
+                    sourceSearch: "ok",
+                    validUntil: searches === 1 ? new Date(Date.now() - 1_000).toISOString() : null,
+                })
+            );
+        });
+
+        await page.goto("/chat");
+        const list = await openConversationList(page);
+        await list.getByRole("textbox", { name: /검색|Search/ }).first().fill("narwhal");
+        // The second answer carries no grant and is shown; the first never was.
+        await expect.poll(() => searches).toBeGreaterThan(1);
+        await expect(list.getByTestId("message-search-result")).toHaveCount(1);
+    });
+
+    test("more than four hits can all be shown, and an incomplete answer says so", async ({ page }) => {
+        await prepareGuestPage(page, "ko");
+        await openWithLongSource(page);
+        await mockSearch(page, {
+            truncated: true,
+            results: Array.from({ length: 6 }, (_, i) => ({
+                ...importedHit(`ext${i}`),
+                snippet: `narwhal ${i}`,
+                snippetHighlight: { start: 0, end: 7 },
+            })),
+        });
+
+        await page.goto("/chat");
+        const results = await searchFor(page, "narwhal");
+        await expect(results.getByTestId("message-search-result")).toHaveCount(4);
+        await results.getByTestId("message-search-toggle-all").click();
+        await expect(results.getByTestId("message-search-result")).toHaveCount(6);
+        await expect(results.getByText("일부 결과만 표시합니다.")).toBeVisible();
+    });
+});
