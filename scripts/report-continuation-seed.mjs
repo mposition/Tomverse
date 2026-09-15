@@ -17,11 +17,13 @@
 // Database mode reads finalized imported conversations that have been continued
 // at least once -- their newest 200 messages, the scan the loader uses, one
 // query per page of 50 -- and evaluates every candidate in memory. It prints
-// whole-percent shares and quantiles per script class, weighted both per
-// snapshot and per assistant turn of the continued conversations (a proxy for
-// seeded requests whose biases the output states). Counts are published as
-// bands, never exactly; groups under five snapshots are suppressed, and so is
-// any percent resting on fewer than five snapshots on either side.
+// shares and quantiles per script class, weighted both per snapshot and per
+// assistant turn of the continued conversations (a proxy for seeded requests
+// whose biases the output states). Nothing is exact enough to solve back to a
+// group's size: counts and shares are bands, token figures are rounded to 100,
+// groups under 20 snapshots are suppressed, and a share resting on fewer than
+// five snapshots on either side says only that (aggregateSeedSamples in the
+// core module explains why each of those is needed).
 // A --max-snapshots value that is not a positive whole number exits 2.
 // No message text, title, ordinal, snapshot id or user id is printed, logged or
 // written; identifiers exist only to join the reads.
@@ -156,8 +158,8 @@ if (useDatabase && process.env.DATABASE_URL?.trim()) {
     database = {
       source: "database",
       note:
-        "Read-only. Counts are bands; shares are whole percents, published only when at least 5 snapshots " +
-        "match and at least 5 do not; groups under 5 snapshots are suppressed." +
+        "Read-only. Counts and shares are bands; token figures are rounded to 100; groups under 20 " +
+        "snapshots are suppressed; a share resting on fewer than 5 snapshots on either side says only that." +
         (includeLocked ? " Locked snapshots were included (--include-locked)." : " Locked snapshots were not read."),
       ...measured,
     };

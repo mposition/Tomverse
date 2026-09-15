@@ -37,20 +37,23 @@ import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 /** The newest-message scan the real loader uses (lib/externalContinuationService.ts). */
 export const SEED_SOURCE_MESSAGE_SCAN_LIMIT = 200;
 
+/** Script groups smaller than this publish no figures at all. */
+export const MIN_GROUP_SIZE = 20;
+
 /**
- * The smallest number of snapshots a published figure may rest on. A group
- * smaller than this is suppressed; a share whose matching (or non-matching)
- * snapshots number between 1 and this minus one is published as a band, not a
- * percent.
+ * The smallest number of snapshots a published share may rest on, on either
+ * side: a share whose matching (or non-matching) snapshots number 1-4 says only
+ * that.
  */
 export const MIN_PUBLISHED_CELL = 5;
 
 /**
- * Upper bounds of the count bands a report publishes instead of counts. Bands
- * are wide enough that subtracting one published figure from another yields a
- * range, never a suppressed group's size or a small exact count.
+ * Lower edges of the count bands a report publishes instead of counts. "1-4"
+ * stays its own band so a handful of locked snapshots is visible rather than
+ * rounded to nothing; above it, bands are wide enough that subtracting one
+ * published figure from another yields a range.
  */
-const COUNT_BAND_EDGES = [1, 5, 10, 50, 100, 500, 1_000, 5_000];
+const COUNT_BAND_EDGES = [1, 5, 20, 50, 100, 500, 1_000, 5_000];
 
 /**
  * What the assistant-turn weight is and is not. It is printed with every
@@ -298,7 +301,20 @@ export function countBand(value) {
   return `${COUNT_BAND_EDGES.at(-1)}+`;
 }
 
-const percent = (part, whole) => (whole === 0 ? null : Math.round((part / whole) * 100));
+/**
+ * A share as a ten-point band ("0%", "1-9%", "10-19%", ... "90-99%", "100%"),
+ * judged on the exact fraction so 99.6% is not reported as all.
+ */
+export function shareBand(part, whole) {
+  if (whole <= 0) return null;
+  if (part <= 0) return "0%";
+  if (part >= whole) return "100%";
+  const lower = Math.floor((part * 100) / whole / 10) * 10;
+  return lower === 0 ? "1-9%" : `${lower}-${lower + 9}%`;
+}
+
+/** Rounded to the nearest 100: the cost decision needs hundreds, not units. */
+const hundreds = (value) => (value === null ? null : Math.round(value / 100) * 100);
 
 /**
  * Per script class and candidate: shares and quantiles, in two units.
@@ -310,14 +326,23 @@ const percent = (part, whole) => (whole === 0 ? null : Math.round((part / whole)
  *                         model requests carried this seed; see
  *                         ASSISTANT_TURN_WEIGHT_NOTE for what the proxy gets wrong
  *
- * Disclosure: groups smaller than `minGroupSize` snapshots are suppressed with
- * no figures. No count is published, only a band (`countBand`), so no total
- * sits next to a group's exact size. A share resting on fewer than
- * MIN_PUBLISHED_CELL snapshots on either side -- matching or not -- is published
- * as a band with no percent, so a percent can never be solved back to 1-4
- * snapshots.
+ * Disclosure. Exact whole percents and exact order statistics can be combined
+ * to solve for a group's size, and from there for a small cell or a suppressed
+ * neighbour (a review found a 46-snapshot group pinned by two percents). So
+ * nothing published here is exact enough to form those equations:
+ *
+ *   - groups under MIN_GROUP_SIZE snapshots are suppressed with no figures;
+ *   - counts are bands (`countBand`), shares are ten-point bands (`shareBand`);
+ *   - a share resting on fewer than MIN_PUBLISHED_CELL snapshots on either side
+ *     says only that, with no band;
+ *   - rendered-token figures are rounded to the nearest 100, and no low
+ *     quantile of included messages is published (a P10 of 0 is a count of
+ *     empty seeds).
+ *
+ * This makes recovery a range rather than a number; it is not a formal
+ * guarantee. The output is an operator artefact for a policy decision record.
  */
-export function aggregateSeedSamples(samples, { minGroupSize = MIN_PUBLISHED_CELL } = {}) {
+export function aggregateSeedSamples(samples, { minGroupSize = MIN_GROUP_SIZE } = {}) {
   const groups = new Map();
   for (const sample of samples) {
     const list = groups.get(sample.script) ?? [];
@@ -340,14 +365,17 @@ export function aggregateSeedSamples(samples, { minGroupSize = MIN_PUBLISHED_CEL
         const rest = rows.length - matching.length;
         if ((matching.length > 0 && matching.length < MIN_PUBLISHED_CELL) || (rest > 0 && rest < MIN_PUBLISHED_CELL)) {
           return {
-            snapshotPercent: null,
-            assistantTurnPercent: null,
-            band: matching.length < MIN_PUBLISHED_CELL ? `fewer than ${MIN_PUBLISHED_CELL} snapshots` : `all but fewer than ${MIN_PUBLISHED_CELL} snapshots`,
+            snapshotShare: null,
+            assistantTurnShare: null,
+            smallCell:
+              matching.length < MIN_PUBLISHED_CELL
+                ? `fewer than ${MIN_PUBLISHED_CELL} snapshots`
+                : `all but fewer than ${MIN_PUBLISHED_CELL} snapshots`,
           };
         }
         return {
-          snapshotPercent: percent(matching.length, rows.length),
-          assistantTurnPercent: percent(
+          snapshotShare: shareBand(matching.length, rows.length),
+          assistantTurnShare: shareBand(
             matching.reduce((total, { weight }) => total + weight, 0),
             totalTurns
           ),
@@ -358,16 +386,15 @@ export function aggregateSeedSamples(samples, { minGroupSize = MIN_PUBLISHED_CEL
         newestMissing: shares((row) => row.newest === "missing"),
         newestShortened: shares((row) => row.newest === "shortened"),
         stoppedByBudget: shares((row) => row.omittedByBudget > 0),
-        includedMessagesP10: quantile(rows.map(({ row }) => row.includedMessages), 0.1),
         includedMessagesP50: quantile(rows.map(({ row }) => row.includedMessages), 0.5),
-        renderedTokensP50: quantile(rows.map(({ row }) => row.renderedTokens), 0.5),
-        renderedTokensP90: quantile(rows.map(({ row }) => row.renderedTokens), 0.9),
+        renderedTokensP50: hundreds(quantile(rows.map(({ row }) => row.renderedTokens), 0.5)),
+        renderedTokensP90: hundreds(quantile(rows.map(({ row }) => row.renderedTokens), 0.9)),
         // Assistant-turn-weighted mean of what this candidate would add per
         // turn -- the cost figure, with the proxy's biases.
         renderedTokensPerAssistantTurn:
           totalTurns === 0
             ? null
-            : Math.round(
+            : hundreds(
                 rows.reduce((total, { row, weight }) => total + row.renderedTokens * weight, 0) /
                   totalTurns
               ),

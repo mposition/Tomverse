@@ -5,6 +5,7 @@ import test from "node:test";
 
 import {
   ASSISTANT_TURN_WEIGHT_NOTE,
+  MIN_GROUP_SIZE,
   MIN_PUBLISHED_CELL,
   SEED_CANDIDATES,
   aggregateSeedSamples,
@@ -18,6 +19,7 @@ import {
   planWithBoundaryExcerpt,
   representativeSeedFixtures,
   scriptClass,
+  shareBand,
 } from "../scripts/report-continuation-seed-core.mjs";
 import {
   CONTINUATION_SEED_TOKEN_BUDGET,
@@ -153,55 +155,79 @@ const sample = (content, assistantTurns, script) => ({
   assistantTurns,
 });
 
+const emptyTurns = [message("user", 0, `${secret} 질문`), message("assistant", 1, "가".repeat(2_100))];
+const fineTurns = [message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"), message("assistant", 1, "짧은 답변입니다 정리했습니다")];
+const repeated = (count, content, turns) => Array.from({ length: count }, () => sample(content, turns));
+
 test("shares are weighted per snapshot and per assistant turn, and one heavy source is not hidden", () => {
-  const empty = [message("user", 0, `${secret} 질문`), message("assistant", 1, "가".repeat(2_100))];
-  const fine = [message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"), message("assistant", 1, "짧은 답변입니다 정리했습니다")];
-  const samples = [
-    ...Array.from({ length: 5 }, () => sample(empty, 100)),
-    ...Array.from({ length: 15 }, () => sample(fine, 1)),
-  ];
-  const report = aggregateSeedSamples(samples);
-  assert.equal(report.hangul.byCandidate.current.emptySeed.snapshotPercent, 25);
-  assert.equal(report.hangul.byCandidate.current.emptySeed.assistantTurnPercent, 97);
-  assert.equal(report.hangul.byCandidate["C-tail"].emptySeed.assistantTurnPercent, 0);
-  assert.equal(typeof report.hangul.byCandidate.B6000.renderedTokensPerAssistantTurn, "number");
+  const report = aggregateSeedSamples([...repeated(5, emptyTurns, 100), ...repeated(15, fineTurns, 1)]);
+  assert.equal(report.hangul.byCandidate.current.emptySeed.snapshotShare, "20-29%");
+  assert.equal(report.hangul.byCandidate.current.emptySeed.assistantTurnShare, "90-99%");
+  assert.equal(report.hangul.byCandidate["C-tail"].emptySeed.assistantTurnShare, "0%");
+  assert.equal(report.hangul.byCandidate.B6000.renderedTokensPerAssistantTurn % 100, 0);
   assert.match(ASSISTANT_TURN_WEIGHT_NOTE, /proxy/);
 });
 
-test("a share resting on fewer than five snapshots on either side is a band, not a percent", () => {
-  const empty = [message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"), message("assistant", 1, "가".repeat(2_100))];
-  const fine = [message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"), message("assistant", 1, "짧은 답변입니다 정리했습니다")];
-  // The inversion the review found: a group of 10 with 11% -> exactly 1 snapshot.
-  const few = aggregateSeedSamples([sample(empty, 1), ...Array.from({ length: 9 }, () => sample(fine, 1))]);
+test("a share resting on fewer than five snapshots on either side says only that", () => {
+  const few = aggregateSeedSamples([...repeated(1, emptyTurns, 1), ...repeated(MIN_GROUP_SIZE - 1, fineTurns, 1)]);
   assert.deepEqual(few.hangul.byCandidate.current.emptySeed, {
-    snapshotPercent: null,
-    assistantTurnPercent: null,
-    band: "fewer than " + MIN_PUBLISHED_CELL + " snapshots",
+    snapshotShare: null,
+    assistantTurnShare: null,
+    smallCell: "fewer than " + MIN_PUBLISHED_CELL + " snapshots",
   });
-  const mostly = aggregateSeedSamples([sample(fine, 1), ...Array.from({ length: 9 }, () => sample(empty, 1))]);
-  assert.equal(mostly.hangul.byCandidate.current.emptySeed.snapshotPercent, null);
-  assert.match(mostly.hangul.byCandidate.current.emptySeed.band, /^all but fewer than/);
-  const none = aggregateSeedSamples(Array.from({ length: 6 }, () => sample(fine, 1)));
-  assert.equal(none.hangul.byCandidate.current.emptySeed.snapshotPercent, 0);
+  const mostly = aggregateSeedSamples([...repeated(1, fineTurns, 1), ...repeated(MIN_GROUP_SIZE - 1, emptyTurns, 1)]);
+  assert.equal(mostly.hangul.byCandidate.current.emptySeed.snapshotShare, null);
+  assert.match(mostly.hangul.byCandidate.current.emptySeed.smallCell, /^all but fewer than/);
+  const none = aggregateSeedSamples(repeated(MIN_GROUP_SIZE, fineTurns, 1));
+  assert.equal(none.hangul.byCandidate.current.emptySeed.snapshotShare, "0%");
+});
+
+test("combined figures do not pin a group's size: neighbouring groups publish the same report", () => {
+  // The confirmation review solved a 46-snapshot group from two exact percents
+  // (5/46 = 11%, 16/46 = 35%). Stopped-by-budget without an empty seed needs a
+  // turn that does not fit after one that does.
+  const stopped = [
+    message("user", 0, "질문입니다 오늘 회의 정리 부탁드립니다"),
+    message("assistant", 1, "가".repeat(2_100)),
+    message("user", 2, "짧은 후속 질문입니다 알려주세요"),
+    message("assistant", 3, "짧은 답변입니다 정리했습니다"),
+  ];
+  const group = (size, empties, stops) =>
+    aggregateSeedSamples([
+      ...repeated(empties, emptyTurns, 1),
+      ...repeated(stops, stopped, 1),
+      ...repeated(size - empties - stops, fineTurns, 1),
+    ]);
+  const published = group(46, 5, 11);
+  for (const [size, empties, stops] of [[44, 5, 10], [47, 5, 11], [49, 5, 12]]) {
+    assert.deepEqual(group(size, empties, stops), published, `${size} snapshots publish as 46 do`);
+  }
+  assert.equal(published.hangul.byCandidate.current.stoppedByBudget.snapshotShare, "30-39%", "the stops are counted");
+  assert.equal(published.hangul.byCandidate.current.emptySeed.snapshotShare, "10-19%");
+  assert.equal(published.hangul.byCandidate.current.includedMessagesP10, undefined, "no low quantile");
+});
+
+test("shares and counts are bands", () => {
+  assert.deepEqual([0, 1, 4, 5, 19, 20, 49, 50, 99, 100, 999, 1_000, 4_999, 5_000].map(countBand), [
+    "0", "1-4", "1-4", "5-19", "5-19", "20-49", "20-49", "50-99", "50-99", "100-499", "500-999", "1000-4999", "1000-4999", "5000+",
+  ]);
+  assert.deepEqual([[0, 10], [1, 200], [1, 10], [19, 20], [199, 200], [20, 20]].map(([part, whole]) => shareBand(part, whole)), [
+    "0%", "1-9%", "10-19%", "90-99%", "90-99%", "100%",
+  ]);
+  assert.equal(shareBand(1, 0), null);
 });
 
 test("aggregation carries no content or identifiers, and a suppressed group cannot be subtracted out", () => {
-  const korean = [message("user", 0, `${secret} 질문`), message("assistant", 1, "가".repeat(2_100))];
   const english = [message("user", 0, `${secret} english question here please`)];
-  const samples = [
-    ...Array.from({ length: 6 }, () => sample(korean, 2)),
-    ...Array.from({ length: 2 }, () => sample(english, 1)),
-  ];
+  const samples = [...repeated(MIN_GROUP_SIZE + 1, emptyTurns, 2), ...Array.from({ length: 2 }, () => sample(english, 1))];
   const report = aggregateSeedSamples(samples);
   assert.doesNotMatch(JSON.stringify(report), /SECRET|아무도|질문|english question/);
   assert.equal(report.latin.suppressed, true);
   assert.equal(report.latin.snapshotsBand, undefined);
-  // Published counts are bands, never an exact 6 next to an exact total of 8.
-  assert.equal(report.hangul.snapshotsBand, "5-9");
-  assert.deepEqual([0, 1, 4, 5, 9, 10, 49, 50, 99, 100, 999, 1_000, 4_999, 5_000].map(countBand), [
-    "0", "1-4", "1-4", "5-9", "5-9", "10-49", "10-49", "50-99", "50-99", "100-499", "500-999", "1000-4999", "1000-4999", "5000+",
-  ]);
+  // Published counts are bands, never an exact 21 next to an exact total of 23.
+  assert.equal(report.hangul.snapshotsBand, "20-49");
   assert.doesNotMatch(JSON.stringify(report), /"snapshots":|"continuations":/);
+  assert.equal(aggregateSeedSamples(repeated(MIN_GROUP_SIZE - 1, emptyTurns, 1)).hangul.suppressed, true);
 });
 
 /* ------------------------------------------------------------ stored data */
@@ -255,7 +281,7 @@ test("the stored measurement pages through, skips locked sources by default, and
   assert.ok(calls.messageIds.every((id) => !id.endsWith("-10") && !id.endsWith("-11")), "locked sources are not read");
   // Two locked snapshots are "1-4", not rounded away to 0.
   assert.equal(result.scopeBands.lockedNotRead, "1-4");
-  assert.equal(result.scopeBands.measured, "10-49");
+  assert.equal(result.scopeBands.measured, "5-19");
   assert.equal(result.scopeBands.continuationsOfDeletedSources, "1-4");
   assert.equal(result.stoppedAtLimit, false);
   assert.equal(result.assistantTurnWeight, ASSISTANT_TURN_WEIGHT_NOTE);
