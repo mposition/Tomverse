@@ -931,3 +931,43 @@ AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않�
    측정하고, 통과했을 때만 durable writer·제품 adapter 연결을 제안한다.
 5. 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합과
    전체 카탈로그 선택 품질을 별도 실험으로 판단한다.
+
+## 2026-09-16 Prompt Refiner 실행 사전등록 계약 회차
+
+앞 회차의 다음 순서 ②를 외부 호출 없이 구현했다. 순수 계약 모듈은 Refiner
+contract/refiner/model/catalog/pricing identity를 정확히 고정하고, 입력 100,000 tokens,
+출력 4,096 tokens, timeout 15초, retry 0을 요구한다. 고정 standard 가격으로 계산한
+요청당 최악 비용은 24,916 microUSD이며, 최대 100 dispatch의 단계 상한은
+2,491,600 microUSD다. 다만 requestId 결속·만료·1회 consume을 갖춘 원자 예약
+authority는 아직 없다. caller가 만든 lease/boolean은 받지 않고, eligibility·별도 단계
+승인·adapter readiness·계약이 모두 맞아도 `reservation_authority_unavailable`로
+dispatch 전에 거절한다. 따라서 현재 성공 admission 경로는 구조적으로 없다.
+
+terminal reason은 성공, admission/adapter 거절, dispatch 후 provider/response 검증
+실패와 cancellation을 content-free receipt 사실과 disposition 단계로 한 번만 매핑한다.
+receipt schema의 retry도 literal 0으로 좁혔다. 이 회차는 runtime writer, 비용 예약기,
+provider adapter/API/model 호출, product mode, Router 배선, AppSetting writer, flag
+활성화를 추가하지 않았다. 따라서 실행 계약 구현은 운영 실행이나 공개 진척으로
+계산하지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
+| 구현 | 순수 실행 사전등록·authority 부재 fail-closed·terminal mapping·핵심 단위 테스트 완료 |
+| 로컬 검증 | focused 30/30, 대상 lint, 전체 typecheck 통과 |
+| 독립 검토·통합 CI | 대기 — 이 회차에서는 독립 Claude 호출을 하지 않음 |
+| 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source의 좁은 diff를 독립 읽기 전용 검토와 Linux 통합 CI로 검증한다.
+2. provider 호출이 없는 동결 corpus·output parser·중단 규칙의 shadow harness를 만든다.
+3. 별도 과금 승인과 원자적 단계 budget reservation이 준비된 뒤에만 작은 shadow를
+   실행해 의미 보존·주입 저항·비용·지연을 측정한다.
+4. 승인된 관측 뒤 durable writer·제품 adapter를 별도 회차로 연결한다.
+5. 제안형 rollout 증거 뒤 Refiner 결과의 Router 결합을 별도 ROUTE-03 실험으로
+   판단한다.

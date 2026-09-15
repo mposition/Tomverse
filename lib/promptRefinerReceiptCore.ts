@@ -33,8 +33,11 @@ export const PROMPT_REFINER_FAILURE_LAYERS = [
     "response_validation",
 ] as const;
 export const PROMPT_REFINER_FAILURE_CODES = [
+    "eligibility_refused",
+    "execution_not_approved",
+    "execution_contract_mismatch",
+    "reservation_authority_unavailable",
     "adapter_unavailable",
-    "cost_guardrail",
     "invalid_response",
     "empty_response",
     "no_change",
@@ -44,8 +47,11 @@ export const PROMPT_REFINER_FAILURE_CODES = [
     "unknown_after_dispatch",
 ] as const;
 const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
+    "eligibility_refused",
+    "execution_not_approved",
+    "execution_contract_mismatch",
+    "reservation_authority_unavailable",
     "adapter_unavailable",
-    "cost_guardrail",
 ]);
 const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
     "invalid_response",
@@ -54,6 +60,19 @@ const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
     "provider_error",
     "timeout",
     "unknown_after_dispatch",
+]);
+const FAILURE_LAYER_BY_CODE = new Map<string, string>([
+    ["eligibility_refused", "admission"],
+    ["execution_not_approved", "admission"],
+    ["execution_contract_mismatch", "admission"],
+    ["reservation_authority_unavailable", "admission"],
+    ["adapter_unavailable", "adapter"],
+    ["provider_error", "provider"],
+    ["timeout", "provider"],
+    ["unknown_after_dispatch", "provider"],
+    ["invalid_response", "response_validation"],
+    ["empty_response", "response_validation"],
+    ["no_change", "response_validation"],
 ]);
 export const PROMPT_REFINER_DISPOSITION_OUTCOMES = [
     "accepted",
@@ -108,7 +127,7 @@ const executionReceiptBaseSchema = z
         outputTokens: optionalTelemetryCount,
         reasoningTokens: optionalTelemetryCount,
         actualCostMicroUsd: optionalTelemetryCount,
-        retryCount: z.number().int().min(0).max(10),
+        retryCount: z.literal(0),
     })
     .strict();
 
@@ -244,6 +263,22 @@ export const promptRefinerExecutionReceiptSchema =
             issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
                 "failureCode",
             ]);
+        }
+        if (receipt.failureCode !== null) {
+            const expectedFailureLayer =
+                receipt.failureCode === "cancelled"
+                    ? dispatchedAt === null
+                        ? "admission"
+                        : "provider"
+                    : FAILURE_LAYER_BY_CODE.get(receipt.failureCode);
+            if (
+                expectedFailureLayer !== undefined &&
+                receipt.failureLayer !== expectedFailureLayer
+            ) {
+                issue("prompt_refiner_failure_code_layer_mismatch", [
+                    "failureLayer",
+                ]);
+            }
         }
     });
 

@@ -1295,7 +1295,8 @@ Non-negotiable requirements:
 Before changing the Prompt Refiner surface or request boundary in
 `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
 `lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`, or
-`lib/promptRefinerReceiptCore.ts`, read:
+`lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
+their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
 - `docs/policy/prompt-refiner-observability.md`
@@ -1329,6 +1330,14 @@ Non-negotiable requirements:
 - No provider call, billing, automatic offer, Router coupling or rollout is
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.
+- The execution preregistration is pure and fail-closed. Exact contract,
+  refiner, model/catalog/pricing identity, output cap, timeout, retry zero and
+  request/stage cost ceilings are frozen, but no reservation authority exists.
+  Admission therefore always refuses before dispatch with
+  `reservation_authority_unavailable` after earlier checks pass. A caller-made
+  lease or atomic boolean is never proof. Only a future authority with atomic
+  requestId binding, expiry and one-time consume may introduce `admitted: true`
+  under a new contract version. Product mode remains unadmitted.
 - The current server gate folds the default-off AppSetting, environment kill
   switch and adapter readiness into one mode. The only active mode is the
   loopback E2E fixture; a stored flag alone must never expose an inert product

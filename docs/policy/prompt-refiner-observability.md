@@ -1,11 +1,19 @@
 # Prompt Refiner receipt와 관측 계약
 
-상태: **provider-independent 데이터 계약 구현, 제품 수집 미연결**.
+상태: **provider-independent 데이터·실행 사전등록 계약 구현, 제품 수집 미연결**.
 
 이 문서는 Prompt Refiner 한 요청에서 무엇을 관측하고 어떤 분모로 읽는지를
 정한다. 현재 구현은 strict schema, 결속 검사, 순수 집계와 오프라인 report까지다.
 provider adapter, API route, Prisma table, browser event writer, 비용 예약·정산,
-Router 결합과 rollout 활성화는 없다.
+Router 결합과 rollout 활성화는 없다. `lib/promptRefinerExecutionContract.ts`는 정확한
+model/catalog/pricing identity와 4,096 output tokens, 15초 timeout, retry 0,
+요청당 24,916 microUSD, 최대 100 dispatch의 단계 2,491,600 microUSD를 동결하지만
+그 자체로 실행을 승인하거나 비용을 예약하지 않는다.
+현재는 원자 예약 authority가 없으므로 모든 다른 조건이 맞아도
+`reservation_authority_unavailable`로 dispatch 전에 거절한다. caller가 전달한 lease나
+atomic 여부 boolean을 성공 증거로 받는 입력과 `admitted: true` 경로는 없다. 후속
+authority가 requestId 결속·만료·1회 consume·비용과 stage slot의 원자 예약을 실제로
+구현한 뒤에만 새 계약 버전으로 성공 admission을 추가할 수 있다.
 
 ## 1. 하나의 변경 가능한 행 대신 두 개의 불변 사실
 
@@ -28,7 +36,7 @@ execution에는 disposition이 최대 하나다. 중복·orphan·request/suggest
 | outcome | 의미 | provider failure 분모 |
 | --- | --- | --- |
 | `suggested` | dispatch 뒤 strict response 검증을 통과해 suggestion을 만들었다 | 포함, 성공 |
-| `failed` | dispatch 이후 adapter/provider/response 검증에서 suggestion을 만들지 못했다 | 포함, 실패 |
+| `failed` | dispatch 이후 provider/response 검증에서 suggestion을 만들지 못했다 | 포함, 실패 |
 | `refused_before_dispatch` | admission/adapter가 provider 호출 전에 거절했다 | 제외 |
 
 `failed`와 `refused_before_dispatch`를 합치지 않는다. provider에 보내지 않은 요청은
@@ -37,8 +45,11 @@ dispatch 시각을 가지며 `admission` layer를 쓸 수 없고, dispatch되지
 `admission`/`adapter` 실패는 `refused_before_dispatch`로만 기록한다.
 `failureLayer`는 `admission`, `adapter`, `provider`, `response_validation` 중 하나이며
 성공만 `none`이다.
+`adapter` layer는 dispatch 전 `adapter_unavailable` 거절에만 사용하며 dispatch 뒤
+adapter 실패로 가장한 receipt는 거부한다.
 `failureCode`는 고정 enum이고 provider 오류 본문을 담을 문자열 필드는 없다.
-`adapter_unavailable`과 `cost_guardrail`은 pre-dispatch 전용이고,
+`eligibility_refused`, `execution_not_approved`, `execution_contract_mismatch`,
+`reservation_authority_unavailable`, `adapter_unavailable`은 pre-dispatch 전용이고,
 `provider_error`, `timeout`, `invalid_response`, `empty_response`, `no_change`,
 `unknown_after_dispatch`는 post-dispatch 전용이다. `cancelled`는 dispatch 전후 모두
 일어날 수 있으므로 code만으로 단계를 주장하지 않고 `dispatchedAt`과 outcome이 그
@@ -134,7 +145,7 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
 
 ## 8. 다음 연결 단계
 
-1. 모델, output cap, timeout, retry 0, per-request/stage 비용 상한을 사전등록한다.
+1. 구현된 사전등록을 독립 검토와 통합 CI로 검증한다. 이는 실행 승인이 아니다.
 2. 별도 승인된 작은 shadow가 execution bundle을 생성한다. 사용자에게 UI를
    노출하지 않으므로 disposition은 만들지 않는다.
 3. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
