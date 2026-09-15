@@ -214,13 +214,14 @@ export const lockApprovalScope = async (
         requesterId: string;
     }
 ) => {
-    const key = [
+    // JSON, not a joined string, so no field can contain the separator.
+    const key = JSON.stringify([
         "tomverse-admin-approval-scope",
         scope.action,
         scope.targetType,
         scope.targetId || "",
         scope.requesterId,
-    ].join("");
+    ]);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
 };
 
