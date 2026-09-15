@@ -32,7 +32,7 @@ import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIde
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
-import { parseQuietHours, quietHoursEnd } from "@/lib/emailQuietHoursCore";
+import { deferralFor } from "@/lib/emailQuietHoursCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
 import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
@@ -492,7 +492,53 @@ const recordOutcome = async (
  * second attempt it would also break the idempotency key's promise, because the
  * key only suppresses a duplicate when the payload matches too.
  */
+/**
+ * Defers a claimed marketing delivery past a night-time window, if one applies.
+ *
+ * Returns true when the row was put back to wait. Pending, attempt count
+ * untouched: waiting for the morning is not a failed attempt. A window that
+ * cannot be read holds the message an hour rather than sending at an hour the
+ * rule might forbid, and says so -- once per profile per cooldown, not once per
+ * delivery, so a malformed policy row does not become an incident per recipient.
+ */
+/** Marks a row that is waiting for a quiet-hours window to end, not failing. */
+const QUIET_HOURS_DEFERRED = "quiet_hours_deferred";
+
+const holdForQuietHours = async (
+  delivery: ClaimedDelivery,
+  windows: Array<{ profileKey: string; quietHours: unknown }>,
+  at: Date
+): Promise<boolean> => {
+  const verdict = deferralFor(windows, at);
+  let until: Date | null = null;
+  if ("invalid" in verdict) {
+    await reportOperationalIncident({
+      code: "EMAIL_QUIET_HOURS_UNREADABLE",
+      title: "Marketing is being held because a profile's quiet hours cannot be read",
+      severity: "error",
+      error: `Profile ${verdict.invalid} in policy ${delivery.policyVersionId} has malformed quietHours.`,
+      cooldownMs: 60 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        profileKey: verdict.invalid,
+        policyVersionId: delivery.policyVersionId,
+      },
+    });
+    until = new Date(at.getTime() + 60 * 60 * 1_000);
+  } else {
+    until = verdict.until;
+  }
+  if (!until) return false;
+  await prisma.emailDelivery.update({
+    where: { id: delivery.id },
+    data: { nextAttemptAt: until, claimedAt: null, lastErrorKind: QUIET_HOURS_DEFERRED },
+  });
+  return true;
+};
+
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
+  // Filled for marketing only; re-checked immediately before the provider call.
+  let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
   const definition = emailTemplateDefinition(delivery.templateVersion.template.key);
 
   // Checked at send time, not at enqueue: a message queued yesterday may be for
@@ -653,63 +699,25 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       return { outcome: "suppressed" as const, classification: definition.classification };
     }
 
-    // Night-time rules (§5.2 E5, §12.6). Deferred to the end of the window,
-    // not skipped: an evening wave must reach Korean recipients at 08:00
-    // rather than never. Both the profile this row was pinned to and the one
-    // the recipient resolves to now are consulted, so neither a stale pin nor
-    // a move into a quiet-hours jurisdiction lets a message through at night.
+    // Night-time rules (docs/policy/email-notifications.md §5.2 E5, §12.6).
+    // Deferred to the end of the window, not skipped: an evening wave must
+    // reach Korean recipients at 08:00 rather than never. Both the profile this
+    // row was pinned to and the one the recipient resolves to now are
+    // consulted, so neither a stale pin nor a move into a quiet-hours
+    // jurisdiction lets a message through at night. Checked again right before
+    // the provider call, because rendering takes time and the clock moves.
     const profileKeys = [
       ...new Set([delivery.jurisdictionProfileKey, resolved?.profileKey].filter(Boolean)),
     ] as string[];
-    const windows = await prisma.jurisdictionProfile.findMany({
+    quietHourWindows = await prisma.jurisdictionProfile.findMany({
       where: {
         policyVersionId: delivery.policyVersionId,
         profileKey: { in: profileKeys },
       },
       select: { profileKey: true, quietHours: true },
     });
-    let deferUntil: Date | null = null;
-    for (const window of windows) {
-      const quietHours = parseQuietHours(window.quietHours);
-      if (quietHours === "invalid") {
-        // A window nobody can read is not a window we may ignore. The message
-        // is held back rather than sent at an hour the rule might forbid, and
-        // the policy row is what has to be fixed.
-        await reportOperationalIncident({
-          code: "EMAIL_QUIET_HOURS_UNREADABLE",
-          title: "A marketing message was held because its quiet hours could not be read",
-          severity: "error",
-          error: `Profile ${window.profileKey} has malformed quietHours.`,
-          context: {
-            component: "standard-email-lane",
-            deliveryId: delivery.id,
-            profileKey: window.profileKey,
-          },
-        });
-        await prisma.emailDelivery.update({
-          where: { id: delivery.id },
-          data: {
-            status: "skipped",
-            skipReason: "quiet_hours",
-            attempts: delivery.attempts,
-            nextAttemptAt: null,
-            claimedAt: null,
-          },
-        });
-        return { outcome: "suppressed" as const, classification: definition.classification };
-      }
-      const end = quietHours ? quietHoursEnd(quietHours, now) : null;
-      if (end && (!deferUntil || end > deferUntil)) deferUntil = end;
-    }
-    if (deferUntil) {
-      // Still pending, attempt count untouched: waiting for the morning is not
-      // a failed attempt and must not spend the retry budget.
-      await prisma.emailDelivery.update({
-        where: { id: delivery.id },
-        data: { nextAttemptAt: deferUntil, claimedAt: null },
-      });
-      return { outcome: "pending" as const, classification: definition.classification };
-    }
+    const held = await holdForQuietHours(delivery, quietHourWindows, now);
+    if (held) return { outcome: "pending" as const, classification: definition.classification };
   }
 
   const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
@@ -860,6 +868,21 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   }
 
   const rendered = composed.rendered;
+
+  // The last word on quiet hours, as close to the send as it can be. The first
+  // check used the claim's clock; rendering and composition have happened since.
+  // The later of the two clocks is used so an injected clock cannot move this
+  // check into the past.
+  if (
+    quietHourWindows.length > 0 &&
+    (await holdForQuietHours(
+      delivery,
+      quietHourWindows,
+      new Date(Math.max(now.getTime(), Date.now()))
+    ))
+  ) {
+    return { outcome: "pending" as const, classification: definition.classification };
+  }
 
   const response = await deliverEmailOnce({
     to: delivery.emailAddress,
@@ -1024,18 +1047,28 @@ export async function drainStandardEmailDeliveries(options?: {
     }
   }
 
-  result.pending = await prisma.emailDelivery.count({
-    where: { lane: "standard", status: "pending" },
-  });
-  const oldestPending = await prisma.emailDelivery.findFirst({
-    where: { lane: "standard", status: "pending" },
-    orderBy: { createdAt: "asc" },
-    select: { createdAt: true },
-  });
   // Resolved here rather than reusing the per-message `now` inside the loop:
   // that one is scoped to a claim and does not exist when the loop never ran,
   // which is exactly the case a stale queue shows up in.
   const measuredAt = options?.now ?? new Date();
+  // A message waiting out a night-time window is on schedule, not behind, and
+  // counting it would page somebody every evening a Korean wave is queued. Those
+  // rows carry QUIET_HOURS_DEFERRED as their last "error" kind until they are
+  // attempted, which is what excludes them here. Everything else -- including a
+  // row waiting on its retry curve -- still counts, as it did before.
+  const backlog: Prisma.EmailDeliveryWhereInput = {
+    lane: "standard",
+    status: "pending",
+    // Spelled as OR rather than NOT: `NOT (kind = x)` is NULL for a row with no
+    // error kind, and SQL would drop every fresh row from the count.
+    OR: [{ lastErrorKind: null }, { lastErrorKind: { not: QUIET_HOURS_DEFERRED } }],
+  };
+  result.pending = await prisma.emailDelivery.count({ where: backlog });
+  const oldestPending = await prisma.emailDelivery.findFirst({
+    where: backlog,
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
   result.oldestPendingMs = oldestPending
     ? Math.max(0, measuredAt.getTime() - oldestPending.createdAt.getTime())
     : null;

@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseQuietHours, quietHoursEnd } from "../lib/emailQuietHoursCore.ts";
-import { JURISDICTION_PROFILE_SEED } from "../lib/emailJurisdictionSeed.ts";
+import {
+  QUIET_HOURS_START_MARGIN_MS,
+  deferralFor,
+  parseQuietHours,
+  quietHoursEnd,
+} from "../lib/emailQuietHoursCore.ts";
+import {
+  JURISDICTION_PROFILE_SEED,
+  jurisdictionSeedProblems,
+} from "../lib/emailJurisdictionSeed.ts";
 
 // Night-time delivery rules. Contract: docs/policy/email-notifications.md
 // §5.2 E5, §12.6, §21 Q4.
@@ -27,10 +35,50 @@ test("inside the Seoul window a message waits for 08:00 Seoul time", () => {
   );
 });
 
-test("outside the window nothing is deferred, and the edges are [start, end)", () => {
+test("outside the window nothing is deferred, and the window ends at end", () => {
   assert.equal(quietHoursEnd(KR, seoul("2026-09-16T08:00:00")), null);
   assert.equal(quietHoursEnd(KR, seoul("2026-09-16T12:00:00")), null);
-  assert.equal(quietHoursEnd(KR, seoul("2026-09-15T20:59:59")), null);
+  assert.equal(quietHoursEnd(KR, seoul("2026-09-15T20:54:59")), null);
+});
+
+test("just before the start counts as inside, so a send cannot straddle 21:00", () => {
+  assert.equal(QUIET_HOURS_START_MARGIN_MS, 5 * 60 * 1_000);
+  for (const at of ["2026-09-15T20:55:00", "2026-09-15T20:59:59"]) {
+    assert.equal(
+      quietHoursEnd(KR, seoul(at))?.toISOString(),
+      seoul("2026-09-16T08:00:00").toISOString(),
+      at
+    );
+  }
+});
+
+test("a zone with daylight saving is refused rather than computed an hour off", () => {
+  for (const tz of ["America/New_York", "Europe/Berlin", "Australia/Sydney"]) {
+    assert.equal(parseQuietHours({ start: "21:00", end: "08:00", tz }), "invalid", tz);
+  }
+  assert.deepEqual(parseQuietHours({ start: "21:00", end: "08:00", tz: "Asia/Kolkata" }), {
+    start: "21:00",
+    end: "08:00",
+    tz: "Asia/Kolkata",
+  });
+});
+
+test("several windows defer to the latest end, and one unreadable window is reported", () => {
+  const at = seoul("2026-09-15T22:00:00");
+  assert.deepEqual(deferralFor([{ profileKey: "US", quietHours: null }], at), { until: null });
+  assert.equal(
+    deferralFor(
+      [
+        { profileKey: "US", quietHours: null },
+        { profileKey: "KR", quietHours: KR },
+      ],
+      at
+    ).until?.toISOString(),
+    seoul("2026-09-16T08:00:00").toISOString()
+  );
+  assert.deepEqual(deferralFor([{ profileKey: "XX", quietHours: { start: "x" } }], at), {
+    invalid: "XX",
+  });
 });
 
 test("the server's clock and zone do not matter, only the profile's", () => {
@@ -70,4 +118,5 @@ test("the seeded KR window is the one this module reads", () => {
     ["KR"]
   );
   assert.deepEqual(parseQuietHours(profiles[0].quietHours), KR);
+  assert.deepEqual(jurisdictionSeedProblems(), []);
 });

@@ -197,9 +197,10 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
   const user = await subscriber({ country: "KR" });
   const rows = await queue(user);
 
-  // The next 23:00 in Seoul (UTC+9, no daylight saving) after the row's own
-  // nextAttemptAt, so the row is due and the clock is inside the window.
-  const at = new Date(Date.now() + 60_000);
+  // The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after the
+  // row's own nextAttemptAt, so the row is due and the clock is inside the
+  // window whatever time of day the suite runs.
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
   at.setUTCMinutes(0, 0, 0);
   while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
   const morning = new Date(at.getTime() + 9 * 60 * 60 * 1_000);
@@ -209,13 +210,21 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
   assert.equal(calls.length, 0, "nothing may be sent inside the window");
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
     where: { id: rows.deliveryId },
-    select: { status: true, skipReason: true, attempts: true, nextAttemptAt: true, claimedAt: true },
+    select: {
+      status: true,
+      skipReason: true,
+      attempts: true,
+      nextAttemptAt: true,
+      claimedAt: true,
+      lastErrorKind: true,
+    },
   });
   assert.equal(delivery.status, "pending");
   assert.equal(delivery.skipReason, null);
   assert.equal(delivery.attempts, 0);
   assert.equal(delivery.claimedAt, null);
   assert.equal(delivery.nextAttemptAt?.toISOString(), morning.toISOString());
+  assert.equal(delivery.lastErrorKind, "quiet_hours_deferred");
 
   // Not due again before the morning.
   const early = await drainStandardEmailDeliveries({
@@ -223,6 +232,8 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
     now: new Date(morning.getTime() - 60_000),
   });
   assert.equal(early.claimed, 0);
+  // Waiting for the morning is on schedule, not a backlog.
+  assert.equal(early.pending, 0);
 });
 
 test("an unconfirmed jurisdiction stops marketing, and says which", async () => {
