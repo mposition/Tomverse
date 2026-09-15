@@ -4909,7 +4909,9 @@ model EmailDelivery {
   /// Why nothing was sent. Not sending is a decision we have to answer for too.
   /// no_consent | consent_lapsed | suppressed_complaint | hard_bounce
   ///   | quiet_hours | jurisdiction_conflict | jurisdiction_unconfirmed
-  ///   | credential_expired | dry_run
+  ///   | jurisdiction_profile_missing | jurisdiction_footer_incomplete
+  ///   | credential_expired | dry_run | marketing_halted | marketing_disabled
+  ///   | marketing_country_not_allowed
   skipReason String?
 
   attempts      Int       @default(0)

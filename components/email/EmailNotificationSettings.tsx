@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
-import { MARKETING_SUPPORTED_COUNTRY_CODES } from "@/lib/emailJurisdictionCore";
+import { MARKETING_ALLOWED_COUNTRY_CODES } from "@/lib/emailJurisdictionCore";
 
 /**
  * The preference centre.
@@ -55,7 +55,7 @@ const MARKETING_PURPOSES = new Set([
     "newsletter",
     "promotions",
 ]);
-const SUPPORTED_COUNTRIES = new Set<string>(MARKETING_SUPPORTED_COUNTRY_CODES);
+const SUPPORTED_COUNTRIES = new Set<string>(MARKETING_ALLOWED_COUNTRY_CODES);
 
 const countryValueFrom = (next: PreferenceState) => {
     if (next.country.selfDeclared) return next.country.selfDeclared;
@@ -83,7 +83,7 @@ export function EmailNotificationSettings() {
 
     const countryOptions = useMemo(() => {
         const displayNames = new Intl.DisplayNames([lang], { type: "region" });
-        return MARKETING_SUPPORTED_COUNTRY_CODES.map((code) => ({
+        return MARKETING_ALLOWED_COUNTRY_CODES.map((code) => ({
             code,
             name: displayNames.of(code) ?? code,
         })).sort((left, right) => left.name.localeCompare(right.name, lang));

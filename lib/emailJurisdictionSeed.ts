@@ -32,7 +32,7 @@
 import { RENDERABLE_FOOTER_BLOCKS } from "@/lib/emailFooterRenderer";
 import {
   JURISDICTION_PROFILES,
-  MARKETING_SUPPORTED_COUNTRY_CODES,
+  JURISDICTION_MAPPED_COUNTRY_CODES,
   profileForCountry,
   type JurisdictionProfileKey,
 } from "@/lib/emailJurisdictionCore";
@@ -303,7 +303,7 @@ export const jurisdictionCountryMapSeed = (): Array<{
   profileKey: JurisdictionProfileKey;
 }> => {
   const rows: Array<{ countryCode: string; profileKey: JurisdictionProfileKey }> = [];
-  for (const country of MARKETING_SUPPORTED_COUNTRY_CODES) {
+  for (const country of JURISDICTION_MAPPED_COUNTRY_CODES) {
     const profileKey = profileForCountry(country);
     if (profileKey === "ZZ") continue;
     rows.push({ countryCode: country, profileKey });

@@ -4,13 +4,27 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v6 (2026-09-15).** marketing opt-in의 국가 확인을 서버 계약과 UX에 반영. 0절 참조.
+- 개정: **v10 (2026-09-15).** marketing 국가 allowlist를 profile 매핑과 분리해 10개국으로 확정. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v10 (2026-09-15) — marketing 국가 allowlist 10개국
+
+- EEA 검토 기록 §7 조건 7을 **좁히기**로 결정했습니다. 승인자 `mposition`.
+  marketing 허용 국가는 **KR·US·CA·AU·GB·SG·DE·FR·AT·CH**입니다.
+- **profile 매핑(37개국)과 marketing allowlist(10개국)는 별도 상수입니다**
+  (`JURISDICTION_MAPPED_COUNTRY_CODES`, `MARKETING_ALLOWED_COUNTRY_CODES`).
+  매핑은 어떤 규칙으로 렌더링하는가이고, allowlist는 그 규칙이 그 나라에서 충분한지
+  누군가 확인했는가입니다. 나머지 EEA 26개국의 transactional·legal footer는 그대로
+  `EU` profile입니다.
+- 검사는 **두 곳**입니다. opt-in 경계(`marketingOptInCountryDecision()`)가 새 동의를
+  거부하고, 발송 lane(`marketingJurisdictionVerdict()`)이 **이미 저장된 동의까지**
+  같은 목록으로 다시 봅니다. 새 skip 사유 `marketing_country_not_allowed`.
+- 근거와 결정표: [EEA·스위스 검토 기록](email-eea-marketing-review-2026-09-14.md) §7.
 
 ### v9 (2026-09-15) — double opt-in 설계 승인
 
