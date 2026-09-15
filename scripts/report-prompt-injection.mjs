@@ -59,7 +59,6 @@ import {
     auditPromptRefinerMessages,
 } from "../lib/promptInjectionAudit.ts";
 import {
-    PROMPT_REFINER_SYSTEM_INSTRUCTION,
     promptRefinerModelMessages,
 } from "../lib/promptRefinerModelPrompt.ts";
 import {
@@ -247,7 +246,6 @@ const promptRefinerCase = (payload) => {
         payloadId: payload.id,
         payload: payload.text,
         messages,
-        rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
         inputScope: PROMPT_REFINER_INPUT_SCOPE,
     };
 };

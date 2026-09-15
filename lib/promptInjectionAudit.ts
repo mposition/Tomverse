@@ -144,8 +144,6 @@ export type PromptRefinerMessageAuditInput = {
     payload: string;
     /** The ordered messages that would cross the provider boundary. */
     messages: readonly (PromptRefinerAuditMessage | null | undefined)[] | null;
-    /** The system instruction that must frame the payload before it appears. */
-    rules: string;
     /** The only lawful scope label in the data message. */
     inputScope: string;
 };
@@ -347,11 +345,10 @@ export function auditAssembledPrompt(input: AuditInput): InjectionViolation[] {
  *
  * Its source text is already a user instruction, but to the Refiner model it
  * must remain the object being rewritten. Exactly two messages make that
- * boundary reviewable. The system
- * message states the rules first, and the user message is exactly the JSON
- * encoding of `{ inputScope, sourceText }`. Any additional role, field or
- * serialization is a new input channel and therefore fails closed until the
- * audit contract is deliberately revised.
+ * boundary reviewable. The system message states the rules first, and the user
+ * message is exactly the JSON encoding of `{ inputScope, sourceText }`. Any
+ * additional role, field or serialization is a new input channel and therefore
+ * fails closed until the audit contract is deliberately revised.
  */
 export function auditPromptRefinerMessages(
     input: PromptRefinerMessageAuditInput
@@ -383,7 +380,6 @@ export function auditPromptRefinerMessages(
     const rulesMessage = input.messages[0];
     if (
         rulesMessage?.role !== "system" ||
-        rulesMessage.content !== input.rules ||
         rulesMessage.content !== PROMPT_REFINER_REQUIRED_SYSTEM_INSTRUCTION
     ) {
         say(
