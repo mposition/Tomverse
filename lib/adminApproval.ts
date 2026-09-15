@@ -14,6 +14,10 @@ import {
   assertRecentAdminAuthentication,
   isAdminReauthenticationError,
 } from "@/lib/adminReauthentication";
+import {
+  generalSoleApprovalAvailability,
+  runAsSoleAdministrator,
+} from "@/lib/adminSoleApproverExecution";
 
 type ApprovalInput = {
   session: Session;
@@ -28,8 +32,17 @@ type ApprovalInput = {
 export class AdminApprovalRequiredError extends Error {
   approvalId: string;
   approvalStatus: string;
+  /**
+   * Why the sole-administrator path did not open, when it could have. Absent
+   * for actions that have their own bound path, whose route reports it.
+   */
+  soleApproverUnavailable?: string;
 
-  constructor(approvalId: string, approvalStatus: string) {
+  constructor(
+    approvalId: string,
+    approvalStatus: string,
+    soleApproverUnavailable?: string
+  ) {
     super(
       approvalStatus === "pending"
         ? `Approval ${approvalId} is pending review by another authorized administrator.`
@@ -38,6 +51,7 @@ export class AdminApprovalRequiredError extends Error {
     this.name = "AdminApprovalRequiredError";
     this.approvalId = approvalId;
     this.approvalStatus = approvalStatus;
+    this.soleApproverUnavailable = soleApproverUnavailable;
   }
 }
 
@@ -118,6 +132,21 @@ export async function runWithAdminApproval<T>(
   operation: () => Promise<T>
 ): Promise<T> {
   await assertRecentAdminAuthentication(input.session);
+
+  // docs/policy/admin-sole-approver.md. With exactly one administrator able to
+  // approve this action, `requestedById !== reviewerId` cannot be satisfied and
+  // the request would wait for a reviewer who does not exist. That
+  // administrator executes it alone, audited. Recomputed from configuration on
+  // every call, so a second eligible administrator restores the two-person
+  // path below with nothing to migrate.
+  const soleApproval = generalSoleApprovalAvailability(
+    input.action,
+    input.session
+  );
+  if (soleApproval.allowed) {
+    return runAsSoleAdministrator(input, operation);
+  }
+
   const claim = await claimApproval(input);
   if (!claim.claimed) {
     if (claim.created) {
@@ -136,7 +165,13 @@ export async function runWithAdminApproval<T>(
         },
       });
     }
-    throw new AdminApprovalRequiredError(claim.approval.id, claim.approval.status);
+    throw new AdminApprovalRequiredError(
+      claim.approval.id,
+      claim.approval.status,
+      soleApproval.reason === "action_has_bound_path"
+        ? undefined
+        : soleApproval.reason
+    );
   }
 
   // A durable audit intent must exist before the high-risk operation starts.
@@ -234,6 +269,9 @@ export const adminApprovalErrorResponse = (
           code: "ADMIN_APPROVAL_REQUIRED",
           approvalId: error.approvalId,
           approvalStatus: error.approvalStatus,
+          ...(error.soleApproverUnavailable
+            ? { soleApproverUnavailable: error.soleApproverUnavailable }
+            : {}),
           ...(extra || {}),
         },
         { status: 409 }

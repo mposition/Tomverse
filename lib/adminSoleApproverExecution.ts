@@ -3,13 +3,22 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 import { NextResponse } from "next/server";
-import { approvalPayloadHash } from "@/lib/adminApprovalCore";
+import {
+    approvalPayloadHash,
+    approvalPermissionForAction,
+    canonicalizeApprovalPayload,
+} from "@/lib/adminApprovalCore";
 import { getConfiguredAdminAccess } from "@/lib/adminAuth";
-import { roleHasPermission, type AdminRole } from "@/lib/adminAuthCore";
+import {
+    roleHasPermission,
+    type AdminPermission,
+    type AdminRole,
+} from "@/lib/adminAuthCore";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import {
     checkCampaignCopyBinding,
     checkDryRunBinding,
+    decideGeneralSoleApproval,
     decideSoleApproverEligibility,
     DRY_RUN_BINDING_MAX_AGE_MS,
     type SoleApproverAction,
@@ -80,7 +89,7 @@ const refuse = (reason: string): never => {
  * configured closes this path on the next request with nothing to migrate and
  * no flag anybody has to remember to clear.
  */
-export const eligibleApproverIdentities = (permission: "ops:write") =>
+export const eligibleApproverIdentities = (permission: AdminPermission) =>
     getConfiguredAdminAccess()
         .filter(
             (row) =>
@@ -112,6 +121,114 @@ export const soleApproverIsAvailable = (
     action: SoleApproverAction,
     session: Session
 ) => soleApproverAvailability(action, session).allowed;
+
+/**
+ * Whether any other two-person action may run on this administrator's word
+ * alone (docs/policy/admin-sole-approver.md).
+ *
+ * Counted against the permission the action itself requires, the same one the
+ * approvals route checks before a reviewer may review it. An organisation with
+ * one owner and one billing administrator has two people who can approve a
+ * refund, so a refund stays two-person there even though only one of them can
+ * approve a retention run.
+ */
+export const generalSoleApprovalAvailability = (
+    action: string,
+    session: Session
+) =>
+    decideGeneralSoleApproval({
+        action,
+        eligibleApproverIdentities: eligibleApproverIdentities(
+            approvalPermissionForAction(action)
+        ),
+        requesterIdentity: session.user?.email,
+    });
+
+/**
+ * Runs a two-person action for the sole eligible administrator, with the audit
+ * record standing where the second reviewer would.
+ *
+ * Called only by `runWithAdminApproval`, after it has checked re-authentication
+ * and `generalSoleApprovalAvailability`. Like `runAsSoleApprover`, nothing is
+ * written to the approval table: no second person granted anything, and a row
+ * would read as though somebody had.
+ *
+ * The record names the action, target, reason and the hash of the exact
+ * payload, so a later reader can tell what was decided and match it against
+ * the route's own audit entry (`user.plan_adjusted`, `user.deleted`, ...) which
+ * carries the before/after detail. The payload itself is not copied: that
+ * detail already lives in the route's entry, and a second copy would repeat
+ * whatever personal data it holds.
+ */
+export async function runAsSoleAdministrator<T>(
+    input: {
+        session: Session;
+        request?: Request;
+        action: string;
+        targetType: string;
+        targetId?: string | null;
+        payload: Record<string, unknown>;
+        reason: string;
+    },
+    operation: () => Promise<T>
+): Promise<T> {
+    const metadata = {
+        action: input.action,
+        rule: "general_sole_administrator",
+        eligibleApproverCount: 1,
+        confirmed: "request_payload",
+        payloadHash: approvalPayloadHash(
+            canonicalizeApprovalPayload(input.payload)
+        ),
+        reason: input.reason.slice(0, 500),
+    };
+
+    // A durable record of the intent exists before the operation starts. If the
+    // audit store is unavailable the operation does not run -- the record is
+    // the only control on this path, so it cannot be best-effort.
+    await writeAdminAuditLog({
+        session: input.session,
+        request: input.request,
+        action: "admin_sole_approver.execution_started",
+        targetType: input.targetType,
+        targetId: input.targetId || null,
+        summary: `Started ${input.action} as the sole eligible administrator.`,
+        metadata,
+    });
+
+    let result: T;
+    try {
+        result = await operation();
+    } catch (error) {
+        await writeAdminAuditLog({
+            session: input.session,
+            request: input.request,
+            action: "admin_sole_approver.execution_failed",
+            targetType: input.targetType,
+            targetId: input.targetId || null,
+            summary: `Failed ${input.action} as the sole eligible administrator.`,
+            metadata: {
+                ...metadata,
+                error:
+                    error instanceof Error
+                        ? `${error.name}: ${error.message}`.slice(0, 1_000)
+                        : String(error).slice(0, 1_000),
+            },
+        }).catch(() => undefined);
+        throw error;
+    }
+
+    await writeAdminAuditLog({
+        session: input.session,
+        request: input.request,
+        action: "admin_sole_approver.executed",
+        targetType: input.targetType,
+        targetId: input.targetId || null,
+        summary: `Executed ${input.action} as the sole eligible administrator.`,
+        metadata,
+    });
+    return result;
+}
 
 /**
  * What the sole approver echoed back, and what it is checked against.

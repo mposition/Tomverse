@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
     checkDryRunBinding,
+    decideGeneralSoleApproval,
     decideSoleApproverEligibility,
     DRY_RUN_BINDING_MAX_AGE_MS,
     SOLE_APPROVER_ACTIONS,
@@ -386,4 +387,92 @@ test("the reason travels from the route to the screen", () => {
     assert.match(panel, /data-testid="sole-approver-unavailable"/);
     // Cleared on success, so it cannot outlive the attempt it explains.
     assert.match(panel, /setFallbackNote\(null\);/);
+});
+
+/* ------------------------------ every other action, since 2026-09-15 ----- */
+
+/**
+ * docs/policy/admin-sole-approver.md widened the exception from two named
+ * actions to every two-person action, with the audit record in place of the
+ * second reviewer. The tests below pin the two things that did not change:
+ * condition 6 for every action, and the bound actions keeping their proof.
+ */
+
+const general = (over = {}) =>
+    decideGeneralSoleApproval({
+        action: "user.plan_adjust",
+        eligibleApproverIdentities: ["owner@example.invalid"],
+        requesterIdentity: "owner@example.invalid",
+        ...over,
+    });
+
+test("the sole administrator may execute the actions the named list never reached", () => {
+    for (const action of [
+        "user.plan_adjust",
+        "user.delete",
+        "user.unlink_oauth",
+        "refund.approve",
+        "credit_purchase.refund",
+        "billing_risk.release_hold",
+        "model.disable",
+        "email_suppression.remove",
+        "email_policy.activate",
+    ]) {
+        assert.deepEqual(general({ action }), {
+            allowed: true,
+            approverIdentity: "owner@example.invalid",
+        });
+    }
+});
+
+test("a second eligible administrator restores two-person approval for every action", () => {
+    for (const action of ["user.plan_adjust", "user.delete", "refund.approve"]) {
+        assert.deepEqual(
+            general({
+                action,
+                eligibleApproverIdentities: [
+                    "owner@example.invalid",
+                    "billing@example.invalid",
+                ],
+            }),
+            { allowed: false, reason: "multiple_eligible_approvers" }
+        );
+    }
+    assert.deepEqual(general({ eligibleApproverIdentities: [] }), {
+        allowed: false,
+        reason: "no_eligible_approver",
+    });
+    assert.deepEqual(general({ requesterIdentity: "other@example.invalid" }), {
+        allowed: false,
+        reason: "requester_is_not_the_sole_approver",
+    });
+});
+
+test("the general path refuses to stand in for an action with a bound confirmation", () => {
+    for (const action of SOLE_APPROVER_ACTIONS) {
+        assert.deepEqual(general({ action }), {
+            allowed: false,
+            reason: "action_has_bound_path",
+        });
+    }
+});
+
+test("runWithAdminApproval decides the sole path after re-authentication and before any claim", () => {
+    const source = readFileSync("lib/adminApproval.ts", "utf8");
+    const body = source.slice(
+        source.indexOf("export async function runWithAdminApproval")
+    );
+    const reauth = body.indexOf("assertRecentAdminAuthentication(input.session)");
+    const decide = body.indexOf("generalSoleApprovalAvailability(");
+    const run = body.indexOf("runAsSoleAdministrator(input, operation)");
+    const claim = body.indexOf("claimApproval(input)");
+    assert.ok(reauth > 0 && decide > reauth && run > decide && claim > run);
+
+    // Counted against the permission the action requires, the same one a
+    // reviewer would need, so "one person can approve this" means this action.
+    const execution = readFileSync("lib/adminSoleApproverExecution.ts", "utf8");
+    assert.match(
+        execution,
+        /eligibleApproverIdentities\(\s*approvalPermissionForAction\(action\)\s*\)/
+    );
 });

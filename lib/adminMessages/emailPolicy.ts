@@ -22,7 +22,7 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       },
       reasonLabel: "Why this version is being activated",
       reasonHelp:
-        "Activation needs a second administrator’s approval. The first submission records the request; the change lands when the approval is granted and the request is repeated.",
+        "Activation needs a second administrator’s approval. The first submission records the request; the change lands when the approval is granted and the request is repeated. While only one administrator can approve, that administrator activates it directly and the audit log records it.",
       activate: "Activate",
       profile: {
         subjectPrefix: "Subject prefix",
@@ -94,7 +94,7 @@ export const adminEmailPolicyMessages = defineAdminMessages({
       },
       reasonLabel: "이 버전을 활성화하는 이유",
       reasonHelp:
-        "활성화에는 두 번째 관리자의 승인이 필요합니다. 첫 제출은 요청을 기록하고, 승인이 난 뒤 요청을 다시 보내면 변경이 적용됩니다.",
+        "활성화에는 두 번째 관리자의 승인이 필요합니다. 첫 제출은 요청을 기록하고, 승인이 난 뒤 요청을 다시 보내면 변경이 적용됩니다. 승인할 수 있는 관리자가 한 명뿐이면 그 관리자가 바로 활성화하고 감사 로그에 남습니다.",
       activate: "활성화",
       profile: {
         subjectPrefix: "제목 접두어",
