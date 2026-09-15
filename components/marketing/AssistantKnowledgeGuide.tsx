@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { ArrowRight, Bot, Check, FileText, MessageSquare } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { MarketingFooter, MarketingHeader } from "@/components/marketing/MarketingChrome";
@@ -28,6 +28,7 @@ export function AssistantKnowledgeGuide() {
   const { status } = useSession();
   const contentLanguage = lang === "ko" ? "ko" : "en";
   const copy = assistantKnowledgeGuideContent[contentLanguage];
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [selectedStep, setSelectedStep] = useState<AssistantKnowledgeGuideStep>(
     "create_assistant"
   );
@@ -44,6 +45,23 @@ export function AssistantKnowledgeGuide() {
       "assistant_knowledge_guide_viewed"
     );
   }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const selectLocalizedCaptions = () => {
+      for (const track of Array.from(video.textTracks)) {
+        track.mode = track.language === contentLanguage ? "showing" : "disabled";
+      }
+    };
+
+    selectLocalizedCaptions();
+    video.addEventListener("loadedmetadata", selectLocalizedCaptions);
+    return () => {
+      video.removeEventListener("loadedmetadata", selectLocalizedCaptions);
+    };
+  }, [contentLanguage]);
 
   const selectStep = (step: AssistantKnowledgeGuideStep) => {
     setSelectedStep(step);
@@ -76,10 +94,17 @@ export function AssistantKnowledgeGuide() {
         </header>
 
         <section className="mt-10 overflow-hidden rounded-[2rem] border border-zinc-200 bg-zinc-950 shadow-2xl shadow-zinc-950/10 dark:border-zinc-800">
-          <div className="relative aspect-[1200/630] w-full overflow-hidden">
+          <div
+            className={`relative w-full overflow-hidden ${
+              ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH
+                ? "aspect-video"
+                : "aspect-[1200/630]"
+            }`}
+          >
             {ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH ? (
               <video
-                className="h-full w-full object-cover"
+                ref={videoRef}
+                className="h-full w-full object-contain"
                 controls
                 playsInline
                 preload="metadata"
@@ -117,10 +142,14 @@ export function AssistantKnowledgeGuide() {
             )}
           </div>
           <div className="border-t border-white/10 px-5 py-4 text-white sm:flex sm:items-center sm:justify-between sm:gap-5 sm:px-7">
-            <p className="text-sm font-bold">{copy.mediaLabel}</p>
+            <p className="text-sm font-bold">
+              {ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH
+                ? copy.videoLabel
+                : copy.mediaLabel}
+            </p>
             <p className="mt-1 text-sm text-zinc-400 sm:mt-0">
               {ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH
-                ? copy.mediaHint
+                ? copy.videoHint
                 : copy.videoUnavailable}
             </p>
           </div>

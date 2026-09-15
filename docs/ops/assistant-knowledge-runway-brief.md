@@ -2,16 +2,18 @@
 
 ## 상태와 교체 경계
 
-Runway MCP가 연결된 작업에서 아래 명세로 49초 이내 MP4를 생성·검토합니다. 현재
-코드 작업 세션에는 Runway 호출 도구가 노출되지 않아 영상을 생성한 것으로 간주하지
-않습니다. 영상이 없을 때 `/guides/assistant-knowledge`는 같은 내용을 모두 담은
-키보드 접근 가능한 인터랙티브 안내와 정적 포스터를 표시합니다.
+Runway Standard에서 생성한 5초 오프닝과 최신 production 빌드의 실제 제품 UI
+캡처를 합성해 44.04초 MP4를 완성했습니다. 오프닝에는 저장소의 실제 Tomverse
+로고와 워드마크를 후처리로 합성해 생성형 텍스트 왜곡을 피했습니다. 제품 장면은
+합성 데모 데이터와 로컬 API mock만 사용했으며 고객 데이터와 production
+자격증명을 사용하지 않았습니다.
 
-검토를 통과한 파일은 Tomverse가 통제하는 경로에 두고
-`lib/assistantKnowledgeGuide.ts`의 `ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH`만 그 경로로
-바꿉니다. 외부 Runway URL을 이메일이나 제품에 직접 넣지 않습니다. 한국어·영어
-WebVTT 초안은 `public/guides/assistant-knowledge/`에 있으며 최종 타임라인과 맞춘 뒤
-함께 검토합니다.
+검토 대상 파일은 Tomverse가 통제하는
+`public/guides/assistant-knowledge/assistant-knowledge.mp4`에 두었습니다. 외부
+Runway URL은 이메일이나 제품에서 사용하지 않습니다. 한국어·영어 WebVTT는
+같은 폴더에 있으며 최종 타임라인과 일치합니다. 영상이 재생되지 않는 환경에서도
+`/guides/assistant-knowledge`의 키보드 접근 가능한 인터랙티브 안내와 정적 포스터가
+동일한 절차를 제공합니다.
 
 ## 결과물
 
@@ -25,11 +27,20 @@ WebVTT 초안은 `public/guides/assistant-knowledge/`에 있으며 최종 타임
 
 ## 타임라인
 
-1. `00:00–00:06` — Tomverse / My AI Assistant + Knowledge 타이틀.
-2. `00:06–00:18` — 새 어시스턴트에서 이름과 지시문 입력 후 생성.
-3. `00:18–00:30` — Knowledge 파일 업로드, 처리 완료, 파일 선택, 변경사항 저장.
-4. `00:30–00:43` — 대화 도구에서 AI 어시스턴트를 열고 생성한 항목 선택.
-5. `00:43–00:49` — 질문과 함께 “관련 발췌가 참고 자료로 사용됨”을 표시하고 종료.
+1. `00:00–00:05.04` — 실제 로고와 Tomverse 워드마크 오프닝.
+2. `00:05.04–00:15.04` — 새 어시스턴트에서 이름과 지시문 입력 후 생성.
+3. `00:15.04–00:27.04` — Knowledge 파일 업로드, 파일 선택, 변경사항 저장.
+4. `00:27.04–00:39.04` — 대화 도구에서 만든 AI 어시스턴트 선택.
+5. `00:39.04–00:44.04` — 질문과 함께 Knowledge 발췌 3개 사용 표기를 보여주고 종료.
+
+## 제작 근거
+
+- Runway task: `45068aee-66fc-4b24-bf6f-b4d135d81f9f`
+- Runway 사용 범위: 추상적 graphite-to-teal 오프닝 배경 5초
+- 제품 캡처: 1920×1080 production build, Playwright, 합성 프로필·파일·대화
+- 최종 인코딩: H.264 High, 1920×1080, 25fps, `yuv420p`, 무음, fast-start
+- 최종 SHA-256: `2e20a5191a0c3449f1a1507b21f02b72653680f487374b86bb4d2e2e4bb40123`
+- 자동 검사: `npm run validate:assistant-knowledge-guide`
 
 ## Runway 프롬프트
 
