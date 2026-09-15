@@ -178,10 +178,11 @@ submit을 fail-closed한다. 제품 caller는 원문/실행문 분리와 receipt
 
 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·profile과
 함께 `promptRefinerModelMessages()`를 `prompt-refiner` 명시적 surface로 실행한다.
-동일 adversarial corpus의 모든 항목에 대해 system 규칙이 먼저인지, 메시지가 정확히
-2개인지, user 메시지가 `inputScope + sourceText`만 가진 canonical JSON인지, 원문
-bytes가 그대로 복원되는지를 검사한다. 역할 순서·JSON 경계·추가 context 채널을
-일부러 깨뜨린 회귀 테스트가 감사기가 실제로 실패하는지도 고정한다.
+동일 adversarial corpus의 모든 항목에 대해 system 규칙이 먼저인지, 독립적으로
+고정한 필수 보안 규칙 여섯 줄이 남아 있는지, 메시지가 정확히 2개인지, user 메시지가
+`inputScope + sourceText`만 가진 canonical JSON인지, 원문 bytes가 그대로
+복원되는지를 검사한다. 역할 순서·필수 규칙·JSON 경계·추가 context 채널을 일부러
+깨뜨린 회귀 테스트가 감사기가 실제로 실패하는지도 고정한다.
 
 이는 **builder의 구조적 PLANNER-03 증거**일 뿐 실제 모델이 모든 주입문을 무시한다는
 품질 인증이나 provider adapter 승인, Refiner 활성화 또는 Router 결합 승인이 아니다.

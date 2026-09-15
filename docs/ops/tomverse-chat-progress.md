@@ -831,12 +831,14 @@ production build를 public origin 두 조합과 loopback fixture에서 실행해
 adversarial payload 전부를 실제 builder에 통과시킨다. 감사기는 다음 구조를
 deterministic하게 확인한다.
 
-- system 규칙이 첫 메시지이며 원문 payload를 포함하지 않는다.
+- system 규칙이 첫 메시지이며 원문 payload를 포함하지 않고, 별도 모듈에 고정한
+  필수 보안 규칙 여섯 줄을 모두 유지한다.
 - provider 경계로 넘어가는 메시지는 정확히 system + user 두 개다.
 - user 메시지는 `inputScope`와 `sourceText`만 가진 canonical JSON이다.
 - JSON을 다시 읽었을 때 입력 scope와 source text bytes가 정확히 복원된다.
-- plaintext 전달, role 역전, 추가 history field, system role로의 원문 누출을
-  일부러 만든 회귀 사례에서 감사기가 0이 아닌 위반을 낸다.
+- plaintext 전달, role 역전, 필수 규칙 삭제, 추가 history field·message, system
+  role로의 원문 누출과 builder 입력 거부를 일부러 만든 회귀 사례에서 감사기가 0이
+  아닌 위반을 낸다.
 
 이 검사는 모델 응답을 생성하지 않고 provider·Router·billing·AppSetting writer를
 건드리지 않는다. 따라서 PLANNER-03의 builder 구조 증거는 채웠지만 실제 모델의

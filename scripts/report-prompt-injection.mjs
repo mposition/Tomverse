@@ -17,7 +17,7 @@
 // message. This deliberately does not claim whether a model obeys an
 // instruction, which no repository assertion could hold.
 //
-// ## The four sources the gate names, and where each actually is
+// ## The sources and prompt surfaces the gate currently names
 //
 //   * memory       -- lib/memoryContextPrompt.ts. Covered below.
 //   * attachment   -- lib/attachmentContextPrompt.ts. Covered below.
@@ -32,6 +32,10 @@
 //                     test. Reported explicitly as "no surface" rather than
 //                     silently omitted: a source the report does not mention
 //                     reads as a source that passed.
+//   * profile      -- assistant profile knowledge excerpts reach the dedicated
+//                     fenced knowledge builder. Covered below.
+//   * refiner      -- current-turn text reaches only the Prompt Refiner's
+//                     system-first, canonical JSON data message. Covered below.
 //
 // If a project instruction field is ever added, this script fails until a
 // surface for it is registered -- see SURFACE_COVERAGE below.
@@ -226,17 +230,27 @@ const knowledgeCase = (payload) => ({
     baselineAssembled: BENIGN_KNOWLEDGE_PROMPT,
 });
 
-const promptRefinerCase = (payload) => ({
-    surface: "prompt-refiner",
-    payloadId: payload.id,
-    payload: payload.text,
-    messages: promptRefinerModelMessages({
-        requestId: `planner03_${payload.id}`,
-        prompt: payload.text,
-    }),
-    rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
-    inputScope: PROMPT_REFINER_INPUT_SCOPE,
-});
+const promptRefinerCase = (payload) => {
+    let messages = null;
+    try {
+        messages = promptRefinerModelMessages({
+            requestId: `planner03_${payload.id}`,
+            prompt: payload.text,
+        });
+    } catch {
+        // A future corpus entry may sit outside the product request schema.
+        // That is still a failed audit surface, not an unhandled report crash;
+        // no validation error or payload bytes are printed.
+    }
+    return {
+        surface: "prompt-refiner",
+        payloadId: payload.id,
+        payload: payload.text,
+        messages,
+        rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
+        inputScope: PROMPT_REFINER_INPUT_SCOPE,
+    };
+};
 
 const violations = [];
 const bySurface = new Map();
@@ -312,4 +326,6 @@ if (violations.length > 0) {
     process.exit(1);
 }
 
-console.log("Untrusted content stayed inside its region on every payload.");
+console.log(
+    "Untrusted content stayed data at every fenced and role-separated boundary."
+);

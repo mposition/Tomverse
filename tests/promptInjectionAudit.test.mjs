@@ -25,6 +25,7 @@ import {
     buildMemoryContextPrompt,
 } from "../lib/memoryContextPrompt.ts";
 import {
+    PROMPT_REFINER_REQUIRED_RULE_LINES,
     auditAssembledPrompt,
     auditRoleSeparatedPrompt,
 } from "../lib/promptInjectionAudit.ts";
@@ -245,6 +246,36 @@ test("a Prompt Refiner that places source text before its rules is caught", () =
         promptRefinerInput(payload, { messages: [messages[1], messages[0]] })
     );
     assert.ok(kinds(found).includes("rules_after_content"), kinds(found).join());
+});
+
+test("the Prompt Refiner security rules are pinned independently of its builder constant", () => {
+    const payload = payloadNamed("priority-claim");
+    const removed = PROMPT_REFINER_REQUIRED_RULE_LINES[2];
+    const weakenedRules = PROMPT_REFINER_SYSTEM_INSTRUCTION.split("\n")
+        .filter((line) => line !== removed)
+        .join("\n");
+    const messages = promptRefinerModelMessages({
+        requestId: "planner03_weakened_rules",
+        prompt: payload.text,
+    });
+    const found = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            rules: weakenedRules,
+            messages: [
+                { role: "system", content: weakenedRules },
+                messages[1],
+            ],
+        })
+    );
+    assert.ok(kinds(found).includes("rules_after_content"), kinds(found).join());
+});
+
+test("a Prompt Refiner builder refusal becomes a violation instead of a crash", () => {
+    const payload = payloadNamed("system-role-claim");
+    const found = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, { messages: null })
+    );
+    assert.ok(kinds(found).includes("structure_injected"), kinds(found).join());
 });
 
 test("a Prompt Refiner that uses plaintext, another field or another message is caught", () => {

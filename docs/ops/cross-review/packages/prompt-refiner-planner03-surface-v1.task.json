@@ -14,7 +14,7 @@
   "writableScope": [
     ".github/workflows/pr-fast-gate.yml",
     "AGENTS.md",
-    "docs/ops/cross-review/packages/prompt-refiner-planner03-surface-v1.task.json",
+    "docs/ops/cross-review/packages/",
     "docs/ops/tomverse-chat-progress.md",
     "docs/ui-contracts/prompt-refiner-suggestion.md",
     "lib/promptInjectionAudit.ts",
