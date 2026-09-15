@@ -27,13 +27,12 @@
  * browser. The rule attaches to the jurisdiction, and a Korean resident reading
  * mail abroad is still inside it.
  *
- * ## Zones with daylight saving are refused
+ * ## Daylight saving
  *
- * The end of the window is computed by wall-clock distance, which is exact only
- * where the UTC offset does not change. Rather than send an hour early on the
- * night a clock moves, `parseQuietHours()` refuses a zone whose offset differs
- * between January and July. Asia/Seoul has no daylight saving. A profile that
- * needs a zone with it needs a zone-aware implementation first.
+ * The end is found as a wall-clock time in the profile's zone and converted to
+ * an instant with that zone's offset *at the end*, not at the start, so a clock
+ * change inside the window moves the end with it. (A zone whose clocks skip the
+ * end time itself would land the end on the first instant after the gap.)
  */
 
 export type QuietHours = { start: string; end: string; tz: string };
@@ -67,9 +66,11 @@ const localClock = (at: Date, tz: string) => {
   return { minutes: read("hour") * 60 + read("minute"), seconds: read("second") };
 };
 
-/** Offset from UTC in minutes at an instant, modulo a day. */
-const offsetMinutes = (at: Date, tz: string) =>
-  (localClock(at, tz).minutes - (at.getUTCHours() * 60 + at.getUTCMinutes()) + 1440) % 1440;
+/** Signed offset from UTC in minutes at an instant (local minus UTC). */
+const offsetMinutes = (at: Date, tz: string) => {
+  const diff = localClock(at, tz).minutes - (at.getUTCHours() * 60 + at.getUTCMinutes());
+  return ((diff + 720 + 1440) % 1440) - 720;
+};
 
 /** Reads the stored JSON, refusing anything malformed rather than guessing. */
 export const parseQuietHours = (value: unknown): QuietHours | null | "invalid" => {
@@ -85,14 +86,6 @@ export const parseQuietHours = (value: unknown): QuietHours | null | "invalid" =
   try {
     new Intl.DateTimeFormat("en-GB", { timeZone: tz });
   } catch {
-    return "invalid";
-  }
-  // Refuse a zone that observes daylight saving in either hemisphere.
-  const year = new Date().getUTCFullYear();
-  if (
-    offsetMinutes(new Date(Date.UTC(year, 0, 15, 12)), tz) !==
-    offsetMinutes(new Date(Date.UTC(year, 6, 15, 12)), tz)
-  ) {
     return "invalid";
   }
   return { start, end, tz };
@@ -124,7 +117,16 @@ export const quietHoursEnd = (quietHours: QuietHours, now: Date): Date | null =>
   const { minutes, seconds } = localClock(probe, quietHours.tz);
   const minutesUntilEnd = (end - minutes + 1440) % 1440;
   const flooredToMinute = probe.getTime() - seconds * 1_000 - (probe.getTime() % 1_000);
-  return new Date(flooredToMinute + minutesUntilEnd * 60_000);
+  // Wall-clock distance first, then corrected by any change in the zone's
+  // offset between the probe and the end. Twice, so a correction that itself
+  // crosses the change settles.
+  const startOffset = offsetMinutes(probe, quietHours.tz);
+  let candidate = flooredToMinute + minutesUntilEnd * 60_000;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const shift = startOffset - offsetMinutes(new Date(candidate), quietHours.tz);
+    candidate = flooredToMinute + minutesUntilEnd * 60_000 + shift * 60_000;
+  }
+  return new Date(candidate);
 };
 
 /**

@@ -406,6 +406,7 @@ const recordOutcome = async (
         sentAt: context.now,
         nextAttemptAt: null,
         claimedAt: null,
+        deferReason: null,
         providerMessageId: outcome.providerMessageId,
         renderedSubject: context.rendered.subject,
         renderedHash: renderedBodyHash(context.rendered),
@@ -447,6 +448,7 @@ const recordOutcome = async (
         lastErrorKind: outcome.errorKind,
         nextAttemptAt: null,
         claimedAt: null,
+        deferReason: null,
       },
     });
     return "failed" as const;
@@ -465,6 +467,7 @@ const recordOutcome = async (
         lastErrorKind: outcome.errorKind,
         nextAttemptAt: null,
         claimedAt: null,
+        deferReason: null,
       },
     });
     return "abandoned" as const;
@@ -478,6 +481,7 @@ const recordOutcome = async (
       lastErrorKind: outcome.errorKind,
       nextAttemptAt: new Date(context.now.getTime() + decision.delayMs),
       claimedAt: null,
+      deferReason: null,
     },
   });
   return "pending" as const;
@@ -501,9 +505,6 @@ const recordOutcome = async (
  * rule might forbid, and says so -- once per profile per cooldown, not once per
  * delivery, so a malformed policy row does not become an incident per recipient.
  */
-/** Marks a row that is waiting for a quiet-hours window to end, not failing. */
-const QUIET_HOURS_DEFERRED = "quiet_hours_deferred";
-
 const holdForQuietHours = async (
   delivery: ClaimedDelivery,
   windows: Array<{ profileKey: string; quietHours: unknown }>,
@@ -531,7 +532,7 @@ const holdForQuietHours = async (
   if (!until) return false;
   await prisma.emailDelivery.update({
     where: { id: delivery.id },
-    data: { nextAttemptAt: until, claimedAt: null, lastErrorKind: QUIET_HOURS_DEFERRED },
+    data: { nextAttemptAt: until, claimedAt: null, deferReason: "quiet_hours" },
   });
   return true;
 };
@@ -1052,16 +1053,20 @@ export async function drainStandardEmailDeliveries(options?: {
   // which is exactly the case a stale queue shows up in.
   const measuredAt = options?.now ?? new Date();
   // A message waiting out a night-time window is on schedule, not behind, and
-  // counting it would page somebody every evening a Korean wave is queued. Those
-  // rows carry QUIET_HOURS_DEFERRED as their last "error" kind until they are
-  // attempted, which is what excludes them here. Everything else -- including a
-  // row waiting on its retry curve -- still counts, as it did before.
+  // counting it would page somebody every evening a Korean wave is queued. It
+  // is excluded only while it is still waiting: once its nextAttemptAt has
+  // passed, a morning the drain has not caught up with counts like any other.
   const backlog: Prisma.EmailDeliveryWhereInput = {
     lane: "standard",
     status: "pending",
-    // Spelled as OR rather than NOT: `NOT (kind = x)` is NULL for a row with no
-    // error kind, and SQL would drop every fresh row from the count.
-    OR: [{ lastErrorKind: null }, { lastErrorKind: { not: QUIET_HOURS_DEFERRED } }],
+    // Spelled out rather than NOT(...): NOT over a nullable column is NULL for a
+    // row with no deferReason, and SQL would drop every ordinary row.
+    OR: [
+      { deferReason: null },
+      { deferReason: { not: "quiet_hours" } },
+      { nextAttemptAt: null },
+      { nextAttemptAt: { lte: measuredAt } },
+    ],
   };
   result.pending = await prisma.emailDelivery.count({ where: backlog });
   const oldestPending = await prisma.emailDelivery.findFirst({

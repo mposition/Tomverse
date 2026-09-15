@@ -347,7 +347,7 @@ export const jurisdictionSeedProblems = (): string[] => {
     // A window the send lane cannot read holds every marketing message for that
     // profile, so a malformed one is caught here, before a draft is created.
     if (parseQuietHours(profile.quietHours) === "invalid") {
-      problems.push(`${profile.profileKey}: quietHours cannot be read (format, zone, or a zone with daylight saving)`);
+      problems.push(`${profile.profileKey}: quietHours cannot be read (format or zone)`);
     }
     for (const block of profile.footerBlocks) {
       if (!FOOTER_BLOCKS.includes(block)) {

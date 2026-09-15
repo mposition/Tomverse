@@ -217,6 +217,7 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
       nextAttemptAt: true,
       claimedAt: true,
       lastErrorKind: true,
+      deferReason: true,
     },
   });
   assert.equal(delivery.status, "pending");
@@ -224,7 +225,9 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
   assert.equal(delivery.attempts, 0);
   assert.equal(delivery.claimedAt, null);
   assert.equal(delivery.nextAttemptAt?.toISOString(), morning.toISOString());
-  assert.equal(delivery.lastErrorKind, "quiet_hours_deferred");
+  assert.equal(delivery.deferReason, "quiet_hours");
+  // Waiting is not an error.
+  assert.equal(delivery.lastErrorKind, null);
 
   // Not due again before the morning.
   const early = await drainStandardEmailDeliveries({
@@ -234,6 +237,19 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
   assert.equal(early.claimed, 0);
   // Waiting for the morning is on schedule, not a backlog.
   assert.equal(early.pending, 0);
+
+  // In the morning it is attempted, and the reason it waited is cleared
+  // whatever the attempt's outcome (here the marketing identity is unset).
+  const later = await drainStandardEmailDeliveries({
+    limit: 1,
+    now: new Date(morning.getTime() + 60_000),
+  });
+  assert.equal(later.claimed, 1);
+  const attempted = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { deferReason: true, attempts: true },
+  });
+  assert.equal(attempted.deferReason, null);
 });
 
 test("an unconfirmed jurisdiction stops marketing, and says which", async () => {

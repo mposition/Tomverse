@@ -52,15 +52,23 @@ test("just before the start counts as inside, so a send cannot straddle 21:00", 
   }
 });
 
-test("a zone with daylight saving is refused rather than computed an hour off", () => {
-  for (const tz of ["America/New_York", "Europe/Berlin", "Australia/Sydney"]) {
-    assert.equal(parseQuietHours({ start: "21:00", end: "08:00", tz }), "invalid", tz);
-  }
-  assert.deepEqual(parseQuietHours({ start: "21:00", end: "08:00", tz: "Asia/Kolkata" }), {
-    start: "21:00",
-    end: "08:00",
-    tz: "Asia/Kolkata",
-  });
+test("a clock change inside the window moves the end with it", () => {
+  const ny = { start: "21:00", end: "08:00", tz: "America/New_York" };
+  // 2026-11-01: 01:30 EDT (05:30Z) is inside; 08:00 is EST, 13:00Z.
+  assert.equal(quietHoursEnd(ny, new Date("2026-11-01T05:30:00Z"))?.toISOString(), "2026-11-01T13:00:00.000Z");
+  // 2026-03-08: 23:00 EST (04:00Z) is inside; 08:00 is EDT, 12:00Z.
+  assert.equal(quietHoursEnd(ny, new Date("2026-03-08T04:00:00Z"))?.toISOString(), "2026-03-08T12:00:00.000Z");
+  // A zone that changes only in the middle of the year and back.
+  const casablanca = { start: "21:00", end: "08:00", tz: "Africa/Casablanca" };
+  const end = quietHoursEnd(casablanca, new Date("2026-02-14T22:00:00Z"));
+  assert.ok(end);
+  const local = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Casablanca",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(end);
+  assert.equal(local, "08:00");
 });
 
 test("several windows defer to the latest end, and one unreadable window is reported", () => {

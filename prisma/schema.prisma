@@ -4914,6 +4914,12 @@ model EmailDelivery {
   ///   | marketing_country_not_allowed
   skipReason String?
 
+  /// Why a still-pending row waits for nextAttemptAt when the wait is not a
+  /// retry. quiet_hours: a night-time window (docs/policy/email-notifications.md
+  /// §5.2 E5). Cleared when the row is next attempted; kept apart from
+  /// lastErrorKind so waiting is never recorded as an error.
+  deferReason String?
+
   attempts      Int       @default(0)
   nextAttemptAt DateTime?
   lastAttemptAt DateTime?
