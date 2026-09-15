@@ -188,6 +188,27 @@ export function proxy(request: NextRequest) {
     });
   }
 
+  // RFC 8058 one-click unsubscribe. The `List-Unsubscribe` header names
+  // `/unsubscribe?t=...` so that a mail client which opens it in a browser
+  // lands on the confirmation page; a client that supports one-click POSTs
+  // `List-Unsubscribe=One-Click` to that same URL. A page cannot answer a POST
+  // -- it rendered HTML with a 200, which the mailbox provider reads as
+  // success, and nobody was unsubscribed. So the POST is handed to the route
+  // that does the work. Only the method and path change; the token stays in the
+  // query string and the form body travels with it. After the host and
+  // origin-secret checks, and with the stripped headers, like every other
+  // forward in this function. `/api/unsubscribe` is already exempt from the
+  // mutation-origin check (lib/requestOrigin.ts) for the same reason: the
+  // provider sends no Origin.
+  if (
+    request.method === "POST" &&
+    request.nextUrl.pathname.replace(/\/+$/, "") === "/unsubscribe"
+  ) {
+    const target = request.nextUrl.clone();
+    target.pathname = "/api/unsubscribe";
+    return NextResponse.rewrite(target, { request: { headers: requestHeaders } });
+  }
+
   // N1a. Answer a CORS preflight from the Capacitor shell here, because no
   // route does: there is not one `export async function OPTIONS` in the whole
   // of `app/api/`, so a preflight would otherwise reach a handler that answers

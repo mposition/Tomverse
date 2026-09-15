@@ -1,8 +1,8 @@
+import { Suspense } from "react";
+
 import { createPageMetadata } from "@/lib/seo";
 import { LanguageProvider } from "@/components/LanguageProvider";
 import { UnsubscribeConfirmation } from "@/components/email/UnsubscribeConfirmation";
-
-export const dynamic = "force-dynamic";
 
 export const metadata = createPageMetadata({
     title: "Unsubscribe",
@@ -23,19 +23,23 @@ export const metadata = createPageMetadata({
  *
  * One click from here completes it, which is what CAN-SPAM's "a single page
  * visit" and the Australian rule against extra steps both allow.
+ *
+ * The token is not read here. This segment's layout is `force-static`, which
+ * empties a server page's `searchParams`; the component reads the query string
+ * in the browser instead, inside a Suspense boundary as `useSearchParams`
+ * requires for a prerendered route. The one-click `POST` to this same URL is
+ * rewritten to `/api/unsubscribe` by the proxy (`proxy.ts`), because a page
+ * cannot answer a `POST`.
  */
-export default async function UnsubscribePage({
-    searchParams,
-}: {
-    searchParams: Promise<{ t?: string }>;
-}) {
-    const { t } = await searchParams;
+export default function UnsubscribePage() {
     // The provider is mounted here rather than inherited: marketing pages in
     // this segment each bring their own, and this one has to render for
     // somebody who may not be signed in and may never have visited before.
     return (
         <LanguageProvider>
-            <UnsubscribeConfirmation token={t ?? ""} />
+            <Suspense fallback={null}>
+                <UnsubscribeConfirmation />
+            </Suspense>
         </LanguageProvider>
     );
 }
