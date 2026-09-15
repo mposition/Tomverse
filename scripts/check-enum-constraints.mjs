@@ -584,7 +584,7 @@ const REGISTRY = {
   EmailDelivery_skip_reason_check: {
     owner: "database",
     reason:
-      "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
+      "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
   },
 
 };

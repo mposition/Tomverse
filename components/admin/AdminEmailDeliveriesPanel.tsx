@@ -184,6 +184,13 @@ export async function AdminEmailDeliveriesPanel({
                       {row.skipReason}
                     </span>
                   ) : null}
+                  {row.deferReason && row.nextAttemptAt ? (
+                    // A pending row that is on schedule, not stuck: the backlog
+                    // alert leaves these out, so the list has to say why.
+                    <span className="mt-1 block font-mono text-[11px] text-zinc-500">
+                      {row.deferReason} → {when(row.nextAttemptAt)}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="py-3 pr-4">
                   <span className="font-mono text-xs text-zinc-200">

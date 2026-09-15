@@ -128,3 +128,30 @@ test("the seeded KR window is the one this module reads", () => {
   assert.deepEqual(parseQuietHours(profiles[0].quietHours), KR);
   assert.deepEqual(jurisdictionSeedProblems(), []);
 });
+
+test("an offset change across UTC+11 and UTC+12 ends at local 08:00", () => {
+  const norfolk = { start: "21:00", end: "08:00", tz: "Pacific/Norfolk" };
+  const localHm = (at) =>
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Pacific/Norfolk",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(at);
+  for (const iso of ["2026-04-04T11:00:00Z", "2026-10-03T11:00:00Z"]) {
+    const end = quietHoursEnd(norfolk, new Date(iso));
+    assert.ok(end, iso);
+    assert.equal(localHm(end), "08:00", iso);
+    assert.ok(end.getTime() - Date.parse(iso) < 14 * 60 * 60 * 1_000, iso);
+  }
+});
+
+test("a repeated hour does not reopen the window between its two occurrences", () => {
+  // New York, 2026-11-01: 01:00-02:00 happens twice. A window ending 01:30
+  // ends at the second 01:30 (EST, 06:30Z), not the first (EDT, 05:30Z).
+  const ny = { start: "21:00", end: "01:30", tz: "America/New_York" };
+  assert.equal(
+    quietHoursEnd(ny, new Date("2026-11-01T05:15:00Z"))?.toISOString(),
+    "2026-11-01T06:30:00.000Z"
+  );
+});

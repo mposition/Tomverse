@@ -14,6 +14,7 @@ import {
 } from "@/lib/emailFeatureFlags";
 import {
   approveCampaign,
+  cancelCampaign,
   createCampaignDraft,
   runCampaignWave,
 } from "@/lib/emailCampaignService";
@@ -377,6 +378,42 @@ test("configured, it sends from the marketing domain with one-click headers", as
   const headers = calls[0].body.headers ?? {};
   assert.match(String(headers["List-Unsubscribe"]), /^<https:\/\/.*\/unsubscribe\?t=.+>$/);
   assert.equal(headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
+});
+
+test("cancelling a campaign stops its unsent deliveries, including one waiting out the night", async () => {
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  const calls = stubProvider();
+  await subscriber({ country: "US" });
+  const campaign = await createCampaignDraft({
+    category: "other",
+    templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+    locales: ["en"],
+    contentByLocale: { en: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en },
+    audienceSpec: {
+      cohort: { kind: "marketing_consent", purpose: "product_updates" },
+    },
+    createdByEmail: "ops@example.test",
+  });
+  await approveCampaign({ campaignId: campaign.id, approvalId: `approval-${randomUUID()}` });
+  const run = await runCampaignWave({ campaignId: campaign.id, kind: "launch" });
+  assert.ok(!("refused" in run), JSON.stringify(run));
+
+  // As if waiting for a window to end: pending, not yet due.
+  await prisma.emailDelivery.updateMany({
+    data: { nextAttemptAt: new Date(Date.now() + 60 * 60 * 1_000), deferReason: "quiet_hours" },
+  });
+
+  const cancelled = await cancelCampaign({ campaignId: campaign.id, reason: "test" });
+  assert.equal(cancelled.deliveriesSkipped, 1);
+
+  await drainStandardEmailDeliveries({ limit: 5, now: new Date(Date.now() + 2 * 60 * 60 * 1_000) });
+  assert.equal(calls.length, 0, "a cancelled campaign must not send");
+  const delivery = await prisma.emailDelivery.findFirstOrThrow({
+    select: { status: true, skipReason: true, deferReason: true },
+  });
+  assert.deepEqual(delivery, { status: "skipped", skipReason: "campaign_cancelled", deferReason: null });
 });
 
 test("a consent campaign reaches the provider with its authored content", async () => {

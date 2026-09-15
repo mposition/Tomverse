@@ -324,6 +324,7 @@ type ClaimedDelivery = {
   renderDataSnapshot: unknown;
   policyVersionId: string;
   jurisdictionProfileKey: string;
+  event: { referenceType: string | null; referenceId: string | null };
   templateVersion: {
     template: { key: string; classification: string; requiresUnsubscribe: boolean };
   };
@@ -346,7 +347,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   const staleBefore = new Date(now.getTime() - STANDARD_LANE_CLAIM_TTL_MS);
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     UPDATE "EmailDelivery"
-       SET "claimedAt" = ${now}, "lastAttemptAt" = ${now}
+       SET "claimedAt" = ${now}, "lastAttemptAt" = ${now}, "deferReason" = NULL
      WHERE "id" = (
        SELECT "id" FROM "EmailDelivery"
         WHERE "lane" = 'standard'
@@ -375,6 +376,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       // Pinned at enqueue, read here: this is the step the pin exists for.
       policyVersionId: true,
       jurisdictionProfileKey: true,
+      event: { select: { referenceType: true, referenceId: true } },
       templateVersion: {
         select: {
           template: {
@@ -869,6 +871,28 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   }
 
   const rendered = composed.rendered;
+
+  // A campaign cancelled while this row waited, or while it was being
+  // rendered, is not sent. Cancellation also skips unsent rows itself; this
+  // closes the window between a claim and that update.
+  if (delivery.event.referenceType === "EmailCampaign" && delivery.event.referenceId) {
+    const campaign = await prisma.emailCampaign.findUnique({
+      where: { id: delivery.event.referenceId },
+      select: { status: true },
+    });
+    if (campaign?.status === "cancelled") {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "campaign_cancelled",
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
 
   // The last word on quiet hours, as close to the send as it can be. The first
   // check used the claim's clock; rendering and composition have happened since.

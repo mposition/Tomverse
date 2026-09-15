@@ -38,6 +38,7 @@ const LIST_SELECT = {
   lane: true,
   status: true,
   skipReason: true,
+  deferReason: true,
   emailAddress: true,
   language: true,
   jurisdictionCountry: true,

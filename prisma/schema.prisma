@@ -4911,7 +4911,7 @@ model EmailDelivery {
   ///   | quiet_hours | jurisdiction_conflict | jurisdiction_unconfirmed
   ///   | jurisdiction_profile_missing | jurisdiction_footer_incomplete
   ///   | credential_expired | dry_run | marketing_halted | marketing_disabled
-  ///   | marketing_country_not_allowed
+  ///   | marketing_country_not_allowed | campaign_cancelled
   skipReason String?
 
   /// Why a still-pending row waits for nextAttemptAt when the wait is not a

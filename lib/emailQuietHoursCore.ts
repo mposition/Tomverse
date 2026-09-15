@@ -29,10 +29,10 @@
  *
  * ## Daylight saving
  *
- * The end is found as a wall-clock time in the profile's zone and converted to
- * an instant with that zone's offset *at the end*, not at the start, so a clock
- * change inside the window moves the end with it. (A zone whose clocks skip the
- * end time itself would land the end on the first instant after the gap.)
+ * The end is found by walking forward in real time until the zone's clock is
+ * outside the window and stays outside, so a clock change inside the window
+ * moves the end with it, a skipped end time ends after the gap, and a repeated
+ * hour does not reopen the window between its two occurrences.
  */
 
 export type QuietHours = { start: string; end: string; tz: string };
@@ -54,22 +54,26 @@ const minutesOf = (value: string): number | null => {
 };
 
 /** Wall-clock minutes since local midnight in `tz`, and the seconds past the minute. */
-const localClock = (at: Date, tz: string) => {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: tz,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(at);
-  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value);
-  return { minutes: read("hour") * 60 + read("minute"), seconds: read("second") };
+const formatters = new Map<string, Intl.DateTimeFormat>();
+const formatterFor = (tz: string) => {
+  let formatter = formatters.get(tz);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    formatters.set(tz, formatter);
+  }
+  return formatter;
 };
 
-/** Signed offset from UTC in minutes at an instant (local minus UTC). */
-const offsetMinutes = (at: Date, tz: string) => {
-  const diff = localClock(at, tz).minutes - (at.getUTCHours() * 60 + at.getUTCMinutes());
-  return ((diff + 720 + 1440) % 1440) - 720;
+const localClock = (at: Date, tz: string) => {
+  const parts = formatterFor(tz).formatToParts(at);
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return { minutes: read("hour") * 60 + read("minute"), seconds: read("second") };
 };
 
 /** Reads the stored JSON, refusing anything malformed rather than guessing. */
@@ -113,20 +117,41 @@ export const quietHoursEnd = (quietHours: QuietHours, now: Date): Date | null =>
       : null;
   if (!probe) return null;
 
+  // Walked on the real timeline rather than computed from offsets, so every
+  // clock change resolves the conservative way without special cases: a
+  // skipped end time ends at the first instant after the gap, and a repeated
+  // one ends at its second occurrence -- the window does not reopen for the
+  // hour between them. The first guess is the wall-clock distance less a
+  // two-hour allowance, which covers any real-world change.
+  const MINUTE = 60_000;
   const end = minutesOf(quietHours.end)!;
   const { minutes, seconds } = localClock(probe, quietHours.tz);
-  const minutesUntilEnd = (end - minutes + 1440) % 1440;
-  const flooredToMinute = probe.getTime() - seconds * 1_000 - (probe.getTime() % 1_000);
-  // Wall-clock distance first, then corrected by any change in the zone's
-  // offset between the probe and the end. Twice, so a correction that itself
-  // crosses the change settles.
-  const startOffset = offsetMinutes(probe, quietHours.tz);
-  let candidate = flooredToMinute + minutesUntilEnd * 60_000;
-  for (let pass = 0; pass < 2; pass += 1) {
-    const shift = startOffset - offsetMinutes(new Date(candidate), quietHours.tz);
-    candidate = flooredToMinute + minutesUntilEnd * 60_000 + shift * 60_000;
+  const floored = probe.getTime() - seconds * 1_000 - (probe.getTime() % 1_000);
+  const wallDistance = (end - minutes + 1440) % 1440;
+  let cursor = Math.max(floored, floored + (wallDistance - 120) * MINUTE);
+  const limit = floored + 28 * 60 * MINUTE;
+  // Coarse five-minute steps to the first outside instant, then back to the
+  // exact minute: window edges are whole minutes.
+  while (cursor <= limit && isInside(quietHours, new Date(cursor))) cursor += 5 * MINUTE;
+  while (cursor - MINUTE >= floored && !isInside(quietHours, new Date(cursor - MINUTE))) {
+    cursor -= MINUTE;
   }
-  return new Date(candidate);
+  while (cursor <= limit) {
+    if (!isInside(quietHours, new Date(cursor))) {
+      // Outside now; make sure a repeated hour does not put it back inside.
+      let reopens = false;
+      for (let ahead = 5; ahead <= 120; ahead += 5) {
+        if (isInside(quietHours, new Date(cursor + ahead * MINUTE))) {
+          reopens = true;
+          break;
+        }
+      }
+      if (!reopens) return new Date(cursor);
+    }
+    cursor += MINUTE;
+  }
+  // Unreachable for any real zone; hold for a day rather than guess.
+  return new Date(limit);
 };
 
 /**
