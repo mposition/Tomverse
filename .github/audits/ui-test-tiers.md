@@ -43,9 +43,11 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **57개 파일, 825 test**를
-선택합니다(두 project 합계 1,650). 2026-08-26의 51개 파일, 1,416 test
-(project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
+desktop-chromium과 mobile-chromium 각 project에서 **58개 파일, 833 test**를
+선택합니다(두 project 합계 1,666). 같은 날 직전 값은 57개 파일, 825 test
+(합계 1,650)이고 차이는 `chat-starter-catalog.spec.ts`의 +8(project당)입니다.
+2026-08-26의 51개 파일, 1,416 test(project당 708)는 아래 증가 이력과 shard
+결정의 기준값으로 남깁니다.
 
 | Spec |
 |---|
@@ -100,10 +102,21 @@ desktop-chromium과 mobile-chromium 각 project에서 **57개 파일, 825 test**
 | `voice-input-composer.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
 | `prompt-refiner-focus.spec.ts` |
+| `chat-starter-catalog.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
 파일 수는 2026-08-31 현재 53개입니다.
+
+`chat-starter-catalog.spec.ts`가 2026-09-15에 합류해 58개입니다
+(project당 +8). 시작 카탈로그는 신규 계정이 처음 보는 화면이고, 이 tier가
+막아야 하는 것은 그 화면이 **없는 기능을 약속하는 상태**입니다. flag가 꺼진
+배포에서 아무것도 렌더하지 않는다는 것, 잠긴 카드가 클릭 전에 요구사항을
+말한다는 것, 클릭이 초안만 채우고 전송하지 않는다는 것은 정적 검사가 답할 수
+없고 화면에서만 확인됩니다. 320px·200% 배율에서 갤러리가 composer의 textarea
+행을 침범하지 않는다는 것도 같습니다 — 모바일 composer 계약의 불변식이고,
+두 shell이 환영 화면을 서로 다르게(overlay와 일반 flow) 그리므로
+desktop·mobile 양쪽에서 돌립니다.
 
 `conversation-draft-identity.spec.ts`가 2026-09-02에 합류해 54개입니다.
 같은 방식으로 막혔고, 같은 이유로 이 tier에 있습니다 — 초안이 신원별로

@@ -18,11 +18,14 @@ import type {
   StarterAccentRole,
 } from "@/lib/chatStarterCatalog";
 import type {
+  StarterAvailability,
   StarterLockReason,
   VisibleStarterCard,
 } from "@/lib/chatStarterAvailability";
 import type { TaskKind } from "@/lib/taskProfileCore";
-import type { ModelTier } from "@/lib/models";
+
+/** The locked half of a card's verdict, which always names its own reason. */
+type StarterLock = Extract<StarterAvailability, { state: "locked" }>;
 
 /**
  * What a new conversation can be used for, said as outcomes.
@@ -114,13 +117,13 @@ export function ChatStarterGallery({
   // teaser the contract refuses.
   if (cards.length === 0) return null;
 
-  const lockLabel = (
-    reason: StarterLockReason,
-    minimumPlan?: ModelTier
-  ): string =>
-    reason === "sign_in_required"
+  // No fallback tier: `plan_required` carries its own, by construction of
+  // `StarterAvailability`. A default here would be a guess about somebody's
+  // money, printed on the card as though it were a fact.
+  const lockLabel = (lock: StarterLock): string =>
+    lock.reason === "sign_in_required"
       ? t("chatStarter.lockedSignIn")
-      : t("chatStarter.lockedPlan").replaceAll("{plan}", minimumPlan ?? "Pro");
+      : t("chatStarter.lockedPlan").replaceAll("{plan}", lock.minimumPlan);
 
   return (
     <section
@@ -141,7 +144,7 @@ export function ChatStarterGallery({
       </p>
       <ul className="mt-3 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
         {cards.map(({ entry, availability }) => {
-          const locked = availability.state === "locked";
+          const lock = availability.state === "locked" ? availability : null;
           return (
             <li key={entry.id} className="min-w-0">
               <button
@@ -150,8 +153,8 @@ export function ChatStarterGallery({
                 data-starter-id={entry.id}
                 data-starter-state={availability.state}
                 onClick={() => {
-                  if (availability.state === "locked") {
-                    onLocked(availability.reason, entry);
+                  if (lock) {
+                    onLocked(lock.reason, entry);
                     return;
                   }
                   onSeed(entry);
@@ -167,11 +170,6 @@ export function ChatStarterGallery({
                   >
                     {iconFor(entry)}
                   </span>
-                  {/*
-                    The requirement is stated here, before the sentence it
-                    applies to, and never after a click: the lock is part of
-                    the offer (docs/ui-contracts/image-generation-workspace.md).
-                  */}
                   {/*
                     The card declared that its question expects a file, so the
                     card says so. Read here rather than acted on: opening a
@@ -191,18 +189,23 @@ export function ChatStarterGallery({
                       <span className="sr-only">{t("chat.attachFile")}</span>
                     </span>
                   )}
-                  {locked && availability.state === "locked" && (
+                  {/*
+                    The requirement is stated here, before the sentence it
+                    applies to, and never after a click: the lock is part of
+                    the offer (docs/ui-contracts/image-generation-workspace.md).
+                  */}
+                  {lock && (
                     <span
                       data-testid="chat-starter-lock"
                       className="min-w-0 truncate rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
                     >
-                      {lockLabel(availability.reason, availability.minimumPlan)}
+                      {lockLabel(lock)}
                     </span>
                   )}
                 </span>
                 <span
                   className={`w-full min-w-0 text-[13px] font-medium ${
-                    locked
+                    lock
                       ? "text-zinc-500 dark:text-zinc-400"
                       : "text-zinc-700 dark:text-zinc-200"
                   }`}

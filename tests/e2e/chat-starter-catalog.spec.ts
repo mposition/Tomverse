@@ -112,10 +112,16 @@ test.describe("Chat starter catalogue", () => {
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
 
-    let chatRequests = 0;
-    await page.route("**/api/chat**", async (route) => {
-      chatRequests += 1;
-      await route.abort();
+    // The send endpoint exactly, not `**/api/chat**`: that glob also catches
+    // `/api/chat/preflight`, which the page uses for reasons unrelated to
+    // sending, so counting it would make this assertion pass or fail for the
+    // wrong reason. `route.fallback()` leaves the mock in place; nothing here
+    // wants to change what a real send would do, only to observe that none
+    // happens.
+    let sends = 0;
+    await page.route("**/api/chat", async (route) => {
+      if (route.request().method() === "POST") sends += 1;
+      await route.fallback();
     });
 
     await openWelcome(page);
@@ -134,7 +140,7 @@ test.describe("Chat starter catalogue", () => {
     // The transcript is still empty and no request was made: a seed is a
     // starting point, never a send.
     await expect(page.getByTestId("chat-empty-state")).toBeVisible();
-    expect(chatRequests).toBe(0);
+    expect(sends).toBe(0);
 
     // A second card replaces the first card's sentence, because nobody has
     // edited it. Typed work is protected by the same rule, asserted below.

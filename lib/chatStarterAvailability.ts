@@ -59,12 +59,16 @@ export type StarterHiddenReason =
 
 export type StarterAvailability =
   | { state: "available" }
-  | {
-      state: "locked";
-      reason: StarterLockReason;
-      /** Present only on `plan_required`, so the card can name the tier. */
-      minimumPlan?: ModelTier;
-    }
+  | { state: "locked"; reason: "sign_in_required" }
+  /**
+   * `minimumPlan` is required on this branch rather than optional on both.
+   *
+   * The card has to name the tier, and an optional field would have made the
+   * component carry a fallback -- which is a guess about somebody's money
+   * printed on screen. A branch that cannot be built without the tier cannot
+   * be rendered without it either.
+   */
+  | { state: "locked"; reason: "plan_required"; minimumPlan: ModelTier }
   | { state: "hidden"; reason: StarterHiddenReason };
 
 export type StarterViewer = {
