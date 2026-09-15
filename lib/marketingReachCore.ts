@@ -88,7 +88,7 @@ export type MarketingReachFinding = {
  * `unprovable` is the gap, and it is the population any double opt-in rollout
  * has to deal with -- and the one that cannot be dealt with by email, because
  * a message asking for consent is itself a commercial message to somebody
- * whose consent we cannot show (docs/policy/email-double-opt-in-draft.md §7).
+ * whose consent we cannot show (docs/policy/email-double-opt-in.md §7).
  */
 export const marketingReachRows = ({
   accounts = 0,
