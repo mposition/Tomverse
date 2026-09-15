@@ -4700,9 +4700,11 @@ model EmailPreference {
   /// thing that makes a consent-based purpose sendable; NULL is refused by the
   /// send gate even when `enabled` is true. confirmationRequestedAt is the
   /// latest request, and a confirmation token is honoured only while it still
-  /// names that instant. Both go back to NULL when the purpose is switched off.
+  /// names its request id. Both go back to NULL when the purpose is switched off.
   confirmedAt             DateTime?
   confirmationRequestedAt DateTime?
+  /// Random id of the latest request; a confirmation token must name it.
+  confirmationRequestId   String?
 
   /// E7. When consent was last confirmed *to* the recipient, and when it is
   /// next due. Passing nextConfirmationNoticeAt does not change `enabled`:

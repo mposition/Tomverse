@@ -15,6 +15,7 @@
 
 ALTER TABLE "EmailPreference" ADD COLUMN "confirmedAt" TIMESTAMP(3);
 ALTER TABLE "EmailPreference" ADD COLUMN "confirmationRequestedAt" TIMESTAMP(3);
+ALTER TABLE "EmailPreference" ADD COLUMN "confirmationRequestId" TEXT;
 
 ALTER TABLE "ConsentRecord" DROP CONSTRAINT IF EXISTS "ConsentRecord_action_check";
 

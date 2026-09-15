@@ -8,7 +8,7 @@ import {
   consumeApiRateLimit,
   readLimitedText,
 } from "@/lib/apiSecurity";
-import { getAnonymousClientKey } from "@/lib/clientIp";
+import { getAnonymousClientKey, getTrustedClientIp } from "@/lib/clientIp";
 import { confirmConsent } from "@/lib/emailConsentConfirmation";
 
 /**
@@ -52,8 +52,11 @@ export async function POST(req: Request) {
   const token = raw ? new URLSearchParams(raw).get("t") ?? "" : "";
   if (!token) return answer({ error: "Invalid link.", code: "INVALID" }, 400);
 
+  const trustedIp = getTrustedClientIp(req);
   const result = await confirmConsent({
     token,
+    // Hashed before it is stored, and only when the edge vouched for it.
+    ip: trustedIp === "unknown" ? null : trustedIp,
     userAgent: req.headers.get("user-agent"),
   });
 
@@ -61,7 +64,7 @@ export async function POST(req: Request) {
     return answer({ ok: true, purpose: result.purpose });
   }
 
-  if (result.reason === "keys_missing") {
+  if (result.reason === "keys_missing" || result.reason === "disabled") {
     return answer({ error: "Confirmation is not configured.", code: "UNAVAILABLE" }, 503);
   }
   if (result.tokenReason && !result.tokenReason.valid && result.tokenReason.reason === "unknown_key") {

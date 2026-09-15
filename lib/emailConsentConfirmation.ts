@@ -1,11 +1,11 @@
 import "server-only";
 
+import { createHmac, randomUUID } from "node:crypto";
+
 import { prisma } from "@/lib/prisma";
-import { appUrl } from "@/lib/accountEmails";
 import { isEmailConsentConfirmationEnabled } from "@/lib/appSettings";
 import {
   consentAddressDigest,
-  createConsentToken,
   readConsentKeyring,
   readConsentToken,
   type ConsentTokenResult,
@@ -21,21 +21,24 @@ import {
 } from "@/lib/emailPreferenceCore";
 import {
   ensureDefaultPreferences,
+  lockEmailPreferenceRow,
   setPreference,
   type ConsentCapture,
 } from "@/lib/emailPreferences";
 import { normalizeSuppressionAddress } from "@/lib/emailSuppression";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import { MARKETING_CONSENT_CONFIRMATION_TEMPLATE } from "@/lib/emailTemplateDefinitions";
-import type { MarketingConsentPurpose } from "@/lib/marketingConsentConfirmationEmail";
+import type {
+  MarketingConsentPurpose,
+  StoredConsentConfirmationPayload,
+} from "@/lib/marketingConsentConfirmationEmail";
 import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
-import { createHmac } from "node:crypto";
 
 /**
  * The double opt-in: asking for a marketing consent confirmation, and applying
  * one.
  *
- * Contract: docs/policy/email-double-opt-in.md §5, §8.
+ * Contract: docs/policy/email-double-opt-in.md §5, §8, §13.
  *
  * Kept beside lib/emailPreferences.ts rather than inside it. The request has to
  * enqueue a message, which pulls in the whole standard lane, and the preference
@@ -45,15 +48,19 @@ import { createHmac } from "node:crypto";
  * ## The two halves
  *
  * `requestConsentConfirmation()` records the request and queues the mail in one
- * transaction (§5 steps 2-3). `enabled` stays false; nothing is sendable yet.
+ * transaction, under the preference row's lock
+ * (docs/policy/email-double-opt-in.md §5 steps 2-3). `enabled` stays false.
  *
  * `confirmConsent()` opens the token and applies it through `setPreference()`
- * with the checked confirmation. That write is conditional on the request still
- * being the latest one, so a superseded or cancelled link confirms nothing.
+ * with the checked confirmation, which re-checks the request id under the same
+ * lock.
  *
- * Neither is reachable from an unsubscribe token: those are a different prefix
- * under a different keyring and `setPreference()` still refuses `viaToken` with
- * `enabled`.
+ * ## The link is never stored
+ *
+ * The delivery snapshot holds the request's non-secret fields; the token is
+ * built from them at send time (`prepareForSend` on the template definition)
+ * and the lane keeps it out of the audit hash. The link carries the token in
+ * the URL fragment, which no server, proxy or error reporter ever receives.
  */
 
 const evidenceHash = (namespace: string, value: string | null | undefined) => {
@@ -76,6 +83,8 @@ export type ConsentConfirmationRequestResult =
         | "disabled"
         | "keys_missing";
     };
+
+const ALREADY_CONFIRMED = Symbol("already_confirmed");
 
 /**
  * Records a confirmation request and queues the confirmation mail.
@@ -107,8 +116,10 @@ export async function requestConsentConfirmation(input: {
   if (!(await isEmailConsentConfirmationEnabled())) {
     return { requested: false, reason: "disabled" };
   }
-  const keyring = readConsentKeyring(process.env);
-  if (!keyring) return { requested: false, reason: "keys_missing" };
+  // Checked here so the request is refused up front; the token itself is built
+  // at send time, where a missing key fails the delivery rather than storing a
+  // link.
+  if (!readConsentKeyring(process.env)) return { requested: false, reason: "keys_missing" };
 
   const country = normalizeCountry(input.confirmedCountry);
   if (!country) throw new Error("A confirmed country must be a two-letter country code.");
@@ -120,86 +131,96 @@ export async function requestConsentConfirmation(input: {
   if (!user?.email) return { requested: false, reason: "no_address" };
 
   await ensureDefaultPreferences(input.userId);
-  const existing = await prisma.emailPreference.findUnique({
-    where: { userId_purpose: { userId: input.userId, purpose } },
-    select: { enabled: true, confirmedAt: true },
-  });
-  if (existing?.enabled && existing.confirmedAt) {
-    return { requested: false, reason: "already_confirmed" };
-  }
-
   const now = input.now ?? new Date();
   const policyVersionId = await ensureBootstrapPolicyVersion();
-  const token = createConsentToken(
-    {
+  const requestId = randomUUID();
+
+  const stored: StoredConsentConfirmationPayload = {
+    purpose,
+    request: {
       userId: input.userId,
-      purpose,
       requestedAt: now.toISOString(),
+      requestId,
       policyVersionId,
       addressDigest: consentAddressDigest(user.email),
     },
-    keyring
-  );
-  const confirmUrl = `${appUrl()}/consent/confirm?t=${encodeURIComponent(token)}`;
+  };
 
-  await prisma.$transaction(async (tx) => {
-    await tx.userSettings.upsert({
-      where: { userId: input.userId },
-      create: {
+  try {
+    await prisma.$transaction(async (tx) => {
+      await lockEmailPreferenceRow(tx, input.userId, purpose);
+      const existing = await tx.emailPreference.findUnique({
+        where: { userId_purpose: { userId: input.userId, purpose } },
+        select: { enabled: true, confirmedAt: true },
+      });
+      if (existing?.enabled && existing.confirmedAt) throw ALREADY_CONFIRMED;
+
+      await tx.userSettings.upsert({
+        where: { userId: input.userId },
+        create: {
+          userId: input.userId,
+          country,
+          countrySource: "self_declared",
+          countryUpdatedAt: now,
+        },
+        update: {
+          country,
+          countrySource: "self_declared",
+          countryUpdatedAt: now,
+        },
+      });
+
+      // enabled is left exactly as it is: false for an ordinary request, and
+      // true only for a row switched on before this step existed, which the send
+      // gate already refuses. The request never turns anything on.
+      await tx.emailPreference.update({
+        where: { userId_purpose: { userId: input.userId, purpose } },
+        data: {
+          confirmationRequestedAt: now,
+          confirmationRequestId: requestId,
+          confirmedAt: null,
+        },
+      });
+
+      await tx.consentRecord.create({
+        data: {
+          userId: input.userId,
+          emailAddress: normalizeSuppressionAddress(user.email!),
+          purpose,
+          action: "confirmation_requested",
+          occurredAt: now,
+          jurisdiction: input.jurisdiction,
+          jurisdictionSource: input.jurisdictionSource,
+          policyVersionId,
+          capturedVia: input.capturedVia,
+          evidence: { via: "preference_center", requestId },
+          ipHash: evidenceHash("ip", input.ip),
+          userAgentHash: evidenceHash("ua", input.userAgent),
+        },
+      });
+
+      // Same transaction as the request (docs/policy/email-notifications.md
+      // §9.1): split, an account could be left "requested" with no mail on its
+      // way, pending forever.
+      const queued = await enqueueStandardEmail({
+        tx,
+        templateKey: MARKETING_CONSENT_CONFIRMATION_TEMPLATE,
+        emailAddress: user.email,
         userId: input.userId,
-        country,
-        countrySource: "self_declared",
-        countryUpdatedAt: now,
-      },
-      update: {
-        country,
-        countrySource: "self_declared",
-        countryUpdatedAt: now,
-      },
+        language: input.language ?? user.settings?.language ?? null,
+        payload: stored,
+      });
+      if (enqueueRefused(queued)) {
+        // Transactional templates are never refused for the marketing flag, so
+        // this is the no-address case racing the read above. Roll the request
+        // back rather than leave it pending with nothing sent.
+        throw new Error(`Consent confirmation could not be queued: ${queued.refused}`);
+      }
     });
-
-    // enabled is left exactly as it is: false for an ordinary request, and true
-    // only for a row switched on before this step existed, which the send gate
-    // already refuses. The request never turns anything on.
-    await tx.emailPreference.update({
-      where: { userId_purpose: { userId: input.userId, purpose } },
-      data: { confirmationRequestedAt: now, confirmedAt: null },
-    });
-
-    await tx.consentRecord.create({
-      data: {
-        userId: input.userId,
-        emailAddress: normalizeSuppressionAddress(user.email!),
-        purpose,
-        action: "confirmation_requested",
-        occurredAt: now,
-        jurisdiction: input.jurisdiction,
-        jurisdictionSource: input.jurisdictionSource,
-        policyVersionId,
-        capturedVia: input.capturedVia,
-        evidence: { via: "preference_center", tokenVersion: keyring.activeVersion },
-        ipHash: evidenceHash("ip", input.ip),
-        userAgentHash: evidenceHash("ua", input.userAgent),
-      },
-    });
-
-    // Same transaction as the request (§5, §9.1 of the ADR): split, an account
-    // could be left "requested" with no mail on its way, pending forever.
-    const queued = await enqueueStandardEmail({
-      tx,
-      templateKey: MARKETING_CONSENT_CONFIRMATION_TEMPLATE,
-      emailAddress: user.email,
-      userId: input.userId,
-      language: input.language ?? user.settings?.language ?? null,
-      payload: { purpose, confirmUrl },
-    });
-    if (enqueueRefused(queued)) {
-      // Transactional templates are never refused for the marketing flag, so
-      // this is the no-address case racing the read above. Roll the request
-      // back rather than leave it pending with nothing sent.
-      throw new Error(`Consent confirmation could not be queued: ${queued.refused}`);
-    }
-  });
+  } catch (error) {
+    if (error === ALREADY_CONFIRMED) return { requested: false, reason: "already_confirmed" };
+    throw error;
+  }
 
   return { requested: true, purpose, requestedAt: now };
 }
@@ -214,13 +235,14 @@ export type ConsentConfirmResult =
         | "superseded"
         | "address_changed"
         | "country_not_allowed"
+        | "disabled"
         | "keys_missing";
     };
 
 /**
- * Applies a confirmation link (§5 steps 4-5). Called from the page's `POST`,
- * never from a `GET`: a mail scanner's prefetch must not be able to create
- * consent (§3 rule 4).
+ * Applies a confirmation link (docs/policy/email-double-opt-in.md §5 steps
+ * 4-5). Called from the page's `POST`, never from a `GET`: a mail scanner's
+ * prefetch must not be able to create consent.
  */
 export async function confirmConsent(input: {
   token: string;
@@ -245,6 +267,13 @@ export async function confirmConsent(input: {
     return { confirmed: false, reason: "invalid" };
   }
 
+  // Off means consent is not being collected -- including through links that
+  // were mailed before somebody switched it off (docs/policy/email-double-opt-in.md
+  // §13.1). Turning it back on within the link's lifetime lets them work again.
+  if (!(await isEmailConsentConfirmationEnabled())) {
+    return { confirmed: false, reason: "disabled" };
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: payload.userId },
     select: { email: true },
@@ -256,23 +285,13 @@ export async function confirmConsent(input: {
     return { confirmed: false, reason: "address_changed" };
   }
 
-  const preference = await prisma.emailPreference.findUnique({
-    where: { userId_purpose: { userId: payload.userId, purpose: payload.purpose } },
-    select: { enabled: true, confirmedAt: true, confirmationRequestedAt: true },
+  // The policy the request was made under must still exist; the consent record
+  // names it rather than whichever version is active now.
+  const policy = await prisma.emailPolicyVersion.findUnique({
+    where: { id: payload.policyVersionId },
+    select: { id: true },
   });
-  const requestedAt = new Date(payload.requestedAt);
-
-  // A second click on the link that already worked is a success, not an error.
-  if (
-    preference?.enabled &&
-    preference.confirmedAt &&
-    preference.confirmationRequestedAt?.getTime() === requestedAt.getTime()
-  ) {
-    return { confirmed: true, purpose: payload.purpose, alreadyConfirmed: true };
-  }
-  if (preference?.confirmationRequestedAt?.getTime() !== requestedAt.getTime()) {
-    return { confirmed: false, reason: "superseded" };
-  }
+  if (!policy) return { confirmed: false, reason: "invalid" };
 
   // Re-read the jurisdiction at the moment consent is created. The request was
   // checked, but a later billing signal could have moved or conflicted it, and
@@ -293,7 +312,12 @@ export async function confirmConsent(input: {
     jurisdictionSource: jurisdiction.source,
     ip: input.ip ?? null,
     userAgent: input.userAgent ?? null,
-    confirmation: { tokenVersion: read.version, requestedAt },
+    confirmation: {
+      tokenVersion: read.version,
+      requestedAt: new Date(payload.requestedAt),
+      requestId: payload.requestId,
+      policyVersionId: payload.policyVersionId,
+    },
     now,
   });
 

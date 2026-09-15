@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  appUrl,
   buildAccountDeletionScheduledEmail,
   buildAccountRestoredEmail,
   buildAccountWelcomeEmail,
@@ -21,8 +22,11 @@ import {
 import {
   buildMarketingConsentConfirmationEmail,
   MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER,
+  prepareConsentConfirmationForSend,
   type MarketingConsentConfirmationPayload,
+  type StoredConsentConfirmationPayload,
 } from "@/lib/marketingConsentConfirmationEmail";
+import { createConsentToken, readConsentKeyring } from "@/lib/emailConsentToken";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 import {
@@ -100,6 +104,17 @@ export type EmailTemplateDefinition<Payload> = {
    * an honest artefact of what shipped.
    */
   placeholderPayload: Payload;
+  /**
+   * Turns the stored snapshot into the payload `render` takes, at send time.
+   *
+   * For a message that carries a capability -- a link that does something when
+   * followed -- the capability is not stored in the snapshot at all. This
+   * re-creates it from non-secret fields on every attempt and names the secret
+   * strings, which the lane replaces with a placeholder before computing the
+   * audit hash (docs/policy/email-notifications.md §10.3). Must be deterministic
+   * for the same reason `render` is.
+   */
+  prepareForSend?: (stored: any) => { payload: Payload; secrets: string[] }; // eslint-disable-line @typescript-eslint/no-explicit-any
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -189,6 +204,17 @@ const definitions: AnyDefinition[] = [
     render: (payload: MarketingConsentConfirmationPayload, language) =>
       buildMarketingConsentConfirmationEmail(payload, language),
     placeholderPayload: MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER,
+    // The link is a capability and is never stored; see prepareForSend above.
+    prepareForSend: (stored: StoredConsentConfirmationPayload) => {
+      const keyring = readConsentKeyring(process.env);
+      if (!keyring) {
+        throw new Error("EMAIL_CONSENT_KEYS is not configured; the confirmation link cannot be built.");
+      }
+      return prepareConsentConfirmationForSend(stored, {
+        createToken: (payload) => createConsentToken(payload, keyring),
+        appUrl: appUrl(),
+      });
+    },
   },
   {
     key: ACCOUNT_WELCOME_TEMPLATE,

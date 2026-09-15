@@ -457,6 +457,28 @@ export function EmailNotificationSettings() {
                                                           "emailNotifications.confirmationResend"
                                                       )}
                                             </button>
+                                            {preference.confirmation === "pending" ? (
+                                                // Invalidates the link already
+                                                // mailed; the switch cannot, because
+                                                // it is off and pressing it asks for
+                                                // another confirmation.
+                                                <button
+                                                    type="button"
+                                                    disabled={busy}
+                                                    onClick={() =>
+                                                        void save({
+                                                            purpose: preference.purpose,
+                                                            enabled: false,
+                                                        })
+                                                    }
+                                                    data-testid={`email-preference-${preference.purpose}-cancel`}
+                                                    className="ml-4 mt-1 min-h-11 text-xs font-semibold text-zinc-500 underline underline-offset-2 hover:text-zinc-900 disabled:opacity-50 dark:text-zinc-400 dark:hover:text-white"
+                                                >
+                                                    {t(
+                                                        "emailNotifications.confirmationCancel"
+                                                    )}
+                                                </button>
+                                            ) : null}
                                         </div>
                                     ) : null}
                                 </div>

@@ -25,6 +25,7 @@ const payload = {
   userId: "user_1",
   purpose: "product_updates",
   requestedAt: now.toISOString(),
+  requestId: "request_1",
   policyVersionId: "policy_1",
   addressDigest: consentAddressDigest("Person@Example.com"),
 };
@@ -36,6 +37,23 @@ test("a token round-trips and names its kind and version", () => {
   assert.equal(read.valid, true);
   assert.deepEqual(read.valid && read.payload, { kind: "consent", ...payload });
   assert.equal(read.valid && read.version, "v1");
+});
+
+test("the same request always yields the same token, and another request a different one", () => {
+  // Deterministic so the lane can rebuild it at send time instead of storing it
+  // (docs/policy/email-double-opt-in.md §13.1).
+  assert.equal(createConsentToken(payload, keyring), createConsentToken(payload, keyring));
+  assert.notEqual(
+    createConsentToken(payload, keyring),
+    createConsentToken({ ...payload, requestId: "request_2" }, keyring)
+  );
+});
+
+test("a token without a request id is refused", () => {
+  const { requestId, ...withoutId } = payload;
+  assert.equal(requestId, "request_1");
+  const token = createConsentToken(withoutId, keyring);
+  assert.deepEqual(readConsentToken(token, keyring, now), { valid: false, reason: "invalid" });
 });
 
 test("the token is opaque: no user id, purpose or address digest in it", () => {
@@ -127,5 +145,9 @@ test("the token is redacted from a logged URL", () => {
   assert.equal(
     redactConsentToken("https://tomverse.app/consent/confirm?t=c1.v1.a.b.c"),
     "https://tomverse.app/consent/confirm?t=[redacted]"
+  );
+  assert.equal(
+    redactConsentToken("https://tomverse.app/consent/confirm#t=c1.v1.a.b.c"),
+    "https://tomverse.app/consent/confirm#t=[redacted]"
   );
 });

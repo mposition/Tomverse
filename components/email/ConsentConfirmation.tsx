@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -17,20 +17,45 @@ import { useLanguage } from "@/components/LanguageProvider";
  * No offer, no feature list, no second call to action: this page confirms and
  * nothing else, for the same reason the confirmation mail does.
  */
-export function ConsentConfirmation({ token }: { token: string }) {
+/**
+ * The token, read once from the URL fragment and then removed from the address
+ * bar, so it does not linger in history, bookmarks or a screenshot. Cached so
+ * the removal cannot make a later read come back empty.
+ */
+let capturedToken: string | null = null;
+const readFragmentToken = () => {
+    if (capturedToken !== null) return capturedToken;
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    capturedToken = params.get("t") ?? "";
+    if (window.location.hash) {
+        window.history.replaceState(
+            null,
+            "",
+            window.location.pathname + window.location.search
+        );
+    }
+    return capturedToken;
+};
+const noSubscription = () => () => {};
+
+export function ConsentConfirmation() {
     const { t } = useLanguage();
-    const [state, setState] = useState<
+    // null on the server and during hydration: the fragment is browser-only, so
+    // the first HTML is a neutral heading rather than a premature "invalid".
+    const token = useSyncExternalStore(noSubscription, readFragmentToken, () => null);
+    const [submitState, setState] = useState<
         "idle" | "working" | "done" | "expired" | "failed"
-    >(token ? "idle" : "failed");
+    >("idle");
+    const state = token === null ? "loading" : token ? submitState : "failed";
 
     const submit = async () => {
-        if (state === "working") return;
+        if (state === "working" || !token) return;
         setState("working");
         try {
             const response = await fetch("/api/consent/confirm", {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({ t: token }),
+                body: new URLSearchParams({ t: token ?? "" }),
             });
             const body = (await response.json().catch(() => null)) as {
                 code?: string;
@@ -77,7 +102,7 @@ export function ConsentConfirmation({ token }: { token: string }) {
                         {t("consentConfirm.settingsLink")}
                     </Link>
                 </>
-            ) : (
+            ) : state === "loading" ? null : (
                 <>
                     <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">
                         {t("consentConfirm.body")}

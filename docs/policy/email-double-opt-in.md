@@ -311,7 +311,7 @@ https://tomverse.app/api/admin/marketing-reach
 
 ## 13. 구현 기록 (2026-09-15)
 
-§11의 11항목과 §11 테스트 목록이 모두 들어갔습니다. 아래는 **설계와 달라진 점**과
+§11의 11항목이 들어갔고, §11 테스트 목록에 더해 동시 클릭·정책 전환·flag off 후 링크·enqueue 실패 rollback·링크 미저장을 DB 통합 테스트로 고정했습니다. 아래는 **설계와 달라진 점**과
 그 이유, 그리고 켜는 순서입니다.
 
 ### 13.1 설계에서 달라진 점
@@ -320,12 +320,18 @@ https://tomverse.app/api/admin/marketing-reach
 |---|---|---|---|
 | 1 | `requestConsentConfirmation()`·`confirmConsent()`를 `lib/emailPreferences.ts`에 | **`lib/emailConsentConfirmation.ts`** (신규) | 요청은 메일을 enqueue하므로 standard lane 전체를 끌어옵니다. `lib/emailPreferences.ts`를 import하는 수신거부 route가 발송기에 의존하지 않도록 분리했습니다 |
 | 2 | payload에 주소를 넣지 않음 | 주소는 넣지 않되 **주소 digest**를 넣음 (`consentAddressDigest()`) | 토큰은 암호화되어 digest가 보이지 않습니다. 메일 발송 뒤 계정 주소가 바뀌면 그 클릭은 새 주소의 소유를 증명하지 못하므로 `address_changed`로 거부합니다 |
-| 3 | 재사용 토큰 거부 | `confirmationRequestedAt`이 토큰의 `requestedAt`과 **같을 때만** 확인. 비교는 트랜잭션 안의 조건부 update | 새 요청이 옛 링크를, 끄기(대기 중 취소)가 대기 링크를 무효화합니다. 무상태 토큰을 유지하면서 재사용·경합을 막는 방법입니다 |
+| 3 | 재사용 토큰 거부 | 요청마다 무작위 **`confirmationRequestId`** 를 저장하고, 토큰이 그 id를 이름 댈 때만 확인. 요청·확인·취소·철회가 모두 **같은 행 잠금**(`SELECT … FOR UPDATE`) 아래에서 읽고 씁니다 | 새 요청이 옛 링크를, 대기 중 취소가 대기 링크를 무효화합니다. timestamp 비교는 같은 밀리초의 두 요청을 둘 다 최신으로 만들고, 잠금 없는 조건부 update는 동시 두 번 클릭에 grant를 두 번 남겼습니다(독립 검토 2026-09-15) |
 | 4 | flag의 의미 미정 | **off는 "동의를 아직 받을 수 없음"** | off일 때 marketing 켜기는 `CONFIRMATION_UNAVAILABLE`(409)로 거절되고 single opt-in으로 저장되지 않습니다. §3 규칙 1이 flag와 무관하게 유지됩니다 |
 | 5 | 상태 셋(꺼짐·대기·켜짐) | 넷째 **`unconfirmed`** 추가 (`consentConfirmationState()`) | 이 단계 이전에 켜진 행(`enabled=true`, `confirmedAt=NULL`)을 있는 그대로 표시합니다. gate는 거부하고, 화면은 "확인 메일 보내기"를 제공합니다(§7의 제품 내 재동의) |
 | 6 | 확인 시점 검사 미정 | 확인 시점에 **관할권을 다시 읽음** | 요청 뒤 결제 국가가 바뀌어 allowlist 밖이 되었거나 충돌하면, 쓸 수 없는 동의를 만들지 않습니다(`country_not_allowed`) |
 | 7 | `setPreference` 계약 | 동의 기반 purpose를 켜는 모든 호출은 `confirmation` 증거가 없으면 **`confirmation_required`** | preference centre를 포함한 어떤 경로도 확인을 건너뛸 수 없습니다. 수신거부 토큰의 `token_cannot_enable`은 먼저 검사되고 그대로입니다 |
 | 8 | 캠페인 대상 | `marketing_consent` cohort와 대상 추정이 **`confirmedAt IS NOT NULL`** 을 함께 요구 | lane이 어차피 거부할 사람을 원장에 수신자로 올리지 않습니다 |
+| 9 | 확인 링크 저장 방식 미정 | **링크를 저장하지 않음.** delivery snapshot에는 요청의 비밀 아닌 필드만 두고, 토큰은 발송 시점에 `prepareForSend`가 만듭니다. 토큰 암호화는 **결정적**(IV = 평문의 HMAC)이라 재시도가 같은 바이트를 냅니다. 감사 hash와 제목은 토큰을 placeholder로 바꾼 뒤 기록합니다 | 링크는 72시간짜리 capability이고, 90일 snapshot에 두면 docs/policy/email-notifications.md §10.3의 자격증명 미저장 규칙에 어긋납니다 |
+| 10 | 링크 형식 `?t=` | **`#t=` (URL fragment)**. 확인 페이지가 읽은 뒤 주소창에서 지웁니다 | fragment는 서버·프록시·access log·Sentry·Referer 어디에도 가지 않습니다. 페이지는 동적인 (application) 그룹에 있습니다 — 정적 marketing layout 아래서는 production CSP nonce가 없어 hydration되지 않습니다 |
+| 11 | 동의 증거의 정책 버전 | 토큰에 고정된 **요청 시점의 `policyVersionId`** 를 grant 기록에 씀 | 요청과 클릭 사이에 정책이 바뀌어도, 사람이 본 정책에 동의했다고 남습니다 |
+| 12 | flag와 이미 발송된 링크 | flag가 off면 **확인도 거부**(`disabled`) | "off는 동의를 받지 않음"이 발송된 링크에도 같게 적용됩니다. 72시간 안에 다시 켜면 링크가 다시 동작합니다 |
+| 13 | IP 증거 | 두 route 모두 신뢰할 수 있는 edge IP만 hash해 기록, `unknown`은 NULL | 설계 §5가 열거한 `ipHash` 증거 |
+| 14 | 대기 취소 UI | 대기 중인 행에 **"요청 취소"** 버튼 | 대기 행의 스위치는 꺼져 있어 누르면 새 확인을 요청하므로, 발송된 링크를 무효화할 별도 수단이 필요합니다 |
 
 ### 13.2 켜는 순서 (운영)
 

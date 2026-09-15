@@ -75,7 +75,7 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
     button: "Confirm subscription",
     expiry: "This link expires in 72 hours.",
     ignore:
-      "If you did not ask for this, ignore this email. Nothing will be sent to you unless you confirm.",
+      "If you did not ask for this, ignore this email. We will not send you this kind of email unless you confirm.",
     change: "You can change or withdraw this at any time in your notification settings.",
   },
   ko: {
@@ -90,7 +90,7 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
     button: "수신 동의 확인",
     expiry: "이 링크는 72시간 후 만료됩니다.",
     ignore:
-      "요청하지 않으셨다면 이 메일을 무시해 주세요. 확인하지 않으면 아무것도 발송되지 않습니다.",
+      "요청하지 않으셨다면 이 메일을 무시해 주세요. 확인하지 않으면 이 종류의 이메일은 발송되지 않습니다.",
     change: "알림 설정에서 언제든지 변경하거나 철회할 수 있습니다.",
   },
   zh: {
@@ -104,7 +104,7 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
       `你申请通过电子邮件接收 Tomverse 的${name}。请在下方确认后开始接收。`,
     button: "确认订阅",
     expiry: "此链接将在 72 小时后失效。",
-    ignore: "如果这不是你本人的请求，请忽略此邮件。未经确认，我们不会向你发送任何内容。",
+    ignore: "如果这不是你本人的请求，请忽略此邮件。未经确认，我们不会向你发送此类邮件。",
     change: "你可以随时在通知设置中更改或撤回。",
   },
   fr: {
@@ -119,7 +119,7 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
     button: "Confirmer l'abonnement",
     expiry: "Ce lien expire dans 72 heures.",
     ignore:
-      "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail. Rien ne vous sera envoyé sans votre confirmation.",
+      "Si vous n'êtes pas à l'origine de cette demande, ignorez cet e-mail. Ce type d'e-mail ne vous sera pas envoyé sans votre confirmation.",
     change:
       "Vous pouvez modifier ou retirer ce choix à tout moment dans vos paramètres de notification.",
   },
@@ -135,7 +135,7 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
     button: "Abonnement bestätigen",
     expiry: "Dieser Link läuft in 72 Stunden ab.",
     ignore:
-      "Wenn Sie dies nicht angefordert haben, ignorieren Sie diese E-Mail. Ohne Ihre Bestätigung wird Ihnen nichts gesendet.",
+      "Wenn Sie dies nicht angefordert haben, ignorieren Sie diese E-Mail. Ohne Ihre Bestätigung senden wir Ihnen diese Art von E-Mail nicht.",
     change:
       "Sie können dies jederzeit in Ihren Benachrichtigungseinstellungen ändern oder widerrufen.",
   },
@@ -151,7 +151,7 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
     button: "Confirmar suscripción",
     expiry: "Este enlace caduca en 72 horas.",
     ignore:
-      "Si no lo solicitaste, ignora este correo. No se te enviará nada a menos que lo confirmes.",
+      "Si no lo solicitaste, ignora este correo. No te enviaremos este tipo de correo a menos que lo confirmes.",
     change:
       "Puedes cambiarlo o retirarlo en cualquier momento en tu configuración de notificaciones.",
   },
@@ -167,15 +167,63 @@ export const MARKETING_CONSENT_CONFIRMATION_COPY: Record<EmailLanguage, Copy> = 
     button: "Confirmar inscrição",
     expiry: "Este link expira em 72 horas.",
     ignore:
-      "Se você não fez esse pedido, ignore este e-mail. Nada será enviado sem a sua confirmação.",
+      "Se você não fez esse pedido, ignore este e-mail. Não enviaremos este tipo de e-mail sem a sua confirmação.",
     change:
       "Você pode alterar ou retirar isso a qualquer momento nas suas configurações de notificação.",
   },
 };
 
+/**
+ * What the delivery snapshot holds: the non-secret request fields only.
+ *
+ * The link is a capability -- whoever has it can confirm the consent for
+ * seventy-two hours -- so it is not stored in the 90-day render snapshot
+ * (docs/policy/email-notifications.md §10.3 keeps credentials out of it). It
+ * is re-created at send time from these fields by
+ * `prepareConsentConfirmationForSend()`, which the token's deterministic
+ * encryption makes byte-identical on every retry.
+ */
+export type StoredConsentConfirmationPayload = {
+  purpose: MarketingConsentPurpose;
+  request: {
+    userId: string;
+    requestedAt: string;
+    requestId: string;
+    policyVersionId: string;
+    addressDigest: string;
+  };
+};
+
+/** The URL placeholder the audit hash and the template registry see. */
+export const CONSENT_CONFIRMATION_URL_PLACEHOLDER =
+  "https://tomverse.app/consent/confirm#t={{token}}";
+
+/**
+ * Builds the send-time payload, and names the secrets it contains so the lane
+ * keeps them out of the audit hash.
+ *
+ * The token travels in the URL fragment (`#t=`), which browsers do not send to
+ * the server: it never reaches access logs, proxies, error reporters or a
+ * Referer header.
+ */
+export const prepareConsentConfirmationForSend = (
+  stored: StoredConsentConfirmationPayload,
+  deps: {
+    createToken: (payload: StoredConsentConfirmationPayload["request"] & { purpose: string }) => string;
+    appUrl: string;
+  }
+): { payload: MarketingConsentConfirmationPayload; secrets: string[] } => {
+  const token = deps.createToken({ ...stored.request, purpose: stored.purpose });
+  const confirmUrl = `${deps.appUrl}/consent/confirm#t=${encodeURIComponent(token)}`;
+  return {
+    payload: { purpose: stored.purpose, confirmUrl },
+    secrets: [confirmUrl, encodeURIComponent(token), token],
+  };
+};
+
 export const MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER: MarketingConsentConfirmationPayload = {
   purpose: "product_updates",
-  confirmUrl: "https://tomverse.app/consent/confirm?t={{token}}",
+  confirmUrl: CONSENT_CONFIRMATION_URL_PLACEHOLDER,
 };
 
 export function buildMarketingConsentConfirmationEmail(

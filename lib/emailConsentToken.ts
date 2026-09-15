@@ -2,7 +2,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
-  randomBytes,
+  createHmac,
 } from "node:crypto";
 
 /**
@@ -30,7 +30,7 @@ import {
  *
  * Confirm one pending consent, for one purpose, for the account that asked, for
  * seventy-two hours -- and only while that request is still the latest one for
- * that purpose (`confirmConsent()` compares `requestedAt` with the stored row).
+ * that purpose (`confirmConsent()` compares `requestId` with the stored row).
  * It cannot create a request, reach another purpose or reach another person.
  *
  * ## No address in the payload
@@ -52,8 +52,14 @@ export type ConsentTokenPayload = {
   kind: "consent";
   userId: string;
   purpose: string;
-  /** ISO instant. Must equal the preference row's `confirmationRequestedAt`. */
+  /** ISO instant the request was made. Drives expiry. */
   requestedAt: string;
+  /**
+   * Random identifier of the request. Must equal the preference row's
+   * `confirmationRequestId`; a timestamp alone could collide within a
+   * millisecond and leave two links "latest".
+   */
+  requestId: string;
   policyVersionId: string;
   /** `consentAddressDigest()` of the address the confirmation was sent to. */
   addressDigest: string;
@@ -116,13 +122,22 @@ export const createConsentToken = (
     throw new Error(`No consent key for version "${keyring.activeVersion}".`);
   }
 
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(ALGORITHM, keyFor(secret), iv);
   const body: ConsentTokenPayload = { kind: "consent", ...payload };
-  const ct = Buffer.concat([
-    cipher.update(JSON.stringify(body), "utf8"),
-    cipher.final(),
-  ]);
+  const plaintext = JSON.stringify(body);
+  // Deterministic: the IV is derived from the plaintext under the key, so the
+  // same request always yields the same token. That is what lets the token be
+  // re-created at send time from non-secret fields instead of being stored in
+  // the delivery snapshot (docs/policy/email-double-opt-in.md §13.1), and it
+  // keeps a retry byte-identical for the provider's idempotency key. An IV is
+  // only ever reused for an identical plaintext -- which yields the identical
+  // ciphertext and reveals nothing new -- and every request carries its own
+  // random `requestId`, so two requests never share one.
+  const iv = createHmac("sha256", keyFor(secret))
+    .update(`iv:${plaintext}`)
+    .digest()
+    .subarray(0, IV_BYTES);
+  const cipher = createCipheriv(ALGORITHM, keyFor(secret), iv);
+  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 
   return [
     TOKEN_PREFIX,
@@ -184,6 +199,7 @@ export const readConsentToken = (
     typeof payload.userId !== "string" ||
     typeof payload.purpose !== "string" ||
     typeof payload.requestedAt !== "string" ||
+    typeof payload.requestId !== "string" ||
     typeof payload.policyVersionId !== "string" ||
     typeof payload.addressDigest !== "string"
   ) {
@@ -204,6 +220,6 @@ export const readConsentToken = (
   return { valid: true, payload, version };
 };
 
-/** Strips the token from a URL before it is logged. */
+/** Strips the token from a URL before it is logged, in the query or the fragment. */
 export const redactConsentToken = (url: string) =>
-  url.replace(/([?&]t=)[^&#]*/gi, "$1[redacted]");
+  url.replace(/([?&#]t=)[^&#]*/gi, "$1[redacted]");

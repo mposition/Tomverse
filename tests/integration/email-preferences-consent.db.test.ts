@@ -87,13 +87,19 @@ const someone = () =>
 const agree = async (input: Parameters<typeof setPreference>[0]) => {
   await ensureDefaultPreferences(input.userId);
   const requestedAt = new Date(Date.now() - 1_000);
+  const requestId = randomUUID();
   await prisma.emailPreference.update({
     where: { userId_purpose: { userId: input.userId, purpose: input.purpose } },
-    data: { confirmationRequestedAt: requestedAt },
+    data: { confirmationRequestedAt: requestedAt, confirmationRequestId: requestId },
   });
   return setPreference({
     ...input,
-    confirmation: { tokenVersion: "v1", requestedAt },
+    confirmation: {
+      tokenVersion: "v1",
+      requestedAt,
+      requestId,
+      policyVersionId: await ensureBootstrapPolicyVersion(),
+    },
   });
 };
 
@@ -471,10 +477,9 @@ test("a confirmation that names an older request confirms nothing", async () => 
   const user = await someone();
   await ensureDefaultPreferences(user.id);
   const older = new Date(Date.now() - 60_000);
-  const newer = new Date(Date.now() - 1_000);
   await prisma.emailPreference.update({
     where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
-    data: { confirmationRequestedAt: newer },
+    data: { confirmationRequestedAt: new Date(), confirmationRequestId: "newer-request" },
   });
 
   const result = await setPreference({
@@ -483,7 +488,12 @@ test("a confirmation that names an older request confirms nothing", async () => 
     enabled: true,
     capturedVia: "preference_center",
     source: "preference_center",
-    confirmation: { tokenVersion: "v1", requestedAt: older },
+    confirmation: {
+      tokenVersion: "v1",
+      requestedAt: older,
+      requestId: "older-request",
+      policyVersionId: await ensureBootstrapPolicyVersion(),
+    },
   });
 
   assert.deepEqual(result, { changed: false, reason: "superseded" });

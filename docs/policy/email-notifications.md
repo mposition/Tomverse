@@ -16,6 +16,7 @@
 
 - [확인 단계 설계](email-double-opt-in.md) §11의 11항목이 들어갔습니다. 설계와 달라진
   점과 켜는 순서는 그 문서 §13입니다.
+- **확인 링크는 저장되지 않고**(발송 시점 생성, URL fragment), 요청·확인·취소는 한 행 잠금 아래에서 일어나며, 동의 기록은 요청 시점의 정책 버전을 씁니다. 설계 문서 §13.1 #9~#14.
 - **marketing purpose는 이제 확인 클릭으로만 켜집니다.** preference centre의 켜기는
   확인 메일 요청이고, 발송 gate(`consentGateVerdict()`)는 `confirmedAt`이 없는 행을
   `no_consent`로 거부합니다. 캠페인 cohort와 대상 추정도 같은 조건을 봅니다.
@@ -1497,6 +1498,9 @@ enabled            Boolean
 source             "signup" | "preference_center" | "unsubscribe_link"
                    | "admin" | "system_default"
 grantedAt                DateTime?  // 현재 enabled 상태가 시작된 시각
+confirmedAt              DateTime?  // double opt-in 확인 클릭 시각. NULL이면 발송 gate가 거부
+confirmationRequestedAt  DateTime?  // 최신 확인 요청 시각 (만료 계산)
+confirmationRequestId    String?    // 최신 확인 요청 id. 토큰이 이 id를 이름 대야 확인됨
 lastConfirmationNoticeAt DateTime?  // E7. 마지막 확인 고지 발송 시각
 nextConfirmationNoticeAt DateTime?  // E7. 다음 고지 예정. 만료 기한이 아님
 updatedAt, createdAt
@@ -1519,6 +1523,7 @@ emailAddress       String   // 당시 주소. 변경돼도 보존
 purpose            String
 action             "granted" | "withdrawn" | "reconfirmed"
                    | "confirmation_notice_sent"   // E7. 고지를 보냈다는 사실
+                   | "confirmation_requested"     // double opt-in 요청. 동의가 아님
                    | "lapsed"                     // 자동 opt-out 정책이 켜진 경우만
 occurredAt         DateTime
 jurisdiction       String   // 당시 판정값. 소급 변경 금지

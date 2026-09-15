@@ -10,6 +10,7 @@ import {
   consumeApiRateLimit,
   readLimitedJson,
 } from "@/lib/apiSecurity";
+import { getTrustedClientIp } from "@/lib/clientIp";
 import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
 import { readPreferences, setPreference, withdrawAllMarketing } from "@/lib/emailPreferences";
 import { EMAIL_PURPOSES, recordsConsent } from "@/lib/emailPreferenceCore";
@@ -178,6 +179,10 @@ export async function PATCH(req: Request) {
         confirmedCountry: countryDecision.countryCode,
         jurisdiction: jurisdiction.countryCode,
         jurisdictionSource: "self_declared",
+        ip: (() => {
+          const trusted = getTrustedClientIp(req);
+          return trusted === "unknown" ? null : trusted;
+        })(),
         userAgent: req.headers.get("user-agent"),
         now,
       });

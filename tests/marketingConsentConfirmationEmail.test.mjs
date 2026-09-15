@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   MARKETING_CONSENT_CONFIRMATION_COPY,
   buildMarketingConsentConfirmationEmail,
+  prepareConsentConfirmationForSend,
 } from "../lib/marketingConsentConfirmationEmail.ts";
 
 // The confirmation mail confirms and does nothing else.
@@ -14,7 +15,7 @@ import {
 // promotion rather than trusted to stay plain.
 
 const LANGUAGES = ["en", "ko", "zh", "fr", "de", "es", "pt"];
-const CONFIRM_URL = "https://tomverse.app/consent/confirm?t=c1.v1.iv.ct.tag";
+const CONFIRM_URL = "https://tomverse.app/consent/confirm#t=c1.v1.iv.ct.tag";
 
 // Words that turn a confirmation into an advertisement, in the languages the
 // copy exists in. Checked against the copy's own sentences only.
@@ -82,4 +83,32 @@ test("the URL is escaped in HTML and the render is deterministic", () => {
     buildMarketingConsentConfirmationEmail({ purpose: "newsletter", confirmUrl: CONFIRM_URL }, "ko"),
     buildMarketingConsentConfirmationEmail({ purpose: "newsletter", confirmUrl: CONFIRM_URL }, "ko")
   );
+});
+
+test("the send-time payload puts the token in the fragment and names every secret form of it", () => {
+  const prepared = prepareConsentConfirmationForSend(
+    {
+      purpose: "newsletter",
+      request: {
+        userId: "user_1",
+        requestedAt: "2026-09-15T00:00:00.000Z",
+        requestId: "request_1",
+        policyVersionId: "policy_1",
+        addressDigest: "digest",
+      },
+    },
+    { createToken: () => "c1.v1.a+b.c", appUrl: "https://tomverse.app" }
+  );
+  assert.equal(prepared.payload.confirmUrl, "https://tomverse.app/consent/confirm#t=c1.v1.a%2Bb.c");
+  assert.equal(prepared.payload.purpose, "newsletter");
+  for (const secret of ["c1.v1.a+b.c", "c1.v1.a%2Bb.c", prepared.payload.confirmUrl]) {
+    assert.ok(prepared.secrets.includes(secret), secret);
+  }
+  // Nothing in the rendered mail survives once every secret is replaced.
+  const email = buildMarketingConsentConfirmationEmail(prepared.payload, "en");
+  let text = email.text;
+  for (const secret of [...prepared.secrets].sort((a, b) => b.length - a.length)) {
+    text = text.split(secret).join("{{secret}}");
+  }
+  assert.equal(text.includes("c1.v1"), false);
 });
