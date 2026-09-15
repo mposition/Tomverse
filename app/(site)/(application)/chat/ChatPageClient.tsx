@@ -6734,7 +6734,11 @@ export function ChatPageClient({
         />
       )}
     {showGuestSignInPrompt && isGuestMode && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"
@@ -6814,7 +6818,11 @@ export function ChatPageClient({
       </div>
     )}
     {upgradeModelPrompt && accountUsage && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"

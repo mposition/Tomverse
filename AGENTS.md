@@ -1177,10 +1177,20 @@ Non-negotiable requirements:
   `npm run check:starter-catalog` refuses a `"feature.…"` literal in the
   catalogue, and proves every flag constant, capability resolver, evidence path
   and locale string still resolves. It runs in PR Fast Gate's static stage.
-- **Adding an entry is three things**: a row in the table, its two strings in
-  all seven locales, and an `evidence` path that exists. Icons are derived from
-  the entry's own accent role and task kind; a fourth step is the one somebody
-  forgets.
+- **Adding an entry is three things**: a row in the table, its three strings
+  (short label, outcome sentence, seed) in all seven locales, and an `evidence`
+  path that exists. Icons are derived from the entry's own accent role and task
+  kind; a fourth step is the one somebody forgets.
+- **The short label is a promise too.** On a touch screen nothing is hovered, so
+  the label is all the card says; it follows the outcome sentence's rules. A
+  locked card shows the requirement badge before its label and is drawn as
+  loudly as a runnable one.
+- **The composer stays in the bottom dock on a new chat.** The welcome screen
+  holds only the greeting, the mobile recent-chats row and the starters,
+  centred with auto margins between the header and the dock; it never holds a
+  composer slot again. The gallery's shape comes from its own width (a `rem`
+  container query), never from which shell rendered it, and the desktop welcome
+  screen lists no recent conversations -- the sidebar already does.
 - **No new accent role.** A card wears the role its feature already owns, or
   the neutral blue/zinc; the AI Review gradient stays reserved even on a card
   describing AI Review.

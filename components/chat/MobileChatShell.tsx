@@ -860,23 +860,18 @@ export function MobileChatShell({
   // live in the image workspace.
   const [conversationDropSurface, setConversationDropSurface] =
     useState<HTMLElement | null>(null);
-  const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
+  // The composer lives in the bottom dock in every state, a new chat included
+  // (docs/ui-contracts/chat-starter-catalog.md section 6). It used to portal
+  // into the welcome screen and move to the dock on the first send; now the
+  // welcome screen is only the greeting, the recent-chats row and the starters
+  // above the dock, and the first message leaves the composer where it was.
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
-  const inputPortalTarget = showsWelcomeSurface
-    ? welcomeInputSlot ?? bottomInputSlot
-    : bottomInputSlot ?? welcomeInputSlot;
-  // STG-F003: portal into a host we move between the two slots, never into
-  // the slots themselves -- switching containers would rebuild the composer
-  // and drop whatever the user had just typed into it.
-  const composerPortalHost = useComposerPortalHost(inputPortalTarget);
-  // Mirrors inputPortalTarget above: the composer (and so the consent
-  // notice slot right next to it) lives in one of two DOM positions
-  // depending on whether the welcome screen is showing.
-  const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
+  // STG-F003: portal into a host rather than into the slot itself, so a slot
+  // that remounts never rebuilds the composer and drops a draft in progress.
+  const composerPortalHost = useComposerPortalHost(bottomInputSlot);
+  // The consent notice sits directly above the composer, so it follows it.
   const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
-  const consentSlotTarget = showsWelcomeSurface
-    ? welcomeConsentSlot ?? bottomConsentSlot
-    : bottomConsentSlot ?? welcomeConsentSlot;
+  const consentSlotTarget = bottomConsentSlot;
   useEffect(() => {
     registerChatConsentSlot(consentSlotTarget);
     return () => registerChatConsentSlot(null);
@@ -984,9 +979,8 @@ export function MobileChatShell({
     webSearchOfferedState,
     webSearchOfferedTopicKey,
   ]);
-  // REFLOW-P1-01. On a new chat the welcome copy and the composer are one
-  // surface: the composer portals into the welcome screen's own slot, so
-  // whatever happens to that surface happens to the composer.
+  // Whether the new-chat welcome copy is on screen. The composer is not part
+  // of it: it stays in the bottom dock in every state.
   const showWelcomeSurface = showsWelcomeSurface && selectedModels.length > 0;
   // UX-026. The single condition the tab strip and its panels both read, so a
   // tab can never be rendered without the panel its `aria-controls` names.
@@ -1006,20 +1000,17 @@ export function MobileChatShell({
   const visibleViewportHeight = useVisibleViewportHeight();
   const headerRef = useRef<HTMLElement | null>(null);
   const bottomDockRef = useRef<HTMLDivElement | null>(null);
-  // The shell rows the banner may never eat into: the header above it, the
-  // bottom dock below it, and -- on a new chat, where the composer lives inside
-  // the welcome surface rather than in the dock -- the composer itself.
+  // The shell rows the banner may never eat into: the header above it and the
+  // bottom dock below it. The composer is inside the dock in every state, a
+  // new chat included, so measuring the dock measures the composer too.
   const [reservedShellHeight, setReservedShellHeight] = useState(0);
   const [rootFontSizePx, setRootFontSizePx] = useState(16);
 
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
-    const composerOutsideDock = showWelcomeSurface ? welcomeInputSlot : null;
-    const measured = [
-      headerRef.current,
-      bottomDockRef.current,
-      composerOutsideDock,
-    ].filter((element): element is HTMLElement => Boolean(element));
+    const measured = [headerRef.current, bottomDockRef.current].filter(
+      (element): element is HTMLElement => Boolean(element)
+    );
     const measure = () => {
       const total = measured.reduce(
         (sum, element) => sum + element.getBoundingClientRect().height,
@@ -1041,7 +1032,7 @@ export function MobileChatShell({
     const observer = new ResizeObserver(measure);
     measured.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [showWelcomeSurface, visibleViewportHeight, welcomeInputSlot]);
+  }, [showWelcomeSurface, visibleViewportHeight]);
 
   const providerBannerMaxHeight = useMemo(() => {
     // Not measured yet (SSR, first client render): the banner keeps its own
@@ -1406,9 +1397,21 @@ export function MobileChatShell({
         // bottom dock in that state, so its reachability is bought by the
         // shell's scroll owner, not by reserving space here.
         //
-        // REFLOW-P1-01. A *new* chat is the opposite case, because the composer
-        // portals into the welcome screen inside this section. `min-h-0 flex-1`
-        // let the section shrink to nothing. Measured at 390x844 / ko / 200%
+        // A new chat now follows the same rule, for the same reason. The
+        // composer used to portal into the welcome screen inside this section,
+        // which is what the REFLOW-P1-01 history below was about; it is in the
+        // bottom dock in every state now (docs/ui-contracts/chat-starter-catalog.md
+        // section 6), so this section holds only the greeting, the recent-chats
+        // row and the starters. It takes what the header, banner and dock leave
+        // and scrolls inside itself when that is not enough -- a scroller that
+        // is *not* an ancestor of the composer, exactly like the answer list
+        // in an ongoing conversation. The path to the composer still has one
+        // scroll owner, the shell, and a banner that squeezes this section can
+        // no longer take the composer with it.
+        //
+        // History, kept because it is the failure this layout must never
+        // recreate. REFLOW-P1-01: while the composer lived in here,
+        // `min-h-0 flex-1` let the section shrink to nothing. Measured at 390x844 / ko / 200%
         // text with a no-fallback outage banner and a 320px keyboard, where the
         // user can see 524px:
         //
@@ -1426,16 +1429,11 @@ export function MobileChatShell({
         // not painted anywhere the user could reach. The shell could not help
         // either; with the section at 0 it had nothing left to scroll.
         //
-        // So on a new chat the welcome surface is laid out in normal flow and
-        // never shrinks (`flex-[1_0_auto]`): it keeps its content's height,
-        // pushes the shell's content past the viewport when it has to, and the
-        // shell -- the single scroll owner on the way to the composer -- scrolls
-        // to it. There is no second, nested scroll region between the two any
-        // more, so "at most one scroll owner" is structural rather than lucky.
-        className={`relative flex flex-col bg-zinc-50 dark:bg-zinc-950 ${
-          showWelcomeSurface
-            ? "flex-[1_0_auto] justify-center"
-            : "min-h-0 flex-1 overflow-hidden"
+        // The fix then was to lay the welcome surface out in normal flow and
+        // never let it shrink. That fix is no longer needed because its premise
+        // -- a composer inside this section -- is gone.
+        className={`relative flex min-h-0 flex-1 flex-col bg-zinc-50 dark:bg-zinc-950 ${
+          showWelcomeSurface ? "overflow-y-auto overscroll-contain" : "overflow-hidden"
         }`}
         onTouchStart={(event) => {
           const touch = event.touches[0];
@@ -1457,20 +1455,12 @@ export function MobileChatShell({
         }}
       >
         {showWelcomeSurface && (
-          // REAUDIT-P1-04 kept this in an absolutely positioned, independently
-          // scrolling overlay so it could not paint past the section's bottom
-          // edge. That solved the overlap and created the nested scroll owner
-          // REFLOW-P1-01 is removing: in normal flow the welcome copy, the
-          // composer and the AI disclaimer are all rows of the same scroll
-          // region, so the composer can neither be clipped nor be left behind
-          // by a scroll that moved the wrong surface.
+          // Normal flow inside the section, never an absolute overlay
+          // (REAUDIT-P1-04): the section is the one region that scrolls this
+          // content, and the composer is not in it.
           <ChatWelcomeScreen
             recentConversations={recentConversations}
-            onSelectConversation={onSelectConversation}
-            inputSlotRef={setWelcomeInputSlot}
-            consentSlotRef={setWelcomeConsentSlot}
             starterGallery={starterGallery}
-            recentAccess="disclosure"
             recentDisclosureRef={(node) => {
               recentDisclosureRef.current = node;
             }}
@@ -1699,7 +1689,9 @@ export function MobileChatShell({
             guestPreviewMode={guestPreviewMode}
             guestMessageCount={guestMessageCount}
             maxGuestMessages={maxGuestMessages}
-            variant={showsWelcomeSurface ? "floating" : "bar"}
+            // One variant in every state: a new chat and an ongoing one share
+            // the dock, so the first send must not restyle it.
+            variant="bar"
             hideTopBorder={comparisonReadiness.isVisible}
             hideDisclaimer
             conversationDropSurface={conversationDropSurface}

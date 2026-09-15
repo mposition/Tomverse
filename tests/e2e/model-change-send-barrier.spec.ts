@@ -394,7 +394,7 @@ test.describe("model change send barrier (desktop)", () => {
     // Not openRecentConversation: both seeded titles contain "QA
     // conversation", so a substring filter is ambiguous here.
     await page
-      .getByTestId("recent-conversation-card")
+      .getByTestId("sidebar-conversation-item")
       .getByText("QA conversation", { exact: true })
       .click();
     await expect(
