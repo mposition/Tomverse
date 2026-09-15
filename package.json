@@ -200,6 +200,7 @@
     "check:capacitor-local-bundle": "node scripts/check-capacitor-local-bundle.mjs",
     "build:mobile-shell": "npm run build --workspace @tomverse/mobile",
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
+    "report:prompt-refiner-receipts": "node --import tsx scripts/report-prompt-refiner-receipts.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",
     "check:conversation-writers": "node scripts/check-conversation-writers.mjs",
