@@ -5,6 +5,7 @@ import { Check, Circle, FileText, MessageSquare, UserRoundPlus } from "lucide-re
 
 import { useLanguage } from "@/components/LanguageProvider";
 import {
+  assistantKnowledgeGuideContentLanguage,
   ASSISTANT_KNOWLEDGE_GUIDE_STEPS,
   type AssistantKnowledgeGuideStep,
 } from "@/lib/assistantKnowledgeGuide";
@@ -64,6 +65,32 @@ const copy = {
     complete: "Complete",
     upcoming: "Next",
   },
+  zh: {
+    eyebrow: "三步设置指南",
+    title: "我的 AI 助手 + Knowledge",
+    resume: "指南会根据实际保存的结果，从下一步继续。",
+    steps: {
+      create_assistant: {
+        title: "创建助手",
+        body: "输入名称和期望的回答方式，然后创建助手。",
+      },
+      add_knowledge: {
+        title: "添加 Knowledge 并保存",
+        body: "在下方添加并选择文件，然后保存指令和模型。",
+      },
+      start_chat: {
+        title: "在对话中使用",
+        body: "进入对话后，刚创建的助手会被自动选中。",
+      },
+    },
+    unavailable:
+      "此账户尚未启用 Knowledge。功能开放后可从文件步骤继续。",
+    goToKnowledge: "前往 Knowledge 输入区",
+    startChat: "使用此助手开始对话",
+    current: "当前步骤",
+    complete: "已完成",
+    upcoming: "下一步",
+  },
 } as const;
 
 const steps = ASSISTANT_KNOWLEDGE_GUIDE_STEPS;
@@ -79,7 +106,7 @@ export function AssistantKnowledgeSetupGuide({
   onStartChat?: () => void;
 }) {
   const { lang } = useLanguage();
-  const labels = copy[lang === "ko" ? "ko" : "en"];
+  const labels = copy[assistantKnowledgeGuideContentLanguage(lang)];
   const currentIndex = steps.indexOf(stage);
 
   return (

@@ -1,0 +1,41 @@
+{
+  "taskId": "assistant-knowledge-newsletter-v1",
+  "requirement": "Ship the first Tomverse Assistant + Knowledge product-update experience with a consent-gated localized email starter, a detailed localized guide, reviewed Korean/English/Chinese tutorial media, and an optional locale-matched Supademo embed that fails safely to an in-product walkthrough.",
+  "completionCriteria": [
+    "The admin campaign composer receives Korean, English, or Chinese Assistant + Knowledge starter content without weakening the existing marketing-consent gate.",
+    "The guide explains creation, Knowledge attachment, supported Agent Skill and Tomverse package import boundaries, privacy, and troubleshooting in Korean, English, and Chinese.",
+    "Korean, English, and Chinese routes select matching 1920x1080 narrated video and caption assets, while every other locale uses English.",
+    "Supademo URLs are optional, independently localized, HTTPS-only, credential-free, limited to Supademo hosts and default ports, and covered by the page CSP.",
+    "When a Supademo URL is absent, the page keeps a usable native three-step walkthrough.",
+    "Relevant unit, media-integrity, build, lint, and browser playback checks pass."
+  ],
+  "baseCommit": "102006072838f09ff6e0104c0e4ae23e7dc8bfab",
+  "writableScope": [
+    "app/(site)/(application)/admin/email-campaigns/page.tsx",
+    "app/(site)/(marketing)/guides/assistant-knowledge/page.tsx",
+    "components/admin/AdminCampaignComposer.tsx",
+    "components/assistants/AssistantKnowledgeSetupGuide.tsx",
+    "components/marketing/AssistantKnowledgeGuide.tsx",
+    "components/marketing/assistantKnowledgeGuideContent.ts",
+    "docs/ops/assistant-knowledge-runway-brief.md",
+    "docs/ops/product-update-email-campaign.md",
+    "docs/ops/cross-review/packages/",
+    "lib/assistantKnowledgeGuide.ts",
+    "lib/marketingRoutes.ts",
+    "lib/assistantKnowledgeSupademo.ts",
+    "lib/assistantKnowledgeSupademoCore.ts",
+    "lib/csp.ts",
+    "lib/productAnnouncementEmail.ts",
+    "package.json",
+    "public/guides/assistant-knowledge",
+    "scripts/build-assistant-knowledge-tutorial-media.mjs",
+    "scripts/capture-assistant-knowledge-tutorial.mjs",
+    "scripts/validate-assistant-knowledge-guide.mjs",
+    "tests/assistantKnowledgeGuide.test.mjs",
+    "tests/assistantKnowledgeSupademoCore.test.mjs",
+    "tests/assistantKnowledgeSupademoCsp.test.mjs",
+    "tests/e2e/assistant-knowledge-guide-video.spec.ts",
+    "tests/marketingRoutes.test.mjs",
+    "tests/productAnnouncementEmail.test.mjs"
+  ]
+}
