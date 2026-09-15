@@ -89,14 +89,27 @@ test("language and time zone together are circumstantial, never authorising", ()
 });
 
 test("thirty EEA countries map onto one profile", () => {
-  for (const country of ["DE", "FR", "IE", "PT", "NO", "IS", "LI", "CH"]) {
+  // The EEA non-EU three (NO, IS, LI) are here because the Directive reaches
+  // them through the EEA Agreement.
+  for (const country of ["DE", "FR", "IE", "PT", "NO", "IS", "LI"]) {
     assert.equal(profileForCountry(country), "EU", `${country} should be EU`);
   }
 
-  // The six with their own rules keep their own profile.
-  for (const country of ["KR", "US", "CA", "AU", "GB", "SG"]) {
+  // The seven with their own rules keep their own profile.
+  for (const country of ["KR", "US", "CA", "AU", "GB", "SG", "CH"]) {
     assert.equal(profileForCountry(country), country);
   }
+});
+
+test("Switzerland is not in the EEA profile", () => {
+  // It was until 2026-09-14. Its rule is Swiss UWG art. 3(1)(o) rather than the
+  // ePrivacy Directive, the revFADP applies with its own supervisory authority,
+  // and the transfer analysis is separate -- so the values matching the EU
+  // profile is exactly the case where two rows have to exist, or a change
+  // justified by one body of law silently moves the other.
+  // docs/policy/email-eea-marketing-review-2026-09-14.md section 4.5.
+  assert.equal(profileForCountry("CH"), "CH");
+  assert.notEqual(profileForCountry("CH"), "EU");
 });
 
 test("a country with no profile falls back rather than guessing", () => {

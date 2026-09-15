@@ -13,9 +13,11 @@
 EMAIL_BUSINESS_LEGAL_NAME=Tomverse Pty Ltd
 EMAIL_BUSINESS_POSTAL_ADDRESS=1 Example Street, Brisbane QLD 4000, Australia
 EMAIL_BUSINESS_CONTACT_EMAIL=support@tomverse.app
-EMAIL_BUSINESS_REGISTRATION_NUMBER=000-00-00000
-EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER=2026-Seoul-00000
 EMAIL_BUSINESS_ABN=00 000 000 000
+
+# 오늘 요구하는 profile이 없습니다 (아래) -- 설정하지 않습니다
+# EMAIL_BUSINESS_REGISTRATION_NUMBER=
+# EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER=
 ```
 
 | 변수 | footer block | 필요한 profile |
@@ -23,8 +25,8 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 | `EMAIL_BUSINESS_LEGAL_NAME` | `legal_name` | 전부 |
 | `EMAIL_BUSINESS_POSTAL_ADDRESS` | `postal_address` | 전부 |
 | `EMAIL_BUSINESS_CONTACT_EMAIL` | `contact_email` | 전부 |
-| `EMAIL_BUSINESS_REGISTRATION_NUMBER` | `business_registration` | KR |
-| `EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER` | `mail_order_registration` | KR |
+| `EMAIL_BUSINESS_REGISTRATION_NUMBER` | `business_registration` | **없음** (아래) |
+| `EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER` | `mail_order_registration` | **없음** (아래) |
 | `EMAIL_BUSINESS_ABN` | `abn` | AU |
 
 `EMAIL_BUSINESS_CONTACT_EMAIL`은 **발신 주소가 아닙니다.** 수신자가 이 메일에
@@ -47,8 +49,16 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 | 값 | 요구하는 profile |
 |---|---|
 | `legal_name` · `postal_address` · `contact_email` | **전부** (`ZZ` 포함) |
-| `business_registration` · `mail_order_registration` | `KR` |
 | `abn` | `AU` |
+| `business_registration` · `mail_order_registration` | **요구하는 profile 없음** |
+
+**한국 두 값은 2026-09-14에 KR profile에서 빠졌습니다.** 시행령 별표 6이 요구하는
+것은 명칭·연락처·수신거부 방법이고, 두 번호는 전자상거래법상 통신판매업자의 표시
+의무입니다. 발송 주체는 호주 법인이고 한국 통신판매업 신고 대상이 아님을
+확인했으므로 번호가 존재하지 않으며, 값을 가질 수 없는 block을 계속 이름 대면
+한국 수신자 marketing이 영구히 거부됩니다. **두 환경변수는 설정하지 않습니다** —
+renderer는 block을 그대로 들고 있으므로, 한국 신고 번호가 생기면 seed 한 줄과 새
+policy version으로 되살아납니다.
 
 ## 확인 방법
 
@@ -61,8 +71,8 @@ EMAIL_BUSINESS_ABN=00 000 000 000
 - `MARKETING_EMAIL_FROM`이 설정되면 **오류**로 바뀝니다. 그 순간부터 marketing은
   전부 거부되는데 `/api/ready`는 계속 통과한다고 답하게 되기 때문입니다 — EM-10이
   unsubscribe 키에 대해 기술한 것과 같은 상태입니다.
-- 관할권 전용 값(`KR`·`AU`)은 marketing이 켜져도 **경고로 남습니다.** 이 배포에
-  그 관할권 수신자가 있는지는 환경변수가 가진 사실이 아닙니다.
+- 관할권 전용 값(오늘은 `AU`의 `abn` 하나)은 marketing이 켜져도 **경고로 남습니다.**
+  이 배포에 그 관할권 수신자가 있는지는 환경변수가 가진 사실이 아닙니다.
 
 빠진 값은 **한 번에 전부** 보고합니다 — 하나 고치고 다시 알게 되는 방식이면 세 번
 배포해야 세 가지를 압니다. 발송 시점의 신호는 여전히

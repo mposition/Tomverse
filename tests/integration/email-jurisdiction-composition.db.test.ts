@@ -144,11 +144,20 @@ test("it carries no advertising label, even under the Korean profile", async () 
 
   assert.equal(bodies.length, 1);
   assert.doesNotMatch(bodies[0].subject, /광고/);
-  // The Korean profile's own blocks do reach it: this is the footer set that
-  // 정보통신망법 asks for, minus the parts that belong to advertising.
-  assert.ok(bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_REGISTRATION_NUMBER));
-  assert.ok(
-    bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_MAIL_ORDER_REGISTRATION_NUMBER)
+  // The Korean footer does reach it: this is the set 정보통신망법 시행령 별표 6
+  // asks for -- the sender's name and a way to contact them -- minus the parts
+  // that belong to advertising.
+  assert.ok(bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_LEGAL_NAME));
+  assert.ok(bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_CONTACT_EMAIL));
+  // And the registration numbers do not, since 2026-09-14: they come from
+  // 전자상거래법's duty on 통신판매업자, the sender is an Australian company that
+  // is not one, and a block whose value can never be set would refuse every
+  // Korean marketing message for good. Asserted as absent rather than left
+  // unmentioned -- the environment above still sets them, so a profile that
+  // named them again would print them and nothing else here would notice.
+  assert.equal(
+    bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_REGISTRATION_NUMBER),
+    false
   );
 });
 
@@ -203,9 +212,11 @@ test("the message is composed against the pinned version, not the active one", a
   await drainStandardEmailDeliveries({ limit: 1 });
 
   assert.equal(bodies.length, 1);
-  // The successor names legal_name alone. The registration numbers prove the
-  // pinned version was the one read.
-  assert.ok(bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_REGISTRATION_NUMBER));
+  // The successor names legal_name alone, so a block the seeded Korean profile
+  // carries and the successor does not is what proves which version was read.
+  // That used to be the registration numbers and is now the contact address:
+  // both versions print the legal name, so it discriminates nothing.
+  assert.ok(bodies[0].text.includes(IDENTITY_ENV.EMAIL_BUSINESS_CONTACT_EMAIL));
 });
 
 test("an unconfigured identity costs the footer, not the message", async () => {
