@@ -76,3 +76,35 @@ export const chatStarterAvailable = (input: {
 }): boolean =>
   !chatStarterKillSwitchEngaged(input.env) &&
   chatStarterEnabledFromValue(input.storedFlagValue);
+
+/**
+ * The answer once a Playwright fixture cookie is allowed to speak.
+ *
+ * ## Why this is a function rather than two lines in the shell
+ *
+ * `isChatStarterEnabled()` returns one boolean for two different reasons: the
+ * stored row says off, or an operator pulled the kill switch. A caller holding
+ * only that boolean cannot tell them apart, and the fixture override in
+ * `components/chat/ReviewWorkspaceShell.tsx` did not: it read `!enabled` and
+ * turned the gallery back on against a pulled switch, under a comment claiming
+ * the switch still won. Cross review round 1, 2026-09-15.
+ *
+ * Nothing in production reaches this -- fixture mode is loopback-only and
+ * `lib/securityEnvironment.ts` refuses to boot a production deployment with its
+ * variables set. What it protects is the meaning of a passing test: a spec that
+ * renders the gallery while the switch is engaged would not notice the switch
+ * breaking, and the switch is this surface's only recovery path once the flag
+ * is on.
+ *
+ * So the cookie stands in for the stored flag and for nothing else. A third
+ * flag added to this shell has a rule to copy rather than a shape to guess at.
+ */
+export const chatStarterEnabledWithFixtureOverride = (input: {
+  /** What the settings read already decided, kill switch folded in. */
+  enabledFromSettings: boolean;
+  /** The fixture cookie's value, or undefined when it is absent. */
+  fixtureCookieValue: string | null | undefined;
+  env: Record<string, string | undefined>;
+}): boolean =>
+  input.enabledFromSettings ||
+  (!chatStarterKillSwitchEngaged(input.env) && input.fixtureCookieValue === "1");
