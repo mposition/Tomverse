@@ -186,15 +186,34 @@ purelymail(사람이 쓰는 메일함)이 계속 `tomverse.app`에서 보냅니�
 존재하지 않습니다(2026-09-14 확인). 한국 profile이 두 block을 더 이상 이름 대지
 않도록 고치는 변경은 `claude/to-develop/email-marketing-activation`에 있습니다.
 
-> **아직 production 코드에 닿지 않은 결함.** 그 수정이 `main`에 오기 전까지
-> **한국 profile로 해석되는 수신자의 transactional 메일에는 footer가 통째로
-> 빠집니다.** `renderJurisdictionFooter()`가 이름 붙은 block 중 하나라도 비면
-> footer 전체를 버리기 때문이고, 두 등록번호가 바로 그 경우입니다. 이것은
-> 2026-09-14의 환경변수 설정이 만든 상태가 아니라 **그 전부터 있던 상태**이며
-> (두 변수는 설정된 적이 없습니다), `/api/ready`는 이것을 error가 아니라
-> warning으로 보므로 계속 `true`로 답합니다. 유일한 신호는 발송마다 남는
-> `email_jurisdiction_footer_degraded`입니다. marketing 쪽은 거부되는 방향이라
-> 안전하지만, transactional은 보내집니다.
+> **footer가 빠지는 결함 — 그리고 2026-09-15의 진단 정정.** 수정 commit이
+> `main`에 있다는 것과 그 수정이 발송에 닿았다는 것은 다릅니다. 발송 경로는
+> seed 상수가 아니라 **`JurisdictionProfile` 행**을 읽고
+> (`lib/standardEmailLane.ts`), 그 행을 만드는
+> `ensureJurisdictionPolicyDraft()`는 version 문자열로 멱등이어서 이미 있는
+> 행을 **고치지 않습니다**. `JURISDICTION_POLICY_SEED_VERSION`이
+> `2026-08-21.jurisdictions.1`에 그대로 있었으므로, KR footer 수정과 CH profile
+> 신설은 코드에만 있었습니다.
+>
+> 그래서 production에서 실제로 무엇이 일어나고 있는지는 **degraded 이유가
+> 갈라 줍니다.** `lib/emailJurisdictionComposition.ts`가 둘을 구분해 적습니다.
+>
+> - `profile_missing` — 활성 version이 `ensureBootstrapPolicyVersion()`이 만든
+>   bootstrap(`2026-08-21.1`)입니다. 이 version에는 **JurisdictionProfile 행이
+>   하나도 없습니다.** 그러면 한국만이 아니라 **모든 수신자**의 transactional
+>   footer가 빠지고, marketing은 `jurisdiction_profile_missing`으로 거부됩니다.
+> - `footer_missing:business_registration,mail_order_registration` — 관리자가
+>   jurisdictions version을 활성화했고, 그 행이 낡은 것입니다.
+>
+> 확인은 `/admin/email-policy` 한 화면입니다. 어느 쪽이든 답은 같습니다 —
+> seed version을 올리고 새 draft를 만들어 활성화하는 것. `/api/ready`는 이
+> 상태를 error가 아니라 warning으로 보므로 계속 `true`로 답하고, 유일한 신호는
+> 발송마다 남는 `email_jurisdiction_footer_degraded`입니다. marketing 쪽은
+> 거부되는 방향이라 안전하지만, transactional은 보내집니다.
+>
+> version은 `2026-09-15.jurisdictions.2`로 올렸고, 같은 실수가 다시
+> 일어나지 않도록 `tests/emailJurisdictionSeed.test.mjs`가 profile 내용의
+> digest를 version에 묶었습니다 — profile을 고치고 version을 두면 실패합니다.
 
 ## 2. 목표 상태
 

@@ -37,11 +37,29 @@ import {
   type JurisdictionProfileKey,
 } from "@/lib/emailJurisdictionCore";
 
-/** The version string of the first seeded policy. */
-export const JURISDICTION_POLICY_SEED_VERSION = "2026-08-21.jurisdictions.1";
+/**
+ * The version string the seed currently describes.
+ *
+ * This is the idempotency key of `ensureJurisdictionPolicyDraft()`: a policy
+ * version row already carrying it is returned as it stands and never edited,
+ * because an active version is what some delivery was already rendered under.
+ *
+ * So editing a profile below reaches nobody until this string moves. The send
+ * path reads the `JurisdictionProfile` row (`lib/standardEmailLane.ts`), not
+ * this file, and a tree that names one set of footer blocks while the row
+ * names another is the failure this constant exists to prevent -- the symptom
+ * is a footer that is silently dropped, or a marketing message held, for a
+ * rule nobody can find in the source.
+ *
+ * Bump it in the same commit as any profile edit, say what moved in the
+ * summary, and remember that the deploy is only half: somebody still creates
+ * the draft and activates it (§12.3, `/admin/email-policy`). Old versions stay
+ * where they are.
+ */
+export const JURISDICTION_POLICY_SEED_VERSION = "2026-09-15.jurisdictions.2";
 
 export const JURISDICTION_POLICY_SEED_SUMMARY =
-  "Initial jurisdiction profiles for KR, US, CA, AU, GB, SG, EU and the ZZ fallback, from the sources confirmed on 2026-08-21.";
+  "Supersedes 2026-08-21.jurisdictions.1. KR no longer names business_registration or mail_order_registration: the sender is not a Korean 통신판매업자, the numbers do not exist, and naming them discarded the entire footer for every Korean recipient. CH becomes a ninth profile of its own rather than resolving through EU. EU and CH footers name abn.";
 
 /**
  * A footer block identifier.

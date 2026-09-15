@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 
 import {
@@ -15,6 +16,13 @@ import {
 
 // The seeded jurisdiction profiles.
 // Contract: docs/policy/email-notifications.md §5.2, §8.7, §12.5.
+
+/**
+ * The seeded profiles as they stood when JURISDICTION_POLICY_SEED_VERSION was
+ * last moved. Recorded, not computed: a digest the test derives from whatever
+ * it is handed proves only that sha256 is deterministic.
+ */
+const SEEDED_BEHAVIOUR_DIGEST = "aafe9807a1ee5466";
 
 test("the seed is usable as written", () => {
   assert.deepEqual(jurisdictionSeedProblems(), []);
@@ -163,4 +171,43 @@ test("the seed version is a fixed string", () => {
   // It is the idempotency key of the draft: two calls must not produce two
   // versions, and a version derived from the clock would.
   assert.match(JURISDICTION_POLICY_SEED_VERSION, /^\d{4}-\d{2}-\d{2}\./);
+});
+
+test("a profile change moves the seed version with it", () => {
+  // The defect this fixes, found 2026-09-15: KR's footerBlocks and the new CH
+  // profile were edited and deployed while the version string stayed at
+  // 2026-08-21.jurisdictions.1. ensureJurisdictionPolicyDraft() is idempotent
+  // by that string, so the row the send path reads never learned about either
+  // change -- the tree said one thing and the mailbox got another.
+  //
+  // notes are excluded on purpose. They are stored on the row and §12.5 wants
+  // them there, but they change nothing a recipient receives, and a guard that
+  // fires on a typo fix is one people learn to bump past without reading.
+  const behaviour = JURISDICTION_PROFILE_SEED.map((profile) => [
+    profile.profileKey,
+    profile.marketingBasis,
+    profile.subjectPrefix,
+    profile.footerBlocks,
+    profile.unsubscribeSlaBusinessDays,
+    profile.consentNoticeIntervalMonths,
+    profile.quietHours ?? null,
+    profile.impliedConsentDays ?? null,
+  ]);
+  const countries = jurisdictionCountryMapSeed().map((row) => [
+    row.countryCode,
+    row.profileKey,
+  ]);
+  const digest = createHash("sha256")
+    .update(JSON.stringify({ behaviour, countries }))
+    .digest("hex")
+    .slice(0, 16);
+
+  assert.equal(
+    digest,
+    SEEDED_BEHAVIOUR_DIGEST,
+    "The seeded profiles changed. Bump JURISDICTION_POLICY_SEED_VERSION, say " +
+      "what moved in JURISDICTION_POLICY_SEED_SUMMARY, and record the new " +
+      `digest here as "${digest}". Without the bump the change reaches no ` +
+      "delivery, because the policy version row is never edited in place."
+  );
 });

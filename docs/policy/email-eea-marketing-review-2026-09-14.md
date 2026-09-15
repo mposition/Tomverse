@@ -253,6 +253,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 | 4 | `docs/policy/email-notifications.md` | §22 **A17**을 9개로 갱신, §21 **Q1**을 이 기록으로 해소 표시, §4.3 EU 주의 문구에서 이 기록을 가리키도록 |
 | 5 | `docs/policy/email-double-opt-in.md` | §7 정정 (§7 조건 3) |
 | 6 | 테스트 | profile 수 8→9, 언어×profile 조합 수(56→63), `CH` 매핑, footer block 추가 |
+| 7 | `lib/emailJurisdictionSeed.ts` | **완료 (2026-09-15).** `JURISDICTION_POLICY_SEED_VERSION`을 `2026-09-15.jurisdictions.2`로 올렸습니다. 항목 1·2를 `main`까지 배포하고도 **행에는 닿지 않은 상태**였습니다 — `ensureJurisdictionPolicyDraft()`가 version 문자열로 멱등이고 발송은 `JurisdictionProfile` 행을 읽기 때문입니다. `tests/emailJurisdictionSeed.test.mjs`가 profile 내용 digest를 version에 묶어 재발을 막습니다. **배포는 절반입니다** — `/admin/email-policy`에서 draft 생성과 활성화(§12.3 2인 승인)가 남습니다 |
 
 ## 10. 다음 검토
 
