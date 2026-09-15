@@ -11,11 +11,11 @@
 // gate.
 //
 // Every payload in tests/fixtures/promptInjectionCorpus.mjs is pushed through
-// each builder that puts untrusted text into a prompt, and the assembled bytes
-// are judged by lib/promptInjectionAudit.ts. What that judges is structural --
-// did the payload escape its region, forge a boundary, get ahead of the rules,
-// or smuggle invisible structure through -- and deliberately not whether a
-// model obeys an instruction, which no assertion here could hold.
+// each builder that puts untrusted text into a prompt. Fenced text surfaces
+// are checked for region containment; the Prompt Refiner's role-separated
+// surface is checked for system-first rules and the exact two-field JSON data
+// message. This deliberately does not claim whether a model obeys an
+// instruction, which no repository assertion could hold.
 //
 // ## The four sources the gate names, and where each actually is
 //
@@ -52,7 +52,15 @@ import {
 import {
     INJECTION_METRIC,
     auditAssembledPrompt,
+    auditRoleSeparatedPrompt,
 } from "../lib/promptInjectionAudit.ts";
+import {
+    PROMPT_REFINER_SYSTEM_INSTRUCTION,
+    promptRefinerModelMessages,
+} from "../lib/promptRefinerModelPrompt.ts";
+import {
+    PROMPT_REFINER_INPUT_SCOPE,
+} from "../lib/promptRefinerSuggestion.ts";
 import {
     ATTACHMENT_MARKERS,
     MEMORY_MARKERS,
@@ -124,6 +132,12 @@ const SURFACE_COVERAGE = [
         surface: "profile-knowledge",
         exercised: true,
         note: "assistant profile knowledge excerpts (release C, §14)",
+    },
+    {
+        source: "prompt-refiner-current-turn",
+        surface: "prompt-refiner",
+        exercised: true,
+        note: "current user-turn text is role-separated and encoded as the sole sourceText field",
     },
 ];
 
@@ -212,6 +226,18 @@ const knowledgeCase = (payload) => ({
     baselineAssembled: BENIGN_KNOWLEDGE_PROMPT,
 });
 
+const promptRefinerCase = (payload) => ({
+    surface: "prompt-refiner",
+    payloadId: payload.id,
+    payload: payload.text,
+    messages: promptRefinerModelMessages({
+        requestId: `planner03_${payload.id}`,
+        prompt: payload.text,
+    }),
+    rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
+    inputScope: PROMPT_REFINER_INPUT_SCOPE,
+});
+
 const violations = [];
 const bySurface = new Map();
 
@@ -227,6 +253,13 @@ for (const payload of PROMPT_INJECTION_CORPUS) {
         bySurface.set(input.surface, (bySurface.get(input.surface) ?? 0) + 1);
         violations.push(...found);
     }
+    const refinerInput = promptRefinerCase(payload);
+    const refinerViolations = auditRoleSeparatedPrompt(refinerInput);
+    bySurface.set(
+        refinerInput.surface,
+        (bySurface.get(refinerInput.surface) ?? 0) + 1
+    );
+    violations.push(...refinerViolations);
 }
 
 const uncoveredSources = SURFACE_COVERAGE.filter(

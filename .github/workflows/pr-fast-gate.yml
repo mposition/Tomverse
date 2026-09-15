@@ -454,12 +454,11 @@ jobs:
         timeout-minutes: 5
         run: npm run check:native-token-boundary
 
-      # PLANNER-03. Memory, imported content and uploaded documents already
-      # reach the prompt, and the defences that keep them data -- fences,
-      # rules stated first, inerting -- had nothing measuring them. This runs
-      # an adversarial corpus through each builder and fails on a payload that
-      # escapes its region, forges a boundary, gets ahead of the rules, or
-      # smuggles a control character through.
+      # PLANNER-03. Memory, imported content, uploaded documents and the
+      # Prompt Refiner's current-turn input cross prompt trust boundaries.
+      # This runs one adversarial corpus through every builder and checks both
+      # fenced-text containment and the Refiner's system-first, canonical JSON
+      # role boundary.
       - name: Prompt-injection containment
         timeout-minutes: 5
         run: npm run check:prompt-injection

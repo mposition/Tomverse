@@ -24,7 +24,17 @@ import {
     MEMORY_MARKERS,
     buildMemoryContextPrompt,
 } from "../lib/memoryContextPrompt.ts";
-import { auditAssembledPrompt } from "../lib/promptInjectionAudit.ts";
+import {
+    auditAssembledPrompt,
+    auditRoleSeparatedPrompt,
+} from "../lib/promptInjectionAudit.ts";
+import {
+    PROMPT_REFINER_SYSTEM_INSTRUCTION,
+    promptRefinerModelMessages,
+} from "../lib/promptRefinerModelPrompt.ts";
+import {
+    PROMPT_REFINER_INPUT_SCOPE,
+} from "../lib/promptRefinerSuggestion.ts";
 import { PROMPT_INJECTION_CORPUS } from "./fixtures/promptInjectionCorpus.mjs";
 
 
@@ -103,6 +113,19 @@ const attachmentInput = (payload, overrides = {}) => ({
     ...overrides,
 });
 
+const promptRefinerInput = (payload, overrides = {}) => ({
+    surface: "prompt-refiner",
+    payloadId: payload.id,
+    payload: payload.text,
+    messages: promptRefinerModelMessages({
+        requestId: `planner03_${payload.id}`,
+        prompt: payload.text,
+    }),
+    rules: PROMPT_REFINER_SYSTEM_INSTRUCTION,
+    inputScope: PROMPT_REFINER_INPUT_SCOPE,
+    ...overrides,
+});
+
 const kinds = (violations) => [...new Set(violations.map((v) => v.kind))].sort();
 
 /* ---------------------------------------------- the builders as they stand */
@@ -123,6 +146,16 @@ test("every corpus payload is contained by the real attachment builder", () => {
             auditAssembledPrompt(attachmentInput(payload)),
             [],
             `${payload.id} escaped the attachment builder`
+        );
+    }
+});
+
+test("every corpus payload stays in the Prompt Refiner data message", () => {
+    for (const payload of PROMPT_INJECTION_CORPUS) {
+        assert.deepEqual(
+            auditRoleSeparatedPrompt(promptRefinerInput(payload)),
+            [],
+            `${payload.id} escaped the Prompt Refiner builder`
         );
     }
 });
@@ -200,6 +233,97 @@ test("a builder that drops the closing fence is caught", () => {
         attachmentInput(payload, { assembled: unfenced })
     );
     assert.ok(found.length > 0, "an unterminated document region went unnoticed");
+});
+
+test("a Prompt Refiner that places source text before its rules is caught", () => {
+    const payload = payloadNamed("priority-claim");
+    const messages = promptRefinerModelMessages({
+        requestId: "planner03_rules_last",
+        prompt: payload.text,
+    });
+    const found = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, { messages: [messages[1], messages[0]] })
+    );
+    assert.ok(kinds(found).includes("rules_after_content"), kinds(found).join());
+});
+
+test("a Prompt Refiner that uses plaintext, another field or another message is caught", () => {
+    const payload = payloadNamed("system-role-claim");
+    const plaintext = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            messages: [
+                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
+                { role: "user", content: payload.text },
+            ],
+        })
+    );
+    assert.ok(kinds(plaintext).includes("forged_boundary"), kinds(plaintext).join());
+
+    const extraContext = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            messages: [
+                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        inputScope: PROMPT_REFINER_INPUT_SCOPE,
+                        sourceText: payload.text,
+                        history: ["must not cross this boundary"],
+                    }),
+                },
+            ],
+        })
+    );
+    assert.ok(
+        kinds(extraContext).includes("structure_injected"),
+        kinds(extraContext).join()
+    );
+
+    const extraMessage = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            messages: [
+                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        inputScope: PROMPT_REFINER_INPUT_SCOPE,
+                        sourceText: payload.text,
+                    }),
+                },
+                { role: "user", content: payload.text },
+            ],
+        })
+    );
+    assert.ok(
+        kinds(extraMessage).includes("structure_injected"),
+        kinds(extraMessage).join()
+    );
+    assert.ok(
+        kinds(extraMessage).includes("escaped_region"),
+        kinds(extraMessage).join()
+    );
+});
+
+test("a Prompt Refiner that leaks source text into another role is caught", () => {
+    const payload = payloadNamed("identity-claim");
+    const found = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            messages: [
+                {
+                    role: "system",
+                    content: `${PROMPT_REFINER_SYSTEM_INSTRUCTION}\n${payload.text}`,
+                },
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        inputScope: PROMPT_REFINER_INPUT_SCOPE,
+                        sourceText: payload.text,
+                    }),
+                },
+            ],
+        })
+    );
+    assert.ok(kinds(found).includes("escaped_region"), kinds(found).join());
 });
 
 test("a body that keeps control characters is caught, and bidi is not", () => {

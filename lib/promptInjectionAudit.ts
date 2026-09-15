@@ -129,6 +129,25 @@ export type AuditInput = {
     baselineAssembled: string;
 };
 
+export type RoleSeparatedPromptMessage = {
+    role: unknown;
+    content: unknown;
+};
+
+export type RoleSeparatedPromptAuditInput = {
+    /** Which model-message builder produced this prompt. */
+    surface: string;
+    payloadId: string;
+    /** The exact untrusted bytes supplied to the builder. */
+    payload: string;
+    /** The ordered messages that would cross the provider boundary. */
+    messages: readonly RoleSeparatedPromptMessage[];
+    /** The system instruction that must frame the payload before it appears. */
+    rules: string;
+    /** The only lawful scope label in the data message. */
+    inputScope: string;
+};
+
 /** Every index at which `needle` occurs. */
 const occurrences = (haystack: string, needle: string): number[] => {
     const found: number[] = [];
@@ -283,6 +302,99 @@ export function auditAssembledPrompt(input: AuditInput): InjectionViolation[] {
                 );
                 break;
             }
+        }
+    }
+
+    return violations;
+}
+
+/**
+ * Audit a builder whose trust boundary is expressed with chat roles and a
+ * canonical JSON data message rather than textual fences.
+ *
+ * The Prompt Refiner is the first such surface: its source text is already a
+ * user instruction, but to this model it must remain the object being
+ * rewritten. Exactly two messages make that boundary reviewable. The system
+ * message states the rules first, and the user message is exactly the JSON
+ * encoding of `{ inputScope, sourceText }`. Any additional role, field or
+ * serialization is a new input channel and therefore fails closed until the
+ * audit contract is deliberately revised.
+ */
+export function auditRoleSeparatedPrompt(
+    input: RoleSeparatedPromptAuditInput
+): InjectionViolation[] {
+    const violations: InjectionViolation[] = [];
+    const say = (kind: InjectionViolationKind, detail: string) =>
+        violations.push({
+            kind,
+            payloadId: input.payloadId,
+            surface: input.surface,
+            detail,
+        });
+
+    if (input.messages.length !== 2) {
+        say(
+            "structure_injected",
+            `expected exactly 2 messages, found ${input.messages.length}`
+        );
+    }
+
+    const rulesMessage = input.messages[0];
+    if (
+        rulesMessage?.role !== "system" ||
+        rulesMessage.content !== input.rules
+    ) {
+        say(
+            "rules_after_content",
+            "the exact system rules are not the first message"
+        );
+    }
+
+    const dataMessage = input.messages[1];
+    if (dataMessage?.role !== "user" || typeof dataMessage.content !== "string") {
+        say(
+            "structure_injected",
+            "the second message is not the canonical user data message"
+        );
+    } else {
+        const expected = JSON.stringify({
+            inputScope: input.inputScope,
+            sourceText: input.payload,
+        });
+        if (dataMessage.content !== expected) {
+            say(
+                "structure_injected",
+                "the user data message is not the exact two-field JSON encoding"
+            );
+        }
+
+        try {
+            const decoded = JSON.parse(dataMessage.content) as unknown;
+            if (
+                typeof decoded !== "object" ||
+                decoded === null ||
+                Array.isArray(decoded) ||
+                (decoded as { inputScope?: unknown }).inputScope !==
+                    input.inputScope ||
+                (decoded as { sourceText?: unknown }).sourceText !== input.payload
+            ) {
+                say(
+                    "escaped_region",
+                    "the decoded data message does not preserve the scope and source bytes"
+                );
+            }
+        } catch {
+            say("forged_boundary", "the user data message is not valid JSON");
+        }
+    }
+
+    for (const [index, message] of input.messages.entries()) {
+        if (index === 1 || typeof message.content !== "string") continue;
+        if (message.content.includes(input.payload)) {
+            say(
+                "escaped_region",
+                `the source payload appears outside the canonical data message at message ${index}`
+            );
         }
     }
 
