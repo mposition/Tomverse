@@ -2179,5 +2179,49 @@ export const en = {
         changesTitle: "Changes to this policy",
         changes: "We may update this policy when the service or legal requirements change and will display the revised effective date.",
         back: "Back to Tomverse",
-    }
+    },
+    chatStarter: {
+        title: "What you can do here",
+        hint: "Pick one to fill the box below. Nothing is sent until you press send.",
+        lockedSignIn: "Sign in to use this",
+        lockedPlan: "Needs the {plan} plan",
+        cards: {
+            compareAnswers: {
+                outcome: "Ask one question and read three models answer it side by side",
+                seed: "Explain in plain language what a vector database is for, in about 200 words.",
+            },
+            documentQuestions: {
+                outcome: "Attach an 18 page PDF and ask several models the same question about it",
+                seed: "I attached a document. Summarise what it asks me to decide, and list every deadline it names.",
+            },
+            sourcedAnswer: {
+                outcome: "Get an answer with the source links it was built from",
+                seed: "What changed in EU AI Act enforcement this year? Include the sources you used.",
+            },
+            debugStackTrace: {
+                outcome: "Paste a stack trace and get the failing line plus a fix to try",
+                seed: "Here is a stack trace from my build. Tell me which line failed and what to change.",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "Turn an answer into an .xlsx file you can download",
+                seed: "Build a monthly budget sheet with category, planned amount and actual amount, and save it as a spreadsheet file.",
+            },
+            readAScreenshot: {
+                outcome: "Attach a screenshot and ask what the error on it means",
+                seed: "I attached a screenshot of an error dialog. Tell me what it means and what to do next.",
+            },
+            translateAndCompare: {
+                outcome: "Translate a draft and read two models versions next to each other",
+                seed: "Translate the text below into English and keep the tone formal:",
+            },
+            compareImageModels: {
+                outcome: "Send one sentence to several image models and compare what each returns",
+                seed: "A quiet reading room at dawn, warm light through tall windows, photographic.",
+            },
+            speakAQuestion: {
+                outcome: "Speak a long question instead of typing it, and edit the text before it is sent",
+                seed: "Turn what I say next into a short, clear set of instructions.",
+            },
+        },
+    },
 };

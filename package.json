@@ -120,6 +120,7 @@
     "eval:router-human-diagnostic": "node --conditions=react-server --import tsx scripts/router-human-review-diagnostic.mjs",
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
+    "check:starter-catalog": "node --import tsx scripts/check-starter-catalog.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
     "check:cloudflare-r2-analytics": "node --import tsx scripts/check-cloudflare-r2-analytics.mjs",
     "check:r2-lifecycle-policy": "node scripts/check-r2-lifecycle-policy.mjs",

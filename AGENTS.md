@@ -1315,3 +1315,56 @@ Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
 contract tests passing when the surface becomes reachable by a product caller.
 <!-- END:prompt-refiner-suggestion-invariant -->
+<!-- BEGIN:chat-starter-catalog-invariant -->
+## Chat starter catalogue invariant
+
+Before changing `lib/chatStarterCatalog.ts`, `lib/chatStarterAvailability.ts`,
+`lib/chatStarterAccess.ts`, `lib/chatStarterCapabilityResolution.ts`,
+`components/chat/ChatStarterGallery.tsx`, the starter wiring in
+`ChatWelcomeScreen.tsx` / `ChatPageClient.tsx` / `ReviewWorkspaceShell.tsx`, or
+`scripts/check-starter-catalog.mjs`, read:
+
+- `docs/ui-contracts/chat-starter-catalog.md`
+
+Non-negotiable requirements:
+
+- **A card says what the viewer gets, not which feature exists.** No card copy
+  in any of the seven locales may claim a better, best, optimal or smartest
+  anything, and none may use an em dash or an en dash.
+- **`available`, `locked` and `hidden` are three different answers.** A flag
+  that is off is `hidden` -- offering a lock with nothing behind it is a sales
+  promise the build cannot keep. A viewer who could unlock it is `locked`, with
+  the requirement stated on the card before the click, never after it. Existence
+  is decided before entitlement, so a dead flag never produces "upgrade to Pro",
+  and a guest meets sign-in before pricing.
+- **Anything undecidable is `hidden`.** An unknown flag key, an unresolved
+  capability and an unloaded plan each fail closed; none of them guesses.
+- **The registry may grow without limit; the screen may not.**
+  `CHAT_STARTER_MAX_VISIBLE` and the selection order live in
+  `lib/chatStarterAvailability.ts` and nowhere else. When a locked card exists
+  the ceiling gives up a *runnable* card, never the last lock -- a gallery that
+  only ever shows what the viewer can already do discloses nothing.
+- **A click seeds and stops.** It writes the existing draft store
+  (`lib/conversationDraftStore.ts`), never a second draft path; it never sends,
+  never overwrites text the person typed, never quotes a price, and never
+  prints a conversation title.
+- **`requires.flagKeys` holds imported constants, never string literals.**
+  `npm run check:starter-catalog` refuses a `"feature.…"` literal in the
+  catalogue, and proves every flag constant, capability resolver, evidence path
+  and locale string still resolves. It runs in PR Fast Gate's static stage.
+- **Adding an entry is three things**: a row in the table, its two strings in
+  all seven locales, and an `evidence` path that exists. Icons are derived from
+  the entry's own accent role and task kind; a fourth step is the one somebody
+  forgets.
+- **No new accent role.** A card wears the role its feature already owns, or
+  the neutral blue/zinc; the AI Review gradient stays reserved even on a card
+  describing AI Review.
+- The whole surface is behind default-off `feature.chatStarterEnabled` with the
+  `CHAT_STARTER_KILL_SWITCH` override, resolved server-side. Off renders
+  nothing at all -- not a disabled teaser.
+- Any related change must keep `tests/chatStarterCatalog.test.mjs` and
+  `tests/e2e/chat-starter-catalog.spec.ts` passing on desktop *and* mobile, and
+  must re-run the mobile composer and sidebar drawer specs.
+- A card that promises a feature this build does not have is a release blocker.
+  Everything else here is ordinary review.
+<!-- END:chat-starter-catalog-invariant -->
