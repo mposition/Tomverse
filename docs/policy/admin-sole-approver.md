@@ -104,6 +104,9 @@ Status: active (2026-09-15 결정). 구현은 `lib/adminApproval.ts`의
   id가 `supersededApprovalIds`에 남습니다. 소비가 아니라 만료인 것은 그 승인으로
   실행된 것이 없기 때문이며, 닫지 않으면 두 번째 관리자가 돌아온 뒤 같은 승인으로
   한 번 더 실행될 수 있습니다. 결속된 두 경로(§4)도 같은 정리를 합니다.
+  이 정리와 일반 경로의 승인 claim은 요청자·action·대상 단위 advisory lock을
+  함께 잡으므로 서로 끼어들지 않습니다. 같은 변경의 승인이 이미 `executing`이면
+  1인 실행은 `approval_executing`으로 거절됩니다.
 
 ## 6.1 알려진 한계
 

@@ -812,3 +812,42 @@ test("a pending request is expired by the sole execution that carries it out", a
     [pending.id]
   );
 });
+
+test("an approval already being carried out refuses a sole execution of the same change", async () => {
+  // Confirmation review (Codex, 2026-09-15): an ordinary claim that has moved
+  // a row to `executing` is the same change in flight, and a sole execution
+  // beside it would run it twice.
+  const admin = await createAdminSession("in-flight-owner");
+  const input = planAdjustInput(admin);
+  await prisma.adminActionApproval.create({
+    data: {
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      status: "executing",
+      payload: input.payload,
+      payloadHash: approvalPayloadHash(input.payload),
+      requestedById: admin.session.user?.id,
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    let executions = 0;
+    await assert.rejects(
+      () => runWithAdminApproval(input, async () => { executions += 1; }),
+      (error: unknown) => {
+        assert.ok(error instanceof AdminSoleApproverRefusedError);
+        assert.equal(error.reason, "approval_executing");
+        return true;
+      }
+    );
+    assert.equal(executions, 0);
+    // Refused before the intent record, and nothing was closed.
+    assert.equal(
+      await prisma.adminAuditLog.count({
+        where: { action: { startsWith: "admin_sole_approver." } },
+      }),
+      0
+    );
+  });
+});

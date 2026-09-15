@@ -73,6 +73,8 @@ const REFUSAL_MESSAGES: Record<string, string> = {
         "The copy has changed since it was read. Read it again and approve from what it says now.",
     copy_unreadable:
         "This campaign's copy could not be rendered, so there is nothing to confirm against.",
+    approval_executing:
+        "An approved request for this change is being carried out right now.",
 };
 
 const refuse = (reason: string): never => {
@@ -196,6 +198,32 @@ export const generalSoleApprovalAvailability = (
  * request for the same action and target by this administrator is the one
  * being carried out.
  */
+/**
+ * A transaction-scoped lock on one requester's requests for one action and
+ * target. `claimApproval()` and the sole executors take it before reading, so
+ * an ordinary claim and a sole execution of the same change cannot interleave.
+ * Deliberately coarser than the payload hash: the bound paths do not match on
+ * it, and the lock only ever serialises one administrator against themselves.
+ */
+export const lockApprovalScope = async (
+    tx: Prisma.TransactionClient,
+    scope: {
+        action: string;
+        targetType: string;
+        targetId?: string | null;
+        requesterId: string;
+    }
+) => {
+    const key = [
+        "tomverse-admin-approval-scope",
+        scope.action,
+        scope.targetType,
+        scope.targetId || "",
+        scope.requesterId,
+    ].join("");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+};
+
 const supersedeOpenRequestsAndRecordStart = async (input: {
     session: Session;
     request?: Request;
@@ -208,26 +236,38 @@ const supersedeOpenRequestsAndRecordStart = async (input: {
     const actorId = input.session.user?.id;
     if (!actorId) throw new Error("An authenticated administrator is required.");
     return prisma.$transaction(async (tx) => {
+        // Serialised with `claimApproval()` for the same scope: without it an
+        // ordinary claim could move a row to `executing` between this read and
+        // this update, and both executions would run.
+        await lockApprovalScope(tx, {
+            action: input.action,
+            targetType: input.targetType,
+            targetId: input.targetId,
+            requesterId: actorId,
+        });
         const now = new Date();
-        const where = {
+        const scope = {
             action: input.action,
             targetType: input.targetType,
             targetId: input.targetId || null,
             requestedById: actorId,
             ...(input.payloadHash ? { payloadHash: input.payloadHash } : {}),
-            status: { in: ["pending", "approved"] },
         };
-        const open = await tx.adminActionApproval.findMany({
-            where,
+        // An approval already being carried out is the same change in flight.
+        // Running it again alone would be the duplicate this closure prevents.
+        const inFlight = await tx.adminActionApproval.count({
+            where: { ...scope, status: "executing", expiresAt: { gt: now } },
+        });
+        if (inFlight > 0) refuse("approval_executing");
+        // The ids recorded are the rows this update actually closed, not the
+        // rows an earlier read saw: a reviewer rejecting in between is not
+        // something this execution superseded.
+        const closed = await tx.adminActionApproval.updateManyAndReturn({
+            where: { ...scope, status: { in: ["pending", "approved"] } },
+            data: { status: "expired", expiresAt: now },
             select: { id: true },
         });
-        const supersededApprovalIds = open.map((row) => row.id);
-        if (supersededApprovalIds.length > 0) {
-            await tx.adminActionApproval.updateMany({
-                where: { ...where, id: { in: supersededApprovalIds } },
-                data: { status: "expired", expiresAt: now },
-            });
-        }
+        const supersededApprovalIds = closed.map((row) => row.id);
         const metadata = { ...input.metadata, supersededApprovalIds };
         await writeAdminAuditLog({
             session: input.session,
