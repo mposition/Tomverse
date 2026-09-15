@@ -866,3 +866,50 @@ deterministic하게 확인한다.
    측정한다.
 5. 품질 증거가 승인된 뒤에만 제품 adapter와 제안형 rollout을 열고, Refiner 결과의
    Router 결합 및 전체 카탈로그 선택 품질은 별도 실험으로 판단한다.
+
+## 2026-09-15 Prompt Refiner receipt·계측 계약 회차
+
+앞 회차의 다음 순서 ②를 provider 호출 없이 구현했다. 실행 사실과 사용자 반응을
+하나의 변경 가능한 행에 섞지 않고 `PromptRefinerExecutionReceipt`와
+`PromptRefinerDispositionReceipt`라는 두 immutable record로 분리했다. strict schema와
+bundle 결속 검사는 성공·dispatch 후 실패·dispatch 전 거절, provider/model/adapter,
+contract version, server timestamps, retry count와 token·microUSD의 known-vs-unknown을
+보존한다. prompt·제안문·digest·user/conversation/session identity·provider 오류
+본문을 담을 필드는 없다.
+
+집계는 suggestion yield, dispatched failure, refusal, 성공 preparation latency
+p50/p95, stale/request, explicit choice/suggestion, accepted/choice를 서로 다른 분모로
+계산하고 각 분자·분모를 함께 낸다. 빈 분모와 percentile은 0이 아니라 `null`이다.
+비용·token은 dispatch된 population 중 reported/missing/total을 분리하며,
+provider/model breakdown에서 attribution이 없는 request는 별도로 센다. 중복·orphan,
+request/suggestion 결속 불일치, stale 단계 모순, 시간 역행과 malformed 입력은
+fail-closed한다.
+
+`npm run report:prompt-refiner-receipts -- --input=<bundle.json>`은 자격증명과 과금
+없이 동결 bundle을 읽고 aggregate만 출력한다. 이 회차는 Prisma table·runtime writer,
+browser disposition API, product adapter, provider 호출, billing, Router 입력,
+AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않았다. 따라서 아직
+운영 데이터가 생기는 경로는 없고, 이 report의 수치는 release gate 증거가 아니다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 +1%p** — C19 관측 계약은 생겼지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 37%** (직전 약 32%) |
+| 구현 | receipt schema·결속·집계·오프라인 report 완료 |
+| 독립 검토·통합 CI | 이 기록 시점에는 대기 |
+| 공개 상태 | 변화 없음 — 제품 adapter 없음, flag default-off, provider 호출 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 이 source를 Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 검증한다.
+2. Refiner model·output cap·timeout·retry 0·per-request/stage 비용 상한을 동결하는
+   사전등록을 만든다. **Claude 독립 검토 필요, provider 호출 0.**
+3. 동결 corpus와 중단 규칙을 가진 작은 shadow harness를 준비한다.
+   **Claude 독립 검토 필요, 준비 자체는 provider 호출 0.**
+4. 별도 과금 승인 뒤 shadow를 한 번 실행해 의미 보존·주입 저항·비용·지연을
+   측정하고, 통과했을 때만 durable writer·제품 adapter 연결을 제안한다.
+5. 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합과
+   전체 카탈로그 선택 품질을 별도 실험으로 판단한다.

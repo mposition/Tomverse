@@ -90,6 +90,13 @@ JSON의 `sourceText` 값으로 인코딩되며, system instruction은 이를 실
 - 최종 답변 provenance: 실제 답을 만든 provider/model을 기존 답변 badge가
   표시한다.
 
+내부 기록의 형식과 분모는
+[`docs/policy/prompt-refiner-observability.md`](../policy/prompt-refiner-observability.md)가
+소유한다. 서버 실행 receipt와 사용자 disposition receipt는 별개이며, 어느 쪽에도
+원문·제안문·digest·user/conversation/session identity 또는 provider 오류 본문을
+담지 않는다. browser response에는 이 receipt도 provider/model attribution도 싣지
+않는다.
+
 Refiner 모델을 답변 badge에 넣거나 Refiner 제안을 최종 답변으로 세는 것은 금지다.
 브라우저의 `refinerVersion`은 `suggest-vN` 형태의 Tomverse prompt-contract
 버전만 허용한다. provider나 model 이름·별칭·release를 이 필드에 인코딩해서
@@ -99,14 +106,18 @@ Refiner 모델을 답변 badge에 넣거나 Refiner 제안을 최종 답변으�
 
 제안은 전송 전에 끝나므로 Refiner 대기 시간은 최종 답변의 TTFT 측정 시작보다
 앞에 있다. 그렇다고 지연이 사라진 것은 아니다. 제안 준비 시간은 별도 지표로
-측정해야 하고, 사용자가 기다리다 원문을 전송하거나 문장을 바꾼 stale 비율도
-보고해야 한다.
+측정하고, 사용자가 기다리다 원문을 전송하거나 문장을 바꾼 stale 비율도 보고한다.
+성공 지연은 성공 suggestion만의 p50/p95, provider 실패율은 dispatch된 execution만,
+stale은 모든 request, 명시적 선택률은 성공 suggestion, 채택률은
+accepted+kept-original을 각각 분모로 쓴다. 서로 다른 분모를 한 conversion 수치로
+합치지 않고, 빈 분모는 0이 아니라 `null`이다.
 
 이 UI 계약은 PLANNER-02, ROUTE-03 또는 품질 증거를 통과시킨 것이 아니다. 실제
 provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필요하다.
 
 1. 비용이 고정된 Refiner 모델·출력 cap·timeout·재시도 0 계약
-2. request/receipt와 사용자 선택률·stale·실패·지연 계측
+2. request/receipt와 사용자 선택률·stale·실패·지연 계측 (provider-independent
+   schema와 오프라인 집계는 구현됨; writer·저장소·제품 수집은 미구현)
 3. 원문 대비 제안문 주입·의미 보존 평가
 4. 승인된 품질 증거와 release gate disposition
 5. server-owned offered 결정과 kill switch
