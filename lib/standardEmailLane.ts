@@ -32,6 +32,7 @@ import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIde
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
+import { parseQuietHours, quietHoursEnd } from "@/lib/emailQuietHoursCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
 import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
@@ -650,6 +651,64 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         },
       });
       return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+
+    // Night-time rules (§5.2 E5, §12.6). Deferred to the end of the window,
+    // not skipped: an evening wave must reach Korean recipients at 08:00
+    // rather than never. Both the profile this row was pinned to and the one
+    // the recipient resolves to now are consulted, so neither a stale pin nor
+    // a move into a quiet-hours jurisdiction lets a message through at night.
+    const profileKeys = [
+      ...new Set([delivery.jurisdictionProfileKey, resolved?.profileKey].filter(Boolean)),
+    ] as string[];
+    const windows = await prisma.jurisdictionProfile.findMany({
+      where: {
+        policyVersionId: delivery.policyVersionId,
+        profileKey: { in: profileKeys },
+      },
+      select: { profileKey: true, quietHours: true },
+    });
+    let deferUntil: Date | null = null;
+    for (const window of windows) {
+      const quietHours = parseQuietHours(window.quietHours);
+      if (quietHours === "invalid") {
+        // A window nobody can read is not a window we may ignore. The message
+        // is held back rather than sent at an hour the rule might forbid, and
+        // the policy row is what has to be fixed.
+        await reportOperationalIncident({
+          code: "EMAIL_QUIET_HOURS_UNREADABLE",
+          title: "A marketing message was held because its quiet hours could not be read",
+          severity: "error",
+          error: `Profile ${window.profileKey} has malformed quietHours.`,
+          context: {
+            component: "standard-email-lane",
+            deliveryId: delivery.id,
+            profileKey: window.profileKey,
+          },
+        });
+        await prisma.emailDelivery.update({
+          where: { id: delivery.id },
+          data: {
+            status: "skipped",
+            skipReason: "quiet_hours",
+            attempts: delivery.attempts,
+            nextAttemptAt: null,
+            claimedAt: null,
+          },
+        });
+        return { outcome: "suppressed" as const, classification: definition.classification };
+      }
+      const end = quietHours ? quietHoursEnd(quietHours, now) : null;
+      if (end && (!deferUntil || end > deferUntil)) deferUntil = end;
+    }
+    if (deferUntil) {
+      // Still pending, attempt count untouched: waiting for the morning is not
+      // a failed attempt and must not spend the retry budget.
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: { nextAttemptAt: deferUntil, claimedAt: null },
+      });
+      return { outcome: "pending" as const, classification: definition.classification };
     }
   }
 

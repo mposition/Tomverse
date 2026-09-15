@@ -189,6 +189,42 @@ test("an account that never opted in is not sent product news", async () => {
   assert.equal(delivery.skipReason, "no_consent");
 });
 
+test("marketing to a Korean recipient at night waits for 08:00 Seoul time", async () => {
+  // docs/policy/email-notifications.md §5.2 E5, §12.6: deferred, not skipped,
+  // and waiting does not spend an attempt.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "KR" });
+  const rows = await queue(user);
+
+  // The next 23:00 in Seoul (UTC+9, no daylight saving) after the row's own
+  // nextAttemptAt, so the row is due and the clock is inside the window.
+  const at = new Date(Date.now() + 60_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  const morning = new Date(at.getTime() + 9 * 60 * 60 * 1_000);
+
+  await drainStandardEmailDeliveries({ limit: 1, now: at });
+
+  assert.equal(calls.length, 0, "nothing may be sent inside the window");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true, attempts: true, nextAttemptAt: true, claimedAt: true },
+  });
+  assert.equal(delivery.status, "pending");
+  assert.equal(delivery.skipReason, null);
+  assert.equal(delivery.attempts, 0);
+  assert.equal(delivery.claimedAt, null);
+  assert.equal(delivery.nextAttemptAt?.toISOString(), morning.toISOString());
+
+  // Not due again before the morning.
+  const early = await drainStandardEmailDeliveries({
+    limit: 1,
+    now: new Date(morning.getTime() - 60_000),
+  });
+  assert.equal(early.claimed, 0);
+});
+
 test("an unconfirmed jurisdiction stops marketing, and says which", async () => {
   await activatePolicy();
   const calls = stubProvider();

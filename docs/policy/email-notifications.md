@@ -2416,7 +2416,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
 | **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). 구현은 미착수 — [설계](email-double-opt-in.md) §11. marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
-| quiet hours 억제 | 정책으로 제어 | Q4 |
+| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 창을 읽을 수 없으면 `quiet_hours`로 보류하고 incident를 올립니다 | Q4 — 회신이 "전자우편은 예외 매체"이면 KR profile의 `quietHours`를 비우는 새 policy version 하나로 끕니다 |
 
 **"만들되 끈다"는 이유:** 규제 확인은 몇 주가 걸리는데 그동안 구조를 못 만들면
 나중에 급하게 만들게 되고, 급하게 만든 동의 시스템이 정확히 이 문서가 막으려는
