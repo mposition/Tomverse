@@ -244,7 +244,13 @@ export async function runWithAdminApproval<T>(
 
   const consumed = await prisma.adminActionApproval.updateMany({
     where: { id: claim.approval.id, status: "executing" },
-    data: { status: "consumed", consumedAt: new Date() },
+    data: {
+      status: "consumed",
+      consumedAt: new Date(),
+      // The lease has done its job; the history keeps the approval's own
+      // deadline rather than the moment the lease would have lapsed.
+      expiresAt: claim.approval.expiresAt,
+    },
   });
   if (consumed.count !== 1) {
     throw new Error("Approved operation could not be marked as consumed.");
