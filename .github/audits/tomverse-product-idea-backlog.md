@@ -125,13 +125,29 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 - CONT-01은 **측정 도구만** 완료입니다. 운영 측정 실행, C/B 정책 선택, seed 규칙 수정은
   남아 있으므로 CONT-01 전체를 완료로 바꾸지 않습니다. 배포 환경·배포 SHA는 미기록입니다.
 
-**현재 이어가기 기능 후보 순서:** CONT-01 → CONT-SEARCH-01 → CONT-EXPORT-01B.
-안전 트랙의 삭제·권한 대응과 기존 Chat 주 개발 우선순위는 별도로 유지합니다.
+**현재 이어가기 트랙의 권장 착수 순서(2026-09-15 재검토):**
 
-**2026-09-15 추가 배치:** 안전 트랙의 삭제·권한 대응 다음에 CONT-01을 원문 검색·
-원문 포함 TXT 확장보다 앞에 둡니다. 이미 제공 중인 이어가기의 문맥 입력 품질이므로
-신규 편의 기능보다 먼저입니다. 제목·파일명 작업은 위 완료 갱신을 따릅니다.
-주 투자 순서는 바꾸지 않으며 CONT-01로 production flag를 끄거나 전체 출시를 차단하지 않습니다.
+1. **CONT-SEARCH-01** — CONT-01의 운영 측정·C/B 결정과 병행 착수할 수 있습니다.
+2. **CONT-EXPORT-01B** — 기존 D6대로 원문 검색 다음입니다.
+3. **IMPORT-LOCK-TITLE-01** — 구현은 제품 결정 후입니다. 정책 결정은 지금 병행할 수 있습니다.
+4. **기존 잠금 순서 cycle 2건** — `task_9d445985`의 P2 안정성 작업입니다.
+   Run↔Chunk를 먼저, staging 만료↔전체 import 삭제를 다음에 둡니다(D 참조).
+
+이는 개발 착수 승인이 아니라 사용자 제안에 대한 자문 순서입니다. 기존 Chat 주 개발
+투자 순위는 유지합니다. **CONT-01은 취소하거나 P2로 내리지 않고 병행 P1로 유지**합니다.
+측정 결과와 C/B 결정이 준비되면 국소 수정 순서를 다시 배치하며, 검색·TXT 전체가 끝날
+때까지 기다리게 하지 않습니다. 검색 대상은 seed 발췌가 아닌 저장된 원문이므로 측정
+완료는 검색 구현의 선행 조건이 아닙니다. 이어가기 확대 마케팅의 문맥 품질 확인 조건도 유지합니다.
+
+검색·TXT는 각자의 소유권·finalized·native/source 잠금·삭제 검증을 반드시 갖춥니다.
+가져오기 목록 제목 정책이 미정이라고 검색에서 잠긴 제목·발췌·개수·존재를 먼저 노출하지
+않습니다. 반대로 목록 제목 수정 전체나 Memory 운영 점검의 완료를 검색 착수 조건으로
+추가하지 않습니다. 새로 제기된 만료/finalize 상태 경합은 아래 별도 조사 항목이며,
+불가역 손상의 근거가 확인되면 그 영향 범위에 한해 이 순서를 재평가합니다.
+
+**이전 배치 기록(2026-09-15, 위 재검토로 대체):** 안전 대응 → CONT-01 → 원문 검색 →
+원문 포함 TXT를 권했습니다. 이후 삭제 직렬화와 측정 도구가 병합됐으므로 운영 측정 대기를
+독립 기능의 개발 대기로 확장하지 않도록 보정했습니다. production flag·전체 출시 조건은 바꾸지 않습니다.
 
 초기 검토 기록(2026-09-11, 현재 착수 순서 아님): 당시 단기 후보 순서는 **대화명 안정화·
 TXT 파일명 정합성 → 원문 검색 → 원문 포함 TXT → 혼용 Voice → 캐시**입니다.
@@ -840,11 +856,68 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 | --- | --- | --- | --- |
 | MEM-SOURCE-DELETE-01 | 원문 삭제와 Memory 추출 저장의 동시 실행 안전성 | 완료(코드) / 병합 사용자 확인(2026-09-15), develop #1448·main #1452 병합 원격 확인. 운영 추출 flag·진행 중 작업 확인은 미확인 | 잔여: 운영 추출 flag·대기/실행 중 run·chunk 읽기 전용 확인(사람). 재착수 후보에서 제외. 검토 중 발견된 기존 잠금 순서 cycle 2건은 별도 후속 과제 |
 | IMPORT-LOCK-TITLE-01 | 잠긴 snapshot 제목의 가져오기 목록 노출 정책 | 정책 P1 / 서버 측 제목 비공개 권장, 제품 결정 대기 | 잠긴 원문 제목의 공개 범위 확정 → 목록 응답·화면·잠금 변경 후 상태 일치 |
+| task_9d445985 | Fix two pre-existing lock-order cycles in memory/import | P2 안정성 / 사용자 제공 칩 ID, 정적 순서 확인·DB 교착 재현 미실시 | Run↔Chunk → staging 만료↔전체 import 삭제 순서로 정리. 같은 transaction의 정산·rollback·lease fencing·재시도 경계 유지 |
+| IMPORT-STAGING-FINALIZE-01 | 만료 sweep의 finalize 완료 상태 덮어쓰기 경합 | 별도 조사 / P2 잠정, DB 재현·운영 발생률 미확인. 이 ID는 목록용이며 외부 칩 생성 아님 | 후보 선별 후 상태 변경의 재현 → 원문 가시성·재시도·삭제 영향 확인 → Import 행 잠금 아래 상태·TTL 재확인. task_9d445985의 두 번째 수정과 조율 |
 | SEC-OPS-01 | Tomverse 전체 플랫폼의 정기 Commercial Grade 보안 점검 | 운영 필수 / 목록 등록, 기존 주간 자동화 일시중지 | 대상 자산·검증 기준·안전한 실행 범위를 정리하고 기존 자동화 보강·재개 여부 승인 |
+
+#### 2026-09-15 후속 순서 검토 — 두 교착과 별도의 만료/finalize 경합
+
+- **검토 기준**: 원격 fetch 후 새 분석 worktree의 develop
+  `fd7af39caa390ddcb1d1e1eb0ade7f7e6652578d`를 읽고 main
+  `82551fd13a3979f5c22abb2fdf499d96caf6c029`과 관련 파일을 대조했습니다.
+  아래 claim/complete·만료·finalize·삭제 함수의 차이는 없습니다. 가져오기 목록의
+  이어가기 요약 추가 등 다른 차이까지 없다는 뜻은 아닙니다. 실제 배포·운영 DB·유료 호출은 확인하지 않았습니다.
+- **사용자 제공 칩**: `task_9d445985` — “Fix two pre-existing lock-order cycles in memory/import”.
+  기존 결함이라는 이유가 아니라, 현재 확인된 영향과 transaction 경계를 근거로 P2를 권합니다.
+  두 교착 모두 DB 동시성 재현은 아직 없으므로 운영 사고·빈도·실제 대기 시간을 단정하지 않습니다.
+
+**1. Run↔Chunk — 두 교착 중 먼저**
+
+- `lib/memoryExtractionService.ts:548`의 `claimMemoryExtractionRun()`은 Run UPDATE
+  후 이전 generation의 Chunk를 pending으로 돌립니다. `:716`의 `completeExtractionChunk()`는
+  크레딧 계정 잠금 → Chunk UPDATE → Run UPDATE 순서여서, lease 재획득과 이전 worker의
+  완료 보고가 겹칠 때 반대 순서의 대기가 가능합니다.
+- 완료 보고와 `settleExtractionRunCredits()`는 같은 transaction입니다. 이 transaction이
+  교착 피해자로 rollback되는 것 자체가 부분 정산·중복 청구의 근거는 아닙니다. 예상 비용은
+  재실행에 따른 provider 원가와 계정 크레딧 작업의 지연입니다. 모든 재시도·Memory 저장이
+  무결하다는 포괄적 증명으로 확대하지 않으며, 수정 시 기존 fencing·멱등 정산 회귀를 확인합니다.
+
+**2. staging 만료↔전체 import 삭제 — 두 교착 중 다음**
+
+- `lib/externalImportService.ts:169`의 `expireStagingImport()`는 미확정 Conversation
+  삭제 → Import UPDATE, `:1699`의 `deleteExternalImport()`는 Import 행 잠금 →
+  Snapshot 행 잠금 순서입니다. 같은 미확정 import에서 만료 정리와 취소가 겹칠 수 있습니다.
+- 이 교착 자체의 관측 가능한 영향 후보는 사용자 취소 실패·정리 지연입니다. import 경로에는
+  과금 처리가 없으며, transaction rollback을 원문 데이터 소실로 표현하지 않습니다.
+- **완료 기준**: 공통 순서로 정리하고 DB 동시성 테스트에서 두 실행 순서를 확인합니다.
+  1번은 정산 원자성·lease fencing·유계 재시도를, 2번은 취소/삭제 의미와 다음 정리 회차의
+  복구를 함께 확인합니다. 교착만을 이유로 관련 없는 검색·TXT의 출시 차단 조건을 추가하지 않습니다.
+
+**3. IMPORT-STAGING-FINALIZE-01 — 위 두 교착에 섞지 않는 상태 경합**
+
+- 사용자 추가 의심을 코드로 좁혔습니다. `reconcileExpiredExternalImportStaging()`(`:1889`)는
+  transaction 밖에서 후보 ID를 고른 뒤, transaction 안에서 status·TTL을 재조회하지 않습니다.
+  `expireStagingImport()`는 `where: { id }`만으로 상태를 failed로 덮어씁니다.
+- 따라서 후보 선별과 만료 쓰기 사이에 finalize가 완료되거나 마지막 활동 시각이 갱신되는
+  실행 순서를 검사해야 합니다. finalize 자체에는 TTL 검사가 있으므로, 이미 만료된 상태에서
+  새 finalize가 정상 성공한다고 가정하지 않습니다. 만료 직전 검사를 통과한 in-flight finalize가
+  완료되는 순서 등 실제 가능한 시간·잠금 조건을 DB 테스트로 고정해야 합니다.
+- **현재 확인한 반증/한계**: 만료 삭제는 `finalized: false`만 대상으로 합니다.
+  `listExternalConversations()`(`:316`)와 `getExternalConversation()`(`:541`)도
+  원문 행의 `finalized`로 판정하고 부모 Import의 completed 상태를 요구하지 않습니다.
+  따라서 failed 덮어쓰기만으로 확정된 원문이 삭제되거나 원문 목록에서 숨겨진다고 단정하지 않습니다.
+- 덮어쓰기가 발생하면 가져오기 이력은 failed를 반환하고, `finalizeExternalImport()`(`:1523`)의
+  completed 전용 멱등 응답 대신 410 경로로 갈 수 있습니다. 이는 별도 상태 정합성 문제입니다.
+  후속 화면·재시작/삭제에 따른 추가 피해와 운영 발생은 아직 확인하지 않았습니다.
+- **다음 완료 단위**: 후보 선정 후 finalize/활동/삭제가 일어나는 회귀 시료를 만들고, 만료 작업이
+  Import 행을 먼저 잠근 뒤 상태·두 TTL을 다시 판정하도록 검토합니다. 재확인 전에 payload를
+  삭제하고 마지막 UPDATE만 조건부로 바꾸는 수정으로 끝내지 않습니다. 건너뛴 후보는 실제 만료
+  처리 건수에 포함하지 않습니다. 동일 함수의 잠금 정리와 함께 고칠 수 있으나 두 교착의 재현과는
+  별도 assertion으로 추적합니다. 실제 데이터 손상 경로가 확인되면 우선순위를 올립니다.
 
 #### MEM-SOURCE-DELETE-01 / IMPORT-LOCK-TITLE-01 — PR-2와 분리한 기존 위험
 
-- **분리와 우선순위**: 별도 변경으로 분리하는 것은 타당하지만 기존 동작이라는 이유로
+- **착수 전 분리·우선순위 기록**(MEM-SOURCE-DELETE-01 코드 완료 전 판단): 별도 변경으로 분리하는 것은 타당하지만 기존 동작이라는 이유로
   안전 결함을 후순위 편의 개선으로 취급하지 않습니다. 삭제·추출 경합의 확인과 수정은
   B의 원문 검색·원문 포함 TXT보다 우선합니다. 제목 공개 정책 검토는 병행할 수 있습니다.
   A의 장기 제품 투자 순서를 바꾸거나 Memory 없는 Chat·이어가기를 일괄 중단한다는 뜻은
