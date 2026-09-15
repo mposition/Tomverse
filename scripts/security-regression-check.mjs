@@ -212,8 +212,15 @@ const checks = [
     file: "lib/chatSecurity.ts",
     test: (source) => {
       const guardrails = read("lib/chatCostGuardrails.ts");
+      const tokenQuota = read("lib/chatTokenQuotaCore.ts");
       return (
-        source.includes("CHAT_USER_TOKENS_PER_DAY") &&
+        // Guests keep a token quota; accounts are counted but never capped by
+        // one, so the retired CHAT_USER_TOKENS_PER_* variables stay unread.
+        source.includes("guestTokenLimits(process.env)") &&
+        source.includes("recordUsage(") &&
+        !source.includes("process.env.CHAT_USER_TOKENS_PER_DAY") &&
+        !source.includes("process.env.CHAT_USER_TOKENS_PER_MONTH") &&
+        tokenQuota.includes("CHAT_GUEST_TOKENS_PER_DAY") &&
         source.includes("getChatCostGuardrails") &&
         // Plan-funded and total cost are separate buckets, so purchased
         // credits are not blocked twice by a plan-shaped ceiling.

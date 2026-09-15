@@ -72,6 +72,12 @@ import {
     withFutureResetAt,
 } from "@/lib/chatLimitDecisionCore";
 import { recordChatLimitDecision } from "@/lib/chatLimitDecisions";
+import {
+    GUEST_IP_TOKEN_MULTIPLIER,
+    guestTokenLimits,
+    tokenQuotaRefusalDetails,
+    type TokenQuotaScope,
+} from "@/lib/chatTokenQuotaCore";
 import { isWebSearchMode, type WebSearchMode } from "@/lib/appDefaults";
 import { getAnonymousClientKey } from "@/lib/clientIp";
 import {
@@ -1238,6 +1244,25 @@ const incrementUsage = async (
     return rows.length > 0;
 };
 
+/** Counts into a bucket that has no ceiling. */
+const recordUsage = async (
+    tx: Prisma.TransactionClient,
+    key: string,
+    period: string,
+    start: Date,
+    amount: number
+) => {
+    if (!Number.isSafeInteger(amount) || amount <= 0) return;
+    await tx.$executeRaw`
+        INSERT INTO "ChatUsageBucket" ("key", "period", "periodStart", "count", "updatedAt")
+        VALUES (${key}, ${period}, ${start}, ${amount}, NOW())
+        ON CONFLICT ("key", "period", "periodStart")
+        DO UPDATE SET
+            "count" = "ChatUsageBucket"."count" + ${amount},
+            "updatedAt" = NOW()
+    `;
+};
+
 // A separate, feature-scoped guest cap (independent of the general
 // day/month chat-message quota from limitsFor/acquireChatAccess): guests
 // get exactly one Quick Difference Summary per day. Uses its own "period"
@@ -2162,51 +2187,9 @@ export const preflightChatComparisonAccess = async (
             }
         }
 
-        const tokenLimits = [
-            {
-                period: "tokens-day",
-                start: userDayWindow.start,
-                limit: positiveInteger(
-                    process.env.CHAT_USER_TOKENS_PER_DAY,
-                    1_000_000
-                ),
-                retryPeriod: "day" as const,
-            },
-            {
-                period: "tokens-month",
-                start: monthStart,
-                limit: positiveInteger(
-                    process.env.CHAT_USER_TOKENS_PER_MONTH,
-                    20_000_000
-                ),
-                retryPeriod: "month" as const,
-            },
-        ];
-        for (const rule of tokenLimits) {
-            const used = await readUsageCount(
-                tx,
-                access.subjectKey,
-                rule.period,
-                rule.start
-            );
-            if (used + totalReservedTokens > rule.limit) {
-                throw new ChatAccessError(
-                    429,
-                    "CHAT_TOKEN_QUOTA_EXCEEDED",
-                    "The selected models need more token capacity than is currently available.",
-                    retryAfterFor(
-                        rule.retryPeriod,
-                        now,
-                        rule.retryPeriod === "day" ? userDayWindow.end : undefined
-                    ),
-                    {
-                        scope: rule.retryPeriod,
-                        requiredTokens: totalReservedTokens,
-                        availableTokens: Math.max(0, rule.limit - used),
-                    }
-                );
-            }
-        }
+        // No cumulative token check: an account's allowance is credits. The
+        // reservation path must agree, or a comparison admitted here would be
+        // refused per model there -- lib/chatTokenQuotaCore.ts.
 
         const providerGroups = new Map<
             AiModel["provider"],
@@ -2557,44 +2540,34 @@ export const acquireChatAccess = async (
         decisionState.resetAt = safeDailyResetAt(accessDayWindow.end, now);
         const accessPeriodStart = (period: Period) =>
             period === "day" ? accessDayWindow.start : periodStart(period, now);
-        const tokenLimits =
-            access.kind === "user"
-                ? [
-                      {
-                          period: "tokens-day",
-                          start: accessDayWindow.start,
-                          limit: positiveInteger(
-                              process.env.CHAT_USER_TOKENS_PER_DAY,
-                              1_000_000
-                          ),
-                      },
-                      {
-                          period: "tokens-month",
-                          start: periodStart("month", now),
-                          limit: positiveInteger(
-                              process.env.CHAT_USER_TOKENS_PER_MONTH,
-                              20_000_000
-                          ),
-                      },
-                  ]
-                : [
-                      {
-                          period: "tokens-day",
-                          start: accessDayWindow.start,
-                          limit: positiveInteger(
-                              process.env.CHAT_GUEST_TOKENS_PER_DAY,
-                              40_000
-                          ),
-                      },
-                      {
-                          period: "tokens-month",
-                          start: periodStart("month", now),
-                          limit: positiveInteger(
-                              process.env.CHAT_GUEST_TOKENS_PER_MONTH,
-                              200_000
-                          ),
-                      },
-                  ];
+        // `limit` is null for an account: the bucket is still counted, never
+        // capped. lib/chatTokenQuotaCore.ts says why.
+        const guestTokens = guestTokenLimits(process.env);
+        const tokenLimits: Array<{
+            period: "tokens-day" | "tokens-month";
+            scope: TokenQuotaScope;
+            start: Date;
+            limit: number | null;
+        }> = [
+            {
+                period: "tokens-day",
+                scope: "day",
+                start: accessDayWindow.start,
+                limit: access.kind === "user" ? null : guestTokens.day,
+            },
+            {
+                period: "tokens-month",
+                scope: "month",
+                start: periodStart("month", now),
+                limit: access.kind === "user" ? null : guestTokens.month,
+            },
+        ];
+        const tokenQuotaResetAt = (scope: TokenQuotaScope) =>
+            scope === "day"
+                ? safeDailyResetAt(accessDayWindow.end, now)
+                : monthlyResetAt(now);
+        const tokenQuotaTimeZone = (scope: TokenQuotaScope) =>
+            scope === "day" ? accessDayWindow.timeZone : "UTC";
         // `cost-*` tracks the plan-funded share only; `op-cost-*` tracks every
         // micro-USD including purchased-credit-funded spend. Both are
         // operational guardrails -- neither is the user's entitlement.
@@ -3114,28 +3087,60 @@ export const acquireChatAccess = async (
             }
         }
 
-        for (const rule of tokenLimits) {
-            const allowed = await incrementUsage(
-                tx,
-                access.subjectKey,
-                rule.period,
-                rule.start,
-                rule.limit,
-                reservedTokens
+        const tokenQuotaError = async (
+            code: "CHAT_TOKEN_QUOTA_EXCEEDED" | "CHAT_IP_TOKEN_QUOTA_EXCEEDED",
+            message: string,
+            rule: (typeof tokenLimits)[number],
+            key: string,
+            period: string,
+            limit: number
+        ) =>
+            new ChatAccessError(
+                429,
+                code,
+                message,
+                retryAfterFor(
+                    rule.scope,
+                    now,
+                    rule.scope === "day" ? accessDayWindow.end : undefined
+                ),
+                tokenQuotaRefusalDetails({
+                    scope: rule.scope,
+                    used: await readUsageCount(tx, key, period, rule.start),
+                    limit,
+                    requiredTokens: reservedTokens,
+                    resetAt: tokenQuotaResetAt(rule.scope),
+                    timeZone: tokenQuotaTimeZone(rule.scope),
+                })
             );
-            if (!allowed) {
-                throw new ChatAccessError(
-                    429,
-                    "CHAT_TOKEN_QUOTA_EXCEEDED",
-                    "Chat token quota exceeded.",
-                    retryAfterFor(
-                        rule.period === "tokens-day" ? "day" : "month",
-                        now,
-                        rule.period === "tokens-day"
-                            ? accessDayWindow.end
-                            : undefined
-                    )
+        for (const rule of tokenLimits) {
+            if (rule.limit === null) {
+                await recordUsage(
+                    tx,
+                    access.subjectKey,
+                    rule.period,
+                    rule.start,
+                    reservedTokens
                 );
+            } else {
+                const allowed = await incrementUsage(
+                    tx,
+                    access.subjectKey,
+                    rule.period,
+                    rule.start,
+                    rule.limit,
+                    reservedTokens
+                );
+                if (!allowed) {
+                    throw await tokenQuotaError(
+                        "CHAT_TOKEN_QUOTA_EXCEEDED",
+                        "Chat token quota exceeded.",
+                        rule,
+                        access.subjectKey,
+                        rule.period,
+                        rule.limit
+                    );
+                }
             }
             reservationEntries.push({
                 key: access.subjectKey,
@@ -3144,28 +3149,25 @@ export const acquireChatAccess = async (
                 amount: reservedTokens,
                 metric: "tokens",
             });
-            if (access.kind === "guest") {
+            if (access.kind === "guest" && rule.limit !== null) {
                 const ipPeriod = `ip-${rule.period}`;
+                const ipLimit = rule.limit * GUEST_IP_TOKEN_MULTIPLIER;
                 const ipAllowed = await incrementUsage(
                     tx,
                     access.ipKey,
                     ipPeriod,
                     rule.start,
-                    rule.limit * 3,
+                    ipLimit,
                     reservedTokens
                 );
                 if (!ipAllowed) {
-                    throw new ChatAccessError(
-                        429,
+                    throw await tokenQuotaError(
                         "CHAT_IP_TOKEN_QUOTA_EXCEEDED",
                         "Guest token quota exceeded.",
-                        retryAfterFor(
-                            rule.period === "tokens-day" ? "day" : "month",
-                            now,
-                            rule.period === "tokens-day"
-                                ? accessDayWindow.end
-                                : undefined
-                        )
+                        rule,
+                        access.ipKey,
+                        ipPeriod,
+                        ipLimit
                     );
                 }
                 reservationEntries.push({
