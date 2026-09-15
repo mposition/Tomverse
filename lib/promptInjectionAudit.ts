@@ -27,8 +27,8 @@
  *   2. **forged_boundary** — the payload changes a fence count or the encoded
  *      data message can no longer be decoded as its required boundary.
  *   3. **rules_after_content** — content appears before its framing rules, the
- *      rules are not in the required role, or an independently pinned security
- *      rule is absent.
+ *      rules are not in the required role, or the independently pinned exact
+ *      rule block is added to, removed from, altered or reordered.
  *   4. **structure_injected** — the payload contributes structure that its
  *      builder must remove, or the role-separated surface gains an unexpected
  *      message, field or non-canonical serialization.
@@ -131,19 +131,19 @@ export type AuditInput = {
     baselineAssembled: string;
 };
 
-export type RoleSeparatedPromptMessage = {
+export type PromptRefinerAuditMessage = {
     role: unknown;
     content: unknown;
 };
 
-export type RoleSeparatedPromptAuditInput = {
+export type PromptRefinerMessageAuditInput = {
     /** Which model-message builder produced this prompt. */
     surface: string;
     payloadId: string;
     /** The exact untrusted bytes supplied to the builder. */
     payload: string;
     /** The ordered messages that would cross the provider boundary. */
-    messages: readonly (RoleSeparatedPromptMessage | null | undefined)[] | null;
+    messages: readonly (PromptRefinerAuditMessage | null | undefined)[] | null;
     /** The system instruction that must frame the payload before it appears. */
     rules: string;
     /** The only lawful scope label in the data message. */
@@ -151,7 +151,7 @@ export type RoleSeparatedPromptAuditInput = {
 };
 
 /**
- * Independent semantic floor for the Prompt Refiner's system message.
+ * Independent exact contract for the Prompt Refiner's system message.
  *
  * Do not derive this from `PROMPT_REFINER_SYSTEM_INSTRUCTION`: the audit must
  * fail when the builder and its exported constant are weakened together. A
@@ -342,19 +342,19 @@ export function auditAssembledPrompt(input: AuditInput): InjectionViolation[] {
 }
 
 /**
- * Audit a builder whose trust boundary is expressed with chat roles and a
- * canonical JSON data message rather than textual fences.
+ * Audit the Prompt Refiner builder, whose trust boundary is expressed with
+ * chat roles and a canonical JSON data message rather than textual fences.
  *
- * The Prompt Refiner is the first such surface: its source text is already a
- * user instruction, but to this model it must remain the object being
- * rewritten. Exactly two messages make that boundary reviewable. The system
+ * Its source text is already a user instruction, but to the Refiner model it
+ * must remain the object being rewritten. Exactly two messages make that
+ * boundary reviewable. The system
  * message states the rules first, and the user message is exactly the JSON
  * encoding of `{ inputScope, sourceText }`. Any additional role, field or
  * serialization is a new input channel and therefore fails closed until the
  * audit contract is deliberately revised.
  */
-export function auditRoleSeparatedPrompt(
-    input: RoleSeparatedPromptAuditInput
+export function auditPromptRefinerMessages(
+    input: PromptRefinerMessageAuditInput
 ): InjectionViolation[] {
     const violations: InjectionViolation[] = [];
     const say = (kind: InjectionViolationKind, detail: string) =>

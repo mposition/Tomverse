@@ -56,7 +56,7 @@ import {
 import {
     INJECTION_METRIC,
     auditAssembledPrompt,
-    auditRoleSeparatedPrompt,
+    auditPromptRefinerMessages,
 } from "../lib/promptInjectionAudit.ts";
 import {
     PROMPT_REFINER_SYSTEM_INSTRUCTION,
@@ -268,7 +268,7 @@ for (const payload of PROMPT_INJECTION_CORPUS) {
         violations.push(...found);
     }
     const refinerInput = promptRefinerCase(payload);
-    const refinerViolations = auditRoleSeparatedPrompt(refinerInput);
+    const refinerViolations = auditPromptRefinerMessages(refinerInput);
     bySurface.set(
         refinerInput.surface,
         (bySurface.get(refinerInput.surface) ?? 0) + 1
