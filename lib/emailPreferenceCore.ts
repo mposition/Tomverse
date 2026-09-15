@@ -96,6 +96,15 @@ export type ConsentGateInput = {
     hasAccount: boolean;
     /** The stored preference, or null when no row exists for it. */
     storedEnabled: boolean | null;
+    /**
+     * When the confirmation link was clicked, or null when it never was.
+     *
+     * docs/policy/email-double-opt-in.md §6. For a consent-based purpose an
+     * enabled row with no confirmation is refused, in the same direction as an
+     * absent row: "the switch is on" is not "the person agreed" until the
+     * mailbox owner has said so. Ignored for purposes that need no consent.
+     */
+    storedConfirmedAt: Date | null;
 };
 
 export type ConsentGateVerdict =
@@ -108,7 +117,15 @@ export const consentGateVerdict = (input: ConsentGateInput): ConsentGateVerdict 
     if (input.classification === "marketing" && !input.hasAccount) return REFUSED;
     if (!input.purpose || !isEmailPurpose(input.purpose)) return { allowed: true };
     if (input.storedEnabled !== null) {
-        return input.storedEnabled ? { allowed: true } : REFUSED;
+        if (!input.storedEnabled) return REFUSED;
+        // Unconfirmed consent is not consent (docs/policy/email-double-opt-in.md
+        // §3 rule 5). This is also what handles rows switched on before the
+        // confirmation step existed: they have no confirmedAt, so they are
+        // refused here without a migration touching them.
+        if (CONSENT_REQUIRED_PURPOSES.has(input.purpose) && !input.storedConfirmedAt) {
+            return REFUSED;
+        }
+        return { allowed: true };
     }
     // No row. What that means depends on whether the purpose needed consent.
     return CONSENT_REQUIRED_PURPOSES.has(input.purpose) ? REFUSED : { allowed: true };
@@ -117,7 +134,8 @@ export const consentGateVerdict = (input: ConsentGateInput): ConsentGateVerdict 
 export type PreferenceChangeRefusal =
   | { allowed: false; reason: "unknown_purpose" }
   | { allowed: false; reason: "locked" }
-  | { allowed: false; reason: "token_cannot_enable" };
+  | { allowed: false; reason: "token_cannot_enable" }
+  | { allowed: false; reason: "confirmation_required" };
 
 export type PreferenceChangeDecision = { allowed: true } | PreferenceChangeRefusal;
 
@@ -127,11 +145,19 @@ export type PreferenceChangeDecision = { allowed: true } | PreferenceChangeRefus
  * `viaToken` is the unsubscribe link: it may only ever turn something off.
  * A leaked token then has a worst case of "this person receives less mail",
  * which is the property that lets the link work without a login at all (§11.4).
+ *
+ * `confirmed` is the double opt-in (docs/policy/email-double-opt-in.md §3 rule
+ * 1): a consent-based purpose may be switched on only by the confirmation
+ * path, which is the one caller that has checked a confirmation token. Every
+ * other caller -- the preference centre included -- asks for a confirmation
+ * instead. The unsubscribe rule above is unchanged and checked first, so a
+ * token that could unsubscribe still cannot enable anything, confirmed or not.
  */
 export const preferenceChangeDecision = (input: {
   purpose: string;
   enabled: boolean;
   viaToken?: boolean;
+  confirmed?: boolean;
 }): PreferenceChangeDecision => {
   if (!isEmailPurpose(input.purpose)) {
     return { allowed: false, reason: "unknown_purpose" };
@@ -142,7 +168,29 @@ export const preferenceChangeDecision = (input: {
   if (input.viaToken && input.enabled) {
     return { allowed: false, reason: "token_cannot_enable" };
   }
+  if (input.enabled && CONSENT_REQUIRED_PURPOSES.has(input.purpose) && !input.confirmed) {
+    return { allowed: false, reason: "confirmation_required" };
+  }
   return { allowed: true };
+};
+
+/**
+ * Where a consent-based preference stands, derived and never stored.
+ *
+ * docs/policy/email-double-opt-in.md §4.1. `unconfirmed` is the fourth state
+ * that table does not list: a row switched on before the confirmation step
+ * existed. It is recorded as what happened -- the person did switch it on --
+ * and the send gate refuses it; the preference centre asks them to confirm.
+ */
+export type ConsentConfirmationState = "off" | "pending" | "on" | "unconfirmed";
+
+export const consentConfirmationState = (row: {
+  enabled: boolean;
+  confirmationRequestedAt: Date | null;
+  confirmedAt: Date | null;
+}): ConsentConfirmationState => {
+  if (row.enabled) return row.confirmedAt ? "on" : "unconfirmed";
+  return row.confirmationRequestedAt ? "pending" : "off";
 };
 
 export type ConsentAction =
@@ -150,6 +198,7 @@ export type ConsentAction =
   | "withdrawn"
   | "reconfirmed"
   | "confirmation_notice_sent"
+  | "confirmation_requested"
   | "lapsed";
 
 /**

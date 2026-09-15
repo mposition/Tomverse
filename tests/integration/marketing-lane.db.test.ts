@@ -141,7 +141,11 @@ const activatePolicy = async () => {
 };
 
 /** An account that opted in to product updates, in a country we can name. */
-const subscriber = async (options?: { country?: string; consented?: boolean }) => {
+const subscriber = async (options?: {
+  country?: string;
+  consented?: boolean;
+  confirmed?: boolean;
+}) => {
   const user = await prisma.user.create({
     data: { email: `${randomUUID()}@example.test`, name: "Subscriber" },
   });
@@ -163,6 +167,10 @@ const subscriber = async (options?: { country?: string; consented?: boolean }) =
         enabled: true,
         source: "preference_center",
         grantedAt: new Date(),
+        // Confirmed: unconfirmed consent is refused by the gate
+        // (docs/policy/email-double-opt-in.md §6), and these tests are about
+        // what happens after it.
+        confirmedAt: options?.confirmed === false ? null : new Date(),
       },
     });
   }
@@ -260,6 +268,26 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
   assert.equal(attempted.deferReason, null);
 });
 
+test("consent switched on but never confirmed is not sent", async () => {
+  // docs/policy/email-double-opt-in.md §3 rule 5, §7: a row enabled before the
+  // confirmation step existed has no confirmedAt, and the gate refuses it
+  // without any migration touching it.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ confirmed: false });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 0);
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.equal(delivery.status, "skipped");
+  assert.equal(delivery.skipReason, "no_consent");
+});
+
 test("an unconfirmed jurisdiction stops marketing, and says which", async () => {
   await activatePolicy();
   const calls = stubProvider();
@@ -273,6 +301,7 @@ test("an unconfirmed jurisdiction stops marketing, and says which", async () => 
       enabled: true,
       source: "preference_center",
       grantedAt: new Date(),
+      confirmedAt: new Date(),
     },
   });
   const rows = await queue(user);

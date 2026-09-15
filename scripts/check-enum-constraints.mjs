@@ -467,7 +467,7 @@ const REGISTRY = {
   ConsentRecord_action_check: {
     owner: "type_only",
     reason:
-      "ConsentAction in lib/emailPreferenceCore.ts: granted, withdrawn, reconfirmed, confirmation_notice_sent, lapsed. The last two are the Korean confirmation duty and the optional lapse behind its own flag (\u00a75.5); they are separate values precisely because notifying is not expiring, and folding them together would make the history unable to answer which one happened.",
+      "ConsentAction in lib/emailPreferenceCore.ts: granted, withdrawn, reconfirmed, confirmation_notice_sent, confirmation_requested, lapsed. confirmation_notice_sent and lapsed are the Korean confirmation duty and the optional lapse behind its own flag (\u00a75.5); they are separate values precisely because notifying is not expiring, and folding them together would make the history unable to answer which one happened. confirmation_requested is the double opt-in's request (docs/policy/email-double-opt-in.md \u00a74.4) and is not a consent: recording it as granted would log the sending of a confirmation mail as agreement.",
   },
   ConsentRecord_captured_via_check: {
     owner: "database",

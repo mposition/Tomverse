@@ -514,6 +514,9 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         enabled: true,
         source: true,
         grantedAt: true,
+        // The double opt-in state: when they asked to confirm and when they did.
+        confirmationRequestedAt: true,
+        confirmedAt: true,
         lastConfirmationNoticeAt: true,
         nextConfirmationNoticeAt: true,
         createdAt: true,

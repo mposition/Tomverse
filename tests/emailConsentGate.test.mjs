@@ -4,9 +4,13 @@ import { readFileSync } from "node:fs";
 import {
   CONSENT_REQUIRED_PURPOSES,
   EMAIL_PURPOSES,
+  consentConfirmationState,
   consentGateVerdict,
   defaultPreferenceEnabled,
+  preferenceChangeDecision,
 } from "../lib/emailPreferenceCore.ts";
+
+const CONFIRMED = new Date("2026-09-15T00:00:00.000Z");
 
 const gate = (overrides = {}) =>
   consentGateVerdict({
@@ -14,8 +18,62 @@ const gate = (overrides = {}) =>
     purpose: "product_updates",
     hasAccount: true,
     storedEnabled: null,
+    storedConfirmedAt: CONFIRMED,
     ...overrides,
   });
+
+test("an enabled but unconfirmed consent is refused", () => {
+  // docs/policy/email-double-opt-in.md §3 rule 5 and §6: unconfirmed consent
+  // is not consent, in the same direction as an absent row.
+  for (const purpose of CONSENT_REQUIRED_PURPOSES) {
+    assert.deepEqual(
+      gate({ purpose, storedEnabled: true, storedConfirmedAt: null }),
+      { allowed: false, skipReason: "no_consent" },
+      purpose
+    );
+    assert.deepEqual(gate({ purpose, storedEnabled: true }), { allowed: true }, purpose);
+  }
+  // A purpose nobody consents to never needed a confirmation.
+  assert.deepEqual(
+    gate({
+      classification: "service",
+      purpose: "service_status",
+      storedEnabled: true,
+      storedConfirmedAt: null,
+    }),
+    { allowed: true }
+  );
+});
+
+test("a consent-based purpose can be switched on only through a confirmation", () => {
+  for (const purpose of CONSENT_REQUIRED_PURPOSES) {
+    assert.deepEqual(preferenceChangeDecision({ purpose, enabled: true }), {
+      allowed: false,
+      reason: "confirmation_required",
+    });
+    assert.deepEqual(preferenceChangeDecision({ purpose, enabled: true, confirmed: true }), {
+      allowed: true,
+    });
+    // The unsubscribe rule is checked first and is not loosened by a
+    // confirmation: a token that could unsubscribe still enables nothing.
+    assert.deepEqual(
+      preferenceChangeDecision({ purpose, enabled: true, viaToken: true, confirmed: true }),
+      { allowed: false, reason: "token_cannot_enable" }
+    );
+    assert.deepEqual(preferenceChangeDecision({ purpose, enabled: false }), { allowed: true });
+  }
+  assert.deepEqual(preferenceChangeDecision({ purpose: "service_status", enabled: true }), {
+    allowed: true,
+  });
+});
+
+test("the confirmation state is derived from the two columns", () => {
+  const at = new Date();
+  assert.equal(consentConfirmationState({ enabled: false, confirmationRequestedAt: null, confirmedAt: null }), "off");
+  assert.equal(consentConfirmationState({ enabled: false, confirmationRequestedAt: at, confirmedAt: null }), "pending");
+  assert.equal(consentConfirmationState({ enabled: true, confirmationRequestedAt: at, confirmedAt: at }), "on");
+  assert.equal(consentConfirmationState({ enabled: true, confirmationRequestedAt: null, confirmedAt: null }), "unconfirmed");
+});
 
 test("an account with no row has not agreed to anything", () => {
   // The measured gap: ensureDefaultPreferences runs on a settings read, so an

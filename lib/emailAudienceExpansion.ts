@@ -141,6 +141,10 @@ const cohortCandidates = async (input: {
             purpose: input.cohort.purpose,
             enabled: true,
             grantedAt: { not: null },
+            // Confirmed consent only (docs/policy/email-double-opt-in.md §6).
+            // The lane refuses the rest anyway; filing them here would put
+            // people in the ledger as recipients who can never receive.
+            confirmedAt: { not: null },
           },
         },
         ...(input.after ? { id: { gt: input.after } } : {}),

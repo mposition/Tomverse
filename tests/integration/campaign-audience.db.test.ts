@@ -347,6 +347,8 @@ test("the product update cohort reaches only active accounts with recorded conse
   const createSubscriber = async (input: {
     enabled: boolean;
     grantedAt: Date | null;
+    /** Defaults to grantedAt: an ordinary subscriber confirmed when they agreed. */
+    confirmedAt?: Date | null;
     accountStatus?: string;
     email?: string | null;
   }) => {
@@ -366,6 +368,8 @@ test("the product update cohort reaches only active accounts with recorded conse
             enabled: input.enabled,
             source: "preference_center",
             grantedAt: input.grantedAt,
+            confirmedAt:
+              input.confirmedAt === undefined ? input.grantedAt : input.confirmedAt,
           },
         },
       },
@@ -381,6 +385,9 @@ test("the product update cohort reaches only active accounts with recorded conse
   });
   await createSubscriber({ enabled: false, grantedAt: null });
   await createSubscriber({ enabled: true, grantedAt: null });
+  // Switched on, never confirmed (docs/policy/email-double-opt-in.md §6): not
+  // in the cohort and not in the ledger.
+  await createSubscriber({ enabled: true, grantedAt: new Date(), confirmedAt: null });
   await createSubscriber({
     enabled: true,
     grantedAt: new Date(),
