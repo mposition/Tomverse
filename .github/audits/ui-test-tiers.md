@@ -43,9 +43,11 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **58개 파일, 833 test**를
-선택합니다(두 project 합계 1,666). 같은 날 직전 값은 57개 파일, 825 test
-(합계 1,650)이고 차이는 `chat-starter-catalog.spec.ts`의 +8(project당)입니다.
+desktop-chromium과 mobile-chromium 각 project에서 **58개 파일, 834 test**를
+선택합니다(두 project 합계 1,668). 그날 처음 합류할 때는 833 test였고, staging
+검증이 찾은 씨앗 토글 결함의 회귀 하나가 더해져 834가 됐습니다. 직전 값은
+57개 파일, 825 test(합계 1,650)이고 차이는 `chat-starter-catalog.spec.ts`
+전체입니다.
 2026-08-26의 51개 파일, 1,416 test(project당 708)는 아래 증가 이력과 shard
 결정의 기준값으로 남깁니다.
 
