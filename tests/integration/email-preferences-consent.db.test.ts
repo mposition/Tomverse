@@ -11,6 +11,7 @@ import {
 } from "@/lib/emailPreferences";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
+import { consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   jurisdictionForUser,
   recordBillingCountry,
@@ -76,6 +77,36 @@ const someone = () =>
     data: { email: `${randomUUID()}@example.com`, name: "Someone" },
   });
 
+/**
+ * Switches a purpose on the only way a consent-based one can be: through a
+ * confirmation (docs/policy/email-double-opt-in.md §3 rule 1).
+ *
+ * Stands in for requestConsentConfirmation + the clicked link, which have their
+ * own tests in email-consent-confirmation.db.test.ts. What these tests are
+ * about -- the history, suppression, idempotency -- starts after that point.
+ */
+const agree = async (input: Parameters<typeof setPreference>[0]) => {
+  await ensureDefaultPreferences(input.userId);
+  const requestedAt = new Date(Date.now() - 1_000);
+  const requestId = randomUUID();
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: input.userId, purpose: input.purpose } },
+    data: { confirmationRequestedAt: requestedAt, confirmationRequestId: requestId },
+  });
+  return setPreference({
+    ...input,
+    confirmation: {
+      tokenVersion: "v1",
+      requestedAt,
+      requestId,
+      policyVersionId: await ensureBootstrapPolicyVersion(),
+      addressDigest: consentAddressDigest(
+        (await prisma.user.findUniqueOrThrow({ where: { id: input.userId } })).email!
+      ),
+    },
+  });
+};
+
 test("a new account starts with nothing consent-based switched on", async () => {
   const user = await someone();
   await ensureDefaultPreferences(user.id);
@@ -102,7 +133,7 @@ test("a new account starts with nothing consent-based switched on", async () => 
 test("seeding twice does not reset somebody's choices", async () => {
   const user = await someone();
   await ensureDefaultPreferences(user.id);
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,
@@ -123,7 +154,7 @@ test("seeding twice does not reset somebody's choices", async () => {
 test("agreeing writes an entry that says when, under which policy, on what", async () => {
   const user = await someone();
 
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,
@@ -162,7 +193,7 @@ test("marketing opt-in stores the confirmed country with its consent", async () 
   const user = await someone();
   const now = new Date("2026-09-14T02:00:00.000Z");
 
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "product_updates",
     enabled: true,
@@ -198,7 +229,7 @@ test("marketing opt-in stores the confirmed country with its consent", async () 
 test("the history is append-only and distinguishes re-agreeing from agreeing", async () => {
   const user = await someone();
   const change = (enabled: boolean) =>
-    setPreference({
+    (enabled ? agree : setPreference)({
       userId: user.id,
       purpose: "promotions",
       enabled,
@@ -270,7 +301,7 @@ test("security and billing cannot be switched off through the service either", a
 
 test("a withdrawal suppresses by address, so it survives the account", async () => {
   const user = await someone();
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,
@@ -315,7 +346,7 @@ test("a withdrawal suppresses by address, so it survives the account", async () 
 
 test("re-enabling clears its own hold and never a global one", async () => {
   const user = await someone();
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,
@@ -339,7 +370,7 @@ test("re-enabling clears its own hold and never a global one", async () => {
     },
   });
 
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,
@@ -357,7 +388,7 @@ test("re-enabling clears its own hold and never a global one", async () => {
 
 test("repeating an unsubscribe is a no-op, not a second withdrawal", async () => {
   const user = await someone();
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "promotions",
     enabled: true,
@@ -410,10 +441,79 @@ test("a token cannot switch anything on", async () => {
   assert.deepEqual(result, { changed: false, reason: "token_cannot_enable" });
 });
 
+test("marketing cannot be switched on without a confirmation", async () => {
+  const user = await someone();
+
+  // docs/policy/email-double-opt-in.md §3 rule 1: enabled becomes true only
+  // after the link is clicked. The preference centre asks for a confirmation
+  // instead; nothing else may skip it.
+  for (const purpose of ["product_updates", "newsletter", "promotions"]) {
+    const result = await setPreference({
+      userId: user.id,
+      purpose,
+      enabled: true,
+      capturedVia: "preference_center",
+      source: "preference_center",
+    });
+    assert.deepEqual(result, { changed: false, reason: "confirmation_required" });
+  }
+  assert.equal(await prisma.consentRecord.count(), 0);
+
+  // service_status needs no consent, so it needs no confirmation either.
+  await setPreference({
+    userId: user.id,
+    purpose: "service_status",
+    enabled: false,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+  const back = await setPreference({
+    userId: user.id,
+    purpose: "service_status",
+    enabled: true,
+    capturedVia: "preference_center",
+    source: "preference_center",
+  });
+  assert.equal(back.changed, true);
+});
+
+test("a confirmation that names an older request confirms nothing", async () => {
+  const user = await someone();
+  await ensureDefaultPreferences(user.id);
+  const older = new Date(Date.now() - 60_000);
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+    data: { confirmationRequestedAt: new Date(), confirmationRequestId: "newer-request" },
+  });
+
+  const result = await setPreference({
+    userId: user.id,
+    purpose: "newsletter",
+    enabled: true,
+    capturedVia: "preference_center",
+    source: "preference_center",
+    confirmation: {
+      tokenVersion: "v1",
+      requestedAt: older,
+      requestId: "older-request",
+      policyVersionId: await ensureBootstrapPolicyVersion(),
+      addressDigest: consentAddressDigest(user.email!),
+    },
+  });
+
+  assert.deepEqual(result, { changed: false, reason: "superseded" });
+  const row = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+  });
+  assert.equal(row.enabled, false);
+  assert.equal(row.confirmedAt, null);
+  assert.equal(await prisma.consentRecord.count(), 0);
+});
+
 test("one action stops every marketing purpose", async () => {
   const user = await someone();
   for (const purpose of ["product_updates", "newsletter", "promotions"]) {
-    await setPreference({
+    await agree({
       userId: user.id,
       purpose,
       enabled: true,
@@ -684,7 +784,7 @@ test("a withdrawn consent does not tell us where somebody is", async () => {
     data: { userId: user.id, language: "en", timeZone: "UTC" },
   });
   await setSelfDeclaredCountry({ userId: user.id, country: "KR" });
-  await setPreference({
+  await agree({
     userId: user.id,
     purpose: "newsletter",
     enabled: true,

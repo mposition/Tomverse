@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  appUrl,
   buildAccountDeletionScheduledEmail,
   buildAccountRestoredEmail,
   buildAccountWelcomeEmail,
@@ -18,6 +19,14 @@ import {
   PRODUCT_ANNOUNCEMENT_PLACEHOLDER,
   type ProductAnnouncementPayload,
 } from "@/lib/productAnnouncementEmail";
+import {
+  buildMarketingConsentConfirmationEmail,
+  MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER,
+  prepareConsentConfirmationForSend,
+  type MarketingConsentConfirmationPayload,
+  type StoredConsentConfirmationPayload,
+} from "@/lib/marketingConsentConfirmationEmail";
+import { createConsentToken, readConsentKeyring } from "@/lib/emailConsentToken";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 import {
@@ -95,6 +104,17 @@ export type EmailTemplateDefinition<Payload> = {
    * an honest artefact of what shipped.
    */
   placeholderPayload: Payload;
+  /**
+   * Turns the stored snapshot into the payload `render` takes, at send time.
+   *
+   * For a message that carries a capability -- a link that does something when
+   * followed -- the capability is not stored in the snapshot at all. This
+   * re-creates it from non-secret fields on every attempt and names the secret
+   * strings, which the lane replaces with a placeholder before computing the
+   * audit hash (docs/policy/email-notifications.md §10.3). Must be deterministic
+   * for the same reason `render` is.
+   */
+  prepareForSend?: (stored: any) => { payload: Payload; secrets: string[] }; // eslint-disable-line @typescript-eslint/no-explicit-any
 };
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -143,6 +163,8 @@ export const AUTH_LOGIN_CODE_TEMPLATE = "auth_login_code";
 export const OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE = "ops_model_lifecycle_daily";
 export const MODEL_LAUNCH_TEMPLATE = "model_launch";
 export const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
+export const MARKETING_CONSENT_CONFIRMATION_TEMPLATE =
+  "marketing_consent_confirmation";
 /**
  * Three keys rather than one with a phase field.
  *
@@ -167,6 +189,32 @@ const definitions: AnyDefinition[] = [
     render: (payload: LoginCodePayload, language) =>
       buildEmailLoginCodeEmail({ ...payload, language }),
     placeholderPayload: { code: "{{code}}", verifyUrl: "{{verifyUrl}}" },
+  },
+  {
+    key: MARKETING_CONSENT_CONFIRMATION_TEMPLATE,
+    senderRole: "general",
+    // Transactional, although it is about marketing: it goes to somebody who
+    // has not yet consented, so filed as marketing the consent gate would refuse
+    // the very message that lets them consent -- and filed as marketing it would
+    // be advertising sent without consent. It carries no promotion and no
+    // unsubscribe link (docs/policy/email-double-opt-in.md §3 rules 2-3).
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: MarketingConsentConfirmationPayload, language) =>
+      buildMarketingConsentConfirmationEmail(payload, language),
+    placeholderPayload: MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER,
+    // The link is a capability and is never stored; see prepareForSend above.
+    prepareForSend: (stored: StoredConsentConfirmationPayload) => {
+      const keyring = readConsentKeyring(process.env);
+      if (!keyring) {
+        throw new Error("EMAIL_CONSENT_KEYS is not configured; the confirmation link cannot be built.");
+      }
+      return prepareConsentConfirmationForSend(stored, {
+        createToken: (payload, version) => createConsentToken(payload, keyring, version),
+        appUrl: appUrl(),
+      });
+    },
   },
   {
     key: ACCOUNT_WELCOME_TEMPLATE,

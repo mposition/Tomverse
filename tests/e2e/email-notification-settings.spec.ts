@@ -5,16 +5,24 @@ import {
   prepareGuestPage,
 } from "./support/app-fixtures";
 
-const preferences = (productUpdates: boolean) => [
-  { purpose: "security", enabled: true, locked: true },
-  { purpose: "billing", enabled: true, locked: true },
-  { purpose: "service_status", enabled: true, locked: false },
-  { purpose: "product_updates", enabled: productUpdates, locked: false },
-  { purpose: "newsletter", enabled: false, locked: false },
-  { purpose: "promotions", enabled: false, locked: false },
+const preferences = (productUpdatesPending: boolean) => [
+  { purpose: "security", enabled: true, locked: true, confirmation: null },
+  { purpose: "billing", enabled: true, locked: true, confirmation: null },
+  { purpose: "service_status", enabled: true, locked: false, confirmation: null },
+  {
+    purpose: "product_updates",
+    enabled: false,
+    locked: false,
+    confirmation: productUpdatesPending ? "pending" : "off",
+    confirmationExpiresAt: productUpdatesPending
+      ? new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString()
+      : null,
+  },
+  { purpose: "newsletter", enabled: false, locked: false, confirmation: "off" },
+  { purpose: "promotions", enabled: false, locked: false, confirmation: "off" },
 ];
 
-test("marketing opt-in confirms a country in the same action @ui-risk", async ({
+test("marketing opt-in confirms a country and asks for an email confirmation @ui-risk", async ({
   page,
 }) => {
   await prepareGuestPage(page, "ko");
@@ -80,9 +88,22 @@ test("marketing opt-in confirms a country in the same action @ui-risk", async ({
   await expect.poll(() => writes).toEqual([
     { purpose: "product_updates", enabled: true, country: "DE" },
   ]);
+  // docs/policy/email-double-opt-in.md §11 item 11: the request is not the
+  // consent. The switch stays off, the row says a confirmation is waiting, and
+  // it can be sent again.
   await expect(page.getByTestId("email-product-updates-opt-in")).toHaveCount(0);
   await expect(
     page.getByTestId("email-preference-product_updates-toggle")
-  ).toHaveAttribute("aria-checked", "true");
-  await expect(page.getByTestId("email-withdraw-all")).toBeVisible();
+  ).toHaveAttribute("aria-checked", "false");
+  await expect(
+    page.getByTestId("email-preference-product_updates-confirmation")
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("email-preference-product_updates-resend")
+  ).toBeVisible();
+  await expect(page.getByTestId("email-withdraw-all")).toHaveCount(0);
+
+  await page.getByTestId("email-preference-product_updates-resend").click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[1]).toEqual({ purpose: "product_updates", enabled: true, country: "DE" });
 });

@@ -285,6 +285,9 @@ beforeEach(() => {
     setBusinessIdentity(true);
     sendingIdentityReady = true;
     snapshotKeyringReady = true;
+    // Present by default so marketing-address cases fail only the check they
+    // are about; the consent keyring has its own case below.
+    process.env.EMAIL_CONSENT_KEYS = "v1:fedcba9876543210fedcba9876543210";
     setNodeEnv(originalNodeEnv);
 });
 
@@ -305,6 +308,7 @@ type ReadinessBody = {
         emailSendingIdentity: boolean;
         emailSnapshotKeyring: boolean;
         emailUnsubscribeKeyring: boolean;
+        emailConsentKeyring: boolean;
         emailBusinessIdentity: boolean;
         searchProviderBudget: boolean;
     };
@@ -337,6 +341,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailSendingIdentity: true,
         emailSnapshotKeyring: true,
         emailUnsubscribeKeyring: true,
+        emailConsentKeyring: true,
         emailBusinessIdentity: true,
         searchProviderBudget: true,
     });
@@ -425,6 +430,19 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             },
         },
         {
+            // The marketing consent confirmation keyring
+            // (docs/policy/email-double-opt-in.md §11 item 10): required on the
+            // same condition as the unsubscribe keyring, with those keys present
+            // so this is the only failure.
+            name: "emailConsentKeyring",
+            arrange: () => {
+                process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+                process.env.EMAIL_UNSUBSCRIBE_KEYS =
+                    "v1:0123456789abcdef0123456789abcdef";
+                delete process.env.EMAIL_CONSENT_KEYS;
+            },
+        },
+        {
             // Conditional in the same shape, and driven through the real
             // environment for the same reason. The keys are supplied here so
             // the only thing wrong is the identity -- otherwise turning
@@ -453,6 +471,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         snapshotKeyringReady = true;
         delete process.env.MARKETING_EMAIL_FROM;
         delete process.env.EMAIL_UNSUBSCRIBE_KEYS;
+        process.env.EMAIL_CONSENT_KEYS = "v1:fedcba9876543210fedcba9876543210";
         setBusinessIdentity(true);
         setNodeEnv(originalNodeEnv);
         arrange();
