@@ -155,3 +155,11 @@ test("a repeated hour does not reopen the window between its two occurrences", (
     "2026-11-01T06:30:00.000Z"
   );
 });
+
+test("a one-minute tail inside a repeated hour is not missed", () => {
+  const ny = { start: "21:00", end: "01:01", tz: "America/New_York" };
+  assert.equal(
+    quietHoursEnd(ny, new Date("2026-11-01T05:00:00Z"))?.toISOString(),
+    "2026-11-01T06:01:00.000Z"
+  );
+});

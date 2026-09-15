@@ -140,7 +140,9 @@ export const quietHoursEnd = (quietHours: QuietHours, now: Date): Date | null =>
     if (!isInside(quietHours, new Date(cursor))) {
       // Outside now; make sure a repeated hour does not put it back inside.
       let reopens = false;
-      for (let ahead = 5; ahead <= 120; ahead += 5) {
+      // Every minute: a repeated hour can put a window back inside for as
+      // little as one minute.
+      for (let ahead = 1; ahead <= 120; ahead += 1) {
         if (isInside(quietHours, new Date(cursor + ahead * MINUTE))) {
           reopens = true;
           break;
