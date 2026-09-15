@@ -121,6 +121,7 @@
     "postinstall": "prisma generate",
     "check:default-models": "node --conditions=react-server --import tsx scripts/check-default-models.mjs",
     "check:starter-catalog": "node --import tsx scripts/check-starter-catalog.mjs",
+    "report:starter-catalog-expectations": "node --import tsx scripts/report-starter-catalog-expectations.mjs",
     "check:openai-model-access": "node --conditions=react-server --import tsx scripts/check-openai-model-access.mjs",
     "check:cloudflare-r2-analytics": "node --import tsx scripts/check-cloudflare-r2-analytics.mjs",
     "check:r2-lifecycle-policy": "node scripts/check-r2-lifecycle-policy.mjs",
