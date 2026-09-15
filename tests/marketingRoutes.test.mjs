@@ -117,10 +117,11 @@ test("the locale aliases stay routable so a redirect target is never a 404", () 
   }
 });
 
-test("the Assistant and Knowledge guide uses the static marketing CSP path", () => {
+test("the dynamic Assistant and Knowledge guide uses the nonce CSP path", () => {
   assert.equal(
     isStaticMarketingPathname("/guides/assistant-knowledge"),
-    true
+    false,
+    "request-time feature flags and Supademo configuration must not use static hashes or shared caching"
   );
   assert.equal(
     isStaticMarketingPathname("/guides/assistant-knowledge/poster"),

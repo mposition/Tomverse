@@ -17,13 +17,13 @@ import {
 import { adminFetch } from "@/lib/adminFetch";
 import { adminEmailCampaignsMessages } from "@/lib/adminMessages/emailCampaigns";
 import {
-  ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT,
+  type AssistantKnowledgeCampaignLanguage,
   type ProductAnnouncementPayload,
 } from "@/lib/productAnnouncementEmail";
 
 const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
 
-type ComposerLocale = keyof typeof ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT;
+type ComposerLocale = AssistantKnowledgeCampaignLanguage;
 type Preview = {
   language: string;
   subject: string;
@@ -32,26 +32,24 @@ type Preview = {
   contentHash: string;
 };
 
-const initialContent = () =>
-  structuredClone(ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT) as Record<
-    ComposerLocale,
-    ProductAnnouncementPayload
-  >;
-
 const inputClass =
   "mt-1 w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3 py-2.5 text-sm text-zinc-100 outline-none transition focus:border-teal-500";
 
 export function AdminCampaignComposer({
   mayWrite,
   campaignsEnabled,
+  starterContent,
 }: {
   mayWrite: boolean;
   campaignsEnabled: boolean;
+  starterContent: Record<ComposerLocale, ProductAnnouncementPayload>;
 }) {
   const router = useRouter();
   const m = useAdminMessages(adminEmailCampaignsMessages).composer;
   const { locale: apiLocale } = useAdminLocale();
-  const [content, setContent] = useState(initialContent);
+  const [content, setContent] = useState(() =>
+    structuredClone(starterContent)
+  );
   const [locale, setLocale] = useState<ComposerLocale>("ko");
   const [previews, setPreviews] = useState<Preview[]>([]);
   const [copyDigest, setCopyDigest] = useState<string | null>(null);

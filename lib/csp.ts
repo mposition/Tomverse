@@ -57,7 +57,7 @@ const directives = (
   } https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://*.googleapis.com https://www.google-analytics.com https://region1.google-analytics.com https://*.google-analytics.com https://*.r2.cloudflarestorage.com https://challenges.cloudflare.com${
     r2Origin ? ` ${r2Origin}` : ""
   }`,
-  "frame-src https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://challenges.cloudflare.com",
+  "frame-src https://accounts.google.com https://content.googleapis.com https://docs.google.com https://drive.google.com https://challenges.cloudflare.com https://supademo.com https://*.supademo.com",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
   "manifest-src 'self'",
