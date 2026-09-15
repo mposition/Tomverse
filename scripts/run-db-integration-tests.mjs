@@ -256,6 +256,12 @@ run(
     // criterion is that expanding twice changes nothing, and the unique index
     // that guarantees it only exists in the database.
     "tests/integration/email-audience-expansion.db.test.ts",
+    // What a campaign would actually reach. The classification is unit-tested
+    // against invented counts; what needs a database is whether the queries
+    // produce them -- a withdrawal after a grant has to beat the grant, and a
+    // suppressed address has to match whatever case the provider reported it
+    // in. Both are silent when wrong, and both overstate the audience.
+    "tests/integration/email-marketing-reach.db.test.ts",
     // The campaign layer above it: approval pins the copy, and a copy change
     // after approval refuses the send (EM-06). Only a database holds the
     // TemplateVersion the pin points at.

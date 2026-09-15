@@ -5,7 +5,7 @@ import {
   MARKETING_PURPOSES,
   marketingReachFindings,
   marketingReachRows,
-} from "../scripts/report-marketing-reach-core.mjs";
+} from "../lib/marketingReachCore.ts";
 
 // The classification behind the Q2 decision record.
 // Contract: docs/policy/email-notifications.md §5.1 C1, §5.6 C8, §11.2.
