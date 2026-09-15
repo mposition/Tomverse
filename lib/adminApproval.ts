@@ -8,6 +8,7 @@ import {
   approvalPayloadHash,
   approvalTtlMinutes,
   canonicalizeApprovalPayload,
+  executionLeaseExpiresAt,
 } from "@/lib/adminApprovalCore";
 import { prisma } from "@/lib/prisma";
 import {
@@ -127,6 +128,11 @@ const claimApproval = async (input: ApprovalInput) => {
         status: "executing",
         consumedById: actorId,
         consumedByEmail: input.session.user?.email || null,
+        // While a row is executing, expiresAt is its execution lease, not the
+        // approval's deadline. The sole closure treats an unexpired executing
+        // row as the same change in flight; a claim made a second before the
+        // approval lapsed must not read as stale while its operation runs.
+        expiresAt: executionLeaseExpiresAt(existing.expiresAt, now),
       },
     });
     return {
@@ -207,6 +213,9 @@ export async function runWithAdminApproval<T>(
           status: "approved",
           consumedById: null,
           consumedByEmail: null,
+          // Back to the approval's own deadline: the lease was for the run
+          // that did not happen, and must not extend what was approved.
+          expiresAt: claim.approval.expiresAt,
         },
       })
       .catch(() => undefined);
@@ -224,6 +233,9 @@ export async function runWithAdminApproval<T>(
           status: "approved",
           consumedById: null,
           consumedByEmail: null,
+          // Back to the approval's own deadline: the lease was for the run
+          // that did not happen, and must not extend what was approved.
+          expiresAt: claim.approval.expiresAt,
         },
       })
       .catch(() => undefined);
