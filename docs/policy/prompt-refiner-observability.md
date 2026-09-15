@@ -21,7 +21,8 @@ authority가 requestId 결속·만료·1회 consume·비용과 stage slot의 원
 
 1. `PromptRefinerExecutionReceipt`는 서버가 쓴다. 어느 provider/model/adapter가
    호출됐는지, suggestion을 만들었는지, 실패 또는 dispatch 전 거절이었는지,
-   서버 시각·token·실비용·retry 수를 기록한다.
+   서버 시각·token·실비용을 기록한다. `retryCount`는 literal `0`만 허용하며 이
+   계약에는 재시도가 없다.
 2. `PromptRefinerDispositionReceipt`는 서버가 승인한 browser 관측이다. 사용자가
    suggestion을 채택했는지, 원문을 유지했는지, draft/scope 변경 등으로 stale이
    됐는지를 기록한다.

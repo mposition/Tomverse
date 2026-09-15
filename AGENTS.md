@@ -1294,7 +1294,7 @@ Non-negotiable requirements:
 
 Before changing the Prompt Refiner surface or request boundary in
 `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
-`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`, or
+`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`,
 `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
 their tests, read:
 

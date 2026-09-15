@@ -7,6 +7,7 @@ import {
     type ModelPricingProfile,
 } from "@/lib/modelPricing";
 import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
+import type { PromptRefinerFailureCode } from "@/lib/promptRefinerReceiptCore";
 import {
     PROMPT_REFINER_MAX_PROMPT_BYTES,
     PROMPT_REFINER_MAX_PROMPT_CHARS,
@@ -394,22 +395,28 @@ export type PromptRefinerTerminalReason =
     | "cancelled_after_dispatch"
     | "unknown_after_dispatch";
 
-export const PROMPT_REFINER_TERMINAL_REASONS = Object.freeze([
-    "suggested",
-    "eligibility_refused",
-    "execution_not_approved",
-    "execution_contract_mismatch",
-    "adapter_unavailable",
-    "reservation_authority_unavailable",
-    "cancelled_before_dispatch",
-    "provider_error",
-    "timeout",
-    "invalid_response",
-    "empty_response",
-    "no_change",
-    "cancelled_after_dispatch",
-    "unknown_after_dispatch",
-] as const satisfies readonly PromptRefinerTerminalReason[]);
+const PROMPT_REFINER_TERMINAL_REASON_COVERAGE = {
+    suggested: true,
+    eligibility_refused: true,
+    execution_not_approved: true,
+    execution_contract_mismatch: true,
+    adapter_unavailable: true,
+    reservation_authority_unavailable: true,
+    cancelled_before_dispatch: true,
+    provider_error: true,
+    timeout: true,
+    invalid_response: true,
+    empty_response: true,
+    no_change: true,
+    cancelled_after_dispatch: true,
+    unknown_after_dispatch: true,
+} as const satisfies Record<PromptRefinerTerminalReason, true>;
+
+export const PROMPT_REFINER_TERMINAL_REASONS = Object.freeze(
+    Object.keys(
+        PROMPT_REFINER_TERMINAL_REASON_COVERAGE
+    ) as PromptRefinerTerminalReason[]
+);
 
 export type PromptRefinerTerminalDispositionPolicy =
     | "choice_or_stale_after_ready"
@@ -423,20 +430,7 @@ export type PromptRefinerTerminalReceiptFacts = {
         | "adapter"
         | "provider"
         | "response_validation";
-    failureCode:
-        | "eligibility_refused"
-        | "execution_not_approved"
-        | "execution_contract_mismatch"
-        | "adapter_unavailable"
-        | "reservation_authority_unavailable"
-        | "provider_error"
-        | "timeout"
-        | "invalid_response"
-        | "empty_response"
-        | "no_change"
-        | "cancelled"
-        | "unknown_after_dispatch"
-        | null;
+    failureCode: PromptRefinerFailureCode | null;
     retryCount: 0;
     dispositionPolicy: PromptRefinerTerminalDispositionPolicy;
 };

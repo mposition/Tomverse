@@ -32,6 +32,8 @@ export const PROMPT_REFINER_FAILURE_LAYERS = [
     "provider",
     "response_validation",
 ] as const;
+export type PromptRefinerFailureLayer =
+    (typeof PROMPT_REFINER_FAILURE_LAYERS)[number];
 export const PROMPT_REFINER_FAILURE_CODES = [
     "eligibility_refused",
     "execution_not_approved",
@@ -46,34 +48,33 @@ export const PROMPT_REFINER_FAILURE_CODES = [
     "cancelled",
     "unknown_after_dispatch",
 ] as const;
-const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-    "eligibility_refused",
-    "execution_not_approved",
-    "execution_contract_mismatch",
-    "reservation_authority_unavailable",
-    "adapter_unavailable",
-]);
-const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-    "invalid_response",
-    "empty_response",
-    "no_change",
-    "provider_error",
-    "timeout",
-    "unknown_after_dispatch",
-]);
-const FAILURE_LAYER_BY_CODE = new Map<string, string>([
-    ["eligibility_refused", "admission"],
-    ["execution_not_approved", "admission"],
-    ["execution_contract_mismatch", "admission"],
-    ["reservation_authority_unavailable", "admission"],
-    ["adapter_unavailable", "adapter"],
-    ["provider_error", "provider"],
-    ["timeout", "provider"],
-    ["unknown_after_dispatch", "provider"],
-    ["invalid_response", "response_validation"],
-    ["empty_response", "response_validation"],
-    ["no_change", "response_validation"],
-]);
+export type PromptRefinerFailureCode =
+    (typeof PROMPT_REFINER_FAILURE_CODES)[number];
+type FixedLayerFailureCode = Exclude<PromptRefinerFailureCode, "cancelled">;
+type FailureLayer = Exclude<PromptRefinerFailureLayer, "none">;
+const FAILURE_LAYER_BY_CODE = {
+    eligibility_refused: "admission",
+    execution_not_approved: "admission",
+    execution_contract_mismatch: "admission",
+    reservation_authority_unavailable: "admission",
+    adapter_unavailable: "adapter",
+    provider_error: "provider",
+    timeout: "provider",
+    unknown_after_dispatch: "provider",
+    invalid_response: "response_validation",
+    empty_response: "response_validation",
+    no_change: "response_validation",
+} as const satisfies Record<FixedLayerFailureCode, FailureLayer>;
+
+const expectedFailureLayer = (
+    code: PromptRefinerFailureCode,
+    dispatched: boolean
+): FailureLayer =>
+    code === "cancelled"
+        ? dispatched
+            ? "provider"
+            : "admission"
+        : FAILURE_LAYER_BY_CODE[code];
 export const PROMPT_REFINER_DISPOSITION_OUTCOMES = [
     "accepted",
     "kept_original",
@@ -246,35 +247,25 @@ export const promptRefinerExecutionReceiptSchema =
                 "inputTokens",
             ]);
         }
-        if (
-            receipt.failureCode !== null &&
-            dispatchedAt === null &&
-            POST_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
-        ) {
-            issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
-                "failureCode",
-            ]);
-        }
-        if (
-            receipt.failureCode !== null &&
-            dispatchedAt !== null &&
-            PRE_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
-        ) {
-            issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
-                "failureCode",
-            ]);
-        }
         if (receipt.failureCode !== null) {
-            const expectedFailureLayer =
-                receipt.failureCode === "cancelled"
-                    ? dispatchedAt === null
-                        ? "admission"
-                        : "provider"
-                    : FAILURE_LAYER_BY_CODE.get(receipt.failureCode);
-            if (
-                expectedFailureLayer !== undefined &&
-                receipt.failureLayer !== expectedFailureLayer
-            ) {
+            const expectedLayer = expectedFailureLayer(
+                receipt.failureCode,
+                dispatchedAt !== null
+            );
+            const codeRequiresDispatch =
+                expectedLayer === "provider" ||
+                expectedLayer === "response_validation";
+            if (dispatchedAt === null && codeRequiresDispatch) {
+                issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
+                    "failureCode",
+                ]);
+            }
+            if (dispatchedAt !== null && !codeRequiresDispatch) {
+                issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
+                    "failureCode",
+                ]);
+            }
+            if (receipt.failureLayer !== expectedLayer) {
                 issue("prompt_refiner_failure_code_layer_mismatch", [
                     "failureLayer",
                 ]);

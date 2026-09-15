@@ -25,6 +25,7 @@ import {
 import { promptRefinerModelMessages } from "../lib/promptRefinerModelPrompt.ts";
 import {
     PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
+    PROMPT_REFINER_FAILURE_CODES,
     promptRefinerExecutionReceiptSchema,
 } from "../lib/promptRefinerReceiptCore.ts";
 import { PROMPT_REFINER_VERSION } from "../lib/promptRefinerSuggestion.ts";
@@ -204,6 +205,10 @@ test("every terminal reason has one content-free receipt and disposition mapping
     };
 
     assert.deepEqual(Object.keys(expected), [...PROMPT_REFINER_TERMINAL_REASONS]);
+    assert.deepEqual(
+        [...new Set(Object.values(expected).map(([, , code]) => code).filter(Boolean))].sort(),
+        [...PROMPT_REFINER_FAILURE_CODES].sort()
+    );
     for (const reason of PROMPT_REFINER_ADMISSION_REFUSAL_REASONS) {
         assert.ok(PROMPT_REFINER_TERMINAL_REASONS.includes(reason));
         const facts = promptRefinerTerminalReceiptFacts(reason);
