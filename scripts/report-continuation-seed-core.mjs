@@ -339,8 +339,12 @@ const hundreds = (value) => (value === null ? null : Math.round(value / 100) * 1
  *     quantile of included messages is published (a P10 of 0 is a count of
  *     empty seeds).
  *
- * This makes recovery a range rather than a number; it is not a formal
- * guarantee. The output is an operator artefact for a policy decision record.
+ * This usually makes recovery a range rather than a number; it is not a formal
+ * guarantee. Edge cases remain: when the whole measured scope is "1-4" and
+ * every script class appears suppressed, each suppressed group holds exactly
+ * one snapshot. Only counts per script class can be learnt that way, never
+ * content or identifiers. The output is an operator artefact for a policy
+ * decision record.
  */
 export function aggregateSeedSamples(samples, { minGroupSize = MIN_GROUP_SIZE } = {}) {
   const groups = new Map();

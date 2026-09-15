@@ -19,11 +19,14 @@
 // query per page of 50 -- and evaluates every candidate in memory. It prints
 // shares and quantiles per script class, weighted both per snapshot and per
 // assistant turn of the continued conversations (a proxy for seeded requests
-// whose biases the output states). Nothing is exact enough to solve back to a
-// group's size: counts and shares are bands, token figures are rounded to 100,
-// groups under 20 snapshots are suppressed, and a share resting on fewer than
-// five snapshots on either side says only that (aggregateSeedSamples in the
-// core module explains why each of those is needed).
+// whose biases the output states). Figures are coarsened so that combining
+// them usually narrows a group's size to a range rather than a number: counts
+// and shares are bands, token figures are rounded to 100, groups under 20
+// snapshots are suppressed, and a share resting on fewer than five snapshots on
+// either side says only that. This is informal protection for an operator
+// artefact, not a guarantee -- with very few snapshots overall, the suppressed
+// groups' sizes can still be deduced (aggregateSeedSamples in the core module
+// explains each measure).
 // A --max-snapshots value that is not a positive whole number exits 2.
 // No message text, title, ordinal, snapshot id or user id is printed, logged or
 // written; identifiers exist only to join the reads.
