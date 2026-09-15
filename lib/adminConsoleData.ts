@@ -6,6 +6,8 @@ import type {
   ProviderHealthCheckRow,
 } from "@/components/admin/AdminProviderOpsPanel";
 import type { FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
+import type { AutoFixReviewRow } from "@/components/admin/AutoFixReviewPanel";
+import { AUTOFIX_CASE_STATE } from "@/lib/feedbackAutoFixCore";
 import type { RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import type { SlaRow } from "@/components/admin/AdminRiskPanels";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -31,6 +33,7 @@ export const ADMIN_READ_LIMITS = {
   auditLog: 50,
   creditLedger: 100,
   feedback: 20,
+  autoFixCases: 20,
   refunds: 20,
   providerIncidents: 50,
   providerChecks: 50,
@@ -72,13 +75,26 @@ const feedbackInclude = {
 export async function loadFeedbackRows(options?: {
   status?: string;
   take?: number;
+  /**
+   * A report to include even when it is older than the newest N -- the
+   * auto-fix section links to a report by id, and that link must land on it.
+   */
+  includeId?: string;
 }): Promise<FeedbackRow[]> {
-  const rows = await prisma.feedback.findMany({
+  const newest = await prisma.feedback.findMany({
     where: options?.status ? { status: options.status } : undefined,
     orderBy: { createdAt: "desc" },
     take: options?.take ?? ADMIN_READ_LIMITS.feedback,
     include: feedbackInclude,
   });
+  const linked =
+    options?.includeId && !newest.some((row) => row.id === options.includeId)
+      ? await prisma.feedback.findMany({
+          where: { id: options.includeId },
+          include: feedbackInclude,
+        })
+      : [];
+  const rows = [...linked, ...newest];
   return rows.map((feedback) => ({
     id: feedback.id,
     userId: feedback.userId,
@@ -128,6 +144,89 @@ export async function loadFeedbackRows(options?: {
       : null,
     createdAt: feedback.createdAt.toISOString(),
   }));
+}
+
+/** Cases the auto-fix review section shows: from review to a stop or to
+ * production, newest activity first. Closed cases are finished work. */
+const AUTOFIX_REVIEW_STATES = [
+  AUTOFIX_CASE_STATE.prOpen,
+  AUTOFIX_CASE_STATE.approved,
+  AUTOFIX_CASE_STATE.merged,
+  AUTOFIX_CASE_STATE.stagingVerified,
+  AUTOFIX_CASE_STATE.productionMerged,
+  AUTOFIX_CASE_STATE.productionVerified,
+  AUTOFIX_CASE_STATE.promotionFailed,
+];
+
+export async function loadAutoFixReviewRows(): Promise<AutoFixReviewRow[]> {
+  const rows = await prisma.feedbackAutoFixCase.findMany({
+    where: { state: { in: AUTOFIX_REVIEW_STATES } },
+    orderBy: { updatedAt: "desc" },
+    take: ADMIN_READ_LIMITS.autoFixCases,
+    select: {
+      id: true,
+      feedbackId: true,
+      state: true,
+      diagnosticSummary: true,
+      fixReport: true,
+      fixManifest: true,
+      redGreenProof: true,
+      fixPrUrl: true,
+      fixHeadSha: true,
+      approvedAt: true,
+      stagingVerifiedAt: true,
+      productionPrUrl: true,
+      productionVerifiedAt: true,
+      promotionObservedAt: true,
+      promotionObservation: true,
+      terminalReason: true,
+      updatedAt: true,
+    },
+  });
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  const object = (value: unknown) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const iso = (value: Date | null) => (value ? value.toISOString() : null);
+  return rows.map((row) => {
+    // Stored JSON is read defensively: the diagnostic summary and the fix
+    // report are bounded technical facts, but their shape is not a schema.
+    const summary = object(row.diagnosticSummary);
+    const report = object(row.fixReport);
+    const sentry = object(summary.sentry);
+    return {
+      id: row.id,
+      feedbackId: row.feedbackId,
+      state: row.state,
+      errorCode: text(summary.errorCode),
+      routeClass: text(summary.routeClass),
+      release: text(summary.release),
+      provider: text(summary.provider),
+      modelId: text(summary.modelId),
+      occurredAt: text(summary.occurredAt),
+      sentryTitle: text(sentry.title),
+      rootCause: text(report.rootCause),
+      fixSummary: text(report.fixSummary),
+      testSummary: text(report.testSummary),
+      changedPaths: Array.isArray(row.fixManifest)
+        ? row.fixManifest
+            .map((entry) => text(object(entry).path))
+            .filter((path): path is string => Boolean(path))
+        : [],
+      proofTestPath: text(object(row.redGreenProof).testPath),
+      fixPrUrl: row.fixPrUrl,
+      fixHeadSha: row.fixHeadSha,
+      approvedAt: iso(row.approvedAt),
+      stagingVerifiedAt: iso(row.stagingVerifiedAt),
+      productionPrUrl: row.productionPrUrl,
+      productionVerifiedAt: iso(row.productionVerifiedAt),
+      promotionObservedAt: iso(row.promotionObservedAt),
+      promotionObservation: row.promotionObservation,
+      terminalReason: row.terminalReason,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  });
 }
 
 /** Open reports older than a day, oldest first, for the work queue. */

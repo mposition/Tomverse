@@ -146,22 +146,30 @@ test.describe("mobile recent-chat disclosure", () => {
   });
 });
 
-test.describe("desktop recent-chat cards are unchanged", () => {
+test.describe("desktop welcome screen lists no recent chats", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
-      "Desktop keeps the existing recent-conversation cards."
+      "Only the desktop shell has a sidebar beside the welcome screen."
     );
     await prepareGuestPage(page, "en");
   });
 
-  test("the welcome screen still lists recent conversations as cards", async ({
+  test("the sidebar lists recent conversations and the welcome screen does not repeat them", async ({
     page,
   }) => {
     await seedGuestConversations(page, ["First chat", "Second chat"]);
     await page.goto("/chat?lang=en");
 
-    await expect(page.getByTestId("recent-conversation-card")).toHaveCount(2);
+    // The sidebar beside the welcome screen is the one list; a second copy in
+    // the middle of the screen was the same information twice.
+    await expect(
+      page.getByTestId("sidebar-conversation-item").filter({ hasText: "First chat" })
+    ).toBeVisible();
+    await expect(page.getByTestId("recent-conversation-card")).toHaveCount(0);
     await expect(page.getByTestId("recent-conversations-disclosure")).toHaveCount(0);
+    const welcomeText = await page.getByTestId("chat-empty-state").innerText();
+    expect(welcomeText).not.toContain("First chat");
+    expect(welcomeText).not.toContain("Second chat");
   });
 });

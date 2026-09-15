@@ -8,12 +8,19 @@ import {
   approvalPayloadHash,
   approvalTtlMinutes,
   canonicalizeApprovalPayload,
+  executionLeaseExpiresAt,
 } from "@/lib/adminApprovalCore";
 import { prisma } from "@/lib/prisma";
 import {
   assertRecentAdminAuthentication,
   isAdminReauthenticationError,
 } from "@/lib/adminReauthentication";
+import {
+  adminSoleApproverErrorResponse,
+  generalSoleApprovalAvailability,
+  lockApprovalScope,
+  runAsSoleAdministrator,
+} from "@/lib/adminSoleApproverExecution";
 
 type ApprovalInput = {
   session: Session;
@@ -28,8 +35,17 @@ type ApprovalInput = {
 export class AdminApprovalRequiredError extends Error {
   approvalId: string;
   approvalStatus: string;
+  /**
+   * Why the sole-administrator path did not open, when it could have. Absent
+   * for actions that have their own bound path, whose route reports it.
+   */
+  soleApproverUnavailable?: string;
 
-  constructor(approvalId: string, approvalStatus: string) {
+  constructor(
+    approvalId: string,
+    approvalStatus: string,
+    soleApproverUnavailable?: string
+  ) {
     super(
       approvalStatus === "pending"
         ? `Approval ${approvalId} is pending review by another authorized administrator.`
@@ -38,6 +54,7 @@ export class AdminApprovalRequiredError extends Error {
     this.name = "AdminApprovalRequiredError";
     this.approvalId = approvalId;
     this.approvalStatus = approvalStatus;
+    this.soleApproverUnavailable = soleApproverUnavailable;
   }
 }
 
@@ -53,6 +70,14 @@ const claimApproval = async (input: ApprovalInput) => {
   );
 
   return prisma.$transaction(async (tx) => {
+    // Shared with the sole executors, so a sole execution cannot close or skip
+    // a row while this claim is moving it to `executing`.
+    await lockApprovalScope(tx, {
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      requesterId: actorId,
+    });
     await tx.adminActionApproval.updateMany({
       where: {
         status: { in: ["pending", "approved"] },
@@ -103,6 +128,11 @@ const claimApproval = async (input: ApprovalInput) => {
         status: "executing",
         consumedById: actorId,
         consumedByEmail: input.session.user?.email || null,
+        // While a row is executing, expiresAt is its execution lease, not the
+        // approval's deadline. The sole closure treats an unexpired executing
+        // row as the same change in flight; a claim made a second before the
+        // approval lapsed must not read as stale while its operation runs.
+        expiresAt: executionLeaseExpiresAt(existing.expiresAt, now),
       },
     });
     return {
@@ -118,6 +148,21 @@ export async function runWithAdminApproval<T>(
   operation: () => Promise<T>
 ): Promise<T> {
   await assertRecentAdminAuthentication(input.session);
+
+  // docs/policy/admin-sole-approver.md. With exactly one administrator able to
+  // approve this action, `requestedById !== reviewerId` cannot be satisfied and
+  // the request would wait for a reviewer who does not exist. That
+  // administrator executes it alone, audited. Recomputed from configuration on
+  // every call, so a second eligible administrator restores the two-person
+  // path below with nothing to migrate.
+  const soleApproval = generalSoleApprovalAvailability(
+    input.action,
+    input.session
+  );
+  if (soleApproval.allowed) {
+    return runAsSoleAdministrator(input, operation);
+  }
+
   const claim = await claimApproval(input);
   if (!claim.claimed) {
     if (claim.created) {
@@ -136,7 +181,13 @@ export async function runWithAdminApproval<T>(
         },
       });
     }
-    throw new AdminApprovalRequiredError(claim.approval.id, claim.approval.status);
+    throw new AdminApprovalRequiredError(
+      claim.approval.id,
+      claim.approval.status,
+      soleApproval.allowed || soleApproval.reason === "action_has_bound_path"
+        ? undefined
+        : soleApproval.reason
+    );
   }
 
   // A durable audit intent must exist before the high-risk operation starts.
@@ -162,6 +213,9 @@ export async function runWithAdminApproval<T>(
           status: "approved",
           consumedById: null,
           consumedByEmail: null,
+          // Back to the approval's own deadline: the lease was for the run
+          // that did not happen, and must not extend what was approved.
+          expiresAt: claim.approval.expiresAt,
         },
       })
       .catch(() => undefined);
@@ -179,6 +233,9 @@ export async function runWithAdminApproval<T>(
           status: "approved",
           consumedById: null,
           consumedByEmail: null,
+          // Back to the approval's own deadline: the lease was for the run
+          // that did not happen, and must not extend what was approved.
+          expiresAt: claim.approval.expiresAt,
         },
       })
       .catch(() => undefined);
@@ -187,7 +244,13 @@ export async function runWithAdminApproval<T>(
 
   const consumed = await prisma.adminActionApproval.updateMany({
     where: { id: claim.approval.id, status: "executing" },
-    data: { status: "consumed", consumedAt: new Date() },
+    data: {
+      status: "consumed",
+      consumedAt: new Date(),
+      // The lease has done its job; the history keeps the approval's own
+      // deadline rather than the moment the lease would have lapsed.
+      expiresAt: claim.approval.expiresAt,
+    },
   });
   if (consumed.count !== 1) {
     throw new Error("Approved operation could not be marked as consumed.");
@@ -234,8 +297,14 @@ export const adminApprovalErrorResponse = (
           code: "ADMIN_APPROVAL_REQUIRED",
           approvalId: error.approvalId,
           approvalStatus: error.approvalStatus,
+          ...(error.soleApproverUnavailable
+            ? { soleApproverUnavailable: error.soleApproverUnavailable }
+            : {}),
           ...(extra || {}),
         },
         { status: 409 }
       )
-    : null;
+    : // The general sole path runs inside `runWithAdminApproval`, so its
+      // refusals reach every route through this one handler rather than
+      // falling through to a 500 in routes that never heard of that path.
+      adminSoleApproverErrorResponse(error);

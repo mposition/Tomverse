@@ -26,6 +26,7 @@ import {
   enqueueNotificationDelivery,
 } from "@/lib/notificationDeliveries";
 import { NOTIFICATION_DELIVERY_STATUS } from "@/lib/notificationRetryCore";
+import { AUTOFIX_CASE_STATE } from "@/lib/feedbackAutoFixCore";
 
 const updateFeedbackSchema = z
   .object({
@@ -163,6 +164,19 @@ export async function PATCH(req: Request, context: RouteContext) {
         eventCreated = created.count === 1;
       }
 
+      // An auto-fix observed live in production is finished by exactly this:
+      // the operator resolving the report (with the reply draft, or their own
+      // words). Compare-and-swap from production_verified only -- a case
+      // still on its way to production is never closed by a resolve.
+      let autoFixCaseClosed = false;
+      if (terminal) {
+        const closed = await tx.feedbackAutoFixCase.updateMany({
+          where: { feedbackId, state: AUTOFIX_CASE_STATE.productionVerified },
+          data: { state: AUTOFIX_CASE_STATE.closed, closedAt: new Date() },
+        });
+        autoFixCaseClosed = closed.count === 1;
+      }
+
       const notifiable = Boolean(existing.email) && existing.emailUpdatesConsent;
       const delivery =
         stage && eventCreated && notifiable
@@ -185,10 +199,11 @@ export async function PATCH(req: Request, context: RouteContext) {
           outcomeCode: body.outcomeCode || null,
           previousStatus: existing.status,
           userNotificationQueued: Boolean(delivery),
+          autoFixCaseClosed,
         },
       });
 
-      return { feedback, delivery, eventCreated, notifiable, stage };
+      return { feedback, delivery, eventCreated, notifiable, stage, autoFixCaseClosed };
     });
 
     if (!result) {
@@ -232,6 +247,7 @@ export async function PATCH(req: Request, context: RouteContext) {
       success: true,
       feedback: result.feedback,
       userNotification,
+      autoFixCaseClosed: result.autoFixCaseClosed,
     });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);

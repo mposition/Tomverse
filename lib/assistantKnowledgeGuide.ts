@@ -12,12 +12,65 @@ export const ASSISTANT_KNOWLEDGE_GUIDE_POSTER_URL = new URL(
   TOMVERSE_PUBLIC_ORIGIN
 ).toString();
 
+export const ASSISTANT_KNOWLEDGE_GUIDE_CONTENT_LANGUAGES = [
+  "ko",
+  "en",
+  "zh",
+] as const;
+
+export type AssistantKnowledgeGuideContentLanguage =
+  (typeof ASSISTANT_KNOWLEDGE_GUIDE_CONTENT_LANGUAGES)[number];
+
 /**
- * Keep the reviewed tutorial on the Tomverse origin. The page retains its
- * keyboard-accessible walkthrough as a complete alternative to the video.
+ * The tutorial follows the language a person selected in Tomverse, not their
+ * country. Korean and Simplified Chinese have dedicated product captures;
+ * every other supported locale uses the English master.
  */
-export const ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH: string | null =
-  `${ASSISTANT_KNOWLEDGE_GUIDE_PATH}/assistant-knowledge.mp4`;
+export const assistantKnowledgeGuideContentLanguage = (
+  language: Language
+): AssistantKnowledgeGuideContentLanguage => {
+  if (language === "ko" || language === "zh") return language;
+  return "en";
+};
+
+/**
+ * Keep reviewed tutorials on the Tomverse origin. Each master contains the UI
+ * in the language it teaches and a matching voiceover; captions remain a
+ * complete alternative when audio is muted.
+ */
+export const ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATHS: Record<
+  AssistantKnowledgeGuideContentLanguage,
+  string
+> = {
+  ko: `${ASSISTANT_KNOWLEDGE_GUIDE_PATH}/assistant-knowledge.ko.mp4`,
+  en: `${ASSISTANT_KNOWLEDGE_GUIDE_PATH}/assistant-knowledge.en.mp4`,
+  zh: `${ASSISTANT_KNOWLEDGE_GUIDE_PATH}/assistant-knowledge.zh.mp4`,
+};
+
+export const assistantKnowledgeGuideVideoPath = (language: Language) =>
+  ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATHS[
+    assistantKnowledgeGuideContentLanguage(language)
+  ];
+
+export const assistantKnowledgeGuideCaptionPath = (language: Language) => {
+  const contentLanguage = assistantKnowledgeGuideContentLanguage(language);
+  return `${ASSISTANT_KNOWLEDGE_GUIDE_PATH}/assistant-knowledge.${contentLanguage}.vtt`;
+};
+
+export const ASSISTANT_KNOWLEDGE_GUIDE_CAPTION_LABELS: Record<
+  AssistantKnowledgeGuideContentLanguage,
+  string
+> = {
+  ko: "한국어",
+  en: "English",
+  zh: "简体中文",
+};
+
+export const assistantKnowledgeGuideCaptionLabel = (language: Language) =>
+  ASSISTANT_KNOWLEDGE_GUIDE_CAPTION_LABELS[
+    assistantKnowledgeGuideContentLanguage(language)
+  ];
+
 export const ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_DURATION_SECONDS = 44.04;
 
 export const ASSISTANT_KNOWLEDGE_GUIDE_STEPS = [

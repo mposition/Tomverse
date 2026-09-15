@@ -4,13 +4,27 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v10 (2026-09-15).** marketing 국가 allowlist를 profile 매핑과 분리해 10개국으로 확정. 0절 참조.
+- 개정: **v11 (2026-09-15).** marketing 동의 확인 단계(double opt-in) 구현, flag off. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v11 (2026-09-15) — double opt-in 구현, 운영 비활성
+
+- [확인 단계 설계](email-double-opt-in.md) §11의 11항목이 들어갔습니다. 설계와 달라진
+  점과 켜는 순서는 그 문서 §13입니다.
+- **확인 링크는 저장되지 않고**(발송 시점 생성, URL fragment), 요청·확인·취소는 한 행 잠금 아래에서 일어나며, 동의 기록은 요청 시점의 정책 버전을 씁니다. 설계 문서 §13.1 #9~#14.
+- **marketing purpose는 이제 확인 클릭으로만 켜집니다.** preference centre의 켜기는
+  확인 메일 요청이고, 발송 gate(`consentGateVerdict()`)는 `confirmedAt`이 없는 행을
+  `no_consent`로 거부합니다. 캠페인 cohort와 대상 추정도 같은 조건을 봅니다.
+- `feature.emailConsentConfirmationEnabled`는 기본 off이고, off는 **확인 없는 동의를
+  허용한다는 뜻이 아니라 동의를 아직 받지 않는다는 뜻**입니다.
+- **배포 순서 제약이 하나 생겼습니다.** `MARKETING_EMAIL_FROM`이 설정된 환경은
+  `EMAIL_CONSENT_KEYS`가 없으면 `/api/ready`가 실패합니다. production은 이미
+  `MARKETING_EMAIL_FROM`을 가지고 있으므로 **키를 먼저 설정한 뒤 배포합니다**.
 
 ### v10 (2026-09-15) — marketing 국가 allowlist 10개국
 
@@ -1484,6 +1498,9 @@ enabled            Boolean
 source             "signup" | "preference_center" | "unsubscribe_link"
                    | "admin" | "system_default"
 grantedAt                DateTime?  // 현재 enabled 상태가 시작된 시각
+confirmedAt              DateTime?  // double opt-in 확인 클릭 시각. NULL이면 발송 gate가 거부
+confirmationRequestedAt  DateTime?  // 최신 확인 요청 시각 (만료 계산)
+confirmationRequestId    String?    // 최신 확인 요청 id. 토큰이 이 id를 이름 대야 확인됨
 lastConfirmationNoticeAt DateTime?  // E7. 마지막 확인 고지 발송 시각
 nextConfirmationNoticeAt DateTime?  // E7. 다음 고지 예정. 만료 기한이 아님
 updatedAt, createdAt
@@ -1506,6 +1523,7 @@ emailAddress       String   // 당시 주소. 변경돼도 보존
 purpose            String
 action             "granted" | "withdrawn" | "reconfirmed"
                    | "confirmation_notice_sent"   // E7. 고지를 보냈다는 사실
+                   | "confirmation_requested"     // double opt-in 요청. 동의가 아님
                    | "lapsed"                     // 자동 opt-out 정책이 켜진 경우만
 occurredAt         DateTime
 jurisdiction       String   // 당시 판정값. 소급 변경 금지
@@ -2017,6 +2035,11 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
   담당자가 한 명이면 이중 승인이 충족 불가능하고, 그러면 모든 발송이 영구 차단
   됩니다. registry에 명시적으로 기록된 허용으로 다루고, 두 번째 담당자가 생기면
   플래그 한 줄로 되돌립니다.
+- **구현(2026-09-15):** 위 표의 이중 승인 전부 — 캠페인 승인, 관할권 정책 활성화,
+  억제 목록 제거 — 는 권한 있는 관리자가 한 명뿐일 때 그 관리자가 혼자
+  실행하고 감사 로그가 두 번째 검토자를 대신합니다. 캠페인 승인만 읽은 카피의
+  digest에 결속됩니다. 두 번째 관리자가 설정되면 다음 요청부터 이중 승인으로
+  돌아갑니다: docs/policy/admin-sole-approver.md.
 
 ### 12.4 억제 목록 관리
 
@@ -2212,7 +2235,8 @@ mail을 멈추고 제거는 mail을 다시 시작시키므로 비대칭이 요�
 
 - `privacy_request`는 **거절**합니다. 법적 권리 행사의 기록이고, 그것을 해제할
   자격이 있는 절차는 그것을 만든 privacy 절차이지 운영 화면의 버튼이 아닙니다.
-- `hard_bounce`·`complaint`는 **2인 승인**이 필요합니다. 13.3이 영구로 부르는
+- `hard_bounce`·`complaint`는 **2인 승인**이 필요합니다(1인 조직에서는 감사된
+  단독 실행, 12.3). 13.3이 영구로 부르는
   항목이고, complaint는 수신자가 발송 도메인을 평가하는 지표이며(14.5) 도메인
   평판은 이 시스템에서 가장 늦게 회복되는 부분입니다.
 - 나머지는 **내용 있는 사유**와 감사 기록입니다. `suppressionRemovalProblem()`이
@@ -2414,9 +2438,9 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
 | `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
-| **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). 구현은 미착수 — [설계](email-double-opt-in.md) §11. marketing 활성화 **전**에 켭니다 |
+| **marketing 동의 확인 단계(double opt-in)** | `feature.emailConsentConfirmationEnabled` | 설계 승인됨 (2026-09-15, `mposition`). **구현됨 (v11)** — [설계](email-double-opt-in.md) §13. `EMAIL_CONSENT_KEYS` 배포 후, marketing 활성화 **전**에 켭니다 |
 | 동의 2년 재확인 배치 | `feature.emailConsentReconfirmEnabled` | marketing 활성화 이후 의미 있음 |
-| quiet hours 억제 | 정책으로 제어 | Q4 |
+| quiet hours 억제 | 정책으로 제어 — **발송 경로에 연결됨 (2026-09-15)**. `JurisdictionProfile.quietHours`를 standard lane이 marketing 발송 직전에 읽고, 창 안이면 **창이 끝나는 시각까지 지연**합니다(skip 아님, attempt 소모 없음, §12.6). 고정된 profile과 현재 해석된 profile 둘 다 봅니다. 판정은 `lib/emailQuietHoursCore.ts`. 발송 직전에 한 번 더 확인하며 창 시작 5분 전부터 창 안으로 봅니다. 종료 시각은 zone의 **종료 시점 offset**으로 환산하므로 서머타임 전환이 창 안에 있어도 맞습니다. 읽을 수 없는 창은 seed 검증과 **policy 활성화**가 막고, 런타임에서 만나면 1시간씩 미루며 incident를 올립니다. 지연 사유는 `EmailDelivery.deferReason`(오류 기록과 분리)에 남고, 아직 기다리는 동안만 큐 적체 지표에서 빠집니다 | Q4 — 회신이 "전자우편은 예외 매체"이면 KR profile의 `quietHours`를 비우는 새 policy version 하나로 끕니다 |
 
 **"만들되 끈다"는 이유:** 규제 확인은 몇 주가 걸리는데 그동안 구조를 못 만들면
 나중에 급하게 만들게 되고, 급하게 만든 동의 시스템이 정확히 이 문서가 막으려는

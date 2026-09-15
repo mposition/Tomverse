@@ -1571,23 +1571,40 @@ export async function openModelPickerCatalogue(page: Page) {
  * Opens a seeded conversation from the new-chat screen, whichever shell is
  * rendering.
  *
- * The desktop welcome screen still lists recent conversations as title cards.
- * The mobile welcome screen deliberately does not -- printing chat titles on
- * the first screen of a phone leaks them to anyone holding it -- so there the
- * path is the compact "View N recent chats" row, which opens the same drawer
- * the hamburger does. Specs go through here instead of clicking
- * `recent-conversation-card` directly so they stay shell-agnostic.
+ * The desktop welcome screen lists no recent conversations: the sidebar beside
+ * it already does, so that is the path (docs/ui-contracts/chat-starter-catalog.md
+ * section 6). The mobile welcome screen prints no titles either -- a phone's
+ * first screen leaks them to anyone holding it -- so there the path is the
+ * compact "View N recent chats" row, which opens the same drawer the hamburger
+ * does. Specs go through here so they stay shell-agnostic.
  */
 export async function openRecentConversation(
   page: Page,
   options: { title?: string } = {}
 ) {
   const disclosure = page.getByTestId("recent-conversations-disclosure");
-  const cards = page.getByTestId("recent-conversation-card");
+  const cards = page.getByTestId("sidebar-conversation-item");
+  const expandSidebar = page.getByTestId("sidebar-expand-button");
   // Which affordance exists depends on the shell, so wait for whichever one
   // this viewport renders before branching -- a bare count() would race the
-  // welcome screen's first paint.
-  await expect(disclosure.or(cards.first())).toBeVisible();
+  // welcome screen's first paint. The mobile sidebar only mounts inside the
+  // drawer, so on that shell the disclosure is the only visible candidate;
+  // a desktop window narrow enough to auto-collapse the sidebar shows only
+  // its expand button.
+  await expect(disclosure.or(cards.first()).or(expandSidebar)).toBeVisible();
+
+  if (!(await disclosure.count()) && !(await cards.count())) {
+    // Open the list the way a person would, then put the rail back so the
+    // rest of the spec measures the layout it asked for.
+    await expandSidebar.click();
+    const card = options.title
+      ? cards.filter({ hasText: options.title })
+      : cards.first();
+    await card.click();
+    await page.getByTestId("sidebar-collapse-button").click();
+    await expect(expandSidebar).toBeVisible();
+    return;
+  }
 
   if (await disclosure.count()) {
     await disclosure.click();

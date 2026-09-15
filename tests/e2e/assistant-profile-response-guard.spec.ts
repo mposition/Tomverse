@@ -197,7 +197,7 @@ async function openTwoConversations(page: Page) {
   await page.goto("/chat?lang=en");
   await expect(page.getByTestId("chat-input")).toBeVisible();
   await page
-    .getByTestId("recent-conversation-card")
+    .getByTestId("sidebar-conversation-item")
     .getByText("QA conversation", { exact: true })
     .click();
   await expect(page.getByText("first answer").first()).toBeVisible();

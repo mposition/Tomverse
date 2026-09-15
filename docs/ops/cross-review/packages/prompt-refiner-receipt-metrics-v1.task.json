@@ -1,0 +1,26 @@
+{
+  "taskId": "prompt-refiner-receipt-metrics-v1",
+  "requirement": "Prompt Refiner를 제품에서 활성화하지 않은 채 provider-independent 내부 실행 receipt와 사용자 disposition receipt, 그리고 지연·실패·stale·사용자 선택률의 명시적 분모를 가진 무과금 집계 계약을 구현한다. 실행과 사용자 선택은 별도 immutable record로 유지하며, prompt·대화·사용자 식별자·provider 오류 본문을 저장할 필드를 두지 않는다. malformed·중복·orphan·결속 불일치·시간 역행은 fail-closed하고, 오프라인 report는 집계값과 provider/model attribution만 출력한다. provider 호출, billing, Router 입력, Prisma schema, 제품 adapter, AppSetting writer, flag 활성화, 품질·rollout 승인, 유료 실행은 포함하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "실행 receipt는 성공·dispatch 후 실패·dispatch 전 거절을 구분하고 provider/model/adapter, contract version, timestamps, token·비용의 known-vs-unknown, retry count와 고정 failure 분류를 content-free하게 기록한다.",
+    "사용자 disposition receipt는 accepted·kept_original·stale을 실행 receipt와 결속하며 stale 원인이 requesting/ready 단계와 모순되거나 request/suggestion id가 어긋나면 거부한다.",
+    "집계는 request 수, suggestion yield, dispatched failure, refusal, preparation latency p50/p95, stale/request, explicit choice/suggestion, accepted/choice, 비용·token coverage와 provider/model breakdown의 분자·분모를 숨기지 않는다.",
+    "빈 표본은 rate·percentile을 null로 보고하고 malformed·중복·orphan·content field·provider 오류 문장을 fail-closed하는 회귀 테스트가 통과한다.",
+    "오프라인 report는 입력 receipt id·request id·suggestion id나 사용자 content를 출력하지 않고, 품질·release readiness·rollout 통과를 주장하지 않는다.",
+    "관련 unit, typecheck, lint, report dry run, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다."
+  ],
+  "baseCommit": "102006072838f09ff6e0104c0e4ae23e7dc8bfab",
+  "writableScope": [
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerReceiptCore.ts",
+    "package.json",
+    "scripts/report-prompt-refiner-receipts.mjs",
+    "tests/promptRefinerReceiptCore.test.mjs"
+  ],
+  "generatedPaths": []
+}

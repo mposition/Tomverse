@@ -467,7 +467,7 @@ const REGISTRY = {
   ConsentRecord_action_check: {
     owner: "type_only",
     reason:
-      "ConsentAction in lib/emailPreferenceCore.ts: granted, withdrawn, reconfirmed, confirmation_notice_sent, lapsed. The last two are the Korean confirmation duty and the optional lapse behind its own flag (\u00a75.5); they are separate values precisely because notifying is not expiring, and folding them together would make the history unable to answer which one happened.",
+      "ConsentAction in lib/emailPreferenceCore.ts: granted, withdrawn, reconfirmed, confirmation_notice_sent, confirmation_requested, lapsed. confirmation_notice_sent and lapsed are the Korean confirmation duty and the optional lapse behind its own flag (\u00a75.5); they are separate values precisely because notifying is not expiring, and folding them together would make the history unable to answer which one happened. confirmation_requested is the double opt-in's request (docs/policy/email-double-opt-in.md \u00a74.4) and is not a consent: recording it as granted would log the sending of a confirmation mail as agreement.",
   },
   ConsentRecord_captured_via_check: {
     owner: "database",
@@ -576,10 +576,15 @@ const REGISTRY = {
     reason:
       "Why somebody in the audience received nothing. A superset of AudienceExclusion because it also carries reasons decided later: `already_changed` is only knowable at the reminder, after the first notice has had time to work. `malformed` is deliberately not in this list -- an unreadable stored value means the account cannot be migrated automatically, not that it should be left uninformed, and an exclusion here would contradict summariseAudience().",
   },
+  EmailDelivery_defer_reason_check: {
+    owner: "database",
+    reason:
+      "Why a pending delivery is waiting for nextAttemptAt when the wait is not a retry. Today only quiet_hours, written by the standard lane when a marketing message reaches a night-time window (docs/policy/email-notifications.md §5.2 E5). Kept apart from lastErrorKind so waiting is never recorded as an error, and cleared when the row is next attempted.",
+  },
   EmailDelivery_skip_reason_check: {
     owner: "database",
     reason:
-      "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
+      "Why a delivery was never attempted -- no_consent, suppressed_complaint, jurisdiction_unconfirmed, campaign_cancelled and the rest. Nullable, so it is only present on a skipped row. It is the answer to \"why did this person not get it\", which is a question support has to be able to answer without reading the send code.",
   },
 
 };

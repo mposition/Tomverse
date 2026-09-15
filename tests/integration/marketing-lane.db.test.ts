@@ -14,6 +14,7 @@ import {
 } from "@/lib/emailFeatureFlags";
 import {
   approveCampaign,
+  cancelCampaign,
   createCampaignDraft,
   runCampaignWave,
 } from "@/lib/emailCampaignService";
@@ -95,6 +96,13 @@ const PAYLOAD = {
   ctaUrl: "https://tomverse.app/chat",
 };
 
+const nextSeoulDaytime = () => {
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== 12) at.setUTCHours(at.getUTCHours() + 1);
+  return at;
+};
+
 beforeEach(async () => {
   await reset();
   mock.restoreAll();
@@ -133,7 +141,11 @@ const activatePolicy = async () => {
 };
 
 /** An account that opted in to product updates, in a country we can name. */
-const subscriber = async (options?: { country?: string; consented?: boolean }) => {
+const subscriber = async (options?: {
+  country?: string;
+  consented?: boolean;
+  confirmed?: boolean;
+}) => {
   const user = await prisma.user.create({
     data: { email: `${randomUUID()}@example.test`, name: "Subscriber" },
   });
@@ -155,6 +167,10 @@ const subscriber = async (options?: { country?: string; consented?: boolean }) =
         enabled: true,
         source: "preference_center",
         grantedAt: new Date(),
+        // Confirmed: unconfirmed consent is refused by the gate
+        // (docs/policy/email-double-opt-in.md §6), and these tests are about
+        // what happens after it.
+        confirmedAt: options?.confirmed === false ? null : new Date(),
       },
     });
   }
@@ -189,6 +205,89 @@ test("an account that never opted in is not sent product news", async () => {
   assert.equal(delivery.skipReason, "no_consent");
 });
 
+test("marketing to a Korean recipient at night waits for 08:00 Seoul time", async () => {
+  // docs/policy/email-notifications.md §5.2 E5, §12.6: deferred, not skipped,
+  // and waiting does not spend an attempt.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "KR" });
+  const rows = await queue(user);
+
+  // The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after the
+  // row's own nextAttemptAt, so the row is due and the clock is inside the
+  // window whatever time of day the suite runs.
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  const morning = new Date(at.getTime() + 9 * 60 * 60 * 1_000);
+
+  await drainStandardEmailDeliveries({ limit: 1, now: at });
+
+  assert.equal(calls.length, 0, "nothing may be sent inside the window");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: {
+      status: true,
+      skipReason: true,
+      attempts: true,
+      nextAttemptAt: true,
+      claimedAt: true,
+      lastErrorKind: true,
+      deferReason: true,
+    },
+  });
+  assert.equal(delivery.status, "pending");
+  assert.equal(delivery.skipReason, null);
+  assert.equal(delivery.attempts, 0);
+  assert.equal(delivery.claimedAt, null);
+  assert.equal(delivery.nextAttemptAt?.toISOString(), morning.toISOString());
+  assert.equal(delivery.deferReason, "quiet_hours");
+  // Waiting is not an error.
+  assert.equal(delivery.lastErrorKind, null);
+
+  // Not due again before the morning.
+  const early = await drainStandardEmailDeliveries({
+    limit: 1,
+    now: new Date(morning.getTime() - 60_000),
+  });
+  assert.equal(early.claimed, 0);
+  // Waiting for the morning is on schedule, not a backlog.
+  assert.equal(early.pending, 0);
+
+  // In the morning it is attempted, and the reason it waited is cleared
+  // whatever the attempt's outcome (here the marketing identity is unset).
+  const later = await drainStandardEmailDeliveries({
+    limit: 1,
+    now: new Date(morning.getTime() + 60_000),
+  });
+  assert.equal(later.claimed, 1);
+  const attempted = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { deferReason: true, attempts: true },
+  });
+  assert.equal(attempted.deferReason, null);
+});
+
+test("consent switched on but never confirmed is not sent", async () => {
+  // docs/policy/email-double-opt-in.md §3 rule 5, §7: a row enabled before the
+  // confirmation step existed has no confirmedAt, and the gate refuses it
+  // without any migration touching it.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ confirmed: false });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 0);
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.equal(delivery.status, "skipped");
+  assert.equal(delivery.skipReason, "no_consent");
+});
+
 test("an unconfirmed jurisdiction stops marketing, and says which", async () => {
   await activatePolicy();
   const calls = stubProvider();
@@ -202,6 +301,7 @@ test("an unconfirmed jurisdiction stops marketing, and says which", async () => 
       enabled: true,
       source: "preference_center",
       grantedAt: new Date(),
+      confirmedAt: new Date(),
     },
   });
   const rows = await queue(user);
@@ -316,6 +416,42 @@ test("configured, it sends from the marketing domain with one-click headers", as
   assert.equal(headers["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
 });
 
+test("cancelling a campaign stops its unsent deliveries, including one waiting out the night", async () => {
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
+  await activatePolicy();
+  const calls = stubProvider();
+  await subscriber({ country: "US" });
+  const campaign = await createCampaignDraft({
+    category: "other",
+    templateKey: PRODUCT_ANNOUNCEMENT_TEMPLATE,
+    locales: ["en"],
+    contentByLocale: { en: ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT.en },
+    audienceSpec: {
+      cohort: { kind: "marketing_consent", purpose: "product_updates" },
+    },
+    createdByEmail: "ops@example.test",
+  });
+  await approveCampaign({ campaignId: campaign.id, approvalId: `approval-${randomUUID()}` });
+  const run = await runCampaignWave({ campaignId: campaign.id, kind: "launch" });
+  assert.ok(!("refused" in run), JSON.stringify(run));
+
+  // As if waiting for a window to end: pending, not yet due.
+  await prisma.emailDelivery.updateMany({
+    data: { nextAttemptAt: new Date(Date.now() + 60 * 60 * 1_000), deferReason: "quiet_hours" },
+  });
+
+  const cancelled = await cancelCampaign({ campaignId: campaign.id, reason: "test" });
+  assert.equal(cancelled.deliveriesSkipped, 1);
+
+  await drainStandardEmailDeliveries({ limit: 5, now: new Date(Date.now() + 2 * 60 * 60 * 1_000) });
+  assert.equal(calls.length, 0, "a cancelled campaign must not send");
+  const delivery = await prisma.emailDelivery.findFirstOrThrow({
+    select: { status: true, skipReason: true, deferReason: true },
+  });
+  assert.deepEqual(delivery, { status: "skipped", skipReason: "campaign_cancelled", deferReason: null });
+});
+
 test("a consent campaign reaches the provider with its authored content", async () => {
   process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
   process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
@@ -372,7 +508,7 @@ test("a Korean subscriber's subject carries the advertising label", async () => 
   const user = await subscriber({ country: "KR" });
   await queue(user);
 
-  await drainStandardEmailDeliveries({ limit: 1 });
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulDaytime() });
 
   assert.equal(calls.length, 1);
   // 정보통신망법 제50조제4항. The body stays in the account's own language:
@@ -422,7 +558,7 @@ test("an incomplete business identity holds marketing rather than sending it", a
   const user = await subscriber({ country: "KR" });
   const rows = await queue(user);
 
-  await drainStandardEmailDeliveries({ limit: 1 });
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulDaytime() });
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({

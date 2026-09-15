@@ -1931,6 +1931,10 @@ model FeedbackAutoFixCase {
   /// --- Phase 3 (null until a fix attempt runs; docs/policy §9) -----------
   /// feedback-autofix/<case-id> -- the case id, never a raw trace ID.
   fixBranch           String?
+  /// The running fix attempt's server-minted id. Every heartbeat and result
+  /// must present it; a claim replaces it and a reclaim or a terminal result
+  /// clears it, so a late callback from an expired run matches nothing.
+  fixAttemptId        String?
   fixPrNumber         Int?
   fixPrUrl            String?
   /// Read back from GitHub after the human-approved merge; never inferred
@@ -1939,6 +1943,38 @@ model FeedbackAutoFixCase {
   stagingSha          String?
   /// The validated Red→Green proof payload (lib/feedbackAutoFixPolicy.ts).
   redGreenProof       Json?
+  /// --- Review request (docs/policy/trace-feedback-automation.md §9.3) ------
+  /// The develop PR head and its change manifest digest, read from GitHub by
+  /// the server (lib/feedbackAutoFixChangeManifest.ts).
+  fixHeadSha          String?
+  fixManifestDigest   String?
+  /// The manifest itself: path, base blob and head blob per changed file.
+  fixManifest         Json?
+  /// Root cause, fix and test summaries from the fix run: bounded, technical,
+  /// derived only from the diagnostic summary -- never the report body.
+  fixReport           Json?
+  /// --- Owner approval, bound to one head and one manifest --------------------
+  /// Who approved is recorded in AdminAuditLog (feedback_autofix.approved), not
+  /// here: the case keeps no account identifier of its own.
+  approvedAt          DateTime?
+  approvedHeadSha     String?
+  approvedManifestDigest String?
+  /// --- Promotion: every value observed by the server itself -----------------
+  stagingDeploymentId String?
+  stagingFirstSeenAt  DateTime?
+  stagingVerifiedAt   DateTime?
+  productionBranch    String?
+  productionPrNumber  Int?
+  productionPrUrl     String?
+  productionPrHeadSha String?
+  productionMergeSha  String?
+  productionDeploymentId String?
+  productionFirstSeenAt  DateTime?
+  productionVerifiedAt   DateTime?
+  /// The last observer pass that read this case and why it did not advance:
+  /// what the console shows as "observation delayed".
+  promotionObservedAt DateTime?
+  promotionObservation String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
@@ -4695,6 +4731,17 @@ model EmailPreference {
   /// When the current enabled state began. Not the row's creation.
   grantedAt DateTime?
 
+  /// The double opt-in (docs/policy/email-double-opt-in.md §4.1). confirmedAt
+  /// is when the mailbox owner clicked the confirmation link and is the only
+  /// thing that makes a consent-based purpose sendable; NULL is refused by the
+  /// send gate even when `enabled` is true. confirmationRequestedAt is the
+  /// latest request, and a confirmation token is honoured only while it still
+  /// names its request id. Both go back to NULL when the purpose is switched off.
+  confirmedAt             DateTime?
+  confirmationRequestedAt DateTime?
+  /// Random id of the latest request; a confirmation token must name it.
+  confirmationRequestId   String?
+
   /// E7. When consent was last confirmed *to* the recipient, and when it is
   /// next due. Passing nextConfirmationNoticeAt does not change `enabled`:
   /// the duty is to notify, not to expire (docs/policy/email-notifications.md
@@ -4729,7 +4776,10 @@ model ConsentRecord {
   emailAddress String
   purpose      String
 
-  /// granted | withdrawn | reconfirmed | confirmation_notice_sent | lapsed
+  /// granted | withdrawn | reconfirmed | confirmation_notice_sent
+  ///   | confirmation_requested | lapsed
+  /// confirmation_requested is the double opt-in's request, not a consent: it
+  /// records that a confirmation mail was asked for and nothing more.
   action     String
   occurredAt DateTime @default(now())
 
@@ -4911,8 +4961,14 @@ model EmailDelivery {
   ///   | quiet_hours | jurisdiction_conflict | jurisdiction_unconfirmed
   ///   | jurisdiction_profile_missing | jurisdiction_footer_incomplete
   ///   | credential_expired | dry_run | marketing_halted | marketing_disabled
-  ///   | marketing_country_not_allowed
+  ///   | marketing_country_not_allowed | campaign_cancelled
   skipReason String?
+
+  /// Why a still-pending row waits for nextAttemptAt when the wait is not a
+  /// retry. quiet_hours: a night-time window (docs/policy/email-notifications.md
+  /// §5.2 E5). Cleared when the row is next attempted; kept apart from
+  /// lastErrorKind so waiting is never recorded as an error.
+  deferReason String?
 
   attempts      Int       @default(0)
   nextAttemptAt DateTime?

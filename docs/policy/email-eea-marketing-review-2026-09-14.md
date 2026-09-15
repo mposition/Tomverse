@@ -185,7 +185,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 
 | # | 조건 | 상태 (2026-09-15) | 근거 |
 |---|---|---|---|
-| 1 | **DOI 구현과 기록** | 🟡 **설계 승인됨, 구현 미착수** | [설계](email-double-opt-in.md) 승인 2026-09-15 `mposition`. §11의 11항목 미실행. `feature.emailConsentConfirmationEnabled`가 docs/policy/email-notifications.md §15.2에 등록 |
+| 1 | **DOI 구현과 기록** | 🟡 **구현됨, 운영 활성화 전** | [설계](email-double-opt-in.md) 승인 2026-09-15 `mposition`, 같은 날 §11의 11항목 구현(설계 §13). **남은 것**: `EMAIL_CONSENT_KEYS` 배포와 `feature.emailConsentConfirmationEnabled` 활성화 — 운영 행위 |
 | 2 | **동의 시점 국가 필수 수집**, 불명·충돌이면 보류 | ✅ **완료** | `marketingOptInCountryDecision()`이 국가 없는 요청을 `country_required`로, profile 없는 국가를 `country_unsupported`로 거부하고, `marketingJurisdictionVerdict()`가 충돌을 `COUNTRY_CONFLICT`로 보류합니다 (`app/api/user/email-preferences/route.ts`, `lib/emailJurisdictionCore.ts`) |
 | 3 | **재동의 요청 메일을 보내지 않습니다** | ✅ **완료 — 그리고 대상이 0명입니다** | 설계 §7이 정정됐고, 2026-09-15 실측에서 확인 메일을 돌려야 할 사용자가 **0명**입니다(`docs/ops/q2-marketing-reach-decision.md` §2.1). 금지 자체는 유지됩니다 — 미확인 상태는 앞으로도 생깁니다 |
 | 4 | footer 사업자 정보 실제 값 (Q8) | ✅ **완료·배포됨** | `EMAIL_BUSINESS_*` production 설정, `/api/ready`의 `emailBusinessIdentity` `true` |

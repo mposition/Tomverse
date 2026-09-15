@@ -14,9 +14,18 @@ import { resolve } from "node:path";
  *   - everything is dark unless FEEDBACK_AUTOFIX_ENABLED is "true";
  *   - a claim is compare-and-swap and a replayed result callback becomes a
  *     refused no-op instead of a state jump;
- *   - "merged" is only accepted with a GitHub read-back shape, and staging
- *     verification only with the exact merge SHA.
+ *   - a reported PR is recorded only as GitHub describes it -- this
+ *     repository, base develop, the case's own branch, open -- with GitHub's
+ *     head and change manifest, and its review request mail commits with it;
+ *   - nothing after pr_open can be reported: merged and staging outcomes no
+ *     longer exist, and a late fix_failed cannot undo an open PR.
  */
+
+import {
+  createFakeGitHub,
+  fakeGitHubFetch,
+  type FakeGitHub,
+} from "../support/fakeGitHubApi";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 const mod = (relativePath: string) =>
@@ -29,8 +38,16 @@ const SECRET = "a-feedback-autofix-sync-secret-32ch!";
 
 type CaseRow = Record<string, unknown> & { id: string; state: string };
 
-type World = { cases: CaseRow[] };
-const freshWorld = (): World => ({ cases: [] });
+type World = {
+  cases: CaseRow[];
+  deliveries: Array<{ kind: string; referenceId: string }>;
+  github: FakeGitHub;
+};
+const freshWorld = (): World => ({
+  cases: [],
+  deliveries: [],
+  github: createFakeGitHub(),
+});
 let world = freshWorld();
 let mocksInstalled = false;
 
@@ -49,13 +66,23 @@ const matches = (row: CaseRow, where: Record<string, unknown>) => {
   if (where.classification !== undefined) {
     if (row.classification !== where.classification) return false;
   }
+  if (where.fixAttemptId !== undefined) {
+    if (row.fixAttemptId !== where.fixAttemptId) return false;
+  }
   return true;
 };
 
 async function loadRoutes() {
   if (!mocksInstalled) {
     mocksInstalled = true;
-    const fakePrisma = {
+    const fakePrisma: Record<string, unknown> = {
+      $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakePrisma),
+      notificationDelivery: {
+        upsert: async ({ create }: { create: { kind: string; referenceId: string } }) => {
+          world.deliveries.push(create);
+          return { id: "delivery-" + world.deliveries.length };
+        },
+      },
       feedbackAutoFixCase: {
         count: async () => 0,
         findMany: async ({
@@ -142,11 +169,62 @@ const candidateCase = (id: string): CaseRow => ({
   diagnosticSummary: { errorCode: "AI_PROVIDER_ERROR" },
   sourceRelease: "sha",
   mergeSha: null,
+  fixAttemptId: null,
 });
 
+/** The attempt id a claim would have minted for a seeded in-flight case. */
+const ATTEMPT = "11111111-2222-4333-8444-555555555555";
+const inFlight = (id: string, state: string): CaseRow => ({
+  ...candidateCase(id),
+  state,
+  fixAttemptId: ATTEMPT,
+});
+
+const realFetch = globalThis.fetch;
 test.beforeEach(() => {
   world = freshWorld();
+  globalThis.fetch = fakeGitHubFetch(world.github);
 });
+test.afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+const DEVELOP_SHA = "d".repeat(40);
+const HEAD_SHA = "e".repeat(40);
+const READ_ENV = {
+  ...ENABLED_ENV,
+  FEEDBACK_AUTOFIX_GITHUB_READ_TOKEN: "github-read-token",
+};
+
+/** A develop PR for `caseId` as GitHub would describe it. */
+const openDevelopPr = (
+  caseId: string,
+  overrides: Partial<FakeGitHub["pulls"][number]> = {}
+) => {
+  world.github.pulls.push({
+    number: 999,
+    state: "open",
+    merged: false,
+    mergeCommitSha: null,
+    baseRef: "develop",
+    baseSha: DEVELOP_SHA,
+    headRef: `feedback-autofix/${caseId}`,
+    headSha: HEAD_SHA,
+    files: ["lib/webSearchStreamTrailer.ts", "tests/x.test.ts"],
+    ...overrides,
+  });
+  world.github.blobs[DEVELOP_SHA] = { "lib/webSearchStreamTrailer.ts": "1".repeat(40) };
+  world.github.blobs[HEAD_SHA] = {
+    "lib/webSearchStreamTrailer.ts": "2".repeat(40),
+    "tests/x.test.ts": "3".repeat(40),
+  };
+};
+
+const FIX_REPORT = {
+  rootCause: "The trailer parser dropped the final chunk when the stream ended early.",
+  fixSummary: "Flush the buffered chunk before closing the trailer.",
+  testSummary: "Adds a stream that ends mid-chunk.",
+};
 
 test("no secret configured means 401 for everyone, even with a guess", async () => {
   await withEnv(
@@ -211,6 +289,8 @@ test("a claim is won exactly once and names the case-id branch", async () => {
     assert.equal(first.claimed, true);
     assert.equal(first.branch, "feedback-autofix/case-claim-1x");
     assert.equal(world.cases[0].state, "fix_attempting");
+    assert.match(String((first as { attemptId?: string }).attemptId), /^[0-9a-f-]{36}$/);
+    assert.equal(world.cases[0].fixAttemptId, (first as { attemptId?: string }).attemptId);
     const second = (await (
       await claim(post("claim", { caseId: "case-claim-1x" }, SECRET))
     ).json()) as { claimed: boolean };
@@ -221,13 +301,14 @@ test("a claim is won exactly once and names the case-id branch", async () => {
 test("a proof that violates the change policy is refused server-side", async () => {
   await withEnv(ENABLED_ENV, async () => {
     const { result } = await loadRoutes();
-    world.cases.push({ ...candidateCase("case-bad-policy"), state: "fix_attempting" });
+    world.cases.push(inFlight("case-bad-policy", "fix_attempting"));
     const body = (await (
       await result(
         post(
           "result",
           {
             caseId: "case-bad-policy",
+            attemptId: ATTEMPT,
             result: {
               outcome: "red_green_proven",
               changedFiles: [
@@ -263,78 +344,194 @@ test("a proof that violates the change policy is refused server-side", async () 
   });
 });
 
-test("the full result sequence transitions in order and refuses replays", async () => {
-  await withEnv(ENABLED_ENV, async () => {
+const provenPayload = {
+  outcome: "red_green_proven",
+  changedFiles: [
+    { path: "lib/webSearchStreamTrailer.ts", addedLines: 4, removedLines: 1, changeKind: "modified" },
+    { path: "tests/x.test.ts", addedLines: 12, removedLines: 0, changeKind: "added" },
+  ],
+  proof: {
+    testPath: "tests/x.test.ts",
+    baseSha: "a".repeat(40),
+    headSha: "b".repeat(40),
+    red: { exitCode: 1, assertionFailure: true },
+    green: { exitCode: 0 },
+  },
+};
+
+const prOpen = { outcome: "pr_open", prNumber: 999, fixReport: FIX_REPORT };
+
+test("the result sequence records the PR as GitHub describes it and refuses replays", async () => {
+  await withEnv(READ_ENV, async () => {
     const { result } = await loadRoutes();
-    world.cases.push({ ...candidateCase("case-sequence00"), state: "fix_attempting" });
+    world.cases.push(inFlight("case-sequence00", "fix_attempting"));
+    openDevelopPr("case-sequence00");
     const send = async (payload: unknown) =>
       (await (
-        await result(post("result", { caseId: "case-sequence00", result: payload }, SECRET))
+        await result(
+          post("result", { caseId: "case-sequence00", attemptId: ATTEMPT, result: payload }, SECRET)
+        )
       ).json()) as { applied: boolean; reason?: string };
 
-    const proven = await send({
-      outcome: "red_green_proven",
-      changedFiles: [
-        { path: "lib/webSearchStreamTrailer.ts", addedLines: 4, removedLines: 1, changeKind: "modified" },
-        { path: "tests/x.test.ts", addedLines: 12, removedLines: 0, changeKind: "added" },
-      ],
-      proof: {
-        testPath: "tests/x.test.ts",
-        baseSha: "a".repeat(40),
-        headSha: "b".repeat(40),
-        red: { exitCode: 1, assertionFailure: true },
-        green: { exitCode: 0 },
-      },
-    });
-    assert.equal(proven.applied, true);
+    // Out of order: a PR before the proof is refused by the state guard,
+    // before anything is read from GitHub.
+    assert.equal((await send(prOpen)).applied, false);
+    assert.equal(world.github.requests.length, 0);
+
+    assert.equal((await send(provenPayload)).applied, true);
     assert.equal(world.cases[0].state, "red_green_proven");
 
-    // Out of order: merged before a PR exists is refused by the graph.
-    const early = await send({
-      outcome: "merged",
-      mergedAt: "2026-08-03T12:00:00Z",
-      mergeSha: "c".repeat(40),
-    });
-    assert.equal(early.applied, false);
+    const pr = await send(prOpen);
+    assert.equal(pr.applied, true, pr.reason);
+    const row = world.cases[0];
+    assert.equal(row.state, "pr_open");
+    assert.equal(row.fixHeadSha, HEAD_SHA);
+    assert.equal(row.fixPrUrl, "https://github.com/mposition/Tomverse/pull/999");
+    assert.deepEqual(row.fixManifest, [
+      { path: "lib/webSearchStreamTrailer.ts", baseBlob: "1".repeat(40), headBlob: "2".repeat(40) },
+      { path: "tests/x.test.ts", baseBlob: null, headBlob: "3".repeat(40) },
+    ]);
+    assert.match(String(row.fixManifestDigest), /^fcm1:[0-9a-f]{64}$/);
+    assert.deepEqual(row.fixReport, FIX_REPORT);
+    assert.deepEqual(world.deliveries, [
+      { kind: "autofix_review_requested", referenceId: "case-sequence00" },
+    ]);
+    assert.ok(
+      world.github.requests.every((request) => request.method === "GET"),
+      "the server only reads GitHub"
+    );
 
-    const pr = await send({ outcome: "pr_open", prNumber: 999, prUrl: "https://github.com/mposition/Tomverse/pull/999" });
-    assert.equal(pr.applied, true);
+    // A replay is a refused no-op, and a late failure cannot undo the PR.
+    assert.equal((await send(prOpen)).applied, false);
+    assert.equal((await send({ outcome: "fix_failed", reason: "late runner" })).applied, false);
     assert.equal(world.cases[0].state, "pr_open");
+    assert.equal(world.deliveries.length, 1);
+  });
+});
 
-    const merged = await send({
-      outcome: "merged",
-      mergedAt: "2026-08-03T12:00:00Z",
-      mergeSha: "c".repeat(40),
+test("a PR that is not the case's own open develop PR is never recorded", async () => {
+  const variants: Array<[string, Partial<FakeGitHub["pulls"][number]>]> = [
+    ["fork head", { headRepository: "someone/Tomverse" }],
+    ["wrong base", { baseRef: "main" }],
+    ["another case's branch", { headRef: "feedback-autofix/other-case-0000" }],
+    ["closed", { state: "closed" }],
+  ];
+  for (const [label, overrides] of variants) {
+    await withEnv(READ_ENV, async () => {
+      world = freshWorld();
+      globalThis.fetch = fakeGitHubFetch(world.github);
+      const { result } = await loadRoutes();
+      world.cases.push(inFlight("case-identity0", "red_green_proven"));
+      openDevelopPr("case-identity0", overrides);
+      const body = (await (
+        await result(
+          post("result", { caseId: "case-identity0", attemptId: ATTEMPT, result: prOpen }, SECRET)
+        )
+      ).json()) as { applied: boolean };
+      assert.equal(body.applied, false, label);
+      assert.equal(world.cases[0].state, "red_green_proven", label);
+      assert.equal(world.deliveries.length, 0, label);
     });
-    assert.equal(merged.applied, true);
-    assert.equal(world.cases[0].mergeSha, "c".repeat(40));
+  }
+});
 
-    // Staging must present the exact merge SHA.
-    const wrongStaging = await send({ outcome: "staging_verified", stagingSha: "d".repeat(40) });
-    assert.equal(wrongStaging.applied, false);
-    const staging = await send({ outcome: "staging_verified", stagingSha: "c".repeat(40) });
-    assert.equal(staging.applied, true);
-    assert.equal(world.cases[0].state, "staging_verified");
+test("without the GitHub read token a PR is not recorded", async () => {
+  await withEnv({ ...READ_ENV, FEEDBACK_AUTOFIX_GITHUB_READ_TOKEN: undefined }, async () => {
+    const { result } = await loadRoutes();
+    world.cases.push(inFlight("case-no-token0", "red_green_proven"));
+    openDevelopPr("case-no-token0");
+    const body = (await (
+      await result(
+        post("result", { caseId: "case-no-token0", attemptId: ATTEMPT, result: prOpen }, SECRET)
+      )
+    ).json()) as { applied: boolean; reason?: string };
+    assert.equal(body.applied, false);
+    assert.equal(body.reason, "github_read_unavailable");
+  });
+});
 
-    // A replayed earlier callback is a refused no-op, not a state rewind.
-    const replay = await send({ outcome: "pr_open", prNumber: 999, prUrl: "https://github.com/mposition/Tomverse/pull/999" });
-    assert.equal(replay.applied, false);
-    assert.equal(world.cases[0].state, "staging_verified");
+test("merged and staging outcomes are no longer accepted from a workflow", async () => {
+  await withEnv(READ_ENV, async () => {
+    const { result } = await loadRoutes();
+    world.cases.push({ ...candidateCase("case-legacy000"), state: "pr_open" });
+    for (const payload of [
+      { outcome: "merged", mergedAt: "2026-08-03T12:00:00Z", mergeSha: "c".repeat(40) },
+      { outcome: "staging_verified", stagingSha: "c".repeat(40) },
+      { outcome: "pr_open", prNumber: 999, prUrl: "https://github.com/mposition/Tomverse/pull/999" },
+    ]) {
+      const response = await result(
+        post("result", { caseId: "case-legacy000", attemptId: ATTEMPT, result: payload }, SECRET)
+      );
+      assert.equal(response.status, 400, JSON.stringify(payload));
+    }
+    assert.equal(world.cases[0].state, "pr_open");
   });
 });
 
 test("heartbeat only answers alive for a case under an active fix lease", async () => {
   await withEnv(ENABLED_ENV, async () => {
     const { heartbeat } = await loadRoutes();
-    world.cases.push({ ...candidateCase("case-heartbeat0"), state: "fix_attempting" });
+    world.cases.push(inFlight("case-heartbeat0", "fix_attempting"));
     const alive = (await (
-      await heartbeat(post("heartbeat", { caseId: "case-heartbeat0" }, SECRET))
+      await heartbeat(post("heartbeat", { caseId: "case-heartbeat0", attemptId: ATTEMPT }, SECRET))
     ).json()) as { alive: boolean };
     assert.equal(alive.alive, true);
     world.cases[0].state = "fix_failed";
     const dead = (await (
-      await heartbeat(post("heartbeat", { caseId: "case-heartbeat0" }, SECRET))
+      await heartbeat(post("heartbeat", { caseId: "case-heartbeat0", attemptId: ATTEMPT }, SECRET))
     ).json()) as { alive: boolean };
     assert.equal(dead.alive, false);
+  });
+});
+
+test("a run whose lease was reclaimed cannot move the next run's case", async () => {
+  await withEnv(READ_ENV, async () => {
+    const { claim, result, heartbeat } = await loadRoutes();
+    world.cases.push(candidateCase("case-stale-run0"));
+    const claimOnce = async () =>
+      (await (
+        await claim(post("claim", { caseId: "case-stale-run0" }, SECRET))
+      ).json()) as { claimed: boolean; attemptId: string };
+
+    // Run A claims, then its lease expires and the case returns to the pool.
+    const runA = await claimOnce();
+    assert.equal(runA.claimed, true);
+    // The in-memory prisma cannot evaluate `lt`, so the reclaim's write is
+    // applied as reclaimExpiredFixLeases() performs it (asserted below).
+    Object.assign(world.cases[0], {
+      state: "awaiting_human_review",
+      leaseExpiresAt: null,
+      claimedAt: null,
+      fixAttemptId: null,
+    });
+    const source = (await import("node:fs")).readFileSync(
+      resolve(ROOT, "lib/feedbackAutoFixSync.ts"),
+      "utf8"
+    );
+    const reclaim = source.slice(source.indexOf("export const reclaimExpiredFixLeases"));
+    assert.match(reclaim, /fixAttemptId: null/, "the reclaim voids the expired run's id");
+
+    // Run B claims the same case.
+    const runB = await claimOnce();
+    assert.equal(runB.claimed, true);
+    assert.notEqual(runB.attemptId, runA.attemptId);
+
+    const send = async (attemptId: string, payload: unknown) =>
+      (await (
+        await result(post("result", { caseId: "case-stale-run0", attemptId, result: payload }, SECRET))
+      ).json()) as { applied: boolean };
+
+    // A's late callbacks match nothing.
+    assert.equal((await send(runA.attemptId, provenPayload)).applied, false);
+    assert.equal((await send(runA.attemptId, { outcome: "fix_failed", reason: "late" })).applied, false);
+    const staleBeat = (await (
+      await heartbeat(post("heartbeat", { caseId: "case-stale-run0", attemptId: runA.attemptId }, SECRET))
+    ).json()) as { alive: boolean };
+    assert.equal(staleBeat.alive, false);
+    assert.equal(world.cases[0].state, "fix_attempting");
+
+    // B's own callback applies.
+    assert.equal((await send(runB.attemptId, provenPayload)).applied, true);
+    assert.equal(world.cases[0].state, "red_green_proven");
   });
 });

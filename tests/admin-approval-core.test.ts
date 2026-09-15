@@ -4,7 +4,9 @@ import {
   approvalPayloadHash,
   approvalPermissionForAction,
   approvalTtlMinutes,
+  ADMIN_APPROVAL_EXECUTION_LEASE_MS,
   canReviewAdminApproval,
+  executionLeaseExpiresAt,
   refundApprovalThresholdCents,
 } from "../lib/adminApprovalCore.ts";
 
@@ -47,4 +49,19 @@ test("approval policy maps actions and clamps configuration", () => {
   assert.equal(approvalPermissionForAction("user.delete"), "user:delete");
   assert.equal(approvalTtlMinutes("1"), 5);
   assert.equal(refundApprovalThresholdCents("-4"), 0);
+});
+
+test("a claim made just before an approval lapses still holds a full execution lease", () => {
+  // Codex review, 2026-09-16: the sole path reads an unexpired executing row
+  // as the same change in flight, so the claim must not inherit a deadline a
+  // second away while its operation is still running.
+  const now = new Date("2026-09-16T00:00:00.000Z");
+  const lapsing = new Date(now.getTime() + 1_000);
+  assert.equal(
+    executionLeaseExpiresAt(lapsing, now).getTime(),
+    now.getTime() + ADMIN_APPROVAL_EXECUTION_LEASE_MS
+  );
+  // Never shorter than the approval's own deadline.
+  const distant = new Date(now.getTime() + 24 * ADMIN_APPROVAL_EXECUTION_LEASE_MS);
+  assert.equal(executionLeaseExpiresAt(distant, now).getTime(), distant.getTime());
 });

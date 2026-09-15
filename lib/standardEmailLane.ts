@@ -32,6 +32,7 @@ import { readBusinessIdentity, BLOCK_ENV_VARIABLE } from "@/lib/emailBusinessIde
 import { composeJurisdictionalMessage } from "@/lib/emailJurisdictionComposition";
 import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
+import { deferralFor } from "@/lib/emailQuietHoursCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
 import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
@@ -323,6 +324,7 @@ type ClaimedDelivery = {
   renderDataSnapshot: unknown;
   policyVersionId: string;
   jurisdictionProfileKey: string;
+  event: { referenceType: string | null; referenceId: string | null };
   templateVersion: {
     template: { key: string; classification: string; requiresUnsubscribe: boolean };
   };
@@ -345,7 +347,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
   const staleBefore = new Date(now.getTime() - STANDARD_LANE_CLAIM_TTL_MS);
   const rows = await prisma.$queryRaw<Array<{ id: string }>>`
     UPDATE "EmailDelivery"
-       SET "claimedAt" = ${now}, "lastAttemptAt" = ${now}
+       SET "claimedAt" = ${now}, "lastAttemptAt" = ${now}, "deferReason" = NULL
      WHERE "id" = (
        SELECT "id" FROM "EmailDelivery"
         WHERE "lane" = 'standard'
@@ -374,6 +376,7 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       // Pinned at enqueue, read here: this is the step the pin exists for.
       policyVersionId: true,
       jurisdictionProfileKey: true,
+      event: { select: { referenceType: true, referenceId: true } },
       templateVersion: {
         select: {
           template: {
@@ -405,6 +408,7 @@ const recordOutcome = async (
         sentAt: context.now,
         nextAttemptAt: null,
         claimedAt: null,
+        deferReason: null,
         providerMessageId: outcome.providerMessageId,
         renderedSubject: context.rendered.subject,
         renderedHash: renderedBodyHash(context.rendered),
@@ -446,6 +450,7 @@ const recordOutcome = async (
         lastErrorKind: outcome.errorKind,
         nextAttemptAt: null,
         claimedAt: null,
+        deferReason: null,
       },
     });
     return "failed" as const;
@@ -464,6 +469,7 @@ const recordOutcome = async (
         lastErrorKind: outcome.errorKind,
         nextAttemptAt: null,
         claimedAt: null,
+        deferReason: null,
       },
     });
     return "abandoned" as const;
@@ -477,6 +483,7 @@ const recordOutcome = async (
       lastErrorKind: outcome.errorKind,
       nextAttemptAt: new Date(context.now.getTime() + decision.delayMs),
       claimedAt: null,
+      deferReason: null,
     },
   });
   return "pending" as const;
@@ -491,7 +498,66 @@ const recordOutcome = async (
  * second attempt it would also break the idempotency key's promise, because the
  * key only suppresses a duplicate when the payload matches too.
  */
+/**
+ * Defers a claimed marketing delivery past a night-time window, if one applies.
+ *
+ * Returns true when the row was put back to wait. Pending, attempt count
+ * untouched: waiting for the morning is not a failed attempt. A window that
+ * cannot be read holds the message an hour rather than sending at an hour the
+ * rule might forbid, and says so -- once per profile per cooldown, not once per
+ * delivery, so a malformed policy row does not become an incident per recipient.
+ */
+const holdForQuietHours = async (
+  delivery: ClaimedDelivery,
+  windows: Array<{ profileKey: string; quietHours: unknown }>,
+  at: Date
+): Promise<boolean> => {
+  const verdict = deferralFor(windows, at);
+  let until: Date | null = null;
+  if ("invalid" in verdict) {
+    await reportOperationalIncident({
+      code: "EMAIL_QUIET_HOURS_UNREADABLE",
+      title: "Marketing is being held because a profile's quiet hours cannot be read",
+      severity: "error",
+      error: `Profile ${verdict.invalid} in policy ${delivery.policyVersionId} has malformed quietHours.`,
+      cooldownMs: 60 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        profileKey: verdict.invalid,
+        policyVersionId: delivery.policyVersionId,
+      },
+    });
+    until = new Date(at.getTime() + 60 * 60 * 1_000);
+  } else {
+    until = verdict.until;
+  }
+  if (!until) return false;
+  await prisma.emailDelivery.update({
+    where: { id: delivery.id },
+    data: { nextAttemptAt: until, claimedAt: null, deferReason: "quiet_hours" },
+  });
+  return true;
+};
+
+/**
+ * Replaces each secret with a fixed placeholder, longest first so a secret
+ * that contains another is removed whole. Used only for what is recorded --
+ * the subject and the audit hash -- never for what is sent.
+ */
+const redactSecrets = (
+  message: { subject: string; html: string; text: string },
+  secrets: string[]
+) => {
+  if (secrets.length === 0) return message;
+  const ordered = [...secrets].filter(Boolean).sort((l, r) => r.length - l.length);
+  const scrub = (value: string) =>
+    ordered.reduce((text, secret) => text.split(secret).join("{{secret}}"), value);
+  return { subject: scrub(message.subject), html: scrub(message.html), text: scrub(message.text) };
+};
+
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
+  // Filled for marketing only; re-checked immediately before the provider call.
+  let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
   const definition = emailTemplateDefinition(delivery.templateVersion.template.key);
 
   // Checked at send time, not at enqueue: a message queued yesterday may be for
@@ -553,7 +619,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
                 purpose: definition.purpose,
               },
             },
-            select: { enabled: true },
+            select: { enabled: true, confirmedAt: true },
           })
         : null;
 
@@ -562,6 +628,8 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       purpose: definition.purpose,
       hasAccount: Boolean(delivery.userId),
       storedEnabled: stored ? stored.enabled : null,
+      // docs/policy/email-double-opt-in.md §6: passed here, judged there.
+      storedConfirmedAt: stored ? stored.confirmedAt : null,
     });
     if (!consent.allowed) {
       await prisma.emailDelivery.update({
@@ -651,10 +719,38 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       });
       return { outcome: "suppressed" as const, classification: definition.classification };
     }
+
+    // Night-time rules (docs/policy/email-notifications.md §5.2 E5, §12.6).
+    // Deferred to the end of the window, not skipped: an evening wave must
+    // reach Korean recipients at 08:00 rather than never. Both the profile this
+    // row was pinned to and the one the recipient resolves to now are
+    // consulted, so neither a stale pin nor a move into a quiet-hours
+    // jurisdiction lets a message through at night. Checked again right before
+    // the provider call, because rendering takes time and the clock moves.
+    const profileKeys = [
+      ...new Set([delivery.jurisdictionProfileKey, resolved?.profileKey].filter(Boolean)),
+    ] as string[];
+    quietHourWindows = await prisma.jurisdictionProfile.findMany({
+      where: {
+        policyVersionId: delivery.policyVersionId,
+        profileKey: { in: profileKeys },
+      },
+      select: { profileKey: true, quietHours: true },
+    });
+    const held = await holdForQuietHours(delivery, quietHourWindows, now);
+    if (held) return { outcome: "pending" as const, classification: definition.classification };
   }
 
-  const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
-  const templateRendered = definition.render(payload, delivery.language);
+  const stored = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
+  // A template that carries a capability rebuilds it here rather than reading
+  // it from the snapshot, and names it so the audit record can leave it out
+  // (docs/policy/email-notifications.md §10.3).
+  const prepared = definition.prepareForSend
+    ? definition.prepareForSend(stored)
+    : { payload: stored, secrets: [] as string[] };
+  const templateRendered = definition.render(prepared.payload, delivery.language);
+  const forAudit = (message: { subject: string; html: string; text: string }) =>
+    redactSecrets(message, prepared.secrets);
   const attempts = delivery.attempts + 1;
 
   // Only marketing carries these, and the template's own flag decides -- which
@@ -699,7 +795,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         now,
         attempts,
         classification: definition.classification,
-        rendered: templateRendered,
+        rendered: forAudit(templateRendered),
         status: null,
       }
     );
@@ -802,6 +898,43 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
 
   const rendered = composed.rendered;
 
+  // A campaign cancelled while this row waited, or while it was being
+  // rendered, is not sent. Cancellation also skips unsent rows itself; this
+  // closes the window between a claim and that update.
+  if (delivery.event.referenceType === "EmailCampaign" && delivery.event.referenceId) {
+    const campaign = await prisma.emailCampaign.findUnique({
+      where: { id: delivery.event.referenceId },
+      select: { status: true },
+    });
+    if (campaign?.status === "cancelled") {
+      await prisma.emailDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "skipped",
+          skipReason: "campaign_cancelled",
+          nextAttemptAt: null,
+          claimedAt: null,
+        },
+      });
+      return { outcome: "suppressed" as const, classification: definition.classification };
+    }
+  }
+
+  // The last word on quiet hours, as close to the send as it can be. The first
+  // check used the claim's clock; rendering and composition have happened since.
+  // The later of the two clocks is used so an injected clock cannot move this
+  // check into the past.
+  if (
+    quietHourWindows.length > 0 &&
+    (await holdForQuietHours(
+      delivery,
+      quietHourWindows,
+      new Date(Math.max(now.getTime(), Date.now()))
+    ))
+  ) {
+    return { outcome: "pending" as const, classification: definition.classification };
+  }
+
   const response = await deliverEmailOnce({
     to: delivery.emailAddress,
     ...rendered,
@@ -875,7 +1008,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     now,
     attempts,
     classification: definition.classification,
-    rendered,
+    rendered: forAudit(rendered),
     status: response.ok ? null : (response.status ?? null),
   });
   return { outcome: recorded, classification: definition.classification };
@@ -965,18 +1098,32 @@ export async function drainStandardEmailDeliveries(options?: {
     }
   }
 
-  result.pending = await prisma.emailDelivery.count({
-    where: { lane: "standard", status: "pending" },
-  });
-  const oldestPending = await prisma.emailDelivery.findFirst({
-    where: { lane: "standard", status: "pending" },
-    orderBy: { createdAt: "asc" },
-    select: { createdAt: true },
-  });
   // Resolved here rather than reusing the per-message `now` inside the loop:
   // that one is scoped to a claim and does not exist when the loop never ran,
   // which is exactly the case a stale queue shows up in.
   const measuredAt = options?.now ?? new Date();
+  // A message waiting out a night-time window is on schedule, not behind, and
+  // counting it would page somebody every evening a Korean wave is queued. It
+  // is excluded only while it is still waiting: once its nextAttemptAt has
+  // passed, a morning the drain has not caught up with counts like any other.
+  const backlog: Prisma.EmailDeliveryWhereInput = {
+    lane: "standard",
+    status: "pending",
+    // Spelled out rather than NOT(...): NOT over a nullable column is NULL for a
+    // row with no deferReason, and SQL would drop every ordinary row.
+    OR: [
+      { deferReason: null },
+      { deferReason: { not: "quiet_hours" } },
+      { nextAttemptAt: null },
+      { nextAttemptAt: { lte: measuredAt } },
+    ],
+  };
+  result.pending = await prisma.emailDelivery.count({ where: backlog });
+  const oldestPending = await prisma.emailDelivery.findFirst({
+    where: backlog,
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
   result.oldestPendingMs = oldestPending
     ? Math.max(0, measuredAt.getTime() - oldestPending.createdAt.getTime())
     : null;

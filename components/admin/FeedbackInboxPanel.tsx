@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -28,6 +29,11 @@ import {
 } from "@/lib/feedbackLifecycleCore";
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import { autoFixReplyDraft } from "@/lib/feedbackAutoFixReplyDraft";
+import {
+  useServerSyncedRows,
+  useSupportInboxRefresh,
+} from "@/components/admin/useSupportInboxRefresh";
 
 type FeedbackInboxMessages = AdminMessageShape<
   (typeof adminFeedbackInboxMessages)["en"]
@@ -154,6 +160,20 @@ type UserNotificationResult =
 
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
 
+/** Case states that belong to diagnosis-only shadow mode; anything past them
+ * is an auto-fix on its way through review and promotion. */
+const SHADOW_CASE_STATES = new Set([
+  "received",
+  "collecting_evidence",
+  "evidence_ready",
+  "evidence_delayed",
+  "classifying",
+  "diagnostic_ready",
+  "ineligible",
+  "awaiting_human_review",
+  "closed",
+]);
+
 /** Whether lifecycle emails can reach this reporter at all. */
 const isNotifiable = (feedback: FeedbackRow) =>
   Boolean(feedback.email) && feedback.emailUpdatesConsent;
@@ -205,7 +225,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     requestedStatus && statuses.includes(requestedStatus as (typeof statuses)[number])
       ? (requestedStatus as (typeof statuses)[number])
       : "all";
-  const [items, setItems] = useState(rows);
+  const [items, setItems] = useServerSyncedRows(rows);
   const [query, setQuery] = useState(() => searchParams.get("q") || "");
   const [statusFilter, setStatusFilter] = useState<"all" | typeof statuses[number]>(
     initialStatus
@@ -219,7 +239,14 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
   const [closeTarget, setCloseTarget] = useState<{
     feedback: FeedbackRow;
     status: "resolved" | "closed";
+    /** Opened from an auto-fix reply draft: the dialog starts from it. */
+    draft?: { outcomeCode: FeedbackClosureOutcome; userReply: string };
   } | null>(null);
+  // A dialog holding an operator's half-written reply, or a request in
+  // flight, is never interrupted by the background refresh.
+  const refreshInbox = useSupportInboxRefresh({
+    paused: Boolean(closeTarget) || Boolean(busyId),
+  });
 
   const updateLocation = (nextQuery: string, nextStatus: typeof statusFilter) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -238,6 +265,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
       if (!statusMatches) return false;
       if (!normalizedQuery) return true;
       return [
+        item.id,
         item.email,
         item.type,
         item.status,
@@ -297,6 +325,10 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
             : item
         )
       );
+      // Re-read the rows and the sidebar badge counts from the server: the
+      // local merge above shows the change at once, the refresh makes every
+      // count on the screen agree with it.
+      refreshInbox();
       // The status change succeeded whatever happened to the email; the
       // sentence about the email only ever adds detail.
       dispatchAppToast(
@@ -544,6 +576,44 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                   </div>
                 </div>
 
+                {(() => {
+                  // Only a fix observed live in production offers a draft;
+                  // the dialog still shows it for review before anything is sent.
+                  const draft = isTerminalFeedbackStatus(feedback.status)
+                    ? null
+                    : autoFixReplyDraft({
+                        caseState: feedback.autoFixCase?.state,
+                        language: feedback.language,
+                      });
+                  return draft ? (
+                    <div
+                      data-testid="feedback-autofix-reply-draft"
+                      className="mt-3 flex flex-col gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs font-semibold leading-5 text-emerald-100 md:flex-row md:items-center md:justify-between"
+                    >
+                      <span>{m.autoFixDraft.ready}</span>
+                      <span className="flex flex-wrap gap-2">
+                        <Link
+                          href="/admin/support?tab=fixes"
+                          className="inline-flex min-h-11 items-center rounded-xl border border-emerald-400/40 px-3 py-2 font-bold text-emerald-50 transition hover:bg-emerald-500/20"
+                        >
+                          {m.autoFixDraft.review}
+                        </Link>
+                        <button
+                          type="button"
+                          data-testid="feedback-autofix-use-draft"
+                          disabled={busy}
+                          onClick={() =>
+                            setCloseTarget({ feedback, status: "resolved", draft })
+                          }
+                          className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-emerald-700 px-3 py-2 font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {m.autoFixDraft.use}
+                        </button>
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
+
                 {isNotifiable(feedback) && feedback.status === "open" ? (
                   <p
                     data-testid="feedback-reviewing-email-hint"
@@ -601,7 +671,9 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         data-testid="feedback-autofix-case"
                         className="truncate"
                       >
-                        {m.shadowDiagnosis}
+                        {SHADOW_CASE_STATES.has(feedback.autoFixCase.state)
+                          ? m.shadowDiagnosis
+                          : m.autoFixStage}
                         {feedback.autoFixCase.state}
                         {feedback.autoFixCase.classification
                           ? ` — ${feedback.autoFixCase.classification}`
@@ -663,6 +735,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
         <FeedbackCompletionDialog
           feedback={closeTarget.feedback}
           status={closeTarget.status}
+          draft={closeTarget.draft}
           busy={busyId === closeTarget.feedback.id}
           onCancel={() => setCloseTarget(null)}
           onConfirm={async (closure) => {
@@ -691,12 +764,14 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
 function FeedbackCompletionDialog({
   feedback,
   status,
+  draft,
   busy,
   onCancel,
   onConfirm,
 }: {
   feedback: FeedbackRow;
   status: "resolved" | "closed";
+  draft?: { outcomeCode: FeedbackClosureOutcome; userReply: string };
   busy: boolean;
   onCancel: () => void;
   onConfirm: (closure: {
@@ -705,10 +780,12 @@ function FeedbackCompletionDialog({
   }) => void;
 }) {
   const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome>(
-    feedback.type === "bug" ? "fixed" : "answered"
+    draft?.outcomeCode ?? (feedback.type === "bug" ? "fixed" : "answered")
   );
   const m = useAdminMessages(adminFeedbackInboxMessages);
-  const [userReply, setUserReply] = useState(feedback.userReply || "");
+  const [userReply, setUserReply] = useState(
+    draft?.userReply ?? (feedback.userReply || "")
+  );
   const selectRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
@@ -864,7 +941,11 @@ function FeedbackCompletionDialog({
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {m.dialog.confirm(m.statuses[status])}
+            {draft
+              ? notifiable && !alreadyCompleted && userReply.trim()
+                ? m.autoFixDraft.sendAndResolve
+                : m.autoFixDraft.resolveOnly
+              : m.dialog.confirm(m.statuses[status])}
           </button>
         </div>
       </div>

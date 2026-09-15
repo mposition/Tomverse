@@ -255,6 +255,22 @@ import {
 // decision reads the same key this file writes.
 const ACTIVE_CHAT_STORAGE_KEY = GUEST_ACTIVE_CHAT_STORAGE_KEY;
 
+/**
+ * Where the draft and message-receipt recovery notices float: under the
+ * header, never at the bottom of the screen.
+ *
+ * They used to sit at `bottom-4`, which is where the composer's dock is. That
+ * covered the composer's action row -- the microphone and send included --
+ * whenever a conversation had answers, and since the composer stays in the
+ * dock on a new chat too (docs/ui-contracts/chat-starter-catalog.md section 6)
+ * it would have covered it on every screen. The mobile composer contract
+ * forbids anything floating over the composer; a notice that needs a decision
+ * can cover conversation text for a moment instead. The height cap keeps a
+ * 200% text notice from running off the screen.
+ */
+const RECOVERY_NOTICE_PLACEMENT =
+  "fixed inset-x-3 top-[calc(4.5rem+env(safe-area-inset-top))] max-h-[calc(100dvh-6rem)] overflow-y-auto";
+
 // Private Mode has been removed as a product concept. This key is kept only
 // so a one-time effect below can clear it out of any browser that still has
 // it set from before the removal -- it must never be read to restore state.
@@ -7636,7 +7652,7 @@ export function ChatPageClient({
         role="alert"
         aria-labelledby="message-receipt-recovery-title"
         data-testid="message-receipt-recovery-dialog"
-        className="fixed inset-x-3 bottom-4 z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900`}
       >
         <h2
           id="message-receipt-recovery-title"
@@ -7662,7 +7678,7 @@ export function ChatPageClient({
         role="alert"
         aria-labelledby="draft-conflict-title"
         data-testid="draft-conflict-dialog"
-        className="fixed inset-x-3 bottom-4 z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900`}
       >
         <h2 id="draft-conflict-title" className="text-sm font-semibold text-zinc-950 dark:text-white">
           {t("chat.draftConflictTitle")}
@@ -7694,7 +7710,7 @@ export function ChatPageClient({
       <section
         role="alert"
         data-testid="draft-sync-failed"
-        className="fixed inset-x-3 bottom-4 z-[74] mx-auto max-w-lg rounded-2xl border border-rose-300 bg-white p-4 shadow-2xl dark:border-rose-900 dark:bg-zinc-900"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[74] mx-auto max-w-lg rounded-2xl border border-rose-300 bg-white p-4 shadow-2xl dark:border-rose-900 dark:bg-zinc-900`}
       >
         <h2 className="text-sm font-semibold text-zinc-950 dark:text-white">
           {t("chat.draftSyncFailedTitle")}
@@ -7713,7 +7729,11 @@ export function ChatPageClient({
       </section>
     )}
     {showGuestSignInPrompt && isGuestMode && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"
@@ -7793,7 +7813,11 @@ export function ChatPageClient({
       </div>
     )}
     {upgradeModelPrompt && accountUsage && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"

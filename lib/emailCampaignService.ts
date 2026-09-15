@@ -477,9 +477,12 @@ export const runCampaignWave = async (input: {
 /**
  * Stops a campaign and every wave that has not finished.
  *
- * Delivery rows already written are left to the lane, which will skip the ones
- * it should: a cancelled campaign is a decision about what happens next, and
- * rewriting rows behind it would lose what had already been done.
+ * Delivery rows already sent are left as they are -- they record what was done.
+ * Rows not yet sent are marked skipped (`campaign_cancelled`) in the same
+ * transaction, and the lane re-checks the campaign immediately before each
+ * send, so a row claimed while this runs does not go out either. Before this a
+ * message waiting for its retry, or for a night window to end, went out after
+ * the campaign had been cancelled.
  */
 export const cancelCampaign = async (input: {
   campaignId: string;
@@ -500,7 +503,24 @@ export const cancelCampaign = async (input: {
       },
       data: { status: "cancelled" },
     });
-    return { campaign, wavesCancelled: waves.count };
+    const deliveries = await tx.emailDelivery.updateMany({
+      where: {
+        status: "pending",
+        event: { referenceType: "EmailCampaign", referenceId: input.campaignId },
+      },
+      data: {
+        status: "skipped",
+        skipReason: "campaign_cancelled",
+        nextAttemptAt: null,
+        claimedAt: null,
+        deferReason: null,
+      },
+    });
+    return {
+      campaign,
+      wavesCancelled: waves.count,
+      deliveriesSkipped: deliveries.count,
+    };
   });
 };
 
@@ -990,6 +1010,9 @@ export const estimateCampaignAudience = async (input: {
       purpose: spec.cohort.purpose,
       enabled: true,
       grantedAt: { not: null },
+      // The same confirmed-only cohort the expansion files
+      // (docs/policy/email-double-opt-in.md §6).
+      confirmedAt: { not: null },
     } as const;
     const [consented, active, activeWithEmail] = await Promise.all([
       prisma.user.count({

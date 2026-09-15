@@ -2,8 +2,14 @@ export const dynamic = "force-dynamic";
 
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminPrivacyRequestsPanel } from "@/components/admin/AdminPrivacyRequestsPanel";
+import { AutoFixReviewPanel } from "@/components/admin/AutoFixReviewPanel";
 import { FeedbackInboxPanel } from "@/components/admin/FeedbackInboxPanel";
-import { ADMIN_READ_LIMITS, loadFeedbackRows } from "@/lib/adminConsoleData";
+import {
+  ADMIN_READ_LIMITS,
+  loadAutoFixReviewRows,
+  loadFeedbackRows,
+} from "@/lib/adminConsoleData";
+import { promotionConfigurationProblems } from "@/lib/feedbackAutoFixPromotion";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 
 const TABS = adminNavItemTabs("support");
@@ -33,9 +39,17 @@ export default async function AdminSupportPage({
       />
       {tab.id === "privacy" ? (
         <AdminPrivacyRequestsPanel />
+      ) : tab.id === "fixes" ? (
+        <AutoFixReviewPanel
+          rows={await loadAutoFixReviewRows()}
+          rowLimit={ADMIN_READ_LIMITS.autoFixCases}
+          configurationProblems={promotionConfigurationProblems()}
+        />
       ) : (
         <FeedbackInboxPanel
-          rows={await loadFeedbackRows()}
+          rows={await loadFeedbackRows({
+            includeId: typeof query.q === "string" ? query.q.trim() || undefined : undefined,
+          })}
           rowLimit={ADMIN_READ_LIMITS.feedback}
         />
       )}

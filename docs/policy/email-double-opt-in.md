@@ -4,14 +4,17 @@
 > `docs/policy/email-notifications.md` v9 개정으로 들어갔고 §15.2의 "만들되 끄는
 > 것" 목록에 `feature.emailConsentConfirmationEnabled`가 추가됐습니다.
 >
-> **승인된 것은 설계이지 구현이 아닙니다.** §11의 체크리스트는 아직 하나도
-> 실행되지 않았고, 코드를 쓰는 것은 별도 착수입니다.
+> **구현됨, 운영 비활성 (2026-09-15).** §11의 11항목이 모두 코드에 들어갔고
+> `feature.emailConsentConfirmationEnabled`는 기본 off입니다. 켜는 순서와 설계에서
+> 달라진 점은 §13에 있습니다. **flag가 꺼져 있어도 규칙은 꺼지지 않습니다** —
+> marketing purpose는 확인 없이 켜지지 않고, 요청 자체가 거절됩니다.
 >
 > - 발단: 21절 **Q1**(EU 회원국별 국내법) 조사, 2026-09-14
 > - 관련 계약: docs/policy/email-notifications.md §5.1, §10.2, §11.3, §6.3
 >   (C1·C8은 §5.1, `ConsentRecord`는 §10.2)
-> - 구현 지점: `lib/emailPreferences.ts`, `lib/emailPreferenceCore.ts`,
->   `app/api/user/email-preferences/route.ts`
+> - 구현 지점: `lib/emailConsentConfirmation.ts`, `lib/emailConsentToken.ts`,
+>   `lib/emailPreferences.ts`, `lib/emailPreferenceCore.ts`,
+>   `app/api/user/email-preferences/route.ts`, `app/api/consent/confirm/route.ts`
 
 ---
 
@@ -96,10 +99,9 @@ confirmationRequestedAt DateTime?
 
 ### 4.2 토큰은 무상태입니다
 
-> **`lib/emailConsentToken.ts`는 아직 없습니다.** 이 설계안이 제안하는 유일한 신규
-> 파일이고(§11), 만들지 여부는 §12의 첫 번째 승인 항목입니다. 검사기에는
-> `scripts/check-doc-references-core.mjs`의 `PLANNED_REFERENCES`로 등록해 두었으며,
-> 파일이 생기면 그 등록을 지워야 검사가 다시 감시합니다.
+> **`lib/emailConsentToken.ts`가 이 형식을 구현합니다(2026-09-15).**
+> `scripts/check-doc-references-core.mjs`의 `PLANNED_REFERENCES` 등록은 지웠고,
+> 검사가 다시 이 경로를 감시합니다.
 
 `lib/unsubscribeToken.ts`와 같은 형태 — `c1.<version>.<iv>.<ct>.<tag>`, AES-GCM,
 버전 있는 키링. pending 행을 따로 두면 만료 정리 cron이 하나 더 생기고, 그 cron이
@@ -269,7 +271,7 @@ https://tomverse.app/api/admin/marketing-reach
 | 2 | `lib/emailPreferenceCore.ts` | `ConsentAction`에 `confirmation_requested` |
 | 3 | `scripts/check-enum-constraints.mjs` | 같은 값 등록 |
 | 4 | `lib/emailConsentToken.ts` (신규) | `c1.` 토큰, `EMAIL_CONSENT_KEYS` 키링 |
-| 5 | `lib/emailPreferences.ts` | `requestConsentConfirmation()`, `confirmConsent()`. `setPreference`의 `token_cannot_enable`은 **그대로** |
+| 5 | `lib/emailPreferences.ts` | `requestConsentConfirmation()`, `confirmConsent()`. `setPreference`의 `token_cannot_enable`은 **그대로** (구현은 `lib/emailConsentConfirmation.ts` — §13.1 #1) |
 | 6 | `lib/emailTemplateDefinitions.ts` | `marketing_consent_confirmation`, classification `transactional`, senderRole `general`, 7개 언어 |
 | 7 | `app/api/user/email-preferences/route.ts` | marketing purpose 켜기 → 확인 요청으로 분기 |
 | 8 | `app/(site)/(marketing)/consent/confirm` + `app/api/consent/confirm` | GET 화면 / POST 적용 |
@@ -297,8 +299,8 @@ https://tomverse.app/api/admin/marketing-reach
 | **도입 시점** | marketing 활성화 **전**. §1과 §7의 근거대로이며, 실측(`enabled` 0)이 그 비용을 확정했습니다 |
 | **§9의 전역 적용** | 관할권별 분기를 두지 않습니다 |
 
-**승인된 것은 설계입니다.** §11의 체크리스트 11항목은 하나도 실행되지 않았고,
-구현 착수는 별도입니다.
+**승인된 것은 설계였고, 구현은 2026-09-15에 들어갔습니다(§13).** flag 활성화는
+별도의 운영 행위입니다.
 
 **남은 사실 하나.** §12 v1은 **Q1 회신**을 승인 조건으로 두면서, 인증된 세션의
 동의로 독일 기준이 충족된다면 이 설계가 폐기 가능하다고 적었습니다. 그 사실은
@@ -306,3 +308,43 @@ https://tomverse.app/api/admin/marketing-reach
 쪽을 고른 것이고, §2가 그 이유 셋을 이미 적고 있습니다(소유 증명이 없는 수집
 경로가 enum에 존재, 독일의 기준은 관행이지 자기 평가가 아님, 규칙은 하나여야
 함). Q1이 "충족"으로 회신되면 그때 폐기가 아니라 **재검토**의 근거가 됩니다.
+
+## 13. 구현 기록 (2026-09-15)
+
+§11의 11항목이 들어갔고, §11 테스트 목록에 더해 동시 클릭·정책 전환·flag off 후 링크·enqueue 실패 rollback·링크 미저장을 DB 통합 테스트로 고정했습니다. 아래는 **설계와 달라진 점**과
+그 이유, 그리고 켜는 순서입니다.
+
+### 13.1 설계에서 달라진 점
+
+| # | 설계 | 구현 | 이유 |
+|---|---|---|---|
+| 1 | `requestConsentConfirmation()`·`confirmConsent()`를 `lib/emailPreferences.ts`에 | **`lib/emailConsentConfirmation.ts`** (신규) | 요청은 메일을 enqueue하므로 standard lane 전체를 끌어옵니다. `lib/emailPreferences.ts`를 import하는 수신거부 route가 발송기에 의존하지 않도록 분리했습니다 |
+| 2 | payload에 주소를 넣지 않음 | 주소는 넣지 않되 **주소 digest**를 넣음 (`consentAddressDigest()`) | 토큰은 암호화되어 digest가 보이지 않습니다. 메일 발송 뒤 계정 주소가 바뀌면 그 클릭은 새 주소의 소유를 증명하지 못하므로 `address_changed`로 거부합니다 |
+| 3 | 재사용 토큰 거부 | 요청마다 무작위 **`confirmationRequestId`** 를 저장하고, 토큰이 그 id를 이름 댈 때만 확인. 요청·확인·취소·철회가 모두 **같은 행 잠금**(`SELECT … FOR UPDATE`) 아래에서 읽고 씁니다 | 새 요청이 옛 링크를, 대기 중 취소가 대기 링크를 무효화합니다. timestamp 비교는 같은 밀리초의 두 요청을 둘 다 최신으로 만들고, 잠금 없는 조건부 update는 동시 두 번 클릭에 grant를 두 번 남겼습니다(독립 검토 2026-09-15) |
+| 4 | flag의 의미 미정 | **off는 "동의를 아직 받을 수 없음"** | off일 때 marketing 켜기는 `CONFIRMATION_UNAVAILABLE`(409)로 거절되고 single opt-in으로 저장되지 않습니다. §3 규칙 1이 flag와 무관하게 유지됩니다 |
+| 5 | 상태 셋(꺼짐·대기·켜짐) | 넷째 **`unconfirmed`** 추가 (`consentConfirmationState()`) | 이 단계 이전에 켜진 행(`enabled=true`, `confirmedAt=NULL`)을 있는 그대로 표시합니다. gate는 거부하고, 화면은 "확인 메일 보내기"를 제공합니다(§7의 제품 내 재동의) |
+| 6 | 확인 시점 검사 미정 | 확인 시점에 **관할권을 다시 읽음** | 요청 뒤 결제 국가가 바뀌어 allowlist 밖이 되었거나 충돌하면, 쓸 수 없는 동의를 만들지 않습니다(`country_not_allowed`) |
+| 7 | `setPreference` 계약 | 동의 기반 purpose를 켜는 모든 호출은 `confirmation` 증거가 없으면 **`confirmation_required`** | preference centre를 포함한 어떤 경로도 확인을 건너뛸 수 없습니다. 수신거부 토큰의 `token_cannot_enable`은 먼저 검사되고 그대로입니다 |
+| 8 | 캠페인 대상 | `marketing_consent` cohort와 대상 추정이 **`confirmedAt IS NOT NULL`** 을 함께 요구 | lane이 어차피 거부할 사람을 원장에 수신자로 올리지 않습니다 |
+| 9 | 확인 링크 저장 방식 미정 | **링크를 저장하지 않음.** delivery snapshot에는 요청의 비밀 아닌 필드만 두고, 토큰은 발송 시점에 `prepareForSend`가 만듭니다. 토큰 암호화는 **결정적**(IV = 평문의 HMAC)이라 재시도가 같은 바이트를 냅니다. 감사 hash와 제목은 토큰을 placeholder로 바꾼 뒤 기록합니다 | 링크는 72시간짜리 capability이고, 90일 snapshot에 두면 docs/policy/email-notifications.md §10.3의 자격증명 미저장 규칙에 어긋납니다 |
+| 10 | 링크 형식 `?t=` | **`#t=` (URL fragment)**. 확인 페이지가 읽은 뒤 주소창에서 지웁니다 | fragment는 서버·프록시·access log·Sentry·Referer 어디에도 가지 않습니다. 페이지는 동적인 (application) 그룹에 있습니다 — 정적 marketing layout 아래서는 production CSP nonce가 없어 hydration되지 않습니다 |
+| 11 | 동의 증거의 정책 버전 | 토큰에 고정된 **요청 시점의 `policyVersionId`** 를 grant 기록에 씀 | 요청과 클릭 사이에 정책이 바뀌어도, 사람이 본 정책에 동의했다고 남습니다 |
+| 12 | flag와 이미 발송된 링크 | flag가 off면 **확인도 거부**(`disabled`) | "off는 동의를 받지 않음"이 발송된 링크에도 같게 적용됩니다. 72시간 안에 다시 켜면 링크가 다시 동작합니다 |
+| 13 | IP 증거 | 두 route 모두 신뢰할 수 있는 edge IP만 hash해 기록, `unknown`은 NULL | 설계 §5가 열거한 `ipHash` 증거 |
+| 14 | 대기 취소 UI | 대기 중인 행에 **"요청 취소"** 버튼 | 대기 행의 스위치는 꺼져 있어 누르면 새 확인을 요청하므로, 발송된 링크를 무효화할 별도 수단이 필요합니다 |
+| 15 | 잠금 순서와 주소 | 요청·확인·철회는 **User 행 → EmailPreference 행** 순서로 잠그고, 주소는 잠근 User 행에서 읽어 digest를 대조·기록합니다. purpose suppression 기록·삭제도 같은 트랜잭션입니다 | 확인과 주소 변경, 확인과 수신거부가 교차해도 다른 주소의 동의나 사라진 suppression이 남지 않습니다 |
+| 16 | 요청 트랜잭션 | template·정책 버전은 트랜잭션 **전에** 준비하고, 트랜잭션 안에서는 delivery 행만 씁니다(`createStandardDeliveryRows`) | 잠금을 쥔 채 전역 연결을 추가로 잡으면 동시 요청이 connection pool을 고갈시킬 수 있습니다 |
+| 17 | 키 회전 | 요청 snapshot에 **`tokenKeyVersion`** 을 고정해 재시도가 같은 키로 같은 토큰을 만듭니다. 그 버전은 큐의 최장 재시도 기간 + 72시간보다 오래 `EMAIL_CONSENT_KEYS`에 남겨야 합니다. IV 파생 키는 암호 키와 분리했습니다 | 회전 사이의 재시도가 다른 본문을 같은 idempotency key로 보내지 않습니다 |
+| 18 | analytics 동의 고지 | 확인 페이지에도 사이트 공통 analytics 동의 고지가 뜰 수 있습니다 | 광고가 아니라 개인정보 고지이며, 이 페이지에서만 숨기는 것은 별도의 개인정보 결정입니다 |
+
+### 13.2 켜는 순서 (운영)
+
+1. **`EMAIL_CONSENT_KEYS`를 staging·production에 먼저 설정합니다.** 형식과 생성은
+   `docs/ops/email-snapshot-keyring.md` §1~2와 같고 변수 이름만 다릅니다.
+   `MARKETING_EMAIL_FROM`이 이미 설정된 환경에서는 이 키가 없으면 **이 코드가 배포되는
+   순간 `/api/ready`가 실패합니다**(§11 항목 10). 그래서 키가 코드보다 먼저입니다.
+2. 코드 배포.
+3. `AppSetting`의 `feature.emailConsentConfirmationEnabled`를 `"true"`로 씁니다. 이때부터
+   설정 화면에서 marketing을 켜면 확인 메일이 나갑니다(transactional, `mail.` 도메인).
+4. `feature.emailMarketingEnabled`는 그 **뒤**이며 docs/policy/email-notifications.md
+   §15.2의 조건을 따릅니다.

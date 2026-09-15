@@ -53,7 +53,7 @@ export const adminWorkQueueMessages = defineAdminMessages({
       eyebrow: "Approval workflow",
       title: "High-risk admin approvals",
       description:
-        "A second authorized administrator reviews each exact target and payload. After approval, the original requester must retry the same action before expiry; successful execution consumes it once.",
+        "A second authorized administrator reviews each exact target and payload. After approval, the original requester must retry the same action before expiry; successful execution consumes it once. While only one administrator holds the permission an action needs, that administrator executes it alone and it is recorded in the audit log instead of appearing here.",
       pendingCount: (count: number) => `${count} pending`,
       loading: "Loading approvals...",
       empty: "No approval requests yet.",
@@ -127,7 +127,7 @@ export const adminWorkQueueMessages = defineAdminMessages({
       eyebrow: "승인 절차",
       title: "고위험 관리자 작업 승인",
       description:
-        "권한이 있는 다른 관리자가 정확한 대상과 payload를 하나씩 검토합니다. 승인 후에는 원래 요청자가 만료 전에 같은 작업을 다시 실행해야 하며, 실행에 성공하면 승인은 한 번만 소비됩니다.",
+        "권한이 있는 다른 관리자가 정확한 대상과 payload를 하나씩 검토합니다. 승인 후에는 원래 요청자가 만료 전에 같은 작업을 다시 실행해야 하며, 실행에 성공하면 승인은 한 번만 소비됩니다. 작업에 필요한 권한을 가진 관리자가 한 명뿐이면 그 관리자가 단독으로 실행하며, 이 대기열이 아니라 감사 로그에 기록됩니다.",
       pendingCount: (count: number) => `대기 ${count}건`,
       loading: "승인 요청을 불러오는 중...",
       empty: "아직 승인 요청이 없습니다.",
