@@ -10,9 +10,21 @@ model/catalog/pricing identity와 4,096 output tokens, 15초 timeout, retry 0,
 요청당 24,916 microUSD, 최대 100 dispatch의 단계 2,491,600 microUSD를 동결하지만
 그 자체로 실행을 승인하거나 비용을 예약하지 않는다. 정적 pricing profile만
 대조하지 않고 실제 비용 경로와 같은 `resolveModelPricing()`으로 100,000-token
-요청의 effective input/output rate도 각각 0.2/1.2인지 다시 확인한다. 따라서
+요청의 effective input/output rate가 각각 0.2/1.2인지, effective
+`maxOutputTokens`가 고정 요청 cap 4,096 이상인지 다시 확인한다. 따라서
 `CHAT_MODEL_GPT_5_6_LUNA_*_USD_PER_MILLION` 환경 override나 미래 runtime registry
-row가 어느 rate든 바꾸면 `execution_contract_mismatch`로 fail-closed한다.
+row가 어느 rate든 바꾸거나 effective output cap을 4,096 미만으로 내리면
+`execution_contract_mismatch`로 fail-closed한다. 더 큰 effective cap은 모델·제품
+경로의 능력일 뿐 Refiner 요청을 키우지 않는다. 미래 adapter는 resolved maximum이
+아니라 계약의 4,096을 명시해야 한다.
+
+resolver 전체를 exact pin으로 오해하지 않는다. checked-in profile의 identity,
+routing, processing tier, pricing version/effective date, reasoning billing과 100,000-token
+tier는 별도로 exact 검사하며 `priceSchedule`이 생기면 새 계약을 요구한다. 반면
+cached-input multiplier는 prompt caching이 disabled라 이 계약의 비용을 바꾸지 않고,
+generic `reservationOutputTokens`는 Refiner authority가 사용할 예약량이 아니다. 미래
+authority는 이 계약의 4,096-token worst case를 예약해야 하며 generic reservation
+cap으로 낮춰 잡을 수 없다.
 현재는 원자 예약 authority가 없으므로 모든 다른 조건이 맞아도
 `reservation_authority_unavailable`로 dispatch 전에 거절한다. caller가 전달한 lease나
 atomic 여부 boolean을 성공 증거로 받는 입력과 `admitted: true` 경로는 없다. 후속

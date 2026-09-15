@@ -54,6 +54,19 @@ const INPUT_PRICE_ENV =
     "CHAT_MODEL_GPT_5_6_LUNA_INPUT_USD_PER_MILLION";
 const OUTPUT_PRICE_ENV =
     "CHAT_MODEL_GPT_5_6_LUNA_OUTPUT_USD_PER_MILLION";
+const CACHED_INPUT_MULTIPLIER_ENV =
+    "CHAT_MODEL_GPT_5_6_LUNA_CACHED_INPUT_PRICE_MULTIPLIER";
+const MAX_OUTPUT_TOKENS_ENV =
+    "CHAT_MODEL_GPT_5_6_LUNA_MAX_OUTPUT_TOKENS";
+const RESERVATION_OUTPUT_TOKENS_ENV =
+    "CHAT_MODEL_GPT_5_6_LUNA_RESERVATION_OUTPUT_TOKENS";
+const PROMPT_REFINER_PRICING_ENV_KEYS = [
+    INPUT_PRICE_ENV,
+    OUTPUT_PRICE_ENV,
+    CACHED_INPUT_MULTIPLIER_ENV,
+    MAX_OUTPUT_TOKENS_ENV,
+    RESERVATION_OUTPUT_TOKENS_ENV,
+];
 
 const envSnapshot = (keys) =>
     Object.fromEntries(
@@ -67,10 +80,11 @@ const envSnapshot = (keys) =>
     );
 
 const withIsolatedPriceEnv = (overrides, callback) => {
-    const keys = Object.keys(overrides);
+    const keys = PROMPT_REFINER_PRICING_ENV_KEYS;
     const before = envSnapshot(keys);
     try {
-        for (const [key, value] of Object.entries(overrides)) {
+        for (const key of keys) {
+            const value = overrides[key];
             if (value === undefined) {
                 delete process.env[key];
             } else {
@@ -87,6 +101,7 @@ const withIsolatedPriceEnv = (overrides, callback) => {
                 delete process.env[key];
             }
         }
+        assert.deepEqual(envSnapshot(keys), before);
     }
 };
 
@@ -133,68 +148,65 @@ test("the maximum escaped request fits the offline token upper bound", () => {
     assert.ok(maxRenderedRequestTokenUpperBound <= PROMPT_REFINER_MAX_INPUT_TOKENS);
 });
 
-test("the checked-in catalogue and pricing must match the exact pin", () => {
-    assert.deepEqual(promptRefinerExecutionContractProblems(), []);
-    assert.deepEqual(
-        promptRefinerExecutionContractProblems({ model: null, pricing: null }),
-        ["model_missing", "pricing_missing"]
-    );
+test("the checked-in catalogue and pricing must match the exact pin", { concurrency: false }, () => {
+    withIsolatedPriceEnv({}, () => {
+        assert.deepEqual(promptRefinerExecutionContractProblems(), []);
+        assert.deepEqual(
+            promptRefinerExecutionContractProblems({ model: null, pricing: null }),
+            ["model_missing", "pricing_missing"]
+        );
 
-    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
-    const pricing = getModelPricingProfile(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
-    assert.ok(model);
-    assert.ok(pricing);
-    assert.ok(
-        promptRefinerExecutionContractProblems({
-            model: { ...model, apiModel: "drifted-model" },
-            pricing,
-        }).includes("api_model_mismatch")
-    );
-    assert.ok(
-        promptRefinerExecutionContractProblems({
-            model,
-            pricing: { ...pricing, pricingVersion: "drifted-price" },
-        }).includes("pricing_version_mismatch")
-    );
-    assert.ok(
-        promptRefinerExecutionContractProblems({
-            model,
-            pricing: {
-                ...pricing,
-                tiers: pricing.tiers.map((tier, index) =>
-                    index === 0
-                        ? { ...tier, inputUsdPerMillionTokens: 999 }
-                        : tier
-                ),
-            },
-        }).includes("input_price_mismatch")
-    );
-    assert.ok(
-        promptRefinerExecutionContractProblems({
-            model: { ...model, contextWindowTokens: 100_000 },
-            pricing,
-        }).includes("context_window_mismatch")
-    );
-    assert.ok(
-        promptRefinerExecutionContractProblems({
-            model,
-            pricing: { ...pricing, reasoningTokenBilling: "not_billed" },
-        }).includes("reasoning_token_billing_mismatch")
-    );
+        const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+        const pricing = getModelPricingProfile(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+        assert.ok(model);
+        assert.ok(pricing);
+        assert.ok(
+            promptRefinerExecutionContractProblems({
+                model: { ...model, apiModel: "drifted-model" },
+                pricing,
+            }).includes("api_model_mismatch")
+        );
+        assert.ok(
+            promptRefinerExecutionContractProblems({
+                model,
+                pricing: { ...pricing, pricingVersion: "drifted-price" },
+            }).includes("pricing_version_mismatch")
+        );
+        assert.ok(
+            promptRefinerExecutionContractProblems({
+                model,
+                pricing: {
+                    ...pricing,
+                    tiers: pricing.tiers.map((tier, index) =>
+                        index === 0
+                            ? { ...tier, inputUsdPerMillionTokens: 999 }
+                            : tier
+                    ),
+                },
+            }).includes("input_price_mismatch")
+        );
+        assert.ok(
+            promptRefinerExecutionContractProblems({
+                model: { ...model, contextWindowTokens: 100_000 },
+                pricing,
+            }).includes("context_window_mismatch")
+        );
+        assert.ok(
+            promptRefinerExecutionContractProblems({
+                model,
+                pricing: { ...pricing, reasoningTokenBilling: "not_billed" },
+            }).includes("reasoning_token_billing_mismatch")
+        );
+    });
 });
 
 test("effective input price env drift fails closed without leaking env", { concurrency: false }, () => {
-    const keys = [INPUT_PRICE_ENV, OUTPUT_PRICE_ENV];
-    const before = envSnapshot(keys);
     const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
     assert.ok(model);
 
     withIsolatedPriceEnv(
         {
             [INPUT_PRICE_ENV]: "99",
-            [OUTPUT_PRICE_ENV]: String(
-                PROMPT_REFINER_EXECUTION_MODEL_PIN.outputUsdPerMillionTokens
-            ),
         },
         () => {
             const effective = resolveModelPricing(model, {
@@ -219,21 +231,14 @@ test("effective input price env drift fails closed without leaking env", { concu
             });
         }
     );
-
-    assert.deepEqual(envSnapshot(keys), before);
 });
 
 test("effective output price env drift fails closed without leaking env", { concurrency: false }, () => {
-    const keys = [INPUT_PRICE_ENV, OUTPUT_PRICE_ENV];
-    const before = envSnapshot(keys);
     const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
     assert.ok(model);
 
     withIsolatedPriceEnv(
         {
-            [INPUT_PRICE_ENV]: String(
-                PROMPT_REFINER_EXECUTION_MODEL_PIN.inputUsdPerMillionTokens
-            ),
             [OUTPUT_PRICE_ENV]: "99",
         },
         () => {
@@ -259,58 +264,111 @@ test("effective output price env drift fails closed without leaking env", { conc
             });
         }
     );
-
-    assert.deepEqual(envSnapshot(keys), before);
 });
 
-test("an otherwise eligible request cannot fabricate successful admission", () => {
-    assert.deepEqual(admitPromptRefinerExecution(candidate()), {
-        admitted: false,
-        reason: "reservation_authority_unavailable",
+test("effective output cap below 4096 fails closed without leaking env", { concurrency: false }, () => {
+    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+    assert.ok(model);
+
+    withIsolatedPriceEnv({ [MAX_OUTPUT_TOKENS_ENV]: "100" }, () => {
+        const effective = resolveModelPricing(model, {
+            estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+        });
+        assert.equal(effective.maxOutputTokens, 100);
+        assert.ok(
+            promptRefinerExecutionContractProblems().includes(
+                "effective_output_cap_below_contract"
+            )
+        );
+        assert.deepEqual(admitPromptRefinerExecution(candidate()), {
+            admitted: false,
+            reason: "execution_contract_mismatch",
+        });
     });
-    assert.deepEqual(
-        admitPromptRefinerExecution(
-            candidate({
-                stageReservation: {
-                    kind: "forged",
-                    leaseId: "caller_controlled",
-                },
-            })
-        ),
-        {
+});
+
+test("effective output cap at or above 4096 keeps the fixed request cap", { concurrency: false }, () => {
+    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
+    assert.ok(model);
+
+    for (const effectiveCap of [
+        PROMPT_REFINER_MAX_OUTPUT_TOKENS,
+        PROMPT_REFINER_MAX_OUTPUT_TOKENS + 1,
+    ]) {
+        withIsolatedPriceEnv(
+            { [MAX_OUTPUT_TOKENS_ENV]: String(effectiveCap) },
+            () => {
+                const effective = resolveModelPricing(model, {
+                    estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
+                });
+                assert.equal(effective.maxOutputTokens, effectiveCap);
+                assert.equal(
+                    promptRefinerExecutionContractProblems().includes(
+                        "effective_output_cap_below_contract"
+                    ),
+                    false
+                );
+                assert.equal(
+                    PROMPT_REFINER_EXECUTION_CONTRACT.request.maxOutputTokens,
+                    PROMPT_REFINER_MAX_OUTPUT_TOKENS
+                );
+            }
+        );
+    }
+});
+
+test("an otherwise eligible request cannot fabricate successful admission", { concurrency: false }, () => {
+    withIsolatedPriceEnv({}, () => {
+        assert.deepEqual(admitPromptRefinerExecution(candidate()), {
             admitted: false,
             reason: "reservation_authority_unavailable",
-        }
-    );
+        });
+        assert.deepEqual(
+            admitPromptRefinerExecution(
+                candidate({
+                    stageReservation: {
+                        kind: "forged",
+                        leaseId: "caller_controlled",
+                    },
+                })
+            ),
+            {
+                admitted: false,
+                reason: "reservation_authority_unavailable",
+            }
+        );
+    });
 });
 
-test("unknown, unapproved, drifted and authority-less candidates fail closed", () => {
-    const cases = [
-        [candidate({ eligible: null }), "eligibility_refused"],
-        [candidate({ mode: "product" }), "eligibility_refused"],
-        [candidate({ stageApproved: null }), "execution_not_approved"],
-        [candidate({ adapterReady: null }), "adapter_unavailable"],
-        [candidate({ contractVersion: "drifted" }), "execution_contract_mismatch"],
-        [candidate({ retryCount: 1 }), "execution_contract_mismatch"],
-        [candidate({ promptCaching: "enabled" }), "execution_contract_mismatch"],
-        [candidate({ tools: "allowed" }), "execution_contract_mismatch"],
-        [candidate({ inputTokenCeiling: null }), "execution_contract_mismatch"],
-        [candidate({ inputTokenCeiling: 0 }), "execution_contract_mismatch"],
-        [candidate({ inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS - 1 }), "execution_contract_mismatch"],
-        [candidate({ inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS + 1 }), "execution_contract_mismatch"],
-        [candidate(), "reservation_authority_unavailable"],
-    ];
+test("unknown, unapproved, drifted and authority-less candidates fail closed", { concurrency: false }, () => {
+    withIsolatedPriceEnv({}, () => {
+        const cases = [
+            [candidate({ eligible: null }), "eligibility_refused"],
+            [candidate({ mode: "product" }), "eligibility_refused"],
+            [candidate({ stageApproved: null }), "execution_not_approved"],
+            [candidate({ adapterReady: null }), "adapter_unavailable"],
+            [candidate({ contractVersion: "drifted" }), "execution_contract_mismatch"],
+            [candidate({ retryCount: 1 }), "execution_contract_mismatch"],
+            [candidate({ promptCaching: "enabled" }), "execution_contract_mismatch"],
+            [candidate({ tools: "allowed" }), "execution_contract_mismatch"],
+            [candidate({ inputTokenCeiling: null }), "execution_contract_mismatch"],
+            [candidate({ inputTokenCeiling: 0 }), "execution_contract_mismatch"],
+            [candidate({ inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS - 1 }), "execution_contract_mismatch"],
+            [candidate({ inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS + 1 }), "execution_contract_mismatch"],
+            [candidate(), "reservation_authority_unavailable"],
+        ];
 
-    for (const [input, reason] of cases) {
-        assert.deepEqual(admitPromptRefinerExecution(input), {
-            admitted: false,
-            reason,
-        });
-    }
-    assert.deepEqual(
-        [...PROMPT_REFINER_ADMISSION_REFUSAL_REASONS].sort(),
-        [...new Set(cases.map(([, reason]) => reason))].sort()
-    );
+        for (const [input, reason] of cases) {
+            assert.deepEqual(admitPromptRefinerExecution(input), {
+                admitted: false,
+                reason,
+            });
+        }
+        assert.deepEqual(
+            [...PROMPT_REFINER_ADMISSION_REFUSAL_REASONS].sort(),
+            [...new Set(cases.map(([, reason]) => reason))].sort()
+        );
+    });
 });
 
 test("every terminal reason has one content-free receipt and disposition mapping", () => {

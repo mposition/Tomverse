@@ -1334,9 +1334,13 @@ Non-negotiable requirements:
   refiner, model/catalog/pricing identity, output cap, timeout, retry zero and
   request/stage cost ceilings are frozen. The gate also resolves the effective
   input/output rates through `resolveModelPricing()` so a per-model environment
-  or runtime registry override cannot bypass the 0.2/1.2 pin. A future authority
-  must pass its runtime model row through this gate in the same critical path
-  before reservation and dispatch. No reservation authority exists today, so
+  or runtime registry override cannot bypass the 0.2/1.2 pin. Its effective
+  output cap must be at least 4,096; a larger capability is allowed but never
+  replaces the Refiner request's exact 4,096 cap. Caching is disabled, and the
+  generic model reservation-output setting must not reduce this contract's
+  4,096-token worst-case reservation. A future authority must pass its runtime
+  model row through this gate in the same critical path before reservation and
+  dispatch. No reservation authority exists today, so
   admission always refuses before dispatch with
   `reservation_authority_unavailable` after earlier checks pass. A caller-made
   lease or atomic boolean is never proof. Only a future authority with atomic

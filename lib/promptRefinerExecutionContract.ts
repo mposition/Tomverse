@@ -197,8 +197,8 @@ export const promptRefinerExecutionContractProblems = (input?: {
         // This is deliberately the same resolver used by reservation and cost
         // settlement paths. Static profile checks below are necessary but not
         // sufficient: DB/admin fields and per-model environment variables have
-        // higher precedence and must not silently move the effective price
-        // above or below the frozen ceiling.
+        // higher precedence and must not silently move the effective price or
+        // make the frozen request output cap impossible.
         const effectivePricing = resolveModelPricing(model, {
             estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
         });
@@ -213,6 +213,17 @@ export const promptRefinerExecutionContractProblems = (input?: {
             PROMPT_REFINER_EXECUTION_MODEL_PIN.outputUsdPerMillionTokens
         ) {
             problems.push("effective_output_price_mismatch");
+        }
+        // The resolved cap is a product/provider capability, while this
+        // contract requests exactly 4,096 tokens. A larger capability does not
+        // change that request; a smaller or invalid one cannot honour it. The
+        // future adapter must pass the contract cap, never substitute this
+        // resolved maximum as the Refiner request cap.
+        if (
+            !Number.isSafeInteger(effectivePricing.maxOutputTokens) ||
+            effectivePricing.maxOutputTokens < PROMPT_REFINER_MAX_OUTPUT_TOKENS
+        ) {
+            problems.push("effective_output_cap_below_contract");
         }
     }
 
