@@ -1,16 +1,25 @@
 WEBVTT
 
-00:00.000 --> 00:05.040
-My AI Assistant + Knowledge. Build an AI that knows your way of working and your sources.
+1
+00:01.200 --> 00:06.800
+Tomverse lets you keep the way you work and the material you return to in one private AI assistant.
 
-00:05.040 --> 00:15.040
-Create a private AI assistant with a name and clear custom instructions.
+2
+00:06.800 --> 00:12.800
+Open My AI Assistants in Settings, create a new setup, then describe how you want answers written.
 
-00:15.040 --> 00:27.040
-Add a Knowledge file, select it for this version, then save instructions and models.
+3
+00:12.800 --> 00:21.500
+If you already use an Agent Skill ZIP or a Tomverse package, review it and import it instead. Scripts do not run, and external tools are not connected automatically.
 
-00:27.040 --> 00:39.040
-Open a conversation, choose AI Assistant in the tools menu, and select your assistant.
+4
+00:21.500 --> 00:26.500
+Add a Knowledge file in the editor and save the revision.
 
-00:39.040 --> 00:44.040
-Ask a question. Three relevant Knowledge excerpts are used as reference material.
+5
+00:26.500 --> 00:35.000
+Then open a conversation, choose your assistant, and ask a question. Relevant excerpts from your material become reference context for the answer.
+
+6
+00:35.000 --> 00:43.500
+Ready to begin? Create your assistant, add Knowledge, and start the first conversation.

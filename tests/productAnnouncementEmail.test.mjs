@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT,
+  assistantKnowledgeCampaignContent,
   buildProductAnnouncementEmail,
   parseProductAnnouncementPayload,
 } from "../lib/productAnnouncementEmail.ts";
@@ -20,8 +21,8 @@ test("product announcements are consent-gated marketing mail", () => {
   assert.deepEqual(templateDefinitionProblems(definition), []);
 });
 
-test("assistant and Knowledge starter copy renders in Korean and English", () => {
-  for (const language of ["ko", "en"]) {
+test("assistant and Knowledge starter copy renders in Korean, English, and Chinese", () => {
+  for (const language of ["ko", "en", "zh"]) {
     const payload = ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT[language];
     const rendered = buildProductAnnouncementEmail(payload, language);
     assert.equal(rendered.subject, payload.subject);
@@ -101,7 +102,7 @@ test("tutorial poster URLs cannot leave Tomverse", () => {
 });
 
 test("starter copy teaches three concrete steps before its single CTA", () => {
-  for (const language of ["ko", "en"]) {
+  for (const language of ["ko", "en", "zh"]) {
     const payload = ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT[language];
     assert.equal(payload.features.length, 3);
     assert.deepEqual(
@@ -109,6 +110,21 @@ test("starter copy teaches three concrete steps before its single CTA", () => {
       ["1.", "2.", "3."]
     );
     assert.match(payload.ctaUrl, /\/guides\/assistant-knowledge/);
+  }
+});
+
+test("package import is only added to composer copy when its rollout flag is on", () => {
+  const unavailable = assistantKnowledgeCampaignContent({
+    includePackageImport: false,
+  });
+  const available = assistantKnowledgeCampaignContent({
+    includePackageImport: true,
+  });
+
+  for (const language of ["ko", "en", "zh"]) {
+    assert.equal(unavailable[language].features.length, 3);
+    assert.equal(available[language].features.length, 4);
+    assert.match(available[language].features[3].title, /^4\./);
   }
 });
 
