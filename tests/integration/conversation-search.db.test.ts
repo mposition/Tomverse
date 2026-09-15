@@ -323,7 +323,7 @@ test("PostgreSQL's statement timeout is recognised in the shape the adapter rais
     await assert.rejects(
         prisma.$transaction(async (tx) => {
             await tx.$queryRaw`SELECT set_config('statement_timeout', '10ms', true)`;
-            await tx.$queryRaw`SELECT pg_sleep(0.5)`;
+            await tx.$queryRaw`SELECT pg_sleep(0.5)::text AS slept`;
         }),
         (error) => isStatementTimeout(error)
     );
@@ -338,7 +338,9 @@ test("rolling back to the savepoint restores the statement timeout for later rea
             await tx.$queryRaw`SELECT set_config('statement_timeout', '20ms', true)`;
             await tx.$executeRaw`ROLLBACK TO SAVEPOINT conversation_search_source`;
             await tx.$executeRaw`RELEASE SAVEPOINT conversation_search_source`;
-            await tx.$queryRaw`SELECT pg_sleep(0.2)`;
+            // Cast, because pg_sleep returns void and Prisma cannot deserialise it;
+            // what matters is that a 200ms statement is not cancelled by a 20ms limit.
+            await tx.$queryRaw`SELECT pg_sleep(0.2)::text AS slept`;
         },
         { timeout: 5_000, maxWait: 5_000 }
     );
