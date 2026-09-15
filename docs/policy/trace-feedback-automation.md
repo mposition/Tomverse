@@ -10,10 +10,11 @@
 |---|---|---|
 | 1 | 메시지별 Trace 상관관계, 서버 발급 token, Trace evidence 모델, Admin 표시 | **구현됨** |
 | 2 | case 상태 머신, 증거 수집(collector), 적격성 판정, 진단 보고서 (diagnosis-only shadow mode) | **구현됨** (기본 비활성 — §8) |
-| 3 | 제한된 자동 수정, `develop` PR, 사람 승인, staging 검증 | **인프라 구현됨** (완전 비활성 — §9.1) |
+| 3 | 제한된 자동 수정, `develop` PR, 소유자 승인, 서버 관측 기반 승격(§9.3) | **인프라 구현됨** (완전 비활성 — §9.1) |
 
-각 Phase는 별도 PR과 별도 사람 승인으로 진행한다. Phase 2·3 코드는 아직
-존재하지 않으며, Admin Console도 자동 수정 상태를 표시하지 않는다.
+각 Phase는 별도 PR과 별도 사람 승인으로 진행한다. Admin Console은 Support의
+`자동 수정 검토` section(`/admin/support?tab=fixes`)에서 case의 문제점·해결책·
+승격 진행을 표시한다(2026-09-15, §9.3).
 
 ## 2. Trace provenance 모델
 
@@ -300,13 +301,13 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
   `develop`에서 assertion으로 실패(문법 오류·import 누락·fixture 부재 제외),
   수정 후 동일 테스트 통과, 허용된 저위험 파일만 변경, 필수 CI 통과,
   provider live 상태·production 데이터·개인정보·결제 없이 재현.
-- 자동 생성 수정의 target은 `develop`뿐이다. `main` PR·production 배포·자동
-  revert 금지. branch protection 우회 금지. auto-merge 활성화 시점을 병합
-  성공으로 기록하지 않고 GitHub API의 `mergedAt`·merge SHA를 read-back한다.
-- `staging_deployed`는 병합 commit이 Railway staging `/api/build-info`로
-  확인되고 `/api/ready`가 통과한 상태만 의미하며, production 사용자 오류가
-  해결됐다는 뜻이 아니다. `Feedback.status`를 staging 배포만으로 `resolved`로
-  바꾸지 않는다.
+- 자동 생성 수정(LLM)이 만드는 것은 `develop` PR뿐이다. 자동화는 어떤 PR도
+  병합하지 않는다 — `main` 승격은 §9.3의 소유자 승인 뒤 **사람이 GitHub에서**
+  병합한다. 자동 revert 금지. branch protection 우회(`--admin`) 금지.
+  auto-merge 금지. 병합 사실은 서버가 GitHub에서 직접 읽는다.
+- staging 반영은 production 사용자 오류가 해결됐다는 뜻이 아니다.
+  `Feedback.status`는 production 관측 뒤에도 자동으로 `resolved`가 되지 않고,
+  운영자의 해결됨 처리로만 바뀐다(§9.3).
 - 초기 운영(최초 20개 PR과 30일 중 더 늦은 시점까지)은 모든 auto-fix PR에
   사람 승인을 요구한다. auto-merge 전환은 별도 정책 변경 PR로만 한다.
 - 자동 수정 제외 영역: 인증·결제·크레딧·guardrail·concurrency·identity·
@@ -321,6 +322,113 @@ LLM confidence는 관찰용 컬럼(`llmConfidence`, 항상 null)일 뿐 게이�
   소규모 workflow PR로 해결돼야 한다.
 - scheduled workflow는 default branch에 있어야 예약 실행된다. 구현이
   `develop`에만 있는 동안 schedule이 활성화됐다고 보고하지 않는다(N/V).
+
+### 9.3 소유자 승인 기반 승격 (2026-09-15 개정)
+
+운영자 요청(2026-09-15)으로 추가했다. 설계와 독립 검토 기록:
+`.github/audits/support-trace-review-flow-design-2026-09-15.md`,
+`support-trace-review-flow-design-review-round0-2026-09-15.md`(reject),
+`support-trace-review-flow-design-review-round1-2026-09-15.md`(reject),
+`support-trace-review-flow-review-round2-2026-09-15.md`(구현 검토, reject). 세
+회차의 발견은 설계 문서 §2·§2a·§2b와 아래 계약에 반영했다.
+
+**신고 접수 (Phase와 무관, flag 없음)**
+
+- token `verified` + traceId가 있는 신고는 `reviewing`으로 저장된다
+  (`lib/feedbackTraceAutoReview.ts`). lifecycle `received`·`reviewing` 두 행을
+  같은 transaction에 쓰고, reviewing 행에는 actor가 없다. 사용자 입력 Trace·
+  미검증 token은 `open`에 남는다(§2).
+- 사용자에게 추가 메일을 보내지 않는다. 운영자 메일은 기존 `support_feedback`
+  한 통이며, 불변 필드 `errorReportVerification`으로 "자동으로 검토중" 변형을
+  렌더링한다.
+
+**상태 그래프** (`lib/feedbackAutoFixCore.ts`)
+
+`pr_open → approved → merged → staging_verified → production_merged →
+production_verified → closed`, 실패는 `promotion_failed → closed`.
+`pr_open → merged`, `staging_verified → closed`, workflow의 `merged`·
+`staging_verified` 보고는 **없다**. 승인 없이 병합된 PR은 승격되지 않는다.
+
+**검토 요청** — fix run이 보고한 PR 번호를 서버가 GitHub에서 읽어 이 저장소·
+base `develop`·`feedback-autofix/<caseId>`·open인지 확인하고, GitHub의 head와
+**change manifest**(경로별 merge-base blob과 head blob,
+`lib/feedbackAutoFixChangeManifest.ts`)를 저장한다. run의 원인·해결 보고
+(`fixReport`, 1,000/1,000/500자, 진단 요약만 입력)와 함께 저장되며
+`autofix_review_requested` 운영자 메일이 같은 transaction에 enqueue된다.
+
+**승인** — `POST /api/admin/feedback-autofix/[caseId]/approve`. owner 역할 +
+최근 인증(step-up) + audit log. 화면이 본 head가 저장된 head이고, GitHub의
+현재 head이며, 그 head의 manifest가 저장된 manifest일 때만 CAS로
+`approved`가 되고 head와 manifest digest에 묶인다. 병합하지 않는다.
+
+**관측** (`lib/feedbackAutoFixPromotion.ts`, maintenance cadence, 읽기 전용)
+
+- develop PR이 **승인 head로** 병합됨 → `merged`. head 변경·다른 head 병합·
+  미병합 close → `promotion_failed` + `autofix_promotion_failed` 메일.
+- 배포 판정(`lib/feedbackAutoFixDeploymentObservation.ts`): Railway control
+  plane에서 서비스·환경의 **트래픽을 받을 수 있는** deployment(SUCCESS·
+  DEPLOYING·REMOVING·SLEEPING)가 **정확히 하나**이고 SUCCESS이며, 그 commit이
+  기대 commit을 **포함**할 것(같거나 기대 commit이 ancestor — GitHub compare로
+  판정, 판정 불가는 미관측), 한 pass의 build-info 표본 5개가 모두 그
+  deployment·그 commit·success일 것, production은 `/api/ready` 표본 5개가 모두
+  **캐시되지 않은** 200일 것(`Age`가 없거나 0).
+  "포함"인 이유: staging은 2026-09-15 두 시간 반 동안 develop 병합 6건을 받았고,
+  정확한 병합 commit이 10분간 live이기를 기다리면 바쁜 날에는 영원히 관측되지
+  않는다. serving 상태 집합은 같은 날 실제 control plane에서 읽었다 — 교체된
+  deployment는 REMOVED가 되고 SUCCESS는 하나만 남으며, CI를 기다리는 WAITING과
+  SKIPPED는 트래픽을 받지 않는다(`tests/fixtures/railwayDeploymentsStaging.json`).
+  한 pass는 창을 열 뿐이고, ≥10분 뒤 같은 deployment로 다시 충족해야 한다.
+  timeout은 실패 상태가 아니라 화면의 "관측 지연"이다.
+  **staging `/api/ready`는 Cloudflare Access 뒤라 관측하지 않는다(N/V)**.
+- main 승격 PR은 서버가 브랜치 `feedback-autofix-main/<caseId>`로 찾는다.
+  이 저장소의 open/merged PR이 정확히 하나이고, 그 manifest가 승인 manifest와
+  **완전히 같을 때**(같은 경로, 같은 before blob = main이 승인 base를 그대로
+  가짐, 같은 after blob)만 기록한다. 다르면 `promotion_failed`. 병합되면
+  `production_merged`, production 판정 통과 시 `production_verified` +
+  `autofix_production_verified` 메일.
+
+**승격 PR workflow** (`.github/workflows/feedback-autofix-promotion-pr.yml`) —
+`pull_request: closed`(privileged trigger 아님), head가 이 저장소일 때만.
+read-only `promotion/prepare`로 적격성을 묻고(서버 상태 변경 없음), back-merge
+완료(`origin/main`이 `origin/develop`의 ancestor)와 main의 승인 base를 확인한 뒤
+cherry-pick 브랜치가 승인 manifest와 같을 때만 PR을 연다. 재실행은 기존
+브랜치·PR을 재사용한다. **병합·`--admin`·`--auto`는 쓰지 않는다**
+(`npm run security:regression`이 고정).
+
+**해결됨** — `production_verified` case의 신고에만 결정적 답변 초안
+(`lib/feedbackAutoFixReplyDraft.ts`, 기술 식별자·사용자 본문 없음)이 표시된다.
+운영자가 해결됨으로 처리하면 같은 transaction에서 case가 CAS로 `closed`가 된다.
+그 전 상태의 case는 해결됨 처리로 닫히지 않는다.
+
+**자격증명과 kill switch** — 서버에는 GitHub **읽기 전용** 토큰만 둔다.
+
+| 환경변수 | 위치 | 용도 |
+|---|---|---|
+| `FEEDBACK_AUTOFIX_ENABLED` | 서버 | Phase 3 전체 master switch (기존) |
+| `FEEDBACK_AUTOFIX_GITHUB_READ_TOKEN` | 서버 | 이 저장소 한정 fine-grained PAT: Contents·Pull requests·Metadata **read**만, 만료 ≤90일 |
+| `FEEDBACK_AUTOFIX_GITHUB_REPOSITORY` | 서버(선택) | 기본 `mposition/Tomverse` |
+| `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_ID` | 서버 | control plane 읽기 (기존 build-info와 공유) |
+| `FEEDBACK_AUTOFIX_RAILWAY_SERVICE_ID` | 서버(선택) | 기본 `RAILWAY_SERVICE_ID` |
+| `FEEDBACK_AUTOFIX_STAGING_RAILWAY_ENVIRONMENT_ID`, `FEEDBACK_AUTOFIX_PRODUCTION_RAILWAY_ENVIRONMENT_ID` | 서버 | 관측 대상 환경 |
+| `FEEDBACK_AUTOFIX_SYNC_SECRET`, `GH_AUTOMATION_PAT` | GitHub secrets | 기존 |
+
+하나라도 없으면 승인 버튼은 사유와 함께 비활성이고 observer는 아무것도 읽지
+않는다. 읽기 토큰이 유출되면 private 소스가 노출되므로 GitHub에서 즉시
+revoke하고 새 토큰으로 교체한다(서버 env 교체 → 재배포). kill switch는
+`FEEDBACK_AUTOFIX_ENABLED` 제거 하나로 충분하다.
+
+**fix run fencing** — claim이 서버 생성 `fixAttemptId`를 발급하고, heartbeat와
+모든 result는 그 id가 일치할 때만 적용된다. lease 회수와 종료 결과가 id를
+지우므로, lease가 만료된 실행의 늦은 callback은 다음 실행의 case를 바꾸지
+못한다.
+
+**N/V** — 실제 GitHub·Railway에 대한 end-to-end 실행은 아직 없다. Railway
+deployments 목록의 상태 의미는 실측했으나(위), GraphQL 응답의 `meta.commitHash`
+필드 이름은 MCP 도구 출력으로만 확인했다 — 없으면 `deployment_commit_unknown`으로
+fail-closed다. GitHub가 대용량·binary 파일의 contents를 돌려주지 않는 경우도
+fail-closed(승격 안 됨)로 처리되지만 실측 전이다.
+back-merge 충돌 자체는 여전히 사람이 해결하며, 해결 전에는 승격 PR이 만들어지지
+않는다.
 
 ## 10. 운영자 절차
 

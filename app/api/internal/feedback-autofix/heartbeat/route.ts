@@ -8,7 +8,7 @@ import {
 } from "@/lib/feedbackAutoFixSync";
 
 const requestSchema = z
-  .object({ caseId: z.string().min(10).max(64) })
+  .object({ caseId: z.string().min(10).max(64), attemptId: z.uuid() })
   .strict();
 
 /** POST: extends the fix lease while a workflow run is alive. A dead runner
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   }
   try {
     const body = await readLimitedJson(request, 1_024, requestSchema);
-    const alive = await heartbeatCase(body.caseId);
+    const alive = await heartbeatCase(body.caseId, body.attemptId);
     return Response.json({ alive }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return Response.json(

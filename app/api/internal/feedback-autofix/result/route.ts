@@ -34,6 +34,8 @@ const proofSchema = z
 const requestSchema = z
   .object({
     caseId: z.string().min(10).max(64),
+    /** The attempt id the claim returned; a stale run's id matches nothing. */
+    attemptId: z.uuid(),
     result: z.discriminatedUnion("outcome", [
       z
         .object({
@@ -46,20 +48,16 @@ const requestSchema = z
         .object({
           outcome: z.literal("pr_open"),
           prNumber: z.number().int().min(1),
-          prUrl: z.string().url().max(300),
-        })
-        .strict(),
-      z
-        .object({
-          outcome: z.literal("merged"),
-          mergedAt: z.iso.datetime(),
-          mergeSha: z.string().regex(/^[0-9a-f]{40}$/i),
-        })
-        .strict(),
-      z
-        .object({
-          outcome: z.literal("staging_verified"),
-          stagingSha: z.string().regex(/^[0-9a-f]{40}$/i),
+          // The run's account of the cause and the fix. Bounded here and
+          // cleaned again before it is stored; the PR itself is re-read from
+          // GitHub by the server, so no URL or SHA is accepted from the run.
+          fixReport: z
+            .object({
+              rootCause: z.string().min(1).max(1_000),
+              fixSummary: z.string().min(1).max(1_000),
+              testSummary: z.string().min(1).max(500),
+            })
+            .strict(),
         })
         .strict(),
       z
@@ -73,10 +71,13 @@ const requestSchema = z
   .strict();
 
 /**
- * POST: a workflow-reported outcome. The change manifest and Red→Green proof
- * are re-validated server-side (lib/feedbackAutoFixSync.ts) and every write
+ * POST: a fix run's reported outcome, up to and including its develop PR.
+ * The change manifest and Red→Green proof are re-validated server-side, the
+ * PR is re-read from GitHub (lib/feedbackAutoFixSync.ts), and every write
  * goes through the state graph, so a replayed or out-of-order callback
- * becomes {applied:false} instead of a state jump.
+ * becomes {applied:false} instead of a state jump. Nothing after the PR is
+ * reported here: approval is the owner's, merges are a person's in GitHub,
+ * and deployments are observed by the server (lib/feedbackAutoFixPromotion.ts).
  */
 export async function POST(request: Request) {
   if (!isAutoFixSyncAuthorized(request)) {
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
   }
   try {
     const body = await readLimitedJson(request, 64 * 1_024, requestSchema);
-    const outcome = await applyAutoFixResult(body.caseId, body.result);
+    const outcome = await applyAutoFixResult(body.caseId, body.attemptId, body.result);
     console.info(
       JSON.stringify({
         event: "autofix_result_reported",
