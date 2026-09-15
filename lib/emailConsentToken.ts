@@ -135,7 +135,18 @@ export const createConsentToken = (
     throw new Error(`No consent key for version "${version}".`);
   }
 
-  const body: ConsentTokenPayload = { kind: "consent", ...payload };
+  // Fields in a fixed order: the token must depend on the values only, not on
+  // the order a caller happened to build the object in, or two renders of the
+  // same request produce two different tokens.
+  const body: ConsentTokenPayload = {
+    kind: "consent",
+    userId: payload.userId,
+    purpose: payload.purpose,
+    requestedAt: payload.requestedAt,
+    requestId: payload.requestId,
+    policyVersionId: payload.policyVersionId,
+    addressDigest: payload.addressDigest,
+  };
   const plaintext = JSON.stringify(body);
   // Deterministic: the IV is derived from the plaintext under the key, so the
   // same request always yields the same token. That is what lets the token be

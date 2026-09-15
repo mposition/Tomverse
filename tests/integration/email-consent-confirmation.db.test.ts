@@ -55,6 +55,7 @@ beforeEach(async () => {
   process.env.EMAIL_SNAPSHOT_KEY_VERSION = "v1";
   process.env.EMAIL_UNSUBSCRIBE_KEYS = "v1:test-unsubscribe-key";
   process.env.EMAIL_CONSENT_KEYS = "v1:test-consent-key";
+  delete process.env.EMAIL_CONSENT_KEY_VERSION;
   process.env.RESEND_API_KEY = "test-key";
   process.env.TRANSACTIONAL_EMAIL_FROM = "Tomverse <no-reply@mail.tomverse.app>";
   delete process.env.MARKETING_EMAIL_FROM;

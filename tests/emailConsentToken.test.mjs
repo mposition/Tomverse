@@ -49,6 +49,18 @@ test("the same request always yields the same token, and another request a diffe
   );
 });
 
+test("the token depends on the values, not the order the object was built in", () => {
+  const reordered = {
+    addressDigest: payload.addressDigest,
+    policyVersionId: payload.policyVersionId,
+    requestId: payload.requestId,
+    requestedAt: payload.requestedAt,
+    purpose: payload.purpose,
+    userId: payload.userId,
+  };
+  assert.equal(createConsentToken(reordered, keyring), createConsentToken(payload, keyring));
+});
+
 test("a token without a request id is refused", () => {
   const { requestId, ...withoutId } = payload;
   assert.equal(requestId, "request_1");
