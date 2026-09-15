@@ -415,6 +415,7 @@ test("the sole administrator may execute the actions the named list never reache
         "credit_purchase.refund",
         "billing_risk.release_hold",
         "model.disable",
+        "model.archive",
         "email_suppression.remove",
         "email_policy.activate",
     ]) {
@@ -464,7 +465,7 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
     );
     const reauth = body.indexOf("assertRecentAdminAuthentication(input.session)");
     const decide = body.indexOf("generalSoleApprovalAvailability(");
-    const run = body.indexOf("runAsSoleAdministrator(input, operation)");
+    const run = body.indexOf("runAsSoleAdministrator(");
     const claim = body.indexOf("claimApproval(input)");
     assert.ok(reauth > 0 && decide > reauth && run > decide && claim > run);
 
@@ -473,6 +474,10 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
     const execution = readFileSync("lib/adminSoleApproverExecution.ts", "utf8");
     assert.match(
         execution,
-        /eligibleApproverIdentities\(\s*approvalPermissionForAction\(action\)\s*\)/
+        /eligibleApproverIdentities\(\s*approvalPermissionForAction\(action\),\s*session\s*\)/
     );
+
+    // An approval a second administrator already granted is consumed through
+    // the ordinary claim, never left claimable beside a sole execution.
+    assert.match(body, /if \(!outstanding\.approvedExists\) \{/);
 });

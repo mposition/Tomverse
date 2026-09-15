@@ -36,6 +36,7 @@ Status: active (2026-09-15 결정). 구현은 `lib/adminApproval.ts`의
 | `user.delete` | 사용자 관리 · 영구 삭제 | `user:delete` |
 | `user.unlink_oauth` | 사용자 보안 · OAuth 연결 해제 | `ops:write` |
 | `model.disable` | 모델 레지스트리 · 비활성화 | `ops:write` |
+| `model.archive` | 모델 레지스트리 · 카탈로그에서 제거 | `ops:write` |
 | `email_suppression.remove` | 이메일 억제 목록 · hard bounce/complaint 해제 | `ops:write` |
 | `email_policy.activate` | 관할권 정책 활성화 | `ops:write` |
 | `retention.cleanup.execute` | 데이터 보존 · 정리 실행 | `ops:write` (§4 결속) |
@@ -49,6 +50,10 @@ Status: active (2026-09-15 결정). 구현은 `lib/adminApproval.ts`의
    `ADMIN_ACCESS_EXPIRY_JSON`)에서 활성·미만료이고 **그 action이 요구하는 권한**
    (`approvalPermissionForAction()`)을 가진 관리자를 셉니다. 검토자가 가져야 하는
    권한과 같은 권한입니다.
+   **`ADMIN_USER_IDS`로 허용된 관리자는 역할과 관계없이 셉니다.** ID 관리자는
+   세션 이메일이 역할 목록에 있을 때 그 역할을 얻는데, 설정만으로는 그 이메일을
+   알 수 없어 행이 `readonly`로 보입니다. 빼면 두 명을 한 명으로 셀 수 있으므로
+   fail-closed로 셉니다. 요청자 자신의 ID는 요청자와 같은 사람으로 합칩니다.
 2. **요청자가 그 한 명.** 다른 관리자의 세션으로는 열리지 않습니다.
 3. **최근 재인증.** 기존과 같이 `assertRecentAdminAuthentication()`이 먼저
    통과해야 합니다.
@@ -92,8 +97,25 @@ Status: active (2026-09-15 결정). 구현은 `lib/adminApproval.ts`의
   1인 경로는 승인이 아니라 실행이며, 두 경로를 섞지 않습니다.
 - 권한 검사, rate limit, 확인 문구(`ADJUST PLAN` 등), 사유 필수, 환불 기준액
   (`ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS`)은 그대로입니다.
-- 이 결정 이전에 쌓인 pending 요청은 자기 승인으로 처리할 수 없고 TTL에 따라
-  만료됩니다. 같은 작업을 다시 실행하면 1인 경로로 실행됩니다.
+- 자기 요청을 자기 승인으로 처리하는 경로는 여전히 없습니다. 같은 요청(action ·
+  대상 · payload hash · 요청자)이 **pending**으로 남아 있으면 1인 실행이 그 행을
+  `expired`로 닫고 감사 행의 `supersededApprovalIds`에 남깁니다 — 나중에
+  누군가 승인해 두 번째로 실행되지 않도록. **이미 approved**인 행이 있으면 1인
+  경로 대신 그 승인을 소비하는 기존 경로로 실행합니다.
+
+## 6.1 알려진 한계
+
+1인 경로에는 승인 행의 단일 소비 claim이 없습니다. **완전히 같은 요청이 동시에
+두 번** 들어오면 둘 다 실행될 수 있습니다(예: 플랜 조정 DB 갱신과 안내 메일
+두 번). 성공 후 마지막 감사 쓰기만 실패해 500이 난 뒤 재시도한 경우도
+같습니다. 이 한계를 받아들인 근거는 다음과 같습니다.
+
+- 모든 route가 관리자별 rate limit과 확인 입력을 거칩니다.
+- 되돌릴 수 없는 작업은 이미 멱등입니다 — 환불은 Stripe idempotency key를
+  쓰고, 계정 삭제의 두 번째 실행은 대상이 없어 실패합니다.
+- 두 실행 모두 감사 로그에 남으므로 사후에 발견됩니다.
+
+실행 receipt(스키마 추가)로 막을 수 있으며, 필요해지면 별도 변경으로 합니다.
 
 ## 7. 되돌리는 법
 

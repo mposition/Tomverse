@@ -8,7 +8,7 @@ import {
     approvalPermissionForAction,
     canonicalizeApprovalPayload,
 } from "@/lib/adminApprovalCore";
-import { getConfiguredAdminAccess } from "@/lib/adminAuth";
+import { getConfiguredAdminAccess, hasAdminPermission } from "@/lib/adminAuth";
 import {
     roleHasPermission,
     type AdminPermission,
@@ -88,17 +88,47 @@ const refuse = (reason: string): never => {
  * Recomputed per call, which is condition 6: a second administrator being
  * configured closes this path on the next request with nothing to migrate and
  * no flag anybody has to remember to clear.
+ *
+ * `ADMIN_USER_IDS` rows are counted whatever role they show. An administrator
+ * admitted by user id takes their role from their *session email* appearing
+ * in an `ADMIN_<ROLE>_EMAILS` list (`getAdminRole()`), and configuration alone
+ * cannot say which email a user id signs in with -- so the row reads as
+ * `readonly` while the person behind it may well be an owner. Leaving them out
+ * would count one administrator where there are two and open this path.
+ * Counting them fails closed instead: the only cost is that an organisation
+ * which admits its sole administrator by id as well as by email must say so
+ * with the requester's own id, which is collapsed onto the requester below.
  */
-export const eligibleApproverIdentities = (permission: AdminPermission) =>
-    getConfiguredAdminAccess()
-        .filter(
-            (row) =>
-                row.accessEnabled &&
-                !row.expired &&
-                row.role !== "not-authorized" &&
+export const eligibleApproverIdentities = (
+    permission: AdminPermission,
+    session?: Session
+) => {
+    const requesterId = session?.user?.id?.trim().toLowerCase();
+    const requesterEmail = session?.user?.email?.trim().toLowerCase();
+    return getConfiguredAdminAccess()
+        .filter((row) => row.accessEnabled && !row.expired)
+        .flatMap((row) => {
+            if (row.identityType === "userId") {
+                const id = row.identity.trim().toLowerCase();
+                // The requester's own id is the requester, not a second
+                // person; without an email to collapse onto it stays distinct
+                // and the path stays shut.
+                if (
+                    requesterId &&
+                    requesterEmail &&
+                    id === requesterId &&
+                    hasAdminPermission(session, permission)
+                ) {
+                    return [requesterEmail];
+                }
+                return [`user-id:${id}`];
+            }
+            return row.role !== "not-authorized" &&
                 roleHasPermission(row.role as AdminRole, permission)
-        )
-        .map((row) => row.identity);
+                ? [row.identity]
+                : [];
+        });
+};
 
 /**
  * Whether the sole-approver path is open, and when it is not, why.
@@ -112,7 +142,7 @@ export const soleApproverAvailability = (
 ) =>
     decideSoleApproverEligibility({
         action,
-        eligibleApproverIdentities: eligibleApproverIdentities("ops:write"),
+        eligibleApproverIdentities: eligibleApproverIdentities("ops:write", session),
         requesterIdentity: session.user?.email,
     });
 
@@ -139,7 +169,8 @@ export const generalSoleApprovalAvailability = (
     decideGeneralSoleApproval({
         action,
         eligibleApproverIdentities: eligibleApproverIdentities(
-            approvalPermissionForAction(action)
+            approvalPermissionForAction(action),
+            session
         ),
         requesterIdentity: session.user?.email,
     });
@@ -169,6 +200,8 @@ export async function runAsSoleAdministrator<T>(
         targetId?: string | null;
         payload: Record<string, unknown>;
         reason: string;
+        /** Pending two-person requests for this exact payload it replaces. */
+        supersededApprovalIds?: string[];
     },
     operation: () => Promise<T>
 ): Promise<T> {
@@ -181,6 +214,7 @@ export async function runAsSoleAdministrator<T>(
             canonicalizeApprovalPayload(input.payload)
         ),
         reason: input.reason.slice(0, 500),
+        supersededApprovalIds: input.supersededApprovalIds ?? [],
     };
 
     // A durable record of the intent exists before the operation starts. If the
@@ -287,7 +321,7 @@ export async function runAsSoleApprover<T>(
 
     const eligibility = decideSoleApproverEligibility({
         action: input.action,
-        eligibleApproverIdentities: eligibleApproverIdentities("ops:write"),
+        eligibleApproverIdentities: eligibleApproverIdentities("ops:write", input.session),
         requesterIdentity: input.session.user?.email,
     });
     if (!eligibility.allowed) refuse(eligibility.reason);
