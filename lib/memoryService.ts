@@ -18,6 +18,7 @@ import {
     type MemoryValidationResult,
 } from "@/lib/memoryValidatorCore";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -35,11 +36,13 @@ import { prisma } from "@/lib/prisma";
 
 const REVIEWABLE_STATUSES = ["candidate", "manual_review_required"] as const;
 
+// The shared per-account memory lock (lib/memoryItemLock.ts). Imported source
+// deletions take the same one, which is what keeps a deletion's memory
+// classification and an extraction's writes from interleaving.
 const acquireUserMemoryLock = (
     tx: Prisma.TransactionClient,
     userId: string
-) =>
-    tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"memory-items:" + userId}))`;
+) => lockAccountMemoryItems(tx, userId);
 
 type StoredEvidence = {
     id: string;
@@ -80,8 +83,14 @@ const assertNotHardRejected = (result: MemoryValidationResult) => {
     }
 };
 
-async function loadOwnedMemory(userId: string, memoryId: string) {
-    const item = await prisma.memoryItem.findUnique({
+async function loadOwnedMemory(
+    userId: string,
+    memoryId: string,
+    // A mutation passes its transaction, so the row it decides on is read after
+    // the account's memory lock (lib/memoryItemLock.ts), not before it.
+    client: Prisma.TransactionClient | typeof prisma = prisma
+) {
+    const item = await client.memoryItem.findUnique({
         where: { id: memoryId },
         include: {
             evidences: {
@@ -306,28 +315,31 @@ export async function approveMemory(input: {
     memoryId: string;
     resolveConflict?: "supersede_existing";
 }) {
-    const item = await loadOwnedMemory(input.userId, input.memoryId);
-    if (!(REVIEWABLE_STATUSES as readonly string[]).includes(item.status)) {
-        throw new ApiSecurityError(
-            409,
-            "MEMORY_ITEM_STATE",
-            "The memory is not awaiting review."
-        );
-    }
-    // Re-validate what is stored. A demoted disposition is approvable — that
-    // is what this individual review is — but a hard reject never is.
-    const result = validateMemoryCandidate({
-        kind: item.kind,
-        statement: item.statement,
-        confidence: item.confidence,
-        sensitivity: item.sensitivity as "standard" | "sensitive",
-        expiresAt: item.expiresAt?.toISOString() ?? null,
-        evidence: evidenceInputs(item.evidences),
-    });
-    assertNotHardRejected(result);
-
     await prisma.$transaction(async (tx) => {
         await acquireUserMemoryLock(tx, input.userId);
+        // Read and validated under the lock: an edit committed between an
+        // unlocked read and this approval would otherwise be approved without
+        // ever having been validated, and a source deletion could remove the
+        // row this decision was about.
+        const item = await loadOwnedMemory(input.userId, input.memoryId, tx);
+        if (!(REVIEWABLE_STATUSES as readonly string[]).includes(item.status)) {
+            throw new ApiSecurityError(
+                409,
+                "MEMORY_ITEM_STATE",
+                "The memory is not awaiting review."
+            );
+        }
+        // Re-validate what is stored. A demoted disposition is approvable — that
+        // is what this individual review is — but a hard reject never is.
+        const result = validateMemoryCandidate({
+            kind: item.kind,
+            statement: item.statement,
+            confidence: item.confidence,
+            sensitivity: item.sensitivity as "standard" | "sensitive",
+            expiresAt: item.expiresAt?.toISOString() ?? null,
+            evidence: evidenceInputs(item.evidences),
+        });
+        assertNotHardRejected(result);
         await assertNoActiveConflict(
             tx,
             input.userId,
@@ -357,17 +369,23 @@ export async function approveMemory(input: {
 }
 
 export async function rejectMemory(userId: string, memoryId: string) {
-    const item = await loadOwnedMemory(userId, memoryId);
-    if (!(REVIEWABLE_STATUSES as readonly string[]).includes(item.status)) {
-        throw new ApiSecurityError(
-            409,
-            "MEMORY_ITEM_STATE",
-            "The memory is not awaiting review."
-        );
-    }
-    await prisma.memoryItem.updateMany({
-        where: { id: item.id, status: { in: [...REVIEWABLE_STATUSES] } },
-        data: { status: "rejected" },
+    await prisma.$transaction(async (tx) => {
+        // Under the account's memory lock, like every memory write: a source
+        // deletion classifies rows and then acts on that classification, and
+        // must not see a status change land in between (lib/memoryItemLock.ts).
+        await acquireUserMemoryLock(tx, userId);
+        const item = await loadOwnedMemory(userId, memoryId, tx);
+        if (!(REVIEWABLE_STATUSES as readonly string[]).includes(item.status)) {
+            throw new ApiSecurityError(
+                409,
+                "MEMORY_ITEM_STATE",
+                "The memory is not awaiting review."
+            );
+        }
+        await tx.memoryItem.updateMany({
+            where: { id: item.id, status: { in: [...REVIEWABLE_STATUSES] } },
+            data: { status: "rejected" },
+        });
     });
 }
 
@@ -383,55 +401,62 @@ export async function editMemory(input: {
     expiresAt?: string | null;
     sensitivity?: "standard" | "sensitive";
 }) {
-    const item = await loadOwnedMemory(input.userId, input.memoryId);
-    if (
-        item.status !== "active" &&
-        !(REVIEWABLE_STATUSES as readonly string[]).includes(item.status)
-    ) {
-        throw new ApiSecurityError(
-            409,
-            "MEMORY_ITEM_STATE",
-            "The memory cannot be edited in its current state."
-        );
-    }
-    const statement = (input.statement ?? item.statement)
-        .normalize("NFC")
-        .trim();
-    const expiresAt =
-        input.expiresAt === undefined
-            ? (item.expiresAt?.toISOString() ?? null)
-            : input.expiresAt;
-    const result = validateMemoryCandidate({
-        kind: item.kind,
-        statement,
-        confidence: item.confidence,
-        sensitivity: input.sensitivity ?? (item.sensitivity as "standard"),
-        expiresAt,
-        evidence: evidenceInputs(item.evidences),
-    });
-    assertNotHardRejected(result);
-
-    const stayActive =
-        item.status === "active" && result.disposition === "accepted";
-    await prisma.memoryItem.update({
-        where: { id: item.id },
-        data: {
+    await prisma.$transaction(async (tx) => {
+        // Under the account's memory lock (lib/memoryItemLock.ts). An edit
+        // turns a derived memory into a user-touched one, which a source
+        // deletion suspends rather than deletes -- so the deletion has to see
+        // the edit or run entirely before it, never classify in between.
+        await acquireUserMemoryLock(tx, input.userId);
+        const item = await loadOwnedMemory(input.userId, input.memoryId, tx);
+        if (
+            item.status !== "active" &&
+            !(REVIEWABLE_STATUSES as readonly string[]).includes(item.status)
+        ) {
+            throw new ApiSecurityError(
+                409,
+                "MEMORY_ITEM_STATE",
+                "The memory cannot be edited in its current state."
+            );
+        }
+        const statement = (input.statement ?? item.statement)
+            .normalize("NFC")
+            .trim();
+        const expiresAt =
+            input.expiresAt === undefined
+                ? (item.expiresAt?.toISOString() ?? null)
+                : input.expiresAt;
+        const result = validateMemoryCandidate({
+            kind: item.kind,
             statement,
-            sensitivity: result.sensitivity,
-            expiresAt: expiresAt ? new Date(expiresAt) : null,
-            revision: { increment: 1 },
-            userEdited: true,
-            conflictKey: `${item.kind}:${memoryStatementKey(statement)}`,
-            // Re-indexed with the statement. Leaving the old terms would make
-            // the row findable by words it no longer contains.
-            searchTerms: memoryRetrievalTerms(statement),
-            retrievalVersion: MEMORY_RETRIEVAL_VERSION,
-            ...(stayActive
-                ? {}
-                : item.status === "active"
-                  ? { status: "manual_review_required", approvedAt: null }
-                  : {}),
-        },
+            confidence: item.confidence,
+            sensitivity: input.sensitivity ?? (item.sensitivity as "standard"),
+            expiresAt,
+            evidence: evidenceInputs(item.evidences),
+        });
+        assertNotHardRejected(result);
+
+        const stayActive =
+            item.status === "active" && result.disposition === "accepted";
+        await tx.memoryItem.update({
+            where: { id: item.id },
+            data: {
+                statement,
+                sensitivity: result.sensitivity,
+                expiresAt: expiresAt ? new Date(expiresAt) : null,
+                revision: { increment: 1 },
+                userEdited: true,
+                conflictKey: `${item.kind}:${memoryStatementKey(statement)}`,
+                // Re-indexed with the statement. Leaving the old terms would make
+                // the row findable by words it no longer contains.
+                searchTerms: memoryRetrievalTerms(statement),
+                retrievalVersion: MEMORY_RETRIEVAL_VERSION,
+                ...(stayActive
+                    ? {}
+                    : item.status === "active"
+                      ? { status: "manual_review_required", approvedAt: null }
+                      : {}),
+            },
+        });
     });
 }
 
@@ -440,25 +465,34 @@ export async function setMemoryPinned(
     memoryId: string,
     pinned: boolean
 ) {
-    const item = await loadOwnedMemory(userId, memoryId);
-    if (item.status !== "active") {
-        throw new ApiSecurityError(
-            409,
-            "MEMORY_ITEM_STATE",
-            "Only active memories can be pinned."
-        );
-    }
-    await prisma.memoryItem.update({
-        where: { id: item.id },
-        data: { pinned },
+    await prisma.$transaction(async (tx) => {
+        // Every memory write takes the account's memory lock
+        // (lib/memoryItemLock.ts), so no write lands between a source
+        // deletion's classification and its action.
+        await acquireUserMemoryLock(tx, userId);
+        const item = await loadOwnedMemory(userId, memoryId, tx);
+        if (item.status !== "active") {
+            throw new ApiSecurityError(
+                409,
+                "MEMORY_ITEM_STATE",
+                "Only active memories can be pinned."
+            );
+        }
+        await tx.memoryItem.update({
+            where: { id: item.id },
+            data: { pinned },
+        });
     });
 }
 
 /** Hard delete: the row and its evidence go together (§13.1 user delete). */
 export async function deleteMemory(userId: string, memoryId: string) {
-    const item = await loadOwnedMemory(userId, memoryId);
-    await prisma.memoryItem.delete({ where: { id: item.id } });
-    return { outcome: "deleted" as const };
+    return prisma.$transaction(async (tx) => {
+        await acquireUserMemoryLock(tx, userId);
+        const item = await loadOwnedMemory(userId, memoryId, tx);
+        await tx.memoryItem.delete({ where: { id: item.id } });
+        return { outcome: "deleted" as const };
+    });
 }
 
 /**
@@ -468,41 +502,50 @@ export async function deleteMemory(userId: string, memoryId: string) {
  * silently included.
  */
 export async function bulkApproveMemories(userId: string) {
+    // Ids only. Everything the decision rests on -- status, statement,
+    // evidence -- is read again under the account's memory lock: a source
+    // deletion that removes a candidate's user-role evidence between an
+    // unlocked read and this approval would otherwise leave an assistant-only
+    // factual memory active (lib/memoryItemLock.ts).
     const candidates = await prisma.memoryItem.findMany({
         where: { userId, status: "candidate", sensitivity: "standard" },
-        include: {
-            evidences: {
-                select: {
-                    id: true,
-                    sourceType: true,
-                    manualContent: true,
-                    externalMessage: {
-                        select: { role: true, externalConversationId: true },
-                    },
-                },
-            },
-        },
+        select: { id: true },
         orderBy: { createdAt: "asc" },
     });
 
     let approved = 0;
     let skipped = 0;
-    for (const item of candidates) {
-        const result = validateMemoryCandidate({
-            kind: item.kind,
-            statement: item.statement,
-            confidence: item.confidence,
-            sensitivity: "standard",
-            expiresAt: item.expiresAt?.toISOString() ?? null,
-            evidence: evidenceInputs(item.evidences),
-        });
-        if (result.disposition !== "accepted" || !result.bulkSafe) {
-            skipped += 1;
-            continue;
-        }
+    for (const { id } of candidates) {
         try {
-            await prisma.$transaction(async (tx) => {
+            const outcome = await prisma.$transaction(async (tx) => {
                 await acquireUserMemoryLock(tx, userId);
+                const item = await tx.memoryItem.findFirst({
+                    where: { id, userId, status: "candidate", sensitivity: "standard" },
+                    include: {
+                        evidences: {
+                            select: {
+                                id: true,
+                                sourceType: true,
+                                manualContent: true,
+                                externalMessage: {
+                                    select: { role: true, externalConversationId: true },
+                                },
+                            },
+                        },
+                    },
+                });
+                if (!item) return "skipped" as const;
+                const result = validateMemoryCandidate({
+                    kind: item.kind,
+                    statement: item.statement,
+                    confidence: item.confidence,
+                    sensitivity: "standard",
+                    expiresAt: item.expiresAt?.toISOString() ?? null,
+                    evidence: evidenceInputs(item.evidences),
+                });
+                if (result.disposition !== "accepted" || !result.bulkSafe) {
+                    return "skipped" as const;
+                }
                 await assertNoActiveConflict(
                     tx,
                     userId,
@@ -510,12 +553,14 @@ export async function bulkApproveMemories(userId: string) {
                     item.id,
                     undefined
                 );
-                await tx.memoryItem.updateMany({
+                const updated = await tx.memoryItem.updateMany({
                     where: { id: item.id, status: "candidate" },
                     data: { status: "active", approvedAt: new Date() },
                 });
+                return updated.count === 1 ? ("approved" as const) : ("skipped" as const);
             });
-            approved += 1;
+            if (outcome === "approved") approved += 1;
+            else skipped += 1;
         } catch (error) {
             if (
                 error instanceof ApiSecurityError &&
@@ -660,11 +705,15 @@ export async function* iterateMemoryExportItems(userId: string) {
  */
 export async function deleteAllMemories(userId: string) {
     return prisma.$transaction(async (tx) => {
-        await acquireUserMemoryLock(tx, userId);
+        // Run rows first, then the memory lock: the order an extraction commit
+        // takes them (lib/memoryExtractionCommit.ts locks its run, then
+        // persistence takes the memory lock). Taking the memory lock first
+        // here made the two transactions wait on each other's first lock.
         const cancelledRuns = await tx.memoryExtractionRun.updateMany({
             where: { userId, status: { in: ["pending", "running"] } },
             data: { status: "cancelled", leaseExpiresAt: null },
         });
+        await acquireUserMemoryLock(tx, userId);
         const deleted = await tx.memoryItem.deleteMany({ where: { userId } });
         return {
             deletedMemories: deleted.count,
