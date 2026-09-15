@@ -10,6 +10,7 @@ import {
   withdrawAllMarketing,
 } from "@/lib/emailPreferences";
 import { suppressionCheck } from "@/lib/emailSuppression";
+import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
 import {
   jurisdictionForUser,
   recordBillingCountry,
@@ -584,6 +585,39 @@ test("a payment method from elsewhere is a conflict, not a move", async () => {
   // The declaration is preserved, not overwritten: paying with a card
   // registered elsewhere is not moving house.
   assert.equal(resolved.selfDeclaredCountry, "KR");
+});
+
+test("a billing country is kept for an account that has no settings row yet", async () => {
+  // UserSettings is created lazily. The recorder used to update, which matched
+  // nothing for such an account and dropped the signal -- and without it the
+  // resolver fell back to the consent-time country, so an older DE consent
+  // kept sending after a payment method said NL
+  // (docs/policy/email-eea-marketing-review-2026-09-14.md §7 condition 7).
+  const user = await someone();
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  await prisma.consentRecord.create({
+    data: {
+      userId: user.id,
+      emailAddress: user.email!.toLowerCase(),
+      purpose: "product_updates",
+      action: "granted",
+      jurisdiction: "DE",
+      jurisdictionSource: "self_declared",
+      policyVersionId,
+      capturedVia: "preference_center",
+    },
+  });
+  assert.equal(
+    await prisma.userSettings.count({ where: { userId: user.id } }),
+    0
+  );
+
+  const recorded = await recordBillingCountry({ userId: user.id, country: "NL" });
+  assert.deepEqual(recorded, { updated: true, country: "NL" });
+
+  const resolved = await jurisdictionForUser({ userId: user.id });
+  assert.equal(resolved.countryCode, "NL");
+  assert.equal(resolved.source, "billing");
 });
 
 test("a fresh country confirmation resolves a later billing mismatch", async () => {

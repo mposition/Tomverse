@@ -2076,6 +2076,7 @@ export const de = {
         countryConflictBody: "Ihr Rechnungsland und das zuvor bestätigte Land stimmen nicht überein ({countries}). Bestätigen Sie oben Ihren aktuellen Wohnsitz.",
         countryUnsupportedBody: "Für das gespeicherte Land sind Marketing-E-Mails noch nicht verfügbar. Wählen Sie nur dann ein anderes Land, wenn Sie jetzt dort wohnen.",
         needsCountryNote: "Bestätigen Sie oben Ihr Wohnsitzland, bevor dies gesendet werden kann.",
+        countryUnsupportedNote: "Marketing-E-Mails sind für Ihr aktuelles Land nicht verfügbar.",
         countryLabel: "Wohnsitzland",
         countryDescription: "Wird nur für die richtigen Werbekennzeichnungen, Absenderangaben und Abmelderegeln verwendet. Beim Aktivieren von Marketing wird es mit dieser Einwilligung gespeichert.",
         countryPlaceholder: "Wohnsitzland auswählen",

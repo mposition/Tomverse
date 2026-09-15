@@ -10,6 +10,7 @@ import { readPreferences, setPreference, withdrawAllMarketing } from "@/lib/emai
 import { EMAIL_PURPOSES, recordsConsent } from "@/lib/emailPreferenceCore";
 import { jurisdictionForUser, setSelfDeclaredCountry } from "@/lib/emailJurisdiction";
 import {
+  isMarketingAllowedCountry,
   marketingOptInCountryDecision,
   marketingJurisdictionVerdict,
   needsCountryConfirmation,
@@ -59,7 +60,8 @@ const state = async (userId: string) => {
       needsConfirmation: needsCountryConfirmation(jurisdiction),
       marketingSupported: jurisdiction.selfDeclaredCountry
         ? marketingOptInCountryDecision(jurisdiction.selfDeclaredCountry).allowed
-        : jurisdiction.profileKey !== "ZZ",
+        : jurisdiction.profileKey !== "ZZ" &&
+          isMarketingAllowedCountry(jurisdiction.countryCode),
     },
   };
 };
@@ -126,6 +128,19 @@ export async function PATCH(req: Request) {
       });
       const verdict = marketingJurisdictionVerdict(jurisdiction);
       if (!verdict.allowed) {
+        // The request's country passed the allowlist above, but the resolution
+        // is what the send lane will use. Refusing here on the same verdict
+        // keeps the toggle from being stored against a country that would
+        // never receive anything.
+        if (verdict.skipReason === "marketing_country_not_allowed") {
+          return NextResponse.json(
+            {
+              error: "Marketing email is not available for this country yet.",
+              code: "COUNTRY_UNSUPPORTED",
+            },
+            { status: 409 }
+          );
+        }
         return NextResponse.json(
           {
             error: "The country could not be confirmed.",

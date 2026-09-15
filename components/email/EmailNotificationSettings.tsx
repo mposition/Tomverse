@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 import { SettingsDetailNav } from "@/components/settings/SettingsDetailNav";
-import { MARKETING_SUPPORTED_COUNTRY_CODES } from "@/lib/emailJurisdictionCore";
+import { MARKETING_ALLOWED_COUNTRY_CODES } from "@/lib/emailJurisdictionCore";
 
 /**
  * The preference centre.
@@ -55,7 +55,7 @@ const MARKETING_PURPOSES = new Set([
     "newsletter",
     "promotions",
 ]);
-const SUPPORTED_COUNTRIES = new Set<string>(MARKETING_SUPPORTED_COUNTRY_CODES);
+const SUPPORTED_COUNTRIES = new Set<string>(MARKETING_ALLOWED_COUNTRY_CODES);
 
 const countryValueFrom = (next: PreferenceState) => {
     if (next.country.selfDeclared) return next.country.selfDeclared;
@@ -83,7 +83,7 @@ export function EmailNotificationSettings() {
 
     const countryOptions = useMemo(() => {
         const displayNames = new Intl.DisplayNames([lang], { type: "region" });
-        return MARKETING_SUPPORTED_COUNTRY_CODES.map((code) => ({
+        return MARKETING_ALLOWED_COUNTRY_CODES.map((code) => ({
             code,
             name: displayNames.of(code) ?? code,
         })).sort((left, right) => left.name.localeCompare(right.name, lang));
@@ -204,6 +204,16 @@ export function EmailNotificationSettings() {
     );
     const savedCountryIsUnsupported =
         Boolean(country) && !SUPPORTED_COUNTRIES.has(country);
+    // A country we know -- declared or from billing -- that marketing does not
+    // reach. Told apart from "no country yet" so the screen never suggests that
+    // confirming a country would make marketing arrive where it cannot.
+    const countryIsUnsupported = Boolean(
+        state &&
+            !state.country.marketingSupported &&
+            (state.country.selfDeclared ||
+                (state.country.confidence === "high" &&
+                    state.country.resolved !== "ZZ"))
+    );
 
     const errorMessage = saveError
         ? t(`emailNotifications.error.${saveError}`)
@@ -303,8 +313,7 @@ export function EmailNotificationSettings() {
                                 {t("emailNotifications.countryNeededTitle")}
                             </h2>
                             <p className="mt-1 text-sm leading-6 text-zinc-600 dark:text-zinc-300">
-                                {!state.country.marketingSupported &&
-                                state.country.selfDeclared
+                                {countryIsUnsupported
                                     ? t("emailNotifications.countryUnsupportedBody")
                                     : state.country.confidence === "conflict"
                                       ? t(
@@ -318,7 +327,11 @@ export function EmailNotificationSettings() {
                         </section>
                     ) : null}
 
-                    {productUpdates && !productUpdates.enabled ? (
+                    {/* Not offered where it cannot be granted: the server would
+                        refuse it, and a button next to "not available for your
+                        country" contradicts it. Confirming a different country
+                        above brings it back. */}
+                    {productUpdates && !productUpdates.enabled && !countryIsUnsupported ? (
                         <section className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950/30">
                             <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700 dark:text-blue-300">
                                 {t("emailNotifications.marketingOptional")}
@@ -367,10 +380,17 @@ export function EmailNotificationSettings() {
                                     {!preference.locked &&
                                     MARKETING_PURPOSES.has(preference.purpose) &&
                                     state.country.needsConfirmation ? (
-                                        <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-500">
-                                            {t(
-                                                "emailNotifications.needsCountryNote"
-                                            )}
+                                        <p
+                                            className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-500"
+                                            data-testid={`email-preference-${preference.purpose}-country-note`}
+                                        >
+                                            {countryIsUnsupported
+                                                ? t(
+                                                      "emailNotifications.countryUnsupportedNote"
+                                                  )
+                                                : t(
+                                                      "emailNotifications.needsCountryNote"
+                                                  )}
                                         </p>
                                     ) : null}
                                 </div>
@@ -390,7 +410,17 @@ export function EmailNotificationSettings() {
                                         aria-label={t(
                                             `emailNotifications.purpose.${preference.purpose}.title`
                                         )}
-                                        disabled={busy}
+                                        // Switching marketing on is unavailable
+                                        // for a country outside the allowlist;
+                                        // switching it off never is.
+                                        disabled={
+                                            busy ||
+                                            (countryIsUnsupported &&
+                                                MARKETING_PURPOSES.has(
+                                                    preference.purpose
+                                                ) &&
+                                                !preference.enabled)
+                                        }
                                         onClick={() =>
                                             togglePreference(preference)
                                         }
