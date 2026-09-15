@@ -519,3 +519,145 @@ test("a stale session is refused before the binding is even read", async () => {
     assert.equal(executions, 0);
   });
 });
+
+/* ------------------------- every other two-person action, since 2026-09-15 ----- */
+
+/**
+ * docs/policy/admin-sole-approver.md. `runWithAdminApproval` itself now lets
+ * the sole eligible administrator execute, so the routes that call it --
+ * plan adjustment, refunds above the threshold, account deletion, OAuth
+ * unlink, billing hold release, model disable, suppression removal, policy
+ * activation -- need no change of their own. What only a database can show is
+ * that the audit record really stands where the reviewer would, that no
+ * approval row pretends someone granted anything, and that a second
+ * administrator puts the queue back.
+ */
+
+const planAdjustInput = (actor: AdminTestActor) => ({
+  session: actor.session,
+  request: actor.request,
+  action: "user.plan_adjust",
+  targetType: "User",
+  targetId: "target-user",
+  payload: { plan: "Pro", reason: "verified support request" },
+  reason: "verified support request",
+});
+
+test("the sole administrator adjusts a plan alone, and the audit stands in for the reviewer", async () => {
+  const admin = await createAdminSession("sole-billing");
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    const input = planAdjustInput(admin);
+    let executions = 0;
+    const result = await runWithAdminApproval(input, async () => {
+      executions += 1;
+      return "adjusted";
+    });
+    assert.equal(result, "adjusted");
+    assert.equal(executions, 1);
+    assert.equal(await prisma.adminActionApproval.count(), 0);
+
+    const audit = await prisma.adminAuditLog.findMany({
+      where: { action: { startsWith: "admin_sole_approver." } },
+      orderBy: { createdAt: "asc" },
+    });
+    assert.deepEqual(
+      audit.map((entry) => entry.action),
+      ["admin_sole_approver.execution_started", "admin_sole_approver.executed"]
+    );
+    const started = audit[0].metadata as Record<string, unknown>;
+    assert.equal(started.action, "user.plan_adjust");
+    assert.equal(started.rule, "general_sole_administrator");
+    assert.equal(started.eligibleApproverCount, 1);
+    assert.equal(started.reason, "verified support request");
+    assert.equal(started.payloadHash, approvalPayloadHash(input.payload));
+    assert.equal(audit[0].targetId, "target-user");
+  });
+});
+
+test("a failed sole execution is recorded as failed and leaves nothing claimable", async () => {
+  const admin = await createAdminSession("sole-failure");
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    await assert.rejects(
+      () =>
+        runWithAdminApproval(planAdjustInput(admin), async () => {
+          throw new Error("stripe unavailable");
+        }),
+      /stripe unavailable/
+    );
+    assert.equal(await prisma.adminActionApproval.count(), 0);
+    assert.deepEqual(
+      (
+        await prisma.adminAuditLog.findMany({
+          where: { action: { startsWith: "admin_sole_approver." } },
+          orderBy: { createdAt: "asc" },
+        })
+      ).map((entry) => entry.action),
+      [
+        "admin_sole_approver.execution_started",
+        "admin_sole_approver.execution_failed",
+      ]
+    );
+  });
+});
+
+test("a second eligible administrator restores the queue for every action", async () => {
+  const admin = await createAdminSession("first-billing");
+  const other = await createAdminSession("second-billing");
+  await withSoleAdmin(
+    [admin.session.user?.email as string, other.session.user?.email as string],
+    async () => {
+      let executions = 0;
+      await assert.rejects(
+        () =>
+          runWithAdminApproval(planAdjustInput(admin), async () => {
+            executions += 1;
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof AdminApprovalRequiredError);
+          // Said, not silent: the operator can tell two administrators from a
+          // misconfiguration.
+          assert.equal(
+            error.soleApproverUnavailable,
+            "multiple_eligible_approvers"
+          );
+          return true;
+        }
+      );
+      assert.equal(executions, 0);
+      assert.equal(
+        await prisma.adminActionApproval.count({ where: { status: "pending" } }),
+        1
+      );
+    }
+  );
+});
+
+test("the general path never stands in for a bound one", async () => {
+  // Retention cleanup and campaign approval keep their digest bindings. A
+  // sole administrator reaching them through runWithAdminApproval -- without
+  // the dry run or the copy they read -- gets the ordinary queue, not a
+  // shortcut around the proof.
+  const admin = await createAdminSession("bound-admin");
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    let executions = 0;
+    await assert.rejects(
+      () =>
+        runWithAdminApproval(
+          {
+            session: admin.session,
+            request: admin.request,
+            action: "retention.cleanup.execute",
+            targetType: "Retention",
+            targetId: "expired-data",
+            payload: { mode: "execute", confirmText: "RUN CLEANUP" },
+            reason: "Execute destructive retention cleanup.",
+          },
+          async () => {
+            executions += 1;
+          }
+        ),
+      AdminApprovalRequiredError
+    );
+    assert.equal(executions, 0);
+  });
+});
