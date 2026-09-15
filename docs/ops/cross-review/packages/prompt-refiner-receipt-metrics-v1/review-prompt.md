@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-receipt-metrics-v1, round 1
+# Independent review — task prompt-refiner-receipt-metrics-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -17,7 +17,7 @@ Prompt Refiner를 제품에서 활성화하지 않은 채 provider-independent �
 - 관련 unit, typecheck, lint, report dry run, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.
 - Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다.
 
-## Change under review — digest sha256:194a7a17c30122466b496a36fcc033815fdd5187b37bb1ad7252b81fbaa9731e, commit bcd66225789c44f304a0dbee591cc67c2237aafd
+## Change under review — digest sha256:ef3a83844798555e9324e50dd5e522d0d6640805ee324ed92b7cea8ebc755b16, commit 3452d730fc7066d2609e4675bf0f0b63821c4124
 
 ```diff
 diff --git a/AGENTS.md b/AGENTS.md
@@ -143,10 +143,10 @@ index 9ade83db..fc49694c 100644
 +   전체 카탈로그 선택 품질을 별도 실험으로 판단한다.
 diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
 new file mode 100644
-index 00000000..6c966007
+index 00000000..4a0da87a
 --- /dev/null
 +++ b/docs/policy/prompt-refiner-observability.md
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,142 @@
 +# Prompt Refiner receipt와 관측 계약
 +
 +상태: **provider-independent 데이터 계약 구현, 제품 수집 미연결**.
@@ -187,6 +187,11 @@ index 00000000..6c966007
 +`failureLayer`는 `admission`, `adapter`, `provider`, `response_validation` 중 하나이며
 +성공만 `none`이다.
 +`failureCode`는 고정 enum이고 provider 오류 본문을 담을 문자열 필드는 없다.
++`adapter_unavailable`과 `cost_guardrail`은 pre-dispatch 전용이고,
++`provider_error`, `timeout`, `invalid_response`, `empty_response`, `no_change`,
++`unknown_after_dispatch`는 post-dispatch 전용이다. `cancelled`는 dispatch 전후 모두
++일어날 수 있으므로 code만으로 단계를 주장하지 않고 `dispatchedAt`과 outcome이 그
++lifecycle을 결정한다.
 +
 +`requestedAt`, `dispatchedAt`, `completedAt`은 모두 서버 시각이다.
 +`preparationLatencyMs`는 `completedAt - requestedAt`에서 도출한 값과 정확히 같아야
@@ -326,10 +331,10 @@ index 16963a2b..cdf2695c 100644
  5. server-owned offered 결정과 kill switch
 diff --git a/lib/promptRefinerReceiptCore.ts b/lib/promptRefinerReceiptCore.ts
 new file mode 100644
-index 00000000..021ce673
+index 00000000..ef34d345
 --- /dev/null
 +++ b/lib/promptRefinerReceiptCore.ts
-@@ -0,0 +1,627 @@
+@@ -0,0 +1,657 @@
 +import { z } from "zod";
 +
 +/**
@@ -375,6 +380,18 @@ index 00000000..021ce673
 +    "cancelled",
 +    "unknown_after_dispatch",
 +] as const;
++const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
++    "adapter_unavailable",
++    "cost_guardrail",
++]);
++const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
++    "invalid_response",
++    "empty_response",
++    "no_change",
++    "provider_error",
++    "timeout",
++    "unknown_after_dispatch",
++]);
 +export const PROMPT_REFINER_DISPOSITION_OUTCOMES = [
 +    "accepted",
 +    "kept_original",
@@ -545,6 +562,24 @@ index 00000000..021ce673
 +        if (dispatchedAt === null && hasAnyTelemetry) {
 +            issue("prompt_refiner_undispatched_receipt_cannot_have_telemetry", [
 +                "inputTokens",
++            ]);
++        }
++        if (
++            receipt.failureCode !== null &&
++            dispatchedAt === null &&
++            POST_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
++        ) {
++            issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
++                "failureCode",
++            ]);
++        }
++        if (
++            receipt.failureCode !== null &&
++            dispatchedAt !== null &&
++            PRE_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
++        ) {
++            issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
++                "failureCode",
 +            ]);
 +        }
 +    });
@@ -1091,10 +1126,10 @@ index 00000000..241a4d21
 +}
 diff --git a/tests/promptRefinerReceiptCore.test.mjs b/tests/promptRefinerReceiptCore.test.mjs
 new file mode 100644
-index 00000000..2f5d5d6e
+index 00000000..72f4a9c7
 --- /dev/null
 +++ b/tests/promptRefinerReceiptCore.test.mjs
-@@ -0,0 +1,487 @@
+@@ -0,0 +1,510 @@
 +import assert from "node:assert/strict";
 +import { mkdtemp, rm, writeFile } from "node:fs/promises";
 +import { tmpdir } from "node:os";
@@ -1197,6 +1232,20 @@ index 00000000..2f5d5d6e
 +});
 +
 +test("execution receipts reject contradictory lifecycle and telemetry claims", () => {
++    const refusal = {
++        outcome: "refused_before_dispatch",
++        suggestionId: null,
++        provider: null,
++        modelId: null,
++        adapterVersion: null,
++        failureLayer: "adapter",
++        dispatchedAt: null,
++        inputTokens: null,
++        cachedInputTokens: null,
++        outputTokens: null,
++        reasoningTokens: null,
++        actualCostMicroUsd: null,
++    };
 +    const invalid = [
 +        execution({ suggestionId: null }),
 +        execution({ preparationLatencyMs: 999 }),
@@ -1235,16 +1284,9 @@ index 00000000..2f5d5d6e
 +            actualCostMicroUsd: null,
 +        }),
 +        execution({
-+            outcome: "refused_before_dispatch",
-+            suggestionId: null,
-+            failureLayer: "adapter",
++            ...refusal,
 +            failureCode: "adapter_unavailable",
-+            dispatchedAt: null,
 +            inputTokens: 1,
-+            cachedInputTokens: null,
-+            outputTokens: null,
-+            reasoningTokens: null,
-+            actualCostMicroUsd: null,
 +        }),
 +        execution({
 +            provider: "example",
@@ -1261,6 +1303,22 @@ index 00000000..2f5d5d6e
 +            reasoningTokens: null,
 +            actualCostMicroUsd: null,
 +        }),
++        ...[
++            "provider_error",
++            "timeout",
++            "invalid_response",
++            "empty_response",
++            "no_change",
++            "unknown_after_dispatch",
++        ].map((failureCode) => execution({ ...refusal, failureCode })),
++        ...["adapter_unavailable", "cost_guardrail"].map((failureCode) =>
++            execution({
++                outcome: "failed",
++                suggestionId: null,
++                failureLayer: "adapter",
++                failureCode,
++            })
++        ),
 +    ];
 +    for (const receipt of invalid) {
 +        assert.equal(promptRefinerExecutionReceiptSchema.safeParse(receipt).success, false);
@@ -1587,46 +1645,44 @@ index 00000000..2f5d5d6e
 
 ## Test results (run by the control program)
 
-- PASS `node --import tsx --test tests/promptRefinerReceiptCore.test.mjs` (1280ms)
+- PASS `node --import tsx --test tests/promptRefinerReceiptCore.test.mjs` (1214ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 1198.0134
+  # duration_ms 1136.9762
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck` (44052ms)
+- PASS `npm run typecheck` (43615ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npm run lint` (66969ms)
+- PASS `npm run lint` (64406ms)
   > ai-chat-hub@0.1.0 lint
   > eslint
-- PASS `npm run check:doc-references` (1402ms)
+- PASS `npm run check:doc-references` (1684ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 833 referenced path(s) across 107 instruction document(s), and 942 path(s) named by comments across 2854 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1054ms)
+- PASS `npm run check:policy-section-references` (1203ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4338 citation(s) against 34 policy document(s). 2698 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 223 predate this change).
-- PASS `npm run check:encoding:strict` (1349ms)
+- PASS `npm run check:encoding:strict` (1494ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `git diff --check` (53ms)
+- PASS `git diff --check` (57ms)
 
 ## Findings from the previous round (check each was addressed)
 
-- [warning/evidence] lib/promptRefinerReceiptCore.ts:198 (superRefine, failed-outcome lifecycle rules): An execution receipt may claim `failureLayer: "admission"` while also carrying `dispatchedAt`, provider attribution, tokens and cost, so a request the receipt says was rejected before the provider call still counts inside the `dispatched` / `dispatchedFailures` denominators this task exists to keep honest.
-- [warning/evidence] lib/promptRefinerReceiptCore.ts:182-207 (refused_before_dispatch vs failed): Two receipts that are byte-identical except for `outcome` both validate for an adapter-layer, never-dispatched event, so whether that event lands in `refusalRate` or in `failedRequestRate` is the writer's free choice rather than a contract fact, which weakens the success / post-dispatch-failure / pre-dispatch-refusal split the first completion criterion requires.
-- [nit/evidence] docs/policy/prompt-refiner-observability.md §3 vs scripts/report-prompt-refiner-receipts.mjs:58-60: The policy says "report는 각 항목마다 `population`, `reported`, `missing`, `total`을 함께 보여 준다", but the default (non-`--json`) report prints coverage for `actualCostMicroUsd` only, and only as `reported/population` plus `total` — `missing` and all four token fields never appear.
+- [warning/evidence] lib/promptRefinerReceiptCore.ts:182-217 (superRefine) and :560-565 (failureCodes aggregate): `failureCode` is validated only as a closed enum and is never constrained by `outcome`/`dispatchedAt`, so a `refused_before_dispatch` receipt that by contract never reached the provider may still be classified `provider_error`, `timeout` or `unknown_after_dispatch`, and the report then prints those codes next to `dispatched: 0` — the same writer's-free-choice ambiguity between pre- and post-dispatch facts that the two round-0 lifecycle findings closed for `failureLayer`.
 
 ## Author's account (read last; a claim, not a finding)
 
@@ -1639,8 +1695,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-receipt-metrics-v1",
-  "round": 1,
-  "reviewedDigest": "sha256:194a7a17c30122466b496a36fcc033815fdd5187b37bb1ad7252b81fbaa9731e",
+  "round": 2,
+  "reviewedDigest": "sha256:ef3a83844798555e9324e50dd5e522d0d6640805ee324ed92b7cea8ebc755b16",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
