@@ -185,6 +185,13 @@ Date / timezone:    ____________________
       `productKey IS NULL`, so they stop wrong combinations and not omissions;
       this is what stops omissions (decision record v1.2 §6)
 - [ ] `npm run check:default-models`
+- [ ] `npm run check:starter-catalog` — proves every Chat starter card is still
+      true: its flag key is a constant some module exports rather than a
+      retyped literal, its capability still resolves, the module it names as
+      evidence still exists, and both of its strings exist in all seven
+      locales. A feature that is removed or renamed does not break the build;
+      it leaves its card behind promising something that is gone, on the first
+      screen a new account sees (docs/ui-contracts/chat-starter-catalog.md)
 - [ ] `npm run check:encoding:strict`
 - [ ] `npm run check:locale-translation` — proves no locale is still showing an
       English sentence where a translation is owed
