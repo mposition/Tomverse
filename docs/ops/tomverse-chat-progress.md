@@ -833,7 +833,7 @@ JSON role 위조형 1개를 더한 adversarial payload 18개 전부를 실제 bu
 deterministic하게 확인한다.
 
 - system 규칙이 첫 메시지이며 원문 payload를 포함하지 않고, 별도 모듈에 고정한
-  필수 보안 규칙 여섯 줄을 모두 유지한다.
+  보안 규칙 여섯 줄만 정확한 순서로 유지한다.
 - provider 경계로 넘어가는 메시지는 정확히 system + user 두 개다.
 - user 메시지는 `inputScope`와 `sourceText`만 가진 canonical JSON이다.
 - JSON을 다시 읽었을 때 입력 scope와 source text bytes가 정확히 복원된다.

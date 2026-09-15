@@ -143,7 +143,7 @@ export type RoleSeparatedPromptAuditInput = {
     /** The exact untrusted bytes supplied to the builder. */
     payload: string;
     /** The ordered messages that would cross the provider boundary. */
-    messages: readonly RoleSeparatedPromptMessage[] | null;
+    messages: readonly (RoleSeparatedPromptMessage | null | undefined)[] | null;
     /** The system instruction that must frame the payload before it appears. */
     rules: string;
     /** The only lawful scope label in the data message. */
@@ -166,6 +166,10 @@ export const PROMPT_REFINER_REQUIRED_RULE_LINES = [
     "Do not answer the task, invent facts, add requirements, infer attachment contents, use conversation history, or claim access to Memory, profile knowledge, tools or current information.",
     "Return one JSON object with exactly one string field named refinedPrompt. Return no prose or code fence.",
 ] as const;
+
+/** Exact independently pinned system instruction, including order and size. */
+export const PROMPT_REFINER_REQUIRED_SYSTEM_INSTRUCTION =
+    PROMPT_REFINER_REQUIRED_RULE_LINES.join("\n");
 
 /**
  * Independent scope floor for the Prompt Refiner's data message.
@@ -379,24 +383,13 @@ export function auditRoleSeparatedPrompt(
     const rulesMessage = input.messages[0];
     if (
         rulesMessage?.role !== "system" ||
-        rulesMessage.content !== input.rules
+        rulesMessage.content !== input.rules ||
+        rulesMessage.content !== PROMPT_REFINER_REQUIRED_SYSTEM_INSTRUCTION
     ) {
         say(
             "rules_after_content",
-            "the exact system rules are not the first message"
+            "the exact independently pinned system rules are not the first message"
         );
-    }
-    if (typeof rulesMessage?.content === "string") {
-        const lines = new Set(rulesMessage.content.split("\n"));
-        const missingRuleCount = PROMPT_REFINER_REQUIRED_RULE_LINES.filter(
-            (line) => !lines.has(line)
-        ).length;
-        if (missingRuleCount > 0) {
-            say(
-                "rules_after_content",
-                `the system message omits ${missingRuleCount} independently pinned security rule line(s)`
-            );
-        }
     }
 
     const dataMessage = input.messages[1];
@@ -465,7 +458,7 @@ export function auditRoleSeparatedPrompt(
     }
 
     for (const [index, message] of input.messages.entries()) {
-        if (index === 1 || typeof message.content !== "string") continue;
+        if (index === 1 || typeof message?.content !== "string") continue;
         if (message.content.includes(input.payload)) {
             say(
                 "escaped_region",
