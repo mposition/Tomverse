@@ -23,8 +23,17 @@ test("shared calculation preserves the exact fixed-input v1 plan bytes and diges
   const legacy = buildDevelopmentPlan({ ...common, corpus: oldCorpus, ...options });
   // Snapshot-specific regression captured before extraction at base 8646fcb50f868268bc90bf47fe0032c171251b45.
   // A reviewed catalogue/pricing change needs a new baseline; this is not a generic catalogue capacity claim.
-  assert.equal(legacy.planDigest, "1465b4ca171c55ddb2b535da5bf3e952fa37dbf03258fd36db495dffba639c63");
-  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "0e480ddd0fd50daa52cf9e48ee67d4e86a7163db3ed903b2b4cb5f6e2763621a");
+  //
+  // Re-baselined for `task-profile-v4`. The plan records the Router's versions,
+  // so bumping the profile version moves the digest on its own. That is the
+  // whole of the difference here and it was checked rather than assumed:
+  // substituting "task-profile-v4" back to "task-profile-v3" in the plan body
+  // and re-deriving reproduces the previous pair exactly
+  // ("1465b4ca…639c63" and "0e480ddd…63621a"). No row, selection, price or
+  // catalogue value moved, and no v1 corpus case changed profile.
+  assert.equal(legacy.versions.router.taskProfile, "task-profile-v4");
+  assert.equal(legacy.planDigest, "c27c6a833b7fc6a41956098d8a967a9c5224545c2de7d74f90d72cf1339afc4b");
+  assert.equal(benchmarkDigest(JSON.stringify(legacy)), "64e628f3ac59ee52283991f2a58a4a71b8b028b793451cc6012229971a0a4b3a");
   assert.deepEqual(validateDevelopmentPlan(legacy, { ...common, corpus: oldCorpus }), legacy);
   assert.throws(() => buildDevelopmentPlan({ ...common, ...options }), /corpus_version_or_purpose/);
   assert.throws(() => validateDevelopmentPlan(plan, { ...common, corpus: oldCorpus }), /plan:unexpected_or_missing_fields/);
