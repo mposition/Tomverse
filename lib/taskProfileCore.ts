@@ -57,8 +57,25 @@ import {
  * Recorded as a new version rather than fixed in place: one version answering
  * `false` before the change and `true` after would make every run under it
  * unattributable.
+ *
+ * v3: source-order wording, marked/provided-record current fields, and an
+ * explicit prohibition on using today's date no longer count as requests for
+ * outside information. Only those incidental spans are ignored; independent
+ * source/recency requests and the explicit search setting keep their priority.
+ * Source intent and the research kind reuse one contextual reading. The model
+ * finder's separate recommendation regex and the recency length rules stay put.
+ *
+ * v4: asking for a search to be *run* is stated intent, the same as asking for
+ * sources. Until now the only vocabulary read was the model finder's -- source,
+ * citation, research, 출처, 근거, 웹 검색 -- so "검색해서 알려줘",
+ * "인터넷에서 찾아봐", "google it" and "can you check online?" all recorded
+ * `needsCurrentInformation: false`, the web-search hard filter never ran for
+ * them, and the retry offer refused them as having no recency signal. The
+ * request forms are added in `lib/webSearchSuggestion.ts`; that module's
+ * contextual masking, the recency reading and its floor, the priority of the
+ * explicit setting, and the model finder's own regex are all unchanged.
  */
-export const TASK_PROFILE_VERSION = "task-profile-v2";
+export const TASK_PROFILE_VERSION = "task-profile-v4";
 
 /**
  * The dominant shape of the turn.
@@ -220,8 +237,8 @@ export function buildTaskProfile(input: TaskProfileInput): TaskProfile {
     if (explicitSearch) fired("search:requested");
     // Stated intent, at any length. See the version note above for why the
     // length floor below must not apply here.
-    const sourceIntent =
-        !explicitSearch && hasExplicitSourceOrSearchIntent(trimmed);
+    const statedSourceIntent = hasExplicitSourceOrSearchIntent(trimmed);
+    const sourceIntent = !explicitSearch && statedSourceIntent;
     if (sourceIntent) fired("search:source-intent");
     // And the softer reading of wording that merely sounds time-sensitive,
     // which keeps its floor: a bare "오늘" is a guess about the turn, not a
@@ -245,7 +262,7 @@ export function buildTaskProfile(input: TaskProfileInput): TaskProfile {
     // work this is and `needsCurrentInformation` says whether it needs the
     // web, and the tests below hold a turn that has one without the other.
     const researchSignals = [
-        hasExplicitSourceOrSearchIntent(trimmed) && fired("research:vocabulary"),
+        statedSourceIntent && fired("research:vocabulary"),
         explicitSearch && fired("research:search-requested"),
     ].filter(Boolean).length;
 
