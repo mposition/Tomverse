@@ -107,6 +107,27 @@ test("execution receipts reject contradictory lifecycle and telemetry claims", (
         execution({
             outcome: "failed",
             suggestionId: null,
+            failureLayer: "admission",
+            failureCode: "cost_guardrail",
+        }),
+        execution({
+            outcome: "failed",
+            suggestionId: null,
+            provider: null,
+            modelId: null,
+            adapterVersion: null,
+            failureLayer: "adapter",
+            failureCode: "adapter_unavailable",
+            dispatchedAt: null,
+            inputTokens: null,
+            cachedInputTokens: null,
+            outputTokens: null,
+            reasoningTokens: null,
+            actualCostMicroUsd: null,
+        }),
+        execution({
+            outcome: "failed",
+            suggestionId: null,
             failureLayer: "provider",
             failureCode: "provider_error",
             dispatchedAt: null,
@@ -425,6 +446,18 @@ test("the CLI emits aggregate-only JSON and a non-approval disclaimer", async ()
         );
         assert.equal(humanRun.status, 0, humanRun.stderr);
         assert.match(humanRun.stdout, /does not judge quality, release readiness, or rollout approval/);
+        for (const label of [
+            "actual cost",
+            "input tokens",
+            "cached input tokens",
+            "output tokens",
+            "reasoning tokens",
+        ]) {
+            assert.match(
+                humanRun.stdout,
+                new RegExp(`${label}: population=1, reported=[01], missing=[01], total=`)
+            );
+        }
 
         const forbiddenText = "never-echo-this-private-prompt";
         await writeFile(

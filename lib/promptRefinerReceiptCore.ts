@@ -195,15 +195,17 @@ export const promptRefinerExecutionReceiptSchema =
             }
         }
 
-        if (
-            receipt.outcome === "failed" &&
-            (receipt.failureLayer === "provider" ||
-                receipt.failureLayer === "response_validation") &&
-            dispatchedAt === null
-        ) {
-            issue("prompt_refiner_remote_failure_requires_dispatch", [
-                "dispatchedAt",
-            ]);
+        if (receipt.outcome === "failed") {
+            if (dispatchedAt === null) {
+                issue("prompt_refiner_failure_requires_dispatch", [
+                    "dispatchedAt",
+                ]);
+            }
+            if (receipt.failureLayer === "admission") {
+                issue("prompt_refiner_failure_cannot_use_admission_layer", [
+                    "failureLayer",
+                ]);
+            }
         }
         if (dispatchedAt !== null && !hasCompleteAttribution) {
             issue("prompt_refiner_dispatch_requires_attribution", ["provider"]);

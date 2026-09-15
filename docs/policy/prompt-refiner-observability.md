@@ -28,12 +28,15 @@ execution에는 disposition이 최대 하나다. 중복·orphan·request/suggest
 | outcome | 의미 | provider failure 분모 |
 | --- | --- | --- |
 | `suggested` | dispatch 뒤 strict response 검증을 통과해 suggestion을 만들었다 | 포함, 성공 |
-| `failed` | adapter 또는 dispatch 이후 suggestion을 만들지 못했다 | dispatch 시각이 있을 때만 포함, 실패 |
+| `failed` | dispatch 이후 adapter/provider/response 검증에서 suggestion을 만들지 못했다 | 포함, 실패 |
 | `refused_before_dispatch` | admission/adapter가 provider 호출 전에 거절했다 | 제외 |
 
 `failed`와 `refused_before_dispatch`를 합치지 않는다. provider에 보내지 않은 요청은
-provider 신뢰성에 대해 아무 말도 하지 않기 때문이다. `failureLayer`는 `admission`,
-`adapter`, `provider`, `response_validation` 중 하나이며 성공만 `none`이다.
+provider 신뢰성에 대해 아무 말도 하지 않기 때문이다. 따라서 `failed`는 반드시
+dispatch 시각을 가지며 `admission` layer를 쓸 수 없고, dispatch되지 않은
+`admission`/`adapter` 실패는 `refused_before_dispatch`로만 기록한다.
+`failureLayer`는 `admission`, `adapter`, `provider`, `response_validation` 중 하나이며
+성공만 `none`이다.
 `failureCode`는 고정 enum이고 provider 오류 본문을 담을 문자열 필드는 없다.
 
 `requestedAt`, `dispatchedAt`, `completedAt`은 모두 서버 시각이다.

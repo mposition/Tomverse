@@ -30,6 +30,13 @@ const parseArguments = (argumentsList) => {
 const percent = (value) =>
     value === null ? "n/a" : `${(value * 100).toFixed(2)}%`;
 const latency = (value) => (value === null ? "n/a" : `${value}ms`);
+const telemetryRows = [
+    ["actual cost", "actualCostMicroUsd", "microUSD"],
+    ["input tokens", "inputTokens", "tokens"],
+    ["cached input tokens", "cachedInputTokens", "tokens"],
+    ["output tokens", "outputTokens", "tokens"],
+    ["reasoning tokens", "reasoningTokens", "tokens"],
+];
 
 const printHumanReport = (summary) => {
     console.log("Prompt Refiner receipt report");
@@ -55,9 +62,13 @@ const printHumanReport = (summary) => {
     console.log(
         `accepted per explicit choice  ${percent(summary.dispositions.acceptanceRatePerChoice)} (${summary.dispositions.accepted}/${summary.dispositions.explicitChoices})`
     );
-    console.log(
-        `cost telemetry                ${summary.telemetry.actualCostMicroUsd.reported}/${summary.telemetry.actualCostMicroUsd.population} dispatched; total ${summary.telemetry.actualCostMicroUsd.total} microUSD`
-    );
+    console.log("telemetry coverage");
+    for (const [label, field, unit] of telemetryRows) {
+        const coverage = summary.telemetry[field];
+        console.log(
+            `  ${label}: population=${coverage.population}, reported=${coverage.reported}, missing=${coverage.missing}, total=${coverage.total} ${unit}`
+        );
+    }
     console.log(`unattributed requests        ${summary.unattributedRequests}`);
     if (summary.byProviderModel.length > 0) {
         console.log("provider/model breakdown");

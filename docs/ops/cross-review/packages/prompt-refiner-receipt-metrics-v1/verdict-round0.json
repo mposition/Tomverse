@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-receipt-metrics-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-receipts-20260915 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-receipts-20260915 shell:default)"
+  ],
+  "startedAt": "2026-09-15T12:07:50.358Z",
+  "durationMs": 298722,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 20,
+    "cachedInputTokens": 531216,
+    "outputTokens": 22671,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.5748039999999999,
+    "raw": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 71844,
+      "cache_read_input_tokens": 531216,
+      "output_tokens": 22671,
+      "output_tokens_details": {
+        "thinking_tokens": 19327
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 71844,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 6672,
+          "cache_read_input_tokens": 73121,
+          "cache_creation_input_tokens": 1523,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 1523
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T12:12:49.140Z",
+  "verdict": {
+    "taskId": "prompt-refiner-receipt-metrics-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:48a514e8ff8338ac62ed8c0f7ceb8e820b78eac80cdbbb8864ce4d72d1f8ffb8",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerReceiptCore.ts:198 (superRefine, failed-outcome lifecycle rules)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "An execution receipt may claim `failureLayer: \"admission\"` while also carrying `dispatchedAt`, provider attribution, tokens and cost, so a request the receipt says was rejected before the provider call still counts inside the `dispatched` / `dispatchedFailures` denominators this task exists to keep honest.",
+        "reproduction": "Add `execution({ outcome: \"failed\", suggestionId: null, failureLayer: \"admission\", failureCode: \"cost_guardrail\" })` to the `invalid` array in tests/promptRefinerReceiptCore.test.mjs:238 (\"execution receipts reject contradictory lifecycle and telemetry claims\") and run `node --import tsx --test tests/promptRefinerReceiptCore.test.mjs`. The base helper supplies `dispatchedAt: \"2026-09-15T00:00:00.100Z\"`, `inputTokens: 100` and `actualCostMicroUsd: 1000`; `safeParse(...).success` is `true`, the assertion expects `false`. Expected: admission-layer non-success fails closed when `dispatchedAt !== null` (one predicate next to the existing `prompt_refiner_remote_failure_requires_dispatch` rule)."
+      },
+      {
+        "location": "lib/promptRefinerReceiptCore.ts:182-207 (refused_before_dispatch vs failed)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "Two receipts that are byte-identical except for `outcome` both validate for an adapter-layer, never-dispatched event, so whether that event lands in `refusalRate` or in `failedRequestRate` is the writer's free choice rather than a contract fact, which weakens the success / post-dispatch-failure / pre-dispatch-refusal split the first completion criterion requires.",
+        "reproduction": "Take the `refused_before_dispatch` receipt already asserted valid at tests/promptRefinerReceiptCore.test.mjs:63-86 (provider/modelId/adapterVersion null, `failureLayer: \"adapter\"`, `failureCode: \"adapter_unavailable\"`, `dispatchedAt: null`, all telemetry null, `retryCount: 0`) and parse it a second time with only `outcome: \"failed\"` changed: `promptRefinerExecutionReceiptSchema.safeParse(...).success` is `true` for both. Expected: the two encodings are disjoint, e.g. a non-dispatched non-success at the `admission`/`adapter` layer must use `refused_before_dispatch`, or `failed` must require a failure code that a refusal cannot use."
+      },
+      {
+        "location": "docs/policy/prompt-refiner-observability.md §3 vs scripts/report-prompt-refiner-receipts.mjs:58-60",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The policy says \"report는 각 항목마다 `population`, `reported`, `missing`, `total`을 함께 보여 준다\", but the default (non-`--json`) report prints coverage for `actualCostMicroUsd` only, and only as `reported/population` plus `total` — `missing` and all four token fields never appear.",
+        "reproduction": "Run `npm run report:prompt-refiner-receipts -- --input=<bundle.json>` on any bundle containing a dispatched receipt (the fixture written by tests/promptRefinerReceiptCore.test.mjs:352 works). Output contains one `cost telemetry 1/1 dispatched; total 1000 microUSD` line and no `inputTokens`/`outputTokens`/`reasoningTokens`/`cachedInputTokens`/`missing` line. Expected: either the human report prints the four-number coverage row per field, or §3 states that the full coverage table is the `--json` surface."
+      }
+    ],
+    "nextAction": "Merge as is; optionally close the two lifecycle gaps with a predicate rejecting admission-layer receipts that carry `dispatchedAt` and one making `failed` and `refused_before_dispatch` disjoint for never-dispatched events, and align §3 with what the human report actually prints."
+  }
+}
