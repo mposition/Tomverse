@@ -27,13 +27,22 @@ export async function jurisdictionForUser(input: {
   userId: string;
   /** Observed for measurement only. Never reaches the decision. */
   ipCountry?: string | null;
+  /**
+   * A declaration being made in this request, before it is persisted.
+   *
+   * The preference route uses this to validate the exact country that will be
+   * committed with consent in the same transaction.
+   */
+  countryConfirmation?: { country: string; confirmedAt: Date };
 }): Promise<JurisdictionForUser> {
   const settings = await prisma.userSettings.findUnique({
     where: { userId: input.userId },
     select: {
       country: true,
       countrySource: true,
+      countryUpdatedAt: true,
       billingCountry: true,
+      billingCountryUpdatedAt: true,
       language: true,
       timeZone: true,
     },
@@ -48,13 +57,24 @@ export async function jurisdictionForUser(input: {
     select: { jurisdiction: true },
   });
 
+  const confirmedCountry = normalizeCountry(input.countryConfirmation?.country);
+  const confirmedAt = input.countryConfirmation?.confirmedAt;
+  const storedSelfDeclaredCountry =
+    settings?.countrySource === "self_declared"
+      ? normalizeCountry(settings.country)
+      : null;
+  const selfDeclaredCountry = confirmedCountry ?? storedSelfDeclaredCountry;
+
   const resolved = resolveEmailJurisdiction({
     billingCountry: settings?.billingCountry ?? null,
+    billingCountryUpdatedAt: settings?.billingCountryUpdatedAt ?? null,
     // Only a country the person entered is a declaration. One this system
     // inferred and wrote back would otherwise be read as high confidence on
     // the next pass -- a guess laundered into a fact by a round trip.
-    selfDeclaredCountry:
-      settings?.countrySource === "self_declared" ? settings.country : null,
+    selfDeclaredCountry,
+    selfDeclaredCountryUpdatedAt: confirmedCountry
+      ? confirmedAt
+      : settings?.countryUpdatedAt ?? null,
     consentCountry:
       lastConsent?.jurisdiction && lastConsent.jurisdiction !== "ZZ"
         ? lastConsent.jurisdiction
@@ -66,10 +86,7 @@ export async function jurisdictionForUser(input: {
 
   return {
     ...resolved,
-    selfDeclaredCountry:
-      settings?.countrySource === "self_declared"
-        ? normalizeCountry(settings.country)
-        : null,
+    selfDeclaredCountry,
   };
 }
 
@@ -87,9 +104,15 @@ export async function setSelfDeclaredCountry(input: {
   const country = normalizeCountry(input.country);
   if (!country) return { updated: false as const };
 
-  await prisma.userSettings.update({
+  await prisma.userSettings.upsert({
     where: { userId: input.userId },
-    data: {
+    create: {
+      userId: input.userId,
+      country,
+      countrySource: "self_declared",
+      countryUpdatedAt: input.now ?? new Date(),
+    },
+    update: {
       country,
       countrySource: "self_declared",
       countryUpdatedAt: input.now ?? new Date(),
@@ -114,9 +137,26 @@ export async function recordBillingCountry(input: {
   const country = normalizeCountry(input.country);
   if (!country) return { updated: false as const };
 
-  await prisma.userSettings.updateMany({
-    where: { userId: input.userId },
-    data: { billingCountry: country, billingCountryUpdatedAt: input.now ?? new Date() },
-  });
+  // An upsert, not an update. `UserSettings` is created lazily, and an account
+  // that never opened settings has no row -- an update would match nothing,
+  // report success, and drop the signal. Dropping it is not neutral: without a
+  // billing country the resolver falls back to the consent-time country, so an
+  // older consent from an allowlisted country would keep sending after a
+  // payment method said the person lives somewhere marketing may not reach.
+  const at = input.now ?? new Date();
+  try {
+    await prisma.userSettings.upsert({
+      where: { userId: input.userId },
+      create: { userId: input.userId, billingCountry: country, billingCountryUpdatedAt: at },
+      update: { billingCountry: country, billingCountryUpdatedAt: at },
+    });
+  } catch (error) {
+    // The account is gone (a webhook can outlive a deletion). Nothing to record
+    // against, which is the one case where not recording is correct.
+    if ((error as { code?: string })?.code === "P2003") {
+      return { updated: false as const };
+    }
+    throw error;
+  }
   return { updated: true as const, country };
 }

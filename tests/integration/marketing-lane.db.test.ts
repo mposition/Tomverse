@@ -219,6 +219,28 @@ test("an unconfirmed jurisdiction stops marketing, and says which", async () => 
   assert.equal(delivery.skipReason, "jurisdiction_unconfirmed");
 });
 
+test("consent from a mapped country outside the allowlist is skipped, not sent", async () => {
+  // The Netherlands resolves to the EU profile, so the footer would render.
+  // What it lacks is a country-level record
+  // (docs/policy/email-eea-marketing-review-2026-09-14.md §7 condition 7), and a
+  // consent stored before the allowlist existed must not become a route around
+  // it.
+  await activatePolicy();
+  const calls = stubProvider();
+  const user = await subscriber({ country: "NL" });
+  const rows = await queue(user);
+
+  await drainStandardEmailDeliveries({ limit: 1 });
+
+  assert.equal(calls.length, 0);
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, skipReason: true },
+  });
+  assert.equal(delivery.status, "skipped");
+  assert.equal(delivery.skipReason, "marketing_country_not_allowed");
+});
+
 test("with no marketing sending identity the send fails and reports once", async () => {
   // A key but no domain. With neither, the provider stops at the missing key
   // and never reaches the identity question -- see the test below.

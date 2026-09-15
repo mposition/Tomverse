@@ -46,6 +46,14 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니다
 (project당 708).
 
+`email-notification-settings.spec.ts`가 2026-09-16에 합류합니다. marketing 동의는
+화면에서 수집되고, 국가 선택 목록·사전 선택 없는 CTA·한 번에 철회하는 동작은
+렌더된 화면에서만 확인됩니다. 틀리면 동의 증거가 틀린 채로 남고 회수가
+성립하지 않으므로 이 tier입니다. **합류 후 총계는 이 포트에서 재실측하지
+않았습니다** — 위 2026-08-26 수치 이후 main에 합류한 spec이 더 있어 그 기준값과
+직접 더할 수 없습니다. 재실측은 `CI=1 npx playwright test --grep=@ui-risk --list`
+입니다.
+
 | Spec |
 |---|
 | `account-flow.spec.ts` |
@@ -96,6 +104,7 @@ mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니�
 | `assistant-knowledge-upload.spec.ts` |
 | `voice-input-composer.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
+| `email-notification-settings.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
