@@ -3,6 +3,8 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
+import { SOURCE_LOCK_SUSPENDED_STATUS } from "@/lib/memorySourceLock";
 import {
     SOURCE_TITLE_PRESERVATION_STALE,
     judgeTitlePreservation,
@@ -485,11 +487,19 @@ export async function getExternalConversation(
  * retrieval by definition, and overwriting its status with
  * `suspended_by_source_delete` would replace the true reason it left with a
  * different one. Those rows keep the status they have.
+ *
+ * `suspended_by_source_lock` is not one of those: it is a suspension that
+ * waits for its source to be unlocked. When that source is deleted instead,
+ * the wait has nothing left to end it, and leaving the status in place was
+ * worse than stale -- the lock reconciliation treats a memory with no evidence
+ * as not blocked and would restore it to `active` with nothing behind it. The
+ * deletion is now the true reason, so the row takes it.
  */
 const SUSPENDABLE_MEMORY_STATUSES = [
     "active",
     "candidate",
     "manual_review_required",
+    SOURCE_LOCK_SUSPENDED_STATUS,
 ] as const;
 
 const NO_MEMORY_IMPACT = {
@@ -659,6 +669,9 @@ async function conversationIdsForScope(
  *
  *   1. the owning `ExternalImport` row, `FOR UPDATE`
  *   2. the `ExternalConversation` rows being deleted, `FOR UPDATE`, by id
+ *   3. the account's memory lock, `lockAccountMemoryItems()` -- taken by the
+ *      callers right after these two, before memories are classified
+ *   4. continuation `Conversation` rows a kept title is written to, by id
  *
  * The single-snapshot delete used to take none up front: it wrote the memory
  * rows, the bridges and the snapshot, and only then updated the parent import's
@@ -809,6 +822,10 @@ export async function deleteExternalConversationSnapshot(
 ) {
     return prisma.$transaction(async (tx) => {
         const row = await lockSnapshotForDeletion(tx, userId, conversationId);
+        // Before the memories are classified: an extraction must not commit a
+        // candidate backed by this snapshot between that classification and
+        // the cascade (lib/memoryItemLock.ts).
+        await lockAccountMemoryItems(tx, userId);
         const titlesPreserved = await preserveContinuationTitles(
             tx,
             userId,
@@ -1565,6 +1582,11 @@ export async function deleteExternalImport(
         // `lockSnapshotForDeletion()` documents and the single-snapshot delete
         // takes too.
         await lockImportSnapshotsForDeletion(tx, row.id);
+        // Then the account's memory lock, before either branch reads or writes
+        // memory-backed rows (lib/memoryItemLock.ts). The open branch touches
+        // no memory, but taking it in one place keeps the order the same for
+        // every source deletion.
+        await lockAccountMemoryItems(tx, userId);
         // A sealed-but-unfinalized import is cancelled exactly like an
         // unsealed one: seal is a completeness statement about the upload,
         // not a commitment to save anything (§5.5).

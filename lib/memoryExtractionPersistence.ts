@@ -8,6 +8,7 @@ import {
     memoryRetrievalTerms,
 } from "@/lib/memoryRetrievalTerms";
 import { memoryStatementKey } from "@/lib/memoryValidatorCore";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 
 /**
  * The storage step of an extraction chunk (policy §8.3, §8.4, §11).
@@ -92,8 +93,10 @@ export async function persistExtractionChunkDecisions(
 
     // Serialize this account's memory writes for the same reason every other
     // path does: conflict keys and the replace below both read rows they are
-    // about to write.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"memory-items:" + input.userId}))`;
+    // about to write. An imported source deletion takes the same lock before it
+    // classifies memories, so a candidate committed here is either seen by that
+    // classification or finds its evidence already gone (lib/memoryItemLock.ts).
+    await lockAccountMemoryItems(tx, input.userId);
 
     // Only this chunk's own untouched proposals. `userEdited` and an approval
     // are both signals the row stopped being the run's to manage.

@@ -20,7 +20,8 @@
 //   node --import tsx scripts/backfill-memory-search-terms.mjs --apply --batch=500
 //
 // Requires DATABASE_URL. Reads and writes only MemoryItem.searchTerms and
-// MemoryItem.retrievalVersion. It never touches statements, status, evidence,
+// MemoryItem.retrievalVersion, each row in its own transaction under the
+// account's memory lock. It never touches statements, status, evidence,
 // approval state or any other column: re-indexing is not a review, and a row
 // the user rejected stays rejected.
 
@@ -28,6 +29,7 @@
 // connects through a PrismaPg driver adapter, and a client constructed without
 // one throws before it ever reaches a query.
 import { prisma } from "../lib/prisma.ts";
+import { lockAccountMemoryItems } from "../lib/memoryItemLock.ts";
 import {
     MEMORY_RETRIEVAL_VERSION,
     memoryRetrievalTerms,
@@ -47,7 +49,25 @@ const summary = {
     alreadyCurrent: 0,
     indexed: 0,
     emptied: 0,
+    // Deleted between the scan and the locked re-read.
+    vanished: 0,
 };
+
+/** Counts a row and returns the terms to write, or null when they are current. */
+function tally(row) {
+    if (memoryTermsAreCurrent(row, MEMORY_RETRIEVAL_VERSION)) {
+        summary.alreadyCurrent += 1;
+        return null;
+    }
+    const searchTerms = memoryRetrievalTerms(row.statement);
+    // A statement that tokenizes to nothing is a real outcome, not a
+    // failure — punctuation-only statements exist. Recording it as an
+    // empty array at the current version stops the row from being
+    // rescanned as work on every future run.
+    if (searchTerms.length === 0) summary.emptied += 1;
+    else summary.indexed += 1;
+    return searchTerms;
+}
 
 async function main() {
     let cursor = null;
@@ -58,6 +78,7 @@ async function main() {
             orderBy: { id: "asc" },
             select: {
                 id: true,
+                userId: true,
                 statement: true,
                 searchTerms: true,
                 retrievalVersion: true,
@@ -66,29 +87,36 @@ async function main() {
         if (rows.length === 0) break;
         cursor = rows[rows.length - 1].id;
 
-        for (const row of rows) {
+        for (const scanned of rows) {
             summary.scanned += 1;
-            if (memoryTermsAreCurrent(row, MEMORY_RETRIEVAL_VERSION)) {
-                summary.alreadyCurrent += 1;
+            if (!apply) {
+                tally(scanned);
                 continue;
             }
-            const searchTerms = memoryRetrievalTerms(row.statement);
-            // A statement that tokenizes to nothing is a real outcome, not a
-            // failure — punctuation-only statements exist. Recording it as an
-            // empty array at the current version stops the row from being
-            // rescanned as work on every future run.
-            if (searchTerms.length === 0) summary.emptied += 1;
-            else summary.indexed += 1;
-
-            if (apply) {
-                await prisma.memoryItem.update({
+            // Under the account's memory lock, from the row as it is now
+            // (lib/memoryItemLock.ts). Terms computed from the statement read
+            // above could overwrite the terms of an edit committed since, and
+            // leave the statement and its search index disagreeing.
+            await prisma.$transaction(async (tx) => {
+                await lockAccountMemoryItems(tx, scanned.userId);
+                const row = await tx.memoryItem.findUnique({
+                    where: { id: scanned.id },
+                    select: { id: true, statement: true, searchTerms: true, retrievalVersion: true },
+                });
+                if (!row) {
+                    summary.vanished += 1;
+                    return;
+                }
+                const searchTerms = tally(row);
+                if (searchTerms === null) return;
+                await tx.memoryItem.update({
                     where: { id: row.id },
                     data: {
                         searchTerms,
                         retrievalVersion: MEMORY_RETRIEVAL_VERSION,
                     },
                 });
-            }
+            });
         }
     }
 
