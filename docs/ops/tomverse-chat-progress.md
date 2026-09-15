@@ -958,7 +958,7 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
 | 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
 | C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
 | 구현 | 순수 실행 사전등록·authority 부재 fail-closed·terminal mapping·핵심 단위 테스트 완료 |
-| 로컬 검증 | focused 30/30, 대상 lint, 전체 typecheck 통과 |
+| 로컬 검증 | focused 26/26, 전체 lint·typecheck 통과 |
 | 독립 검토·통합 CI | 대기 — 이 회차에서는 독립 Claude 호출을 하지 않음 |
 | 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
 

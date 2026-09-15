@@ -212,7 +212,7 @@ export const promptRefinerExecutionReceiptSchema =
         }
 
         if (receipt.outcome === "refused_before_dispatch") {
-            if (dispatchedAt !== null || hasAnyTelemetry || receipt.retryCount !== 0) {
+            if (dispatchedAt !== null || hasAnyTelemetry) {
                 issue("prompt_refiner_refusal_cannot_claim_provider_work", [
                     "outcome",
                 ]);

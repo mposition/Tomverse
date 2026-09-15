@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-execution-contract-v1, round 0
+# Independent review — task prompt-refiner-execution-contract-v1, round 1
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -18,18 +18,20 @@ Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않�
 - 관련 unit, 전체 typecheck, lint, model-pricing, 문서·정책 참조, strict encoding과 diff whitespace 검사가 통과한다.
 - Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다.
 
-## Change under review — digest sha256:dd073b8a582f13fbf5bbaa6a4897fe5cbe1cff2c5e986f4c9cc8ab7db24f19f1, commit f7df0b75c7e13d829749a5a157e7af310df86813
+## Change under review — digest sha256:ca9d7a2aa1a27fe5241c404815c985921d69dd809708a83a8d7212432df92618, commit b87863d325eb24b43b3e12248ad0d593b5be86c3
 
 ```diff
 diff --git a/AGENTS.md b/AGENTS.md
-index 41c949d6..87a07a6c 100644
+index 41c949d6..fafe4330 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
-@@ -1295,7 +1295,8 @@ Non-negotiable requirements:
+@@ -1294,8 +1294,9 @@ Non-negotiable requirements:
+ 
  Before changing the Prompt Refiner surface or request boundary in
  `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
- `lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`, or
+-`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`, or
 -`lib/promptRefinerReceiptCore.ts`, read:
++`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`,
 +`lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
 +their tests, read:
  
@@ -133,7 +135,7 @@ index 56663170..91538fe8 100644
 +5. 제안형 rollout 증거 뒤 Refiner 결과의 Router 결합을 별도 ROUTE-03 실험으로
 +   판단한다.
 diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
-index 4a0da87a..4101a085 100644
+index 4a0da87a..3c7f7b85 100644
 --- a/docs/policy/prompt-refiner-observability.md
 +++ b/docs/policy/prompt-refiner-observability.md
 @@ -1,11 +1,19 @@
@@ -158,7 +160,17 @@ index 4a0da87a..4101a085 100644
  
  ## 1. 하나의 변경 가능한 행 대신 두 개의 불변 사실
  
-@@ -28,7 +36,7 @@ execution에는 disposition이 최대 하나다. 중복·orphan·request/suggest
+@@ -13,7 +21,8 @@ Router 결합과 rollout 활성화는 없다.
+ 
+ 1. `PromptRefinerExecutionReceipt`는 서버가 쓴다. 어느 provider/model/adapter가
+    호출됐는지, suggestion을 만들었는지, 실패 또는 dispatch 전 거절이었는지,
+-   서버 시각·token·실비용·retry 수를 기록한다.
++   서버 시각·token·실비용을 기록한다. `retryCount`는 literal `0`만 허용하며 이
++   계약에는 재시도가 없다.
+ 2. `PromptRefinerDispositionReceipt`는 서버가 승인한 browser 관측이다. 사용자가
+    suggestion을 채택했는지, 원문을 유지했는지, draft/scope 변경 등으로 stale이
+    됐는지를 기록한다.
+@@ -28,7 +37,7 @@ execution에는 disposition이 최대 하나다. 중복·orphan·request/suggest
  | outcome | 의미 | provider failure 분모 |
  | --- | --- | --- |
  | `suggested` | dispatch 뒤 strict response 검증을 통과해 suggestion을 만들었다 | 포함, 성공 |
@@ -167,7 +179,7 @@ index 4a0da87a..4101a085 100644
  | `refused_before_dispatch` | admission/adapter가 provider 호출 전에 거절했다 | 제외 |
  
  `failed`와 `refused_before_dispatch`를 합치지 않는다. provider에 보내지 않은 요청은
-@@ -37,8 +45,11 @@ dispatch 시각을 가지며 `admission` layer를 쓸 수 없고, dispatch되지
+@@ -37,8 +46,11 @@ dispatch 시각을 가지며 `admission` layer를 쓸 수 없고, dispatch되지
  `admission`/`adapter` 실패는 `refused_before_dispatch`로만 기록한다.
  `failureLayer`는 `admission`, `adapter`, `provider`, `response_validation` 중 하나이며
  성공만 `none`이다.
@@ -180,7 +192,7 @@ index 4a0da87a..4101a085 100644
  `provider_error`, `timeout`, `invalid_response`, `empty_response`, `no_change`,
  `unknown_after_dispatch`는 post-dispatch 전용이다. `cancelled`는 dispatch 전후 모두
  일어날 수 있으므로 code만으로 단계를 주장하지 않고 `dispatchedAt`과 outcome이 그
-@@ -134,7 +145,7 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
+@@ -134,7 +146,7 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
  
  ## 8. 다음 연결 단계
  
@@ -212,10 +224,10 @@ index cdf2695c..9272e3e3 100644
  3. 원문 대비 제안문 주입·의미 보존 평가
 diff --git a/lib/promptRefinerExecutionContract.ts b/lib/promptRefinerExecutionContract.ts
 new file mode 100644
-index 00000000..f531e310
+index 00000000..b007ee88
 --- /dev/null
 +++ b/lib/promptRefinerExecutionContract.ts
-@@ -0,0 +1,522 @@
+@@ -0,0 +1,516 @@
 +import {
 +    getModel,
 +    type AiModel,
@@ -225,6 +237,7 @@ index 00000000..f531e310
 +    type ModelPricingProfile,
 +} from "@/lib/modelPricing";
 +import { calculateProviderUsageCost } from "@/lib/providerUsageCost";
++import type { PromptRefinerFailureCode } from "@/lib/promptRefinerReceiptCore";
 +import {
 +    PROMPT_REFINER_MAX_PROMPT_BYTES,
 +    PROMPT_REFINER_MAX_PROMPT_CHARS,
@@ -612,22 +625,28 @@ index 00000000..f531e310
 +    | "cancelled_after_dispatch"
 +    | "unknown_after_dispatch";
 +
-+export const PROMPT_REFINER_TERMINAL_REASONS = Object.freeze([
-+    "suggested",
-+    "eligibility_refused",
-+    "execution_not_approved",
-+    "execution_contract_mismatch",
-+    "adapter_unavailable",
-+    "reservation_authority_unavailable",
-+    "cancelled_before_dispatch",
-+    "provider_error",
-+    "timeout",
-+    "invalid_response",
-+    "empty_response",
-+    "no_change",
-+    "cancelled_after_dispatch",
-+    "unknown_after_dispatch",
-+] as const satisfies readonly PromptRefinerTerminalReason[]);
++const PROMPT_REFINER_TERMINAL_REASON_COVERAGE = {
++    suggested: true,
++    eligibility_refused: true,
++    execution_not_approved: true,
++    execution_contract_mismatch: true,
++    adapter_unavailable: true,
++    reservation_authority_unavailable: true,
++    cancelled_before_dispatch: true,
++    provider_error: true,
++    timeout: true,
++    invalid_response: true,
++    empty_response: true,
++    no_change: true,
++    cancelled_after_dispatch: true,
++    unknown_after_dispatch: true,
++} as const satisfies Record<PromptRefinerTerminalReason, true>;
++
++export const PROMPT_REFINER_TERMINAL_REASONS = Object.freeze(
++    Object.keys(
++        PROMPT_REFINER_TERMINAL_REASON_COVERAGE
++    ) as PromptRefinerTerminalReason[]
++);
 +
 +export type PromptRefinerTerminalDispositionPolicy =
 +    | "choice_or_stale_after_ready"
@@ -641,20 +660,7 @@ index 00000000..f531e310
 +        | "adapter"
 +        | "provider"
 +        | "response_validation";
-+    failureCode:
-+        | "eligibility_refused"
-+        | "execution_not_approved"
-+        | "execution_contract_mismatch"
-+        | "adapter_unavailable"
-+        | "reservation_authority_unavailable"
-+        | "provider_error"
-+        | "timeout"
-+        | "invalid_response"
-+        | "empty_response"
-+        | "no_change"
-+        | "cancelled"
-+        | "unknown_after_dispatch"
-+        | null;
++    failureCode: PromptRefinerFailureCode | null;
 +    retryCount: 0;
 +    dispositionPolicy: PromptRefinerTerminalDispositionPolicy;
 +};
@@ -739,12 +745,15 @@ index 00000000..f531e310
 +    }
 +};
 diff --git a/lib/promptRefinerReceiptCore.ts b/lib/promptRefinerReceiptCore.ts
-index ef34d345..6d2391aa 100644
+index ef34d345..efd64178 100644
 --- a/lib/promptRefinerReceiptCore.ts
 +++ b/lib/promptRefinerReceiptCore.ts
-@@ -33,8 +33,11 @@ export const PROMPT_REFINER_FAILURE_LAYERS = [
+@@ -32,9 +32,14 @@ export const PROMPT_REFINER_FAILURE_LAYERS = [
+     "provider",
      "response_validation",
  ] as const;
++export type PromptRefinerFailureLayer =
++    (typeof PROMPT_REFINER_FAILURE_LAYERS)[number];
  export const PROMPT_REFINER_FAILURE_CODES = [
 +    "eligibility_refused",
 +    "execution_not_approved",
@@ -755,40 +764,53 @@ index ef34d345..6d2391aa 100644
      "invalid_response",
      "empty_response",
      "no_change",
-@@ -44,8 +47,11 @@ export const PROMPT_REFINER_FAILURE_CODES = [
+@@ -43,18 +48,33 @@ export const PROMPT_REFINER_FAILURE_CODES = [
+     "cancelled",
      "unknown_after_dispatch",
  ] as const;
- const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-+    "eligibility_refused",
-+    "execution_not_approved",
-+    "execution_contract_mismatch",
-+    "reservation_authority_unavailable",
-     "adapter_unavailable",
+-const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
+-    "adapter_unavailable",
 -    "cost_guardrail",
- ]);
- const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-     "invalid_response",
-@@ -55,6 +61,19 @@ const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-     "timeout",
-     "unknown_after_dispatch",
- ]);
-+const FAILURE_LAYER_BY_CODE = new Map<string, string>([
-+    ["eligibility_refused", "admission"],
-+    ["execution_not_approved", "admission"],
-+    ["execution_contract_mismatch", "admission"],
-+    ["reservation_authority_unavailable", "admission"],
-+    ["adapter_unavailable", "adapter"],
-+    ["provider_error", "provider"],
-+    ["timeout", "provider"],
-+    ["unknown_after_dispatch", "provider"],
-+    ["invalid_response", "response_validation"],
-+    ["empty_response", "response_validation"],
-+    ["no_change", "response_validation"],
-+]);
+-]);
+-const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
+-    "invalid_response",
+-    "empty_response",
+-    "no_change",
+-    "provider_error",
+-    "timeout",
+-    "unknown_after_dispatch",
+-]);
++export type PromptRefinerFailureCode =
++    (typeof PROMPT_REFINER_FAILURE_CODES)[number];
++type FixedLayerFailureCode = Exclude<PromptRefinerFailureCode, "cancelled">;
++type FailureLayer = Exclude<PromptRefinerFailureLayer, "none">;
++const FAILURE_LAYER_BY_CODE = {
++    eligibility_refused: "admission",
++    execution_not_approved: "admission",
++    execution_contract_mismatch: "admission",
++    reservation_authority_unavailable: "admission",
++    adapter_unavailable: "adapter",
++    provider_error: "provider",
++    timeout: "provider",
++    unknown_after_dispatch: "provider",
++    invalid_response: "response_validation",
++    empty_response: "response_validation",
++    no_change: "response_validation",
++} as const satisfies Record<FixedLayerFailureCode, FailureLayer>;
++
++const expectedFailureLayer = (
++    code: PromptRefinerFailureCode,
++    dispatched: boolean
++): FailureLayer =>
++    code === "cancelled"
++        ? dispatched
++            ? "provider"
++            : "admission"
++        : FAILURE_LAYER_BY_CODE[code];
  export const PROMPT_REFINER_DISPOSITION_OUTCOMES = [
      "accepted",
      "kept_original",
-@@ -108,7 +127,7 @@ const executionReceiptBaseSchema = z
+@@ -108,7 +128,7 @@ const executionReceiptBaseSchema = z
          outputTokens: optionalTelemetryCount,
          reasoningTokens: optionalTelemetryCount,
          actualCostMicroUsd: optionalTelemetryCount,
@@ -797,29 +819,53 @@ index ef34d345..6d2391aa 100644
      })
      .strict();
  
-@@ -245,6 +264,22 @@ export const promptRefinerExecutionReceiptSchema =
-                 "failureCode",
+@@ -227,23 +247,29 @@ export const promptRefinerExecutionReceiptSchema =
+                 "inputTokens",
              ]);
          }
+-        if (
+-            receipt.failureCode !== null &&
+-            dispatchedAt === null &&
+-            POST_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
+-        ) {
+-            issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
+-                "failureCode",
+-            ]);
+-        }
+-        if (
+-            receipt.failureCode !== null &&
+-            dispatchedAt !== null &&
+-            PRE_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
+-        ) {
+-            issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
+-                "failureCode",
+-            ]);
 +        if (receipt.failureCode !== null) {
-+            const expectedFailureLayer =
-+                receipt.failureCode === "cancelled"
-+                    ? dispatchedAt === null
-+                        ? "admission"
-+                        : "provider"
-+                    : FAILURE_LAYER_BY_CODE.get(receipt.failureCode);
-+            if (
-+                expectedFailureLayer !== undefined &&
-+                receipt.failureLayer !== expectedFailureLayer
-+            ) {
++            const expectedLayer = expectedFailureLayer(
++                receipt.failureCode,
++                dispatchedAt !== null
++            );
++            const codeRequiresDispatch =
++                expectedLayer === "provider" ||
++                expectedLayer === "response_validation";
++            if (dispatchedAt === null && codeRequiresDispatch) {
++                issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
++                    "failureCode",
++                ]);
++            }
++            if (dispatchedAt !== null && !codeRequiresDispatch) {
++                issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
++                    "failureCode",
++                ]);
++            }
++            if (receipt.failureLayer !== expectedLayer) {
 +                issue("prompt_refiner_failure_code_layer_mismatch", [
 +                    "failureLayer",
 +                ]);
 +            }
-+        }
+         }
      });
  
- const staleBeforeReady = new Set<string>([
 diff --git a/lib/promptRefinerSuggestion.ts b/lib/promptRefinerSuggestion.ts
 index 950a0a31..8c94cb2a 100644
 --- a/lib/promptRefinerSuggestion.ts
@@ -834,10 +880,10 @@ index 950a0a31..8c94cb2a 100644
  
 diff --git a/tests/promptRefinerExecutionContract.test.mjs b/tests/promptRefinerExecutionContract.test.mjs
 new file mode 100644
-index 00000000..ed9f4e6e
+index 00000000..ac6c9e05
 --- /dev/null
 +++ b/tests/promptRefinerExecutionContract.test.mjs
-@@ -0,0 +1,319 @@
+@@ -0,0 +1,324 @@
 +import assert from "node:assert/strict";
 +import test from "node:test";
 +
@@ -865,6 +911,7 @@ index 00000000..ed9f4e6e
 +import { promptRefinerModelMessages } from "../lib/promptRefinerModelPrompt.ts";
 +import {
 +    PROMPT_REFINER_EXECUTION_RECEIPT_VERSION,
++    PROMPT_REFINER_FAILURE_CODES,
 +    promptRefinerExecutionReceiptSchema,
 +} from "../lib/promptRefinerReceiptCore.ts";
 +import { PROMPT_REFINER_VERSION } from "../lib/promptRefinerSuggestion.ts";
@@ -1044,6 +1091,10 @@ index 00000000..ed9f4e6e
 +    };
 +
 +    assert.deepEqual(Object.keys(expected), [...PROMPT_REFINER_TERMINAL_REASONS]);
++    assert.deepEqual(
++        [...new Set(Object.values(expected).map(([, , code]) => code).filter(Boolean))].sort(),
++        [...PROMPT_REFINER_FAILURE_CODES].sort()
++    );
 +    for (const reason of PROMPT_REFINER_ADMISSION_REFUSAL_REASONS) {
 +        assert.ok(PROMPT_REFINER_TERMINAL_REASONS.includes(reason));
 +        const facts = promptRefinerTerminalReceiptFacts(reason);
@@ -1260,50 +1311,58 @@ index 72f4a9c7..70828c7c 100644
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1117ms)
+- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1139ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 1047.478
+  # duration_ms 1063.4925
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck` (35322ms)
+- PASS `npm run typecheck` (35800ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npm run lint -- --quiet` (46706ms)
+- PASS `npm run lint -- --quiet` (47715ms)
   > ai-chat-hub@0.1.0 lint
   > eslint --quiet
-- PASS `npm run check:model-pricing` (682ms)
+- PASS `npm run check:model-pricing` (672ms)
   > ai-chat-hub@0.1.0 check:model-pricing
   > node --import tsx scripts/check-model-pricing.mjs
   
   
   Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.
-- PASS `npm run check:doc-references` (1286ms)
+- PASS `npm run check:doc-references` (1278ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 854 referenced path(s) across 108 instruction document(s), and 954 path(s) named by comments across 2898 source file(s), all present.
-- PASS `npm run check:policy-section-references` (953ms)
+- PASS `npm run check:policy-section-references` (946ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4428 citation(s) against 35 policy document(s). 2788 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1414 and 226 predate this change).
-- PASS `npm run check:encoding:strict` (1198ms)
+- PASS `npm run check:encoding:strict` (1235ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `git diff --check 7f0fe682b11ac9529fdd7bf7acc968edecf36a9c HEAD` (48ms)
+- PASS `git diff --check 7f0fe682b11ac9529fdd7bf7acc968edecf36a9c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1'` (46ms)
+
+## Findings from the previous round (check each was addressed)
+
+- [warning/evidence] lib/promptRefinerReceiptCore.ts:64 and :274 (FAILURE_LAYER_BY_CODE / expectedFailureLayer !== undefined): The new failure-code/layer invariant is fail-open on drift: the table is typed `Map<string, string>` and an unmapped code silently skips the check, so a failure code added to `PROMPT_REFINER_FAILURE_CODES` but omitted from the table accepts any `failureLayer`, which is exactly the combination criterion 5 asks the strict schema to validate.
+- [nit/evidence] lib/promptRefinerExecutionContract.ts:397 (PROMPT_REFINER_TERMINAL_REASONS): `as const satisfies readonly PromptRefinerTerminalReason[]` only checks that each listed element is a valid reason, not that every reason is listed, so the exported list and the bijection test can silently miss a reason even though the switch is exhaustiveness-checked.
+- [nit/evidence] lib/promptRefinerExecutionContract.ts:426 (PromptRefinerTerminalReceiptFacts.failureCode): The failure-code union here hand-duplicates `PROMPT_REFINER_FAILURE_CODES` in lib/promptRefinerReceiptCore.ts with no type-level link, so the two can diverge without a compile error even though the mapping is the thing that must agree with the receipt schema.
+- [nit/judgement] docs/policy/prompt-refiner-observability.md:24: Section 1 still describes the execution receipt as recording a "retry 수" without stating that the schema now pins `retryCount` to literal 0, so the policy document is less precise than AGENTS.md and the progress note on the retry-zero freeze.
+- [nit/judgement] AGENTS.md:1295-1299: The file list now reads "..., `lib/promptRefinerModelPrompt.ts`, or `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or their tests", carrying two `or`s in one list.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Prompt Refiner shadow 실행의 고정 model/pricing/limit/cost 계약과 content-free terminal mapping을 추가했다. 현재 원자 예약 authority가 없어 성공 admission은 구조적으로 없으며 모든 조건이 맞아도 dispatch 전에 reservation_authority_unavailable로 거절한다. provider/API/model 호출, runtime writer/adapter, billing, Router 결합, AppSetting writer와 flag 활성화는 포함하지 않는다.
+Summary: Close all five Claude round-0 findings: make failure-code/layer and terminal-reason coverage type-exhaustive, derive the execution failure-code type from receipt core without a runtime cycle, document literal retry zero, and fix the AGENTS file-list grammar. No provider/API/model call or runtime activation.
 
 ## Answer format
 
@@ -1312,8 +1371,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-execution-contract-v1",
-  "round": 0,
-  "reviewedDigest": "sha256:dd073b8a582f13fbf5bbaa6a4897fe5cbe1cff2c5e986f4c9cc8ab7db24f19f1",
+  "round": 1,
+  "reviewedDigest": "sha256:ca9d7a2aa1a27fe5241c404815c985921d69dd809708a83a8d7212432df92618",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {

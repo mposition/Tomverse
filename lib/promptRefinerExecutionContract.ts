@@ -51,10 +51,20 @@ export const PROMPT_REFINER_EXECUTION_MODEL_PIN = Object.freeze({
  *
  * The public request accepts at most 16,000 UTF-16 code units and 32 KiB of
  * UTF-8 source. JSON escaping can expand one control character to six ASCII
- * bytes, so the source alone can render to 96,000 bytes. 100,000 tokens keeps
- * that worst case, the fixed system instruction, the canonical JSON envelope
- * and message framing inside the priced short-context tier. A future adapter
- * must prove a request-specific upper bound no larger than this before call.
+ * bytes, so the source alone can render to 96,000 bytes.
+ *
+ * Offline proof lemma: for the target OpenAI byte-level BPE family assumed by
+ * this preregistration, every emitted token covers at least one UTF-8 byte, so
+ * rendered content tokens are bounded above by rendered UTF-8 bytes. The
+ * repository does not catalogue the exact upstream tokenizer, so this is a
+ * conservative family-level proof assumption, not a claim about its merges or
+ * a runtime tokenizer result. A future adapter must still identify/count with
+ * its actual tokenizer and fail closed above this ceiling before any call.
+ *
+ * The framing allowance is an offline contract-proof constant for the fixed
+ * system instruction, canonical JSON envelope and message framing. No runtime
+ * adapter consumes it. Applying the lemma first and then adding that allowance
+ * keeps the worst rendered request inside the 100,000-token priced tier.
  */
 export const PROMPT_REFINER_MAX_INPUT_TOKENS = 100_000;
 export const PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE = 2_048;

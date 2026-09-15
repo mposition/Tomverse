@@ -68,22 +68,26 @@ test("execution contract freezes the shadow limits and worst-case cost", () => {
     assert.equal(Object.isFrozen(PROMPT_REFINER_TERMINAL_REASONS), true);
 });
 
-test("the maximum escaped request fits the conservative input-token ceiling", () => {
+test("the maximum escaped request fits the offline token upper bound", () => {
     const messages = promptRefinerModelMessages({
         requestId: "request_max_escaped",
         prompt: "\0".repeat(16_000),
     });
-    const renderedBytes = messages.reduce(
+    const renderedUtf8Bytes = messages.reduce(
         (total, message) => total + new TextEncoder().encode(message.content).length,
         0
     );
+    // Apply the documented byte-level-BPE lemma before adding the separate
+    // token-denominated offline framing allowance.
+    const maxRenderedContentTokenUpperBound = renderedUtf8Bytes;
+    const maxRenderedRequestTokenUpperBound =
+        maxRenderedContentTokenUpperBound +
+        PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE;
 
     assert.equal(messages.length, 2);
-    assert.equal(renderedBytes, 96_848);
-    assert.ok(
-        renderedBytes + PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE <=
-            PROMPT_REFINER_MAX_INPUT_TOKENS
-    );
+    assert.equal(renderedUtf8Bytes, 96_848);
+    assert.equal(maxRenderedContentTokenUpperBound, 96_848);
+    assert.ok(maxRenderedRequestTokenUpperBound <= PROMPT_REFINER_MAX_INPUT_TOKENS);
 });
 
 test("the checked-in catalogue and pricing must match the exact pin", () => {
