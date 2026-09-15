@@ -37,8 +37,16 @@ import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 /** The newest-message scan the real loader uses (lib/externalContinuationService.ts). */
 export const SEED_SOURCE_MESSAGE_SCAN_LIMIT = 200;
 
-/** A cut shorter than this is not worth a shortened turn; C then stops without it. */
-export const MIN_EXCERPT_TOKENS = 150;
+/** Counts a report publishes are rounded to this, so suppressed groups cannot be subtracted out. */
+export const PUBLISHED_COUNT_ROUNDING = 5;
+
+/** The text the planner actually judges and prices: the pre-cut to the message cap. */
+const preCut = (content) => {
+  const points = [...content];
+  return points.length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT
+    ? { text: points.slice(0, CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT).join(""), cut: true }
+    : { text: content, cut: false };
+};
 
 // ---------------------------------------------------------------- script class
 
@@ -91,9 +99,10 @@ export function excerptToTokens(text, maxTokens, keep) {
 
 /**
  * Candidate C: the shipped window rule, except that the first turn that does
- * not fit is cut to the remaining budget instead of ending selection empty.
- * Mirrors `planContinuationSeed()` step for step so any difference in the
- * report is the cut and nothing else.
+ * not fit is cut to whatever budget remains -- any positive amount -- instead of
+ * ending selection there. Mirrors `planContinuationSeed()` step for step so any
+ * difference in the report is the cut and nothing else. No minimum cut size is
+ * assumed: choosing one would be part of the policy decision this informs.
  */
 export function planWithBoundaryExcerpt({
   messages,
@@ -108,11 +117,7 @@ export function planWithBoundaryExcerpt({
   let excerpted = false;
   for (let index = eligible.length - 1; index >= 0; index -= 1) {
     const message = eligible[index];
-    const points = codePoints(message.content);
-    const preCut = points.length > CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT;
-    const text = preCut
-      ? points.slice(0, CONTINUATION_SEED_MESSAGE_CHARACTER_LIMIT).join("")
-      : message.content;
+    const { text, cut: wasPreCut } = preCut(message.content);
     if (text.trim().length === 0) continue;
     const cost = estimateTextTokens(text);
     if (spent + cost <= tokenBudget) {
@@ -121,12 +126,12 @@ export function planWithBoundaryExcerpt({
         role: message.role,
         ordinal: message.ordinal,
         text,
-        shortened: preCut || message.truncated,
+        shortened: wasPreCut || message.truncated,
       });
       continue;
     }
     const remaining = tokenBudget - spent;
-    if (remaining >= MIN_EXCERPT_TOKENS) {
+    if (remaining > 0) {
       const cut = excerptToTokens(text, remaining, keep);
       if (cut.trim().length > 0) {
         spent += estimateTextTokens(cut);
@@ -186,22 +191,27 @@ export const SEED_CANDIDATES = [
  * `newest` is about the newest eligible non-blank message, the one the user
  * most likely wants continued: carried whole, carried shortened, or not at all.
  * `renderedTokens` prices the whole seed input the model receives -- rules,
- * header and fence included -- because that, not the body budget, is what each
- * turn costs.
+ * header and fence included -- rendered with the snapshot's own provider and
+ * import time, as the loader renders it, because that and not the body budget
+ * is what each turn costs.
+ *
+ * "Blank" is judged on the pre-cut text, as the planner judges it: a message
+ * whose first 4,000 code points are whitespace is skipped by the rule, not
+ * left out by the budget.
  */
-export function evaluatePlan(plan, messages) {
-  const eligibleNonBlank = [...messages]
-    .filter((message) => isContinuationSeedRole(message.role) && message.content.trim().length > 0)
+export function evaluatePlan(plan, messages, { provider = "chatgpt", importedAt = null } = {}) {
+  const isBlank = (message) => preCut(message.content).text.trim().length === 0;
+  const eligible = messages.filter((message) => isContinuationSeedRole(message.role));
+  const eligibleNonBlank = eligible
+    .filter((message) => !isBlank(message))
     .sort((a, b) => a.ordinal - b.ordinal);
   const newest = eligibleNonBlank.at(-1);
   const newestTurn = newest ? plan.turns.find((turn) => turn.ordinal === newest.ordinal) : undefined;
-  const prompt = buildContinuationSeedPrompt({ provider: "chatgpt", importedAt: null, plan });
+  const prompt = buildContinuationSeedPrompt({ provider, importedAt, plan });
   const renderedTokens =
     (prompt.rulesText ? estimateTextTokens(prompt.rulesText) : 0) +
     (prompt.transcriptText ? estimateTextTokens(prompt.transcriptText) : 0);
-  const blankEligible = messages.filter(
-    (message) => isContinuationSeedRole(message.role) && message.content.trim().length === 0
-  ).length;
+  const blankEligible = eligible.filter(isBlank).length;
   return {
     empty: plan.turns.length === 0,
     eligibleNonBlank: eligibleNonBlank.length,
@@ -226,15 +236,23 @@ export function factsRetained(plan, facts) {
 /**
  * Every candidate over one conversation's loaded messages. The returned object
  * holds no text and no identifiers.
+ *
+ * The script class is decided on the same newest-200 scan the seed is built
+ * from, which is what the seed can carry; an older part of a long conversation
+ * in another language does not change what reaches the model.
  */
-export function evaluateSeedCandidates(messages, sourceMessageCount) {
+export function evaluateSeedCandidates(messages, sourceMessageCount, context = {}) {
   const eligibleText = messages
     .filter((message) => isContinuationSeedRole(message.role))
     .map((message) => message.content)
     .join("\n");
   const results = {};
   for (const candidate of SEED_CANDIDATES) {
-    results[candidate.id] = evaluatePlan(candidate.plan(messages, sourceMessageCount), messages);
+    results[candidate.id] = evaluatePlan(
+      candidate.plan(messages, sourceMessageCount),
+      messages,
+      context
+    );
   }
   return { script: scriptClass(eligibleText), results };
 }
@@ -248,14 +266,27 @@ const quantile = (values, q) => {
   return sorted[index];
 };
 
+/** Rounded to the nearest `PUBLISHED_COUNT_ROUNDING`, never to a smaller exact figure. */
+export const roundedCount = (value) =>
+  Math.round(value / PUBLISHED_COUNT_ROUNDING) * PUBLISHED_COUNT_ROUNDING;
+
+const percent = (part, whole) => (whole === 0 ? null : Math.round((part / whole) * 100));
+
 /**
- * Per script class and candidate: counts and quantiles. Groups smaller than
- * `minGroupSize` are reported as suppressed, with no figures, so a small
- * population cannot be read back out of the numbers.
+ * Per script class and candidate: shares and quantiles, in two units.
  *
- * `weight` lets a sample stand for several continued conversations of one
- * snapshot for the request-weighted view, without counting the immutable
- * source several times in the snapshot view.
+ *   snapshot share   each imported conversation counts once, however often it
+ *                    was continued -- how common a shape of source is
+ *   request share    each sample weighted by `requests`, the assistant turns its
+ *                    continued conversations have had -- roughly how many model
+ *                    requests carried (or would have carried) this seed, which is
+ *                    the unit both the quality effect and the cost land in
+ *
+ * Privacy: groups smaller than `minGroupSize` snapshots are suppressed with no
+ * figures. Every published count is rounded to the nearest
+ * `PUBLISHED_COUNT_ROUNDING` and every share is a whole percent, so a
+ * suppressed group's size cannot be recovered by subtracting published counts
+ * from a published total.
  */
 export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
   const groups = new Map();
@@ -270,25 +301,124 @@ export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
       report[script] = { suppressed: true, reason: `fewer than ${minGroupSize} snapshots` };
       continue;
     }
-    const continuations = list.reduce((total, sample) => total + (sample.weight ?? 1), 0);
+    const weightOf = (sample) => Math.max(0, sample.requests ?? 0);
+    const totalRequests = list.reduce((total, sample) => total + weightOf(sample), 0);
     const byCandidate = {};
     for (const candidate of SEED_CANDIDATES) {
-      const rows = list.map((sample) => sample.results[candidate.id]);
-      const count = (predicate) => rows.filter(predicate).length;
+      const rows = list.map((sample) => ({ row: sample.results[candidate.id], weight: weightOf(sample) }));
+      const shares = (predicate) => {
+        const matching = rows.filter(({ row }) => predicate(row));
+        return {
+          snapshotPercent: percent(matching.length, rows.length),
+          requestPercent: percent(
+            matching.reduce((total, { weight }) => total + weight, 0),
+            totalRequests
+          ),
+        };
+      };
       byCandidate[candidate.id] = {
-        emptySeed: count((row) => row.empty && row.eligibleNonBlank > 0),
-        newestMissing: count((row) => row.newest === "missing"),
-        newestShortened: count((row) => row.newest === "shortened"),
-        includedMessagesP50: quantile(rows.map((row) => row.includedMessages), 0.5),
-        includedMessagesP10: quantile(rows.map((row) => row.includedMessages), 0.1),
-        renderedTokensP50: quantile(rows.map((row) => row.renderedTokens), 0.5),
-        renderedTokensP90: quantile(rows.map((row) => row.renderedTokens), 0.9),
-        stoppedByBudget: count((row) => row.omittedByBudget > 0),
+        emptySeed: shares((row) => row.empty && row.eligibleNonBlank > 0),
+        newestMissing: shares((row) => row.newest === "missing"),
+        newestShortened: shares((row) => row.newest === "shortened"),
+        stoppedByBudget: shares((row) => row.omittedByBudget > 0),
+        includedMessagesP10: quantile(rows.map(({ row }) => row.includedMessages), 0.1),
+        includedMessagesP50: quantile(rows.map(({ row }) => row.includedMessages), 0.5),
+        renderedTokensP50: quantile(rows.map(({ row }) => row.renderedTokens), 0.5),
+        renderedTokensP90: quantile(rows.map(({ row }) => row.renderedTokens), 0.9),
+        // Request-weighted mean of what this candidate would add to each seeded
+        // request, the figure a cost decision needs.
+        renderedTokensPerRequest:
+          totalRequests === 0
+            ? null
+            : Math.round(
+                rows.reduce((total, { row, weight }) => total + row.renderedTokens * weight, 0) /
+                  totalRequests
+              ),
       };
     }
-    report[script] = { snapshots: list.length, continuations, byCandidate };
+    report[script] = {
+      snapshotsRounded: roundedCount(list.length),
+      requestsRounded: roundedCount(totalRequests),
+      byCandidate,
+    };
   }
   return report;
+}
+
+// ---------------------------------------------------------------- stored data
+
+/**
+ * The database measurement, with the database behind injected functions so it
+ * can be executed in a test without one.
+ *
+ *   fetchSnapshotPage(cursor, take)  -> [{ id, provider, importedAt, messageCount, locked }]
+ *                                       finalized snapshots with at least one continuation
+ *   fetchNewestMessages(ids)         -> Map(id -> messages), newest SEED_SOURCE_MESSAGE_SCAN_LIMIT
+ *   fetchRequestWeights(ids)         -> Map(id -> assistant turns across its continuations)
+ *   countDeletedSourceContinuations() -> number
+ *
+ * Identifiers exist only inside this function, to join the three reads; none
+ * is placed in the returned object. Locked snapshots are counted and skipped
+ * unless `includeLocked` -- see the runner for why that is an explicit choice.
+ */
+export async function measureStoredConversations(
+  { fetchSnapshotPage, fetchNewestMessages, fetchRequestWeights, countDeletedSourceContinuations },
+  { includeLocked = false, maxSnapshots = Number.POSITIVE_INFINITY, pageSize = 50, onProgress } = {}
+) {
+  const samples = [];
+  let lockedSkipped = 0;
+  let lockedMeasured = 0;
+  let noEligibleText = 0;
+  let seen = 0;
+  let cursor;
+  while (seen < maxSnapshots) {
+    const page = await fetchSnapshotPage(cursor, Math.min(pageSize, maxSnapshots - seen));
+    if (page.length === 0) break;
+    cursor = page.at(-1).id;
+    seen += page.length;
+    const readable = page.filter((snapshot) => includeLocked || !snapshot.locked);
+    lockedSkipped += page.length - readable.length;
+    const ids = readable.map((snapshot) => snapshot.id);
+    const [messagesById, weightsById] =
+      ids.length === 0 ? [new Map(), new Map()] : await Promise.all([fetchNewestMessages(ids), fetchRequestWeights(ids)]);
+    for (const snapshot of readable) {
+      const messages = messagesById.get(snapshot.id) ?? [];
+      const evaluated = evaluateSeedCandidates(messages, snapshot.messageCount, {
+        provider: snapshot.provider,
+        importedAt: snapshot.importedAt,
+      });
+      if (evaluated.results.current.eligibleNonBlank === 0) {
+        noEligibleText += 1;
+        continue;
+      }
+      if (snapshot.locked) lockedMeasured += 1;
+      samples.push({ script: evaluated.script, results: evaluated.results, requests: weightsById.get(snapshot.id) ?? 0 });
+    }
+    onProgress?.(seen);
+    if (page.length < pageSize) break;
+  }
+  return {
+    scopeRounded: {
+      snapshotsScanned: roundedCount(seen),
+      measured: roundedCount(samples.length),
+      lockedNotRead: roundedCount(lockedSkipped),
+      lockedMeasured: roundedCount(lockedMeasured),
+      noEligibleText: roundedCount(noEligibleText),
+      continuationsOfDeletedSources: roundedCount(await countDeletedSourceContinuations()),
+    },
+    stoppedAtLimit: seen >= maxSnapshots,
+    byScript: aggregateSeedSamples(samples),
+  };
+}
+
+/**
+ * What a failed database read may say: a fixed sentence and, when the error
+ * carries one, Prisma's error code. Never the error's message -- a connection
+ * error names the host, and a query error can quote the statement.
+ */
+export function databaseErrorNote(error) {
+  const code = typeof error?.code === "string" && /^P\d{4}$/.test(error.code) ? ` (${error.code})` : "";
+  return `The database could not be read${code}; nothing was measured.`;
 }
 
 // ---------------------------------------------------------------- fixtures
