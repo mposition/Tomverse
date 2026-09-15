@@ -2,21 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  EMPTY_STARTER_SEED_MEMORIES,
   applyStarterSeed,
   starterSeedMayWrite,
+  starterSeedMemoryFor,
 } from "../lib/chatStarterSeed.ts";
 
 const apply = (overrides = {}) =>
   applyStarterSeed({
+    scope: "A",
     draft: "",
     seedText: "seed A",
     wantsWebSearch: false,
     currentWebSearchMode: "off",
-    memory: null,
+    memories: EMPTY_STARTER_SEED_MEMORIES,
     ...overrides,
   });
 
-const wrote = (text) => ({ text, restore: "off", applied: "off" });
+const wrote = (text, scope = "A") => ({ scope, text, restore: "off", applied: "off" });
+const recordOf = (result, scope = "A") => starterSeedMemoryFor(result.memories, scope);
 
 // --- who owns the box -------------------------------------------------------
 
@@ -58,12 +62,10 @@ test("the seed applies as a unit or not at all", () => {
 });
 
 test("the memory records the text the seed leaves in the box", () => {
-  const result = apply({ seedText: "seed A" });
-  assert.equal(result.memory.text, "seed A");
+  assert.equal(recordOf(apply({ seedText: "seed A" })).text, "seed A");
   // An image card hands its sentence over and empties the chat box; what it
   // leaves behind is the empty string, not the sentence it handed over.
-  const handedOver = apply({ seedText: "" });
-  assert.equal(handedOver.memory.text, "");
+  assert.equal(recordOf(apply({ seedText: "" })).text, "");
 });
 
 // --- a seed outlives a language change --------------------------------------
@@ -83,11 +85,72 @@ test("a seed written in one language is still ours after the language changes", 
     seedText: "같은 질문을 여러 모델에게 물어보기",
     wantsWebSearch: false,
     currentWebSearchMode: english.webSearchMode,
-    memory: english.memory,
+    memories: english.memories,
   });
   assert.equal(korean.applies, true);
   assert.equal(korean.webSearchMode, "off");
-  assert.equal(korean.memory.text, "같은 질문을 여러 모델에게 물어보기");
+  assert.equal(recordOf(korean).text, "같은 질문을 여러 모델에게 물어보기");
+});
+
+// --- one record per conversation --------------------------------------------
+
+test("each conversation restores to its own mode, not the last one seeded", () => {
+  // Cross review v2 round 0. A over `auto`, then B over `off` with the same
+  // card, then back to A. A single page-wide record was B's by then, and A's
+  // draft and mode matched it by coincidence, so A was put back to `off`.
+  const inA = apply({
+    scope: "A",
+    seedText: "sourced seed",
+    wantsWebSearch: true,
+    currentWebSearchMode: "auto",
+  });
+  const inB = apply({
+    scope: "B",
+    seedText: "sourced seed",
+    wantsWebSearch: true,
+    currentWebSearchMode: "off",
+    memories: inA.memories,
+  });
+  const backInA = apply({
+    scope: "A",
+    draft: "sourced seed",
+    seedText: "plain seed",
+    wantsWebSearch: false,
+    currentWebSearchMode: "always",
+    memories: inB.memories,
+  });
+  assert.equal(backInA.applies, true);
+  assert.equal(backInA.webSearchMode, "auto");
+  // B's record is untouched by what happened in A.
+  assert.deepEqual(recordOf(backInA, "B"), {
+    scope: "B",
+    text: "sourced seed",
+    restore: "off",
+    applied: "always",
+  });
+});
+
+test("a conversation no card has seeded trusts nobody else's record", () => {
+  // B's draft and mode equal what A's record wrote, but no card wrote them in
+  // B: the sentence is the person's, and nothing of the seed lands.
+  const inA = apply({ scope: "A", seedText: "seed A", wantsWebSearch: true });
+  const inB = apply({
+    scope: "B",
+    draft: "seed A",
+    seedText: "seed B",
+    currentWebSearchMode: "always",
+    memories: inA.memories,
+  });
+  assert.deepEqual(inB, { applies: false });
+});
+
+test("a record filed under the wrong scope is refused, not trusted", () => {
+  const misfiled = new Map([["A", wrote("seed A", "B")]]);
+  assert.equal(starterSeedMemoryFor(misfiled, "A"), null);
+  assert.deepEqual(
+    apply({ scope: "A", draft: "seed A", memories: misfiled }),
+    { applies: false }
+  );
 });
 
 // --- the toggle follows the same ownership rule -----------------------------
@@ -96,7 +159,12 @@ test("a card that wants search arms it and remembers what it replaced", () => {
   const result = apply({ wantsWebSearch: true, currentWebSearchMode: "off" });
   assert.equal(result.applies, true);
   assert.equal(result.webSearchMode, "always");
-  assert.deepEqual(result.memory, { text: "seed A", restore: "off", applied: "always" });
+  assert.deepEqual(recordOf(result), {
+    scope: "A",
+    text: "seed A",
+    restore: "off",
+    applied: "always",
+  });
 });
 
 test("a later card that does not want search puts the mode back", () => {
@@ -108,7 +176,7 @@ test("a later card that does not want search puts the mode back", () => {
     seedText: "seed B",
     wantsWebSearch: false,
     currentWebSearchMode: first.webSearchMode,
-    memory: first.memory,
+    memories: first.memories,
   });
   assert.equal(second.applies, true);
   assert.equal(second.webSearchMode, "off");
@@ -122,7 +190,7 @@ test("what it puts back is what was there before the first seed, not a default",
     seedText: "seed B",
     wantsWebSearch: false,
     currentWebSearchMode: "always",
-    memory: first.memory,
+    memories: first.memories,
   });
   assert.equal(second.webSearchMode, "auto");
 });
@@ -137,10 +205,15 @@ test("a toggle the person changed themselves is theirs, and is not put back", ()
     seedText: "seed B",
     wantsWebSearch: false,
     currentWebSearchMode: "auto",
-    memory: first.memory,
+    memories: first.memories,
   });
   assert.equal(second.webSearchMode, "auto");
-  assert.deepEqual(second.memory, { text: "seed B", restore: "auto", applied: "auto" });
+  assert.deepEqual(recordOf(second), {
+    scope: "A",
+    text: "seed B",
+    restore: "auto",
+    applied: "auto",
+  });
 });
 
 test("re-picking the searching card arms it again from the same restore point", () => {
@@ -150,17 +223,17 @@ test("re-picking the searching card arms it again from the same restore point", 
     seedText: "seed B",
     wantsWebSearch: false,
     currentWebSearchMode: "always",
-    memory: first.memory,
+    memories: first.memories,
   });
   const third = apply({
     draft: "seed B",
     seedText: "seed A",
     wantsWebSearch: true,
     currentWebSearchMode: second.webSearchMode,
-    memory: second.memory,
+    memories: second.memories,
   });
   assert.equal(third.webSearchMode, "always");
-  assert.equal(third.memory.restore, "off");
+  assert.equal(recordOf(third).restore, "off");
 });
 
 test("a first card that does not want search changes nothing", () => {
@@ -169,17 +242,22 @@ test("a first card that does not want search changes nothing", () => {
   assert.equal(result.webSearchMode, "auto");
 });
 
-test("stale memory from another conversation is ignored, not trusted", () => {
-  // A conversation switch resets the mode without telling this module. The
-  // memory is only trusted while the live mode still matches what it wrote, so
-  // the mismatch makes it capture afresh rather than restore a stranger's
-  // value.
-  const stale = { text: "seed A", restore: "always", applied: "always" };
+test("a record whose mode was reset under it is ignored, not trusted", () => {
+  // Reopening a conversation resets the mode from its saved settings without
+  // telling this module. The record is only trusted while the live mode still
+  // matches what it wrote, so the mismatch makes it capture afresh rather
+  // than restore a value from before the reset.
+  const stale = new Map([["A", { scope: "A", text: "seed A", restore: "always", applied: "always" }]]);
   const result = apply({
     wantsWebSearch: false,
     currentWebSearchMode: "off",
-    memory: stale,
+    memories: stale,
   });
   assert.equal(result.webSearchMode, "off");
-  assert.deepEqual(result.memory, { text: "seed A", restore: "off", applied: "off" });
+  assert.deepEqual(recordOf(result), {
+    scope: "A",
+    text: "seed A",
+    restore: "off",
+    applied: "off",
+  });
 });

@@ -40,6 +40,16 @@
  * already was -- by remembering what we last wrote and asking whether the box
  * still holds exactly that.
  *
+ * ## Why the memory is kept per conversation
+ *
+ * One memory for the whole page is trusted by coincidence. Cross review of the
+ * fix above (v2 round 0) showed it: seed conversation A over `auto`, seed
+ * conversation B over `off`, return to A and pick another card -- A's draft and
+ * mode still match the single record, which is now B's, so A was put back to
+ * B's `off` instead of its own `auto`. So the memory is a store keyed by the
+ * composer's draft scope, the same key the draft store uses, and a record is
+ * only ever read for the scope that wrote it.
+ *
  * Pure, and separate from `ChatPageClient` on purpose -- the component is
  * seven thousand lines and this rule is four cases that each need a test.
  */
@@ -56,9 +66,31 @@ import type { WebSearchMode } from "@/lib/appDefaults";
  * mode that no longer equals `applied`, has been taken back by the person.
  */
 export type StarterSeedMemory = {
+  /** The draft scope (`draftKeyFor`) this record was written in. */
+  scope: string;
   text: string;
   restore: WebSearchMode;
   applied: WebSearchMode;
+};
+
+/** Every scope's last record, keyed by draft scope. */
+export type StarterSeedMemories = ReadonlyMap<string, StarterSeedMemory>;
+
+export const EMPTY_STARTER_SEED_MEMORIES: StarterSeedMemories = new Map();
+
+/**
+ * The record a click in `scope` may trust, or `null`.
+ *
+ * A record filed under the wrong key is refused too, so a caller that mixes
+ * scopes up fails toward leaving the composer alone rather than trusting a
+ * stranger's record.
+ */
+export const starterSeedMemoryFor = (
+  memories: StarterSeedMemories,
+  scope: string
+): StarterSeedMemory | null => {
+  const memory = memories.get(scope);
+  return memory !== undefined && memory.scope === scope ? memory : null;
 };
 
 export type StarterSeedApplication =
@@ -67,7 +99,8 @@ export type StarterSeedApplication =
   | {
       applies: true;
       webSearchMode: WebSearchMode;
-      memory: StarterSeedMemory;
+      /** The store with this scope's record replaced; other scopes untouched. */
+      memories: StarterSeedMemories;
     };
 
 /**
@@ -87,10 +120,13 @@ export const starterSeedMayWrite = (input: {
 /**
  * The whole decision for one click.
  *
- * `memory` is what the last application recorded, or `null` on the first click
- * of a run. The caller keeps it in a ref; nothing here reads or writes state.
+ * `memories` is what earlier applications recorded, per draft scope. The
+ * caller keeps the store in a ref and replaces it with the one returned;
+ * nothing here reads or writes state.
  */
 export function applyStarterSeed(input: {
+  /** The composer's draft scope (`draftKeyFor`), the key the draft lives under. */
+  scope: string;
   /** What the composer holds right now. */
   draft: string;
   /** What the composer will hold if this seed applies. */
@@ -99,9 +135,10 @@ export function applyStarterSeed(input: {
   wantsWebSearch: boolean;
   /** The composer's live web-search mode. */
   currentWebSearchMode: WebSearchMode;
-  memory: StarterSeedMemory | null;
+  memories: StarterSeedMemories;
 }): StarterSeedApplication {
-  if (!starterSeedMayWrite({ draft: input.draft, memory: input.memory })) {
+  const memory = starterSeedMemoryFor(input.memories, input.scope);
+  if (!starterSeedMayWrite({ draft: input.draft, memory })) {
     return { applies: false };
   }
 
@@ -109,13 +146,16 @@ export function applyStarterSeed(input: {
   // A person who reached past the card and flipped it themselves has taken it
   // back, and their setting is then the one to preserve -- including as the
   // value a later card restores to.
-  const owned = input.memory !== null && input.memory.applied === input.currentWebSearchMode;
-  const restore = owned ? input.memory!.restore : input.currentWebSearchMode;
+  const owned = memory !== null && memory.applied === input.currentWebSearchMode;
+  const restore = owned ? memory.restore : input.currentWebSearchMode;
   const webSearchMode = input.wantsWebSearch ? "always" : restore;
 
-  return {
-    applies: true,
-    webSearchMode,
-    memory: { text: input.seedText, restore, applied: webSearchMode },
-  };
+  const memories = new Map(input.memories);
+  memories.set(input.scope, {
+    scope: input.scope,
+    text: input.seedText,
+    restore,
+    applied: webSearchMode,
+  });
+  return { applies: true, webSearchMode, memories };
 }
