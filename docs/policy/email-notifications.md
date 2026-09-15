@@ -12,6 +12,20 @@
 
 ## 0. 개정 이력
 
+### v6 (2026-09-14) — Q12 해소: 방침에 이메일 처리 고지
+
+- `/privacy`에 **"보내 드리는 이메일"** section을 추가했습니다. 승인자 `mposition`,
+  효력일 2026-09-14. 7개 언어 전부에 문구가 들어갔고 방침의 시행일도 함께 옮겼습니다.
+- **이것은 marketing 선행 조건이 아니라 지금의 공백이었습니다.** `EmailPreference`·
+  `ConsentRecord`·`EmailDelivery`·`SuppressionEntry`는 flag와 무관하게 이미 쓰이고
+  있는데 방침의 14개 section에 이메일이 한 번도 나오지 않았습니다.
+- `retention` section이 "계정 데이터 삭제 시 제거"만 적어 **계정 삭제 후에도 남는
+  suppression의 반대를 암시**하고 있었습니다. 예외 한 구절을 넣어 고쳤습니다.
+- **일부러 비워 둔 셋**: 보관 기간 숫자(Q6 미결 — 지키지 못할 약속을 적지 않습니다),
+  수신 국가·subprocessor 목록(Q11 잔여 — 제28조의8제2항 8개 항목을 채울 사실이
+  아직 없습니다), 관할권별 marketing 법적 근거(Q1 §7 — 방침이 코드보다 앞서게
+  됩니다). 근거는 [초안 §5](../ops/q12-privacy-email-disclosure-draft.md).
+
 ### v5 (2026-09-14) — A18 결정, Q8 확보, Q1 내부 검토
 
 | # | 변경 | 근거 |
@@ -30,7 +44,7 @@
 |---|---|---|
 | 1 | 전체 아키텍처 (Resend 유지 + 얇은 port, outbox, consent/suppression/jurisdiction 분리) | **승인** |
 | 2 | credential lane은 **방식 B** — 자격증명 미저장, 요청 내 재시도, 사용자 재요청으로 복구 | **승인** |
-| 3 | marketing은 production 비활성. ~~suppression 경계 결정(A18)~~ **A18은 2026-09-14 해소**(별도 계정). 남은 차단 사유는 Q1 외부 자문·Q2·Q12, DMARC 관측, warm-up, 관할권 정책 version 활성화입니다 | **승인** |
+| 3 | marketing은 production 비활성. ~~suppression 경계 결정(A18)~~ **A18은 2026-09-14 해소**(별도 계정). 남은 차단 사유는 Q1 외부 자문·Q2, DMARC 관측, warm-up, 관할권 정책 version 활성화입니다(**Q12는 2026-09-14 해소**) | **승인** |
 | 4 | 구현 착수는 아래 정합성 5건 반영 후 | **반영 완료** |
 
 **명칭 변경:** `fast lane` -> **`credential synchronous lane`**.
@@ -2308,7 +2322,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 
 | 항목 | flag | 활성화 조건 |
 |---|---|---|
-| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1·Q2** 회신. Q8은 2026-09-14 해소 |
+| marketing 분류 발송 | `feature.emailMarketingEnabled` | 21절 **Q1·Q2** 회신. Q8·Q12는 2026-09-14 해소 |
 | marketing 도메인(`news.`) | 동일 | 위 + warm-up 계획 승인 |
 | `(광고)` / `<ADV>` 접두어 적용 | 정책 활성화로 제어 | Q4(한국), 싱가포르 확인 |
 | 관리자 대량 발송 UI | `feature.emailCampaignsEnabled` | 승인 프로세스 확정 |
@@ -2646,7 +2660,7 @@ marketing 도메인 신설 시 4~6주 warm-up:
 | Q9 | 아동 사용자가 실제로 존재할 수 있는가? 연령 확인을 하는가? **어느 기준값을 쓸 것인가** — GDPR 제8조는 기본 16세(회원국이 13세까지 하향 가능), 한국 14세, 영국·미국 13세 | 5.4. **이메일이 아니라 가입·개인정보 처리 정책의 결정** | 가입 플로우, marketing opt-in UI 제공 여부 |
 | Q10 | 미국 **주별 개인정보법**(CCPA 등) 중 이메일 마케팅에 실제로 영향을 주는 요건이 있는가? GPC 신호를 존중해야 하는가? | 4.3 미국. 2026년 현황 미확인 | 미국 marketing |
 | Q11 | Resend의 **DPA를 체결했는가?** subprocessor 목록을 개인정보처리방침에 반영했는가? | GDPR 제28조 처리자 계약 | 모든 발송(현재도!) |
-| Q12 | 개인정보처리방침에 **이메일 마케팅과 이메일 관련 처리**가 기재되어 있는가? **초안: [이메일 처리 고지 초안](../ops/q12-privacy-email-disclosure-draft.md)** — 문구(en·ko), 문장별 의존 관계, 일부러 쓰지 않은 셋 | 고지 없이 처리 불가. **marketing만의 문제가 아닙니다** — 수신 설정·동의 이력·발송 기록·계정 삭제 후에도 남는 suppression은 지금 일어나는 처리인데 방침에 이메일이 한 번도 나오지 않습니다. Q11의 `/privacy` 잔여 항목이 같은 section에 들어갑니다 | marketing 활성화 |
+| ~~Q12~~ | **해소 (2026-09-14 승인, 승인자 `mposition`, 효력일 2026-09-14).** `/privacy`에 **"보내 드리는 이메일"** section이 생겼습니다(`components/legal/PrivacyPolicy.tsx`, `locales/*.ts` 7개 언어). 담은 것 — 발송하는 메일의 종류와 끌 수 있는 것/없는 것, 로그인 없는 one-click 수신거부, 보관하는 항목(`EmailPreference`·`ConsentRecord`·`EmailDelivery`), IP·UA를 값이 아니라 salted hash로만 보관한다는 사실, 발송 대행자 Resend와 두 도메인의 추적 비활성, 그리고 **계정 삭제 후에도 남는 suppression**. `retention` section에도 그 예외를 한 구절 넣었습니다 — 이전에는 "계정 데이터 삭제 시 제거"만 적혀 반대를 암시했습니다 | [이메일 처리 고지 초안](../ops/q12-privacy-email-disclosure-draft.md) | **남은 것**: 보관 기간 숫자(Q6 미결), 수신 국가·subprocessor 목록의 제28조의8제2항 8개 항목(Q11 잔여), 관할권별 marketing 법적 근거(Q1 §7). 셋 다 일부러 비워 두었고 근거는 초안 §5 |
 | ~~Q13~~ | **해결(v3).** 시행령상 의무는 수신동의 사실·동의일·유지/철회 방법의 **고지**이며, 무응답 자동 만료 규정은 확인되지 않음. 자동 opt-out 기본 OFF(5.5)가 맞음 | — | 해소 |
 | **Q14** | 확인 고지에 담을 문구가 시행령이 요구하는 사항(전송자 명칭, 수신동의 날짜와 사실, 유지/철회 의사표시 방법)을 충족하는가? 고지 자체가 광고로 읽히지 않는가? | 고지에 판촉이 섞이면 광고성 정보가 되어 `(광고)` 표시 대상 | 확인 고지 템플릿 |
 | ~~Q15~~ | **해결(v3), 표현 정정(v5).** suppression은 **team(계정) 전체**에 적용되며 도메인을 구분하지 않음. region 단위 억제는 SES의 성질이지 Resend 문서가 말하는 경계가 아님. 질문이 아니라 **확인된 제약**이 되었고 5.3.1로 옮겼습니다 | — | 해소. 대신 **A18**(계정 분리 결정)이 생김 |
