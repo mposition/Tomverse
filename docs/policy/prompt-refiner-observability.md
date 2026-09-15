@@ -38,6 +38,11 @@ dispatch 시각을 가지며 `admission` layer를 쓸 수 없고, dispatch되지
 `failureLayer`는 `admission`, `adapter`, `provider`, `response_validation` 중 하나이며
 성공만 `none`이다.
 `failureCode`는 고정 enum이고 provider 오류 본문을 담을 문자열 필드는 없다.
+`adapter_unavailable`과 `cost_guardrail`은 pre-dispatch 전용이고,
+`provider_error`, `timeout`, `invalid_response`, `empty_response`, `no_change`,
+`unknown_after_dispatch`는 post-dispatch 전용이다. `cancelled`는 dispatch 전후 모두
+일어날 수 있으므로 code만으로 단계를 주장하지 않고 `dispatchedAt`과 outcome이 그
+lifecycle을 결정한다.
 
 `requestedAt`, `dispatchedAt`, `completedAt`은 모두 서버 시각이다.
 `preparationLatencyMs`는 `completedAt - requestedAt`에서 도출한 값과 정확히 같아야

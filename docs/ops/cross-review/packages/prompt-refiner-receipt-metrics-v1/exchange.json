@@ -110,17 +110,101 @@
         }
       ],
       "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerReceiptCore.ts:198 (superRefine, failed-outcome lifecycle rules); open finding: lib/promptRefinerReceiptCore.ts:182-207 (refused_before_dispatch vs failed); open finding: docs/policy/prompt-refiner-observability.md §3 vs scripts/report-prompt-refiner-receipts.mjs:58-60); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:194a7a17c30122466b496a36fcc033815fdd5187b37bb1ad7252b81fbaa9731e",
+      "commit": "bcd66225789c44f304a0dbee591cc67c2237aafd",
+      "filesChanged": [
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/verdict-round0.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerReceiptCore.ts",
+        "package.json",
+        "scripts/report-prompt-refiner-receipts.mjs",
+        "tests/promptRefinerReceiptCore.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --import tsx --test tests/promptRefinerReceiptCore.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1198.0134",
+          "durationMs": 1280
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 44052
+        },
+        {
+          "rule": "npm run lint",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
+          "durationMs": 66969
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 833 referenced path(s) across 107 instruction document(s), and 942 path(s) named by comments across 2854 source file(s), all present.",
+          "durationMs": 1402
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4338 citation(s) against 34 policy document(s). 2698 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 223 predate this change).",
+          "durationMs": 1054
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1349
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 53
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerReceiptCore.ts:182-217 (superRefine) and :560-565 (failureCodes aggregate)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "`failureCode` is validated only as a closed enum and is never constrained by `outcome`/`dispatchedAt`, so a `refused_before_dispatch` receipt that by contract never reached the provider may still be classified `provider_error`, `timeout` or `unknown_after_dispatch`, and the report then prints those codes next to `dispatched: 0` — the same writer's-free-choice ambiguity between pre- and post-dispatch facts that the two round-0 lifecycle findings closed for `failureLayer`.",
+          "reproduction": "Take the `refused_before_dispatch` receipt already asserted valid at tests/promptRefinerReceiptCore.test.mjs:63-86 and change only `failureCode` to `\"unknown_after_dispatch\"` (or `\"provider_error\"`, or `\"timeout\"`): `promptRefinerExecutionReceiptSchema.safeParse(...).success` is `true`, and `summarizePromptRefinerReceipts(bundle([thatReceipt], []))` returns `{ dispatched: 0, dispatchedFailures: 0, failureCodes: { unknown_after_dispatch: 1 } }`. Expected, matching the failureLayer rules at :188-196 and :204-208: codes that assert provider contact (`provider_error`, `timeout`, `invalid_response`, `empty_response`, `no_change`, `unknown_after_dispatch`) fail closed when `dispatchedAt === null`, and pre-dispatch codes (`adapter_unavailable`, `cost_guardrail`) fail closed on a dispatched `failed` receipt.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerReceiptCore.ts:182-217 (superRefine) and :560-565 (failureCodes aggregate)); the author fixes it and the change is re-reviewed"
     }
   ],
-  "changeDigest": "sha256:48a514e8ff8338ac62ed8c0f7ceb8e820b78eac80cdbbb8864ce4d72d1f8ffb8",
-  "commit": "0ff41cea2ed4a7be66a32d6f881689361ae5bc05",
+  "changeDigest": "sha256:194a7a17c30122466b496a36fcc033815fdd5187b37bb1ad7252b81fbaa9731e",
+  "commit": "bcd66225789c44f304a0dbee591cc67c2237aafd",
   "changeSummary": "(no summary supplied; the diff is the record)",
   "testResults": [
     {
       "command": "node --import tsx --test tests/promptRefinerReceiptCore.test.mjs",
       "passed": true,
-      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1613.4985",
-      "durationMs": 1703
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1198.0134",
+      "durationMs": 1280
     }
   ],
   "guardRuns": [
@@ -128,31 +212,31 @@
       "rule": "npm run typecheck",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
-      "durationMs": 46936
+      "durationMs": 44052
     },
     {
       "rule": "npm run lint",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 lint\n> eslint",
-      "durationMs": 63458
+      "durationMs": 66969
     },
     {
       "rule": "npm run check:doc-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 833 referenced path(s) across 107 instruction document(s), and 942 path(s) named by comments across 2854 source file(s), all present.",
-      "durationMs": 1442
+      "durationMs": 1402
     },
     {
       "rule": "npm run check:policy-section-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4338 citation(s) against 34 policy document(s). 2698 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 223 predate this change).",
-      "durationMs": 1072
+      "durationMs": 1054
     },
     {
       "rule": "npm run check:encoding:strict",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
-      "durationMs": 1350
+      "durationMs": 1349
     },
     {
       "rule": "git diff --check",
@@ -166,44 +250,35 @@
   "reviewConclusion": "approve",
   "findings": [
     {
-      "location": "lib/promptRefinerReceiptCore.ts:198 (superRefine, failed-outcome lifecycle rules)",
+      "location": "lib/promptRefinerReceiptCore.ts:182-217 (superRefine) and :560-565 (failureCodes aggregate)",
       "severity": "warning",
       "basis": "evidence",
-      "claim": "An execution receipt may claim `failureLayer: \"admission\"` while also carrying `dispatchedAt`, provider attribution, tokens and cost, so a request the receipt says was rejected before the provider call still counts inside the `dispatched` / `dispatchedFailures` denominators this task exists to keep honest.",
-      "reproduction": "Add `execution({ outcome: \"failed\", suggestionId: null, failureLayer: \"admission\", failureCode: \"cost_guardrail\" })` to the `invalid` array in tests/promptRefinerReceiptCore.test.mjs:238 (\"execution receipts reject contradictory lifecycle and telemetry claims\") and run `node --import tsx --test tests/promptRefinerReceiptCore.test.mjs`. The base helper supplies `dispatchedAt: \"2026-09-15T00:00:00.100Z\"`, `inputTokens: 100` and `actualCostMicroUsd: 1000`; `safeParse(...).success` is `true`, the assertion expects `false`. Expected: admission-layer non-success fails closed when `dispatchedAt !== null` (one predicate next to the existing `prompt_refiner_remote_failure_requires_dispatch` rule).",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "lib/promptRefinerReceiptCore.ts:182-207 (refused_before_dispatch vs failed)",
-      "severity": "warning",
-      "basis": "evidence",
-      "claim": "Two receipts that are byte-identical except for `outcome` both validate for an adapter-layer, never-dispatched event, so whether that event lands in `refusalRate` or in `failedRequestRate` is the writer's free choice rather than a contract fact, which weakens the success / post-dispatch-failure / pre-dispatch-refusal split the first completion criterion requires.",
-      "reproduction": "Take the `refused_before_dispatch` receipt already asserted valid at tests/promptRefinerReceiptCore.test.mjs:63-86 (provider/modelId/adapterVersion null, `failureLayer: \"adapter\"`, `failureCode: \"adapter_unavailable\"`, `dispatchedAt: null`, all telemetry null, `retryCount: 0`) and parse it a second time with only `outcome: \"failed\"` changed: `promptRefinerExecutionReceiptSchema.safeParse(...).success` is `true` for both. Expected: the two encodings are disjoint, e.g. a non-dispatched non-success at the `admission`/`adapter` layer must use `refused_before_dispatch`, or `failed` must require a failure code that a refusal cannot use.",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "docs/policy/prompt-refiner-observability.md §3 vs scripts/report-prompt-refiner-receipts.mjs:58-60",
-      "severity": "nit",
-      "basis": "evidence",
-      "claim": "The policy says \"report는 각 항목마다 `population`, `reported`, `missing`, `total`을 함께 보여 준다\", but the default (non-`--json`) report prints coverage for `actualCostMicroUsd` only, and only as `reported/population` plus `total` — `missing` and all four token fields never appear.",
-      "reproduction": "Run `npm run report:prompt-refiner-receipts -- --input=<bundle.json>` on any bundle containing a dispatched receipt (the fixture written by tests/promptRefinerReceiptCore.test.mjs:352 works). Output contains one `cost telemetry 1/1 dispatched; total 1000 microUSD` line and no `inputTokens`/`outputTokens`/`reasoningTokens`/`cachedInputTokens`/`missing` line. Expected: either the human report prints the four-number coverage row per field, or §3 states that the full coverage table is the `--json` surface.",
+      "claim": "`failureCode` is validated only as a closed enum and is never constrained by `outcome`/`dispatchedAt`, so a `refused_before_dispatch` receipt that by contract never reached the provider may still be classified `provider_error`, `timeout` or `unknown_after_dispatch`, and the report then prints those codes next to `dispatched: 0` — the same writer's-free-choice ambiguity between pre- and post-dispatch facts that the two round-0 lifecycle findings closed for `failureLayer`.",
+      "reproduction": "Take the `refused_before_dispatch` receipt already asserted valid at tests/promptRefinerReceiptCore.test.mjs:63-86 and change only `failureCode` to `\"unknown_after_dispatch\"` (or `\"provider_error\"`, or `\"timeout\"`): `promptRefinerExecutionReceiptSchema.safeParse(...).success` is `true`, and `summarizePromptRefinerReceipts(bundle([thatReceipt], []))` returns `{ dispatched: 0, dispatchedFailures: 0, failureCodes: { unknown_after_dispatch: 1 } }`. Expected, matching the failureLayer rules at :188-196 and :204-208: codes that assert provider contact (`provider_error`, `timeout`, `invalid_response`, `empty_response`, `no_change`, `unknown_after_dispatch`) fail closed when `dispatchedAt === null`, and pre-dispatch codes (`adapter_unavailable`, `cost_guardrail`) fail closed on a dispatched `failed` receipt.",
       "disposition": "fix_requested"
     }
   ],
-  "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerReceiptCore.ts:198 (superRefine, failed-outcome lifecycle rules); open finding: lib/promptRefinerReceiptCore.ts:182-207 (refused_before_dispatch vs failed); open finding: docs/policy/prompt-refiner-observability.md §3 vs scripts/report-prompt-refiner-receipts.mjs:58-60); the author fixes it and the change is re-reviewed; package round 1 once the change is revised",
+  "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerReceiptCore.ts:182-217 (superRefine) and :560-565 (failureCodes aggregate)); the author fixes it and the change is re-reviewed; package round 2 once the change is revised",
   "status": "awaiting_revision",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-15T12:12:49.143Z",
-  "packagedRounds": 1,
+  "producedAt": "2026-09-15T12:21:19.596Z",
+  "packagedRounds": 2,
   "concludedAtRound": null,
   "lineage": [],
   "inheritedFindings": [],
-  "headCommit": "0ff41cea2ed4a7be66a32d6f881689361ae5bc05",
+  "headCommit": "bcd66225789c44f304a0dbee591cc67c2237aafd",
   "worktreeDirty": false,
   "filesChanged": [
     "AGENTS.md",
     "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/change.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/exchange.json",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/review-prompt.md",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-receipt-metrics-v1/verdict-round0.json",
     "docs/ops/tomverse-chat-progress.md",
     "docs/policy/prompt-refiner-observability.md",
     "docs/ui-contracts/prompt-refiner-suggestion.md",

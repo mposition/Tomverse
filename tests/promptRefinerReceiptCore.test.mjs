@@ -100,6 +100,20 @@ test("execution receipts keep success, failure and refusal facts distinct", () =
 });
 
 test("execution receipts reject contradictory lifecycle and telemetry claims", () => {
+    const refusal = {
+        outcome: "refused_before_dispatch",
+        suggestionId: null,
+        provider: null,
+        modelId: null,
+        adapterVersion: null,
+        failureLayer: "adapter",
+        dispatchedAt: null,
+        inputTokens: null,
+        cachedInputTokens: null,
+        outputTokens: null,
+        reasoningTokens: null,
+        actualCostMicroUsd: null,
+    };
     const invalid = [
         execution({ suggestionId: null }),
         execution({ preparationLatencyMs: 999 }),
@@ -138,16 +152,9 @@ test("execution receipts reject contradictory lifecycle and telemetry claims", (
             actualCostMicroUsd: null,
         }),
         execution({
-            outcome: "refused_before_dispatch",
-            suggestionId: null,
-            failureLayer: "adapter",
+            ...refusal,
             failureCode: "adapter_unavailable",
-            dispatchedAt: null,
             inputTokens: 1,
-            cachedInputTokens: null,
-            outputTokens: null,
-            reasoningTokens: null,
-            actualCostMicroUsd: null,
         }),
         execution({
             provider: "example",
@@ -164,6 +171,22 @@ test("execution receipts reject contradictory lifecycle and telemetry claims", (
             reasoningTokens: null,
             actualCostMicroUsd: null,
         }),
+        ...[
+            "provider_error",
+            "timeout",
+            "invalid_response",
+            "empty_response",
+            "no_change",
+            "unknown_after_dispatch",
+        ].map((failureCode) => execution({ ...refusal, failureCode })),
+        ...["adapter_unavailable", "cost_guardrail"].map((failureCode) =>
+            execution({
+                outcome: "failed",
+                suggestionId: null,
+                failureLayer: "adapter",
+                failureCode,
+            })
+        ),
     ];
     for (const receipt of invalid) {
         assert.equal(promptRefinerExecutionReceiptSchema.safeParse(receipt).success, false);

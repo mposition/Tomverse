@@ -43,6 +43,18 @@ export const PROMPT_REFINER_FAILURE_CODES = [
     "cancelled",
     "unknown_after_dispatch",
 ] as const;
+const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
+    "adapter_unavailable",
+    "cost_guardrail",
+]);
+const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
+    "invalid_response",
+    "empty_response",
+    "no_change",
+    "provider_error",
+    "timeout",
+    "unknown_after_dispatch",
+]);
 export const PROMPT_REFINER_DISPOSITION_OUTCOMES = [
     "accepted",
     "kept_original",
@@ -213,6 +225,24 @@ export const promptRefinerExecutionReceiptSchema =
         if (dispatchedAt === null && hasAnyTelemetry) {
             issue("prompt_refiner_undispatched_receipt_cannot_have_telemetry", [
                 "inputTokens",
+            ]);
+        }
+        if (
+            receipt.failureCode !== null &&
+            dispatchedAt === null &&
+            POST_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
+        ) {
+            issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
+                "failureCode",
+            ]);
+        }
+        if (
+            receipt.failureCode !== null &&
+            dispatchedAt !== null &&
+            PRE_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
+        ) {
+            issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
+                "failureCode",
             ]);
         }
     });
