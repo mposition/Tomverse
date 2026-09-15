@@ -72,8 +72,9 @@ export type UserUsageResponse = {
     creditsDay: number;
     creditsMonth: number;
     proModelResponsesMonth: number;
-    tokensDay: number;
-    tokensMonth: number;
+    /** Always null: an account has no cumulative token quota. */
+    tokensDay: null;
+    tokensMonth: null;
     costDay: number;
     costMonth: number;
     maxModels: number;

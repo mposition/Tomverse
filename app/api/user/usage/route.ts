@@ -129,8 +129,10 @@ export async function GET(req: Request) {
               30
             )
           : 0,
-      tokensDay: positiveInteger(process.env.CHAT_USER_TOKENS_PER_DAY, 1_000_000),
-      tokensMonth: positiveInteger(process.env.CHAT_USER_TOKENS_PER_MONTH, 20_000_000),
+      // No cumulative token quota for an account (lib/chatTokenQuotaCore.ts);
+      // null states "no limit", and `usage.tokens*` still reports the count.
+      tokensDay: null,
+      tokensMonth: null,
       // Operational guardrails, not entitlement. Kept in `limits` for the admin
       // console and diagnostics; the customer-facing allowance is credits.
       costDay: costGuardrails.planDay,
