@@ -272,12 +272,13 @@ const hasDraggedFiles = (dataTransfer: DataTransfer | null) =>
 /**
  * A drag one drop surface has already taken responsibility for.
  *
- * While a chat is empty the composer portals *into* the conversation canvas
- * (ChatWelcomeScreen's input slot), so one drop travels through both drop
- * surfaces. Marking the DOM event is what makes "handled once" a property of
- * the event rather than of a containment test -- and containment is exactly
- * what is stale for the render in which the composer moves between its two
- * slots, because the portal host is moved in an effect. The canvas listens in
+ * The composer and the conversation canvas are both drop surfaces. The
+ * composer used to portal *into* the canvas on an empty chat, so one drop
+ * travelled through both; it now stays in the bottom dock in every state, but
+ * any layout that nests one inside the other must still count a drop once.
+ * Marking the DOM event is what makes "handled once" a property of the event
+ * rather than of a containment test -- containment is stale for any render in
+ * which the portal host moves, because the host is moved in an effect. The canvas listens in
  * the capture phase, so on a nested drop the canvas claims the event and the
  * composer stands down: one overlay, one upload, wherever the pointer is.
  */
@@ -3669,7 +3670,16 @@ export function ChatInput({
           </button>
         </div>
 
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5">
+        {/*
+          This group wraps too, and it may not shrink below its widest control.
+          At 200% text and 320-360px its 44px circles were wider than the
+          space beside "+": with `min-w-0` the group squeezed below one
+          control, and `justify-end` overflowed that control leftwards over
+          "+" (two overlaps at 320px, one at 360px, measured 2026-09-15). With
+          the default minimum the outer row breaks first and the group takes a
+          line of its own.
+        */}
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-1.5">
           <button
             ref={modelMenuButtonRef}
             type="button"
@@ -3684,7 +3694,7 @@ export function ChatInput({
               setIsMenuOpen(true);
               trackProductEvent("model_picker_opened", selectedModels.length, {});
             }}
-            className={`flex min-w-0 max-w-[112px] touch-manipulation items-center gap-1 rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
+            className={`flex min-w-0 max-w-[112px] touch-manipulation items-center gap-1 overflow-hidden rounded-full border border-zinc-300 bg-zinc-50 px-2.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-800 ${isMobileShell ? "h-11" : "h-10"}`}
             // Named so the outage banner can hand focus back to the model
             // selector when a swap or a recovered provider unmounts the
             // control the user was standing on (ProviderStatusBanner).

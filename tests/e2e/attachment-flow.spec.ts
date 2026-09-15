@@ -455,8 +455,8 @@ test.describe("attachment UX", () => {
     await dragOver(surface, transfer);
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText("파일을 놓으면 첨부됩니다");
-    // The composer portals into this same canvas while the chat is empty. One
-    // drag must raise one overlay, or the same drop is handled twice.
+    // The composer is a drop surface of its own, in the dock below this
+    // canvas. One drag must raise one overlay, or the same drop is handled twice.
     await expect(composerOverlay).toHaveCount(0);
 
     // Crossing into a child and back out of it is enter/leave traffic the

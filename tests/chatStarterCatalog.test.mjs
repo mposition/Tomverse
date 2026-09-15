@@ -138,6 +138,24 @@ test("every entry is well formed and names a file that exists", () => {
   }
 });
 
+test("every entry's short label is its own key beside its outcome sentence", () => {
+  // The label is the promise wherever the sentence is not on screen, so it is
+  // a key of its own under the same card -- never the outcome key reused, and
+  // never another card's label.
+  const labels = new Set();
+  for (const entry of CHAT_STARTER_CATALOG) {
+    assert.equal(typeof entry.labelKey, "string", entry.id);
+    assert.notEqual(entry.labelKey, entry.outcomeKey, entry.id);
+    assert.equal(
+      entry.labelKey.replace(/\.label$/, ".outcome"),
+      entry.outcomeKey,
+      `${entry.id}: the label and the outcome belong to the same card`
+    );
+    assert.equal(labels.has(entry.labelKey), false, `duplicate label ${entry.labelKey}`);
+    labels.add(entry.labelKey);
+  }
+});
+
 test("flag keys are the constants their owning modules export", () => {
   // The catalogue's rule is that a flag key is imported, never retyped. A
   // retyped key that differs by one character hides its card forever with
@@ -199,6 +217,7 @@ const viewer = (overrides = {}) => ({
 
 const entry = (overrides = {}) => ({
   id: "probe",
+  labelKey: "chatStarter.cards.compareAnswers.label",
   outcomeKey: "chatStarter.cards.compareAnswers.outcome",
   taskProfile: { kind: "general", needsCurrentInformation: false },
   requires: {},
