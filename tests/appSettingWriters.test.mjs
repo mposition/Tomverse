@@ -116,6 +116,14 @@ const READ_ONLY_KEYS = {
       "VOICE_INPUT_KILL_SWITCH is an environment variable, so it also works " +
       "when the database is the thing that is unwell.",
   },
+  PROMPT_REFINER_FLAG_KEY: {
+    reason:
+      "Prompt Refiner activation requires an approved paid adapter, fixed " +
+      "cost and timeout bounds, PLANNER-03 evidence and rollout disposition. " +
+      "Until those exist, an application toggle would expose the final step " +
+      "without the safety and quality gates that make it usable. Emergency " +
+      "stopping remains available through PROMPT_REFINER_KILL_SWITCH.",
+  },
 };
 
 const source = readFileSync(SOURCE, "utf8");

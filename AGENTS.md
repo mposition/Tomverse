@@ -1302,18 +1302,30 @@ Non-negotiable requirements:
 - No provider call, billing, automatic offer, Router coupling or rollout is
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.
+- The current server gate folds the default-off AppSetting, environment kill
+  switch and adapter readiness into one mode. The only active mode is the
+  loopback E2E fixture; a stored flag alone must never expose an inert product
+  control, and there is no product/provider mode yet.
+- A Refiner request, ready proposal and accepted resolution are bound to both
+  the exact draft bytes and the `identity + mounted surface + conversation`
+  scope. Changing any scope member discards them even when the next draft has
+  identical text; text equality never transfers Refiner state across scopes.
 - Every Refiner action keeps a 44px touch target and states why it is disabled.
 - The requesting, failed, and ready state regions are polite live statuses. A
   genuinely new state identity receives focus without scrolling. An initially
   mounted bound state or the same identity reappearing after a draft edit does
   not steal focus; a completed decision returns focus to the textarea.
-- The current PLANNER-03 report does not exercise the Refiner builder. A real
-  caller or provider adapter is blocked until `prompt-refiner` is registered as
-  a report surface and the adversarial corpus runs through it.
+- The current PLANNER-03 report does not exercise the Refiner builder. A
+  model-facing caller or provider adapter that reaches
+  `promptRefinerModelMessages()` is blocked until `prompt-refiner` is
+  registered as a report surface and the adversarial corpus runs through it.
+  The loopback fixture caller reaches only its no-cost E2E route and is not
+  that model-facing path.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
-contract tests passing when the surface becomes reachable by a product caller.
+contract tests passing. `tests/e2e/prompt-refiner-chat-input.spec.ts` is the
+actual ChatInput fixture gate for focus, IME, narrow width and text scaling.
 <!-- END:prompt-refiner-suggestion-invariant -->
 <!-- BEGIN:chat-starter-catalog-invariant -->
 ## Chat starter catalogue invariant

@@ -43,13 +43,12 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **58개 파일, 834 test**를
-선택합니다(두 project 합계 1,668). 그날 처음 합류할 때는 833 test였고, staging
-검증이 찾은 씨앗 토글 결함의 회귀 하나가 더해져 834가 됐습니다. 직전 값은
-57개 파일, 825 test(합계 1,650)이고 차이는 `chat-starter-catalog.spec.ts`
-전체입니다.
-2026-08-26의 51개 파일, 1,416 test(project당 708)는 아래 증가 이력과 shard
-결정의 기준값으로 남깁니다.
+desktop-chromium과 mobile-chromium 각 project에서 **59개 파일, 844 test**를
+선택합니다(두 project 합계 1,688). 같은 날 `chat-starter-catalog.spec.ts`와
+`prompt-refiner-chat-input.spec.ts`가 병렬로 합류하기 전 값은 57개 파일,
+825 test(project당)였습니다. Starter spec은 staging에서 찾은 씨앗 토글 결함
+회귀를 포함해 +9, Refiner spec은 +10입니다. 2026-08-26의 51개 파일,
+1,416 test(project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
 |---|
@@ -104,6 +103,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **58개 파일, 834 test**
 | `voice-input-composer.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
 | `prompt-refiner-focus.spec.ts` |
+| `prompt-refiner-chat-input.spec.ts` |
 | `chat-starter-catalog.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
@@ -156,6 +156,13 @@ release-blocking 회귀 검사입니다.
 기록되므로 PR에서 막습니다. 태그된 test는 한 건이고 desktop·mobile 두
 project에서 실행됩니다. 같은 날 `CI=1 --grep=@ui-risk --list` 실측은 각
 project에서 **57개 파일, 825 test**(두 project 합계 1,650)입니다.
+
+`prompt-refiner-chat-input.spec.ts`도 2026-09-15에 합류했습니다. 격리 panel이
+아니라 실제 `/chat`의 mobile composer에서 server default-off, 두 decision 뒤 focus
+복귀와 무전송, 요청 중 편집의 late result 폐기, invalid response 실패·재시도,
+최대 길이 입력, IME, 320px·200% text/zoom과 44px action을 검증합니다. 이 경계가
+깨지면 사용자의 작성 중 원문을 덮거나 전송 의사 없이 요청을 보낼 수 있어 release를
+막습니다. 이 spec은 project당 10 test입니다.
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —
