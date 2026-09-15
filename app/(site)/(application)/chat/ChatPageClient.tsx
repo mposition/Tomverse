@@ -3052,12 +3052,22 @@ export function ChatPageClient({
     const handleStartImageDraft = (
         draftText: string,
         modelId?: string,
-        options?: { fromImageRequest?: boolean }
+        options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
     ) => {
         conversationSelectionTicketRef.current += 1;
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
-            text: draftText,
+            /*
+              What the chat composer gets back if the image draft is cancelled.
+
+              The composer hands over its own draft, so there the seed and the
+              sentence to restore are the same string and the default is right.
+              A starter card hands over a seed that was never in the chat box,
+              and restoring it would put an image prompt in the chat composer --
+              against this handler's own promise below that the chat draft comes
+              back exactly as it was.
+            */
+            text: options?.chatDraftOnReturn ?? draftText,
         });
         setImageDraftAutoGenerate(
             Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
@@ -6901,18 +6911,16 @@ export function ChatPageClient({
   */
   const handleStarterSeed = (entry: ChatStarterEntry) => {
     const seedText = t(entry.seed.promptSeedKey);
-    if (entry.seed.productKey === "studio") {
-      // An image card belongs to the image workspace, and `handleStartImageDraft`
-      // is how the composer already hands a sentence over. Called without
-      // `fromImageRequest`, so `imageDraftAutoGenerate` stays false: the draft
-      // is seeded and the person still presses generate.
-      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0]);
-      return;
-    }
     // Text and toggles are decided together (lib/chatStarterSeed.ts). They used
     // to be decided apart, and the half that did not think about ownership
     // armed web search on somebody's own sentence and never disarmed it --
     // found in staging, at 9 credits a send instead of 1.
+    //
+    // Which product the seed lands in is decided AFTER this, never before. The
+    // image card branched first and so skipped the ownership test altogether:
+    // it took over a composer holding typed work, and it never put back the
+    // search a previous card had armed. That is the staging defect again, on
+    // the one path the staging fix did not cover.
     const application = applyStarterSeed({
       draft: inputValue,
       seedTexts: starterSeedTexts,
@@ -6929,6 +6937,21 @@ export function ChatPageClient({
     }
     starterSeedTogglesRef.current = application.memory;
     setWebSearchMode(application.webSearchMode);
+    if (entry.seed.productKey === "studio") {
+      // An image card belongs to the image workspace, and `handleStartImageDraft`
+      // is how the composer already hands a sentence over. Called without
+      // `fromImageRequest`, so `imageDraftAutoGenerate` stays false: the draft
+      // is seeded and the person still presses generate.
+      //
+      // The chat composer is left empty rather than holding a previous card's
+      // sentence: that seed was withdrawn together with its toggle just above,
+      // and a seed is applied as a unit or not at all.
+      setInputValue("");
+      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0], {
+        chatDraftOnReturn: "",
+      });
+      return;
+    }
     setInputValue(seedText);
     setFocusToken((value) => value + 1);
   };

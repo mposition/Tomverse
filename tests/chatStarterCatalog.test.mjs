@@ -374,6 +374,76 @@ test("a screen with only locked cards still shows them", () => {
   assert.equal(cards.length, 2);
 });
 
+test("meeting a requirement never removes a card from the screen", () => {
+  // The inversion the reserved slot caused when it was held for locks alone:
+  // a card low in the registry appeared to the account that could not use it
+  // and vanished for the account that could, because meeting the requirement
+  // moved it to the back of the runnable queue and the ceiling cut it. Real
+  // case: `compare-image-models`, visible to Free and never to Pro.
+  const catalog = [
+    ...Array.from({ length: 8 }, (_, index) => entry({ id: `open-${index}` })),
+    entry({ id: "needs-pro", requires: { signedIn: true, minimumPlan: "Pro" } }),
+  ];
+  const free = selectVisibleStarterCards(
+    viewer({ signedIn: true, plan: "Free" }),
+    catalog
+  );
+  const pro = selectVisibleStarterCards(
+    viewer({ signedIn: true, plan: "Pro" }),
+    catalog
+  );
+  assert.equal(
+    free.find((card) => card.entry.id === "needs-pro")?.availability.state,
+    "locked"
+  );
+  assert.equal(
+    pro.find((card) => card.entry.id === "needs-pro")?.availability.state,
+    "available",
+    "the account that can use the card is the one that cannot see it"
+  );
+  assert.equal(pro.length, CHAT_STARTER_MAX_VISIBLE);
+});
+
+test("the promoted slot goes to an acquirable requirement, not a flag", () => {
+  // A flag or a capability is the deployment's decision, not something an
+  // account can go and get, so a card gated on one is ranked like any other
+  // and the ceiling may cut it. Only `signedIn` and `minimumPlan` are promises
+  // the gallery makes to a person about themselves.
+  const catalog = [
+    ...Array.from({ length: 8 }, (_, index) => entry({ id: `open-${index}` })),
+    entry({ id: "flag-gated", requires: { flagKeys: [VOICE_INPUT_FLAG_KEY] } }),
+  ];
+  const cards = selectVisibleStarterCards(
+    viewer({
+      signedIn: true,
+      plan: "Pro",
+      enabledFlags: new Set([VOICE_INPUT_FLAG_KEY]),
+      knownFlags: new Set(allFlags),
+    }),
+    catalog
+  );
+  assert.equal(cards.length, CHAT_STARTER_MAX_VISIBLE);
+  assert.ok(!cards.some((card) => card.entry.id === "flag-gated"));
+});
+
+test("the real catalogue shows a Pro account the image card it can run", () => {
+  // The configuration the defect was found in: image generation on, a plan
+  // that meets the card's own requirement.
+  const cards = selectVisibleStarterCards(
+    viewer({
+      signedIn: true,
+      plan: "Pro",
+      enabledFlags: new Set([IMAGE_GENERATION_FLAG_KEY]),
+      knownFlags: new Set(allFlags),
+    })
+  );
+  assert.equal(
+    cards.find((card) => card.entry.id === "compare-image-models")?.availability
+      .state,
+    "available"
+  );
+});
+
 test("the real catalogue offers a guest something to do", () => {
   // A first screen that is entirely locks is a price list, not an entry point.
   const cards = selectVisibleStarterCards(
