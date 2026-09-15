@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-execution-pricing-drift-v1, round 1
+# Independent review — task prompt-refiner-execution-pricing-drift-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -18,7 +18,7 @@ Do not take the author's summary as a description of what the change does; the d
 - focused unit, 전체 typecheck, lint, model-pricing, 문서·정책 참조, strict encoding과 실제 6-file diff whitespace 검사가 통과한다.
 - Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다.
 
-## Change under review — digest sha256:8a184a434b8dec53b573221ea824b67cc0d78e3400769f765b443b0dc796e979, commit 710cb5954f7f52138dbfe8a4a097e3ca0b22cd82
+## Change under review — digest sha256:0c2906924f465d3a4ce883330c2c4c4c49c8d1107b5d8a98c7b0134c4d60b96b, commit 75eaa94f52a6fd91b44b0c568d5a6a26f9fb9775
 
 ```diff
 diff --git a/AGENTS.md b/AGENTS.md
@@ -45,7 +45,7 @@ index fafe4330..0a42e296 100644
    lease or atomic boolean is never proof. Only a future authority with atomic
    requestId binding, expiry and one-time consume may introduce `admitted: true`
 diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
-index 0fc988bb..3c089339 100644
+index 0fc988bb..90d0ace8 100644
 --- a/docs/ops/tomverse-chat-progress.md
 +++ b/docs/ops/tomverse-chat-progress.md
 @@ -938,7 +938,14 @@ AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않
@@ -72,8 +72,8 @@ index 0fc988bb..3c089339 100644
 -| 로컬 검증 | focused 26/26, 전체 lint·typecheck 통과 |
 -| 독립 검토·통합 CI | 대기 — 이 회차에서는 독립 Claude 호출을 하지 않음 |
 +| 구현 | 순수 실행 사전등록·effective 가격/output-cap drift·authority 부재 fail-closed·terminal mapping 구현 |
-+| 로컬 검증 | output-cap/env 격리 테스트 포함 focused 30/30; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
-+| 독립 검토·통합 CI | continuation round 0은 approve+재현 nit 2건으로 수정 대기; 이 revision은 아직 미검토 |
++| 로컬 검증 | env·registry-row 가격/output-cap 격리 테스트 포함 focused 32/32 및 hostile-env 32/32; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
++| 독립 검토·통합 CI | continuation round 1은 approve+재현 가능한 test-design nit 2건으로 수정 대기; 이 final revision은 아직 미검토 |
  | 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
  
  ### 이 Cycle 다음 권장 순서
@@ -203,7 +203,7 @@ index 477cd0e1..51c25934 100644
  
      if (!pricing) {
 diff --git a/tests/promptRefinerExecutionContract.test.mjs b/tests/promptRefinerExecutionContract.test.mjs
-index 8ebf8f78..b42e9cce 100644
+index 8ebf8f78..dc3a1565 100644
 --- a/tests/promptRefinerExecutionContract.test.mjs
 +++ b/tests/promptRefinerExecutionContract.test.mjs
 @@ -2,7 +2,10 @@ import assert from "node:assert/strict";
@@ -218,7 +218,7 @@ index 8ebf8f78..b42e9cce 100644
  import {
      PROMPT_REFINER_ADMISSION_REFUSAL_REASONS,
      PROMPT_REFINER_EXECUTION_CONTRACT,
-@@ -47,6 +50,61 @@ const candidate = (overrides = {}) => ({
+@@ -47,6 +50,67 @@ const candidate = (overrides = {}) => ({
      ...overrides,
  });
  
@@ -251,6 +251,12 @@ index 8ebf8f78..b42e9cce 100644
 +        ])
 +    );
 +
++// These callbacks and their restoration are synchronous: no promise or timer
++// can outlive the `finally`. Top-level tests in this file use node:test's
++// default sequential scheduling, and the repository unit runner additionally
++// pins `--test-concurrency=1` in scripts/run-unit-tests.mjs. A leaf test's
++// `concurrency` option only limits its own subtests, so it would not add an
++// isolation guarantee here.
 +const withIsolatedPriceEnv = (overrides, callback) => {
 +    const keys = PROMPT_REFINER_PRICING_ENV_KEYS;
 +    const before = envSnapshot(keys);
@@ -280,24 +286,22 @@ index 8ebf8f78..b42e9cce 100644
  test("execution contract freezes the shadow limits and worst-case cost", () => {
      assert.equal(PROMPT_REFINER_EXECUTION_CONTRACT.mode, "shadow");
      assert.equal(PROMPT_REFINER_EXECUTION_CONTRACT.userVisible, false);
-@@ -90,104 +148,227 @@ test("the maximum escaped request fits the offline token upper bound", () => {
-     assert.ok(maxRenderedRequestTokenUpperBound <= PROMPT_REFINER_MAX_INPUT_TOKENS);
+@@ -91,103 +155,307 @@ test("the maximum escaped request fits the offline token upper bound", () => {
  });
  
--test("the checked-in catalogue and pricing must match the exact pin", () => {
+ test("the checked-in catalogue and pricing must match the exact pin", () => {
 -    assert.deepEqual(promptRefinerExecutionContractProblems(), []);
 -    assert.deepEqual(
 -        promptRefinerExecutionContractProblems({ model: null, pricing: null }),
 -        ["model_missing", "pricing_missing"]
 -    );
-+test("the checked-in catalogue and pricing must match the exact pin", { concurrency: false }, () => {
 +    withIsolatedPriceEnv({}, () => {
 +        assert.deepEqual(promptRefinerExecutionContractProblems(), []);
 +        assert.deepEqual(
 +            promptRefinerExecutionContractProblems({ model: null, pricing: null }),
 +            ["model_missing", "pricing_missing"]
 +        );
-+
+ 
 +        const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
 +        const pricing = getModelPricingProfile(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
 +        assert.ok(model);
@@ -341,8 +345,8 @@ index 8ebf8f78..b42e9cce 100644
 +        );
 +    });
 +});
- 
-+test("effective input price env drift fails closed without leaking env", { concurrency: false }, () => {
++
++test("effective input price env drift fails closed without leaking env", () => {
      const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
 -    const pricing = getModelPricingProfile(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
      assert.ok(model);
@@ -426,7 +430,7 @@ index 8ebf8f78..b42e9cce 100644
 -                },
 -            })
 -        ),
-+test("effective output price env drift fails closed without leaking env", { concurrency: false }, () => {
++test("effective output price env drift fails closed without leaking env", () => {
 +    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
 +    assert.ok(model);
 +
@@ -477,7 +481,7 @@ index 8ebf8f78..b42e9cce 100644
 -        [candidate({ inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS + 1 }), "execution_contract_mismatch"],
 -        [candidate(), "reservation_authority_unavailable"],
 -    ];
-+test("effective output cap below 4096 fails closed without leaking env", { concurrency: false }, () => {
++test("effective output cap below 4096 fails closed without leaking env", () => {
 +    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
 +    assert.ok(model);
  
@@ -501,7 +505,7 @@ index 8ebf8f78..b42e9cce 100644
 +    });
 +});
 +
-+test("effective output cap at or above 4096 keeps the fixed request cap", { concurrency: false }, () => {
++test("effective output cap at or above 4096 keeps the fixed request cap", () => {
 +    const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
 +    assert.ok(model);
 +
@@ -535,7 +539,88 @@ index 8ebf8f78..b42e9cce 100644
 -    );
 +});
 +
-+test("an otherwise eligible request cannot fabricate successful admission", { concurrency: false }, () => {
++test("runtime registry row prices must match both effective rate pins", () => {
++    withIsolatedPriceEnv({}, () => {
++        const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
++        const pricing = getModelPricingProfile(
++            PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId
++        );
++        assert.ok(model);
++        assert.ok(pricing);
++
++        const inputOverride = {
++            ...model,
++            inputUsdPerMillionTokens: 99,
++        };
++        const inputEffective = resolveModelPricing(inputOverride, {
++            estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
++        });
++        assert.equal(inputEffective.costSource, "model_registry_override");
++        assert.equal(inputEffective.inputUsdPerMillionTokens, 99);
++        const inputProblems = promptRefinerExecutionContractProblems({
++            model: inputOverride,
++            pricing,
++        });
++        assert.ok(inputProblems.includes("effective_input_price_mismatch"));
++        assert.equal(inputProblems.includes("input_price_mismatch"), false);
++
++        const outputOverride = {
++            ...model,
++            outputUsdPerMillionTokens: 99,
++        };
++        const outputEffective = resolveModelPricing(outputOverride, {
++            estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
++        });
++        assert.equal(outputEffective.costSource, "model_registry_override");
++        assert.equal(outputEffective.outputUsdPerMillionTokens, 99);
++        const outputProblems = promptRefinerExecutionContractProblems({
++            model: outputOverride,
++            pricing,
++        });
++        assert.ok(outputProblems.includes("effective_output_price_mismatch"));
++        assert.equal(outputProblems.includes("output_price_mismatch"), false);
++    });
++});
++
++test("runtime registry row output cap enforces the 4096 boundary", () => {
++    withIsolatedPriceEnv({}, () => {
++        const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId);
++        const pricing = getModelPricingProfile(
++            PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId
++        );
++        assert.ok(model);
++        assert.ok(pricing);
++
++        for (const [effectiveCap, rejected] of [
++            [100, true],
++            [PROMPT_REFINER_MAX_OUTPUT_TOKENS, false],
++            [PROMPT_REFINER_MAX_OUTPUT_TOKENS + 1, false],
++        ]) {
++            const rowModel = { ...model, maxOutputTokens: effectiveCap };
++            const effective = resolveModelPricing(rowModel, {
++                estimatedPromptTokens: PROMPT_REFINER_MAX_INPUT_TOKENS,
++            });
++            assert.equal(effective.costSource, "registry");
++            assert.equal(effective.maxOutputTokens, effectiveCap);
++            const problems = promptRefinerExecutionContractProblems({
++                model: rowModel,
++                pricing,
++            });
++            assert.equal(
++                problems.includes("effective_output_cap_below_contract"),
++                rejected,
++                String(effectiveCap)
++            );
++            assert.equal(
++                problems.includes("output_cap_exceeds_model_profile"),
++                false,
++                String(effectiveCap)
++            );
++        }
++    });
++});
++
++test("an otherwise eligible request cannot fabricate successful admission", () => {
 +    withIsolatedPriceEnv({}, () => {
 +        assert.deepEqual(admitPromptRefinerExecution(candidate()), {
 +            admitted: false,
@@ -558,7 +643,7 @@ index 8ebf8f78..b42e9cce 100644
 +    });
 +});
 +
-+test("unknown, unapproved, drifted and authority-less candidates fail closed", { concurrency: false }, () => {
++test("unknown, unapproved, drifted and authority-less candidates fail closed", () => {
 +    withIsolatedPriceEnv({}, () => {
 +        const cases = [
 +            [candidate({ eligible: null }), "eligibility_refused"],
@@ -595,55 +680,55 @@ index 8ebf8f78..b42e9cce 100644
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1171ms)
+- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1126ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 1093.273
+  # duration_ms 1054.2328
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck` (37307ms)
+- PASS `npm run typecheck` (36521ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npm run lint -- --quiet` (49776ms)
+- PASS `npm run lint -- --quiet` (50581ms)
   > ai-chat-hub@0.1.0 lint
   > eslint --quiet
-- PASS `npm run check:model-pricing` (707ms)
+- PASS `npm run check:model-pricing` (711ms)
   > ai-chat-hub@0.1.0 check:model-pricing
   > node --import tsx scripts/check-model-pricing.mjs
   
   
   Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.
-- PASS `npm run check:doc-references` (1340ms)
+- PASS `npm run check:doc-references` (1324ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
-  Document reference check passed: 854 referenced path(s) across 108 instruction document(s), and 954 path(s) named by comments across 2898 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1024ms)
+  Document reference check passed: 854 referenced path(s) across 108 instruction document(s), and 955 path(s) named by comments across 2898 source file(s), all present.
+- PASS `npm run check:policy-section-references` (989ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4428 citation(s) against 35 policy document(s). 2788 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1414 and 226 predate this change).
-- PASS `npm run check:encoding:strict` (1271ms)
+- PASS `npm run check:encoding:strict` (1243ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `git diff --check 96e20b351335a802f53a33e9f2af96572c989705 HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1' ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-pricing-drift-v1'` (48ms)
+- PASS `git diff --check 96e20b351335a802f53a33e9f2af96572c989705 HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-contract-v1' ':(exclude)docs/ops/cross-review/packages/prompt-refiner-execution-pricing-drift-v1'` (50ms)
 
 ## Findings from the previous round (check each was addressed)
 
-- [nit/evidence] lib/promptRefinerExecutionContract.ts:197-216 (promptRefinerExecutionContractProblems): The new effective-value gate covers only the two rates, so the sibling env override CHAT_MODEL_GPT_5_6_LUNA_MAX_OUTPUT_TOKENS still moves the resolved request output cap (the value app/api/chat/route.ts:1422-1423 feeds to requestOutputCapTokens) below the frozen 4,096 while the static check at lib/promptRefinerExecutionContract.ts:282 passes on the profile's 128,000 and the contract reports no drift.
-- [nit/evidence] tests/promptRefinerExecutionContract.test.mjs:137: The baseline assertion that the checked-in catalogue yields no problems is no longer hermetic now that the gate reads process.env, and withIsolatedPriceEnv already supports the `undefined` = delete branch that would fix it but nothing exercises it, so the branch is dead code while the one test that needs it is left ambient.
+- [nit/evidence] tests/promptRefinerExecutionContract.test.mjs:203-288 (effective drift tests): Only the environment branch of the new effective gate is covered: the higher-precedence DB/admin registry-row branch (`model.inputUsdPerMillionTokens ?? ...` at lib/modelPricing.ts:1669-1699), which AGENTS.md:1336-1337, docs/policy/prompt-refiner-observability.md:15-16 and the progress note at docs/ops/tomverse-chat-progress.md:943 all promise is rejected, is asserted nowhere even though ContractModel was widened specifically to carry those fields.
+- [nit/evidence] tests/promptRefinerExecutionContract.test.mjs:151,203,236,269,290,320,343: The `{ concurrency: false }` option added to these process.env-mutating tests is a no-op that suggests a serialization guarantee it does not give, since node:test's `concurrency` configures a test's own subtests (default 1) and these tests have none — the real isolation comes from `withIsolatedPriceEnv` plus the root's default sequential execution.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Close continuation round 0 findings by rejecting an effective resolved output cap below the frozen 4,096-token request while allowing equal or higher capability, making the baseline and admission tests hermetic across all five relevant model-pricing env variables with exact restoration, and documenting which resolved/static pricing fields can or cannot change the Refiner contract.
+Summary: Close continuation round 1 test-design findings by directly covering higher-precedence runtime registry/admin row input and output price overrides plus max-output caps below, at, and above 4,096 under cleared pricing env, and by removing misleading leaf concurrency options while documenting synchronous finally restoration, node:test top-level sequencing, and the repository runner's test-concurrency=1.
 
 ## Answer format
 
@@ -652,8 +737,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-execution-pricing-drift-v1",
-  "round": 1,
-  "reviewedDigest": "sha256:8a184a434b8dec53b573221ea824b67cc0d78e3400769f765b443b0dc796e979",
+  "round": 2,
+  "reviewedDigest": "sha256:0c2906924f465d3a4ce883330c2c4c4c49c8d1107b5d8a98c7b0134c4d60b96b",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
