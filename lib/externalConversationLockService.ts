@@ -13,6 +13,7 @@ import {
     type SourceLockImpact,
 } from "@/lib/memorySourceLock";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
+import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { prisma } from "@/lib/prisma";
 import { logSecurityAuditEvent } from "@/lib/securityAudit";
 
@@ -229,6 +230,12 @@ export async function setExternalConversationLock(input: {
             data: { password: input.passwordHash },
         });
 
+        // The account's memory lock, after this snapshot's row lock -- the
+        // order a source deletion takes them (lib/memoryItemLock.ts). Without
+        // it a lock on source B and a deletion of source A could each judge a
+        // memory backed by both as still reachable through the other.
+        await lockAccountMemoryItems(tx, input.userId);
+
         // Read after the write, so the evidence facts already reflect the new
         // lock state and one plan covers both directions.
         const memories = await memoriesTouchingSources(tx, input.userId, [
@@ -382,6 +389,10 @@ export async function reconcileSourceLockedMemories(now = new Date()): Promise<{
         }
         for (const [userId, memoryIds] of byUser) {
             const applied = await prisma.$transaction(async (tx) => {
+                // Under the account's memory lock, so the facts are not read
+                // while a source deletion is between its classification and
+                // its cascade (lib/memoryItemLock.ts).
+                await lockAccountMemoryItems(tx, userId);
                 const facts = await memoryLockFacts(tx, userId, memoryIds);
                 return applySourceLockPlan(tx, userId, facts, now);
             });

@@ -8,6 +8,17 @@ import {
     previewExternalSourceDeletion,
 } from "@/lib/externalImportService";
 import { verifyExternalMessageEvidence } from "@/lib/memoryEvidenceValidation";
+import {
+    deleteMemory,
+    editMemory,
+    rejectMemory,
+    setMemoryPinned,
+} from "@/lib/memoryService";
+import { reconcileExpiredMemories } from "@/lib/memoryExpiryService";
+import {
+    reconcileSourceLockedMemories,
+    setExternalConversationLock,
+} from "@/lib/externalConversationLockService";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import { prisma } from "@/lib/prisma";
@@ -362,56 +373,88 @@ test("cancelling an unfinished import touches no memory", async () => {
     );
 });
 
-/* ------------------------------ deletion vs extraction (MEM-SOURCE-DELETE-01) */
+/* ------------------------------ memory lock serialisation (MEM-SOURCE-DELETE-01) */
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * An extraction chunk's write, held open: it takes the account's memory lock,
- * writes a candidate and its evidence the way persistence does, then waits for
- * `release` before committing. The deletion under test starts while it waits.
+ * Resolves once some session is waiting for an advisory lock, and fails if none
+ * does within the deadline. A barrier on the database's own state, not a sleep:
+ * the transaction under test has provably reached the lock, and without the
+ * lock it never waits, so the test fails rather than passing by timing.
  */
-const holdExtractionWrite = (userId: string, messageId: string) => {
+const untilAnAdvisoryLockIsAwaited = async (deadlineMs = 10_000) => {
+    const deadline = Date.now() + deadlineMs;
+    while (Date.now() < deadline) {
+        const rows = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
+            SELECT count(*)::bigint AS waiting
+            FROM pg_locks
+            WHERE locktype = 'advisory' AND NOT granted
+        `;
+        if (Number(rows[0]?.waiting ?? 0) > 0) return;
+        await pause(20);
+    }
+    assert.fail("no transaction waited for the account memory lock");
+};
+
+/**
+ * Holds `userId`'s memory lock in an open transaction, running `body` inside
+ * it first, until `release()` is called.
+ */
+const holdMemoryLock = <T>(
+    userId: string,
+    body: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<T>
+) => {
     let release!: () => void;
     const released = new Promise<void>((resolve) => {
         release = resolve;
     });
-    let signalWritten!: (id: string) => void;
-    const written = new Promise<string>((resolve) => {
-        signalWritten = resolve;
+    let signalHeld!: (value: T) => void;
+    const held = new Promise<T>((resolve) => {
+        signalHeld = resolve;
     });
     const committed = prisma.$transaction(
         async (tx) => {
             await lockAccountMemoryItems(tx, userId);
-            const statement = "사용자는 새벽에 일한다";
-            const item = await tx.memoryItem.create({
-                data: {
-                    userId,
-                    kind: "preference",
-                    statement,
-                    status: "candidate",
-                    confidence: 0.8,
-                    userEdited: false,
-                    searchTerms: memoryRetrievalTerms(statement),
-                    retrievalVersion: 1,
-                },
-            });
-            await tx.memoryEvidence.create({
-                data: {
-                    memoryItemId: item.id,
-                    userId,
-                    sourceType: "external_message",
-                    externalMessageId: messageId,
-                    evidenceDigest: externalContentDigest(`${item.id}:${messageId}`),
-                },
-            });
-            signalWritten(item.id);
+            const value = await body(tx);
+            signalHeld(value);
             await released;
-            return item.id;
+            return value;
         },
-        { timeout: 20_000 }
+        { timeout: 30_000 }
     );
-    return { written, release, committed };
+    return { held, release, committed };
+};
+
+/** An extraction chunk's write: a candidate and its evidence, as persistence writes them. */
+const writeCandidate = async (
+    tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+    userId: string,
+    messageId: string
+) => {
+    const statement = "사용자는 새벽에 일한다";
+    const item = await tx.memoryItem.create({
+        data: {
+            userId,
+            kind: "preference",
+            statement,
+            status: "candidate",
+            confidence: 0.8,
+            userEdited: false,
+            searchTerms: memoryRetrievalTerms(statement),
+            retrievalVersion: 1,
+        },
+    });
+    await tx.memoryEvidence.create({
+        data: {
+            memoryItemId: item.id,
+            userId,
+            sourceType: "external_message",
+            externalMessageId: messageId,
+            evidenceDigest: externalContentDigest(`${item.id}:${messageId}`),
+        },
+    });
+    return item.id;
 };
 
 for (const [label, runDelete] of [
@@ -438,19 +481,13 @@ for (const [label, runDelete] of [
         const conversation = await seedConversation(user.id, importRow.id);
         const message = await seedMessage(user.id, conversation.id, 0);
 
-        const extraction = holdExtractionWrite(user.id, message.id);
-        const candidateId = await extraction.written;
-
-        let deletionSettled = false;
-        const deletion = runDelete(user.id, importRow.id, conversation.id).finally(() => {
-            deletionSettled = true;
-        });
-        await pause(750);
-        assert.equal(
-            deletionSettled,
-            false,
-            "the deletion must wait for the extraction's memory lock"
+        const extraction = holdMemoryLock(user.id, (tx) =>
+            writeCandidate(tx, user.id, message.id)
         );
+        const candidateId = await extraction.held;
+
+        const deletion = runDelete(user.id, importRow.id, conversation.id);
+        await untilAnAdvisoryLockIsAwaited();
 
         extraction.release();
         await extraction.committed;
@@ -465,6 +502,113 @@ for (const [label, runDelete] of [
         );
     });
 }
+
+test("an edit committed while a deletion waits is seen as user-touched and suspended, not deleted", async () => {
+    // The stale-plan failure: a deletion that classified this memory as derived
+    // and then acted after an edit would delete the user's own words.
+    const user = await createUser();
+    const importRow = await seedImport(user.id);
+    const conversation = await seedConversation(user.id, importRow.id);
+    const message = await seedMessage(user.id, conversation.id, 0);
+    const memory = await seedMemory(user.id, "사용자는 아침형이다", {
+        messageIds: [message.id],
+    });
+
+    const edit = holdMemoryLock(user.id, (tx) =>
+        tx.memoryItem.update({
+            where: { id: memory.id },
+            data: { statement: "사용자는 저녁형이다", userEdited: true },
+        })
+    );
+    await edit.held;
+    const deletion = deleteExternalConversationSnapshot(user.id, conversation.id);
+    await untilAnAdvisoryLockIsAwaited();
+    edit.release();
+    await edit.committed;
+    const result = await deletion;
+
+    assert.equal(result.memory.deletedMemories, 0);
+    assert.equal(await statusOf(memory.id), "suspended_by_source_delete");
+});
+
+for (const [label, runWriter] of [
+    [
+        "editMemory",
+        (userId: string, memoryId: string) =>
+            editMemory({ userId, memoryId, statement: "사용자는 차를 좋아한다" }),
+    ],
+    ["rejectMemory", (userId: string, memoryId: string) => rejectMemory(userId, memoryId)],
+    ["setMemoryPinned", (userId: string, memoryId: string) => setMemoryPinned(userId, memoryId, true)],
+    ["deleteMemory", (userId: string, memoryId: string) => deleteMemory(userId, memoryId)],
+    ["reconcileExpiredMemories", () => reconcileExpiredMemories(new Date("2030-01-01T00:00:00.000Z"))],
+] as const) {
+    test(`${label} waits for the account memory lock`, async () => {
+        const user = await createUser();
+        const status = label === "rejectMemory" ? "candidate" : "active";
+        const memory = await seedMemory(user.id, "사용자는 커피를 좋아한다", {
+            manualGrounds: "사용자가 직접 말함",
+            status,
+        });
+        if (label === "reconcileExpiredMemories") {
+            await prisma.memoryItem.update({
+                where: { id: memory.id },
+                data: { expiresAt: new Date("2029-01-01T00:00:00.000Z") },
+            });
+        }
+        const holder = holdMemoryLock(user.id, async () => null);
+        await holder.held;
+        const writer = runWriter(user.id, memory.id);
+        await untilAnAdvisoryLockIsAwaited();
+        holder.release();
+        await holder.committed;
+        await writer;
+    });
+}
+
+test("setExternalConversationLock waits for the account memory lock", async () => {
+    const user = await createUser();
+    const importRow = await seedImport(user.id);
+    const conversation = await seedConversation(user.id, importRow.id);
+    const holder = holdMemoryLock(user.id, async () => null);
+    await holder.held;
+    const locking = setExternalConversationLock({
+        userId: user.id,
+        conversationId: conversation.id,
+        passwordHash: "hash-for-test",
+    });
+    await untilAnAdvisoryLockIsAwaited();
+    holder.release();
+    await holder.committed;
+    const result = await locking;
+    assert.equal(result.locked, true);
+});
+
+test("deleting a locked source moves its lock-suspended memory to source-delete, and the lock sweep leaves it there", async () => {
+    // Before, the lock suspension was not a suspendable status: the delete left
+    // it as `suspended_by_source_lock` with no evidence, and the next lock
+    // reconciliation -- which treats no evidence as not blocked -- restored it
+    // to `active` with nothing behind it.
+    const user = await createUser();
+    const importRow = await seedImport(user.id);
+    const conversation = await seedConversation(user.id, importRow.id);
+    const message = await seedMessage(user.id, conversation.id, 0);
+    const memory = await seedMemory(user.id, "사용자는 주말에 등산한다", {
+        messageIds: [message.id],
+        userEdited: true,
+        status: "suspended_by_source_lock",
+    });
+    await prisma.externalConversation.update({
+        where: { id: conversation.id },
+        data: { password: "hash-for-test" },
+    });
+
+    const result = await deleteExternalConversationSnapshot(user.id, conversation.id);
+    assert.equal(result.memory.suspendedMemories, 1);
+    assert.equal(await statusOf(memory.id), "suspended_by_source_delete");
+
+    await reconcileSourceLockedMemories();
+    assert.equal(await statusOf(memory.id), "suspended_by_source_delete");
+});
 
 test("an extraction that reaches the memory lock after a deletion stores nothing from the deleted source", async () => {
     const user = await createUser();
@@ -493,12 +637,9 @@ test("a deletion does not wait on an unrelated account's memory lock", async () 
     const importRow = await seedImport(owner.id);
     const conversation = await seedConversation(owner.id, importRow.id);
     await seedMessage(owner.id, conversation.id, 0);
-    const otherImport = await seedImport(other.id);
-    const otherConversation = await seedConversation(other.id, otherImport.id);
-    const otherMessage = await seedMessage(other.id, otherConversation.id, 0);
 
-    const extraction = holdExtractionWrite(other.id, otherMessage.id);
-    await extraction.written;
+    const holder = holdMemoryLock(other.id, async () => null);
+    await holder.held;
     try {
         const result = await Promise.race([
             deleteExternalConversationSnapshot(owner.id, conversation.id),
@@ -506,7 +647,7 @@ test("a deletion does not wait on an unrelated account's memory lock", async () 
         ]);
         assert.notEqual(result, "timed out", "another account's lock is not this deletion's");
     } finally {
-        extraction.release();
-        await extraction.committed;
+        holder.release();
+        await holder.committed;
     }
 });

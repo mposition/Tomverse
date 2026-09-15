@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
 import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
+import { SOURCE_LOCK_SUSPENDED_STATUS } from "@/lib/memorySourceLock";
 import {
     SOURCE_TITLE_PRESERVATION_STALE,
     judgeTitlePreservation,
@@ -619,11 +620,19 @@ export async function getExternalConversation(
  * retrieval by definition, and overwriting its status with
  * `suspended_by_source_delete` would replace the true reason it left with a
  * different one. Those rows keep the status they have.
+ *
+ * `suspended_by_source_lock` is not one of those: it is a suspension that
+ * waits for its source to be unlocked. When that source is deleted instead,
+ * the wait has nothing left to end it, and leaving the status in place was
+ * worse than stale -- the lock reconciliation treats a memory with no evidence
+ * as not blocked and would restore it to `active` with nothing behind it. The
+ * deletion is now the true reason, so the row takes it.
  */
 const SUSPENDABLE_MEMORY_STATUSES = [
     "active",
     "candidate",
     "manual_review_required",
+    SOURCE_LOCK_SUSPENDED_STATUS,
 ] as const;
 
 const NO_MEMORY_IMPACT = {

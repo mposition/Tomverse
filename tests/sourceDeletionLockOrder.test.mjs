@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
@@ -114,22 +115,112 @@ test("both deletions take the account's memory lock after their row locks and be
     );
 });
 
-test("every memory writer uses the one lock function, never its own key string", () => {
-    const helper = readFileSync("lib/memoryItemLock.ts", "utf8");
-    assert.match(helper, /hashtext\(\$\{"memory-items:" \+ userId\}\)/);
-    for (const path of [
-        "lib/memoryService.ts",
-        "lib/memoryExtractionPersistence.ts",
-        "lib/externalImportService.ts",
-    ]) {
-        const code = readFileSync(path, "utf8");
-        assert.match(code, /lockAccountMemoryItems\(/, path);
-        assert.doesNotMatch(code, /"memory-items:"/, `${path} must not spell the key itself`);
-    }
-    // The persistence step still takes it before its first memory read.
-    const persistence = readFileSync("lib/memoryExtractionPersistence.ts", "utf8");
-    assert.ok(
-        persistence.indexOf("await lockAccountMemoryItems(tx, input.userId)") <
-            persistence.indexOf("tx.memoryItem.deleteMany(")
+/**
+ * Every MemoryItem write happens under the account's memory lock.
+ *
+ * Checked per function, not per file: for each write, the enclosing function
+ * must take the lock before that write, or be a helper whose every call site
+ * takes it first. A file that merely mentions the lock somewhere proves
+ * nothing -- that is how edit, reject, expiry and the source-lock paths were
+ * missed before.
+ */
+const MEMORY_WRITER_FILES = [
+  "lib/memoryService.ts",
+  "lib/memoryExtractionPersistence.ts",
+  "lib/externalImportService.ts",
+  "lib/externalConversationLockService.ts",
+  "lib/memoryExpiryService.ts",
+];
+const WRITE = /\b(?:tx|client|prisma)\.memoryItem\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/g;
+const LOCK = /\b(?:lockAccountMemoryItems|acquireUserMemoryLock)\(/;
+
+/** Top-level function bodies, by name. Good enough for these files' style. */
+const topLevelFunctions = (code) => {
+  const heads = [...code.matchAll(/^(?:export )?(?:async )?function\*? (\w+)\(|^(?:export )?const (\w+) = (?:async )?\(/gm)];
+  return heads.map((head, index) => ({
+    name: head[1] ?? head[2],
+    start: head.index,
+    end: heads[index + 1]?.index ?? code.length,
+  }));
+};
+
+test("every MemoryItem write is preceded by the account memory lock in its own function or all its callers", () => {
+  const helpersNeedingLockedCallers = new Map();
+  for (const path of MEMORY_WRITER_FILES) {
+    const code = readFileSync(path, "utf8");
+    assert.doesNotMatch(code, /"memory-items:"/, `${path} must use lockAccountMemoryItems(), not spell the key`);
+    assert.doesNotMatch(
+      code,
+      /\bprisma\.memoryItem\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/,
+      `${path}: a memory write outside a transaction cannot hold the lock`
     );
+    const functions = topLevelFunctions(code);
+    for (const write of code.matchAll(WRITE)) {
+      const fn = functions.find((candidate) => candidate.start <= write.index && write.index < candidate.end);
+      assert.ok(fn, `${path}: a write outside any function`);
+      const before = code.slice(fn.start, write.index);
+      if (LOCK.test(before)) continue;
+      helpersNeedingLockedCallers.set(`${path}#${fn.name}`, { path, name: fn.name });
+    }
+  }
+  const expectedHelpers = [
+    "lib/externalImportService.ts#applySourceDeletionToMemories",
+    "lib/externalConversationLockService.ts#applySourceLockPlan",
+    "lib/memoryService.ts#assertNoActiveConflict",
+  ];
+  assert.deepEqual([...helpersNeedingLockedCallers.keys()].sort(), expectedHelpers.sort());
+  for (const { path, name } of helpersNeedingLockedCallers.values()) {
+    const code = readFileSync(path, "utf8");
+    const functions = topLevelFunctions(code);
+    // Every mention except the definition's own head.
+    const calls = [...code.matchAll(new RegExp("\\b" + name + "\\(", "g"))].filter(
+      (call) => !/function\*?\s+$/.test(code.slice(Math.max(0, call.index - 12), call.index))
+    );
+    let callSites = 0;
+    for (const call of calls) {
+      const caller = functions.find((fn) => fn.start <= call.index && call.index < fn.end);
+      if (!caller || caller.name === name) continue;
+      callSites += 1;
+      assert.match(
+        code.slice(caller.start, call.index),
+        LOCK,
+        `${path}: ${caller.name} calls ${name} without taking the memory lock first`
+      );
+    }
+    assert.ok(callSites > 0, `${name} has callers`);
+  }
+});
+
+test("no other module writes MemoryItem rows", () => {
+  // A new writer elsewhere must join the list above, and therefore the lock.
+  const listed = execSync("git ls-files lib app", { encoding: "utf8" })
+    .split("\n")
+    .filter((file) => /\.(ts|tsx)$/.test(file));
+  const writers = listed.filter((file) => {
+    try {
+      return /memoryItem\.(?:create|createMany|update|updateMany|upsert|delete|deleteMany)\(/.test(readFileSync(file, "utf8"));
+    } catch {
+      return false;
+    }
+  });
+  assert.deepEqual(writers.sort(), [...MEMORY_WRITER_FILES].sort());
+});
+
+test("delete-all takes the run rows before the memory lock, the order an extraction commit takes them", () => {
+  const service = readFileSync("lib/memoryService.ts", "utf8");
+  const start = service.indexOf("export async function deleteAllMemories(");
+  const body = service.slice(start, service.indexOf("\nexport ", start + 1));
+  const runs = body.indexOf("tx.memoryExtractionRun.updateMany(");
+  const lock = body.indexOf("acquireUserMemoryLock(tx, userId)");
+  assert.ok(runs > 0 && lock > runs, "run rows first, then the memory lock");
+
+  const commit = readFileSync("lib/memoryExtractionCommit.ts", "utf8");
+  assert.ok(commit.indexOf('FROM "MemoryExtractionRun"') < commit.indexOf("persistExtractionChunkDecisions("));
+});
+
+test("a source deletion transitions a lock-suspended memory instead of leaving it to be restored", () => {
+  const service = readFileSync("lib/externalImportService.ts", "utf8");
+  const start = service.indexOf("const SUSPENDABLE_MEMORY_STATUSES = [");
+  const list = service.slice(start, service.indexOf("] as const;", start));
+  assert.match(list, /SOURCE_LOCK_SUSPENDED_STATUS/);
 });
