@@ -827,8 +827,9 @@ production build를 public origin 두 조합과 loopback fixture에서 실행해
 ## 2026-09-15 Prompt Refiner PLANNER-03 명시적 surface 회차
 
 앞 회차의 다음 순서 ②를 구현했다. `promptRefinerModelMessages()`를
-`npm run check:prompt-injection`의 `prompt-refiner` surface로 등록하고, 기존 17개
-adversarial payload 전부를 실제 builder에 통과시킨다. 감사기는 다음 구조를
+`npm run check:prompt-injection`의 `prompt-refiner` surface로 등록하고, 기존 17개에
+JSON role 위조형 1개를 더한 adversarial payload 18개 전부를 실제 builder에
+통과시킨다. 감사기는 다음 구조를
 deterministic하게 확인한다.
 
 - system 규칙이 첫 메시지이며 원문 payload를 포함하지 않고, 별도 모듈에 고정한

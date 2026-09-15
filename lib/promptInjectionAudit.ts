@@ -167,6 +167,16 @@ export const PROMPT_REFINER_REQUIRED_RULE_LINES = [
     "Return one JSON object with exactly one string field named refinedPrompt. Return no prose or code fence.",
 ] as const;
 
+/**
+ * Independent scope floor for the Prompt Refiner's data message.
+ *
+ * Keep this literal separate from `PROMPT_REFINER_INPUT_SCOPE` for the same
+ * reason the rule lines above are separate from the builder: changing the
+ * product constant must not silently change what PLANNER-03 considers safe.
+ */
+export const PROMPT_REFINER_REQUIRED_INPUT_SCOPE =
+    "current_user_turn_text_only" as const;
+
 /** Every index at which `needle` occurs. */
 const occurrences = (haystack: string, needle: string): number[] => {
     const found: number[] = [];
@@ -390,40 +400,67 @@ export function auditRoleSeparatedPrompt(
     }
 
     const dataMessage = input.messages[1];
+    if (input.inputScope !== PROMPT_REFINER_REQUIRED_INPUT_SCOPE) {
+        say(
+            "structure_injected",
+            "the configured input scope is not the independently pinned current-turn-only scope"
+        );
+    }
     if (dataMessage?.role !== "user" || typeof dataMessage.content !== "string") {
         say(
             "structure_injected",
             "the second message is not the canonical user data message"
         );
     } else {
-        const expected = JSON.stringify({
-            inputScope: input.inputScope,
-            sourceText: input.payload,
-        });
-        if (dataMessage.content !== expected) {
-            say(
-                "structure_injected",
-                "the user data message is not the exact two-field JSON encoding"
-            );
+        let decoded: unknown;
+        try {
+            decoded = JSON.parse(dataMessage.content) as unknown;
+        } catch {
+            say("forged_boundary", "the user data message is not valid JSON");
         }
 
-        try {
-            const decoded = JSON.parse(dataMessage.content) as unknown;
-            if (
-                typeof decoded !== "object" ||
-                decoded === null ||
-                Array.isArray(decoded) ||
-                (decoded as { inputScope?: unknown }).inputScope !==
-                    input.inputScope ||
-                (decoded as { sourceText?: unknown }).sourceText !== input.payload
+        if (
+            typeof decoded === "object" &&
+            decoded !== null &&
+            !Array.isArray(decoded)
+        ) {
+            const record = decoded as Record<string, unknown>;
+            const keys = Object.keys(record).sort();
+            const hasExactFields =
+                keys.length === 2 &&
+                keys[0] === "inputScope" &&
+                keys[1] === "sourceText";
+
+            if (!hasExactFields) {
+                say(
+                    "structure_injected",
+                    "the decoded data message does not have exactly the two allowed fields"
+                );
+            } else if (
+                record.inputScope !== PROMPT_REFINER_REQUIRED_INPUT_SCOPE ||
+                record.sourceText !== input.payload
             ) {
                 say(
                     "escaped_region",
                     "the decoded data message does not preserve the scope and source bytes"
                 );
+            } else {
+                const canonical = JSON.stringify({
+                    inputScope: PROMPT_REFINER_REQUIRED_INPUT_SCOPE,
+                    sourceText: input.payload,
+                });
+                if (dataMessage.content !== canonical) {
+                    say(
+                        "structure_injected",
+                        "the user data message is not the canonical two-field JSON encoding"
+                    );
+                }
             }
-        } catch {
-            say("forged_boundary", "the user data message is not valid JSON");
+        } else if (decoded !== undefined) {
+            say(
+                "structure_injected",
+                "the decoded data message is not a JSON object"
+            );
         }
     }
 

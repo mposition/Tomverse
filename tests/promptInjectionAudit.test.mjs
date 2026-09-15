@@ -25,6 +25,7 @@ import {
     buildMemoryContextPrompt,
 } from "../lib/memoryContextPrompt.ts";
 import {
+    PROMPT_REFINER_REQUIRED_INPUT_SCOPE,
     PROMPT_REFINER_REQUIRED_RULE_LINES,
     auditAssembledPrompt,
     auditRoleSeparatedPrompt,
@@ -270,6 +271,31 @@ test("the Prompt Refiner security rules are pinned independently of its builder 
     assert.ok(kinds(found).includes("rules_after_content"), kinds(found).join());
 });
 
+test("the Prompt Refiner input scope is pinned independently of its builder constant", () => {
+    const payload = payloadNamed("priority-claim");
+    const weakenedScope = "full_conversation_context";
+    const found = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            inputScope: weakenedScope,
+            messages: [
+                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        inputScope: weakenedScope,
+                        sourceText: payload.text,
+                    }),
+                },
+            ],
+        })
+    );
+    assert.ok(
+        kinds(found).includes("structure_injected"),
+        kinds(found).join()
+    );
+    assert.ok(kinds(found).includes("escaped_region"), kinds(found).join());
+});
+
 test("a Prompt Refiner builder refusal becomes a violation instead of a crash", () => {
     const payload = payloadNamed("system-role-claim");
     const found = auditRoleSeparatedPrompt(
@@ -288,7 +314,7 @@ test("a Prompt Refiner that uses plaintext, another field or another message is 
             ],
         })
     );
-    assert.ok(kinds(plaintext).includes("forged_boundary"), kinds(plaintext).join());
+    assert.deepEqual(kinds(plaintext), ["forged_boundary"]);
 
     const extraContext = auditRoleSeparatedPrompt(
         promptRefinerInput(payload, {
@@ -309,6 +335,42 @@ test("a Prompt Refiner that uses plaintext, another field or another message is 
         kinds(extraContext).includes("structure_injected"),
         kinds(extraContext).join()
     );
+
+    const changedSource = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            messages: [
+                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
+                {
+                    role: "user",
+                    content: JSON.stringify({
+                        inputScope: PROMPT_REFINER_REQUIRED_INPUT_SCOPE,
+                        sourceText: `${payload.text} changed`,
+                    }),
+                },
+            ],
+        })
+    );
+    assert.deepEqual(kinds(changedSource), ["escaped_region"]);
+
+    const nonCanonical = auditRoleSeparatedPrompt(
+        promptRefinerInput(payload, {
+            messages: [
+                { role: "system", content: PROMPT_REFINER_SYSTEM_INSTRUCTION },
+                {
+                    role: "user",
+                    content: JSON.stringify(
+                        {
+                            inputScope: PROMPT_REFINER_REQUIRED_INPUT_SCOPE,
+                            sourceText: payload.text,
+                        },
+                        null,
+                        2
+                    ),
+                },
+            ],
+        })
+    );
+    assert.deepEqual(kinds(nonCanonical), ["structure_injected"]);
 
     const extraMessage = auditRoleSeparatedPrompt(
         promptRefinerInput(payload, {

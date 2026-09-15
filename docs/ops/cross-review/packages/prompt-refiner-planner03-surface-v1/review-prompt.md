@@ -17,7 +17,7 @@ Prompt Refiner를 제품에서 활성화하지 않은 채 실제 promptRefinerMo
 - 관련 test, typecheck, lint, build, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.
 - Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다.
 
-## Change under review — digest sha256:8237fafcb203ac07d956cb3212dd6d45d5a94d0095a35476bef3bc22357275a4
+## Change under review — digest sha256:8237fafcb203ac07d956cb3212dd6d45d5a94d0095a35476bef3bc22357275a4, commit b51834ff852a9b458c013d4429d11aee1d517f54
 
 ```diff
 diff --git a/.github/workflows/pr-fast-gate.yml b/.github/workflows/pr-fast-gate.yml
@@ -719,66 +719,66 @@ index 75ebf91c..fc0c143d 100644
 
 ## Test results (run by the control program)
 
-- PASS `npm run test:unit` (818917ms)
+- PASS `npm run test:unit` (899135ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 2585.5919
+  ℹ duration_ms 14306.6966
 
 ## Guard results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs tests/promptRefinerSuggestion.test.mjs` (412ms)
+- PASS `node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs tests/promptRefinerSuggestion.test.mjs` (491ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 331.5666
-- PASS `npm run check:prompt-injection` (739ms)
+  # duration_ms 410.1387
+- PASS `npm run check:prompt-injection` (804ms)
   adversarial_retrieved_content_instruction_precedence_violations = 0
   17 adversarial payload(s) through memory (17), attachment (17), attachment-filename (17), profile-knowledge (17), prompt-refiner (17)
   not exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)
   Untrusted content stayed data at every fenced and role-separated boundary.
-- PASS `npm run check:release-gate-coverage` (522ms)
+- PASS `npm run check:release-gate-coverage` (657ms)
   > ai-chat-hub@0.1.0 check:release-gate-coverage
   > node scripts/check-release-gate-coverage.mjs
   
   Release gate coverage check passed: 52 CI-enforced and 3 manually gated check(s), all named in the release checklist.
-- PASS `npm run report:release-gate-evidence -- --json` (604ms)
+- PASS `npm run report:release-gate-evidence -- --json` (1428ms)
   "note": "memory-release-b-enabled is a runtime condition; supply it to classify this gate."
       }
     ],
     "notApplicable": []
   }
-- PASS `npm run typecheck` (62969ms)
+- PASS `npm run typecheck` (71354ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npx eslint . --max-warnings=0` (82667ms)
-- PASS `npm run build` (41493ms)
+- PASS `npx eslint . --max-warnings=0` (89404ms)
+- PASS `npm run build` (36000ms)
   ƒ Proxy (Middleware)
   
   ○  (Static)   prerendered as static content
   ●  (SSG)      prerendered as static HTML (uses generateStaticParams)
   ƒ  (Dynamic)  server-rendered on demand
-- PASS `npm run check:doc-references` (1725ms)
+- PASS `npm run check:doc-references` (1637ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 829 referenced path(s) across 105 instruction document(s), and 929 path(s) named by comments across 2840 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1138ms)
+- PASS `npm run check:policy-section-references` (1015ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4323 citation(s) against 33 policy document(s). 2685 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 221 predate this change).
-- PASS `npm run check:encoding:strict` (1521ms)
+- PASS `npm run check:encoding:strict` (1268ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `git diff --check` (54ms)
+- PASS `git diff --check` (50ms)
 
 ## Findings from the previous round (check each was addressed)
 
