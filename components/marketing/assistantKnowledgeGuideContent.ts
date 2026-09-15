@@ -6,7 +6,8 @@ export type AssistantKnowledgeGuideCopy = {
   description: string;
   posterAlt: string;
   mediaLabel: string;
-  mediaHint: string;
+  videoLabel: string;
+  videoHint: string;
   stepsHeading: string;
   steps: Array<{
     id: AssistantKnowledgeGuideStep;
@@ -36,7 +37,8 @@ export const assistantKnowledgeGuideContent: Record<
     posterAlt:
       "나의 AI 어시스턴트 생성, Knowledge 추가, 대화에서 사용의 3단계 Tomverse 안내",
     mediaLabel: "인터랙티브 사용법",
-    mediaHint: "아래 단계 버튼을 누르면 해당 화면에서 할 일을 미리 보여드립니다.",
+    videoLabel: "무음 사용법 영상",
+    videoHint: "한국어 자막이 자동으로 켜져 음성 없이도 전체 흐름을 볼 수 있습니다.",
     stepsHeading: "직접 눌러보는 3단계",
     steps: [
       {
@@ -84,7 +86,8 @@ export const assistantKnowledgeGuideContent: Record<
     posterAlt:
       "Tomverse guide showing three steps: create an AI assistant, add Knowledge, and use it in a conversation",
     mediaLabel: "Interactive how-to",
-    mediaHint: "Choose a step below to preview what you will do on that screen.",
+    videoLabel: "Silent tutorial",
+    videoHint: "English captions turn on automatically, so the complete flow works without audio.",
     stepsHeading: "Try the three steps",
     steps: [
       {

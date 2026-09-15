@@ -13,11 +13,12 @@ export const ASSISTANT_KNOWLEDGE_GUIDE_POSTER_URL = new URL(
 ).toString();
 
 /**
- * The Runway-produced tutorial will live on a Tomverse origin and be set here
- * once the reviewed export exists. Until then the page renders the complete,
- * keyboard-accessible interactive walkthrough instead of a broken player.
+ * Keep the reviewed tutorial on the Tomverse origin. The page retains its
+ * keyboard-accessible walkthrough as a complete alternative to the video.
  */
-export const ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH: string | null = null;
+export const ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH: string | null =
+  `${ASSISTANT_KNOWLEDGE_GUIDE_PATH}/assistant-knowledge.mp4`;
+export const ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_DURATION_SECONDS = 44.04;
 
 export const ASSISTANT_KNOWLEDGE_GUIDE_STEPS = [
   "create_assistant",
