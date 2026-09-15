@@ -37,8 +37,31 @@ import { estimateTextTokens } from "../lib/chatTokenEstimate.ts";
 /** The newest-message scan the real loader uses (lib/externalContinuationService.ts). */
 export const SEED_SOURCE_MESSAGE_SCAN_LIMIT = 200;
 
-/** Counts a report publishes are rounded to this, so suppressed groups cannot be subtracted out. */
-export const PUBLISHED_COUNT_ROUNDING = 5;
+/**
+ * The smallest number of snapshots a published figure may rest on. A group
+ * smaller than this is suppressed; a share whose matching (or non-matching)
+ * snapshots number between 1 and this minus one is published as a band, not a
+ * percent.
+ */
+export const MIN_PUBLISHED_CELL = 5;
+
+/**
+ * Upper bounds of the count bands a report publishes instead of counts. Bands
+ * are wide enough that subtracting one published figure from another yields a
+ * range, never a suppressed group's size or a small exact count.
+ */
+const COUNT_BAND_EDGES = [1, 5, 10, 50, 100, 500, 1_000, 5_000];
+
+/**
+ * What the assistant-turn weight is and is not. It is printed with every
+ * database result, because the figure is only as good as this proxy.
+ */
+export const ASSISTANT_TURN_WEIGHT_NOTE =
+  "Assistant-turn weight is a proxy for seeded requests, not a count of them. It counts every " +
+  "assistant message saved in a continued conversation: turns that carried no seed (seeding off, " +
+  "source locked at the time, deep research) are included, a multi-model turn counts once per model, " +
+  "requests that failed before a message was saved are missing, and no time window or seed-version " +
+  "filter is applied.";
 
 /** The text the planner actually judges and prices: the pre-cut to the message cap. */
 const preCut = (content) => {
@@ -266,29 +289,35 @@ const quantile = (values, q) => {
   return sorted[index];
 };
 
-/** Rounded to the nearest `PUBLISHED_COUNT_ROUNDING`, never to a smaller exact figure. */
-export const roundedCount = (value) =>
-  Math.round(value / PUBLISHED_COUNT_ROUNDING) * PUBLISHED_COUNT_ROUNDING;
+/** A count as a band ("0", "1-4", "5-9", ... "5000+"), never the count itself. */
+export function countBand(value) {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  for (let index = 1; index < COUNT_BAND_EDGES.length; index += 1) {
+    if (value < COUNT_BAND_EDGES[index]) return `${COUNT_BAND_EDGES[index - 1]}-${COUNT_BAND_EDGES[index] - 1}`;
+  }
+  return `${COUNT_BAND_EDGES.at(-1)}+`;
+}
 
 const percent = (part, whole) => (whole === 0 ? null : Math.round((part / whole) * 100));
 
 /**
  * Per script class and candidate: shares and quantiles, in two units.
  *
- *   snapshot share   each imported conversation counts once, however often it
- *                    was continued -- how common a shape of source is
- *   request share    each sample weighted by `requests`, the assistant turns its
- *                    continued conversations have had -- roughly how many model
- *                    requests carried (or would have carried) this seed, which is
- *                    the unit both the quality effect and the cost land in
+ *   snapshot share        each imported conversation counts once, however often
+ *                         it was continued -- how common a shape of source is
+ *   assistant-turn share  each sample weighted by the assistant turns its
+ *                         continued conversations have had, a proxy for how many
+ *                         model requests carried this seed; see
+ *                         ASSISTANT_TURN_WEIGHT_NOTE for what the proxy gets wrong
  *
- * Privacy: groups smaller than `minGroupSize` snapshots are suppressed with no
- * figures. Every published count is rounded to the nearest
- * `PUBLISHED_COUNT_ROUNDING` and every share is a whole percent, so a
- * suppressed group's size cannot be recovered by subtracting published counts
- * from a published total.
+ * Disclosure: groups smaller than `minGroupSize` snapshots are suppressed with
+ * no figures. No count is published, only a band (`countBand`), so no total
+ * sits next to a group's exact size. A share resting on fewer than
+ * MIN_PUBLISHED_CELL snapshots on either side -- matching or not -- is published
+ * as a band with no percent, so a percent can never be solved back to 1-4
+ * snapshots.
  */
-export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
+export function aggregateSeedSamples(samples, { minGroupSize = MIN_PUBLISHED_CELL } = {}) {
   const groups = new Map();
   for (const sample of samples) {
     const list = groups.get(sample.script) ?? [];
@@ -301,18 +330,26 @@ export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
       report[script] = { suppressed: true, reason: `fewer than ${minGroupSize} snapshots` };
       continue;
     }
-    const weightOf = (sample) => Math.max(0, sample.requests ?? 0);
-    const totalRequests = list.reduce((total, sample) => total + weightOf(sample), 0);
+    const weightOf = (sample) => Math.max(0, sample.assistantTurns ?? 0);
+    const totalTurns = list.reduce((total, sample) => total + weightOf(sample), 0);
     const byCandidate = {};
     for (const candidate of SEED_CANDIDATES) {
       const rows = list.map((sample) => ({ row: sample.results[candidate.id], weight: weightOf(sample) }));
       const shares = (predicate) => {
         const matching = rows.filter(({ row }) => predicate(row));
+        const rest = rows.length - matching.length;
+        if ((matching.length > 0 && matching.length < MIN_PUBLISHED_CELL) || (rest > 0 && rest < MIN_PUBLISHED_CELL)) {
+          return {
+            snapshotPercent: null,
+            assistantTurnPercent: null,
+            band: matching.length < MIN_PUBLISHED_CELL ? `fewer than ${MIN_PUBLISHED_CELL} snapshots` : `all but fewer than ${MIN_PUBLISHED_CELL} snapshots`,
+          };
+        }
         return {
           snapshotPercent: percent(matching.length, rows.length),
-          requestPercent: percent(
+          assistantTurnPercent: percent(
             matching.reduce((total, { weight }) => total + weight, 0),
-            totalRequests
+            totalTurns
           ),
         };
       };
@@ -325,20 +362,20 @@ export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
         includedMessagesP50: quantile(rows.map(({ row }) => row.includedMessages), 0.5),
         renderedTokensP50: quantile(rows.map(({ row }) => row.renderedTokens), 0.5),
         renderedTokensP90: quantile(rows.map(({ row }) => row.renderedTokens), 0.9),
-        // Request-weighted mean of what this candidate would add to each seeded
-        // request, the figure a cost decision needs.
-        renderedTokensPerRequest:
-          totalRequests === 0
+        // Assistant-turn-weighted mean of what this candidate would add per
+        // turn -- the cost figure, with the proxy's biases.
+        renderedTokensPerAssistantTurn:
+          totalTurns === 0
             ? null
             : Math.round(
                 rows.reduce((total, { row, weight }) => total + row.renderedTokens * weight, 0) /
-                  totalRequests
+                  totalTurns
               ),
       };
     }
     report[script] = {
-      snapshotsRounded: roundedCount(list.length),
-      requestsRounded: roundedCount(totalRequests),
+      snapshotsBand: countBand(list.length),
+      assistantTurnsBand: countBand(totalTurns),
       byCandidate,
     };
   }
@@ -354,7 +391,7 @@ export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
  *   fetchSnapshotPage(cursor, take)  -> [{ id, provider, importedAt, messageCount, locked }]
  *                                       finalized snapshots with at least one continuation
  *   fetchNewestMessages(ids)         -> Map(id -> messages), newest SEED_SOURCE_MESSAGE_SCAN_LIMIT
- *   fetchRequestWeights(ids)         -> Map(id -> assistant turns across its continuations)
+ *   fetchAssistantTurnCounts(ids)    -> Map(id -> assistant turns across its continuations)
  *   countDeletedSourceContinuations() -> number
  *
  * Identifiers exist only inside this function, to join the three reads; none
@@ -362,7 +399,7 @@ export function aggregateSeedSamples(samples, { minGroupSize = 5 } = {}) {
  * unless `includeLocked` -- see the runner for why that is an explicit choice.
  */
 export async function measureStoredConversations(
-  { fetchSnapshotPage, fetchNewestMessages, fetchRequestWeights, countDeletedSourceContinuations },
+  { fetchSnapshotPage, fetchNewestMessages, fetchAssistantTurnCounts, countDeletedSourceContinuations },
   { includeLocked = false, maxSnapshots = Number.POSITIVE_INFINITY, pageSize = 50, onProgress } = {}
 ) {
   const samples = [];
@@ -379,8 +416,8 @@ export async function measureStoredConversations(
     const readable = page.filter((snapshot) => includeLocked || !snapshot.locked);
     lockedSkipped += page.length - readable.length;
     const ids = readable.map((snapshot) => snapshot.id);
-    const [messagesById, weightsById] =
-      ids.length === 0 ? [new Map(), new Map()] : await Promise.all([fetchNewestMessages(ids), fetchRequestWeights(ids)]);
+    const [messagesById, turnsById] =
+      ids.length === 0 ? [new Map(), new Map()] : await Promise.all([fetchNewestMessages(ids), fetchAssistantTurnCounts(ids)]);
     for (const snapshot of readable) {
       const messages = messagesById.get(snapshot.id) ?? [];
       const evaluated = evaluateSeedCandidates(messages, snapshot.messageCount, {
@@ -392,21 +429,28 @@ export async function measureStoredConversations(
         continue;
       }
       if (snapshot.locked) lockedMeasured += 1;
-      samples.push({ script: evaluated.script, results: evaluated.results, requests: weightsById.get(snapshot.id) ?? 0 });
+      samples.push({
+        script: evaluated.script,
+        results: evaluated.results,
+        assistantTurns: turnsById.get(snapshot.id) ?? 0,
+      });
     }
     onProgress?.(seen);
     if (page.length < pageSize) break;
   }
+  // Reaching the limit is not stopping at it: only a row left unread is.
+  const stoppedAtLimit = seen >= maxSnapshots && cursor !== undefined && (await fetchSnapshotPage(cursor, 1)).length > 0;
   return {
-    scopeRounded: {
-      snapshotsScanned: roundedCount(seen),
-      measured: roundedCount(samples.length),
-      lockedNotRead: roundedCount(lockedSkipped),
-      lockedMeasured: roundedCount(lockedMeasured),
-      noEligibleText: roundedCount(noEligibleText),
-      continuationsOfDeletedSources: roundedCount(await countDeletedSourceContinuations()),
+    scopeBands: {
+      snapshotsScanned: countBand(seen),
+      measured: countBand(samples.length),
+      lockedNotRead: countBand(lockedSkipped),
+      lockedMeasured: countBand(lockedMeasured),
+      noEligibleText: countBand(noEligibleText),
+      continuationsOfDeletedSources: countBand(await countDeletedSourceContinuations()),
     },
-    stoppedAtLimit: seen >= maxSnapshots,
+    stoppedAtLimit,
+    assistantTurnWeight: ASSISTANT_TURN_WEIGHT_NOTE,
     byScript: aggregateSeedSamples(samples),
   };
 }

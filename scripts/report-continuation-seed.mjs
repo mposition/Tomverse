@@ -18,8 +18,11 @@
 // at least once -- their newest 200 messages, the scan the loader uses, one
 // query per page of 50 -- and evaluates every candidate in memory. It prints
 // whole-percent shares and quantiles per script class, weighted both per
-// snapshot and per assistant turn of the continued conversations, with groups
-// under five snapshots suppressed and every count rounded to the nearest five.
+// snapshot and per assistant turn of the continued conversations (a proxy for
+// seeded requests whose biases the output states). Counts are published as
+// bands, never exactly; groups under five snapshots are suppressed, and so is
+// any percent resting on fewer than five snapshots on either side.
+// A --max-snapshots value that is not a positive whole number exits 2.
 // No message text, title, ordinal, snapshot id or user id is printed, logged or
 // written; identifiers exist only to join the reads.
 //
@@ -49,11 +52,16 @@ const argv = process.argv.slice(2);
 const json = argv.includes("--json");
 const useDatabase = argv.includes("--database");
 const includeLocked = argv.includes("--include-locked");
-const maxSnapshotsArg = argv[argv.indexOf("--max-snapshots") + 1];
-const maxSnapshots =
-  argv.includes("--max-snapshots") && Number.isSafeInteger(Number(maxSnapshotsArg)) && Number(maxSnapshotsArg) > 0
-    ? Number(maxSnapshotsArg)
-    : Number.POSITIVE_INFINITY;
+// A mistyped limit must not quietly become "no limit" and read every snapshot.
+let maxSnapshots = Number.POSITIVE_INFINITY;
+if (argv.includes("--max-snapshots")) {
+  const value = argv[argv.indexOf("--max-snapshots") + 1] ?? "";
+  if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) {
+    process.stderr.write("--max-snapshots needs a positive whole number, for example --max-snapshots 2000\n");
+    process.exit(2);
+  }
+  maxSnapshots = Number(value);
+}
 
 // ------------------------------------------------------------------ fixtures
 
@@ -123,15 +131,15 @@ if (useDatabase && process.env.DATABASE_URL?.trim()) {
           }
           return byId;
         },
-        fetchRequestWeights: async (ids) => {
+        fetchAssistantTurnCounts: async (ids) => {
           const rows = await prisma.$queryRaw`
-            SELECT b."externalConversationId" AS "sourceId", count(m."id")::bigint AS "requests"
+            SELECT b."externalConversationId" AS "sourceId", count(m."id")::bigint AS "turns"
             FROM "ConversationContinuationBridge" b
             JOIN "Message" m ON m."conversationId" = b."conversationId" AND m."role" = 'assistant'
             WHERE b."externalConversationId" IN (${Prisma.join(ids)})
             GROUP BY b."externalConversationId"
           `;
-          return new Map(rows.map((row) => [row.sourceId, Number(row.requests)]));
+          return new Map(rows.map((row) => [row.sourceId, Number(row.turns)]));
         },
         countDeletedSourceContinuations: () =>
           prisma.conversationContinuationBridge.count({ where: { externalConversationId: null } }),
@@ -148,7 +156,8 @@ if (useDatabase && process.env.DATABASE_URL?.trim()) {
     database = {
       source: "database",
       note:
-        "Read-only. Whole-percent shares and quantiles; groups under 5 snapshots suppressed; counts rounded to 5." +
+        "Read-only. Counts are bands; shares are whole percents, published only when at least 5 snapshots " +
+        "match and at least 5 do not; groups under 5 snapshots are suppressed." +
         (includeLocked ? " Locked snapshots were included (--include-locked)." : " Locked snapshots were not read."),
       ...measured,
     };
@@ -184,13 +193,14 @@ if (json) {
   }
   console.log(`  Stored conversations: ${database.note}`);
   if (database.source === "database") {
-    console.log(`  Scope (rounded): ${JSON.stringify(database.scopeRounded)}${database.stoppedAtLimit ? " -- stopped at --max-snapshots" : ""}`);
+    console.log(`  Scope (bands): ${JSON.stringify(database.scopeBands)}${database.stoppedAtLimit ? " -- stopped at --max-snapshots" : ""}`);
+    console.log(`  ${database.assistantTurnWeight}`);
     for (const [script, group] of Object.entries(database.byScript)) {
       if (group.suppressed) {
         console.log(`    ${script}: suppressed (${group.reason})`);
         continue;
       }
-      console.log(`    ${script}: about ${group.snapshotsRounded} snapshot(s), about ${group.requestsRounded} assistant turn(s)`);
+      console.log(`    ${script}: ${group.snapshotsBand} snapshot(s), ${group.assistantTurnsBand} assistant turn(s)`);
       for (const [id, figures] of Object.entries(group.byCandidate)) {
         console.log(`      ${id.padEnd(8)} ${JSON.stringify(figures)}`);
       }
