@@ -43,8 +43,8 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **59개 파일, 844 test**를
-선택합니다(두 project 합계 1,688). 같은 날 `chat-starter-catalog.spec.ts`와
+desktop-chromium과 mobile-chromium 각 project에서 **60개 파일, 848 test**를
+선택합니다(두 project 합계 1,696. `unsubscribe-link.spec.ts` 합류로 +1 파일, +4 test). 같은 날 `chat-starter-catalog.spec.ts`와
 `prompt-refiner-chat-input.spec.ts`가 병렬로 합류하기 전 값은 57개 파일,
 825 test(project당)였습니다. Starter spec은 staging에서 찾은 씨앗 토글 결함
 회귀를 포함해 +9, Refiner spec은 +10입니다. 2026-08-26의 51개 파일,
@@ -170,7 +170,7 @@ project에서 **57개 파일, 825 test**(두 project 합계 1,650)입니다.
 one-click `POST` — 를 빌드된 앱에서 확인합니다. 둘 다 framework의 routing에서 깨져
 있었고(force-static layout이 페이지의 `searchParams`를 비움, 페이지가 `POST`에 200 HTML로
 답함) 어느 단위 테스트도 닿지 않았습니다. 이 경계가 깨지면 수신거부했다고 믿는 사람에게
-marketing이 계속 나가므로 PR에서 막습니다. project당 3 test입니다.
+marketing이 계속 나가므로 PR에서 막습니다. project당 4 test입니다(최초 HTML에 오류 문구가 없고 nonce CSP가 붙는지도 확인).
 
 2026-08-26에 열일곱 개가 한 번에 합류했습니다(51개 파일 1,416 test, 두
 project 합계). 하나씩 고른 것이 아니라 기준 하나를 적용한 결과입니다 —

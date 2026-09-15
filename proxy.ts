@@ -202,7 +202,10 @@ export function proxy(request: NextRequest) {
   // provider sends no Origin.
   if (
     request.method === "POST" &&
-    request.nextUrl.pathname.replace(/\/+$/, "") === "/unsubscribe"
+    request.nextUrl.pathname.replace(/\/+$/, "") === "/unsubscribe" &&
+    // Never a Server Action or RSC request: those belong to the page itself.
+    !request.headers.has("next-action") &&
+    !request.headers.has("rsc")
   ) {
     const target = request.nextUrl.clone();
     target.pathname = "/api/unsubscribe";

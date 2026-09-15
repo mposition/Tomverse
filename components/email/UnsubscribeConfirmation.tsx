@@ -1,6 +1,5 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
@@ -23,20 +22,12 @@ import { useLanguage } from "@/components/LanguageProvider";
  *
  * The undo link is not an extra step: it appears after the unsubscribe has
  * already taken effect, and only to catch a mis-click.
- *
- * **The token is read here, in the browser, not passed down from the page.**
- * The `(marketing)` layout is `force-static`, which makes a server page's
- * `searchParams` empty however the page itself is configured -- so a prop read
- * from them was always `""`, and every link showed "no longer valid". Read on
- * the client, the query string is the one the recipient actually opened.
  */
-export function UnsubscribeConfirmation() {
+export function UnsubscribeConfirmation({ token }: { token: string }) {
     const { t } = useLanguage();
-    const token = useSearchParams().get("t") ?? "";
-    const [submitState, setState] = useState<
-        "idle" | "working" | "done" | "failed"
-    >("idle");
-    const state = token ? submitState : "failed";
+    const [state, setState] = useState<"idle" | "working" | "done" | "failed">(
+        token ? "idle" : "failed"
+    );
     const [scope, setScope] = useState<"purpose" | "all">("purpose");
 
     const submit = async (all: boolean) => {
