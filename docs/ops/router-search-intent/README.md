@@ -21,12 +21,12 @@
 > separately forbids 검색, and a whole-turn pairing read that closed-book case
 > as a request to search. With the proximity rule, no case in
 > `development-v1.json` or `development-v2.json` changes profile, and the v2
-> bridge report's selection counts are unchanged. The v1 plan digests in
-> `tests/routerDevelopmentPlanV2.test.mjs` were re-baselined all the same,
-> because the plan records the Router's version block: substituting
-> `task-profile-v4` back to `task-profile-v3` in the plan body and re-deriving
-> reproduces the previous digests exactly, so the version string is the whole
-> of that difference.
+> bridge report's selection counts are unchanged. On the branch that carries
+> the router-development benchmark harness, its pinned v1 plan digests were
+> re-baselined all the same, because the plan records the Router's version
+> block: substituting `task-profile-v4` back to `task-profile-v3` in the plan
+> body and re-deriving reproduces the previous digests exactly, so the version
+> string is the whole of that difference.
 
 This development change addresses identified incidental source/search-intent and
 recency cues used by the deterministic task profiler, web-search retry topic
