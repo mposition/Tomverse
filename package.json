@@ -31,6 +31,7 @@
     "capture:marketing-proof": "node scripts/capture-marketing-proof.mjs",
     "capture:week1-marketing-kit": "node scripts/capture-week1-marketing-kit.mjs",
     "validate:week1-marketing-kit": "node scripts/validate-week1-marketing-kit.mjs",
+    "validate:assistant-knowledge-guide": "node scripts/validate-assistant-knowledge-guide.mjs",
     "capture:week1-marketing-kit:en": "node scripts/capture-week1-marketing-kit-en.mjs",
     "validate:week1-marketing-kit:en": "node scripts/validate-week1-marketing-kit-en.mjs",
     "staging:continuation-record": "node scripts/start-continuation-staging-record.mjs",

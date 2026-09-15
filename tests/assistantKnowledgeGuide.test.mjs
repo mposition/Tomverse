@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -10,6 +12,8 @@ import {
   assistantKnowledgeSignInHref,
   ASSISTANT_KNOWLEDGE_GUIDE_POSTER_PATH,
   ASSISTANT_KNOWLEDGE_GUIDE_POSTER_URL,
+  ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH,
+  ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_DURATION_SECONDS,
   isAssistantKnowledgeGuideValue,
   isAssistantKnowledgeGuideRequest,
 } from "../lib/assistantKnowledgeGuide.ts";
@@ -49,6 +53,64 @@ test("newsletter guide links keep attribution and language on Tomverse paths", (
     "https://tomverse.app/guides/assistant-knowledge/poster"
   );
   assert.equal(assistantKnowledgeGuideUrl("ko"), guide.toString());
+});
+
+test("the reviewed tutorial is served from the Tomverse guide origin", () => {
+  assert.equal(
+    ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_PATH,
+    "/guides/assistant-knowledge/assistant-knowledge.mp4"
+  );
+  assert.equal(
+    existsSync(
+      fileURLToPath(
+        new URL(
+          "../public/guides/assistant-knowledge/assistant-knowledge.mp4",
+          import.meta.url
+        )
+      )
+    ),
+    true
+  );
+});
+
+const cueSeconds = (minutes, seconds, milliseconds) =>
+  Number(minutes) * 60 + Number(seconds) + Number(milliseconds) / 1000;
+
+const readCaptionCues = (language) => {
+  const source = readFileSync(
+    fileURLToPath(
+      new URL(
+        `../public/guides/assistant-knowledge/assistant-knowledge.${language}.vtt`,
+        import.meta.url
+      )
+    ),
+    "utf8"
+  );
+  return [
+    ...source.matchAll(
+      /(\d{2}):(\d{2})\.(\d{3}) --> (\d{2}):(\d{2})\.(\d{3})/g
+    ),
+  ].map((match) => ({
+    start: cueSeconds(match[1], match[2], match[3]),
+    end: cueSeconds(match[4], match[5], match[6]),
+  }));
+};
+
+test("both caption tracks cover one contiguous exported timeline", () => {
+  assert.ok(ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_DURATION_SECONDS < 49);
+
+  for (const language of ["ko", "en"]) {
+    const cues = readCaptionCues(language);
+    assert.equal(cues.length, 5);
+    assert.equal(cues[0].start, 0);
+    for (let index = 1; index < cues.length; index += 1) {
+      assert.equal(cues[index - 1].end, cues[index].start);
+    }
+    assert.equal(
+      cues.at(-1).end,
+      ASSISTANT_KNOWLEDGE_GUIDE_VIDEO_DURATION_SECONDS
+    );
+  }
 });
 
 test("the setup guide uses a literal flag and encodes opaque profile ids", () => {
