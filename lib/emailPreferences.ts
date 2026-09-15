@@ -9,13 +9,16 @@ import {
   EMAIL_PURPOSES,
   LOCKED_EMAIL_PURPOSES,
   consentActionFor,
+  consentConfirmationState,
   defaultPreferenceEnabled,
   preferenceChangeDecision,
   recordsConsent,
+  type ConsentConfirmationState,
   type EmailPurpose,
   type PreferenceChangeRefusal,
 } from "@/lib/emailPreferenceCore";
 import { normalizeCountry } from "@/lib/emailJurisdictionCore";
+import { CONSENT_CONFIRMATION_TTL_MS } from "@/lib/emailConsentToken";
 import {
   normalizeSuppressionAddress,
   recordSuppression,
@@ -61,7 +64,9 @@ export type ConsentCapture =
 export type PreferenceChangeResult =
   | { changed: true; purpose: EmailPurpose; enabled: boolean }
   | { changed: false; reason: PreferenceChangeRefusal["reason"] }
-  | { changed: false; reason: "already_set" };
+  | { changed: false; reason: "already_set" }
+  /** The confirmation named a request that is no longer the latest one. */
+  | { changed: false; reason: "superseded" };
 
 /**
  * Creates the rows a new account starts with.
@@ -98,6 +103,13 @@ export type PreferenceState = {
   locked: boolean;
   grantedAt: Date | null;
   nextConfirmationNoticeAt: Date | null;
+  /**
+   * The double opt-in state for a consent-based purpose, null otherwise
+   * (docs/policy/email-double-opt-in.md §4.1).
+   */
+  confirmation: ConsentConfirmationState | null;
+  /** When the latest confirmation link stops working, while one is pending. */
+  confirmationExpiresAt: Date | null;
 };
 
 export async function readPreferences(userId: string): Promise<PreferenceState[]> {
@@ -109,6 +121,8 @@ export async function readPreferences(userId: string): Promise<PreferenceState[]
       enabled: true,
       grantedAt: true,
       nextConfirmationNoticeAt: true,
+      confirmedAt: true,
+      confirmationRequestedAt: true,
     },
   });
   const byPurpose = new Map(rows.map((row) => [row.purpose, row]));
@@ -117,12 +131,25 @@ export async function readPreferences(userId: string): Promise<PreferenceState[]
   // cannot end up listing them in insertion order.
   return EMAIL_PURPOSES.map((purpose) => {
     const row = byPurpose.get(purpose);
+    const enabled = row?.enabled ?? defaultPreferenceEnabled(purpose);
+    const confirmation = recordsConsent(purpose)
+      ? consentConfirmationState({
+          enabled,
+          confirmedAt: row?.confirmedAt ?? null,
+          confirmationRequestedAt: row?.confirmationRequestedAt ?? null,
+        })
+      : null;
     return {
       purpose,
-      enabled: row?.enabled ?? defaultPreferenceEnabled(purpose),
+      enabled,
       locked: LOCKED_EMAIL_PURPOSES.has(purpose),
       grantedAt: row?.grantedAt ?? null,
       nextConfirmationNoticeAt: row?.nextConfirmationNoticeAt ?? null,
+      confirmation,
+      confirmationExpiresAt:
+        confirmation === "pending" && row?.confirmationRequestedAt
+          ? new Date(row.confirmationRequestedAt.getTime() + CONSENT_CONFIRMATION_TTL_MS)
+          : null,
     };
   });
 }
@@ -156,12 +183,24 @@ export async function setPreference(input: {
   consentWording?: string | null;
   /** The country the person confirmed in the same opt-in action. */
   confirmedCountry?: string | null;
+  /**
+   * The checked confirmation that authorises switching a consent-based purpose
+   * on (docs/policy/email-double-opt-in.md §5 step 5).
+   *
+   * Only `confirmConsent()` in lib/emailConsentConfirmation.ts passes this, and
+   * only after it has opened a confirmation token. The write is conditional on
+   * the stored `confirmationRequestedAt` still equalling `requestedAt`, inside
+   * the transaction, so a token superseded by a newer request -- or cancelled
+   * by switching the purpose off -- cannot confirm anything.
+   */
+  confirmation?: { tokenVersion: string; requestedAt: Date };
   now?: Date;
 }): Promise<PreferenceChangeResult> {
   const decision = preferenceChangeDecision({
     purpose: input.purpose,
     enabled: input.enabled,
     ...(input.viaToken === undefined ? {} : { viaToken: input.viaToken }),
+    confirmed: Boolean(input.confirmation),
   });
   if (!decision.allowed) return { changed: false, reason: decision.reason };
 
@@ -183,17 +222,43 @@ export async function setPreference(input: {
 
   const existing = await prisma.emailPreference.findUnique({
     where: { userId_purpose: { userId: input.userId, purpose } },
-    select: { enabled: true },
+    select: { enabled: true, confirmedAt: true, confirmationRequestedAt: true },
   });
 
-  // Idempotent: the unsubscribe link is followed twice, the form is
-  // double-submitted, the one-click header and the confirmation page both
-  // fire. None of those should add a second withdrawal to the history.
+  const consentBased = recordsConsent(purpose);
+  // For a consent-based purpose, "was it on" means "was it confirmed". A row
+  // switched on before the confirmation step existed was never consent in the
+  // sense the send gate uses, so confirming it is the grant, not a re-grant.
+  const wasEffectivelyEnabled = existing
+    ? consentBased
+      ? existing.enabled && existing.confirmedAt !== null
+      : existing.enabled
+    : null;
+
   if (existing && existing.enabled === input.enabled) {
-    return { changed: false, reason: "already_set" };
+    // Switching off while only a confirmation is pending: nothing was ever
+    // consented to, so there is nothing to withdraw and no history to write.
+    // Clearing the request is what makes the mailed link stop working.
+    if (!input.enabled && existing.confirmationRequestedAt) {
+      await prisma.emailPreference.update({
+        where: { userId_purpose: { userId: input.userId, purpose } },
+        data: { confirmationRequestedAt: null, confirmedAt: null },
+      });
+      return { changed: true, purpose, enabled: false };
+    }
+    // Confirming a row that was switched on without confirmation is a real
+    // change; everything else here is a repeat. Idempotent: the unsubscribe
+    // link is followed twice, the form is double-submitted, the one-click
+    // header and the confirmation page both fire. None of those should add a
+    // second entry to the history.
+    if (!(input.enabled && input.confirmation && !existing.confirmedAt)) {
+      return { changed: false, reason: "already_set" };
+    }
   }
 
-  await prisma.$transaction(async (tx) => {
+  const superseded = Symbol("superseded");
+  try {
+    await prisma.$transaction(async (tx) => {
     if (confirmedCountry) {
       await tx.userSettings.upsert({
         where: { userId: input.userId },
@@ -211,17 +276,41 @@ export async function setPreference(input: {
       });
     }
 
-    await tx.emailPreference.update({
-      where: { userId_purpose: { userId: input.userId, purpose } },
-      data: {
-        enabled: input.enabled,
-        source: input.source,
-        grantedAt: input.enabled ? now : null,
-        ...(input.enabled ? {} : { nextConfirmationNoticeAt: null }),
-      },
-    });
+    const data = {
+      enabled: input.enabled,
+      source: input.source,
+      grantedAt: input.enabled ? now : null,
+      ...(input.enabled
+        ? consentBased
+          ? { confirmedAt: now }
+          : {}
+        : {
+            nextConfirmationNoticeAt: null,
+            // docs/policy/email-double-opt-in.md §8: switching back on after
+            // switching off needs a fresh confirmation.
+            confirmedAt: null,
+            confirmationRequestedAt: null,
+          }),
+    };
+    if (input.enabled && consentBased) {
+      // Conditional on the request the token named still being the latest.
+      const updated = await tx.emailPreference.updateMany({
+        where: {
+          userId: input.userId,
+          purpose,
+          confirmationRequestedAt: input.confirmation!.requestedAt,
+        },
+        data,
+      });
+      if (updated.count !== 1) throw superseded;
+    } else {
+      await tx.emailPreference.update({
+        where: { userId_purpose: { userId: input.userId, purpose } },
+        data,
+      });
+    }
 
-    if (recordsConsent(purpose)) {
+    if (consentBased) {
       await tx.consentRecord.create({
         data: {
           userId: input.userId,
@@ -230,7 +319,7 @@ export async function setPreference(input: {
           emailAddress: normalizeSuppressionAddress(user.email!),
           purpose,
           action: consentActionFor({
-            wasEnabled: existing?.enabled ?? null,
+            wasEnabled: wasEffectivelyEnabled,
             nowEnabled: input.enabled,
           }),
           occurredAt: now,
@@ -246,6 +335,13 @@ export async function setPreference(input: {
               ? { wordingHash: evidenceHash("wording", input.consentWording) }
               : {}),
             ...(input.deliveryId ? { deliveryId: input.deliveryId } : {}),
+            ...(input.confirmation
+              ? {
+                  confirmedVia: "link",
+                  tokenVersion: input.confirmation.tokenVersion,
+                  requestedAt: input.confirmation.requestedAt.toISOString(),
+                }
+              : {}),
             via: input.source,
           },
           ipHash: evidenceHash("ip", input.ip),
@@ -253,7 +349,11 @@ export async function setPreference(input: {
         },
       });
     }
-  });
+    });
+  } catch (error) {
+    if (error === superseded) return { changed: false, reason: "superseded" };
+    throw error;
+  }
 
   if (!input.enabled) {
     await recordSuppression({

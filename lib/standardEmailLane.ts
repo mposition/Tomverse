@@ -603,7 +603,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
                 purpose: definition.purpose,
               },
             },
-            select: { enabled: true },
+            select: { enabled: true, confirmedAt: true },
           })
         : null;
 
@@ -612,6 +612,8 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       purpose: definition.purpose,
       hasAccount: Boolean(delivery.userId),
       storedEnabled: stored ? stored.enabled : null,
+      // docs/policy/email-double-opt-in.md §6: passed here, judged there.
+      storedConfirmedAt: stored ? stored.confirmedAt : null,
     });
     if (!consent.allowed) {
       await prisma.emailDelivery.update({

@@ -21,6 +21,10 @@ import { MARKETING_ALLOWED_COUNTRY_CODES } from "@/lib/emailJurisdictionCore";
  *    confirmed jurisdiction before it will send. The API stores the country
  *    and the consent record in the same transaction, so the interface cannot
  *    show an enabled switch whose legal profile was never captured.
+ *  - **Switching marketing on sends a confirmation mail, not a consent.** The
+ *    switch stays off and the row says a confirmation is waiting, with a way to
+ *    send it again (docs/policy/email-double-opt-in.md §11 item 11). Showing it
+ *    as on would tell somebody they are subscribed before they are.
  *  - **No confirmation dialog on switching something off.** Making a person
  *    argue with a modal about leaving is the friction the Australian rules
  *    exist to prevent, and it does not change the outcome -- it changes which
@@ -31,6 +35,10 @@ type Preference = {
     purpose: string;
     enabled: boolean;
     locked: boolean;
+    /** Double opt-in state for marketing purposes; null for the rest. */
+    confirmation?: "off" | "pending" | "on" | "unconfirmed" | null;
+    /** ISO instant; present while a confirmation is pending. */
+    confirmationExpiresAt?: string | null;
 };
 
 type CountryState = {
@@ -48,6 +56,7 @@ type SaveError =
     | "COUNTRY_REQUIRED"
     | "COUNTRY_CONFLICT"
     | "COUNTRY_UNSUPPORTED"
+    | "CONFIRMATION_UNAVAILABLE"
     | "SAVE_FAILED";
 
 const MARKETING_PURPOSES = new Set([
@@ -56,6 +65,12 @@ const MARKETING_PURPOSES = new Set([
     "promotions",
 ]);
 const SUPPORTED_COUNTRIES = new Set<string>(MARKETING_ALLOWED_COUNTRY_CODES);
+
+const isExpired = (expiresAt: string | null | undefined) => {
+    if (!expiresAt) return false;
+    const at = Date.parse(expiresAt);
+    return Number.isFinite(at) && at <= Date.now();
+};
 
 const countryValueFrom = (next: PreferenceState) => {
     if (next.country.selfDeclared) return next.country.selfDeclared;
@@ -149,7 +164,8 @@ export function EmailNotificationSettings() {
                 setSaveError(
                     code === "COUNTRY_REQUIRED" ||
                         code === "COUNTRY_CONFLICT" ||
-                        code === "COUNTRY_UNSUPPORTED"
+                        code === "COUNTRY_UNSUPPORTED" ||
+                        code === "CONFIRMATION_UNAVAILABLE"
                         ? code
                         : "SAVE_FAILED"
                 );
@@ -331,7 +347,10 @@ export function EmailNotificationSettings() {
                         refuse it, and a button next to "not available for your
                         country" contradicts it. Confirming a different country
                         above brings it back. */}
-                    {productUpdates && !productUpdates.enabled && !countryIsUnsupported ? (
+                    {productUpdates &&
+                    !productUpdates.enabled &&
+                    productUpdates.confirmation !== "pending" &&
+                    !countryIsUnsupported ? (
                         <section className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950/30">
                             <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700 dark:text-blue-300">
                                 {t("emailNotifications.marketingOptional")}
@@ -392,6 +411,53 @@ export function EmailNotificationSettings() {
                                                       "emailNotifications.needsCountryNote"
                                                   )}
                                         </p>
+                                    ) : null}
+                                    {preference.confirmation === "pending" ||
+                                    preference.confirmation === "unconfirmed" ? (
+                                        <div
+                                            className="mt-2"
+                                            data-testid={`email-preference-${preference.purpose}-confirmation`}
+                                        >
+                                            <p
+                                                className="text-xs leading-5 text-amber-700 dark:text-amber-500"
+                                                aria-live="polite"
+                                            >
+                                                {preference.confirmation ===
+                                                "unconfirmed"
+                                                    ? t(
+                                                          "emailNotifications.confirmationUnconfirmedNote"
+                                                      )
+                                                    : isExpired(
+                                                            preference.confirmationExpiresAt
+                                                        )
+                                                      ? t(
+                                                            "emailNotifications.confirmationExpiredNote"
+                                                        )
+                                                      : t(
+                                                            "emailNotifications.confirmationPendingNote"
+                                                        )}
+                                            </p>
+                                            <button
+                                                type="button"
+                                                disabled={busy}
+                                                onClick={() =>
+                                                    enableMarketing(
+                                                        preference.purpose
+                                                    )
+                                                }
+                                                data-testid={`email-preference-${preference.purpose}-resend`}
+                                                className="mt-1 min-h-11 text-xs font-semibold text-zinc-700 underline underline-offset-2 hover:text-zinc-950 disabled:opacity-50 dark:text-zinc-300 dark:hover:text-white"
+                                            >
+                                                {preference.confirmation ===
+                                                "unconfirmed"
+                                                    ? t(
+                                                          "emailNotifications.confirmationSend"
+                                                      )
+                                                    : t(
+                                                          "emailNotifications.confirmationResend"
+                                                      )}
+                                            </button>
+                                        </div>
                                     ) : null}
                                 </div>
 

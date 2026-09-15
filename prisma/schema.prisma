@@ -4695,6 +4695,15 @@ model EmailPreference {
   /// When the current enabled state began. Not the row's creation.
   grantedAt DateTime?
 
+  /// The double opt-in (docs/policy/email-double-opt-in.md §4.1). confirmedAt
+  /// is when the mailbox owner clicked the confirmation link and is the only
+  /// thing that makes a consent-based purpose sendable; NULL is refused by the
+  /// send gate even when `enabled` is true. confirmationRequestedAt is the
+  /// latest request, and a confirmation token is honoured only while it still
+  /// names that instant. Both go back to NULL when the purpose is switched off.
+  confirmedAt             DateTime?
+  confirmationRequestedAt DateTime?
+
   /// E7. When consent was last confirmed *to* the recipient, and when it is
   /// next due. Passing nextConfirmationNoticeAt does not change `enabled`:
   /// the duty is to notify, not to expire (docs/policy/email-notifications.md
@@ -4729,7 +4738,10 @@ model ConsentRecord {
   emailAddress String
   purpose      String
 
-  /// granted | withdrawn | reconfirmed | confirmation_notice_sent | lapsed
+  /// granted | withdrawn | reconfirmed | confirmation_notice_sent
+  ///   | confirmation_requested | lapsed
+  /// confirmation_requested is the double opt-in's request, not a consent: it
+  /// records that a confirmation mail was asked for and nothing more.
   action     String
   occurredAt DateTime @default(now())
 

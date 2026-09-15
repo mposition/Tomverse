@@ -5,7 +5,12 @@ import { getServerSession } from "next-auth/next";
 import { z } from "zod";
 
 import { authOptions } from "@/lib/auth";
-import { apiSecurityResponse, readLimitedJson } from "@/lib/apiSecurity";
+import {
+  apiSecurityResponse,
+  consumeApiRateLimit,
+  readLimitedJson,
+} from "@/lib/apiSecurity";
+import { requestConsentConfirmation } from "@/lib/emailConsentConfirmation";
 import { readPreferences, setPreference, withdrawAllMarketing } from "@/lib/emailPreferences";
 import { EMAIL_PURPOSES, recordsConsent } from "@/lib/emailPreferenceCore";
 import { jurisdictionForUser, setSelfDeclaredCountry } from "@/lib/emailJurisdiction";
@@ -153,18 +158,41 @@ export async function PATCH(req: Request) {
         );
       }
 
-      await setPreference({
+      // Switching a marketing purpose on is a request for a confirmation mail,
+      // never the consent itself (docs/policy/email-double-opt-in.md §5). The
+      // preference stays off until the link in that mail is used.
+      //
+      // Bounded per account: each request sends a message to the account's own
+      // address, and a loop on this endpoint would be a way to fill somebody's
+      // inbox with confirmation mail.
+      await consumeApiRateLimit(
+        req,
+        `consent-confirmation:${userId}`,
+        "consent-confirmation",
+        { minute: 3, day: 10 }
+      );
+      const requested = await requestConsentConfirmation({
         userId,
         purpose: body.purpose!,
-        enabled: true,
         capturedVia: "preference_center",
-        source: "preference_center",
-        userAgent: req.headers.get("user-agent"),
+        confirmedCountry: countryDecision.countryCode,
         jurisdiction: jurisdiction.countryCode,
         jurisdictionSource: "self_declared",
-        confirmedCountry: countryDecision.countryCode,
+        userAgent: req.headers.get("user-agent"),
         now,
       });
+      if (!requested.requested && requested.reason !== "already_confirmed") {
+        // Off, or keys not deployed: the step that would make consent valid is
+        // not available, so no consent is collected. Saying so is better than
+        // storing a switch that silently never sends.
+        return NextResponse.json(
+          {
+            error: "Email subscriptions cannot be confirmed right now.",
+            code: "CONFIRMATION_UNAVAILABLE",
+          },
+          { status: 409 }
+        );
+      }
     } else if (body.withdrawAllMarketing) {
       await withdrawAllMarketing({
         userId,

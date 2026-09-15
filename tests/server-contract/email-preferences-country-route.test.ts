@@ -54,6 +54,23 @@ const loadRoute = async () => {
     namedExports: { getServerSession: async () => ({ user: { id: "user_1" } }) },
   });
   mock.module(mod("lib/auth.ts"), { namedExports: { authOptions: {} } });
+  const { createRequire } = await import("node:module");
+  const require = createRequire(import.meta.url);
+  const realApiSecurity = require(resolve(ROOT, "lib/apiSecurity.ts")) as Record<
+    string,
+    unknown
+  >;
+  mock.module(mod("lib/apiSecurity.ts"), {
+    namedExports: { ...realApiSecurity, consumeApiRateLimit: async () => {} },
+  });
+  mock.module(mod("lib/emailConsentConfirmation.ts"), {
+    namedExports: {
+      requestConsentConfirmation: async (input: Record<string, unknown>) => {
+        world.calls.push({ fn: "requestConsentConfirmation", input });
+        return { requested: true, purpose: input.purpose, requestedAt: new Date() };
+      },
+    },
+  });
   mock.module(mod("lib/emailPreferences.ts"), {
     namedExports: {
       readPreferences: async () => [],
@@ -162,13 +179,17 @@ test("a conflicting resolution is refused as a conflict", async () => {
   assert.deepEqual(world.calls, []);
 });
 
-test("an allowlisted country reaches the consent write", async () => {
+test("an allowlisted country asks for a confirmation and never writes consent directly", async () => {
   reset();
   const response = await patch({ purpose: "product_updates", enabled: true, country: "DE" });
   assert.equal(response.status, 200);
-  const write = world.calls.find((call) => call.fn === "setPreference");
-  assert.ok(write, "the consent write was not reached");
-  assert.equal(write.input.confirmedCountry, "DE");
+  // docs/policy/email-double-opt-in.md §5: switching marketing on is a request
+  // for a confirmation mail, not the consent.
+  assert.deepEqual(
+    world.calls.map((call) => call.fn),
+    ["requestConsentConfirmation"]
+  );
+  assert.equal(world.calls[0].input.confirmedCountry, "DE");
 });
 
 test("somebody in NL can still save a country, switch off, and withdraw everything", async () => {

@@ -18,6 +18,11 @@ import {
   PRODUCT_ANNOUNCEMENT_PLACEHOLDER,
   type ProductAnnouncementPayload,
 } from "@/lib/productAnnouncementEmail";
+import {
+  buildMarketingConsentConfirmationEmail,
+  MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER,
+  type MarketingConsentConfirmationPayload,
+} from "@/lib/marketingConsentConfirmationEmail";
 import { buildModelLifecycleDailyEmail } from "@/lib/modelLifecycleDailyEmail";
 import type { LifecycleReportInput } from "@/lib/modelLifecycleDailyReportCore";
 import {
@@ -143,6 +148,8 @@ export const AUTH_LOGIN_CODE_TEMPLATE = "auth_login_code";
 export const OPS_MODEL_LIFECYCLE_DAILY_TEMPLATE = "ops_model_lifecycle_daily";
 export const MODEL_LAUNCH_TEMPLATE = "model_launch";
 export const PRODUCT_ANNOUNCEMENT_TEMPLATE = "product_announcement";
+export const MARKETING_CONSENT_CONFIRMATION_TEMPLATE =
+  "marketing_consent_confirmation";
 /**
  * Three keys rather than one with a phase field.
  *
@@ -167,6 +174,21 @@ const definitions: AnyDefinition[] = [
     render: (payload: LoginCodePayload, language) =>
       buildEmailLoginCodeEmail({ ...payload, language }),
     placeholderPayload: { code: "{{code}}", verifyUrl: "{{verifyUrl}}" },
+  },
+  {
+    key: MARKETING_CONSENT_CONFIRMATION_TEMPLATE,
+    senderRole: "general",
+    // Transactional, although it is about marketing: it goes to somebody who
+    // has not yet consented, so filed as marketing the consent gate would refuse
+    // the very message that lets them consent -- and filed as marketing it would
+    // be advertising sent without consent. It carries no promotion and no
+    // unsubscribe link (docs/policy/email-double-opt-in.md §3 rules 2-3).
+    classification: "transactional",
+    purpose: null,
+    requiresUnsubscribe: false,
+    render: (payload: MarketingConsentConfirmationPayload, language) =>
+      buildMarketingConsentConfirmationEmail(payload, language),
+    placeholderPayload: MARKETING_CONSENT_CONFIRMATION_PLACEHOLDER,
   },
   {
     key: ACCOUNT_WELCOME_TEMPLATE,
