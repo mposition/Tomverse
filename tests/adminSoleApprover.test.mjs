@@ -486,4 +486,25 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
     );
     assert.match(execution, /status: \{ in: \["pending", "approved"\] \}/);
     assert.match(execution, /\n\s+tx,\n\s+\}\);\n\s+return metadata;/);
+
+    // The ordinary claim and the sole closure share one scope lock, taken
+    // before either reads, so they cannot interleave on the same change.
+    const claimBody = source.slice(
+        source.indexOf("const claimApproval"),
+        source.indexOf("export async function runWithAdminApproval")
+    );
+    assert.ok(
+        claimBody.indexOf("lockApprovalScope(tx") > 0 &&
+            claimBody.indexOf("lockApprovalScope(tx") <
+                claimBody.indexOf("tx.adminActionApproval.")
+    );
+    const closure = execution.slice(
+        execution.indexOf("const supersedeOpenRequestsAndRecordStart")
+    );
+    assert.ok(
+        closure.indexOf("lockApprovalScope(tx") > 0 &&
+            closure.indexOf("lockApprovalScope(tx") <
+                closure.indexOf("tx.adminActionApproval.")
+    );
+    assert.match(closure, /refuse\("approval_executing"\)/);
 });

@@ -15,7 +15,9 @@ import {
   isAdminReauthenticationError,
 } from "@/lib/adminReauthentication";
 import {
+  adminSoleApproverErrorResponse,
   generalSoleApprovalAvailability,
+  lockApprovalScope,
   runAsSoleAdministrator,
 } from "@/lib/adminSoleApproverExecution";
 
@@ -67,6 +69,14 @@ const claimApproval = async (input: ApprovalInput) => {
   );
 
   return prisma.$transaction(async (tx) => {
+    // Shared with the sole executors, so a sole execution cannot close or skip
+    // a row while this claim is moving it to `executing`.
+    await lockApprovalScope(tx, {
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId,
+      requesterId: actorId,
+    });
     await tx.adminActionApproval.updateMany({
       where: {
         status: { in: ["pending", "approved"] },
@@ -276,4 +286,7 @@ export const adminApprovalErrorResponse = (
         },
         { status: 409 }
       )
-    : null;
+    : // The general sole path runs inside `runWithAdminApproval`, so its
+      // refusals reach every route through this one handler rather than
+      // falling through to a 500 in routes that never heard of that path.
+      adminSoleApproverErrorResponse(error);
