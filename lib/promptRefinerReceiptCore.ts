@@ -32,9 +32,14 @@ export const PROMPT_REFINER_FAILURE_LAYERS = [
     "provider",
     "response_validation",
 ] as const;
+export type PromptRefinerFailureLayer =
+    (typeof PROMPT_REFINER_FAILURE_LAYERS)[number];
 export const PROMPT_REFINER_FAILURE_CODES = [
+    "eligibility_refused",
+    "execution_not_approved",
+    "execution_contract_mismatch",
+    "reservation_authority_unavailable",
     "adapter_unavailable",
-    "cost_guardrail",
     "invalid_response",
     "empty_response",
     "no_change",
@@ -43,18 +48,33 @@ export const PROMPT_REFINER_FAILURE_CODES = [
     "cancelled",
     "unknown_after_dispatch",
 ] as const;
-const PRE_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-    "adapter_unavailable",
-    "cost_guardrail",
-]);
-const POST_DISPATCH_ONLY_FAILURE_CODES = new Set<string>([
-    "invalid_response",
-    "empty_response",
-    "no_change",
-    "provider_error",
-    "timeout",
-    "unknown_after_dispatch",
-]);
+export type PromptRefinerFailureCode =
+    (typeof PROMPT_REFINER_FAILURE_CODES)[number];
+type FixedLayerFailureCode = Exclude<PromptRefinerFailureCode, "cancelled">;
+type FailureLayer = Exclude<PromptRefinerFailureLayer, "none">;
+const FAILURE_LAYER_BY_CODE = {
+    eligibility_refused: "admission",
+    execution_not_approved: "admission",
+    execution_contract_mismatch: "admission",
+    reservation_authority_unavailable: "admission",
+    adapter_unavailable: "adapter",
+    provider_error: "provider",
+    timeout: "provider",
+    unknown_after_dispatch: "provider",
+    invalid_response: "response_validation",
+    empty_response: "response_validation",
+    no_change: "response_validation",
+} as const satisfies Record<FixedLayerFailureCode, FailureLayer>;
+
+const expectedFailureLayer = (
+    code: PromptRefinerFailureCode,
+    dispatched: boolean
+): FailureLayer =>
+    code === "cancelled"
+        ? dispatched
+            ? "provider"
+            : "admission"
+        : FAILURE_LAYER_BY_CODE[code];
 export const PROMPT_REFINER_DISPOSITION_OUTCOMES = [
     "accepted",
     "kept_original",
@@ -108,7 +128,7 @@ const executionReceiptBaseSchema = z
         outputTokens: optionalTelemetryCount,
         reasoningTokens: optionalTelemetryCount,
         actualCostMicroUsd: optionalTelemetryCount,
-        retryCount: z.number().int().min(0).max(10),
+        retryCount: z.literal(0),
     })
     .strict();
 
@@ -192,7 +212,7 @@ export const promptRefinerExecutionReceiptSchema =
         }
 
         if (receipt.outcome === "refused_before_dispatch") {
-            if (dispatchedAt !== null || hasAnyTelemetry || receipt.retryCount !== 0) {
+            if (dispatchedAt !== null || hasAnyTelemetry) {
                 issue("prompt_refiner_refusal_cannot_claim_provider_work", [
                     "outcome",
                 ]);
@@ -227,23 +247,29 @@ export const promptRefinerExecutionReceiptSchema =
                 "inputTokens",
             ]);
         }
-        if (
-            receipt.failureCode !== null &&
-            dispatchedAt === null &&
-            POST_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
-        ) {
-            issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
-                "failureCode",
-            ]);
-        }
-        if (
-            receipt.failureCode !== null &&
-            dispatchedAt !== null &&
-            PRE_DISPATCH_ONLY_FAILURE_CODES.has(receipt.failureCode)
-        ) {
-            issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
-                "failureCode",
-            ]);
+        if (receipt.failureCode !== null) {
+            const expectedLayer = expectedFailureLayer(
+                receipt.failureCode,
+                dispatchedAt !== null
+            );
+            const codeRequiresDispatch =
+                expectedLayer === "provider" ||
+                expectedLayer === "response_validation";
+            if (dispatchedAt === null && codeRequiresDispatch) {
+                issue("prompt_refiner_post_dispatch_code_requires_dispatch", [
+                    "failureCode",
+                ]);
+            }
+            if (dispatchedAt !== null && !codeRequiresDispatch) {
+                issue("prompt_refiner_pre_dispatch_code_forbids_dispatch", [
+                    "failureCode",
+                ]);
+            }
+            if (receipt.failureLayer !== expectedLayer) {
+                issue("prompt_refiner_failure_code_layer_mismatch", [
+                    "failureLayer",
+                ]);
+            }
         }
     });
 

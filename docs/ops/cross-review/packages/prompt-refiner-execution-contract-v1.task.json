@@ -1,0 +1,28 @@
+{
+  "taskId": "prompt-refiner-execution-contract-v1",
+  "requirement": "Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않은 채 첫 shadow 실행의 provider-independent 사전등록 계약을 고정한다. 계약은 Refiner·model/catalog/pricing identity, context와 reasoning billing, 입력·출력 cap, timeout, retry 0, 요청·단계 최악 비용을 정확히 고정하고 drift를 fail-closed한다. 현재 원자 예약 authority가 없으므로 caller가 만든 lease나 boolean으로 성공 admission을 만들 수 없어야 하며, 모든 다른 조건이 맞아도 reservation_authority_unavailable로 dispatch 전에 거절해야 한다. terminal reason은 content-free receipt의 lifecycle·failure layer/code·disposition 단계에 하나씩 매핑되고 receipt schema와 합치해야 한다. runtime writer, 원자 예약 구현, provider adapter/API/model 호출, billing, 제품 mode, Router 결합, AppSetting writer, flag 활성화, 유료 benchmark와 rollout 승인은 포함하지 않는다. author는 codex, reviewer는 claude이며 Claude Code Max 구독 CLI의 읽기 전용 도구만 사용한다.",
+  "completionCriteria": [
+    "실행 계약은 gpt-5-6-luna의 provider·catalog/API model·pricing version/effective date·routing·tier·reasoning effort·context window·reasoning token billing과 입출력 단가를 정확히 고정하고 checked-in catalog/pricing drift를 거절한다.",
+    "입력 100000 tokens, 출력 4096 tokens, context 요구량 104096 tokens, timeout 15000ms, retry 0, 요청당 24916 microUSD, 최대 100 dispatch와 단계 2491600 microUSD가 같은 가격 계산 경로에서 도출되고 경계 테스트로 고정된다.",
+    "admission은 eligibility, 별도 단계 승인, adapter readiness, 정확한 계약 identity를 순서대로 fail-closed하며, 원자 예약 authority가 없는 현재 계약에는 admitted true 경로가 없고 caller가 임의의 lease·atomic 표식을 추가해도 reservation_authority_unavailable로 거절한다.",
+    "성공 admission을 후속 계약에 추가하려면 requestId 결속, 만료, stage slot과 최악 비용의 원자 예약, 1회 consume을 실제 authority가 제공해야 한다는 경계가 코드와 정책에 기록된다.",
+    "모든 공개 admission refusal과 terminal reason은 도달 가능하고 content-free receipt lifecycle·failure layer/code·retry 0·disposition 단계에 전단사적으로 매핑되며 strict receipt schema가 그 조합을 검증한다.",
+    "기존 Prompt Refiner 제안·receipt 계약과 관련 문서는 provider 호출, 제품 writer/adapter, flag 활성화 또는 rollout 승인을 주장하지 않고 현재 authority 부재와 default-off 경계를 정확히 설명한다.",
+    "관련 unit, 전체 typecheck, lint, model-pricing, 문서·정책 참조, strict encoding과 diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 사용자가 승인한 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 Anthropic API key를 사용하지 않는다. 최초 검토와 최대 2회 수정 검토만 허용한다."
+  ],
+  "baseCommit": "7f0fe682b11ac9529fdd7bf7acc968edecf36a9c",
+  "writableScope": [
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerExecutionContract.ts",
+    "lib/promptRefinerReceiptCore.ts",
+    "lib/promptRefinerSuggestion.ts",
+    "tests/promptRefinerExecutionContract.test.mjs",
+    "tests/promptRefinerReceiptCore.test.mjs"
+  ],
+  "generatedPaths": []
+}

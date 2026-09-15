@@ -8,6 +8,7 @@
 - 사용자 표면: `components/chat/PromptRefinerSuggestionPanel.tsx`
 - 요청·결정 계약: `lib/promptRefinerSuggestion.ts`
 - 모델 경계: `lib/promptRefinerModelPrompt.ts`
+- 실행 사전등록: `lib/promptRefinerExecutionContract.ts`
 
 이 단계의 목적은 모델을 먼저 붙이는 것이 아니라, 모델이 붙었을 때 사용자 원문과
 라우팅 입력이 조용히 같은 것으로 취급되지 않도록 경계를 고정하는 것이다.
@@ -116,6 +117,13 @@ accepted+kept-original을 각각 분모로 쓴다. 서로 다른 분모를 한 c
 provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필요하다.
 
 1. 비용이 고정된 Refiner 모델·출력 cap·timeout·재시도 0 계약
+   (provider-independent 사전등록은 구현됨. 예약 authority가 없으므로 admission은
+   항상 dispatch 전에 거절하며 실제 adapter·비용 예약·dispatch 권한은 없음.
+   정적 profile과 `resolveModelPricing()`의 effective input/output rate가 모두 exact
+   pin과 일치하고 effective output cap은 4,096 이상이어야 함. 더 큰 capability에도
+   adapter는 계약 cap 4,096을 명시하며 generic cached/reservation 설정을 이 계약의
+   비용·예약량으로 바꾸지 않음. 미래 authority도 runtime row를 전달해
+   예약·dispatch 전에 이 gate를 다시 통과해야 함)
 2. request/receipt와 사용자 선택률·stale·실패·지연 계측 (provider-independent
    schema와 오프라인 집계는 구현됨; writer·저장소·제품 수집은 미구현)
 3. 원문 대비 제안문 주입·의미 보존 평가

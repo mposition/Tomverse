@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-execution-contract-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-15T22:23:50.748Z",
+  "durationMs": 182949,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 18,
+    "cachedInputTokens": 567088,
+    "outputTokens": 14059,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.5337100000000001,
+    "raw": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 87528,
+      "cache_read_input_tokens": 567088,
+      "output_tokens": 14059,
+      "output_tokens_details": {
+        "thinking_tokens": 10174
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 87528,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 5017,
+          "cache_read_input_tokens": 89915,
+          "cache_creation_input_tokens": 2355,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2355
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T22:26:53.750Z",
+  "verdict": {
+    "taskId": "prompt-refiner-execution-contract-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:ca9d7a2aa1a27fe5241c404815c985921d69dd809708a83a8d7212432df92618",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/promptRefinerExecutionContract.test.mjs:78-86 and lib/promptRefinerExecutionContract.ts:60 (PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The only evidence that the 100,000-token input ceiling covers the worst-case request compares a UTF-8 byte count against a token constant and adds a token-denominated framing allowance to it, and the unstated lemma that makes this sound (a byte-level BPE token spans at least one UTF-8 byte) appears in neither the assertion nor the constant's comment, while the exported allowance is consumed by no contract check.",
+        "reproduction": "Read tests/promptRefinerExecutionContract.test.mjs:78-86: renderedBytes is computed with new TextEncoder().encode(...).length (96,848 bytes) and asserted as renderedBytes + PROMPT_REFINER_MESSAGE_FRAMING_TOKEN_ALLOWANCE <= PROMPT_REFINER_MAX_INPUT_TOKENS, i.e. bytes + tokens <= tokens; then `rg -n \"MESSAGE_FRAMING_TOKEN_ALLOWANCE\" lib scripts app components` returns only the declaration at lib/promptRefinerExecutionContract.ts:60, so no production path uses it. Adding one sentence to the doc comment stating tokens <= UTF-8 bytes for this tokenizer family would make the bound auditable without changing any number."
+      },
+      {
+        "location": "lib/promptRefinerReceiptCore.ts:215",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The refusal rule still tests `receipt.retryCount !== 0`, which can never be true now that the base schema pins `retryCount: z.literal(0)` at line 131, so that disjunct is unreachable and no test can distinguish its removal.",
+        "reproduction": "Delete `|| receipt.retryCount !== 0` from lib/promptRefinerReceiptCore.ts:215 and run `node --conditions=react-server --import tsx --test tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerExecutionContract.test.mjs`: it still passes, because any input with retryCount != 0 is rejected by the literal before superRefine runs. Keeping it as defence in depth is a defensible choice; if kept, a one-line comment saying so would stop a later reader from reading it as a live branch."
+      }
+    ],
+    "nextAction": "Merge-ready from this reviewer's side: all five round-0 findings are closed with type-level enforcement rather than prose, the frozen identity and cost figures re-derive from the checked-in catalogue and pricing, and the remaining two items are optional comment-only clean-ups."
+  }
+}

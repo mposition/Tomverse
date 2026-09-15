@@ -99,6 +99,75 @@ test("execution receipts keep success, failure and refusal facts distinct", () =
     );
 });
 
+test("failure codes require their exact lifecycle layer", () => {
+    const refusal = {
+        receiptId: "exec_exact_layer",
+        requestId: "request_exact_layer",
+        suggestionId: null,
+        provider: null,
+        modelId: null,
+        adapterVersion: null,
+        outcome: "refused_before_dispatch",
+        dispatchedAt: null,
+        completedAt: "2026-09-15T00:00:00.050Z",
+        preparationLatencyMs: 50,
+        inputTokens: null,
+        cachedInputTokens: null,
+        outputTokens: null,
+        reasoningTokens: null,
+        actualCostMicroUsd: null,
+    };
+    const exactPairs = [
+        ["eligibility_refused", "admission"],
+        ["execution_not_approved", "admission"],
+        ["execution_contract_mismatch", "admission"],
+        ["reservation_authority_unavailable", "admission"],
+        ["adapter_unavailable", "adapter"],
+    ];
+
+    for (const [failureCode, failureLayer] of exactPairs) {
+        assert.equal(
+            promptRefinerExecutionReceiptSchema.safeParse(
+                execution({ ...refusal, failureCode, failureLayer })
+            ).success,
+            true
+        );
+    }
+    assert.equal(
+        promptRefinerExecutionReceiptSchema.safeParse(
+            execution({
+                ...refusal,
+                failureCode: "execution_not_approved",
+                failureLayer: "adapter",
+            })
+        ).success,
+        false
+    );
+    assert.equal(
+        promptRefinerExecutionReceiptSchema.safeParse(
+            execution({
+                ...refusal,
+                failureCode: "adapter_unavailable",
+                failureLayer: "admission",
+            })
+        ).success,
+        false
+    );
+    assert.equal(
+        promptRefinerExecutionReceiptSchema.safeParse(
+            execution({
+                receiptId: "exec_postdispatch_adapter_layer",
+                requestId: "request_postdispatch_adapter_layer",
+                suggestionId: null,
+                outcome: "failed",
+                failureCode: "provider_error",
+                failureLayer: "adapter",
+            })
+        ).success,
+        false
+    );
+});
+
 test("execution receipts reject contradictory lifecycle and telemetry claims", () => {
     const refusal = {
         outcome: "refused_before_dispatch",
@@ -122,7 +191,7 @@ test("execution receipts reject contradictory lifecycle and telemetry claims", (
             outcome: "failed",
             suggestionId: null,
             failureLayer: "admission",
-            failureCode: "cost_guardrail",
+            failureCode: "reservation_authority_unavailable",
         }),
         execution({
             outcome: "failed",
@@ -179,7 +248,7 @@ test("execution receipts reject contradictory lifecycle and telemetry claims", (
             "no_change",
             "unknown_after_dispatch",
         ].map((failureCode) => execution({ ...refusal, failureCode })),
-        ...["adapter_unavailable", "cost_guardrail"].map((failureCode) =>
+        ...["adapter_unavailable", "reservation_authority_unavailable"].map((failureCode) =>
             execution({
                 outcome: "failed",
                 suggestionId: null,
