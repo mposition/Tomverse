@@ -14,6 +14,7 @@ import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import {
   marketingJurisdictionVerdict,
   normalizeCountry,
+  profileForCountry,
 } from "@/lib/emailJurisdictionCore";
 import {
   CONSENT_REQUIRED_PURPOSES,
@@ -22,17 +23,22 @@ import {
 import {
   ensureDefaultPreferences,
   lockEmailPreferenceRow,
+  lockUserEmail,
   setPreference,
   type ConsentCapture,
 } from "@/lib/emailPreferences";
 import { normalizeSuppressionAddress } from "@/lib/emailSuppression";
-import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
+import {
+  ensureBootstrapPolicyVersion,
+  ensureTemplateVersion,
+} from "@/lib/emailTemplateRegistry";
+import { isLanguage } from "@/lib/language";
 import { MARKETING_CONSENT_CONFIRMATION_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import type {
   MarketingConsentPurpose,
   StoredConsentConfirmationPayload,
 } from "@/lib/marketingConsentConfirmationEmail";
-import { enqueueRefused, enqueueStandardEmail } from "@/lib/standardEmailLane";
+import { createStandardDeliveryRows } from "@/lib/standardEmailLane";
 
 /**
  * The double opt-in: asking for a marketing consent confirmation, and applying
@@ -85,6 +91,7 @@ export type ConsentConfirmationRequestResult =
     };
 
 const ALREADY_CONFIRMED = Symbol("already_confirmed");
+const ADDRESS_MOVED = Symbol("address_moved");
 
 /**
  * Records a confirmation request and queues the confirmation mail.
@@ -119,7 +126,8 @@ export async function requestConsentConfirmation(input: {
   // Checked here so the request is refused up front; the token itself is built
   // at send time, where a missing key fails the delivery rather than storing a
   // link.
-  if (!readConsentKeyring(process.env)) return { requested: false, reason: "keys_missing" };
+  const keyring = readConsentKeyring(process.env);
+  if (!keyring) return { requested: false, reason: "keys_missing" };
 
   const country = normalizeCountry(input.confirmedCountry);
   if (!country) throw new Error("A confirmed country must be a two-letter country code.");
@@ -144,10 +152,28 @@ export async function requestConsentConfirmation(input: {
       policyVersionId,
       addressDigest: consentAddressDigest(user.email),
     },
+    tokenKeyVersion: keyring.activeVersion,
   };
+
+  // Everything the delivery rows need is resolved before the transaction, so
+  // the transaction holds one connection and does nothing but its own writes.
+  // Resolving these with the global client while the row locks are held would
+  // take a second connection per request and can starve the pool.
+  const requested = input.language ?? user.settings?.language ?? null;
+  const language = isLanguage(requested) ? requested : "en";
+  const template = await ensureTemplateVersion({
+    templateKey: MARKETING_CONSENT_CONFIRMATION_TEMPLATE,
+    language,
+  });
 
   try {
     await prisma.$transaction(async (tx) => {
+      // Same lock order as setPreference(): user, then preference. The address
+      // the mail goes to is the one read under the lock.
+      const lockedEmail = await lockUserEmail(tx, input.userId);
+      if (!lockedEmail || consentAddressDigest(lockedEmail) !== stored.request.addressDigest) {
+        throw ADDRESS_MOVED;
+      }
       await lockEmailPreferenceRow(tx, input.userId, purpose);
       const existing = await tx.emailPreference.findUnique({
         where: { userId_purpose: { userId: input.userId, purpose } },
@@ -201,24 +227,24 @@ export async function requestConsentConfirmation(input: {
 
       // Same transaction as the request (docs/policy/email-notifications.md
       // §9.1): split, an account could be left "requested" with no mail on its
-      // way, pending forever.
-      const queued = await enqueueStandardEmail({
-        tx,
+      // way, pending forever. The jurisdiction is the one this request just
+      // confirmed, not a fresh read that could not see this transaction.
+      await createStandardDeliveryRows(tx, {
         templateKey: MARKETING_CONSENT_CONFIRMATION_TEMPLATE,
-        emailAddress: user.email,
+        emailAddress: lockedEmail,
         userId: input.userId,
-        language: input.language ?? user.settings?.language ?? null,
+        language,
         payload: stored,
+        ...template,
+        policyVersionId,
+        jurisdictionCountry: country,
+        jurisdictionProfileKey: profileForCountry(country),
       });
-      if (enqueueRefused(queued)) {
-        // Transactional templates are never refused for the marketing flag, so
-        // this is the no-address case racing the read above. Roll the request
-        // back rather than leave it pending with nothing sent.
-        throw new Error(`Consent confirmation could not be queued: ${queued.refused}`);
-      }
     });
   } catch (error) {
     if (error === ALREADY_CONFIRMED) return { requested: false, reason: "already_confirmed" };
+    // The address changed between the read and the lock; nothing was written.
+    if (error === ADDRESS_MOVED) return { requested: false, reason: "no_address" };
     throw error;
   }
 
@@ -317,6 +343,7 @@ export async function confirmConsent(input: {
       requestedAt: new Date(payload.requestedAt),
       requestId: payload.requestId,
       policyVersionId: payload.policyVersionId,
+      addressDigest: payload.addressDigest,
     },
     now,
   });
@@ -327,5 +354,6 @@ export async function confirmConsent(input: {
   if (result.reason === "already_set") {
     return { confirmed: true, purpose: payload.purpose, alreadyConfirmed: true };
   }
+  if (result.reason === "address_changed") return { confirmed: false, reason: "address_changed" };
   return { confirmed: false, reason: "superseded" };
 }

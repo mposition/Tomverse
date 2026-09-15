@@ -107,7 +107,8 @@ const currentToken = async (userId: string) => {
       policyVersionId: requested.policyVersionId,
       addressDigest: consentAddressDigest(user.email!),
     },
-    readConsentKeyring(process.env)!
+    readConsentKeyring(process.env)!,
+    "v1"
   );
 };
 
@@ -207,6 +208,52 @@ test("the click turns it on under the request's policy, and a second click grant
   // The person agreed under the policy they were shown, not the one active now.
   assert.equal(grants[0].policyVersionId, requestedUnder);
   assert.ok(grants[0].ipHash);
+});
+
+test("a key rotation between request and send does not change the link", async () => {
+  const user = await someone();
+  await request(user.id);
+  const before = await currentToken(user.id);
+  // v2 becomes active; v1 stays listed, as the rotation procedure requires.
+  process.env.EMAIL_CONSENT_KEYS = "v2:rotated-consent-key,v1:test-consent-key";
+  process.env.EMAIL_CONSENT_KEY_VERSION = "v2";
+  const calls: Array<{ text: string }> = [];
+  mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+    calls.push(JSON.parse(String(init.body)));
+    return new Response(JSON.stringify({ id: `resend-${randomUUID()}` }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  await drainStandardEmailDeliveries({ limit: 5 });
+  const link = calls[0]?.text.match(/\/consent\/confirm#t=(\S+)/);
+  assert.ok(link);
+  assert.equal(decodeURIComponent(link[1]), before);
+  assert.match(before, /^c1\.v1\./);
+  assert.equal((await confirmConsent({ token: before })).confirmed, true);
+  delete process.env.EMAIL_CONSENT_KEY_VERSION;
+});
+
+test("a withdrawal right after a confirmation leaves the purpose off and suppressed", async () => {
+  const user = await someone();
+  await request(user.id);
+  assert.equal((await confirmConsent({ token: await currentToken(user.id) })).confirmed, true);
+  await setPreference({
+    userId: user.id,
+    purpose: "product_updates",
+    enabled: false,
+    capturedVia: "unsubscribe_page",
+    source: "unsubscribe_link",
+    viaToken: true,
+  });
+  assert.equal((await preference(user.id)).enabled, false);
+  assert.equal(
+    await prisma.suppressionEntry.count({
+      where: { scope: "purpose", purposeKey: "product_updates", reason: "unsubscribe" },
+    }),
+    1
+  );
 });
 
 test("a newer request supersedes the older link, even within the same millisecond", async () => {

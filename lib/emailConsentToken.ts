@@ -101,6 +101,9 @@ export const readConsentKeyring = (env: NodeJS.ProcessEnv): ConsentKeyring | nul
 // token kinds interchangeable.
 const keyFor = (secret: string) =>
   createHash("sha256").update(`email-consent:${secret}`).digest();
+// Separate key for deriving the IV, so the cipher key is never also a MAC key.
+const ivKeyFor = (secret: string) =>
+  createHash("sha256").update(`email-consent-iv:${secret}`).digest();
 
 /**
  * A digest of the address, bound into the token and never shown.
@@ -113,13 +116,23 @@ export const consentAddressDigest = (address: string) =>
     .update(`email-consent-address:${address.trim().toLowerCase()}`)
     .digest("base64url");
 
+/**
+ * Encrypts a request into a token.
+ *
+ * `version` pins the key: a request records the version that was active when
+ * it was made, and every later render of the same delivery uses that one, so a
+ * key rotation between a send and its retry cannot change the bytes. That
+ * version must stay in `EMAIL_CONSENT_KEYS` for at least the queue's longest
+ * retry window plus the link's seventy-two hours.
+ */
 export const createConsentToken = (
   payload: Omit<ConsentTokenPayload, "kind">,
-  keyring: ConsentKeyring
+  keyring: ConsentKeyring,
+  version: string = keyring.activeVersion
 ): string => {
-  const secret = keyring.secrets[keyring.activeVersion];
+  const secret = keyring.secrets[version];
   if (!secret) {
-    throw new Error(`No consent key for version "${keyring.activeVersion}".`);
+    throw new Error(`No consent key for version "${version}".`);
   }
 
   const body: ConsentTokenPayload = { kind: "consent", ...payload };
@@ -128,12 +141,14 @@ export const createConsentToken = (
   // same request always yields the same token. That is what lets the token be
   // re-created at send time from non-secret fields instead of being stored in
   // the delivery snapshot (docs/policy/email-double-opt-in.md §13.1), and it
-  // keeps a retry byte-identical for the provider's idempotency key. An IV is
-  // only ever reused for an identical plaintext -- which yields the identical
-  // ciphertext and reveals nothing new -- and every request carries its own
-  // random `requestId`, so two requests never share one.
-  const iv = createHmac("sha256", keyFor(secret))
-    .update(`iv:${plaintext}`)
+  // keeps a retry byte-identical for the provider's idempotency key. The IV
+  // is a 96-bit truncation of an HMAC under a key separate from the cipher key,
+  // so two different plaintexts share one only by collision: around 2^48
+  // tokens under one key version before that becomes likely, against a volume
+  // bounded by per-account request limits. Rotate the key version long before
+  // anything near that; the realistic volume is many orders of magnitude lower.
+  const iv = createHmac("sha256", ivKeyFor(secret))
+    .update(plaintext)
     .digest()
     .subarray(0, IV_BYTES);
   const cipher = createCipheriv(ALGORITHM, keyFor(secret), iv);
@@ -141,7 +156,7 @@ export const createConsentToken = (
 
   return [
     TOKEN_PREFIX,
-    keyring.activeVersion,
+    version,
     iv.toString("base64url"),
     ct.toString("base64url"),
     cipher.getAuthTag().toString("base64url"),

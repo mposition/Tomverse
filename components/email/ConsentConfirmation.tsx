@@ -15,34 +15,24 @@ import { useLanguage } from "@/components/LanguageProvider";
  * created by a scanner is not a consent.
  *
  * No offer, no feature list, no second call to action: this page confirms and
- * nothing else, for the same reason the confirmation mail does.
+ * nothing else, for the same reason the confirmation mail does. (The site-wide
+ * analytics consent notice may still appear, as on every page; it is a privacy
+ * notice, not a promotion, and hiding it here would be a privacy decision.)
  */
-/**
- * The token, read once from the URL fragment and then removed from the address
- * bar, so it does not linger in history, bookmarks or a screenshot. Cached so
- * the removal cannot make a later read come back empty.
- */
-let capturedToken: string | null = null;
-const readFragmentToken = () => {
-    if (capturedToken !== null) return capturedToken;
-    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-    capturedToken = params.get("t") ?? "";
-    if (window.location.hash) {
-        window.history.replaceState(
-            null,
-            "",
-            window.location.pathname + window.location.search
-        );
-    }
-    return capturedToken;
+const readFragmentToken = () =>
+    new URLSearchParams(window.location.hash.replace(/^#/, "")).get("t") ?? "";
+const subscribeToHash = (onChange: () => void) => {
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
 };
-const noSubscription = () => () => {};
 
 export function ConsentConfirmation() {
     const { t } = useLanguage();
     // null on the server and during hydration: the fragment is browser-only, so
     // the first HTML is a neutral heading rather than a premature "invalid".
-    const token = useSyncExternalStore(noSubscription, readFragmentToken, () => null);
+    // Read from the live URL on every render and on hashchange -- no cache, so a
+    // second link opened in the same document is the one submitted.
+    const token = useSyncExternalStore(subscribeToHash, readFragmentToken, () => null);
     const [submitState, setState] = useState<
         "idle" | "working" | "done" | "expired" | "failed"
     >("idle");

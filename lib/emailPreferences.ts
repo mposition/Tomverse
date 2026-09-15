@@ -18,7 +18,7 @@ import {
   type PreferenceChangeRefusal,
 } from "@/lib/emailPreferenceCore";
 import { normalizeCountry } from "@/lib/emailJurisdictionCore";
-import { CONSENT_CONFIRMATION_TTL_MS } from "@/lib/emailConsentToken";
+import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   normalizeSuppressionAddress,
   recordSuppression,
@@ -66,7 +66,9 @@ export type PreferenceChangeResult =
   | { changed: false; reason: PreferenceChangeRefusal["reason"] }
   | { changed: false; reason: "already_set" }
   /** The confirmation named a request that is no longer the latest one. */
-  | { changed: false; reason: "superseded" };
+  | { changed: false; reason: "superseded" }
+  /** The account's address is not the one the confirmation link was sent to. */
+  | { changed: false; reason: "address_changed" };
 
 /**
  * Creates the rows a new account starts with.
@@ -173,6 +175,20 @@ export async function readPreferences(userId: string): Promise<PreferenceState[]
  * of a consent-based preference goes through this, so reads and writes of the
  * confirmation state cannot interleave.
  */
+export async function lockUserEmail(
+  tx: Prisma.TransactionClient,
+  userId: string
+): Promise<string | null> {
+  const rows = await tx.$queryRaw<Array<{ email: string | null }>>`SELECT "email" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+  return rows[0]?.email ?? null;
+}
+
+/**
+ * Takes the row lock for one preference inside a transaction. Every transition
+ * of a consent-based preference goes through this, so reads and writes of the
+ * confirmation state cannot interleave. Always after `lockUserEmail()`, so the
+ * two locks are taken in one order everywhere.
+ */
 export async function lockEmailPreferenceRow(
   tx: Prisma.TransactionClient,
   userId: string,
@@ -214,6 +230,8 @@ export async function setPreference(input: {
     requestedAt: Date;
     requestId: string;
     policyVersionId: string;
+    /** The mailbox the link was sent to, re-checked under the user row lock. */
+    addressDigest: string;
   };
   now?: Date;
 }): Promise<PreferenceChangeResult> {
@@ -249,6 +267,18 @@ export async function setPreference(input: {
   // click grants twice, a request racing a confirmation undoes it, and a cancel
   // racing a confirmation leaves `enabled` true with no confirmation.
   const outcome = await prisma.$transaction(async (tx) => {
+    // The address is read under the user row lock and everything below uses
+    // that value, so a confirmation cannot be recorded against an address that
+    // changed after the link was checked, and a withdrawal suppresses the
+    // address that actually withdrew.
+    const email = await lockUserEmail(tx, input.userId);
+    if (!email) return "no_address" as const;
+    if (
+      input.confirmation &&
+      consentAddressDigest(email) !== input.confirmation.addressDigest
+    ) {
+      return "address_changed" as const;
+    }
     await lockEmailPreferenceRow(tx, input.userId, purpose);
     const existing = await tx.emailPreference.findUnique({
       where: { userId_purpose: { userId: input.userId, purpose } },
@@ -335,7 +365,7 @@ export async function setPreference(input: {
           // The address as it is now. Consent attaches to a mailbox, so a later
           // address change must not rewrite what this row says
           // (docs/policy/email-notifications.md §13.4).
-          emailAddress: normalizeSuppressionAddress(user.email!),
+          emailAddress: normalizeSuppressionAddress(email),
           purpose,
           action: consentActionFor({
             wasEnabled: wasEffectivelyEnabled,
@@ -369,39 +399,42 @@ export async function setPreference(input: {
         },
       });
     }
+
+    if (!input.enabled) {
+      await recordSuppression(
+        {
+          emailAddress: email,
+          purposeKey: purpose,
+          reason: "unsubscribe",
+          source:
+            input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center",
+          sourceDeliveryId: input.deliveryId ?? null,
+          occurredAt: now,
+        },
+        tx
+      );
+    } else {
+      // Re-enabling clears only this purpose's own hold. A global suppression --
+      // a hard bounce, a complaint, an operator decision -- is not something a
+      // preference toggle may lift (docs/policy/email-notifications.md §12.4).
+      // deleteMany rather than delete: a missing row must not abort the
+      // transaction.
+      await tx.suppressionEntry.deleteMany({
+        where: {
+          emailAddress: normalizeSuppressionAddress(email),
+          scope: "purpose",
+          purposeKey: purpose,
+        },
+      });
+    }
     return "changed" as const;
   });
 
+  if (outcome === "no_address") return { changed: false, reason: "unknown_purpose" };
+  if (outcome === "address_changed") return { changed: false, reason: "address_changed" };
   if (outcome === "superseded") return { changed: false, reason: "superseded" };
   if (outcome === "already_set") return { changed: false, reason: "already_set" };
   if (outcome === "cancelled") return { changed: true, purpose, enabled: false };
-
-  if (!input.enabled) {
-    await recordSuppression({
-      emailAddress: user.email,
-      purposeKey: purpose,
-      reason: "unsubscribe",
-      source:
-        input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center",
-      sourceDeliveryId: input.deliveryId ?? null,
-      occurredAt: now,
-    });
-  } else {
-    // Re-enabling clears only this purpose's own hold. A global suppression --
-    // a hard bounce, a complaint, an operator decision -- is not something a
-    // preference toggle may lift, and §12.4 requires dual approval to remove.
-    await prisma.suppressionEntry
-      .delete({
-        where: {
-          emailAddress_scope_purposeKey: {
-            emailAddress: normalizeSuppressionAddress(user.email),
-            scope: "purpose",
-            purposeKey: purpose,
-          },
-        },
-      })
-      .catch(() => undefined);
-  }
 
   return { changed: true, purpose, enabled: input.enabled };
 }

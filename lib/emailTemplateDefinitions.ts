@@ -211,7 +211,7 @@ const definitions: AnyDefinition[] = [
         throw new Error("EMAIL_CONSENT_KEYS is not configured; the confirmation link cannot be built.");
       }
       return prepareConsentConfirmationForSend(stored, {
-        createToken: (payload) => createConsentToken(payload, keyring),
+        createToken: (payload, version) => createConsentToken(payload, keyring, version),
         appUrl: appUrl(),
       });
     },

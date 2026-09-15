@@ -332,6 +332,10 @@ https://tomverse.app/api/admin/marketing-reach
 | 12 | flag와 이미 발송된 링크 | flag가 off면 **확인도 거부**(`disabled`) | "off는 동의를 받지 않음"이 발송된 링크에도 같게 적용됩니다. 72시간 안에 다시 켜면 링크가 다시 동작합니다 |
 | 13 | IP 증거 | 두 route 모두 신뢰할 수 있는 edge IP만 hash해 기록, `unknown`은 NULL | 설계 §5가 열거한 `ipHash` 증거 |
 | 14 | 대기 취소 UI | 대기 중인 행에 **"요청 취소"** 버튼 | 대기 행의 스위치는 꺼져 있어 누르면 새 확인을 요청하므로, 발송된 링크를 무효화할 별도 수단이 필요합니다 |
+| 15 | 잠금 순서와 주소 | 요청·확인·철회는 **User 행 → EmailPreference 행** 순서로 잠그고, 주소는 잠근 User 행에서 읽어 digest를 대조·기록합니다. purpose suppression 기록·삭제도 같은 트랜잭션입니다 | 확인과 주소 변경, 확인과 수신거부가 교차해도 다른 주소의 동의나 사라진 suppression이 남지 않습니다 |
+| 16 | 요청 트랜잭션 | template·정책 버전은 트랜잭션 **전에** 준비하고, 트랜잭션 안에서는 delivery 행만 씁니다(`createStandardDeliveryRows`) | 잠금을 쥔 채 전역 연결을 추가로 잡으면 동시 요청이 connection pool을 고갈시킬 수 있습니다 |
+| 17 | 키 회전 | 요청 snapshot에 **`tokenKeyVersion`** 을 고정해 재시도가 같은 키로 같은 토큰을 만듭니다. 그 버전은 큐의 최장 재시도 기간 + 72시간보다 오래 `EMAIL_CONSENT_KEYS`에 남겨야 합니다. IV 파생 키는 암호 키와 분리했습니다 | 회전 사이의 재시도가 다른 본문을 같은 idempotency key로 보내지 않습니다 |
+| 18 | analytics 동의 고지 | 확인 페이지에도 사이트 공통 analytics 동의 고지가 뜰 수 있습니다 | 광고가 아니라 개인정보 고지이며, 이 페이지에서만 숨기는 것은 별도의 개인정보 결정입니다 |
 
 ### 13.2 켜는 순서 (운영)
 

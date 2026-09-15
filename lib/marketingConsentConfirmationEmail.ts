@@ -192,6 +192,8 @@ export type StoredConsentConfirmationPayload = {
     policyVersionId: string;
     addressDigest: string;
   };
+  /** The consent key version active at request time; retries render with it. */
+  tokenKeyVersion: string;
 };
 
 /** The URL placeholder the audit hash and the template registry see. */
@@ -209,11 +211,17 @@ export const CONSENT_CONFIRMATION_URL_PLACEHOLDER =
 export const prepareConsentConfirmationForSend = (
   stored: StoredConsentConfirmationPayload,
   deps: {
-    createToken: (payload: StoredConsentConfirmationPayload["request"] & { purpose: string }) => string;
+    createToken: (
+      payload: StoredConsentConfirmationPayload["request"] & { purpose: string },
+      version: string
+    ) => string;
     appUrl: string;
   }
 ): { payload: MarketingConsentConfirmationPayload; secrets: string[] } => {
-  const token = deps.createToken({ ...stored.request, purpose: stored.purpose });
+  const token = deps.createToken(
+    { ...stored.request, purpose: stored.purpose },
+    stored.tokenKeyVersion
+  );
   const confirmUrl = `${deps.appUrl}/consent/confirm#t=${encodeURIComponent(token)}`;
   return {
     payload: { purpose: stored.purpose, confirmUrl },

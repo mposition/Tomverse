@@ -2,7 +2,7 @@
 --
 -- Contract: docs/policy/email-double-opt-in.md §4.1, §4.4, §11 items 1-3.
 --
--- Two nullable columns and no backfill. A row switched on before this existed
+-- Three nullable columns and no backfill. A row switched on before this existed
 -- has confirmedAt NULL and is refused by the send gate, which is the correct
 -- reading of it: the switch was flipped, the mailbox owner never confirmed.
 -- Writing a confirmedAt for those rows would be manufacturing the one fact

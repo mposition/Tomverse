@@ -83,7 +83,9 @@ test("it expires after seventy-two hours, and a future stamp is refused", () => 
 test("a tampered token and an unknown key version are refused", () => {
   const token = createConsentToken(payload, keyring);
   const parts = token.split(".");
-  parts[3] = `${parts[3].slice(0, -2)}AA`;
+  // Flip the first character, whatever it is: the token is deterministic, so a
+  // fixed replacement could happen to equal the original.
+  parts[3] = `${parts[3][0] === "A" ? "B" : "A"}${parts[3].slice(1)}`;
   assert.deepEqual(readConsentToken(parts.join("."), keyring, now), {
     valid: false,
     reason: "invalid",

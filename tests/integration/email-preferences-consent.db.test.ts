@@ -11,6 +11,7 @@ import {
 } from "@/lib/emailPreferences";
 import { suppressionCheck } from "@/lib/emailSuppression";
 import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
+import { consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   jurisdictionForUser,
   recordBillingCountry,
@@ -99,6 +100,9 @@ const agree = async (input: Parameters<typeof setPreference>[0]) => {
       requestedAt,
       requestId,
       policyVersionId: await ensureBootstrapPolicyVersion(),
+      addressDigest: consentAddressDigest(
+        (await prisma.user.findUniqueOrThrow({ where: { id: input.userId } })).email!
+      ),
     },
   });
 };
@@ -493,6 +497,7 @@ test("a confirmation that names an older request confirms nothing", async () => 
       requestedAt: older,
       requestId: "older-request",
       policyVersionId: await ensureBootstrapPolicyVersion(),
+      addressDigest: consentAddressDigest(user.email!),
     },
   });
 
