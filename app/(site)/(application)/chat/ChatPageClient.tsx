@@ -88,7 +88,6 @@ import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
 import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
 import {
-  CHAT_STARTER_CATALOG,
   type ChatStarterEntry,
   type StarterCapability,
 } from "@/lib/chatStarterCatalog";
@@ -98,7 +97,8 @@ import {
 } from "@/lib/chatStarterAvailability";
 import {
   applyStarterSeed,
-  type StarterSeedToggleMemory,
+  EMPTY_STARTER_SEED_MEMORIES,
+  type StarterSeedMemories,
 } from "@/lib/chatStarterSeed";
 import {
   useLanguage,
@@ -798,6 +798,7 @@ export function ChatPageClient({
   // one store, so switching between desktop and mobile is not a draft
   // boundary either. In-memory for this tab only -- see the hook's docstring.
   const {
+    activeDraftKey,
     draftText: inputValue,
     draftAttachments: attachments,
     setDraftText: setInputValue,
@@ -2886,11 +2887,21 @@ export function ChatPageClient({
     const handleStartImageDraft = (
         draftText: string,
         modelId?: string,
-        options?: { fromImageRequest?: boolean }
+        options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
     ) => {
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
-            text: draftText,
+            /*
+              What the chat composer gets back if the image draft is cancelled.
+
+              The composer hands over its own draft, so there the seed and the
+              sentence to restore are the same string and the default is right.
+              A starter card hands over a seed that was never in the chat box,
+              and restoring it would put an image prompt in the chat composer --
+              against this handler's own promise below that the chat draft comes
+              back exactly as it was.
+            */
+            text: options?.chatDraftOnReturn ?? draftText,
         });
         setImageDraftAutoGenerate(
             Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
@@ -6243,27 +6254,31 @@ export function ChatPageClient({
     isGuestMode,
   ]);
 
-  /*
-    Every sentence a starter card can put in the composer.
-
-    Read by the seed handler below to tell "the box still holds a seed nobody
-    edited" from "the box holds something this person wrote". Picking a second
-    card replaces the first one's sentence; it never replaces typed work.
-  */
   /**
-   * What the last starter seed did to the composer's toggles.
+   * What the last starter seed wrote: the draft text and the toggles.
+   *
+   * Read by the seed handler below to tell "the box still holds a seed nobody
+   * edited" from "the box holds something this person wrote". Picking a second
+   * card replaces the first one's sentence; it never replaces typed work.
+   *
+   * Remembered rather than recognised against the catalogue's sentences in the
+   * active locale: that set lost the sentence already in the box whenever the
+   * language changed, and the next card could then neither replace it nor put
+   * back the search it had armed (cross review round 2, 2026-09-15).
+   *
+   * Kept per draft scope, the key the draft store files this conversation's
+   * draft under: one record for the whole page let conversation A trust a
+   * record conversation B wrote, and put A's search back to B's value (cross
+   * review v2 round 0).
    *
    * A ref rather than state: nothing renders from it, and it must not make the
-   * seed handler a new function on every toggle change. It survives a
-   * conversation switch harmlessly -- `applyStarterSeed` only trusts it while
-   * the live mode still matches what it recorded writing.
+   * seed handler a new function on every draft or toggle change.
+   * `applyStarterSeed` only trusts a scope's record while that scope's live
+   * draft and mode still match what it recorded writing, so a stale record
+   * fails toward leaving the composer alone.
    */
-  const starterSeedTogglesRef = useRef<StarterSeedToggleMemory | null>(null);
-
-  const starterSeedTexts = useMemo(
-    () =>
-      new Set(CHAT_STARTER_CATALOG.map((entry) => t(entry.seed.promptSeedKey))),
-    [t]
+  const starterSeedMemoriesRef = useRef<StarterSeedMemories>(
+    EMPTY_STARTER_SEED_MEMORIES
   );
 
   /*
@@ -6281,24 +6296,26 @@ export function ChatPageClient({
   */
   const handleStarterSeed = (entry: ChatStarterEntry) => {
     const seedText = t(entry.seed.promptSeedKey);
-    if (entry.seed.productKey === "studio") {
-      // An image card belongs to the image workspace, and `handleStartImageDraft`
-      // is how the composer already hands a sentence over. Called without
-      // `fromImageRequest`, so `imageDraftAutoGenerate` stays false: the draft
-      // is seeded and the person still presses generate.
-      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0]);
-      return;
-    }
     // Text and toggles are decided together (lib/chatStarterSeed.ts). They used
     // to be decided apart, and the half that did not think about ownership
     // armed web search on somebody's own sentence and never disarmed it --
     // found in staging, at 9 credits a send instead of 1.
+    //
+    // Which product the seed lands in is decided AFTER this, never before. The
+    // image card branched first and so skipped the ownership test altogether:
+    // it took over a composer holding typed work, and it never put back the
+    // search a previous card had armed. That is the staging defect again, on
+    // the one path the staging fix did not cover.
+    const handsToStudio = entry.seed.productKey === "studio";
     const application = applyStarterSeed({
+      scope: activeDraftKey,
       draft: inputValue,
-      seedTexts: starterSeedTexts,
+      // What the chat composer is left holding: an image card hands its
+      // sentence to the image workspace and empties the chat box (below).
+      seedText: handsToStudio ? "" : seedText,
       wantsWebSearch: Boolean(entry.seed.webSearch),
       currentWebSearchMode: webSearchMode,
-      memory: starterSeedTogglesRef.current,
+      memories: starterSeedMemoriesRef.current,
     });
     if (!application.applies) {
       // The box holds the person's writing, so nothing of the seed lands. The
@@ -6307,8 +6324,23 @@ export function ChatPageClient({
       setFocusToken((value) => value + 1);
       return;
     }
-    starterSeedTogglesRef.current = application.memory;
+    starterSeedMemoriesRef.current = application.memories;
     setWebSearchMode(application.webSearchMode);
+    if (handsToStudio) {
+      // An image card belongs to the image workspace, and `handleStartImageDraft`
+      // is how the composer already hands a sentence over. Called without
+      // `fromImageRequest`, so `imageDraftAutoGenerate` stays false: the draft
+      // is seeded and the person still presses generate.
+      //
+      // The chat composer is left empty rather than holding a previous card's
+      // sentence: that seed was withdrawn together with its toggle just above,
+      // and a seed is applied as a unit or not at all.
+      setInputValue("");
+      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0], {
+        chatDraftOnReturn: "",
+      });
+      return;
+    }
     setInputValue(seedText);
     setFocusToken((value) => value + 1);
   };

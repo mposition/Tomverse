@@ -195,16 +195,38 @@ export type VisibleStarterCard = {
  *
  * One slot, not a proportion: the point is that a lock is reachable, not that
  * the screen fills with prices.
+ *
+ * ## Why the slot is not only for locks
+ *
+ * Held for locks alone, the rule inverted itself. `compare-image-models` sits
+ * low in the registry, so with image generation on a Free account saw it --
+ * locked, in the reserved slot -- and a Pro account did not: the moment the
+ * requirement was met the card joined the back of the runnable queue and the
+ * ceiling cut it. The one product the gallery advertises was visible only to
+ * the accounts that could not use it.
+ *
+ * So the invariant is monotonic: **meeting a requirement never removes a card
+ * from the screen.** The slot is held for the card that carries a requirement,
+ * whether that requirement is unmet (locked) or has just been met (runnable
+ * but below the cut). Only requirements a viewer can acquire count --
+ * `signedIn` and `minimumPlan`. A flag or a capability is not something an
+ * account can go and get, so a card gated on one is ranked like any other.
  */
-const RESERVED_LOCKED_SLOTS = 1;
+const RESERVED_REQUIREMENT_SLOTS = 1;
+
+/** A requirement the viewer could go and satisfy, as opposed to one the deployment decides. */
+const declaresAcquirableRequirement = (entry: ChatStarterEntry): boolean =>
+  entry.requires.signedIn === true || entry.requires.minimumPlan !== undefined;
 
 /**
  * What the screen shows, in the order it shows it.
  *
  * Hidden entries are dropped, runnable cards come before locked ones, and the
  * result is cut to `CHAT_STARTER_MAX_VISIBLE` -- with one slot held back for a
- * locked card whenever one exists and the limit has room for both (see
- * `RESERVED_LOCKED_SLOTS`).
+ * card that carries an acquirable requirement whenever the limit has room for
+ * both (see `RESERVED_REQUIREMENT_SLOTS`). A locked card claims that slot
+ * first; with no lock to show, it goes to a card whose requirement the viewer
+ * has just met and that the cut would otherwise remove.
  *
  * Sorting is stable within each group, so the registry's own order is what
  * decides ties and the surface never reshuffles between renders.
@@ -227,15 +249,29 @@ export function selectVisibleStarterCards(
   const locked = resolved.filter((card) => card.availability.state === "locked");
 
   // The reservation only applies where both can fit. At a ceiling of one there
-  // is nothing to balance, and holding the single slot for a lock would leave
-  // a first screen with nothing on it a person could do.
-  const reserved =
-    locked.length > 0 && ceiling > RESERVED_LOCKED_SLOTS
-      ? Math.min(RESERVED_LOCKED_SLOTS, locked.length)
+  // is nothing to balance, and holding the single slot for a requirement would
+  // leave a first screen with nothing on it a person could do.
+  const roomToReserve = ceiling > RESERVED_REQUIREMENT_SLOTS;
+  if (locked.length > 0) {
+    const reserved = roomToReserve
+      ? Math.min(RESERVED_REQUIREMENT_SLOTS, locked.length)
       : 0;
-  const shown = [
-    ...runnable.slice(0, ceiling - reserved),
-    ...locked,
-  ].slice(0, ceiling);
-  return shown;
+    return [...runnable.slice(0, ceiling - reserved), ...locked].slice(
+      0,
+      ceiling
+    );
+  }
+
+  // No lock to disclose. The slot then belongs to a card whose requirement this
+  // viewer has just met and that the cut would otherwise drop -- the case that
+  // made a Pro account the only one never shown the image card.
+  const cut = runnable.slice(ceiling);
+  const promoted = roomToReserve
+    ? cut.find((card) => declaresAcquirableRequirement(card.entry))
+    : undefined;
+  if (!promoted) return runnable.slice(0, ceiling);
+  return [
+    ...runnable.filter((card) => card !== promoted).slice(0, ceiling - 1),
+    promoted,
+  ];
 }

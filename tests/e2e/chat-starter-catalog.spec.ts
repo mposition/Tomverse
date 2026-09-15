@@ -1,6 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-import { mockUserUsage, setRootFontSize } from "./support/chat-state-fixtures";
+import {
+  mockGuestUsage,
+  mockUserUsage,
+  setRootFontSize,
+} from "./support/chat-state-fixtures";
 
 /**
  * The Chat starter catalogue on the welcome screen.
@@ -189,6 +193,54 @@ test.describe("Chat starter catalogue", () => {
     await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
   });
 
+  test("a seed stays ours across a language change", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Cross review round 2, 2026-09-15: ownership was "is the draft one of the
+    // sentences the cards produce in the active locale". Changing the language
+    // took the sentence already in the box out of that set, so the next card
+    // read it as the person's own writing, applied nothing, and the search the
+    // first card armed could no longer be put back -- the 9-credit send again.
+    // A guest, because the language control a guest has changes the locale in
+    // place; a reload would clear the draft and prove nothing. The guest holds
+    // enough credits for a searching send, or the guest-limit dialog opens
+    // over the gallery the moment search is armed.
+    await enableStarterFlag(page);
+    await mockGuestUsage(page, 0, 1000);
+    await openWelcome(page);
+
+    const textarea = page.getByTestId("chat-textarea");
+    const sourced = page.locator('[data-starter-id="sourced-answer"]');
+    const plain = page.locator('[data-starter-id="compare-answers"]');
+    await expect(sourced).toBeVisible();
+    await sourced.click();
+    await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+    const englishSeed = await textarea.inputValue();
+    expect(englishSeed.trim().length).toBeGreaterThan(0);
+    const englishPlainCard = (await plain.textContent()) ?? "";
+
+    const isMobile = (page.viewportSize()?.width ?? 1024) < 768;
+    if (isMobile) {
+      await page.getByTestId("mobile-chat-shell").locator("header button").first().click();
+    }
+    await page
+      .locator("select")
+      .filter({ has: page.locator('option[value="ko"]') })
+      .last()
+      .selectOption("ko");
+    if (isMobile) await page.keyboard.press("Escape");
+
+    // The locale really changed, and the draft survived it: otherwise the
+    // assertions below would pass without exercising anything.
+    await expect(plain).not.toHaveText(englishPlainCard);
+    await expect(textarea).toHaveValue(englishSeed);
+
+    await plain.click();
+    await expect(textarea).not.toHaveValue(englishSeed);
+    expect((await textarea.inputValue()).trim().length).toBeGreaterThan(0);
+    await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+  });
+
   test("the gallery never takes the textarea's row, at 320px and at 200% text", { tag: "@ui-risk" }, async ({
     page,
   }) => {
@@ -266,6 +318,70 @@ test.describe("Chat starter catalogue", () => {
     await expect(imageCard).toBeVisible();
     await expect(imageCard).toHaveAttribute("data-starter-state", "locked");
     await expect(imageCard.getByTestId("chat-starter-lock")).toBeVisible();
+  });
+
+  test("the image card refuses typed work like every other card", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Cross review round 0, 2026-09-15: the studio branch returned before the
+    // ownership test, so this card was the one card that could take over a
+    // composer holding somebody's own sentence -- and carry them into another
+    // workspace while doing it. The product a seed lands in is decided after
+    // ownership, never before.
+    await enableStarterFlag(page);
+    await enableImageFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await openWelcome(page);
+
+    const textarea = page.getByTestId("chat-textarea");
+    await textarea.fill("my own half finished question");
+
+    const imageCard = page.locator('[data-starter-id="compare-image-models"]');
+    await expect(imageCard).toHaveAttribute("data-starter-state", "available");
+    await imageCard.click();
+
+    // The sentence is untouched and the chat is still the screen they are on:
+    // a refused seed changes nothing, including where they are.
+    await expect(textarea).toHaveValue("my own half finished question");
+    await expect(page.getByTestId("image-generation-prompt")).toHaveCount(0);
+  });
+
+  test("the image card puts back the search a previous card armed", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // The same 9-credits-instead-of-1 defect staging found, on the path the
+    // staging fix missed: sourced-answer arms search, the image card replaces
+    // that seed, and the toggle has to come back with the sentence it came in
+    // with.
+    await enableStarterFlag(page);
+    await enableImageFlag(page);
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro" });
+    await openWelcome(page);
+
+    await page.locator('[data-starter-id="sourced-answer"]').click();
+    await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+
+    // The image workspace opened with the card's own sentence.
+    await page.locator('[data-starter-id="compare-image-models"]').click();
+    const imagePrompt = page.getByTestId("image-generation-prompt");
+    await expect(imagePrompt).toBeVisible();
+    expect((await imagePrompt.inputValue()).trim().length).toBeGreaterThan(0);
+
+    // The toggle is asked about back in the chat, never from the image
+    // workspace: over there the composer does not exist, so an absent chip
+    // would say nothing about whether search was disarmed. Asserted from the
+    // image side, this test passed against the very defect it is here to
+    // catch.
+    await page.getByTestId("image-generation-cancel-draft").click();
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+
+    // And the chat composer kept nothing: the sourced card's seed was
+    // withdrawn with its toggle, so what comes back is an empty box rather
+    // than either card's sentence.
+    await expect(page.getByTestId("chat-textarea")).toHaveValue("");
   });
 
   test("with the image flag off the image card is absent, not locked", { tag: "@ui-risk" }, async ({
