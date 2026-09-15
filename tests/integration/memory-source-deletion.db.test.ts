@@ -22,6 +22,7 @@ import {
     reconcileSourceLockedMemories,
     setExternalConversationLock,
 } from "@/lib/externalConversationLockService";
+import { persistExtractionChunkDecisions } from "@/lib/memoryExtractionPersistence";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { memoryRetrievalTerms } from "@/lib/memoryRetrievalTerms";
 import { prisma } from "@/lib/prisma";
@@ -387,7 +388,8 @@ const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * and without the lock it never waits, so the test fails rather than passing by
  * timing.
  *
- * The key is matched exactly. A bigint advisory key shows its high half in
+ * The key is matched exactly, in this database: `pg_locks` covers the whole
+ * cluster and advisory locks are database-local. A bigint advisory key shows its high half in
  * `classid` and its low half in `objid`, with `objsubid` 1; any other
  * session waiting on any other advisory lock (credit account, import) is not
  * evidence that this one arrived.
@@ -406,6 +408,7 @@ const untilTheMemoryLockIsAwaited = async (userId: string, deadlineMs = 4_000) =
             FROM pg_locks
             WHERE locktype = 'advisory'
               AND NOT granted
+              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
               AND objsubid = 1
               AND classid = ((hashtext(${key})::bigint >> 32) & 4294967295)::oid
               AND objid = (hashtext(${key})::bigint & 4294967295)::oid
@@ -573,6 +576,22 @@ for (const [label, runWriter] of [
             }),
     ],
     ["reconcileSourceLockedMemories", () => reconcileSourceLockedMemories()],
+    [
+        // The real persistence step, not a stand-in: with no decisions it still
+        // takes the lock before replacing this chunk's earlier proposals.
+        "persistExtractionChunkDecisions",
+        (userId: string) =>
+            prisma.$transaction((tx) =>
+                persistExtractionChunkDecisions(tx, {
+                    userId,
+                    runId: "run-lock-participation",
+                    chunkIndex: 0,
+                    extractionModelId: "gpt-5-6-luna",
+                    promptVersion: "mem-extract-v1",
+                    decisions: [],
+                })
+            ),
+    ],
 ] as const) {
     test(`${label} waits for the account memory lock`, async () => {
         const user = await createUser();
