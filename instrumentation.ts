@@ -17,11 +17,12 @@ export async function register() {
 // priced correctly, and every problem here already fails the PR gate.
 async function reportCostConfigurationIssues() {
   try {
-    const [{ AVAILABLE_MODELS }, { findUnpricedModels }, guardrails] =
+    const [{ AVAILABLE_MODELS }, { findUnpricedModels }, guardrails, tokenQuota] =
       await Promise.all([
         import("@/lib/models"),
         import("@/lib/modelPricing"),
         import("@/lib/chatCostGuardrails"),
+        import("@/lib/chatTokenQuotaCore"),
       ]);
 
     const unpricedPremium = findUnpricedModels(AVAILABLE_MODELS).filter(
@@ -48,6 +49,21 @@ async function reportCostConfigurationIssues() {
           names: retired,
           message:
             "These environment variables held the old per-user USD entitlement ceiling and are no longer read. Configure CHAT_COST_GUARDRAIL_* instead.",
+        })
+      );
+    }
+
+    const retiredTokenLimits = tokenQuota.findRetiredUserTokenLimitEnvNames(
+      process.env
+    );
+    if (retiredTokenLimits.length > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "retired_token_limit_env_ignored",
+          severity: "warning",
+          names: retiredTokenLimits,
+          message:
+            "These environment variables capped a signed-in account's cumulative tokens and are no longer read. Credits are the entitlement; remove them.",
         })
       );
     }
