@@ -327,7 +327,11 @@ export function EmailNotificationSettings() {
                         </section>
                     ) : null}
 
-                    {productUpdates && !productUpdates.enabled ? (
+                    {/* Not offered where it cannot be granted: the server would
+                        refuse it, and a button next to "not available for your
+                        country" contradicts it. Confirming a different country
+                        above brings it back. */}
+                    {productUpdates && !productUpdates.enabled && !countryIsUnsupported ? (
                         <section className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900 dark:bg-blue-950/30">
                             <p className="text-xs font-bold uppercase tracking-[0.14em] text-blue-700 dark:text-blue-300">
                                 {t("emailNotifications.marketingOptional")}
@@ -406,7 +410,17 @@ export function EmailNotificationSettings() {
                                         aria-label={t(
                                             `emailNotifications.purpose.${preference.purpose}.title`
                                         )}
-                                        disabled={busy}
+                                        // Switching marketing on is unavailable
+                                        // for a country outside the allowlist;
+                                        // switching it off never is.
+                                        disabled={
+                                            busy ||
+                                            (countryIsUnsupported &&
+                                                MARKETING_PURPOSES.has(
+                                                    preference.purpose
+                                                ) &&
+                                                !preference.enabled)
+                                        }
                                         onClick={() =>
                                             togglePreference(preference)
                                         }

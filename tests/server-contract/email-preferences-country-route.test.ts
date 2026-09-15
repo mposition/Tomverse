@@ -39,7 +39,10 @@ const world: {
   calls: Call[];
   /** What jurisdictionForUser resolves to, before any countryConfirmation. */
   billingCountry: string | null;
-} = { calls: [], billingCountry: null };
+  /** When set, jurisdictionForUser returns exactly this, ignoring the request. */
+  forcedResolution: Record<string, unknown> | null;
+  jurisdictionReads: number;
+} = { calls: [], billingCountry: null, forcedResolution: null, jurisdictionReads: 0 };
 
 let route: { PATCH: (request: Request) => Promise<Response> } | null = null;
 
@@ -69,6 +72,8 @@ const loadRoute = async () => {
       jurisdictionForUser: async (input: {
         countryConfirmation?: { country: string; confirmedAt: Date };
       }) => {
+        world.jurisdictionReads += 1;
+        if (world.forcedResolution) return world.forcedResolution;
         const resolved = core.resolveEmailJurisdiction({
           billingCountry: world.billingCountry,
           billingCountryUpdatedAt: world.billingCountry
@@ -109,28 +114,52 @@ const patch = async (body: Record<string, unknown>) => {
 const reset = () => {
   world.calls = [];
   world.billingCountry = null;
+  world.forcedResolution = null;
+  world.jurisdictionReads = 0;
 };
 
-test("marketing opt-in from a mapped country outside the allowlist is refused and stores nothing", async () => {
+test("marketing opt-in from a mapped country outside the allowlist is refused at the request boundary", async () => {
   reset();
   const response = await patch({ purpose: "product_updates", enabled: true, country: "NL" });
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, "COUNTRY_UNSUPPORTED");
   assert.deepEqual(world.calls, []);
+  // Refused by the request-country guard itself, before any resolution is
+  // read -- so removing that guard fails this test even if the later verdict
+  // would also have refused.
+  assert.equal(world.jurisdictionReads, 0);
 });
 
-test("a resolution the lane could not send under is refused even when the request names an allowed country", async () => {
+test("a confirmed resolution outside the allowlist is refused as unsupported", async () => {
+  reset();
+  // The request's country passes the first guard; the resolution the lane will
+  // use is a confirmed NL. This drives the verdict's own
+  // marketing_country_not_allowed branch in the route.
+  world.forcedResolution = {
+    countryCode: "NL",
+    profileKey: "EU",
+    confidence: "high",
+    source: "billing",
+    conflicts: [],
+    observedIpCountry: null,
+    selfDeclaredCountry: "DE",
+  };
+  const response = await patch({ purpose: "product_updates", enabled: true, country: "DE" });
+  assert.equal(response.status, 409);
+  assert.equal((await response.json()).code, "COUNTRY_UNSUPPORTED");
+  assert.equal(world.jurisdictionReads, 1);
+  assert.deepEqual(world.calls, []);
+});
+
+test("a conflicting resolution is refused as a conflict", async () => {
   reset();
   // A billing signal from NL stamped after the request's DE confirmation leaves
-  // the two in conflict, so the lane would hold the message. The route must not
-  // store consent the lane would never use.
+  // the two in conflict, so the lane would hold the message.
   world.billingCountry = "NL";
   const response = await patch({ purpose: "product_updates", enabled: true, country: "DE" });
   assert.equal(response.status, 409);
-  assert.equal(
-    world.calls.some((call) => call.fn === "setPreference"),
-    false
-  );
+  assert.equal((await response.json()).code, "COUNTRY_CONFLICT");
+  assert.deepEqual(world.calls, []);
 });
 
 test("an allowlisted country reaches the consent write", async () => {
