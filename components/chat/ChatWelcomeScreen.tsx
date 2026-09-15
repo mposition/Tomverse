@@ -8,14 +8,20 @@ import { History } from "lucide-react";
 
 type ChatWelcomeScreenProps = {
   /**
-   * Recent conversations, counted rather than listed.
+   * Whether there is anything to go back to, which is all this screen asks.
    *
    * Only the mobile shell passes these, together with
    * `onOpenRecentConversations`. Three title cards were both the tallest thing
    * on a 320x568 new-chat screen *and* a privacy leak, since a shared or
    * borrowed phone showed real conversation titles before anyone asked for
-   * them; one row that only says how many there are keeps the access path
-   * without printing the titles.
+   * them; one row that opens the drawer keeps the access path without printing
+   * a single title.
+   *
+   * The row does not quote a number either. It opens the sidebar's whole
+   * conversation list, search and all, so "3 recent chats" would have named
+   * this screen's own slice rather than what the drawer goes on to show. The
+   * count stays in `data-recent-count` for the specs, where it is a fact about
+   * the fixture rather than a promise to the reader.
    *
    * The desktop shell passes nothing: the sidebar beside this screen already
    * lists the same conversations, so a second list in the middle of the screen
@@ -59,13 +65,7 @@ export function ChatWelcomeScreen({
   const { t, lang } = useLanguage();
   const welcomeGreeting = session?.user ? t("chat.welcomeBack") : t("chat.welcome");
   const recentCount = recentConversations.length;
-  const disclosureLabel =
-    recentCount === 1
-      ? t("chat.recentConversationsDisclosureOne")
-      : t("chat.recentConversationsDisclosure").replaceAll(
-          "{count}",
-          String(recentCount)
-        );
+  const disclosureLabel = t("chat.recentConversationsDisclosure");
 
   return (
     <div

@@ -1533,7 +1533,7 @@ export async function openModelPickerCatalogue(page: Page) {
  * it already does, so that is the path (docs/ui-contracts/chat-starter-catalog.md
  * section 6). The mobile welcome screen prints no titles either -- a phone's
  * first screen leaks them to anyone holding it -- so there the path is the
- * compact "View N recent chats" row, which opens the same drawer the hamburger
+ * compact "View recent chats" row, which opens the same drawer the hamburger
  * does. Specs go through here so they stay shell-agnostic.
  */
 export async function openRecentConversation(
