@@ -143,9 +143,9 @@ export const GATE_EVIDENCE = {
         note: "Follows PLANNER-01: a cost-growth gate cannot be measured against a planner that does not exist, and its criterion is stated as cost increase without approved quality evidence, so it also waits on PLANNER-01's evaluation being approved.",
     },
     "PLANNER-03": {
-        capability: ["lib/chatContextBundleCore.ts", "lib/memoryContextPrompt.ts", "lib/attachmentContextPrompt.ts"],
-        measurement: ["scripts/report-prompt-injection.mjs", "lib/promptInjectionAudit.ts", "tests/promptInjectionAudit.test.mjs", "tests/fixtures/promptInjectionCorpus.mjs"],
-        note: "The adversarial corpus runs through the memory, attachment-body and filename builders on every PR and reports the gate metric. It judges the structure of the assembled bytes -- escaped region, forged boundary, rules after content, smuggled control characters -- and deliberately not whether a model obeys an injected instruction, which nothing here could assert. Of the four sources the gate names, imported text reaches a prompt only as a validated memory, and project content has no prompt path at all (ConversationProject carries a name and no instruction text); both are stated in the report rather than omitted.",
+        capability: ["lib/chatContextBundleCore.ts", "lib/memoryContextPrompt.ts", "lib/attachmentContextPrompt.ts", "lib/promptRefinerModelPrompt.ts"],
+        measurement: ["scripts/report-prompt-injection.mjs", "lib/promptInjectionAudit.ts", "tests/promptInjectionAudit.test.mjs", "tests/promptRefinerSuggestion.test.mjs", "tests/fixtures/promptInjectionCorpus.mjs"],
+        note: "The adversarial corpus runs through the memory, attachment-body, filename, profile-knowledge and Prompt Refiner builders on every PR and reports the gate metric. Fenced surfaces are checked for escaped regions, forged boundaries, late rules and smuggled controls; the Refiner is checked for system-first rules and the exact two-field JSON data message. This deliberately does not claim whether a model obeys an injected instruction, which nothing here could assert. Imported text reaches a prompt only as a validated memory, and project content has no prompt path at all (ConversationProject carries a name and no instruction text); both are stated in the report rather than omitted.",
     },
 
     "BILLING-01": {

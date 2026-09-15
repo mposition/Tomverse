@@ -1,0 +1,481 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-planner03-hardening-v1",
+  "requirement": "종결된 prompt-refiner-planner03-surface-v1 exchange의 round 2에 남은 세 지적을 후속 변경으로 닫는다. 역할 메시지 배열에 null 또는 undefined 원소가 있어도 감사기는 throw하지 않고 fail-closed해야 한다. Prompt Refiner system instruction은 builder와 독립된 정확한 여섯 줄·순서·크기로 고정되어, 규칙을 추가·삭제·변경·재정렬하면 PLANNER-03 위반이어야 한다. JSON role 위조 corpus 항목의 source notation은 실제 payload bytes를 오해 없이 보여야 한다. 제품 adapter, provider 호출, billing, Router, AppSetting, flag와 rollout 상태는 변경하지 않는다. author는 codex, reviewer는 claude다.",
+  "completionCriteria": [
+    "null 또는 undefined role-message 원소가 감사기를 crash시키지 않고 위반으로 반환된다.",
+    "독립 고정된 system instruction과 builder 출력은 정확히 일치해야 하며, 상충 규칙 한 줄을 추가한 회귀가 검출된다.",
+    "JSON role 위조 payload의 source notation과 runtime bytes가 명확하고 공용 18개 corpus 전체의 PLANNER-03 metric은 0이다.",
+    "관련 test, 전체 unit, typecheck, 전체 lint, build, release gate, 문서·인코딩·정책 참조와 diff whitespace 검사가 통과한다.",
+    "Claude Code Max는 승인된 skip-preflight 예외 아래 Read·Grep·Glob만으로 고정 digest를 독립 검토하며 API key를 사용하지 않는다."
+  ],
+  "baseCommit": "2f9df4d7449cf48b25240a921e4d1489e4406c1d",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:11f2f636dae7a3fbb981fcfd60d25992129a001d6d072cbe34d22b959d5e5d46",
+      "commit": "02cf6c3bb4bbc7f1161917b0d5d7f9b065769eae",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1.task.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptInjectionAudit.ts",
+        "tests/fixtures/promptInjectionCorpus.mjs",
+        "tests/promptInjectionAudit.test.mjs"
+      ],
+      "changeSummary": "종결된 surface-v1 exchange의 마지막 세 지적을 후속 변경으로 닫았다. null role-message 원소를 fail-closed하고, system instruction 전체를 독립 exact contract로 고정하며, JSON role 위조 payload source 표기를 실제 bytes와 명확히 일치시켰다.",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2784.2462",
+          "durationMs": 793592
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 361.9062",
+          "durationMs": 447
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 829
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 52 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 564
+        },
+        {
+          "rule": "npm run report:release-gate-evidence -- --json",
+          "passed": true,
+          "detail": "      \"note\": \"memory-release-b-enabled is a runtime condition; supply it to classify this gate.\"\n    }\n  ],\n  \"notApplicable\": []\n}",
+          "durationMs": 652
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 46063
+        },
+        {
+          "rule": "npx eslint . --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 70406
+        },
+        {
+          "rule": "npm run build",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 28131
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 829 referenced path(s) across 105 instruction document(s), and 929 path(s) named by comments across 2840 source file(s), all present.",
+          "durationMs": 1670
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4323 citation(s) against 33 policy document(s). 2685 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 221 predate this change).",
+          "durationMs": 1169
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1592
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 60
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptInjectionAudit.ts:26-34 and :153-160",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "Two doc comments in the changed file still describe the old subset rule — the header calls rules_after_content the case where \"an independently pinned security rule is absent\", and PROMPT_REFINER_REQUIRED_RULE_LINES is still introduced as an \"Independent semantic floor\" — while the code now enforces exact equality, so adding, altering or reordering a line is equally a violation.",
+          "reproduction": "Read lib/promptInjectionAudit.ts:30-31 and :154 next to the new check at :383-393; the contradictory-rules case in tests/promptInjectionAudit.test.mjs:273-288 adds a seventh line (nothing is absent, nothing is a floor violation) and is still reported, which the comments do not describe.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "tests/promptInjectionAudit.test.mjs:316-336",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The requirement names null or undefined elements, but the new regression pins only `null` at index 0; `undefined` and a malformed element at index 1 are handled at runtime by the optional chaining at :385, :402 and :461 yet nothing fixes that behaviour against a future edit.",
+          "reproduction": "Add to the same test: `auditRoleSeparatedPrompt(promptRefinerInput(payload, { messages: [messages[0], undefined] }))` and `[undefined, validDataMessage]`; both currently return violations without throwing (structure_injected and rules_after_content respectively), so the assertions pass today and would fail if a later change drops an `?.`.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptInjectionAudit.ts:356-393",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "auditRoleSeparatedPrompt is documented as the generic role-separated auditor but now requires every caller's system message to equal the Prompt Refiner instruction verbatim, so a second role-separated surface cannot use it without editing the audit — the same coupling the pinned input scope already had, now extended to the whole instruction.",
+          "reproduction": "Call auditRoleSeparatedPrompt with surface \"other\" and any other correct system instruction: it reports rules_after_content unconditionally at :389. No product path does this today; it is a design note, not an observed defect.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptInjectionAudit.ts:26-34 and :153-160; open finding: tests/promptInjectionAudit.test.mjs:316-336; open finding: lib/promptInjectionAudit.ts:356-393); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:8ccc299b114a2315a37a5a2089bc5c5bfd73aca45ad4a56ff989048fe9d8ed43",
+      "commit": "c530337c59256779171332a714075b5309fb232f",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/verdict-round0.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptInjectionAudit.ts",
+        "scripts/report-prompt-injection.mjs",
+        "tests/fixtures/promptInjectionCorpus.mjs",
+        "tests/promptInjectionAudit.test.mjs"
+      ],
+      "changeSummary": "Round 0의 세 지적을 닫았다. exact-contract 설명을 코드와 일치시키고, null과 undefined가 두 message 위치에 있을 때 fail-closed하는 회귀를 고정했으며, 범용성을 암시하던 감사기·타입 이름을 Prompt Refiner 전용 이름으로 좁혔다.",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 14705.6291",
+          "durationMs": 944333
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 373.8965",
+          "durationMs": 476
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 934
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 52 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 590
+        },
+        {
+          "rule": "npm run report:release-gate-evidence -- --json",
+          "passed": true,
+          "detail": "      \"note\": \"memory-release-b-enabled is a runtime condition; supply it to classify this gate.\"\n    }\n  ],\n  \"notApplicable\": []\n}",
+          "durationMs": 678
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 62837
+        },
+        {
+          "rule": "npx eslint . --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 79239
+        },
+        {
+          "rule": "npm run build",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 36589
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 829 referenced path(s) across 105 instruction document(s), and 929 path(s) named by comments across 2840 source file(s), all present.",
+          "durationMs": 1417
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4323 citation(s) against 33 policy document(s). 2685 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 221 predate this change).",
+          "durationMs": 1036
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1315
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 51
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptInjectionAudit.ts:386 (rulesMessage.content !== input.rules)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "With the exact-instruction pin added at :387, the clause that compares the emitted system message against the builder's own exported constant is no longer covered by any test, so it can be deleted with the whole suite and the report still green — the one drift it catches (builder emits the pinned text while PROMPT_REFINER_SYSTEM_INSTRUCTION is weakened) is unpinned.",
+          "reproduction": "Delete line 386 (`rulesMessage.content !== input.rules ||`), then run `node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs` and `npm run check:prompt-injection`: both still pass, because the only two tests overriding `rules` (:262-271, :276-288) also set the message content to the same weakened/contradictory string, so clause :387 alone accounts for every expected violation. A case with `rules: weakenedRules` but `messages: [{ role: 'system', content: PROMPT_REFINER_SYSTEM_INSTRUCTION }, messages[1]]` expecting `rules_after_content` would pin it.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptInjectionAudit.ts:348-354",
+          "severity": "nit",
+          "basis": "preference",
+          "claim": "The rewritten doc comment leaves a ragged half-filled line (\"Exactly two messages make that boundary reviewable. The system\" / \"message states the rules first\"), unlike every other comment block in the file, which is filled to the column.",
+          "reproduction": "Read lib/promptInjectionAudit.ts:348-354 and compare the wrap with :344-347 or :153-160; reflowing the paragraph fixes it.",
+          "disposition": "resolved_by_project_rule"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptInjectionAudit.ts:386 (rulesMessage.content !== input.rules)); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:050986bea3b542c619c7f00e24fcd9a18e4fc78f751569aa08b6c93c06297547",
+      "commit": "cc31a787a243179ff00462a1749b665e3c5e1ce4",
+      "filesChanged": [
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change-round1.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/package-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/verdict-round1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptInjectionAudit.ts",
+        "scripts/report-prompt-injection.mjs",
+        "tests/fixtures/promptInjectionCorpus.mjs",
+        "tests/promptInjectionAudit.test.mjs"
+      ],
+      "changeSummary": "Round 1의 열린 지적을 닫았다. Prompt Refiner 감사기에서 builder가 전달한 rules 상수와의 공유 비교를 제거하고, 독립 exact system instruction만을 신뢰 기준으로 사용한다. 설명 문단 줄바꿈도 정리했다.",
+      "testResults": [
+        {
+          "command": "npm run test:unit",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 7294.0499",
+          "durationMs": 813586
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 343.4773",
+          "durationMs": 425
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 769
+        },
+        {
+          "rule": "npm run check:release-gate-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 52 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+          "durationMs": 533
+        },
+        {
+          "rule": "npm run report:release-gate-evidence -- --json",
+          "passed": true,
+          "detail": "      \"note\": \"memory-release-b-enabled is a runtime condition; supply it to classify this gate.\"\n    }\n  ],\n  \"notApplicable\": []\n}",
+          "durationMs": 619
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 58534
+        },
+        {
+          "rule": "npx eslint . --max-warnings=0",
+          "passed": true,
+          "detail": "",
+          "durationMs": 83546
+        },
+        {
+          "rule": "npm run build",
+          "passed": true,
+          "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+          "durationMs": 35826
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 829 referenced path(s) across 105 instruction document(s), and 929 path(s) named by comments across 2840 source file(s), all present.",
+          "durationMs": 1660
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4323 citation(s) against 33 policy document(s). 2685 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 221 predate this change).",
+          "durationMs": 1156
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1523
+        },
+        {
+          "rule": "git diff --check",
+          "passed": true,
+          "detail": "",
+          "durationMs": 54
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [],
+      "nextAction": "Land the change: both round-1 findings are closed (the shared `input.rules` comparison and its `rules` input field are gone, leaving `PROMPT_REFINER_REQUIRED_SYSTEM_INSTRUCTION` as the sole pin at lib/promptInjectionAudit.ts:383 — verified line-for-line against lib/promptRefinerModelPrompt.ts:9-14, with builder drift now caught by the real-builder corpus test at tests/promptInjectionAudit.test.mjs:154 — and the doc block at :343-351 is filled to the column), null/undefined elements at either index fail closed without a crash (:382, :398, :457, covered at tests:320-356), the added-contradictory-rule regression is detected (tests:271-285), the json-role-fragment payload's double-quoted notation now maps unambiguously to its runtime bytes with no useless escapes, 18 corpus entries report PLANNER-03 = 0, and every touched path stays inside writableScope with no adapter, provider, billing, Router, AppSetting or flag change."
+    }
+  ],
+  "changeDigest": "sha256:050986bea3b542c619c7f00e24fcd9a18e4fc78f751569aa08b6c93c06297547",
+  "commit": "cc31a787a243179ff00462a1749b665e3c5e1ce4",
+  "changeSummary": "Round 1의 열린 지적을 닫았다. Prompt Refiner 감사기에서 builder가 전달한 rules 상수와의 공유 비교를 제거하고, 독립 exact system instruction만을 신뢰 기준으로 사용한다. 설명 문단 줄바꿈도 정리했다.",
+  "testResults": [
+    {
+      "command": "npm run test:unit",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 7294.0499",
+      "durationMs": 813586
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "node --conditions=react-server --import tsx --test tests/promptInjectionAudit.test.mjs tests/promptRefinerSuggestion.test.mjs",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 343.4773",
+      "durationMs": 425
+    },
+    {
+      "rule": "npm run check:prompt-injection",
+      "passed": true,
+      "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+      "durationMs": 769
+    },
+    {
+      "rule": "npm run check:release-gate-coverage",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:release-gate-coverage\n> node scripts/check-release-gate-coverage.mjs\n\nRelease gate coverage check passed: 52 CI-enforced and 3 manually gated check(s), all named in the release checklist.",
+      "durationMs": 533
+    },
+    {
+      "rule": "npm run report:release-gate-evidence -- --json",
+      "passed": true,
+      "detail": "      \"note\": \"memory-release-b-enabled is a runtime condition; supply it to classify this gate.\"\n    }\n  ],\n  \"notApplicable\": []\n}",
+      "durationMs": 619
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 58534
+    },
+    {
+      "rule": "npx eslint . --max-warnings=0",
+      "passed": true,
+      "detail": "",
+      "durationMs": 83546
+    },
+    {
+      "rule": "npm run build",
+      "passed": true,
+      "detail": "ƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\n●  (SSG)      prerendered as static HTML (uses generateStaticParams)\nƒ  (Dynamic)  server-rendered on demand",
+      "durationMs": 35826
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 829 referenced path(s) across 105 instruction document(s), and 929 path(s) named by comments across 2840 source file(s), all present.",
+      "durationMs": 1660
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4323 citation(s) against 33 policy document(s). 2685 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1417 and 221 predate this change).",
+      "durationMs": 1156
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1523
+    },
+    {
+      "rule": "git diff --check",
+      "passed": true,
+      "detail": "",
+      "durationMs": 54
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [],
+  "nextAction": "Land the change: both round-1 findings are closed (the shared `input.rules` comparison and its `rules` input field are gone, leaving `PROMPT_REFINER_REQUIRED_SYSTEM_INSTRUCTION` as the sole pin at lib/promptInjectionAudit.ts:383 — verified line-for-line against lib/promptRefinerModelPrompt.ts:9-14, with builder drift now caught by the real-builder corpus test at tests/promptInjectionAudit.test.mjs:154 — and the doc block at :343-351 is filled to the column), null/undefined elements at either index fail closed without a crash (:382, :398, :457, covered at tests:320-356), the added-contradictory-rule regression is detected (tests:271-285), the json-role-fragment payload's double-quoted notation now maps unambiguously to its runtime bytes with no useless escapes, 18 corpus entries report PLANNER-03 = 0, and every touched path stays inside writableScope with no adapter, provider, billing, Router, AppSetting or flag change.",
+  "status": "passed",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-15T10:39:44.877Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "cc31a787a243179ff00462a1749b665e3c5e1ce4",
+  "worktreeDirty": false,
+  "filesChanged": [
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change-round1.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/change.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/exchange.json",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/package-round1.json",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-prompt.md",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/review-round1.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-planner03-hardening-v1/verdict-round1.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptInjectionAudit.ts",
+    "scripts/report-prompt-injection.mjs",
+    "tests/fixtures/promptInjectionCorpus.mjs",
+    "tests/promptInjectionAudit.test.mjs"
+  ]
+}

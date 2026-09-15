@@ -176,10 +176,15 @@ fixture에서 채택한 resolution은 synthetic 문장을 user Message로 오인
 submit을 fail-closed한다. 제품 caller는 원문/실행문 분리와 receipt 영속화를 먼저
 구현해야 이 guard를 제품 mode로 대체할 수 있다.
 
-현재 `npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·
-profile 등의 기존 surface만 실행하며 `promptRefinerModelMessages()`를 아직
-exercise하지 않는다. 따라서 이 회차의 JSON quoting·system instruction은 구조적
-방어이지 PLANNER-03 통과 증거가 아니다. 실제 caller/provider adapter를 추가하는
-다음 회차에서는 `prompt-refiner`를 report의 명시적 surface로 등록하고 adversarial
-corpus를 이 builder에 통과시켜야 한다. 그 전에는 Refiner 활성화나 Router 결합을
-허용하지 않는다.
+`npm run check:prompt-injection`의 PLANNER-03 report는 memory·attachment·profile과
+함께 `promptRefinerModelMessages()`를 `prompt-refiner` 명시적 surface로 실행한다.
+동일 adversarial corpus의 모든 항목에 대해 system 규칙이 먼저인지, 독립적으로
+고정한 보안 규칙 여섯 줄만 정확한 순서로 있는지, 메시지가 정확히 2개인지, user 메시지가
+`inputScope + sourceText`만 가진 canonical JSON인지, 원문 bytes가 그대로
+복원되는지를 검사한다. 역할 순서·필수 규칙·JSON 경계·추가 context 채널을 일부러
+깨뜨린 회귀 테스트가 감사기가 실제로 실패하는지도 고정한다.
+
+이는 **builder의 구조적 PLANNER-03 증거**일 뿐 실제 모델이 모든 주입문을 무시한다는
+품질 인증이나 provider adapter 승인, Refiner 활성화 또는 Router 결합 승인이 아니다.
+실제 caller는 이 builder를 단독 입력 경로로 사용해야 하고, 비용·receipt·의미 보존·
+model-output 평가 등 §6의 나머지 조건은 별도로 충족해야 한다.

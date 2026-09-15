@@ -1319,12 +1319,13 @@ Non-negotiable requirements:
   genuinely new state identity receives focus without scrolling. An initially
   mounted bound state or the same identity reappearing after a draft edit does
   not steal focus; a completed decision returns focus to the textarea.
-- The current PLANNER-03 report does not exercise the Refiner builder. A
-  model-facing caller or provider adapter that reaches
-  `promptRefinerModelMessages()` is blocked until `prompt-refiner` is
-  registered as a report surface and the adversarial corpus runs through it.
-  The loopback fixture caller reaches only its no-cost E2E route and is not
-  that model-facing path.
+- `promptRefinerModelMessages()` is the explicit `prompt-refiner` surface in
+  the PLANNER-03 report. Every adversarial corpus item must retain the exact
+  two-message boundary: system rules first, then only the canonical
+  `inputScope + sourceText` JSON user message. A model-facing caller or
+  provider adapter must use this builder and keep that report green. The
+  loopback fixture caller still reaches only its no-cost E2E route and is not
+  a model-facing path.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer

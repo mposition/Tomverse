@@ -1,0 +1,100 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-planner03-hardening-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-prompt-refiner-planner03-20260915 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-prompt-refiner-planner03-20260915 shell:default)"
+  ],
+  "startedAt": "2026-09-15T09:51:17.313Z",
+  "durationMs": 122470,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 12,
+    "cachedInputTokens": 159195,
+    "outputTokens": 8660,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 0.7239615000000001,
+    "raw": {
+      "input_tokens": 12,
+      "cache_creation_input_tokens": 42142,
+      "cache_read_input_tokens": 159195,
+      "output_tokens": 8660,
+      "output_tokens_details": {
+        "thinking_tokens": 6296
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 42142,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2826,
+          "cache_read_input_tokens": 42199,
+          "cache_creation_input_tokens": 4685,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4685
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T09:53:19.866Z",
+  "verdict": {
+    "taskId": "prompt-refiner-planner03-hardening-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:11f2f636dae7a3fbb981fcfd60d25992129a001d6d072cbe34d22b959d5e5d46",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptInjectionAudit.ts:26-34 and :153-160",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "Two doc comments in the changed file still describe the old subset rule — the header calls rules_after_content the case where \"an independently pinned security rule is absent\", and PROMPT_REFINER_REQUIRED_RULE_LINES is still introduced as an \"Independent semantic floor\" — while the code now enforces exact equality, so adding, altering or reordering a line is equally a violation.",
+        "reproduction": "Read lib/promptInjectionAudit.ts:30-31 and :154 next to the new check at :383-393; the contradictory-rules case in tests/promptInjectionAudit.test.mjs:273-288 adds a seventh line (nothing is absent, nothing is a floor violation) and is still reported, which the comments do not describe."
+      },
+      {
+        "location": "tests/promptInjectionAudit.test.mjs:316-336",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The requirement names null or undefined elements, but the new regression pins only `null` at index 0; `undefined` and a malformed element at index 1 are handled at runtime by the optional chaining at :385, :402 and :461 yet nothing fixes that behaviour against a future edit.",
+        "reproduction": "Add to the same test: `auditRoleSeparatedPrompt(promptRefinerInput(payload, { messages: [messages[0], undefined] }))` and `[undefined, validDataMessage]`; both currently return violations without throwing (structure_injected and rules_after_content respectively), so the assertions pass today and would fail if a later change drops an `?.`."
+      },
+      {
+        "location": "lib/promptInjectionAudit.ts:356-393",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "auditRoleSeparatedPrompt is documented as the generic role-separated auditor but now requires every caller's system message to equal the Prompt Refiner instruction verbatim, so a second role-separated surface cannot use it without editing the audit — the same coupling the pinned input scope already had, now extended to the whole instruction.",
+        "reproduction": "Call auditRoleSeparatedPrompt with surface \"other\" and any other correct system instruction: it reports rules_after_content unconditionally at :389. No product path does this today; it is a design note, not an observed defect."
+      }
+    ],
+    "nextAction": "Approve and merge; the three round-2 points are closed (null/undefined elements fail closed instead of throwing, the six-line instruction is pinned by exact equality with an added-contradictory-line regression, and the json-role-fragment notation now shows its real bytes), with the nits optional follow-ups."
+  }
+}
