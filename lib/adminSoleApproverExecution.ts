@@ -176,6 +176,74 @@ export const generalSoleApprovalAvailability = (
     });
 
 /**
+ * Closes the two-person requests a sole execution is about to carry out, and
+ * writes `admin_sole_approver.execution_started` in the same transaction.
+ *
+ * A request still open for this action and target -- pending or already
+ * approved -- would otherwise stay claimable after the sole execution, and the
+ * same change could run a second time once a second administrator is back.
+ * It is expired rather than consumed: nothing was executed under it, and the
+ * audit row names it in `supersededApprovalIds`.
+ *
+ * One conditional update does it, so there is no window between reading and
+ * closing: a reviewer whose approval commits first has their row closed here
+ * too, and one who comes second finds the row no longer pending and is told
+ * it changed. The intent record commits with the closure or neither does.
+ *
+ * `payloadHash` narrows the match to the exact request on the general path.
+ * The bound paths omit it -- their approval payload is not what they execute
+ * (the cleanup retry and the campaign copy are both re-read), so any open
+ * request for the same action and target by this administrator is the one
+ * being carried out.
+ */
+const supersedeOpenRequestsAndRecordStart = async (input: {
+    session: Session;
+    request?: Request;
+    action: string;
+    targetType: string;
+    targetId?: string | null;
+    payloadHash?: string;
+    metadata: Record<string, Prisma.InputJsonValue | null | undefined>;
+}) => {
+    const actorId = input.session.user?.id;
+    if (!actorId) throw new Error("An authenticated administrator is required.");
+    return prisma.$transaction(async (tx) => {
+        const now = new Date();
+        const where = {
+            action: input.action,
+            targetType: input.targetType,
+            targetId: input.targetId || null,
+            requestedById: actorId,
+            ...(input.payloadHash ? { payloadHash: input.payloadHash } : {}),
+            status: { in: ["pending", "approved"] },
+        };
+        const open = await tx.adminActionApproval.findMany({
+            where,
+            select: { id: true },
+        });
+        const supersededApprovalIds = open.map((row) => row.id);
+        if (supersededApprovalIds.length > 0) {
+            await tx.adminActionApproval.updateMany({
+                where: { ...where, id: { in: supersededApprovalIds } },
+                data: { status: "expired", expiresAt: now },
+            });
+        }
+        const metadata = { ...input.metadata, supersededApprovalIds };
+        await writeAdminAuditLog({
+            session: input.session,
+            request: input.request,
+            action: "admin_sole_approver.execution_started",
+            targetType: input.targetType,
+            targetId: input.targetId || null,
+            summary: `Started ${input.action} as the sole eligible administrator.`,
+            metadata,
+            tx,
+        });
+        return metadata;
+    });
+};
+
+/**
  * Runs a two-person action for the sole eligible administrator, with the audit
  * record standing where the second reviewer would.
  *
@@ -200,34 +268,30 @@ export async function runAsSoleAdministrator<T>(
         targetId?: string | null;
         payload: Record<string, unknown>;
         reason: string;
-        /** Pending two-person requests for this exact payload it replaces. */
-        supersededApprovalIds?: string[];
     },
     operation: () => Promise<T>
 ): Promise<T> {
-    const metadata = {
-        action: input.action,
-        rule: "general_sole_administrator",
-        eligibleApproverCount: 1,
-        confirmed: "request_payload",
-        payloadHash: approvalPayloadHash(
-            canonicalizeApprovalPayload(input.payload)
-        ),
-        reason: input.reason.slice(0, 500),
-        supersededApprovalIds: input.supersededApprovalIds ?? [],
-    };
-
+    const payloadHash = approvalPayloadHash(
+        canonicalizeApprovalPayload(input.payload)
+    );
     // A durable record of the intent exists before the operation starts. If the
     // audit store is unavailable the operation does not run -- the record is
     // the only control on this path, so it cannot be best-effort.
-    await writeAdminAuditLog({
+    const metadata = await supersedeOpenRequestsAndRecordStart({
         session: input.session,
         request: input.request,
-        action: "admin_sole_approver.execution_started",
+        action: input.action,
         targetType: input.targetType,
-        targetId: input.targetId || null,
-        summary: `Started ${input.action} as the sole eligible administrator.`,
-        metadata,
+        targetId: input.targetId,
+        payloadHash,
+        metadata: {
+            action: input.action,
+            rule: "general_sole_administrator",
+            eligibleApproverCount: 1,
+            confirmed: "request_payload",
+            payloadHash,
+            reason: input.reason.slice(0, 500),
+        },
     });
 
     let result: T;
@@ -371,13 +435,14 @@ export async function runAsSoleApprover<T>(
     // Condition 5, first half. A durable record of the intent exists before
     // anything is deleted, for the same reason `runWithAdminApproval` writes
     // one: if the audit store is unavailable, the operation does not run.
-    await writeAdminAuditLog({
+    // Open two-person requests for this action and target are closed in the
+    // same transaction, so none stays claimable beside this execution.
+    await supersedeOpenRequestsAndRecordStart({
         session: input.session,
         request: input.request,
-        action: "admin_sole_approver.execution_started",
+        action: input.action,
         targetType: input.targetType,
-        targetId: input.targetId || null,
-        summary: `Started ${input.action} as the sole eligible administrator.`,
+        targetId: input.targetId,
         metadata: {
             action: input.action,
             // Named so the record says why one approver was enough, rather

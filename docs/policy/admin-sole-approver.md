@@ -97,11 +97,13 @@ Status: active (2026-09-15 결정). 구현은 `lib/adminApproval.ts`의
   1인 경로는 승인이 아니라 실행이며, 두 경로를 섞지 않습니다.
 - 권한 검사, rate limit, 확인 문구(`ADJUST PLAN` 등), 사유 필수, 환불 기준액
   (`ADMIN_REFUND_APPROVAL_THRESHOLD_CENTS`)은 그대로입니다.
-- 자기 요청을 자기 승인으로 처리하는 경로는 여전히 없습니다. 같은 요청(action ·
-  대상 · payload hash · 요청자)이 **pending**으로 남아 있으면 1인 실행이 그 행을
-  `expired`로 닫고 감사 행의 `supersededApprovalIds`에 남깁니다 — 나중에
-  누군가 승인해 두 번째로 실행되지 않도록. **이미 approved**인 행이 있으면 1인
-  경로 대신 그 승인을 소비하는 기존 경로로 실행합니다.
+- 자기 요청을 자기 승인으로 처리하는 경로는 여전히 없습니다.
+- **1인 실행은 같은 요청의 열린 2인 승인 행을 닫습니다.** 요청자가 같고 action ·
+  대상이 같으며(일반 경로는 payload hash까지 같은) `pending`·`approved` 행은
+  `execution_started` 감사 행과 **같은 transaction**에서 `expired`로 바뀌고, 그
+  id가 `supersededApprovalIds`에 남습니다. 소비가 아니라 만료인 것은 그 승인으로
+  실행된 것이 없기 때문이며, 닫지 않으면 두 번째 관리자가 돌아온 뒤 같은 승인으로
+  한 번 더 실행될 수 있습니다. 결속된 두 경로(§4)도 같은 정리를 합니다.
 
 ## 6.1 알려진 한계
 
