@@ -57,6 +57,13 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
         "Default-off, unlike the kill switches above: it is enabled only while this toggle is on. Provider budget env vars must be live first or /api/ready fails the moment this turns on (docs/policy/image-generation.md §8).",
       toggle: "Image generation enabled",
     },
+    chatStarter: {
+      eyebrow: "Opt-in rollout",
+      title: "Chat starter catalogue",
+      description:
+        "The cards a new conversation's welcome screen offers. Default-off, and off is off: nothing renders, not a disabled teaser. A card is only shown where its own feature is on, so switching this on cannot advertise anything the build does not do (docs/ui-contracts/chat-starter-catalog.md). CHAT_STARTER_KILL_SWITCH overrides this toggle and needs no database.",
+      toggle: "Chat starter catalogue enabled",
+    },
     optInRollout: "Opt-in rollout",
     externalImport: {
       title: "External conversation import",
@@ -157,6 +164,13 @@ export const adminPlatformSettingsMessages = defineAdminMessages({
       description:
         "위의 kill switch와 달리 기본값이 꺼짐이며, 이 토글이 켜져 있는 동안에만 활성화됩니다. 공급자 예산 환경변수가 먼저 적용되어 있어야 하며, 그렇지 않으면 켜는 즉시 /api/ready가 실패합니다(docs/policy/image-generation.md §8).",
       toggle: "이미지 생성 사용",
+    },
+    chatStarter: {
+      eyebrow: "옵트인 롤아웃",
+      title: "Chat 시작 카탈로그",
+      description:
+        "새 대화의 환영 화면이 제안하는 카드입니다. 기본값은 꺼짐이고, 꺼짐은 아무것도 렌더하지 않는 것입니다 — 비활성 teaser가 아닙니다. 각 카드는 자기 기능이 켜져 있을 때만 보이므로, 이것을 켜도 빌드가 하지 못하는 일을 광고할 수는 없습니다(docs/ui-contracts/chat-starter-catalog.md). CHAT_STARTER_KILL_SWITCH가 이 토글을 무시하고 끄며, DB가 필요 없습니다.",
+      toggle: "Chat 시작 카탈로그 사용",
     },
     optInRollout: "옵트인 롤아웃",
     externalImport: {

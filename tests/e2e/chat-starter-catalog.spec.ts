@@ -179,34 +179,52 @@ test.describe("Chat starter catalogue", () => {
     await expect(gallery(page)).toBeVisible();
     expect(await hasHorizontalOverflow(page)).toBe(false);
 
-    const textarea = page.getByTestId("chat-textarea");
-    await textarea.scrollIntoViewIfNeeded();
-    const inputBox = await textarea.boundingBox();
-    expect(inputBox).not.toBeNull();
+    // Every rectangle is read in ONE evaluate, so they all describe the same
+    // frame at the same scroll offset.
+    //
+    // The first version of this test measured the composer, then called
+    // `scrollIntoViewIfNeeded` on each card and measured that -- comparing
+    // viewport coordinates taken at different scroll positions, which reported
+    // an overlap that does not exist. Scrolling is not needed to read layout:
+    // an element below the fold still has a box.
+    const geometry = await page.evaluate(() => {
+      const rect = (node: Element) => {
+        const box = node.getBoundingClientRect();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      };
+      const composer = document.querySelector('[data-testid="chat-textarea"]');
+      return {
+        composer: composer ? rect(composer) : null,
+        cards: Array.from(
+          document.querySelectorAll('[data-testid="chat-starter-card"]')
+        ).map(rect),
+      };
+    });
 
-    const count = await cards(page).count();
-    expect(count).toBeGreaterThan(0);
-    for (let index = 0; index < count; index += 1) {
-      const card = cards(page).nth(index);
-      await card.scrollIntoViewIfNeeded();
-      const box = await card.boundingBox();
-      expect(box, `card ${index} has no box`).not.toBeNull();
+    expect(geometry.composer).not.toBeNull();
+    expect(geometry.cards.length).toBeGreaterThan(0);
+    const composerBox = geometry.composer!;
+
+    geometry.cards.forEach((box, index) => {
       // Inside the viewport horizontally: nothing here may push the page wide.
-      expect(box!.x).toBeGreaterThanOrEqual(-1);
-      expect(box!.x + box!.width).toBeLessThanOrEqual(321);
+      expect(box.x, `card ${index} starts left of the viewport`).toBeGreaterThanOrEqual(-1);
+      expect(
+        box.x + box.width,
+        `card ${index} runs past the right edge`
+      ).toBeLessThanOrEqual(321);
       // 44px touch target, which has to survive text scaling rather than be
       // squeezed by it.
-      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box.height, `card ${index} is under the touch target`).toBeGreaterThanOrEqual(44);
       // And it may not sit on the textarea's row. Overlap is a rectangle
       // intersection, not a y comparison: the composer contract forbids
       // sharing the row, floating above it and overlapping it alike.
       const overlaps =
-        box!.x < inputBox!.x + inputBox!.width &&
-        box!.x + box!.width > inputBox!.x &&
-        box!.y < inputBox!.y + inputBox!.height &&
-        box!.y + box!.height > inputBox!.y;
+        box.x < composerBox.x + composerBox.width &&
+        box.x + box.width > composerBox.x &&
+        box.y < composerBox.y + composerBox.height &&
+        box.y + box.height > composerBox.y;
       expect(overlaps, `card ${index} overlaps the composer`).toBe(false);
-    }
+    });
   });
 
   test("the image card is locked for a Free account rather than hidden", { tag: "@ui-risk" }, async ({

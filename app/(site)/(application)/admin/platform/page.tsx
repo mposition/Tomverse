@@ -7,6 +7,7 @@ import {
   isAssistantKnowledgeEnabled,
   isAssistantPackageImportEnabled,
   isAssistantProfilesEnabled,
+  isChatStarterEnabled,
   isExternalContinuationEnabled,
   isExternalImportEnabled,
   isImageGenerationEnabled,
@@ -23,6 +24,7 @@ export default async function AdminPlatformSettingsPage() {
     externalConversationContinuationEnabled,
     assistantProfilesEnabled,
     assistantKnowledgeEnabled,
+    chatStarterEnabled,
     assistantPackageImportEnabled,
     memoryExtractionEnabled,
     memoryInjectionEnabled,
@@ -34,6 +36,7 @@ export default async function AdminPlatformSettingsPage() {
     isExternalContinuationEnabled(),
     isAssistantProfilesEnabled(),
     isAssistantKnowledgeEnabled(),
+    isChatStarterEnabled(),
     // Reported here, changed through its own control and its own request: a
     // save that carried it with everything else could not leave an audit row
     // saying this flag moved
@@ -57,6 +60,7 @@ export default async function AdminPlatformSettingsPage() {
       }
       assistantProfilesEnabled={assistantProfilesEnabled}
       assistantKnowledgeEnabled={assistantKnowledgeEnabled}
+      chatStarterEnabled={chatStarterEnabled}
       assistantPackageImportEnabled={assistantPackageImportEnabled}
       memoryExtractionEnabled={memoryExtractionEnabled}
       memoryInjectionEnabled={memoryInjectionEnabled}

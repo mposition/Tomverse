@@ -304,6 +304,76 @@ test("runnable cards are ordered before locked ones, stably", () => {
   );
 });
 
+test("the ceiling costs a runnable card, never the last locked one", () => {
+  // The defect this pins: the first version sorted runnable ahead of locked
+  // and cut at the limit, so a guest on the default configuration -- six
+  // runnable cards and one locked one -- saw the lock removed, and the gallery
+  // disclosed nothing at all. The e2e spec caught it. A requirement that is
+  // only ever discovered after a click is the thing the disclosure rule
+  // forbids, so the ceiling gives up a runnable card instead.
+  const catalog = [
+    ...Array.from({ length: 9 }, (_, index) => entry({ id: `open-${index}` })),
+    entry({ id: "needs-account", requires: { signedIn: true } }),
+  ];
+  const cards = selectVisibleStarterCards(
+    viewer({ signedIn: false, plan: null }),
+    catalog
+  );
+  assert.equal(cards.length, CHAT_STARTER_MAX_VISIBLE);
+  assert.equal(
+    cards.filter((card) => card.availability.state === "locked").length,
+    1
+  );
+  assert.equal(cards.at(-1)?.entry.id, "needs-account");
+});
+
+test("the real catalogue discloses a lock to a guest on the default flags", () => {
+  // The exact configuration the defect appeared in: nothing switched on.
+  const cards = selectVisibleStarterCards(
+    viewer({
+      signedIn: false,
+      plan: null,
+      enabledFlags: new Set(),
+      knownFlags: new Set(allFlags),
+    })
+  );
+  assert.ok(
+    cards.some((card) => card.availability.state === "locked"),
+    "a guest sees no requirement stated anywhere in the gallery"
+  );
+  assert.ok(cards.some((card) => card.availability.state === "available"));
+});
+
+test("at a ceiling of one the runnable card wins", () => {
+  // Nothing to balance, and a first screen whose only card is a price is not
+  // an entry point.
+  const catalog = [
+    entry({ id: "needs-account", requires: { signedIn: true } }),
+    entry({ id: "open-a" }),
+  ];
+  const cards = selectVisibleStarterCards(
+    viewer({ signedIn: false, plan: null }),
+    catalog,
+    1
+  );
+  assert.deepEqual(
+    cards.map((card) => card.entry.id),
+    ["open-a"]
+  );
+});
+
+test("a screen with only locked cards still shows them", () => {
+  const catalog = [
+    entry({ id: "locked-a", requires: { signedIn: true } }),
+    entry({ id: "locked-b", requires: { signedIn: true } }),
+  ];
+  const cards = selectVisibleStarterCards(
+    viewer({ signedIn: false, plan: null }),
+    catalog
+  );
+  assert.equal(cards.length, 2);
+});
+
 test("the real catalogue offers a guest something to do", () => {
   // A first screen that is entirely locks is a price list, not an entry point.
   const cards = selectVisibleStarterCards(

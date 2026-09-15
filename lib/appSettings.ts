@@ -369,6 +369,34 @@ export async function isChatStarterEnabled(): Promise<boolean> {
   return chatStarterAvailable({ storedFlagValue: row?.value, env: process.env });
 }
 
+/**
+ * The admin write path for the starter catalogue.
+ *
+ * It exists, unlike `setVoiceInputEnabled`, because the two flags protect
+ * different things. Turning voice input on commits this product to a
+ * per-second provider bill whose user-facing price is unsettled, so its
+ * activation is a procedure and a checkbox would be that procedure's last step
+ * offered without its first three. Turning the starter catalogue on calls no
+ * provider, reserves no credit and writes no row: it changes which cards a
+ * welcome screen paints, and every card on it has already been proved true by
+ * `npm run check:starter-catalog` before the commit existed.
+ *
+ * So the absence of a writer here would not be a decision, it would be a flag
+ * only a deploy can move -- which is the defect `tests/appSettingWriters.test.mjs`
+ * was written about.
+ *
+ * "true"/"false" are the only stored values; a missing row and "false" are
+ * equally off, so disabling never needs a delete. No snapshot to invalidate:
+ * nothing on a chat turn reads this.
+ */
+export async function setChatStarterEnabled(enabled: boolean) {
+  await prisma.appSetting.upsert({
+    where: { key: CHAT_STARTER_FLAG_KEY },
+    update: { value: enabled ? "true" : "false" },
+    create: { key: CHAT_STARTER_FLAG_KEY, value: enabled ? "true" : "false" },
+  });
+}
+
 export class VoiceInputDisabledError extends Error {
   constructor() {
     super("Voice input is not enabled.");
