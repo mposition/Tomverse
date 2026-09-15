@@ -29,7 +29,11 @@ import {
   isVoiceInputEnabled,
 } from "@/lib/appSettings";
 import { IMAGE_GENERATION_FLAG_KEY } from "@/lib/imageGenerationAccess";
-import { VOICE_INPUT_FLAG_KEY } from "@/lib/voiceInputAccess";
+import {
+  VOICE_INPUT_FLAG_KEY,
+  voiceInputKillSwitchEngaged,
+} from "@/lib/voiceInputAccess";
+import { chatStarterEnabledWithFixtureOverride } from "@/lib/chatStarterAccess";
 import { CHAT_STARTER_FLAG_KEYS } from "@/lib/chatStarterCatalog";
 import { resolveChatStarterCapabilities } from "@/lib/chatStarterCapabilityResolution";
 import {
@@ -164,7 +168,16 @@ export async function ReviewWorkspaceShell({
     // per-context. The cookie stands in for *both* facts the shell folds
     // together above, which is why the composer specs can drive the microphone
     // without an account.
-    if (!voiceInputEnabled) {
+    //
+    // The kill switch is asked here for the reason written out below the
+    // starter override: `isVoiceInputEnabled()` folds the pulled switch and the
+    // stored off into one false, and this cookie may only stand in for the
+    // second. Pre-existing rather than introduced by this change, and included
+    // because it is the same line three lines away -- left alone, this file
+    // teaches the wrong pattern to whoever adds the fourth flag.
+    // `isImageGenerationEnabled()` has no kill switch, so its override has
+    // nothing to bypass and is unchanged.
+    if (!voiceInputEnabled && !voiceInputKillSwitchEngaged(process.env)) {
       voiceInputEnabled = jar.get("__tomverse_e2e_voice_input")?.value === "1";
     }
     // A deterministic, no-cost adapter for actual ChatInput browser coverage.
@@ -185,13 +198,28 @@ export async function ReviewWorkspaceShell({
     // to reach a value a deployment could not.
     const overrideRaw = jar.get("__tomverse_e2e_image_group_max_models")?.value;
     if (overrideRaw) maxImageModels = resolveImageGroupMaxModels(overrideRaw);
-    // Same shape and same guard as the two above. The starter gallery's own
-    // specs need the surface without a database, and a spec must not be able
-    // to reach a state a deployment could not: the cookie only stands in for
-    // the stored flag, and the kill switch above still wins.
-    if (!chatStarterEnabled) {
-      chatStarterEnabled = jar.get("__tomverse_e2e_chat_starter")?.value === "1";
-    }
+    /*
+      Same shape as the two above, and the kill switch is asked again here.
+
+      "The cookie stands in for the stored flag" is the whole of what this
+      override may do, and `isChatStarterEnabled()` folds two different reasons
+      for false into one boolean -- the row says off, or an operator pulled the
+      switch. Testing `!chatStarterEnabled` cannot tell them apart, so the
+      cookie turned the gallery back on against a pulled switch. The comment
+      that used to sit here claimed the switch still won; it did not.
+
+      Cross review round 1, 2026-09-15 found it. Fixture mode is loopback-only
+      and production readiness refuses to boot with its variables set
+      (lib/securityEnvironment.ts), so no deployment could serve this -- but a
+      spec that passes while the switch is engaged is a spec that would not
+      notice the switch breaking, and the switch is this surface's whole
+      recovery path.
+    */
+    chatStarterEnabled = chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: chatStarterEnabled,
+      fixtureCookieValue: jar.get("__tomverse_e2e_chat_starter")?.value,
+      env: process.env,
+    });
   }
 
   const promptRefinerOffered = promptRefinerOfferDecision({

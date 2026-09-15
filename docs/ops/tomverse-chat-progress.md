@@ -742,14 +742,25 @@ flag key를 리터럴로 적으면 gate는 통과하고 약속은 거짓이 되�
 
 ### 상태 구분
 
+이 표는 **지금 이 시점**의 상태이며, 처음 작성 당시의 "병합 없음 · 배포 없음 ·
+어느 환경에서도 켜지지 않았다"를 대체한다. 그 세 줄은 회차가 진행되는 동안
+사실이 아니게 되었는데 갱신되지 않았고, cross review round 1(2026-09-15)이
+요구사항이 이름 댄 staging 배포 SHA와 그 줄들의 모순을 지적했다.
+**한 회차의 기록은 그 회차가 끝날 때까지 살아 있는 문서다.**
+
 | 상태 | 값 |
 | --- | --- |
-| 구현 | 완료 (worktree `claude/to-develop/chat-starter-catalog`) |
-| 내부 검증 | typecheck · lint · `check:starter-catalog` · `check:accent-tokens` · `check:locale-translation` · `check:doc-references` · `check:policy-section-references` · `check:encoding:strict` · `check:e2e-copy-selectors` 통과, 신규 unit 24개 통과 |
-| 독립 검토 | cross-review round 0 package 생성 (Codex reviewer). 검토 실행은 이 컨테이너 밖 |
-| 병합 | 없음 |
-| 배포 | 없음 |
-| 공개 | 없음 — `feature.chatStarterEnabled`는 어느 환경에서도 켜지지 않았다 |
+| 구현 | 완료. 브랜치 `claude/to-develop/chat-starter-staging-checklist`. 최신은 v1 round 2 finding 2건(F1 씨앗 소유권의 locale 의존, F2 계약 문서 상태 줄)의 수정 commit |
+| 내부 검증 | F1·F2 수정 뒤: `.github/workflows/pr-fast-gate.yml`에서 추출한 `check:*` 47개 중 44개 통과 — 실패 3개(`check:retired-product-name` · `check:staging-verification-records` · `check:tomverse-chat-release-gate-view`)는 이 로컬 Windows clone의 untracked 파일과 CRLF 작업 트리에서 나며 이 변경의 파일을 가리키지 않는다(CI 판독 필요). typecheck, 수정 파일 eslint, unit 48개(`chatStarterCatalog` · `chatStarterSeed`), e2e 24개(`chat-starter-catalog.spec.ts`, desktop·mobile) 통과. F1 회귀 e2e는 수정 전 build에서 desktop·mobile 모두 그 증상으로 실패함을 확인했다. 이전 회차 기록의 "static 50개"는 같은 기준으로 다시 세지 않았으므로 47과 비교하지 않는다 |
+| 독립 검토 | **v2 교환 `passed`** (round 1 `approve`, finding 0, 검토 대상 `39a82c34`, baseCommit `414cea20` 기준 이 작업 전체 43개 파일). 경과: v1 교환(`chat-starter-catalog-v1`): round 0 `request_changes` 1건 → round 1 2건 → round 2 2건, 수정 회차 상한에 닿아 `on_hold (revisions_exhausted)`. round 2의 2건은 이 회차에서 수정. 이어가는 교환은 `docs/ops/cross-review/packages/chat-starter-catalog-v2.task.json`(supersedes v1, baseCommit 동일). v2 round 0 `request_changes` 1건(씨앗 기억이 대화 scope 없이 하나라 다른 대화의 기록을 신뢰함) → 수정 후 round 1 `approve`. 이 줄의 갱신은 검토 뒤의 기록 변경이며 코드 변경이 아니다 |
+| 병합 | **부분.** `bba20780`까지 develop에 병합됨(PR #1433 · #1434 · #1439 · #1441). round 1 수정 `31407335`, round 2 수정 `ef35f86f`, F1·F2 수정은 미병합. **main에는 없다** |
+| 배포 | **staging에 배포됨** — `4f300e21a959`(= PR #1433 병합 commit). 그 배포에는 씨앗 소유권 수정(`8f23694e`, 이후 develop 병합)도 round 1·2 수정도 F1 수정도 **없다**. production 배포 없음 |
+| 공개 | **production 공개 없음.** staging에서는 검증을 위해 운영자가 `feature.chatStarterEnabled`를 켰고, kill switch로 다시 사라지는 것까지 확인했다(A-2). 현재 staging의 flag 상태는 이 저장소가 답할 수 없다 |
+| staging 검증 | 차단 구획 A·B·C 실행됨. **기록의 판정·서명은 미완** — 초안은 실행자에게 전달했고 commit되지 않았다. 비차단 소견 4건 미결 |
+
+배포와 공개를 한 줄로 적지 않는다. 이 표면은 default-off이므로 **병합도 배포도
+공개가 아니고**, staging에서 flag를 켠 것은 검증 행위이지 출시가 아니다. 셋을
+하나로 접으면 "배포됐다"가 "사람들이 보고 있다"로 읽힌다.
 
 ### C01–C21 중 어디인가
 
@@ -779,14 +790,21 @@ pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProduc
 
 ### 다음 권장 순서
 
-1. Codex 독립 검토를 받고 지적을 닫는다.
-2. `npm run test:e2e` 전체(desktop·mobile)와 모바일 composer·drawer spec
-   재실행을 CI에서 확인한다.
-3. flag를 켜지 않은 채 병합한다. 이 표면은 default-off이므로 병합이 곧 공개가
-   아니다.
-4. staging에서 flag를 켜고 첫 화면을 실기기로 확인한 뒤 공개 여부를 판정한다.
-   되돌릴 수 없는 항목은 **없는 기능을 약속하는 카드** 하나뿐이고, 그것은
-   `check:starter-catalog`가 이미 막는다.
+1~3은 끝났고 4는 한 번 돌았다.
+
+1. ~~Codex 독립 검토를 받고 지적을 닫는다.~~ v1 교환(on_hold) 뒤 v2 교환이
+   round 1에서 `passed`로 끝났다.
+2. ~~`npm run test:e2e` 전체 재실행을 CI에서 확인한다.~~ 병합된 PR들에서
+   확인됐다.
+3. ~~flag를 켜지 않은 채 병합한다.~~ `bba20780`까지 develop에 들어갔다.
+4. **staging 검증을 마무리한다.** 한 회차가 `4f300e21a959`에서 돌아 차단 구획
+   A·B·C를 닫았으나, 그 회차가 찾아낸 씨앗 소유권 결함의 수정은 그 배포에
+   없었다. 수정이 실린 배포에서 **B·C를 다시 확인**하고 기록의 판정·서명을
+   채운다. 비차단 소견 4건도 이때 판정한다.
+5. main으로의 병합과 production flag 활성화는 그 뒤다. 되돌릴 수 없는 항목은
+   **없는 기능을 약속하는 카드** 하나뿐이고, 그것은 `check:starter-catalog`가
+   이미 막는다.
+
 ## 2026-09-15 Prompt Refiner 서버 offer gate·실제 composer 무과금 검증 회차
 
 이번 회차는 위 권장 순서의 1번을 구현한다. 서버가 소유하는

@@ -21,6 +21,7 @@ import {
   CHAT_STARTER_KILL_SWITCH_ENV,
   chatStarterAvailable,
   chatStarterEnabledFromValue,
+  chatStarterEnabledWithFixtureOverride,
   chatStarterKillSwitchEngaged,
 } from "../lib/chatStarterAccess.ts";
 import { resolveChatStarterCapabilities } from "../lib/chatStarterCapabilityResolution.ts";
@@ -62,6 +63,59 @@ test("the kill switch wins over any stored value", () => {
     chatStarterKillSwitchEngaged({ [CHAT_STARTER_KILL_SWITCH_ENV]: "  " }),
     false
   );
+});
+
+test("the kill switch wins over the e2e fixture cookie too", () => {
+  // Cross review round 1, 2026-09-15. The shell tested `!enabled` before
+  // letting the cookie speak, and `enabled` is false both when the row says
+  // off and when an operator pulled the switch -- so the cookie turned the
+  // gallery back on against a pulled switch, under a comment saying it could
+  // not. The cookie stands in for the stored flag and for nothing else.
+  const cookie = { fixtureCookieValue: "1" };
+  assert.equal(
+    chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: false,
+      ...cookie,
+      env: {},
+    }),
+    true,
+    "with no switch engaged the cookie is the whole point of the override"
+  );
+  assert.equal(
+    chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: false,
+      ...cookie,
+      env: { [CHAT_STARTER_KILL_SWITCH_ENV]: "1" },
+    }),
+    false,
+    "an engaged switch is not something a cookie may overrule"
+  );
+  // And a switch pulled while the stored flag reads true is still a refusal:
+  // `enabledFromSettings` already folds it in, so this asserts the override
+  // adds nothing that the settings answer had removed.
+  assert.equal(
+    chatStarterEnabledWithFixtureOverride({
+      enabledFromSettings: chatStarterAvailable({
+        storedFlagValue: "true",
+        env: { [CHAT_STARTER_KILL_SWITCH_ENV]: "1" },
+      }),
+      ...cookie,
+      env: { [CHAT_STARTER_KILL_SWITCH_ENV]: "1" },
+    }),
+    false
+  );
+  // No cookie is no override, whatever the value looks like.
+  for (const value of [undefined, null, "", "0", "true", "yes"]) {
+    assert.equal(
+      chatStarterEnabledWithFixtureOverride({
+        enabledFromSettings: false,
+        fixtureCookieValue: value,
+        env: {},
+      }),
+      value === "1",
+      `${JSON.stringify(value)} must not be read as an opt-in`
+    );
+  }
 });
 
 // --- the table --------------------------------------------------------------
@@ -372,6 +426,76 @@ test("a screen with only locked cards still shows them", () => {
     catalog
   );
   assert.equal(cards.length, 2);
+});
+
+test("meeting a requirement never removes a card from the screen", () => {
+  // The inversion the reserved slot caused when it was held for locks alone:
+  // a card low in the registry appeared to the account that could not use it
+  // and vanished for the account that could, because meeting the requirement
+  // moved it to the back of the runnable queue and the ceiling cut it. Real
+  // case: `compare-image-models`, visible to Free and never to Pro.
+  const catalog = [
+    ...Array.from({ length: 8 }, (_, index) => entry({ id: `open-${index}` })),
+    entry({ id: "needs-pro", requires: { signedIn: true, minimumPlan: "Pro" } }),
+  ];
+  const free = selectVisibleStarterCards(
+    viewer({ signedIn: true, plan: "Free" }),
+    catalog
+  );
+  const pro = selectVisibleStarterCards(
+    viewer({ signedIn: true, plan: "Pro" }),
+    catalog
+  );
+  assert.equal(
+    free.find((card) => card.entry.id === "needs-pro")?.availability.state,
+    "locked"
+  );
+  assert.equal(
+    pro.find((card) => card.entry.id === "needs-pro")?.availability.state,
+    "available",
+    "the account that can use the card is the one that cannot see it"
+  );
+  assert.equal(pro.length, CHAT_STARTER_MAX_VISIBLE);
+});
+
+test("the promoted slot goes to an acquirable requirement, not a flag", () => {
+  // A flag or a capability is the deployment's decision, not something an
+  // account can go and get, so a card gated on one is ranked like any other
+  // and the ceiling may cut it. Only `signedIn` and `minimumPlan` are promises
+  // the gallery makes to a person about themselves.
+  const catalog = [
+    ...Array.from({ length: 8 }, (_, index) => entry({ id: `open-${index}` })),
+    entry({ id: "flag-gated", requires: { flagKeys: [VOICE_INPUT_FLAG_KEY] } }),
+  ];
+  const cards = selectVisibleStarterCards(
+    viewer({
+      signedIn: true,
+      plan: "Pro",
+      enabledFlags: new Set([VOICE_INPUT_FLAG_KEY]),
+      knownFlags: new Set(allFlags),
+    }),
+    catalog
+  );
+  assert.equal(cards.length, CHAT_STARTER_MAX_VISIBLE);
+  assert.ok(!cards.some((card) => card.entry.id === "flag-gated"));
+});
+
+test("the real catalogue shows a Pro account the image card it can run", () => {
+  // The configuration the defect was found in: image generation on, a plan
+  // that meets the card's own requirement.
+  const cards = selectVisibleStarterCards(
+    viewer({
+      signedIn: true,
+      plan: "Pro",
+      enabledFlags: new Set([IMAGE_GENERATION_FLAG_KEY]),
+      knownFlags: new Set(allFlags),
+    })
+  );
+  assert.equal(
+    cards.find((card) => card.entry.id === "compare-image-models")?.availability
+      .state,
+    "available"
+  );
 });
 
 test("the real catalogue offers a guest something to do", () => {
