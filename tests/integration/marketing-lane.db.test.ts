@@ -173,6 +173,15 @@ const queue = async (user: { id: string; email: string | null }) =>
     })
   );
 
+const nextSeoulHour = (hour: number) => {
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== hour) {
+    at.setUTCHours(at.getUTCHours() + 1);
+  }
+  return at;
+};
+
 test("an account that never opted in is not sent product news", async () => {
   await activatePolicy();
   const calls = stubProvider();
@@ -201,9 +210,7 @@ test("marketing to a Korean recipient at night waits for 08:00 Seoul time", asyn
   // The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after the
   // row's own nextAttemptAt, so the row is due and the clock is inside the
   // window whatever time of day the suite runs.
-  const at = new Date(Date.now() + 60 * 60 * 1_000);
-  at.setUTCMinutes(0, 0, 0);
-  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  const at = nextSeoulHour(23);
   const morning = new Date(at.getTime() + 9 * 60 * 60 * 1_000);
 
   await drainStandardEmailDeliveries({ limit: 1, now: at });
@@ -472,7 +479,7 @@ test("a Korean subscriber's subject carries the advertising label", async () => 
   const user = await subscriber({ country: "KR" });
   await queue(user);
 
-  await drainStandardEmailDeliveries({ limit: 1 });
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulHour(11) });
 
   assert.equal(calls.length, 1);
   // 정보통신망법 제50조제4항. The body stays in the account's own language:
@@ -522,7 +529,7 @@ test("an incomplete business identity holds marketing rather than sending it", a
   const user = await subscriber({ country: "KR" });
   const rows = await queue(user);
 
-  await drainStandardEmailDeliveries({ limit: 1 });
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulHour(11) });
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
