@@ -203,9 +203,14 @@ export function proxy(request: NextRequest) {
   if (
     request.method === "POST" &&
     request.nextUrl.pathname.replace(/\/+$/, "") === "/unsubscribe" &&
-    // Never a Server Action or RSC request: those belong to the page itself.
+    // Only what RFC 8058 sends: a form-encoded (or multipart) body, and never a
+    // Server Action or a PPR resume, which belong to the page. `rsc` is not
+    // checked because Next.js strips Flight headers before the proxy runs.
+    /^(application\/x-www-form-urlencoded|multipart\/form-data)\b/i.test(
+      request.headers.get("content-type") ?? ""
+    ) &&
     !request.headers.has("next-action") &&
-    !request.headers.has("rsc")
+    !request.headers.has("next-resume")
   ) {
     const target = request.nextUrl.clone();
     target.pathname = "/api/unsubscribe";
