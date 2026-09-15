@@ -100,6 +100,10 @@ export const ADMIN_NAV_ITEMS_KO: Readonly<Record<string, LocalizedItem>> = {
     aliases: ["피드백", "수신함", "문의", "개인정보", "정보주체 권리", "불만"],
     tabs: {
       feedback: { label: "피드백", description: "제품에서 접수된 신고와 요청" },
+      fixes: {
+        label: "자동 수정 검토",
+        description: "Trace로 찾은 문제점과 해결책, 승인과 배포 진행",
+      },
       privacy: { label: "개인정보 요청", description: "내보내기와 삭제 요청" },
     },
   },

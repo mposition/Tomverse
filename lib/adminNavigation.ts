@@ -179,6 +179,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
         description: "Reports and requests submitted from the product",
       },
       {
+        id: "fixes",
+        label: "Auto-fix review",
+        description: "Problems and fixes found from traces, approval and rollout",
+      },
+      {
         id: "privacy",
         label: "Privacy requests",
         description: "Export and erasure requests",

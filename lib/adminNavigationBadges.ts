@@ -38,6 +38,9 @@ export type AdminNavigationCounts = {
    */
   overdueCampaignWaves: number | null;
   openFeedback: number | null;
+  /** Auto-fix cases waiting on an operator: a PR to approve, a verified fix
+   * to reply about, or a stopped promotion (AUTOFIX_OPERATOR_ACTION_STATES). */
+  autoFixActionCases: number | null;
   openPrivacyRequests: number | null;
   pendingRefunds: number | null;
   pendingApprovals: number | null;
@@ -52,6 +55,7 @@ export const EMPTY_ADMIN_NAVIGATION_COUNTS: AdminNavigationCounts = {
   openModelLifecycle: null,
   overdueCampaignWaves: null,
   openFeedback: null,
+  autoFixActionCases: null,
   openPrivacyRequests: null,
   pendingRefunds: null,
   pendingApprovals: null,
@@ -87,7 +91,13 @@ export const adminNavigationBadge = (
         counts.openPrivacyRequests
       );
     case "support":
-      return sum(counts.openFeedback, counts.openPrivacyRequests);
+      // Distinct work items: an auto-reviewed report is `reviewing`, not
+      // `open`, so its case is not also counted as open feedback.
+      return sum(
+        counts.openFeedback,
+        counts.autoFixActionCases,
+        counts.openPrivacyRequests
+      );
     case "refunds":
       return counts.pendingRefunds;
     case "providers":

@@ -34,12 +34,28 @@ export const AUTOFIX_CASE_STATE = {
   /** A develop PR exists; a human must approve it (never auto-merge in the
    * initial operating period). */
   prOpen: "pr_open",
-  /** GitHub's mergedAt/mergeSha were read back -- never inferred. */
-  merged: "merged",
-  /** The merge commit was confirmed on staging with readiness green. */
-  stagingVerified: "staging_verified",
   /** The attempt could not produce a proof or a PR; a human decides next. */
   fixFailed: "fix_failed",
+  // --- Owner-approved promotion (docs/policy/trace-feedback-automation.md §9.3)
+  // Every state below is entered only on a fact the server read itself: an
+  // approval made in the console, or GitHub / a deployment observed through a
+  // read-only credential. No automation merges anything -- a person merges
+  // both PRs in GitHub, under branch protection.
+  /** An owner approved the PR at one head SHA and one patch digest. */
+  approved: "approved",
+  /** The develop PR was observed merged at exactly the approved head. */
+  merged: "merged",
+  /** The merge commit was observed on staging across a stabilisation window. */
+  stagingVerified: "staging_verified",
+  /** The main promotion PR was observed merged with the approved digest. */
+  productionMerged: "production_merged",
+  /** The production merge commit was observed live and ready across a
+   * stabilisation window. The report is still not resolved: only the
+   * operator's reply does that. */
+  productionVerified: "production_verified",
+  /** Promotion stopped on an observed fact that breaks the approval (a head
+   * pushed after approval, a PR closed unmerged, a digest mismatch). */
+  promotionFailed: "promotion_failed",
 } as const;
 export type AutoFixCaseState =
   (typeof AUTOFIX_CASE_STATE)[keyof typeof AUTOFIX_CASE_STATE];
@@ -87,12 +103,50 @@ const TRANSITIONS: Record<AutoFixCaseState, readonly AutoFixCaseState[]> = {
     AUTOFIX_CASE_STATE.awaitingHumanReview,
   ],
   red_green_proven: [AUTOFIX_CASE_STATE.prOpen, AUTOFIX_CASE_STATE.fixFailed],
-  pr_open: [AUTOFIX_CASE_STATE.merged, AUTOFIX_CASE_STATE.fixFailed],
-  merged: [AUTOFIX_CASE_STATE.stagingVerified, AUTOFIX_CASE_STATE.fixFailed],
-  staging_verified: [AUTOFIX_CASE_STATE.closed],
+  // The only way forward from an open PR is an owner's approval. There is no
+  // pr_open -> merged edge: a PR someone merged without approving it is not
+  // promoted, it stays here and the console says so.
+  pr_open: [AUTOFIX_CASE_STATE.approved, AUTOFIX_CASE_STATE.fixFailed],
   fix_failed: [AUTOFIX_CASE_STATE.closed, AUTOFIX_CASE_STATE.awaitingHumanReview],
+  // --- Owner-approved promotion ---------------------------------------------
+  approved: [AUTOFIX_CASE_STATE.merged, AUTOFIX_CASE_STATE.promotionFailed],
+  merged: [
+    AUTOFIX_CASE_STATE.stagingVerified,
+    AUTOFIX_CASE_STATE.promotionFailed,
+  ],
+  // No staging_verified -> closed: staging is not production, and a case must
+  // not be finished before the fix reached the people who reported it.
+  staging_verified: [
+    AUTOFIX_CASE_STATE.productionMerged,
+    AUTOFIX_CASE_STATE.promotionFailed,
+  ],
+  production_merged: [
+    AUTOFIX_CASE_STATE.productionVerified,
+    AUTOFIX_CASE_STATE.promotionFailed,
+  ],
+  production_verified: [AUTOFIX_CASE_STATE.closed],
+  promotion_failed: [AUTOFIX_CASE_STATE.closed],
   closed: [],
 };
+
+/**
+ * States an operator has to act on -- the support badge counts these, so a
+ * PR waiting for approval, a verified fix waiting for its reply and a stopped
+ * promotion are visible from anywhere in the console.
+ */
+export const AUTOFIX_OPERATOR_ACTION_STATES: readonly AutoFixCaseState[] = [
+  AUTOFIX_CASE_STATE.prOpen,
+  AUTOFIX_CASE_STATE.productionVerified,
+  AUTOFIX_CASE_STATE.promotionFailed,
+];
+
+/** States the promotion observer re-reads on every pass. */
+export const AUTOFIX_PROMOTION_OBSERVED_STATES: readonly AutoFixCaseState[] = [
+  AUTOFIX_CASE_STATE.approved,
+  AUTOFIX_CASE_STATE.merged,
+  AUTOFIX_CASE_STATE.stagingVerified,
+  AUTOFIX_CASE_STATE.productionMerged,
+];
 
 export const canTransitionAutoFixCase = (
   from: string,
