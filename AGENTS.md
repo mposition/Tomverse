@@ -1283,9 +1283,11 @@ Non-negotiable requirements:
 
 Before changing the Prompt Refiner surface or request boundary in
 `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
-`lib/promptRefinerSuggestion.ts`, or `lib/promptRefinerModelPrompt.ts`, read:
+`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`, or
+`lib/promptRefinerReceiptCore.ts`, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
+- `docs/policy/prompt-refiner-observability.md`
 
 Non-negotiable requirements:
 
@@ -1303,6 +1305,16 @@ Non-negotiable requirements:
   tool result, Router candidates, provider identity or model identity.
 - Refiner provider/model attribution belongs to an internal receipt and never
   replaces the answering-model badge.
+- Server execution and user disposition are separate immutable receipts. No
+  receipt may carry prompt/proposal bytes or digests, user/conversation/session
+  identity, attachment/Memory/profile/Router data, or provider error prose.
+  Unknown token/cost telemetry is null, not zero. Duplicate, orphan, binding
+  mismatch and time reversal fail closed.
+- Reliability, stale and choice metrics keep different denominators: provider
+  failure is over dispatched execution; stale is over all requests; explicit
+  choice is over successful suggestions; acceptance is over explicit choices.
+  Empty populations are null and no descriptive aggregate approves quality,
+  a release gate or rollout.
 - No provider call, billing, automatic offer, Router coupling or rollout is
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.

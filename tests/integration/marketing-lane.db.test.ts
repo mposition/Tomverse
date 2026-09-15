@@ -96,6 +96,13 @@ const PAYLOAD = {
   ctaUrl: "https://tomverse.app/chat",
 };
 
+const nextSeoulDaytime = () => {
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== 12) at.setUTCHours(at.getUTCHours() + 1);
+  return at;
+};
+
 beforeEach(async () => {
   await reset();
   mock.restoreAll();
@@ -472,7 +479,7 @@ test("a Korean subscriber's subject carries the advertising label", async () => 
   const user = await subscriber({ country: "KR" });
   await queue(user);
 
-  await drainStandardEmailDeliveries({ limit: 1 });
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulDaytime() });
 
   assert.equal(calls.length, 1);
   // 정보통신망법 제50조제4항. The body stays in the account's own language:
@@ -522,7 +529,7 @@ test("an incomplete business identity holds marketing rather than sending it", a
   const user = await subscriber({ country: "KR" });
   const rows = await queue(user);
 
-  await drainStandardEmailDeliveries({ limit: 1 });
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulDaytime() });
 
   assert.equal(calls.length, 0);
   const delivery = await prisma.emailDelivery.findUniqueOrThrow({
