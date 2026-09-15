@@ -51,15 +51,21 @@ import {
  * is a footer that is silently dropped, or a marketing message held, for a
  * rule nobody can find in the source.
  *
- * Bump it in the same commit as any profile edit, say what moved in the
- * summary, and remember that the deploy is only half: somebody still creates
- * the draft and activates it (§12.3, `/admin/email-policy`). Old versions stay
- * where they are.
+ * Bump it in the same commit as any profile edit that has already been
+ * created as a row, and say what moved in the summary. While no row carries it
+ * yet -- which was true in production until 2026-09-15, where the only active
+ * version was the bootstrap one with no profiles at all -- editing a profile
+ * in place is correct and bumping would mint a second version describing the
+ * same thing.
+ *
+ * Either way the deploy is only half of it: somebody still creates the draft
+ * and activates it (docs/policy/email-notifications.md §12.3,
+ * `/admin/email-policy`). Old versions stay where they are.
  */
-export const JURISDICTION_POLICY_SEED_VERSION = "2026-09-15.jurisdictions.2";
+export const JURISDICTION_POLICY_SEED_VERSION = "2026-08-21.jurisdictions.1";
 
 export const JURISDICTION_POLICY_SEED_SUMMARY =
-  "Supersedes 2026-08-21.jurisdictions.1. KR no longer names business_registration or mail_order_registration: the sender is not a Korean 통신판매업자, the numbers do not exist, and naming them discarded the entire footer for every Korean recipient. CH becomes a ninth profile of its own rather than resolving through EU. EU and CH footers name abn.";
+  "Jurisdiction profiles for KR, US, CA, AU, GB, SG, EU, CH and the ZZ fallback, from the sources confirmed on 2026-08-21 and the EEA/Swiss review of 2026-09-14. KR names no registration numbers: the sender is not a Korean 통신판매업자, so those values do not exist and naming them would discard the whole footer. CH is its own profile rather than resolving through EU. EU and CH footers name abn.";
 
 /**
  * A footer block identifier.

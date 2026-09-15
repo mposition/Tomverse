@@ -253,7 +253,7 @@ A1으로 해당 없음, 독일의 UWG 제7조 제3항 예외는 C8로 미사용.
 | 4 | `docs/policy/email-notifications.md` | §22 **A17**을 9개로 갱신, §21 **Q1**을 이 기록으로 해소 표시, §4.3 EU 주의 문구에서 이 기록을 가리키도록 |
 | 5 | `docs/policy/email-double-opt-in.md` | §7 정정 (§7 조건 3) |
 | 6 | 테스트 | profile 수 8→9, 언어×profile 조합 수(56→63), `CH` 매핑, footer block 추가 |
-| 7 | `lib/emailJurisdictionSeed.ts` | **완료 (2026-09-15).** `JURISDICTION_POLICY_SEED_VERSION`을 `2026-09-15.jurisdictions.2`로 올렸습니다. 항목 1·2를 `main`까지 배포하고도 **행에는 닿지 않은 상태**였습니다 — `ensureJurisdictionPolicyDraft()`가 version 문자열로 멱등이고 발송은 `JurisdictionProfile` 행을 읽기 때문입니다. `tests/emailJurisdictionSeed.test.mjs`가 profile 내용 digest를 version에 묶어 재발을 막습니다. **배포는 절반입니다** — `/admin/email-policy`에서 draft 생성과 활성화(§12.3 2인 승인)가 남습니다 |
+| 7 | `lib/emailJurisdictionSeed.ts`·`tests/emailJurisdictionSeed.test.mjs` | **완료 (2026-09-15).** 항목 1·2가 `main`에 있는데도 **행에는 닿지 않은 상태**였습니다 — `/admin/email-policy` 확인 결과 활성 version이 bootstrap `2026-08-21.1`(프로필 0개)이었고 `2026-08-21.jurisdictions.1`은 만들어진 적이 없습니다. 증상은 한국 수신자가 아니라 **모든 수신자**의 transactional footer 누락이었고, marketing은 `jurisdiction_profile_missing`으로 전량 거부되는 상태였습니다. 코드 수정은 불필요했고(`main`에 9개 profile이 이미 정확), **`초안 생성` + 활성화**가 남은 전부입니다. 재발 방지로 profile 내용 digest를 test에 기록했고, seed version을 언제 올리고 언제 올리지 않는지를 상수 주석에 적었습니다 |
 
 ## 10. 다음 검토
 
