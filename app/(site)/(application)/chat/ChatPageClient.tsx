@@ -113,6 +113,10 @@ import {
   type StarterLockReason,
 } from "@/lib/chatStarterAvailability";
 import {
+  applyStarterSeed,
+  type StarterSeedToggleMemory,
+} from "@/lib/chatStarterSeed";
+import {
   useLanguage,
   type Language,
 } from "@/components/LanguageProvider";
@@ -7041,6 +7045,16 @@ export function ChatPageClient({
     edited" from "the box holds something this person wrote". Picking a second
     card replaces the first one's sentence; it never replaces typed work.
   */
+  /**
+   * What the last starter seed did to the composer's toggles.
+   *
+   * A ref rather than state: nothing renders from it, and it must not make the
+   * seed handler a new function on every toggle change. It survives a
+   * conversation switch harmlessly -- `applyStarterSeed` only trusts it while
+   * the live mode still matches what it recorded writing.
+   */
+  const starterSeedTogglesRef = useRef<StarterSeedToggleMemory | null>(null);
+
   const starterSeedTexts = useMemo(
     () =>
       new Set(CHAT_STARTER_CATALOG.map((entry) => t(entry.seed.promptSeedKey))),
@@ -7070,12 +7084,27 @@ export function ChatPageClient({
       handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0]);
       return;
     }
-    if (entry.seed.webSearch) setWebSearchMode("always");
-    setInputValue((current) =>
-      current.trim().length === 0 || starterSeedTexts.has(current)
-        ? seedText
-        : current
-    );
+    // Text and toggles are decided together (lib/chatStarterSeed.ts). They used
+    // to be decided apart, and the half that did not think about ownership
+    // armed web search on somebody's own sentence and never disarmed it --
+    // found in staging, at 9 credits a send instead of 1.
+    const application = applyStarterSeed({
+      draft: inputValue,
+      seedTexts: starterSeedTexts,
+      wantsWebSearch: Boolean(entry.seed.webSearch),
+      currentWebSearchMode: webSearchMode,
+      memory: starterSeedTogglesRef.current,
+    });
+    if (!application.applies) {
+      // The box holds the person's writing, so nothing of the seed lands. The
+      // focus move stays: the click returns them to what they were typing
+      // rather than reading as a control that did nothing.
+      setFocusToken((value) => value + 1);
+      return;
+    }
+    starterSeedTogglesRef.current = application.memory;
+    setWebSearchMode(application.webSearchMode);
+    setInputValue(seedText);
     setFocusToken((value) => value + 1);
   };
 

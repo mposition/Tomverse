@@ -43,12 +43,12 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **59개 파일, 843 test**를
-선택합니다(두 project 합계 1,686). 같은 날 `chat-starter-catalog.spec.ts`와
+desktop-chromium과 mobile-chromium 각 project에서 **59개 파일, 844 test**를
+선택합니다(두 project 합계 1,688). 같은 날 `chat-starter-catalog.spec.ts`와
 `prompt-refiner-chat-input.spec.ts`가 병렬로 합류하기 전 값은 57개 파일,
-825 test(project당)였고 두 spec은 각각 +8, +10입니다. 2026-08-26의
-51개 파일, 1,416 test(project당 708)는 아래 증가 이력과 shard 결정의
-기준값으로 남깁니다.
+825 test(project당)였습니다. Starter spec은 staging에서 찾은 씨앗 토글 결함
+회귀를 포함해 +9, Refiner spec은 +10입니다. 2026-08-26의 51개 파일,
+1,416 test(project당 708)는 아래 증가 이력과 shard 결정의 기준값으로 남깁니다.
 
 | Spec |
 |---|
