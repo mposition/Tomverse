@@ -305,8 +305,12 @@ const withSoleAdmin = async <T>(
     admins: process.env.ADMIN_EMAILS,
     owners: process.env.ADMIN_OWNER_EMAILS,
     expiry: process.env.ADMIN_ACCESS_EXPIRY_JSON,
+    userIds: process.env.ADMIN_USER_IDS,
   };
   process.env.ADMIN_EMAILS = emails.join(",");
+  // Id-admitted administrators are counted as approvers, so an inherited
+  // ADMIN_USER_IDS would silently close every sole-path test here.
+  delete process.env.ADMIN_USER_IDS;
   process.env.ADMIN_OWNER_EMAILS = emails.join(",");
   delete process.env.ADMIN_ACCESS_EXPIRY_JSON;
   try {
@@ -321,6 +325,8 @@ const withSoleAdmin = async <T>(
     else process.env.ADMIN_OWNER_EMAILS = previous.owners;
     if (previous.expiry !== undefined)
       process.env.ADMIN_ACCESS_EXPIRY_JSON = previous.expiry;
+    if (previous.userIds === undefined) delete process.env.ADMIN_USER_IDS;
+    else process.env.ADMIN_USER_IDS = previous.userIds;
   }
 };
 
@@ -668,10 +674,9 @@ test("an administrator admitted by user id is counted, so the sole path fails cl
   // readonly. Leaving them out would count one approver where there are two.
   const admin = await createAdminSession("email-owner");
   const other = await createAdminSession("id-owner");
-  const previousIds = process.env.ADMIN_USER_IDS;
-  process.env.ADMIN_USER_IDS = other.session.user?.id as string;
-  try {
-    await withSoleAdmin([admin.session.user?.email as string], async () => {
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+      // Set inside: withSoleAdmin clears and restores ADMIN_USER_IDS itself.
+      process.env.ADMIN_USER_IDS = other.session.user?.id as string;
       let executions = 0;
       await assert.rejects(
         () =>
@@ -688,14 +693,10 @@ test("an administrator admitted by user id is counted, so the sole path fails cl
         executions += 1;
       });
       assert.equal(executions, 1);
-    });
-  } finally {
-    if (previousIds === undefined) delete process.env.ADMIN_USER_IDS;
-    else process.env.ADMIN_USER_IDS = previousIds;
-  }
+  });
 });
 
-test("a request already approved by a second administrator is consumed, not left claimable", async () => {
+test("a request already approved by a second administrator is closed, not left claimable", async () => {
   const admin = await createAdminSession("returning-owner");
   const reviewer = await createAdminSession("departed-reviewer");
   const input = planAdjustInput(admin);
@@ -730,9 +731,54 @@ test("a request already approved by a second administrator is consumed, not left
     assert.equal(executions, 1);
     assert.equal(
       (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: pending.id } })).status,
-      "consumed"
+      "expired"
     );
   });
+
+  // With the reviewer back, the same request queues again rather than running
+  // on the approval that was already carried out.
+  await withSoleAdmin(
+    [admin.session.user?.email as string, reviewer.session.user?.email as string],
+    async () => {
+      let executions = 0;
+      await assert.rejects(
+        () => runWithAdminApproval(input, async () => { executions += 1; }),
+        AdminApprovalRequiredError
+      );
+      assert.equal(executions, 0);
+    }
+  );
+});
+
+test("the bound retention path closes an approved cleanup request too", async () => {
+  const admin = await createAdminSession("bound-returning-owner");
+  const approval = await prisma.adminActionApproval.create({
+    data: {
+      action: "retention.cleanup.execute",
+      targetType: "Retention",
+      targetId: "expired-data",
+      status: "approved",
+      payload: { mode: "execute", confirmText: "RUN CLEANUP" },
+      payloadHash: approvalPayloadHash({ mode: "execute", confirmText: "RUN CLEANUP" }),
+      requestedById: admin.session.user?.id,
+      expiresAt: new Date(Date.now() + 30 * 60_000),
+    },
+  });
+  await withSoleAdmin([admin.session.user?.email as string], async () => {
+    const { run, digest } = await seedDryRun(admin);
+    await executeAsSoleApprover(admin, run.id, digest, async () => ({ ok: true }));
+  });
+  assert.equal(
+    (await prisma.adminActionApproval.findUniqueOrThrow({ where: { id: approval.id } })).status,
+    "expired"
+  );
+  const started = await prisma.adminAuditLog.findFirstOrThrow({
+    where: { action: "admin_sole_approver.execution_started" },
+  });
+  assert.deepEqual(
+    (started.metadata as Record<string, unknown>).supersededApprovalIds,
+    [approval.id]
+  );
 });
 
 test("a pending request is expired by the sole execution that carries it out", async () => {

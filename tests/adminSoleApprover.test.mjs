@@ -477,7 +477,13 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
         /eligibleApproverIdentities\(\s*approvalPermissionForAction\(action\),\s*session\s*\)/
     );
 
-    // An approval a second administrator already granted is consumed through
-    // the ordinary claim, never left claimable beside a sole execution.
-    assert.match(body, /if \(!outstanding\.approvedExists\) \{/);
+    // Open two-person requests are closed, in the same transaction as the
+    // intent record, by both sole executors -- the general one and the bound
+    // one -- so none stays claimable beside a sole execution.
+    assert.equal(
+        execution.match(/await supersedeOpenRequestsAndRecordStart\(/g)?.length,
+        2
+    );
+    assert.match(execution, /status: \{ in: \["pending", "approved"\] \}/);
+    assert.match(execution, /\n\s+tx,\n\s+\}\);\n\s+return metadata;/);
 });
