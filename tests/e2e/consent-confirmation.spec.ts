@@ -41,6 +41,10 @@ test("opening a confirmation link changes nothing until the button is pressed", 
   await page.waitForLoadState("networkidle");
   expect(posts).toEqual([]);
 
+  // The capability is taken out of the address bar once read, and the button
+  // still submits it.
+  await expect.poll(() => page.url()).not.toContain("#t=");
+
   await button.click();
   await expect(page.getByTestId("consent-confirm-done")).toBeVisible();
   expect(posts).toHaveLength(1);

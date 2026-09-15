@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { useLanguage } from "@/components/LanguageProvider";
 
@@ -30,9 +30,25 @@ export function ConsentConfirmation() {
     const { t } = useLanguage();
     // null on the server and during hydration: the fragment is browser-only, so
     // the first HTML is a neutral heading rather than a premature "invalid".
-    // Read from the live URL on every render and on hashchange -- no cache, so a
-    // second link opened in the same document is the one submitted.
-    const token = useSyncExternalStore(subscribeToHash, readFragmentToken, () => null);
+    // Read from the live URL on every render and on hashchange, so a second link
+    // opened in the same document is the one submitted.
+    const live = useSyncExternalStore(subscribeToHash, readFragmentToken, () => null);
+    // The token is a capability, so it is captured here and then removed from the
+    // address bar -- out of history, bookmarks and screenshots. Captured in
+    // component state (adjusted during render, not in an effect), because the
+    // live value is empty again once the fragment is gone.
+    const [captured, setCaptured] = useState<string | null>(null);
+    if (live && live !== captured) setCaptured(live);
+    useEffect(() => {
+        if (captured && window.location.hash) {
+            window.history.replaceState(
+                null,
+                "",
+                window.location.pathname + window.location.search
+            );
+        }
+    }, [captured]);
+    const token = captured ?? live;
     const [submitState, setState] = useState<
         "idle" | "working" | "done" | "expired" | "failed"
     >("idle");
