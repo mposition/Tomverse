@@ -2167,4 +2167,48 @@ export const pt = {
         changes: "Podemos atualizar esta política quando o serviço ou requisitos legais mudarem e exibiremos a data revisada.",
         back: "Voltar para Tomverse",
     },
+    chatStarter: {
+        title: "O que você pode fazer aqui",
+        hint: "Escolha um cartão para preencher o campo abaixo. Nada é enviado até você tocar em enviar.",
+        lockedSignIn: "Entre na conta para usar",
+        lockedPlan: "Requer o plano {plan}",
+        cards: {
+            compareAnswers: {
+                outcome: "Faça uma pergunta e leia três modelos respondendo lado a lado",
+                seed: "Explique em linguagem simples para que serve um banco de dados vetorial, em cerca de 200 palavras.",
+            },
+            documentQuestions: {
+                outcome: "Anexe um PDF de 18 páginas e faça a mesma pergunta a vários modelos",
+                seed: "Anexei um documento. Resuma o que ele pede que eu decida e liste todos os prazos citados.",
+            },
+            sourcedAnswer: {
+                outcome: "Receba uma resposta com os links das fontes usadas",
+                seed: "O que mudou neste ano na aplicação do regulamento europeu de IA? Inclua as fontes usadas.",
+            },
+            debugStackTrace: {
+                outcome: "Cole um stack trace e receba a linha que falhou e uma correção para testar",
+                seed: "Este é um stack trace da minha compilação. Diga qual linha falhou e o que devo mudar.",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "Transforme uma resposta em um arquivo .xlsx para baixar",
+                seed: "Crie uma planilha de orçamento mensal com categoria, valor previsto e valor real, e salve como arquivo de planilha.",
+            },
+            readAScreenshot: {
+                outcome: "Anexe uma captura de tela e pergunte o que o erro significa",
+                seed: "Anexei a captura de uma caixa de diálogo de erro. Diga o que significa e o que fazer em seguida.",
+            },
+            translateAndCompare: {
+                outcome: "Traduza um rascunho e compare as versões de dois modelos",
+                seed: "Traduza o texto abaixo para o inglês mantendo um tom formal:",
+            },
+            compareImageModels: {
+                outcome: "Envie uma frase para vários modelos de imagem e compare o que cada um devolve",
+                seed: "Uma sala de leitura tranquila ao amanhecer, luz quente por janelas altas, estilo fotográfico.",
+            },
+            speakAQuestion: {
+                outcome: "Dite uma pergunta longa em vez de digitar e edite o texto antes do envio",
+                seed: "Transforme o que eu disser a seguir em uma lista de instruções curta e clara.",
+            },
+        },
+    },
 } satisfies typeof en;

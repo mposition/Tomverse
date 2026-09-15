@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
 import { displayHeadingClass } from "@/lib/displayHeading";
@@ -25,6 +26,19 @@ type ChatWelcomeScreenProps = {
   recentAccess?: "cards" | "disclosure";
   onOpenRecentConversations?: () => void;
   recentDisclosureRef?: (node: HTMLButtonElement | null) => void;
+  /**
+   * The starter catalogue, when this deployment offers one.
+   *
+   * A node rather than data, because what the gallery shows depends on the
+   * viewer's plan, the deployment's flags and this request's capabilities --
+   * all of which `ChatPageClient` has already resolved and this screen has no
+   * business resolving again.
+   *
+   * `undefined` renders nothing: no heading, no frame, no row height. That is
+   * the whole of the flag-off state (docs/ui-contracts/chat-starter-catalog.md
+   * section 2), and it is why this is a slot rather than a boolean.
+   */
+  starterGallery?: ReactNode;
 };
 
 export function ChatWelcomeScreen({
@@ -35,6 +49,7 @@ export function ChatWelcomeScreen({
   recentAccess = "cards",
   onOpenRecentConversations,
   recentDisclosureRef,
+  starterGallery,
 }: ChatWelcomeScreenProps) {
   const { data: session } = useSession();
   const { t, lang } = useLanguage();
@@ -70,6 +85,13 @@ export function ChatWelcomeScreen({
       </p>
       <div ref={inputSlotRef} className="mt-5 w-full max-w-xl" />
       <div ref={consentSlotRef} className="w-full max-w-xl empty:mt-0 [&:not(:empty)]:mt-3" />
+      {/*
+        Below the composer, in normal flow, in a row of its own. The mobile
+        composer contract gives the textarea a dedicated full-width row, so the
+        gallery may follow it but may never share it, overlap it or float above
+        it (docs/ui-contracts/mobile-chat-composer.md).
+      */}
+      {starterGallery}
       {recentCount > 0 &&
         (recentAccess === "disclosure" ? (
           <button

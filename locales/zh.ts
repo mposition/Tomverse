@@ -2146,5 +2146,49 @@ export const zh = {
         changesTitle: "政策变更",
         changes: "当服务或法律要求发生变化时，我们可能更新本政策，并显示修订后的生效日期。",
         back: "返回 Tomverse",
-    }
+    },
+    chatStarter: {
+        title: "在这里可以做什么",
+        hint: "选择一张卡片即可填入下方输入框。在你点击发送之前不会发出任何内容。",
+        lockedSignIn: "登录后可使用",
+        lockedPlan: "需要 {plan} 方案",
+        cards: {
+            compareAnswers: {
+                outcome: "提一个问题，并排阅读三个模型的回答",
+                seed: "用通俗的语言解释向量数据库用来解决什么问题，大约 200 字。",
+            },
+            documentQuestions: {
+                outcome: "上传一份 18 页的 PDF，向多个模型提出同一个问题",
+                seed: "我上传了一份文档。请概括它要我做出什么决定，并列出其中提到的所有截止日期。",
+            },
+            sourcedAnswer: {
+                outcome: "获得一份附带来源链接的回答",
+                seed: "今年欧盟人工智能法案的执行有哪些变化？请附上你使用的来源。",
+            },
+            debugStackTrace: {
+                outcome: "粘贴一段堆栈跟踪，得到出错的那一行和可尝试的修复",
+                seed: "这是我构建时的堆栈跟踪。请告诉我哪一行出错，以及应该改什么。",
+            },
+            spreadsheetFromAnswer: {
+                outcome: "把回答变成可下载的 .xlsx 文件",
+                seed: "帮我建立一份月度预算表，包含类别、计划金额和实际金额，并保存为电子表格文件。",
+            },
+            readAScreenshot: {
+                outcome: "上传一张截图，询问上面的错误是什么意思",
+                seed: "我上传了一张错误对话框的截图。请告诉我它是什么意思，以及接下来该怎么做。",
+            },
+            translateAndCompare: {
+                outcome: "翻译一段草稿，并排比较两个模型的版本",
+                seed: "把下面的文字翻译成英文，保持正式的语气：",
+            },
+            compareImageModels: {
+                outcome: "把同一句话发给多个图像模型，比较各自的结果",
+                seed: "清晨安静的阅览室，暖光从高窗照入，摄影风格。",
+            },
+            speakAQuestion: {
+                outcome: "用语音说出较长的问题，在发送前再修改文字",
+                seed: "把我接下来说的话整理成一份简短清晰的操作说明。",
+            },
+        },
+    },
 } satisfies typeof en;
