@@ -1,6 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mockAuthenticatedApi, prepareGuestPage } from "./support/app-fixtures";
-import { mockUserUsage, setRootFontSize } from "./support/chat-state-fixtures";
+import {
+  mockGuestUsage,
+  mockUserUsage,
+  setRootFontSize,
+} from "./support/chat-state-fixtures";
 
 /**
  * The Chat starter catalogue on the welcome screen.
@@ -186,6 +190,54 @@ test.describe("Chat starter catalogue", () => {
     const plain = page.locator('[data-starter-id="compare-answers"]');
     await expect(plain).toBeVisible();
     await plain.click();
+    await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
+  });
+
+  test("a seed stays ours across a language change", { tag: "@ui-risk" }, async ({
+    page,
+  }) => {
+    // Cross review round 2, 2026-09-15: ownership was "is the draft one of the
+    // sentences the cards produce in the active locale". Changing the language
+    // took the sentence already in the box out of that set, so the next card
+    // read it as the person's own writing, applied nothing, and the search the
+    // first card armed could no longer be put back -- the 9-credit send again.
+    // A guest, because the language control a guest has changes the locale in
+    // place; a reload would clear the draft and prove nothing. The guest holds
+    // enough credits for a searching send, or the guest-limit dialog opens
+    // over the gallery the moment search is armed.
+    await enableStarterFlag(page);
+    await mockGuestUsage(page, 0, 1000);
+    await openWelcome(page);
+
+    const textarea = page.getByTestId("chat-textarea");
+    const sourced = page.locator('[data-starter-id="sourced-answer"]');
+    const plain = page.locator('[data-starter-id="compare-answers"]');
+    await expect(sourced).toBeVisible();
+    await sourced.click();
+    await expect(page.getByTestId("web-search-mode-chip")).toBeVisible();
+    const englishSeed = await textarea.inputValue();
+    expect(englishSeed.trim().length).toBeGreaterThan(0);
+    const englishPlainCard = (await plain.textContent()) ?? "";
+
+    const isMobile = (page.viewportSize()?.width ?? 1024) < 768;
+    if (isMobile) {
+      await page.getByTestId("mobile-chat-shell").locator("header button").first().click();
+    }
+    await page
+      .locator("select")
+      .filter({ has: page.locator('option[value="ko"]') })
+      .last()
+      .selectOption("ko");
+    if (isMobile) await page.keyboard.press("Escape");
+
+    // The locale really changed, and the draft survived it: otherwise the
+    // assertions below would pass without exercising anything.
+    await expect(plain).not.toHaveText(englishPlainCard);
+    await expect(textarea).toHaveValue(englishSeed);
+
+    await plain.click();
+    await expect(textarea).not.toHaveValue(englishSeed);
+    expect((await textarea.inputValue()).trim().length).toBeGreaterThan(0);
     await expect(page.getByTestId("web-search-mode-chip")).toHaveCount(0);
   });
 

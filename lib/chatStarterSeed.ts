@@ -24,6 +24,22 @@
  * the same terms as the text: we may put back what we put there, and we may
  * not touch what the person set.
  *
+ * ## Why the text is remembered rather than recognised
+ *
+ * The text used to be owned by recognition: "is the draft one of the sentences
+ * the cards produce", with that set built from the active locale. Cross review
+ * round 2 (2026-09-15) found the hole -- change the language after a click and
+ * the sentence already in the box is no longer in the set, so the next card
+ * reads it as the person's writing, applies nothing, and the search the first
+ * card armed can no longer be put back. The 9-credit send, reached by a
+ * language switch. A copy edit or a translation update does the same.
+ *
+ * Recognising every locale's sentences instead would close that and open the
+ * opposite hole: a person who typed a card's sentence themselves, in any
+ * language, would have it replaced. So the text is owned the way the toggle
+ * already was -- by remembering what we last wrote and asking whether the box
+ * still holds exactly that.
+ *
  * Pure, and separate from `ChatPageClient` on purpose -- the component is
  * seven thousand lines and this rule is four cases that each need a test.
  */
@@ -31,15 +47,16 @@
 import type { WebSearchMode } from "@/lib/appDefaults";
 
 /**
- * What a previous seed did to the composer's toggles, if anything.
+ * What the last seed wrote into the composer.
  *
- * `restore` is the mode as it stood before the first seed of this run touched
- * it. `applied` is the mode that seed left behind. Comparing `applied` against
- * the live mode is what tells a toggle we own from one the person has since
- * changed -- the exact analogue of comparing the draft against the sentences
- * the cards can produce.
+ * `text` is the draft that seed left behind. `restore` is the web-search mode
+ * as it stood before the first seed of this run touched it, and `applied` the
+ * mode that seed left behind. Each is trusted only while the live composer
+ * still reads as what was written: a draft that no longer equals `text`, or a
+ * mode that no longer equals `applied`, has been taken back by the person.
  */
-export type StarterSeedToggleMemory = {
+export type StarterSeedMemory = {
+  text: string;
   restore: WebSearchMode;
   applied: WebSearchMode;
 };
@@ -50,20 +67,22 @@ export type StarterSeedApplication =
   | {
       applies: true;
       webSearchMode: WebSearchMode;
-      memory: StarterSeedToggleMemory;
+      memory: StarterSeedMemory;
     };
 
 /**
  * Whether the composer is free for a seed to write into.
  *
- * Empty, or still holding a sentence one of the cards produced. Anything else
- * is the person's work, and a starter card is an offer rather than an edit.
+ * Empty, or still holding exactly the text the last seed wrote. Anything else
+ * is the person's work, and a starter card is an offer rather than an edit --
+ * including a sentence that happens to match a card's, if no card put it there.
  */
 export const starterSeedMayWrite = (input: {
   draft: string;
-  seedTexts: ReadonlySet<string>;
+  memory: StarterSeedMemory | null;
 }): boolean =>
-  input.draft.trim().length === 0 || input.seedTexts.has(input.draft);
+  input.draft.trim().length === 0 ||
+  (input.memory !== null && input.memory.text === input.draft);
 
 /**
  * The whole decision for one click.
@@ -74,15 +93,15 @@ export const starterSeedMayWrite = (input: {
 export function applyStarterSeed(input: {
   /** What the composer holds right now. */
   draft: string;
-  /** Every sentence the catalogue's cards can produce, in the active locale. */
-  seedTexts: ReadonlySet<string>;
+  /** What the composer will hold if this seed applies. */
+  seedText: string;
   /** Whether the clicked card declares web search. */
   wantsWebSearch: boolean;
   /** The composer's live web-search mode. */
   currentWebSearchMode: WebSearchMode;
-  memory: StarterSeedToggleMemory | null;
+  memory: StarterSeedMemory | null;
 }): StarterSeedApplication {
-  if (!starterSeedMayWrite({ draft: input.draft, seedTexts: input.seedTexts })) {
+  if (!starterSeedMayWrite({ draft: input.draft, memory: input.memory })) {
     return { applies: false };
   }
 
@@ -97,6 +116,6 @@ export function applyStarterSeed(input: {
   return {
     applies: true,
     webSearchMode,
-    memory: { restore, applied: webSearchMode },
+    memory: { text: input.seedText, restore, applied: webSearchMode },
   };
 }

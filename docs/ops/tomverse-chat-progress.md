@@ -750,11 +750,11 @@ flag key를 리터럴로 적으면 gate는 통과하고 약속은 거짓이 되�
 
 | 상태 | 값 |
 | --- | --- |
-| 구현 | 완료. 브랜치 `claude/to-develop/chat-starter-staging-checklist`, 최신 commit `31407335` |
-| 내부 검증 | PR Fast Gate static 검사 50개(workflow에서 추출), typecheck, eslint, unit 42개, e2e 22개(desktop·mobile), 이웃 계약 spec(image workspace · image intent handoff · mobile composer · comparison action rail) 158개 통과 |
-| 독립 검토 | **미완.** round 0 `request_changes` 1건(수정 완료) → round 1 `request_changes` 2건(이 회차에서 수정) → round 2 미검토 |
-| 병합 | **부분.** `bba20780`까지 develop에 병합됨(PR #1433 · #1434 · #1439 · #1441). round 1 수정 `31407335`은 미병합. **main에는 없다** |
-| 배포 | **staging에 배포됨** — `4f300e21a959`(= PR #1433 병합 commit). 그 배포에는 씨앗 소유권 수정(`8f23694e`, 이후 develop 병합)도 round 1 수정(`31407335`)도 **없다**. production 배포 없음 |
+| 구현 | 완료. 브랜치 `claude/to-develop/chat-starter-staging-checklist`. 최신은 v1 round 2 finding 2건(F1 씨앗 소유권의 locale 의존, F2 계약 문서 상태 줄)의 수정 commit |
+| 내부 검증 | F1·F2 수정 뒤: `.github/workflows/pr-fast-gate.yml`에서 추출한 `check:*` 47개 중 44개 통과 — 실패 3개(`check:retired-product-name` · `check:staging-verification-records` · `check:tomverse-chat-release-gate-view`)는 이 로컬 Windows clone의 untracked 파일과 CRLF 작업 트리에서 나며 이 변경의 파일을 가리키지 않는다(CI 판독 필요). typecheck, 수정 파일 eslint, unit 45개(`chatStarterCatalog` · `chatStarterSeed`), e2e 24개(`chat-starter-catalog.spec.ts`, desktop·mobile) 통과. F1 회귀 e2e는 수정 전 build에서 desktop·mobile 모두 그 증상으로 실패함을 확인했다. 이전 회차 기록의 "static 50개"는 같은 기준으로 다시 세지 않았으므로 47과 비교하지 않는다 |
+| 독립 검토 | **미완.** v1 교환(`chat-starter-catalog-v1`): round 0 `request_changes` 1건 → round 1 2건 → round 2 2건, 수정 회차 상한에 닿아 `on_hold (revisions_exhausted)`. round 2의 2건은 이 회차에서 수정. 이어가는 교환은 `docs/ops/cross-review/packages/chat-starter-catalog-v2.task.json`(supersedes v1, baseCommit 동일) |
+| 병합 | **부분.** `bba20780`까지 develop에 병합됨(PR #1433 · #1434 · #1439 · #1441). round 1 수정 `31407335`, round 2 수정 `ef35f86f`, F1·F2 수정은 미병합. **main에는 없다** |
+| 배포 | **staging에 배포됨** — `4f300e21a959`(= PR #1433 병합 commit). 그 배포에는 씨앗 소유권 수정(`8f23694e`, 이후 develop 병합)도 round 1·2 수정도 F1 수정도 **없다**. production 배포 없음 |
 | 공개 | **production 공개 없음.** staging에서는 검증을 위해 운영자가 `feature.chatStarterEnabled`를 켰고, kill switch로 다시 사라지는 것까지 확인했다(A-2). 현재 staging의 flag 상태는 이 저장소가 답할 수 없다 |
 | staging 검증 | 차단 구획 A·B·C 실행됨. **기록의 판정·서명은 미완** — 초안은 실행자에게 전달했고 commit되지 않았다. 비차단 소견 4건 미결 |
 
@@ -792,8 +792,9 @@ pricing profile, 마케팅 페이지, 카드 가격 표시, `promptRefinerProduc
 
 1~3은 끝났다. 1은 진행 중이고 4는 한 번 돌았다.
 
-1. **Codex 독립 검토를 받고 지적을 닫는다.** round 0과 round 1을 받았고 둘 다
-   `request_changes`였다. round 2 패키징이 다음이며, 수정 회차 상한은 2다.
+1. **Codex 독립 검토를 받고 지적을 닫는다.** v1 교환은 round 0·1·2 모두
+   `request_changes`로 끝나 on_hold다. round 2의 두 지적을 고친 뒤 v2 task로
+   이어가며, 연속 교환 상한(2)상 v2 다음 한 번이 남는다.
 2. ~~`npm run test:e2e` 전체 재실행을 CI에서 확인한다.~~ 병합된 PR들에서
    확인됐다.
 3. ~~flag를 켜지 않은 채 병합한다.~~ `bba20780`까지 develop에 들어갔다.

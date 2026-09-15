@@ -1,7 +1,11 @@
 # Chat 시작 카탈로그 (Starter Catalog) 계약
 
 - 상태: **구현 완료, 내부 검증 통과, production 비활성.**
-  `feature.chatStarterEnabled`는 default-off이고 어느 환경에서도 켜지지 않았다.
+  `feature.chatStarterEnabled`는 default-off이고 **production에서 켜진 적이
+  없다.** staging에서는 검증을 위해 운영자가 켰고 kill switch로 다시 사라지는
+  것까지 확인했다. 그것은 검증 행위이지 공개가 아니며, 현재 staging의 flag
+  상태는 이 저장소가 답할 수 없다. 회차별 상태는
+  `docs/ops/tomverse-chat-progress.md`가 적는다.
 - 표: `lib/chatStarterCatalog.ts`
 - 판정: `lib/chatStarterAvailability.ts`
 - 런타임 capability 해석: `lib/chatStarterCapabilityResolution.ts`
@@ -144,9 +148,19 @@
 - 씨앗은 **기존 초안 경로**(`lib/conversationDraftStore.ts` ·
   `useConversationDrafts`)의 `setInputValue`를 지난다. 두 번째 초안 경로를
   만들지 않는다.
-- **타이핑한 내용을 덮어쓰지 않는다.** 초안이 비어 있거나 그 자체가 다른 카드의
-  씨앗일 때만 교체한다. 그래서 카드를 두 번 고르면 바뀌고, 사람이 쓴 글은 사라
-  지지 않는다.
+- **타이핑한 내용을 덮어쓰지 않는다.** 초안이 비어 있거나 **직전 씨앗이 쓴
+  텍스트와 정확히 같을 때만** 교체한다. 그래서 카드를 두 번 고르면 바뀌고,
+  사람이 쓴 글은 사라지지 않는다. 카드가 쓴 적 없는 문장은 어떤 카드의 씨앗과
+  글자가 같아도 사람의 글이다.
+
+  소유권은 **알아보는 것이 아니라 기억하는 것이다.** 처음에는 "초안이 카드가
+  만드는 문장 중 하나인가"를 현재 locale의 문장 집합으로 판정했다. 2026-09-15
+  cross review round 2가 그 구멍을 찾았다 — 카드를 누른 뒤 언어를 바꾸면 이미
+  들어 있는 문장이 집합에서 빠지므로 다음 카드가 그것을 사람의 글로 읽고 아무것도
+  적용하지 않으며, 앞 카드가 켠 검색을 되돌릴 방법이 사라진다(아래 9크레딧
+  결함). 문구 수정과 번역 갱신도 같은 결과를 낸다. 모든 locale의 문장을 집합에
+  넣으면 반대 구멍이 열린다 — 어떤 언어로든 그 문장을 직접 타이핑한 사람의 글을
+  덮어쓴다. 그래서 텍스트도 토글처럼 **마지막으로 쓴 값**을 기억한다.
 - **씨앗은 통째로 적용되거나 전혀 적용되지 않는다.** 텍스트와 토글을 따로
   판정하지 않는다. 판정은 `lib/chatStarterSeed.ts`의 `applyStarterSeed()`
   한 곳이다.
