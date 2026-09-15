@@ -9,6 +9,8 @@
 - 표면: `components/chat/ChatStarterGallery.tsx`
 - 진실성 gate: `scripts/check-starter-catalog.mjs`
   (`npm run check:starter-catalog`, PR Fast Gate static 단계)
+- staging 검증: `docs/ops/chat-starter-catalog-staging-checklist.md`
+  (정답지는 `npm run report:starter-catalog-expectations`)
 
 이 계약의 목적은 카드를 예쁘게 만드는 것이 아니다. **기능이 추가되면 표에 행
 하나를 더하는 것으로 진입점이 따라 자라고, 기능이 꺼지면 카드가 저절로
