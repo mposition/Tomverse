@@ -1,5 +1,4 @@
 import { createPageMetadata } from "@/lib/seo";
-import { LanguageProvider } from "@/components/LanguageProvider";
 import { UnsubscribeConfirmation } from "@/components/email/UnsubscribeConfirmation";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +22,19 @@ export const metadata = createPageMetadata({
  *
  * One click from here completes it, which is what CAN-SPAM's "a single page
  * visit" and the Australian rule against extra steps both allow.
+ *
+ * ## Why this lives in the (application) group
+ *
+ * It used to sit under (marketing), whose layout is `force-static`. That made
+ * the server `searchParams` below always empty, so every link rendered "no
+ * longer valid"; and because the page was prerendered but is not a listed
+ * static marketing path, production's nonce CSP had no nonce for its scripts,
+ * so a client-side fix could not hydrate either. A dynamic page reads the
+ * token on the server and gets a per-request nonce like every other dynamic
+ * route. The URL is unchanged -- route groups do not appear in it -- so links
+ * already in inboxes keep working. The one-click `POST` to this URL is
+ * rewritten to `/api/unsubscribe` by `proxy.ts`, because a page cannot answer a
+ * `POST`. The (application) layout supplies the language provider.
  */
 export default async function UnsubscribePage({
     searchParams,
@@ -30,12 +42,5 @@ export default async function UnsubscribePage({
     searchParams: Promise<{ t?: string }>;
 }) {
     const { t } = await searchParams;
-    // The provider is mounted here rather than inherited: marketing pages in
-    // this segment each bring their own, and this one has to render for
-    // somebody who may not be signed in and may never have visited before.
-    return (
-        <LanguageProvider>
-            <UnsubscribeConfirmation token={t ?? ""} />
-        </LanguageProvider>
-    );
+    return <UnsubscribeConfirmation token={t ?? ""} />;
 }
