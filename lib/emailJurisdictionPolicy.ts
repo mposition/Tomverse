@@ -1,3 +1,4 @@
+import { parseQuietHours } from "@/lib/emailQuietHoursCore";
 import "server-only";
 
 import { prisma } from "@/lib/prisma";
@@ -251,6 +252,20 @@ export async function activatePolicyVersion(input: {
       throw new JurisdictionPolicyError(
         "POLICY_VERSION_EMPTY",
         "That version has no jurisdiction profiles, so activating it would leave every send without one."
+      );
+    }
+    // A night-time window the send lane cannot read would hold every marketing
+    // message for that profile. Refused here, so an unreadable window can never
+    // be the one a delivery is pinned to.
+    const windows = await tx.jurisdictionProfile.findMany({
+      where: { policyVersionId: input.versionId },
+      select: { profileKey: true, quietHours: true },
+    });
+    const unreadable = windows.filter((row) => parseQuietHours(row.quietHours) === "invalid");
+    if (unreadable.length > 0) {
+      throw new JurisdictionPolicyError(
+        "POLICY_VERSION_QUIET_HOURS_INVALID",
+        `Quiet hours cannot be read for ${unreadable.map((row) => row.profileKey).join(", ")}.`
       );
     }
 
