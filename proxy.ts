@@ -113,6 +113,34 @@ export function proxy(request: NextRequest) {
     return blockedMutationOriginResponse(request);
   }
 
+  // RFC 8058 one-click unsubscribe. The `List-Unsubscribe` header names
+  // `/unsubscribe?t=...` so that a mail client which opens it in a browser
+  // lands on the confirmation page; a client that supports one-click POSTs
+  // `List-Unsubscribe=One-Click` to that same URL. A page cannot answer a POST
+  // -- it rendered HTML with a 200, which the mailbox provider reads as
+  // success, and nobody was unsubscribed. So the POST is handed to the route
+  // that does the work. Only the method and path change; the token stays in the
+  // query string and the form body travels with it. After the host and
+  // origin-secret checks, like every other forward in this function.
+  // `/api/unsubscribe` is already exempt from the mutation-origin check
+  // (lib/requestOrigin.ts) for the same reason: the provider sends no Origin.
+  if (
+    request.method === "POST" &&
+    request.nextUrl.pathname.replace(/\/+$/, "") === "/unsubscribe" &&
+    // Only what RFC 8058 sends: a form-encoded (or multipart) body, and never a
+    // Server Action or a PPR resume, which belong to the page. `rsc` is not
+    // checked because Next.js strips Flight headers before the proxy runs.
+    /^(application\/x-www-form-urlencoded|multipart\/form-data)\b/i.test(
+      request.headers.get("content-type") ?? ""
+    ) &&
+    !request.headers.has("next-action") &&
+    !request.headers.has("next-resume")
+  ) {
+    const target = request.nextUrl.clone();
+    target.pathname = "/api/unsubscribe";
+    return NextResponse.rewrite(target);
+  }
+
   // Router prefetches fetch an RSC payload rather than a document, so they need
   // no nonce and no CSP header. They must still clear the host, origin-secret
   // and mutation-origin checks above: gating those on request headers would let

@@ -97,8 +97,11 @@ export const unsubscribeHeaders = (
   if (!url) return {};
 
   return {
-    // The URL form rather than a mailto: the one-click POST goes to the API
-    // route, and a mailto would put the burden on a human reading an inbox.
+    // The URL form rather than a mailto: a mailto would put the burden on a
+    // human reading an inbox. The URL is the confirmation page, so a client
+    // that opens it gets the page; the one-click POST to the same URL is
+    // rewritten to /api/unsubscribe by proxy.ts, because a page answers a POST
+    // with HTML and a 200 that unsubscribes nobody.
     "List-Unsubscribe": `<${url}>`,
     "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
   };

@@ -54,6 +54,15 @@ mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니�
 직접 더할 수 없습니다. 재실측은 `CI=1 npx playwright test --grep=@ui-risk --list`
 입니다.
 
+`unsubscribe-link.spec.ts`가 2026-09-16에 합류합니다(project당 4 test).
+메일 클라이언트가 여는 수신거부 링크는 로그인 없이 한 번에 동작해야 하는데,
+그 페이지가 어느 route group에 있는지에 따라 hydration이 막히거나 서버
+`searchParams`가 비는 것이 production에서 실제로 일어났습니다. 화면 없이는
+드러나지 않는 경계라 @ui-risk입니다. **이 줄의 합류 후 파일·test 총계는 이
+포트에서 재실측하지 않았습니다** — 위 2026-08-26 수치 이후 main에 합류한
+spec이 더 있어 그 기준값과 직접 더할 수 없습니다. 재실측은
+`CI=1 npx playwright test --grep=@ui-risk --list`입니다.
+
 | Spec |
 |---|
 | `account-flow.spec.ts` |
@@ -105,6 +114,8 @@ mobile-chromium 두 project에서 **51개 파일, 1,416 test**를 선택합니�
 | `voice-input-composer.spec.ts` |
 | `conversation-draft-identity.spec.ts` |
 | `email-notification-settings.spec.ts` |
+
+| `unsubscribe-link.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
