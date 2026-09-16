@@ -1461,6 +1461,8 @@ export const de = {
         loadMore: "Mehr anzeigen",
         previousSnapshots: "{count} frühere Versionen",
         exportAll: "Alles herunterladen (JSON)",
+        exportLockedNote:
+            "Gesperrte Unterhaltungen werden ohne Titel und Inhalt aufgenommen. Für den vollständigen Inhalt bitte zuerst entsperren.",
         exportFailed: "Export konnte nicht heruntergeladen werden.",
         viewerRoleUser: "Nutzer",
         viewerRoleAssistant: "Assistent",
