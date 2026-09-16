@@ -63,10 +63,10 @@ import {
  * and activates it (docs/policy/email-notifications.md §12.3,
  * `/admin/email-policy`). Old versions stay where they are.
  */
-export const JURISDICTION_POLICY_SEED_VERSION = "2026-08-21.jurisdictions.1";
+export const JURISDICTION_POLICY_SEED_VERSION = "2026-09-16.jurisdictions.2";
 
 export const JURISDICTION_POLICY_SEED_SUMMARY =
-  "Jurisdiction profiles for KR, US, CA, AU, GB, SG, EU, CH and the ZZ fallback, from the sources confirmed on 2026-08-21 and the EEA/Swiss review of 2026-09-14. KR names no registration numbers: the sender is not a Korean 통신판매업자, so those values do not exist and naming them would discard the whole footer. CH is its own profile rather than resolving through EU. EU and CH footers name abn.";
+  "Jurisdiction profiles for KR, US, CA, AU, GB, SG, EU, CH and the ZZ fallback, from the sources confirmed on 2026-08-21 and the EEA/Swiss review of 2026-09-14. KR names no registration numbers: the sender is not a Korean 통신판매업자, so those values do not exist and naming them would discard the whole footer. CH is its own profile rather than resolving through EU. EU and CH footers name abn. KR carries no quiet hours from 2026-09-16: the Network Act's night-time rule names media prescribed by decree and electronic mail is excluded from them (open question Q4, resolved).";
 
 /**
  * A footer block identifier.
@@ -121,13 +121,13 @@ export const JURISDICTION_PROFILE_SEED: readonly JurisdictionProfileSeed[] = [
     ],
     unsubscribeSlaBusinessDays: 1,
     consentNoticeIntervalMonths: 24,
-    quietHours: { start: "21:00", end: "08:00", tz: "Asia/Seoul" },
+    quietHours: null,
     impliedConsentDays: null,
     notes: [
       "정보통신망법 제50조. 영리목적 광고성 정보는 사전 동의(제1항), 제목 앞 `(광고)` 표시(제4항 및 시행령 제61조), 수신거부 방법 명시(시행령 별표 6). 확인일 2026-08-21.",
       "E3 footerBlocks에서 business_registration·mail_order_registration을 뺐습니다(2026-09-14). 시행령 별표 6이 요구하는 것은 전송자의 명칭·연락처·수신거부 방법이고 등록번호는 여기 없습니다. 두 번호는 전자상거래법상 통신판매업자의 표시 의무에서 온 항목인데, 발송 주체는 호주 법인이고 한국 통신판매업 신고 대상이 아님을 확인했으므로(운영 확인 2026-09-14) 그 번호가 존재하지 않습니다. renderJurisdictionFooter()는 이름 붙은 block 중 하나라도 값이 없으면 footer 전체를 버리므로, 존재하지 않는 번호를 계속 이름 대면 한국 수신자 marketing이 영구히 거부됩니다. 신고 대상이 되면 블록을 되살리는 것은 새 EmailPolicyVersion 하나입니다.",
       "E7 consentNoticeIntervalMonths=24: 제50조제8항 + 시행령 제62조의3. 2년마다 수신자에게 동의 사실을 *알릴* 의무이며 동의가 만료되는 것이 아닙니다(§5.5). 답이 없는 수신자의 동의는 그대로 유지됩니다.",
-      "E5 quietHours 21:00-08:00: 제50조제3항의 야간 전송 제한. 전자우편이 매체 예외에 해당하는지 확인되기 전까지 보수적으로 적용합니다(§5.2 E5).",
+      "E5 quietHours=null (2026-09-16, Q4 해소). 제50조제3항의 야간 전송 제한은 단서와 시행령 제61조제2항이 전자우편을 제외합니다 — 전자우편은 수신확인의 즉시성이 낮아 이용자 통제가 쉽다는 이유이며, 방송미디어통신위원회·KISA 「불법스팸 방지를 위한 정보통신망법 안내서」(KISA-GD-2025-0037, 2025.12)가 그렇게 적습니다. 같은 내용을 SMS·푸시로 보내면 그쪽은 여전히 별도 동의 대상이고, 그 판정은 이 profile이 아니라 그 채널의 것입니다. 창을 되살리는 것은 새 EmailPolicyVersion 하나입니다(§5.2 E5).",
       "unsubscribeSlaBusinessDays=1 is copy only: 법은 즉시 처리와 결과 통지를 요구하고, 실제 처리는 모든 관할권에서 동기적입니다(C3).",
     ].join("\n"),
   },
