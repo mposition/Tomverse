@@ -105,4 +105,3 @@
 - [Open Graph: locale의 별도 형식](https://ogp.me/#optional)
 - [검토 기준 SEO 매핑](https://github.com/mposition/Tomverse/blob/8c7cb5ceb877b7721325c9e83bb18d53c5e9293e/lib/seo.ts)
 - [검토 기준 sitemap](https://github.com/mposition/Tomverse/blob/8c7cb5ceb877b7721325c9e83bb18d53c5e9293e/app/sitemap.ts)
-
