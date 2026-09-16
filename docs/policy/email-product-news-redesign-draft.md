@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 수집 경로 만들기 (초안 v5)
+# 제품 소식 이메일: 수집 경로 만들기 (초안 v6)
 
 > **이 문서의 지위: 초안입니다. 승인되지 않았고, 코드는 하나도 없습니다.**
 > 여기 적힌 D1~D5는 제안이며, §8의 승인 항목이 처리되기 전에는 어떤 것도
@@ -12,6 +12,30 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v6 (2026-09-16) — 독립 검토 5회차 반영 (판정: approve-with-changes)
+
+5회차가 조건부 승인을 냈고, 조건으로 붙은 것을 전부 문서에 넣었습니다.
+
+- **OAuth 결속을 쿠키에서 로그인 후 finalize로 바꿨습니다.** 쿠키 하나로는
+  다른 브라우저 재생, 같은 브라우저 동시 가입 두 개의 덮어쓰기, 하위 도메인
+  cookie tossing을 막지 못합니다. `sessionStorage`의 `attemptId`와 **인증된
+  세션**을 함께 요구하는 쪽으로 옮겼습니다.
+- **소비와 확인 메일 생성을 한 transaction으로 묶었습니다.** 따로 두면 선택은
+  소비됐는데 메일이 없는 상태가 남습니다.
+- **국가를 뒤로 옮긴 결과를 끝까지 적었습니다** — 요청 기록은 미확정으로 남고,
+  **grant 시점의 활성 정책**이 화면과 기록을 정하며, 한국이면 그 화면이 곧
+  동의 행위이므로 `광고성 정보 수신동의`·발신자·목적·철회 방법·국가와 정책
+  버전을 보여 주고 그 문구의 해시를 evidence에 남깁니다.
+- **한국 처리결과 통지(시행령 제62조의2, 14일)를 S3에 넣었습니다.** 확인 메일은
+  grant 전에 나가므로 그 통지가 아닙니다.
+- **판정 입력을 버전 id에서 enqueue 시점 판정 snapshot으로** 바꿨습니다. id만
+  보고는 그때 그 국가의 map·profile이 있었는지 알 수 없습니다.
+- **DB 오류는 백오프를 그대로 써서 재시도**합니다. 즉시 재claim하면 hot loop와
+  incident 폭주가 됩니다.
+- **S0의 범위를 넓혔습니다.** 분류표만이 아니라 국가 확인 시점·미확정 관할권의
+  의미·grant 시점 정책·한국 처리결과 통지까지 함께 승인받아야 합니다.
+- **윤일과 F4 증거 기준을 "테스트한다"에서 "정한다"로** 바꿨습니다.
 
 ### v5 (2026-09-16) — 독립 검토 4회차 반영
 
@@ -226,16 +250,38 @@ OAuth 버튼은 이메일을 알기 전에 `signIn()`을 시작하므로 발급 
 
 규칙입니다.
 
-- **소비는 compare-and-set 한 번**입니다(`consumedAt IS NULL`인 행만 갱신).
-  두 번째 시도는 실패하고 아무것도 하지 않습니다.
+- **소비와 그 결과는 한 transaction입니다.** CAS만 성공하고 확인 메일 생성이
+  별도 transaction에서 실패하면 선택은 사라지고 메일은 없습니다. 그래서 ①
+  만료·channel·binding까지 포함한 CAS ② 확인 요청 생성 ③ transactional
+  delivery 행 생성 ④ `consumedAt`·`userId` 확정을 **하나로 묶습니다.** 이를
+  위해 `requestConsentConfirmation(tx, …)` 형태의 transaction-aware seam이
+  필요하며, 그것이 S3 범위입니다.
+- CAS는 `consumedAt IS NULL`인 행만 갱신하므로 두 번째 시도는 실패하고 아무것도
+  하지 않습니다.
 - **email_code**: 그 `EmailLoginAttempt`와 정규화된 주소가 일치하고, 그 호출이
   **신규 사용자를 만드는 경우**에만 소비합니다.
-- **oauth**: `signIn()`을 호출하기 **전에** 행을 만들고, 그 `nonce` 원본을
-  httpOnly·SameSite=Lax·짧은 만료의 쿠키에 둡니다. 행에는 provider와, 우리가
-  발급한 `attemptId`를 남깁니다. callback에서 쿠키의 nonce로 행을 찾고,
-  **provider가 확인한 주소와 최종 user id**에 결합한 뒤 소비하고 쿠키를
-  지웁니다. NextAuth의 `state`는 우리가 값을 정할 수 없으므로 결속 수단으로
-  쓰지 않습니다.
+- **oauth**: OAuth 흐름 자체에는 결속하지 않습니다. NextAuth의 `state`는 값을
+  정할 수 없고, 쿠키 하나로 버티면 (a) 원본을 다른 브라우저로 복사해 재생할 수
+  있고 (b) 같은 브라우저의 동시 가입 두 개가 같은 이름의 쿠키를 덮어써 첫 탭의
+  선택이 두 번째 callback에 붙을 수 있으며 (c) 하위 도메인이 같은 이름의 쿠키를
+  심는 길이 남습니다.
+
+  대신 **로그인이 끝난 뒤에 마무리**합니다. 가입 화면이 `attemptId`를
+  **`sessionStorage`**(탭마다 별개이고 쿠키가 아닙니다)에 두고, OAuth가 돌아와
+  세션이 생긴 뒤 클라이언트가 그 값을 finalize 엔드포인트로 보냅니다. 서버는
+  **인증된 세션의 user**를 신뢰하고, 그 계정이 **이 흐름에서 방금 만들어진
+  것**일 때만 소비합니다.
+
+  이렇게 하면 쿠키 사양 논쟁이 사라지고(쿠키가 없습니다), 탭이 섞이지 않으며
+  (`sessionStorage`는 탭 범위), 훔친 `attemptId`만으로는 아무것도 못 합니다 —
+  그 계정의 세션이 함께 있어야 합니다.
+
+  주소는 **"adapter가 돌려준 계정 주소"** 라고 씁니다. Google·Azure provider
+  mapper가 모든 경로에서 `email_verified`를 강제하지는 않으므로 "provider가
+  확인한 주소"는 코드보다 강한 표현이고, **사서함 증명은 DOI가 합니다.**
+- 탭을 닫아 finalize가 오지 않으면 **동의는 없던 일이 됩니다.** 계정은
+  만들어졌고, 설정에서 언제든 켤 수 있습니다. 잃어버린 동의를 나중에 주워
+  담지 않습니다.
 - **기존 사용자의 로그인은 절대 소비하지 않습니다.** 동의는 가입 순간의
   결정이고, 로그인은 가입이 아닙니다.
 - **체크 해제 후 재시도는 이전 행을 무효화**합니다. 무효화와 새 행 발급은 **한
@@ -274,6 +320,40 @@ wrapper가 그 경계를 대신하려면 request-scoped attempt context를 넘�
   IP·언어·시간대로 기본값을 채우되 사용자가 확인해야 `self_declared`입니다.
 - 국가가 정해진 뒤에야 preference가 켜집니다. 즉 **국가 질문은 가입에서
   사라지고 확인 클릭 한 번 뒤로 옮겨갑니다.**
+
+**어느 정책이 그 화면을 정하는가.** 요청 시점에는 국가가 없으므로
+`confirmation_requested`는 `ZZ`/미확정으로 기록하고, **국가를 고른 시점의 활성
+정책**이 화면 문구와 `granted` 기록을 함께 정합니다. 요청 시점 정책과 현재
+정책이 다를 수 있고, 둘 중 하나를 고르지 않으면 기록과 실제로 보여 준 문구가
+어긋납니다.
+
+**최종 POST는 `token + confirmedCountry`를 함께 받습니다.** 국가 저장,
+preference 켜기, `ConsentRecord(granted)`, 한국이면 다음 고지 예정일 계산까지
+**지금의 `setPreference()` transaction 안에서** 일어납니다.
+
+### 한국에서는 이 화면이 곧 동의 행위입니다
+
+국가를 뒤로 옮겼으므로, 법적으로 의미 있는 동의는 가입 화면의 체크가 아니라
+**국가를 고른 뒤 누르는 최종 확인**입니다. 확정된 국가가 KR이면 그 클릭 전에
+다음이 화면에 있어야 하고, 그 **렌더된 문구의 해시를 `ConsentRecord(granted)`
+의 evidence에 남깁니다.**
+
+- **광고성 정보 수신동의** — KISA 안내가 무효로 지목한 "혜택 알림"·"정보 제공"
+  같은 표현을 쓰지 않습니다
+- 발신자
+- 목적과 내용
+- 철회 방법
+- 확인된 국가와 적용된 정책 버전
+
+UI 언어가 영어여도 관할권이 KR이면 한국 표시를 함께 냅니다. 언어는 사용자의
+선택이고 관할권은 법의 문제라 서로 다른 축입니다.
+
+### 한국의 처리결과 통지 (시행령 제62조의2)
+
+동의 또는 철회 뒤 **14일 이내**에 발신자, 처리 사실과 날짜, 처리결과를 알려야
+합니다. **현재 확인 메일은 이것이 아닙니다** — grant 이전에 나가기 때문입니다.
+첫 한국 동의를 받는 순간부터 의무가 생기므로 **F4가 아니라 S3 범위**이고,
+결과 영수증 화면 또는 별도 transactional 메일과 그 감사 증거를 함께 만듭니다.
 
 따라서 `requestConsentConfirmation()`은 국가가 아직 없는 요청을 받을 수 있어야
 하고, 확인 route는 국가를 함께 받을 수 있어야 합니다. 이 두 계약 변경이 S3의
@@ -348,16 +428,22 @@ releaseNotesAuthorizationVerdict({
   activePolicyVersion, // 지금 활성인 EmailPolicyVersion
   countryMapEntry,     // 그 버전이 이 국가를 매핑하는가
   profile,             // 그 버전에 이 profile 행이 있는가
-  enqueuedPolicyVersion, // 이 행이 만들어질 때 허용했던 버전
+  enqueuedSnapshot,    // 이 행이 만들어질 때의 판정: 정책 버전, 확정 국가,
+                       // 그 국가의 map·profile 존재 여부, 허용/거부와 사유
   marketingEnabled,    // feature.emailMarketingEnabled
   releaseNotesEnabled, // feature.emailReleaseNotesEnabled
   suppression,
 }) -> { allowed: true } | { allowed: false, skipReason }
 ```
 
-`enqueuedPolicyVersion`이 입력에 있는 이유는 **"한 번은 허용됐다가 지금은
-아니다"와 "애초에 허용된 적이 없다"가 다른 사건**이기 때문입니다. 전자가
-`permission_revoked`이고 후자는 `marketing_country_not_allowed`입니다.
+snapshot이 **버전 id 하나가 아닌 이유**는, 순수 함수가 "그때 그 국가의
+map과 profile이 있었는가"를 id만 보고는 알 수 없기 때문입니다. 그래서 enqueue
+시점에 판정 결과 자체를 적어 둡니다.
+
+그 위에서 두 사건이 갈립니다 — **"한 번은 허용됐다가 지금은 아니다"** 가
+`permission_revoked`이고, **"enqueue 시점에도 허용되지 않았다"** 가
+`marketing_country_not_allowed`입니다. "어느 정책에서도 허용된 적 없다"는 두
+시점만으로 증명할 수 없으므로 그렇게 주장하지 않습니다.
 
 skip 사유의 경계입니다.
 
@@ -371,9 +457,11 @@ skip 사유의 경계입니다.
 | 기존 사유 | suppression, 관할권 미확정 |
 
 **활성 정책을 읽지 못하는 것은 skip이 아닙니다.** DB 오류로 판정할 수 없으면
-행을 영구 skip으로 만들지 말고 claim을 풀어 다시 시도하며 incident를 올립니다.
-읽지 못한 것과 허용되지 않은 것은 다른 사실이고, 앞의 것을 뒤의 것으로
-기록하면 복구 가능한 장애가 조용한 데이터 손실이 됩니다.
+행을 영구 skip으로 만들지 말고 claim을 풀어 **기존 재시도 일정의
+`nextAttemptAt`을 설정**하고 incident를 올립니다. 즉시 다시 claim되면 hot
+loop와 incident 폭주가 되므로 백오프를 그대로 씁니다. 읽지 못한 것과 허용되지
+않은 것은 다른 사실이고, 앞의 것을 뒤의 것으로 기록하면 복구 가능한 장애가
+조용한 데이터 손실이 됩니다.
 
 사용자가 한 일과 우리가 한 일은 다른 사건이고, 지원 문의에 답하려면 둘을
 구분해야 합니다.
@@ -400,7 +488,7 @@ skip 사유의 경계입니다.
 | F1 | `account_feature_change` (계약상 필요한 통지) | 2회차 검토: "이미 쓰는 기능의 변경"은 service 분류 근거로 너무 넓습니다. 한국 예외는 계약·안전·보안 통지에 초점이 있고, 범위를 **법률 검토로 좁힌 allowlist**로 정의해야 합니다. 별도 purpose·기본값·철회 동작·DB CHECK가 함께 필요합니다 |
 | F2 | 호주 발신자 overlay | Spam Act는 발신 조직의 중앙관리가 호주에 있으면 **수신자 국가와 무관하게** 적용됩니다. 이는 release_notes만의 문제가 아니라 우리가 보내는 모든 상업 메일의 문제이고, 이메일 시스템 전체의 개선으로 다뤄야 합니다 |
 | F3 | 관할권별 근거 완화 (soft opt-in, 추론 동의) | R1 외부 자문이 선행합니다. 그때 `releaseNotesBasis`·취득 증거 장부·국가별 allowlist를 만듭니다 |
-| F4 | 한국 2년 재확인 고지 배치 | 한국 동의자가 생기는 순간부터 타이머가 돕니다. **기한이 있는 보류입니다.** 시행령 제62조의3은 동의일부터 2년이 되는 날 **전까지 수신자에게 확인 안내가 가 있을 것**을 요구하므로, 릴리스 조건은 "배치를 배포했다"가 아니라 **"첫 대상자의 기한 전에 고지가 실제로 발송되고 `ConsentRecord(confirmation_notice_sent)`가 남았다"** 입니다. 배포만 하고 worker가 꺼져 있거나 첫 실행이 늦으면 의무는 충족되지 않습니다. 예정일은 **Asia/Seoul 달력 기준**으로 계산하며(`confirmedAt + 24개월`의 같은 UTC instant는 "같은 날 전까지"보다 늦을 수 있습니다), 윤일 규칙을 테스트합니다. backfill은 활성 동의의 최신 `granted`·`reconfirmed` 기록에 **같은 계산 함수**를 씁니다 |
+| F4 | 한국 2년 재확인 고지 배치 | 한국 동의자가 생기는 순간부터 타이머가 돕니다. **기한이 있는 보류입니다.** 시행령 제62조의3은 동의일부터 2년이 되는 날 **전까지 수신자에게 확인 안내가 가 있을 것**을 요구하므로, 릴리스 조건은 "배치를 배포했다"가 아니라 **"첫 대상자의 기한 전에 고지가 실제로 나갔다"** 입니다. **증거 기준은 법률 검토로 하나를 고릅니다** — provider 접수(accepted)인지 실제 전달 이벤트(delivered)인지. `ConsentRecord(confirmation_notice_sent)`는 그 사건 **뒤에만 멱등 생성**하고 `EmailDelivery` id·provider message id와 연결합니다. enqueue 시점에 기록하면 worker가 멈추거나 provider가 실패해도 조건이 충족된 것처럼 보입니다. 배포만 하고 worker가 꺼져 있거나 첫 실행이 늦으면 의무는 충족되지 않습니다. 예정일은 **Asia/Seoul 달력 기준**으로 계산하며(`confirmedAt + 24개월`의 같은 UTC instant는 "같은 날 전까지"보다 늦을 수 있습니다), 윤일은 테스트가 아니라 결정입니다 — 2월 29일 동의자의 비윤년 기한을 법률 검토로 확정하거나, **보수적으로 하루 앞선 날짜**를 씁니다. 이 결정은 S3이 `nextConfirmationNoticeAt`을 처음 저장하기 전에 필요합니다. backfill은 활성 동의의 최신 `granted`·`reconfirmed` 기록에 **같은 계산 함수**를 씁니다 |
 
 ---
 
@@ -439,10 +527,10 @@ skip 사유의 경계입니다.
 
 | # | 단계 | 왜 이 순서인가 | 검증 |
 |---|---|---|---|
-| S0 | **상위 계약 개정과 승인** — [이메일 알림](email-notifications.md) §3의 분류표가 아직 "명시적으로 구독한 기능 업데이트"를 `service(동의 기반)`로 적습니다. D1은 marketing으로 고정하므로, 코드가 먼저 들어가면 승인된 정책과 구현이 서로 모순됩니다 | 사람. **S2 병합 전에 승인** |
+| S0 | **상위 계약 개정과 승인.** 분류표만이 아닙니다 — 승인된 문서들이 국가를 "marketing opt-in 시점"에 확정하고 국가와 동의 기록을 같은 transaction에 남긴다고 정해 두었는데, 이 설계는 그 시점을 확인 화면으로 옮깁니다. 함께 개정·승인할 것: ① §3 분류표 ② 국가 확인 시점 ③ `confirmation_requested`의 미확정 관할권 의미 ④ grant 시점 정책과 evidence ⑤ 한국 처리결과 통지. 그리고 §8의 A·B·C 승인 | 사람. **S1·S2 전에 승인** |
 | S1 | `feature.emailReleaseNotesEnabled` (기본 false) + **실제 writer**(`createStandardDeliveryRows`, `expandEmailEvent`)와 drain 검사, 전용 skip 사유 | **게이트가 물건보다 먼저.** 반대로 하면 전용 게이트 없는 템플릿이 잠시 존재합니다 | unit + 통합. flag 부재·손상 시 `false` |
 | S2 | purpose 표(+classification) · DB CHECK · `withdrawAllMarketing` 범위 | 가입 화면이 켤 대상이 존재해야 합니다 | unit + enum-constraints + DB 통합 |
-| S3 | `SignupConsentAttempt` 상태 행 + 두 가입 경로의 소비 + DOI 연결 + 한국 최초 고지 예정일 | 여기서 처음으로 동의가 쌓입니다 | 상태 전이표 unit + e2e(OAuth 취소·재시도·다중 탭·기존 사용자 로그인) + DB 통합. **Codex 검토** |
+| S3 | `SignupConsentAttempt` + 로그인 후 finalize + 한 transaction 소비 + 확인 화면의 국가·한국 표시·처리결과 통지 + 최초 고지 예정일 | 여기서 처음으로 동의가 쌓입니다. **착수 전에 닫아야 하는 것**: 윤일 규칙(2월 29일 동의자의 비윤년 기한)을 보수적 조기 발송으로 확정, F4 증거 기준(§9) | 상태 전이표 unit + e2e(OAuth 취소·재시도·다중 탭·기존 사용자 로그인·탭 닫힘) + DB 통합. **Codex 검토** |
 | S4 | 템플릿 + 구조화 payload + 링크 allowlist + 7개 언어 | 보낼 물건은 마지막에서 두 번째 | unit + locale |
 | S5 | audience + **행을 쓰지 않는** `estimateReleaseNotesAudience()` + admin 표시 + 현재 정책 재판정 | 발송 전에 누가 받는지 셀 수 있어야 합니다. 기존 campaign dry-run 계약은 건드리지 않습니다 | 통합 + 미리보기가 행을 0개 쓰는지 검증. **Codex 검토** |
 | S6 | 구현 기록과 새 정책 버전 초안 | 분류 개정은 S0에서 끝났으므로 여기 남는 것은 기록입니다 | 정적 검사 |
