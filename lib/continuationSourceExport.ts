@@ -34,7 +34,13 @@ import { readOnlySnapshotTransaction } from "@/lib/readOnlySnapshotTransaction";
  */
 
 /** Caps on the finished file, not on any one query. Provisional, and stated in the policy. */
-export const CONTINUATION_SOURCE_EXPORT_LIMITS = {
+export type ContinuationSourceExportLimits = {
+    maxBytes: number;
+    maxMessages: number;
+    pageSize: number;
+};
+
+export const CONTINUATION_SOURCE_EXPORT_LIMITS: ContinuationSourceExportLimits = {
     /** UTF-8 bytes of the finished document. */
     maxBytes: 10 * 1024 * 1024,
     /** Imported and Tomverse messages together. */
@@ -136,6 +142,15 @@ export async function buildContinuationSourceExport(input: {
      * test passes for the wrong reason. Nothing in the product passes it.
      */
     afterSnapshot?: () => Promise<void>;
+    /**
+     * Overrides for the caps, for a test that has to cross one.
+     *
+     * The product passes none: proving a refusal with a real ten-megabyte
+     * fixture costs the shared database lane minutes and megabytes to assert
+     * something about a comparison. `tests/continuationSourceExport.test.mjs`
+     * pins the real numbers.
+     */
+    limits?: Partial<ContinuationSourceExportLimits>;
 }): Promise<
     | {
           ok: true;
@@ -154,7 +169,7 @@ export async function buildContinuationSourceExport(input: {
     | { ok: false; locked: true }
     | { ok: false; kindNotSupported: true }
 > {
-    const limits = CONTINUATION_SOURCE_EXPORT_LIMITS;
+    const limits = { ...CONTINUATION_SOURCE_EXPORT_LIMITS, ...input.limits };
     const read = await readOnlySnapshotTransaction(
         async (tx) => {
             const conversation = await tx.conversation.findFirst({

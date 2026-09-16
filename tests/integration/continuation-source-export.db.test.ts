@@ -7,8 +7,8 @@ import { createResourceUnlockCookie } from "@/lib/conversationLock";
 import { CONTINUATION_SEED_VERSION } from "@/lib/externalContinuationSeedCore";
 import { continuationProviderDisplay } from "@/lib/externalContinuationSeedPrompt";
 import {
-    CONTINUATION_SOURCE_EXPORT_LIMITS,
     buildContinuationSourceExport,
+    type ContinuationSourceExportLimits,
     continuationSourceExportStillPermitted,
 } from "@/lib/continuationSourceExport";
 
@@ -142,14 +142,18 @@ const build = (
     userId: string,
     conversationId: string,
     grants: Grant[] = [],
-    afterSnapshot?: () => Promise<void>
+    options: {
+        afterSnapshot?: () => Promise<void>;
+        limits?: Partial<ContinuationSourceExportLimits>;
+    } = {}
 ) =>
     buildContinuationSourceExport({
         request: requestWith(grants),
         userId,
         conversationId,
         providerLabel: continuationProviderDisplay,
-        afterSnapshot,
+        afterSnapshot: options.afterSnapshot,
+        limits: options.limits,
         header: ({ conversation }) => ({
             title: conversation.title,
             text: `Tomverse Review Export\nConversation: ${conversation.title}\n\n`,
@@ -267,24 +271,25 @@ test("each lock refuses the file until its own grant is presented", async () => 
 });
 
 test("a file too large to be one document is refused rather than shortened", async () => {
+    // The cap is lowered rather than the fixture raised: this asserts the
+    // comparison, and a ten-megabyte fixture would cost the shared lane
+    // minutes to assert the same thing. The real numbers are pinned in
+    // tests/continuationSourceExport.test.mjs.
     const user = await createUser();
     const { conversation } = await seed(user.id, {
-        importedContents: Array.from({ length: 12 }, (_, index) =>
-            `${index} `.repeat(Math.ceil(CONTINUATION_SOURCE_EXPORT_LIMITS.maxBytes / 12 / 2))
-        ),
+        importedContents: Array.from({ length: 4 }, (_, index) => `${index} `.repeat(200)),
     });
-    const built = await build(user.id, conversation.id);
+    const built = await build(user.id, conversation.id, [], { limits: { maxBytes: 1_000 } });
     assert.equal(built.ok ? null : "refusal" in built ? built.refusal.code : null, "EXPORT_TOO_LARGE");
 });
 
 test("the original is read past one page, in ordinal order", async () => {
     const user = await createUser();
-    const contents = Array.from(
-        { length: CONTINUATION_SOURCE_EXPORT_LIMITS.pageSize + 25 },
-        (_, index) => `imported turn ${index}`
-    );
+    // The page size is lowered for the same reason the caps are: what is being
+    // asserted is that the walk continues, not that 500 rows fit in one query.
+    const contents = Array.from({ length: 37 }, (_, index) => `imported turn ${index}`);
     const { conversation } = await seed(user.id, { importedContents: contents });
-    const built = await build(user.id, conversation.id);
+    const built = await build(user.id, conversation.id, [], { limits: { pageSize: 10 } });
     assert.ok(built.ok);
     assert.equal(built.document.importedMessageCount, contents.length);
     const text = textOf(built.document.bytes);
@@ -293,35 +298,34 @@ test("the original is read past one page, in ordinal order", async () => {
 
 test("the size cap is refused from the counts, before the text is assembled", async () => {
     const user = await createUser();
-    // Few messages, far past the byte cap: the message-count cap cannot see this.
+    // Few messages, each far past the byte cap: the message-count cap cannot
+    // see this, and the refusal comes from the summed lengths.
     const { conversation } = await seed(user.id, {
-        importedContents: Array.from({ length: 4 }, () =>
-            "x".repeat(Math.ceil(CONTINUATION_SOURCE_EXPORT_LIMITS.maxBytes / 3))
-        ),
+        importedContents: Array.from({ length: 4 }, () => "x".repeat(600)),
     });
-    const built = await build(user.id, conversation.id);
+    const built = await build(user.id, conversation.id, [], {
+        limits: { maxBytes: 1_000, maxMessages: 1_000 },
+    });
     assert.equal(built.ok ? null : "refusal" in built ? built.refusal.code : null, "EXPORT_TOO_LARGE");
 });
 
 test("the message cap counts both halves together", async () => {
     const user = await createUser();
-    const half = Math.ceil((CONTINUATION_SOURCE_EXPORT_LIMITS.maxMessages + 2) / 2);
+    // Neither half exceeds the cap alone; together they do.
     const { conversation } = await seed(user.id, {
-        importedContents: Array.from({ length: half }, (_, index) => `i${index}`),
-        nativeContents: Array.from({ length: half }, (_, index) => `n${index}`),
+        importedContents: Array.from({ length: 6 }, (_, index) => `i${index}`),
+        nativeContents: Array.from({ length: 6 }, (_, index) => `n${index}`),
     });
-    const built = await build(user.id, conversation.id);
+    assert.ok((await build(user.id, conversation.id, [], { limits: { maxMessages: 12 } })).ok);
+    const built = await build(user.id, conversation.id, [], { limits: { maxMessages: 11 } });
     assert.equal(built.ok ? null : "refusal" in built ? built.refusal.code : null, "EXPORT_TOO_LARGE");
 });
 
 test("the Tomverse half is read past one page too", async () => {
     const user = await createUser();
-    const nativeContents = Array.from(
-        { length: CONTINUATION_SOURCE_EXPORT_LIMITS.pageSize + 17 },
-        (_, index) => `tomverse turn ${index}`
-    );
+    const nativeContents = Array.from({ length: 23 }, (_, index) => `tomverse turn ${index}`);
     const { conversation } = await seed(user.id, { nativeContents });
-    const built = await build(user.id, conversation.id);
+    const built = await build(user.id, conversation.id, [], { limits: { pageSize: 10 } });
     assert.ok(built.ok);
     assert.equal(built.document.nativeMessageCount, nativeContents.length);
     const text = textOf(built.document.bytes);
@@ -350,14 +354,16 @@ test("writes landing while the file is built leave it internally coherent", asyn
 
     // Committed after the snapshot is fixed, and before a single message has
     // been read: the file must show the conversation as it was, not a mixture.
-    const built = await build(user.id, conversation.id, [], async () => {
-        await prisma.message.create({
-            data: { conversationId: conversation.id, role: "user", content: "arrived mid-export" },
-        });
-        await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { title: "renamed mid-export" },
-        });
+    const built = await build(user.id, conversation.id, [], {
+        afterSnapshot: async () => {
+            await prisma.message.create({
+                data: { conversationId: conversation.id, role: "user", content: "arrived mid-export" },
+            });
+            await prisma.conversation.update({
+                where: { id: conversation.id },
+                data: { title: "renamed mid-export" },
+            });
+        },
     });
     assert.ok(built.ok);
     const text = textOf(built.document.bytes);
