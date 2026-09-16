@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 수집 경로 만들기 (초안 v4)
+# 제품 소식 이메일: 수집 경로 만들기 (초안 v5)
 
 > **이 문서의 지위: 초안입니다. 승인되지 않았고, 코드는 하나도 없습니다.**
 > 여기 적힌 D1~D5는 제안이며, §8의 승인 항목이 처리되기 전에는 어떤 것도
@@ -12,6 +12,30 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v5 (2026-09-16) — 독립 검토 4회차 반영
+
+네 번째 검토가 남은 구멍을 좁게 지목했고, 전부 문서의 빈칸이었습니다.
+
+- **OAuth 이음매를 실제로 적었습니다.** NextAuth의 `state`는 우리가 값을 정할
+  수 없으므로 결속 수단이 아닙니다 → `signIn()` 전에 행을 만들고 nonce를
+  httpOnly 쿠키에 두었다가 callback에서 찾습니다. 상태 전이는 네 줄의 표로
+  고정했습니다.
+- **국가 handoff가 없었습니다.** `requestConsentConfirmation()`이 국가를
+  필수로 받는데 가입 시점에는 없습니다 → 국가 질문을 **확인 화면으로**
+  옮겼습니다. 가입 화면에서 국가는 사라집니다.
+- **dry-run 계약이 상위 문서와 충돌했습니다.** 기존 campaign dry-run은 일부러
+  skipped 행을 만듭니다 → 그 계약은 그대로 두고 release notes용으로 행을 쓰지
+  않는 `estimateReleaseNotesAudience()`를 따로 둡니다.
+- **저수준 writer 이름이 틀렸습니다.** `enqueueStandardEmail()`이 아니라
+  `createStandardDeliveryRows()`입니다.
+- **판정에 이력 입력을 넣었습니다.** "한 번 허용됐다가 지금 아니다"와 "애초에
+  허용된 적이 없다"를 구분하려면 enqueue 당시 버전이 필요합니다. 그리고 DB를
+  읽지 못한 것은 skip이 아니라 **재시도와 incident**입니다.
+- **외부 CTA를 닫았습니다.** 승인 시점 해석도 SSRF 표면이라 시점만 옮깁니다.
+- **F4 기한을 배포가 아니라 고지 도달로 바꿨습니다.** 시행령이 요구하는 것은
+  2년이 되는 날 전까지 확인 안내가 가 있는 것이고, 예정일은 Asia/Seoul 달력
+  기준입니다.
 
 ### v4 (2026-09-16) — 독립 검토 3회차 반영: 두 계약을 채웠습니다
 
@@ -141,13 +165,21 @@ ePrivacy 제13조(2)의 soft opt-in은 "원래 광고인 메일"을 조건부로
 
 `feature.emailReleaseNotesEnabled` (기본 `false`)를 **1단계에서** 만듭니다.
 
-- **행을 만드는 모든 자리와 drain 양쪽**에서 검사합니다. 하나만 막으면 이미
-  큐에 있는 것이 나갑니다. 자리는 `enqueueStandardEmail()` 하나가 아닙니다 —
-  `lib/emailAudienceExpansion.ts`의 `expandEmailEvent()`는 delivery 행을 직접
-  만들므로, lane만 고치면 flag가 꺼진 동안 행이 쌓였다가 켜는 순간 한꺼번에
-  나갑니다.
-- **dry-run은 행을 만들지 않으므로 이 게이트를 지나지 않습니다.** 세는 것과
-  보내는 것은 다른 일이고, 세지 못하면 켜기 전에 확인할 방법이 없습니다.
+- **행을 만드는 실제 자리와 drain 양쪽**에서 검사합니다. 하나만 막으면 이미
+  큐에 있는 것이 나갑니다. 저수준 writer는 `enqueueStandardEmail()`이 아니라
+  **`createStandardDeliveryRows()`**(`lib/standardEmailLane.ts`)이며, 이미
+  `lib/emailConsentConfirmation.ts`가 직접 부릅니다. 캠페인 쪽은
+  `lib/emailAudienceExpansion.ts`의 `expandEmailEvent()`가 따로 만듭니다.
+  **두 자리 모두에서 template key로 판정**합니다 — lane만 고치면 flag가 꺼진
+  동안 행이 쌓였다가 켜는 순간 한꺼번에 나갑니다.
+- 막힌 자리는 전용 사유 `release_notes_disabled`로 남깁니다. 아무것도 안 하고
+  조용히 건너뛰면 왜 안 나갔는지 물었을 때 답할 수 없습니다.
+- **기존 campaign dry-run은 그대로 둡니다.** 상위 계약과 현재 구현은 dry-run이
+  `EmailDelivery(status="skipped", skipReason="dry_run")` 행을 **일부러**
+  만듭니다([이메일 알림](email-notifications.md) §20). 그 계약을 이 설계가 바꾸지 않습니다 — 대신 release notes에는
+  행을 하나도 쓰지 않는 **`estimateReleaseNotesAudience()`** 를 따로 두고, 같은
+  판정 함수를 부르되 `EmailEvent`·`EmailDelivery`·`EmailCampaignRecipient`에
+  아무것도 쓰지 않습니다.
 - 기존 `feature.emailMarketingEnabled`와 **AND**입니다. 마케팅 전체가 꺼져
   있으면 이것이 켜져도 나가지 않습니다.
 - 순서가 중요합니다 — **템플릿보다 flag가 먼저 존재해야** 합니다. 반대로 하면
@@ -198,12 +230,27 @@ OAuth 버튼은 이메일을 알기 전에 `signIn()`을 시작하므로 발급 
   두 번째 시도는 실패하고 아무것도 하지 않습니다.
 - **email_code**: 그 `EmailLoginAttempt`와 정규화된 주소가 일치하고, 그 호출이
   **신규 사용자를 만드는 경우**에만 소비합니다.
-- **oauth**: 먼저 provider·state에 묶인 행을 만들고, callback에서 **provider가
-  확인한 주소와 최종 user id**에 결합한 뒤 소비합니다.
+- **oauth**: `signIn()`을 호출하기 **전에** 행을 만들고, 그 `nonce` 원본을
+  httpOnly·SameSite=Lax·짧은 만료의 쿠키에 둡니다. 행에는 provider와, 우리가
+  발급한 `attemptId`를 남깁니다. callback에서 쿠키의 nonce로 행을 찾고,
+  **provider가 확인한 주소와 최종 user id**에 결합한 뒤 소비하고 쿠키를
+  지웁니다. NextAuth의 `state`는 우리가 값을 정할 수 없으므로 결속 수단으로
+  쓰지 않습니다.
 - **기존 사용자의 로그인은 절대 소비하지 않습니다.** 동의는 가입 순간의
   결정이고, 로그인은 가입이 아닙니다.
-- **체크 해제 후 재시도는 이전 행을 `supersededAt`으로 무효화**합니다. 탭이
-  여럿이어도 살아 있는 행은 하나입니다.
+- **체크 해제 후 재시도는 이전 행을 무효화**합니다. 무효화와 새 행 발급은 **한
+  transaction**이고, 살아 있는 행은 브라우저당 하나입니다(`nonceHash` unique).
+  경합은 `UPDATE ... WHERE consumedAt IS NULL AND supersededAt IS NULL`이
+  한 행만 이기는 것으로 정리됩니다.
+
+상태 전이는 이 넷뿐입니다.
+
+| 지금 | 사건 | 다음 |
+|---|---|---|
+| `pending` | 소비 성공 | `consumed` (userId 기록) |
+| `pending` | 같은 브라우저가 새로 발급 | `superseded` |
+| `pending` | 만료 | `expired` (삭제 대상) |
+| `consumed`·`superseded`·`expired` | 무엇이든 | 변하지 않음 |
 - 만료·supersede·소비 실패 어느 경우에도 **계정 생성은 성공**합니다. 동의를
   못 받은 것이지 가입을 막을 일이 아닙니다. 실패는 구조화 이벤트로 남깁니다.
 
@@ -214,6 +261,23 @@ wrapper가 그 경계를 대신하려면 request-scoped attempt context를 넘�
 
 이 행은 **인증 절차의 일회성 상태**이지 장기 증거 장부가 아닙니다. 만료된
 행은 지웁니다.
+
+### 소비 뒤에 무엇이 일어나는가 — 국가 없이 동의를 시작합니다
+
+지금 `requestConsentConfirmation()`은 `confirmedCountry`를 **필수**로 받습니다
+(`lib/emailConsentConfirmation.ts:108`). 가입 시점에는 확정된 국가가 없습니다.
+그래서 국가를 가입 화면으로 끌어오지 않고, **확인 화면으로 넘깁니다.**
+
+- 소비 성공 → 확인 메일을 보냅니다. 이 시점에는 **국가가 없어도 됩니다** —
+  아직 아무것도 켜지지 않았고, 확인 메일 자체는 transactional입니다.
+- 확인 링크를 누른 화면에서, 확정된 국가가 없으면 **거기서 한 번 묻습니다.**
+  IP·언어·시간대로 기본값을 채우되 사용자가 확인해야 `self_declared`입니다.
+- 국가가 정해진 뒤에야 preference가 켜집니다. 즉 **국가 질문은 가입에서
+  사라지고 확인 클릭 한 번 뒤로 옮겨갑니다.**
+
+따라서 `requestConsentConfirmation()`은 국가가 아직 없는 요청을 받을 수 있어야
+하고, 확인 route는 국가를 함께 받을 수 있어야 합니다. 이 두 계약 변경이 S3의
+범위입니다.
 
 ### 국가는 어떻게 되는가
 
@@ -238,10 +302,10 @@ DOI 흐름이 이미 국가를 묻습니다(현재 구현). 그 화면의 **기�
 
 - `link`는 **제품 경로 id**입니다. 자유 URL이 아니라 고정된 목적지 표에서
   고르며, 가격·결제·업그레이드 경로는 표에 없습니다.
-- **발송 시점에 redirect를 따라가지 않습니다.** 외부 목적지가 꼭 필요하면
-  **초안 승인 시 한 번 해석해 canonical 목적지를 저장**하고, 발송 경로는
-  네트워크를 건드리지 않습니다. 발송 중 redirect 추적은 SSRF와 비결정적
-  렌더링을 부릅니다.
+- **외부 목적지는 이 범위에서 허용하지 않습니다.** 승인 시점에 한 번
+  해석하더라도 그 fetch 자체가 SSRF와 DNS rebinding 표면이고, 시점을 옮길 뿐
+  없애지 못합니다. 외부 CTA가 필요해지면 사람이 검토해 등록한 목적지 표를
+  먼저 만듭니다. 발송 경로는 어떤 경우에도 네트워크를 따라가지 않습니다.
 - CTA는 타입이 있는 필드이고 자유 문구가 아닙니다.
 - 금칙어 검사(가격·할인·한정 기간 표현)는 **보조 guard**로만 둡니다. 2회차
   검토가 지적한 대로 문자열 검사는 법적 분류기가 아니며, 링크 대상과 전체
@@ -284,11 +348,16 @@ releaseNotesAuthorizationVerdict({
   activePolicyVersion, // 지금 활성인 EmailPolicyVersion
   countryMapEntry,     // 그 버전이 이 국가를 매핑하는가
   profile,             // 그 버전에 이 profile 행이 있는가
+  enqueuedPolicyVersion, // 이 행이 만들어질 때 허용했던 버전
   marketingEnabled,    // feature.emailMarketingEnabled
   releaseNotesEnabled, // feature.emailReleaseNotesEnabled
   suppression,
 }) -> { allowed: true } | { allowed: false, skipReason }
 ```
+
+`enqueuedPolicyVersion`이 입력에 있는 이유는 **"한 번은 허용됐다가 지금은
+아니다"와 "애초에 허용된 적이 없다"가 다른 사건**이기 때문입니다. 전자가
+`permission_revoked`이고 후자는 `marketing_country_not_allowed`입니다.
 
 skip 사유의 경계입니다.
 
@@ -297,7 +366,14 @@ skip 사유의 경계입니다.
 | `consent_withdrawn` | 사용자가 껐거나 확인을 취소했다 |
 | `permission_revoked` | **정책 쪽이 바뀌었다** — 활성 버전이 이 국가의 매핑이나 profile을 더 이상 갖지 않는다 |
 | `no_consent` | 애초에 켜진 적이 없다 |
-| 기존 사유 | suppression, 관할권 미확정, 국가 미지원 |
+| `release_notes_disabled` | 전용 flag가 꺼져 있다 |
+| `marketing_country_not_allowed` | 어느 정책에서도 지원된 적이 없는 국가다 |
+| 기존 사유 | suppression, 관할권 미확정 |
+
+**활성 정책을 읽지 못하는 것은 skip이 아닙니다.** DB 오류로 판정할 수 없으면
+행을 영구 skip으로 만들지 말고 claim을 풀어 다시 시도하며 incident를 올립니다.
+읽지 못한 것과 허용되지 않은 것은 다른 사실이고, 앞의 것을 뒤의 것으로
+기록하면 복구 가능한 장애가 조용한 데이터 손실이 됩니다.
 
 사용자가 한 일과 우리가 한 일은 다른 사건이고, 지원 문의에 답하려면 둘을
 구분해야 합니다.
@@ -324,7 +400,7 @@ skip 사유의 경계입니다.
 | F1 | `account_feature_change` (계약상 필요한 통지) | 2회차 검토: "이미 쓰는 기능의 변경"은 service 분류 근거로 너무 넓습니다. 한국 예외는 계약·안전·보안 통지에 초점이 있고, 범위를 **법률 검토로 좁힌 allowlist**로 정의해야 합니다. 별도 purpose·기본값·철회 동작·DB CHECK가 함께 필요합니다 |
 | F2 | 호주 발신자 overlay | Spam Act는 발신 조직의 중앙관리가 호주에 있으면 **수신자 국가와 무관하게** 적용됩니다. 이는 release_notes만의 문제가 아니라 우리가 보내는 모든 상업 메일의 문제이고, 이메일 시스템 전체의 개선으로 다뤄야 합니다 |
 | F3 | 관할권별 근거 완화 (soft opt-in, 추론 동의) | R1 외부 자문이 선행합니다. 그때 `releaseNotesBasis`·취득 증거 장부·국가별 allowlist를 만듭니다 |
-| F4 | 한국 2년 재확인 고지 배치 | 한국 동의자가 생기는 순간부터 타이머가 돕니다. **기한이 있는 보류입니다** — S3이 한국 profile의 DOI 확인 시 최초 고지 예정일을 저장하고(저장하지 않으면 `confirmedAt`과 `ConsentRecord`에서 결정론적으로 backfill할 수 있어야 합니다), 배치는 **첫 대상자의 예정일 전에** 배포합니다. 이 기한을 릴리스 조건으로 적습니다 |
+| F4 | 한국 2년 재확인 고지 배치 | 한국 동의자가 생기는 순간부터 타이머가 돕니다. **기한이 있는 보류입니다.** 시행령 제62조의3은 동의일부터 2년이 되는 날 **전까지 수신자에게 확인 안내가 가 있을 것**을 요구하므로, 릴리스 조건은 "배치를 배포했다"가 아니라 **"첫 대상자의 기한 전에 고지가 실제로 발송되고 `ConsentRecord(confirmation_notice_sent)`가 남았다"** 입니다. 배포만 하고 worker가 꺼져 있거나 첫 실행이 늦으면 의무는 충족되지 않습니다. 예정일은 **Asia/Seoul 달력 기준**으로 계산하며(`confirmedAt + 24개월`의 같은 UTC instant는 "같은 날 전까지"보다 늦을 수 있습니다), 윤일 규칙을 테스트합니다. backfill은 활성 동의의 최신 `granted`·`reconfirmed` 기록에 **같은 계산 함수**를 씁니다 |
 
 ---
 
@@ -336,7 +412,8 @@ skip 사유의 경계입니다.
 |---|---|
 | `EmailPreference.purpose` CHECK | `release_notes` 추가 |
 | `EmailTemplate.purpose` CHECK | 동일 |
-| `EmailDelivery.skipReason` CHECK | `permission_revoked` 추가 |
+| `EmailDelivery.skipReason` CHECK | `permission_revoked`, `consent_withdrawn`, `release_notes_disabled` 추가 |
+| `EmailCampaignRecipient` | `policyVersionId` — 어느 정책으로 판정했는지. 제외 사유 CHECK도 함께 갱신 |
 | purpose 표 | `classification` 컬럼(코드 상수 + 정적 검사) |
 | `SignupConsentAttempt` | 신규 테이블. 인증 절차의 일회성 상태이며 만료 행은 삭제 |
 
@@ -344,7 +421,7 @@ skip 사유의 경계입니다.
 
 새로: `lib/emailReleaseNotes.ts`(판정),
 `lib/releaseNotesContentRules.ts`(payload·링크 규칙),
-`lib/emailSignupConsentIntent.ts`(서명된 1회용 intent).
+`lib/emailSignupConsentAttempt.ts`(가입 동의 시도 행과 그 상태 전이).
 
 고침: `lib/appSettings.ts`(전용 flag reader — 값이 없거나 읽을 수 없으면 항상 `false`),
 `lib/emailPreferenceCore.ts`(purpose 표에 classification),
@@ -363,11 +440,11 @@ skip 사유의 경계입니다.
 | # | 단계 | 왜 이 순서인가 | 검증 |
 |---|---|---|---|
 | S0 | **상위 계약 개정과 승인** — [이메일 알림](email-notifications.md) §3의 분류표가 아직 "명시적으로 구독한 기능 업데이트"를 `service(동의 기반)`로 적습니다. D1은 marketing으로 고정하므로, 코드가 먼저 들어가면 승인된 정책과 구현이 서로 모순됩니다 | 사람. **S2 병합 전에 승인** |
-| S1 | `feature.emailReleaseNotesEnabled` (기본 false) + **행을 만드는 모든 자리**(`enqueueStandardEmail`, `expandEmailEvent`, 그 밖의 직접 writer)와 drain 검사 | **게이트가 물건보다 먼저.** 반대로 하면 전용 게이트 없는 템플릿이 잠시 존재합니다 | unit + 통합. flag 부재·손상 시 `false` |
+| S1 | `feature.emailReleaseNotesEnabled` (기본 false) + **실제 writer**(`createStandardDeliveryRows`, `expandEmailEvent`)와 drain 검사, 전용 skip 사유 | **게이트가 물건보다 먼저.** 반대로 하면 전용 게이트 없는 템플릿이 잠시 존재합니다 | unit + 통합. flag 부재·손상 시 `false` |
 | S2 | purpose 표(+classification) · DB CHECK · `withdrawAllMarketing` 범위 | 가입 화면이 켤 대상이 존재해야 합니다 | unit + enum-constraints + DB 통합 |
 | S3 | `SignupConsentAttempt` 상태 행 + 두 가입 경로의 소비 + DOI 연결 + 한국 최초 고지 예정일 | 여기서 처음으로 동의가 쌓입니다 | 상태 전이표 unit + e2e(OAuth 취소·재시도·다중 탭·기존 사용자 로그인) + DB 통합. **Codex 검토** |
 | S4 | 템플릿 + 구조화 payload + 링크 allowlist + 7개 언어 | 보낼 물건은 마지막에서 두 번째 | unit + locale |
-| S5 | audience·dry-run·admin 표시 + 현재 정책 재판정 | 발송 전에 누가 받는지 셀 수 있어야 합니다 | 통합 + dry-run 0건 검증. **Codex 검토** |
+| S5 | audience + **행을 쓰지 않는** `estimateReleaseNotesAudience()` + admin 표시 + 현재 정책 재판정 | 발송 전에 누가 받는지 셀 수 있어야 합니다. 기존 campaign dry-run 계약은 건드리지 않습니다 | 통합 + 미리보기가 행을 0개 쓰는지 검증. **Codex 검토** |
 | S6 | 구현 기록과 새 정책 버전 초안 | 분류 개정은 S0에서 끝났으므로 여기 남는 것은 기록입니다 | 정적 검사 |
 
 **활성화 순서는 고정입니다** — 정책 버전 활성화 → `/api/ready` 확인 →
