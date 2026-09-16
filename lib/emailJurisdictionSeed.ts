@@ -30,6 +30,7 @@
  */
 
 import { RENDERABLE_FOOTER_BLOCKS } from "@/lib/emailFooterRenderer";
+import { parseQuietHours } from "@/lib/emailQuietHoursCore";
 import {
   JURISDICTION_PROFILES,
   JURISDICTION_MAPPED_COUNTRY_CODES,
@@ -342,6 +343,11 @@ export const jurisdictionSeedProblems = (): string[] => {
     }
     if (profile.footerBlocks.length === 0) {
       problems.push(`${profile.profileKey}: has no footer blocks`);
+    }
+    // A window the send lane cannot read holds every marketing message for that
+    // profile, so a malformed one is caught here, before a draft is created.
+    if (parseQuietHours(profile.quietHours) === "invalid") {
+      problems.push(`${profile.profileKey}: quietHours cannot be read (format or zone)`);
     }
     for (const block of profile.footerBlocks) {
       if (!FOOTER_BLOCKS.includes(block)) {
