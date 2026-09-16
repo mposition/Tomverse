@@ -11,6 +11,7 @@ import {
 } from "@/lib/emailSuppressionCauses";
 import {
   holdSuppressionFence,
+  lockSuppressionAddress,
   readSuppressionAuthority,
 } from "@/lib/emailSuppressionAuthority";
 import {
@@ -110,6 +111,7 @@ export async function recordSuppression(
   // Shared fence first: no suppression write may straddle the read-authority
   // cutover (docs/policy/email-product-news-redesign-draft.md, section 7.4).
   await holdSuppressionFence(client);
+  await lockSuppressionAddress(client, emailAddress);
 
   // The cause first and unconditionally: every event is its own fact, including
   // one the entry's merge rule below declines to record. Marked so the entry
@@ -215,7 +217,11 @@ export const APPROVAL_REQUIRED_SUPPRESSION_REASONS = [
   "complaint",
 ] as const;
 
-export type SuppressionRemovalRefusal = "not_found" | "unliftable";
+/**
+ * `authority_changed`: the read authority moved between choosing a lift path
+ * and taking the fence. Nothing was released; asking again takes the other path.
+ */
+export type SuppressionRemovalRefusal = "not_found" | "unliftable" | "authority_changed";
 
 /**
  * Lifts one suppression, returning what it was so the audit entry can hold it.
@@ -233,6 +239,18 @@ export async function removeSuppression(input: {
 > {
   return prisma.$transaction(async (tx) => {
     await holdSuppressionFence(tx);
+    // Read under the fence: a cutover that committed after the caller chose
+    // this path means entries no longer decide, and lifting a whole selector
+    // here would release causes the release matrix keeps.
+    if ((await readSuppressionAuthority(tx)) !== "entry") {
+      return { removed: false as const, refusal: "authority_changed" as const };
+    }
+    const found = await tx.suppressionEntry.findUnique({
+      where: { id: input.id },
+      select: { emailAddress: true },
+    });
+    if (!found) return { removed: false as const, refusal: "not_found" as const };
+    await lockSuppressionAddress(tx, found.emailAddress);
     const entry = await tx.suppressionEntry.findUnique({
       where: { id: input.id },
     });
@@ -319,6 +337,17 @@ export async function liftSuppressionCauses(input: {
   const now = input.now ?? new Date();
   return prisma.$transaction(async (tx) => {
     await holdSuppressionFence(tx);
+    if ((await readSuppressionAuthority(tx)) !== "causes") {
+      return { removed: false as const, refusal: "authority_changed" as const };
+    }
+    const found = await tx.suppressionEntry.findUnique({
+      where: { id: input.entryId },
+      select: { emailAddress: true },
+    });
+    if (!found) return { removed: false as const, refusal: "not_found" as const };
+    // The address lock before the causes are read, so no cause can appear
+    // between the read and the decision to remove the entry.
+    await lockSuppressionAddress(tx, found.emailAddress);
     const entry = await tx.suppressionEntry.findUnique({ where: { id: input.entryId } });
     if (!entry) return { removed: false as const, refusal: "not_found" as const };
 

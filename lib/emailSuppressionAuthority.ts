@@ -43,6 +43,21 @@ export async function holdSuppressionFence(tx: Prisma.TransactionClient) {
   await tx.$queryRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${SUPPRESSION_AUTHORITY_FENCE}))`;
 }
 
+/**
+ * Serialises every write, release and blocker check for one address, after
+ * the fence. The fence only keeps writers apart from the cutover; writers
+ * share it, so without this a lift that read the causes could be followed by
+ * a new cause it never saw and still remove the entry as though nothing
+ * remained. A row lock cannot do this -- the new cause is a row that does not
+ * exist yet -- so it is an advisory lock on the normalised address.
+ */
+export async function lockSuppressionAddress(
+  tx: Prisma.TransactionClient,
+  normalizedAddress: string
+) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-suppression-address:${normalizedAddress}`}))`;
+}
+
 /** The cutover's side of the fence: waits for every in-flight writer to finish. */
 export async function holdSuppressionFenceExclusive(tx: Prisma.TransactionClient) {
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${SUPPRESSION_AUTHORITY_FENCE}))`;

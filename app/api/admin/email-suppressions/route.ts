@@ -255,7 +255,9 @@ export async function POST(req: Request) {
         const status =
           lifted.refusal === "not_found" ? 404 : 409;
         const error =
-          lifted.refusal === "approval_stale"
+          lifted.refusal === "authority_changed"
+            ? "Suppression decisions changed over while this was in progress. Try again."
+            : lifted.refusal === "approval_stale"
             ? "The suppression changed after this was asked for. Review it again."
             : lifted.refusal === "unliftable"
               ? "Nothing here can be lifted from this screen; a privacy request is lifted by the privacy process that created it."
@@ -304,6 +306,15 @@ export async function POST(req: Request) {
       : await lift();
 
     if (!result.removed) {
+      if (result.refusal === "authority_changed") {
+        return NextResponse.json(
+          {
+            error: "Suppression decisions changed over while this was in progress. Try again.",
+            code: "authority_changed",
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         {
           error:

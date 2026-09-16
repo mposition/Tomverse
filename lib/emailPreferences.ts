@@ -26,6 +26,7 @@ import {
 import { markCauseWriter, releaseSelectorCauses } from "@/lib/emailSuppressionCauses";
 import {
   holdSuppressionFence,
+  lockSuppressionAddress,
   readSuppressionAuthority,
 } from "@/lib/emailSuppressionAuthority";
 import { isActiveCause } from "@/lib/emailSuppressionAuthorityCore";
@@ -327,6 +328,11 @@ export async function setPreference(input: {
       // fire. None of those should add a second entry to the history.
       return "already_set" as const;
     }
+
+    // Every suppression write, release and blocker check for this address is
+    // serialised here, after the user row: no cause can appear between the
+    // blocker check below and the release that follows it.
+    await lockSuppressionAddress(tx, normalizeSuppressionAddress(email));
 
     // Once causes decide, switching on lifts only this purpose's own
     // unsubscribe. Any other active cause for this purpose, for marketing as a

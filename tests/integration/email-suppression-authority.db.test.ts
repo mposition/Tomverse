@@ -195,3 +195,71 @@ test("switching a purpose back on is refused while another cause still stops it"
   });
   assert.deepEqual(result, { changed: false, reason: "suppressed" });
 });
+
+test("an entry-path removal that finds causes deciding releases nothing", async () => {
+  const emailAddress = address();
+  const entry = await suppress(emailAddress, "manual");
+  await setAuthority("causes");
+
+  const { removeSuppression } = await import("@/lib/emailSuppression");
+  const result = await removeSuppression({ id: entry.id! });
+  assert.deepEqual(result, { removed: false, refusal: "authority_changed" });
+  const causes = await prisma.suppressionCause.findMany({ where: { emailAddress } });
+  assert.ok(causes.every((cause) => cause.releasedAt === null));
+});
+
+test("a cause written while a lift waits for the address is seen by the lift", async () => {
+  const emailAddress = address();
+  const entry = await suppress(emailAddress, "manual");
+  await setAuthority("causes");
+  const active = await activeCausesForEntry(entry.id!);
+
+  const { lockSuppressionAddress, holdSuppressionFence } = await import(
+    "@/lib/emailSuppressionAuthority"
+  );
+
+  let holding!: () => void;
+  const held = new Promise<void>((resolve) => (holding = resolve));
+  let finish!: () => void;
+  const release = new Promise<void>((resolve) => (finish = resolve));
+
+  // A writer that holds the address, then adds a hard bounce and commits.
+  const writer = prisma.$transaction(
+    async (tx) => {
+      await holdSuppressionFence(tx);
+      await lockSuppressionAddress(tx, emailAddress);
+      holding();
+      await release;
+      await tx.$queryRaw`SELECT set_config('app.suppression_writer', 'causes', true)`;
+      await tx.suppressionCause.create({
+        data: {
+          emailAddress,
+          scope: "global",
+          purposeKey: "*",
+          reason: "hard_bounce",
+          source: "provider_webhook",
+          sourceEventKey: `test:${randomUUID()}`,
+          occurredAt: new Date(),
+        },
+      });
+    },
+    { timeout: 20_000 }
+  );
+
+  await held;
+  const lift = liftSuppressionCauses({
+    entryId: entry.id!,
+    approvedCauseIds: active!.causeIds,
+    action: "admin",
+    evidence: { kind: "admin" },
+    writeReleaseAudit: auditInTx,
+  });
+  // Give the lift time to block on the address before the writer commits.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  finish();
+  await writer;
+
+  const lifted = await lift;
+  assert.deepEqual(lifted, { removed: false, refusal: "approval_stale" });
+  assert.equal(await prisma.suppressionEntry.count({ where: { emailAddress } }), 1);
+});
