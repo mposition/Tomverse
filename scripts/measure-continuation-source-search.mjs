@@ -58,6 +58,9 @@ const { searchConversationMessages, SOURCE_SEARCH_TIMEOUT_MS } = await import(
   "../lib/conversationSearch.ts"
 );
 const { CONTINUATION_SEED_VERSION } = await import("../lib/externalContinuationSeedCore.ts");
+// The one creation service every writer uses, so this fixture carries a
+// product key like any real conversation (docs/policy/conversation-product-key.md).
+const { createConversation } = await import("../lib/conversationCreation.ts");
 
 const SNAPSHOTS = 2_000;
 const MESSAGES_PER_SNAPSHOT = 50;
@@ -120,9 +123,9 @@ try {
         ordinal: m,
       })),
     });
-    const conversation = await prisma.conversation.create({
-      data: { userId, title: `continuation ${s}`, productKey: "review" },
-    });
+    const conversation = await prisma.$transaction((tx) =>
+      createConversation(tx, { userId, title: `continuation ${s}`, productKey: "review" })
+    );
     await prisma.conversationContinuationBridge.create({
       data: {
         userId,

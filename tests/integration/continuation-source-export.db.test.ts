@@ -75,7 +75,15 @@ const seed = async (
             digestVersion: 1,
             ordinal: index * 2,
             sourceModelLabel: index % 2 === 0 ? null : "gpt-4-turbo",
-            truncated: index === 1,
+            // A truncated row carries what it was cut from, as the schema requires.
+            ...(index === 1
+                ? {
+                      truncated: true,
+                      originalContentDigest: `o-${index}-${snapshot.id}`,
+                      originalCharacterCount: content.length + 10,
+                      retainedCharacterCount: content.length,
+                  }
+                : { truncated: false }),
         })),
     });
     const conversation = await prisma.conversation.create({
