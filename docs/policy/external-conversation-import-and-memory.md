@@ -766,6 +766,24 @@ Node crypto)입니다.
   사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
 - **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
   반납하고 진행분을 보존합니다.
+- **chunk의 종료 상태는 셋이고, 과금되는 것은 하나입니다**(2026-09-16).
+  `completed`는 provider를 실제로 호출한 chunk, `skipped`는 호출 없이 끝난
+  chunk(계획이 지목한 대화가 전부 사라진 경우), `failed`는 재시도 한도까지
+  실패한 chunk입니다.
+  - run 진행도와 종료 판정은 **`completed + skipped`**입니다. `skipped`를
+    기다리면 run이 끝나지 않습니다.
+  - 정산의 `chunksCharged`는 **`completed`만**입니다. 정산 계약이 "과금된
+    chunk는 실제로 provider를 호출했다"이므로
+    (`lib/memoryExtractionCredits.ts`), `skipped`를 세면 그 문장이 거짓이 됩니다.
+  - `skipped`는 terminal이며 재시도하지 않습니다. 재시도할 대상이 없어서 끝난
+    것이지 실패해서 끝난 것이 아닙니다.
+
+  이전에는 `skipped`가 없어 이 경우가 `completed`로 기록됐고, **원문을 지운
+  사용자가 그 삭제 때문에 불가능해진 호출에 과금되는 구조였습니다.** §13.1은
+  삭제가 run을 좌초시키지 않는다고만 정했을 뿐 그 과금을 승인한 적이 없습니다.
+  실제 청구는 일어나지 않았습니다 — `feature.memoryExtractionEnabled`는
+  production에서 켜진 적이 없습니다(운영자 확인, 2026-09-16). 즉 이 수정은 flag를
+  켜기 전에 도착한 것이지 사후 정정이 아닙니다.
 - extraction provider 지연이 credit·refund·notification 같은 기존 maintenance
   작업을 늦추지 않도록, dispatch는 기존 reconciliation 응답과 분리된 경로에서
   수행하고 지표도 `memory_extraction_dispatch`로 분리합니다.

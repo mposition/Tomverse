@@ -43,6 +43,7 @@ const EMPTY = (windowDays: number): ExtractionMetricsSummary => ({
     chunks: {
         total: 0,
         completed: 0,
+        skipped: 0,
         failed: 0,
         failureCodes: {},
         retryRate: null,

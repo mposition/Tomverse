@@ -429,7 +429,7 @@ const REGISTRY = {
   MemoryExtractionChunk_status_check: {
     owner: "database",
     reason:
-      "The chunk lifecycle. Deliberately not the run lifecycle: a chunk is never cancelled on its own, so the two lists differ by one value and sharing them would widen this column.",
+      "The chunk lifecycle. Deliberately not the run lifecycle: a chunk is never cancelled on its own, and `skipped` — finished without calling the provider — has no run-level counterpart, so sharing the lists would widen this column.",
   },
   MemoryExtractionCreditReservation_status_check: {
     owner: "database",
