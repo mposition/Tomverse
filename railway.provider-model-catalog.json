@@ -1,8 +1,0 @@
-{
-  "$schema": "https://railway.com/railway.schema.json",
-  "deploy": {
-    "startCommand": "npm run maintenance:provider-model-catalog",
-    "cronSchedule": "0 0 * * *",
-    "restartPolicyType": "NEVER"
-  }
-}

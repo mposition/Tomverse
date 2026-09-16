@@ -376,7 +376,7 @@ marketing을 포함하지 않는다는 범위 결정.
    사용자는 로그인하지 못하고 아무도 그것을 모릅니다.
 7. **그러나 로그인 코드는 일반 큐로도, 재시도 worker로도 구제되지 않습니다.**
    코드 TTL 상한이 10분인데(`lib/emailLogin.ts:15`) 큐 drain은 15분 주기에 얹혀
-   있고(`railway.credit-reconciliation.json:5`), 더 근본적으로 **DB에는 HMAC만
+   있고(`.railway/scheduled-jobs.ts`의 `Credit Reconciliation`, 2026-09-17 전에는 `railway.credit-reconciliation.json:5`), 더 근본적으로 **DB에는 HMAC만
    있어 worker가 메일을 재구성할 수 없습니다.** 권고는 요청 안 재시도 + 실패를
    숨기지 않는 응답 + 상시 노출되는 "다시 보내기"입니다(9.4a).
 8. **Resend의 suppression은 계정 전체에 걸립니다.** 서브도메인을 나눠도 marketing
@@ -1387,7 +1387,7 @@ marketing 행은 2026-08-21까지 `2`와 `5m, 1h`를 함께 적고 있어 이 �
 
 - `lib/emailLogin.ts:15` — `CODE_TTL_MINUTES = clamp(env || 10, 1, 10)`.
   **상한이 10이므로 환경변수로도 10분을 넘길 수 없습니다.**
-- `railway.credit-reconciliation.json:5` — `*/15 * * * *`. 현재 큐 drain이
+- `.railway/scheduled-jobs.ts` `Credit Reconciliation` — `*/15 * * * *`(2026-09-17 전에는 `railway.credit-reconciliation.json:5`). 현재 큐 drain이
   얹혀 있는 유일한 짧은 주기 cron입니다.
 - 따라서 `NOTIFICATION_RETRY_DELAYS_MS`의 첫 지연이 60초여도 **실제로는 최대
   15분 뒤에야 재시도**되고, 그때 코드는 이미 죽어 있습니다. 재시도 곡선이
