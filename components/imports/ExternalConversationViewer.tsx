@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeft, Loader2, Trash2 } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
@@ -98,6 +98,22 @@ export function ExternalConversationViewer({
     const { t } = useLanguage();
     const router = useRouter();
     const [state, setState] = useState<ViewerState>({ kind: "loading" });
+    /**
+     * Which read of this snapshot the screen is currently showing.
+     *
+     * Bumped by every re-read of the first page, and carried by every page
+     * request; a result from an older generation is dropped rather than
+     * written. Without it, "load more" is a held copy of the transcript with a
+     * `setState` attached to it, and the lock cannot take it away: locking
+     * re-reads, is refused, and draws the password gate -- and then the
+     * in-flight page lands and writes the old messages back over it. Both of
+     * its branches do, because the refusal branch restores `state` too.
+     *
+     * A ref rather than state: the check has to see the newest value from
+     * inside a closure that was created before it changed, which is the one
+     * thing a state value cannot do.
+     */
+    const readGeneration = useRef(0);
     const [deleteArmed, setDeleteArmed] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     // Requested with the first page only: the delete confirmation needs it,
@@ -172,7 +188,9 @@ export function ExternalConversationViewer({
     );
 
     const loadFirstPage = useCallback(async () => {
+        const generation = ++readGeneration.current;
         const result = await fetchPage(0);
+        if (generation !== readGeneration.current) return;
         if (result.kind === "ok") {
             setState({
                 kind: "ready",
@@ -185,32 +203,27 @@ export function ExternalConversationViewer({
     }, [fetchPage]);
 
     useEffect(() => {
-        let cancelled = false;
         queueMicrotask(() => {
-            void fetchPage(0).then((result) => {
-                if (cancelled) return;
-                if (result.kind === "ok") {
-                    setState({
-                        kind: "ready",
-                        conversation: result.conversation,
-                        loadingMore: false,
-                    });
-                } else {
-                    setState({ kind: result.kind });
-                }
-            });
+            void loadFirstPage();
         });
+        // Unmounting bumps the generation, which is what the old `cancelled`
+        // flag did and also covers a page request still in flight.
         return () => {
-            cancelled = true;
+            readGeneration.current += 1;
         };
-    }, [fetchPage]);
+    }, [loadFirstPage]);
 
     const loadMore = useCallback(async () => {
         if (state.kind !== "ready" || state.loadingMore) return;
         const loaded = state.conversation.messages.length;
         if (loaded >= state.conversation.messageTotal) return;
+        const generation = readGeneration.current;
         setState({ ...state, loadingMore: true });
         const result = await fetchPage(loaded);
+        // The snapshot may have been locked, unlocked or deleted while this
+        // page was in flight. `state` here is the transcript as it was before
+        // that happened, so writing either branch would put it back on screen.
+        if (generation !== readGeneration.current) return;
         if (result.kind === "ok") {
             setState({
                 kind: "ready",
@@ -223,6 +236,12 @@ export function ExternalConversationViewer({
                 },
                 loadingMore: false,
             });
+        } else if (result.kind === "locked" || result.kind === "not_found") {
+            // A page refused for a reason that is about the snapshot rather
+            // than about this request is the whole answer, not a failed
+            // increment: keeping the transcript would be showing content the
+            // server has just refused to serve.
+            setState({ kind: result.kind });
         } else {
             setState({ ...state, loadingMore: false });
         }
