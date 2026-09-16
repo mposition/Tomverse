@@ -116,6 +116,50 @@ its own rules. They exist to buy rows, never to buy them from the reader.
   does not count as a change: it moves where the list puts a conversation, not
   the conversation, so it leaves `updatedAt` alone and an integration test holds
   that. A guest's pins stay in the browser, because a guest's conversations do.
+- **Pins are causally ordered and every device converges** (decided
+  2026-09-16). Each tap carries its own sequence (`Conversation.pinSeq`), issued
+  as `max(now in ms, highest seen + 1, highest still-landable issued + 1)` --
+  above every write this client made that may yet land, but not above one the
+  server refused, which can never land -- and the server applies
+  a write only over a smaller one. That guarantees, and tests hold:
+  1. **On one client, the last tap is the last write** in whatever order its
+     requests arrive and whichever of them failed on the wire -- including two
+     in a row that both failed, which teach the client nothing.
+  2. **A tap made after seeing a state always beats that state**, on any device.
+     Having seen it, the tap's sequence is above it.
+  3. **Every device converges.** The column ends on the highest sequence, each
+     device draws what it learns of the column rather than its own last answer,
+     and a newer list outranks any claim still held.
+
+  What it does **not** guarantee, and no design can: taps from two devices that
+  have not seen each other's change are concurrent, so their order is decided by
+  their clocks, not by which was really pressed later. When those clocks disagree
+  the "wrong" tap can win. The screen and the database still agree, and tapping
+  again settles it. A pin is fully reversible, so this is not a release blocker.
+
+  **Whether a row exists is the list's to say** (decided 2026-09-16). Guarantee 3
+  covers conversations that exist. The pin route answers 404 the same for a
+  deleted conversation and for someone else's -- "not found and not mine are the
+  same answer" -- so a 404 proves only that nothing was written, never that a
+  conversation is gone, and the store does not conclude it. A consequence the
+  decision accepts: while a stale list still shows a conversation that was just
+  deleted, a late answer from before the deletion can change that row's pin
+  display. The next list without the row removes it and everything the store
+  held about it. Do not add a tombstone to "fix" this -- two were tried, and each
+  either let a late answer past it or blocked a conversation's rightful owner.
+
+  - Not a client timeout, queue or retry rule, and not a compare-and-set on the
+    version a client last saw -- eleven rounds of review took each apart. The
+    last fails exactly on case 1: two failed taps name the same version.
+  - An unknown outcome is resolved by resending the same write, which is
+    idempotent by its sequence. A superseded write is followed, never retried.
+  - A sequence more than an hour ahead of the server's clock is refused
+    (`PIN_SEQUENCE_OUT_OF_RANGE`), so one badly wrong clock cannot hold a row
+    against every later tap.
+
+  The protocol lives in `lib/conversationPinStore.ts`, and
+  `tests/conversationPinStore.test.mjs` runs it against a server that applies a
+  write after telling the client it failed.
 - **The conversation menu keeps its own 44px target** inside a row that is
   itself the click target.
 

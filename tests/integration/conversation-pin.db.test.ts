@@ -5,14 +5,21 @@ import { after, beforeEach, test } from "node:test";
 import { prisma } from "@/lib/prisma";
 
 /**
- * `Conversation.pinnedAt` — the column the sidebar's pinned section reads.
+ * `Conversation.pinnedAt` and `Conversation.pinSeq` -- what the sidebar's pinned
+ * section reads, and what puts pin writes in order.
  *
- * What is under test is the **write**, not the button: a pin must not count as
- * activity. `updatedAt` is `@updatedAt`, the sidebar groups its date headers by
- * it, and an ordinary Prisma update therefore files a pinned conversation under
- * "today" and tells its owner it was answered today. The pin route writes raw
- * SQL for that reason, and these cases are what stops somebody replacing it
- * with a tidier `prisma.conversation.update` later.
+ * Two properties are under test, and both are about the **statement**, not the
+ * button, because each exists to stop a tidier rewrite later:
+ *
+ * 1. A pin is not activity. `updatedAt` is `@updatedAt` and the sidebar groups
+ *    its date headers by it, so an ordinary Prisma update would file a pinned
+ *    conversation under "today". The route writes raw SQL for that reason.
+ * 2. The last tap is the last write, in whatever order requests arrive. A write
+ *    carries its tap's sequence and applies only over a smaller one, so an older
+ *    request that lands late matches no row -- including when two requests both
+ *    failed on the wire and the client learned nothing between them.
+ *
+ * The statement below is the route's, verbatim apart from the placeholders.
  */
 
 const ownerId = `pin-owner-${randomUUID()}`;
@@ -43,26 +50,40 @@ after(async () => {
   await prisma.$disconnect();
 });
 
+type PinRow = { pinned: boolean; pinSeq: number };
+
+/** The route's statement. */
+const writePin = (userId: string, pinned: boolean, seq: number) =>
+  prisma.$queryRaw<PinRow[]>`
+    UPDATE "Conversation"
+    SET "pinnedAt" = CASE WHEN ${pinned} THEN COALESCE("pinnedAt", NOW()) ELSE NULL END,
+        "pinSeq" = ${seq}::double precision
+    WHERE "id" = ${conversationId}
+      AND "userId" = ${userId}
+      AND "pinSeq" < ${seq}::double precision
+    RETURNING ("pinnedAt" IS NOT NULL) AS "pinned", "pinSeq"
+  `;
+
 const readRow = () =>
   prisma.conversation.findUniqueOrThrow({
     where: { id: conversationId },
-    select: { pinnedAt: true, updatedAt: true },
+    select: { pinnedAt: true, pinSeq: true, updatedAt: true },
   });
 
-test("a new conversation is not pinned, and needs no backfill to say so", async () => {
+const tap = 1_789_000_000_000; // a millisecond timestamp, as the client issues
+
+test("a new conversation is unpinned at sequence 0, and needs no backfill", async () => {
   const row = await readRow();
   assert.equal(row.pinnedAt, null);
+  assert.equal(row.pinSeq, 0);
 });
 
-test("pinning does not count as activity", async () => {
+test("an accepted write records its sequence and does not move updatedAt", async () => {
   const before = await readRow();
-  // The statement the route runs.
-  const affected = await prisma.$executeRaw`
-    UPDATE "Conversation"
-    SET "pinnedAt" = NOW()
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NULL
-  `;
-  assert.equal(affected, 1);
+  const applied = await writePin(ownerId, true, tap);
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].pinned, true);
+  assert.equal(Number(applied[0].pinSeq), tap);
 
   const after = await readRow();
   assert.notEqual(after.pinnedAt, null);
@@ -73,60 +94,62 @@ test("pinning does not count as activity", async () => {
   );
 });
 
-test("pinning twice changes nothing and reports that it changed nothing", async () => {
-  await prisma.$executeRaw`
-    UPDATE "Conversation" SET "pinnedAt" = NOW()
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NULL
-  `;
+test("a millisecond sequence round-trips exactly", async () => {
+  // DOUBLE PRECISION holds every integer below 2^53; a timestamp is far below.
+  await writePin(ownerId, true, tap + 1);
+  const row = await readRow();
+  assert.equal(row.pinSeq, tap + 1);
+});
+
+test("an older tap landing after a newer one matches nothing", async () => {
+  // The case the sequence exists for: the last tap (unpin) lands first, and the
+  // earlier pin arrives afterwards -- as it can when its connection dropped.
+  await writePin(ownerId, false, tap + 2);
+  const late = await writePin(ownerId, true, tap + 1);
+
+  assert.deepEqual(late, [], "the older tap is refused");
+  const row = await readRow();
+  assert.equal(row.pinnedAt, null, "the column ends on the last tap");
+  assert.equal(row.pinSeq, tap + 2);
+});
+
+test("two taps land in either order and the column ends on the last", async () => {
+  // Order A: earlier first, then later.
+  await writePin(ownerId, true, tap + 10);
+  await writePin(ownerId, false, tap + 11);
+  assert.equal((await readRow()).pinnedAt, null);
+
+  await resetData();
+
+  // Order B: later first, then earlier.
+  await writePin(ownerId, false, tap + 11);
+  await writePin(ownerId, true, tap + 10);
+  assert.equal((await readRow()).pinnedAt, null);
+});
+
+test("resending the same write is harmless and reports that it already landed", async () => {
+  await writePin(ownerId, true, tap);
+  const resend = await writePin(ownerId, true, tap);
+  assert.deepEqual(resend, [], "an equal sequence is not written twice");
+  const row = await readRow();
+  assert.equal(row.pinSeq, tap, "and the route answers with this sequence, proving it landed");
+});
+
+test("re-pinning keeps the original moment it was pinned", async () => {
+  await writePin(ownerId, true, tap);
   const first = await readRow();
-  const affected = await prisma.$executeRaw`
-    UPDATE "Conversation" SET "pinnedAt" = NOW()
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NULL
-  `;
-  assert.equal(affected, 0, "a second tap, or a second device, is not an error");
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await writePin(ownerId, true, tap + 1);
   const second = await readRow();
   assert.equal(second.pinnedAt?.getTime(), first.pinnedAt?.getTime());
 });
 
-test("unpinning clears the column and still does not count as activity", async () => {
-  await prisma.$executeRaw`
-    UPDATE "Conversation" SET "pinnedAt" = NOW()
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NULL
-  `;
-  const pinned = await readRow();
-  const affected = await prisma.$executeRaw`
-    UPDATE "Conversation" SET "pinnedAt" = NULL
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NOT NULL
-  `;
-  assert.equal(affected, 1);
-  const cleared = await readRow();
-  assert.equal(cleared.pinnedAt, null);
-  assert.equal(cleared.updatedAt.getTime(), pinned.updatedAt.getTime());
-});
-
-test("unpinning something already unpinned writes nothing", async () => {
-  // The same shape as the double pin above: idempotent on both sides, so two
-  // devices agreeing does not become a row rewrite -- and a rewrite here would
-  // be the one thing this column must never do, which is move `updatedAt`.
-  const before = await readRow();
-  const affected = await prisma.$executeRaw`
-    UPDATE "Conversation" SET "pinnedAt" = NULL
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NOT NULL
-  `;
-  assert.equal(affected, 0);
-  const after = await readRow();
-  assert.equal(after.pinnedAt, null);
-  assert.equal(after.updatedAt.getTime(), before.updatedAt.getTime());
-});
-
-test("another account's pin statement matches no row at all", async () => {
-  const affected = await prisma.$executeRaw`
-    UPDATE "Conversation" SET "pinnedAt" = NOW()
-    WHERE "id" = ${conversationId} AND "userId" = ${otherId} AND "pinnedAt" IS NULL
-  `;
-  assert.equal(affected, 0, "not found and not mine are the same answer");
+test("another account's write matches no row at all", async () => {
+  const applied = await writePin(otherId, true, tap);
+  assert.deepEqual(applied, [], "not found and not mine are the same answer");
   const row = await readRow();
   assert.equal(row.pinnedAt, null);
+  assert.equal(row.pinSeq, 0);
 });
 
 test("an ordinary Prisma update is exactly what the route may not do", async () => {
@@ -136,7 +159,7 @@ test("an ordinary Prisma update is exactly what the route may not do", async () 
   await new Promise((resolve) => setTimeout(resolve, 5));
   await prisma.conversation.update({
     where: { id: conversationId },
-    data: { pinnedAt: new Date() },
+    data: { pinnedAt: new Date(), pinSeq: tap },
   });
   const after = await readRow();
   assert.ok(

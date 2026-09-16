@@ -10,6 +10,19 @@ import {
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import {
+    forgetMissingPins,
+    getLegacyPins,
+    getPinOverrides,
+    getServerLegacyPins,
+    getServerPinOverrides,
+    observeServerPins,
+    reconcilePinStore,
+    requestPin,
+    subscribePinStore,
+    toggleLegacyPin,
+    type PinTransport,
+} from "@/lib/conversationPinStore";
 import { useSession } from "next-auth/react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -170,6 +183,27 @@ const getServerOrganizerPreference = (): OrganizerPreference => "auto";
 
 const DELETE_ARM_TIMEOUT_MS = 5_000;
 
+/*
+  How many models this conversation answers with, and nothing more.
+
+  The row used to name the model on every line. In a list where almost every
+  conversation runs the same selection that named nothing, and on an imported
+  row it named the model that will answer *next* rather than the one that
+  produced the transcript anybody is reading. What is left is the one fact a
+  name could not carry: that this conversation is a comparison.
+
+  Image conversations keep selectedModels as "[]" by invariant, so they count 0
+  and show no chip; the glyph already says what they are.
+
+  Module scope, and deliberately so: it reads nothing but its argument, and the
+  filter that calls it runs near the top of the component while the row that
+  calls it renders near the bottom. Declared between the two it was a temporal
+  dead zone -- selecting the 비교 filter threw a ReferenceError before the list
+  drew a single row. Up here there is no order left to get wrong.
+*/
+const conversationModelCount = (conversation: Conversation) =>
+    conversation.kind === "image" ? 0 : conversation.selectedModels?.length ?? 0;
+
 const interpolateSidebarCopy = (
     template: string,
     values: Record<string, string | number>
@@ -225,68 +259,77 @@ export function ChatSidebar({
     const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
     /*
-      Which conversations are pinned, from whichever side knows.
-
-      This is the browser's own list, which is where every pin used to live. It
-      is still the whole answer for a guest, whose conversations are local too,
-      and for an account it is read *alongside* `Conversation.pinned` from the
-      server so a pin made before the column existed does not vanish and a pin
-      made on another device shows up. Nothing is written back on load:
-      `togglePinned` settles a conversation server-side the next time somebody
-      actually touches it.
-    */
-    const [locallyPinnedIds, setLocallyPinnedIds] = useState<string[]>(() => {
-        if (typeof window === "undefined") return [];
-        try {
-            const saved = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
-            return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
-        } catch {
-            return [];
-        }
-    });
-    /*
       What a toggle has claimed, settled with the server's own answer.
 
       Optimistic rather than awaited: a pin is a list arrangement, and a list
       that rearranges a beat after the tap reads as a slow list. The entry is
       then replaced by what the response says the column holds, so two devices
-      toggling the same conversation agree; on failure it flips back, so the
-      row returns rather than showing a pin the account does not have.
+      toggling the same conversation agree; on failure it goes back to what the
+      server last confirmed, so the row never shows a pin the account does not
+      have.
 
-      Cleared when the identity changes: one account's arrangement is not
-      another's, and a guest's is neither.
+      Subscribed rather than held: the value lives in the module store above, so
+      it survives the drawer closing mid-request and is the same value the
+      desktop copy of this component reads.
     */
-    const [pinOverrides, setPinOverrides] = useState<Record<string, boolean>>({});
-    /** The newest toggle per conversation, so a slow answer cannot win. */
-    const pinRequestSeq = useRef(new Map<string, number>());
+    const pinOverrides = useSyncExternalStore(
+        subscribePinStore,
+        getPinOverrides,
+        getServerPinOverrides
+    );
+    /*
+      The pins this browser made before `Conversation.pinnedAt` existed. Read
+      from the same store as the overrides rather than from component state:
+      held per instance it was the last half of the split this store exists to
+      close, and its rollback could be lost by a second tap or aimed at an
+      instance the drawer had already unmounted.
+    */
+    const legacyPinnedIds = useSyncExternalStore(
+        subscribePinStore,
+        getLegacyPins,
+        getServerLegacyPins
+    );
     const { data: pinSession } = useSession();
     const pinIdentity = isGuestMode ? "guest" : (pinSession?.user?.id ?? "anonymous");
-    const [pinOverridesIdentity, setPinOverridesIdentity] = useState(pinIdentity);
-    if (pinOverridesIdentity !== pinIdentity) {
-        // Render-phase reset, the React-sanctioned way to drop state that
-        // belongs to a previous value: one account's arrangement is not
-        // another's, and a guest's is neither.
-        setPinOverridesIdentity(pinIdentity);
-        setPinOverrides({});
-    }
-
-    const readLocalPins = (): string[] => {
-        try {
-            const stored = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
-            return Array.isArray(stored)
-                ? stored.filter((item): item is string => typeof item === "string")
-                : [];
-        } catch {
-            return [];
-        }
-    };
-    const writeLocalPins = (ids: string[]) => {
-        try {
-            localStorage.setItem("tomverse_pinned_conversations", JSON.stringify(ids));
-        } catch {
-            // A browser that refuses storage still has the server's column.
-        }
-    };
+    useEffect(() => {
+        // One account's arrangement is not another's, and a guest's is neither.
+        // In an effect because it writes the module store; the store notifies,
+        // so there is no render-phase reset to pair it with any more.
+        reconcilePinStore(pinIdentity);
+    }, [pinIdentity]);
+    // Ids, what the server says about each, and the sequence it said it at, as
+    // one string, so the effect below runs when any of them changes. The
+    // sequence is the part that matters: a pin changed on another device and
+    // changed back leaves the value where it was and moves only the sequence.
+    const serverPinKey = conversations
+        .map(
+            (conversation) =>
+                `${conversation.id}:${conversation.pinned === true ? 1 : 0}:${conversation.pinSeq ?? ""}`
+        )
+        .join(",");
+    useEffect(() => {
+        const rows = serverPinKey
+            ? serverPinKey.split(",").map((entry) => {
+                  // Ids are opaque, so split from the right: the last two
+                  // fields are ours.
+                  const versionAt = entry.lastIndexOf(":");
+                  const pinnedAt = entry.lastIndexOf(":", versionAt - 1);
+                  const sequence = entry.slice(versionAt + 1);
+                  return {
+                      id: entry.slice(0, pinnedAt),
+                      pinned: entry.slice(pinnedAt + 1, versionAt) === "1",
+                      pinSeq: sequence === "" ? undefined : Number(sequence),
+                  };
+              })
+            : [];
+        // What the server now says, compared by sequence so a stale list cannot
+        // undo a write and a newer one outranks what this tab is holding.
+        observeServerPins(rows);
+        // And conversations the account no longer has. The store outlives this
+        // component on purpose, so without this it would keep an entry for
+        // every id the tab ever pinned, deleted ones included.
+        forgetMissingPins(rows.map((row) => row.id));
+    }, [serverPinKey]);
 
     /*
       Pinned, as answered by whichever side knows: this toggle first, then the
@@ -297,7 +340,7 @@ export function ChatSidebar({
         .filter(
             (conversation) =>
                 pinOverrides[conversation.id] ??
-                (conversation.pinned === true || locallyPinnedIds.includes(conversation.id))
+                (conversation.pinned === true || legacyPinnedIds.includes(conversation.id))
         )
         .map((conversation) => conversation.id);
     const [messageSearchResults, setMessageSearchResults] = useState<Array<{
@@ -704,97 +747,88 @@ export function ChatSidebar({
         return () => window.clearTimeout(timer);
     }, [dayTick]);
 
-    const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
-        let next: string[] = [];
-        try {
-            const current = JSON.parse(localStorage.getItem(storageKey) || "[]");
-            const values = Array.isArray(current) ? current.filter((item): item is string => typeof item === "string") : [];
-            next = values.includes(id) ? values.filter((item) => item !== id) : [id, ...values];
-            localStorage.setItem(storageKey, JSON.stringify(next));
-        } catch {
-            next = [id];
-            localStorage.setItem(storageKey, JSON.stringify(next));
-        }
-        setter(next);
-    };
-
     /*
       Pinning, which is the account's for a signed-in reader and the browser's
       for a guest.
 
-      A guest's conversations live in this browser, so their pins do too.
-      An account's pin is server state (`Conversation.pinnedAt`), written
-      optimistically: the row moves under the pointer and the request follows,
-      and a request that fails puts the row back rather than leaving a pin the
-      server never took.
+      A guest's conversations live in this browser, so their pins do too. An
+      account's pin is server state, and the whole write protocol -- optimistic
+      row, ordered queue, versioned write, conflict and failure handling --
+      lives in `lib/conversationPinStore.ts`, where it is tested against a fake
+      server that can apply a write late. What stays here is only the wire.
 
       Old local pins are not migrated on load. Reading them is free and writing
       them is a change nobody asked for on a page they only opened, so they are
-      read alongside the server's answer (see `pinnedConversationIds` below) and
-      settle server-side the next time this conversation is toggled. The local
-      entry is dropped in the same move, so the two cannot disagree afterwards.
+      read alongside the server's answer and settle server-side the next time
+      that conversation is toggled.
     */
+    const pinTransport: PinTransport = async ({ id, pinned, seq, ownerId }) => {
+        let response: Response;
+        try {
+            response = await fetch(`/api/conversations/${id}/pin`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                // `seq` is this tap's place in order: the server applies it
+                // only over an older one, so no request can land over a later
+                // tap. `ownerId` lets it refuse a write made before a sign-out
+                // and sent after it.
+                //
+                // Deliberately no timeout. A slow request is not a failed one,
+                // and it cannot land over a later tap anyway -- so abandoning it
+                // would only report a failure that may not have happened.
+                body: JSON.stringify({ pinned, seq, ownerId }),
+            });
+        } catch {
+            return { kind: "failed" };
+        }
+
+        if (response.status === 404) {
+            await discardResponseBody(response);
+            return { kind: "gone" };
+        }
+        if (response.ok || response.status === 409) {
+            const body = (await response.json().catch(() => null)) as {
+                code?: unknown;
+                pinned?: unknown;
+                pinSeq?: unknown;
+            } | null;
+            // A 409 that is not a supersession -- the account changed -- is a
+            // refusal: nothing was written and there is no state to adopt.
+            if (response.status === 409 && body?.code !== "PIN_SUPERSEDED") {
+                return { kind: "refused" };
+            }
+            if (typeof body?.pinned !== "boolean" || typeof body?.pinSeq !== "number") {
+                return { kind: "failed" };
+            }
+            return {
+                kind: response.ok ? "applied" : "superseded",
+                pinned: body.pinned,
+                seq: body.pinSeq,
+            };
+        }
+        await discardResponseBody(response);
+        // A 4xx was refused before any write. A 5xx is an answer about nothing.
+        return response.status >= 500 ? { kind: "failed" } : { kind: "refused" };
+    };
+
     const togglePinned = (id: string) => {
         const shouldPin = !pinnedConversationIds.includes(id);
         if (isGuestMode) {
-            toggleStoredId("tomverse_pinned_conversations", id, setLocallyPinnedIds);
+            toggleLegacyPin(id);
             return;
         }
-
-        // One number per conversation, so a slow first request cannot land on
-        // top of a fast second one. Two taps in a row used to be two answers
-        // racing, and the loser could leave the screen saying the opposite of
-        // the row.
-        const requestId = (pinRequestSeq.current.get(id) ?? 0) + 1;
-        pinRequestSeq.current.set(id, requestId);
-        const isLatest = () => pinRequestSeq.current.get(id) === requestId;
-
-        setPinOverrides((current) => ({ ...current, [id]: shouldPin }));
-        // The browser's old entry for this conversation goes now, but it is
-        // kept in hand: if the request fails, it goes back, or a reload would
-        // show a pin the reader had before the tap and no longer has.
-        const hadLocalPin = locallyPinnedIds.includes(id);
-        const restoreLocalPin = () => {
-            if (!hadLocalPin) return;
-            setLocallyPinnedIds((current) =>
-                current.includes(id) ? current : [id, ...current]
-            );
-            writeLocalPins([id, ...readLocalPins().filter((item) => item !== id)]);
-        };
-        if (hadLocalPin) {
-            setLocallyPinnedIds((current) => current.filter((item) => item !== id));
-            writeLocalPins(readLocalPins().filter((item) => item !== id));
-        }
-
-        void fetch(`/api/conversations/${id}/pin`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pinned: shouldPin }),
-        })
-            .then(async (response) => {
-                if (!response.ok) {
-                    await discardResponseBody(response);
-                    if (!isLatest()) return;
-                    // Put the row back rather than leaving a pin the account
-                    // does not have.
-                    setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
-                    restoreLocalPin();
-                    return;
-                }
-                // The server's own answer, not the request's hope: two devices
-                // toggling at once settle on what the column actually holds.
-                const body = (await response.json().catch(() => null)) as
-                    | { pinned?: unknown }
-                    | null;
-                if (!isLatest()) return;
-                const settled = typeof body?.pinned === "boolean" ? body.pinned : shouldPin;
-                setPinOverrides((current) => ({ ...current, [id]: settled }));
-            })
-            .catch(() => {
-                if (!isLatest()) return;
-                setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
-                restoreLocalPin();
-            });
+        // The row exactly as it is on screen now. The list's sequence otherwise
+        // reaches the store in an effect that runs after painting, and a tap in
+        // that gap would be issued below the state the reader was looking at.
+        const row = conversations.find((conversation) => conversation.id === id);
+        void requestPin({
+            id,
+            pinned: shouldPin,
+            identity: pinIdentity,
+            ownerId: pinSession?.user?.id ?? null,
+            transport: pinTransport,
+            seen: row ? { id, pinned: row.pinned === true, pinSeq: row.pinSeq } : undefined,
+        });
     };
     useEffect(() => {
         if (isGuestMode) {
@@ -1069,21 +1103,6 @@ export function ChatSidebar({
         }
         return t("sidebar.organizerNoFilter");
     })();
-
-    /*
-      How many models this conversation answers with, and nothing more.
-
-      The row used to name the model on every line. In a list where almost
-      every conversation runs the same selection that named nothing, and on an
-      imported row it named the model that will answer *next* rather than the
-      one that produced the transcript anybody is reading. What is left is the
-      one fact a name could not carry: that this conversation is a comparison.
-
-      Image conversations keep selectedModels as "[]" by invariant, so they
-      count 0 and show no chip; the glyph already says what they are.
-    */
-    const conversationModelCount = (conversation: Conversation) =>
-        conversation.kind === "image" ? 0 : conversation.selectedModels?.length ?? 0;
 
     const closeConversationMenu = useCallback(() => {
         setOpenMenuId(null);
@@ -1957,11 +1976,21 @@ export function ChatSidebar({
                                           data-testid="sidebar-pinned-header"
                                           aria-expanded={!isPinnedCollapsed}
                                           onClick={() => setIsPinnedCollapsed((value) => !value)}
-                                          className="flex min-h-8 w-full items-center gap-1.5 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-zinc-200"
+                                          // Same 11px AA floor as the date
+                                          // header below: zinc-500 on zinc-950
+                                          // is 4.12:1 and AA wants 4.5.
+                                          className="flex min-h-8 w-full items-center gap-1.5 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-400 dark:hover:text-zinc-200"
                                       >
                                           <Pin className="h-3 w-3 shrink-0" aria-hidden="true" />
                                           <span>{t("sidebar.pinnedSection")}</span>
-                                          <span className="font-semibold text-zinc-400">
+                                          {/*
+                                            Inherits the header's colour rather
+                                            than setting its own zinc-400, which
+                                            at 11px was below AA on the light
+                                            ground. The count is quieter by
+                                            weight, which costs no contrast.
+                                          */}
+                                          <span className="font-semibold">
                                               {groupedConversations.pinned.length}
                                           </span>
                                           <ChevronDown
@@ -1986,7 +2015,10 @@ export function ChatSidebar({
                                 // screen rather than once per group: four groups
                                 // of fixed headers would have eaten the rows the
                                 // shorter row height just bought.
-                                className="sticky top-0 z-[1] bg-zinc-50 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:bg-zinc-950"
+                                // `dark:text-zinc-400` rather than inheriting
+                                // zinc-500: at 11px on zinc-950 that is 4.12:1,
+                                // and WCAG 2.2 AA wants 4.5 for text this size.
+                                className="sticky top-0 z-[1] bg-zinc-50 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:bg-zinc-950 dark:text-zinc-400"
                             >
                                 {dateBucketLabel(group.bucket)}
                             </p>

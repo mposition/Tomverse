@@ -284,6 +284,13 @@ export type Conversation = {
      */
     pinned?: boolean;
     /**
+     * `Conversation.pinSeq`: the sequence of the last pin write the server
+     * accepted. A new write must carry a greater one, and each list is compared
+     * by it so a refreshed answer can be told from a stale one -- which the value
+     * alone cannot do once a pin has been changed and changed back.
+     */
+    pinSeq?: number;
+    /**
      * Last activity, which is what the sidebar's date headers group by and
      * what the server already orders the list by.
      *
