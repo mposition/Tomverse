@@ -32,7 +32,8 @@ export type KeyRetentionProblem = {
   code:
     | "EMAIL_UNSUBSCRIBE_KEY_RETIRED_TOO_EARLY"
     | "EMAIL_UNSUBSCRIBE_KEY_CHANGED"
-    | "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL";
+    | "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL"
+    | "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNPROTECTED";
   keyVersion: string;
   message: string;
 };
@@ -42,6 +43,13 @@ export type KeyRetentionInput = {
   canaries: Array<{ keyVersion: string; token: string }>;
   /** Most recent `sentAt` per key version; absent means never sent. */
   lastSentAt: Record<string, Date | null | undefined>;
+  /**
+   * Most recent send of a message that carried an unsubscribe link but records
+   * no key version -- everything sent before versions were recorded. Nobody can
+   * say which version signed it, so it holds *every* canaried version until it
+   * ages out of the window.
+   */
+  unattributedLastSentAt?: Date | null;
   now: Date;
 };
 
@@ -59,11 +67,35 @@ export const unsubscribeKeyRetentionVerdict = (
   const errors: KeyRetentionProblem[] = [];
   const warnings: KeyRetentionProblem[] = [];
   const retirable: string[] = [];
+  const unattributed = input.unattributedLastSentAt ?? null;
+  const unattributedRequired =
+    unattributed !== null && input.now.getTime() < unattributed.getTime() + RETENTION_MS;
+
+  // Mail that depends on a key nobody recorded, with nothing standing guard over
+  // any key. Fail closed: whatever the keyring looks like, it cannot be shown
+  // to still open those links.
+  if (unattributed && unattributedRequired && (input.canaries.length === 0 || !input.keyring)) {
+    const until = new Date(unattributed.getTime() + RETENTION_MS).toISOString();
+    errors.push({
+      severity: "error",
+      code: input.keyring
+        ? "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNPROTECTED"
+        : "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL",
+      keyVersion: "unattributed",
+      message: input.keyring
+        ? `Mail with unsubscribe links sent before key versions were recorded (last ${unattributed.toISOString()}) has no canary guarding its key. Keep every current version until ${until}.`
+        : `EMAIL_UNSUBSCRIBE_KEYS is unset, but mail with unsubscribe links was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days; its links are dead until ${until}.`,
+    });
+  }
 
   for (const canary of [...input.canaries].sort((a, b) =>
     a.keyVersion.localeCompare(b.keyVersion)
   )) {
-    const lastSent = input.lastSentAt[canary.keyVersion] ?? null;
+    const own = input.lastSentAt[canary.keyVersion] ?? null;
+    const lastSent =
+      own && unattributed
+        ? new Date(Math.max(own.getTime(), unattributed.getTime()))
+        : (own ?? unattributed);
     const retainUntil = lastSent ? new Date(lastSent.getTime() + RETENTION_MS) : null;
     const required = retainUntil !== null && input.now < retainUntil;
     const until = retainUntil?.toISOString() ?? "";

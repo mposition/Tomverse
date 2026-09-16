@@ -91,6 +91,11 @@ export async function POST(req: Request) {
   // nothing an attacker could amplify.
   const read = readUnsubscribeToken(token, keyring);
   if (!read.valid) {
+    // Limited before anything is logged: a token naming a version that does not
+    // exist is free to forge, and logging it first would turn the origin limit
+    // into a log-amplification path.
+    const limited = await limitInvalid(req);
+    if (limited) return limited;
     if (read.reason === "unknown_key") {
       // Not a user error: somebody dropped a key version and every link of that
       // vintage is now dead. The recipient's remaining option is the spam
@@ -102,9 +107,6 @@ export async function POST(req: Request) {
         })
       );
     }
-    // Logged before the limit, so a flood of dead links still says why.
-    const limited = await limitInvalid(req);
-    if (limited) return limited;
     // One answer for every failure. Distinguishing them would turn this into an
     // oracle for which tokens are real.
     return answer({ error: "Invalid link." }, 400);

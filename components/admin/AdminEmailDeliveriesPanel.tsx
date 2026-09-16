@@ -197,7 +197,7 @@ export async function AdminEmailDeliveriesPanel({
                     {row.templateVersion.template.key}
                   </span>
                   <span className="mt-1 block text-[11px] text-zinc-500">
-                    {row.templateVersion.template.classification} · v
+                    {row.templateVersion.classification} · v
                     {row.templateVersion.version} · {row.lane}
                   </span>
                   {/* Written by us and identical for every recipient of this

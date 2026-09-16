@@ -209,6 +209,30 @@ test("the version holds the same classification rules as the template", async ()
   );
 });
 
+test("an insert from the previous build, which omits the metadata, still succeeds", async () => {
+  // Migrations run before the new build takes traffic. The previous build's
+  // insert names none of the three columns; a compatibility trigger fills them
+  // from the template row, which is what that build's drain would have read.
+  const { templateId } = await ensureTemplateVersion({
+    templateKey: ACCOUNT_WELCOME_TEMPLATE,
+    language: "en",
+  });
+  const id = `legacy-${randomUUID()}`;
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "TemplateVersion"
+       ("id", "templateId", "version", "language", "subject", "bodyHtml", "bodyText",
+        "contentHash", "status", "publishedAt", "updatedAt")
+     VALUES ($1, $2, 1, 'de', 's', '<p>s</p>', 's', 'legacy-hash', 'published', NOW(), NOW())`,
+    id,
+    templateId
+  );
+
+  const version = await prisma.templateVersion.findUniqueOrThrow({ where: { id } });
+  assert.equal(version.classification, "transactional");
+  assert.equal(version.purpose, null);
+  assert.equal(version.requiresUnsubscribe, false);
+});
+
 test("the drain refuses a queued message whose version no longer matches the code", async () => {
   const user = await prisma.user.create({
     data: { email: `${randomUUID()}@example.com`, name: "Someone" },
@@ -258,4 +282,78 @@ test("the drain refuses a queued message whose version no longer matches the cod
   assert.equal(after.status, "failed");
   assert.equal(after.lastErrorKind, "template_metadata_mismatch");
   assert.equal(after.claimedAt, null);
+});
+
+/** A sent delivery whose version says one thing and whose template row another. */
+const reclassifiedSend = async (input: {
+  classification: string;
+  purpose: string | null;
+  requiresUnsubscribe: boolean;
+  sentAt: Date;
+}) => {
+  const user = await prisma.user.create({
+    data: { email: `${randomUUID()}@example.com`, name: "Someone" },
+  });
+  const rows = enqueuedRow(
+    await enqueueStandardEmail({
+      templateKey: ACCOUNT_WELCOME_TEMPLATE,
+      emailAddress: user.email,
+      userId: user.id,
+      payload: { name: "Someone" },
+    })
+  );
+  const delivery = await prisma.emailDelivery.update({
+    where: { id: rows!.deliveryId },
+    data: { status: "sent", sentAt: input.sentAt },
+    select: { id: true, templateVersionId: true },
+  });
+  await prisma.$transaction([
+    prisma.$executeRawUnsafe(
+      `ALTER TABLE "TemplateVersion" DISABLE TRIGGER "template_version_send_metadata_is_immutable"`
+    ),
+    prisma.$executeRawUnsafe(
+      `UPDATE "TemplateVersion" SET "classification" = $1, "purpose" = $2, "requiresUnsubscribe" = $3 WHERE "id" = $4`,
+      input.classification,
+      input.purpose,
+      input.requiresUnsubscribe,
+      delivery.templateVersionId
+    ),
+    prisma.$executeRawUnsafe(
+      `ALTER TABLE "TemplateVersion" ENABLE TRIGGER "template_version_send_metadata_is_immutable"`
+    ),
+  ]);
+  return delivery;
+};
+
+test("snapshot retention follows the version's classification, not the template row's", async () => {
+  // The row says transactional (90 days); the version says legal (2,555 days).
+  // Purging on the row's window would destroy a legal record irreversibly.
+  const { purgeExpiredRenderSnapshots } = await import("@/lib/emailSnapshotRetention");
+  const now = new Date();
+  const delivery = await reclassifiedSend({
+    classification: "legal",
+    purpose: null,
+    requiresUnsubscribe: false,
+    sentAt: new Date(now.getTime() - 120 * 24 * 60 * 60 * 1_000),
+  });
+
+  await purgeExpiredRenderSnapshots(now);
+
+  const after = await prisma.emailDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
+  assert.notEqual(after.renderDataSnapshot, null);
+  assert.equal(after.snapshotPurgedAt, null);
+});
+
+test("marketing send health counts by the version's classification", async () => {
+  const { marketingSendCounts } = await import("@/lib/marketingSendHealth");
+  const now = new Date();
+  await reclassifiedSend({
+    classification: "marketing",
+    purpose: "product_updates",
+    requiresUnsubscribe: true,
+    sentAt: new Date(now.getTime() - 60 * 1_000),
+  });
+
+  const counts = await marketingSendCounts(now);
+  assert.equal(counts.sent, 1);
 });

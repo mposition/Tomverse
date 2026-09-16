@@ -35,6 +35,34 @@ UPDATE "TemplateVersion" AS tv
   FROM "EmailTemplate" AS t
  WHERE tv."templateId" = t."id";
 
+-- Deploy compatibility, transitional. Migrations run before the new build takes
+-- traffic, so for a moment the previous build is still inserting versions --
+-- the first login code in a new language, the first send after a copy change --
+-- and it does not know these columns exist. Without this those inserts fail
+-- the NOT NULL below, and a login code is the first thing that would.
+--
+-- Fills only what the insert left NULL, from the template row, which is exactly
+-- what the previous build's drain would have read. The current build always
+-- supplies all three, so this never decides a value for it. Remove it in a
+-- later migration once no build older than this one can be running.
+CREATE OR REPLACE FUNCTION "template_version_send_metadata_legacy_insert"()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW."classification" IS NULL AND NEW."requiresUnsubscribe" IS NULL THEN
+        SELECT t."classification", t."purpose", t."requiresUnsubscribe"
+          INTO NEW."classification", NEW."purpose", NEW."requiresUnsubscribe"
+          FROM "EmailTemplate" AS t
+         WHERE t."id" = NEW."templateId";
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "template_version_send_metadata_legacy_insert"
+    BEFORE INSERT ON "TemplateVersion"
+    FOR EACH ROW
+    EXECUTE FUNCTION "template_version_send_metadata_legacy_insert"();
+
 ALTER TABLE "TemplateVersion"
     ALTER COLUMN "classification" SET NOT NULL,
     ALTER COLUMN "requiresUnsubscribe" SET NOT NULL;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
-import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
+import { ACCOUNT_WELCOME_TEMPLATE, MODEL_LAUNCH_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import {
   ensureBootstrapPolicyVersion,
   ensureTemplateVersion,
@@ -61,7 +61,7 @@ const sentDelivery = async (input: {
   return prisma.emailDelivery.create({
     data: {
       eventId: event.id,
-      recipientKey: `address:${randomUUID()}`,
+      recipientKey: `addr:${randomUUID()}@example.com`,
       emailAddress: `${randomUUID()}@example.com`,
       language: "en",
       lane: "standard",
@@ -112,4 +112,49 @@ test("the newest send per version is the one that counts", async () => {
 
   const verdict = await getUnsubscribeKeyRetentionReadiness(now, env("v2:secret-two", "v2"));
   assert.equal(verdict.ready, false);
+});
+
+test("mail from before versions were recorded adopts every listed version", async () => {
+  // Sent with an unsubscribe link and no recorded version: a marketing template
+  // version, since only those require the link.
+  const now = new Date();
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  const { templateId, templateVersionId } = await ensureTemplateVersion({
+    templateKey: MODEL_LAUNCH_TEMPLATE,
+    language: "en",
+  });
+  const event = await prisma.emailEvent.create({
+    data: { kind: "model.launch", templateId, payload: {}, audienceKind: "single_user" },
+  });
+  await prisma.emailDelivery.create({
+    data: {
+      eventId: event.id,
+      recipientKey: `addr:${randomUUID()}@example.com`,
+      emailAddress: `${randomUUID()}@example.com`,
+      language: "en",
+      lane: "standard",
+      policyVersionId,
+      templateVersionId,
+      idempotencyKey: randomUUID(),
+      jurisdictionCountry: "US",
+      jurisdictionProfileKey: "us",
+      status: "sent",
+      sentAt: new Date(now.getTime() - 3 * DAY),
+    },
+  });
+
+  const listed = env("v1:secret-one,v2:secret-two", "v2");
+  const first = await getUnsubscribeKeyRetentionReadiness(now, listed);
+  assert.equal(first.ready, true);
+  assert.deepEqual(
+    (await prisma.emailUnsubscribeKeyCanary.findMany({ orderBy: { keyVersion: "asc" } })).map(
+      (row) => row.keyVersion
+    ),
+    ["v1", "v2"]
+  );
+
+  // Now dropping either version is refused until that mail ages out.
+  const dropped = await getUnsubscribeKeyRetentionReadiness(now, env("v2:secret-two", "v2"));
+  assert.equal(dropped.ready, false);
+  assert.equal(dropped.errors[0].keyVersion, "v1");
 });

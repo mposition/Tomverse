@@ -130,3 +130,39 @@ test("no message names a secret or a token", () => {
   assert.doesNotMatch(text, /secret-one|a-different-secret/);
   assert.equal(text.includes(canaryV1.token), false);
 });
+
+test("mail sent before versions were recorded holds every canaried version", () => {
+  const verdict = unsubscribeKeyRetentionVerdict({
+    keyring: keyring({ v2: "secret-two" }),
+    canaries: [canaryV1],
+    lastSentAt: {},
+    unattributedLastSentAt: daysAgo(5),
+    now,
+  });
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.errors[0].code, "EMAIL_UNSUBSCRIBE_KEY_RETIRED_TOO_EARLY");
+});
+
+test("recent unattributed mail with no canary at all is not ready", () => {
+  const verdict = unsubscribeKeyRetentionVerdict({
+    keyring: v1,
+    canaries: [],
+    lastSentAt: {},
+    unattributedLastSentAt: daysAgo(5),
+    now,
+  });
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.errors[0].code, "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNPROTECTED");
+});
+
+test("unattributed mail that aged out holds nothing", () => {
+  const verdict = unsubscribeKeyRetentionVerdict({
+    keyring: keyring({ v2: "secret-two" }),
+    canaries: [canaryV1],
+    lastSentAt: {},
+    unattributedLastSentAt: daysAgo(UNSUBSCRIBE_KEY_RETENTION_DAYS + 1),
+    now,
+  });
+  assert.equal(verdict.ready, true);
+  assert.deepEqual(verdict.retirable, ["v1"]);
+});

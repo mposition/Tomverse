@@ -28,6 +28,20 @@ const baseHeaders = {
   "X-Content-Type-Options": "nosniff",
 };
 
+const withDeadline = async <T>(work: Promise<T>, ms: number, message: string) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
+
 const checkDatabase = async () => {
   const startedAt = Date.now();
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -187,16 +201,28 @@ const readinessResponse = async (head = false) => {
   // editing that version kills links already in inboxes -- which the recipient
   // answers with the spam button. Decrypt-only; it never calls the endpoint.
   // A thrown check is not ready, for the reason the image budget gives.
-  const unsubscribeRetentionStatus = await getUnsubscribeKeyRetentionReadiness().then(
-    (status) => ({ status, error: null as string | null }),
-    (error: unknown) => ({
-      status: null,
-      error:
-        error instanceof Error
-          ? error.message
-          : "The unsubscribe key retention readiness check threw.",
-    })
-  );
+  // Skipped when the database check already failed -- asking the same database
+  // again would only queue another probe behind it -- and bounded by the same
+  // deadline when it runs.
+  const unsubscribeRetentionStatus = databaseResult.ready
+    ? await withDeadline(
+        getUnsubscribeKeyRetentionReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The unsubscribe key retention readiness check timed out."
+      ).then(
+        (status) => ({ status, error: null as string | null }),
+        (error: unknown) => ({
+          status: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The unsubscribe key retention readiness check threw.",
+        })
+      )
+    : {
+        status: null,
+        error: "Skipped: the database readiness check failed.",
+      };
   const emailUnsubscribeKeyRetention = unsubscribeRetentionStatus.status?.ready ?? false;
   // The marketing consent confirmation keyring (docs/policy/email-double-opt-in.md
   // §11 item 10). Same condition as the unsubscribe keyring above: an error
