@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-reservation-authority-v1, round 1
+# Independent review — task prompt-refiner-reservation-authority-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -16,12 +16,12 @@ Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않�
 - DB trigger가 terminal timestamp를 소유한다. 잠금 뒤 clock_timestamp() 기준으로 조기 expire와 timestamp 위조를 거부하고, deadline을 넘긴 consume/release는 expired tombstone으로 저장하며 consume race에서는 정확히 한 번만 성공한다.
 - authority table·반환값은 prompt/content/user/conversation/provider 오류를 저장하지 않는다. migration에는 stage seed가 없고 제품/API/script import, runtime writer, provider/model/API 호출, AppSetting·flag 활성화가 없으며 기존 v1에는 admitted:true 경로가 없다.
 - Prisma schema diff는 PromptRefinerReservationStage와 PromptRefinerReservation 신규 model 44줄뿐이고 enum·DB integration lane·bounded retention registry가 migration과 일치한다. 최신 develop의 MemoryExtractionChunk skipped 상태와 다른 기존 계약을 보존한다.
-- focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 15/15가 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.
+- focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 17/17이 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.
 - Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 요약을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 남으면 on_hold다.
 - Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다.
 - Multi-round 감사기록을 보존하기 위해 docs/ops/cross-review/packages/ parent를 control-program writable scope로 선언한다. 이는 기능 writable source 확대가 아니며 own output directory는 매 round --diff-exclude되고 generatedPaths에는 넣지 않는다. Round 1의 filesChanged tree scope는 source 16개와 커밋된 round 0 audit record 7개를 합친 23개일 수 있지만, reviewed diff와 changeDigest는 source 16개만 포함해야 한다.
 
-## Change under review — digest sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7, commit 73043d0ba46fa3225a9c0a63e9a5393c9359bdd8
+## Change under review — digest sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f, commit b32039a97f6f6cea83aefd6011ffd2d5bebf1e39
 
 ```diff
 diff --git a/.github/workflows/credit-finance-db-integration.yml b/.github/workflows/credit-finance-db-integration.yml
@@ -84,7 +84,7 @@ index 64602562..57d286c1 100644
    loopback E2E fixture; a stored flag alone must never expose an inert product
 diff --git a/docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json
 new file mode 100644
-index 00000000..12749300
+index 00000000..5dbff486
 --- /dev/null
 +++ b/docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json
 @@ -0,0 +1,37 @@
@@ -99,7 +99,7 @@ index 00000000..12749300
 +    "DB trigger가 terminal timestamp를 소유한다. 잠금 뒤 clock_timestamp() 기준으로 조기 expire와 timestamp 위조를 거부하고, deadline을 넘긴 consume/release는 expired tombstone으로 저장하며 consume race에서는 정확히 한 번만 성공한다.",
 +    "authority table·반환값은 prompt/content/user/conversation/provider 오류를 저장하지 않는다. migration에는 stage seed가 없고 제품/API/script import, runtime writer, provider/model/API 호출, AppSetting·flag 활성화가 없으며 기존 v1에는 admitted:true 경로가 없다.",
 +    "Prisma schema diff는 PromptRefinerReservationStage와 PromptRefinerReservation 신규 model 44줄뿐이고 enum·DB integration lane·bounded retention registry가 migration과 일치한다. 최신 develop의 MemoryExtractionChunk skipped 상태와 다른 기존 계약을 보존한다.",
-+    "focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 15/15가 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.",
++    "focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 17/17이 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.",
 +    "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 요약을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 남으면 on_hold다.",
 +    "Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다.",
 +    "Multi-round 감사기록을 보존하기 위해 docs/ops/cross-review/packages/ parent를 control-program writable scope로 선언한다. 이는 기능 writable source 확대가 아니며 own output directory는 매 round --diff-exclude되고 generatedPaths에는 넣지 않는다. Round 1의 filesChanged tree scope는 source 16개와 커밋된 round 0 audit record 7개를 합친 23개일 수 있지만, reviewed diff와 changeDigest는 source 16개만 포함해야 한다."
@@ -126,7 +126,7 @@ index 00000000..12749300
 +  "generatedPaths": []
 +}
 diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
-index 9dbaa542..7e4318bd 100644
+index 9dbaa542..3d35b6a1 100644
 --- a/docs/ops/tomverse-chat-progress.md
 +++ b/docs/ops/tomverse-chat-progress.md
 @@ -980,3 +980,60 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
@@ -175,7 +175,7 @@ index 9dbaa542..7e4318bd 100644
 +| C19–C20 Refiner·Planner·품질 평가 | **약 41%** (직전 약 38%, durable authority 구현 반영) |
 +| 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·명시적 UTC DB-owned terminal clock·SQL limit으로 제한된 expiry lock footprint·원자 slot/cost·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
 +| 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 17/17, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
-+| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 15개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
++| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 17개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
 +| 독립 검토·통합 CI | 대기 — 구현 완료 뒤 Claude 읽기 전용 검토와 Linux CI 필요 |
 +| 병합·배포·공개 | 미수행. provider/API/model 호출 0, stage seed/writer 0, v1 admission·flag 변경 0 |
 +
@@ -2440,76 +2440,76 @@ index 00000000..0cf01699
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1264ms)
+- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1398ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 1180.6125
+  # duration_ms 1305.613
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck -- --pretty false` (43377ms)
+- PASS `npm run typecheck -- --pretty false` (54386ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false --pretty false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs` (3470ms)
-- PASS `npx prisma validate` (2249ms)
+- PASS `npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs` (49917ms)
+- PASS `npx prisma validate` (15345ms)
   The schema at prisma\schema.prisma is valid 🚀
-- PASS `npm run check:model-pricing` (893ms)
+- PASS `npm run check:model-pricing` (1352ms)
   > ai-chat-hub@0.1.0 check:model-pricing
   > node --import tsx scripts/check-model-pricing.mjs
   
   
   Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.
-- PASS `npm run check:enum-constraints` (1183ms)
+- PASS `npm run check:enum-constraints` (3794ms)
   > ai-chat-hub@0.1.0 check:enum-constraints
   > node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs
   
   Enum constraint check passed: 93 closed list(s) in the schema — 43 compared against an application list, 16 held only as a TypeScript union, 34 written down only in the database.
-- PASS `npm run check:db-integration-coverage` (556ms)
+- PASS `npm run check:db-integration-coverage` (621ms)
   > ai-chat-hub@0.1.0 check:db-integration-coverage
   > node scripts/check-db-integration-coverage.mjs
   
   DB integration coverage check passed: 118 suite(s) in tests/integration/, all 118 named by the runner.
-- PASS `npm run check:doc-references` (1547ms)
+- PASS `npm run check:doc-references` (8282ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 868 referenced path(s) across 109 instruction document(s), and 968 path(s) named by comments across 2922 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1135ms)
+- PASS `npm run check:policy-section-references` (2743ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4468 citation(s) against 36 policy document(s). 2890 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1351 and 227 predate this change).
-- PASS `npm run check:encoding:strict` (1421ms)
+- PASS `npm run check:encoding:strict` (3875ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `npm run check:data-domain-registry` (797ms)
+- PASS `npm run check:data-domain-registry` (1732ms)
   y\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.
      Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.
      Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.
      2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.
-- PASS `node --test tests/unsweptTables.test.mjs` (159ms)
+- PASS `node --test tests/unsweptTables.test.mjs` (188ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 79.5439
-- PASS `git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'` (59ms)
+  # duration_ms 96.2856
+- PASS `git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'` (63ms)
 
 ## Findings from the previous round (check each was addressed)
 
-- [warning/evidence] prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275: Every DB-clock comparison mixes `clock_timestamp()` (timestamptz) with `TIMESTAMP(3)` (without time zone) columns/variables, so the whole TTL, expiry-ownership and late-consume-becomes-expired contract silently depends on the server's `TimeZone` GUC being UTC: on a non-UTC database inserts always fail closed, and if the GUC has a negative offset the guard accepts a post-deadline consume for |offset| hours instead of writing the required expired tombstone.
-- [nit/judgement] lib/promptRefinerReservationAuthority.ts:328-339: The doc comment says "Expires active rows in bounded batches", but the `SELECT ... FOR UPDATE` has no `LIMIT`: it locks every `reserved` row for the stage and `limit` is only applied by `.slice()` after the client-side filter, so `limit` bounds the writes but not the lock footprint.
+- [nit/evidence] docs/ops/tomverse-chat-progress.md:1025: The finance-lane row still reports "전용 15개 suite를 fresh DB에서 통과시켰으며", which contradicts line 1024 of the same table ("신규 DB integration 17/17") and the 17 cases actually shipped in the new suite, leaving a self-contradicting verification record in the change.
+- [nit/evidence] lib/promptRefinerReservationAuthority.ts:328-337 vs. the author's round-1 account: The author's account states the sweep applies "FOR UPDATE SKIP LOCKED·LIMIT", but the shipped SQL uses plain `FOR UPDATE` with no `SKIP LOCKED`, so the audit record overstates the implemented locking clause (the LIMIT placement itself is correct and no code change is required).
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Round 0의 두 finding을 수정했다. migration의 모든 authority DB-clock 비교와 terminal timestamp를 naive UTC column contract에 맞춰 clock_timestamp() AT TIME ZONE 'UTC'로 고정해 session TimeZone 의존을 제거했고, expiry sweep은 stage→registry SHARE lock 뒤 DB에서 expiry predicate·ORDER BY·FOR UPDATE SKIP LOCKED·LIMIT을 적용해 limit만큼만 reservation row를 잠근다. 독립 verifier가 non-UTC insert/late terminal과 lock-footprint 경계를 PASS했다. provider/product 활성화, stage seed/admin writer, runtime caller, provider/model/API 호출 없이 v1 admitted:false를 유지한다. 최신 origin/develop 기준 schema diff는 Prompt Refiner +44/-0다. focused 42와 기존 12 package guard를 이번 source commit에서 재실행한다. 별도 worktree-local PostgreSQL 17에서 fresh 112 migrations, drift 0, authority DB 17/17을 확인했고 timezone/lock-footprint 독립 검증도 통과했으나, package 생성에서는 DB를 재호출하지 않는다. full finance 비교의 실패 17개는 base에도 동일한 기존 chat concurrency/rate/image 실패였고 신규 authority 실패는 0이었다. Multi-round control scope의 filesChanged에는 source 16개와 committed round 0 audit record 7개, 총 23개가 보일 수 있지만 own output은 diff-exclude되어 reviewed diff와 changeDigest는 source 16개만 포함한다.
+Summary: Round 1의 문서 finding을 실제 source에서 정정했다. stale authority DB 15/15와 전용 15개 suite 표기를 검증된 17/17·17개로 바로잡았다. Round 1 작성자 요약의 'FOR UPDATE SKIP LOCKED'은 감사 문구 오류였고 실제 구현은 expiry predicate와 ORDER BY 뒤 caller LIMIT을 적용한 다음 plain FOR UPDATE를 실행하므로 이 항목에는 code change가 필요하지 않았다. 과거 package, exchange round record, verdict와 events는 immutable 감사 기록으로 바이트 변경 없이 보존했다. Round 0의 UTC clock 및 bounded lock-footprint 두 finding은 앞선 source 수정과 독립 검증으로 계속 해결된 상태다. 제품 또는 provider 활성화, stage seed/runtime caller, provider/model/API 호출은 없으며 이번 package 생성도 API를 호출하지 않는다.
 
 ## Answer format
 
@@ -2518,8 +2518,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-reservation-authority-v1",
-  "round": 1,
-  "reviewedDigest": "sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7",
+  "round": 2,
+  "reviewedDigest": "sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {

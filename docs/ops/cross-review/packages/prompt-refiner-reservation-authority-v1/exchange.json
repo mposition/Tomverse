@@ -10,7 +10,7 @@
     "DB trigger가 terminal timestamp를 소유한다. 잠금 뒤 clock_timestamp() 기준으로 조기 expire와 timestamp 위조를 거부하고, deadline을 넘긴 consume/release는 expired tombstone으로 저장하며 consume race에서는 정확히 한 번만 성공한다.",
     "authority table·반환값은 prompt/content/user/conversation/provider 오류를 저장하지 않는다. migration에는 stage seed가 없고 제품/API/script import, runtime writer, provider/model/API 호출, AppSetting·flag 활성화가 없으며 기존 v1에는 admitted:true 경로가 없다.",
     "Prisma schema diff는 PromptRefinerReservationStage와 PromptRefinerReservation 신규 model 44줄뿐이고 enum·DB integration lane·bounded retention registry가 migration과 일치한다. 최신 develop의 MemoryExtractionChunk skipped 상태와 다른 기존 계약을 보존한다.",
-    "focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 15/15가 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.",
+    "focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 17/17이 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.",
     "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 요약을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 남으면 on_hold다.",
     "Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다.",
     "Multi-round 감사기록을 보존하기 위해 docs/ops/cross-review/packages/ parent를 control-program writable scope로 선언한다. 이는 기능 writable source 확대가 아니며 own output directory는 매 round --diff-exclude되고 generatedPaths에는 넣지 않는다. Round 1의 filesChanged tree scope는 source 16개와 커밋된 round 0 audit record 7개를 합친 23개일 수 있지만, reviewed diff와 changeDigest는 source 16개만 포함해야 한다."
@@ -285,17 +285,141 @@
         }
       ],
       "nextAction": "Both round-0 findings are fixed and verified — every authority DB-clock comparison and terminal timestamp now uses `clock_timestamp() AT TIME ZONE 'UTC'` (migration.sql:169-171, 226, 271-283) with a dedicated non-UTC-session integration test, and the sweep applies the expiry predicate, `ORDER BY \"expiresAt\", \"id\"` and the caller `LIMIT` in SQL before `FOR UPDATE` so at most `limit` rows are locked (authority:328-337, asserted by tests/promptRefinerReservationCore.test.mjs); correct the stale \"15개\" verification count (and the SKIP LOCKED wording in the round-1 record) and this can be approved in round 2 with no code change."
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f",
+      "commit": "b32039a97f6f6cea83aefd6011ffd2d5bebf1e39",
+      "filesChanged": [
+        ".github/workflows/credit-finance-db-integration.yml",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/change-round1.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/package-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round1-attempt1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round1-attempt1.failure.json",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/verdict-round1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerReservationAuthority.ts",
+        "lib/promptRefinerReservationCore.ts",
+        "prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql",
+        "prisma/schema.prisma",
+        "scripts/check-enum-constraints.mjs",
+        "scripts/db-integration-groups.mjs",
+        "scripts/report-unswept-tables-core.mjs",
+        "scripts/run-db-integration-tests.mjs",
+        "tests/integration/prompt-refiner-reservation.db.test.ts",
+        "tests/promptRefinerReservationCore.test.mjs"
+      ],
+      "changeSummary": "Round 1의 문서 finding을 실제 source에서 정정했다. stale authority DB 15/15와 전용 15개 suite 표기를 검증된 17/17·17개로 바로잡았다. Round 1 작성자 요약의 'FOR UPDATE SKIP LOCKED'은 감사 문구 오류였고 실제 구현은 expiry predicate와 ORDER BY 뒤 caller LIMIT을 적용한 다음 plain FOR UPDATE를 실행하므로 이 항목에는 code change가 필요하지 않았다. 과거 package, exchange round record, verdict와 events는 immutable 감사 기록으로 바이트 변경 없이 보존했다. Round 0의 UTC clock 및 bounded lock-footprint 두 finding은 앞선 source 수정과 독립 검증으로 계속 해결된 상태다. 제품 또는 provider 활성화, stage seed/runtime caller, provider/model/API 호출은 없으며 이번 package 생성도 API를 호출하지 않는다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1305.613",
+          "durationMs": 1398
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 54386
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 49917
+        },
+        {
+          "rule": "npx prisma validate",
+          "passed": true,
+          "detail": "The schema at prisma\\schema.prisma is valid 🚀",
+          "durationMs": 15345
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 1352
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 93 closed list(s) in the schema — 43 compared against an application list, 16 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 3794
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 118 suite(s) in tests/integration/, all 118 named by the runner.",
+          "durationMs": 621
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 868 referenced path(s) across 109 instruction document(s), and 968 path(s) named by comments across 2922 source file(s), all present.",
+          "durationMs": 8282
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4468 citation(s) against 36 policy document(s). 2890 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1351 and 227 predate this change).",
+          "durationMs": 2743
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 3875
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.\n   Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 1732
+        },
+        {
+          "rule": "node --test tests/unsweptTables.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 96.2856",
+          "durationMs": 188
+        },
+        {
+          "rule": "git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 63
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": null,
+      "findings": [],
+      "nextAction": "awaiting the reviewer's verdict"
     }
   ],
-  "changeDigest": "sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7",
-  "commit": "73043d0ba46fa3225a9c0a63e9a5393c9359bdd8",
-  "changeSummary": "Round 0의 두 finding을 수정했다. migration의 모든 authority DB-clock 비교와 terminal timestamp를 naive UTC column contract에 맞춰 clock_timestamp() AT TIME ZONE 'UTC'로 고정해 session TimeZone 의존을 제거했고, expiry sweep은 stage→registry SHARE lock 뒤 DB에서 expiry predicate·ORDER BY·FOR UPDATE SKIP LOCKED·LIMIT을 적용해 limit만큼만 reservation row를 잠근다. 독립 verifier가 non-UTC insert/late terminal과 lock-footprint 경계를 PASS했다. provider/product 활성화, stage seed/admin writer, runtime caller, provider/model/API 호출 없이 v1 admitted:false를 유지한다. 최신 origin/develop 기준 schema diff는 Prompt Refiner +44/-0다. focused 42와 기존 12 package guard를 이번 source commit에서 재실행한다. 별도 worktree-local PostgreSQL 17에서 fresh 112 migrations, drift 0, authority DB 17/17을 확인했고 timezone/lock-footprint 독립 검증도 통과했으나, package 생성에서는 DB를 재호출하지 않는다. full finance 비교의 실패 17개는 base에도 동일한 기존 chat concurrency/rate/image 실패였고 신규 authority 실패는 0이었다. Multi-round control scope의 filesChanged에는 source 16개와 committed round 0 audit record 7개, 총 23개가 보일 수 있지만 own output은 diff-exclude되어 reviewed diff와 changeDigest는 source 16개만 포함한다.",
+  "changeDigest": "sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f",
+  "commit": "b32039a97f6f6cea83aefd6011ffd2d5bebf1e39",
+  "changeSummary": "Round 1의 문서 finding을 실제 source에서 정정했다. stale authority DB 15/15와 전용 15개 suite 표기를 검증된 17/17·17개로 바로잡았다. Round 1 작성자 요약의 'FOR UPDATE SKIP LOCKED'은 감사 문구 오류였고 실제 구현은 expiry predicate와 ORDER BY 뒤 caller LIMIT을 적용한 다음 plain FOR UPDATE를 실행하므로 이 항목에는 code change가 필요하지 않았다. 과거 package, exchange round record, verdict와 events는 immutable 감사 기록으로 바이트 변경 없이 보존했다. Round 0의 UTC clock 및 bounded lock-footprint 두 finding은 앞선 source 수정과 독립 검증으로 계속 해결된 상태다. 제품 또는 provider 활성화, stage seed/runtime caller, provider/model/API 호출은 없으며 이번 package 생성도 API를 호출하지 않는다.",
   "testResults": [
     {
       "command": "node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
       "passed": true,
-      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1180.6125",
-      "durationMs": 1264
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1305.613",
+      "durationMs": 1398
     }
   ],
   "guardRuns": [
@@ -303,118 +427,107 @@
       "rule": "npm run typecheck -- --pretty false",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
-      "durationMs": 43377
+      "durationMs": 54386
     },
     {
       "rule": "npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs",
       "passed": true,
       "detail": "",
-      "durationMs": 3470
+      "durationMs": 49917
     },
     {
       "rule": "npx prisma validate",
       "passed": true,
       "detail": "The schema at prisma\\schema.prisma is valid 🚀",
-      "durationMs": 2249
+      "durationMs": 15345
     },
     {
       "rule": "npm run check:model-pricing",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
-      "durationMs": 893
+      "durationMs": 1352
     },
     {
       "rule": "npm run check:enum-constraints",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 93 closed list(s) in the schema — 43 compared against an application list, 16 held only as a TypeScript union, 34 written down only in the database.",
-      "durationMs": 1183
+      "durationMs": 3794
     },
     {
       "rule": "npm run check:db-integration-coverage",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 118 suite(s) in tests/integration/, all 118 named by the runner.",
-      "durationMs": 556
+      "durationMs": 621
     },
     {
       "rule": "npm run check:doc-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 868 referenced path(s) across 109 instruction document(s), and 968 path(s) named by comments across 2922 source file(s), all present.",
-      "durationMs": 1547
+      "durationMs": 8282
     },
     {
       "rule": "npm run check:policy-section-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4468 citation(s) against 36 policy document(s). 2890 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1351 and 227 predate this change).",
-      "durationMs": 1135
+      "durationMs": 2743
     },
     {
       "rule": "npm run check:encoding:strict",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
-      "durationMs": 1421
+      "durationMs": 3875
     },
     {
       "rule": "npm run check:data-domain-registry",
       "passed": true,
       "detail": "y\\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.\n   Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
-      "durationMs": 797
+      "durationMs": 1732
     },
     {
       "rule": "node --test tests/unsweptTables.test.mjs",
       "passed": true,
-      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 79.5439",
-      "durationMs": 159
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 96.2856",
+      "durationMs": 188
     },
     {
       "rule": "git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'",
       "passed": true,
       "detail": "",
-      "durationMs": 59
+      "durationMs": 63
     }
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": "request_changes",
-  "findings": [
-    {
-      "location": "docs/ops/tomverse-chat-progress.md:1025",
-      "severity": "nit",
-      "basis": "evidence",
-      "claim": "The finance-lane row still reports \"전용 15개 suite를 fresh DB에서 통과시켰으며\", which contradicts line 1024 of the same table (\"신규 DB integration 17/17\") and the 17 cases actually shipped in the new suite, leaving a self-contradicting verification record in the change.",
-      "reproduction": "Read docs/ops/tomverse-chat-progress.md lines 1024-1025 (one row says 17/17, the next says 15), then count the suite: `Select-String -Path tests/integration/prompt-refiner-reservation.db.test.ts -Pattern '^test\\(' | Measure-Object` → 17. Expected: both rows state the same, actual, count.",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "lib/promptRefinerReservationAuthority.ts:328-337 vs. the author's round-1 account",
-      "severity": "nit",
-      "basis": "evidence",
-      "claim": "The author's account states the sweep applies \"FOR UPDATE SKIP LOCKED·LIMIT\", but the shipped SQL uses plain `FOR UPDATE` with no `SKIP LOCKED`, so the audit record overstates the implemented locking clause (the LIMIT placement itself is correct and no code change is required).",
-      "reproduction": "`Select-String -Path lib/promptRefinerReservationAuthority.ts -Pattern 'SKIP LOCKED'` returns nothing; lines 335-336 read `LIMIT ${limit}` then `FOR UPDATE`. Expected: the round-1 summary/package text matches the shipped clause.",
-      "disposition": "fix_requested"
-    }
-  ],
-  "nextAction": "Both round-0 findings are fixed and verified — every authority DB-clock comparison and terminal timestamp now uses `clock_timestamp() AT TIME ZONE 'UTC'` (migration.sql:169-171, 226, 271-283) with a dedicated non-UTC-session integration test, and the sweep applies the expiry predicate, `ORDER BY \"expiresAt\", \"id\"` and the caller `LIMIT` in SQL before `FOR UPDATE` so at most `limit` rows are locked (authority:328-337, asserted by tests/promptRefinerReservationCore.test.mjs); correct the stale \"15개\" verification count (and the SKIP LOCKED wording in the round-1 record) and this can be approved in round 2 with no code change.; package round 2 once the change is revised",
-  "status": "awaiting_revision",
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand the review prompt (round 2) to the claude reviewer; its verdict must name digest sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f",
+  "status": "awaiting_review",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-16T10:43:34.165Z",
-  "packagedRounds": 2,
+  "producedAt": "2026-09-16T10:51:13.950Z",
+  "packagedRounds": 3,
   "concludedAtRound": null,
   "lineage": [],
   "inheritedFindings": [],
-  "headCommit": "73043d0ba46fa3225a9c0a63e9a5393c9359bdd8",
+  "headCommit": "b32039a97f6f6cea83aefd6011ffd2d5bebf1e39",
   "worktreeDirty": false,
   "filesChanged": [
     ".github/workflows/credit-finance-db-integration.yml",
     "AGENTS.md",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/change-round1.diff",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/change.diff",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/exchange.json",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/package-round1.json",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-prompt.md",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round1-attempt1.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round1-attempt1.failure.json",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/review-round1.events.jsonl",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1/verdict-round1.json",
     "docs/ops/tomverse-chat-progress.md",
     "docs/policy/prompt-refiner-observability.md",
     "docs/ui-contracts/prompt-refiner-suggestion.md",
