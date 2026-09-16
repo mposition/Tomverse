@@ -2,6 +2,12 @@ import { readdirSync, readFileSync } from "node:fs";
 
 const read = (path) => readFileSync(path, "utf8");
 
+// Railway cron services as .railway/railway.ts deploys them. Read as data
+// rather than as text so a check pairs a start command with its own schedule.
+const { RAILWAY_CRON_SERVICES } = await import("../.railway/scheduled-jobs.ts");
+const railwayCron = (startCommand) =>
+  RAILWAY_CRON_SERVICES.find((job) => job.startCommand === startCommand);
+
 const WORKFLOW_DIR = ".github/workflows";
 
 const workflowFiles = () =>
@@ -554,7 +560,7 @@ const checks = [
     test: (source) => {
       const probe = read("lib/providerProbe.ts");
       const errorClassification = read("lib/providerErrorClassification.ts");
-      const cron = read("railway.provider-probe.json");
+      const cron = railwayCron("npm run maintenance:provider-probe");
       const runner = read("scripts/run-provider-probe.mjs");
       return (
         // Constant-time secret comparison, and an unauthenticated request
@@ -584,7 +590,7 @@ const checks = [
         // The Railway cron cadence stays comfortably under the public
         // status page's freshness window, and the trigger script only ever
         // calls this one fixed, HTTPS-enforced endpoint.
-        cron.includes('"cronSchedule": "*/10 * * * *"') &&
+        cron?.cronSchedule === "*/10 * * * *" &&
         runner.includes("/api/internal/provider-probe/check") &&
         runner.includes('protocol !== "https:"')
       );
@@ -992,10 +998,12 @@ const checks = [
   },
   {
     name: "Railway maintenance cron is represented in code",
-    file: "railway.maintenance.json",
+    file: ".railway/railway.ts",
     test: (source) =>
-      source.includes('"startCommand": "npm run maintenance:cleanup"') &&
-      source.includes('"cronSchedule": "0 3 * * *"'),
+      source.includes('export const partial = "scheduled-jobs";') &&
+      source.includes("resources: buildScheduledJobResources(ctx.environment") &&
+      read(".railway/scheduled-jobs.ts").includes('restartPolicyType: "NEVER"') &&
+      railwayCron("npm run maintenance:cleanup")?.cronSchedule === "0 3 * * *",
   },
   {
     name: "Process liveness stays independent from external dependencies",
@@ -3096,7 +3104,7 @@ const checks = [
       const review = read(
         "app/api/conversations/[conversationId]/comparison-reviews/route.ts"
       );
-      const cron = read("railway.credit-reconciliation.json");
+      const cron = railwayCron("npm run maintenance:credit-reservations");
       const runner = read("scripts/run-credit-reconciliation.mjs");
       return (
         source.includes("MAINTENANCE_SECRET") &&
@@ -3110,8 +3118,7 @@ const checks = [
           "linkChatReservationProviderRequest"
         ) &&
         review.includes("runComparisonReview") &&
-        cron.includes('"cronSchedule": "*/15 * * * *"') &&
-        cron.includes('"startCommand": "npm run maintenance:credit-reservations"') &&
+        cron?.cronSchedule === "*/15 * * * *" &&
         runner.includes("/api/internal/maintenance/credit-reservations")
       );
     },
