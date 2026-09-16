@@ -1,11 +1,11 @@
 # Prompt Refiner receipt와 관측 계약
 
-상태: **provider-independent 데이터·실행 사전등록 계약 구현, 제품 수집 미연결**.
+상태: **provider-independent 데이터·실행 사전등록·예약 authority 구현, 제품 수집 미연결**.
 
 이 문서는 Prompt Refiner 한 요청에서 무엇을 관측하고 어떤 분모로 읽는지를
 정한다. 현재 구현은 strict schema, 결속 검사, 순수 집계와 오프라인 report까지다.
-provider adapter, API route, Prisma table, browser event writer, 비용 예약·정산,
-Router 결합과 rollout 활성화는 없다. `lib/promptRefinerExecutionContract.ts`는 정확한
+provider adapter, API route, browser event writer, 제품 caller, Router 결합과 rollout
+활성화는 없다. `lib/promptRefinerExecutionContract.ts`는 정확한
 model/catalog/pricing identity와 4,096 output tokens, 15초 timeout, retry 0,
 요청당 24,916 microUSD, 최대 100 dispatch의 단계 2,491,600 microUSD를 동결하지만
 그 자체로 실행을 승인하거나 비용을 예약하지 않는다. 정적 pricing profile만
@@ -25,13 +25,48 @@ cached-input multiplier는 prompt caching이 disabled라 이 계약의 비용을
 generic `reservationOutputTokens`는 Refiner authority가 사용할 예약량이 아니다. 미래
 authority는 이 계약의 4,096-token worst case를 예약해야 하며 generic reservation
 cap으로 낮춰 잡을 수 없다.
-현재는 원자 예약 authority가 없으므로 모든 다른 조건이 맞아도
-`reservation_authority_unavailable`로 dispatch 전에 거절한다. caller가 전달한 lease나
-atomic 여부 boolean을 성공 증거로 받는 입력과 `admitted: true` 경로는 없다. 후속
-authority가 requestId 결속·만료·1회 consume·비용과 stage slot의 원자 예약을 실제로
-구현한 뒤에만 새 계약 버전으로 성공 admission을 추가할 수 있다. 그 authority는
-runtime model row를 이 gate에 전달하고 원자 예약·dispatch 전에 같은 critical path에서
-통과시켜야 한다. 정적 profile 검사 결과를 과거에 캐시한 값으로 대신할 수 없다.
+server-only 원자 예약 authority는 별도 구현됐지만 stage seed/admin writer와 제품
+caller가 없고 기존 v1 admission은 의도적으로 그대로다. 따라서 모든 다른 조건이
+맞아도 v1은 `reservation_authority_unavailable`로 dispatch 전에 거절하며
+`admitted: true` 경로가 없다. 이 authority는 DB transaction 안에서 고정 stage row,
+model registry table `SHARE`, reservation row 순서로 잠근다. 따라서 pinned row가 없던
+경우를 포함해 admin INSERT/UPDATE/DELETE가 runtime 검증과 consume 사이에 끼어들 수
+없다. runtime model row와 effective pricing은 reserve와 consume 모두에서 다시
+검증한다. requestId·고정 stage·canonical contract digest·server-minted reservationId를
+결속하고 naive timestamp에는 `clock_timestamp() AT TIME ZONE 'UTC'`만 사용하는 만료·
+1회 CAS consume·영구 terminal tombstone을
+강제한다. 정적
+profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease/atomic boolean은 성공
+증거가 아니다. 새로 승인된 후속 계약만 authority의 consumed fact를 성공 admission에
+연결할 수 있다.
+
+## 0. Durable reservation authority 경계
+
+- stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며 요청당 24,916 microUSD,
+  최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
+- reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
+  검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
+  counter를 결속한다. stage 최초 counter는 0/0이어야 하고 direct stage counter UPDATE는
+  집계와 맞을 수 없어 거부된다. direct insert도 같은 예산을 소비하고 101번째·위조
+  insert·unique 충돌은 행과 accounting을 함께 rollback한다. terminal timestamp도 DB
+  trigger가 단 한 번의 clock으로 쓰며 만료 뒤 consume/release는 expired로 저장한다.
+- expiry sweep은 DB clock 만료 조건과 `expiresAt, id` 순서를 SQL에서 적용하고 caller
+  `limit`을 `FOR UPDATE`보다 먼저 적용한다. 따라서 limit은 update 수뿐 아니라 lock
+  footprint도 제한한다.
+- 계약 identity는 stage lifecycle(`approved`, `closed`)과 reservation lifecycle을 모두
+  포함한 정렬 canonical JSON의 SHA-256 digest로 결속한다. reserve와
+  consume은 runtime registry/pricing drift가 있으면 슬롯을 만들거나 사용하지 않는다.
+- 동일 requestId 재요청은 stage와 registry 잠금 뒤 stage 상태/runtime 재검증보다 먼저
+  기존 사실을 읽는다. active lease만 성공 fact이며 terminal 행은 명시적 non-success
+  결과다. 어떤 경우에도 같은 requestId로 슬롯을 더 만들거나 재사용하지 않는다.
+  released/expired/consumed 행도 100개 상한에 남고 삭제·재사용·환급하지 않는다.
+- authority table과 반환값에는 prompt, content, user, conversation, provider 오류를
+  저장하지 않는다. reserve/consume/release/expire의 content-free fact만 반환한다.
+- migration은 stage를 seed하지 않는다. 제품/API/script import도 없으므로 이 구현만
+  배포해도 provider/model 호출이나 비용 지출을 만들 수 없다.
+- 미래 dispatch는 consume이 검증하고 반환한 reservation의 정확한 contract digest와
+  checked-in execution/reservation contract constants를 그대로 사용해야 한다. consume 뒤 registry를
+  다시 읽어 모델·가격·cap을 재해석하면 TOCTOU 보호를 무효화하므로 금지한다.
 
 ## 1. 하나의 변경 가능한 행 대신 두 개의 불변 사실
 
@@ -170,3 +205,62 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
 3. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
 4. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
 5. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
+
+## 9. provider-free shadow harness 관측 경계
+
+`npm run shadow:prompt-refiner`는 체크인된 `prompt-refiner-shadow-corpus-v1`
+합성 fixture 16개만 처리한다. corpus version·content digest·배열 순서와 실행 source의
+full commit SHA 및 고정 allowlist exact bytes를 함께 고정한다. provider/model/API,
+credential lookup, 예약 authority, stage writer, 제품 caller와 연결하지 않으므로
+`providerCalls = 0`, `costMicroUsd = 0`은 알려진 사실이다.
+sourceRef와 정렬된 allowlist file-hash map의 canonical identity digest는 journal과
+witness 최초 header에 함께 기록하며 resume 때 exact match를 강제한다. allowlist와
+`.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도 같은
+Git bytes로 만든다. Git child는 caller env보다 우선한 `GIT_NO_LAZY_FETCH=1`,
+`GIT_NO_REPLACE_OBJECTS=1`과 비대화형 설정 아래에서만 실행하고 commit·allowlist blob의
+로컬 존재를 먼저 확인한다. replace ref는 고정 SHA 해석에 관여할 수 없고,
+partial/blobless promisor clone의 누락 객체를 원격에서 가져오는 것도 허용하지 않는다.
+source cap은 corpus 전용 cap, `package-lock.json` 4 MiB, 나머지 allowlist 1 MiB이고,
+Git capture는 8 MiB로 제한한다. blob 크기를 먼저 검사하므로 cap 초과는 모호한 child
+buffer 실패가 아니라 `source_file_byte_limit`으로 기록된다. 현재 lockfile은
+특정 byte 수에 고정하지 않고 실행 시 동적으로 측정해 0보다 크고 4 MiB 이하임을
+검증한다.
+
+source identity에는 sourceRef, pinned repository paths와 `package-lock.json` bytes가
+들어간다. 설치된 `node_modules`의 실제 bytes, package-manager cache, install 환경·명령,
+registry 응답 또는 install attestation은 포함하지 않는다. 이 provider-free 결과는
+dependency installation provenance나 설치 결과 동일성의 증거가 아니다.
+
+모델 모양의 fixture output은 `parseBenchmarkJson()`의 syntax·duplicate key·complexity
+제한, `strictBenchmarkObject(["refinedPrompt"])`의 exact field 검사, 기존 prompt
+byte/character bound 순서로 fail-closed한다. repair, coercion, fence 제거 또는 부분
+salvage는 없다. audit output과 journal에는 사용자 prompt·fixture output·proposal
+bytes 또는 그 **per-item content digest**, 사용자·conversation·session 정보와 provider
+오류문을 쓰지 않는다. 체크인된 합성 집합의 `corpusDigest`와 source identity hash는
+재현 provenance로 저장하며 사용자 콘텐츠 receipt로 취급하지 않는다.
+
+하네스 관측은 다음 두 값을 섞지 않는다.
+
+- structural boundary: sourceText가 canonical JSON data message 밖으로 벗어났는지의
+  구조 검사다.
+- behavioral fixture outcome: 로컬 fixture output 파싱 결과가 동결 expected와 같은지의
+  deterministic 회귀 검사다.
+
+structural violation 0은 실제 모델의 instruction compliance 또는 행동상 prompt
+injection resistance를 증명하지 않는다. behavioral match도 실제 모델 품질을 측정하지
+않는다. 각 값은 독립 population과 분자를 가진다.
+
+journal은 intent-before-evaluation, SHA-256 chain, 별도 registration witness, `wx` lock,
+append 후 `fsync`와 strict terminal state를 사용한다. terminal 없는 intent는 unknown으로
+남겨 재평가하지 않는다. clean interruption과 `case_limit` stop만 재개 가능하고,
+structural/behavioral mismatch, truncation, chain/witness disagreement, duplicate/conflicting
+terminal 또는 stale lock은 자동 복구하지 않는다. 로컬 witness는 악의적인 관리자나 두
+파일의 동시 rollback을 막는 외부 원장이 아니므로 실제 실행 권한의 대체물이 아니다.
+마지막 정상 terminal 뒤 complete event 전 중단은 별도 resume event 없이 검증된 terminal
+집합에서 complete를 확정하고, 마지막 case mismatch는 remaining 0인 non-resumable stop으로
+정상 재생한다. `max-cases`는 부호 없는 ASCII 10진 정수 표기만 받는다.
+
+세부 운영 계약과 정확한 digest는
+[`prompt-refiner-shadow-harness.md`](../ops/prompt-refiner-shadow-harness.md)에 있다.
+이 하네스가 completed라는 사실은 실제 shadow 실행, 품질 승인, release gate, 제품 연결
+또는 rollout 승인이 아니다.

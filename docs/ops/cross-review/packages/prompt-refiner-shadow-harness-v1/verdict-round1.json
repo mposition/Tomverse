@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-harness-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-shadow-harness-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-shadow-harness-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-16T14:16:34.960Z",
+  "durationMs": 264220,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 26,
+    "cachedInputTokens": 1273436,
+    "outputTokens": 19342,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.3465239999999996,
+    "raw": {
+      "input_tokens": 26,
+      "cache_creation_input_tokens": 117375,
+      "cache_read_input_tokens": 1273436,
+      "output_tokens": 19342,
+      "output_tokens_details": {
+        "thinking_tokens": 14631
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 117375,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 3084,
+          "cache_read_input_tokens": 119854,
+          "cache_creation_input_tokens": 2263,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2263
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-16T14:20:59.246Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-harness-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "scripts/prompt-refiner-shadow-harness.mjs:119-122 (readBoundedUtf8 non-corpus bound) and :57 (execFileSync maxBuffer)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "Every non-corpus allowlist path shares a hard 1,048,576-byte read bound and a 4 MiB git maxBuffer, and package-lock.json already consumes most of that headroom, so ordinary dependency growth will make the harness unrunnable with an error code that names a size problem rather than the lockfile.",
+        "reproduction": "package-lock.json is 15,910 lines at this commit (grep -c '^' package-lock.json), roughly 0.6 MiB against the 1,048,576 bound. Add dependencies until the lockfile exceeds 1 MiB, then run `npm run shadow:prompt-refiner -- --journal=<new.jsonl> --source-ref=<40-hex-sha>`: it exits 1 with `prompt-refiner-shadow: source_file_size_or_type` with no drift and no way to proceed. Past 4 MiB the `git show` child instead throws a maxBuffer error whose message is sanitised at :146 to the opaque `input_output_or_snapshot_error`. Suggested fix: give package-lock.json its own bound sized to the file, or raise both bounds together with a comment tying them to the lockfile."
+      },
+      {
+        "location": "lib/promptRefinerShadowSource.ts:7-21 (PROMPT_REFINER_SHADOW_SOURCE_PATHS) with docs/ops/prompt-refiner-shadow-harness.md section 2",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The canonical source identity binds package-lock.json but not the installed dependency bytes the harness actually executes (tsx, zod via lib/promptRefinerSuggestion.ts:1, server-only via lib/promptRefinerModelPrompt.ts:1), and neither the ops doc nor the policy doc states that limit, so \"exact source identity\" reads stronger than what is verified.",
+        "reproduction": "Run `npm run shadow:prompt-refiner -- --journal=<a.jsonl> --source-ref=<sha>` and record `sourceIdentityDigest`. Modify any loaded file under node_modules/zod (for example append a top-level side effect), then run again with `--journal=<b.jsonl> --source-ref=<same sha>`: the run still completes and `sourceIdentityDigest` is byte-identical, showing executed bytes outside the 13-path allowlist are not bound. Suggested fix: one sentence in docs/ops/prompt-refiner-shadow-harness.md section 2 stating that the identity covers the 13 pinned paths and the lockfile, not the installed node_modules tree."
+      }
+    ],
+    "nextAction": "Approve as-is; the two nits are optional follow-ups (a package-lock-sized read bound and a one-line scope caveat in docs/ops/prompt-refiner-shadow-harness.md section 2) and neither blocks the read-only independent review or Linux integration CI."
+  }
+}

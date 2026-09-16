@@ -99,6 +99,7 @@ model User {
   assistantProfileImports              AssistantProfileImport[]
   assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
   emailPreferences                     EmailPreference[]
+  emailPreferenceTransitions           EmailPreferenceTransition[]
   consentRecords                       ConsentRecord[]
   emailDeliveries                      EmailDelivery[]
   campaignRecipients                   EmailCampaignRecipient[]
@@ -4831,6 +4832,71 @@ model ConsentRecord {
 /// code mean opposite things -- the first is ordinary, the second is either an
 /// account takeover in progress or proof we are misclassifying mail
 /// (docs/policy/email-notifications.md §13.3).
+/// One cause of a suppression, append-only. Written beside SuppressionEntry in
+/// the shadow deploy and not yet read by any send decision. Identity and
+/// provenance never change; a release is written once. A trigger carries entry
+/// writes from a build that does not write causes itself.
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
+model SuppressionCause {
+  id           String @id @default(cuid())
+  emailAddress String
+
+  /// global | classification | purpose
+  scope      String
+  /// "*" for global, the classification name ("marketing") or the purpose.
+  purposeKey String
+
+  /// hard_bounce | soft_bounce | complaint | unsubscribe | manual | privacy_request
+  reason String
+  source String
+
+  /// Stable per writer, so a retried event adds nothing: webhook:<eventId>,
+  /// softbounce:<deliveryId>, preference:<transitionId>, admin:<key>,
+  /// legacy:suppression:<entryId>, legacy-trigger:<entryId>:<uuid>.
+  sourceEventKey String
+
+  sourceStream         String?
+  sourceDomain         String?
+  sourceClassification String?
+  sourceDeliveryId     String?
+  sourceMessageId      String?
+  sourceRequestId      String?
+  providerAccount      String?
+  evidence             Json?
+
+  occurredAt DateTime
+  expiresAt  DateTime?
+
+  releasedAt      DateTime?
+  releaseKind     String?
+  releaseEvidence Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([emailAddress, scope, purposeKey, reason, sourceEventKey], map: "SuppressionCause_selector_reason_event_key")
+  @@index([emailAddress, releasedAt])
+  @@index([expiresAt])
+}
+
+/// Every change to a preference's enabled state, append-only. Gives a withdrawal
+/// that records no consent a stable id for the suppression cause it creates.
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
+model EmailPreferenceTransition {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose         String
+  fromEnabled     Boolean
+  toEnabled       Boolean
+  /// signup | preference_center | unsubscribe_link | admin | system_default
+  ///   | consent_confirmation | privacy_request | provider_complaint
+  source          String
+  consentRecordId String?
+  occurredAt      DateTime @default(now())
+
+  @@index([userId, purpose, occurredAt])
+}
+
 model SuppressionEntry {
   id           String @id @default(cuid())
   emailAddress String
@@ -5023,6 +5089,14 @@ model EmailDelivery {
   /// (docs/policy/email-notifications.md §11.4).
   unsubscribeKeyVersion String?
 
+  /// The provider account (transactional | marketing) and the From address and
+  /// domain the message actually went out as, fixed at send. A webhook binds to
+  /// the delivery of its own account; a suppression cause records the domain
+  /// that was used, not what configuration says later.
+  providerAccount String?
+  sentFrom        String?
+  sentDomain      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5033,6 +5107,7 @@ model EmailDelivery {
   @@index([emailAddress, createdAt])
   @@index([status, snapshotPurgedAt])
   @@index([unsubscribeKeyVersion, sentAt])
+  @@index([providerAccount, providerMessageId])
 }
 
 /// One inert unsubscribe token per key version, minted with that key the first
@@ -5331,4 +5406,48 @@ model MobileAuthEvent {
   @@index([userId, occurredAt])
   @@index([event, occurredAt])
   @@index([occurredAt])
+}
+
+// --- Prompt Refiner shadow reservation authority --------------------------
+//
+// These rows authorize no provider call on their own. The stage is deliberately
+// not seeded: a future separately approved harness must create the exact stage
+// record before the server-only authority can reserve anything. Reservations
+// are content-free tombstones and are never deleted or reused.
+
+model PromptRefinerReservationStage {
+  id                     String   @id
+  contractVersion        String
+  contractDigest         String   @unique
+  status                 String
+  perRequestCostMicroUsd BigInt
+  maxReservations        Int
+  costCeilingMicroUsd    BigInt
+  reservationCount       Int      @default(0)
+  allocatedCostMicroUsd  BigInt   @default(0)
+  approvedBy             String
+  approvedAt             DateTime
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  reservations PromptRefinerReservation[]
+}
+
+model PromptRefinerReservation {
+  id                   String    @id
+  stageId              String
+  requestId            String    @unique
+  contractDigest       String
+  status               String    @default("reserved")
+  reservedCostMicroUsd BigInt
+  expiresAt            DateTime
+  consumedAt           DateTime?
+  releasedAt           DateTime?
+  expiredAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  stage PromptRefinerReservationStage @relation(fields: [stageId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@index([stageId, status, expiresAt])
 }

@@ -485,7 +485,7 @@ test("runWithAdminApproval decides the sole path after re-authentication and bef
         2
     );
     assert.match(execution, /status: \{ in: \["pending", "approved"\] \}/);
-    assert.match(execution, /\n\s+tx,\n\s+\}\);\n\s+return metadata;/);
+    assert.match(execution, /\n\s+tx,\n\s+\}\);\n\s+return \{ metadata, auditLogId \};/);
 
     // The ordinary claim and the sole closure share one scope lock, taken
     // before either reads, so they cannot interleave on the same change.

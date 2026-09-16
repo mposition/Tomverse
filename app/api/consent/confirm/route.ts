@@ -74,6 +74,12 @@ export async function POST(req: Request) {
       JSON.stringify({ event: "consent_key_missing", at: new Date().toISOString() })
     );
   }
+  // A valid link for an address that cannot receive this mail. Only reachable
+  // after the token opened, so it tells a token holder nothing they could not
+  // already learn, and "invalid link" would send them to request another one.
+  if (result.reason === "suppressed") {
+    return answer({ error: "This address cannot receive this email.", code: "SUPPRESSED" }, 409);
+  }
   // Expired is told apart because its remedy differs: ask again from the
   // settings screen. Everything else is one answer, so this cannot become an
   // oracle for which tokens are real.

@@ -1018,6 +1018,13 @@ and disabling attachments still permits deletion.
 
 ## Scheduled Maintenance
 
+The cron services below are declared in `.railway/scheduled-jobs.ts` and
+applied with Railway Infrastructure as Code (`.railway/railway.ts`). The
+`railway.*.json` Config File Paths this section names are the legacy setup:
+Railway stops reading them on 2026-12-01 and new services cannot opt into them.
+The switch-over and the rules for adding a cron service or one of its variables
+are in `docs/ops/railway-iac-scheduled-jobs.md`.
+
 Set the same secret on the web service and the Railway Cron service:
 
 ```text

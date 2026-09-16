@@ -144,6 +144,14 @@ export const PLANNED_REFERENCES = {
         document: "docs/policy/email-product-news-redesign-draft.md",
         reason: "The test that would enforce D5 across seven locales, named so the design can say what proves the rule rather than leaving it to review.",
     },
+    // The marketing automation policy fixes the SEO agent's allowlist to four
+    // exact files. Three exist; the fourth is the llms.txt route the policy
+    // names as a planned file, and the document says in its status line that
+    // nothing is implemented until the operator records approval.
+    "app/llms.txt/route.ts": {
+        document: "docs/policy/marketing-automation.md",
+        reason: "Fourth file of the SEO agent's exact allowlist (section 9.2). Planned, not built: the policy is awaiting operator approval.",
+    },
     // An entry here is a document telling the reader about something that does
     // not exist yet. Empty is the healthy state; `lib/marketingMemoryClaims.ts`
     // was the last one and now exists, so the boundary in

@@ -20,6 +20,7 @@ import {
   generalSoleApprovalAvailability,
   lockApprovalScope,
   runAsSoleAdministrator,
+  type AdminApprovalContext,
 } from "@/lib/adminSoleApproverExecution";
 
 type ApprovalInput = {
@@ -145,7 +146,7 @@ const claimApproval = async (input: ApprovalInput) => {
 
 export async function runWithAdminApproval<T>(
   input: ApprovalInput,
-  operation: () => Promise<T>
+  operation: (context: AdminApprovalContext) => Promise<T>
 ): Promise<T> {
   await assertRecentAdminAuthentication(input.session);
 
@@ -192,8 +193,9 @@ export async function runWithAdminApproval<T>(
 
   // A durable audit intent must exist before the high-risk operation starts.
   // If the audit store is unavailable, the operation is not allowed to run.
+  let authorizationAuditLogId: string;
   try {
-    await writeAdminAuditLog({
+    authorizationAuditLogId = await writeAdminAuditLog({
       session: input.session,
       request: input.request,
       action: "admin_approval.execution_started",
@@ -224,7 +226,7 @@ export async function runWithAdminApproval<T>(
 
   let result: T;
   try {
-    result = await operation();
+    result = await operation({ approvalId: claim.approval.id, authorizationAuditLogId });
   } catch (error) {
     await prisma.adminActionApproval
       .updateMany({

@@ -1,0 +1,148 @@
+import {
+  suppressionVerdict,
+  type SendClassification,
+  type SuppressionReason,
+  type SuppressionRecord,
+} from "@/lib/emailSuppressionCore";
+
+/**
+ * Which record decides a send, what may lift a cause, and whether the causes
+ * are ready to decide.
+ *
+ * Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4
+ * (deploy B). Pure: every rule here is exercised without a database.
+ */
+
+/** The AppSetting holding the read authority. Absent means `entry`. */
+export const SUPPRESSION_READ_AUTHORITY_KEY = "email.suppressionReadAuthority";
+
+export type SuppressionReadAuthority = "entry" | "causes";
+
+/**
+ * The stored value, read strictly. Anything but the exact string `causes` is
+ * `entry`: an unreadable setting must fall back to the record every instance
+ * already agrees on, not to the one only this build understands.
+ */
+export const suppressionReadAuthorityFromValue = (
+  value: unknown
+): SuppressionReadAuthority => (value === "causes" ? "causes" : "entry");
+
+/** The advisory key every suppression writer shares and the cutover takes alone. */
+export const SUPPRESSION_AUTHORITY_FENCE = "tomverse-email-suppression-authority";
+
+/**
+ * What an action may release, per cause (the release matrix).
+ *
+ * Not an ordering: each cell is its own condition. An action releases only the
+ * causes it may; the others stay active.
+ */
+export type ReleaseAction =
+  | "admin"
+  | "approved_admin"
+  | "preference_enabled"
+  | "delivered"
+  | "expiry";
+
+const RELEASE_MATRIX: Record<SuppressionReason, ReadonlySet<ReleaseAction>> = {
+  privacy_request: new Set(),
+  hard_bounce: new Set(["approved_admin"]),
+  complaint: new Set(["approved_admin"]),
+  manual: new Set(["admin", "approved_admin"]),
+  unsubscribe: new Set(["preference_enabled"]),
+  soft_bounce: new Set(["admin", "approved_admin", "delivered", "expiry"]),
+};
+
+export const releasableBy = (action: ReleaseAction, reason: string): boolean =>
+  RELEASE_MATRIX[reason as SuppressionReason]?.has(action) ?? false;
+
+/**
+ * Whether an administrator lifting these causes needs a second administrator
+ * (or the audited sole-administrator path). True when any cause an approved
+ * lift would release is one a single administrator may not.
+ */
+export const removalNeedsApproval = (activeReasons: readonly string[]): boolean =>
+  activeReasons.some(
+    (reason) => releasableBy("approved_admin", reason) && !releasableBy("admin", reason)
+  );
+
+/** A cause as the send decision and the parity check read it. */
+export type ActiveCause = SuppressionRecord & { id?: string };
+
+export const isActiveCause = (
+  cause: { releasedAt?: Date | null; expiresAt?: Date | null },
+  now: Date
+) =>
+  !cause.releasedAt && (!cause.expiresAt || cause.expiresAt.getTime() > now.getTime());
+
+const PARITY_CLASSIFICATIONS: SendClassification[] = [
+  "transactional",
+  "service",
+  "legal",
+  "marketing",
+];
+
+export type ParitySelector = {
+  emailAddress: string;
+  scope: string;
+  purposeKey: string;
+};
+
+export type ParityFinding = ParitySelector & {
+  classification: SendClassification;
+  /** The entry allows the send and the causes block it: stricter, and expected. */
+  kind: "unsafe" | "stricter";
+  entryReason: string;
+};
+
+/**
+ * Compares, per selector, what the entry allows with what the active causes
+ * allow, for every classification.
+ *
+ * `unsafe` -- the causes allow what the entry blocks -- is what the cutover
+ * gate counts, because switching would start sending mail the current record
+ * stops. `stricter` -- the causes block what the entry allows -- is reported
+ * and not counted: the entry's merge rule overwrites one permanent reason with
+ * another, so a manual hold overwritten by a complaint lets transactional mail
+ * through, and the causes keeping the manual hold is the point of the change.
+ */
+export const suppressionParity = (input: {
+  entries: Array<ParitySelector & { reason: string; sourceStream?: string | null; expiresAt?: Date | null }>;
+  causes: Array<ParitySelector & ActiveCause & { releasedAt?: Date | null }>;
+  now: Date;
+}): { unsafe: ParityFinding[]; stricter: ParityFinding[] } => {
+  const key = (selector: ParitySelector) =>
+    `${selector.emailAddress}\u0000${selector.scope}\u0000${selector.purposeKey}`;
+  const causesBySelector = new Map<string, ActiveCause[]>();
+  for (const cause of input.causes) {
+    if (!isActiveCause(cause, input.now)) continue;
+    const list = causesBySelector.get(key(cause)) ?? [];
+    list.push(cause);
+    causesBySelector.set(key(cause), list);
+  }
+
+  const unsafe: ParityFinding[] = [];
+  const stricter: ParityFinding[] = [];
+  for (const entry of input.entries) {
+    if (entry.expiresAt && entry.expiresAt.getTime() <= input.now.getTime()) continue;
+    const records = causesBySelector.get(key(entry)) ?? [];
+    for (const classification of PARITY_CLASSIFICATIONS) {
+      const byEntry = suppressionVerdict({
+        classification,
+        records: [entry as SuppressionRecord],
+        now: input.now,
+      }).allowed;
+      const byCauses = suppressionVerdict({ classification, records, now: input.now }).allowed;
+      if (byEntry === byCauses) continue;
+      const finding: ParityFinding = {
+        emailAddress: entry.emailAddress,
+        scope: entry.scope,
+        purposeKey: entry.purposeKey,
+        classification,
+        kind: byCauses ? "unsafe" : "stricter",
+        entryReason: entry.reason,
+      };
+      (byCauses ? unsafe : stricter).push(finding);
+    }
+  }
+  return { unsafe, stricter };
+};

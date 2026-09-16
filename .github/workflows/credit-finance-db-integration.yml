@@ -8,6 +8,8 @@ on:
       - "lib/credit*.ts"
       - "lib/billing*.ts"
       - "lib/stripe*.ts"
+      - "lib/promptRefinerReservation*.ts"
+      - "lib/promptRefinerExecutionContract.ts"
       - "lib/adminUsers.ts"
       - "lib/userTimeZone.ts"
       - "app/api/billing/**"

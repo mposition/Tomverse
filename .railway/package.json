@@ -1,0 +1,16 @@
+{
+  "name": "tomverse-railway-iac",
+  "private": true,
+  "type": "module",
+  "description": "Railway Infrastructure as Code for the scheduled-job cron services. Not part of the app build or the npm workspaces.",
+  "scripts": {
+    "status": "node run.mjs status",
+    "use:staging": "node run.mjs link --project Tomverse --environment staging",
+    "use:production": "node run.mjs link --project Tomverse --environment production",
+    "plan": "node run.mjs config plan --verbose",
+    "apply": "node run.mjs config apply"
+  },
+  "devDependencies": {
+    "railway": "3.11.0"
+  }
+}

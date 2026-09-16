@@ -1,5 +1,18 @@
 import "server-only";
 
+/**
+ * What an approved operation is told about its own authorisation, so it can
+ * name that evidence in the transaction that acts on it
+ * (docs/policy/email-product-news-redesign-draft.md, section 7.4). The
+ * two-person path supplies the approval row and its execution-start audit
+ * entry; the sole-administrator path has no approval row and supplies its
+ * execution-start audit entry alone.
+ */
+export type AdminApprovalContext = {
+    approvalId: string | null;
+    authorizationAuditLogId: string;
+};
+
 import type { Prisma } from "@prisma/client";
 import type { Session } from "next-auth";
 import { NextResponse } from "next/server";
@@ -270,7 +283,7 @@ const supersedeOpenRequestsAndRecordStart = async (input: {
         });
         const supersededApprovalIds = closed.map((row) => row.id);
         const metadata = { ...input.metadata, supersededApprovalIds };
-        await writeAdminAuditLog({
+        const auditLogId = await writeAdminAuditLog({
             session: input.session,
             request: input.request,
             action: "admin_sole_approver.execution_started",
@@ -280,7 +293,7 @@ const supersedeOpenRequestsAndRecordStart = async (input: {
             metadata,
             tx,
         });
-        return metadata;
+        return { metadata, auditLogId };
     });
 };
 
@@ -310,7 +323,7 @@ export async function runAsSoleAdministrator<T>(
         payload: Record<string, unknown>;
         reason: string;
     },
-    operation: () => Promise<T>
+    operation: (context: AdminApprovalContext) => Promise<T>
 ): Promise<T> {
     const payloadHash = approvalPayloadHash(
         canonicalizeApprovalPayload(input.payload)
@@ -318,7 +331,7 @@ export async function runAsSoleAdministrator<T>(
     // A durable record of the intent exists before the operation starts. If the
     // audit store is unavailable the operation does not run -- the record is
     // the only control on this path, so it cannot be best-effort.
-    const metadata = await supersedeOpenRequestsAndRecordStart({
+    const { metadata, auditLogId } = await supersedeOpenRequestsAndRecordStart({
         session: input.session,
         request: input.request,
         action: input.action,
@@ -337,7 +350,7 @@ export async function runAsSoleAdministrator<T>(
 
     let result: T;
     try {
-        result = await operation();
+        result = await operation({ approvalId: null, authorizationAuditLogId: auditLogId });
     } catch (error) {
         await writeAdminAuditLog({
             session: input.session,

@@ -1302,10 +1302,14 @@ Before changing the Prompt Refiner surface or request boundary in
 `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
 `lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`,
 `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
-their tests, read:
+`lib/promptRefinerShadowHarness.ts`, `lib/promptRefinerShadowJournal.ts`,
+`lib/promptRefinerShadowSource.ts`,
+`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus, or their
+tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
 - `docs/policy/prompt-refiner-observability.md`
+- `docs/ops/prompt-refiner-shadow-harness.md`
 
 Non-negotiable requirements:
 
@@ -1344,14 +1348,32 @@ Non-negotiable requirements:
   output cap must be at least 4,096; a larger capability is allowed but never
   replaces the Refiner request's exact 4,096 cap. Caching is disabled, and the
   generic model reservation-output setting must not reduce this contract's
-  4,096-token worst-case reservation. A future authority must pass its runtime
-  model row through this gate in the same critical path before reservation and
-  dispatch. No reservation authority exists today, so
-  admission always refuses before dispatch with
-  `reservation_authority_unavailable` after earlier checks pass. A caller-made
-  lease or atomic boolean is never proof. Only a future authority with atomic
-  requestId binding, expiry and one-time consume may introduce `admitted: true`
-  under a new contract version. Product mode remains unadmitted.
+  4,096-token worst-case reservation. The standalone server-only authority
+  passes its runtime model row through this gate inside both reserve and
+  consume. Its global order is fixed stage row, model-registry table SHARE,
+  then reservation row, covering both an existing registry row and an
+  absent-row insert. The reservation BEFORE INSERT trigger validates and locks;
+  only the AFTER INSERT trigger may bind counters to the exact aggregate of
+  already-visible tombstones. A stage must start at zero, and a direct stage
+  counter update therefore cannot mint a slot. Direct inserts, unique conflicts
+  and the 101st row cannot bypass or split accounting. The database also owns
+  terminal timestamps and turns a late consume/release into expiry. It binds
+  requestId + stage + canonical
+  contract digest + server-minted reservation id. Naive DB timestamp columns
+  compare and store only `clock_timestamp() AT TIME ZONE 'UTC'`; expiry sweeps
+  filter and order in SQL and apply their caller limit before `FOR UPDATE`, so
+  the limit bounds both mutation count and lock footprint. One-time consume and
+  permanent terminal tombstones remain DB-enforced.
+  A repeated request returns the existing active fact before stage/runtime
+  revalidation; a terminal fact is a discriminated non-success and is never a
+  reusable lease. A future dispatch must use the exact digest returned by
+  consume together with the checked-in execution/reservation contract constants,
+  and must not reload/reinterpret the registry after that boundary. It has no stage
+  seed/admin writer, product caller or provider path. Existing v1 admission
+  therefore still refuses before dispatch with
+  `reservation_authority_unavailable`; a caller-made lease or atomic boolean is
+  never proof. Only a separately approved new contract may connect an
+  authority consumed fact to `admitted: true`. Product mode remains unadmitted.
 - The current server gate folds the default-off AppSetting, environment kill
   switch and adapter readiness into one mode. The only active mode is the
   loopback E2E fixture; a stored flag alone must never expose an inert product
@@ -1372,6 +1394,32 @@ Non-negotiable requirements:
   provider adapter must use this builder and keep that report green. The
   loopback fixture caller still reaches only its no-cost E2E route and is not
   a model-facing path.
+- The provider-free shadow harness accepts only the fixed, reviewed synthetic
+  corpus and exact bytes from a full commit SHA allowlist. It has no live,
+  plugin, adapter, credential, authority, product or provider mode. Model-shaped
+  fixture output goes through `parseBenchmarkJson()`, an exact
+  `refinedPrompt` object and the existing prompt bounds; repair and partial
+  salvage are forbidden. Its content-free journal uses durable intent before
+  evaluation, a hash chain plus a separate witness, an unrecoverable `wx`
+  lock, strict terminals and no retry of an unknown intent. Journal and witness
+  headers bind the exact full source ref and canonical allowlist identity
+  digest; a different source snapshot can never resume the run. Git child reads
+  must disable lazy fetch and replacement objects, and fail closed unless every
+  pinned object is local;
+  `package-lock.json` has a dedicated 4 MiB source cap, other non-corpus source
+  files have a 1 MiB cap, and Git capture remains bounded above both. Tests read
+  the current lockfile size dynamically and require it to be non-empty and at
+  most the declared cap; no incidental byte count is pinned. The source
+  identity binds pinned repository bytes, not installed `node_modules`, package
+  manager caches, install environments, or an installation attestation; a local
+  completion is not dependency-installation provenance.
+  `max-cases` accepts only unsigned ASCII decimal notation. A clean interruption
+  after the final terminal finalizes completion without a zero-remaining resume,
+  while a final-case mismatch remains a replayable non-resumable stop. Structural message
+  boundary evidence and behavioral fixture outcome remain separate metrics;
+  zero structural violations must never be described as model compliance or
+  injection resistance. A completed local run is not model-quality, release,
+  admission or rollout evidence.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer

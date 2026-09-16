@@ -23,6 +23,13 @@ import {
   normalizeSuppressionAddress,
   recordSuppression,
 } from "@/lib/emailSuppression";
+import { markCauseWriter, releaseSelectorCauses } from "@/lib/emailSuppressionCauses";
+import {
+  holdSuppressionFence,
+  lockSuppressionAddress,
+  readSuppressionAuthority,
+} from "@/lib/emailSuppressionAuthority";
+import { isActiveCause } from "@/lib/emailSuppressionAuthorityCore";
 
 /**
  * What a person currently receives, and the append-only record of how it got
@@ -68,7 +75,13 @@ export type PreferenceChangeResult =
   /** The confirmation named a request that is no longer the latest one. */
   | { changed: false; reason: "superseded" }
   /** The account's address is not the one the confirmation link was sent to. */
-  | { changed: false; reason: "address_changed" };
+  | { changed: false; reason: "address_changed" }
+  /**
+   * Once causes decide: switching on would lift only this purpose's own
+   * unsubscribe, and another active cause still stops this mail
+   * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+   */
+  | { changed: false; reason: "suppressed" };
 
 /**
  * Creates the rows a new account starts with.
@@ -267,6 +280,9 @@ export async function setPreference(input: {
   // click grants twice, a request racing a confirmation undoes it, and a cancel
   // racing a confirmation leaves `enabled` true with no confirmation.
   const outcome = await prisma.$transaction(async (tx) => {
+    // The shared fence before any row lock: a withdrawal writes a suppression,
+    // and no suppression write may straddle the read-authority cutover.
+    await holdSuppressionFence(tx);
     // The address is read under the user row lock and everything below uses
     // that value, so a confirmation cannot be recorded against an address that
     // changed after the link was checked, and a withdrawal suppresses the
@@ -311,6 +327,33 @@ export async function setPreference(input: {
       // double-submitted, the one-click header and the confirmation page both
       // fire. None of those should add a second entry to the history.
       return "already_set" as const;
+    }
+
+    // Every suppression write, release and blocker check for this address is
+    // serialised here, after the user row: no cause can appear between the
+    // blocker check below and the release that follows it.
+    await lockSuppressionAddress(tx, normalizeSuppressionAddress(email));
+
+    // Once causes decide, switching on lifts only this purpose's own
+    // unsubscribe. Any other active cause for this purpose, for marketing as a
+    // whole, or for the address (a soft bounce aside, which expires) still stops
+    // the mail, so the switch is refused rather than shown as on.
+    if (input.enabled && (await readSuppressionAuthority(tx)) === "causes") {
+      const blocking = await tx.suppressionCause.findMany({
+        where: {
+          emailAddress: normalizeSuppressionAddress(email),
+          releasedAt: null,
+          OR: [
+            { scope: "purpose", purposeKey: purpose, reason: { not: "unsubscribe" } },
+            ...(consentBased ? [{ scope: "classification", purposeKey: "marketing" }] : []),
+            { scope: "global", reason: { not: "soft_bounce" } },
+          ],
+        },
+        select: { id: true, expiresAt: true, releasedAt: true },
+      });
+      if (blocking.some((cause) => isActiveCause(cause, now))) {
+        return "suppressed" as const;
+      }
     }
 
     // For a consent-based purpose, "was it on" means "was it confirmed". A row
@@ -358,8 +401,9 @@ export async function setPreference(input: {
       },
     });
 
+    let consentRecordId: string | null = null;
     if (consentBased) {
-      await tx.consentRecord.create({
+      const consentRecord = await tx.consentRecord.create({
         data: {
           userId: input.userId,
           // The address as it is now. Consent attaches to a mailbox, so a later
@@ -398,7 +442,27 @@ export async function setPreference(input: {
           userAgentHash: evidenceHash("ua", input.userAgent),
         },
       });
+      consentRecordId = consentRecord.id;
     }
+
+    // Every change of the enabled state, append-only. The id keys the suppression
+    // cause a withdrawal creates, including withdrawals that record no consent
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+    const transition =
+      existing.enabled !== input.enabled
+        ? await tx.emailPreferenceTransition.create({
+            data: {
+              userId: input.userId,
+              purpose,
+              fromEnabled: existing.enabled,
+              toEnabled: input.enabled,
+              source: input.confirmation ? "consent_confirmation" : input.source,
+              consentRecordId,
+              occurredAt: now,
+            },
+            select: { id: true },
+          })
+        : null;
 
     if (!input.enabled) {
       await recordSuppression(
@@ -410,6 +474,9 @@ export async function setPreference(input: {
             input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center",
           sourceDeliveryId: input.deliveryId ?? null,
           occurredAt: now,
+          // A switch-off always changes the enabled state (an unchanged one
+          // returned above), so the transition exists.
+          sourceEventKey: `preference:${transition?.id ?? "unchanged"}`,
         },
         tx
       );
@@ -419,6 +486,21 @@ export async function setPreference(input: {
       // preference toggle may lift (docs/policy/email-notifications.md §12.4).
       // deleteMany rather than delete: a missing row must not abort the
       // transaction.
+      // The causes behind that hold are released with it, keyed to the
+      // transition that lifted them.
+      await markCauseWriter(tx);
+      await releaseSelectorCauses(tx, {
+        emailAddress: normalizeSuppressionAddress(email),
+        scope: "purpose",
+        purposeKey: purpose,
+        // Entries still decide in an older build, where lifting the row lifts
+        // everything behind it; once causes decide, only the unsubscribe the
+        // person asked for is theirs to lift.
+        onlyReason: (await readSuppressionAuthority(tx)) === "causes" ? "unsubscribe" : null,
+        releaseKind: "preference_enabled",
+        releaseEvidence: { kind: "preference", transitionId: transition?.id ?? null },
+        releasedAt: now,
+      });
       await tx.suppressionEntry.deleteMany({
         where: {
           emailAddress: normalizeSuppressionAddress(email),
@@ -434,6 +516,7 @@ export async function setPreference(input: {
   if (outcome === "address_changed") return { changed: false, reason: "address_changed" };
   if (outcome === "superseded") return { changed: false, reason: "superseded" };
   if (outcome === "already_set") return { changed: false, reason: "already_set" };
+  if (outcome === "suppressed") return { changed: false, reason: "suppressed" };
   if (outcome === "cancelled") return { changed: true, purpose, enabled: false };
 
   return { changed: true, purpose, enabled: input.enabled };

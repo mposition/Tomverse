@@ -980,3 +980,127 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
    비용·지연을 측정한다.
 4. 승인된 증거가 있을 때만 제안형 UI를 연결하고, 그 뒤 Refiner 결과의 Router 결합과
    전체 카탈로그 선택 품질을 별도 측정한다.
+
+## 2026-09-16 Prompt Refiner durable reservation authority 회차
+
+앞 회차의 다음 순서 ①을 provider 호출 없이 구현했다. append-only migration은 고정
+stage 한 행과 최대 100개의 content-free reservation tombstone만 허용한다. stage는
+요청당 24,916 microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와
+transaction 양쪽에서 강제하며 migration에는 seed가 없다. reservation `BEFORE INSERT`
+trigger는 검증·stage 잠금만 수행하고, 성공한 tombstone이 보이는 `AFTER INSERT` trigger만
+stage counter를 실제 행 집계에 맞춘다. stage는 0/0에서만 생성되며 direct counter UPDATE로
+slot을 만들 수 없다. direct insert도 예산을 쓰고 unique 충돌·위조·101번째 insert는 행과
+accounting을 함께 rollback한다. terminal timestamp도 DB trigger가 소유하고 만료 뒤 direct
+consume/release는 expired tombstone이 된다. authority는 stage row→
+model registry table `SHARE`→reservation row 순서로 잠근 뒤 requestId·stage·canonical
+contract digest·server-minted reservationId를 결속한다. digest에는 stage와 reservation
+lifecycle 상태 집합이 모두 포함된다. naive DB timestamp에는 명시적
+`clock_timestamp() AT TIME ZONE 'UTC'`를 사용하고, expiry sweep은 DB에서 만료 필터·
+정렬·limit을 `FOR UPDATE` 전에 적용해 lock footprint도 limit 이하로 묶는다. 잠금 뒤 DB clock 기반
+5분 만료와 1회 CAS consume을 사용하며
+consumed/released/expired 행을 삭제·환급·재사용하지 않는다.
+
+reserve와 consume의 같은 critical path에서 runtime model registry row와 effective
+pricing을 실행 계약에 다시 대조하므로 환경 가격 override나 registry drift가 있으면
+슬롯 생성 또는 사용 전에 fail-closed한다. existing request는 stage/runtime 재검증보다
+먼저 같은 active fact 또는 terminal non-success fact를 돌려주며 새 슬롯으로 재사용하지
+않는다. 미래 dispatch는 consume이 반환한 exact digest와 checked-in execution/reservation
+contract constants를 쓰고 registry를
+다시 읽지 않는다. authority는 prompt/content/user/
+conversation/provider 오류를 저장하지 않고 reserve/consume/release/expire의 제한된
+사실만 반환한다. 제품/API/script caller, provider adapter/model 호출, stage admin writer,
+flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
+`reservation_authority_unavailable`도 그대로이므로 이 회차만으로 실행 경로가 열리지
+않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 안전한 예약 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 41%** (직전 약 38%, durable authority 구현 반영) |
+| 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·명시적 UTC DB-owned terminal clock·SQL limit으로 제한된 expiry lock footprint·원자 slot/cost·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
+| 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 17/17, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
+| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 17개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
+| 독립 검토·통합 CI | Claude Code Max Round 2가 digest `sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f`를 `approve`, findings 0으로 판정했다. PR #1494 통합 CI는 20 successful·1 skipped·0 failing이었고, 초기 `assistantProfileImportCore` 전역 `Restrict` 오탐은 model scope로 수정한 뒤 통과했다. |
+| 병합·배포·공개 | PR #1494가 develop에 squash merge되었고 merge SHA는 `cdc55162e35d0f4ee7b1300293fc0bac66b6f1b0`이다. production 배포/공개, provider/API/model 호출, stage seed/writer, v1 admission/flag 변경은 여전히 없음. |
+
+### 이 Cycle 다음 권장 순서
+
+1. Claude 읽기 전용 독립 검토와 Linux 통합 CI에서 transaction/race/rollback 및 migration
+   경계를 다시 검증한다.
+2. provider 호출 없이 동결 corpus·output parser·append-only journal·중단 규칙을 갖춘
+   shadow harness를 구현하되 아직 authority를 dispatch에 연결하지 않는다.
+3. harness와 authority를 잇는 새 admission 계약, stage 생성/admin writer, 비용 승인을
+   별도 설계·검토한다. 기존 v1은 수정하지 않는다.
+4. 그 새 계약이 승인된 뒤 bounded shadow를 정확히 한 번 유료 실행한다.
+5. 의미 보존·주입 저항·비용·지연 증거가 통과할 때만 writer와 제안형 제품 adapter를
+   연결하고, 이후 Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을 별도 실험한다.
+
+## 2026-09-16 Prompt Refiner provider-free shadow harness 회차
+
+앞 회차의 다음 순서 ②를 외부 호출 없이 구현했다. 한국어 8·영어 8의 합성 fixture
+16개를 exact version·digest·배열 순서로 동결하고, 모델 모양의 output을
+`parseBenchmarkJson()` → exact `refinedPrompt` object → 기존 prompt byte/character
+bound 순서로 해석한다. JSON repair·fence 제거·schema coercion·부분 salvage는 없다.
+corpus와 실행 code는 full 40-hex commit SHA의 고정 allowlist bytes와 현재 bytes가
+완전히 같을 때만 CLI에서 실행되며 EOL drift도 거부한다. live/provider/plugin/adapter,
+동적 자격증명 조회와 corpus 교체 인자는 존재하지 않는다.
+
+Prompt Refiner 전용 journal은 `wx` lock, SHA-256 entry chain, 별도 registration witness,
+append `fsync`, 평가 전 durable intent와 strict terminal을 사용한다. terminal 없는 intent는
+unknown이라 다시 평가하지 않고, terminal 뒤의 clean interruption과 의도적인
+`case_limit` stop만 deterministic 순서로 재개한다. 구조·fixture mismatch, truncation,
+rollback, witness 불일치, duplicate/conflicting terminal과 stale lock은 수리하거나
+재시도하지 않는다. 실행은 corpus와 호출별 case 수로만 제한하며 wall-clock에 의존하지
+않고 provider call과 비용은 항상 0이다.
+
+PLANNER-03 구조 검사는 공격 문자열이 data message 밖으로 탈출하지 않았다는 증거일
+뿐이다. 실제 모델 비순응 행동의 증거로 과장하지 않도록 structural boundary population과
+behavioral fixture outcome population을 분리했다. 후자도 로컬 fixture의 parser 회귀일 뿐
+실제 모델의 의미 보존·주입 저항 품질을 측정하지 않는다. journal·report에는 prompt,
+fixture output, proposal bytes나 그 per-item content digest를 남기지 않는다. 재현을 위한
+합성 `corpusDigest`, full sourceRef와 canonical allowlist identity hash는 최초
+journal·witness header와 aggregate에 저장하고 다른 source snapshot의 resume를 거부한다.
+allowlist와 `.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도
+Git blob과 같은 bytes로 유지한다. 독립 검토 round 0에서 찾은 마지막 terminal 직후
+중단과 마지막 case mismatch 경계를 수정해, 전자는 invalid resume event 없이 complete를
+확정하고 후자는 remaining 0인 non-resumable stop으로 재생한다. Git child에는 caller
+env보다 우선한 `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`과 로컬 객체 선행조건을
+강제하고 `max-cases`는 ASCII 10진 정수만 받는다.
+`package-lock.json`은 전용 4 MiB cap 안에 있는지 현재 크기를 테스트에서 동적으로
+검증하고, 나머지 non-corpus source는 1 MiB cap, Git capture는 8 MiB로 제한했다.
+just-over-cap은 명시적 source-domain 오류다.
+source identity는 pinned repository bytes와 lockfile을 결속하지만 실제 `node_modules`,
+package-manager cache·설치 환경·install attestation은 결속하지 않으므로 설치 provenance
+증거가 아니다.
+
+이 회차는 reservation authority dispatch 연결, stage seed/admin writer, product
+route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 또는
+`admitted: true` 경로를 추가하지 않았다. 따라서 completed local run은 실제 shadow,
+품질 승인, release gate 또는 공개 진척이 아니다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 제품 호출·공개 범위는 그대로이고 재현·중단 복구·source identity 기반이 통합됐다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
+| 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
+| 로컬 검증 | 전용 core/CLI **24/24**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, package-lock dynamic within-cap/exact-cap/over-cap·root-only LF attribute·no-network child trap·replace-object 무시·missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 **approve**였지만 재현 가능한 nit 2건을 남기고 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종료됐다. 두 nit은 exchange 밖 후속 commit에서 수정했고, 감사 무결성·집중 회귀·전체 회귀의 내부 3중 검증을 모두 PASS했다. PR #1500 Linux CI는 **20 success / 0 fail**이다. |
+| 병합·배포·공개 | PR **#1500**이 `develop`에 merge SHA `ecaad7d9274a4c2be01c9b43b0a612e2383014b4`로 병합됐다. provider/API/model 호출·유료 실행·stage seed/admin writer·제품 caller·flag·`admitted: true`는 없고, 제품 배포·공개 활성화도 없다. |
+
+### 이 Cycle 다음 권장 순서
+
+1. provider-free harness evidence를 reservation authority에 연결하는 **별도 admission/admin
+   writer 계약**을 default-off로 구현한다. stage seed는 생성하지 않고 기존 v1
+   admission도 수정하지 않는다.
+2. 새 계약을 독립 검토한 뒤, **명시적 비용 승인** 하에 bounded paid shadow를
+   정확히 1회만 실행해 의미 보존·행동상 주입 저항·비용·지연 증거를 수집한다.
+3. 승인된 증거가 gate를 통과할 때만 suggestion adapter와 UI를 연결하며, writer·flag·제품
+   활성화는 동일한 evidence gate 밖으로 나가지 않는다.
+4. Refiner 제안형 흐름의 사용자 선택 증거 뒤 Router full-catalog 선택 품질 최적화를
+   별도 실험으로 진행한다.
