@@ -14,6 +14,11 @@ import {
 import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import type { FeedbackLifecycleStage } from "@/lib/feedbackLifecycleCore";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
+import { qualifiesForTraceAutoReview } from "@/lib/feedbackTraceAutoReview";
+import {
+  buildAutoFixOperatorEmail,
+  type AutoFixOperatorEmailKind,
+} from "@/lib/autoFixOperatorEmail";
 import type { SenderRole } from "@/lib/emailSendingIdentityCore";
 import {
   NOTIFICATION_DELIVERY_STATUS,
@@ -58,6 +63,12 @@ export const NOTIFICATION_KIND = {
   feedbackUserReceived: "feedback_user_received",
   feedbackUserReviewing: "feedback_user_reviewing",
   feedbackUserCompleted: "feedback_user_completed",
+  // Operator notices about an auto-fix case (docs/policy/trace-feedback-automation.md
+  // §9.3). The referenceId is the case id; each stage is reached at most once,
+  // so the (kind, referenceId) unique constraint makes each mail at most once.
+  autoFixReviewRequested: "autofix_review_requested",
+  autoFixProductionVerified: "autofix_production_verified",
+  autoFixPromotionFailed: "autofix_promotion_failed",
 } as const;
 
 export type NotificationKind =
@@ -88,6 +99,9 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.feedbackUserReceived]: "support",
   [NOTIFICATION_KIND.feedbackUserReviewing]: "support",
   [NOTIFICATION_KIND.feedbackUserCompleted]: "support",
+  [NOTIFICATION_KIND.autoFixReviewRequested]: "operations",
+  [NOTIFICATION_KIND.autoFixProductionVerified]: "operations",
+  [NOTIFICATION_KIND.autoFixPromotionFailed]: "operations",
 };
 
 /** Which submitter-facing kind announces each lifecycle stage. */
@@ -222,6 +236,7 @@ async function renderNotification(
         plan: true,
         attachmentCount: true,
         path: true,
+        errorReportVerification: true,
       },
     });
     if (!feedback) return null;
@@ -237,6 +252,62 @@ async function renderNotification(
         plan: feedback.plan,
         attachmentCount: feedback.attachmentCount,
         path: feedback.path,
+        autoReviewed: qualifiesForTraceAutoReview({
+          verification: feedback.errorReportVerification,
+          traceId: feedback.traceId,
+        }),
+      }),
+    };
+  }
+
+  const autoFixKind: Record<string, AutoFixOperatorEmailKind> = {
+    [NOTIFICATION_KIND.autoFixReviewRequested]: "review_requested",
+    [NOTIFICATION_KIND.autoFixProductionVerified]: "production_verified",
+    [NOTIFICATION_KIND.autoFixPromotionFailed]: "promotion_failed",
+  };
+  if (autoFixKind[kind]) {
+    const recipient = supportNotificationRecipient();
+    if (!recipient) return null;
+    const autoFixCase = await prisma.feedbackAutoFixCase.findUnique({
+      where: { id: referenceId },
+      select: {
+        id: true,
+        feedbackId: true,
+        fixPrUrl: true,
+        fixReport: true,
+        fixManifest: true,
+        diagnosticSummary: true,
+        productionPrUrl: true,
+        productionMergeSha: true,
+        terminalReason: true,
+      },
+    });
+    if (!autoFixCase) return null;
+    const report = (autoFixCase.fixReport ?? {}) as Record<string, unknown>;
+    const summary = (autoFixCase.diagnosticSummary ?? {}) as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === "string" ? value : null);
+    const changedPaths = Array.isArray(autoFixCase.fixManifest)
+      ? autoFixCase.fixManifest
+          .map((entry) => text((entry as Record<string, unknown> | null)?.path))
+          .filter((path): path is string => Boolean(path))
+      : [];
+    const consoleBase =
+      process.env.PUBLIC_APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://tomverse.app";
+    return {
+      to: recipient,
+      ...buildAutoFixOperatorEmail(autoFixKind[kind], {
+        caseId: autoFixCase.id,
+        feedbackId: autoFixCase.feedbackId,
+        errorCode: text(summary.errorCode),
+        fixPrUrl: autoFixCase.fixPrUrl,
+        rootCause: text(report.rootCause),
+        fixSummary: text(report.fixSummary),
+        testSummary: text(report.testSummary),
+        changedPaths,
+        productionPrUrl: autoFixCase.productionPrUrl,
+        productionMergeSha: autoFixCase.productionMergeSha,
+        terminalReason: autoFixCase.terminalReason,
+        consoleUrl: `${consoleBase}/admin/support?tab=fixes`,
       }),
     };
   }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const PROMPT_REFINER_INPUT_SCOPE = "current_user_turn_text_only" as const;
+export const PROMPT_REFINER_VERSION = "suggest-v1" as const;
 export const PROMPT_REFINER_MAX_PROMPT_CHARS = 16_000;
 export const PROMPT_REFINER_MAX_PROMPT_BYTES = 32 * 1024;
 

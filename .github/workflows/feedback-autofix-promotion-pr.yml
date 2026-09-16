@@ -1,0 +1,217 @@
+# Owner-approved promotion of an auto-fix to main
+# (docs/policy/trace-feedback-automation.md §9.3).
+#
+# When a feedback-autofix/<case-id> PR is merged into develop, this opens the
+# matching main promotion PR -- and nothing more. It NEVER merges anything:
+# a person merges the main PR in GitHub, under branch protection, and the
+# server observes that merge and the deployments itself.
+#
+# Guardrails that must survive any edit to this file:
+#   - the plain pull_request trigger, never pull_request_target, and the job
+#     refuses a head that lives outside this repository before any secret is
+#     touched;
+#   - the server's prepare call decides eligibility (approved, merged at the
+#     approved head) and changes nothing; this workflow reports nothing back;
+#   - main must already contain develop's ancestry (the back-merge after the
+#     last squashed release) and still hold the approved before-blob for every
+#     changed path, and the branch must be exactly the approved change, before
+#     anything is pushed;
+#   - the sync secret appears only in the prepare step and the GitHub PAT only
+#     in the git/gh steps; no step merges, and none uses --admin or --auto;
+#   - a rerun reuses the existing branch and PR instead of making another.
+name: Feedback Auto-Fix Promotion PR
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+  workflow_dispatch:
+    inputs:
+      case_id:
+        description: "Auto-fix case id (the part after feedback-autofix/)"
+        required: true
+      pr_number:
+        description: "The merged develop PR number"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: feedback-autofix-promotion
+  cancel-in-progress: false
+
+env:
+  TOMVERSE_APP_URL: https://tomverse.app
+
+jobs:
+  promotion-pr:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       startsWith(github.event.pull_request.head.ref, 'feedback-autofix/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Identify the case
+        id: case
+        env:
+          EVENT_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          INPUT_CASE_ID: ${{ inputs.case_id }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            case_id="$INPUT_CASE_ID"
+            pr_number="$INPUT_PR_NUMBER"
+          else
+            case_id="${EVENT_HEAD_REF#feedback-autofix/}"
+            pr_number="$EVENT_PR_NUMBER"
+          fi
+          # A server-minted case id: lowercase letters and digits only. Anything
+          # else is not a case this workflow may act on.
+          if ! printf '%s' "$case_id" | grep -Eq '^[a-z0-9]{10,64}$'; then
+            echo "Not an auto-fix case branch."
+            exit 1
+          fi
+          if ! printf '%s' "$pr_number" | grep -Eq '^[0-9]{1,9}$'; then
+            echo "Invalid PR number."
+            exit 1
+          fi
+          echo "case_id=$case_id" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "branch=feedback-autofix-main/$case_id" >> "$GITHUB_OUTPUT"
+
+      - name: Ask the server whether this merge was approved (sync secret only)
+        id: prepare
+        env:
+          FEEDBACK_AUTOFIX_SYNC_SECRET: ${{ secrets.FEEDBACK_AUTOFIX_SYNC_SECRET }}
+          CASE_ID: ${{ steps.case.outputs.case_id }}
+          PR_NUMBER: ${{ steps.case.outputs.pr_number }}
+        run: |
+          response=$(curl -sS -f -X POST \
+            -H "Authorization: Bearer ${FEEDBACK_AUTOFIX_SYNC_SECRET}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -cn --arg id "$CASE_ID" --argjson pr "$PR_NUMBER" '{caseId:$id, prNumber:$pr}')" \
+            "${TOMVERSE_APP_URL}/api/internal/feedback-autofix/promotion/prepare")
+          if [ "$(echo "$response" | jq -r '.eligible')" != "true" ]; then
+            echo "Not promoted: $(echo "$response" | jq -r '.reason // "unknown"')"
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$response" | jq '.manifest' > "$RUNNER_TEMP/approved-manifest.json"
+          merge_sha=$(echo "$response" | jq -r '.mergeSha')
+          if ! printf '%s' "$merge_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "The server returned no usable merge commit."
+            exit 1
+          fi
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.prepare.outputs.eligible == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node.js
+        if: steps.prepare.outputs.eligible == 'true'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.prepare.outputs.eligible == 'true'
+        run: npm ci
+
+      - name: Refuse unless main can receive exactly the approved change
+        if: steps.prepare.outputs.eligible == 'true'
+        run: |
+          git fetch origin develop main
+          # The back-merge after the last squashed release must have landed:
+          # otherwise main and develop share no ancestry for released work and
+          # a cherry-pick is not the approved change in context.
+          if ! git merge-base --is-ancestor origin/main origin/develop; then
+            echo "main is not yet contained in develop (back-merge pending); not promoting."
+            exit 1
+          fi
+          node --import tsx scripts/feedback-autofix-promotion-manifest.mjs \
+            check-main "$RUNNER_TEMP/approved-manifest.json" origin/main
+
+      - name: Fetch an existing promotion branch (GitHub PAT only)
+        if: steps.prepare.outputs.eligible == 'true'
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+          BRANCH: ${{ steps.case.outputs.branch }}
+        run: |
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if git ls-remote --exit-code --heads "$remote" "$BRANCH" > /dev/null; then
+            git fetch "$remote" "refs/heads/${BRANCH}:refs/remotes/promotion/${BRANCH}"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and check the promotion branch
+        if: steps.prepare.outputs.eligible == 'true'
+        env:
+          BRANCH: ${{ steps.case.outputs.branch }}
+          MERGE_SHA: ${{ steps.prepare.outputs.merge_sha }}
+          EXISTS: ${{ steps.existing.outputs.exists }}
+        run: |
+          if [ "$EXISTS" = "true" ]; then
+            git checkout -B "$BRANCH" "refs/remotes/promotion/${BRANCH}"
+          else
+            git checkout -B "$BRANCH" origin/main
+            parents=$(git rev-list --parents -n 1 "$MERGE_SHA" | wc -w)
+            if [ "$parents" -gt 2 ]; then
+              pick_args="-m 1"
+            else
+              pick_args=""
+            fi
+            if ! git -c user.name="tomverse-feedback-autofix[bot]" \
+                -c user.email="tomverse-feedback-autofix-bot@users.noreply.github.com" \
+                cherry-pick -x $pick_args "$MERGE_SHA"; then
+              git cherry-pick --abort || true
+              echo "The approved change does not apply to main cleanly; not promoting."
+              exit 1
+            fi
+          fi
+          node --import tsx scripts/feedback-autofix-promotion-manifest.mjs \
+            check-branch "$RUNNER_TEMP/approved-manifest.json" origin/main HEAD
+
+      - name: Push and open the main promotion PR (GitHub PAT only, never merges)
+        if: steps.prepare.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+          BRANCH: ${{ steps.case.outputs.branch }}
+          CASE_ID: ${{ steps.case.outputs.case_id }}
+          PR_NUMBER: ${{ steps.case.outputs.pr_number }}
+          EXISTS: ${{ steps.existing.outputs.exists }}
+        run: |
+          if [ "$EXISTS" != "true" ]; then
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+          fi
+          # A promotion that already merged is finished: a rerun must not open
+          # a second PR from the same branch (review round 2, N4).
+          merged=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state merged --json number --jq '.[0].number')
+          if [ -n "$merged" ]; then
+            echo "Promotion PR #${merged} already merged; nothing to open."
+            exit 0
+          fi
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "Promotion PR #${existing} already exists."
+            exit 0
+          fi
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$BRANCH" \
+            --title "Promote auto-fix case ${CASE_ID} to production" \
+            --body "$(printf 'Promotes the owner-approved auto-fix from develop PR #%s (case `%s`) to main.\n\nThis branch was checked against the approved change manifest: main still had the approved base for every changed path, and the branch changes exactly those paths to exactly the approved contents. The server repeats that check from GitHub before it records this PR.\n\nMerge it in GitHub once staging is verified in the Admin Console (Support > Auto-fix review). Nothing merges it automatically.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_' "$PR_NUMBER" "$CASE_ID")"

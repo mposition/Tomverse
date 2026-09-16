@@ -990,10 +990,21 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **Phase 3(자동 수정)은 인프라만 존재하고 운영은 비활성입니다**
   (`FEEDBACK_AUTOFIX_ENABLED` + sync secret + 수동 dispatch 3중 잠금,
   정책 문서 §9.1). LLM confidence를 자동 게이트로 쓰지 않고, 결정적
-  Red→Green 증명 없는 자동 수정을 금지하며, 자동 생성 수정의 target은
-  `develop`뿐이고 auto-merge는 켜지 않습니다. change policy는
+  Red→Green 증명 없는 자동 수정을 금지하며, 자동 생성 수정이 만드는 것은
+  `develop` PR뿐이고 auto-merge는 켜지 않습니다. change policy는
   `lib/feedbackAutoFixPolicy.ts`가 정의하며 파이프라인 자기 자신을 수정
   대상에서 제외합니다. staging 배포를 production 해결로 표시하지 않습니다.
+- **승격은 소유자 승인 + 사람의 GitHub 병합 + 서버 관측입니다**
+  (docs/policy/trace-feedback-automation.md §9.3). **자동화는 어떤 PR도 병합하지 않고 `--admin`도 쓰지 않습니다.**
+  승인은 PR head와 change manifest(경로별 before/after blob)에 묶이고, main
+  승격 PR은 manifest가 승인과 완전히 같을 때만 인정합니다. GitHub·배포 사실은
+  workflow 보고가 아니라 서버가 **읽기 전용** 자격증명으로 직접 읽으며, 배포는
+  Railway control plane의 단일 live deployment + 다중 표본 + 10분 안정화 창으로만
+  판정합니다. 서버에 GitHub 쓰기 토큰을 두지 않습니다.
+- **검증된 Trace 신고는 `reviewing`으로 접수됩니다.** 사용자 입력 Trace는
+  `open`에 남고, 자동 전환은 사용자에게 메일을 보내지 않으며 운영자 메일은
+  `support_feedback` 한 통입니다. `Feedback.status`를 `resolved`로 바꾸는 것은
+  운영자뿐입니다.
 
 # 이메일 알림
 
@@ -1283,8 +1294,9 @@ Non-negotiable requirements:
 
 Before changing the Prompt Refiner surface or request boundary in
 `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
-`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`, or
-`lib/promptRefinerReceiptCore.ts`, read:
+`lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`,
+`lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
+their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
 - `docs/policy/prompt-refiner-observability.md`
@@ -1318,6 +1330,22 @@ Non-negotiable requirements:
 - No provider call, billing, automatic offer, Router coupling or rollout is
   implied by the composer seam. Each requires its own approved server-owned
   gate and evidence.
+- The execution preregistration is pure and fail-closed. Exact contract,
+  refiner, model/catalog/pricing identity, output cap, timeout, retry zero and
+  request/stage cost ceilings are frozen. The gate also resolves the effective
+  input/output rates through `resolveModelPricing()` so a per-model environment
+  or runtime registry override cannot bypass the 0.2/1.2 pin. Its effective
+  output cap must be at least 4,096; a larger capability is allowed but never
+  replaces the Refiner request's exact 4,096 cap. Caching is disabled, and the
+  generic model reservation-output setting must not reduce this contract's
+  4,096-token worst-case reservation. A future authority must pass its runtime
+  model row through this gate in the same critical path before reservation and
+  dispatch. No reservation authority exists today, so
+  admission always refuses before dispatch with
+  `reservation_authority_unavailable` after earlier checks pass. A caller-made
+  lease or atomic boolean is never proof. Only a future authority with atomic
+  requestId binding, expiry and one-time consume may introduce `admitted: true`
+  under a new contract version. Product mode remains unadmitted.
 - The current server gate folds the default-off AppSetting, environment kill
   switch and adapter readiness into one mode. The only active mode is the
   loopback E2E fixture; a stored flag alone must never expose an inert product
@@ -1381,10 +1409,20 @@ Non-negotiable requirements:
   `npm run check:starter-catalog` refuses a `"feature.…"` literal in the
   catalogue, and proves every flag constant, capability resolver, evidence path
   and locale string still resolves. It runs in PR Fast Gate's static stage.
-- **Adding an entry is three things**: a row in the table, its two strings in
-  all seven locales, and an `evidence` path that exists. Icons are derived from
-  the entry's own accent role and task kind; a fourth step is the one somebody
-  forgets.
+- **Adding an entry is three things**: a row in the table, its three strings
+  (short label, outcome sentence, seed) in all seven locales, and an `evidence`
+  path that exists. Icons are derived from the entry's own accent role and task
+  kind; a fourth step is the one somebody forgets.
+- **The short label is a promise too.** On a touch screen nothing is hovered, so
+  the label is all the card says; it follows the outcome sentence's rules. A
+  locked card shows the requirement badge before its label and is drawn as
+  loudly as a runnable one.
+- **The composer stays in the bottom dock on a new chat.** The welcome screen
+  holds only the greeting, the mobile recent-chats row and the starters,
+  centred with auto margins between the header and the dock; it never holds a
+  composer slot again. The gallery's shape comes from its own width (a `rem`
+  container query), never from which shell rendered it, and the desktop welcome
+  screen lists no recent conversations -- the sidebar already does.
 - **No new accent role.** A card wears the role its feature already owns, or
   the neutral blue/zinc; the AI Review gradient stays reserved even on a card
   describing AI Review.

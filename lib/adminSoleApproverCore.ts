@@ -37,6 +37,23 @@
  * noticing (tests/adminSoleApprover.test.mjs).
  *
  * Pure. The caller supplies who is eligible and what the latest dry run was.
+ *
+ * ## 2026-09-15: every two-person action, not two of them
+ *
+ * The scoping above was revisited and widened by an organisational decision
+ * (docs/policy/admin-sole-approver.md). In a one-administrator organisation the
+ * two-person rule is unsatisfiable for *every* action, not only for campaigns:
+ * a manual plan adjustment, a refund above the threshold or an account
+ * deletion queued a request nobody could ever grant. The control the second
+ * reviewer provided is replaced by the audit record, which the decision
+ * accepts as sufficient while one person is accountable for all of it.
+ *
+ * Two things did not change. Condition 6 still applies to every action -- a
+ * second eligible administrator restores the two-person path on the next
+ * request. And the two actions in `SOLE_APPROVER_ACTIONS` keep their bound
+ * confirmations (dry-run digest, copy digest): they are stronger than the
+ * general path, so the general path refuses to stand in for them
+ * (`decideGeneralSoleApproval`).
  */
 
 /**
@@ -67,9 +84,12 @@
  * impossible, and stops the moment a second administrator exists — which is
  * condition 6, unchanged.
  *
- * Neither argument reaches `user.delete` or the refund actions: a schedule
- * performs no equivalent, and they are perfectly possible with one
- * administrator asking a second one.
+ * Neither argument reaches `user.delete` or the refund actions, and when this
+ * list was written they stayed two-person. Since 2026-09-15 they reach the
+ * sole-administrator path through a third argument instead -- the audit record
+ * in place of the second reviewer -- which is `decideGeneralSoleApproval`, not
+ * this list. This list now means "actions whose sole approval is bound to a
+ * confirmation", and adding an action here still requires such a binding.
  */
 export const SOLE_APPROVER_ACTIONS = [
     "retention.cleanup.execute",
@@ -99,7 +119,7 @@ export type SoleApproverEligibility =
               | "requester_is_not_the_sole_approver";
       };
 
-export function decideSoleApproverEligibility(input: {
+type SoleApproverCandidates = {
     action: string;
     /**
      * Identities that are configured, active, unexpired and hold the
@@ -109,12 +129,59 @@ export function decideSoleApproverEligibility(input: {
     eligibleApproverIdentities: readonly string[];
     /** The requesting administrator's identity, in the same form. */
     requesterIdentity: string | null | undefined;
-}): SoleApproverEligibility {
+};
+
+export function decideSoleApproverEligibility(
+    input: SoleApproverCandidates
+): SoleApproverEligibility {
     if (
         !(SOLE_APPROVER_ACTIONS as readonly string[]).includes(input.action)
     ) {
         return { allowed: false, reason: "action_not_eligible" };
     }
+    return countSoleApprover(input);
+}
+
+export type GeneralSoleApproval =
+    | { allowed: true; approverIdentity: string }
+    | {
+          allowed: false;
+          reason:
+              | "action_has_bound_path"
+              | "no_eligible_approver"
+              | "multiple_eligible_approvers"
+              | "requester_is_not_the_sole_approver";
+      };
+
+/**
+ * Whether one administrator may execute any other two-person action alone
+ * (docs/policy/admin-sole-approver.md).
+ *
+ * The same count as `decideSoleApproverEligibility`, so condition 6 holds for
+ * every action. What it does not do is cover `SOLE_APPROVER_ACTIONS`: those
+ * have a bound confirmation that proves the administrator saw what they are
+ * approving, and a path without that proof must not become a way around it.
+ */
+export function decideGeneralSoleApproval(
+    input: SoleApproverCandidates
+): GeneralSoleApproval {
+    if ((SOLE_APPROVER_ACTIONS as readonly string[]).includes(input.action)) {
+        return { allowed: false, reason: "action_has_bound_path" };
+    }
+    return countSoleApprover(input);
+}
+
+function countSoleApprover(
+    input: SoleApproverCandidates
+):
+    | { allowed: true; approverIdentity: string }
+    | {
+          allowed: false;
+          reason:
+              | "no_eligible_approver"
+              | "multiple_eligible_approvers"
+              | "requester_is_not_the_sole_approver";
+      } {
     const eligible = Array.from(
         new Set(
             input.eligibleApproverIdentities

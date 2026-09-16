@@ -112,6 +112,14 @@ type ChatMessageListProps = {
     olderCount: number;
     onLoadOlder?: () => void;
     loadingOlder?: boolean;
+    /** Imported turns below the loaded window (after opening at a search hit). */
+    newerCount?: number;
+    onLoadNewer?: () => void;
+    loadingNewer?: boolean;
+    /** Scroll to and focus this `imported:` message once it is rendered. */
+    focusRequest?: { messageId: string; nonce: number } | null;
+    /** Called once the requested message has been scrolled to and focused. */
+    onFocusApplied?: (nonce: number) => void;
   };
 };
 type MarkdownCodeProps = ComponentPropsWithoutRef<"code"> & ExtraProps;
@@ -512,6 +520,51 @@ export function ChatMessageList({
     };
   }, [scrollToBottomNow]);
 
+  /*
+    Opening at a search hit.
+
+    Declared after the auto-scroll effects above so that, in the commit where
+    the target first renders, it runs after them: the initial-load branch has
+    already jumped to the bottom and switched to "following", and this undoes
+    exactly that. The order inside is the contract -- pause first, so neither
+    the ResizeObserver nor the next streamed chunk pulls the view back down;
+    then centre the target; then move focus without a second scroll. A nonce is
+    handled once, so re-rendering does not keep dragging the reader back.
+  */
+  const focusRequest = importedTranscript?.focusRequest ?? null;
+  const onFocusApplied = importedTranscript?.onFocusApplied;
+  const handledFocusNonceRef = useRef<number | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!focusRequest || handledFocusNonceRef.current === focusRequest.nonce) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const target = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-message-id]")
+    ).find((element) => element.dataset.messageId === focusRequest.messageId);
+    if (!target) return;
+    handledFocusNonceRef.current = focusRequest.nonce;
+
+    setMode("paused");
+    isProgrammaticScrollRef.current = true;
+    const containerBox = container.getBoundingClientRect();
+    const targetBox = target.getBoundingClientRect();
+    container.scrollTop +=
+      targetBox.top - containerBox.top - (container.clientHeight - targetBox.height) / 2;
+    requestAnimationFrame(() => {
+      isProgrammaticScrollRef.current = false;
+    });
+    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    setHighlightedMessageId(focusRequest.messageId);
+    onFocusApplied?.(focusRequest.nonce);
+  }, [focusRequest, messages, onFocusApplied, setMode]);
+  useEffect(() => {
+    if (!highlightedMessageId) return;
+    const timer = window.setTimeout(() => setHighlightedMessageId(null), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [highlightedMessageId]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {/* aria-live + aria-atomic without role="status": the two are equivalent
@@ -714,10 +767,16 @@ export function ChatMessageList({
               <Fragment key={msg.id || idx}>
               <div
                 data-testid="chat-message"
+                data-message-id={msg.id || undefined}
                 data-message-role={msg.role}
                 data-model-id={msg.modelId || ""}
                 data-message-source={imported ? "imported" : "native"}
-                className={`flex w-full flex-col ${isUser ? "items-end" : "items-start"}`}
+                data-search-focused={highlightedMessageId === msg.id ? "true" : undefined}
+                className={`flex w-full flex-col rounded-2xl transition-shadow focus:outline-none ${isUser ? "items-end" : "items-start"} ${
+                  highlightedMessageId === msg.id
+                    ? "ring-2 ring-blue-500/60 ring-offset-2 ring-offset-white dark:ring-offset-zinc-950"
+                    : ""
+                }`}
               >
                 {!isUser && imported && (
                   /*
@@ -1566,6 +1625,35 @@ export function ChatMessageList({
                   )}
                 </div>
               </div>
+              {isLastImported &&
+                importedTranscript &&
+                (importedTranscript.newerCount ?? 0) > 0 && (
+                /*
+                  Newer imported turns, below a window that was opened at a
+                  search hit rather than at the end.
+
+                  Above the divider, never below it: what follows the divider
+                  is the Tomverse half, and a gap in the imported half must not
+                  read as though the Tomverse turns continued straight on from
+                  the last imported one on screen.
+                */
+                <div className="flex justify-center py-1">
+                  <button
+                    type="button"
+                    data-testid="imported-load-newer"
+                    onClick={importedTranscript.onLoadNewer}
+                    disabled={importedTranscript.loadingNewer}
+                    className="inline-flex min-h-9 items-center gap-2 rounded-full border border-dashed border-zinc-300 px-3 text-[11px] font-semibold text-zinc-500 transition-colors hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  >
+                    {importedTranscript.loadingNewer
+                      ? t("continuation.loadingNewerImported")
+                      : t("continuation.showNewerImported").replaceAll(
+                          "{count}",
+                          String(importedTranscript.newerCount)
+                        )}
+                  </button>
+                </div>
+              )}
               {isLastImported && (
                 /*
                   Where Tomverse takes over.

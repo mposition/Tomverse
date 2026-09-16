@@ -14,7 +14,10 @@ import {
 } from "@/lib/apiSecurity";
 import { ensureGuestVerified } from "@/lib/turnstile";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
-import { FEEDBACK_LIFECYCLE_STAGE } from "@/lib/feedbackLifecycleCore";
+import {
+  initialFeedbackLifecycleEvents,
+  initialFeedbackStatus,
+} from "@/lib/feedbackTraceAutoReview";
 import { isLanguage } from "@/lib/language";
 import {
   NOTIFICATION_KIND,
@@ -238,9 +241,17 @@ export async function POST(req: Request) {
     // with the report. The raw token is read here once and never persisted;
     // a verification failure of any kind still stores the feedback.
     const traceReport = await resolveTraceReport(body);
+    // A report backed by a server-verified trace arrives already in review:
+    // there is a recorded server failure to look at, and the operator mail
+    // below says so (lib/feedbackTraceAutoReview.ts).
+    const autoReviewInput = {
+      verification: traceReport.verification,
+      traceId: body.traceId,
+    };
     const { feedback, delivery, userDelivery } = await prisma.$transaction(async (tx) => {
       const feedback = await tx.feedback.create({
         data: {
+          status: initialFeedbackStatus(autoReviewInput),
           userId: session?.user?.id || null,
           email,
           type: body.type,
@@ -286,15 +297,15 @@ export async function POST(req: Request) {
         });
       }
       // The immutable snapshot the receipt email renders from -- and the
-      // record that this stage was announced at most once.
-      await tx.feedbackLifecycleEvent.create({
-        data: {
-          feedbackId: feedback.id,
-          stage: FEEDBACK_LIFECYCLE_STAGE.received,
-          previousStatus: null,
-          newStatus: feedback.status,
-        },
-      });
+      // record that each stage was announced at most once. An auto-reviewed
+      // report also records its reviewing stage, with no actor, but queues no
+      // second submitter email: the receipt going out in the same second is
+      // the only mail that moment warrants.
+      for (const event of initialFeedbackLifecycleEvents(autoReviewInput)) {
+        await tx.feedbackLifecycleEvent.create({
+          data: { feedbackId: feedback.id, ...event },
+        });
+      }
       const delivery = await enqueueNotificationDelivery(tx, {
         kind: NOTIFICATION_KIND.supportFeedback,
         referenceId: feedback.id,

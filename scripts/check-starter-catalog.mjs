@@ -193,7 +193,10 @@ for (const entry of CHAT_STARTER_CATALOG) {
     );
   }
 
+  // The short label is the promise wherever the full sentence is not on
+  // screen, so it is held to the same rules as the sentence.
   for (const [label, key] of [
+    ["labelKey", entry.labelKey],
     ["outcomeKey", entry.outcomeKey],
     ["promptSeedKey", entry.seed.promptSeedKey],
   ]) {
@@ -215,6 +218,8 @@ for (const key of [
   "chatStarter.hint",
   "chatStarter.lockedSignIn",
   "chatStarter.lockedPlan",
+  "chatStarter.lockedSignInShort",
+  "chatStarter.lockedPlanShort",
 ]) {
   for (const locale of LOCALES) {
     const value = readKey(bundles[locale], key);

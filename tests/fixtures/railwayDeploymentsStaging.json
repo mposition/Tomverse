@@ -1,0 +1,15 @@
+{
+  "_comment": "Railway control plane, Tomverse app service, staging environment, read 2026-09-15 ~13:35Z through the Railway MCP list_deployments tool (read-only). Deployment ids replaced with placeholders; statuses, order and commit SHAs are as returned (commit SHAs are public in the repository history). Used by tests/feedbackAutoFixDeploymentObservation.test.ts to pin which statuses can be serving traffic.",
+  "deployments": [
+    { "id": "dep-10", "status": "WAITING", "createdAt": "2026-09-15T13:33:42.355Z", "commitSha": "2ae2985b4ce3e5500fed9e6844f2520912aeef6c" },
+    { "id": "dep-09", "status": "SKIPPED", "createdAt": "2026-09-15T12:49:06.624Z", "commitSha": "ae6236f16dbd5e02e1108b1197d71f118ddd4668" },
+    { "id": "dep-08", "status": "SKIPPED", "createdAt": "2026-09-15T12:39:20.317Z", "commitSha": "ae6236f16dbd5e02e1108b1197d71f118ddd4668" },
+    { "id": "dep-07", "status": "SUCCESS", "createdAt": "2026-09-15T11:53:18.216Z", "commitSha": "fd7af39caa390ddcb1d1e1eb0ade7f7e6652578d" },
+    { "id": "dep-06", "status": "REMOVED", "createdAt": "2026-09-15T11:13:42.735Z", "commitSha": "102006072838f09ff6e0104c0e4ae23e7dc8bfab" },
+    { "id": "dep-05", "status": "REMOVED", "createdAt": "2026-09-15T11:01:19.387Z", "commitSha": "03776aaa78718f0d966a9c65ddcf97ec4112d8ff" },
+    { "id": "dep-04", "status": "REMOVED", "createdAt": "2026-09-15T10:46:35.451Z", "commitSha": "d09b439637bd989826b899c0d98e95ce78200e43" },
+    { "id": "dep-03", "status": "REMOVED", "createdAt": "2026-09-15T10:36:41.274Z", "commitSha": "d97e171d475e9f701ae37b2008daad1a89a4721e" },
+    { "id": "dep-02", "status": "REMOVED", "createdAt": "2026-09-15T10:26:49.434Z", "commitSha": "902cc217797785f76322b84d86395846329d25b3" },
+    { "id": "dep-01", "status": "REMOVED", "createdAt": "2026-09-15T09:36:29.445Z", "commitSha": "cc9f4959e854b0826c616c551ae28a2afe5cd78c" }
+  ]
+}

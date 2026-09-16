@@ -72,6 +72,15 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     traceSourceClaim: (provenance: string) => `${provenance} (client claim)`,
     clientCode: (code: string) => `Client-classified code: ${code}`,
     shadowDiagnosis: "Shadow diagnosis (observation only, no auto-fix): ",
+    autoFixStage: "Auto-fix: ",
+    autoFixDraft: {
+      ready:
+        "The fix for this report was observed live in production. A reply draft is ready; nothing has been sent to the reporter.",
+      use: "Reply with the draft and resolve",
+      review: "Review the fix",
+      sendAndResolve: "Send reply and mark resolved",
+      resolveOnly: "Mark resolved",
+    },
     evidenceRow: {
       serverCode: (code: string, source: string) => `Server code: ${code} (${source})`,
       route: (routeClass: string) => `Route: ${routeClass}`,
@@ -169,6 +178,15 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
     traceSourceClaim: (provenance: string) => `${provenance} (클라이언트 주장)`,
     clientCode: (code: string) => `클라이언트 분류 코드: ${code}`,
     shadowDiagnosis: "Shadow 진단 (관찰 전용, 자동 수정 없음): ",
+    autoFixStage: "자동 수정: ",
+    autoFixDraft: {
+      ready:
+        "이 신고의 수정이 production에 반영된 것을 확인했습니다. 답변 초안이 준비되었고, 신고자에게는 아직 아무것도 보내지 않았습니다.",
+      use: "초안으로 답변하고 해결됨 처리",
+      review: "수정 내용 보기",
+      sendAndResolve: "답변 보내고 해결됨으로 표시",
+      resolveOnly: "해결됨으로 표시",
+    },
     evidenceRow: {
       serverCode: (code: string, source: string) => `서버 코드: ${code} (${source})`,
       route: (routeClass: string) => `경로 분류: ${routeClass}`,

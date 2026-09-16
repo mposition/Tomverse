@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resourceUnlockAccess } from "../lib/conversationLock.ts";
 import {
     LOCK_RESOURCE_TYPES,
     createConversationUnlockCookie,
@@ -62,6 +63,35 @@ test("a conversation grant minted through either entry point is the same grant",
         hasConversationUnlockGrant(request, USER, "conv-1", PASSWORD_HASH),
         true
     );
+});
+
+test("one read answers both whether a grant opens a resource and until when", () => {
+    // The two questions come from the same cookie and the same clock reading,
+    // so a caller that shows something derived from a grant cannot be told
+    // "yes" and "no expiry" across a second boundary (CONT-SEARCH-01).
+    const setCookie = createConversationUnlockCookie(USER, "conv-1", PASSWORD_HASH);
+    const request = requestWith(cookieValue(setCookie));
+    const granted = resourceUnlockAccess("conversation", request, USER, "conv-1", PASSWORD_HASH);
+    assert.equal(granted.granted, true);
+    assert.equal(
+        granted.expiresAt,
+        Number(cookieValue(setCookie).split("=")[1].split(".")[0]),
+        "the expiry is the grant's own, in epoch seconds"
+    );
+    assert.ok(granted.expiresAt > Math.floor(Date.now() / 1000));
+
+    // No lock: allowed, and nothing expires.
+    assert.deepEqual(resourceUnlockAccess("conversation", request, USER, "conv-1", null), {
+        granted: true,
+        expiresAt: null,
+    });
+    // No grant, and a grant for another resource: refused with no expiry.
+    for (const request of [requestWith(""), requestWith(cookieValue(setCookie))]) {
+        assert.deepEqual(
+            resourceUnlockAccess("conversation", request, USER, "conv-2", PASSWORD_HASH),
+            { granted: false, expiresAt: null }
+        );
+    }
 });
 
 test("an unlocked resource needs no grant at all", () => {

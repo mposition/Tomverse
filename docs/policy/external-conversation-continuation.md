@@ -510,6 +510,40 @@ timeline 안에서는 발생하지 않습니다 — 원본이 스크롤 영역 *
 tombstone 또는 lock 안내가 들어가고, divider·native message·composer·사이드바
 이동은 그대로입니다. seed는 주입되지 않습니다(§6, §7).
 
+#### 8.2.1 메시지 검색 (CONT-SEARCH-01)
+
+사이드바 메시지 검색은 native `Message`와 함께 **이 계정의 이어진 대화에 연결된
+finalized snapshot의 저장된 원문**(`ExternalMessage`)을 찾습니다. 구현은
+`lib/conversationSearch.ts` 하나입니다.
+
+- **대상.** bridge·이어진 대화·snapshot이 모두 같은 계정 소유이고, 이어진 대화의
+  native 잠금과 snapshot의 `external_conversation` 잠금이 **각자의 grant로** 열려 있는
+  원문만. 연결되지 않은 import, staging snapshot, 삭제된 원문은 대상이 아닙니다.
+  원문을 지워도 이어진 대화의 native 메시지는 그대로 검색됩니다.
+- **인가가 모든 상한보다 먼저입니다.** 인가 판정과 후보·본문 조회는 한 READ ONLY
+  REPEATABLE READ snapshot에서 읽고, grant 없는 대화는 후보 SQL의 조건으로 빼며, 원문은
+  인가된 snapshot 집합에서만 스캔합니다. 잠긴 자료의 일치 개수가 결과의 순서·개수·
+  `truncated`·원문 시간 초과 여부를 바꾸지 않아야 하며, 바꾸면 출시 차단입니다(§13).
+- **결과는 (열리는 대화, 메시지) 단위입니다.** 원문 결과는 `kind: "imported"`,
+  `externalMessageId`, 원본 공급자와 원본 모델 라벨을 싣고 runtime `modelId`를 싣지
+  않습니다. 한 원문이 여러 이어진 대화에 연결되면 최근 활동 순 세 갈래까지 각각의 결과로
+  보이며, 임의의 다른 갈래나 최신 import로 이동하지 않습니다. digest·ordinal·seed·import
+  id는 응답에 없습니다.
+- **검색어는 literal 부분 문자열**이고 2~80자입니다(한국어·영어 동일). `%`·`_`는 wildcard가
+  아닙니다.
+- **원문 검색에는 시간 상한이 있습니다.** 초과하면 원문 결과를 **전부** 버리고 native 결과만
+  돌려주며 `sourceSearch: "timed_out"`으로 "원문 검색 시간이 초과되어 Tomverse 메시지 결과만
+  표시합니다"를 보입니다. "결과 없음"이나 일부 성공으로 표시하지 않습니다. 현재 3초는
+  임시 안전 상한이며, 계정 상한 근처 합성 데이터의 측정 후 확정합니다. 정상 사용에서
+  반복되면 시간 제한이 아니라 조회 구조·인덱스를 재검토합니다.
+- **결과를 누르면 그 원문 메시지로 이동합니다.** timeline read의 `around`가 bridge가
+  가리키는 snapshot 안에서만 id를 찾아 그 주변 페이지를 주고, window는 위아래로 한
+  페이지씩 늘어납니다. id를 찾지 못한 것·잠김·삭제는 끝 페이지와 "이 결과는 더 이상 열 수
+  없습니다" 안내입니다. `around`는 스크롤 위치일 뿐 권한 증거가 아닙니다.
+- **검색 가능하다는 것과 모델에게 전달된다는 것은 별개입니다.** 검색은 원문을 `Message`나
+  Memory로 복제하지 않고, seed나 모델 context를 넓히지 않으며, 유료 모델·embedding을
+  호출하지 않습니다. 검색어·원문·id는 로그와 analytics에 남기지 않습니다.
+
 ### 8.3 모델 선택
 
 **일반 Chat composer의 모델 picker를 그대로 씁니다.** 이 화면은 자기 규칙도,
@@ -673,6 +707,8 @@ USD를 싣지 않습니다.
 - migration이 기존 continuation의 `selectedModels`를 바꿈(§15)
 - flag off가 ordinary chat을 깨뜨리거나 사용자 새 메시지를 숨김
 - share·export를 통해 외부 원문이 사용자 동의 없이 공개됨
+- 메시지 검색이 잠긴·권한 없는·다른 계정·미완료 원문의 본문·제목·존재·개수를 드러내거나,
+  잠긴 자료가 결과의 순서·개수·`truncated`·원문 시간 초과 여부를 바꿈(§8.2.1)
 
 라벨 조정·breadcrumb·추가 모바일 polish는 데이터·보안 계약이 맞으면 비차단으로
 기록할 수 있습니다.

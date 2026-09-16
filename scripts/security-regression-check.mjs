@@ -941,7 +941,7 @@ const checks = [
   },
   {
     name: "Conversation search filters locked results by unlock grant",
-    file: "app/api/conversations/search/route.ts",
+    file: "lib/conversationSearch.ts",
     /*
       The guarantee, not the formatting.
 
@@ -959,14 +959,32 @@ const checks = [
       rule was satisfied by the import line alone, so replacing the call with
       anything else while keeping the import passed it. Verified by mutation --
       dropping `password` from the select fails, and renaming the call fails.
+
+      CONT-SEARCH-01 moved the query into lib/conversationSearch.ts and added
+      imported transcripts, which carry a second, independent lock. So the
+      rule now also requires the external grant, and requires the locked rows
+      to be excluded inside the candidate queries (`notIn: denied…`) -- the
+      order that keeps a locked match from deciding which authorised hits are
+      returned.
     */
     test: (source) =>
-      /conversation:\s*\{\s*select:\s*\{[\s\S]*?\bpassword:\s*true\b/.test(
+      // Both lock columns are read, inside the one snapshot the candidates are
+      // read from...
+      /readOnlySnapshotTransaction\(/.test(source) &&
+      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{\s*id:\s*true,\s*password:\s*true\s*\}/.test(
         source
       ) &&
-      /hasConversationUnlockGrant\([^)]*message\.conversation\.password[^)]*\)/.test(
+      /externalConversation:\s*\{\s*select:\s*\{\s*password:\s*true\s*\}\s*\}/.test(source) &&
+      // ...each is passed to its own grant check...
+      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.password[^)]*\)/.test(source) &&
+      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.password[^)]*\)/.test(
         source
-      ),
+      ) &&
+      // ...and the decision is inside the candidate queries, before any cap:
+      // denied conversations excluded, imported text read only from the
+      // authorised snapshots.
+      /NOT \(c\.id = ANY\(\$\{deniedConversationIds\}::text\[\]\)\)/.test(source) &&
+      /"externalConversationId" = ANY\(\$\{authorizedSnapshotIds\}::text\[\]\)/.test(source),
   },
   {
     name: "Bulk conversation deletion requires unlock grants",
@@ -3751,6 +3769,65 @@ const checks = [
         !prStep.includes("--auto")
       );
     },
+  },
+  {
+    // Owner-approved promotion (docs/policy/trace-feedback-automation.md §9.3).
+    // The promotion-PR workflow opens a main PR and must never merge one:
+    // merging is a person's act in GitHub under branch protection. It runs on
+    // the plain pull_request trigger (never the privileged one), refuses a
+    // head outside this repository in the job condition -- before any secret
+    // is read -- and keeps the sync secret and the GitHub PAT in separate
+    // steps. Third-party actions stay pinned by SHA.
+    name: "Feedback auto-fix promotion workflow opens a main PR and never merges",
+    file: ".github/workflows/feedback-autofix-promotion-pr.yml",
+    test: (raw) => {
+      const source = raw.replace(/\r\n/g, "\n");
+      const code = source
+        .split("\n")
+        .filter((line) => !/^\s*#/.test(line))
+        .join("\n");
+      const steps = code.split(/\n {6}- name: /);
+      const prepare = steps.find((step) => step.startsWith("Ask the server"));
+      const push = steps.find((step) => step.startsWith("Push and open the main promotion PR"));
+      const fetchExisting = steps.find((step) => step.startsWith("Fetch an existing promotion branch"));
+      const secretSteps = steps.filter((step) => step.includes("FEEDBACK_AUTOFIX_SYNC_SECRET"));
+      const patSteps = steps.filter((step) => step.includes("GH_AUTOMATION_PAT"));
+      return (
+        /\n  pull_request:\n    types: \[closed\]\n    branches: \[develop\]/.test(code) &&
+        !code.includes("pull_request_target") &&
+        !code.includes("schedule:") &&
+        code.includes("github.event.pull_request.head.repo.full_name == github.repository") &&
+        code.includes("github.event.pull_request.merged == true") &&
+        !/gh pr merge|--admin|--auto\b|git push[^\n]*\bmain\b/.test(code) &&
+        code.includes("actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803") &&
+        code.includes("actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38") &&
+        code.includes("merge-base --is-ancestor origin/main origin/develop") &&
+        code.includes("check-main") &&
+        code.includes("check-branch") &&
+        Boolean(prepare) &&
+        Boolean(push) &&
+        Boolean(fetchExisting) &&
+        secretSteps.length === 1 &&
+        secretSteps[0] === prepare &&
+        patSteps.length === 2 &&
+        patSteps.includes(push) &&
+        patSteps.includes(fetchExisting) &&
+        !prepare.includes("GH_AUTOMATION_PAT") &&
+        !push.includes("FEEDBACK_AUTOFIX_SYNC_SECRET")
+      );
+    },
+  },
+  {
+    // The server's side of promotion reads GitHub and never writes to it: no
+    // non-GET request, no merge endpoint, no dispatch. A write credential on
+    // the production server was the round-0 review's blocker F8.
+    name: "Feedback auto-fix GitHub access on the server is read-only",
+    file: "lib/feedbackAutoFixGitHub.ts",
+    test: (source) =>
+      source.includes('method: "GET"') &&
+      !/method:\s*"(POST|PUT|PATCH|DELETE)"/.test(source) &&
+      !/\/merge\b|\/dispatches\b|\/reviews\b/.test(source) &&
+      source.includes('redirect: "error"'),
   },
   {
     // The auto-PR guard decides whether a branch gets a pull request at all,
