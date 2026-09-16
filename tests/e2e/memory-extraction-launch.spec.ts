@@ -30,13 +30,18 @@ type Conversation = {
   id: string;
   importId: string;
   provider: string;
-  title: string;
+  /** `null` for a locked snapshot: the server withholds its title. */
+  title: string | null;
   externalStableId: string | null;
   messageCount: number;
   contentBytes: number;
   sourceCreatedAt: string | null;
   sourceUpdatedAt: string | null;
   importedAt: string;
+  /** Sent by /api/external-conversations; the launcher used to drop it. */
+  locked?: boolean;
+  /** A locked snapshot's title is withheld from lists (IMPORT-LOCK-TITLE-01). */
+  titleWithheld?: boolean;
 };
 
 const conversation = (id: string, contentBytes = 40_000): Conversation => ({
@@ -89,6 +94,8 @@ async function mockExtractionApi(
     creditsPerConversation?: number;
     /** The create call answers 409 MEMORY_ESTIMATE_CHANGED. */
     estimateChangedOnCreate?: boolean;
+    /** The estimate call answers 423 CONVERSATION_LOCKED. */
+    lockedOnEstimate?: boolean;
     run?: Partial<RunRow>;
   } = {}
 ): Promise<ExtractionQaState> {
@@ -164,6 +171,16 @@ async function mockExtractionApi(
       const selected = (body.selectedConversationIds as string[]) ?? [];
       if (body.estimateOnly) {
         state.estimateBodies.push(body);
+        if (options.lockedOnEstimate) {
+          return route.fulfill({
+            status: 423,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: "A selected conversation is locked.",
+              code: "CONVERSATION_LOCKED",
+            }),
+          });
+        }
         return route.fulfill(
           json({
             chunkCount: selected.length,
@@ -452,4 +469,78 @@ test("a run that does not exist says so instead of spinning", async ({
   await page.goto("/settings/memory/runs/missing-run");
 
   await expect(page.getByTestId("memory-extraction-run-missing")).toBeVisible();
+});
+
+/* ------------------------------------------------------------ locked rows */
+
+/**
+ * A locked snapshot may not be sent to a provider
+ * (docs/policy/external-conversation-import-and-memory.md §7.1). The server
+ * refuses it; these pin that the screen says so before anyone asks, and says
+ * so again when the server is the one that noticed.
+ */
+
+const lockedConversation = (id: string): Conversation => ({
+  ...conversation(id),
+  title: null,
+  titleWithheld: true,
+  locked: true,
+});
+
+test("a locked conversation is shown, cannot be chosen, and offers the way to unlock it", async ({
+  page,
+}) => {
+  const state = await mockExtractionApi(page, {
+    pairs: [approvedPair],
+    conversations: [conversation("c-1"), lockedConversation("c-2")],
+  });
+  await openMemoryPage(page);
+
+  const rows = page.getByTestId("memory-extraction-conversation-row");
+  await expect(rows).toHaveCount(2);
+
+  // Shown rather than hidden: a row that vanished from the user's own list
+  // would be unexplained.
+  const locked = page.locator(
+    '[data-testid="memory-extraction-conversation-row"][data-locked="true"]'
+  );
+  await expect(locked).toHaveCount(1);
+  await expect(locked.getByRole("checkbox")).toBeDisabled();
+  await expect(
+    locked.getByTestId("memory-extraction-conversation-locked")
+  ).toBeVisible();
+
+  // And it says why, and where to go.
+  const unlock = locked.getByTestId("memory-extraction-conversation-unlock");
+  await expect(unlock).toHaveAttribute(
+    "href",
+    "/settings/imports/conversations/c-2"
+  );
+
+  // "All visible" chooses what can be chosen, so the estimate never names it.
+  await page.getByTestId("memory-extraction-select-visible").click();
+  await page.getByTestId("memory-extraction-estimate").click();
+  await expect.poll(() => state.estimateBodies.length).toBe(1);
+  expect(state.estimateBodies[0].selectedConversationIds).toEqual(["c-1"]);
+});
+
+test("a lock the server finds is reported as a lock, not as a generic failure", async ({
+  page,
+}) => {
+  // The case the screen cannot see coming: locked in another tab after the
+  // list loaded, or on a page never scrolled to. "Try again" would get the
+  // same answer, so it must not be what the screen says.
+  await mockExtractionApi(page, {
+    pairs: [approvedPair],
+    conversations: [conversation("c-1")],
+    lockedOnEstimate: true,
+  });
+  await openMemoryPage(page);
+
+  await page.getByTestId("memory-extraction-select-visible").click();
+  await page.getByTestId("memory-extraction-estimate").click();
+
+  const error = page.getByTestId("memory-extraction-error");
+  await expect(error).toContainText("locked");
+  await expect(error).not.toContainText("Something went wrong");
 });

@@ -3247,7 +3247,9 @@ model MemoryExtractionChunk {
 
   chunkIndex Int
 
-  /// pending | running | completed | failed — allowlist CHECK in the migration.
+  /// pending | running | completed | skipped | failed — allowlist CHECK in the
+  /// migration. `skipped` finished without calling the provider (its sources
+  /// were all gone), so it counts as processed but is never charged.
   status String @default("pending")
 
   /// ExternalConversation IDs this call covers, in plan order.

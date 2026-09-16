@@ -694,3 +694,205 @@ test("the lease sweep skips runs another transaction holds instead of waiting on
     await holder.done;
     assert.equal((await reconcileExpiredMemoryExtractionRuns()).reclaimedRuns, 1);
 });
+
+
+/* ------------------------------------------ chunks that called no provider */
+
+/**
+ * The defect these pin: a chunk whose conversations had all gone returned
+ * `completed`, and `chunksCharged` is the count of completed chunks, so the
+ * account paid for a provider call nobody made. The settlement contract says
+ * in as many words that a charged chunk "really did call the provider"
+ * (lib/memoryExtractionCredits.ts), so this was a contradiction rather than a
+ * decision -- and deleting a source is an ordinary, repeatable thing to do.
+ */
+
+test("a chunk that called no provider finishes the run and is not charged", async () => {
+    const { user, conversationIds } = await seed(2);
+    const { run } = await createRun(user.id, conversationIds);
+    assert.equal(run.chunkTotal, 1, "fixture: one chunk, so its report is terminal");
+
+    const lease = await claimMemoryExtractionRun({ runId: run.id, owner: "worker" });
+    assert.ok(lease);
+    const chunk = await claimNextExtractionChunk(lease);
+    assert.ok(chunk);
+
+    const reported = await completeExtractionChunk(lease, chunk.chunkIndex, {
+        outcome: "skipped",
+    });
+    assert.deepEqual(
+        { applied: reported.applied, runStatus: reported.runStatus },
+        { applied: true, runStatus: "completed" },
+        "a skip still finishes the run -- waiting for it would never end"
+    );
+
+    const row = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: chunk.chunkIndex },
+    });
+    assert.equal(row.status, "skipped");
+    assert.ok(row.completedAt, "terminal like completed, so it has a finish time");
+
+    const reservation = await reservationFor(run.id);
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.outcome, "completed");
+    assert.equal(reservation.chunksCharged, 0, "nothing called the provider");
+    assert.equal(reservation.settledCredits, 0);
+    assert.ok(
+        reservation.reservedCredits > 0,
+        "fixture: there was something to refund"
+    );
+});
+
+test("a run that skipped one chunk and ran another is charged for one", async () => {
+    const { user, conversationIds } = await seed(11);
+    const { run } = await createRun(user.id, conversationIds);
+    assert.ok(run.chunkTotal >= 2, "fixture: more than one chunk");
+
+    const lease = await claimMemoryExtractionRun({ runId: run.id, owner: "worker" });
+    assert.ok(lease);
+    let charged = 0;
+    for (let index = 0; index < run.chunkTotal; index += 1) {
+        const chunk = await claimNextExtractionChunk(lease);
+        assert.ok(chunk, `fixture: chunk ${index} was claimable`);
+        // The first one ran; every other one had nothing left to read.
+        const outcome = index === 0 ? ("completed" as const) : ("skipped" as const);
+        if (outcome === "completed") charged += 1;
+        await completeExtractionChunk(lease, chunk.chunkIndex, { outcome });
+    }
+
+    const finished = await prisma.memoryExtractionRun.findUniqueOrThrow({
+        where: { id: run.id },
+    });
+    assert.equal(finished.status, "completed");
+    assert.equal(
+        finished.chunkCompleted,
+        run.chunkTotal,
+        "progress counts processed chunks, or the bar never fills"
+    );
+
+    const reservation = await reservationFor(run.id);
+    assert.equal(reservation.chunksCharged, charged);
+    assert.ok(
+        reservation.settledCredits < reservation.reservedCredits,
+        "the chunks that did not run were refunded"
+    );
+});
+
+test("a superseded generation cannot record a skip or settle on it", async () => {
+    // The fence is the same one a completed report meets, and it has to hold
+    // for the new outcome too: a skip settles the run when it is the last
+    // chunk, so a stale worker recording one would settle a run it no longer
+    // owns.
+    const { run, stale, chunk } = await runWithStaleChunk(2);
+    await claimMemoryExtractionRun({ runId: run.id, owner: "worker-next" });
+
+    const reported = await completeExtractionChunk(stale, chunk.chunkIndex, {
+        outcome: "skipped",
+    });
+    assert.equal(reported.applied, false);
+
+    const row = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: chunk.chunkIndex },
+    });
+    assert.notEqual(row.status, "skipped");
+    assert.equal((await reservationFor(run.id)).status, "reserved");
+});
+
+/* ------------------------------------------------------- locked selections */
+
+/**
+ * A locked snapshot may not be sent to a provider
+ * (docs/policy/external-conversation-import-and-memory.md §7.1), so a
+ * selection holding one is refused before anything is reserved.
+ */
+
+test("a selection holding a locked snapshot is refused with 423 and reserves nothing", async () => {
+    const { user, conversationIds } = await seed(2);
+    await prisma.externalConversation.update({
+        where: { id: conversationIds[0] },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    await assert.rejects(
+        estimateMemoryExtraction(baseInput(user.id, conversationIds)),
+        (error: unknown) =>
+            error instanceof ApiSecurityError &&
+            error.status === 423 &&
+            error.code === "CONVERSATION_LOCKED"
+    );
+    assert.equal(await prisma.memoryExtractionRun.count(), 0);
+    assert.equal(await prisma.memoryExtractionCreditReservation.count(), 0);
+});
+
+test("an id the caller does not own is not found, not locked", async () => {
+    // "Not yours" and "locked" must not be told apart for a snapshot the
+    // caller has no business knowing the state of, so ownership is judged
+    // first and the lock only after it.
+    const { user } = await seed(1);
+    const { conversationIds: foreign } = await seed(1);
+    await prisma.externalConversation.update({
+        where: { id: foreign[0] },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    await assert.rejects(
+        estimateMemoryExtraction(baseInput(user.id, foreign)),
+        (error: unknown) =>
+            error instanceof ApiSecurityError && error.code === "NOT_FOUND"
+    );
+});
+
+test("a snapshot locked between the estimate and the run is refused inside the transaction", async () => {
+    /*
+      The race this pins. `createMemoryExtractionRun` re-runs the estimate
+      first, and that estimate runs outside the transaction that writes the
+      run and its reservation -- so it alone cannot stop a lock that lands in
+      between.
+
+      The credit-account lock is the first thing that transaction takes. Held
+      from outside, it parks the create *after* its estimate has passed and
+      *before* it reads the rows again. The lock is committed in that gap, and
+      only the in-transaction read can see it.
+    */
+    const { user, conversationIds } = await seed(2);
+    const estimate = await estimateMemoryExtraction(
+        baseInput(user.id, conversationIds)
+    );
+
+    const holder = holdLock((tx) =>
+        tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit-account:${user.id}`}))`
+    );
+    await holder.holding;
+
+    const creating = createMemoryExtractionRun({
+        ...baseInput(user.id, conversationIds),
+        confirmedCredits: estimate.estimatedCredits,
+    });
+    // Attached before the wait, so a rejection is never unhandled.
+    const outcome = creating.then(
+        () => "created" as const,
+        (error: unknown) => error
+    );
+    await waitForLockWaiters(1);
+
+    await prisma.externalConversation.update({
+        where: { id: conversationIds[0] },
+        data: { password: "scrypt$1$test-locked" },
+    });
+    holder.release();
+    await holder.done;
+
+    const settled = await outcome;
+    assert.ok(
+        settled instanceof ApiSecurityError &&
+            settled.status === 423 &&
+            settled.code === "CONVERSATION_LOCKED",
+        `expected a 423 from inside the transaction, got ${String(settled)}`
+    );
+    assert.equal(await prisma.memoryExtractionRun.count(), 0, "no run");
+    assert.equal(
+        await prisma.memoryExtractionCreditReservation.count(),
+        0,
+        "no reservation, so nothing to refund"
+    );
+});

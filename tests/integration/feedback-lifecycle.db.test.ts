@@ -327,6 +327,82 @@ test("the completed stage is announced once, with the first closure's snapshot",
   assert.equal(audits.length, 2);
 });
 
+test("a withheld close leaves the one announcement unspent, in the database", async () => {
+  await seedReporter();
+  await submitAsReporter();
+  const feedback = await prisma.feedback.findFirstOrThrow();
+  await seedAdmin();
+
+  const withheld = await patchAsAdmin(feedback.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "중복 신고라 같은 답변을 두 번 보내지 않았습니다.",
+    notifyReporter: false,
+  });
+  assert.equal(withheld.status, 200);
+  assert.deepEqual(
+    ((await withheld.json()) as { userNotification: unknown }).userNotification,
+    { queued: false, reason: "operator_withheld" }
+  );
+
+  // Nothing claimed the completed stage and nothing was queued, but the
+  // closure itself is committed. The mocked contract tests can only say the
+  // route did not call its fakes; this says the rows are genuinely absent.
+  assert.equal(
+    await prisma.feedbackLifecycleEvent.count({
+      where: { feedbackId: feedback.id, stage: "completed" },
+    }),
+    0
+  );
+  assert.equal(
+    await prisma.notificationDelivery.count({
+      where: { kind: "feedback_user_completed", referenceId: feedback.id },
+    }),
+    0
+  );
+  assert.equal(
+    (await prisma.feedback.findUniqueOrThrow({ where: { id: feedback.id } })).status,
+    "resolved"
+  );
+
+  // Re-selecting the status it already has is the console's way back, and the
+  // announcement it raises is the first one.
+  const announced = await patchAsAdmin(feedback.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "중복 신고라 같은 답변을 두 번 보내지 않았습니다.",
+  });
+  assert.equal(announced.status, 200);
+  assert.deepEqual(
+    ((await announced.json()) as { userNotification: { queued: boolean } })
+      .userNotification.queued,
+    true
+  );
+  assert.equal(
+    await prisma.notificationDelivery.count({
+      where: { kind: "feedback_user_completed", referenceId: feedback.id },
+    }),
+    1
+  );
+});
+
+test("withholding a stage with no way back is refused outright", async () => {
+  await seedReporter();
+  await submitAsReporter();
+  const feedback = await prisma.feedback.findFirstOrThrow();
+  await seedAdmin();
+
+  const response = await patchAsAdmin(feedback.id, {
+    status: "reviewing",
+    notifyReporter: false,
+  });
+  assert.equal(response.status, 400);
+  assert.equal(
+    (await prisma.feedback.findUniqueOrThrow({ where: { id: feedback.id } })).status,
+    "open"
+  );
+});
+
 test("the database itself refuses a second event for the same stage", async () => {
   await seedReporter();
   await submitAsReporter();
