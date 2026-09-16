@@ -1069,8 +1069,9 @@ Git blob과 같은 bytes로 유지한다. 독립 검토 round 0에서 찾은 마
 확정하고 후자는 remaining 0인 non-resumable stop으로 재생한다. Git child에는 caller
 env보다 우선한 `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`과 로컬 객체 선행조건을
 강제하고 `max-cases`는 ASCII 10진 정수만 받는다.
-`package-lock.json`은 현재 568,011 bytes이며 전용 4 MiB cap, 나머지 non-corpus source는
-1 MiB cap, Git capture는 8 MiB로 제한했다. just-over-cap은 명시적 source-domain 오류다.
+`package-lock.json`은 전용 4 MiB cap 안에 있는지 현재 크기를 테스트에서 동적으로
+검증하고, 나머지 non-corpus source는 1 MiB cap, Git capture는 8 MiB로 제한했다.
+just-over-cap은 명시적 source-domain 오류다.
 source identity는 pinned repository bytes와 lockfile을 결속하지만 실제 `node_modules`,
 package-manager cache·설치 환경·install attestation은 결속하지 않으므로 설치 provenance
 증거가 아니다.
@@ -1088,14 +1089,15 @@ route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 
 | 직전 의미 있는 회차 대비 | **약 0%p** — 재현 가능한 무과금 검증 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
 | C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
 | 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
-| 로컬 검증 | 전용 core/CLI **23/23**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, package-lock exact/over-cap·no-network child trap·replace-object 무시·missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
-| 독립 검토·통합 CI | Claude Code Max round 0의 4건은 수정했고 round 1은 approve와 nit 2건을 반환했다. 두 판정 기록을 각각 감사 commit으로 보존했으며 nit 2건 수정 뒤 재검토·Linux 통합 CI 전 상태 |
+| 로컬 검증 | 전용 core/CLI **24/24**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, package-lock dynamic within-cap/exact-cap/over-cap·root-only LF attribute·no-network child trap·replace-object 무시·missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 **approve**였지만 재현 가능한 nit 2건을 남기고 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종료됐다. 판정 기록은 감사 commit으로 보존했고, 휘발성 lockfile 크기 결속과 비의도적 하위 경로 LF 적용은 exchange 밖 후속 commit으로 수정했다. 다음 gate는 Linux 통합 CI다. |
 | 병합·배포·공개 | 없음. provider/API/model 호출 0, stage/admin writer 없음, 제품 caller·flag·v1 admission 변경 없음 |
 
 ### 이 Cycle 다음 권장 순서
 
-1. Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 exact source, corpus,
-   parser, journal crash/tamper 경계를 검증한다. 이는 실행 승인이 아니다.
+1. 최종 독립 검토 승인과 exchange 밖 nit 수정을 포함한 현재 commit을 Linux 통합
+   CI에서 검증한다. exact source, corpus, parser, journal crash/tamper와 root-only LF
+   attribute가 대상이며 이는 실행 승인이 아니다.
 2. 하네스와 durable authority를 연결하는 **새 admission 계약**, stage 생성/admin
    writer와 content-free runtime receipt 저장을 별도 구현·검토한다. 기존 v1은 수정하지
    않고 provider 호출도 하지 않는다.

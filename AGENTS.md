@@ -1407,7 +1407,9 @@ Non-negotiable requirements:
   must disable lazy fetch and replacement objects, and fail closed unless every
   pinned object is local;
   `package-lock.json` has a dedicated 4 MiB source cap, other non-corpus source
-  files have a 1 MiB cap, and Git capture remains bounded above both. The source
+  files have a 1 MiB cap, and Git capture remains bounded above both. Tests read
+  the current lockfile size dynamically and require it to be non-empty and at
+  most the declared cap; no incidental byte count is pinned. The source
   identity binds pinned repository bytes, not installed `node_modules`, package
   manager caches, install environments, or an installation attestation; a local
   completion is not dependency-installation provenance.

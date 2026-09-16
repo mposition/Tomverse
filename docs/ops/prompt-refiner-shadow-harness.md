@@ -43,7 +43,8 @@ Windows `core.autocrlf=true`의 정상 checkout도 Git blob bytes와 같게 유�
 source byte cap은 corpus의 기존 전용 cap, `package-lock.json` **4 MiB**, 그 밖의
 allowlist 파일 **1 MiB**로 명시한다. Git blob 크기를 `cat-file -s`로 먼저 검사한 뒤
 최대 **8 MiB** capture buffer 안에서만 읽으므로, lockfile이 4 MiB를 넘으면 child buffer
-오류가 아니라 `source_file_byte_limit`으로 닫힌다. 현재 lockfile은 568,011 bytes다.
+오류가 아니라 `source_file_byte_limit`으로 닫힌다. 테스트는 현재 lockfile의
+실측 크기를 동적으로 읽어 0보다 크고 4 MiB cap 이하인지 확인한다.
 
 source identity가 결속하는 것은 sourceRef와 이 고정 repository path들의 bytes이며,
 그중 `package-lock.json`도 포함된다. 실제 설치된 `node_modules` 파일 bytes, package

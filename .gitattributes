@@ -53,10 +53,10 @@ tests/fixtures/providerModelDocs/*.md text eol=lf
 # checkout with core.autocrlf=true byte-identical to the source commit without
 # changing line-ending policy for the rest of the repository. The attribute
 # file is itself part of the identity so this contract cannot drift silently.
-.gitattributes text eol=lf
-package.json text eol=lf
-package-lock.json text eol=lf
-tsconfig.json text eol=lf
+/.gitattributes text eol=lf
+/package.json text eol=lf
+/package-lock.json text eol=lf
+/tsconfig.json text eol=lf
 docs/ops/prompt-refiner-shadow/corpus-v1.json text eol=lf
 lib/promptRefinerShadowHarness.ts text eol=lf
 lib/promptRefinerShadowJournal.ts text eol=lf

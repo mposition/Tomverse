@@ -222,7 +222,9 @@ Git bytes로 만든다. Git child는 caller env보다 우선한 `GIT_NO_LAZY_FET
 partial/blobless promisor clone의 누락 객체를 원격에서 가져오는 것도 허용하지 않는다.
 source cap은 corpus 전용 cap, `package-lock.json` 4 MiB, 나머지 allowlist 1 MiB이고,
 Git capture는 8 MiB로 제한한다. blob 크기를 먼저 검사하므로 cap 초과는 모호한 child
-buffer 실패가 아니라 `source_file_byte_limit`으로 기록된다.
+buffer 실패가 아니라 `source_file_byte_limit`으로 기록된다. 현재 lockfile은
+특정 byte 수에 고정하지 않고 실행 시 동적으로 측정해 0보다 크고 4 MiB 이하임을
+검증한다.
 
 source identity에는 sourceRef, pinned repository paths와 `package-lock.json` bytes가
 들어간다. 설치된 `node_modules`의 실제 bytes, package-manager cache, install 환경·명령,

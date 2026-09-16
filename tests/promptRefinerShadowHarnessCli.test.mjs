@@ -257,11 +257,11 @@ test("a normal core.autocrlf=true checkout preserves every pinned source byte", 
 });
 
 test("package-lock has a bounded dedicated cap and just-over-limit fails clearly", () => {
-  assert.equal(
-    lstatSync(join(root, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH)).size,
-    568_011
-  );
-  assert.ok(568_011 < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);
+  const currentLockSize = lstatSync(
+    join(root, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH)
+  ).size;
+  assert.ok(currentLockSize > 0);
+  assert.ok(currentLockSize <= PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);
 
   const clone = join(temporary, "package-lock-cap-checkout");
   execFileSync("git", ["clone", "--quiet", "--no-local", checkout, clone], {
@@ -335,6 +335,44 @@ test("package-lock has a bounded dedicated cap and just-over-limit fails clearly
   } finally {
     assert.ok(lstatSync(cloneDependencies).isSymbolicLink());
     unlinkSync(cloneDependencies);
+  }
+});
+
+test("LF attributes cover only the pinned root source paths", () => {
+  const attributeLines = new Set(
+    readFileSync(join(checkout, ".gitattributes"), "utf8").split(/\r?\n/)
+  );
+  for (const path of [".gitattributes", "package.json", "package-lock.json", "tsconfig.json"]) {
+    assert.ok(attributeLines.has(`/${path} text eol=lf`));
+  }
+
+  const sourceAttributes = new Set(
+    git([
+      "check-attr",
+      "text",
+      "eol",
+      "--",
+      ...PROMPT_REFINER_SHADOW_SOURCE_PATHS,
+    ]).trimEnd().split(/\r?\n/)
+  );
+  for (const path of PROMPT_REFINER_SHADOW_SOURCE_PATHS) {
+    assert.ok(sourceAttributes.has(`${path}: text: set`));
+    assert.ok(sourceAttributes.has(`${path}: eol: lf`));
+  }
+
+  const nested = [
+    "apps/mobile/package.json",
+    "packages/chat-core/package.json",
+    "packages/ui-tokens/package.json",
+    "apps/mobile/tsconfig.json",
+    "packages/chat-core/tsconfig.json",
+  ];
+  const nestedAttributes = new Set(
+    git(["check-attr", "text", "eol", "--", ...nested]).trimEnd().split(/\r?\n/)
+  );
+  for (const path of nested) {
+    assert.ok(nestedAttributes.has(`${path}: text: unspecified`));
+    assert.ok(nestedAttributes.has(`${path}: eol: unspecified`));
   }
 });
 
