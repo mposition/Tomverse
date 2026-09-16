@@ -18,6 +18,20 @@ on:
       - "app/api/chat/route.ts"
       - "app/api/chat/deep-research/**"
       - "lib/perplexityDeepResearch.ts"
+      # The suite outgrew its name: it also runs the feedback lifecycle, the
+      # notification queue and the suppression scenarios. Those paths were
+      # missing here, and on 2026-09-16 a change to the reply-delivery rules
+      # went through two pull requests without this suite running once --
+      # then failed on the push to develop and again on main, where it looked
+      # like the next person's problem. A path filter is only as good as the
+      # list of what the suite actually covers.
+      - "lib/feedbackLifecycle*.ts"
+      - "lib/notificationDeliveries.ts"
+      - "lib/notificationRetryCore.ts"
+      - "lib/emailSuppression*.ts"
+      - "lib/accountDeletion.ts"
+      - "app/api/feedback/**"
+      - "app/api/admin/feedback/**"
       - "tests/integration/**"
       - "scripts/run-db-integration-tests.mjs"
       - "package.json"
