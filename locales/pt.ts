@@ -2042,6 +2042,9 @@ export const pt = {
         errorEstimateChanged:
             "As conversas selecionadas mudaram e a estimativa não corresponde mais. Verifique antes de iniciar.",
         errorPairUnavailable: "Esse modelo não está disponível no momento.",
+        errorLocked:
+            "Uma das conversas selecionadas está bloqueada, então a extração não pode começar. Atualize a lista e selecione novamente.",
+        lockedRowHint: "Conversas bloqueadas não podem ser usadas na extração.",
         errorBudget:
             "A capacidade de extração está temporariamente esgotada. Tente novamente em instantes.",
         runTitle: "Progresso da extração",
