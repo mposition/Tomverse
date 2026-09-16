@@ -16,6 +16,11 @@ import {
   MOBILE_AUTH_KEYRING_HEALTH_JOB_KEY,
   PENDING_SCHEDULED_JOB_KEYS,
 } from "../lib/scheduledJobsCore.ts";
+import {
+  RAILWAY_CRON_SERVICES,
+  RAILWAY_ENVIRONMENT_BRANCHES,
+  buildScheduledJobResources,
+} from "../.railway/scheduled-jobs.ts";
 
 // SCHED-DRIFT-001. railway.credit-reconciliation.json moved from */5 to */15
 // and lib/scheduledJobs.ts was not moved with it, so the credit-reconciliation
@@ -26,10 +31,12 @@ import {
 // daily ones kept writing their time out in the prose, in the next-run estimate
 // and in the cron file separately, and the assertion below read neither of the
 // last two -- so the same drift was still available to them. It is the whole
-// table now, in both directions: every declared trigger against the file that
-// deploys it, and every deployed cron file against the table.
+// table now, in both directions: every declared trigger against the service that
+// deploys it, and every deployed cron service against the table.
 //
-// Two kinds of test below. The first reads the Railway cron files themselves,
+// Two kinds of test below. The first reads the Railway cron declarations
+// themselves -- .railway/scheduled-jobs.ts, which .railway/railway.ts deploys,
+// and while they still exist the legacy railway.*.json Config as Code files --
 // so the TypeScript catalogue cannot drift from the deployed schedule again
 // without going red. The second pins the timing decisions on a fixed clock,
 // including the exact boundaries the old values got wrong.
@@ -42,45 +49,154 @@ const jobByKey = (key) => {
   return definition;
 };
 
-const readCronSchedule = (configFile) => {
-  const raw = readFileSync(join(process.cwd(), configFile), "utf8");
-  const cron = JSON.parse(raw)?.deploy?.cronSchedule;
-  assert.ok(typeof cron === "string", `${configFile} has no deploy.cronSchedule`);
-  return cron;
+const railwayCronService = (serviceName) => {
+  const matches = RAILWAY_CRON_SERVICES.filter((job) => job.service === serviceName);
+  assert.equal(
+    matches.length,
+    1,
+    `.railway/scheduled-jobs.ts declares "${serviceName}" ${matches.length} times`
+  );
+  return matches[0];
 };
 
 test("every declared trigger matches the Railway cron that actually drives it", () => {
-  for (const [name, { configFile, trigger }] of Object.entries(CRON_TRIGGERS)) {
-    const cron = readCronSchedule(configFile);
+  for (const [name, { railwayService, trigger }] of Object.entries(CRON_TRIGGERS)) {
+    const { cronSchedule: cron } = railwayCronService(railwayService);
     const deployed = parseCronSchedule(cron);
     assert.ok(
       deployed,
-      `${configFile} uses "${cron}", which parseCronSchedule cannot read. If the ` +
+      `${railwayService} uses "${cron}", which parseCronSchedule cannot read. If the ` +
         `schedule is no longer one of the two shapes this repository deploys, ` +
         `teach the parser the new shape rather than deleting the check.`
     );
     assert.deepEqual(
       deployed,
       { ...trigger },
-      `${name} declares ${describeCronTrigger(trigger)}, but ${configFile} ` +
-        `deploys "${cron}"`
+      `${name} declares ${describeCronTrigger(trigger)}, but Railway service ` +
+        `${railwayService} deploys "${cron}"`
     );
   }
 });
 
-test("every deployed cron file is claimed by exactly one trigger", () => {
+test("every deployed cron service is claimed by exactly one trigger", () => {
   // The other direction. Without it a new cron service could be deployed with
   // no catalogue entry, and the dashboard would simply never mention the job it
   // runs -- which reads identically to a job that is healthy.
-  const deployedFiles = readdirSync(process.cwd())
-    .filter((entry) => /^railway\..+\.json$/.test(entry))
-    .filter((entry) => {
-      const raw = readFileSync(join(process.cwd(), entry), "utf8");
-      return typeof JSON.parse(raw)?.deploy?.cronSchedule === "string";
-    });
-  const claimed = Object.values(CRON_TRIGGERS).map((entry) => entry.configFile);
-  assert.deepEqual([...claimed].sort(), deployedFiles.sort());
-  assert.equal(new Set(claimed).size, claimed.length, "two triggers share a file");
+  const deployed = RAILWAY_CRON_SERVICES.map((job) => job.service);
+  const claimed = Object.values(CRON_TRIGGERS).map((entry) => entry.railwayService);
+  assert.deepEqual([...claimed].sort(), [...deployed].sort());
+  assert.equal(new Set(claimed).size, claimed.length, "two triggers share a service");
+  assert.deepEqual(
+    RAILWAY_CRON_SERVICES.map((job) => job.key).sort(),
+    Object.keys(CRON_TRIGGERS).sort(),
+    "the IaC table and the catalogue key the same jobs differently"
+  );
+});
+
+test("the IaC cron table names a real script and a variable list for each environment", () => {
+  const scripts = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")).scripts;
+  for (const job of RAILWAY_CRON_SERVICES) {
+    const script = /^npm run ([\w:-]+)$/.exec(job.startCommand)?.[1];
+    assert.ok(script, `${job.service}: start command "${job.startCommand}" is not an npm script`);
+    assert.ok(scripts[script], `${job.service}: package.json has no "${script}" script`);
+    for (const environment of Object.keys(RAILWAY_ENVIRONMENT_BRANCHES)) {
+      const variables = job.variables[environment];
+      // An empty list is not "no variables": applying it deletes every variable
+      // the service has in that environment.
+      assert.ok(
+        Array.isArray(variables) && variables.length > 0,
+        `${job.service} declares no variables for ${environment}`
+      );
+      assert.equal(new Set(variables).size, variables.length, `${job.service}: duplicate variable`);
+    }
+  }
+});
+
+test("the IaC resource list is exactly the table, per environment, and refuses the unknown", () => {
+  // railway.ts is a pass-through to buildScheduledJobResources(), so this is
+  // the graph an apply would act on. A service missing here is a service the
+  // named partial deletes; a variable missing here is a variable it deletes.
+  const PRESERVED = Symbol("preserve");
+  const dsl = {
+    github: (repo, options) => ({ repo, ...options }),
+    preserve: () => PRESERVED,
+    service: (name, config) => ({ name, ...config }),
+  };
+  for (const [environment, branch] of Object.entries(RAILWAY_ENVIRONMENT_BRANCHES)) {
+    const resources = buildScheduledJobResources(environment, dsl);
+    assert.deepEqual(
+      resources.map((resource) => resource.name),
+      RAILWAY_CRON_SERVICES.map((job) => job.service),
+      `${environment}: the resource list drops or adds a service`
+    );
+    for (const job of RAILWAY_CRON_SERVICES) {
+      const resource = resources.find((entry) => entry.name === job.service);
+      assert.deepEqual(resource.source, { repo: "mposition/Tomverse", branch });
+      assert.equal(resource.start, job.startCommand);
+      assert.deepEqual(resource.deploy, {
+        cronSchedule: job.cronSchedule,
+        restartPolicyType: "NEVER",
+      });
+      assert.deepEqual(Object.keys(resource.env).sort(), [...job.variables[environment]].sort());
+      assert.ok(
+        Object.values(resource.env).every((value) => value === PRESERVED),
+        `${environment}/${job.service}: a variable value is written instead of preserved`
+      );
+    }
+  }
+  for (const environment of ["pr-1234", "Production", "", undefined]) {
+    assert.throws(() => buildScheduledJobResources(environment, dsl), /No scheduled-job configuration/);
+  }
+  assert.equal(
+    new Set(RAILWAY_CRON_SERVICES.map((job) => job.startCommand)).size,
+    RAILWAY_CRON_SERVICES.length,
+    "two cron services run the same command"
+  );
+});
+
+test("the IaC entry point stays a pass-through owning only the scheduled-jobs partial", () => {
+  const source = readFileSync(join(process.cwd(), ".railway", "railway.ts"), "utf8");
+  assert.match(source, /export const partial = "scheduled-jobs";/);
+  assert.match(source, /resources: buildScheduledJobResources\(ctx\.environment, \{/);
+  // Anything that reshapes the list here escapes the test above.
+  for (const reshaping of [".filter(", ".slice(", ".concat(", "...", ".map("]) {
+    assert.ok(!source.includes(reshaping), `.railway/railway.ts reshapes resources with ${reshaping}`);
+  }
+});
+
+// Which legacy Config as Code file each Railway service reads, as found on
+// 2026-09-17 in every deployment's `meta.configFile`.
+const LEGACY_CONFIG_FILES = {
+  "railway.credit-reconciliation.json": "Credit Reconciliation",
+  "railway.provider-probe.json": "Provider Probe",
+  "railway.maintenance.json": "Maintenance Cron",
+  "railway.provider-model-catalog.json": "Provider Model Catalog",
+  "railway.provider-usage-sync.json": "Provider Usage Sync",
+};
+
+test("the legacy railway.*.json cron files, while they remain, agree with the IaC table", () => {
+  // Transitional. Railway keeps reading these Config as Code files until the
+  // Config File Path is cleared on each service, or 2026-12-01, whichever is
+  // first -- so during the switch the file is what runs and the table is what
+  // will run. They must say the same thing, file by file, or the cutover
+  // changes a schedule nobody reviewed. They go together or not at all: one
+  // deleted early would be a service reading a file that no longer exists.
+  const legacyFiles = readdirSync(process.cwd()).filter((entry) =>
+    /^railway\..+\.(json|toml)$/.test(entry)
+  );
+  if (legacyFiles.length === 0) return;
+  assert.deepEqual(
+    [...legacyFiles].sort(),
+    Object.keys(LEGACY_CONFIG_FILES).sort(),
+    "legacy Config as Code files must all remain until the cutover, then all go"
+  );
+  for (const [file, serviceName] of Object.entries(LEGACY_CONFIG_FILES)) {
+    const deploy = JSON.parse(readFileSync(join(process.cwd(), file), "utf8"))?.deploy ?? {};
+    const job = railwayCronService(serviceName);
+    assert.equal(deploy.startCommand, job.startCommand, `${file} vs ${serviceName} startCommand`);
+    assert.equal(deploy.cronSchedule, job.cronSchedule, `${file} vs ${serviceName} cronSchedule`);
+    assert.equal(deploy.restartPolicyType, "NEVER", `${file} restartPolicyType`);
+  }
 });
 
 test("every job's silence budget outlasts one cycle of its own trigger", () => {

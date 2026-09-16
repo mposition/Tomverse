@@ -41,5 +41,8 @@
   // types, no `@/*` alias reaching into this app). Leaving it in this project
   // would type-check the Capacitor shell with the Next.js app's settings, which
   // is the coupling apps/mobile exists to stay out of.
-  "exclude": ["node_modules", "apps"]
+  // .railway/railway.ts imports the Railway SDK, which lives in its own
+  // .railway/node_modules and is installed only by an operator about to plan
+  // (npm run railway:iac:install). The data table beside it stays checked.
+  "exclude": ["node_modules", "apps", ".railway/railway.ts", ".railway/node_modules"]
 }
