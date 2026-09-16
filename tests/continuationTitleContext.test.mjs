@@ -220,7 +220,9 @@ test("every request whose response names a continuation sends the zone hint", ()
         ["components/chat/ChatSidebar.tsx", "fetch(`/api/conversations/search?q=", /headers: displayTimeZoneHeaders\(\)/],
         ["components/imports/ExternalImportManagement.tsx", "`/api/external-conversations?offset=", /headers: displayTimeZoneHeaders\(\)/],
         // A file is worded by the server, so exports also send the language.
-        ["app/(site)/(application)/chat/ChatPageClient.tsx", "fetch(`/api/conversations/${convId}/export`, {", /headers: exportNamingHeaders\(lang\)/],
+        // Both modes are the same request with one query away
+        // (docs/policy/external-conversation-continuation.md §9.1).
+        ["app/(site)/(application)/chat/ChatPageClient.tsx", "`/api/conversations/${convId}/export${options.includeSource", /headers: exportNamingHeaders\(lang\)/],
         ["components/auth/AuthButton.tsx", 'fetch("/api/conversations/export-all", {', /headers: exportNamingHeaders\(globalLang\)/],
     ]) {
         const source = code(path);

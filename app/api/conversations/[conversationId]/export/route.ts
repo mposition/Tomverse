@@ -32,8 +32,108 @@ import {
     featureNotIncludedResponse,
     getUserBillingPlan,
 } from "@/lib/billingEntitlements";
+import {
+    buildContinuationSourceExport,
+    continuationSourceExportStillPermitted,
+} from "@/lib/continuationSourceExport";
 
 const MESSAGE_PAGE_SIZE = 20;
+
+/**
+ * The continuation's own turns *and* the imported original, as one file.
+ *
+ * Refusals are their own codes rather than a generic failure: "the original
+ * was deleted" and "the original is locked" are different situations with
+ * different next steps, and a file quietly missing its first half would be
+ * indistinguishable from one that never had it.
+ */
+async function sourceIncludedExport(
+    req: Request,
+    userId: string,
+    conversationId: string,
+    // Read once by the caller: the raw header has exactly one reader
+    // (lib/continuationTitleContext.ts).
+    timeZone: string
+): Promise<Response> {
+    const copy = continuationExportCopy(req);
+    const personalizationNotice = (await isMemoryInjectionEnabled())
+        ? conversationExportPersonalizationNotice()
+        : undefined;
+
+    let permissionInput: {
+        bridgeId: string;
+        externalConversationId: string;
+        conversationPassword: string | null;
+        snapshotPassword: string | null;
+    } | null = null;
+    const built = await buildContinuationSourceExport({
+        request: req,
+        userId,
+        conversationId,
+        providerLabel: continuationProviderDisplay,
+        header: ({ conversation, bridge }) => {
+            const { title, headerLines } = continuationExportTitle({
+                storedTitle: conversation.title,
+                bridge,
+                timeZone,
+                copy,
+            });
+            return {
+                title,
+                text: `${formatConversationHeader(
+                    { title, createdAt: conversation.createdAt },
+                    personalizationNotice,
+                    [
+                        ...continuationExportProvenance({
+                            providerLabel: continuationProviderDisplay(bridge.provider),
+                            importedAt: bridge.sourceImportedAt,
+                            sourceDeleted: false,
+                            includesSource: true,
+                        }),
+                        ...headerLines,
+                    ]
+                )}\n`,
+            };
+        },
+    });
+    if ("notFound" in built) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if ("locked" in built) return conversationLockedResponse();
+    if ("kindNotSupported" in built) return conversationKindNotSupportedResponse();
+    if (!built.ok) {
+        return NextResponse.json(
+            { error: "This conversation's original cannot be included.", code: built.refusal.code },
+            { status: built.refusal.status }
+        );
+    }
+    permissionInput = built.permission;
+
+    // Read once more, outside the snapshot: permission is decided here, and a
+    // source deleted or re-locked since is refused rather than sent.
+    const stale = await continuationSourceExportStillPermitted({
+        request: req,
+        userId,
+        conversationId,
+        ...permissionInput,
+    });
+    if (stale) {
+        return NextResponse.json(
+            { error: "This conversation's original cannot be included.", code: stale.code },
+            { status: stale.status }
+        );
+    }
+
+    return new Response(built.document.bytes as unknown as BodyInit, {
+        headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": conversationExportContentDisposition(built.title),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            // What the browser must have received before it saves the file.
+            "X-Export-Bytes": String(built.document.bytes.byteLength),
+            "X-Export-SHA256": built.document.sha256,
+        },
+    });
+}
 
 export async function GET(
     req: Request,
@@ -56,6 +156,20 @@ export async function GET(
         });
 
         const { conversationId } = await context.params;
+
+        /*
+          `?include=source` is the imported original in the same file
+          (docs/policy/external-conversation-continuation.md §9). A different
+          document, so a different path: it is read in one snapshot and
+          assembled before anything is sent, while the ordinary export below
+          keeps streaming page by page, byte for byte as it always has.
+        */
+        const displayTimeZone = effectiveDisplayTimeZone(
+            req.headers.get(DISPLAY_TIME_ZONE_HEADER)
+        );
+        if (new URL(req.url).searchParams.get("include") === "source") {
+            return await sourceIncludedExport(req, userId, conversationId, displayTimeZone);
+        }
 
         const conversation = await prisma.conversation.findFirst({
             where: { id: conversationId, userId },
@@ -123,9 +237,7 @@ export async function GET(
             continuationExportTitle({
                 storedTitle: conversation.title,
                 bridge: conversation.continuationBridge,
-                timeZone: effectiveDisplayTimeZone(
-                    req.headers.get(DISPLAY_TIME_ZONE_HEADER)
-                ),
+                timeZone: displayTimeZone,
                 // The page's words for the title, so the filename is the
                 // name the list shows; the header lines stay English.
                 copy: continuationExportCopy(req),

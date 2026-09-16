@@ -158,3 +158,187 @@ test("a plan without the download entitlement disables the control and sends not
   // A refused export leaves the workspace exactly as it was.
   await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
 });
+
+/**
+ * CONT-EXPORT-01B (docs/policy/external-conversation-continuation.md §9.1):
+ * a continuation offers two files, and the one that carries the imported
+ * original is saved only when it arrived whole.
+ */
+test.describe("downloading a continuation with its original @ui-risk", () => {
+  const CONTINUATION_ID = "qa-continuation-export";
+  const SOURCE_BODY = "Tomverse Review Export\nConversation: A continued conversation\n\n";
+
+  const digestOf = async (body: string) => {
+    const bytes = new TextEncoder().encode(body);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return {
+      bytes,
+      hex: Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join(""),
+    };
+  };
+
+  /** A conversation list with one continuation row, as the server answers it. */
+  const mockContinuationList = (page: Page) =>
+    page.route("**/api/conversations", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            id: CONTINUATION_ID,
+            title: "A continued conversation",
+            kind: "chat",
+            projectId: null,
+            selectedModels: ["gpt-5-6-luna"],
+            disabledPanels: [],
+            webSearchMode: "off",
+            isLocked: false,
+            shareEnabled: false,
+            shareExpiresAt: null,
+            messageCount: 2,
+            surface: "continuation",
+            sourceState: "available",
+            sourceProvider: "chatgpt",
+            sourceTitle: "Imported original",
+            fallbackTitleDate: "2026-07-02",
+          },
+        ]),
+      });
+    });
+
+  /*
+    The mobile shell keeps the list in a drawer, and which control opens it
+    depends on whether a conversation is open: the welcome screen has the
+    disclosure, an open conversation has the header button. This list holds one
+    continuation the fixture cannot open, so the screen is the welcome one.
+  */
+  const openMenuForContinuation = async (page: Page) => {
+    const disclosure = page.getByTestId("recent-conversations-disclosure");
+    const headerButton = page.getByTestId("mobile-sidebar-open");
+    const menu = page.getByTestId("conversation-menu").first();
+    await expect(disclosure.or(headerButton).or(menu).first()).toBeVisible();
+    if ((await menu.count()) === 0) {
+      if ((await disclosure.count()) > 0) await disclosure.click();
+      else await headerButton.click();
+    }
+    await expect(menu).toBeVisible();
+    await menu.click();
+    await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
+  };
+
+  test("both files are offered, and the one with the original is verified before it is saved", async ({
+    page,
+  }) => {
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro", limits: { allowDownloads: true } });
+    await mockContinuationList(page);
+    const { bytes, hex } = await digestOf(SOURCE_BODY);
+    const requests: string[] = [];
+    await page.route("**/api/conversations/*/export**", (route) => {
+      const url = route.request().url();
+      requests.push(url);
+      const withSource = url.includes("include=source");
+      return route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="qa-continuation.txt"',
+          ...(withSource
+            ? { "X-Export-Bytes": String(bytes.byteLength), "X-Export-SHA256": hex }
+            : {}),
+        },
+        body: withSource ? SOURCE_BODY : "Tomverse only\n",
+      });
+    });
+
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+    await openMenuForContinuation(page);
+
+    const withSource = page
+      .getByTestId("conversation-menu-panel")
+      .getByTestId("conversation-download-with-source");
+    // Said before the click, because a downloaded file cannot be recalled.
+    await expect(withSource).toContainText("회수할 수 없습니다");
+    const download = page.waitForEvent("download");
+    await withSource.click();
+    expect((await download).suggestedFilename()).toBe("qa-continuation.txt");
+    expect(requests.at(-1)).toContain("include=source");
+
+    // And the other item is still the ordinary export, with no query.
+    await openMenuForContinuation(page);
+    const ordinary = page
+      .getByTestId("conversation-menu-panel")
+      .getByTestId("conversation-download");
+    const second = page.waitForEvent("download");
+    await ordinary.click();
+    await second;
+    expect(requests.at(-1)).not.toContain("include=source");
+  });
+
+  test("a file that did not arrive whole is not saved", async ({ page }) => {
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro", limits: { allowDownloads: true } });
+    await mockContinuationList(page);
+    const { bytes, hex } = await digestOf(SOURCE_BODY);
+    await page.route("**/api/conversations/*/export**", (route) =>
+      route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="qa-continuation.txt"',
+          // Says it is the whole file, and is not.
+          "X-Export-Bytes": String(bytes.byteLength),
+          "X-Export-SHA256": hex,
+        },
+        body: SOURCE_BODY.slice(0, 20),
+      })
+    );
+
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+    await openMenuForContinuation(page);
+    let saved = false;
+    page.on("download", () => {
+      saved = true;
+    });
+    await page
+      .getByTestId("conversation-menu-panel")
+      .getByTestId("conversation-download-with-source")
+      .click();
+
+    await expect(page.getByTestId("app-toast").first()).toContainText("끝까지 받지 못해");
+    expect(saved).toBe(false);
+  });
+
+  test("a locked original is refused with the way out, not a generic failure", async ({
+    page,
+  }) => {
+    await mockAuthenticatedApi(page);
+    await mockUserUsage(page, { plan: "Pro", limits: { allowDownloads: true } });
+    await mockContinuationList(page);
+    await page.route("**/api/conversations/*/export**", (route) =>
+      route.fulfill({
+        status: 423,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: "locked",
+          code: "EXPORT_SOURCE_LOCKED",
+        }),
+      })
+    );
+
+    await page.goto("/chat");
+    await expect(page.getByTestId("chat-input")).toBeVisible();
+    await openMenuForContinuation(page);
+    await page
+      .getByTestId("conversation-menu-panel")
+      .getByTestId("conversation-download-with-source")
+      .click();
+
+    await expect(page.getByTestId("app-toast").first()).toContainText("잠금을 해제");
+  });
+});
