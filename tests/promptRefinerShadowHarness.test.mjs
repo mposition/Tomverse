@@ -384,6 +384,36 @@ test("a structural or behavioral mismatch stops non-resumably without a call", (
   );
 });
 
+test("a mismatch on the final case records a replayable non-resumable stop", () => {
+  const mismatched = structuredClone(corpus);
+  mismatched.cases.at(-1).expected = {
+    status: "failed",
+    failureCode: "invalid_response",
+    refinedPrompt: null,
+  };
+  redigest(mismatched);
+  const validated = validatePromptRefinerShadowCorpus(mismatched);
+  const path = journal("final-behavioral-mismatch");
+  const report = runPromptRefinerShadowHarness({
+    corpus: validated,
+    journalPath: path,
+    resume: false,
+  });
+  assert.equal(report.status, "stopped");
+  assert.equal(report.stopReason, "behavioral_fixture_mismatch");
+  assert.equal(report.resumable, false);
+  assert.equal(report.processedCases, 16);
+  assert.equal(report.remainingCases, 0);
+  const evidence = texts(path);
+  const replay = replayPromptRefinerShadowJournal({
+    corpus: validated,
+    journalText: evidence.journalText,
+    witnessText: evidence.witnessText,
+  });
+  assert.equal(replay.status, "stopped");
+  assert.equal(replay.resumable, false);
+});
+
 test("an interrupted intent is unknown and never redispatched", () => {
   const completePath = journal("unknown-source");
   runPromptRefinerShadowHarness({ corpus, journalPath: completePath, resume: false });
@@ -467,6 +497,49 @@ test("a clean interruption between cases can resume, while stale locks fail clos
     () => runPromptRefinerShadowHarness({ corpus, journalPath: lockedPath, resume: false }),
     /lock_unavailable_no_stale_recovery/
   );
+});
+
+test("a final-terminal interruption finalizes without an invalid resume event", () => {
+  const completePath = journal("final-interruption-source");
+  runPromptRefinerShadowHarness({
+    corpus,
+    journalPath: completePath,
+    resume: false,
+  });
+  const complete = texts(completePath);
+  const journalLines = complete.journalText.trimEnd().split("\n");
+  const witnessLines = complete.witnessText.trimEnd().split("\n");
+  assert.equal(JSON.parse(journalLines.at(-1)).event.kind, "run_completed");
+
+  const path = journal("final-interrupted");
+  const paths = promptRefinerShadowPaths(path);
+  const interruptedJournal = `${journalLines.slice(0, -1).join("\n")}\n`;
+  const interruptedWitness = `${witnessLines.slice(0, -1).join("\n")}\n`;
+  writeFileSync(paths.journal, interruptedJournal);
+  writeFileSync(paths.witness, interruptedWitness);
+  const replay = replayPromptRefinerShadowJournal({
+    corpus,
+    journalText: interruptedJournal,
+    witnessText: interruptedWitness,
+  });
+  assert.equal(replay.status, "interrupted");
+  assert.equal(replay.unknownCases, 0);
+  assert.equal(replay.remainingCases, 0);
+  assert.equal(replay.resumable, true);
+
+  const report = runPromptRefinerShadowHarness({
+    corpus,
+    journalPath: path,
+    resume: true,
+  });
+  assert.equal(report.status, "completed");
+  const finalized = texts(path);
+  const appendedEvents = finalized.journalText
+    .slice(interruptedJournal.length)
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line).event.kind);
+  assert.deepEqual(appendedEvents, ["run_completed"]);
 });
 
 test("journal replay rejects truncation, rollback, duplicate terminals and conflicting results", () => {

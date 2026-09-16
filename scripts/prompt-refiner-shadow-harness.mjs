@@ -42,13 +42,28 @@ function readBoundedUtf8(path, maximum) {
   }
 }
 
+const gitEnvironment = {
+  ...process.env,
+  GIT_NO_LAZY_FETCH: "1",
+  GIT_TERMINAL_PROMPT: "0",
+};
+
 const git = (args) =>
   execFileSync("git", args, {
     cwd: root,
+    env: gitEnvironment,
     encoding: "utf8",
     maxBuffer: 4 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
   });
+
+function requireLocalGitObject(objectName) {
+  try {
+    git(["cat-file", "-e", objectName]);
+  } catch {
+    throw new Error("source_object_missing_no_lazy_fetch");
+  }
+}
 
 function parseOptions() {
   const options = new Map();
@@ -87,8 +102,12 @@ function main() {
   if (!/^[a-f0-9]{40}$/.test(sourceRef)) {
     throw new Error("source_ref_required_full_sha");
   }
+  requireLocalGitObject(`${sourceRef}^{commit}`);
   if (git(["rev-parse", "--verify", `${sourceRef}^{commit}`]).trim() !== sourceRef) {
     throw new Error("source_ref_invalid");
+  }
+  for (const path of PROMPT_REFINER_SHADOW_SOURCE_PATHS) {
+    requireLocalGitObject(`${sourceRef}:${path}`);
   }
   const anchored = Object.fromEntries(
     PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [path, git(["show", `${sourceRef}:${path}`])])
@@ -104,6 +123,9 @@ function main() {
   const source = validatePromptRefinerShadowSource({ sourceRef, anchored, current });
   const corpus = parsePromptRefinerShadowCorpus(current[PROMPT_REFINER_SHADOW_CORPUS_PATH]);
   const maxCasesText = options.get("max-cases");
+  if (maxCasesText !== undefined && !/^[1-9][0-9]*$/.test(maxCasesText)) {
+    throw new Error("max_cases_ascii_decimal_required");
+  }
   const maxCases = maxCasesText === undefined ? undefined : Number(maxCasesText);
   const report = runPromptRefinerShadowHarness({
     corpus,

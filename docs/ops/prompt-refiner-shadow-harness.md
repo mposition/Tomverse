@@ -29,7 +29,10 @@ credential/private-key·URL·email 형태 검사는 방어적 보조 장치이�
 CLI는 full 40-hex commit SHA를 요구하고 고정 allowlist의 각 파일을 `git show`로 읽은
 bytes와 현재 작업 트리 bytes가 정확히 같을 때만 실행한다. EOL 차이도 drift다. corpus
 경로나 adapter/plugin/live/provider 모드를 인자로 바꿀 수 없고, 동적 plugin loading과
-credential lookup도 없다. sourceRef와 정렬된 `path → file SHA-256` map의 canonical
+credential lookup도 없다. 모든 Git child에는 `GIT_NO_LAZY_FETCH=1`과 비대화형 설정을
+강제하고 commit과 allowlist blob이 로컬에 실제로 존재하는지 `cat-file -e`로 먼저
+확인한다. partial/blobless promisor clone에서 객체가 없으면 원격 조회 없이 fail-closed한다.
+sourceRef와 정렬된 `path → file SHA-256` map의 canonical
 identity digest는 journal·witness 최초 header에 함께 고정되며, 재개 시 둘 다 정확히
 같아야 한다. 고정 allowlist의 모든 경로와 `.gitattributes` 자체를 `eol=lf`로 pin해
 Windows `core.autocrlf=true`의 정상 checkout도 Git blob bytes와 같게 유지한다. 테스트는
@@ -76,7 +79,8 @@ Prompt Refiner 전용 namespace의 journal은 다음을 강제한다.
 - intent만 있고 terminal이 없으면 결과는 `interrupted`, unknown case 1이며 재실행하지
   않는다. 자동 재시도·repair parser·trailing partial 무시는 없다.
 - case terminal 뒤 stop/complete 전 중단은 clean interruption이라 같은 corpus/source로
-  재개할 수 있다.
+  재개할 수 있다. 마지막 terminal 뒤 중단은 `run_resumed`를 쓰지 않고 검증된 terminal
+  집합에서 `run_completed`만 durable하게 확정한다.
 - `--max-cases=N`으로 만든 `case_limit` stop만 재개할 수 있다. 구조 또는 fixture
   mismatch stop은 재개할 수 없다.
 - duplicate/orphan/conflicting terminal, chain·witness 불일치, truncation, rollback,
@@ -100,7 +104,8 @@ npm run shadow:prompt-refiner -- --journal=<new.jsonl> --source-ref=<40-hex-sha>
 npm run shadow:prompt-refiner -- --journal=<existing.jsonl> --source-ref=<same-sha> --resume
 ```
 
-의도적인 구간 중단은 `--max-cases=N`을 함께 쓴다. 첫 실행에는 `--resume`을 쓰지 않고,
+의도적인 구간 중단은 ASCII 10진수 `--max-cases=N`을 함께 쓴다. hex·지수·부호·공백
+표기는 거부한다. 첫 실행에는 `--resume`을 쓰지 않고,
 기존 journal에는 반드시 `--resume`을 쓴다. source/corpus mismatch, unknown intent,
 mismatch stop, stale lock, truncation 또는 witness disagreement는 새 실행이나 자동 수리의
 근거가 아니다.

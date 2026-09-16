@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -178,6 +179,18 @@ test("CLI has no live, plugin, corpus override or credential mode", () => {
   assert.equal(run(["--help"]).status, 0);
 });
 
+test("CLI accepts only unsigned ASCII decimal max-cases", () => {
+  for (const [index, value] of ["0x10", "1e1", "+16", " 16", "16 "].entries()) {
+    const result = run([
+      `--journal=${join(temporary, `invalid-max-cases-${index}.jsonl`)}`,
+      `--source-ref=${sourceRef}`,
+      `--max-cases=${value}`,
+    ]);
+    assert.equal(result.status, 1, value);
+    assert.match(result.stderr, /max_cases_ascii_decimal_required/);
+  }
+});
+
 test("CLI refuses exact-byte source drift including EOL-only drift", () => {
   const path = join(checkout, PROMPT_REFINER_SHADOW_SOURCE_PATHS[0]);
   const original = readFileSync(path, "utf8");
@@ -270,5 +283,31 @@ test("a source A partial journal cannot resume under exact source B", () => {
     assert.equal(readFileSync(`${journal}.witness.jsonl`, "utf8"), witnessBefore);
   } finally {
     writeFileSync(path, original);
+  }
+});
+
+test("a promisor checkout with a missing source blob fails without lazy fetch", () => {
+  const corpusPath = PROMPT_REFINER_SHADOW_SOURCE_PATHS.find((path) =>
+    path.endsWith("corpus-v1.json")
+  );
+  assert.ok(corpusPath);
+  const objectId = git(["rev-parse", `${sourceRef}:${corpusPath}`]).trim();
+  const gitDirectory = resolve(checkout, git(["rev-parse", "--git-dir"]).trim());
+  const objectPath = join(gitDirectory, "objects", objectId.slice(0, 2), objectId.slice(2));
+  const savedObjectPath = `${objectPath}.saved-for-no-lazy-fetch-test`;
+  renameSync(objectPath, savedObjectPath);
+  try {
+    git(["config", "--local", "remote.origin.url", "https://127.0.0.1:1/no-fetch.git"]);
+    git(["config", "--local", "remote.origin.promisor", "true"]);
+    git(["config", "--local", "remote.origin.partialclonefilter", "blob:none"]);
+    const result = run([
+      `--journal=${join(temporary, "missing-promisor-blob.jsonl")}`,
+      `--source-ref=${sourceRef}`,
+    ]);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /source_object_missing_no_lazy_fetch/);
+  } finally {
+    renameSync(savedObjectPath, objectPath);
+    git(["config", "--local", "--remove-section", "remote.origin"]);
   }
 });

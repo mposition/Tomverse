@@ -1403,7 +1403,11 @@ Non-negotiable requirements:
   evaluation, a hash chain plus a separate witness, an unrecoverable `wx`
   lock, strict terminals and no retry of an unknown intent. Journal and witness
   headers bind the exact full source ref and canonical allowlist identity
-  digest; a different source snapshot can never resume the run. Structural message
+  digest; a different source snapshot can never resume the run. Git child reads
+  must disable lazy fetch and fail closed unless every pinned object is local;
+  `max-cases` accepts only unsigned ASCII decimal notation. A clean interruption
+  after the final terminal finalizes completion without a zero-remaining resume,
+  while a final-case mismatch remains a replayable non-resumable stop. Structural message
   boundary evidence and behavioral fixture outcome remain separate metrics;
   zero structural violations must never be described as model compliance or
   injection resistance. A completed local run is not model-quality, release,

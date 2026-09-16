@@ -433,26 +433,25 @@ function eventFrom(
             ["kind", "reason", "processedCases", "remainingCases"],
             "run_stopped"
         );
-        if (
-            ![
-                "case_limit",
-                "structural_boundary_violation",
-                "behavioral_fixture_mismatch",
-            ].includes(
-                stopped.reason as string
-            ) ||
-            stopped.processedCases !== terminals.size ||
-            stopped.remainingCases !== corpus.cases.length - terminals.size ||
-            stopped.remainingCases <= 0
-        ) {
-            fail("stop_state");
-        }
         const last = [...terminals.values()].at(-1);
         const expectedStopReason = last?.structuralBoundaryViolations
             ? "structural_boundary_violation"
             : last && !last.behavioralOutcomeMatched
               ? "behavioral_fixture_mismatch"
               : "case_limit";
+        if (
+            ![
+                "case_limit",
+                "structural_boundary_violation",
+                "behavioral_fixture_mismatch",
+            ].includes(stopped.reason as string) ||
+            stopped.processedCases !== terminals.size ||
+            stopped.remainingCases !== corpus.cases.length - terminals.size ||
+            stopped.remainingCases < 0 ||
+            (stopped.reason === "case_limit" && stopped.remainingCases === 0)
+        ) {
+            fail("stop_state");
+        }
         if (stopped.reason !== expectedStopReason) {
             fail("stop_reason");
         }
@@ -847,6 +846,31 @@ export function runPromptRefinerShadowHarness(input: {
         } else {
             replay = readReplay(paths, corpus, sourceIdentity, io);
             if (!replay.resumable) fail("journal_not_resumable");
+            if (replay.remainingCases === 0) {
+                appendEvent(
+                    {
+                        kind: "run_completed",
+                        processedCases: PROMPT_REFINER_SHADOW_CORPUS_CASES,
+                        structuralBoundaryPopulation:
+                            PROMPT_REFINER_SHADOW_CORPUS_CASES,
+                        structuralBoundaryViolations: 0,
+                        behavioralOutcomePopulation:
+                            PROMPT_REFINER_SHADOW_CORPUS_CASES,
+                        behavioralOutcomeMatches:
+                            PROMPT_REFINER_SHADOW_CORPUS_CASES,
+                        providerCalls: 0,
+                        costMicroUsd: 0,
+                    },
+                    replay.entries,
+                    paths,
+                    io
+                );
+                return reportFrom(
+                    readReplay(paths, corpus, sourceIdentity, io),
+                    corpus,
+                    sourceIdentity
+                );
+            }
             appendEvent(
                 {
                     kind: "run_resumed",

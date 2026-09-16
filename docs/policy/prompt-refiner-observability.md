@@ -216,7 +216,9 @@ credential lookup, 예약 authority, stage writer, 제품 caller와 연결하지
 sourceRef와 정렬된 allowlist file-hash map의 canonical identity digest는 journal과
 witness 최초 header에 함께 기록하며 resume 때 exact match를 강제한다. allowlist와
 `.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도 같은
-Git bytes로 만든다.
+Git bytes로 만든다. Git child는 `GIT_NO_LAZY_FETCH=1`과 비대화형 설정 아래에서만
+실행하고 commit·allowlist blob의 로컬 존재를 먼저 확인한다. partial/blobless promisor
+clone의 누락 객체를 원격에서 가져오는 것은 허용하지 않고 실행을 거부한다.
 
 모델 모양의 fixture output은 `parseBenchmarkJson()`의 syntax·duplicate key·complexity
 제한, `strictBenchmarkObject(["refinedPrompt"])`의 exact field 검사, 기존 prompt
@@ -243,6 +245,9 @@ append 후 `fsync`와 strict terminal state를 사용한다. terminal 없는 int
 structural/behavioral mismatch, truncation, chain/witness disagreement, duplicate/conflicting
 terminal 또는 stale lock은 자동 복구하지 않는다. 로컬 witness는 악의적인 관리자나 두
 파일의 동시 rollback을 막는 외부 원장이 아니므로 실제 실행 권한의 대체물이 아니다.
+마지막 정상 terminal 뒤 complete event 전 중단은 별도 resume event 없이 검증된 terminal
+집합에서 complete를 확정하고, 마지막 case mismatch는 remaining 0인 non-resumable stop으로
+정상 재생한다. `max-cases`는 부호 없는 ASCII 10진 정수 표기만 받는다.
 
 세부 운영 계약과 정확한 digest는
 [`prompt-refiner-shadow-harness.md`](../ops/prompt-refiner-shadow-harness.md)에 있다.
