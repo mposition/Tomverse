@@ -1,7 +1,8 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v15)
+# 제품 소식 이메일: 권한과 기계 (초안 v16)
 
-> **이 문서의 지위: 초안입니다. 승인되지 않았고, 코드는 하나도 없습니다.**
-> **S0와 S1a는 착수할 수 있습니다**(12절) — G는 EEA·영국 soft opt-in만 막습니다.
+> **이 문서의 지위: 초안입니다.** 승인되지 않았습니다. **S1a는 구현·병합됐습니다**(#1492,
+> [이메일 알림](email-notifications.md) v15).
+> **S0와 S1b는 착수할 수 있습니다**(12절) — G는 EEA·영국 soft opt-in만 막습니다.
 > 그 밖의 단계는 12절의 선행 결정이 닫힌 뒤입니다. 이 문서가
 > 이름 대는 새 module은 아직 존재하지 않으며,
 > `scripts/check-doc-references-core.mjs`의 `PLANNED_REFERENCES`에 그렇게
@@ -13,6 +14,25 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v16 (2026-09-16) — 독립 검토 11회차 반영: S1b 선행 결정
+
+11회차(v15 대상)는 **S1a 착수 가능, S1b 착수 불가**였고 S1b에 빠진 결정 다섯과
+나머지 지적을 짚었습니다. S1a는 그 사이 구현·독립 코드 검토 3회를 거쳐 병합됐습니다.
+v16은 **S1b를 착수 가능하게 만드는 결정**을 적습니다. 다섯 모두 소유자 결정이 아닌
+기술 결정입니다.
+
+| # | 지적 | v16 |
+|---|---|---|
+| **C35** | 관리자 테스트 메일이 sender 목록에 없음 | **운영자 진단 경로로 allowlist.** 수신자가 로그인한 관리자 자신이고, 목적이 provider 설정 확인이라 suppression이 끼면 시험이 거짓말을 합니다(7.4) |
+| **C36** | 로그인 방법 변경 안내에는 claim·backoff가 없음 | **standard lane으로 옮깁니다.** 요청 transaction 안에서 enqueue, 이후는 standard lane 규칙(7.4) |
+| **C37** | 실패한 webhook 재전송이 `duplicate`로 끝나 재처리되지 않음 | `processedAt IS NULL` 행을 **lease로 claim**해 재처리하는 상태기계(7.4) |
+| **C38** | 삭제 요청 접수 시 `withdrawAllMarketing()`은 `risk_accepted` cohort를 막지 못함 | 접수 transaction에서 **모든 marketing purpose에 `privacy_request` purpose suppression**. override는 suppression을 넘지 못합니다(7.4) |
+| **C39** | `privacy_request`가 다른 이유로 덮어써져 provenance가 사라짐 | **이유 우선순위**를 정하고 `privacy_request`는 어떤 이유로도 덮어쓰지 않음(7.4) |
+| **C40** | 제거 경로가 잠금·이유 확인을 거치지 않음 | 제거도 같은 잠금 순서와 잠금 안 재조회. preference 재활성화는 **자기가 만든 이유의 행만** 지움(7.4) |
+| **C41** | 알림 큐 한 파일에 운영자·고객 kind가 섞여 파일 단위 정적 검사가 우회됨 | 운영자 발송을 **별도 module로 분리**, 알림 큐 파일은 allowlist에서 뺌(7.4) |
+| **C42** | 판정 출력의 `pinnedVersion`·`requiredVersion`이 정의되지 않음 | `pinnedDisplayContractHash`·`requiredDisplayContractHash`·`satisfied`로 통일(7.6) |
+| **C43** | legal hold 해제 후 suppression 규칙 없음 | **결과 상태가 `completed && !legalHold`가 될 때마다** 멱등으로 보장(7.4) |
 
 ### v15 (2026-09-16) — 독립 검토 10회차 반영
 
@@ -535,7 +555,7 @@ suppression 판정 시각**, **provider 제출 시각**, `legalAllowed`, 그리�
 | 1 | **marketing 분류에는 예외 없이 수신거부** | **부분** — 재분류 시 구멍(7.2) |
 | 2 | 로그인·개인정보 없는 one-click | **있음.** rate limit 조정 필요(7.3) |
 | 3 | **철회 후 발송 0건** | **없음** — 경합 구간(7.4) |
-| 4 | 수신거부 주소가 발송 후 30일 이상 유효 | **증명 불가** — canary 토큰(7.5) |
+| 4 | 수신거부 주소가 발송 후 30일 이상 유효 — 계약은 이전 key 1년 보존 | **있음(S1a)** — keyring canary readiness, 보존 1년(7.5) |
 | 5 | 전체 수신거부 선택지 | **부분 구현** — `withdrawAllMarketing()` 범위. **S3**의 purpose classification 표로 닫음 |
 | 6 | suppression이 **고객 대상 sender 전체**(7.4의 목록, 운영자 알림 제외)의 모든 발송보다 우선 | **부분** — 경합이 있고, **환불·로그인 방법 변경 안내는 검사하지 않습니다**(7.4) |
 | 7 | 재구독 권유 금지 — **수신거부한 주소에 재구독을 요청하는 메일을 보내지 않음**. 수신거부 확인 페이지의 즉시 "되돌리기"는 본인 조작이라 허용 | **suppression이 이미 강제.** 추가로 S3의 purpose 표에 재구독 요청용 purpose를 두지 않음을 정적 검사 |
@@ -603,34 +623,111 @@ sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은
 | writer | hard bounce·complaint (`lib/emailWebhookProcessing.ts`) | 전역 |
 | writer | soft bounce 임계 (`recordSoftBounce()`, `lib/emailSuppression.ts`) | 전역 |
 | writer | admin 수동 (`app/api/admin/email-suppressions/route.ts`) — **이유는 항상 `manual`** | 전역 (purpose 지정 시 → purpose) |
-| writer | **privacy request** (`app/api/admin/privacy-requests/route.ts`) — **신규**, 아래 | 전역 |
+| writer | **privacy request** (`app/api/admin/privacy-requests/route.ts`) — **신규**, 아래 | 전역, 접수 시 purpose |
+| **remover** | `removeSuppression()` (`lib/emailSuppression.ts`) | 전역 (purpose 행이면 → purpose) |
+| **remover** | preference 재활성화 (`setPreference()`의 켜기) | 전역 → purpose |
 | sender | standard lane (`lib/standardEmailLane.ts`) | 전역 → purpose |
 | sender | credential lane (`lib/credentialEmailLane.ts`) | 전역 |
 | sender | 알림 큐의 고객 대상 kind — `feedback_user_*`, 환불 안내 (`lib/notificationDeliveries.ts`) | 전역 |
-| sender | 로그인 방법 변경 안내 (`sendLoginMethodChangedEmail()`, `lib/emailLoginEmails.ts`) | 전역 |
+| sender | 로그인 방법 변경 안내 — **standard lane으로 이동**(아래) | standard lane과 같음 |
 
 **고객 대상 sender는 하나의 helper를 지납니다(C29).** `sendWithAddressLock()`이
 전역(→ purpose) 잠금 → suppression 재조회 → provider 제출을 한 범위에서 합니다.
 
-- 환불 안내와 로그인 방법 변경 안내는 지금 **suppression을 보지 않습니다.** 이들도
-  transactional 판정(hard bounce·manual·privacy request에서 막음, complaint로는
-  막지 않음 — [이메일 알림](email-notifications.md) §13.3)을 받습니다.
-- **예외는 운영자 알림뿐**입니다 — `lib/operationalMonitoring.ts`,
-  `lib/providerMonitoring.ts`, 알림 큐의 운영자 kind. 수신자가 고객이 아니라 우리
-  운영 주소입니다.
-- **정적 검사** — `deliverEmailOnce`·`sendTransactionalEmail`·`emailProvider().send`
-  를 import하는 파일은 helper와 위 운영자 알림 allowlist뿐이어야 합니다.
+- 환불 안내는 지금 **suppression을 보지 않습니다.** transactional 판정(hard bounce·
+  manual·privacy request에서 막음, complaint로는 막지 않음 —
+  [이메일 알림](email-notifications.md) §13.3)을 받습니다.
 
-**privacy request가 만드는 suppression(C30)** — 지금은 아무 곳도 만들지 않습니다.
+**로그인 방법 변경 안내는 standard lane으로 옮깁니다(C36).** 지금은 요청이 끝난 뒤
+직접 보내고 실패하면 incident만 남기므로, 잠금을 못 얻거나 provider가 늦으면 **보안
+안내가 조용히 사라집니다.** 로그인 방법을 추가·제거한 요청의 transaction 안에서
+enqueue하고, 이후 claim·backoff·잠금·시간 예산은 standard lane 규칙을 그대로 따릅니다.
+보안 안내이므로 senderRole은 `security`, 분류는 `transactional`입니다. credential
+lane으로 보내지 않는 이유 — 이것은 자격증명이 아니고, 몇 분 늦어도 의미가 사라지지
+않습니다.
+
+**운영자 발송은 모듈로 갈라 둡니다(C41).** 알림 큐 한 파일에 운영자 kind와 고객 kind가
+섞여 있어, 파일 단위 allowlist에 그 파일을 넣으면 같은 파일의 고객 발송이 helper를
+우회해도 검사가 잡지 못합니다.
+
+- 운영자 kind의 raw 발송을 **별도 module**로 옮기고, 그 module만 allowlist에 넣습니다.
+- `lib/notificationDeliveries.ts`는 allowlist에 **넣지 않습니다** — 고객 kind는 helper,
+  운영자 kind는 분리된 module을 부릅니다.
+- **allowlist(raw provider 발송 허용)** — helper 자신, `lib/operationalMonitoring.ts`,
+  `lib/providerMonitoring.ts`, 분리된 운영자 발송 module, **관리자 테스트 메일**
+  (`app/api/admin/test-email/route.ts`, 아래).
+- **정적 검사** — `deliverEmailOnce`·`sendTransactionalEmail`·`emailProvider().send`
+  를 import하는 파일은 위 allowlist뿐이어야 합니다.
+
+**관리자 테스트 메일은 운영자 진단 경로입니다(C35).** 수신자는 **로그인한 관리자
+자신의 주소**이고, 목적은 provider와 `TRANSACTIONAL_EMAIL_FROM`이 동작하는지 확인하는
+것입니다. suppression을 끼우면 그 주소가 막혔을 때 "설정은 정상"을 "발송 실패"로
+보고하게 되어, 시험이 자기가 재려는 것을 잴 수 없습니다. 고객에게 가는 경로가 아니고
+관리자 권한·rate limit·감사 기록을 이미 거칩니다.
+
+**privacy request가 만드는 suppression(C30, C38, C43)** — 지금은 아무 곳도 만들지
+않습니다.
 
 | 요청 유형 | 시점 | 기록 |
 |---|---|---|
-| `deletion` | **접수(생성) 시** | `withdrawAllMarketing()` — 처리 중에도 marketing이 나가지 않게 |
-| `deletion` | **`completed` 전환 시**, legal hold가 없을 때 | `recordSuppression(reason: "privacy_request")` 전역, **상태 변경과 같은 transaction**, provenance에 request id |
+| `deletion` | **접수(생성) transaction 안** | **모든 marketing purpose에 `privacy_request` purpose suppression**, provenance에 request id. `withdrawAllMarketing()`만으로는 부족합니다 — 이미 꺼진 preference는 `already_set`으로 끝나 행을 만들지 않고, `risk_accepted` cohort에는 철회할 동의가 없어 override가 계속 적용됩니다. suppression은 override가 넘지 못하는 blocker입니다(5.6) |
+| `deletion` | **결과 상태가 `completed && !legalHold`가 되는 모든 갱신** | 전역 `privacy_request` suppression, **같은 transaction**, provenance에 request id. 멱등 — 이미 있으면 그대로 |
 | `access`·`export`·`correction` | — | suppression 없음 |
 
-- `rejected`로 끝난 삭제 요청은 접수 시의 marketing 철회만 남깁니다.
+- **legal hold(C43)** — `completed` 상태에서 hold만 해제되는 갱신도 위 조건을
+  만족하므로 그때 suppression이 생깁니다. 조건을 "`completed`로 바뀌는 순간"이 아니라
+  **"갱신 후 상태"** 로 판정하는 이유입니다.
+- `rejected`로 끝난 삭제 요청은 접수 시의 purpose suppression을 남깁니다. 삭제를
+  요청한 사람을 marketing에 되돌리는 것은 보수적인 방향이 아닙니다.
 - `privacy_request` suppression은 기존대로 해제할 수 없는 이유입니다.
+
+**이유 우선순위와 병합(C39)** — suppression 행은 `(address, scope, purposeKey)`마다
+하나라서, 이후 사건이 같은 행을 갱신합니다. 지금은 영구 이유끼리 서로 덮어쓸 수 있어
+`privacy_request`가 hard bounce로 바뀌면 provenance가 사라지고 해제 불가였던 행이
+일반 제거 대상이 됩니다.
+
+| 순위 | 이유 | 해제 |
+|---|---|---|
+| 1 | `privacy_request` | 불가 |
+| 2 | `manual` | 관리자 |
+| 3 | `hard_bounce`·`complaint` | 두 번째 관리자 승인 |
+| 4 | `unsubscribe` (purpose) | preference 재활성화 |
+| 5 | `soft_bounce` (만료) | 만료 |
+
+- **새 사건의 순위가 기존보다 낮으면 행을 바꾸지 않습니다.** 같은 순위면 최신
+  사건의 발생 시각·출처로 갱신합니다.
+- **`privacy_request` 행은 어떤 사건으로도 갱신하지 않습니다** — 이유도, provenance의
+  request id도 그대로입니다.
+- 판정은 한 곳(순위 표를 가진 pure 함수)에서 하고 `recordSuppression()`이 부릅니다.
+
+**제거도 같은 잠금을 지납니다(C40).**
+
+- `removeSuppression()`은 전역(→ purpose) 잠금을 잡고 **잠금 안에서 행과 이유를 다시
+  읽은 뒤** 해제 가능 여부를 판정합니다. 그 사이 privacy request가 같은 행을 강화했으면
+  거절합니다.
+- **preference 재활성화는 자기가 만든 행만 지웁니다** — 그 purpose의 `unsubscribe`
+  이유 행. `manual`·`privacy_request` purpose 행이 있으면 지우지 않고, 켜기 자체를
+  거절합니다(사용자에게는 "이 주소로는 받을 수 없습니다").
+
+**webhook 재처리 상태기계(C37)** — 지금은 원본 사건을 먼저 저장하고 적용에 실패하면
+`processingError`만 남깁니다. provider가 재전송하면 unique 충돌이 `duplicate`로 끝나
+**적용을 다시 시도하지 않습니다.** 잠금 대기 초과로 5xx를 돌려도 복구되지 않습니다.
+
+| 받은 사건의 행 상태 | 처리 |
+|---|---|
+| 없음 | 새로 만들고 **claim한 상태로** 적용 |
+| `processedAt` 있음 | `duplicate` — 200, 아무것도 안 함 |
+| `processedAt` 없음, claim 없음 또는 lease 만료 | **조건부 UPDATE로 claim** 후 재적용 |
+| `processedAt` 없음, lease 유효 | 다른 처리가 진행 중 — **409**로 응답해 provider가 나중에 재전송 |
+
+- claim은 `processingStartedAt`(lease 시작)과 `processingAttempts`를 조건부 UPDATE
+  하나로 씁니다. lease는 **writer 잠금 대기(20초) + 여유 = 60초**입니다.
+- 적용이 끝나면 `processedAt`을 쓰고 claim을 비웁니다. 실패하면 `processingError`를
+  쓰고 claim을 비운 뒤 **5xx**를 돌려 provider 재전송을 받습니다.
+- 적용은 멱등이어야 합니다 — suppression은 병합 규칙(위)으로, delivery 상태 갱신은
+  이미 같은 상태면 no-op으로.
+- 같은 사건이 `processingAttempts` 10회를 넘으면 incident를 올리고 더 claim하지
+  않습니다(재전송은 200으로 흡수).
 
 **시간 예산(C31)**
 
@@ -655,7 +752,7 @@ sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은
 이후 시작된 provider 제출 0건"**, 그리고 두 시각을 `EmailPermissionDecision`에
 남깁니다.
 
-### 7.5 30일 유효 — keyring canary readiness (C12, C25)
+### 7.5 수신거부 링크 유효 — keyring canary readiness (C12, C25, S1a 구현)
 
 토큰은 만료되지 않지만 **과거 키가 환경변수에 남아 있는 동안만** 해독됩니다
 (`lib/unsubscribeToken.ts`). 토큰은 random IV로 만들어지고 실제 발송 토큰을
@@ -665,7 +762,7 @@ sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은
   확인합니다 — endpoint를 호출하지 않으므로 rate limit·preference write·고객
   데이터에 닿지 않습니다.
 - **delivery에 key version을 기록**합니다.
-- readiness 계약: **그 key version으로 마지막 발송한 뒤 30일이 지나기 전에는 그
+- readiness 계약: **그 key version으로 마지막 발송한 뒤 1년(구현 당시 30일에서 계약에 맞춰 정정)이 지나기 전에는 그
   키를 제거할 수 없습니다.** readiness가 모든 보존 대상 key version의 canary를
   복호화해 확인합니다.
 - **이것은 불변식 10(end-to-end synthetic)이 아닙니다.** 불변식 10은 endpoint·
@@ -694,7 +791,7 @@ releaseNotesAuthorizationVerdict({
   legalAllowed,                      // 모든 authority가 허용
   overrideApplied,                   // null | { approvalId, type: "risk_accepted" }
   blockers,                          // suppression, objected, ZZ, 의무 미정, flag, display
-  displayContract: { pinnedVersion, requiredVersion, satisfied },
+  displayContract: { pinnedDisplayContractHash, requiredDisplayContractHash, satisfied },
   allowed,                           // (legalAllowed || overrideApplied) && blockers가 비어 있음
   ruleVersions, policyVersionId, evaluatedAt,
 }
@@ -711,6 +808,9 @@ releaseNotesAuthorizationVerdict({
   - replacement는 `supersedesDeliveryId`를 갖고 그 컬럼은 **unique** — 한 delivery의
     replacement는 최대 하나입니다.
   - **`displayContractHash`** — 표시 계약의 canonical JSON(키 정렬) SHA-256입니다.
+    판정 출력과 두 snapshot은 모두 **`pinnedDisplayContractHash`(enqueue 때 고정한 값)·
+    `requiredDisplayContractHash`(send 때 다시 계산한 값)·`satisfied`** 라는 같은 이름을
+    씁니다.
     담는 것: 후보별 `ruleVersion`(정렬), 표시 의무 key마다 합성된 상태와 값,
     **유효한 waiver 승인 id**(정렬), 제목 접두어, footer block id 목록, 수신거부 안내
     metadata, `TemplateVersion` id. enqueue 때 delivery에 고정하고, send 때 현재 값으로
@@ -947,8 +1047,8 @@ EEA·영국을 여는 선행 게이트입니다.
 | # | 단계 | 선행 결정 | 비고 |
 |---|---|---|---|
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8 | — | 문서 |
-| S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·30일 readiness | **닫힘** | **착수 가능.** **Codex 검토** |
-| S1b | **잠금** — 7.4의 writer·sender 목록 전체, `recordSuppression()` 내부 잠금, `sendWithAddressLock()` helper와 정적 검사, 시간 예산, privacy request suppression | **닫힘**(7.4) | S1a 뒤. **Codex 검토** |
+| S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·보존 readiness | **닫힘** | **완료** — #1492 병합. Codex 코드 검토 3회. 보존 기간은 계약대로 1년 |
+| S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, `recordSuppression()` 내부 잠금과 이유 우선순위, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v16) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
 | S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
@@ -959,6 +1059,15 @@ EEA·영국을 여는 선행 게이트입니다.
 | S9 | **7.6 판정 함수와 두 snapshot**, 표시 계약 비교·재enqueue, DB 오류 재시도(불변식 11), 전용 flag를 `createStandardDeliveryRows`·`expandEmailEvent`·drain에서 검사, audience·estimate·drain 공유, 행 없는 미리보기 | S3·S5·S8 | **Codex 검토** |
 | S10a | 불변식 10 end-to-end synthetic — 전용 계정·경로·예상 응답·데이터 무변경 조건 | S9 | 활성화 전 |
 | S10 | 방침·약관 게시, 전체 변경 고지, 시행일, 새 정책 버전 | — | 마지막 |
+
+**S1b의 PR 분할** — 한 PR에 담기에는 경로가 많습니다.
+
+1. **S1b-1** 이유 우선순위, `recordSuppression()`·`removeSuppression()` 잠금, preference
+   재활성화 제한, privacy request suppression(접수·완료·legal hold).
+2. **S1b-2** webhook 재처리 상태기계.
+3. **S1b-3** `sendWithAddressLock()`, standard·credential lane과 알림 큐 고객 kind 전환,
+   시간 예산, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard
+   lane 이동.
 
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
 평판). **EEA·영국 soft opt-in 전에** — G.
