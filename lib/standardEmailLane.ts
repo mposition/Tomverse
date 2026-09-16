@@ -539,6 +539,22 @@ const holdForQuietHours = async (
   return true;
 };
 
+/**
+ * Replaces each secret with a fixed placeholder, longest first so a secret
+ * that contains another is removed whole. Used only for what is recorded --
+ * the subject and the audit hash -- never for what is sent.
+ */
+const redactSecrets = (
+  message: { subject: string; html: string; text: string },
+  secrets: string[]
+) => {
+  if (secrets.length === 0) return message;
+  const ordered = [...secrets].filter(Boolean).sort((l, r) => r.length - l.length);
+  const scrub = (value: string) =>
+    ordered.reduce((text, secret) => text.split(secret).join("{{secret}}"), value);
+  return { subject: scrub(message.subject), html: scrub(message.html), text: scrub(message.text) };
+};
+
 const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // Filled for marketing only; re-checked immediately before the provider call.
   let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
@@ -603,7 +619,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
                 purpose: definition.purpose,
               },
             },
-            select: { enabled: true },
+            select: { enabled: true, confirmedAt: true },
           })
         : null;
 
@@ -612,6 +628,8 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       purpose: definition.purpose,
       hasAccount: Boolean(delivery.userId),
       storedEnabled: stored ? stored.enabled : null,
+      // docs/policy/email-double-opt-in.md §6: passed here, judged there.
+      storedConfirmedAt: stored ? stored.confirmedAt : null,
     });
     if (!consent.allowed) {
       await prisma.emailDelivery.update({
@@ -723,8 +741,16 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     if (held) return { outcome: "pending" as const, classification: definition.classification };
   }
 
-  const payload = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
-  const templateRendered = definition.render(payload, delivery.language);
+  const stored = decryptSnapshot(delivery.renderDataSnapshot, snapshotKeyring());
+  // A template that carries a capability rebuilds it here rather than reading
+  // it from the snapshot, and names it so the audit record can leave it out
+  // (docs/policy/email-notifications.md §10.3).
+  const prepared = definition.prepareForSend
+    ? definition.prepareForSend(stored)
+    : { payload: stored, secrets: [] as string[] };
+  const templateRendered = definition.render(prepared.payload, delivery.language);
+  const forAudit = (message: { subject: string; html: string; text: string }) =>
+    redactSecrets(message, prepared.secrets);
   const attempts = delivery.attempts + 1;
 
   // Only marketing carries these, and the template's own flag decides -- which
@@ -769,7 +795,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
         now,
         attempts,
         classification: definition.classification,
-        rendered: templateRendered,
+        rendered: forAudit(templateRendered),
         status: null,
       }
     );
@@ -982,7 +1008,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     now,
     attempts,
     classification: definition.classification,
-    rendered,
+    rendered: forAudit(rendered),
     status: response.ok ? null : (response.status ?? null),
   });
   return { outcome: recorded, classification: definition.classification };

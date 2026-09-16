@@ -91,6 +91,13 @@ const READ_ONLY_KEYS = {
       "with no consumer would be a switch that does nothing, which teaches an " +
       "operator that switches do nothing.",
   },
+  EMAIL_CONSENT_CONFIRMATION_FLAG_KEY: {
+    reason:
+      "docs/policy/email-double-opt-in.md: turning this on starts sending " +
+      "confirmation mail and needs EMAIL_CONSENT_KEYS deployed first. It is an " +
+      "operator step in the marketing activation order, recorded by writing " +
+      "the row, not a toggle a screen should offer ahead of that order.",
+  },
   VOICE_INPUT_FLAG_KEY: {
     reason:
       "docs/policy/voice-input.md §14: enabling voice input starts paying a " +

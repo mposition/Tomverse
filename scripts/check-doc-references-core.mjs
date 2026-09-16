@@ -128,12 +128,8 @@ export const PLANNED_REFERENCES = {
     // not exist yet. Empty is the healthy state; `lib/marketingMemoryClaims.ts`
     // was the last one and now exists, so the boundary in
     // docs/policy/external-conversation-import-and-memory.md §17 is guarded by
-    // the check again rather than exempt from it.
-    "lib/emailConsentToken.ts": {
-        document: "docs/policy/email-double-opt-in-draft.md",
-        reason:
-            "A design proposal names the module it proposes. The draft is explicit that the file does not exist -- section 4.2 says so where the token format is described, and section 11 lists it as the one new file -- and whether it is ever written is the first of the approvals section 12 asks for. Building an empty module to satisfy this check would put a file in the tree that no decision has authorised.",
-    },
+    // the check again rather than exempt from it. `lib/emailConsentToken.ts`
+    // left this list when the approved double opt-in design was built.
 };
 
 /**
