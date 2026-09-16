@@ -191,6 +191,9 @@ async function loadRoute(): Promise<{
         findUnique: async ({ where }: { where: { id: string } }) =>
           world.stored.find((row) => row.id === where.id) ?? null,
       },
+      suppressionEntry: {
+        findMany: async () => [],
+      },
       userSettings: {
         findUnique: async () =>
           world.settingsLanguage ? { language: world.settingsLanguage } : null,
@@ -235,6 +238,27 @@ async function loadRoute(): Promise<{
         },
       },
       notificationDelivery: {
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          world.deliveries.find((entry) => entry.id === where.id) ?? null,
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: { id: string; status?: string; nextAttemptAt?: Date };
+          data: Record<string, unknown>;
+        }) => {
+          const row = world.deliveries.find(
+            (entry: Record<string, unknown>) =>
+              entry.id === where.id &&
+              (where.status === undefined || entry.status === where.status) &&
+              (where.nextAttemptAt === undefined ||
+                (entry.nextAttemptAt as Date | undefined)?.getTime() ===
+                  where.nextAttemptAt.getTime())
+          );
+          if (!row) return { count: 0 };
+          Object.assign(row, data);
+          return { count: 1 };
+        },
         upsert: async ({
           create,
         }: {
@@ -251,6 +275,7 @@ async function loadRoute(): Promise<{
             ...create,
             status: "pending",
             attempts: 0,
+            nextAttemptAt: new Date(),
             inTx: world.txActive,
           };
           world.deliveries.push(row);

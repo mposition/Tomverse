@@ -15,6 +15,8 @@ import { buildFeedbackLifecycleEmail } from "@/lib/feedbackLifecycleEmails";
 import type { FeedbackLifecycleStage } from "@/lib/feedbackLifecycleCore";
 import { feedbackReferenceFromId } from "@/lib/feedbackPolicy";
 import { qualifiesForTraceAutoReview } from "@/lib/feedbackTraceAutoReview";
+import { feedbackStageRecipient } from "@/lib/feedbackLifecycleCore";
+import { suppressionCheck } from "@/lib/emailSuppression";
 import {
   buildAutoFixOperatorEmail,
   type AutoFixOperatorEmailKind,
@@ -63,6 +65,14 @@ export const NOTIFICATION_KIND = {
   feedbackUserReceived: "feedback_user_received",
   feedbackUserReviewing: "feedback_user_reviewing",
   feedbackUserCompleted: "feedback_user_completed",
+  /**
+   * One more attempt at a completed reply that was written but never sent --
+   * reports closed before 2026-09-16, when the answer still required the
+   * reporter's "status updates" tick. The operator asks for it explicitly, it
+   * renders the stored reply unchanged, and `(kind, referenceId)` allows it
+   * exactly once.
+   */
+  feedbackUserCompletedResend: "feedback_user_completed_resend",
   // Operator notices about an auto-fix case (docs/policy/trace-feedback-automation.md
   // §9.3). The referenceId is the case id; each stage is reached at most once,
   // so the (kind, referenceId) unique constraint makes each mail at most once.
@@ -99,6 +109,7 @@ export const NOTIFICATION_SENDER_ROLE: Record<NotificationKind, SenderRole> = {
   [NOTIFICATION_KIND.feedbackUserReceived]: "support",
   [NOTIFICATION_KIND.feedbackUserReviewing]: "support",
   [NOTIFICATION_KIND.feedbackUserCompleted]: "support",
+  [NOTIFICATION_KIND.feedbackUserCompletedResend]: "support",
   [NOTIFICATION_KIND.autoFixReviewRequested]: "operations",
   [NOTIFICATION_KIND.autoFixProductionVerified]: "operations",
   [NOTIFICATION_KIND.autoFixPromotionFailed]: "operations",
@@ -217,10 +228,21 @@ export async function recordNotificationAttempt({
  * idempotency key depends on that: it only suppresses a duplicate when the
  * payload matches as well as the key.
  */
+type RenderedNotification =
+  | { to: string; subject: string; text: string; html: string }
+  /** Nothing to send, and why. Distinct reasons because "no mail arrived" is
+   * a question an operator has to be able to answer. */
+  | { refusal: "contact_removed" | "not_consented" };
+
+const isRenderRefusal = (
+  value: RenderedNotification | null
+): value is { refusal: "contact_removed" | "not_consented" } =>
+  Boolean(value && "refusal" in value);
+
 async function renderNotification(
   kind: string,
   referenceId: string
-): Promise<{ to: string; subject: string; text: string; html: string } | null> {
+): Promise<RenderedNotification | null> {
   if (kind === NOTIFICATION_KIND.supportFeedback) {
     const recipient = supportNotificationRecipient();
     if (!recipient) return null;
@@ -316,14 +338,17 @@ async function renderNotification(
     [NOTIFICATION_KIND.feedbackUserReceived]: "received",
     [NOTIFICATION_KIND.feedbackUserReviewing]: "reviewing",
     [NOTIFICATION_KIND.feedbackUserCompleted]: "completed",
+    [NOTIFICATION_KIND.feedbackUserCompletedResend]: "completed",
   };
   const lifecycleStage = feedbackUserStage[kind];
   if (lifecycleStage) {
     // Rendered from the immutable lifecycle event, so a retry presents the
     // same subject and body as the first attempt. Only the recipient is
-    // resolved at send time: consent withdrawn or the address removed (account
-    // deletion) makes every still-pending stage unsendable rather than mailing
-    // an address the user took away.
+    // resolved at send time, against the stage's own rule
+    // (feedbackStageRecipient): the answer to a report needs an address, the
+    // two progress notices need the reporter's tick, and an address removed by
+    // account deletion makes every still-pending stage unsendable rather than
+    // mailing an address the user took away.
     const event = await prisma.feedbackLifecycleEvent.findUnique({
       where: {
         feedbackId_stage: { feedbackId: referenceId, stage: lifecycleStage },
@@ -344,9 +369,21 @@ async function renderNotification(
     });
     if (!event) return null;
     const feedback = event.feedback;
-    if (!feedback.email || !feedback.emailUpdatesConsent) return null;
+    const recipient = feedbackStageRecipient({
+      stage: lifecycleStage,
+      email: feedback.email,
+      emailUpdatesConsent: feedback.emailUpdatesConsent,
+    });
+    if (!recipient.canSend) {
+      // Named rather than folded into "source missing": an operator asking why
+      // a reply never arrived needs to know which of these it was.
+      return {
+        refusal:
+          recipient.reason === "no_address" ? "contact_removed" : "not_consented",
+      };
+    }
     return {
-      to: feedback.email,
+      to: feedback.email as string,
       ...buildFeedbackLifecycleEmail(lifecycleStage, {
         reference: feedbackReferenceFromId(feedback.id),
         type: feedback.type,
@@ -409,6 +446,9 @@ export async function attemptNotificationDelivery({
 }): Promise<NotificationAttemptOutcome> {
   const message = await renderNotification(kind, referenceId);
   if (!message) return { kind: "unsendable", reason: "source_missing" };
+  if (isRenderRefusal(message)) {
+    return { kind: "unsendable", reason: message.refusal };
+  }
 
   try {
     const senderRole = NOTIFICATION_SENDER_ROLE[kind as NotificationKind];
@@ -418,6 +458,28 @@ export async function attemptNotificationDelivery({
       // going out under whichever sender is the default is precisely what the
       // role axis exists to stop.
       return { kind: "unsendable", reason: "sender_role_unknown" };
+    }
+    // The address's own suppression state, through the one table that decides
+    // it (docs/policy/email-notifications.md §13.3): a hard bounce, an
+    // operator's manual stop and a privacy request outrank even a message the
+    // recipient asked for. Until 2026-09-16 this path asked nobody, so a
+    // suppressed address was attempted and the failure looked like the
+    // provider's.
+    //
+    // Scoped to the reporter-facing kinds on purpose. The operator alerts and
+    // the refund notices in this queue go to different people under different
+    // expectations, and deciding their suppression policy is not this
+    // change's to make (independent review 2026-09-16).
+    if (kind.startsWith("feedback_user_")) {
+      const suppression = await suppressionCheck({
+        emailAddress: message.to,
+        classification: "transactional",
+      });
+      if (!suppression.allowed) {
+        // manual and privacy_request share one skip reason in the core table;
+        // the console shows what it is given rather than inventing a split.
+        return { kind: "unsendable", reason: `suppressed:${suppression.skipReason}` };
+      }
     }
     const result = await sendTransactionalEmail({
       ...message,
@@ -436,6 +498,11 @@ export async function attemptNotificationDelivery({
  * The inline first attempt every enqueuing caller makes, so the common case
  * still notifies immediately instead of waiting for the next drain.
  *
+ * It claims the row exactly as a drain does before it sends (independent
+ * review 2026-09-16, F5): the two used to race, and only identical payloads
+ * and the provider's idempotency key kept that from being visible. A row this
+ * call does not win is left to whoever did.
+ *
  * Never throws: the row is already queued, so the worst a failure here can do
  * is delay the notification to the next cron pass. Returns whether it was
  * delivered, for the caller's own operational log.
@@ -450,6 +517,28 @@ export async function deliverNotificationNow({
   referenceId: string;
 }) {
   try {
+    const now = new Date();
+    const row = await prisma.notificationDelivery.findUnique({
+      where: { id: deliveryId },
+      select: { status: true, attempts: true, nextAttemptAt: true },
+    });
+    if (!row || row.status !== NOTIFICATION_DELIVERY_STATUS.pending) {
+      return { delivered: false, status: row?.status ?? "missing", errorKind: null };
+    }
+    // The drain's own claim, byte for byte: whoever moves nextAttemptAt from
+    // the value they read owns this attempt.
+    const claimed = await prisma.notificationDelivery.updateMany({
+      where: {
+        id: deliveryId,
+        status: NOTIFICATION_DELIVERY_STATUS.pending,
+        nextAttemptAt: row.nextAttemptAt,
+      },
+      data: { nextAttemptAt: new Date(now.getTime() + 5 * 60_000) },
+    });
+    if (claimed.count !== 1) {
+      // A drain got there first; it will report what happened.
+      return { delivered: false, status: "pending", errorKind: "not_claimed" };
+    }
     const outcome = await attemptNotificationDelivery({
       kind,
       referenceId,
@@ -457,8 +546,9 @@ export async function deliverNotificationNow({
     });
     const transition = await recordNotificationAttempt({
       id: deliveryId,
-      attemptsBefore: 0,
+      attemptsBefore: row.attempts,
       outcome,
+      now,
     });
     return {
       delivered: transition.status === NOTIFICATION_DELIVERY_STATUS.delivered,

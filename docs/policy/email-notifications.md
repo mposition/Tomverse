@@ -4,13 +4,45 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v11 (2026-09-15).** marketing 동의 확인 단계(double opt-in) 구현, flag off. 0절 참조.
+- 개정: **v12 (2026-09-16).** 피드백 처리 결과 답변은 transactional(주소만 있으면 발송),
+  접수·검토중은 동의 기반. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v12 (2026-09-16) — 피드백 처리 결과 답변은 transactional
+
+계기: 2026-09-15 운영자가 신고를 해결 처리하며 답변을 적고 버튼을 눌렀으나
+신고자에게 아무것도 가지 않았습니다. 세 lifecycle 단계가 모두 "이메일 상태
+알림" 동의를 요구하고 있었고, 화면은 그 사실을 회색 한 줄로만 말했습니다.
+분석과 독립 검토: `.github/audits/support-reply-delivery-truth-design-2026-09-16.md`.
+
+- **처리 결과 답변(`completed`)은 §3 정의상 transactional입니다** — 신고자 본인이
+  시작한 요청에 대한 응답이므로 동의가 필요하지 않고, **주소만 있으면 보냅니다.**
+  접수(`received`)·검토중(`reviewing`)은 요청에 대한 응답이 아닌 진행 통지이므로
+  그대로 동의 기반입니다. 판정은 `feedbackStageRecipient()`
+  (`lib/feedbackLifecycleCore.ts`) 한 곳이며 라우트·큐·콘솔이 같은 함수를 씁니다.
+- 이 개정으로 **새로 메일을 받는 대상은 로그인 계정으로 신고하고 체크박스를 켜지
+  않은 사람의 답변 한 통**뿐입니다. 게스트 주소 수집 방식은 바꾸지 않았습니다 —
+  게스트는 지금도 연락을 원할 때만 주소를 남기고, 그 주소가 곧 요청입니다.
+  (검증되지 않은 제3자 주소로 발송이 확대되지 않도록 한 결정입니다.)
+- **lifecycle 이벤트는 여전히 불변입니다.** 미발송 이벤트를 고쳐서 다시 보내지
+  않습니다. 개정 이전에 답변만 저장된 건은 운영자가 명시적으로 누르는
+  `feedback_user_completed_resend`가 저장된 답변을 **그대로** 한 번 보냅니다.
+- **이 경로도 suppression을 확인합니다.** 지금까지 `sendTransactionalEmail()`을
+  직접 부르며 §13.3 판정을 건너뛰었습니다. 이제 `suppressionCheck({ classification:
+  "transactional" })`을 통과해야 나갑니다(하드 바운스·manual·privacy_request 차단).
+  검사는 **`feedback_user_*` kind에만** 겁니다 — 같은 큐의 운영자 알림과 환불
+  알림은 수신자도 기대도 다르고, 그 정책은 이 개정이 정할 일이 아닙니다.
+  `manual`과 `privacy_request`는 core 표가 둘 다 `suppressed_complaint`로
+  돌려주므로 콘솔에서도 구별되지 않습니다(그대로 표시합니다).
+- **미발송 사유를 구분합니다**: `contact_removed`, `not_consented`,
+  `suppressed:<reason>`, `source_missing`. 콘솔 수신함이 답변 메일의 상태를
+  보여 주며, 표현은 "메일 제공자 접수됨"입니다 — 이 큐는 받은편지함 도달을
+  알지 못합니다.
 
 ### v11 (2026-09-15) — double opt-in 구현, 운영 비활성
 

@@ -16,6 +16,7 @@ import {
   FEEDBACK_CLOSURE_OUTCOMES,
   FEEDBACK_STATUSES,
   FEEDBACK_USER_REPLY_MAX_LENGTH,
+  feedbackStageRecipient,
   isTerminalFeedbackStatus,
   isValidFeedbackUserReply,
   lifecycleStageForStatus,
@@ -51,8 +52,11 @@ type UserNotificationSkipReason =
   | "no_stage"
   /** This stage was already announced once; the event record exists. */
   | "already_notified"
-  /** No contact address, or the submitter did not opt in for this report. */
-  | "not_notifiable";
+  /** No address on the report, so nothing can reach the reporter at all. */
+  | "no_address"
+  /** A progress notice the reporter did not ask for (the answer never needs
+   * the tick -- docs/policy/email-notifications.md §3). */
+  | "not_consented";
 
 type RouteContext = {
   params: Promise<{ feedbackId: string }>;
@@ -177,9 +181,18 @@ export async function PATCH(req: Request, context: RouteContext) {
         autoFixCaseClosed = closed.count === 1;
       }
 
-      const notifiable = Boolean(existing.email) && existing.emailUpdatesConsent;
+      // One rule for every stage and every surface (lib/feedbackLifecycleCore.ts):
+      // the answer to the report needs an address, the progress notices need
+      // the reporter's tick.
+      const recipient = stage
+        ? feedbackStageRecipient({
+            stage,
+            email: existing.email,
+            emailUpdatesConsent: existing.emailUpdatesConsent,
+          })
+        : null;
       const delivery =
-        stage && eventCreated && notifiable
+        stage && eventCreated && recipient?.canSend
           ? await enqueueNotificationDelivery(tx, {
               kind: FEEDBACK_USER_NOTIFICATION_KIND[stage],
               referenceId: feedbackId,
@@ -203,7 +216,7 @@ export async function PATCH(req: Request, context: RouteContext) {
         },
       });
 
-      return { feedback, delivery, eventCreated, notifiable, stage, autoFixCaseClosed };
+      return { feedback, delivery, eventCreated, recipient, stage, autoFixCaseClosed };
     });
 
     if (!result) {
@@ -221,7 +234,13 @@ export async function PATCH(req: Request, context: RouteContext) {
     } else if (!result.eventCreated) {
       userNotification = { queued: false, reason: "already_notified" };
     } else if (!result.delivery) {
-      userNotification = { queued: false, reason: "not_notifiable" };
+      userNotification = {
+        queued: false,
+        reason:
+          result.recipient && !result.recipient.canSend
+            ? result.recipient.reason
+            : "no_address",
+      };
     } else {
       const outcome = await deliverNotificationNow({
         deliveryId: result.delivery.id,

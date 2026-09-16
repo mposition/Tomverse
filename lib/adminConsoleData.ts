@@ -8,6 +8,7 @@ import type {
 import type { FeedbackRow } from "@/components/admin/FeedbackInboxPanel";
 import type { AutoFixReviewRow } from "@/components/admin/AutoFixReviewPanel";
 import { AUTOFIX_CASE_STATE } from "@/lib/feedbackAutoFixCore";
+import { NOTIFICATION_KIND } from "@/lib/notificationDeliveries";
 import type { RefundRequestRow } from "@/components/admin/RefundRequestsPanel";
 import type { SlaRow } from "@/components/admin/AdminRiskPanels";
 import { getRuntimeModels } from "@/lib/modelRegistry";
@@ -95,6 +96,49 @@ export async function loadFeedbackRows(options?: {
         })
       : [];
   const rows = [...linked, ...newest];
+  // The reply's delivery state, for exactly the rows this screen shows (the
+  // bounded read above plus the linked one). Without it "the reporter says
+  // they got nothing" has no answer anywhere in the console: this queue is
+  // not the standard lane, so /admin/email-delivery never sees it.
+  const replyDeliveries = rows.length
+    ? await prisma.notificationDelivery.findMany({
+        where: {
+          referenceId: { in: rows.map((row) => row.id) },
+          kind: {
+            in: [
+              NOTIFICATION_KIND.feedbackUserCompleted,
+              NOTIFICATION_KIND.feedbackUserCompletedResend,
+            ],
+          },
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          referenceId: true,
+          kind: true,
+          status: true,
+          attempts: true,
+          lastErrorKind: true,
+          deliveredAt: true,
+          updatedAt: true,
+        },
+      })
+    : [];
+  // The completion record the reply email actually renders from. The row's
+  // own `userReply` is the latest thing an operator typed, which is not the
+  // same text once a report has been closed twice -- and sending something
+  // the operator was not shown is exactly the failure this change is about.
+  const completionEvents = rows.length
+    ? await prisma.feedbackLifecycleEvent.findMany({
+        where: { feedbackId: { in: rows.map((row) => row.id) }, stage: "completed" },
+        select: { feedbackId: true, outcomeCode: true, userReply: true },
+      })
+    : [];
+  const completionByFeedback = new Map(
+    completionEvents.map((event) => [event.feedbackId, event])
+  );
+  // Newest per report wins: a resend is what happened last.
+  const replyDeliveryByFeedback = new Map<string, (typeof replyDeliveries)[number]>();
+  for (const row of replyDeliveries) replyDeliveryByFeedback.set(row.referenceId, row);
   return rows.map((feedback) => ({
     id: feedback.id,
     userId: feedback.userId,
@@ -134,6 +178,27 @@ export async function loadFeedbackRows(options?: {
           occurredAt: feedback.traceEvidence.occurredAt.toISOString(),
         }
       : null,
+    completionSnapshot: (() => {
+      const event = completionByFeedback.get(feedback.id);
+      return event
+        ? { outcomeCode: event.outcomeCode, userReply: event.userReply }
+        : null;
+    })(),
+    replyDelivery: (() => {
+      const row = replyDeliveryByFeedback.get(feedback.id);
+      return row
+        ? {
+            resent: row.kind === NOTIFICATION_KIND.feedbackUserCompletedResend,
+            status: row.status,
+            attempts: row.attempts,
+            lastErrorKind: row.lastErrorKind,
+            // "Accepted by the mail provider", not "in their inbox": this
+            // queue learns nothing after the API call succeeds.
+            acceptedAt: row.deliveredAt ? row.deliveredAt.toISOString() : null,
+            updatedAt: row.updatedAt.toISOString(),
+          }
+        : null;
+    })(),
     autoFixCase: feedback.autoFixCase
       ? {
           state: feedback.autoFixCase.state,

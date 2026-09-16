@@ -855,6 +855,10 @@ export const fr = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Vous pouvez envoyer sans rien ajouter : les détails de l'erreur sont joints dans tous les cas.",
         traceOptionalHint: "L'ID de suivi est facultatif. Vous pouvez envoyer sans.",
+        replyAlwaysAccount:
+          "Quel que soit ce choix, la réponse à ce signalement arrive sur l'e-mail de votre compte.",
+        replyNeedsAddress:
+          "Pour recevoir la réponse à ce signalement, cochez la case ci-dessus et laissez une adresse e-mail.",
         emailUpdatesLabel: "Recevoir le statut par e-mail",
         emailUpdatesAccountHint:
           "L'accusé de réception et le suivi de ce signalement seront envoyés à l'adresse e-mail de votre compte.",
