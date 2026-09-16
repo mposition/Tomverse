@@ -102,6 +102,52 @@ test("every module that moves credit lots also locks the account", () => {
     );
 });
 
+test("a chunk report locks its fenced run row before any chunk row", () => {
+    // task_9d445985: a reclaim takes the run and then the dead generation's
+    // chunks, so a report that took its chunk first could deadlock with it.
+    const source = readFileSync(join(libDir, "memoryExtractionService.ts"), "utf8");
+    const start = source.indexOf("export async function completeExtractionChunk(");
+    const body = source.slice(start, source.indexOf("\nexport ", start + 1));
+    const credit = body.indexOf("acquireCreditAccountLock(tx");
+    const runLock = body.indexOf('FROM "MemoryExtractionRun"');
+    const firstChunk = body.indexOf("tx.memoryExtractionChunk.");
+    assert.ok(credit >= 0 && runLock > credit, "credit account, then the run row");
+    assert.ok(firstChunk > runLock, "the run row before any chunk read or write");
+    const fence = body.slice(runLock, body.indexOf("FOR UPDATE", runLock));
+    assert.match(fence, /status = 'running'/);
+    assert.match(fence, /"leaseGeneration" = \$\{lease\.leaseGeneration\}/);
+    assert.match(body, /advanced\.count !== 1/, "no settlement for a run the report did not advance");
+
+    const claim = source.slice(
+        source.indexOf("export async function claimMemoryExtractionRun("),
+        source.indexOf("export async function heartbeatMemoryExtractionRun(")
+    );
+    assert.ok(
+        claim.indexOf('UPDATE "MemoryExtractionRun"') < claim.indexOf("tx.memoryExtractionChunk.updateMany("),
+        "a reclaim takes the run before the chunks"
+    );
+});
+
+test("delete-all locks the account and settles every run it cancels", () => {
+    const source = readFileSync(join(libDir, "memoryService.ts"), "utf8");
+    const start = source.indexOf("export async function deleteAllMemories(");
+    const body = source.slice(start, source.indexOf("\nexport ", start + 1));
+    const credit = body.indexOf("lockCreditAccount(tx, userId)");
+    const runs = body.indexOf('FROM "MemoryExtractionRun"');
+    const settle = body.indexOf("settleExtractionRunCredits(tx");
+    const memory = body.indexOf("acquireUserMemoryLock(tx, userId)");
+    assert.ok(credit >= 0 && runs > credit && settle > runs && memory > settle);
+});
+
+test("the lease sweep takes run rows in id order and never waits for a held one", () => {
+    // Delete-all locks an account's active runs by id; a sweep that locked them
+    // in plan order could take two in the opposite order (task_9d445985).
+    const source = readFileSync(join(libDir, "memoryExtractionService.ts"), "utf8");
+    const start = source.indexOf("export async function reconcileExpiredMemoryExtractionRuns(");
+    const body = source.slice(start, source.indexOf("\nexport ", start + 1));
+    assert.match(body, /ORDER BY id\s+FOR UPDATE SKIP LOCKED/);
+});
+
 test("the extraction path locks the account before its own run lock", () => {
     // Order, not merely presence. Chat takes the credit account first and then
     // its own advisory lock; a second path that inverted the pair would

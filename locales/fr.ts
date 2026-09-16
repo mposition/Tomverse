@@ -53,6 +53,13 @@ export const fr = {
         shareRevokeFailed: "Impossible d'arrêter le partage.",
         downloadFailed: "Échec du téléchargement de la conversation.",
         downloadTxt: "Télécharger (.txt)",
+        downloadWithSourceTxt: "Télécharger avec l'original (.txt)",
+        downloadWithSourceHint: "Inclut le texte original conservé. Un fichier téléchargé ne peut pas être repris.",
+        downloadContinuationOnlyTxt: "Télécharger seulement la partie Tomverse (.txt)",
+        downloadSourceLocked: "Déverrouillez d'abord l'original importé, puis retéléchargez.",
+        downloadSourceDeleted: "L'original importé n'est plus conservé : il ne peut pas être inclus.",
+        downloadTooLarge: "Cette conversation et son original sont trop volumineux pour un seul fichier.",
+        downloadVerifyFailed: "Le téléchargement est arrivé incomplet et n'a pas été enregistré. Réessayez.",
         shareFailed: "Impossible de créer le lien de partage.",
         shareContinuationUnavailable: "Cette conversation a été démarrée depuis une discussion importée : elle ne peut pas être partagée publiquement.",
         shareLocked: "Déverrouillez ce chat avec son mot de passe avant de le partager.",
@@ -855,6 +862,10 @@ export const fr = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Vous pouvez envoyer sans rien ajouter : les détails de l'erreur sont joints dans tous les cas.",
         traceOptionalHint: "L'ID de suivi est facultatif. Vous pouvez envoyer sans.",
+        replyAlwaysAccount:
+          "Quel que soit ce choix, la réponse à ce signalement arrive sur l'e-mail de votre compte.",
+        replyNeedsAddress:
+          "Pour recevoir la réponse à ce signalement, cochez la case ci-dessus et laissez une adresse e-mail.",
         emailUpdatesLabel: "Recevoir le statut par e-mail",
         emailUpdatesAccountHint:
           "L'accusé de réception et le suivi de ce signalement seront envoyés à l'adresse e-mail de votre compte.",

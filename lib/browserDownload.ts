@@ -68,6 +68,45 @@ export function saveBlobAsFile(blob: Blob, filename: string) {
 }
 
 /**
+ * Saves a response whose completeness the server vouched for.
+ *
+ * `X-Export-Bytes` and `X-Export-SHA256` describe the bytes the server
+ * assembled; a file that does not match them is not saved. A half-received
+ * transcript looks exactly like a complete one -- it ends, and nothing in it
+ * says where it was cut -- so the check is required rather than best-effort:
+ * missing or malformed headers are a failure, not a reason to skip it
+ * (docs/policy/external-conversation-continuation.md §9).
+ *
+ * Returns why it refused, so the caller can say it.
+ */
+export async function saveVerifiedResponseAsFile(
+    response: Response,
+    fallbackName: string
+): Promise<{ saved: true } | { saved: false; reason: "missing_headers" | "size_mismatch" | "digest_mismatch" }> {
+    const declaredBytes = response.headers.get("X-Export-Bytes") ?? "";
+    const declaredDigest = (response.headers.get("X-Export-SHA256") ?? "").toLowerCase();
+    if (!/^\d+$/.test(declaredBytes) || !/^[0-9a-f]{64}$/.test(declaredDigest)) {
+        await response.arrayBuffer().catch(() => undefined);
+        return { saved: false, reason: "missing_headers" };
+    }
+    // The decoded bytes, so a gzipped transfer compares like any other.
+    const received = await response.arrayBuffer();
+    if (received.byteLength !== Number(declaredBytes)) {
+        return { saved: false, reason: "size_mismatch" };
+    }
+    const digest = await crypto.subtle.digest("SHA-256", received);
+    const hex = Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    if (hex !== declaredDigest) return { saved: false, reason: "digest_mismatch" };
+    saveBlobAsFile(
+        new Blob([received], { type: "text/plain;charset=utf-8" }),
+        filenameFromContentDisposition(response.headers.get("content-disposition"), fallbackName)
+    );
+    return { saved: true };
+}
+
+/**
  * Saves an already-checked response as a file, using the name the server sent.
  *
  * The caller checks `response.ok` itself: what a failed export should say is

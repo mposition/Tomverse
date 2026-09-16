@@ -51,6 +51,13 @@ export const en = {
         shareRevokeFailed: "Failed to stop sharing.",
         downloadFailed: "Failed to download the conversation.",
         downloadTxt: "Download (.txt)",
+        downloadWithSourceTxt: "Download with the original (.txt)",
+        downloadWithSourceHint: "Includes the stored original. A downloaded file cannot be recalled.",
+        downloadContinuationOnlyTxt: "Download the Tomverse part only (.txt)",
+        downloadSourceLocked: "Unlock the imported original first, then download it with this conversation.",
+        downloadSourceDeleted: "The imported original is no longer stored, so it cannot be included.",
+        downloadTooLarge: "This conversation and its original are too large for one file.",
+        downloadVerifyFailed: "The download did not arrive complete, so it was not saved. Please try again.",
         shareFailed: "Failed to create share link.",
         shareContinuationUnavailable: "This conversation was started from an imported chat, so it cannot be shared publicly.",
         shareLocked: "Unlock this chat with its password before sharing.",
@@ -855,6 +862,10 @@ export const en = {
         messageCounter: "{count} / {max}",
         errorReportHint: "You can send this without adding anything. The error details are attached either way.",
         traceOptionalHint: "The trace ID is optional. You can send without it.",
+        replyAlwaysAccount:
+          "Whatever you choose here, the answer to this report goes to your account email.",
+        replyNeedsAddress:
+          "To receive the answer to this report, tick the box above and leave an email address.",
         emailUpdatesLabel: "Email me status updates",
         emailUpdatesAccountHint:
           "A receipt and status updates for this report will go to your account email.",

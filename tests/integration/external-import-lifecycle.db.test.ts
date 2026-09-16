@@ -1300,3 +1300,154 @@ test("an expired unsealed import still reads as expired, not unsealed", async ()
         expectCode("EXTERNAL_IMPORT_STAGING_EXPIRED")
     );
 });
+
+/*
+  task_9d445985 (second cycle) and IMPORT-STAGING-FINALIZE-01.
+
+  Both are about what happens between the sweep choosing a candidate and the
+  sweep writing it. Interleavings are forced: a holder keeps a lock, and the
+  test waits until PostgreSQL reports each contender waiting before starting
+  the next.
+*/
+
+const waitForLockWaiters = async (count: number) => {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+        const [row] = await prisma.$queryRaw<Array<{ waiting: number }>>`
+            SELECT count(*)::int AS waiting FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `;
+        if (row.waiting >= count) return;
+        if (Date.now() > deadline) throw new Error(`expected ${count} lock waiters, saw ${row.waiting}`);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+};
+
+const holdLock = (
+    take: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<unknown>,
+    beforeCommit?: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<unknown>
+) => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let acquired!: () => void;
+    const holding = new Promise<void>((resolve) => {
+        acquired = resolve;
+    });
+    const done = prisma.$transaction(
+        async (tx) => {
+            await take(tx);
+            acquired();
+            await released;
+            await beforeCommit?.(tx);
+        },
+        { timeout: 30_000, maxWait: 30_000 }
+    );
+    return { holding, release, done };
+};
+
+const openStaleImport = async () => {
+    const user = await createUser();
+    const created = await createExternalImport({
+        userId: user.id,
+        provider: "chatgpt",
+        parserVersion: "test-1",
+    });
+    await appendExternalImportBatch({
+        userId: user.id,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: "digest-0",
+        conversations: [conversationPayload("conv-a"), conversationPayload("conv-b")],
+    });
+    await prisma.$executeRaw`
+      UPDATE "ExternalImport"
+      SET "updatedAt" = NOW() - INTERVAL '25 hours'
+      WHERE id = ${created.id}
+    `;
+    return { user, importId: created.id };
+};
+
+/** The day counter the sweep reports into, summed across periods. */
+const stagingExpiredCounter = async () => {
+    const rows = await prisma.chatUsageBucket.findMany({
+        // lib/externalImportMetrics.ts counterKey("staging_expired"), in the day period.
+        where: { key: "external-import:staging-expired", period: "external-import-day" },
+        select: { count: true },
+    });
+    return rows.reduce((sum, row) => sum + Number(row.count), 0);
+};
+
+test("a delete queued behind a sweep on the same open import does not deadlock", async () => {
+    // Old order: the sweep waited on the snapshots with nothing held; the
+    // delete took the import and waited on the snapshots; once released the
+    // sweep deleted the snapshots and waited on the import the delete held.
+    const { user, importId } = await openStaleImport();
+    const counterBefore = await stagingExpiredCounter();
+    const holder = holdLock((tx) =>
+        tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE "importId" = ${importId} ORDER BY id FOR UPDATE`
+    );
+    await holder.holding;
+
+    const sweep = reconcileExpiredExternalImportStaging();
+    await waitForLockWaiters(1);
+    const deletion = deleteExternalImport(user.id, importId);
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [sweepResult, deleteResult] = await Promise.all([sweep, deletion]);
+    assert.equal(sweepResult.expiredImports, 1);
+    // The counter the skip tests compare against really moves when an import expires.
+    assert.equal(await stagingExpiredCounter(), counterBefore + 1);
+    // The sweep committed first, so the delete found a failed import and
+    // removed it outright.
+    assert.equal(deleteResult.outcome, "deleted");
+    assert.equal(await prisma.externalImport.count({ where: { id: importId } }), 0);
+    assert.equal(await prisma.externalConversation.count({ where: { importId } }), 0);
+});
+
+test("a finalize that commits after the sweep chose the import keeps it completed and uncounted", async () => {
+    const { importId } = await openStaleImport();
+    const counterBefore = await stagingExpiredCounter();
+    const holder = holdLock(
+        (tx) => tx.$queryRaw`SELECT id FROM "ExternalImport" WHERE id = ${importId} FOR UPDATE`,
+        (tx) => tx.$executeRaw`UPDATE "ExternalImport" SET status = 'completed' WHERE id = ${importId}`
+    );
+    await holder.holding;
+
+    // The sweep reads the import as an open, stale candidate, then waits for
+    // the row while the holder completes it.
+    const sweep = reconcileExpiredExternalImportStaging();
+    await waitForLockWaiters(1);
+    holder.release();
+    await holder.done;
+
+    assert.equal((await sweep).expiredImports, 0, "a skipped candidate is not counted");
+    const row = await prisma.externalImport.findUniqueOrThrow({ where: { id: importId } });
+    assert.equal(row.status, "completed");
+    assert.equal(row.failureCode, null);
+    assert.equal(await prisma.externalConversation.count({ where: { importId } }), 2);
+    assert.equal(await stagingExpiredCounter(), counterBefore);
+});
+
+test("an import touched after the candidate read is not expired", async () => {
+    const { importId } = await openStaleImport();
+    const counterBefore = await stagingExpiredCounter();
+    const holder = holdLock(
+        (tx) => tx.$queryRaw`SELECT id FROM "ExternalImport" WHERE id = ${importId} FOR UPDATE`,
+        (tx) => tx.$executeRaw`UPDATE "ExternalImport" SET "updatedAt" = NOW() WHERE id = ${importId}`
+    );
+    await holder.holding;
+    const sweep = reconcileExpiredExternalImportStaging();
+    await waitForLockWaiters(1);
+    holder.release();
+    await holder.done;
+
+    assert.equal((await sweep).expiredImports, 0);
+    const row = await prisma.externalImport.findUniqueOrThrow({ where: { id: importId } });
+    assert.equal(row.status, "staging");
+    assert.equal(await prisma.externalConversation.count({ where: { importId } }), 2);
+    assert.equal(await stagingExpiredCounter(), counterBefore);
+});

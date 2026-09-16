@@ -53,6 +53,13 @@ export const es = {
         shareRevokeFailed: "No se pudo detener el uso compartido.",
         downloadFailed: "No se pudo descargar la conversación.",
         downloadTxt: "Descargar (.txt)",
+        downloadWithSourceTxt: "Descargar con el original (.txt)",
+        downloadWithSourceHint: "Incluye el texto original guardado. Un archivo descargado no se puede recuperar.",
+        downloadContinuationOnlyTxt: "Descargar solo la parte de Tomverse (.txt)",
+        downloadSourceLocked: "Desbloquea primero el original importado y vuelve a descargarlo.",
+        downloadSourceDeleted: "El original importado ya no está guardado, así que no puede incluirse.",
+        downloadTooLarge: "Esta conversación y su original son demasiado grandes para un solo archivo.",
+        downloadVerifyFailed: "La descarga no llegó completa, así que no se guardó. Inténtalo de nuevo.",
         shareFailed: "No se pudo crear el enlace compartido.",
         shareContinuationUnavailable: "Esta conversación se inició desde un chat importado, por lo que no se puede compartir públicamente.",
         shareLocked: "Desbloquea este chat con su contraseña antes de compartirlo.",
@@ -855,6 +862,10 @@ export const es = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Puedes enviarlo sin añadir nada: los detalles del error se adjuntan igualmente.",
         traceOptionalHint: "El trace ID es opcional. Puedes enviar sin él.",
+        replyAlwaysAccount:
+          "Elijas lo que elijas aquí, la respuesta a este informe llegará al correo de tu cuenta.",
+        replyNeedsAddress:
+          "Para recibir la respuesta a este informe, marca la casilla de arriba y deja un correo electrónico.",
         emailUpdatesLabel: "Recibir el estado por correo",
         emailUpdatesAccountHint:
           "El acuse de recibo y las actualizaciones de este informe irán al correo de tu cuenta.",

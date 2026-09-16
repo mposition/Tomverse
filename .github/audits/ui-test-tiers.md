@@ -42,9 +42,13 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-15 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **60개 파일, 848 test**를
-선택합니다(두 project 합계 1,696. `unsubscribe-link.spec.ts` 합류로 +1 파일, +4 test). 같은 날 `chat-starter-catalog.spec.ts`와
+현재 실측: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
+desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 862 test**를
+선택합니다(두 project 합계 1,724). 2026-09-15의 60개 파일 848 test에서 +2 파일 +14 test이며,
+그 14 중 **9는 이번에 합류한 두 spec**(`external-conversation-continuation.spec.ts` 6,
+`conversation-export.spec.ts` 3)이고 나머지 5는 그 사이 develop에서 기존 태그 spec이 늘어난 몫입니다
+— 같은 날 태그 없이 develop을 기준으로 다시 세면 60개 파일 851 test입니다.
+848은 `unsubscribe-link.spec.ts` 합류로 +1 파일, +4 test였던 시점의 값입니다. 같은 날 `chat-starter-catalog.spec.ts`와
 `prompt-refiner-chat-input.spec.ts`가 병렬로 합류하기 전 값은 57개 파일,
 825 test(project당)였습니다. Starter spec은 staging에서 찾은 씨앗 토글 결함
 회귀를 포함해 +9, Refiner spec은 +10입니다. 2026-08-26의 51개 파일,
@@ -107,6 +111,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **60개 파일, 848 test**
 | `chat-starter-catalog.spec.ts` |
 | `unsubscribe-link.spec.ts` |
 | `external-conversation-continuation.spec.ts` |
+| `conversation-export.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
@@ -122,8 +127,14 @@ desktop-chromium과 mobile-chromium 각 project에서 **60개 파일, 848 test**
 두 shell이 환영 화면을 서로 다르게(overlay와 일반 flow) 그리므로
 desktop·mobile 양쪽에서 돌립니다.
 
+`conversation-export.spec.ts`가 2026-09-16에 합류해 62개입니다(project당 +3 test,
+원문 포함 다운로드 describe만 태그). 이 파일이 막는 것은 파일 하나가 사용자 계정 밖으로
+나가는 순간입니다 — 어떤 항목을 눌렀을 때 원문이 들어가는지, 끝까지 받지 못한 파일이
+저장되지 않는지, 잠긴 원문이 이유와 함께 거절되는지는 화면에서만 확인되고, 내려받은
+파일은 회수할 수 없습니다(docs/policy/external-conversation-continuation.md §9.1).
+
 `external-conversation-continuation.spec.ts`가 2026-09-16에 합류해 61개입니다
-(project당 +4, 검색 describe만 태그). 이어가기 화면에서 원문 검색 결과를 눌렀을 때
+(project당 +6, 검색 describe만 태그). 이어가기 화면에서 원문 검색 결과를 눌렀을 때
 그 메시지로 실제로 이동하는지, 잠금 grant가 만료된 발췌가 화면에서 사라지는지는
 정적 검사가 답할 수 없습니다. 후자는 권한 없는 본문 노출이라 회수가 성립하지 않고,
 전자는 결과가 대화만 열고 위치를 잃으면 기능이 조용히 반쪽이 됩니다

@@ -55,6 +55,13 @@ export const ko = {
         shareRevokeFailed: "공유 중지에 실패했습니다.",
         downloadFailed: "대화를 다운로드하지 못했습니다.",
         downloadTxt: "다운로드(.txt)",
+        downloadWithSourceTxt: "원문과 이어진 대화 다운로드 (.txt)",
+        downloadWithSourceHint: "저장된 원문 텍스트를 포함합니다. 내려받은 파일은 회수할 수 없습니다.",
+        downloadContinuationOnlyTxt: "Tomverse에서 이어진 부분만 다운로드 (.txt)",
+        downloadSourceLocked: "가져온 원문의 잠금을 해제한 뒤 다시 내려받아 주세요.",
+        downloadSourceDeleted: "가져온 원문이 더 이상 저장돼 있지 않아 포함할 수 없습니다.",
+        downloadTooLarge: "이 대화와 원문을 한 파일로 담기에는 너무 큽니다.",
+        downloadVerifyFailed: "파일을 끝까지 받지 못해 저장하지 않았습니다. 다시 시도해 주세요.",
         shareFailed: "공유 링크를 생성하지 못했습니다.",
         shareContinuationUnavailable: "가져온 대화에서 시작한 대화는 공개 공유할 수 없습니다.",
         shareLocked: "비밀번호로 대화를 잠금 해제한 후 공유해 주세요.",
@@ -859,6 +866,10 @@ export const ko = {
         messageCounter: "{count} / {max}자",
         errorReportHint: "추가 설명을 입력하지 않아도 보낼 수 있습니다. 오류 내용은 자동으로 함께 전송됩니다.",
         traceOptionalHint: "추적 ID는 선택 사항입니다. 입력하지 않아도 전송됩니다.",
+        replyAlwaysAccount:
+          "여기서 무엇을 선택하든, 이 신고의 처리 결과 답변은 계정 이메일로 보내 드립니다.",
+        replyNeedsAddress:
+          "이 신고의 처리 결과 답변을 받으시려면 위 항목을 선택하고 이메일 주소를 남겨 주세요.",
         emailUpdatesLabel: "처리 상태를 이메일로 받기",
         emailUpdatesAccountHint:
           "이 신고 건의 접수 및 처리 상태 안내를 계정 이메일로 보내드립니다.",

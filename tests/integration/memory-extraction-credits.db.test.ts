@@ -9,11 +9,17 @@ import {
 import { externalContentDigest } from "@/lib/externalImportDigest";
 import { settleExtractionRunCredits } from "@/lib/memoryExtractionCredits";
 import type { MemoryExtractionEvalEntry } from "@/lib/memoryExtractionEvalRegister";
+import { MEMORY_EXTRACTION_LEASE_TTL_MS } from "@/lib/memoryExtractionCore";
 import {
     cancelMemoryExtractionRun,
+    claimMemoryExtractionRun,
+    claimNextExtractionChunk,
+    completeExtractionChunk,
     createMemoryExtractionRun,
     estimateMemoryExtraction,
+    reconcileExpiredMemoryExtractionRuns,
 } from "@/lib/memoryExtractionService";
+import { deleteAllMemories } from "@/lib/memoryService";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -466,4 +472,225 @@ test("cancelling a run waits for the account's credit lock (§9 lock order)", as
             where: { runId: run.id },
         });
     assert.equal(reservation.status, "settled");
+});
+
+/*
+  task_9d445985 (first cycle): a chunk report and a lease reclaim on the same
+  run, plus the settlement delete-all now owns.
+
+  Interleavings are forced, not raced. A holder transaction keeps a lock;
+  each contender is started and the test waits until PostgreSQL reports it
+  waiting on a lock before starting the next, so the queue order is the one
+  named in the test rather than whatever the scheduler chose.
+*/
+
+/** Waits until at least `count` backends are waiting on a heavyweight lock. */
+const waitForLockWaiters = async (count: number) => {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+        const [row] = await prisma.$queryRaw<Array<{ waiting: number }>>`
+            SELECT count(*)::int AS waiting FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `;
+        if (row.waiting >= count) return;
+        if (Date.now() > deadline) throw new Error(`expected ${count} lock waiters, saw ${row.waiting}`);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+};
+
+/** Holds `lockSql` in its own transaction until `release()`. */
+const holdLock = (take: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<unknown>) => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let acquired!: () => void;
+    const holding = new Promise<void>((resolve) => {
+        acquired = resolve;
+    });
+    const done = prisma.$transaction(
+        async (tx) => {
+            await take(tx);
+            acquired();
+            await released;
+        },
+        { timeout: 30_000, maxWait: 30_000 }
+    );
+    return { holding, release, done };
+};
+
+const holdRunRow = (runId: string) =>
+    holdLock((tx) => tx.$queryRaw`SELECT id FROM "MemoryExtractionRun" WHERE id = ${runId} FOR UPDATE`);
+
+/** A running run whose lease has expired, with one chunk its dead worker holds. */
+const runWithStaleChunk = async (conversationCount: number) => {
+    const { user, conversationIds } = await seed(conversationCount);
+    const { run } = await createRun(user.id, conversationIds);
+    const stale = await claimMemoryExtractionRun({ runId: run.id, owner: "worker-stale" });
+    assert.ok(stale);
+    const chunk = await claimNextExtractionChunk(stale);
+    assert.ok(chunk);
+    await prisma.memoryExtractionRun.update({
+        where: { id: run.id },
+        data: { leaseExpiresAt: new Date(Date.now() - MEMORY_EXTRACTION_LEASE_TTL_MS) },
+    });
+    return { user, run, stale, chunk };
+};
+
+const reservationFor = (runId: string) =>
+    prisma.memoryExtractionCreditReservation.findUniqueOrThrow({ where: { runId } });
+
+test("a stale report queued behind a reclaim is fenced out instead of deadlocking", async () => {
+    // On the old order the report held its chunk and waited for the run while
+    // the reclaim held the run and waited for that chunk.
+    const { run, stale, chunk } = await runWithStaleChunk(2);
+    const holder = holdRunRow(run.id);
+    await holder.holding;
+
+    const reclaim = claimMemoryExtractionRun({ runId: run.id, owner: "worker-next" });
+    await waitForLockWaiters(1);
+    const report = completeExtractionChunk(stale, chunk.chunkIndex, { outcome: "completed" });
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [revived, reported] = await Promise.all([reclaim, report]);
+    assert.ok(revived, "the reclaim took the run");
+    assert.equal(reported.applied, false, "the superseded generation changed nothing");
+    const row = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: chunk.chunkIndex },
+    });
+    assert.equal(row.status, "pending");
+    assert.equal((await reservationFor(run.id)).status, "reserved");
+});
+
+test("a reclaim queued behind a terminal report finds a finished run", async () => {
+    const { run, stale, chunk } = await runWithStaleChunk(2);
+    assert.equal(run.chunkTotal, 1, "fixture: one chunk, so its report is terminal");
+    const holder = holdRunRow(run.id);
+    await holder.holding;
+
+    const report = completeExtractionChunk(stale, chunk.chunkIndex, { outcome: "completed" });
+    await waitForLockWaiters(1);
+    const reclaim = claimMemoryExtractionRun({ runId: run.id, owner: "worker-next" });
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [reported, revived] = await Promise.all([report, reclaim]);
+    assert.deepEqual(
+        { applied: reported.applied, runStatus: reported.runStatus },
+        { applied: true, runStatus: "completed" }
+    );
+    assert.equal(revived, null);
+    const reservation = await reservationFor(run.id);
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.outcome, "completed");
+    assert.equal(reservation.chunksCharged, 1);
+});
+
+test("a reclaim queued behind a non-terminal report finds a renewed lease", async () => {
+    const { run, stale, chunk } = await runWithStaleChunk(11);
+    assert.ok(run.chunkTotal >= 2, "fixture: more than one chunk, so the report is not terminal");
+    const holder = holdRunRow(run.id);
+    await holder.holding;
+
+    const report = completeExtractionChunk(stale, chunk.chunkIndex, { outcome: "completed" });
+    await waitForLockWaiters(1);
+    const reclaim = claimMemoryExtractionRun({ runId: run.id, owner: "worker-next" });
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [reported, revived] = await Promise.all([report, reclaim]);
+    assert.deepEqual(
+        { applied: reported.applied, runStatus: reported.runStatus },
+        { applied: true, runStatus: "running" }
+    );
+    assert.equal(revived, null, "the report renewed the lease");
+    assert.equal((await reservationFor(run.id)).status, "reserved");
+});
+
+test("delete-all queued behind a terminal report leaves the report's settlement alone", async () => {
+    const { user, run, stale, chunk } = await runWithStaleChunk(2);
+    const holder = holdRunRow(run.id);
+    await holder.holding;
+
+    // The report takes the credit account, then waits for the run row.
+    const report = completeExtractionChunk(stale, chunk.chunkIndex, { outcome: "completed" });
+    await waitForLockWaiters(1);
+    // Delete-all waits for the credit account the report holds.
+    const deletion = deleteAllMemories(user.id);
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [reported, deleted] = await Promise.all([report, deletion]);
+    assert.equal(reported.applied, true);
+    assert.equal(deleted.cancelledRuns, 0, "the run had finished before delete-all looked");
+    const reservation = await reservationFor(run.id);
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.outcome, "completed");
+    assert.equal(reservation.chunksCharged, 1);
+});
+
+test("a report queued behind delete-all is fenced out, and delete-all settles once", async () => {
+    const { user, run, stale, chunk } = await runWithStaleChunk(2);
+    const holder = holdRunRow(run.id);
+    await holder.holding;
+
+    // Delete-all takes the credit account, then waits for the run row.
+    const deletion = deleteAllMemories(user.id);
+    await waitForLockWaiters(1);
+    // The report waits for the credit account.
+    const report = completeExtractionChunk(stale, chunk.chunkIndex, { outcome: "completed" });
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [deleted, reported] = await Promise.all([deletion, report]);
+    assert.equal(deleted.cancelledRuns, 1);
+    assert.equal(reported.applied, false);
+    const row = await prisma.memoryExtractionChunk.findFirstOrThrow({
+        where: { runId: run.id, chunkIndex: chunk.chunkIndex },
+    });
+    assert.equal(row.status, "running", "the fenced report did not touch its chunk");
+    const reservation = await reservationFor(run.id);
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.outcome, "cancelled");
+    assert.equal(reservation.chunksCharged, 0);
+    assert.equal(reservation.settledCredits, 0);
+    assert.equal(await monthlyUsed(user.id), 0, "everything reserved came back");
+});
+
+test("delete-all refunds a run that never started, and never refunds a settled one twice", async () => {
+    const { user, conversationIds } = await seed();
+    const { run } = await createRun(user.id, conversationIds);
+
+    const first = await deleteAllMemories(user.id);
+    assert.equal(first.cancelledRuns, 1);
+    const reservation = await reservationFor(run.id);
+    assert.equal(reservation.status, "settled");
+    assert.equal(reservation.outcome, "cancelled");
+    assert.equal(await monthlyUsed(user.id), 0);
+
+    // An active run whose reservation is somehow already settled: delete-all
+    // cancels the run and claims nothing a second time.
+    await prisma.memoryExtractionRun.update({ where: { id: run.id }, data: { status: "pending" } });
+    const second = await deleteAllMemories(user.id);
+    assert.equal(second.cancelledRuns, 1);
+    const again = await reservationFor(run.id);
+    assert.deepEqual(again.settledAt, reservation.settledAt);
+    assert.equal(await monthlyUsed(user.id), 0);
+});
+
+test("the lease sweep skips runs another transaction holds instead of waiting on them", async () => {
+    const { run } = await runWithStaleChunk(2);
+    const holder = holdRunRow(run.id);
+    await holder.holding;
+    const swept = await reconcileExpiredMemoryExtractionRuns();
+    assert.equal(swept.reclaimedRuns, 0, "a held row is left for the next cycle");
+    holder.release();
+    await holder.done;
+    assert.equal((await reconcileExpiredMemoryExtractionRuns()).reclaimedRuns, 1);
 });

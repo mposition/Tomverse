@@ -53,6 +53,13 @@ export const de = {
         shareRevokeFailed: "Freigabe konnte nicht beendet werden.",
         downloadFailed: "Unterhaltung konnte nicht heruntergeladen werden.",
         downloadTxt: "Herunterladen (.txt)",
+        downloadWithSourceTxt: "Mit dem Original herunterladen (.txt)",
+        downloadWithSourceHint: "Enthält den gespeicherten Originaltext. Eine heruntergeladene Datei lässt sich nicht zurückholen.",
+        downloadContinuationOnlyTxt: "Nur den Tomverse-Teil herunterladen (.txt)",
+        downloadSourceLocked: "Entsperren Sie zuerst das importierte Original und laden Sie es dann erneut herunter.",
+        downloadSourceDeleted: "Das importierte Original ist nicht mehr gespeichert und kann nicht enthalten sein.",
+        downloadTooLarge: "Diese Unterhaltung und ihr Original sind für eine Datei zu groß.",
+        downloadVerifyFailed: "Der Download kam unvollständig an und wurde nicht gespeichert. Bitte erneut versuchen.",
         shareFailed: "Freigabelink konnte nicht erstellt werden.",
         shareContinuationUnavailable: "Dieses Gespräch wurde aus einem importierten Chat gestartet und kann nicht öffentlich geteilt werden.",
         shareLocked: "Entsperren Sie diesen Chat vor dem Teilen mit dem Passwort.",
@@ -855,6 +862,10 @@ export const de = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Sie können ohne Ergänzung senden. Die Fehlerdetails werden ohnehin angehängt.",
         traceOptionalHint: "Die Trace ID ist optional. Sie können auch ohne sie senden.",
+        replyAlwaysAccount:
+          "Unabhängig von dieser Auswahl geht die Antwort auf diese Meldung an deine Konto-E-Mail.",
+        replyNeedsAddress:
+          "Um die Antwort auf diese Meldung zu erhalten, aktiviere das Kästchen oben und hinterlasse eine E-Mail-Adresse.",
         emailUpdatesLabel: "Statusupdates per E-Mail erhalten",
         emailUpdatesAccountHint:
           "Eingangsbestätigung und Statusupdates zu dieser Meldung gehen an Ihre Konto-E-Mail-Adresse.",

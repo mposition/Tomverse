@@ -78,6 +78,53 @@ export const lifecycleStageForStatus = (
 };
 
 /**
+ * Whether a stage's email may be sent to this reporter, and why not.
+ *
+ * The three stages are not the same kind of message, and until 2026-09-16 the
+ * code treated them as one: all three required the "email me status updates"
+ * tick, which meant an operator could write a reply to a report, close it, and
+ * have the reply reach nobody -- with the dialog, the button and the toast all
+ * looking exactly as they do when a reply is sent. That happened on
+ * 2026-09-15.
+ *
+ *  - `completed` is the **answer to the request the reporter made**, which
+ *    docs/policy/email-notifications.md §3 classifies as transactional: no
+ *    consent needed, because they asked. It needs an address and nothing else.
+ *    (A guest only has an address here if they asked to be contacted at it; a
+ *    signed-in account's address comes from the verified session.)
+ *  - `received` and `reviewing` are unsolicited progress notices. They are
+ *    what the tick governs, and they keep needing it.
+ *
+ * One function so the route, the queue renderer and the console cannot answer
+ * this differently -- three copies of `email && consent` are what made the
+ * incident possible.
+ */
+export type FeedbackStageRecipientRefusal = "no_address" | "not_consented";
+
+export type FeedbackStageRecipientVerdict =
+  | { canSend: true }
+  | { canSend: false; reason: FeedbackStageRecipientRefusal };
+
+/** Which stages the reporter's "email me status updates" tick governs. */
+export const FEEDBACK_STAGE_NEEDS_CONSENT: Record<FeedbackLifecycleStage, boolean> = {
+  received: true,
+  reviewing: true,
+  completed: false,
+};
+
+export const feedbackStageRecipient = (input: {
+  stage: FeedbackLifecycleStage;
+  email: string | null | undefined;
+  emailUpdatesConsent: boolean | null | undefined;
+}): FeedbackStageRecipientVerdict => {
+  if (!input.email) return { canSend: false, reason: "no_address" };
+  if (FEEDBACK_STAGE_NEEDS_CONSENT[input.stage] && !input.emailUpdatesConsent) {
+    return { canSend: false, reason: "not_consented" };
+  }
+  return { canSend: true };
+};
+
+/**
  * The user-facing reply contract. Distinct from the internal admin note in
  * both storage and validation: this text is quoted verbatim (escaped) in the
  * completed email, so it is short by design.

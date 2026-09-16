@@ -1023,11 +1023,18 @@ adjudication은 **서로 다른 두 사람의 권위 있는 판정이 충돌할 
     (id 순), 추출 commit과 전체 삭제는 `MemoryExtractionRun` → memory 잠금, source
     잠금은 snapshot 행 → memory 잠금. memory 잠금 보유자는 그 행들을 기다리지
     않습니다(evidence 검증은 잠금 없는 읽기, evidence FK는 `ExternalMessage`만 참조).
+  - 행끼리의 순서도 고정합니다(task_9d445985). 추출 run은 `MemoryExtractionRun` → `MemoryExtractionChunk`:
+    lease 재획득, chunk 완료 보고, 추출 commit이 모두 run 행을 먼저 잡고, 완료 보고는 그 잠금 자체를
+    `status = running`과 lease generation 조건으로 걸어 밀려난 worker가 chunk를 건드리거나 정산하지 못하게 합니다.
+    staging 만료는 `ExternalImport` → 미확정 `ExternalConversation`(id 순)으로 전체 import 삭제와 같은 순서이고,
+    만료 sweep은 import 행을 잠근 **뒤** 상태와 두 TTL을 다시 판정해 그 사이 확정·삭제·활동이 있던 import를
+    건너뜁니다(건너뛴 후보는 만료 수에 세지 않음).
   - source 잠금으로 정지된(`suspended_by_source_lock`) memory의 source가 삭제되면
     `suspended_by_source_delete`(또는 삭제 선택 시 삭제)로 전환합니다. 그대로 두면
     evidence가 없어 잠금 reconciliation이 차단되지 않은 것으로 보고 `active`로
     복원합니다.
-- memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단,
+- memory delete-all: 즉시 retrieval 제외, 진행 중 extraction 취소·차단(취소한 run의 크레딧 예약은
+  사용자 취소와 같이 그 transaction에서 정산; 크레딧 계정 잠금 → run 행 → memory 잠금),
   evidence·searchTerms 삭제, imported conversation은 별도 확인 없이 자동
   삭제하지 않음, content 없는 최소 audit만 보존, 실패 시 reconciliation, 멱등.
 - account deletion은 Import·memory·profile·knowledge를 모두 cascade합니다.
