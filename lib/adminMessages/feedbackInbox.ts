@@ -27,6 +27,8 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       queued: " Reply queued; delivery will be retried.",
       alreadyNotified: " This stage was already announced -- no new email.",
       noAddress: " Nothing was emailed: this report carries no address.",
+      withheld:
+        " Nothing was emailed: you closed this one without announcing it. Pressing the same status button again sends the reply.",
       notConsented: " Nothing was emailed: the reporter did not ask for progress notices.",
       noStage: " Nothing was emailed: this status announces nothing.",
     },
@@ -126,7 +128,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       label: (status: string) => `Close feedback as ${status}`,
       title: (status: string) => `Mark as ${status}`,
       alreadyCompleted:
-        "This report was already closed once. The completion email is sent only for the first closure, so no new email will go out.",
+        "This report's completion email has already been raised once. It is raised only for the first closure, so no new email will go out.",
       willEmail:
         "The reporter opted into email updates. Confirming sends the completion email previewed below.",
       noEmail: "This report carries no address. The status changes and nothing is emailed.",
@@ -137,6 +139,11 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
         `Pressing confirm emails this reply to ${address}.`,
       cannotSend: "Nothing will be emailed: this report carries no address. The reply is kept as an internal record.",
       confirmWithoutEmail: "Mark closed without emailing",
+      withholdLabel: "Close this one without emailing the reporter",
+      withholdHint:
+        "Nothing is sent and nothing claims they were told, so pressing the same status button again still sends the reply.",
+      withheld:
+        "Nothing will be emailed. The report closes and the reply stays available to send later.",
       replyTooShort: (min: number) =>
         `A reply needs at least ${min} characters, or leave it empty.`,
       replyHint: (length: number, max: number) =>
@@ -170,6 +177,8 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       queued: " 답변을 대기열에 넣었습니다. 발송은 재시도됩니다.",
       alreadyNotified: " 이 단계는 이미 안내되어 새 이메일은 없습니다.",
       noAddress: " 이메일은 보내지 않았습니다. 이 신고에는 주소가 없습니다.",
+      withheld:
+        " 이메일은 보내지 않았습니다. 알리지 않고 닫았습니다. 같은 상태 버튼을 다시 누르면 그때 답변이 발송됩니다.",
       notConsented: " 이메일은 보내지 않았습니다. 신고자가 진행 알림을 요청하지 않았습니다.",
       noStage: " 이메일은 보내지 않았습니다. 이 상태는 안내 대상이 아닙니다.",
     },
@@ -268,7 +277,7 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       label: (status: string) => `피드백을 ${status} 상태로 종료`,
       title: (status: string) => `${status} 상태로 표시`,
       alreadyCompleted:
-        "이 신고는 이미 한 번 종료되었습니다. 완료 이메일은 첫 종료 때만 발송되므로 새 이메일은 나가지 않습니다.",
+        "이 신고의 완료 이메일은 이미 한 번 만들어졌습니다. 완료 이메일은 첫 종료 때만 만들어지므로 새 이메일은 나가지 않습니다.",
       willEmail:
         "신고자가 이메일 알림을 선택했습니다. 확인하면 아래 미리보기의 완료 이메일이 발송됩니다.",
       noEmail: "이 신고에는 주소가 없습니다. 아무것도 발송하지 않고 상태만 바뀝니다.",
@@ -278,6 +287,12 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       willSendTo: (address: string) => `확인을 누르면 이 답변을 ${address}로 보냅니다.`,
       cannotSend: "이메일은 발송되지 않습니다. 이 신고에는 주소가 없습니다. 답변은 내부 기록으로만 남습니다.",
       confirmWithoutEmail: "발송 없이 종료 상태로 변경",
+      withholdLabel: "이번에는 신고자에게 메일을 보내지 않고 닫기",
+      withholdHint:
+        "아무것도 보내지 않고, 안내했다고 기록하지도 않습니다. 나중에 같은 상태 버튼을 다시 누르면 그때 발송됩니다.",
+      withheld:
+        "이메일은 발송되지 않습니다. 신고는 닫히고, 답변은 나중에 보낼 수 있습니다.",
+
       replyTooShort: (min: number) =>
         `답변은 ${min}자 이상이어야 합니다. 아니면 비워 두세요.`,
       replyHint: (length: number, max: number) =>

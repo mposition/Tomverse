@@ -178,7 +178,12 @@ type UserNotificationResult =
   | { queued: true; delivered: boolean }
   | {
       queued: false;
-      reason: "no_stage" | "already_notified" | "no_address" | "not_consented";
+      reason:
+        | "no_stage"
+        | "already_notified"
+        | "no_address"
+        | "not_consented"
+        | "operator_withheld";
     };
 
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
@@ -228,6 +233,7 @@ const userNotificationSentence = (
   // Every outcome says something. Silence read as "sent" once, and the
   // reporter never got the reply.
   if (result.reason === "already_notified") return sentences.alreadyNotified;
+  if (result.reason === "operator_withheld") return sentences.withheld;
   if (result.reason === "no_address") return sentences.noAddress;
   if (result.reason === "not_consented") return sentences.notConsented;
   return sentences.noStage;
@@ -345,7 +351,12 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
   const updateStatus = async (
     id: string,
     status: typeof statuses[number],
-    closure?: { outcomeCode: FeedbackClosureOutcome; userReply?: string }
+    closure?: {
+      outcomeCode: FeedbackClosureOutcome;
+      userReply?: string;
+      /** False closes the report without announcing it to the reporter. */
+      notifyReporter?: boolean;
+    }
   ) => {
     if (busyId) return false;
     setBusyId(id);
@@ -360,6 +371,9 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                 outcomeCode: closure.outcomeCode,
                 ...(closure.userReply?.trim()
                   ? { userReply: closure.userReply.trim() }
+                  : {}),
+                ...(closure.notifyReporter === false
+                  ? { notifyReporter: false }
                   : {}),
               }
             : {}),
@@ -644,11 +658,25 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         {m.reply}
                       </a>
                     ) : null}
-                    {statuses.map((status) => (
+                    {statuses.map((status) => {
+                      // The status a report already has is normally a dead
+                      // button. The exception is a closure the reporter was
+                      // never told about: pressing it again is how the
+                      // withheld announcement finally goes out, and without
+                      // that the withhold checkbox would be a one-way door.
+                      const canStillAnnounce =
+                        feedback.status === status &&
+                        isTerminalFeedbackStatus(status) &&
+                        !feedback.completionSnapshot &&
+                        canEmailReply(feedback);
+                      return (
                       <button
                         key={status}
                         type="button"
-                        disabled={busy || feedback.status === status}
+                        data-testid={
+                          canStillAnnounce ? "feedback-status-announce-again" : undefined
+                        }
+                        disabled={busy || (feedback.status === status && !canStillAnnounce)}
                         onClick={() =>
                           isTerminalFeedbackStatus(status)
                             ? // Closing asks for the outcome and the
@@ -665,7 +693,8 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         ) : null}
                         {m.statuses[status]}
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -913,6 +942,7 @@ function FeedbackCompletionDialog({
   onConfirm: (closure: {
     outcomeCode: FeedbackClosureOutcome;
     userReply?: string;
+    notifyReporter?: boolean;
   }) => void;
 }) {
   const [outcomeCode, setOutcomeCode] = useState<FeedbackClosureOutcome>(
@@ -922,6 +952,13 @@ function FeedbackCompletionDialog({
   const [userReply, setUserReply] = useState(
     draft?.userReply ?? (feedback.userReply || "")
   );
+  /**
+   * Withholding this one announcement. Off by default -- the reporter asked a
+   * question and the answer is the point -- but a duplicate of something they
+   * already have an answer to does not need a second email, and without this
+   * the only way to avoid one is to leave the report open.
+   */
+  const [withholdEmail, setWithholdEmail] = useState(false);
   const selectRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
@@ -942,8 +979,14 @@ function FeedbackCompletionDialog({
   const replyState = feedbackUserReplyState(userReply);
   const replyValid = replyState === "empty" || replyState === "ready";
   const notifiable = canEmailReply(feedback);
-  const alreadyCompleted =
-    isTerminalFeedbackStatus(feedback.status) || Boolean(feedback.closureOutcome);
+  // Closed is not the same as announced. An operator can close a report
+  // without announcing it, and a report closed before the lifecycle events
+  // existed never had one either -- in both cases the one announcement this
+  // stage gets is still unspent. The completed event is what holds that claim,
+  // and it is what the server checks before it queues anything. (It says the
+  // attempt was made, not that the mail arrived: an address removed since, or
+  // a suppression, still refuses the send.)
+  const alreadyCompleted = Boolean(feedback.completionSnapshot);
   const preview = useMemo(
     () =>
       buildFeedbackLifecycleEmail("completed", {
@@ -986,7 +1029,9 @@ function FeedbackCompletionDialog({
               {notifiable
                 ? alreadyCompleted
                   ? m.dialog.alreadyCompleted
-                  : m.dialog.willSendTo(feedback.email as string)
+                  : withholdEmail
+                    ? m.dialog.withheld
+                    : m.dialog.willSendTo(feedback.email as string)
                 : m.dialog.cannotSend}
             </p>
           </div>
@@ -1021,7 +1066,9 @@ function FeedbackCompletionDialog({
         </label>
 
         <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
-          {notifiable && !alreadyCompleted ? m.dialog.reply : m.dialog.replyInternal}
+          {notifiable && !alreadyCompleted && !withholdEmail
+            ? m.dialog.reply
+            : m.dialog.replyInternal}
           <textarea
             data-testid="feedback-completion-reply"
             value={userReply}
@@ -1045,6 +1092,24 @@ function FeedbackCompletionDialog({
         </p>
 
         {notifiable && !alreadyCompleted ? (
+          <label className="mt-4 flex items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3 text-xs font-semibold leading-5 text-zinc-200">
+            <input
+              type="checkbox"
+              data-testid="feedback-completion-withhold"
+              checked={withholdEmail}
+              onChange={(event) => setWithholdEmail(event.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+            />
+            <span>
+              {m.dialog.withholdLabel}
+              <span className="mt-1 block font-normal text-zinc-500">
+                {m.dialog.withholdHint}
+              </span>
+            </span>
+          </label>
+        ) : null}
+
+        {notifiable && !alreadyCompleted && !withholdEmail ? (
           <div
             data-testid="feedback-completion-preview"
             className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3"
@@ -1075,16 +1140,20 @@ function FeedbackCompletionDialog({
               onConfirm({
                 outcomeCode,
                 ...(userReply.trim() ? { userReply: userReply.trim() } : {}),
+                ...(withholdEmail ? { notifyReporter: false } : {}),
               })
             }
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             {draft
-              ? notifiable && !alreadyCompleted && userReply.trim()
+              ? notifiable &&
+                !alreadyCompleted &&
+                !withholdEmail &&
+                userReply.trim()
                 ? m.autoFixDraft.sendAndResolve
                 : m.autoFixDraft.resolveOnly
-              : notifiable && !alreadyCompleted
+              : notifiable && !alreadyCompleted && !withholdEmail
                 ? m.dialog.confirm(m.statuses[status])
                 : m.dialog.confirmWithoutEmail}
           </button>

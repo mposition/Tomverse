@@ -746,3 +746,121 @@ test("an unsubscribe suppression does not block the answer to a report", async (
   assert.equal(response.status, 200);
   assert.equal(world.emails.length, 1);
 });
+
+// --- closing without announcing it --------------------------------------------
+//
+// Some closures are not worth an email (a duplicate of a report the reporter
+// already has an answer to). Withholding is per-call and deliberate: nothing
+// is sent, and -- because no lifecycle event claims the stage was announced --
+// the reply can still be sent afterwards.
+
+test("notifyReporter:false closes the report and sends nothing", async () => {
+  const { PATCH } = await loadRoute();
+  const { request, context } = patch(world.feedback!.id, {
+    status: "closed",
+    outcomeCode: "duplicate",
+    userReply: "This is the same issue as the report you filed last week.",
+    notifyReporter: false,
+  });
+  const response = await withCapturedLogs(() => PATCH(request, context));
+
+  assert.equal(response.status, 200);
+  assert.equal(world.feedback!.status, "closed");
+  assert.equal(world.feedback!.closureOutcome, "duplicate");
+  assert.deepEqual((await readJson(response)).userNotification, {
+    queued: false,
+    reason: "operator_withheld",
+  });
+  assert.equal(world.deliveries.length, 0);
+  assert.equal(world.emails.length, 0);
+  // No event: nothing may claim the reporter was told.
+  assert.equal(world.lifecycleEvents.length, 0);
+  const audit = world.audits.find((entry) => entry.action === "feedback.status.updated");
+  assert.equal((audit?.metadata as { notifyReporter?: boolean })?.notifyReporter, false);
+});
+
+test("a withheld close leaves the announcement available afterwards", async () => {
+  const { PATCH } = await loadRoute();
+  const withheld = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    notifyReporter: false,
+  });
+  await withCapturedLogs(() => PATCH(withheld.request, withheld.context));
+  assert.equal(world.emails.length, 0);
+
+  // Closing it again, this time announcing, is the first announcement.
+  const announced = patch(world.feedback!.id, {
+    status: "closed",
+    outcomeCode: "fixed",
+    userReply: "We shipped the fix; sorry for the delay in telling you.",
+  });
+  const response = await withCapturedLogs(() => PATCH(announced.request, announced.context));
+
+  assert.deepEqual((await readJson(response)).userNotification, {
+    queued: true,
+    delivered: true,
+  });
+  assert.equal(world.lifecycleEvents.length, 1);
+  assert.equal(world.emails.length, 1);
+  assert.match(world.emails[0].text, /sorry for the delay/);
+});
+
+test("announcing is what happens when nothing is said about it", async () => {
+  const { PATCH } = await loadRoute();
+  const { request, context } = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "We found the cause, fixed it, and the fix is now live.",
+  });
+  await withCapturedLogs(() => PATCH(request, context));
+  assert.equal(world.emails.length, 1);
+  const audit = world.audits.find((entry) => entry.action === "feedback.status.updated");
+  assert.equal((audit?.metadata as { notifyReporter?: boolean })?.notifyReporter, true);
+});
+
+test("re-selecting the same closed status is what sends a withheld reply", async () => {
+  const { PATCH } = await loadRoute();
+  const withheld = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "We found the cause and shipped the fix.",
+    notifyReporter: false,
+  });
+  await withCapturedLogs(() => PATCH(withheld.request, withheld.context));
+  assert.equal(world.emails.length, 0);
+  assert.equal(world.lifecycleEvents.length, 0);
+
+  // The console's way back is the button the report is already on. The status
+  // does not change, so this is the case a "nothing to do, it is already
+  // resolved" short-circuit would silently eat.
+  const announced = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "We found the cause and shipped the fix.",
+  });
+  const response = await withCapturedLogs(() => PATCH(announced.request, announced.context));
+
+  assert.deepEqual((await readJson(response)).userNotification, {
+    queued: true,
+    delivered: true,
+  });
+  assert.equal(world.lifecycleEvents.length, 1);
+  assert.equal(world.emails.length, 1);
+  assert.match(world.emails[0].text, /shipped the fix/);
+});
+
+test("withholding is refused on a status that has no way back", async () => {
+  const { PATCH } = await loadRoute();
+  const { request, context } = patch(world.feedback!.id, {
+    status: "reviewing",
+    notifyReporter: false,
+  });
+  const response = await withCapturedLogs(() => PATCH(request, context));
+
+  assert.equal(response.status, 400);
+  assert.equal((await readJson(response)).code, "FEEDBACK_WITHHOLD_NOT_APPLICABLE");
+  // Nothing moved: not the status, not the queue.
+  assert.equal(world.feedback!.status, "open");
+  assert.equal(world.deliveries.length, 0);
+});
