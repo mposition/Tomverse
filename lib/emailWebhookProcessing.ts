@@ -100,8 +100,9 @@ export async function processResendWebhook(input: {
   const receivedAt = input.receivedAt ?? new Date();
   const eventType = typeof input.payload.type === "string" ? input.payload.type : "unknown";
 
+  let webhookEventId: string;
   try {
-    await prisma.providerWebhookEvent.create({
+    const stored = await prisma.providerWebhookEvent.create({
       data: {
         provider: RESEND_PROVIDER,
         providerEventId: input.providerEventId,
@@ -109,7 +110,9 @@ export async function processResendWebhook(input: {
         receivedAt,
         payload: input.payload as never,
       },
+      select: { id: true },
     });
+    webhookEventId = stored.id;
   } catch (error) {
     // The unique index is the replay guard. A redelivery is normal provider
     // behaviour, not a fault, so it answers 200 and changes nothing.
@@ -124,7 +127,12 @@ export async function processResendWebhook(input: {
   }
 
   try {
-    const result = await applyResendEvent({ eventType, payload: input.payload, receivedAt });
+    const result = await applyResendEvent({
+      eventType,
+      payload: input.payload,
+      receivedAt,
+      webhookEventId,
+    });
     await prisma.providerWebhookEvent.update({
       where: {
         provider_providerEventId: {
@@ -158,6 +166,8 @@ const applyResendEvent = async (input: {
   eventType: string;
   payload: ResendEventPayload;
   receivedAt: Date;
+  /** The stored event row; keys the suppression cause so a replay adds none. */
+  webhookEventId: string;
 }): Promise<{ effect: string; deliveryId: string | null }> => {
   const bounceType =
     typeof input.payload.data?.bounce?.type === "string"
@@ -184,6 +194,8 @@ const applyResendEvent = async (input: {
           id: true,
           emailAddress: true,
           lane: true,
+          providerAccount: true,
+          sentDomain: true,
           templateVersion: {
             // The version it was sent under, not the template row: the row is
             // history and may carry a classification the code has since moved off.
@@ -228,6 +240,7 @@ const applyResendEvent = async (input: {
     const outcome = await recordSoftBounce({
       emailAddress,
       deliveryId: delivery?.id ?? null,
+      webhookEventId: input.webhookEventId,
       sourceStream: classification === "marketing" ? "marketing" : "transactional",
       sourceMessageId: providerMessageId,
       now: input.receivedAt,
@@ -255,7 +268,12 @@ const applyResendEvent = async (input: {
     sourceClassification: classification,
     sourceDeliveryId: delivery?.id ?? null,
     sourceMessageId: providerMessageId,
+    // The domain and account the message actually went out through, fixed on
+    // the delivery at send; NULL for a message sent before they were recorded.
+    sourceDomain: delivery?.sentDomain ?? null,
+    providerAccount: delivery?.providerAccount ?? null,
     occurredAt: input.receivedAt,
+    sourceEventKey: `webhook:${input.webhookEventId}`,
   });
 
   if (classification === "marketing") {

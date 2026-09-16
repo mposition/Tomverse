@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { z } from "zod";
@@ -69,6 +70,12 @@ const removeSchema = z.object({
 
 const requestSchema = z.discriminatedUnion("action", [addSchema, removeSchema]);
 
+/** The caller's Idempotency-Key when it is a sane token, otherwise a fresh id. */
+const adminIdempotencyKey = (req: Request) => {
+  const header = req.headers.get("idempotency-key")?.trim();
+  return header && /^[A-Za-z0-9._:-]{8,128}$/.test(header) ? header : randomUUID();
+};
+
 const REMOVAL_PROBLEM_MESSAGE = {
   reason_too_short:
     "Say why this suppression is being lifted, in a sentence. It is the only record of why mail to this address was re-enabled.",
@@ -137,6 +144,9 @@ export async function POST(req: Request) {
         source: "admin",
         purposeKey,
         ...(body.note ? { evidence: { note: body.note } } : {}),
+        // A retried request with the same Idempotency-Key records one cause;
+        // without the header each request is its own event.
+        sourceEventKey: `admin:${adminIdempotencyKey(req)}`,
       });
 
       await writeAdminAuditLog({

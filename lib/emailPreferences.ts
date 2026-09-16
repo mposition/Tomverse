@@ -23,6 +23,7 @@ import {
   normalizeSuppressionAddress,
   recordSuppression,
 } from "@/lib/emailSuppression";
+import { markCauseWriter, releaseSelectorCauses } from "@/lib/emailSuppressionCauses";
 
 /**
  * What a person currently receives, and the append-only record of how it got
@@ -358,8 +359,9 @@ export async function setPreference(input: {
       },
     });
 
+    let consentRecordId: string | null = null;
     if (consentBased) {
-      await tx.consentRecord.create({
+      const consentRecord = await tx.consentRecord.create({
         data: {
           userId: input.userId,
           // The address as it is now. Consent attaches to a mailbox, so a later
@@ -398,7 +400,27 @@ export async function setPreference(input: {
           userAgentHash: evidenceHash("ua", input.userAgent),
         },
       });
+      consentRecordId = consentRecord.id;
     }
+
+    // Every change of the enabled state, append-only. The id keys the suppression
+    // cause a withdrawal creates, including withdrawals that record no consent
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+    const transition =
+      existing.enabled !== input.enabled
+        ? await tx.emailPreferenceTransition.create({
+            data: {
+              userId: input.userId,
+              purpose,
+              fromEnabled: existing.enabled,
+              toEnabled: input.enabled,
+              source: input.confirmation ? "consent_confirmation" : input.source,
+              consentRecordId,
+              occurredAt: now,
+            },
+            select: { id: true },
+          })
+        : null;
 
     if (!input.enabled) {
       await recordSuppression(
@@ -410,6 +432,9 @@ export async function setPreference(input: {
             input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center",
           sourceDeliveryId: input.deliveryId ?? null,
           occurredAt: now,
+          // A switch-off always changes the enabled state (an unchanged one
+          // returned above), so the transition exists.
+          sourceEventKey: `preference:${transition?.id ?? "unchanged"}`,
         },
         tx
       );
@@ -419,6 +444,17 @@ export async function setPreference(input: {
       // preference toggle may lift (docs/policy/email-notifications.md §12.4).
       // deleteMany rather than delete: a missing row must not abort the
       // transaction.
+      // The causes behind that hold are released with it, keyed to the
+      // transition that lifted them.
+      await markCauseWriter(tx);
+      await releaseSelectorCauses(tx, {
+        emailAddress: normalizeSuppressionAddress(email),
+        scope: "purpose",
+        purposeKey: purpose,
+        releaseKind: "preference_enabled",
+        releaseEvidence: { kind: "preference", transitionId: transition?.id ?? null },
+        releasedAt: now,
+      });
       await tx.suppressionEntry.deleteMany({
         where: {
           emailAddress: normalizeSuppressionAddress(email),

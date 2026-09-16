@@ -207,6 +207,7 @@ test("a suppression created by a privacy request cannot be lifted from here", as
   // to lift it is the privacy process that created it, not a button on an
   // operations screen -- so this is a refusal rather than an approval gate.
   const created = await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: "someone@example.com",
     reason: "privacy_request",
     source: "admin",
@@ -225,6 +226,7 @@ test("lifting returns what it removed, so the audit entry can hold it", async ()
   // a row a concurrent lift already removed would be a record of something
   // that did not happen.
   const created = await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: "bounced@example.com",
     reason: "hard_bounce",
     source: "provider_webhook",
