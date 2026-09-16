@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { after, beforeEach, test } from "node:test";
 
 import { recordProviderComplaint } from "@/lib/emailComplaintSuppression";
-import { ensureDefaultPreferences } from "@/lib/emailPreferences";
+import { ensureDefaultPreferences, setPreference } from "@/lib/emailPreferences";
+import { consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   lockPrivacyIntake,
   preparePrivacyIntake,
@@ -58,7 +59,7 @@ const subscriber = async (email = address()) => {
 
 /** The route's intake, without the route. */
 const intake = async (input: { userId: string | null; email: string }) => {
-  const prepared = await preparePrivacyIntake({ userId: input.userId });
+  const prepared = await preparePrivacyIntake();
   return prisma.$transaction(
     async (tx) => {
       await lockPrivacyIntake(tx, { userId: input.userId });
@@ -310,4 +311,120 @@ test("a complaint about mail that cannot be switched off records only the compla
   assert.deepEqual(result, { purpose: null, attributed: false });
   const causes = await prisma.suppressionCause.findMany({ where: { emailAddress: user.email! } });
   assert.deepEqual(causes.map((cause) => [cause.scope, cause.reason]), [["global", "complaint"]]);
+});
+
+test("while entries decide, confirming a subscription again does not lift a deletion request", async () => {
+  const user = await subscriber();
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  await intake({ userId: user.id, email: user.email! });
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+    data: { confirmationRequestId: "req-again", confirmationRequestedAt: new Date() },
+  });
+
+  const result = await setPreference({
+    userId: user.id,
+    purpose: "newsletter",
+    enabled: true,
+    capturedVia: "preference_center",
+    source: "preference_center",
+    confirmation: {
+      tokenVersion: "v1",
+      requestedAt: new Date(),
+      requestId: "req-again",
+      policyVersionId,
+      addressDigest: consentAddressDigest(user.email!),
+    },
+  });
+  assert.deepEqual(result, { changed: false, reason: "suppressed" });
+  assert.equal(
+    (await suppressionCheck({ emailAddress: user.email!, classification: "marketing", purpose: "newsletter" })).allowed,
+    false
+  );
+});
+
+test("a later privacy request does not restamp the entry of an earlier one", async () => {
+  const emailAddress = address();
+  const first = await recordSuppression({
+    emailAddress,
+    reason: "privacy_request",
+    source: "admin",
+    sourceEventKey: "privacy:first:completed",
+    sourceRequestId: "first",
+    occurredAt: new Date("2026-01-01T00:00:00Z"),
+  });
+  const second = await recordSuppression({
+    emailAddress,
+    reason: "privacy_request",
+    source: "admin",
+    sourceEventKey: "privacy:second:completed",
+    sourceRequestId: "second",
+  });
+  assert.equal(second.changed, false);
+  assert.equal(second.id, first.id);
+  const entry = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
+  assert.equal(entry.occurredAt.toISOString(), "2026-01-01T00:00:00.000Z");
+  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress } }), 2);
+});
+
+test("a replayed complaint does not switch off a preference turned back on since", async () => {
+  const user = await subscriber();
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  const webhookEventId = randomUUID();
+  await complaint({ emailAddress: user.email!, userId: user.id, purpose: "newsletter", policyVersionId, webhookEventId });
+  // Somebody switched it back on by whatever route; the replay must leave it.
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+    data: { enabled: true, confirmedAt: new Date() },
+  });
+  const replay = await complaint({
+    emailAddress: user.email!,
+    userId: user.id,
+    purpose: "newsletter",
+    policyVersionId,
+    webhookEventId,
+  });
+  assert.deepEqual(replay, { purpose: "newsletter", attributed: true, duplicate: true });
+  const preference = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+  });
+  assert.equal(preference.enabled, true);
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 1);
+});
+
+test("a complaint naming a deleted account still records both stops", async () => {
+  const emailAddress = address();
+  const policyVersionId = await ensureBootstrapPolicyVersion();
+  const result = await complaint({
+    emailAddress,
+    userId: "deleted-account",
+    purpose: "newsletter",
+    policyVersionId,
+  });
+  assert.deepEqual(result, { purpose: "newsletter", attributed: false });
+  const causes = await prisma.suppressionCause.findMany({ where: { emailAddress } });
+  assert.deepEqual(
+    causes.map((cause) => [cause.scope, cause.reason]).sort(),
+    [["global", "complaint"], ["purpose", "unsubscribe"]]
+  );
+});
+
+test("switching off a subscription that was never confirmed records no withdrawal", async () => {
+  const user = await prisma.user.create({ data: { email: address() } });
+  await ensureDefaultPreferences(user.id);
+  // On without a confirmation: from before the confirmation step.
+  await prisma.emailPreference.update({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+    data: { enabled: true, confirmedAt: null },
+  });
+  await intake({ userId: user.id, email: user.email! });
+  const preference = await prisma.emailPreference.findUniqueOrThrow({
+    where: { userId_purpose: { userId: user.id, purpose: "newsletter" } },
+  });
+  assert.equal(preference.enabled, false);
+  assert.equal(await prisma.consentRecord.count({ where: { userId: user.id } }), 0);
+  assert.equal(
+    await prisma.emailPreferenceTransition.count({ where: { userId: user.id, purpose: "newsletter" } }),
+    1
+  );
 });

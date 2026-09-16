@@ -5,18 +5,22 @@
 -- Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4
 -- (complaint is also a purpose opt-out; privacy request).
 --
--- Widening only: every row valid before is valid after.
+-- Widening only: every row valid before is valid after. Added NOT VALID and
+-- validated in a separate statement, so existing rows are scanned under
+-- VALIDATE's lighter lock rather than the ADD's.
 
 ALTER TABLE "EmailPreference" DROP CONSTRAINT "EmailPreference_source_check";
 ALTER TABLE "EmailPreference" ADD CONSTRAINT "EmailPreference_source_check"
     CHECK ("source" IN (
         'signup', 'preference_center', 'unsubscribe_link', 'admin', 'system_default',
         'privacy_request', 'provider_complaint'
-    ));
+    )) NOT VALID;
+ALTER TABLE "EmailPreference" VALIDATE CONSTRAINT "EmailPreference_source_check";
 
 ALTER TABLE "ConsentRecord" DROP CONSTRAINT "ConsentRecord_captured_via_check";
 ALTER TABLE "ConsentRecord" ADD CONSTRAINT "ConsentRecord_captured_via_check"
     CHECK ("capturedVia" IN (
         'signup_form', 'preference_center', 'unsubscribe_page', 'import', 'admin',
         'provider_complaint'
-    ));
+    )) NOT VALID;
+ALTER TABLE "ConsentRecord" VALIDATE CONSTRAINT "ConsentRecord_captured_via_check";

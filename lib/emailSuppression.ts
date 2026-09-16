@@ -182,9 +182,9 @@ export async function recordSuppression(
     reason === "manual" ||
     reason === "privacy_request";
 
-  if (existing?.reason === "privacy_request" && input.reason !== "privacy_request") {
-    // A data-subject request is never overwritten, not even by another permanent
-    // reason: the entry would then read as liftable and the only record of the
+  if (existing?.reason === "privacy_request") {
+    // A data-subject request is never overwritten, not by another permanent
+    // reason and not by a later request restamping it: the entry would then read as liftable and the only record of the
     // request would be gone (docs/policy/email-product-news-redesign-draft.md,
     // section 7.4). The new event is still its own cause above.
     return { id: existing.id, changed: false };

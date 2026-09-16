@@ -404,16 +404,31 @@ export async function applyPreferenceChange(
   // unsubscribe. Any other active cause for this purpose, for marketing as a
   // whole, or for the address (a soft bounce aside, which expires) still stops
   // the mail, so the switch is refused rather than shown as on.
-  if (input.enabled && (await readSuppressionAuthority(tx)) === "causes") {
+  //
+  // While entries still decide, the older rule stands -- the toggle lifts its
+  // purpose row -- except for a privacy request. That is never liftable, and
+  // the classification stop a deletion intake writes is invisible to the
+  // entry read, so lifting the purpose row would restart the mail
+  // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  if (input.enabled) {
+    const causesDecide = (await readSuppressionAuthority(tx)) === "causes";
     const blocking = await tx.suppressionCause.findMany({
       where: {
         emailAddress: normalizeSuppressionAddress(email),
         releasedAt: null,
-        OR: [
-          { scope: "purpose", purposeKey: purpose, reason: { not: "unsubscribe" } },
-          ...(consentBased ? [{ scope: "classification", purposeKey: "marketing" }] : []),
-          { scope: "global", reason: { not: "soft_bounce" } },
-        ],
+        OR: causesDecide
+          ? [
+              { scope: "purpose", purposeKey: purpose, reason: { not: "unsubscribe" } },
+              ...(consentBased ? [{ scope: "classification", purposeKey: "marketing" }] : []),
+              { scope: "global", reason: { not: "soft_bounce" } },
+            ]
+          : [
+              { scope: "purpose", purposeKey: purpose, reason: "privacy_request" },
+              ...(consentBased
+                ? [{ scope: "classification", purposeKey: "marketing", reason: "privacy_request" }]
+                : []),
+              { scope: "global", reason: "privacy_request" },
+            ],
       },
       select: { id: true, expiresAt: true, releasedAt: true },
     });
@@ -468,7 +483,12 @@ export async function applyPreferenceChange(
   });
 
   let consentRecordId: string | null = null;
-  if (consentBased) {
+  // Switching off records a withdrawal only where there was consent to
+  // withdraw. A row that was on without a confirmation -- from before the
+  // confirmation step, or never confirmed -- consented to nothing, and a
+  // withdrawal row would say it had. The transition and the hold are still
+  // written below.
+  if (consentBased && (input.enabled || wasEffectivelyEnabled)) {
     const consentRecord = await tx.consentRecord.create({
       data: {
         userId: input.userId,

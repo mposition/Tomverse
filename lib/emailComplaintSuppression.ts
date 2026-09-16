@@ -53,9 +53,6 @@ export async function recordProviderComplaint(input: {
   const purpose = complaintOptOutPurpose(input.delivery?.purpose ?? null);
   const delivery = input.delivery;
   const userId = purpose && delivery?.userId ? delivery.userId : null;
-  // Outside the transaction: it may create rows, and nothing below may start
-  // before the fence.
-  if (userId) await ensureDefaultPreferences(userId);
 
   return prisma.$transaction(
     async (tx) => {
@@ -77,8 +74,33 @@ export async function recordProviderComplaint(input: {
       await recordSuppression(input.suppression, tx);
       if (!purpose || !delivery) return { purpose: null, attributed: false };
 
+      // The purpose stop first, whether or not anyone could be attributed and
+      // whether or not the preference was already off: it is keyed to the
+      // mailbox, so the purpose stays stopped after an operator lifts the
+      // complaint.
       const purposeEventKey = `webhook:${input.webhookEventId}:purpose`;
+      const purposeStop = await recordSuppression(
+        {
+          emailAddress: delivery.emailAddress,
+          purposeKey: purpose,
+          reason: "unsubscribe",
+          source: "provider_webhook",
+          sourceEventKey: purposeEventKey,
+          sourceDeliveryId: delivery.id,
+          occurredAt: input.occurredAt,
+        },
+        tx
+      );
+
+      // A redelivered event has already had its effect. Applying the opt-out
+      // again would switch off a preference the person has since switched back
+      // on, with no new cause behind it.
+      if (purposeStop.duplicate) return { purpose, attributed: attributable, duplicate: true };
+
       if (attributable && userId) {
+        // Created here, under the User row lock that established the account
+        // still exists, so a deleted account cannot fail the transaction.
+        await ensureDefaultPreferences(userId, tx);
         // The withdrawal names the conditions the message went out under -- its
         // policy version and jurisdiction -- because the complaint is a reaction
         // to that message, not to whatever applies today.
@@ -98,23 +120,6 @@ export async function recordProviderComplaint(input: {
           suppressionSource: "provider_webhook",
         });
       }
-
-      // The purpose stop is written whether or not anyone could be attributed,
-      // and whether or not the preference was already off: it is keyed to the
-      // mailbox, so the purpose stays stopped after an operator lifts the
-      // complaint. When the withdrawal above wrote it, this is a duplicate.
-      await recordSuppression(
-        {
-          emailAddress: delivery.emailAddress,
-          purposeKey: purpose,
-          reason: "unsubscribe",
-          source: "provider_webhook",
-          sourceEventKey: purposeEventKey,
-          sourceDeliveryId: delivery.id,
-          occurredAt: input.occurredAt,
-        },
-        tx
-      );
       return { purpose, attributed: attributable };
     },
     { timeout: 20_000 }

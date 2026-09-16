@@ -28,20 +28,20 @@ import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
  */
 
 /**
- * The work that cannot run inside the intake transaction: the default
- * preference rows and the policy version a withdrawal names. Called before the
- * transaction opens.
+ * The policy version a withdrawal names, resolved before the intake
+ * transaction opens: it may create a row, and nothing may start before the
+ * fence.
  */
-export async function preparePrivacyIntake(input: { userId: string | null }) {
-  if (input.userId) await ensureDefaultPreferences(input.userId);
+export async function preparePrivacyIntake() {
   return { policyVersionId: await ensureBootstrapPolicyVersion() };
 }
 
 /**
- * Takes the fence and the User row, in the one order every writer uses. Called
- * first in the intake transaction, before the request row is written, so the
- * foreign key's share lock on the User row is taken after the row lock rather
- * than before it.
+ * Takes the fence and the User row, in the one order every writer uses, and
+ * returns the account's address as locked. Called first in the intake
+ * transaction, before the request row is written: the request records that
+ * address, and the foreign key's share lock on the User row comes after the row
+ * lock rather than before it.
  */
 export async function lockPrivacyIntake(
   tx: Prisma.TransactionClient,
@@ -69,9 +69,12 @@ export async function recordPrivacyIntake(
     now: Date;
   }
 ) {
-  const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   const userEmail = await lockPrivacyIntake(tx, { userId: input.userId });
+  // The account's address as locked, so the stop lands on the mailbox the
+  // withdrawal below also records against and only one address is locked.
+  const emailAddress = normalizeSuppressionAddress(userEmail ?? input.emailAddress);
   await lockSuppressionAddress(tx, emailAddress);
+  if (input.userId && userEmail) await ensureDefaultPreferences(input.userId, tx);
 
   await recordSuppression(
     {
@@ -110,8 +113,6 @@ export async function recordPrivacyIntake(
   }
 
   // The account's own marketing preferences, switched off under the same locks.
-  // Its current address may differ from the one the request names; the
-  // withdrawal records against the account's address, as every withdrawal does.
   if (!input.userId || !userEmail) return;
   for (const purpose of EMAIL_PURPOSES) {
     if (!recordsConsent(purpose)) continue;
