@@ -30,8 +30,7 @@
     "scripts/run-db-integration-tests.mjs",
     "tests/integration/prompt-refiner-reservation.db.test.ts",
     "tests/promptRefinerReservationCore.test.mjs",
-    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json",
-    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1"
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json"
   ],
   "generatedPaths": [
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1"
