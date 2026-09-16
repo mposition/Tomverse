@@ -75,7 +75,8 @@ test("the seeded version carries every profile and country", async () => {
   const korea = detail!.profiles.find((profile) => profile.profileKey === "KR")!;
   assert.equal(korea.subjectPrefix, "(광고)");
   assert.equal(korea.consentNoticeIntervalMonths, 24);
-  // §0 v13: the 21:00-08:00 window left on 2026-09-16. 시행령 제61조제2항
+  // docs/policy/email-notifications.md §0 v13: the 21:00-08:00 window left on
+  // 2026-09-16. 시행령 제61조제2항
   // excludes electronic mail from the media the Network Act's night-time rule
   // names, and the window had been a conservative default while that question
   // was open. The column stays -- it is how the next jurisdiction that does
