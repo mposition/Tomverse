@@ -415,7 +415,7 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
     if (busyId) return;
     setBusyId(feedback.id);
     try {
-      const response = await fetch(`/api/admin/feedback/${feedback.id}/resend-reply`, {
+      const response = await adminFetch(`/api/admin/feedback/${feedback.id}/resend-reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
       });
