@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-reservation-authority-v1, round 0
+# Independent review — task prompt-refiner-reservation-authority-v1, round 1
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -19,8 +19,9 @@ Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않�
 - focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 15/15가 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.
 - Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 요약을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 남으면 on_hold다.
 - Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다.
+- Multi-round 감사기록을 보존하기 위해 docs/ops/cross-review/packages/ parent를 control-program writable scope로 선언한다. 이는 기능 writable source 확대가 아니며 own output directory는 매 round --diff-exclude되고 generatedPaths에는 넣지 않는다. Round 1의 filesChanged tree scope는 source 16개와 커밋된 round 0 audit record 7개를 합친 23개일 수 있지만, reviewed diff와 changeDigest는 source 16개만 포함해야 한다.
 
-## Change under review — digest sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169, commit aa270112715c9fbe7c3dd8c8e9efcaf113b53245
+## Change under review — digest sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7, commit 73043d0ba46fa3225a9c0a63e9a5393c9359bdd8
 
 ```diff
 diff --git a/.github/workflows/credit-finance-db-integration.yml b/.github/workflows/credit-finance-db-integration.yml
@@ -37,10 +38,10 @@ index 529763ed..9c34a9b9 100644
        - "lib/userTimeZone.ts"
        - "app/api/billing/**"
 diff --git a/AGENTS.md b/AGENTS.md
-index 64602562..5747739d 100644
+index 64602562..57d286c1 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
-@@ -1344,14 +1344,29 @@ Non-negotiable requirements:
+@@ -1344,14 +1344,32 @@ Non-negotiable requirements:
    output cap must be at least 4,096; a larger capability is allowed but never
    replaces the Refiner request's exact 4,096 cap. Caching is disabled, and the
    generic model reservation-output setting must not reduce this contract's
@@ -63,8 +64,11 @@ index 64602562..5747739d 100644
 +  and the 101st row cannot bypass or split accounting. The database also owns
 +  terminal timestamps and turns a late consume/release into expiry. It binds
 +  requestId + stage + canonical
-+  contract digest + server-minted reservation id and uses `clock_timestamp()`
-+  after locks for expiry, one-time consume and permanent terminal tombstones.
++  contract digest + server-minted reservation id. Naive DB timestamp columns
++  compare and store only `clock_timestamp() AT TIME ZONE 'UTC'`; expiry sweeps
++  filter and order in SQL and apply their caller limit before `FOR UPDATE`, so
++  the limit bounds both mutation count and lock footprint. One-time consume and
++  permanent terminal tombstones remain DB-enforced.
 +  A repeated request returns the existing active fact before stage/runtime
 +  revalidation; a terminal fact is a discriminated non-success and is never a
 +  reusable lease. A future dispatch must use the exact digest returned by
@@ -80,10 +84,10 @@ index 64602562..5747739d 100644
    loopback E2E fixture; a stored flag alone must never expose an inert product
 diff --git a/docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json
 new file mode 100644
-index 00000000..7cf69f1c
+index 00000000..12749300
 --- /dev/null
 +++ b/docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,37 @@
 +{
 +  "taskId": "prompt-refiner-reservation-authority-v1",
 +  "requirement": "Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않은 채 첫 shadow 실행을 위한 durable reservation authority를 구현한다. 데이터베이스가 유일한 slot·최악비용 accounting owner여야 하며, 고정 stage 한 개에서 최대 100개의 영구 tombstone과 총 2491600 microUSD만 허용한다. requestId·stageId·canonical contract digest·server-minted reservationId를 정확히 결속하고, stage row→ModelRegistryEntry table SHARE→reservation row 잠금 순서와 잠금 뒤 DB clock을 사용해 runtime model/pricing drift, 5분 TTL, terminal 전이, 1회 consume을 fail-closed한다. 실제 tombstone 집계와 stage counter를 원자적으로 결속하고 direct·batch·unique-conflict·동시 insert가 100-slot/비용 상한을 우회하지 못하게 한다. 기존 Prompt Refiner v1은 admitted:false와 reservation_authority_unavailable을 유지하며 stage seed/admin writer, 제품/API/script runtime caller, provider adapter/model 호출, flag 활성화, Router 결합, 유료 실행은 포함하지 않는다. author는 codex, reviewer는 claude이며 사용자가 승인한 --skip-preflight 예외 아래 Claude Code Max 구독 CLI의 Read·Grep·Glob만 사용한다.",
@@ -97,7 +101,8 @@ index 00000000..7cf69f1c
 +    "Prisma schema diff는 PromptRefinerReservationStage와 PromptRefinerReservation 신규 model 44줄뿐이고 enum·DB integration lane·bounded retention registry가 migration과 일치한다. 최신 develop의 MemoryExtractionChunk skipped 상태와 다른 기존 계약을 보존한다.",
 +    "focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 15/15가 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.",
 +    "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 요약을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 남으면 on_hold다.",
-+    "Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다."
++    "Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다.",
++    "Multi-round 감사기록을 보존하기 위해 docs/ops/cross-review/packages/ parent를 control-program writable scope로 선언한다. 이는 기능 writable source 확대가 아니며 own output directory는 매 round --diff-exclude되고 generatedPaths에는 넣지 않는다. Round 1의 filesChanged tree scope는 source 16개와 커밋된 round 0 audit record 7개를 합친 23개일 수 있지만, reviewed diff와 changeDigest는 source 16개만 포함해야 한다."
 +  ],
 +  "baseCommit": "5b4b6c6daead506ffd77a25888abe3a5e932f57c",
 +  "writableScope": [
@@ -116,15 +121,15 @@ index 00000000..7cf69f1c
 +    "scripts/run-db-integration-tests.mjs",
 +    "tests/integration/prompt-refiner-reservation.db.test.ts",
 +    "tests/promptRefinerReservationCore.test.mjs",
-+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json"
++    "docs/ops/cross-review/packages/"
 +  ],
 +  "generatedPaths": []
 +}
 diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
-index 9dbaa542..c4e70140 100644
+index 9dbaa542..7e4318bd 100644
 --- a/docs/ops/tomverse-chat-progress.md
 +++ b/docs/ops/tomverse-chat-progress.md
-@@ -980,3 +980,58 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
+@@ -980,3 +980,60 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
     비용·지연을 측정한다.
  4. 승인된 증거가 있을 때만 제안형 UI를 연결하고, 그 뒤 Refiner 결과의 Router 결합과
     전체 카탈로그 선택 품질을 별도 측정한다.
@@ -142,7 +147,9 @@ index 9dbaa542..c4e70140 100644
 +consume/release는 expired tombstone이 된다. authority는 stage row→
 +model registry table `SHARE`→reservation row 순서로 잠근 뒤 requestId·stage·canonical
 +contract digest·server-minted reservationId를 결속한다. digest에는 stage와 reservation
-+lifecycle 상태 집합이 모두 포함된다. 잠금 뒤 `clock_timestamp()` 기반
++lifecycle 상태 집합이 모두 포함된다. naive DB timestamp에는 명시적
++`clock_timestamp() AT TIME ZONE 'UTC'`를 사용하고, expiry sweep은 DB에서 만료 필터·
++정렬·limit을 `FOR UPDATE` 전에 적용해 lock footprint도 limit 이하로 묶는다. 잠금 뒤 DB clock 기반
 +5분 만료와 1회 CAS consume을 사용하며
 +consumed/released/expired 행을 삭제·환급·재사용하지 않는다.
 +
@@ -166,8 +173,8 @@ index 9dbaa542..c4e70140 100644
 +| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
 +| 직전 의미 있는 회차 대비 | **약 0%p** — 안전한 예약 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
 +| C19–C20 Refiner·Planner·품질 평가 | **약 41%** (직전 약 38%, durable authority 구현 반영) |
-+| 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·DB-owned terminal clock·원자 slot/cost·잠금 후 DB clock expiry·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
-+| 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 15/15, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
++| 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·명시적 UTC DB-owned terminal clock·SQL limit으로 제한된 expiry lock footprint·원자 slot/cost·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
++| 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 17/17, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
 +| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 15개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
 +| 독립 검토·통합 CI | 대기 — 구현 완료 뒤 Claude 읽기 전용 검토와 Linux CI 필요 |
 +| 병합·배포·공개 | 미수행. provider/API/model 호출 0, stage seed/writer 0, v1 admission·flag 변경 0 |
@@ -184,7 +191,7 @@ index 9dbaa542..c4e70140 100644
 +5. 의미 보존·주입 저항·비용·지연 증거가 통과할 때만 writer와 제안형 제품 adapter를
 +   연결하고, 이후 Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을 별도 실험한다.
 diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
-index cce82b1c..8ddeeecf 100644
+index cce82b1c..b4d5db3a 100644
 --- a/docs/policy/prompt-refiner-observability.md
 +++ b/docs/policy/prompt-refiner-observability.md
 @@ -1,11 +1,11 @@
@@ -202,7 +209,7 @@ index cce82b1c..8ddeeecf 100644
  model/catalog/pricing identity와 4,096 output tokens, 15초 timeout, retry 0,
  요청당 24,916 microUSD, 최대 100 dispatch의 단계 2,491,600 microUSD를 동결하지만
  그 자체로 실행을 승인하거나 비용을 예약하지 않는다. 정적 pricing profile만
-@@ -25,13 +25,44 @@ cached-input multiplier는 prompt caching이 disabled라 이 계약의 비용을
+@@ -25,13 +25,48 @@ cached-input multiplier는 prompt caching이 disabled라 이 계약의 비용을
  generic `reservationOutputTokens`는 Refiner authority가 사용할 예약량이 아니다. 미래
  authority는 이 계약의 4,096-token worst case를 예약해야 하며 generic reservation
  cap으로 낮춰 잡을 수 없다.
@@ -221,7 +228,8 @@ index cce82b1c..8ddeeecf 100644
 +경우를 포함해 admin INSERT/UPDATE/DELETE가 runtime 검증과 consume 사이에 끼어들 수
 +없다. runtime model row와 effective pricing은 reserve와 consume 모두에서 다시
 +검증한다. requestId·고정 stage·canonical contract digest·server-minted reservationId를
-+결속하고 잠금 뒤의 `clock_timestamp()` 만료·1회 CAS consume·영구 terminal tombstone을
++결속하고 naive timestamp에는 `clock_timestamp() AT TIME ZONE 'UTC'`만 사용하는 만료·
++1회 CAS consume·영구 terminal tombstone을
 +강제한다. 정적
 +profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease/atomic boolean은 성공
 +증거가 아니다. 새로 승인된 후속 계약만 authority의 consumed fact를 성공 admission에
@@ -237,6 +245,9 @@ index cce82b1c..8ddeeecf 100644
 +  집계와 맞을 수 없어 거부된다. direct insert도 같은 예산을 소비하고 101번째·위조
 +  insert·unique 충돌은 행과 accounting을 함께 rollback한다. terminal timestamp도 DB
 +  trigger가 단 한 번의 clock으로 쓰며 만료 뒤 consume/release는 expired로 저장한다.
++- expiry sweep은 DB clock 만료 조건과 `expiresAt, id` 순서를 SQL에서 적용하고 caller
++  `limit`을 `FOR UPDATE`보다 먼저 적용한다. 따라서 limit은 update 수뿐 아니라 lock
++  footprint도 제한한다.
 +- 계약 identity는 stage lifecycle(`approved`, `closed`)과 reservation lifecycle을 모두
 +  포함한 정렬 canonical JSON의 SHA-256 digest로 결속한다. reserve와
 +  consume은 runtime registry/pricing drift가 있으면 슬롯을 만들거나 사용하지 않는다.
@@ -255,10 +266,10 @@ index cce82b1c..8ddeeecf 100644
  ## 1. 하나의 변경 가능한 행 대신 두 개의 불변 사실
  
 diff --git a/docs/ui-contracts/prompt-refiner-suggestion.md b/docs/ui-contracts/prompt-refiner-suggestion.md
-index 8385f0c3..3deea263 100644
+index 8385f0c3..a2a3bb91 100644
 --- a/docs/ui-contracts/prompt-refiner-suggestion.md
 +++ b/docs/ui-contracts/prompt-refiner-suggestion.md
-@@ -117,13 +117,23 @@ accepted+kept-original을 각각 분모로 쓴다. 서로 다른 분모를 한 c
+@@ -117,13 +117,25 @@ accepted+kept-original을 각각 분모로 쓴다. 서로 다른 분모를 한 c
  provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필요하다.
  
  1. 비용이 고정된 Refiner 모델·출력 cap·timeout·재시도 0 계약
@@ -272,7 +283,9 @@ index 8385f0c3..3deea263 100644
 +   잠금 뒤 DB clock 만료·1회 consume·영구 tombstone을 강제함. BEFORE INSERT는 검증·잠금만,
 +   AFTER INSERT는 성공한 tombstone 집계와 counter 결속만 맡으며 stage는 반드시 0/0에서
 +   시작함. direct stage counter UPDATE, direct/unique/101번째 insert 우회는 거부 또는 함께
-+   rollback됨. terminal timestamp도 DB가 소유하고 늦은 consume/release는 expired가 됨.
++   rollback됨. naive timestamp의 clock은 명시적 UTC이며 terminal timestamp도 DB가
++   소유하고 늦은 consume/release는 expired가 됨. expiry sweep의 SQL limit은 update와
++   row-lock footprint를 함께 제한함.
 +   기존 request는 active와 terminal을 구분하며 terminal은 usable lease가 아님.
     정적 profile과 `resolveModelPricing()`의 effective input/output rate가 모두 exact
     pin과 일치하고 effective output cap은 4,096 이상이어야 함. 더 큰 capability에도
@@ -288,7 +301,7 @@ index 8385f0c3..3deea263 100644
  3. 원문 대비 제안문 주입·의미 보존 평가
 diff --git a/lib/promptRefinerReservationAuthority.ts b/lib/promptRefinerReservationAuthority.ts
 new file mode 100644
-index 00000000..be99d01d
+index 00000000..12dccfb2
 --- /dev/null
 +++ b/lib/promptRefinerReservationAuthority.ts
 @@ -0,0 +1,348 @@
@@ -337,7 +350,7 @@ index 00000000..be99d01d
 +
 +const dbClock = async (tx: Prisma.TransactionClient) => {
 +    const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    if (!clock) throw new Error("PostgreSQL did not return its transaction clock");
 +    return clock.now;
@@ -624,13 +637,13 @@ index 00000000..be99d01d
 +            FROM "PromptRefinerReservation"
 +            WHERE "stageId" = ${stageId}
 +              AND "status" = 'reserved'
++              AND "expiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')
 +            ORDER BY "expiresAt", "id"
++            LIMIT ${limit}
 +            FOR UPDATE
 +        `);
 +        const now = await dbClock(tx);
-+        const rows = lockedRows
-+            .filter((row) => row.expiresAt.getTime() <= now.getTime())
-+            .slice(0, limit);
++        const rows = lockedRows;
 +        if (rows.length > 0) {
 +            await tx.promptRefinerReservation.updateMany({
 +                where: { id: { in: rows.map((row) => row.id) }, status: "reserved" },
@@ -827,7 +840,7 @@ index 00000000..d9c14c6d
 +    expected.contractDigest === actual.contractDigest;
 diff --git a/prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql b/prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql
 new file mode 100644
-index 00000000..cf009a88
+index 00000000..41635f7e
 --- /dev/null
 +++ b/prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql
 @@ -0,0 +1,290 @@
@@ -999,9 +1012,9 @@ index 00000000..cf009a88
 +       OR NEW."contractDigest" <> 'sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f'
 +       OR NEW."reservedCostMicroUsd" <> 24916
 +       OR NEW."expiresAt" <> NEW."createdAt" + INTERVAL '5 minutes'
-+       OR NEW."createdAt" > clock_timestamp()
-+       OR NEW."expiresAt" <= clock_timestamp()
-+       OR NEW."expiresAt" > clock_timestamp() + INTERVAL '5 minutes' THEN
++       OR NEW."createdAt" > (clock_timestamp() AT TIME ZONE 'UTC')
++       OR NEW."expiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')
++       OR NEW."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC') + INTERVAL '5 minutes' THEN
 +        RAISE EXCEPTION 'PromptRefinerReservation contract binding is invalid';
 +    END IF;
 +
@@ -1056,7 +1069,7 @@ index 00000000..cf009a88
 +    UPDATE "PromptRefinerReservationStage"
 +    SET "reservationCount" = actual_count,
 +        "allocatedCostMicroUsd" = actual_cost,
-+        "updatedAt" = clock_timestamp()
++        "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
 +    WHERE "id" = 'prompt-refiner-shadow-v1';
 +    GET DIAGNOSTICS changed = ROW_COUNT;
 +    IF changed <> 1 THEN
@@ -1101,7 +1114,7 @@ index 00000000..cf009a88
 +    IF NEW."status" NOT IN ('consumed', 'released', 'expired') THEN
 +        RAISE EXCEPTION 'PromptRefinerReservation % transition is invalid', OLD."id";
 +    END IF;
-+    observed_at := clock_timestamp();
++    observed_at := (clock_timestamp() AT TIME ZONE 'UTC');
 +    IF NEW."status" = 'expired' AND observed_at < OLD."expiresAt" THEN
 +        RAISE EXCEPTION 'PromptRefinerReservation % cannot expire before its deadline', OLD."id";
 +    END IF;
@@ -1242,10 +1255,10 @@ index b1a7bccc..94715943 100644
      "tests/integration/login-methods.db.test.ts",
 diff --git a/tests/integration/prompt-refiner-reservation.db.test.ts b/tests/integration/prompt-refiner-reservation.db.test.ts
 new file mode 100644
-index 00000000..a8442c00
+index 00000000..587c8693
 --- /dev/null
 +++ b/tests/integration/prompt-refiner-reservation.db.test.ts
-@@ -0,0 +1,822 @@
+@@ -0,0 +1,948 @@
 +import assert from "node:assert/strict";
 +import { randomUUID } from "node:crypto";
 +import { before, beforeEach, test } from "node:test";
@@ -1343,7 +1356,7 @@ index 00000000..a8442c00
 +            signalLocked();
 +            await gate;
 +            const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
-+                SELECT clock_timestamp() AS "now"
++                SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +            `;
 +            return clock!.now;
 +        },
@@ -1501,7 +1514,7 @@ index 00000000..a8442c00
 +test("every exact direct insert consumes budget and forged or 101st inserts fail closed", async () => {
 +    await createStage();
 +    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const createdAt = clock!.now;
 +    const firstId = randomUUID();
@@ -1647,7 +1660,7 @@ index 00000000..a8442c00
 +test("the database owns terminal clocks and turns every late direct transition into expiry", async () => {
 +    await createStage();
 +    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const nearExpiryCreatedAt = new Date(clock!.now.getTime() - 298_800);
 +    await prisma.promptRefinerReservation.createMany({
@@ -1711,7 +1724,7 @@ index 00000000..a8442c00
 +    assert.equal(active.ok, true);
 +    if (!active.ok) return;
 +    const before = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const forged = new Date(0);
 +    await assert.rejects(
@@ -1736,7 +1749,7 @@ index 00000000..a8442c00
 +        WHERE "id" = ${active.value.reservation.reservationId}
 +    `;
 +    const after = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const consumed = await prisma.promptRefinerReservation.findUniqueOrThrow({
 +        where: { id: active.value.reservation.reservationId },
@@ -1749,10 +1762,89 @@ index 00000000..a8442c00
 +    assert.equal(consumed.expiredAt, null);
 +});
 +
++test("naive reservation timestamps remain UTC under non-UTC database sessions", async () => {
++    await createStage();
++    const [databaseZone] = await prisma.$queryRaw<Array<{ zone: string }>>`
++        SELECT current_setting('TimeZone') AS "zone"
++    `;
++    for (const [zone, requestedStatus] of [
++        ["America/New_York", "consumed"],
++        ["Asia/Seoul", "released"],
++    ] as const) {
++        await assert.rejects(
++            prisma.$transaction(async (tx) => {
++                await tx.$queryRaw`
++                    SELECT set_config('TimeZone', ${zone}, true)
++                `;
++                const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
++                    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
++                `;
++                const exactId = `timezone_exact_${requestedStatus}`;
++                await tx.promptRefinerReservation.create({
++                    data: {
++                        id: exactId,
++                        stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++                        requestId: exactId,
++                        contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++                        status: "reserved",
++                        reservedCostMicroUsd: BigInt(24_916),
++                        createdAt: clock!.now,
++                        expiresAt: new Date(clock!.now.getTime() + 300_000),
++                    },
++                });
++                const exact = await tx.promptRefinerReservation.findUniqueOrThrow({
++                    where: { id: exactId },
++                });
++                assert.equal(exact.expiresAt.getTime() - exact.createdAt.getTime(), 300_000);
++
++                const lateId = `timezone_late_${requestedStatus}`;
++                const lateCreatedAt = new Date(clock!.now.getTime() - 299_700);
++                await tx.promptRefinerReservation.create({
++                    data: {
++                        id: lateId,
++                        stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++                        requestId: lateId,
++                        contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++                        status: "reserved",
++                        reservedCostMicroUsd: BigInt(24_916),
++                        createdAt: lateCreatedAt,
++                        expiresAt: new Date(lateCreatedAt.getTime() + 300_000),
++                    },
++                });
++                await wait(400);
++                await tx.$executeRaw`
++                    UPDATE "PromptRefinerReservation"
++                    SET "status" = ${requestedStatus}
++                    WHERE "id" = ${lateId}
++                `;
++                const late = await tx.promptRefinerReservation.findUniqueOrThrow({
++                    where: { id: lateId },
++                });
++                assert.equal(late.status, "expired");
++                assert.ok(late.expiredAt);
++                assert.equal(late.consumedAt, null);
++                assert.equal(late.releasedAt, null);
++                throw new Error(`rollback-${zone}`);
++            }),
++            new RegExp(`rollback-${zone.replace(/[/.]/g, "\\$&")}`)
++        );
++        assert.equal(await prisma.promptRefinerReservation.count(), 0);
++        const stage = await prisma.promptRefinerReservationStage.findUniqueOrThrow({
++            where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
++        });
++        assert.equal(stage.reservationCount, 0);
++        assert.equal(stage.allocatedCostMicroUsd, BigInt(0));
++    }
++    const [after] = await prisma.$queryRaw<Array<{ zone: string }>>`
++        SELECT current_setting('TimeZone') AS "zone"
++    `;
++    assert.equal(after!.zone, databaseZone!.zone, "SET LOCAL must not leak past rollback");
++});
++
 +test("consume observes expiry after stage-lock contention and commits the expired tombstone", async () => {
 +    await createStage();
 +    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const createdAt = new Date(clock!.now.getTime() - 300_000 + 1_000);
 +    const expiresAt = new Date(createdAt.getTime() + 300_000);
@@ -1798,7 +1890,7 @@ index 00000000..a8442c00
 +    assert.equal(released.ok, true);
 +
 +    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const oldCreated = new Date(clock!.now.getTime() - 300_000 + 200);
 +    await prisma.promptRefinerReservation.create({
@@ -1834,6 +1926,53 @@ index 00000000..a8442c00
 +    assert.equal(
 +        groups.some((group) => group.status === "expired" && group._count === 1),
 +        true
++    );
++});
++
++test("expiry limit orders and updates only the bounded SQL selection", async () => {
++    await createStage();
++    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
++    `;
++    const earlier = new Date(clock!.now.getTime() - 299_850);
++    const later = new Date(clock!.now.getTime() - 299_750);
++    await prisma.promptRefinerReservation.createMany({
++        data: [
++            { id: "expiry_limit_first", createdAt: earlier },
++            { id: "expiry_limit_second", createdAt: later },
++        ].map(({ id, createdAt }) => ({
++            id,
++            stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++            requestId: id,
++            contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++            status: "reserved",
++            reservedCostMicroUsd: BigInt(24_916),
++            createdAt,
++            expiresAt: new Date(createdAt.getTime() + 300_000),
++        })),
++    });
++    await wait(350);
++    const firstSweep = await expirePromptRefinerReservations({ limit: 1 });
++    assert.equal(firstSweep.ok, true);
++    if (!firstSweep.ok) return;
++    assert.equal(firstSweep.value.expiredCount, 1);
++    const afterFirst = await prisma.promptRefinerReservation.findMany({
++        orderBy: { id: "asc" },
++    });
++    assert.deepEqual(
++        afterFirst.map((row) => [row.id, row.status]),
++        [
++            ["expiry_limit_first", "expired"],
++            ["expiry_limit_second", "reserved"],
++        ]
++    );
++    const secondSweep = await expirePromptRefinerReservations({ limit: 1 });
++    assert.equal(secondSweep.ok, true);
++    if (!secondSweep.ok) return;
++    assert.equal(secondSweep.value.expiredCount, 1);
++    assert.equal(
++        await prisma.promptRefinerReservation.count({ where: { status: "expired" } }),
++        2
 +    );
 +});
 +
@@ -1932,7 +2071,7 @@ index 00000000..a8442c00
 +                await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '200ms'");
 +                await tx.$executeRaw`
 +                    UPDATE "ModelRegistryEntry"
-+                    SET "updatedAt" = clock_timestamp()
++                    SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
 +                    WHERE "id" = ${PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId}
 +                `;
 +            }),
@@ -1983,7 +2122,7 @@ index 00000000..a8442c00
 +test("stage-row locking admits only the remaining five slots under concurrency", async () => {
 +    await createStage();
 +    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-+        SELECT clock_timestamp() AS "now"
++        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
 +    `;
 +    const oldCreated = new Date(clock!.now.getTime());
 +    await prisma.promptRefinerReservation.createMany({
@@ -2070,10 +2209,10 @@ index 00000000..a8442c00
 +});
 diff --git a/tests/promptRefinerReservationCore.test.mjs b/tests/promptRefinerReservationCore.test.mjs
 new file mode 100644
-index 00000000..afcab82a
+index 00000000..0cf01699
 --- /dev/null
 +++ b/tests/promptRefinerReservationCore.test.mjs
-@@ -0,0 +1,213 @@
+@@ -0,0 +1,222 @@
 +import assert from "node:assert/strict";
 +import { readFileSync } from "node:fs";
 +import test from "node:test";
@@ -2286,77 +2425,91 @@ index 00000000..afcab82a
 +        assert.ok(registryLock > stageLock, `${functionName}: registry lock order`);
 +        assert.ok(reservationLock > registryLock, `${functionName}: reservation lock order`);
 +    }
++
++    const expireStart = source.indexOf("const expirePromptRefinerReservations");
++    const expireEnd = source.indexOf("\n};", expireStart);
++    const expireBody = source.slice(expireStart, expireEnd);
++    assert.match(
++        expireBody,
++        /"expiresAt" <= \(clock_timestamp\(\) AT TIME ZONE 'UTC'\)[\s\S]*ORDER BY "expiresAt", "id"[\s\S]*LIMIT \$\{limit\}[\s\S]*FOR UPDATE/,
++        "the caller limit must bound the ordered DB lock footprint"
++    );
 +});
 
 ```
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1926ms)
+- PASS `node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (1264ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 1818.0318
+  # duration_ms 1180.6125
 
 ## Guard results (run by the control program)
 
-- PASS `npm run typecheck -- --pretty false` (52739ms)
+- PASS `npm run typecheck -- --pretty false` (43377ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false --pretty false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs` (3511ms)
-- PASS `npx prisma validate` (2268ms)
+- PASS `npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs` (3470ms)
+- PASS `npx prisma validate` (2249ms)
   The schema at prisma\schema.prisma is valid 🚀
-- PASS `npm run check:model-pricing` (870ms)
+- PASS `npm run check:model-pricing` (893ms)
   > ai-chat-hub@0.1.0 check:model-pricing
   > node --import tsx scripts/check-model-pricing.mjs
   
   
   Model pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.
-- PASS `npm run check:enum-constraints` (1783ms)
+- PASS `npm run check:enum-constraints` (1183ms)
   > ai-chat-hub@0.1.0 check:enum-constraints
   > node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs
   
   Enum constraint check passed: 93 closed list(s) in the schema — 43 compared against an application list, 16 held only as a TypeScript union, 34 written down only in the database.
-- PASS `npm run check:db-integration-coverage` (808ms)
+- PASS `npm run check:db-integration-coverage` (556ms)
   > ai-chat-hub@0.1.0 check:db-integration-coverage
   > node scripts/check-db-integration-coverage.mjs
   
   DB integration coverage check passed: 118 suite(s) in tests/integration/, all 118 named by the runner.
-- PASS `npm run check:doc-references` (1633ms)
+- PASS `npm run check:doc-references` (1547ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 868 referenced path(s) across 109 instruction document(s), and 968 path(s) named by comments across 2922 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1162ms)
+- PASS `npm run check:policy-section-references` (1135ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4468 citation(s) against 36 policy document(s). 2890 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1351 and 227 predate this change).
-- PASS `npm run check:encoding:strict` (1771ms)
+- PASS `npm run check:encoding:strict` (1421ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `npm run check:data-domain-registry` (785ms)
+- PASS `npm run check:data-domain-registry` (797ms)
   y\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.
      Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.
      Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.
      2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.
-- PASS `node --test tests/unsweptTables.test.mjs` (158ms)
+- PASS `node --test tests/unsweptTables.test.mjs` (159ms)
   # fail 0
   # cancelled 0
   # skipped 0
   # todo 0
-  # duration_ms 77.6643
-- PASS `git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'` (61ms)
+  # duration_ms 79.5439
+- PASS `git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'` (59ms)
+
+## Findings from the previous round (check each was addressed)
+
+- [warning/evidence] prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275: Every DB-clock comparison mixes `clock_timestamp()` (timestamptz) with `TIMESTAMP(3)` (without time zone) columns/variables, so the whole TTL, expiry-ownership and late-consume-becomes-expired contract silently depends on the server's `TimeZone` GUC being UTC: on a non-UTC database inserts always fail closed, and if the GUC has a negative offset the guard accepts a post-deadline consume for |offset| hours instead of writing the required expired tombstone.
+- [nit/judgement] lib/promptRefinerReservationAuthority.ts:328-339: The doc comment says "Expires active rows in bounded batches", but the `SELECT ... FOR UPDATE` has no `LIMIT`: it locks every `reserved` row for the stage and `limit` is only applied by `.slice()` after the client-side filter, so `limit` bounds the writes but not the lock footprint.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: Codex가 provider/product 활성화 없이 DB-owned Prompt Refiner reservation authority를 구현했다. 고정 stage는 0/0에서 시작하고 최대 100 tombstone·2491600 microUSD를 AFTER INSERT의 실제 count/sum과 결속한다. exact four-part binding, stage→registry SHARE→reservation 잠금, DB-owned TTL/terminal clock, one-time consume와 영구 tombstone을 구현했으며 v1 admitted:false, no seed/writer/runtime caller/provider를 유지한다. 최신 origin/develop 5b4b6c6d를 merge했고 schema diff는 Prompt Refiner +44/-0이다. 통합 뒤 focused 42/42, typecheck/lint/Prisma/pricing/enum/DB coverage/docs/policy/encoding/diff가 통과했다. 별도 worktree-local PostgreSQL 17에서 fresh 112 migrations, drift 0, authority DB 15/15를 확인하고 삭제했다. full finance 비교의 실패 17개는 base에도 동일한 기존 chat concurrency/rate/image 실패였고 신규 authority 실패는 0이었다. package 생성은 외부 DB, Railway, provider, API, Claude를 호출하지 않는다.
+Summary: Round 0의 두 finding을 수정했다. migration의 모든 authority DB-clock 비교와 terminal timestamp를 naive UTC column contract에 맞춰 clock_timestamp() AT TIME ZONE 'UTC'로 고정해 session TimeZone 의존을 제거했고, expiry sweep은 stage→registry SHARE lock 뒤 DB에서 expiry predicate·ORDER BY·FOR UPDATE SKIP LOCKED·LIMIT을 적용해 limit만큼만 reservation row를 잠근다. 독립 verifier가 non-UTC insert/late terminal과 lock-footprint 경계를 PASS했다. provider/product 활성화, stage seed/admin writer, runtime caller, provider/model/API 호출 없이 v1 admitted:false를 유지한다. 최신 origin/develop 기준 schema diff는 Prompt Refiner +44/-0다. focused 42와 기존 12 package guard를 이번 source commit에서 재실행한다. 별도 worktree-local PostgreSQL 17에서 fresh 112 migrations, drift 0, authority DB 17/17을 확인했고 timezone/lock-footprint 독립 검증도 통과했으나, package 생성에서는 DB를 재호출하지 않는다. full finance 비교의 실패 17개는 base에도 동일한 기존 chat concurrency/rate/image 실패였고 신규 authority 실패는 0이었다. Multi-round control scope의 filesChanged에는 source 16개와 committed round 0 audit record 7개, 총 23개가 보일 수 있지만 own output은 diff-exclude되어 reviewed diff와 changeDigest는 source 16개만 포함한다.
 
 ## Answer format
 
@@ -2365,8 +2518,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-reservation-authority-v1",
-  "round": 0,
-  "reviewedDigest": "sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
+  "round": 1,
+  "reviewedDigest": "sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
