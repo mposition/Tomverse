@@ -1,7 +1,7 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v12)
+# 제품 소식 이메일: 권한과 기계 (초안 v13)
 
 > **이 문서의 지위: 초안입니다. 승인되지 않았고, 코드는 하나도 없습니다.**
-> **S1(기계 보강)은 착수할 수 있습니다** — G는 EEA·영국 soft opt-in만 막습니다.
+> **S0와 S1a는 착수할 수 있습니다**(12절) — G는 EEA·영국 soft opt-in만 막습니다.
 > 그 밖의 단계는 12절의 선행 결정이 닫힌 뒤입니다. 이 문서가
 > 이름 대는 새 module은 아직 존재하지 않으며,
 > `scripts/check-doc-references-core.mjs`의 `PLANNED_REFERENCES`에 그렇게
@@ -13,6 +13,25 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v13 (2026-09-16) — 독립 검토 8회차(v11 대상) 반영
+
+8회차는 v11을 검토했고 reject였습니다. 호주 floor·싱가포르·canary 방향은
+맞다고 봤고, 남은 것은 **`risk_accepted`를 판정 모델에 어떻게 싣는가**와
+**S1이 혼자 설 수 없다**는 것이었습니다. v12의 결정(IP 추정 국가, 의무별 상태)
+위에서 닫았습니다.
+
+| # | 지적 | v13 |
+|---|---|---|
+| **L12** | 동의 없는 수신자에게 2년 고지 일정을 만들면 가짜 동의일이 생김 | 2년 주기와 동의 결과 통지는 **실제 동의 시점부터**. `risk_accepted` 수신자는 표시 의무와 수신거부 결과 통지만(7.7) |
+| **C13** | "전부 통과"와 `risk_accepted` 발송이 한 출력에 공존 불가. 승인의 source가 발송 판정일 수 없음 | **`EmailSendApproval` 원장**(6) + 판정 출력에 `legalAllowed`와 `overrideApplied`를 분리. authority 판정은 거부 그대로 보존(7.6) |
+| **C14** | 78계정을 고정하는 데이터 없음, 주소 변경, 기존 계정의 국가 | 승인 시점의 `userId + 주소 digest` cohort 고정, 주소가 바뀌면 제외, 기존 계정도 5.3의 IP 추정으로 국가 기록, **국가 미확정은 override로도 안 보냄**(5.6) |
+| **C15** | S1이 S3·S5·S8에 의존 | S1을 **S1a(독립) / S1b(잠금) / S9(판정)** 로 나눔. 불변식 5→S3, 9→S6, 7은 강제 지점을 정함(12) |
+| **C16** | 렌더 시점 이후 표시 의무가 바뀌면 옛 footer로 통과 | send 판정이 pinned 표시 metadata와 **현재 의무 계약**을 비교, 불충족이면 skip 후 재enqueue(7.6) |
+| **C17** | credential lane과 suppression writer 전체 목록 없음 | writer 네 곳·sender 두 곳을 이름으로 적고, credential lane은 **범위 밖임과 그 이유**를 명시(7.4) |
+| **C18** | 인증 전 선택과 인증 후 화면 중 무엇이 최종인가 | v12에서 인증 후 화면이 없어짐. **인증 전 가입 흐름의 추정 국가·rule·문안 해시가 attempt 행에 들어가고** finalize가 한 transaction으로 소비(5.2) |
+| **C19** | AT·IE가 EEA 행과 별도 행에 중복 | 행을 나눔(4.3) |
+| **C20** | 기존 `TemplateVersion` backfill 출처 | 당시의 `EmailTemplate` 값을 역사값으로 복사, 코드와의 차이는 감사 출력, 현재 코드 metadata는 새 version(7.2) |
 
 ### v12 (2026-09-16) — 한국 의무의 무게를 나누고, 국가는 IP 추정으로
 
@@ -207,6 +226,9 @@ ACMA는 계정 관계를 추론 동의 근거로 인정하되 **관계가 끝나
 CAN-SPAM(수신자 authority)을 통과하고 **동시에** 호주 동의(발신자 authority)가
 있어야 합니다.
 
+**`risk_accepted`는 authority 판정을 바꾸지 않습니다.** authority는 거부 그대로
+남고, 판정 출력이 `legalAllowed: false`와 `overrideApplied`를 따로 담습니다(7.6).
+
 하나의 근거가 양쪽을 충족하면(예: 명시적 동의) 그 사실도 기록합니다. 판정
 함수의 전체 입출력은 7.6입니다. **이 함수 하나를 estimate·audience expansion·
 writer·drain이 공유합니다.**
@@ -222,8 +244,10 @@ writer·drain이 공유합니다.**
 | **AU** | 4.4의 관계가 서면 `inferred_consent` | 4.4의 여섯 항목 |
 | **SG** | **`express_consent`** | PDPA가 direct marketing에 opt-in 요구. SCA의 `<ADV>`·수신거부 이메일 요건은 별도 표시 의무로 유지 |
 | **KR** | `express_consent` | 가입 화면 동의 + DOI. 법정 의무는 7.7의 의무별 상태 |
-| **EEA 각국·GB** | `express_consent` | **G(R1 외부 자문)** 가 회원국별로 확인하면 soft opt-in |
-| **CH·CA·AT·IE** | `express_consent` | CH는 FDPIC, AT는 ECG-Liste, IE는 12개월 창 |
+| **EEA(AT·IE 제외)·GB** | `express_consent` | **G(R1 외부 자문)** 가 회원국별로 확인하면 soft opt-in |
+| **AT** | `express_consent` | ECG-Liste 대조 없이는 해제 없음. 이번 범위에서 soft opt-in 대상 아님 |
+| **IE** | `express_consent` | 12개월 창·형사범. 이번 범위에서 soft opt-in 대상 아님 |
+| **CH·CA** | `express_consent` | CH는 FDPIC, CA는 CASL. 해제 없음 |
 | **ZZ** | 발송 안 함 | — |
 
 **신규 가입자의 호주 추론 동의**는 E(방침 개정)가 시행된 뒤, 5.1의 고지를 본
@@ -280,6 +304,7 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
 | `channel` | `oauth` \| `email_code` |
 | `binding` | oauth는 provider, email_code는 **`EmailLoginAttempt` id와 정규화된 주소** |
 | `expressOptInRequested` · `noticeShown` · `objected` | 두 장치의 결과(5.1, 서로 독립) |
+| `estimatedCountry` · `countrySource` · `ruleVersion` · `copyHash` | **그 선택을 할 때 보여 준 것** — 추정 국가와 근거, 적용 rule 버전, 렌더된 문안 해시(5.3) |
 | `expiresAt` · `consumedAt` · `supersededAt` · `userId` | 소비 결과 |
 
 - `attemptId`는 **탭 범위 `sessionStorage`**. 쿠키를 쓰지 않습니다.
@@ -288,7 +313,13 @@ OAuth는 NextAuth adapter가 callback 중 계정을 만들고(`lib/auth.ts`), �
 - 소비는 **`consumedAt IS NULL AND supersededAt IS NULL AND expiresAt > now()`
   조건의 compare-and-set 한 번**.
 - **소비·권한 사건 기록·확인 메일 생성은 한 transaction**입니다. 따로 두면 선택은
-  소비됐는데 메일이 없는 상태가 남습니다.
+  소비됐는데 메일이 없는 상태가 남습니다. 사건에는 attempt 행의 국가·rule·문안
+  해시가 그대로 옮겨집니다 — **인증 후에 다시 보여 주는 화면은 없으므로 이것이
+  유일한 최종 선택입니다.**
+- **"이 흐름에서 방금 만들어진 계정"의 증명** — 계정 생성 시각이 attempt 발급
+  이후이고, binding이 일치하며(oauth는 그 provider의 첫 `Account` 행, email_code는
+  그 `EmailLoginAttempt`가 만든 사용자), 그 사용자에게 소비된 attempt가 아직
+  없을 때(`userId` unique)만 소비합니다.
 - **기존 사용자의 로그인은 절대 소비하지 않습니다.**
 - 체크 해제 후 재시도는 이전 행을 `supersededAt`으로 무효화하고, 무효화와 새 행
   발급은 한 transaction입니다.
@@ -323,6 +354,8 @@ v9는 국가를 DOI 확인 화면에서만 받아, **체크하지 않은 사용�
    보냅니다(4.2의 "전부 통과" 규칙을 그대로 씁니다). 한국일 수도 있는 사용자는
    한국 rule도 통과해야 합니다.
 5. 신호가 전혀 없으면 `ZZ` — 보내지 않습니다.
+6. **기존 계정도 같은 방식입니다.** 다음 로그인 때 IP 추정 국가를 기록하고, 설정에서
+   정정할 수 있습니다. 로그인하지 않아 국가가 없는 계정은 받지 않습니다.
 
 **호주 발신자 authority는 국가와 무관하게 모든 발송에 걸리므로**(2.5), 추정
 국가가 판정을 바꾸는 경우는 한국·EEA·싱가포르처럼 추가 요건이 있는 나라뿐입니다.
@@ -378,22 +411,38 @@ DOI 확인 화면은 동의한 사람의 **주소 확인**만 담당합니다. �
 아니라 "적발 가능성이 낮다"** 입니다. 범위는 **전 법역**이고, 미국에서는 방침
 약속 위반(FTC) 위험까지 포함합니다.
 
+**승인은 발송보다 먼저 존재합니다** — `EmailSendApproval`(6절)에 한 번 쓰고
+바꾸지 않습니다. 발송 판정은 그 승인을 **참조**할 뿐 source가 아닙니다.
+
+**cohort를 고정합니다.**
+
+- 승인 시점의 정확한 계정 목록을 `userId`와 **정규화 주소 digest** 쌍으로
+  승인에 묶습니다(`EmailSendApprovalMember`). "78명"은 설명이고, 목록이 범위입니다.
+- **현재 주소의 digest가 목록과 다르면 제외**합니다. 주소를 바꾼 계정의 새 주소는
+  승인 대상이 아닙니다.
+- 승인 이후 가입한 계정은 어떤 경로로도 들어가지 않습니다.
+
+**override가 할 수 있는 것과 없는 것**
+
+| override가 넘는 것 | override가 넘지 못하는 것 |
+|---|---|
+| authority의 근거 부족(동의·관계 없음) | 철회·거부(`objected`)·purpose 또는 주소 전역 suppression |
+| | **국가 미확정**(`ZZ`) — 표시 의무를 정할 수 없으므로 |
+| | 의무 상태가 정해지지 않은 rule(7.8) |
+| | kill switch·send flag·readiness |
+
 쓰는 규칙입니다.
 
-1. **동의를 지어내지 않습니다.** `ConsentRecord(granted)`를 쓰지 않습니다. 실제로
-   없던 동의를 장부에 적으면 대조되는 날 실수가 아니라 위조로 보입니다.
-2. **승인자·날짜·범위를 함께 기록합니다.** `EmailPermissionDecision`에 남습니다.
+1. **동의를 지어내지 않습니다.** `ConsentRecord(granted)`를 쓰지 않습니다.
+2. **판정은 거부 그대로 남깁니다.** 발송별 판정에는 `legalAllowed: false`와
+   `overrideApplied: { approvalId, type: "risk_accepted" }`가 함께 남습니다(7.6).
 3. **admin 화면에 그대로 보입니다.** 숨기면 다음 사람이 동의로 읽습니다.
-4. **동의가 들어오면 덮입니다.** 그 주소가 5.4의 안내나 설정에서 동의하면 근거가
-   `express_consent`로 바뀌고, 이전 결정은 이력으로 남습니다.
-5. **표시 의무는 면제되지 않습니다.** `risk_accepted`로 보내도 수신자 관할의
-   라벨·명시사항·수신거부는 7.7에 기록된 대로 적용됩니다 — 한국 수신자에게는
-   별표 6의 명시사항과 수신거부 시 14일 처리결과 통지. `(광고)`는 7.7의 면제
-   결정을 따릅니다.
-6. **범위가 닫혀 있습니다.** 기존 78계정에만 적용되며 신규 가입자에게 확장되지
-   않습니다.
-7. **재검토 시점을 적습니다.** 순수 유입이 생기거나, 수신거부·불만이 들어오면 다시
-   판단합니다.
+4. **동의가 들어오면 덮입니다.** 그 주소가 5.4의 안내나 설정에서 동의하면
+   `legalAllowed: true`가 되고 override는 더 이상 쓰이지 않습니다.
+5. **표시 의무는 7.7의 기록을 따릅니다.** 동의일이 없으므로 **2년 고지와 동의
+   결과 통지는 해당하지 않고**, 수신거부 결과 통지는 해당합니다.
+6. **재검토 시점을 적습니다.** 순수 유입이 생기거나, 수신거부·불만이 들어오면 다시
+   판단합니다. 승인을 거두면 `revokedAt`을 쓰고, 이후 판정은 override 없이 합니다.
 
 ## 6. D4 — 기록: 세 층 (C4)
 
@@ -402,14 +451,15 @@ DOI 확인 화면은 동의한 사람의 **주소 확인**만 담당합니다. �
 | **`ConsentRecord`** (기존) | **명시적 동의**의 생애 — 요청·부여·철회·재확인 |
 | **`EmailPermissionEvent`** (신규, append-only) | 고지와 관계의 사실 — `notice_shown`, `objected`, `relationship_started`, `relationship_ended`, `basis_ended` |
 | **`EmailPermissionDecision`** (신규) | **발송별 판정** — 어떤 authority를 어떤 evidence로 통과했는지 |
+| **`EmailSendApproval`** (신규, immutable) | **사람의 결정** — `risk_accepted` override(5.6)와 의무 `waived`(7.8). 승인자·일시·유형·범위·사유·재검토 조건·`revokedAt`. cohort는 `EmailSendApprovalMember` |
 
 **두 장부가 같은 사실의 경쟁 source가 되지 않습니다.** 동의는 `ConsentRecord`
 하나가 말하고, 나머지 사실은 `EmailPermissionEvent`가 말합니다.
 
 `EmailPermissionDecision`이 담는 것 — `deliveryId`, 적용 authority 목록과 각
 결과, 참조한 evidence id들, `policyVersionId`와 `ruleVersion`, **발송 직전
-suppression 판정 시각**, **provider 제출 시각**. `risk_accepted`로 보낸 건은
-**승인자·승인일·적용 범위**를 함께 담습니다(5.6).
+suppression 판정 시각**, **provider 제출 시각**, `legalAllowed`, 그리고 override를
+썼다면 **`EmailSendApproval` id**(5.6). 승인 내용을 복사하지 않고 참조합니다.
 
 **판정 snapshot은 두 개입니다** — enqueue 시점의 판정과 **provider 제출 직전의 현재
 판정**. 한 개의 `policyVersionId`로 두 시점을 표현할 수 없으므로 각각 버전을
@@ -432,11 +482,11 @@ suppression 판정 시각**, **provider 제출 시각**. `risk_accepted`로 보�
 | 2 | 로그인·개인정보 없는 one-click | **있음.** rate limit 조정 필요(7.3) |
 | 3 | **철회 후 발송 0건** | **없음** — 경합 구간(7.4) |
 | 4 | 수신거부 주소가 발송 후 30일 이상 유효 | **증명 불가** — canary 토큰(7.5) |
-| 5 | 전체 수신거부 선택지 | **부분 구현** — `withdrawAllMarketing()` 범위 |
+| 5 | 전체 수신거부 선택지 | **부분 구현** — `withdrawAllMarketing()` 범위. **S3**의 purpose classification 표로 닫음 |
 | 6 | suppression이 **고객 대상 lane** 모든 발송보다 우선 | **부분** — purpose 철회뿐 아니라 **주소 전역 suppression에도 경합**(7.4) |
-| 7 | 재구독 권유 금지 | **없음** |
+| 7 | 재구독 권유 금지 — **수신거부한 주소에 재구독을 요청하는 메일을 보내지 않음**. 수신거부 확인 페이지의 즉시 "되돌리기"는 본인 조작이라 허용 | **suppression이 이미 강제.** 추가로 S3의 purpose 표에 재구독 요청용 purpose를 두지 않음을 정적 검사 |
 | 8 | 관계 종료 시 중단 | **없음** — 4.4 선행 |
-| 9 | **법적 발신자 정보가 없으면 marketing은 fail-closed** — 한국은 별표 6의 명칭·**전자우편주소·전화번호**·주소 | **부분** — 한국 footer에 **전화번호 block이 없습니다** |
+| 9 | **법적 발신자 정보가 없으면 marketing은 fail-closed** — 한국은 별표 6의 명칭·**전자우편주소·전화번호**·주소 | **부분** — 한국 footer에 **전화번호 block이 없습니다. S6** |
 | 12 | **의무마다 상태가 정해져 있어야 발송** — `implemented`·`deferred`·`waived` 중 하나가 없으면 그 국가 rule은 막힘(7.8) | **없음** |
 | 10 | end-to-end synthetic 점검 | **없음** |
 | 11 | **발송 판정 조회 오류는 영구 실패가 아니라 재시도** | **없음** — 현재 drain은 예상 밖 오류를 영구 `failed`로 만듭니다(7.6) |
@@ -456,6 +506,12 @@ key마다 끊깁니다).
 - 새 `TemplateVersion`을 만들 때 그 셋을 함께 저장하고 이후 바꾸지 않습니다.
 - **registry와 drain 모두** 코드 정의와 **정확히** 비교하고, 다르면 fail-closed.
 - marketing 분류면 저장된 `requiresUnsubscribe=false`를 **신뢰하지 않고** 강제합니다.
+- **기존 version의 backfill** — 그 version이 쓰이던 당시의 `EmailTemplate` 행 값을
+  **역사값으로** 복사합니다. 현재 코드 정의를 복사하면 과거를 고쳐 쓰게 됩니다.
+  코드와 다른 행은 **감사 출력으로 목록화**하고 고치지 않습니다.
+- **현재 코드 metadata가 역사값과 다르면 본문이 같아도 새 version**을 만듭니다.
+  registry lookup은 `contentHash`와 **세 metadata 필드**를 함께 조건으로 씁니다.
+- `EmailTemplate` 행의 세 필드는 이후 판정에 쓰지 않습니다.
 
 ### 7.3 수신거부 rate limit
 
@@ -485,7 +541,27 @@ suppression을 재검사한 뒤 provider 제출까지** 마칩니다. 철회가 
 sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은 제출이 끝난 뒤
 완료됩니다.
 
-보장 문구는 관측 가능한 사건으로 적습니다 — **"철회 또는 suppression 커밋
+**잠금을 잡는 곳 — 전체 목록**
+
+| 쪽 | 코드 | 잡는 잠금 |
+|---|---|---|
+| writer | `setPreference()`의 purpose 철회 (`lib/emailPreferences.ts`) | 전역 → purpose |
+| writer | hard bounce·complaint (`lib/emailWebhookProcessing.ts`) | 전역 |
+| writer | soft bounce 임계 (`recordSoftBounce()`, `lib/emailSuppression.ts`) | 전역 |
+| writer | admin 수동·privacy request (`app/api/admin/email-suppressions/route.ts`) | 전역 (purpose 지정 시 → purpose) |
+| sender | standard lane (`lib/standardEmailLane.ts`) | 전역 → purpose |
+
+- 모든 writer는 `recordSuppression()`을 거치므로 **잠금은 그 함수 안에서** 잡습니다.
+  새 writer가 잠금을 빠뜨릴 수 없게 하기 위해서입니다.
+- sender는 **provider 시도마다** 잠금 → 최종 재조회 → provider 제출을 한 범위에서
+  하고, **retry 대기는 잠금 밖**입니다.
+- **credential lane(`lib/credentialEmailLane.ts`)은 범위 밖입니다.** 로그인 코드는
+  수신자가 **같은 요청에서** 스스로 요청한 메일이고, transactional이라 막는
+  suppression은 hard bounce·privacy request뿐입니다. provider 호출 동안 DB 잠금을
+  쥔 채 동기 요청을 붙잡는 비용이, 그 사이 커밋된 bounce 한 건을 한 번 더 보내는
+  위험보다 큽니다. 보장 문구도 **standard lane으로 한정**합니다.
+
+보장 문구는 관측 가능한 사건으로 적습니다 — **"standard lane에서 철회 또는 suppression 커밋
 이후 시작된 provider 제출 0건"**, 그리고 두 시각을 `EmailPermissionDecision`에
 남깁니다.
 
@@ -501,36 +577,47 @@ sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은
 - readiness 계약: **그 key version으로 마지막 발송한 뒤 30일이 지나기 전에는 그
   키를 제거할 수 없습니다.** synthetic check가 canary로 해독을 확인합니다.
 
-### 7.6 발송 판정의 전체 계약 (C9)
+### 7.6 발송 판정의 전체 계약 (C9, C13, C16)
 
 ```
 releaseNotesAuthorizationVerdict({
   address, purpose,
-  recipientCountry,       // 5.3에서 확정된 국가. 미확정이면 거부
-  rule,                   // 그 국가의 ReleaseNotesCountryRule(버전 포함)
-  auSenderAuthority,      // 호주 발신자 authority 입력(동의·관계 사건)
-  consentRecords,         // ConsentRecord 중 이 주소·purpose
-  permissionEvents,       // EmailPermissionEvent 중 이 주소
-  riskAcceptance,         // 5.6의 결정(있으면)
-  suppression,            // 주소 전역 + purpose
-  flags,                  // marketing, releaseNotes, collection
-  phase,                  // "enqueue" | "send"
+  recipientCountry, countrySource,   // 5.3. ZZ면 거부
+  countryCandidates,                 // 추정이 갈리면 둘 이상(5.3)
+  rules,                             // 후보 국가마다 ReleaseNotesCountryRule(버전 포함)
+  obligations,                       // rule의 의무 상태(7.8)
+  auSenderAuthority,                 // 호주 발신자 authority 입력
+  consentRecords, permissionEvents,
+  approvals,                         // EmailSendApproval 중 이 주소가 cohort에 있는 것
+  suppression,                       // 주소 전역 + purpose
+  flags,                             // marketing, releaseNotes, collection
+  pinnedDisplay,                     // enqueue 때 고정한 TemplateVersion과 표시 metadata
+  phase,                             // "enqueue" | "send"
 }) -> {
-  allowed,
   authorities: [{ authority, basis, evidenceIds, verdict, reason }],
-  ruleVersion, policyVersionId, evaluatedAt,
+  legalAllowed,                      // 모든 authority가 허용
+  overrideApplied,                   // null | { approvalId, type: "risk_accepted" }
+  blockers,                          // suppression, objected, ZZ, 의무 미정, flag, display
+  displayContract: { pinnedVersion, requiredVersion, satisfied },
+  allowed,                           // (legalAllowed || overrideApplied) && blockers가 비어 있음
+  ruleVersions, policyVersionId, evaluatedAt,
 }
 ```
 
-- **렌더링 정책과 권한 판정을 나눕니다.** 렌더링은 enqueue 시점에 고정된 정책,
+- **authority 판정은 override의 영향을 받지 않습니다.** override는 `allowed`
+  계산에만 들어가고, `blockers`는 override가 넘지 못합니다(5.6의 표).
+- **렌더링 정책과 권한 판정을 나눕니다.** 렌더링은 enqueue 시점에 고정,
   권한은 **provider 제출 직전의 현재 값**으로 다시 판정합니다.
-- **snapshot을 둘 남깁니다** — `phase: enqueue`와 `phase: send`. 두 번째가
-  거부하면 `permission_revoked`(정책 쪽 변화) 또는 `consent_withdrawn`(사용자
-  쪽 변화)으로 skip합니다.
+- **표시 계약도 send 시점에 비교합니다(C16).** pinned 표시 metadata가 **현재
+  의무 상태가 요구하는 표시**(footer block, 제목 접두어, 수신거부 안내)를 충족하지
+  못하면 `display_contract_changed`로 skip하고 **현재 version으로 재enqueue**합니다.
+- **snapshot을 둘 남깁니다** — `phase: enqueue`와 `phase: send`. 각 snapshot에
+  rule·표시 계약의 양쪽 버전과 비교 결과가 들어갑니다. send가 거부하면
+  `permission_revoked` 또는 `consent_withdrawn`으로 skip합니다.
 - **판정에 필요한 DB 조회가 실패하면 skip도 failed도 아닙니다.** claim을 풀고
-  **기존 backoff로 `nextAttemptAt`을 설정**하며 incident를 올립니다. 즉시 재claim은
-  hot loop입니다. **현재 drain은 예상 밖 오류를 영구 `failed`로 만들므로**
-  (`lib/standardEmailLane.ts`) 이 분기를 따로 둡니다.
+  **기존 backoff로 `nextAttemptAt`을 설정**하며 incident를 올립니다. **현재 drain은
+  예상 밖 오류를 영구 `failed`로 만들므로**(`lib/standardEmailLane.ts`) 이 분기를
+  따로 둡니다.
 
 ### 7.7 한국 법정 의무 — 의무별로 정합니다
 
@@ -545,6 +632,11 @@ releaseNotesAuthorizationVerdict({
 | **14일 이내 처리결과 통지** — 수신동의·수신거부·철회 | 제50조제7항, 시행령 제62조의2 | **implemented** | 아래 |
 | **2년마다 수신동의 사실 고지** | 제50조제8항, 시행령 제62조의3 | **deferred** — 첫 기한 전까지 | 아래 |
 | 제목 `(광고)` 표기 | 제50조제4항, 별표 6 | **waived** | 아래 |
+
+**동의일이 있는 사람에게만 걸리는 의무가 있습니다(L12).** 동의 결과 통지와 2년
+고지는 **실제 동의 시점부터** 시작합니다. `risk_accepted`로 받는 사람에게는
+동의일이 없으므로 해당하지 않고, 그 일정을 만들려고 동의일을 지어내지 않습니다.
+수신거부 결과 통지와 표시 항목은 동의 여부와 무관하게 적용됩니다.
 
 **14일 통지 — 구현합니다.** 수신동의는 DOI 확인 메일이 같은 역할을 하므로,
 그 메일에 **전송자 명칭·동의 사실과 날짜·처리 결과**가 들어가게 문안을 맞춥니다.
@@ -575,7 +667,7 @@ v11은 "하나라도 빠지면 한국 rule disabled"였습니다. 그 장치가 
 |---|---|---|
 | `implemented` | 코드가 수행하고 readiness가 확인 | 확인하는 check 이름 |
 | `deferred` | 아직 없지만 기한 전에 만듦 | `dueBy`, 경고 시점 |
-| `waived` | 하지 않기로 결정 | 승인자·날짜·사유·재검토 조건 |
+| `waived` | 하지 않기로 결정 | **`EmailSendApproval` id**(유형 `obligation_waiver`) — 승인자·날짜·사유·재검토 조건은 그 원장에 |
 
 - **상태가 없는 의무가 하나라도 있으면** 그 rule은 막힙니다. 새 의무가 생기면
   누군가 정할 때까지 보내지 않습니다.
@@ -662,7 +754,7 @@ preference를 바꾸지 않습니다. 보안·청구·서비스 이메일은 자
 | D | **한국** | **승인 — 동의 체크박스 + 의무별 결정**(7.7): 명시사항·수신거부 안내·14일 통지 구현, 2년 고지 연기, `(광고)` 면제 |
 | E | **방침·약관 개정과 전체 변경 고지** | **승인** |
 | F | **기존 78계정** | **승인 — 전원 발송, `risk_accepted`로 기록**(5.6) |
-| G | **R1 외부 자문** | **미결. EEA·영국 soft opt-in만 막습니다.** S1은 착수 가능 |
+| G | **R1 외부 자문** | **미결. EEA·영국 soft opt-in만 막습니다.** S0·S1a는 착수 가능 |
 
 ### 11.1 D — 한국은 동의를 받아서 이메일로 보냅니다
 
@@ -679,6 +771,8 @@ preference를 바꾸지 않습니다. 보안·청구·서비스 이메일은 자
 - 5.4의 **제품 내 동의 안내는 그대로 띄웁니다.** 동의한 분은 `express_consent`로
   옮겨가고 `risk_accepted`가 덮입니다.
 - **동의 기록을 지어내지 않습니다.**
+- **범위는 승인 시점의 계정·주소 목록입니다**(5.6). 주소를 바꾸거나 국가가 없는
+  계정은 받지 않습니다.
 - **표시 의무는 7.7의 기록을 따릅니다** — 기존 계정이라고 따로 면제하지 않습니다.
 - 수신거부는 즉시·영구이며 7절의 불변식 전부를 지납니다.
 
@@ -713,15 +807,16 @@ EEA·영국을 여는 선행 게이트입니다.
 | # | 단계 | 선행 결정 | 비고 |
 |---|---|---|---|
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8 | — | 문서 |
-| S1 | **기계** — 7.2 TemplateVersion 메타데이터, 7.4 두 잠금, 7.3 rate limit, 7.5 canary, 7.6 판정 계약과 DB 오류 재시도, 불변식 5·7·9·10·11. 전용 flag를 `createStandardDeliveryRows`·`expandEmailEvent`·drain에서 검사 | **닫힘**(7.2 결정) | **착수 가능.** **Codex 검토** |
+| S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 canary·key version·30일 readiness, 불변식 10(synthetic) | **닫힘**(7.2 backfill 결정) | **착수 가능.** **Codex 검토** |
+| S1b | **잠금** — 7.4의 목록 전체, `recordSuppression()` 내부 잠금, standard lane의 시도별 잠금·재조회 | 7.4의 목록 | S1a 뒤. **Codex 검토** |
 | S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
-| S3 | `EmailPermissionEvent`·`Decision` + purpose classification 표 + DB CHECK | — | **Codex 검토** |
+| S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
 | S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | **R4** 유지·휴면 기준, OAuth 주소가 "직접 제공"을 충족하는 방법 | |
-| S6 | 의무 상태 기록(7.8) + 한국 `implemented` 항목 — `contact_phone`, 한·영 안내, 14일 통지 + 2년 고지 기한 경고 | — | 2년 배치는 기한 전 별도 |
+| S6 | 의무 상태 기록(7.8) + 한국 `implemented` 항목 — `contact_phone`(불변식 9), 한·영 안내, 14일 통지 + 2년 고지 기한 경고 | S3(승인 원장) | 2년 배치는 기한 전 별도 |
 | S7 | 템플릿 + 구조화 payload + 링크 표 | — | |
-| S8 | 기존 사용자 제품 내 동의 안내(5.4) + 제품 내 안내 화면(9절) + `risk_accepted` 기록·admin 표시 | — | |
-| S9 | audience·estimate·drain 판정 공유 + 행 없는 미리보기 | — | **Codex 검토** |
+| S8 | 기존 사용자 제품 내 동의 안내(5.4) + 기존 계정 IP 추정 국가 기록(5.3) + 제품 내 안내 화면(9절) + 78계정 승인·cohort 기록과 admin 표시 | S3 | |
+| S9 | **7.6 판정 함수와 두 snapshot**, 표시 계약 비교·재enqueue, DB 오류 재시도(불변식 11), 전용 flag를 `createStandardDeliveryRows`·`expandEmailEvent`·drain에서 검사, audience·estimate·drain 공유, 행 없는 미리보기 | S3·S5·S8 | **Codex 검토** |
 | S10 | 방침·약관 게시, 전체 변경 고지, 시행일, 새 정책 버전 | — | 마지막 |
 
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
