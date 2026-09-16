@@ -22,7 +22,10 @@
 //
 // `CRON_TRIGGERS` below is the single place a job's schedule is written down,
 // and tests/scheduledJobsCore.test.mjs asserts every entry against the Railway
-// config file it names, so the two cannot drift apart again without a red test.
+// cron service it names in .railway/scheduled-jobs.ts -- the table
+// .railway/railway.ts deploys -- so the two cannot drift apart again without a
+// red test. (Until 2026-09-17 each entry named a `railway.*.json` Config as
+// Code file; Railway stops reading those on 2026-12-01.)
 //
 // SCHED-DRIFT-002, found while widening that assertion: the fix above covered
 // the two every-N-minutes crons and left the three daily ones exactly as they
@@ -41,33 +44,34 @@ export type CronTrigger =
 
 /**
  * Every Railway cron service that drives a job here, with the schedule it is
- * deployed with. `configFile` is what makes the claim checkable: the test reads
- * that file and parses its `cronSchedule` rather than trusting this table.
+ * deployed with. `railwayService` is what makes the claim checkable: the test
+ * finds that service in .railway/scheduled-jobs.ts and parses its
+ * `cronSchedule` rather than trusting this table.
  */
 export const CRON_TRIGGERS = {
   creditReconciliation: {
-    configFile: "railway.credit-reconciliation.json",
+    railwayService: "Credit Reconciliation",
     trigger: { kind: "everyMinutes", minutes: 15 },
   },
   providerProbe: {
-    configFile: "railway.provider-probe.json",
+    railwayService: "Provider Probe",
     trigger: { kind: "everyMinutes", minutes: 10 },
   },
   maintenance: {
-    configFile: "railway.maintenance.json",
+    railwayService: "Maintenance Cron",
     trigger: { kind: "dailyUtc", hour: 3, minute: 0 },
   },
   providerModelCatalog: {
-    configFile: "railway.provider-model-catalog.json",
+    railwayService: "Provider Model Catalog",
     trigger: { kind: "dailyUtc", hour: 0, minute: 0 },
   },
   providerUsageSync: {
-    configFile: "railway.provider-usage-sync.json",
+    railwayService: "Provider Usage Sync",
     trigger: { kind: "dailyUtc", hour: 0, minute: 30 },
   },
 } as const satisfies Record<
   string,
-  { configFile: string; trigger: CronTrigger }
+  { railwayService: string; trigger: CronTrigger }
 >;
 
 export type CronTriggerKey = keyof typeof CRON_TRIGGERS;

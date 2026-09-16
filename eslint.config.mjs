@@ -69,6 +69,8 @@ const eslintConfig = defineConfig([
     "playwright-report/**",
     "test-results/**",
     ".claude/**",
+    // Railway IaC tooling installed on demand (.railway/package.json).
+    ".railway/node_modules/**",
     // The Admin Console E2E suite writes its own report and artifact
     // directories. Both are gitignored, but they were not listed here, so
     // running that suite and then `npm run lint` produced hundreds of errors
