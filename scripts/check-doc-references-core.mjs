@@ -136,9 +136,9 @@ export const PLANNED_REFERENCES = {
         document: "docs/policy/email-product-news-redesign-draft.md",
         reason: "Proposed content rules for release notes (D5). Not built: the classification it enforces is itself awaiting approval B.",
     },
-    "lib/emailSignupConsentAttempt.ts": {
+    "lib/emailPermission.ts": {
         document: "docs/policy/email-product-news-redesign-draft.md",
-        reason: "Proposed short-lived attempt row that carries a sign-up consent choice to whichever path finalises the account, consumed once by compare-and-set (D3). Not built: section 8 approval A decides whether the sign-up screen asks at all.",
+        reason: "Proposed permission verdict and the sign-up attempt row behind it (D3, D4). Not built: section 11 approval A decides whether the bases exist at all.",
     },
     "tests/releaseNotesContentRules.test.mjs": {
         document: "docs/policy/email-product-news-redesign-draft.md",
