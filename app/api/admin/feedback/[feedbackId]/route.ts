@@ -39,6 +39,17 @@ const updateFeedbackSchema = z
      * completed email. Never the internal admin note.
      */
     userReply: z.string().trim().max(FEEDBACK_USER_REPLY_MAX_LENGTH).optional(),
+    /**
+     * Close this one without telling the reporter. Deliberate and per-call:
+     * some closures (a duplicate of a report the same person already has an
+     * answer for) are not worth a second email, and the alternative an
+     * operator reaches for otherwise is not closing the report at all.
+     *
+     * It withholds the announcement; it does not cancel it. No lifecycle
+     * event is written, so nothing claims the reporter was told, and the
+     * report stays eligible for "send this reply now" afterwards.
+     */
+    notifyReporter: z.boolean().optional(),
   })
   .strict();
 
@@ -56,7 +67,9 @@ type UserNotificationSkipReason =
   | "no_address"
   /** A progress notice the reporter did not ask for (the answer never needs
    * the tick -- docs/policy/email-notifications.md §3). */
-  | "not_consented";
+  | "not_consented"
+  /** The operator closed this one without announcing it. */
+  | "operator_withheld";
 
 type RouteContext = {
   params: Promise<{ feedbackId: string }>;
@@ -98,6 +111,20 @@ export async function PATCH(req: Request, context: RouteContext) {
         { status: 400 }
       );
     }
+    // Withholding is offered on closure and nowhere else, so it is refused
+    // elsewhere rather than quietly honoured. The console's way back -- the
+    // status button the report already sits on -- exists only for terminal
+    // statuses; a withheld `reviewing` notice would have no way back at all,
+    // which is precisely the trap the completed stage was rebuilt to avoid.
+    if (!terminal && body.notifyReporter === false) {
+      return NextResponse.json(
+        {
+          error: "Withholding the notice only applies when closing feedback.",
+          code: "FEEDBACK_WITHHOLD_NOT_APPLICABLE",
+        },
+        { status: 400 }
+      );
+    }
     // Optional, but when present it must read as a sentence and stay a
     // summary. The empty string counts as absent.
     if (!isValidFeedbackUserReply(body.userReply)) {
@@ -110,6 +137,9 @@ export async function PATCH(req: Request, context: RouteContext) {
       );
     }
     const userReply = body.userReply?.trim() ? body.userReply.trim() : null;
+    // Announcing is the default; withholding is something the operator asks
+    // for on this call, and the audit entry records which it was.
+    const notifyReporter = body.notifyReporter !== false;
 
     await writeAdminAuditLog({
       session,
@@ -119,7 +149,11 @@ export async function PATCH(req: Request, context: RouteContext) {
       targetId: feedbackId,
       summary: `Started feedback status change to ${body.status}.`,
       // Never the reply text or any address: status and outcome code only.
-      metadata: { status: body.status, outcomeCode: body.outcomeCode || null },
+      metadata: {
+        status: body.status,
+        outcomeCode: body.outcomeCode || null,
+        notifyReporter,
+      },
     });
 
     const stage = lifecycleStageForStatus(body.status);
@@ -144,13 +178,20 @@ export async function PATCH(req: Request, context: RouteContext) {
         },
       });
 
+      // A withheld announcement writes no event at all. The event is not proof
+      // of delivery -- a missing address or a suppression still refuses the
+      // send -- but it does claim this stage's single notification attempt:
+      // (feedbackId, stage) is unique, and only creating it queues mail. Spend
+      // that claim on a mail nobody sent and the reply can never go out. The
+      // closure itself is still on the Feedback row and in the audit log.
+      //
       // Only the FIRST transition into a stage creates its event -- and only
       // that event can queue an email. `skipDuplicates` makes this a no-op
       // instead of an aborted transaction when the row already exists, which
       // is exactly what a refresh, a re-selected status, or a concurrent
       // request should be.
       let eventCreated = false;
-      if (stage) {
+      if (stage && notifyReporter) {
         const created = await tx.feedbackLifecycleEvent.createMany({
           data: [
             {
@@ -211,12 +252,21 @@ export async function PATCH(req: Request, context: RouteContext) {
           status: body.status,
           outcomeCode: body.outcomeCode || null,
           previousStatus: existing.status,
+          notifyReporter,
           userNotificationQueued: Boolean(delivery),
           autoFixCaseClosed,
         },
       });
 
-      return { feedback, delivery, eventCreated, recipient, stage, autoFixCaseClosed };
+      return {
+        feedback,
+        delivery,
+        eventCreated,
+        recipient,
+        stage,
+        notifyReporter,
+        autoFixCaseClosed,
+      };
     });
 
     if (!result) {
@@ -231,6 +281,8 @@ export async function PATCH(req: Request, context: RouteContext) {
       | { queued: true; delivered: boolean };
     if (!result.stage) {
       userNotification = { queued: false, reason: "no_stage" };
+    } else if (!result.notifyReporter) {
+      userNotification = { queued: false, reason: "operator_withheld" };
     } else if (!result.eventCreated) {
       userNotification = { queued: false, reason: "already_notified" };
     } else if (!result.delivery) {
