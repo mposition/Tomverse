@@ -456,5 +456,3 @@ const STATUS: Record<ContinuationSourceExportRefusal["code"], ContinuationSource
 function refusal(code: ContinuationSourceExportRefusal["code"]): ContinuationSourceExportRefusal {
     return { code, status: STATUS[code] } as ContinuationSourceExportRefusal;
 }
-
-
