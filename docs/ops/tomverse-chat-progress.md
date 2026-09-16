@@ -966,15 +966,17 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
 | C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
 | 구현 | 순수 실행 사전등록·effective 가격/output-cap drift·authority 부재 fail-closed·terminal mapping 구현 |
 | 로컬 검증 | env·registry-row 가격/output-cap 격리 테스트 포함 focused 32/32 및 hostile-env 32/32; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
-| 독립 검토·통합 CI | continuation round 1은 approve+재현 가능한 test-design nit 2건으로 수정 대기; 이 final revision은 아직 미검토 |
-| 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
+| 독립 검토·통합 CI | 원 exchange는 round 2 `approve`와 environment pricing finding 1건을 남겨 controller가 `on_hold / revisions_exhausted`로 종결; 새 continuation은 Claude Code Max round 2 `approve`, findings 0, controller `passed`. PR #1466 CI는 success 12개·의도된 skipped 1개, review thread/comment 0개 |
+| 병합·배포·공개 | PR #1466이 develop에 `6df87ee5d7265a2e41bfd772b92e9405708ff6c8`로 병합됨. provider/API 호출 0, runtime adapter 없음, flag default-off이며 production 공개·활성화는 하지 않음 |
 
 ### 이 Cycle 다음 권장 순서
 
-1. 종료 exchange 기록은 바꾸지 말고 이 후속 좁은 diff를 새 내부 검토와 Linux 통합 CI로 검증한다.
-2. provider 호출이 없는 동결 corpus·output parser·중단 규칙의 shadow harness를 만든다.
-3. 별도 과금 승인과 원자적 단계 budget reservation이 준비된 뒤에만 작은 shadow를
-   실행해 의미 보존·주입 저항·비용·지연을 측정한다.
-4. 승인된 관측 뒤 durable writer·제품 adapter를 별도 회차로 연결한다.
-5. 제안형 rollout 증거 뒤 Refiner 결과의 Router 결합을 별도 ROUTE-03 실험으로
-   판단한다.
+1. 비용과 stage slot을 원자적으로 예약하고 requestId 결속·만료·1회 consume을
+   강제하는 durable reservation authority를 구현한다. provider 호출은 하지 않고
+   Claude 독립 검토를 받는다.
+2. provider 호출 없이 동결 corpus·output parser·중단 규칙을 갖춘 shadow harness를
+   구현한다.
+3. 별도 유료 승인 뒤 bounded shadow를 정확히 한 번 실행해 의미 보존·주입 저항·
+   비용·지연을 측정한다.
+4. 승인된 증거가 있을 때만 제안형 UI를 연결하고, 그 뒤 Refiner 결과의 Router 결합과
+   전체 카탈로그 선택 품질을 별도 측정한다.
