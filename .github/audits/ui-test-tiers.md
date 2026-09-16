@@ -43,8 +43,14 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 맞춥니다.
 
 현재 실측: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
-desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 862 test**를
-선택합니다(두 project 합계 1,724). 2026-09-15의 60개 파일 848 test에서 +2 파일 +14 test이며,
+desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**를
+선택합니다(두 project 합계 1,732). 파일 수는 그대로이고 +4는 전부
+`conversation-export.spec.ts`의 기존 `@ui-risk` describe 안입니다 — 대화 컨텍스트
+메뉴의 가로 overflow를 재는 case 4건(원문 available·deleted × 텍스트 배율
+100%·200%)이며, 문자열이 아니라 렌더된 폭을 재므로 번역이 길어질 때도
+같은 판정을 냅니다.
+
+이전 값 862의 산정 기록: 2026-09-15의 60개 파일 848 test에서 +2 파일 +14 test이며,
 그 14 중 **9는 이번에 합류한 두 spec**(`external-conversation-continuation.spec.ts` 6,
 `conversation-export.spec.ts` 3)이고 나머지 5는 그 사이 develop에서 기존 태그 spec이 늘어난 몫입니다
 — 같은 날 태그 없이 develop을 기준으로 다시 세면 60개 파일 851 test입니다.
