@@ -32,7 +32,5 @@
     "tests/promptRefinerReservationCore.test.mjs",
     "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json"
   ],
-  "generatedPaths": [
-    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1"
-  ]
+  "generatedPaths": []
 }
