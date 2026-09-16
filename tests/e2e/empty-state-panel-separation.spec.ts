@@ -267,14 +267,31 @@ test.describe("model selection stays available before the first question", () =>
     await enterConversation(page, { theme: "light", viewport: DESKTOP_VIEWPORT });
     await expect(page.getByTestId("chat-empty-state")).toHaveCount(1);
 
-    // The composer -- and with it the model picker -- lives inside the start
-    // screen, which is what makes banning the hidden panel selector safe.
-    const welcomeHoldsComposer = await page.evaluate(() => {
+    // The composer -- and with it the model picker -- is a control on screen
+    // in front of the inert panels, which is what makes banning the hidden
+    // panel selector safe. It sits in the bottom dock, the place it keeps
+    // after the first question (docs/ui-contracts/chat-starter-catalog.md
+    // section 6): outside the start screen, outside every panel, and on top at
+    // its own centre.
+    const composerPlacement = await page.evaluate(() => {
       const welcome = document.querySelector('[data-testid="chat-empty-state"]');
       const input = document.querySelector('[data-testid="chat-input"]');
-      return Boolean(welcome && input && welcome.contains(input));
+      const textarea = document.querySelector('[data-testid="chat-textarea"]');
+      if (!welcome || !input || !textarea) return null;
+      const box = textarea.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return {
+        insideWelcome: welcome.contains(input),
+        insidePanel: Boolean(input.closest('[data-testid="desktop-model-panel"]')),
+        belowWelcome: box.y >= welcome.getBoundingClientRect().bottom - 1,
+        reachable: Boolean(hit && (hit === textarea || textarea.contains(hit))),
+      };
     });
-    expect(welcomeHoldsComposer, "the start screen carries the composer itself").toBe(true);
+    expect(composerPlacement, "the start screen renders a composer").not.toBeNull();
+    expect(composerPlacement!.insideWelcome, "the composer is in the dock, not the start screen").toBe(false);
+    expect(composerPlacement!.insidePanel, "the composer is never inside an inert panel").toBe(false);
+    expect(composerPlacement!.belowWelcome, "the dock sits below the start screen").toBe(true);
+    expect(composerPlacement!.reachable, "the composer is on top at its own centre").toBe(true);
 
     const dialog = await openModelPickerCatalogue(page);
     const option = dialog

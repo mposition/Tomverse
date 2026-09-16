@@ -127,7 +127,7 @@ export const PRODUCT_ANNOUNCEMENT_PLACEHOLDER: ProductAnnouncementPayload = {
 
 /** Starter copy for Tomverse's first product newsletter. */
 export const ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT: Record<
-  "ko" | "en",
+  "ko" | "en" | "zh",
   ProductAnnouncementPayload
 > = {
   ko: {
@@ -190,4 +190,92 @@ export const ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT: Record<
     ctaLabel: "See the three steps and start",
     ctaUrl: assistantKnowledgeGuideUrl("en"),
   },
+  zh: {
+    subject: "让 AI 按你的方式工作，也读懂你的资料",
+    preheader:
+      "创建私有 AI 助手，并把 Knowledge 文件作为对话的参考资料。",
+    eyebrow: "Tomverse 产品更新",
+    headline: "为你的 AI 助手添加真正需要的 Knowledge",
+    intro:
+      "把你的工作方式和经常使用的资料放进一个私有 AI 助手，不必在每次对话中重复说明。",
+    media: {
+      posterUrl: ASSISTANT_KNOWLEDGE_GUIDE_POSTER_URL,
+      alt: "创建 AI 助手、添加 Knowledge 并在对话中使用的三步指南",
+      badge: "查看三步互动指南",
+    },
+    features: [
+      {
+        title: "1. 创建助手",
+        body: "填写名称和期望的回答方式，创建第一个版本。你可以继续使用账户的默认模型。",
+      },
+      {
+        title: "2. 添加 Knowledge 并保存",
+        body: "上传文件、选择此版本可使用的资料，然后保存指令和模型。相关摘录会成为回答的参考资料。",
+      },
+      {
+        title: "3. 在对话中选择",
+        body: "在对话工具的 AI 助手菜单中选择刚创建的助手，然后开始提问。",
+      },
+    ],
+    closing:
+      "你的助手和 Knowledge 仅限当前账户使用，不会公开展示或与其他用户共享。",
+    ctaLabel: "查看三步指南并开始",
+    ctaUrl: assistantKnowledgeGuideUrl("zh"),
+  },
 };
+
+export type AssistantKnowledgeCampaignLanguage =
+  keyof typeof ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT;
+
+const ASSISTANT_PACKAGE_IMPORT_FEATURE: Record<
+  AssistantKnowledgeCampaignLanguage,
+  MarketingFeature
+> = {
+  ko: {
+    title: "4. 기존 구성이 있다면 가져오기",
+    body: "Agent Skill ZIP 또는 Tomverse 패키지를 검토해 새 어시스턴트로 가져올 수 있습니다. 스크립트와 외부 도구는 자동 실행·연결되지 않습니다.",
+  },
+  en: {
+    title: "4. Import an existing setup",
+    body: "Review an Agent Skill ZIP or Tomverse package and bring it into a new assistant. Scripts do not run, and external tools are not connected automatically.",
+  },
+  zh: {
+    title: "4. 导入现有配置",
+    body: "审阅 Agent Skill ZIP 或 Tomverse 包，并将其导入为新助手。脚本不会运行，外部工具也不会自动连接。",
+  },
+};
+
+/**
+ * The composer only advertises package import when the same rollout flag that
+ * guards the product route is on. A draft created while the flag is off must
+ * not promise a button recipients cannot see.
+ */
+export const assistantKnowledgeCampaignContent = ({
+  includePackageImport,
+}: {
+  includePackageImport: boolean;
+}): Record<
+  AssistantKnowledgeCampaignLanguage,
+  ProductAnnouncementPayload
+> =>
+  Object.fromEntries(
+    (
+      Object.entries(ASSISTANT_KNOWLEDGE_CAMPAIGN_CONTENT) as Array<
+        [
+          AssistantKnowledgeCampaignLanguage,
+          ProductAnnouncementPayload,
+        ]
+      >
+    ).map(([language, payload]) => [
+      language,
+      {
+        ...payload,
+        features: includePackageImport
+          ? [...payload.features, ASSISTANT_PACKAGE_IMPORT_FEATURE[language]]
+          : [...payload.features],
+      },
+    ])
+  ) as Record<
+    AssistantKnowledgeCampaignLanguage,
+    ProductAnnouncementPayload
+  >;

@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-execution-pricing-drift-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-15T23:18:17.580Z",
+  "durationMs": 163593,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 20,
+    "cachedInputTokens": 456510,
+    "outputTokens": 11556,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.1902739999999998,
+    "raw": {
+      "input_tokens": 20,
+      "cache_creation_input_tokens": 66051,
+      "cache_read_input_tokens": 456510,
+      "output_tokens": 11556,
+      "output_tokens_details": {
+        "thinking_tokens": 8092
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 66051,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 1237,
+          "cache_read_input_tokens": 68563,
+          "cache_creation_input_tokens": 2230,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2230
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T23:21:01.230Z",
+  "verdict": {
+    "taskId": "prompt-refiner-execution-pricing-drift-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:8a184a434b8dec53b573221ea824b67cc0d78e3400769f765b443b0dc796e979",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/promptRefinerExecutionContract.test.mjs:203-288 (effective drift tests)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "Only the environment branch of the new effective gate is covered: the higher-precedence DB/admin registry-row branch (`model.inputUsdPerMillionTokens ?? ...` at lib/modelPricing.ts:1669-1699), which AGENTS.md:1336-1337, docs/policy/prompt-refiner-observability.md:15-16 and the progress note at docs/ops/tomverse-chat-progress.md:943 all promise is rejected, is asserted nowhere even though ContractModel was widened specifically to carry those fields.",
+        "reproduction": "Add to the file: `const model = getModel(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId); const pricing = getModelPricingProfile(PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId); assert.ok(promptRefinerExecutionContractProblems({ model: { ...model, inputUsdPerMillionTokens: 99 }, pricing }).includes(\"effective_input_price_mismatch\")); assert.ok(promptRefinerExecutionContractProblems({ model: { ...model, maxOutputTokens: 100 }, pricing }).includes(\"effective_output_cap_below_contract\"));` then run `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs`. It passes today, showing the behaviour is correct but untested; deleting lines 202-227 of lib/promptRefinerExecutionContract.ts with the env tests removed would leave the registry-row path silent."
+      },
+      {
+        "location": "tests/promptRefinerExecutionContract.test.mjs:151,203,236,269,290,320,343",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The `{ concurrency: false }` option added to these process.env-mutating tests is a no-op that suggests a serialization guarantee it does not give, since node:test's `concurrency` configures a test's own subtests (default 1) and these tests have none — the real isolation comes from `withIsolatedPriceEnv` plus the root's default sequential execution.",
+        "reproduction": "Remove `{ concurrency: false }` from all seven tests and run `node --conditions=react-server --import tsx --test tests/promptRefinerExecutionContract.test.mjs`: the suite passes identically, so the option changes no scheduling. Conversely it would still not help if the root were made concurrent, because it only bounds subtests of each leaf."
+      }
+    ],
+    "nextAction": "Both round-0 findings are closed — the resolved output cap below 4,096 now yields `effective_output_cap_below_contract` and refuses with `execution_contract_mismatch` (lib/promptRefinerExecutionContract.ts:222-227), and every gate-reading test now runs inside `withIsolatedPriceEnv`, exercising the previously dead delete branch and asserting exact env restoration; the two nits above are optional and may be recorded as the current version stands."
+  }
+}

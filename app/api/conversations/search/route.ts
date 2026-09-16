@@ -2,21 +2,28 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
-import { conversationSurface } from "@/lib/continuationRoutes";
-import { prisma } from "@/lib/prisma";
 import { authOptions } from "@/lib/auth";
 import {
   apiSecurityResponse,
   consumeApiRateLimit,
 } from "@/lib/apiSecurity";
-import { hasConversationUnlockGrant } from "@/lib/conversationLock";
+import { searchConversationMessages } from "@/lib/conversationSearch";
 import {
-  CONTINUATION_NAMING_BRIDGE_SELECT,
   DISPLAY_TIME_ZONE_HEADER,
-  continuationRowNaming,
   effectiveDisplayTimeZone,
 } from "@/lib/continuationTitleContext";
 
+/**
+ * Message search, native and imported.
+ *
+ * docs/policy/external-conversation-continuation.md §8.2: a search hit is a
+ * way into a conversation too, so every hit says where that conversation
+ * opens (`surface`, decided by `conversationSurface()`), and names it with the
+ * same naming columns the list reads (lib/continuationTitleContext.ts) --
+ * otherwise an unnamed continuation's hit showed the writer's internal
+ * placeholder. The query, authorisation and ranking live in
+ * lib/conversationSearch.ts.
+ */
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -30,77 +37,21 @@ export async function GET(req: Request) {
 
     const q = new URL(req.url).searchParams.get("q")?.trim() || "";
     if (q.length < 2) {
-      return NextResponse.json({ results: [] });
+      return NextResponse.json({ results: [], truncated: false, sourceSearch: "ok", validUntil: null });
     }
     if (q.length > 80) {
       return NextResponse.json({ error: "Search query is too long." }, { status: 400 });
     }
 
-    const messages = await prisma.message.findMany({
-      where: {
-        conversation: { userId: session.user.id },
-        content: { contains: q, mode: "insensitive" },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      select: {
-        id: true,
-        conversationId: true,
-        content: true,
-        role: true,
-        modelId: true,
-        conversation: {
-          select: {
-            title: true,
-            productKey: true,
-            password: true,
-            // docs/policy/external-conversation-continuation.md §8.2: a
-            // search hit is a way into a conversation too, so it has to say
-            // where that conversation opens. And it names the conversation,
-            // so it reads the same naming columns the list reads
-            // (lib/continuationTitleContext.ts) -- otherwise an unnamed
-            // continuation's hit showed the writer's internal placeholder.
-            continuationBridge: { select: CONTINUATION_NAMING_BRIDGE_SELECT },
-          },
-        },
-      },
+    const answer = await searchConversationMessages({
+      request: req,
+      userId: session.user.id,
+      query: q,
+      // Formatting only (lib/continuationTitleContext.ts).
+      displayTimeZone: effectiveDisplayTimeZone(req.headers.get(DISPLAY_TIME_ZONE_HEADER)),
     });
 
-    const authorizedMessages = messages
-      .filter((message) =>
-        hasConversationUnlockGrant(
-          req,
-          session.user.id,
-          message.conversationId,
-          message.conversation.password
-        )
-      )
-      .slice(0, 30);
-    // Formatting only (lib/continuationTitleContext.ts).
-    const displayTimeZone = effectiveDisplayTimeZone(
-      req.headers.get(DISPLAY_TIME_ZONE_HEADER)
-    );
-
-    return NextResponse.json({
-      results: authorizedMessages.map((message) => ({
-        id: message.id,
-        conversationId: message.conversationId,
-        conversationTitle: message.conversation.title,
-        // The page resolves the shown name from these, exactly as it does for
-        // a list row.
-        ...continuationRowNaming(message.conversation.continuationBridge, displayTimeZone),
-        surface: conversationSurface({
-          hasContinuationBridge: message.conversation.continuationBridge !== null,
-          productKey: message.conversation.productKey,
-        }),
-        role: message.role,
-        modelId: message.modelId,
-        snippet:
-          message.content.length > 180
-            ? `${message.content.slice(0, 180)}...`
-            : message.content,
-      })),
-    });
+    return NextResponse.json(answer, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const securityResponse = apiSecurityResponse(error);
     if (securityResponse) return securityResponse;

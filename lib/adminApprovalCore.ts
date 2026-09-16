@@ -33,6 +33,24 @@ export const approvalPermissionForAction = (
   return "ops:write";
 };
 
+/**
+ * How long an `executing` approval counts as in flight.
+ *
+ * Long enough for the slowest approved operation (a Stripe refund, an account
+ * deletion) to finish; a process that dies mid-run leaves a row that stops
+ * blocking the sole path after this. Never shorter than the approval's own
+ * deadline, so claiming cannot shorten a row's life.
+ */
+export const ADMIN_APPROVAL_EXECUTION_LEASE_MS = 60 * 60 * 1000;
+
+export const executionLeaseExpiresAt = (approvalExpiresAt: Date, now: Date) =>
+  new Date(
+    Math.max(
+      approvalExpiresAt.getTime(),
+      now.getTime() + ADMIN_APPROVAL_EXECUTION_LEASE_MS
+    )
+  );
+
 export const approvalTtlMinutes = (value: string | undefined) => {
   const parsed = Number(value || 30);
   if (!Number.isFinite(parsed)) return 30;

@@ -34,6 +34,18 @@
 기능 이름은 그것이 무엇에 쓰이는지 아무도 말할 수 없을 때 남는 것이다. 신규
 사용자가 처음 보는 화면은 그것을 설명할 자리가 아니다.
 
+### 짧은 문구도 약속이다 (2026-09-15 개정)
+
+카드가 화면에 보여 주는 것은 `labelKey`의 짧은 문구("출처 링크 붙은 답 받기")다.
+전체 문장(`outcomeKey`)은 카드의 접근성 설명이고, 포인터를 올리거나 포커스한
+동안에만 카드 아래 한 줄에 보인다. **터치 화면에는 hover가 없으므로 짧은 문구만
+으로 약속이 성립해야 한다.** 그래서 짧은 문구는 전체 문장과 같은 규칙을 따른다
+— 결과를 말하고, 기능 이름을 말하지 않으며, 아래 두 금지를 지킨다.
+
+처음 판(v1)은 카드마다 전체 문장을 13px로 그렸다. 문장이 두세 줄로 접혀 카드
+6장이 1366×768(배율 125%)에서 첫 화면 밖으로 밀렸고, 375px에서는 한 장만
+보였다. 짧은 문구는 그 밀도 문제의 답이며, 짧아졌다고 약속이 약해져서는 안 된다.
+
 문구에 걸리는 두 가지 금지는 저장소가 다른 곳에서 이미 강제하는 것과 같다.
 
 - **우월성 주장 금지** (`best` · `optimal` · `smartest` · `최적` · `최고`
@@ -41,7 +53,8 @@
   비열등성이고, 카드는 그보다 강한 주장을 할 자리가 아니다.
 - **em dash · en dash 금지** (`components/marketing/landingContent.ts` 규칙).
 
-두 규칙 모두 `npm run check:starter-catalog`가 7개 locale 전부에서 검사한다.
+두 규칙 모두 `npm run check:starter-catalog`가 7개 locale 전부에서, `labelKey` ·
+`outcomeKey` · `promptSeedKey`와 짧은 잠금 문구까지 검사한다.
 
 ## 2. available / locked / hidden 은 서로 다른 세 가지다
 
@@ -64,6 +77,13 @@
 
 `locked` 카드는 **클릭한 뒤에 거절하지 않는다.** 요구사항은 카드 위에, 문장보다
 먼저 있다.
+
+잠금 배지는 짧은 문구(`lockedPlanShort` "Pro 필요", `lockedSignInShort` "로그인
+필요")를 보이고, 전체 문장(`lockedPlan`, `lockedSignIn`)을 카드의 접근성 설명에
+넣는다. "Pro" 한 단어만 쓰지 않는다 — 판매 배지와 요구사항이 구분되지 않는다.
+**잠긴 카드를 흐리게 그리지 않는다.** 글자 색·테두리는 실행 가능한 카드와 같고,
+다른 것은 배지뿐이다(`docs/ui-contracts/image-generation-workspace.md`의 "not
+quieter").
 
 ### fail-closed
 
@@ -233,15 +253,52 @@ capability id 목록뿐이고, 키·backend 이름·예산은 건너가지 않�
 
 ## 6. 레이아웃 불변식
 
-- **갤러리는 textarea의 가로 행을 쓰지 않는다.** composer 계약
-  (`docs/ui-contracts/mobile-chat-composer.md`)이 textarea에 전용 전폭 행을
-  주므로, 갤러리는 그 아래 normal flow의 자기 블록이다. `absolute` ·
-  negative margin · `transform` · 공유 grid cell을 쓰지 않는다.
-- **최근 대화 제목을 카드에 출력하지 않는다.** `ChatWelcomeScreen`이 모바일에서
-  제목 대신 개수만 내보내는 이유(공유·대여 단말에서의 노출)가 이 표면에도
-  그대로 적용된다. 카드 문구는 전부 locale 문자열이고 사용자 콘텐츠가 아니다.
+2026-09-15 개정. 이전 판은 composer를 새 대화 화면 안에 두고 갤러리를 그 아래에
+두었다. 지금은 아래 구조다.
+
+```
+헤더                                   고정
+빈 공간                                 ┐
+인사말 · (모바일) 최근 대화 N개 버튼       │ 새 대화 영역: 한 묶음, 세로 가운데
+시작 칩 / 타일 · 미리보기 줄               │
+빈 공간                                 ┘
+composer · AI 고지 · 동의 안내            하단 dock (대화 중과 같은 자리)
+```
+
+- **composer는 모든 상태에서 셸의 하단 dock에 있다.** 새 대화도 대화 중과 같은
+  자리이고 같은 `variant="bar"`다. 그래서 첫 메시지를 보내도 composer의 위치와
+  모양이 바뀌지 않는다. 새 대화 화면(`ChatWelcomeScreen`)은 composer slot을 갖지
+  않는다.
+- **갤러리는 textarea의 가로 행을 쓰지 않는다.** 갤러리는 dock 위 새 대화 영역의
+  자기 블록이고, composer는 그 영역 밖이다. `absolute` · negative margin ·
+  `transform` · 공유 grid cell을 쓰지 않는다.
+- **세로 가운데는 auto margin이다.** 묶음에 `my-auto`, 그 부모는 `min-h-full`
+  이다. `justify-content: center`를 고정 높이 상자에 쓰지 않는다 — 내용이 넘치면
+  위쪽이 스크롤로도 닿지 않는 곳에 잘린다. auto margin은 공간이 모자라면 0이 되어
+  묶음이 위에서 시작하고 아래로 스크롤된다. 초기 스크롤 위치는 맨 위다.
+- **새 대화 영역의 스크롤은 composer로 가는 길이 아니다.** 모바일에서 이 영역은
+  대화 중의 답변 목록처럼 `min-h-0 flex-1`이며 넘치면 자기 안에서 스크롤한다.
+  composer의 조상이 아니므로 "composer까지 스크롤 소유자는 최대 하나"는 셸 하나로
+  유지된다. 배너·키보드가 이 영역을 줄여도 composer를 함께 가져가지 않는다.
+  데스크톱은 패널 위 `inset-0` overlay가 같은 역할이다.
+- **모양은 셸이 아니라 갤러리 자신의 폭이 정한다.** `@container/starters`의
+  `rem` 기준 container query로 30rem 이상은 줄바꿈 칩, 그 아래는 2열 타일,
+  18rem 아래는 1열이다. `ChatPageClient`가 한 요소를 두 셸에 넘기므로 셸 prop이나
+  `layout === "mobile"`로 분기하지 않는다. 텍스트 배율이 커지면 같은 규칙으로 좁은
+  모양이 된다.
+- **미리보기 줄은 hover·focus에 반응하는 보조 표시다.** 기본은 `hint`이고, 카드에
+  포인터를 올리거나 포커스하면 그 카드의 전체 문장으로 바뀐다. 같은 내용이 카드의
+  접근성 설명에 있으므로 `aria-hidden`이다. 클릭 뒤 "선택됨" 표시나 live 알림을
+  두지 않는다 — 포인터 환경에서는 입력란으로 포커스가 옮겨지고(768px 이상, coarse
+  pointer 아님), 터치 환경에서는 키보드를 억지로 열지 않는 기존 정책을 따른다.
+- **최근 대화 제목을 출력하지 않는다.** 모바일은 제목 대신 개수만 말하는 버튼
+  하나로 drawer를 연다(공유·대여 단말에서의 노출). **데스크톱은 새 대화 화면에
+  최근 대화를 두지 않는다** — 옆 사이드바가 같은 목록이다. 카드 문구는 전부 locale
+  문자열이고 사용자 콘텐츠가 아니다.
 - **터치 타깃 44px**(`min-h-11`), 320px 폭과 200% 텍스트 배율에서 가로 overflow
-  없음, 문장은 잘리지 않고 줄바꿈한다.
+  없음, 문구는 칩 안에서도 잘리지 않고 줄바꿈한다(`nowrap`·`truncate` 금지).
+- **글자 크기는 타이포그래피 계약을 따른다.** 카드 문구 14px, 잠금 배지 12px,
+  미리보기 줄 13px.
 - **accent는 역할 token만.** 기능별 카드는 그 기능이 이미 가진 역할을 쓰고
   (이미지 = `accent-image-*`, web search = `accent-web-search-*`, 생성 파일 =
   `accent-generated-artifact-*`), 역할이 없는 카드는 중립(blue/zinc)을 쓴다.
@@ -254,7 +311,8 @@ capability id 목록뿐이고, 키·backend 이름·예산은 건너가지 않�
 **세 가지뿐이다.**
 
 1. `lib/chatStarterCatalog.ts`의 `CHAT_STARTER_CATALOG`에 행 하나.
-2. `outcomeKey`와 `seed.promptSeedKey`를 **7개 locale 전부**에.
+2. `labelKey` · `outcomeKey` · `seed.promptSeedKey` 세 문자열을 **7개 locale
+   전부**에. 짧은 문구는 좁은 타일 한 칸에서 두 줄 안에 드는 길이로 쓴다.
 3. `evidence`에 그 약속을 실제로 수행하는 모듈의 경로.
 
 그 밖에는 없다. 아이콘은 `accentRole`과 `taskProfile.kind`에서 파생되므로 따로
@@ -291,7 +349,8 @@ capability id 목록뿐이고, 키·backend 이름·예산은 건너가지 않�
 2. `lib/chatStarterCatalog.ts` 코드에 `"feature.…"` 리터럴이 없는가.
 3. 모든 capability가 실재하는 모듈의 실재하는 export로 해석되는가.
 4. 모든 `evidence` 경로가 실재하는 파일인가.
-5. 모든 `outcomeKey` · `promptSeedKey`가 7개 locale 전부에 있는가.
+5. 모든 `labelKey` · `outcomeKey` · `promptSeedKey`와 갤러리 chrome 문구(짧은
+   잠금 문구 포함)가 7개 locale 전부에 있는가.
 6. 문구에 우월성 주장과 em dash · en dash가 없는가.
 7. 화면 상한이 4~6 안에 있는가.
 

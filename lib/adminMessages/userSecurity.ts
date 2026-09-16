@@ -60,7 +60,7 @@ export const adminUserSecurityMessages = defineAdminMessages({
       restrictAi: "Restrict AI usage",
       revokeSessions: "Revoke all sessions",
     },
-    unlinkLabel: "Unlink OAuth (owner + two-person approval):",
+    unlinkLabel: "Unlink OAuth (owner + two-person approval; alone when only one administrator can approve it):",
     unlink: (provider: string) => `Unlink ${provider}`,
     reauthenticate: "Sign in again to continue",
     footer:
@@ -118,7 +118,7 @@ export const adminUserSecurityMessages = defineAdminMessages({
       restrictAi: "AI 사용 제한",
       revokeSessions: "모든 세션 폐기",
     },
-    unlinkLabel: "OAuth 연결 해제 (owner + 2인 승인):",
+    unlinkLabel: "OAuth 연결 해제 (owner + 2인 승인, 승인할 수 있는 관리자가 1명뿐이면 단독):",
     unlink: (provider: string) => `${provider} 연결 해제`,
     reauthenticate: "계속하려면 다시 로그인",
     footer:

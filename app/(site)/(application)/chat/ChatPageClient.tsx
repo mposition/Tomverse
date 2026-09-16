@@ -7,6 +7,7 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
 } from "react";
 import { AlertCircle, ArrowRight, CheckCircle2, Info, Loader2, Sparkles, X } from "lucide-react";
 import { useModalDialog } from "@/components/useModalDialog";
@@ -95,6 +96,13 @@ import {
 } from "@/lib/continuationTitleContext";
 import { continuationTitleCopy } from "@/components/chat/continuationTitleCopy";
 import { useContinuationSource } from "@/components/continuations/useContinuationSource";
+import {
+  clearContinuationFocus,
+  continuationFocusSnapshot,
+  noteContinuationFocusConversation,
+  serverContinuationFocusSnapshot,
+  subscribeContinuationFocus,
+} from "@/lib/continuationFocusHandoff";
 import { continuationTimelineMessages } from "@/lib/continuationTimelineMessages";
 import { CHAT_WORKSPACE_PATH, LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
 import { chatRuntimeKey, isChatRuntimeStreaming } from "@/lib/chatStreamRuntime";
@@ -246,6 +254,22 @@ import {
 // Defined in lib/guestChatInitialModels so the first-render guest model
 // decision reads the same key this file writes.
 const ACTIVE_CHAT_STORAGE_KEY = GUEST_ACTIVE_CHAT_STORAGE_KEY;
+
+/**
+ * Where the draft and message-receipt recovery notices float: under the
+ * header, never at the bottom of the screen.
+ *
+ * They used to sit at `bottom-4`, which is where the composer's dock is. That
+ * covered the composer's action row -- the microphone and send included --
+ * whenever a conversation had answers, and since the composer stays in the
+ * dock on a new chat too (docs/ui-contracts/chat-starter-catalog.md section 6)
+ * it would have covered it on every screen. The mobile composer contract
+ * forbids anything floating over the composer; a notice that needs a decision
+ * can cover conversation text for a moment instead. The height cap keeps a
+ * 200% text notice from running off the screen.
+ */
+const RECOVERY_NOTICE_PLACEMENT =
+  "fixed inset-x-3 top-[calc(4.5rem+env(safe-area-inset-top))] max-h-[calc(100dvh-6rem)] overflow-y-auto";
 
 // Private Mode has been removed as a product concept. This key is kept only
 // so a one-time effect below can clear it out of any browser that still has
@@ -3984,7 +4008,13 @@ export function ChatPageClient({
         // A deleted conversation can never be PATCHed again -- drop any
         // queued or confirmed sync state it still holds.
         modelSettingsSyncQueueRef.current.reset(id);
-        if (currentChatId === id) {
+        // Gone from the list now, not when the refetch lands: anything keyed
+        // on the list -- a search answer that quotes this conversation among
+        // them -- must not outlive the delete by a network round trip.
+        setConversations((prev) => prev.filter((conversation) => conversation.id !== id));
+        // The ref, not the closure: the confirmation closes before the request,
+        // so the reader may have opened another conversation while it ran.
+        if (currentChatIdRef.current === id) {
           handleNewChat();
         }
         fetchConversations();
@@ -7212,8 +7242,54 @@ export function ChatPageClient({
     model. `null` for anything that is not a continuation, which is what stops
     the hook from firing at all.
   */
+  /*
+    A search hit's target message (lib/continuationFocusHandoff.ts), applied
+    only while the conversation it names is the one on screen. Cleared as soon
+    as a different conversation is shown, so returning to this one later opens
+    it at its end rather than at an old hit.
+  */
+  const pendingContinuationFocus = useSyncExternalStore(
+    subscribeContinuationFocus,
+    continuationFocusSnapshot,
+    serverContinuationFocusSnapshot
+  );
+  useEffect(() => {
+    noteContinuationFocusConversation(shellConversationId ?? null);
+  }, [shellConversationId]);
+  const continuationFocusRequest = useMemo(
+    () =>
+      pendingContinuationFocus &&
+      hasConversationPrelude &&
+      pendingContinuationFocus.conversationId === shellConversationId
+        ? {
+            externalMessageId: pendingContinuationFocus.externalMessageId,
+            nonce: pendingContinuationFocus.nonce,
+          }
+        : null,
+    [hasConversationPrelude, pendingContinuationFocus, shellConversationId]
+  );
+  const settleSearchHitFocus = useCallback(
+    (outcome: { reason: string }) => {
+      if (outcome.reason === "found") return;
+      // Nothing to scroll to, so the request is spent now. A found one is
+      // spent when the list has actually moved to it (below).
+      clearContinuationFocus();
+      // Said, never silently swallowed: the reader clicked a result and is
+      // owed a reason when the conversation opens somewhere else.
+      showToast(t("continuation.searchHitUnavailable"), "info");
+    },
+    [showToast, t]
+  );
+  // Consumed once applied, so the next time this conversation opens -- from
+  // the list, after a new chat, in a remounted panel -- it opens at its end
+  // rather than jumping back to an old hit.
+  const consumeAppliedSearchHitFocus = useCallback((nonce: number) => {
+    if (continuationFocusSnapshot()?.nonce === nonce) clearContinuationFocus();
+  }, []);
   const continuationSource = useContinuationSource(
-    hasConversationPrelude ? shellConversationId : null
+    hasConversationPrelude ? shellConversationId : null,
+    continuationFocusRequest,
+    settleSearchHitFocus
   );
   const importedMessages = useMemo(
     () =>
@@ -7235,6 +7311,21 @@ export function ChatPageClient({
             olderCount: continuationSource.olderCount,
             onLoadOlder: continuationSource.loadMore,
             loadingOlder: continuationSource.loadingMore,
+            newerCount: continuationSource.newerCount,
+            onLoadNewer: continuationSource.loadNewer,
+            loadingNewer: continuationSource.loadingNewer,
+            // Only while the request that produced the outcome is still live:
+            // a settled outcome from an earlier visit must not move a panel
+            // that mounts later.
+            focusRequest:
+              continuationSource.focusOutcome?.messageId &&
+              continuationFocusRequest?.nonce === continuationSource.focusOutcome.nonce
+                ? {
+                    messageId: continuationSource.focusOutcome.messageId,
+                    nonce: continuationSource.focusOutcome.nonce,
+                  }
+                : null,
+            onFocusApplied: consumeAppliedSearchHitFocus,
           }
         : undefined,
     [
@@ -7242,6 +7333,12 @@ export function ChatPageClient({
       continuationSource.olderCount,
       continuationSource.loadMore,
       continuationSource.loadingMore,
+      continuationSource.newerCount,
+      continuationSource.loadNewer,
+      continuationSource.loadingNewer,
+      continuationSource.focusOutcome,
+      continuationFocusRequest,
+      consumeAppliedSearchHitFocus,
     ]
   );
 
@@ -7555,7 +7652,7 @@ export function ChatPageClient({
         role="alert"
         aria-labelledby="message-receipt-recovery-title"
         data-testid="message-receipt-recovery-dialog"
-        className="fixed inset-x-3 bottom-4 z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[76] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900`}
       >
         <h2
           id="message-receipt-recovery-title"
@@ -7581,7 +7678,7 @@ export function ChatPageClient({
         role="alert"
         aria-labelledby="draft-conflict-title"
         data-testid="draft-conflict-dialog"
-        className="fixed inset-x-3 bottom-4 z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[75] mx-auto max-w-lg rounded-2xl border border-amber-300 bg-white p-4 shadow-2xl dark:border-amber-800 dark:bg-zinc-900`}
       >
         <h2 id="draft-conflict-title" className="text-sm font-semibold text-zinc-950 dark:text-white">
           {t("chat.draftConflictTitle")}
@@ -7613,7 +7710,7 @@ export function ChatPageClient({
       <section
         role="alert"
         data-testid="draft-sync-failed"
-        className="fixed inset-x-3 bottom-4 z-[74] mx-auto max-w-lg rounded-2xl border border-rose-300 bg-white p-4 shadow-2xl dark:border-rose-900 dark:bg-zinc-900"
+        className={`${RECOVERY_NOTICE_PLACEMENT} z-[74] mx-auto max-w-lg rounded-2xl border border-rose-300 bg-white p-4 shadow-2xl dark:border-rose-900 dark:bg-zinc-900`}
       >
         <h2 className="text-sm font-semibold text-zinc-950 dark:text-white">
           {t("chat.draftSyncFailedTitle")}
@@ -7632,7 +7729,11 @@ export function ChatPageClient({
       </section>
     )}
     {showGuestSignInPrompt && isGuestMode && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"
@@ -7712,7 +7813,11 @@ export function ChatPageClient({
       </div>
     )}
     {upgradeModelPrompt && accountUsage && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"

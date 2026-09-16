@@ -12,7 +12,11 @@ import {
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { hasAdminPermission } from "@/lib/adminAuth";
-import { isEmailCampaignsEnabled } from "@/lib/appSettings";
+import {
+  isAssistantPackageImportEnabled,
+  isEmailCampaignsEnabled,
+} from "@/lib/appSettings";
+import { assistantKnowledgeCampaignContent } from "@/lib/productAnnouncementEmail";
 
 const TABS = adminNavItemTabs("email-campaigns");
 
@@ -39,6 +43,10 @@ export default async function AdminEmailCampaignsPage({
   const query = await searchParams;
   const tab = resolveAdminTab(TABS, query.tab);
   const session = await getServerSession(authOptions);
+  const [campaignsEnabled, packageImportAvailable] = await Promise.all([
+    isEmailCampaignsEnabled(),
+    isAssistantPackageImportEnabled(),
+  ]);
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -58,7 +66,10 @@ export default async function AdminEmailCampaignsPage({
         <>
           <AdminCampaignComposer
             mayWrite={Boolean(session && hasAdminPermission(session, "ops:write"))}
-            campaignsEnabled={await isEmailCampaignsEnabled()}
+            campaignsEnabled={campaignsEnabled}
+            starterContent={assistantKnowledgeCampaignContent({
+              includePackageImport: packageImportAvailable,
+            })}
           />
           <AdminEmailCampaignsPanel
             rows={await listAdminCampaigns({ limit: LIMIT })}

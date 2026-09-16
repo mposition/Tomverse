@@ -5,7 +5,7 @@ import {
 } from "@/lib/assistantKnowledgeGuide";
 import { prepareGuestPage } from "./support/app-fixtures";
 
-type GuideLanguage = "en" | "ko";
+type GuideLanguage = "en" | "ko" | "zh";
 
 async function openGuide(page: Page, language: GuideLanguage) {
   await prepareGuestPage(page, language);
@@ -43,7 +43,7 @@ test("the guide serves the reviewed tutorial and matches captions to the page la
     "The checked-in H.264 export only needs one browser playback contract."
   );
 
-  for (const language of ["ko", "en"] as const) {
+  for (const language of ["ko", "en", "zh"] as const) {
     const video = await openGuide(page, language);
     await expect(video).toHaveAttribute(
       "poster",
@@ -86,16 +86,10 @@ test("the guide serves the reviewed tutorial and matches captions to the page la
       };
     });
 
-    expect(state.currentSrc).toMatch(/assistant-knowledge\.mp4$/);
-    expect(state.currentTime).toBeGreaterThan(0);
-    expect(state.tracks).toEqual(
-      expect.arrayContaining([
-        { language, mode: "showing" },
-        {
-          language: language === "ko" ? "en" : "ko",
-          mode: "disabled",
-        },
-      ])
+    expect(state.currentSrc).toMatch(
+      new RegExp(`assistant-knowledge\\.${language}\\.mp4$`)
     );
+    expect(state.currentTime).toBeGreaterThan(0);
+    expect(state.tracks).toEqual([{ language, mode: "showing" }]);
   }
 });

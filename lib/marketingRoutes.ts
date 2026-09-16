@@ -5,7 +5,6 @@ const exactMarketingPaths = new Set([
   "/ai-for-file-analysis",
   "/chatgpt-vs-claude",
   "/compare-ai-models",
-  "/guides/assistant-knowledge",
   "/faq",
   "/models",
   "/pricing",
