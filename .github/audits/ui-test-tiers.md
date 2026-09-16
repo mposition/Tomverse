@@ -116,10 +116,19 @@ spec이 더 있어 그 기준값과 직접 더할 수 없습니다. 재실측은
 | `email-notification-settings.spec.ts` |
 
 | `unsubscribe-link.spec.ts` |
+| `external-conversation-continuation.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준
 파일 수는 2026-08-31 현재 53개입니다.
+
+`external-conversation-continuation.spec.ts`가 2026-09-16에 합류했습니다
+(project당 +4, 검색 describe만 태그). 이어가기 화면에서 원문 검색 결과를 눌렀을 때
+그 메시지로 실제로 이동하는지, 잠금 grant가 만료된 발췌가 화면에서 사라지는지는
+정적 검사가 답할 수 없습니다. 후자는 권한 없는 본문 노출이라 회수가 성립하지 않고,
+전자는 결과가 대화만 열고 위치를 잃으면 기능이 조용히 반쪽이 됩니다
+(docs/policy/external-conversation-continuation.md §8.2.1). 나머지 describe는
+태그 없이 전체 CI에 남습니다.
 
 `conversation-draft-identity.spec.ts`가 2026-09-02에 합류해 54개입니다.
 같은 방식으로 막혔고, 같은 이유로 이 tier에 있습니다 — 초안이 신원별로

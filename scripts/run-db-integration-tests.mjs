@@ -349,6 +349,10 @@ run(
     // database can show that removing the source leaves the conversation and
     // its messages standing while the bridge becomes a tombstone.
     "tests/integration/external-conversation-continuation.db.test.ts",
+    // Message search over native turns and linked originals: that a locked
+    // match cannot take an authorised hit's candidate slot is a property of
+    // the SQL and the snapshot it runs in, not of the ranking function.
+    "tests/integration/conversation-search.db.test.ts",
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",
