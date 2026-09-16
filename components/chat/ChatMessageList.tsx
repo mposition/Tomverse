@@ -587,9 +587,15 @@ export function ChatMessageList({
         // as wheel/trackpad/touch/scrollbar input already does via the
         // browser's own scroll handling -- no extra key handling needed.
         tabIndex={0}
-        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-6"
+        // Vertical padding and the gap below are the transcript's structural
+        // spacing, not its reading rhythm: the text size and line height are
+        // untouched. Measured at 375px, a one-line exchange spent 14px between
+        // messages and 24px at the ends while the message itself was 36px, so
+        // this is where a screen buys another turn without anything getting
+        // harder to read.
+        className="min-h-0 flex-1 overflow-y-auto px-2.5 py-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500 md:px-6 md:py-4"
       >
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-3.5 pb-3 md:gap-5 md:pb-4">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-2.5 pb-3 md:gap-3.5 md:pb-4">
           {importedTranscript && (
             /*
               Where this conversation came from, as one line at the top of it.
@@ -931,28 +937,34 @@ export function ChatMessageList({
                   </div>
                 )}
 
-                {isUser && (
+                {/*
+                  An imported question keeps its header, because it says
+                  something the bubble cannot: this was asked somewhere else.
+                  Naming it "You" would be true of the person and false of the
+                  conversation -- it was not sent in this Tomverse conversation
+                  and this turn cannot edit or resend it.
+
+                  An ordinary question does not. The bubble is on the right and
+                  it is the product's own colour; "나" above every one of them
+                  repeated that at 30px a message -- a name row of 24px and the
+                  6px under it -- which on a 375px screen is nearly as tall as
+                  the one-line message it introduces. The name stays in the
+                  accessibility tree, where the right-hand edge says nothing.
+                */}
+                {isUser && imported && (
                   <div className="mb-1.5 mr-1 flex select-none items-center gap-2">
                     <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">
-                      {/*
-                        An imported question was asked somewhere else. Naming
-                        it "You" would be true of the person and false of the
-                        conversation: it was not sent in this Tomverse
-                        conversation, and it is not something this turn can
-                        edit or resend.
-                      */}
-                      {imported
-                        ? t("continuation.importedYou").replaceAll(
-                            "{provider}",
-                            providerLabel(imported.provider)
-                          )
-                        : t("chat.you")}
+                      {t("continuation.importedYou").replaceAll(
+                        "{provider}",
+                        providerLabel(imported.provider)
+                      )}
                     </span>
                     <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-white">
                       <UserRound className="h-3.5 w-3.5" />
                     </span>
                   </div>
                 )}
+                {isUser && !imported && <span className="sr-only">{t("chat.you")}</span>}
 
                 <div
                   role={!isUser && msg.status === "error" ? "alert" : undefined}
