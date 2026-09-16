@@ -173,10 +173,11 @@ test("the file carries the stored original, the divider and the conversation's o
     const divider = text.indexOf("===== Continued in Tomverse =====");
     const native = text.indexOf("tomverse answer one");
     assert.ok(first > 0 && divider > first && native > divider);
-    // The provider label the product renders, not a shortened one.
-    assert.match(
-        text,
-        new RegExp(`\\[Imported · ${continuationProviderDisplay("chatgpt")} · gpt-4-turbo\\]`)
+    // The provider label the product renders, not a shortened one. Compared as
+    // a string: the label itself contains parentheses.
+    assert.ok(
+        text.includes(`[Imported · ${continuationProviderDisplay("chatgpt")} · gpt-4-turbo]`),
+        text.slice(0, 400)
     );
     assert.match(text, /shortened when it was imported/);
     assert.match(text, /===== End of export \(2 imported, 2 Tomverse messages\) =====/);
@@ -324,7 +325,7 @@ test("the Tomverse half is read past one page too", async () => {
     assert.ok(built.ok);
     assert.equal(built.document.nativeMessageCount, nativeContents.length);
     const text = textOf(built.document.bytes);
-    assert.match(text, new RegExp(`tomverse turn ${nativeContents.length - 1}`));
+    assert.ok(text.includes(`tomverse turn ${nativeContents.length - 1}`));
 });
 
 test("the file carries the snapshot this bridge names, not another the account owns", async () => {
