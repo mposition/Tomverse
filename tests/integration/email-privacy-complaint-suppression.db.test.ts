@@ -59,7 +59,7 @@ const subscriber = async (email = address()) => {
 
 /** The route's intake, without the route. */
 const intake = async (input: { userId: string | null; email: string }) => {
-  const prepared = await preparePrivacyIntake();
+  const prepared = await preparePrivacyIntake({ userId: input.userId });
   return prisma.$transaction(
     async (tx) => {
       await lockPrivacyIntake(tx, { userId: input.userId });

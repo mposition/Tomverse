@@ -7,8 +7,8 @@ import {
 } from "@/lib/emailPreferenceCore";
 import {
   applyPreferenceChange,
-  ensureDefaultPreferences,
   lockUserEmail,
+  seedPreferencesIfAccountExists,
 } from "@/lib/emailPreferences";
 import {
   normalizeSuppressionAddress,
@@ -53,6 +53,9 @@ export async function recordProviderComplaint(input: {
   const purpose = complaintOptOutPurpose(input.delivery?.purpose ?? null);
   const delivery = input.delivery;
   const userId = purpose && delivery?.userId ? delivery.userId : null;
+  // Before the transaction; a deleted account seeds nothing and is found
+  // unattributable under the lock below.
+  if (userId) await seedPreferencesIfAccountExists(userId);
 
   return prisma.$transaction(
     async (tx) => {
@@ -98,9 +101,6 @@ export async function recordProviderComplaint(input: {
       if (purposeStop.duplicate) return { purpose, attributed: attributable, duplicate: true };
 
       if (attributable && userId) {
-        // Created here, under the User row lock that established the account
-        // still exists, so a deleted account cannot fail the transaction.
-        await ensureDefaultPreferences(userId, tx);
         // The withdrawal names the conditions the message went out under -- its
         // policy version and jurisdiction -- because the complaint is a reaction
         // to that message, not to whatever applies today.

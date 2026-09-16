@@ -113,7 +113,7 @@ export async function POST(req: Request) {
     const now = new Date();
     // A deletion request stops marketing in the transaction that records it
     // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
-    const prepared = deletion ? await preparePrivacyIntake() : null;
+    const prepared = deletion ? await preparePrivacyIntake({ userId }) : null;
     const privacyRequest = await prisma.$transaction(
       async (tx) => {
         // The account's address as locked, not as read before the transaction:

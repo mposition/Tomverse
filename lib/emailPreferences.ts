@@ -115,6 +115,23 @@ export async function ensureDefaultPreferences(
   });
 }
 
+/**
+ * `ensureDefaultPreferences()` for a writer that is about to lock the account
+ * and may find it deleted. Runs on its own, before that transaction: seeding
+ * under the User row lock would take the lock and then the preference keys,
+ * the reverse of every unlocked seeding path, and two such transactions can
+ * deadlock. An account that no longer exists has nothing to seed, and the
+ * writer finds that out under its lock.
+ */
+export async function seedPreferencesIfAccountExists(userId: string) {
+  try {
+    await ensureDefaultPreferences(userId);
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code !== "P2003") throw error;
+  }
+}
+
 export type PreferenceState = {
   purpose: EmailPurpose;
   enabled: boolean;

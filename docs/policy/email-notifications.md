@@ -43,8 +43,9 @@ privacy request 표와 "complaint는 목적 opt-out도 함께"를 구현합니�
    `provider_complaint`를 더합니다(확장만).
 6. **재전달된 complaint는 preference를 다시 바꾸지 않습니다.** purpose 원인을 먼저 쓰고,
    그 키가 이미 있으면(같은 사건) 철회를 건너뜁니다 — 사이에 다시 켠 preference를 되돌리지
-   않기 위해서입니다. 계정 확인과 기본 preference 행 생성은 User 행 잠금 안에서 하므로,
-   삭제된 계정을 가리키는 complaint도 두 원인은 기록됩니다.
+   않기 위해서입니다. 기본 preference 행은 transaction 전에 만들고(계정이 없으면 건너뜀),
+   계정 귀속은 User 행 잠금 안에서 판정하므로 삭제된 계정을 가리키는 complaint도 두 원인은
+   기록됩니다. 잠금 안에서 행을 만들면 잠금 없는 기존 생성 경로와 순서가 반대라 교착할 수 있습니다.
 7. **판정 기준이 `entry`여도 preference 켜기는 `privacy_request` 원인이 있으면 거절합니다**
    (purpose·marketing 분류·전역). 삭제 접수의 분류 원인은 entry 판정에 보이지 않으므로,
    켜기가 purpose entry를 지우면 발송이 다시 열리기 때문입니다. 그 밖의 이유는 v16과 같습니다.

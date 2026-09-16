@@ -5,8 +5,8 @@ import type { Prisma } from "@prisma/client";
 import { EMAIL_PURPOSES, recordsConsent } from "@/lib/emailPreferenceCore";
 import {
   applyPreferenceChange,
-  ensureDefaultPreferences,
   lockUserEmail,
+  seedPreferencesIfAccountExists,
 } from "@/lib/emailPreferences";
 import { normalizeSuppressionAddress, recordSuppression } from "@/lib/emailSuppression";
 import {
@@ -28,11 +28,12 @@ import { ensureBootstrapPolicyVersion } from "@/lib/emailTemplateRegistry";
  */
 
 /**
- * The policy version a withdrawal names, resolved before the intake
- * transaction opens: it may create a row, and nothing may start before the
- * fence.
+ * The work that cannot run inside the intake transaction: the default
+ * preference rows (see `seedPreferencesIfAccountExists()`) and the policy
+ * version a withdrawal names.
  */
-export async function preparePrivacyIntake() {
+export async function preparePrivacyIntake(input: { userId: string | null }) {
+  if (input.userId) await seedPreferencesIfAccountExists(input.userId);
   return { policyVersionId: await ensureBootstrapPolicyVersion() };
 }
 
@@ -74,7 +75,6 @@ export async function recordPrivacyIntake(
   // withdrawal below also records against and only one address is locked.
   const emailAddress = normalizeSuppressionAddress(userEmail ?? input.emailAddress);
   await lockSuppressionAddress(tx, emailAddress);
-  if (input.userId && userEmail) await ensureDefaultPreferences(input.userId, tx);
 
   await recordSuppression(
     {
