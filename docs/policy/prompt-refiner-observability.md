@@ -1,11 +1,11 @@
 # Prompt Refiner receipt와 관측 계약
 
-상태: **provider-independent 데이터·실행 사전등록 계약 구현, 제품 수집 미연결**.
+상태: **provider-independent 데이터·실행 사전등록·예약 authority 구현, 제품 수집 미연결**.
 
 이 문서는 Prompt Refiner 한 요청에서 무엇을 관측하고 어떤 분모로 읽는지를
 정한다. 현재 구현은 strict schema, 결속 검사, 순수 집계와 오프라인 report까지다.
-provider adapter, API route, Prisma table, browser event writer, 비용 예약·정산,
-Router 결합과 rollout 활성화는 없다. `lib/promptRefinerExecutionContract.ts`는 정확한
+provider adapter, API route, browser event writer, 제품 caller, Router 결합과 rollout
+활성화는 없다. `lib/promptRefinerExecutionContract.ts`는 정확한
 model/catalog/pricing identity와 4,096 output tokens, 15초 timeout, retry 0,
 요청당 24,916 microUSD, 최대 100 dispatch의 단계 2,491,600 microUSD를 동결하지만
 그 자체로 실행을 승인하거나 비용을 예약하지 않는다. 정적 pricing profile만
@@ -25,13 +25,44 @@ cached-input multiplier는 prompt caching이 disabled라 이 계약의 비용을
 generic `reservationOutputTokens`는 Refiner authority가 사용할 예약량이 아니다. 미래
 authority는 이 계약의 4,096-token worst case를 예약해야 하며 generic reservation
 cap으로 낮춰 잡을 수 없다.
-현재는 원자 예약 authority가 없으므로 모든 다른 조건이 맞아도
-`reservation_authority_unavailable`로 dispatch 전에 거절한다. caller가 전달한 lease나
-atomic 여부 boolean을 성공 증거로 받는 입력과 `admitted: true` 경로는 없다. 후속
-authority가 requestId 결속·만료·1회 consume·비용과 stage slot의 원자 예약을 실제로
-구현한 뒤에만 새 계약 버전으로 성공 admission을 추가할 수 있다. 그 authority는
-runtime model row를 이 gate에 전달하고 원자 예약·dispatch 전에 같은 critical path에서
-통과시켜야 한다. 정적 profile 검사 결과를 과거에 캐시한 값으로 대신할 수 없다.
+server-only 원자 예약 authority는 별도 구현됐지만 stage seed/admin writer와 제품
+caller가 없고 기존 v1 admission은 의도적으로 그대로다. 따라서 모든 다른 조건이
+맞아도 v1은 `reservation_authority_unavailable`로 dispatch 전에 거절하며
+`admitted: true` 경로가 없다. 이 authority는 DB transaction 안에서 고정 stage row,
+model registry table `SHARE`, reservation row 순서로 잠근다. 따라서 pinned row가 없던
+경우를 포함해 admin INSERT/UPDATE/DELETE가 runtime 검증과 consume 사이에 끼어들 수
+없다. runtime model row와 effective pricing은 reserve와 consume 모두에서 다시
+검증한다. requestId·고정 stage·canonical contract digest·server-minted reservationId를
+결속하고 잠금 뒤의 `clock_timestamp()` 만료·1회 CAS consume·영구 terminal tombstone을
+강제한다. 정적
+profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease/atomic boolean은 성공
+증거가 아니다. 새로 승인된 후속 계약만 authority의 consumed fact를 성공 admission에
+연결할 수 있다.
+
+## 0. Durable reservation authority 경계
+
+- stage는 `prompt-refiner-shadow-v1` 한 행으로 제한되며 요청당 24,916 microUSD,
+  최대 100개, 총 2,491,600 microUSD를 DB constraint와 transaction에서 함께 지킨다.
+- reservation `BEFORE INSERT` trigger는 stage를 잠그고 정확한 계약·초기 상태·5분 TTL을
+  검증만 한다. 성공한 행이 보이는 `AFTER INSERT` trigger만 실제 tombstone 집계와 stage
+  counter를 결속한다. stage 최초 counter는 0/0이어야 하고 direct stage counter UPDATE는
+  집계와 맞을 수 없어 거부된다. direct insert도 같은 예산을 소비하고 101번째·위조
+  insert·unique 충돌은 행과 accounting을 함께 rollback한다. terminal timestamp도 DB
+  trigger가 단 한 번의 clock으로 쓰며 만료 뒤 consume/release는 expired로 저장한다.
+- 계약 identity는 stage lifecycle(`approved`, `closed`)과 reservation lifecycle을 모두
+  포함한 정렬 canonical JSON의 SHA-256 digest로 결속한다. reserve와
+  consume은 runtime registry/pricing drift가 있으면 슬롯을 만들거나 사용하지 않는다.
+- 동일 requestId 재요청은 stage와 registry 잠금 뒤 stage 상태/runtime 재검증보다 먼저
+  기존 사실을 읽는다. active lease만 성공 fact이며 terminal 행은 명시적 non-success
+  결과다. 어떤 경우에도 같은 requestId로 슬롯을 더 만들거나 재사용하지 않는다.
+  released/expired/consumed 행도 100개 상한에 남고 삭제·재사용·환급하지 않는다.
+- authority table과 반환값에는 prompt, content, user, conversation, provider 오류를
+  저장하지 않는다. reserve/consume/release/expire의 content-free fact만 반환한다.
+- migration은 stage를 seed하지 않는다. 제품/API/script import도 없으므로 이 구현만
+  배포해도 provider/model 호출이나 비용 지출을 만들 수 없다.
+- 미래 dispatch는 consume이 검증하고 반환한 reservation의 정확한 contract digest와
+  checked-in execution/reservation contract constants를 그대로 사용해야 한다. consume 뒤 registry를
+  다시 읽어 모델·가격·cap을 재해석하면 TOCTOU 보호를 무효화하므로 금지한다.
 
 ## 1. 하나의 변경 가능한 행 대신 두 개의 불변 사실
 

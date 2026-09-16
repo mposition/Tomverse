@@ -48,6 +48,10 @@ export const BOUNDED_TABLES = {
         "one row per template key, and the keys are written in lib/emailTemplateDefinitions.ts",
     ProviderDailyUsage:
         "one row per (provider, model, source, day); the day makes it grow, but at a rate set by the catalogue rather than by traffic",
+    PromptRefinerReservationStage:
+        "one fixed preregistered shadow stage; the application has no seed or writer that can create further stages",
+    PromptRefinerReservation:
+        "at most 100 permanent tombstones under the fixed stage; released and expired rows consume their slot and cannot be deleted or reused",
 };
 
 /**

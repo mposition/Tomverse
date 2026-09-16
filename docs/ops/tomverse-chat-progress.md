@@ -980,3 +980,58 @@ provider adapter/API/model 호출, product mode, Router 배선, AppSetting write
    비용·지연을 측정한다.
 4. 승인된 증거가 있을 때만 제안형 UI를 연결하고, 그 뒤 Refiner 결과의 Router 결합과
    전체 카탈로그 선택 품질을 별도 측정한다.
+
+## 2026-09-16 Prompt Refiner durable reservation authority 회차
+
+앞 회차의 다음 순서 ①을 provider 호출 없이 구현했다. append-only migration은 고정
+stage 한 행과 최대 100개의 content-free reservation tombstone만 허용한다. stage는
+요청당 24,916 microUSD, 최대 100개, 총 2,491,600 microUSD를 DB constraint와
+transaction 양쪽에서 강제하며 migration에는 seed가 없다. reservation `BEFORE INSERT`
+trigger는 검증·stage 잠금만 수행하고, 성공한 tombstone이 보이는 `AFTER INSERT` trigger만
+stage counter를 실제 행 집계에 맞춘다. stage는 0/0에서만 생성되며 direct counter UPDATE로
+slot을 만들 수 없다. direct insert도 예산을 쓰고 unique 충돌·위조·101번째 insert는 행과
+accounting을 함께 rollback한다. terminal timestamp도 DB trigger가 소유하고 만료 뒤 direct
+consume/release는 expired tombstone이 된다. authority는 stage row→
+model registry table `SHARE`→reservation row 순서로 잠근 뒤 requestId·stage·canonical
+contract digest·server-minted reservationId를 결속한다. digest에는 stage와 reservation
+lifecycle 상태 집합이 모두 포함된다. 잠금 뒤 `clock_timestamp()` 기반
+5분 만료와 1회 CAS consume을 사용하며
+consumed/released/expired 행을 삭제·환급·재사용하지 않는다.
+
+reserve와 consume의 같은 critical path에서 runtime model registry row와 effective
+pricing을 실행 계약에 다시 대조하므로 환경 가격 override나 registry drift가 있으면
+슬롯 생성 또는 사용 전에 fail-closed한다. existing request는 stage/runtime 재검증보다
+먼저 같은 active fact 또는 terminal non-success fact를 돌려주며 새 슬롯으로 재사용하지
+않는다. 미래 dispatch는 consume이 반환한 exact digest와 checked-in execution/reservation
+contract constants를 쓰고 registry를
+다시 읽지 않는다. authority는 prompt/content/user/
+conversation/provider 오류를 저장하지 않고 reserve/consume/release/expire의 제한된
+사실만 반환한다. 제품/API/script caller, provider adapter/model 호출, stage admin writer,
+flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
+`reservation_authority_unavailable`도 그대로이므로 이 회차만으로 실행 경로가 열리지
+않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 안전한 예약 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 41%** (직전 약 38%, durable authority 구현 반영) |
+| 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·DB-owned terminal clock·원자 slot/cost·잠금 후 DB clock expiry·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
+| 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 15/15, 전용 로컬 PostgreSQL fresh migration 111개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
+| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 15개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
+| 독립 검토·통합 CI | 대기 — 구현 완료 뒤 Claude 읽기 전용 검토와 Linux CI 필요 |
+| 병합·배포·공개 | 미수행. provider/API/model 호출 0, stage seed/writer 0, v1 admission·flag 변경 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. Claude 읽기 전용 독립 검토와 Linux 통합 CI에서 transaction/race/rollback 및 migration
+   경계를 다시 검증한다.
+2. provider 호출 없이 동결 corpus·output parser·append-only journal·중단 규칙을 갖춘
+   shadow harness를 구현하되 아직 authority를 dispatch에 연결하지 않는다.
+3. harness와 authority를 잇는 새 admission 계약, stage 생성/admin writer, 비용 승인을
+   별도 설계·검토한다. 기존 v1은 수정하지 않는다.
+4. 그 새 계약이 승인된 뒤 bounded shadow를 정확히 한 번 유료 실행한다.
+5. 의미 보존·주입 저항·비용·지연 증거가 통과할 때만 writer와 제안형 제품 adapter를
+   연결하고, 이후 Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을 별도 실험한다.

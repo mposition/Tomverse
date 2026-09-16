@@ -1344,14 +1344,29 @@ Non-negotiable requirements:
   output cap must be at least 4,096; a larger capability is allowed but never
   replaces the Refiner request's exact 4,096 cap. Caching is disabled, and the
   generic model reservation-output setting must not reduce this contract's
-  4,096-token worst-case reservation. A future authority must pass its runtime
-  model row through this gate in the same critical path before reservation and
-  dispatch. No reservation authority exists today, so
-  admission always refuses before dispatch with
-  `reservation_authority_unavailable` after earlier checks pass. A caller-made
-  lease or atomic boolean is never proof. Only a future authority with atomic
-  requestId binding, expiry and one-time consume may introduce `admitted: true`
-  under a new contract version. Product mode remains unadmitted.
+  4,096-token worst-case reservation. The standalone server-only authority
+  passes its runtime model row through this gate inside both reserve and
+  consume. Its global order is fixed stage row, model-registry table SHARE,
+  then reservation row, covering both an existing registry row and an
+  absent-row insert. The reservation BEFORE INSERT trigger validates and locks;
+  only the AFTER INSERT trigger may bind counters to the exact aggregate of
+  already-visible tombstones. A stage must start at zero, and a direct stage
+  counter update therefore cannot mint a slot. Direct inserts, unique conflicts
+  and the 101st row cannot bypass or split accounting. The database also owns
+  terminal timestamps and turns a late consume/release into expiry. It binds
+  requestId + stage + canonical
+  contract digest + server-minted reservation id and uses `clock_timestamp()`
+  after locks for expiry, one-time consume and permanent terminal tombstones.
+  A repeated request returns the existing active fact before stage/runtime
+  revalidation; a terminal fact is a discriminated non-success and is never a
+  reusable lease. A future dispatch must use the exact digest returned by
+  consume together with the checked-in execution/reservation contract constants,
+  and must not reload/reinterpret the registry after that boundary. It has no stage
+  seed/admin writer, product caller or provider path. Existing v1 admission
+  therefore still refuses before dispatch with
+  `reservation_authority_unavailable`; a caller-made lease or atomic boolean is
+  never proof. Only a separately approved new contract may connect an
+  authority consumed fact to `admitted: true`. Product mode remains unadmitted.
 - The current server gate folds the default-off AppSetting, environment kill
   switch and adapter readiness into one mode. The only active mode is the
   loopback E2E fixture; a stored flag alone must never expose an inert product
