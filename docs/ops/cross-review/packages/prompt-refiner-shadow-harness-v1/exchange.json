@@ -1,0 +1,582 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-shadow-harness-v1",
+  "requirement": "Prompt Refiner를 제품·reservation authority·provider에 연결하지 않은 채, 체크인된 합성 corpus와 모델 모양의 고정 fixture output만 처리하는 provider-free shadow harness를 구현한다. corpus version·digest·순서와 full source commit SHA·고정 allowlist exact bytes·canonical source identity를 결속하고, strict parser와 content-free append-only journal/witness가 중단·재개·tamper 경계를 fail-closed해야 한다. 사용자 prompt·fixture output·refined prompt와 per-item digest는 증거에 남기지 않되 합성 corpusDigest와 source identity hash는 재현 provenance로 기록한다. 구조적 PLANNER-03 경계와 behavioral fixture 결과는 별도 지표·분모로 유지하며 둘 중 어느 것도 실제 모델 품질이나 주입 저항 행동으로 과장하지 않는다. provider/model/API/Railway/network/credential lookup, 유료 실행, reservation authority dispatch 연결, stage seed/admin writer, 제품 route/runtime caller, receipt writer, flag 활성화와 admitted:true는 포함하지 않는다. author는 codex, reviewer는 claude이며 독립 검토는 Claude Code Max 구독 CLI의 Read·Grep·Glob 읽기 전용으로만 수행한다.",
+  "completionCriteria": [
+    "prompt-refiner-shadow-corpus-v1은 검토된 synthetic_test_only fixture 16개(한국어 8·영어 8)를 deterministic 배열 순서로 고정하고 exact schema·고정 id·언어 균형·byte/character bounds·중복·credential/identity-like 방어 검사·canonical corpusDigest를 fail-closed 검증한다.",
+    "모델 모양 output parser는 raw 64KiB와 BOM을 blank trim보다 먼저 검사하고 parseBenchmarkJson의 duplicate-key·complexity 제한, strictBenchmarkObject의 refinedPrompt 단일 field, 기존 16000 characters·32KiB prompt bound 순서만 사용한다. JSON repair·fence 제거·coercion·부분 salvage를 하지 않으며 oversize whitespace, BOM-only, 16001자 refinement를 invalid로 처리한다.",
+    "journal은 Prompt Refiner 전용 namespace에서 wx lock, SHA-256 previous-digest chain, 별도 registration witness, append fsync를 사용하고 매 case 평가 전에 content-free intent를 durable하게 기록한다. terminal 없는 intent는 unknown이며 다시 평가하지 않고, trailing partial·stale lock·repair·자동 retry를 허용하지 않는다.",
+    "completed·stopped·interrupted가 구분되고 clean interruption과 case_limit만 deterministic 순서로 resume한다. 구조/behavior mismatch, pending unknown intent, truncation, rollback, witness disagreement, duplicate/orphan/conflicting terminal, event-after-completion은 non-resumable 또는 fail-closed이며 journal/witness를 덮어쓰지 않는다.",
+    "CLI는 full 40-hex source SHA와 고정 allowlist만 받고 exact Git blob bytes와 현재 bytes가 같을 때만 실행한다. sourceRef와 정렬된 path-to-file-hash map의 canonical identity digest를 journal/witness 최초 header에 결속해 source A partial run을 source B로 resume할 수 없다.",
+    "allowlist의 모든 경로와 .gitattributes 자체는 LF로 pin되고 Windows core.autocrlf=true 정상 checkout에서도 Git blob과 byte-identical하다. live/provider/plugin/adapter/corpus override나 동적 executable input이 없고 no-network child trap과 credential-bearing environment에서 CLI가 provider/network/credential을 사용하거나 노출하지 않는다.",
+    "structuralBoundaryViolations와 behavioralOutcomeMatched는 별도 population·분자로 보고한다. structural 0은 실제 모델 instruction compliance 또는 주입 저항 행동의 증거가 아니며 behavioral match도 deterministic fixture/parser 회귀일 뿐이라는 제한이 코드·정책·운영 문서·진행 기록에 일치한다.",
+    "journal·witness·aggregate report에는 사용자/source prompt, fixture output, refined prompt bytes나 per-item content digest, 사용자·conversation·session identity와 provider 오류문이 없다. 합성 corpusDigest와 source identity hashes만 재현 provenance로 기록한다.",
+    "실행은 corpus 16개와 호출별 max-cases로만 제한되고 wall-clock에 의존하지 않으며 providerCalls와 costMicroUsd는 항상 알려진 0이다. provider/model/API/Railway/network/credential lookup, reservation authority dispatch 연결, stage seed/admin writer, product caller/writer, flag와 admitted:true 경로가 없다.",
+    "전용 shadow 17/17, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, 변경 파일 lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.",
+    "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다."
+  ],
+  "baseCommit": "cea66ca8d025dc19daed085669dc8cfbceeb6460",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7",
+      "commit": "49e03ac1fb558b642d816da6e89b5352dd8f5fd3",
+      "filesChanged": [
+        ".gitattributes",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/corpus-v1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/promptRefinerShadowHarness.ts",
+        "lib/promptRefinerShadowJournal.ts",
+        "lib/promptRefinerShadowSource.ts",
+        "package.json",
+        "scripts/prompt-refiner-shadow-harness.mjs",
+        "tests/promptRefinerShadowHarness.test.mjs",
+        "tests/promptRefinerShadowHarnessCli.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13239.4572",
+          "durationMs": 13826
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2883.012",
+          "durationMs": 2979
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 859
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 47624
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3285
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 970 path(s) named by comments across 2937 source file(s), all present.",
+          "durationMs": 1595
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+          "durationMs": 1124
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1440
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.\n   Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 788
+        },
+        {
+          "rule": "git diff --check cea66ca8d025dc19daed085669dc8cfbceeb6460..HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 58
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowJournal.ts:487 (eventFrom, run_resumed `resumed.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:665-669 (replay `resumable`) and lib/promptRefinerShadowJournal.ts:847-861 (resume branch appends run_resumed before any remaining-case guard)",
+          "severity": "error",
+          "basis": "evidence",
+          "claim": "A clean interruption after the 16th case terminal but before `run_completed` is reported resumable, yet resuming appends a `run_resumed` event with `remainingCases: 0` that the journal's own replay permanently rejects, so the run can neither complete nor be replayed afterwards — contradicting the documented contract that a clean post-terminal interruption resumes (docs/ops/prompt-refiner-shadow-harness.md section 5).",
+          "reproduction": "In tests/promptRefinerShadowHarness.test.mjs style: `const done = journal(\"final-interruption\"); runPromptRefinerShadowHarness({ corpus, journalPath: done, resume: false }); const full = texts(done); const j = full.journalText.trimEnd().split(\"\\n\"); const w = full.witnessText.trimEnd().split(\"\\n\"); const path = journal(\"final-interrupted\"); const p = promptRefinerShadowPaths(path); writeFileSync(p.journal, j.slice(0, -1).join(\"\\n\") + \"\\n\"); writeFileSync(p.witness, w.slice(0, -1).join(\"\\n\") + \"\\n\");` (drops only the trailing `run_completed` entry and its witness line, i.e. a crash in that window). `replayPromptRefinerShadowJournal` on those two texts reports status `interrupted`, `unknownCases: 0`, `remainingCases: 0`, `resumable: true`. Then `runPromptRefinerShadowHarness({ corpus, journalPath: path, resume: true })` throws `prompt_refiner_shadow_resume_state` *after* writing the new entry, and every later `replayPromptRefinerShadowJournal` of the resulting files throws `prompt_refiner_shadow_resume_state` too. Expected: the resume completes the run, or is refused before any append leaves the journal unreplayable.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowJournal.ts:446 (eventFrom, run_stopped `stopped.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:902-925 (mismatch stop appends before any remaining-case guard)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "Same root cause on the stop path: a structural or behavioral mismatch on the last corpus case makes the harness write a `run_stopped` event with `remainingCases: 0` that its own replay rejects, so instead of the documented non-resumable `behavioral_fixture_mismatch`/`structural_boundary_violation` stop the operator gets `prompt_refiner_shadow_stop_state` and an unreplayable journal.",
+          "reproduction": "Copy the existing \"a structural or behavioral mismatch stops non-resumably without a call\" test but mutate the last case instead of the first: `const m = structuredClone(corpus); m.cases[15].expected = { status: \"failed\", failureCode: \"invalid_response\", refinedPrompt: null }; redigest(m); const v = validatePromptRefinerShadowCorpus(m); runPromptRefinerShadowHarness({ corpus: v, journalPath: journal(\"last-case-mismatch\"), resume: false });` Actual: throws `prompt_refiner_shadow_stop_state`, and `replayPromptRefinerShadowJournal` on the written files throws the same. Expected: a report with `status: \"stopped\"`, `stopReason: \"behavioral_fixture_mismatch\"`, `resumable: false`, `processedCases: 16`.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/prompt-refiner-shadow-harness.mjs:45-51,90-95 (git subprocess) vs tests/promptRefinerShadowHarnessCli.test.mjs:96-104 (in-process network trap)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The no-network trap only patches the CLI process (fetch/http/https/net/tls/dgram), not the `git` child process, so on a partial/blobless clone `git show <sha>:<path>` can lazily fetch objects from the promisor remote — network activity the trap cannot observe or block.",
+          "reproduction": "`git clone --filter=blob:none <remote> shallowish && cd shallowish && npm run shadow:prompt-refiner -- --journal=/tmp/j.jsonl --source-ref=<40-hex>` with the remote reachable; git fetches the allowlisted blobs over the network during the `git show` calls, while the same run under the test's trap reports no network use. A `GIT_NO_LAZY_FETCH=1` / `--filter` guard or an explicit local-objects precondition would close it.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "scripts/prompt-refiner-shadow-harness.mjs:107",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "`Number(maxCasesText)` accepts non-decimal spellings, so `--max-cases=0x10` and `--max-cases=1e1` are silently taken as 16 and 10 rather than rejected as malformed input (the value is still bounded to 1..16 and safe-integer, so nothing unsafe follows).",
+          "reproduction": "`npm run shadow:prompt-refiner -- --journal=<new.jsonl> --source-ref=<40-hex> --max-cases=0x10` completes all 16 cases; expected an `argument_value_required`-style rejection from a `/^[1-9][0-9]*$/` check.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Guard `remainingCases > 0` before appending `run_resumed`/`run_stopped` (and exclude `remainingCases === 0` from `resumable`, or let that state complete the run) so a final-case interruption or mismatch cannot write an event the replay rejects; re-run the 17 shadow tests with added last-case coverage."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+      "commit": "6d5d2fd87f3def76c5070e71ac6d521490d67c6e",
+      "filesChanged": [
+        ".gitattributes",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round0.json",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/corpus-v1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/promptRefinerShadowHarness.ts",
+        "lib/promptRefinerShadowJournal.ts",
+        "lib/promptRefinerShadowSource.ts",
+        "package.json",
+        "scripts/prompt-refiner-shadow-harness.mjs",
+        "tests/promptRefinerShadowHarness.test.mjs",
+        "tests/promptRefinerShadowHarnessCli.test.mjs"
+      ],
+      "changeSummary": "latest develop base sync only; 19 outside-scope email paths belong to base d16093c5 and are not authored here; old/latest literal scoped diff is byte-equal at sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee; round0 numbered artifacts/verdict remain immutable; all four round0 findings are fixed plus GIT_NO_REPLACE_OBJECTS adversarial hardening.",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 18967.3362",
+          "durationMs": 19473
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 49
+        },
+        {
+          "rule": "node -e 'const fs=require(\"fs\"),c=require(\"child_process\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const n=c.execFileSync(\"git\",[\"diff\",\"--name-only\",\"d16093c550564eb36bcc49aded1d263ce6130914\",\"--\"],{encoding:\"utf8\"}).trim().split(/\\r?\\n/).filter(Boolean).map(x=>x.replaceAll(\"\\\\\\\\\",\"/\"));const u=(f,s)=>f===s.replace(/\\/$/,\"\")||f.startsWith(s.replace(/\\/$/,\"\")+\"/\");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error(\"outside scope: \"+o.join(\",\"));console.log(\"latest-base names in existing writableScope: \"+n.length+\", outside: 0\")'",
+          "passed": true,
+          "detail": "latest-base names in existing writableScope: 21, outside: 0",
+          "durationMs": 98
+        },
+        {
+          "rule": "node -e 'const fs=require(\"fs\"),c=require(\"child_process\"),h=require(\"crypto\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const s=t.writableScope.map(x=>\":(literal)\"+x).concat([\":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\"]);const d=b=>c.execFileSync(\"git\",[\"diff\",b,\"--\",...s],{maxBuffer:33554432});const a=d(\"cea66ca8d025dc19daed085669dc8cfbceeb6460\"),n=d(\"d16093c550564eb36bcc49aded1d263ce6130914\");const x=h.createHash(\"sha256\").update(a).digest(\"hex\"),y=h.createHash(\"sha256\").update(n).digest(\"hex\");if(!a.equals(n)||x!==\"067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee\")throw Error(\"scoped diff mismatch \"+x+\" \"+y);console.log(\"old/latest literal scoped diff equal: \"+a.length+\" bytes sha256:\"+x)'",
+          "passed": true,
+          "detail": "old/latest literal scoped diff equal: 134099 bytes sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+          "durationMs": 129
+        },
+        {
+          "rule": "node -e 'const fs=require(\"fs\"),h=require(\"crypto\"),p=\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/\";const e={\"change-round0.diff\":\"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7\",\"package-round0.json\":\"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d\",\"review-round0.events.jsonl\":\"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072\",\"verdict-round0.json\":\"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf\"};for(const [f,x] of Object.entries(e)){const a=h.createHash(\"sha256\").update(fs.readFileSync(p+f)).digest(\"hex\");if(a!==x)throw Error(\"round0 changed: \"+f)}console.log(\"round0 numbered artifacts and verdict immutable: 4\")'",
+          "passed": true,
+          "detail": "round0 numbered artifacts and verdict immutable: 4",
+          "durationMs": 73
+        },
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2480.7797",
+          "durationMs": 2559
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 733
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 43855
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3163
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 971 path(s) named by comments across 2941 source file(s), all present.",
+          "durationMs": 1513
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+          "durationMs": 1144
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1898
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 886
+        },
+        {
+          "rule": "git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . ':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 59
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "scripts/prompt-refiner-shadow-harness.mjs:119-122 (readBoundedUtf8 non-corpus bound) and :57 (execFileSync maxBuffer)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "Every non-corpus allowlist path shares a hard 1,048,576-byte read bound and a 4 MiB git maxBuffer, and package-lock.json already consumes most of that headroom, so ordinary dependency growth will make the harness unrunnable with an error code that names a size problem rather than the lockfile.",
+          "reproduction": "package-lock.json is 15,910 lines at this commit (grep -c '^' package-lock.json), roughly 0.6 MiB against the 1,048,576 bound. Add dependencies until the lockfile exceeds 1 MiB, then run `npm run shadow:prompt-refiner -- --journal=<new.jsonl> --source-ref=<40-hex-sha>`: it exits 1 with `prompt-refiner-shadow: source_file_size_or_type` with no drift and no way to proceed. Past 4 MiB the `git show` child instead throws a maxBuffer error whose message is sanitised at :146 to the opaque `input_output_or_snapshot_error`. Suggested fix: give package-lock.json its own bound sized to the file, or raise both bounds together with a comment tying them to the lockfile.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowSource.ts:7-21 (PROMPT_REFINER_SHADOW_SOURCE_PATHS) with docs/ops/prompt-refiner-shadow-harness.md section 2",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The canonical source identity binds package-lock.json but not the installed dependency bytes the harness actually executes (tsx, zod via lib/promptRefinerSuggestion.ts:1, server-only via lib/promptRefinerModelPrompt.ts:1), and neither the ops doc nor the policy doc states that limit, so \"exact source identity\" reads stronger than what is verified.",
+          "reproduction": "Run `npm run shadow:prompt-refiner -- --journal=<a.jsonl> --source-ref=<sha>` and record `sourceIdentityDigest`. Modify any loaded file under node_modules/zod (for example append a top-level side effect), then run again with `--journal=<b.jsonl> --source-ref=<same sha>`: the run still completes and `sourceIdentityDigest` is byte-identical, showing executed bytes outside the 13-path allowlist are not bound. Suggested fix: one sentence in docs/ops/prompt-refiner-shadow-harness.md section 2 stating that the identity covers the 13 pinned paths and the lockfile, not the installed node_modules tree.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: scripts/prompt-refiner-shadow-harness.mjs:119-122 (readBoundedUtf8 non-corpus bound) and :57 (execFileSync maxBuffer); open finding: lib/promptRefinerShadowSource.ts:7-21 (PROMPT_REFINER_SHADOW_SOURCE_PATHS) with docs/ops/prompt-refiner-shadow-harness.md section 2); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c",
+      "commit": "8f20ea1f5ba44013d3c71b85d21b27313e13b4bc",
+      "filesChanged": [
+        ".gitattributes",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round1.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round1.json",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/corpus-v1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/promptRefinerShadowHarness.ts",
+        "lib/promptRefinerShadowJournal.ts",
+        "lib/promptRefinerShadowSource.ts",
+        "package.json",
+        "scripts/prompt-refiner-shadow-harness.mjs",
+        "tests/promptRefinerShadowHarness.test.mjs",
+        "tests/promptRefinerShadowHarnessCli.test.mjs"
+      ],
+      "changeSummary": "round1 approve의 nit 2건을 모두 닫았다: package-lock.json에는 명시적 4 MiB cap, Git child capture에는 bounded 8 MiB buffer를 적용하고 current/anchored 경계 초과를 source_file_byte_limit domain error로 검증한다. sourceIdentity는 pinned repo paths, package-lock bytes, sourceRef를 결속하지만 installed node_modules 실제 bytes, package-manager cache/install environment, registry/install attestation은 결속하지 않으며 이 provider-free 증거가 dependency installation provenance가 아니라는 한계를 문서화했다. round0 네 finding과 추가 Git replace hardening은 계속 유지된다. origin/develop d16093c5는 HEAD의 ancestor이고 브랜치는 0 behind이며, old/current literal scoped diff는 140842 bytes, sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c로 exact equal이다. round0/1 numbered artifacts, verdict, events는 불변이다.",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 26524.248",
+          "durationMs": 27055
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 51
+        },
+        {
+          "rule": "node -e \"const fs=require(\\\"fs\\\"),c=require(\\\"child_process\\\");const t=JSON.parse(fs.readFileSync(\\\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\\\",\\\"utf8\\\"));const n=c.execFileSync(\\\"git\\\",[\\\"diff\\\",\\\"--name-only\\\",\\\"d16093c550564eb36bcc49aded1d263ce6130914\\\",\\\"--\\\"],{encoding:\\\"utf8\\\"}).trim().split(/\\\\r?\\\\n/).filter(Boolean).map(x=>x.replaceAll(\\\"\\\\\\\\\\\",\\\"/\\\"));const u=(f,s)=>f===s.replace(/\\\\/$/,\\\"\\\")||f.startsWith(s.replace(/\\\\/$/,\\\"\\\")+\\\"/\\\");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error(\\\"outside scope: \\\"+o.join(\\\",\\\"));console.log(\\\"latest-base names in existing writableScope: \\\"+n.length+\\\", outside: 0\\\")\"",
+          "passed": true,
+          "detail": "latest-base names in existing writableScope: 25, outside: 0",
+          "durationMs": 113
+        },
+        {
+          "rule": "node -e \"const fs=require(\\\"fs\\\"),c=require(\\\"child_process\\\"),h=require(\\\"crypto\\\");const t=JSON.parse(fs.readFileSync(\\\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\\\",\\\"utf8\\\"));const s=t.writableScope.map(x=>\\\":(literal)\\\"+x).concat([\\\":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\\\"]);const d=b=>c.execFileSync(\\\"git\\\",[\\\"diff\\\",b,\\\"--\\\",...s],{maxBuffer:33554432});const a=d(\\\"cea66ca8d025dc19daed085669dc8cfbceeb6460\\\"),n=d(\\\"d16093c550564eb36bcc49aded1d263ce6130914\\\");const x=h.createHash(\\\"sha256\\\").update(a).digest(\\\"hex\\\"),y=h.createHash(\\\"sha256\\\").update(n).digest(\\\"hex\\\");if(!a.equals(n)||x!==\\\"442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c\\\")throw Error(\\\"scoped diff mismatch \\\"+x+\\\" \\\"+y);console.log(\\\"old/latest literal scoped diff equal: \\\"+a.length+\\\" bytes sha256:\\\"+x)\"",
+          "passed": true,
+          "detail": "old/latest literal scoped diff equal: 140842 bytes sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c",
+          "durationMs": 141
+        },
+        {
+          "rule": "node -e \"const fs=require(\\\"fs\\\"),h=require(\\\"crypto\\\"),p=\\\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/\\\";const e={\\\"change-round0.diff\\\":\\\"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7\\\",\\\"package-round0.json\\\":\\\"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d\\\",\\\"review-round0.events.jsonl\\\":\\\"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072\\\",\\\"verdict-round0.json\\\":\\\"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf\\\",\\\"change-round1.diff\\\":\\\"067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee\\\",\\\"package-round1.json\\\":\\\"4e9682bdf96a9511f28b3c69ac8a37703f3d9f4493de041b6e9249d6b73fe2b7\\\",\\\"review-round1.events.jsonl\\\":\\\"2a5df6dd2989983d0445ed780bd81a9b1bca9cb76ea76eab9e4358304f58ae2f\\\",\\\"verdict-round1.json\\\":\\\"16caa031559f643228ff981ef9475ff3734e3adffbcd2c882d358c34f65a24a8\\\"};for(const [f,x] of Object.entries(e)){const a=h.createHash(\\\"sha256\\\").update(fs.readFileSync(p+f)).digest(\\\"hex\\\");if(a!==x)throw Error(\\\"prior round changed: \\\"+f)}console.log(\\\"round0/1 numbered artifacts, verdicts and events immutable: 8\\\")\"",
+          "passed": true,
+          "detail": "round0/1 numbered artifacts, verdicts and events immutable: 8",
+          "durationMs": 83
+        },
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2735.9655",
+          "durationMs": 2818
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 784
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 49274
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 4772
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 971 path(s) named by comments across 2941 source file(s), all present.",
+          "durationMs": 3432
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+          "durationMs": 3108
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 3973
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 2549
+        },
+        {
+          "rule": "git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . \":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\"",
+          "passed": true,
+          "detail": "",
+          "durationMs": 179
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/promptRefinerShadowHarnessCli.test.mjs:260-264 (\"package-lock has a bounded dedicated cap...\")",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The test pins the incidental current size of package-lock.json (`assert.equal(lstatSync(...).size, 568_011)`) instead of the invariant it means to assert (size < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES), so any ordinary dependency change fails the shadow suite with an unrelated equality error, and the hardcoded 568,011 in docs/ops/prompt-refiner-shadow-harness.md section 2 and docs/ops/tomverse-chat-progress.md goes stale at the same moment; the follow-on `assert.ok(568_011 < CAP)` compares two literals and can never fail.",
+          "reproduction": "Add or bump any dependency (e.g. `npm install --save-dev <pkg>` so package-lock.json changes length), then `npm run test:prompt-refiner-shadow`. The case fails at the first assertion with `Expected values to be strictly equal: <new size> !== 568011` while the 4 MiB cap logic and every other assertion in the case still hold. Replacing the two assertions with `const size = lstatSync(...).size; assert.ok(size < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);` keeps the intended check and removes the doc coupling.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": ".gitattributes:56-59 (`.gitattributes`, `package.json`, `package-lock.json`, `tsconfig.json` entries)",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "These four patterns have no leading slash, so Git matches them at every directory depth and they pin files outside the harness allowlist, contradicting the block comment's claim that this is a \"narrow list\" that keeps \"line-ending policy for the rest of the repository\" unchanged (apps/mobile/package.json, packages/chat-core/package.json, packages/ui-tokens/package.json, apps/mobile/tsconfig.json and packages/chat-core/tsconfig.json are now `text eol=lf` too).",
+          "reproduction": "`git check-attr text eol -- apps/mobile/package.json packages/chat-core/tsconfig.json` at this commit prints `text: set` and `eol: lf` for both, although only the repo-root package.json and tsconfig.json appear in PROMPT_REFINER_SHADOW_SOURCE_PATHS (lib/promptRefinerShadowSource.ts:11-25). Anchoring the four entries as `/.gitattributes`, `/package.json`, `/package-lock.json`, `/tsconfig.json` makes the attribute scope equal the allowlist; the harness's byte comparison is unaffected either way because a mismatched checkout already fails closed with `runtime_source_drift`.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerShadowHarnessCli.test.mjs:260-264 (\"package-lock has a bounded dedicated cap...\"); open finding: .gitattributes:56-59 (`.gitattributes`, `package.json`, `package-lock.json`, `tsconfig.json` entries)) and no revision remains"
+    }
+  ],
+  "changeDigest": "sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c",
+  "commit": "8f20ea1f5ba44013d3c71b85d21b27313e13b4bc",
+  "changeSummary": "round1 approve의 nit 2건을 모두 닫았다: package-lock.json에는 명시적 4 MiB cap, Git child capture에는 bounded 8 MiB buffer를 적용하고 current/anchored 경계 초과를 source_file_byte_limit domain error로 검증한다. sourceIdentity는 pinned repo paths, package-lock bytes, sourceRef를 결속하지만 installed node_modules 실제 bytes, package-manager cache/install environment, registry/install attestation은 결속하지 않으며 이 provider-free 증거가 dependency installation provenance가 아니라는 한계를 문서화했다. round0 네 finding과 추가 Git replace hardening은 계속 유지된다. origin/develop d16093c5는 HEAD의 ancestor이고 브랜치는 0 behind이며, old/current literal scoped diff는 140842 bytes, sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c로 exact equal이다. round0/1 numbered artifacts, verdict, events는 불변이다.",
+  "testResults": [
+    {
+      "command": "npm run test:prompt-refiner-shadow",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 26524.248",
+      "durationMs": 27055
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 51
+    },
+    {
+      "rule": "node -e \"const fs=require(\\\"fs\\\"),c=require(\\\"child_process\\\");const t=JSON.parse(fs.readFileSync(\\\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\\\",\\\"utf8\\\"));const n=c.execFileSync(\\\"git\\\",[\\\"diff\\\",\\\"--name-only\\\",\\\"d16093c550564eb36bcc49aded1d263ce6130914\\\",\\\"--\\\"],{encoding:\\\"utf8\\\"}).trim().split(/\\\\r?\\\\n/).filter(Boolean).map(x=>x.replaceAll(\\\"\\\\\\\\\\\",\\\"/\\\"));const u=(f,s)=>f===s.replace(/\\\\/$/,\\\"\\\")||f.startsWith(s.replace(/\\\\/$/,\\\"\\\")+\\\"/\\\");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error(\\\"outside scope: \\\"+o.join(\\\",\\\"));console.log(\\\"latest-base names in existing writableScope: \\\"+n.length+\\\", outside: 0\\\")\"",
+      "passed": true,
+      "detail": "latest-base names in existing writableScope: 25, outside: 0",
+      "durationMs": 113
+    },
+    {
+      "rule": "node -e \"const fs=require(\\\"fs\\\"),c=require(\\\"child_process\\\"),h=require(\\\"crypto\\\");const t=JSON.parse(fs.readFileSync(\\\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\\\",\\\"utf8\\\"));const s=t.writableScope.map(x=>\\\":(literal)\\\"+x).concat([\\\":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\\\"]);const d=b=>c.execFileSync(\\\"git\\\",[\\\"diff\\\",b,\\\"--\\\",...s],{maxBuffer:33554432});const a=d(\\\"cea66ca8d025dc19daed085669dc8cfbceeb6460\\\"),n=d(\\\"d16093c550564eb36bcc49aded1d263ce6130914\\\");const x=h.createHash(\\\"sha256\\\").update(a).digest(\\\"hex\\\"),y=h.createHash(\\\"sha256\\\").update(n).digest(\\\"hex\\\");if(!a.equals(n)||x!==\\\"442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c\\\")throw Error(\\\"scoped diff mismatch \\\"+x+\\\" \\\"+y);console.log(\\\"old/latest literal scoped diff equal: \\\"+a.length+\\\" bytes sha256:\\\"+x)\"",
+      "passed": true,
+      "detail": "old/latest literal scoped diff equal: 140842 bytes sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c",
+      "durationMs": 141
+    },
+    {
+      "rule": "node -e \"const fs=require(\\\"fs\\\"),h=require(\\\"crypto\\\"),p=\\\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/\\\";const e={\\\"change-round0.diff\\\":\\\"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7\\\",\\\"package-round0.json\\\":\\\"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d\\\",\\\"review-round0.events.jsonl\\\":\\\"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072\\\",\\\"verdict-round0.json\\\":\\\"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf\\\",\\\"change-round1.diff\\\":\\\"067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee\\\",\\\"package-round1.json\\\":\\\"4e9682bdf96a9511f28b3c69ac8a37703f3d9f4493de041b6e9249d6b73fe2b7\\\",\\\"review-round1.events.jsonl\\\":\\\"2a5df6dd2989983d0445ed780bd81a9b1bca9cb76ea76eab9e4358304f58ae2f\\\",\\\"verdict-round1.json\\\":\\\"16caa031559f643228ff981ef9475ff3734e3adffbcd2c882d358c34f65a24a8\\\"};for(const [f,x] of Object.entries(e)){const a=h.createHash(\\\"sha256\\\").update(fs.readFileSync(p+f)).digest(\\\"hex\\\");if(a!==x)throw Error(\\\"prior round changed: \\\"+f)}console.log(\\\"round0/1 numbered artifacts, verdicts and events immutable: 8\\\")\"",
+      "passed": true,
+      "detail": "round0/1 numbered artifacts, verdicts and events immutable: 8",
+      "durationMs": 83
+    },
+    {
+      "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2735.9655",
+      "durationMs": 2818
+    },
+    {
+      "rule": "npm run check:prompt-injection",
+      "passed": true,
+      "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+      "durationMs": 784
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 49274
+    },
+    {
+      "rule": "npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 4772
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 971 path(s) named by comments across 2941 source file(s), all present.",
+      "durationMs": 3432
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+      "durationMs": 3108
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 3973
+    },
+    {
+      "rule": "npm run check:data-domain-registry",
+      "passed": true,
+      "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+      "durationMs": 2549
+    },
+    {
+      "rule": "git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . \":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\"",
+      "passed": true,
+      "detail": "",
+      "durationMs": 179
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "tests/promptRefinerShadowHarnessCli.test.mjs:260-264 (\"package-lock has a bounded dedicated cap...\")",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The test pins the incidental current size of package-lock.json (`assert.equal(lstatSync(...).size, 568_011)`) instead of the invariant it means to assert (size < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES), so any ordinary dependency change fails the shadow suite with an unrelated equality error, and the hardcoded 568,011 in docs/ops/prompt-refiner-shadow-harness.md section 2 and docs/ops/tomverse-chat-progress.md goes stale at the same moment; the follow-on `assert.ok(568_011 < CAP)` compares two literals and can never fail.",
+      "reproduction": "Add or bump any dependency (e.g. `npm install --save-dev <pkg>` so package-lock.json changes length), then `npm run test:prompt-refiner-shadow`. The case fails at the first assertion with `Expected values to be strictly equal: <new size> !== 568011` while the 4 MiB cap logic and every other assertion in the case still hold. Replacing the two assertions with `const size = lstatSync(...).size; assert.ok(size < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);` keeps the intended check and removes the doc coupling.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": ".gitattributes:56-59 (`.gitattributes`, `package.json`, `package-lock.json`, `tsconfig.json` entries)",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "These four patterns have no leading slash, so Git matches them at every directory depth and they pin files outside the harness allowlist, contradicting the block comment's claim that this is a \"narrow list\" that keeps \"line-ending policy for the rest of the repository\" unchanged (apps/mobile/package.json, packages/chat-core/package.json, packages/ui-tokens/package.json, apps/mobile/tsconfig.json and packages/chat-core/tsconfig.json are now `text eol=lf` too).",
+      "reproduction": "`git check-attr text eol -- apps/mobile/package.json packages/chat-core/tsconfig.json` at this commit prints `text: set` and `eol: lf` for both, although only the repo-root package.json and tsconfig.json appear in PROMPT_REFINER_SHADOW_SOURCE_PATHS (lib/promptRefinerShadowSource.ts:11-25). Anchoring the four entries as `/.gitattributes`, `/package.json`, `/package-lock.json`, `/tsconfig.json` makes the attribute scope equal the allowlist; the harness's byte comparison is unaffected either way because a mismatched checkout already fails closed with `runtime_source_drift`.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 2 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
+  "failure": null,
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-16T14:43:38.938Z",
+  "packagedRounds": 3,
+  "concludedAtRound": 2,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "8f20ea1f5ba44013d3c71b85d21b27313e13b4bc",
+  "worktreeDirty": false,
+  "filesChanged": [
+    ".gitattributes",
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round1.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/exchange.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round1.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-prompt.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round1.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round1.json",
+    "docs/ops/prompt-refiner-shadow-harness.md",
+    "docs/ops/prompt-refiner-shadow/corpus-v1.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/promptRefinerShadowHarness.ts",
+    "lib/promptRefinerShadowJournal.ts",
+    "lib/promptRefinerShadowSource.ts",
+    "package.json",
+    "scripts/prompt-refiner-shadow-harness.mjs",
+    "tests/promptRefinerShadowHarness.test.mjs",
+    "tests/promptRefinerShadowHarnessCli.test.mjs"
+  ]
+}

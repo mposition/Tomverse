@@ -203,6 +203,8 @@
     "build:mobile-shell": "npm run build --workspace @tomverse/mobile",
     "check:prompt-injection": "node --conditions=react-server --import tsx scripts/report-prompt-injection.mjs",
     "report:prompt-refiner-receipts": "node --import tsx scripts/report-prompt-refiner-receipts.mjs",
+    "shadow:prompt-refiner": "node --conditions=react-server --import tsx scripts/prompt-refiner-shadow-harness.mjs",
+    "test:prompt-refiner-shadow": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
     "check:push-scope": "node scripts/check-push-scope.mjs",
     "check:retired-product-name": "node scripts/check-retired-product-name.mjs",
     "check:conversation-writers": "node scripts/check-conversation-writers.mjs",
