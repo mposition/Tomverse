@@ -7,6 +7,7 @@ import {
   readSuppressionAuthority,
 } from "@/lib/emailSuppressionAuthority";
 import {
+  isActiveCause,
   SUPPRESSION_READ_AUTHORITY_KEY,
   suppressionParity,
   type ParityFinding,
@@ -140,7 +141,7 @@ export async function runSuppressionCutover(input: {
         authorityBefore,
         authorityAfter: switched ? "causes" : authorityBefore,
         entries: entries.length,
-        activeCauses: causes.length,
+        activeCauses: causes.filter((cause) => isActiveCause(cause, now)).length,
         unsafe: parity.unsafe,
         stricter: parity.stricter.length,
         repairedCauses,

@@ -2129,6 +2129,7 @@ export const en = {
             COUNTRY_CONFLICT: "We could not confirm the country. Select where you live now and try again.",
             COUNTRY_UNSUPPORTED: "Marketing email is not available for this country yet.",
             CONFIRMATION_UNAVAILABLE: "Email subscriptions cannot be confirmed right now. Try again later.",
+            SUPPRESSED: "This address can't receive these emails. Contact support if you think that's a mistake.",
             SAVE_FAILED: "Could not save your email settings. Try again in a moment.",
         },
         purpose: {
@@ -2177,6 +2178,7 @@ export const en = {
         doneBody: "Thank you. You can change or withdraw this at any time in your notification settings.",
         expiredBody: "This confirmation link has expired. Send a new one from your notification settings.",
         invalidBody: "This link is no longer valid. Open your notification settings to choose what you receive.",
+        suppressedBody: "This address can't receive these emails, so the subscription wasn't confirmed. Contact support if you think that's a mistake.",
         settingsLink: "Open notification settings",
     },
     privacyPolicy: {

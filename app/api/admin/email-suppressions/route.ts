@@ -73,6 +73,16 @@ const removeSchema = z.object({
 
 const requestSchema = z.discriminatedUnion("action", [addSchema, removeSchema]);
 
+/** A lift refused inside an approved operation; see the causes-mode branch. */
+class SuppressionLiftRefused extends Error {
+  constructor(
+    readonly refusal: "not_found" | "unliftable" | "authority_changed" | "approval_stale"
+  ) {
+    super(`Suppression lift refused: ${refusal}`);
+    this.name = "SuppressionLiftRefused";
+  }
+}
+
 /** The caller's Idempotency-Key when it is a sane token, otherwise a fresh id. */
 const adminIdempotencyKey = (req: Request) => {
   const header = req.headers.get("idempotency-key")?.trim();
@@ -215,41 +225,53 @@ export async function POST(req: Request) {
             tx,
           });
 
-      const lifted = active.needsApproval
-        ? await runWithAdminApproval(
-            {
-              session,
-              request: req,
-              action: "email_suppression.remove",
-              targetType: "SuppressionEntry",
-              targetId: body.id,
-              // The cause ids are part of what is approved: a cause added after
-              // the request is a different approval.
-              payload: { id: body.id, causeIds: active.causeIds },
-              reason: body.reason,
-            },
-            (context) =>
-              liftSuppressionCauses({
-                entryId: body.id,
-                approvedCauseIds: active.causeIds,
-                action: "approved_admin",
-                evidence: context.approvalId
-                  ? {
-                      kind: "dual_approval",
-                      approvalId: context.approvalId,
-                      authorizationAuditLogId: context.authorizationAuditLogId,
-                    }
-                  : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
-                writeReleaseAudit: releaseAudit(context.approvalId ? "dual_approval" : "sole_admin"),
-              })
-          )
-        : await liftSuppressionCauses({
-            entryId: body.id,
-            approvedCauseIds: active.causeIds,
-            action: "admin",
-            evidence: { kind: "admin" },
-            writeReleaseAudit: releaseAudit("admin"),
-          });
+      // A refused lift inside an approved operation is thrown, not returned, so
+      // the approval path records it as a failed execution rather than as one
+      // that ran; outside that path the result is handled directly.
+      let lifted: Awaited<ReturnType<typeof liftSuppressionCauses>>;
+      try {
+        lifted = active.needsApproval
+          ? await runWithAdminApproval(
+              {
+                session,
+                request: req,
+                action: "email_suppression.remove",
+                targetType: "SuppressionEntry",
+                targetId: body.id,
+                // The cause ids are part of what is approved: a cause added after
+                // the request is a different approval.
+                payload: { id: body.id, causeIds: active.causeIds },
+                reason: body.reason,
+              },
+              async (context) => {
+                const outcome = await liftSuppressionCauses({
+                  entryId: body.id,
+                  approvedCauseIds: active.causeIds,
+                  action: "approved_admin",
+                  evidence: context.approvalId
+                    ? {
+                        kind: "dual_approval",
+                        approvalId: context.approvalId,
+                        authorizationAuditLogId: context.authorizationAuditLogId,
+                      }
+                    : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
+                  writeReleaseAudit: releaseAudit(context.approvalId ? "dual_approval" : "sole_admin"),
+                });
+                if (!outcome.removed) throw new SuppressionLiftRefused(outcome.refusal);
+                return outcome;
+              }
+            )
+          : await liftSuppressionCauses({
+              entryId: body.id,
+              approvedCauseIds: active.causeIds,
+              action: "admin",
+              evidence: { kind: "admin" },
+              writeReleaseAudit: releaseAudit("admin"),
+            });
+      } catch (error) {
+        if (!(error instanceof SuppressionLiftRefused)) throw error;
+        lifted = { removed: false, refusal: error.refusal };
+      }
 
       if (!lifted.removed) {
         const status =

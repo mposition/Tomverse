@@ -227,6 +227,16 @@ export async function PATCH(req: Request) {
       // `locked` is the one refusal worth naming: the client renders those
       // rows as unswitchable, so reaching here means the two disagree and a
       // generic error would hide that.
+      // Switching on is refused while another suppression cause still stops
+      // this mail (docs/policy/email-product-news-redesign-draft.md, section
+      // 7.4). Said as itself: reading the state back would show the switch off
+      // with no reason.
+      if (!result.changed && result.reason === "suppressed") {
+        return NextResponse.json(
+          { error: "This address cannot receive this email.", code: "SUPPRESSED" },
+          { status: 409 }
+        );
+      }
       if (!result.changed && result.reason === "locked") {
         return NextResponse.json(
           { error: "This notification cannot be turned off.", code: "LOCKED" },

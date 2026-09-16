@@ -50,7 +50,7 @@ export function ConsentConfirmation() {
     }, [captured]);
     const token = captured ?? live;
     const [submitState, setState] = useState<
-        "idle" | "working" | "done" | "expired" | "failed"
+        "idle" | "working" | "done" | "expired" | "suppressed" | "failed"
     >("idle");
     const state = token === null ? "loading" : token ? submitState : "failed";
 
@@ -70,7 +70,13 @@ export function ConsentConfirmation() {
                 setState("done");
                 return;
             }
-            setState(body?.code === "EXPIRED" ? "expired" : "failed");
+            setState(
+                body?.code === "EXPIRED"
+                    ? "expired"
+                    : body?.code === "SUPPRESSED"
+                      ? "suppressed"
+                      : "failed"
+            );
         } catch {
             setState("failed");
         }
@@ -91,7 +97,7 @@ export function ConsentConfirmation() {
                 >
                     {t("consentConfirm.doneBody")}
                 </p>
-            ) : state === "expired" || state === "failed" ? (
+            ) : state === "expired" || state === "failed" || state === "suppressed" ? (
                 <>
                     <p
                         className="text-sm leading-6 text-zinc-600 dark:text-zinc-300"
@@ -99,7 +105,9 @@ export function ConsentConfirmation() {
                     >
                         {state === "expired"
                             ? t("consentConfirm.expiredBody")
-                            : t("consentConfirm.invalidBody")}
+                            : state === "suppressed"
+                              ? t("consentConfirm.suppressedBody")
+                              : t("consentConfirm.invalidBody")}
                     </p>
                     <Link
                         href="/settings/notifications"

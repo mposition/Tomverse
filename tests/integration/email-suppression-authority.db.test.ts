@@ -254,8 +254,18 @@ test("a cause written while a lift waits for the address is seen by the lift", a
     evidence: { kind: "admin" },
     writeReleaseAudit: auditInTx,
   });
-  // Give the lift time to block on the address before the writer commits.
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  // Release the writer only once the lift is observed waiting on an advisory
+  // lock -- a fixed delay would let the test pass with no lock at all if the
+  // lift happened to start after the writer committed.
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const [row] = await prisma.$queryRaw<Array<{ waiting: bigint }>>`
+      SELECT count(*) AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+    `;
+    if (Number(row.waiting) > 0) break;
+    if (Date.now() > deadline) throw new Error("the lift never waited on the address lock");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
   finish();
   await writer;
 
