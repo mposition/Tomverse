@@ -5,7 +5,10 @@ import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
-import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
+import {
+  reportOperationalDependencyStatus,
+  reportOperationalIncident,
+} from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
 import { getVoiceModelPriceReadiness } from "@/lib/voiceModelPriceReadiness";
 import { getVoiceProviderBudgetReadiness } from "@/lib/voiceProviderBudgetReadiness";
@@ -260,6 +263,23 @@ const readinessResponse = async (head = false) => {
     .filter(([, passed]) => !passed)
     .map(([name]) => name);
   after(async () => {
+    // A warning on a healthy check reaches nobody through the dependency
+    // report, which records context only when unhealthy. Mail that is not yet
+    // guarded by an adopted keyring is exactly the state that must not be
+    // mistaken for verified, so it is raised on its own, rate limited.
+    const unguarded = unsubscribeRetentionStatus.status?.warnings.filter(
+      (problem) => problem.code === "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED"
+    );
+    if (unguarded && unguarded.length > 0) {
+      await reportOperationalIncident({
+        code: "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED",
+        title: "Older mail with unsubscribe links is not yet guarded by an adopted keyring",
+        severity: "warning",
+        error: unguarded.map((problem) => problem.message).join(" | "),
+        cooldownMs: 60 * 60 * 1_000,
+        context: { component: "api-ready", route: "/api/ready", traceId },
+      });
+    }
     await Promise.all([
       reportOperationalDependencyStatus({
         dependency: "postgresql",

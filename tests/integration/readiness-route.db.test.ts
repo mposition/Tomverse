@@ -219,7 +219,7 @@ mock.module(mod("lib/searchProviderBudgetReadiness.ts"), {
  * tests/integration/email-unsubscribe-key-retention.db.test.ts. `null` stands
  * for "the check threw", which the route must answer as not ready.
  */
-let keyRetention: { ready: boolean } | null = { ready: true };
+let keyRetention: { ready: boolean; unadopted?: boolean } | null = { ready: true };
 mock.module(mod("lib/emailUnsubscribeKeyRetention.ts"), {
     namedExports: {
         getUnsubscribeKeyRetentionReadiness: async () => {
@@ -236,7 +236,16 @@ mock.module(mod("lib/emailUnsubscribeKeyRetention.ts"), {
                               message: "v0 removed too early",
                           },
                       ],
-                warnings: [],
+                warnings: keyRetention.unadopted
+                    ? [
+                          {
+                              severity: "warning",
+                              code: "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED",
+                              keyVersion: "unattributed",
+                              message: "older mail not yet adopted",
+                          },
+                      ]
+                    : [],
                 retirable: [],
             };
         },
@@ -247,8 +256,12 @@ mock.module(mod("lib/emailUnsubscribeKeyRetention.ts"), {
 
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
+let incidents: Array<{ code: string; severity?: string }> = [];
 mock.module(mod("lib/operationalMonitoring.ts"), {
     namedExports: {
+        reportOperationalIncident: async (input: { code: string; severity?: string }) => {
+            incidents.push({ code: input.code, severity: input.severity });
+        },
         reportOperationalDependencyStatus: async (input: {
             dependency: string;
             healthy: boolean;
@@ -468,7 +481,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             },
         },
         {
-            // A key version that mail sent in the last thirty days depends on
+            // A key version that mail sent in the last year depends on
             // was dropped or edited: links already in inboxes are dead.
             name: "emailUnsubscribeKeyRetention",
             arrange: () => {
@@ -554,6 +567,23 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             "every dependency is reported, not only the failing one"
         );
     }
+});
+
+test("unguarded older mail stays ready but is reported where someone will see it", async () => {
+    // The warning rides on a healthy check, and the dependency report drops the
+    // context of a healthy one -- so without its own incident nobody would ever
+    // learn that older mail is not yet guarded.
+    deferred = [];
+    incidents = [];
+    keyRetention = { ready: true, unadopted: true };
+    const { response, body } = await get();
+    assert.equal(response.status, 200);
+    assert.equal(body.checks.emailUnsubscribeKeyRetention, true);
+    await runDeferred();
+    assert.deepEqual(incidents, [
+        { code: "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED", severity: "warning" },
+    ]);
+    keyRetention = { ready: true };
 });
 
 test("the unsubscribe keyring is required only once marketing can send", async () => {
