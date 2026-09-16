@@ -173,7 +173,11 @@ test("the file carries the stored original, the divider and the conversation's o
     const divider = text.indexOf("===== Continued in Tomverse =====");
     const native = text.indexOf("tomverse answer one");
     assert.ok(first > 0 && divider > first && native > divider);
-    assert.match(text, /\[Imported · ChatGPT · gpt-4-turbo\]/);
+    // The provider label the product renders, not a shortened one.
+    assert.match(
+        text,
+        new RegExp(`\\[Imported · ${continuationProviderDisplay("chatgpt")} · gpt-4-turbo\\]`)
+    );
     assert.match(text, /shortened when it was imported/);
     assert.match(text, /===== End of export \(2 imported, 2 Tomverse messages\) =====/);
     assert.equal(built.document.importedMessageCount, 2);
