@@ -362,6 +362,10 @@ run(
     // idempotency key, a verdict is scoped to one person, and both cascades
     // are the deletion path the data-domain registry claims.
     "tests/integration/comparison-review-item-feedback.db.test.ts",
+    // A pin is not activity: the sidebar groups its date headers by
+    // `updatedAt`, so pinning may not touch it, and another account's pin
+    // statement must match no row.
+    "tests/integration/conversation-pin.db.test.ts",
     // v1.2 decision 2: what the database refuses about a conversation's
     // product, and that the three CHECKs are still NOT VALID.
     "tests/integration/conversation-product-key.db.test.ts",

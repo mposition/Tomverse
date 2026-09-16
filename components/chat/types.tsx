@@ -276,6 +276,14 @@ export type Conversation = {
     messageCount?: number;
     createdAt?: string;
     /**
+     * Whether this conversation is pinned to the top of the sidebar.
+     *
+     * Server state for an account (`Conversation.pinnedAt`), and absent for a
+     * guest row, whose pins stay in that browser because the conversation does
+     * too.
+     */
+    pinned?: boolean;
+    /**
      * Last activity, which is what the sidebar's date headers group by and
      * what the server already orders the list by.
      *

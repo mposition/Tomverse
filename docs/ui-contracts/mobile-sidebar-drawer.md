@@ -83,6 +83,36 @@ button's box was `542..582` against a 560px viewport with a list scroll range of
   of the scroll region.
 - The drawer panel takes `bottom: useKeyboardInset()` while the keyboard is up.
 
+## The conversation row (2026-09-16)
+
+The list inside this drawer is the densest thing in the product, so the row has
+its own rules. They exist to buy rows, never to buy them from the reader.
+
+- **The title owns the row.** It keeps `min-w-[14ch]`; a chip may take what is
+  left and no more, at most one chip is drawn, and under `17rem` of list width
+  none is. What a hidden chip said is reachable through the organizer's
+  filters.
+- **A row is one line, and its height is a minimum, never fixed.** 48px in this
+  drawer (the 44px touch target plus room for the focus ring), 40px on the
+  desktop sidebar. At 200% text the row grows; nothing clips.
+- **A glyph only where it says something.** Imported, image and locked rows keep
+  theirs; an ordinary chat has none, because a chat bubble in a list of chats
+  marked nothing and set the row's height. An imported conversation whose source
+  was deleted wears the same provider mark, muted, with the fact in its
+  accessible name -- not a second line.
+- **Status is icons, at most two, each with its own accessible name.** Stacked
+  chips grew the row by a line each.
+- **The date headers are sticky**, so they cost their height once on screen
+  rather than once per group, and they are drawn only when the list is showing
+  everything (`lib/conversationListGrouping.ts`). A filtered list is already one
+  answer; dates over it fragment it into groups of one.
+- **Pinning is account state** (`Conversation.pinnedAt`), written without
+  touching `updatedAt`: the headers group by that column, so a pin that bumped
+  it would tell the reader a conversation was answered when it was only moved.
+  A guest's pins stay in the browser, because a guest's conversations do.
+- **The conversation menu keeps its own 44px target** inside a row that is
+  itself the click target.
+
 ## Regression coverage
 
 `tests/e2e/mobile-short-viewport-drawer.spec.ts` is the contract's test. It must

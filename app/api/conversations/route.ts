@@ -88,6 +88,8 @@ export async function GET(req: Request) {
         // rows it could not date -- and a date header cannot be derived from a
         // position.
         updatedAt: true,
+        // The pin lives on the account, not in one browser.
+        pinnedAt: true,
         kind: true,
         productKey: true,
         projectId: true,
@@ -178,6 +180,7 @@ export async function GET(req: Request) {
         id: conv.id,
         title: conv.title,
         updatedAt: conv.updatedAt.toISOString(),
+        pinned: conv.pinnedAt !== null,
         kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conv.projectId || null,
         selectedModels:

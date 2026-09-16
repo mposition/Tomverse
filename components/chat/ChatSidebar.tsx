@@ -206,7 +206,18 @@ export function ChatSidebar({
     const [projects, setProjects] = useState<ConversationProject[]>([]);
     const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
-    const [pinnedConversationIds, setPinnedConversationIds] = useState<string[]>(() => {
+    /*
+      Which conversations are pinned, from whichever side knows.
+
+      This is the browser's own list, which is where every pin used to live. It
+      is still the whole answer for a guest, whose conversations are local too,
+      and for an account it is read *alongside* `Conversation.pinned` from the
+      server so a pin made before the column existed does not vanish and a pin
+      made on another device shows up. Nothing is written back on load:
+      `togglePinned` settles a conversation server-side the next time somebody
+      actually touches it.
+    */
+    const [locallyPinnedIds, setLocallyPinnedIds] = useState<string[]>(() => {
         if (typeof window === "undefined") return [];
         try {
             const saved = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
@@ -215,6 +226,29 @@ export function ChatSidebar({
             return [];
         }
     });
+    /*
+      What a toggle has claimed before the server has answered it.
+
+      Optimistic rather than awaited: a pin is a list arrangement, and a list
+      that rearranges a beat after the tap reads as a slow list. On success the
+      server's own answer arrives in `conversations` and says the same thing;
+      on failure the entry is flipped back, so the row returns rather than
+      showing a pin the account does not have.
+    */
+    const [pinOverrides, setPinOverrides] = useState<Record<string, boolean>>({});
+
+    /*
+      Pinned, as answered by whichever side knows: this toggle first, then the
+      account's own column, then the pins this browser made before the column
+      existed.
+    */
+    const pinnedConversationIds = conversations
+        .filter(
+            (conversation) =>
+                pinOverrides[conversation.id] ??
+                (conversation.pinned === true || locallyPinnedIds.includes(conversation.id))
+        )
+        .map((conversation) => conversation.id);
     const [messageSearchResults, setMessageSearchResults] = useState<Array<{
         /** Absent from an older server; treated as native. */
         kind?: "native" | "imported";
@@ -627,8 +661,63 @@ export function ChatSidebar({
         setter(next);
     };
 
-    const togglePinned = (id: string) =>
-        toggleStoredId("tomverse_pinned_conversations", id, setPinnedConversationIds);
+    /*
+      Pinning, which is the account's for a signed-in reader and the browser's
+      for a guest.
+
+      A guest's conversations live in this browser, so their pins do too.
+      An account's pin is server state (`Conversation.pinnedAt`), written
+      optimistically: the row moves under the pointer and the request follows,
+      and a request that fails puts the row back rather than leaving a pin the
+      server never took.
+
+      Old local pins are not migrated on load. Reading them is free and writing
+      them is a change nobody asked for on a page they only opened, so they are
+      read alongside the server's answer (see `pinnedConversationIds` below) and
+      settle server-side the next time this conversation is toggled. The local
+      entry is dropped in the same move, so the two cannot disagree afterwards.
+    */
+    const togglePinned = (id: string) => {
+        const shouldPin = !pinnedConversationIds.includes(id);
+        if (isGuestMode) {
+            toggleStoredId("tomverse_pinned_conversations", id, setLocallyPinnedIds);
+            return;
+        }
+
+        setPinOverrides((current) => ({ ...current, [id]: shouldPin }));
+        // Whatever the server answers, this conversation is no longer one this
+        // browser holds an opinion about: the account's column is the answer
+        // from here on, and two sources that can disagree is the defect being
+        // removed.
+        setLocallyPinnedIds((current) => current.filter((item) => item !== id));
+        try {
+            const stored = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
+            const values = Array.isArray(stored)
+                ? stored.filter((item): item is string => typeof item === "string" && item !== id)
+                : [];
+            localStorage.setItem("tomverse_pinned_conversations", JSON.stringify(values));
+        } catch {
+            localStorage.removeItem("tomverse_pinned_conversations");
+        }
+
+        void fetch(`/api/conversations/${id}/pin`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pinned: shouldPin }),
+        })
+            .then((response) => {
+                // On success the override already says what the server now
+                // holds, and the next list read replaces it with the same
+                // answer.
+                if (response.ok) return;
+                // Put the row back rather than leaving a pin the account does
+                // not have.
+                setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
+            })
+            .catch(() => {
+                setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
+            });
+    };
     useEffect(() => {
         if (isGuestMode) {
             const timer = window.setTimeout(() => setProjects([]), 0);

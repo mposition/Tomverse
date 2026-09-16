@@ -380,12 +380,31 @@ model Conversation {
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime                        @default(now())
   updatedAt             DateTime                        @updatedAt
+
+  /// When this conversation was pinned to the top of the sidebar, or NULL.
+  ///
+  /// Server-stored because a pin is a decision about the account's list, not
+  /// about one browser: it used to live in `localStorage`, so the same account
+  /// opened on a second device silently lost the order it had arranged -- a
+  /// defect nobody reports, because the list looks ordinary rather than broken.
+  ///
+  /// A timestamp rather than a boolean, nullable and with no default: NULL is
+  /// "not pinned" and owes no backfill, and the moment it was pinned gives the
+  /// pinned section an order for free if it ever needs one.
+  ///
+  /// **Written without touching `updatedAt`.** That column is `@updatedAt` and
+  /// the sidebar groups by it, so an ordinary Prisma update would file a
+  /// pinned conversation under 오늘 and tell the reader it was answered today.
+  /// `app/api/conversations/[conversationId]/pin/route.ts` writes this column
+  /// with raw SQL for exactly that reason.
+  pinnedAt              DateTime?
   password              String?
   importedGuestKey      String?
 
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
   @@index([userId, kind])
+  @@index([userId, pinnedAt])
 }
 
 model ConversationProject {
