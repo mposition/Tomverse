@@ -45,6 +45,7 @@ function readBoundedUtf8(path, maximum) {
 const gitEnvironment = {
   ...process.env,
   GIT_NO_LAZY_FETCH: "1",
+  GIT_NO_REPLACE_OBJECTS: "1",
   GIT_TERMINAL_PROMPT: "0",
 };
 

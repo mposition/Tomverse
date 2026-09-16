@@ -1066,9 +1066,9 @@ journal·witness header와 aggregate에 저장하고 다른 source snapshot의 r
 allowlist와 `.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도
 Git blob과 같은 bytes로 유지한다. 독립 검토 round 0에서 찾은 마지막 terminal 직후
 중단과 마지막 case mismatch 경계를 수정해, 전자는 invalid resume event 없이 complete를
-확정하고 후자는 remaining 0인 non-resumable stop으로 재생한다. Git child에는
-`GIT_NO_LAZY_FETCH=1`과 로컬 객체 선행조건을 강제하고 `max-cases`는 ASCII 10진 정수만
-받는다.
+확정하고 후자는 remaining 0인 non-resumable stop으로 재생한다. Git child에는 caller
+env보다 우선한 `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`과 로컬 객체 선행조건을
+강제하고 `max-cases`는 ASCII 10진 정수만 받는다.
 
 이 회차는 reservation authority dispatch 연결, stage seed/admin writer, product
 route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 또는
@@ -1083,7 +1083,7 @@ route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 
 | 직전 의미 있는 회차 대비 | **약 0%p** — 재현 가능한 무과금 검증 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
 | C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
 | 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
-| 로컬 검증 | 전용 core/CLI **21/21**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, no-network child trap, missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
+| 로컬 검증 | 전용 core/CLI **22/22**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, no-network child trap, replace-object 무시, missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
 | 독립 검토·통합 CI | Claude Code Max 읽기 전용 round 0은 request_changes 4건. 판정 기록은 별도 감사 commit으로 보존했고 4건을 수정했으며 재검토·Linux 통합 CI 전 상태 |
 | 병합·배포·공개 | 없음. provider/API/model 호출 0, stage/admin writer 없음, 제품 caller·flag·v1 admission 변경 없음 |
 

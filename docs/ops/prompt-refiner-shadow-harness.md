@@ -29,9 +29,11 @@ credential/private-key·URL·email 형태 검사는 방어적 보조 장치이�
 CLI는 full 40-hex commit SHA를 요구하고 고정 allowlist의 각 파일을 `git show`로 읽은
 bytes와 현재 작업 트리 bytes가 정확히 같을 때만 실행한다. EOL 차이도 drift다. corpus
 경로나 adapter/plugin/live/provider 모드를 인자로 바꿀 수 없고, 동적 plugin loading과
-credential lookup도 없다. 모든 Git child에는 `GIT_NO_LAZY_FETCH=1`과 비대화형 설정을
-강제하고 commit과 allowlist blob이 로컬에 실제로 존재하는지 `cat-file -e`로 먼저
-확인한다. partial/blobless promisor clone에서 객체가 없으면 원격 조회 없이 fail-closed한다.
+credential lookup도 없다. 모든 Git child에는 `GIT_NO_LAZY_FETCH=1`,
+`GIT_NO_REPLACE_OBJECTS=1`과 비대화형 설정을 caller 환경보다 우선해 강제하고 commit과
+allowlist blob이 로컬에 실제로 존재하는지 `cat-file -e`로 먼저 확인한다. 따라서 replace
+ref로 고정 SHA의 의미를 바꿀 수 없고, partial/blobless promisor clone에서 객체가 없으면
+원격 조회 없이 fail-closed한다.
 sourceRef와 정렬된 `path → file SHA-256` map의 canonical
 identity digest는 journal·witness 최초 header에 함께 고정되며, 재개 시 둘 다 정확히
 같아야 한다. 고정 allowlist의 모든 경로와 `.gitattributes` 자체를 `eol=lf`로 pin해

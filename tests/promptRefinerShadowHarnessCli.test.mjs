@@ -252,6 +252,60 @@ test("a normal core.autocrlf=true checkout preserves every pinned source byte", 
   }
 });
 
+test("a Git replacement cannot attribute source B bytes to pinned source A", () => {
+  const clone = join(temporary, "replace-object-checkout");
+  execFileSync(
+    "git",
+    ["clone", "--quiet", "--no-local", checkout, clone],
+    {
+      cwd: temporary,
+      env: cleanEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+  const cloneDependencies = join(clone, "node_modules");
+  symlinkSync(
+    realpathSync(join(root, "node_modules")),
+    cloneDependencies,
+    process.platform === "win32" ? "junction" : "dir"
+  );
+  const cloneGit = (args) =>
+    execFileSync("git", args, {
+      cwd: clone,
+      env: cleanEnvironment,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  try {
+    cloneGit(["config", "--local", "user.name", "Offline Replace Fixture"]);
+    cloneGit(["config", "--local", "user.email", "replace-fixture@example.invalid"]);
+    const sourceA = cloneGit(["rev-parse", "HEAD"]).trim();
+    assert.equal(sourceA, sourceRef);
+    const path = join(clone, "tsconfig.json");
+    writeFileSync(path, `${readFileSync(path, "utf8")}\n`);
+    cloneGit(["add", "--", "tsconfig.json"]);
+    cloneGit(["commit", "--quiet", "--no-gpg-sign", "-m", "Synthetic source B"]);
+    const sourceB = cloneGit(["rev-parse", "HEAD"]).trim();
+    assert.notEqual(sourceB, sourceA);
+    cloneGit(["replace", sourceA, sourceB]);
+
+    const result = run(
+      [
+        `--journal=${join(temporary, "replace-object.jsonl")}`,
+        `--source-ref=${sourceA}`,
+      ],
+      { GIT_NO_REPLACE_OBJECTS: "0" },
+      clone
+    );
+    assert.equal(result.status, 1, result.stdout);
+    assert.match(result.stderr, /runtime_source_drift/);
+  } finally {
+    assert.ok(lstatSync(cloneDependencies).isSymbolicLink());
+    unlinkSync(cloneDependencies);
+  }
+});
+
 test("a source A partial journal cannot resume under exact source B", () => {
   const journal = join(temporary, "source-bound-resume.jsonl");
   const first = run([

@@ -216,9 +216,10 @@ credential lookup, 예약 authority, stage writer, 제품 caller와 연결하지
 sourceRef와 정렬된 allowlist file-hash map의 canonical identity digest는 journal과
 witness 최초 header에 함께 기록하며 resume 때 exact match를 강제한다. allowlist와
 `.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도 같은
-Git bytes로 만든다. Git child는 `GIT_NO_LAZY_FETCH=1`과 비대화형 설정 아래에서만
-실행하고 commit·allowlist blob의 로컬 존재를 먼저 확인한다. partial/blobless promisor
-clone의 누락 객체를 원격에서 가져오는 것은 허용하지 않고 실행을 거부한다.
+Git bytes로 만든다. Git child는 caller env보다 우선한 `GIT_NO_LAZY_FETCH=1`,
+`GIT_NO_REPLACE_OBJECTS=1`과 비대화형 설정 아래에서만 실행하고 commit·allowlist blob의
+로컬 존재를 먼저 확인한다. replace ref는 고정 SHA 해석에 관여할 수 없고,
+partial/blobless promisor clone의 누락 객체를 원격에서 가져오는 것도 허용하지 않는다.
 
 모델 모양의 fixture output은 `parseBenchmarkJson()`의 syntax·duplicate key·complexity
 제한, `strictBenchmarkObject(["refinedPrompt"])`의 exact field 검사, 기존 prompt
