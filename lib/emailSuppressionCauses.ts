@@ -94,6 +94,8 @@ export async function releaseSelectorCauses(
     releaseKind: string;
     releaseEvidence: Prisma.InputJsonValue;
     releasedAt: Date;
+    /** Release only causes with this reason; null or absent releases all. */
+    onlyReason?: string | null;
   }
 ): Promise<number> {
   const result = await tx.suppressionCause.updateMany({
@@ -102,6 +104,7 @@ export async function releaseSelectorCauses(
       scope: input.scope,
       purposeKey: input.purposeKey,
       releasedAt: null,
+      ...(input.onlyReason ? { reason: input.onlyReason } : {}),
     },
     data: {
       releasedAt: input.releasedAt,
