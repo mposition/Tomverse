@@ -77,6 +77,10 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
         // in the product, so an export that omitted it would be narrower than
         // the screen.
         productKey: true,
+        // The pin is the account's own arrangement of its list, visible on
+        // every device it signs in on, so an export without it would be
+        // narrower than the screen.
+        pinnedAt: true,
         createdAt: true,
         updatedAt: true,
         messages: {

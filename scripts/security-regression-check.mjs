@@ -1799,14 +1799,17 @@ const checks = [
       source.includes('help_source: "sidebar_header"'),
   },
   {
-    name: "Chat sidebar separates status, labels, and projects with contextual help",
+    // Labels were removed on 2026-09-16: three fixed values stored in one
+    // browser, duplicating server-side projects and absent on a second device.
+    // What this pin still holds is the separation that mattered -- status is
+    // not filed under organisation -- and that each surface explains itself.
+    name: "Chat sidebar separates status from projects with contextual help",
     file: "components/chat/ChatSidebar.tsx",
     test: (source) =>
       source.includes('data-testid="sidebar-status-filters"') &&
-      source.includes('data-testid="sidebar-label-filters"') &&
       source.includes('data-testid="sidebar-projects"') &&
+      !source.includes('data-testid="sidebar-label-filters"') &&
       source.includes('topic="locked"') &&
-      source.includes('topic="label"') &&
       source.includes('topic="project"') &&
       source.includes("SIDEBAR_TOUR_STORAGE_KEY") &&
       source.includes('trackProductEvent("sidebar_tour_completed")'),

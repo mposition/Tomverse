@@ -60,7 +60,7 @@ test.describe("mobile recent-chat disclosure", () => {
   });
 
   for (const count of [1, 3]) {
-    test(`${count} recent chat(s): a counted row, and no titles on screen`, async ({
+    test(`${count} recent chat(s): one row, no titles and no count on screen`, async ({
       page,
     }) => {
       const titles = [SENSITIVE_TITLE, "Tax return questions", "Divorce paperwork"].slice(
@@ -73,9 +73,12 @@ test.describe("mobile recent-chat disclosure", () => {
       const disclosure = page.getByTestId("recent-conversations-disclosure");
       await expect(disclosure).toBeVisible();
       await expect(disclosure).toHaveAttribute("data-recent-count", String(count));
-      await expect(disclosure).toHaveAccessibleName(
-        count === 1 ? "View 1 recent chat" : `View ${count} recent chats`
-      );
+      // The row opens the drawer's whole conversation list, so it names that
+      // rather than this screen's own three-item slice. The count stays in the
+      // data attribute above, where it describes the fixture instead of
+      // promising the reader a number the drawer will not honour.
+      await expect(disclosure).toHaveAccessibleName("View recent chats");
+      expect(await disclosure.innerText()).not.toMatch(/\d/);
 
       // No title card, and no title text anywhere in the welcome screen's DOM.
       await expect(page.getByTestId("recent-conversation-card")).toHaveCount(0);

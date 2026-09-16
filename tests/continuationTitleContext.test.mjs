@@ -297,9 +297,20 @@ test("search hits and the import page menu use the list's resolver", () => {
     assert.doesNotMatch(menu, /entry\.title\?\.trim\(\)\s*\?\s*entry\.title/);
 });
 
-test("the deleted label appears only for the deleted state", () => {
+test("the deleted source is said once, and only for the deleted state", () => {
+    // It used to be a chip under the title, which made imported rows 79px
+    // against 57px for everything else. It is now the provider mark drawn
+    // muted, with the fact in the row's accessible name: the same statement,
+    // no extra line, and still nothing for a row whose source is merely locked
+    // or untitled.
     const sidebar = code("components/chat/ChatSidebar.tsx");
-    assert.match(sidebar, /conv\.sourceState === "deleted" && \(/);
-    assert.match(sidebar, /t\("continuation\.sourceDeletedBadge"\)/);
-    assert.equal(sidebar.split("sourceDeletedBadge").length - 1, 1);
+    assert.match(sidebar, /const sourceDeleted = conv\.sourceState === "deleted";/);
+    assert.match(sidebar, /sourceDeleted \? "opacity-40" : ""/);
+    // Twice, and only twice: the imported row that draws the provider mark, and
+    // the locked row that draws a padlock instead and would otherwise lose the
+    // provenance a reader who cannot see the mark was relying on. Both are
+    // guarded by the same `deleted` state; neither is a line of its own.
+    assert.equal(sidebar.split("sourceDeletedBadge").length - 1, 2);
+    assert.match(sidebar, /conv\.isLocked && conv\.surface === "continuation"/);
+    assert.doesNotMatch(sidebar, /data-testid="conversation-source-deleted"\s*\n\s*className/);
 });

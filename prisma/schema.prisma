@@ -380,6 +380,54 @@ model Conversation {
   project               ConversationProject?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt             DateTime                        @default(now())
   updatedAt             DateTime                        @updatedAt
+
+  /// When this conversation was pinned to the top of the sidebar, or NULL.
+  ///
+  /// Server-stored because a pin is a decision about the account's list, not
+  /// about one browser: it used to live in `localStorage`, so the same account
+  /// opened on a second device silently lost the order it had arranged -- a
+  /// defect nobody reports, because the list looks ordinary rather than broken.
+  ///
+  /// A timestamp rather than a boolean, nullable and with no default: NULL is
+  /// "not pinned" and owes no backfill, and the moment it was pinned gives the
+  /// pinned section an order for free if it ever needs one.
+  ///
+  /// **Written without touching `updatedAt`.** That column is `@updatedAt` and
+  /// the sidebar groups by it, so an ordinary Prisma update would file a
+  /// pinned conversation under 오늘 and tell the reader it was answered today.
+  /// `app/api/conversations/[conversationId]/pin/route.ts` writes this column
+  /// with raw SQL for exactly that reason.
+  pinnedAt              DateTime?
+  /// The sequence of the last pin write this conversation accepted. A write
+  /// carries its own sequence and applies only if it is greater, so the last
+  /// tap is the last write in whatever order the requests arrive.
+  ///
+  /// A client cannot order its own writes: a request whose connection dropped
+  /// may still be applied afterwards, so "the browser saw it fail" is not "the
+  /// column was not written". A compare-and-set on an *observed* version is not
+  /// enough either -- two taps that both fail leave the client knowing nothing
+  /// new, so both name the same version and whichever lands first wins. The
+  /// sequence belongs to the tap instead, and each one is above every write
+  /// this client made that may still land, whether or not anything came back.
+  ///
+  /// A sequence is `max(now in ms, highest seen + 1, highest still-landable
+  /// issued + 1)` -- a refused write can never land, so it sets no floor --
+  /// so it survives a reload and a tap made after seeing a state beats that
+  /// state. Taps from two devices that have not seen each other are ordered by
+  /// their clocks, which is the most any design can do for concurrent writes;
+  /// see `docs/ui-contracts/mobile-sidebar-drawer.md`.
+  ///
+  /// `Float` (DOUBLE PRECISION) rather than `BigInt`: a double holds every
+  /// integer up to 2^53 exactly and a millisecond timestamp is about 1.8e12,
+  /// while a `BigInt` on this model would make `JSON.stringify` throw on any of
+  /// the dozens of places that read a whole conversation row.
+  ///
+  /// Also what tells a refreshed list from a stale one, which the value alone
+  /// cannot once a pin has been changed and changed back.
+  ///
+  /// Written by the same raw statement as `pinnedAt`, so it moves `updatedAt`
+  /// no more than that column does.
+  pinSeq                Float     @default(0)
   password              String?
   importedGuestKey      String?
 

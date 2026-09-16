@@ -111,8 +111,10 @@ test("font-black is reserved for headline-sized customer text", () => {
     // superseded walkthrough embed above it was replaced by a stage diagram,
     // then down three more when the landing redesign moved the shared stage
     // copy from `proof` to `preview` and the destructure above grew a comment
-    // explaining where it went.
-    "components/marketing/ChatWorkspaceGuide.tsx:193",
+    // explaining where it went, then down four more when the tour icon list
+    // lost a row with the labels feature and gained the comments naming which
+    // row each icon and the analytics topic belong to.
+    "components/marketing/ChatWorkspaceGuide.tsx:201",
   ]);
 
   const violations = [];

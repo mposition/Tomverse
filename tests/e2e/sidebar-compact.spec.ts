@@ -32,13 +32,17 @@ test.describe("compact sidebar layout", () => {
     const organizerToggle = page.getByTestId("sidebar-organizer-toggle");
     await organizerToggle.click();
     await expect(organizerToggle).toHaveAttribute("aria-expanded", "true");
+    // The status filters, which is what the organizer holds now. The label
+    // filters this used to click went with the labels feature, and a selector
+    // for a block that no longer renders fails as a missing element rather
+    // than as the thing this case was written to check: that the collapsed
+    // toggle still names the filter that is on.
     await page
-      .getByTestId("sidebar-label-filters")
-      .locator('button[aria-pressed="false"]')
-      .first()
+      .getByTestId("sidebar-status-filters")
+      .getByRole("button", { name: "비밀번호 잠금" })
       .click();
     await organizerToggle.click();
-    await expect(organizerToggle).toContainText("업무");
+    await expect(organizerToggle).toContainText("비밀번호 잠금");
     await expect
       .poll(() =>
         page.evaluate(() =>
