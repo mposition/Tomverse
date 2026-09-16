@@ -145,127 +145,247 @@
         }
       ],
       "nextAction": "Guard `remainingCases > 0` before appending `run_resumed`/`run_stopped` (and exclude `remainingCases === 0` from `resumable`, or let that state complete the run) so a final-case interruption or mismatch cannot write an event the replay rejects; re-run the 17 shadow tests with added last-case coverage."
+    },
+    {
+      "round": 1,
+      "changeDigest": "sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+      "commit": "6d5d2fd87f3def76c5070e71ac6d521490d67c6e",
+      "filesChanged": [
+        ".gitattributes",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round0.json",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/corpus-v1.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/promptRefinerShadowHarness.ts",
+        "lib/promptRefinerShadowJournal.ts",
+        "lib/promptRefinerShadowSource.ts",
+        "package.json",
+        "scripts/prompt-refiner-shadow-harness.mjs",
+        "tests/promptRefinerShadowHarness.test.mjs",
+        "tests/promptRefinerShadowHarnessCli.test.mjs"
+      ],
+      "changeSummary": "latest develop base sync only; 19 outside-scope email paths belong to base d16093c5 and are not authored here; old/latest literal scoped diff is byte-equal at sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee; round0 numbered artifacts/verdict remain immutable; all four round0 findings are fixed plus GIT_NO_REPLACE_OBJECTS adversarial hardening.",
+      "testResults": [
+        {
+          "command": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 18967.3362",
+          "durationMs": 19473
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 49
+        },
+        {
+          "rule": "node -e 'const fs=require(\"fs\"),c=require(\"child_process\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const n=c.execFileSync(\"git\",[\"diff\",\"--name-only\",\"d16093c550564eb36bcc49aded1d263ce6130914\",\"--\"],{encoding:\"utf8\"}).trim().split(/\\r?\\n/).filter(Boolean).map(x=>x.replaceAll(\"\\\\\\\\\",\"/\"));const u=(f,s)=>f===s.replace(/\\/$/,\"\")||f.startsWith(s.replace(/\\/$/,\"\")+\"/\");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error(\"outside scope: \"+o.join(\",\"));console.log(\"latest-base names in existing writableScope: \"+n.length+\", outside: 0\")'",
+          "passed": true,
+          "detail": "latest-base names in existing writableScope: 21, outside: 0",
+          "durationMs": 98
+        },
+        {
+          "rule": "node -e 'const fs=require(\"fs\"),c=require(\"child_process\"),h=require(\"crypto\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const s=t.writableScope.map(x=>\":(literal)\"+x).concat([\":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\"]);const d=b=>c.execFileSync(\"git\",[\"diff\",b,\"--\",...s],{maxBuffer:33554432});const a=d(\"cea66ca8d025dc19daed085669dc8cfbceeb6460\"),n=d(\"d16093c550564eb36bcc49aded1d263ce6130914\");const x=h.createHash(\"sha256\").update(a).digest(\"hex\"),y=h.createHash(\"sha256\").update(n).digest(\"hex\");if(!a.equals(n)||x!==\"067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee\")throw Error(\"scoped diff mismatch \"+x+\" \"+y);console.log(\"old/latest literal scoped diff equal: \"+a.length+\" bytes sha256:\"+x)'",
+          "passed": true,
+          "detail": "old/latest literal scoped diff equal: 134099 bytes sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+          "durationMs": 129
+        },
+        {
+          "rule": "node -e 'const fs=require(\"fs\"),h=require(\"crypto\"),p=\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/\";const e={\"change-round0.diff\":\"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7\",\"package-round0.json\":\"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d\",\"review-round0.events.jsonl\":\"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072\",\"verdict-round0.json\":\"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf\"};for(const [f,x] of Object.entries(e)){const a=h.createHash(\"sha256\").update(fs.readFileSync(p+f)).digest(\"hex\");if(a!==x)throw Error(\"round0 changed: \"+f)}console.log(\"round0 numbered artifacts and verdict immutable: 4\")'",
+          "passed": true,
+          "detail": "round0 numbered artifacts and verdict immutable: 4",
+          "durationMs": 73
+        },
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2480.7797",
+          "durationMs": 2559
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 733
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 43855
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3163
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 971 path(s) named by comments across 2941 source file(s), all present.",
+          "durationMs": 1513
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+          "durationMs": 1144
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1898
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 886
+        },
+        {
+          "rule": "git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . ':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 59
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": null,
+      "findings": [],
+      "nextAction": "awaiting the reviewer's verdict"
     }
   ],
-  "changeDigest": "sha256:c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7",
-  "commit": "49e03ac1fb558b642d816da6e89b5352dd8f5fd3",
-  "changeSummary": "(no summary supplied; the diff is the record)",
+  "changeDigest": "sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+  "commit": "6d5d2fd87f3def76c5070e71ac6d521490d67c6e",
+  "changeSummary": "latest develop base sync only; 19 outside-scope email paths belong to base d16093c5 and are not authored here; old/latest literal scoped diff is byte-equal at sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee; round0 numbered artifacts/verdict remain immutable; all four round0 findings are fixed plus GIT_NO_REPLACE_OBJECTS adversarial hardening.",
   "testResults": [
     {
       "command": "npm run test:prompt-refiner-shadow",
       "passed": true,
-      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 13239.4572",
-      "durationMs": 13826
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 18967.3362",
+      "durationMs": 19473
     }
   ],
   "guardRuns": [
     {
+      "rule": "git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 49
+    },
+    {
+      "rule": "node -e 'const fs=require(\"fs\"),c=require(\"child_process\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const n=c.execFileSync(\"git\",[\"diff\",\"--name-only\",\"d16093c550564eb36bcc49aded1d263ce6130914\",\"--\"],{encoding:\"utf8\"}).trim().split(/\\r?\\n/).filter(Boolean).map(x=>x.replaceAll(\"\\\\\\\\\",\"/\"));const u=(f,s)=>f===s.replace(/\\/$/,\"\")||f.startsWith(s.replace(/\\/$/,\"\")+\"/\");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error(\"outside scope: \"+o.join(\",\"));console.log(\"latest-base names in existing writableScope: \"+n.length+\", outside: 0\")'",
+      "passed": true,
+      "detail": "latest-base names in existing writableScope: 21, outside: 0",
+      "durationMs": 98
+    },
+    {
+      "rule": "node -e 'const fs=require(\"fs\"),c=require(\"child_process\"),h=require(\"crypto\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const s=t.writableScope.map(x=>\":(literal)\"+x).concat([\":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\"]);const d=b=>c.execFileSync(\"git\",[\"diff\",b,\"--\",...s],{maxBuffer:33554432});const a=d(\"cea66ca8d025dc19daed085669dc8cfbceeb6460\"),n=d(\"d16093c550564eb36bcc49aded1d263ce6130914\");const x=h.createHash(\"sha256\").update(a).digest(\"hex\"),y=h.createHash(\"sha256\").update(n).digest(\"hex\");if(!a.equals(n)||x!==\"067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee\")throw Error(\"scoped diff mismatch \"+x+\" \"+y);console.log(\"old/latest literal scoped diff equal: \"+a.length+\" bytes sha256:\"+x)'",
+      "passed": true,
+      "detail": "old/latest literal scoped diff equal: 134099 bytes sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+      "durationMs": 129
+    },
+    {
+      "rule": "node -e 'const fs=require(\"fs\"),h=require(\"crypto\"),p=\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/\";const e={\"change-round0.diff\":\"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7\",\"package-round0.json\":\"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d\",\"review-round0.events.jsonl\":\"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072\",\"verdict-round0.json\":\"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf\"};for(const [f,x] of Object.entries(e)){const a=h.createHash(\"sha256\").update(fs.readFileSync(p+f)).digest(\"hex\");if(a!==x)throw Error(\"round0 changed: \"+f)}console.log(\"round0 numbered artifacts and verdict immutable: 4\")'",
+      "passed": true,
+      "detail": "round0 numbered artifacts and verdict immutable: 4",
+      "durationMs": 73
+    },
+    {
       "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
       "passed": true,
-      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2883.012",
-      "durationMs": 2979
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2480.7797",
+      "durationMs": 2559
     },
     {
       "rule": "npm run check:prompt-injection",
       "passed": true,
       "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
-      "durationMs": 859
+      "durationMs": 733
     },
     {
       "rule": "npm run typecheck",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
-      "durationMs": 47624
+      "durationMs": 43855
     },
     {
       "rule": "npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs",
       "passed": true,
       "detail": "",
-      "durationMs": 3285
+      "durationMs": 3163
     },
     {
       "rule": "npm run check:doc-references",
       "passed": true,
-      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 970 path(s) named by comments across 2937 source file(s), all present.",
-      "durationMs": 1595
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 884 referenced path(s) across 111 instruction document(s), and 971 path(s) named by comments across 2941 source file(s), all present.",
+      "durationMs": 1513
     },
     {
       "rule": "npm run check:policy-section-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
-      "durationMs": 1124
+      "durationMs": 1144
     },
     {
       "rule": "npm run check:encoding:strict",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
-      "durationMs": 1440
+      "durationMs": 1898
     },
     {
       "rule": "npm run check:data-domain-registry",
       "passed": true,
-      "detail": "y\\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.\n   Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
-      "durationMs": 788
+      "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+      "durationMs": 886
     },
     {
-      "rule": "git diff --check cea66ca8d025dc19daed085669dc8cfbceeb6460..HEAD",
+      "rule": "git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . ':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1'",
       "passed": true,
       "detail": "",
-      "durationMs": 58
+      "durationMs": 59
     }
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": "request_changes",
-  "findings": [
-    {
-      "location": "lib/promptRefinerShadowJournal.ts:487 (eventFrom, run_resumed `resumed.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:665-669 (replay `resumable`) and lib/promptRefinerShadowJournal.ts:847-861 (resume branch appends run_resumed before any remaining-case guard)",
-      "severity": "error",
-      "basis": "evidence",
-      "claim": "A clean interruption after the 16th case terminal but before `run_completed` is reported resumable, yet resuming appends a `run_resumed` event with `remainingCases: 0` that the journal's own replay permanently rejects, so the run can neither complete nor be replayed afterwards — contradicting the documented contract that a clean post-terminal interruption resumes (docs/ops/prompt-refiner-shadow-harness.md section 5).",
-      "reproduction": "In tests/promptRefinerShadowHarness.test.mjs style: `const done = journal(\"final-interruption\"); runPromptRefinerShadowHarness({ corpus, journalPath: done, resume: false }); const full = texts(done); const j = full.journalText.trimEnd().split(\"\\n\"); const w = full.witnessText.trimEnd().split(\"\\n\"); const path = journal(\"final-interrupted\"); const p = promptRefinerShadowPaths(path); writeFileSync(p.journal, j.slice(0, -1).join(\"\\n\") + \"\\n\"); writeFileSync(p.witness, w.slice(0, -1).join(\"\\n\") + \"\\n\");` (drops only the trailing `run_completed` entry and its witness line, i.e. a crash in that window). `replayPromptRefinerShadowJournal` on those two texts reports status `interrupted`, `unknownCases: 0`, `remainingCases: 0`, `resumable: true`. Then `runPromptRefinerShadowHarness({ corpus, journalPath: path, resume: true })` throws `prompt_refiner_shadow_resume_state` *after* writing the new entry, and every later `replayPromptRefinerShadowJournal` of the resulting files throws `prompt_refiner_shadow_resume_state` too. Expected: the resume completes the run, or is refused before any append leaves the journal unreplayable.",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "lib/promptRefinerShadowJournal.ts:446 (eventFrom, run_stopped `stopped.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:902-925 (mismatch stop appends before any remaining-case guard)",
-      "severity": "warning",
-      "basis": "evidence",
-      "claim": "Same root cause on the stop path: a structural or behavioral mismatch on the last corpus case makes the harness write a `run_stopped` event with `remainingCases: 0` that its own replay rejects, so instead of the documented non-resumable `behavioral_fixture_mismatch`/`structural_boundary_violation` stop the operator gets `prompt_refiner_shadow_stop_state` and an unreplayable journal.",
-      "reproduction": "Copy the existing \"a structural or behavioral mismatch stops non-resumably without a call\" test but mutate the last case instead of the first: `const m = structuredClone(corpus); m.cases[15].expected = { status: \"failed\", failureCode: \"invalid_response\", refinedPrompt: null }; redigest(m); const v = validatePromptRefinerShadowCorpus(m); runPromptRefinerShadowHarness({ corpus: v, journalPath: journal(\"last-case-mismatch\"), resume: false });` Actual: throws `prompt_refiner_shadow_stop_state`, and `replayPromptRefinerShadowJournal` on the written files throws the same. Expected: a report with `status: \"stopped\"`, `stopReason: \"behavioral_fixture_mismatch\"`, `resumable: false`, `processedCases: 16`.",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "scripts/prompt-refiner-shadow-harness.mjs:45-51,90-95 (git subprocess) vs tests/promptRefinerShadowHarnessCli.test.mjs:96-104 (in-process network trap)",
-      "severity": "nit",
-      "basis": "judgement",
-      "claim": "The no-network trap only patches the CLI process (fetch/http/https/net/tls/dgram), not the `git` child process, so on a partial/blobless clone `git show <sha>:<path>` can lazily fetch objects from the promisor remote — network activity the trap cannot observe or block.",
-      "reproduction": "`git clone --filter=blob:none <remote> shallowish && cd shallowish && npm run shadow:prompt-refiner -- --journal=/tmp/j.jsonl --source-ref=<40-hex>` with the remote reachable; git fetches the allowlisted blobs over the network during the `git show` calls, while the same run under the test's trap reports no network use. A `GIT_NO_LAZY_FETCH=1` / `--filter` guard or an explicit local-objects precondition would close it.",
-      "disposition": "fix_requested"
-    },
-    {
-      "location": "scripts/prompt-refiner-shadow-harness.mjs:107",
-      "severity": "nit",
-      "basis": "judgement",
-      "claim": "`Number(maxCasesText)` accepts non-decimal spellings, so `--max-cases=0x10` and `--max-cases=1e1` are silently taken as 16 and 10 rather than rejected as malformed input (the value is still bounded to 1..16 and safe-integer, so nothing unsafe follows).",
-      "reproduction": "`npm run shadow:prompt-refiner -- --journal=<new.jsonl> --source-ref=<40-hex> --max-cases=0x10` completes all 16 cases; expected an `argument_value_required`-style rejection from a `/^[1-9][0-9]*$/` check.",
-      "disposition": "fix_requested"
-    }
-  ],
-  "nextAction": "Guard `remainingCases > 0` before appending `run_resumed`/`run_stopped` (and exclude `remainingCases === 0` from `resumable`, or let that state complete the run) so a final-case interruption or mismatch cannot write an event the replay rejects; re-run the 17 shadow tests with added last-case coverage.; package round 1 once the change is revised",
-  "status": "awaiting_revision",
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand the review prompt (round 1) to the claude reviewer; its verdict must name digest sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+  "status": "awaiting_review",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-16T13:37:29.926Z",
-  "packagedRounds": 1,
+  "producedAt": "2026-09-16T14:14:56.583Z",
+  "packagedRounds": 2,
   "concludedAtRound": null,
   "lineage": [],
   "inheritedFindings": [],
-  "headCommit": "49e03ac1fb558b642d816da6e89b5352dd8f5fd3",
+  "headCommit": "6d5d2fd87f3def76c5070e71ac6d521490d67c6e",
   "worktreeDirty": false,
   "filesChanged": [
     ".gitattributes",
     "AGENTS.md",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/change.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/exchange.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-prompt.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/verdict-round0.json",
     "docs/ops/prompt-refiner-shadow-harness.md",
     "docs/ops/prompt-refiner-shadow/corpus-v1.json",
     "docs/ops/tomverse-chat-progress.md",
