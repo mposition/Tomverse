@@ -432,6 +432,24 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **잠긴 snapshot은 메모리 추출에 쓸 수 없습니다**(2026-09-16). 새 결정이 아니라
+  바로 위 문장의 적용입니다 — 추출은 snapshot의 제목과 모든 메시지를 외부
+  provider에 보내므로, 그것이 우회 노출이 아니라면 무엇도 아닙니다. 아래 삭제의
+  반대 사례와 같은 논리입니다: 삭제는 내용을 드러내지 않아 막지 않고, 추출은
+  드러내므로 막습니다.
+  - **선택·견적·생성**: 잠긴 snapshot은 고를 수 없고(목록에 잠김으로 보이고
+    해제 화면으로 가는 길을 줍니다), 견적과 생성은 `423 CONVERSATION_LOCKED`로
+    거절합니다. 생성은 run과 예약을 쓰는 트랜잭션 **안에서** snapshot 행을
+    `ORDER BY id FOR UPDATE`로 다시 읽습니다 — 그 앞의 견적은 트랜잭션 밖이라,
+    그것만으로는 사이에 걸린 잠금을 못 막습니다. 거절이 예약보다 먼저이므로
+    아무것도 청구되지 않습니다.
+  - **실행 중 잠금**은 §11.1이 다룹니다.
+  - **provider 호출이 나간 뒤 이긴 잠금**: 그 노출은 이미 일어났고 되돌릴 수
+    없습니다. 결과는 평소대로 `candidate`로 저장하며, 특별한 상태를 주지
+    않습니다. `suspended_by_source_lock`은 `active` 위에만 쓰이고 해제 시
+    `active`로 복원되므로, 후보에 쓰면 해제가 승인된 적 없는 것을 승격시킵니다.
+    그 후보가 채팅에 닿지 않는 것은 상태가 아니라 검색 쿼리의 읽기 시점
+    필터(`lib/memoryRetrievalService.ts`)가 보장합니다.
 - **잠긴 snapshot의 원문 제목도 잠금이 가리는 내용입니다**(IMPORT-LOCK-TITLE-01, 2026-09-15 제품 결정).
   가져오기 목록(`listExternalConversations`)과 가져오기 상태(`getExternalImportStatus`)는 잠긴 행의
   `title`을 **보내지 않고**(`null`, `titleWithheld: true`) 브라우저가 해제 grant를 가지고 있어도 같습니다.
@@ -763,7 +781,23 @@ Node crypto)입니다.
   소진 시 명시적 lease 반납 후 `pending` 복귀. 프로세스가 강제 종료되면
   lease 만료 후 maintenance가 회수합니다.
 - **chunk 경계마다 재검사**합니다: feature flag, 승인 pair와 revocation,
-  사용자 plan, provider 예산. run 생성 시점의 판정을 캐시하지 않습니다.
+  사용자 plan, provider 예산, **source 잠금**. run 생성 시점의 판정을 캐시하지
+  않습니다. source 잠금은 2026-09-16에 추가됐습니다 — 이 목록은 닫힌 열거라,
+  없는 항목은 재검사되지 않는다는 뜻이었습니다.
+- **실행 중 잠긴 source**는 run을 멈추지 않고 그 source만 뺍니다.
+  - chunk를 읽을 때 잠긴 snapshot을 거릅니다. 일부만 잠겼으면 **남은 source로
+    한 번 호출**하고 그 chunk는 `completed`입니다. 하나를 잠갔다고 사용자가 승인한
+    나머지를 버리지 않습니다.
+  - 전부 잠겼으면 읽을 것이 없으므로 `skipped`이며 과금되지 않습니다.
+  - 읽은 뒤 요청이 나가기 전에 잠기면, **요청 직전의 재검사**가 막습니다. 요청은
+    나가지 않고 provider 입장권은 해제되며, chunk는 `source_locked`로 재시도해
+    재로드가 잠긴 source를 뺍니다.
+  - 그 재검사가 선형화점입니다. 그 뒤 요청 바이트가 나가기 전에 커밋된 잠금까지
+    닫으려면 네트워크 호출 동안 행 잠금을 쥐어야 하므로 닫지 않으며, 그 경우는
+    §7.1의 "provider 호출이 나간 뒤 이긴 잠금"입니다.
+  - run 전체를 취소하지 않는 이유: `memory delete-all`이 진행 중 run을 통째로
+    취소하는 것(§13.1)은 추출이 방금 비운 memory store를 다시 채우기 때문이고,
+    source 잠금은 그 source만 무효화합니다.
 - **취소·flag off·revocation은 즉시 정지 사유**이며, 정지한 slice는 lease를
   반납하고 진행분을 보존합니다.
 - **chunk의 종료 상태는 셋이고, 과금되는 것은 하나입니다**(2026-09-16).
@@ -1579,7 +1613,7 @@ entitlement(`CREDIT_*`, `PLAN_*`)와 guardrail(`OPERATIONAL_*`, `PROVIDER_*`)
 | cross-user IDOR (import·memory·profile·knowledge·lock grant) | owner scope 전면 적용, resource type 결속 grant(§7), IDOR 테스트 |
 | context bundle replay·변조 | 서명·nonce·expiry·subject/conversation 결속, admission과 역할 분리(§10) |
 | staging 자원 노출 | 일반 목록·검색·export 비노출, TTL·cleanup |
-| lock 우회 (evidence·retrieval·share 경유) | suspension 원자성(§7.1), 잠긴 evidence 열람 차단, share/export 제외(§13.3) |
+| lock 우회 (evidence·retrieval·share·extraction 경유) | suspension 원자성(§7.1), 잠긴 evidence 열람 차단, share/export 제외(§13.3), 잠긴 snapshot의 추출 거절과 실행 중 제외·요청 직전 재검사(§7.1, §11.1) |
 | provider 예산 잠식 (대량 추출) | batch sub-budget 10%(§3), interactive 우선 |
 | eval 조작 (표본 부풀림·분모 조작·smoke 위장) | 표본 계약(§12.2), manifest 사전 고정, 코드/운영 분리(§12.4), register 감사 |
 | 데이터 유출 (로그·telemetry·오류) | content·title·filename·외부 ID·digest·statement의 로그 금지, content-free 지표만 |

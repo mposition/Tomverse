@@ -797,3 +797,102 @@ test("a superseded generation cannot record a skip or settle on it", async () =>
     assert.notEqual(row.status, "skipped");
     assert.equal((await reservationFor(run.id)).status, "reserved");
 });
+
+/* ------------------------------------------------------- locked selections */
+
+/**
+ * A locked snapshot may not be sent to a provider
+ * (docs/policy/external-conversation-import-and-memory.md §7.1), so a
+ * selection holding one is refused before anything is reserved.
+ */
+
+test("a selection holding a locked snapshot is refused with 423 and reserves nothing", async () => {
+    const { user, conversationIds } = await seed(2);
+    await prisma.externalConversation.update({
+        where: { id: conversationIds[0] },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    await assert.rejects(
+        estimateMemoryExtraction(baseInput(user.id, conversationIds)),
+        (error: unknown) =>
+            error instanceof ApiSecurityError &&
+            error.status === 423 &&
+            error.code === "CONVERSATION_LOCKED"
+    );
+    assert.equal(await prisma.memoryExtractionRun.count(), 0);
+    assert.equal(await prisma.memoryExtractionCreditReservation.count(), 0);
+});
+
+test("an id the caller does not own is not found, not locked", async () => {
+    // "Not yours" and "locked" must not be told apart for a snapshot the
+    // caller has no business knowing the state of, so ownership is judged
+    // first and the lock only after it.
+    const { user } = await seed(1);
+    const { conversationIds: foreign } = await seed(1);
+    await prisma.externalConversation.update({
+        where: { id: foreign[0] },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    await assert.rejects(
+        estimateMemoryExtraction(baseInput(user.id, foreign)),
+        (error: unknown) =>
+            error instanceof ApiSecurityError && error.code === "NOT_FOUND"
+    );
+});
+
+test("a snapshot locked between the estimate and the run is refused inside the transaction", async () => {
+    /*
+      The race this pins. `createMemoryExtractionRun` re-runs the estimate
+      first, and that estimate runs outside the transaction that writes the
+      run and its reservation -- so it alone cannot stop a lock that lands in
+      between.
+
+      The credit-account lock is the first thing that transaction takes. Held
+      from outside, it parks the create *after* its estimate has passed and
+      *before* it reads the rows again. The lock is committed in that gap, and
+      only the in-transaction read can see it.
+    */
+    const { user, conversationIds } = await seed(2);
+    const estimate = await estimateMemoryExtraction(
+        baseInput(user.id, conversationIds)
+    );
+
+    const holder = holdLock((tx) =>
+        tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit-account:${user.id}`}))`
+    );
+    await holder.holding;
+
+    const creating = createMemoryExtractionRun({
+        ...baseInput(user.id, conversationIds),
+        confirmedCredits: estimate.estimatedCredits,
+    });
+    // Attached before the wait, so a rejection is never unhandled.
+    const outcome = creating.then(
+        () => "created" as const,
+        (error: unknown) => error
+    );
+    await waitForLockWaiters(1);
+
+    await prisma.externalConversation.update({
+        where: { id: conversationIds[0] },
+        data: { password: "scrypt$1$test-locked" },
+    });
+    holder.release();
+    await holder.done;
+
+    const settled = await outcome;
+    assert.ok(
+        settled instanceof ApiSecurityError &&
+            settled.status === 423 &&
+            settled.code === "CONVERSATION_LOCKED",
+        `expected a 423 from inside the transaction, got ${String(settled)}`
+    );
+    assert.equal(await prisma.memoryExtractionRun.count(), 0, "no run");
+    assert.equal(
+        await prisma.memoryExtractionCreditReservation.count(),
+        0,
+        "no reservation, so nothing to refund"
+    );
+});

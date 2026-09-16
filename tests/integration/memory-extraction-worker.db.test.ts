@@ -14,6 +14,7 @@ import {
 import {
     dispatchPendingMemoryExtractionRuns,
     handleMemoryExtractionChunk,
+    type ExtractionAdapterFactory,
 } from "@/lib/memoryExtractionWorker";
 import { prisma } from "@/lib/prisma";
 
@@ -450,4 +451,193 @@ test("a deferred run is picked up by the next pass", async () => {
         }),
         2
     );
+});
+
+
+/* ------------------------------------------------- sources locked mid-run */
+
+/**
+ * A run is created against an unlocked selection, and it can run for a long
+ * time. These pin what happens when the owner locks a source in the meantime
+ * (docs/policy/external-conversation-import-and-memory.md §7.1, §11.1).
+ *
+ * The adapter here calls `onCallIssued` the way the production adapter does
+ * (lib/memoryExtractionProvider.ts) -- `answeringAdapter` above does not, and
+ * the last-moment lock check lives inside that hook, so a test built on it
+ * would pass without ever reaching the check.
+ */
+const issuingAdapter = (
+    statement: string,
+    hooks: {
+        /** Runs after the chunk has loaded and before the request leaves. */
+        beforeIssue?: () => Promise<void>;
+        /** Runs after the request has left and before the answer returns. */
+        afterIssue?: () => Promise<void>;
+        prompts?: string[];
+    } = {}
+): ExtractionAdapterFactory => (factory) => async ({ prompt }) => {
+    if (hooks.beforeIssue) await hooks.beforeIssue();
+    await factory.onCallIssued();
+    hooks.prompts?.push(prompt.user);
+    if (hooks.afterIssue) await hooks.afterIssue();
+    return {
+        text: JSON.stringify({
+            candidates: [
+                {
+                    kind: "preference",
+                    polarity: "affirmed",
+                    statement,
+                    confidence: 0.9,
+                    sensitivity: "standard",
+                    expiresAt: null,
+                    evidence: [{ messageLabel: "m1", quote: "formal Korean" }],
+                },
+            ],
+        }),
+    };
+};
+
+const lockConversation = (id: string) =>
+    prisma.externalConversation.update({
+        where: { id },
+        // Any stored value means locked; the check is `password IS NOT NULL`.
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+const titleOf = async (id: string) =>
+    (
+        await prisma.externalConversation.findUniqueOrThrow({
+            where: { id },
+            select: { title: true },
+        })
+    ).title;
+
+const providerCallsFor = (runId: string) =>
+    prisma.memoryExtractionProviderCall.findMany({
+        where: { chunk: { runId } },
+        select: { callIssued: true },
+    });
+
+test("a source locked after the run was created never reaches the provider", async () => {
+    const { run } = await seedRun(1);
+    const { lease, chunk } = await claimFirstChunk(run.id);
+    await lockConversation(chunk.conversationIds[0]);
+
+    const prompts: string[] = [];
+    const result = await handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("Should never be asked.", { prompts }),
+    });
+
+    // Every source in the chunk is locked, so there is nothing to send: the
+    // chunk is skipped, which settlement does not charge.
+    assert.deepEqual(result, { outcome: "skipped" });
+    assert.equal(prompts.length, 0, "the adapter was never called");
+    assert.deepEqual(
+        await providerCallsFor(run.id),
+        [],
+        "no provider call was even admitted"
+    );
+});
+
+test("a chunk with one source locked sends the others and only the others", async () => {
+    const { run } = await seedRun(2);
+    const { lease, chunk } = await claimFirstChunk(run.id);
+    assert.equal(chunk.conversationIds.length, 2, "fixture: both in one chunk");
+    const [lockedId, openId] = chunk.conversationIds;
+    const lockedTitle = await titleOf(lockedId);
+    const openTitle = await titleOf(openId);
+    await lockConversation(lockedId);
+
+    const prompts: string[] = [];
+    const result = await handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            prompts,
+        }),
+    });
+
+    // One lock does not throw away the other source the owner approved, and
+    // the call that did go out is charged like any other.
+    assert.deepEqual(result, { outcome: "completed" });
+    assert.equal(prompts.length, 1);
+    assert.ok(prompts[0].includes(openTitle), "the unlocked source was sent");
+    assert.ok(
+        !prompts[0].includes(lockedTitle),
+        "the locked source's title was not sent"
+    );
+});
+
+test("a source locked while the request was being prepared stops it before it leaves", async () => {
+    // The load filtered nothing -- the source was open then -- and the lock
+    // lands between that read and the request. The last-moment check has to
+    // catch it, because nothing earlier can.
+    const { run } = await seedRun(1);
+    const { lease, chunk } = await claimFirstChunk(run.id);
+
+    const prompts: string[] = [];
+    const result = await handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("Should never be asked.", {
+            prompts,
+            beforeIssue: async () => {
+                await lockConversation(chunk.conversationIds[0]);
+            },
+        }),
+    });
+
+    assert.deepEqual(result, { outcome: "failed", code: "source_locked" });
+    assert.equal(prompts.length, 0, "the request never left");
+    const calls = await providerCallsFor(run.id);
+    assert.equal(calls.length, 1, "fixture: the call was admitted");
+    assert.equal(
+        calls[0].callIssued,
+        false,
+        "never marked issued, so its cost is released rather than settled"
+    );
+    assert.equal(await prisma.memoryItem.count(), 0);
+});
+
+test("an answer that arrived after its source was locked is kept as an ordinary candidate", async () => {
+    // The request left while the source was open and the lock landed while
+    // the provider was answering. The exposure has already happened and
+    // cannot be undone; what is left to decide is what to do with the answer.
+    //
+    // Kept, and kept as `candidate` -- not `suspended_by_source_lock`. That
+    // status is written only over `active` and restored to `active` on
+    // unlock (lib/memorySourceLock.ts), so storing a candidate in it would let
+    // unlocking promote something the user never approved. Nor does keeping it
+    // expose anything: retrieval excludes a memory whose evidence is all
+    // locked at read time, whatever its status says -- pinned by "a locked
+    // source's memory is excluded from retrieval even if its status was
+    // missed" in tests/integration/external-conversation-lock.db.test.ts.
+    const { run } = await seedRun(1);
+    const { lease, chunk } = await claimFirstChunk(run.id);
+
+    const result = await handleMemoryExtractionChunk({
+        lease,
+        chunk,
+        register: APPROVED_REGISTER,
+        adapterFactory: issuingAdapter("The user prefers formal Korean.", {
+            afterIssue: async () => {
+                await lockConversation(chunk.conversationIds[0]);
+            },
+        }),
+    });
+
+    assert.deepEqual(result, { outcome: "completed" });
+    const stored = await prisma.memoryItem.findMany({
+        select: { status: true, approvedAt: true },
+    });
+    assert.equal(stored.length, 1);
+    assert.equal(stored[0].status, "candidate");
+    assert.equal(stored[0].approvedAt, null);
+    const calls = await providerCallsFor(run.id);
+    assert.equal(calls[0]?.callIssued, true, "the call really did go out");
 });
