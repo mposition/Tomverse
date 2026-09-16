@@ -43,7 +43,7 @@ const refuse = <T>(reason: PromptRefinerReservationRefusal): AuthorityResult<T> 
 
 const dbClock = async (tx: Prisma.TransactionClient) => {
     const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     if (!clock) throw new Error("PostgreSQL did not return its transaction clock");
     return clock.now;
@@ -330,13 +330,13 @@ export const expirePromptRefinerReservations = async (input?: {
             FROM "PromptRefinerReservation"
             WHERE "stageId" = ${stageId}
               AND "status" = 'reserved'
+              AND "expiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')
             ORDER BY "expiresAt", "id"
+            LIMIT ${limit}
             FOR UPDATE
         `);
         const now = await dbClock(tx);
-        const rows = lockedRows
-            .filter((row) => row.expiresAt.getTime() <= now.getTime())
-            .slice(0, limit);
+        const rows = lockedRows;
         if (rows.length > 0) {
             await tx.promptRefinerReservation.updateMany({
                 where: { id: { in: rows.map((row) => row.id) }, status: "reserved" },

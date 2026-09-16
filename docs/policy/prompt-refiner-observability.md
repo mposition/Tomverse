@@ -33,7 +33,8 @@ model registry table `SHARE`, reservation row 순서로 잠근다. 따라서 pin
 경우를 포함해 admin INSERT/UPDATE/DELETE가 runtime 검증과 consume 사이에 끼어들 수
 없다. runtime model row와 effective pricing은 reserve와 consume 모두에서 다시
 검증한다. requestId·고정 stage·canonical contract digest·server-minted reservationId를
-결속하고 잠금 뒤의 `clock_timestamp()` 만료·1회 CAS consume·영구 terminal tombstone을
+결속하고 naive timestamp에는 `clock_timestamp() AT TIME ZONE 'UTC'`만 사용하는 만료·
+1회 CAS consume·영구 terminal tombstone을
 강제한다. 정적
 profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease/atomic boolean은 성공
 증거가 아니다. 새로 승인된 후속 계약만 authority의 consumed fact를 성공 admission에
@@ -49,6 +50,9 @@ profile 검사 결과를 과거에 캐시한 값이나 caller가 전달한 lease
   집계와 맞을 수 없어 거부된다. direct insert도 같은 예산을 소비하고 101번째·위조
   insert·unique 충돌은 행과 accounting을 함께 rollback한다. terminal timestamp도 DB
   trigger가 단 한 번의 clock으로 쓰며 만료 뒤 consume/release는 expired로 저장한다.
+- expiry sweep은 DB clock 만료 조건과 `expiresAt, id` 순서를 SQL에서 적용하고 caller
+  `limit`을 `FOR UPDATE`보다 먼저 적용한다. 따라서 limit은 update 수뿐 아니라 lock
+  footprint도 제한한다.
 - 계약 identity는 stage lifecycle(`approved`, `closed`)과 reservation lifecycle을 모두
   포함한 정렬 canonical JSON의 SHA-256 digest로 결속한다. reserve와
   consume은 runtime registry/pricing drift가 있으면 슬롯을 만들거나 사용하지 않는다.

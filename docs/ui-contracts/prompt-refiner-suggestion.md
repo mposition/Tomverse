@@ -125,7 +125,9 @@ provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필�
    잠금 뒤 DB clock 만료·1회 consume·영구 tombstone을 강제함. BEFORE INSERT는 검증·잠금만,
    AFTER INSERT는 성공한 tombstone 집계와 counter 결속만 맡으며 stage는 반드시 0/0에서
    시작함. direct stage counter UPDATE, direct/unique/101번째 insert 우회는 거부 또는 함께
-   rollback됨. terminal timestamp도 DB가 소유하고 늦은 consume/release는 expired가 됨.
+   rollback됨. naive timestamp의 clock은 명시적 UTC이며 terminal timestamp도 DB가
+   소유하고 늦은 consume/release는 expired가 됨. expiry sweep의 SQL limit은 update와
+   row-lock footprint를 함께 제한함.
    기존 request는 active와 terminal을 구분하며 terminal은 usable lease가 아님.
    정적 profile과 `resolveModelPricing()`의 effective input/output rate가 모두 exact
    pin과 일치하고 effective output cap은 4,096 이상이어야 함. 더 큰 capability에도

@@ -166,9 +166,9 @@ BEGIN
        OR NEW."contractDigest" <> 'sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f'
        OR NEW."reservedCostMicroUsd" <> 24916
        OR NEW."expiresAt" <> NEW."createdAt" + INTERVAL '5 minutes'
-       OR NEW."createdAt" > clock_timestamp()
-       OR NEW."expiresAt" <= clock_timestamp()
-       OR NEW."expiresAt" > clock_timestamp() + INTERVAL '5 minutes' THEN
+       OR NEW."createdAt" > (clock_timestamp() AT TIME ZONE 'UTC')
+       OR NEW."expiresAt" <= (clock_timestamp() AT TIME ZONE 'UTC')
+       OR NEW."expiresAt" > (clock_timestamp() AT TIME ZONE 'UTC') + INTERVAL '5 minutes' THEN
         RAISE EXCEPTION 'PromptRefinerReservation contract binding is invalid';
     END IF;
 
@@ -223,7 +223,7 @@ BEGIN
     UPDATE "PromptRefinerReservationStage"
     SET "reservationCount" = actual_count,
         "allocatedCostMicroUsd" = actual_cost,
-        "updatedAt" = clock_timestamp()
+        "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
     WHERE "id" = 'prompt-refiner-shadow-v1';
     GET DIAGNOSTICS changed = ROW_COUNT;
     IF changed <> 1 THEN
@@ -268,7 +268,7 @@ BEGIN
     IF NEW."status" NOT IN ('consumed', 'released', 'expired') THEN
         RAISE EXCEPTION 'PromptRefinerReservation % transition is invalid', OLD."id";
     END IF;
-    observed_at := clock_timestamp();
+    observed_at := (clock_timestamp() AT TIME ZONE 'UTC');
     IF NEW."status" = 'expired' AND observed_at < OLD."expiresAt" THEN
         RAISE EXCEPTION 'PromptRefinerReservation % cannot expire before its deadline', OLD."id";
     END IF;

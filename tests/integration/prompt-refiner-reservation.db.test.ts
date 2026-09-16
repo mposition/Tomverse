@@ -95,7 +95,7 @@ const holdStageLock = async () => {
             signalLocked();
             await gate;
             const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
-                SELECT clock_timestamp() AS "now"
+                SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
             `;
             return clock!.now;
         },
@@ -253,7 +253,7 @@ test("a repeated request is idempotent and never consumes a second slot", async 
 test("every exact direct insert consumes budget and forged or 101st inserts fail closed", async () => {
     await createStage();
     const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const createdAt = clock!.now;
     const firstId = randomUUID();
@@ -399,7 +399,7 @@ test("consume requires the four-part binding and succeeds exactly once under rac
 test("the database owns terminal clocks and turns every late direct transition into expiry", async () => {
     await createStage();
     const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const nearExpiryCreatedAt = new Date(clock!.now.getTime() - 298_800);
     await prisma.promptRefinerReservation.createMany({
@@ -463,7 +463,7 @@ test("the database owns terminal clocks and turns every late direct transition i
     assert.equal(active.ok, true);
     if (!active.ok) return;
     const before = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const forged = new Date(0);
     await assert.rejects(
@@ -488,7 +488,7 @@ test("the database owns terminal clocks and turns every late direct transition i
         WHERE "id" = ${active.value.reservation.reservationId}
     `;
     const after = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const consumed = await prisma.promptRefinerReservation.findUniqueOrThrow({
         where: { id: active.value.reservation.reservationId },
@@ -501,10 +501,89 @@ test("the database owns terminal clocks and turns every late direct transition i
     assert.equal(consumed.expiredAt, null);
 });
 
+test("naive reservation timestamps remain UTC under non-UTC database sessions", async () => {
+    await createStage();
+    const [databaseZone] = await prisma.$queryRaw<Array<{ zone: string }>>`
+        SELECT current_setting('TimeZone') AS "zone"
+    `;
+    for (const [zone, requestedStatus] of [
+        ["America/New_York", "consumed"],
+        ["Asia/Seoul", "released"],
+    ] as const) {
+        await assert.rejects(
+            prisma.$transaction(async (tx) => {
+                await tx.$queryRaw`
+                    SELECT set_config('TimeZone', ${zone}, true)
+                `;
+                const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`
+                    SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+                `;
+                const exactId = `timezone_exact_${requestedStatus}`;
+                await tx.promptRefinerReservation.create({
+                    data: {
+                        id: exactId,
+                        stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+                        requestId: exactId,
+                        contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+                        status: "reserved",
+                        reservedCostMicroUsd: BigInt(24_916),
+                        createdAt: clock!.now,
+                        expiresAt: new Date(clock!.now.getTime() + 300_000),
+                    },
+                });
+                const exact = await tx.promptRefinerReservation.findUniqueOrThrow({
+                    where: { id: exactId },
+                });
+                assert.equal(exact.expiresAt.getTime() - exact.createdAt.getTime(), 300_000);
+
+                const lateId = `timezone_late_${requestedStatus}`;
+                const lateCreatedAt = new Date(clock!.now.getTime() - 299_700);
+                await tx.promptRefinerReservation.create({
+                    data: {
+                        id: lateId,
+                        stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+                        requestId: lateId,
+                        contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+                        status: "reserved",
+                        reservedCostMicroUsd: BigInt(24_916),
+                        createdAt: lateCreatedAt,
+                        expiresAt: new Date(lateCreatedAt.getTime() + 300_000),
+                    },
+                });
+                await wait(400);
+                await tx.$executeRaw`
+                    UPDATE "PromptRefinerReservation"
+                    SET "status" = ${requestedStatus}
+                    WHERE "id" = ${lateId}
+                `;
+                const late = await tx.promptRefinerReservation.findUniqueOrThrow({
+                    where: { id: lateId },
+                });
+                assert.equal(late.status, "expired");
+                assert.ok(late.expiredAt);
+                assert.equal(late.consumedAt, null);
+                assert.equal(late.releasedAt, null);
+                throw new Error(`rollback-${zone}`);
+            }),
+            new RegExp(`rollback-${zone.replace(/[/.]/g, "\\$&")}`)
+        );
+        assert.equal(await prisma.promptRefinerReservation.count(), 0);
+        const stage = await prisma.promptRefinerReservationStage.findUniqueOrThrow({
+            where: { id: PROMPT_REFINER_RESERVATION_STAGE_ID },
+        });
+        assert.equal(stage.reservationCount, 0);
+        assert.equal(stage.allocatedCostMicroUsd, BigInt(0));
+    }
+    const [after] = await prisma.$queryRaw<Array<{ zone: string }>>`
+        SELECT current_setting('TimeZone') AS "zone"
+    `;
+    assert.equal(after!.zone, databaseZone!.zone, "SET LOCAL must not leak past rollback");
+});
+
 test("consume observes expiry after stage-lock contention and commits the expired tombstone", async () => {
     await createStage();
     const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const createdAt = new Date(clock!.now.getTime() - 300_000 + 1_000);
     const expiresAt = new Date(createdAt.getTime() + 300_000);
@@ -550,7 +629,7 @@ test("release and expiry leave tombstones and do not refund stage bounds", async
     assert.equal(released.ok, true);
 
     const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const oldCreated = new Date(clock!.now.getTime() - 300_000 + 200);
     await prisma.promptRefinerReservation.create({
@@ -586,6 +665,53 @@ test("release and expiry leave tombstones and do not refund stage bounds", async
     assert.equal(
         groups.some((group) => group.status === "expired" && group._count === 1),
         true
+    );
+});
+
+test("expiry limit orders and updates only the bounded SQL selection", async () => {
+    await createStage();
+    const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
+    `;
+    const earlier = new Date(clock!.now.getTime() - 299_850);
+    const later = new Date(clock!.now.getTime() - 299_750);
+    await prisma.promptRefinerReservation.createMany({
+        data: [
+            { id: "expiry_limit_first", createdAt: earlier },
+            { id: "expiry_limit_second", createdAt: later },
+        ].map(({ id, createdAt }) => ({
+            id,
+            stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
+            requestId: id,
+            contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
+            status: "reserved",
+            reservedCostMicroUsd: BigInt(24_916),
+            createdAt,
+            expiresAt: new Date(createdAt.getTime() + 300_000),
+        })),
+    });
+    await wait(350);
+    const firstSweep = await expirePromptRefinerReservations({ limit: 1 });
+    assert.equal(firstSweep.ok, true);
+    if (!firstSweep.ok) return;
+    assert.equal(firstSweep.value.expiredCount, 1);
+    const afterFirst = await prisma.promptRefinerReservation.findMany({
+        orderBy: { id: "asc" },
+    });
+    assert.deepEqual(
+        afterFirst.map((row) => [row.id, row.status]),
+        [
+            ["expiry_limit_first", "expired"],
+            ["expiry_limit_second", "reserved"],
+        ]
+    );
+    const secondSweep = await expirePromptRefinerReservations({ limit: 1 });
+    assert.equal(secondSweep.ok, true);
+    if (!secondSweep.ok) return;
+    assert.equal(secondSweep.value.expiredCount, 1);
+    assert.equal(
+        await prisma.promptRefinerReservation.count({ where: { status: "expired" } }),
+        2
     );
 });
 
@@ -684,7 +810,7 @@ test("a registry admin update cannot slip between consume validation and reserva
                 await tx.$executeRawUnsafe("SET LOCAL lock_timeout = '200ms'");
                 await tx.$executeRaw`
                     UPDATE "ModelRegistryEntry"
-                    SET "updatedAt" = clock_timestamp()
+                    SET "updatedAt" = (clock_timestamp() AT TIME ZONE 'UTC')
                     WHERE "id" = ${PROMPT_REFINER_EXECUTION_MODEL_PIN.modelId}
                 `;
             }),
@@ -735,7 +861,7 @@ test("a failure after reservation insert rolls the row and stage accounting back
 test("stage-row locking admits only the remaining five slots under concurrency", async () => {
     await createStage();
     const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`
-        SELECT clock_timestamp() AS "now"
+        SELECT (clock_timestamp() AT TIME ZONE 'UTC')::TIMESTAMP(3) AS "now"
     `;
     const oldCreated = new Date(clock!.now.getTime());
     await prisma.promptRefinerReservation.createMany({

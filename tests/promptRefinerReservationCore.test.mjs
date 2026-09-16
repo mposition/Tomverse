@@ -210,4 +210,13 @@ test("authority source stores no prompt/content identity and calls no provider",
         assert.ok(registryLock > stageLock, `${functionName}: registry lock order`);
         assert.ok(reservationLock > registryLock, `${functionName}: reservation lock order`);
     }
+
+    const expireStart = source.indexOf("const expirePromptRefinerReservations");
+    const expireEnd = source.indexOf("\n};", expireStart);
+    const expireBody = source.slice(expireStart, expireEnd);
+    assert.match(
+        expireBody,
+        /"expiresAt" <= \(clock_timestamp\(\) AT TIME ZONE 'UTC'\)[\s\S]*ORDER BY "expiresAt", "id"[\s\S]*LIMIT \$\{limit\}[\s\S]*FOR UPDATE/,
+        "the caller limit must bound the ordered DB lock footprint"
+    );
 });

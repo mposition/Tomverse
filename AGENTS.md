@@ -1355,8 +1355,11 @@ Non-negotiable requirements:
   and the 101st row cannot bypass or split accounting. The database also owns
   terminal timestamps and turns a late consume/release into expiry. It binds
   requestId + stage + canonical
-  contract digest + server-minted reservation id and uses `clock_timestamp()`
-  after locks for expiry, one-time consume and permanent terminal tombstones.
+  contract digest + server-minted reservation id. Naive DB timestamp columns
+  compare and store only `clock_timestamp() AT TIME ZONE 'UTC'`; expiry sweeps
+  filter and order in SQL and apply their caller limit before `FOR UPDATE`, so
+  the limit bounds both mutation count and lock footprint. One-time consume and
+  permanent terminal tombstones remain DB-enforced.
   A repeated request returns the existing active fact before stage/runtime
   revalidation; a terminal fact is a discriminated non-success and is never a
   reusable lease. A future dispatch must use the exact digest returned by
