@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v23)
+# 제품 소식 이메일: 권한과 기계 (초안 v24)
 
 > **이 문서의 지위: 초안입니다.** 승인되지 않았습니다. **S1a는 구현·병합됐습니다**(#1492,
 > [이메일 알림](email-notifications.md) v15).
@@ -14,6 +14,17 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v24 (2026-09-16) — 독립 검토 19회차: 조건부 승인
+
+19회차(v23 대상)는 **approve with changes**입니다. S1b-1·S1b-2·S1b-3 모두 착수 가능하고,
+남은 셋은 구현 조건입니다.
+
+| # | 지적 | v24 |
+|---|---|---|
+| C93 (구현) | 대조 0건 확인과 설정 전환 사이에 writer·remover가 끼어들 수 있음 | **cutover fence** — 모든 suppression writer·remover와 전환 작업이 같은 fence를 공유, 보정 → 재대조 → 설정 전환을 한 fenced transaction으로(7.4) |
+| C94 (구현) | 침묵 판정이 계정을 분류에서 유도 | 신규 발송은 **`EmailDelivery.providerAccount`**, 분류 유도는 기존 행 backfill에만(7.4) |
+| C95 (구현) | "3단계"라 적었지만 실제는 A·B·C·D 네 배포 | "A/B/C 권위 전환 + D cleanup"으로 정정, D도 별도 PR(7.4, 12) |
 
 ### v23 (2026-09-16) — 독립 검토 18회차 반영
 
@@ -819,7 +830,7 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   transactional 경보를 가르므로, delivery id만 남기면 정리된 delivery의 출처를 잃습니다.
   unmatched webhook의 `sourceStream`은 **서명이 검증된 endpoint의 계정**에서 정합니다.
   해제 기록은 `releasedAt`·`releaseKind`·`releaseEvidence`이고, 갱신은 그 한 번뿐입니다.
-- **`SuppressionEntry`는 요약이 아니라 전환 기간의 호환 기록**입니다(아래 3단계 배포).
+- **`SuppressionEntry`는 요약이 아니라 전환 기간의 호환 기록**입니다(아래 A/B/C 권위 전환 + D cleanup).
   원인에서 다시 계산하지 않고, C 배포에서 쓰기를 멈춥니다. 판정 기준이 원인으로 넘어간
   뒤 **발송 판정과 관리자 화면은 원인을 직접 읽고**, 활성의 정의는 하나입니다 —
   `releasedAt IS NULL AND (expiresAt IS NULL OR expiresAt > now())`. 지금의
@@ -829,7 +840,7 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   `evidence`·`occurredAt`·`expiresAt`을 그대로, `sourceEventKey`는
   `legacy:suppression:<entryId>`. migration 끝에서 **원인 건수와 entry 건수가 다르면
   예외로 실패**합니다(`DO` 블록).
-- **배포 중 공존은 세 번의 배포로 없앱니다(C68, C75, C76).** 한 배포 안에서 이전
+- **배포 중 공존은 권위 전환 세 배포(A/B/C)와 설정 정리 배포(D)로 없앱니다(C68, C75, C76, C90).** 한 배포 안에서 이전
   build와 새 build가 서로 다른 읽기·쓰기 규칙으로 공존하면, 요약 재계산이 이전 build의
   변경을 덮거나 여러 원인을 한 행으로 투영해야 합니다. 그래서 권위를 **한 배포에
   하나씩만** 옮깁니다.
@@ -861,6 +872,12 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
     **entry와 활성 원인의 대조 보고가 발송 효과(분류별 허용·차단)·만료·provenance에서
     0건 불일치**. 불일치가 있으면 잠금 기반 보정(entry 기준으로 원인 추가·해제)을 돌린
     뒤 다시 대조합니다.
+  - **cutover fence(C93)** — 대조와 전환 사이에 해제나 기록이 끼어들면 "설정이 `causes`인
+    순간부터 원인별 승인"이라는 경계가 깨집니다. 모든 suppression writer·remover는 자기
+    transaction 시작에서 **공유 fence**를 잡고(공유 모드), 전환 작업은 같은 fence를
+    **배타 모드**로 잡은 한 transaction 안에서 **보정 → 0건 재대조 → 설정 전환**을 합니다.
+    전환 전에 시작한 해제는 전환보다 먼저 커밋되거나 전환 뒤에 시작합니다. 잠금 방식은
+    구현이 정합니다.
   - **해제 의미도 설정을 따릅니다.** `entry`인 동안 관리자 해제는 **지금 의미**(그
     selector의 entry 삭제 = 모든 원인 해제, 지금 승인 규칙)이고, 원인 해제는 그와 같은
     transaction입니다. 해제 행위 × 원인 행렬과 원인별 승인은 **설정이 `causes`가 된
@@ -1111,9 +1128,10 @@ sourceEventKey)`이고 `sourceEventKey`는 NOT NULL입니다.
     - 15분 경계는 `receivedAt`과 DB `now()`로 판정합니다.
 - **incident 두 가지를 더 둡니다** — 수신 후 **1시간** 넘게 미처리인 행이 있을 때, 그리고
   **계정별 침묵**(provider가 endpoint를 자동 비활성화했을 가능성).
-  - **발송 증거는 `EmailDelivery.sentAt`뿐입니다(C67).** stream은 delivery가 고정한
-    `TemplateVersion.classification`에서 유도합니다. standard·credential lane이 여기에
-    들어갑니다.
+  - **발송 증거는 `EmailDelivery.sentAt`뿐입니다(C67).** 계정은 **delivery가 발송 시 고정한
+    `EmailDelivery.providerAccount`** 입니다(C94). `TemplateVersion.classification`에서의
+    유도는 그 컬럼이 없던 기존 행의 backfill에만 씁니다. standard·credential lane이
+    여기에 들어갑니다.
   - **제외 경로**(delivery 행이 없음): 알림 큐(`lib/notificationDeliveries.ts`), 운영자
     알림, 관리자 테스트 메일. 이들만 발송된 날은 침묵을 판정하지 않습니다.
   - **창과 시계** — DB `now()` 하나를 기준으로 `[now() − 24시간, now())`. 발송은
@@ -1441,7 +1459,7 @@ EEA·영국을 여는 선행 게이트입니다.
 |---|---|---|---|
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8, **webhook·suppression 절 동기화(이메일 알림 9.6, 10.2, 12.3, 12.4, 13.2, 13.3, 13.5, 13.7, 14.4 — 중복 webhook은 processed·abandoned만 즉시 200이고 미처리는 7.4의 claim·lease 전이, 사건·delivery·entry 단일 transaction과 이유 병합은 7.4의 원인 모델로, entry 단위 이중 승인·감사는 해제 행위 × 원인 행렬과 원자적 해제 감사로, 보존 설명에 원인 장부)** | — | 문서 |
 | S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·보존 readiness | **닫힘** | **완료** — #1492 병합. Codex 코드 검토 3회. 보존 기간은 계약대로 1년 |
-| S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, 원인별 멱등 insert·활성 원인 효과 합성·3단계 권위 전환, 총잠금 순서, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v18) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
+| S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, 원인별 멱등 insert·활성 원인 효과 합성·A/B/C 권위 전환과 D cleanup, 총잠금 순서, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v24 — 19회차 조건부 승인) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
 | S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
@@ -1461,11 +1479,11 @@ EEA·영국을 여는 선행 게이트입니다.
    총잠금 순서, preference 재활성화 제한, privacy request
    suppression(접수·완료·legal hold), `withdrawAllMarketing()`의 transaction 수용,
    complaint의 목적 opt-out과 `provider_complaint` 표현, delivered·bounce 사건 시각의 단조
-   규칙과 사건 순서 표, provider 사건 시각, 원인 provenance 컬럼, **3단계 배포의 A(shadow)와
+   규칙과 사건 순서 표, provider 사건 시각, 원인 provenance 컬럼, **A/B/C 권위 전환 + D cleanup 중 A(shadow)와
    entry trigger**, B의 런타임 설정과 대조·보정 보고, `EmailDelivery.sentFrom`·`sentDomain`,
-   C·D 배포와 rollback 하한(각 gate 뒤 별도 PR),
+   rollback 하한,
    **`EmailDelivery.providerAccount`와 `(providerAccount, providerMessageId)` 결속**
-   (C81 — complaint 귀속과 단조 규칙이 필요로 함). B·C는 각 gate 뒤 별도 PR.
+   (C81 — complaint 귀속과 단조 규칙이 필요로 함). B·C·D는 각 gate 뒤 별도 PR.
 2. **S1b-2** webhook 재처리 — stream별 endpoint·secret·`ProviderWebhookEvent.providerAccount`,
    lease·fencing과 시도 전이·끝 상태 경합, `awaiting_delivery` 재결속,
    15분 runner의 sweep, 종료와 incident 세 가지.
