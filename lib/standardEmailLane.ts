@@ -39,6 +39,7 @@ import { jurisdictionForUser } from "@/lib/emailJurisdiction";
 import { marketingJurisdictionVerdict } from "@/lib/emailJurisdictionCore";
 import { deferralFor } from "@/lib/emailQuietHoursCore";
 import { streamForClassification } from "@/lib/emailSendingIdentityCore";
+import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import { consentGateVerdict, isEmailPurpose } from "@/lib/emailPreferenceCore";
 import {
   EMAIL_AUDIT_HASH_KEY_VERSION,
@@ -410,6 +411,9 @@ const recordOutcome = async (
     status: number | null;
     /** Recorded on a successful send only; see §11.4. */
     unsubscribeKeyVersion?: string | null;
+    /** The account and From the provider accepted, fixed on a successful send. */
+    providerAccount?: string | null;
+    sentFrom?: string | null;
   }
 ) => {
   if (outcome.kind === "delivered") {
@@ -427,6 +431,9 @@ const recordOutcome = async (
         renderedHash: renderedBodyHash(context.rendered),
         renderedHashKeyVersion: EMAIL_AUDIT_HASH_KEY_VERSION,
         unsubscribeKeyVersion: context.unsubscribeKeyVersion ?? null,
+        providerAccount: context.providerAccount ?? null,
+        sentFrom: context.sentFrom ?? null,
+        sentDomain: sentDomainOf(context.sentFrom),
       },
     });
     return "sent" as const;
@@ -1070,6 +1077,8 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     rendered: forAudit(rendered),
     status: response.ok ? null : (response.status ?? null),
     unsubscribeKeyVersion,
+    providerAccount: streamForClassification(definition.classification),
+    sentFrom: response.ok ? response.from : null,
   });
   return { outcome: recorded, classification: definition.classification };
 };

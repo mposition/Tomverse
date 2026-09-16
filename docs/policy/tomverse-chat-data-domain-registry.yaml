@@ -1186,6 +1186,23 @@ domains:
       that -- so what cascades away here is never the reason a login alert was
       not sent.
 
+  - domain: emailPreferenceTransition
+    prismaModel: EmailPreferenceTransition
+    userLinkageRole: subject
+    owner: security-privacy
+    deletionAction: delete
+    deletionMechanism: cascade_from_user
+    retentionPolicy: immediate
+    implementationStatus: implemented
+    inUnifiedExport: included
+    note: >-
+      Each time a preference was switched on or off, append-only. It exists to
+      give a withdrawal a stable id for the suppression cause it creates --
+      including a withdrawal that records no consent -- and it belongs to the
+      person, so it goes with the account. The suppression cause it keyed stays,
+      because suppression attaches to the mailbox; what stays there is the key
+      string, not this row.
+
   - domain: modelMigrationRecord
     prismaModel: ModelMigrationRecord
     userLinkageRole: subject

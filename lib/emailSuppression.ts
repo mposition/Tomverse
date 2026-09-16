@@ -5,6 +5,11 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
+  markCauseWriter,
+  recordSuppressionCause,
+  releaseSelectorCauses,
+} from "@/lib/emailSuppressionCauses";
+import {
   SOFT_BOUNCE_SUPPRESSION_MS,
   SOFT_BOUNCE_SUPPRESSION_THRESHOLD,
   suppressionVerdict,
@@ -58,6 +63,15 @@ export type RecordSuppressionInput = {
   sourceMessageId?: string | null;
   evidence?: Prisma.InputJsonValue;
   occurredAt?: Date;
+  /**
+   * Stable per writer, so a retried event records one cause
+   * (docs/policy/email-product-news-redesign-draft.md, section 7.4):
+   * webhook:<eventId>, softbounce:<deliveryId>, preference:<transitionId>,
+   * admin:<idempotency key>.
+   */
+  sourceEventKey: string;
+  sourceRequestId?: string | null;
+  providerAccount?: string | null;
 };
 
 /**
@@ -72,12 +86,52 @@ export type RecordSuppressionInput = {
 export async function recordSuppression(
   input: RecordSuppressionInput,
   // A transaction when the suppression must commit with the change that caused
-  // it -- a withdrawal and its hold are one fact.
-  client: Pick<typeof prisma, "suppressionEntry"> = prisma
-) {
+  // it -- a withdrawal and its hold are one fact. Without one, the entry and its
+  // cause still commit together in a transaction of their own.
+  client?: Prisma.TransactionClient
+): Promise<{ id: string | null; changed: boolean; duplicate?: true }> {
+  if (!client) {
+    return prisma.$transaction((tx) => recordSuppression(input, tx));
+  }
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   const purposeKey = input.purposeKey ?? GLOBAL_PURPOSE_KEY;
   const scope = purposeKey === GLOBAL_PURPOSE_KEY ? "global" : "purpose";
+  const occurredAt = input.occurredAt ?? new Date();
+
+  // The cause first and unconditionally: every event is its own fact, including
+  // one the entry's merge rule below declines to record. Marked so the entry
+  // trigger does not add a second cause for the same write.
+  await markCauseWriter(client);
+  const recorded = await recordSuppressionCause(client, {
+    emailAddress,
+    scope,
+    purposeKey,
+    reason: input.reason,
+    source: input.source,
+    sourceEventKey: input.sourceEventKey,
+    sourceStream: input.sourceStream ?? null,
+    sourceDomain: input.sourceDomain ?? null,
+    sourceClassification: input.sourceClassification ?? null,
+    sourceDeliveryId: input.sourceDeliveryId ?? null,
+    sourceMessageId: input.sourceMessageId ?? null,
+    sourceRequestId: input.sourceRequestId ?? null,
+    providerAccount: input.providerAccount ?? null,
+    ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
+    occurredAt,
+    expiresAt: input.expiresAt ?? null,
+  });
+
+  // The same event again -- a redelivered webhook, a retried admin request. It
+  // is a no-op for the entry too: re-merging it would restamp the entry with the
+  // retry's time and provenance while the cause keeps the first, and the two
+  // records would disagree about one event.
+  if (!recorded) {
+    const current = await client.suppressionEntry.findUnique({
+      where: { emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey } },
+      select: { id: true },
+    });
+    return { id: current?.id ?? null, changed: false, duplicate: true };
+  }
 
   const existing = await client.suppressionEntry.findUnique({
     where: {
@@ -108,7 +162,7 @@ export async function recordSuppression(
     sourceClassification: input.sourceClassification ?? null,
     sourceDeliveryId: input.sourceDeliveryId ?? null,
     sourceMessageId: input.sourceMessageId ?? null,
-    occurredAt: input.occurredAt ?? new Date(),
+    occurredAt,
     ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
   };
 
@@ -174,6 +228,17 @@ export async function removeSuppression(input: {
     ) {
       return { removed: false as const, refusal: "unliftable" as const };
     }
+    // While sends are decided from entries, lifting the row lifts everything
+    // behind it, so every active cause of the selector is released with it.
+    await markCauseWriter(tx);
+    await releaseSelectorCauses(tx, {
+      emailAddress: entry.emailAddress,
+      scope: entry.scope as "global" | "purpose",
+      purposeKey: entry.purposeKey,
+      releaseKind: "entry_removed",
+      releaseEvidence: { kind: "entry_removed", entryId: entry.id },
+      releasedAt: new Date(),
+    });
     await tx.suppressionEntry.delete({ where: { id: entry.id } });
     return { removed: true as const, entry };
   });
@@ -228,6 +293,8 @@ export async function suppressionCheck(input: {
 export async function recordSoftBounce(input: {
   emailAddress: string;
   deliveryId?: string | null;
+  /** The webhook event, for the cause key when there is no delivery. */
+  webhookEventId: string;
   sourceStream?: string | null;
   sourceMessageId?: string | null;
   now?: Date;
@@ -257,6 +324,9 @@ export async function recordSoftBounce(input: {
     sourceDeliveryId: input.deliveryId ?? null,
     sourceMessageId: input.sourceMessageId ?? null,
     occurredAt: now,
+    sourceEventKey: input.deliveryId
+      ? `softbounce:${input.deliveryId}`
+      : `softbounce:webhook:${input.webhookEventId}`,
   });
   return { suppressed: true, run };
 }
