@@ -1,6 +1,10 @@
 import "server-only";
 
-import { createUnsubscribeToken, readUnsubscribeKeyring } from "@/lib/unsubscribeToken";
+import {
+  createUnsubscribeToken,
+  readUnsubscribeKeyring,
+  type UnsubscribeKeyring,
+} from "@/lib/unsubscribeToken";
 
 /**
  * The `List-Unsubscribe` headers, and who gets them.
@@ -39,7 +43,15 @@ export type UnsubscribeTarget = {
 export type UnsubscribeRefusal = "unsubscribe_keys_missing";
 
 export type UnsubscribeLink =
-  | { ok: true; url: string | null }
+  | {
+      ok: true;
+      url: string | null;
+      /**
+       * The keyring that signed `url`, so the caller can record the version the
+       * message depends on and store its canary. Null exactly when `url` is.
+       */
+      keyring: UnsubscribeKeyring | null;
+    }
   | { ok: false; refusal: UnsubscribeRefusal; message: string };
 
 /**
@@ -57,7 +69,7 @@ export type UnsubscribeLink =
  */
 export const unsubscribeUrl = (input: UnsubscribeTarget): UnsubscribeLink => {
   if (!input.requiresUnsubscribe || !input.userId || !input.purpose) {
-    return { ok: true, url: null };
+    return { ok: true, url: null, keyring: null };
   }
 
   const keyring = readUnsubscribeKeyring(process.env);
@@ -81,6 +93,7 @@ export const unsubscribeUrl = (input: UnsubscribeTarget): UnsubscribeLink => {
   return {
     ok: true,
     url: `${input.appUrl}/unsubscribe?t=${encodeURIComponent(token)}`,
+    keyring,
   };
 };
 

@@ -57,9 +57,11 @@ const LIST_SELECT = {
     select: {
       version: true,
       language: true,
-      template: {
-        select: { key: true, classification: true, purpose: true },
-      },
+      // Classification and purpose from the version the message was sent
+      // under; the template row is history and supplies only the key.
+      classification: true,
+      purpose: true,
+      template: { select: { key: true } },
     },
   },
 } satisfies Prisma.EmailDeliverySelect;
@@ -97,12 +99,10 @@ const whereFor = (filters: DeliveryFilters): Prisma.EmailDeliveryWhereInput => (
   ...(filters.classifications.length > 0 || filters.templateKey
     ? {
         templateVersion: {
-          template: {
-            ...(filters.classifications.length > 0
-              ? { classification: { in: filters.classifications } }
-              : {}),
-            ...(filters.templateKey ? { key: filters.templateKey } : {}),
-          },
+          ...(filters.classifications.length > 0
+            ? { classification: { in: filters.classifications } }
+            : {}),
+          ...(filters.templateKey ? { template: { key: filters.templateKey } } : {}),
         },
       }
     : {}),
@@ -160,7 +160,7 @@ export async function abandonedLegalEmailCount(): Promise<number> {
   return prisma.emailDelivery.count({
     where: {
       status: "abandoned",
-      templateVersion: { template: { classification: "legal" } },
+      templateVersion: { classification: "legal" },
     },
   });
 }

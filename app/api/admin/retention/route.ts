@@ -281,7 +281,7 @@ export async function GET(req: Request) {
           prisma.emailDelivery.count({
             where: {
               renderDataSnapshot: { not: Prisma.DbNull },
-              templateVersion: { template: { classification } },
+              templateVersion: { classification },
               OR: [
                 { sentAt: { lt: cutoff } },
                 { sentAt: null, createdAt: { lt: cutoff } },
