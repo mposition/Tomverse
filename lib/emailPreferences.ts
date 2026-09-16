@@ -24,6 +24,11 @@ import {
   recordSuppression,
 } from "@/lib/emailSuppression";
 import { markCauseWriter, releaseSelectorCauses } from "@/lib/emailSuppressionCauses";
+import {
+  holdSuppressionFence,
+  readSuppressionAuthority,
+} from "@/lib/emailSuppressionAuthority";
+import { isActiveCause } from "@/lib/emailSuppressionAuthorityCore";
 
 /**
  * What a person currently receives, and the append-only record of how it got
@@ -69,7 +74,13 @@ export type PreferenceChangeResult =
   /** The confirmation named a request that is no longer the latest one. */
   | { changed: false; reason: "superseded" }
   /** The account's address is not the one the confirmation link was sent to. */
-  | { changed: false; reason: "address_changed" };
+  | { changed: false; reason: "address_changed" }
+  /**
+   * Once causes decide: switching on would lift only this purpose's own
+   * unsubscribe, and another active cause still stops this mail
+   * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+   */
+  | { changed: false; reason: "suppressed" };
 
 /**
  * Creates the rows a new account starts with.
@@ -268,6 +279,9 @@ export async function setPreference(input: {
   // click grants twice, a request racing a confirmation undoes it, and a cancel
   // racing a confirmation leaves `enabled` true with no confirmation.
   const outcome = await prisma.$transaction(async (tx) => {
+    // The shared fence before any row lock: a withdrawal writes a suppression,
+    // and no suppression write may straddle the read-authority cutover.
+    await holdSuppressionFence(tx);
     // The address is read under the user row lock and everything below uses
     // that value, so a confirmation cannot be recorded against an address that
     // changed after the link was checked, and a withdrawal suppresses the
@@ -312,6 +326,28 @@ export async function setPreference(input: {
       // double-submitted, the one-click header and the confirmation page both
       // fire. None of those should add a second entry to the history.
       return "already_set" as const;
+    }
+
+    // Once causes decide, switching on lifts only this purpose's own
+    // unsubscribe. Any other active cause for this purpose, for marketing as a
+    // whole, or for the address (a soft bounce aside, which expires) still stops
+    // the mail, so the switch is refused rather than shown as on.
+    if (input.enabled && (await readSuppressionAuthority(tx)) === "causes") {
+      const blocking = await tx.suppressionCause.findMany({
+        where: {
+          emailAddress: normalizeSuppressionAddress(email),
+          releasedAt: null,
+          OR: [
+            { scope: "purpose", purposeKey: purpose, reason: { not: "unsubscribe" } },
+            ...(consentBased ? [{ scope: "classification", purposeKey: "marketing" }] : []),
+            { scope: "global", reason: { not: "soft_bounce" } },
+          ],
+        },
+        select: { id: true, expiresAt: true, releasedAt: true },
+      });
+      if (blocking.some((cause) => isActiveCause(cause, now))) {
+        return "suppressed" as const;
+      }
     }
 
     // For a consent-based purpose, "was it on" means "was it confirmed". A row
@@ -451,6 +487,10 @@ export async function setPreference(input: {
         emailAddress: normalizeSuppressionAddress(email),
         scope: "purpose",
         purposeKey: purpose,
+        // Entries still decide in an older build, where lifting the row lifts
+        // everything behind it; once causes decide, only the unsubscribe the
+        // person asked for is theirs to lift.
+        onlyReason: (await readSuppressionAuthority(tx)) === "causes" ? "unsubscribe" : null,
         releaseKind: "preference_enabled",
         releaseEvidence: { kind: "preference", transitionId: transition?.id ?? null },
         releasedAt: now,
@@ -470,6 +510,7 @@ export async function setPreference(input: {
   if (outcome === "address_changed") return { changed: false, reason: "address_changed" };
   if (outcome === "superseded") return { changed: false, reason: "superseded" };
   if (outcome === "already_set") return { changed: false, reason: "already_set" };
+  if (outcome === "suppressed") return { changed: false, reason: "suppressed" };
   if (outcome === "cancelled") return { changed: true, purpose, enabled: false };
 
   return { changed: true, purpose, enabled: input.enabled };

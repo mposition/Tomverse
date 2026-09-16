@@ -23,10 +23,13 @@ import { suppressionRemovalProblem } from "@/lib/adminEmailDeliveryFilters";
 import {
   APPROVAL_REQUIRED_SUPPRESSION_REASONS,
   GLOBAL_PURPOSE_KEY,
+  activeCausesForEntry,
+  liftSuppressionCauses,
   normalizeSuppressionAddress,
   recordSuppression,
   removeSuppression,
 } from "@/lib/emailSuppression";
+import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
 
 /**
  * Adding and lifting suppressions, both audited.
@@ -182,6 +185,90 @@ export async function POST(req: Request) {
       "admin-suppression-remove",
       { minute: 5, day: 50 }
     );
+
+    // Once causes decide, a lift releases causes by the release matrix and the
+    // approval is bound to the exact set of active causes it was asked for
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+    if ((await readSuppressionAuthority()) === "causes") {
+      const active = await activeCausesForEntry(body.id);
+      if (!active) {
+        return NextResponse.json({ error: "Not found." }, { status: 404 });
+      }
+      const releaseAudit =
+        (evidenceKind: string) => (tx: Parameters<typeof writeAdminAuditLog>[0]["tx"]) =>
+          writeAdminAuditLog({
+            session,
+            request: req,
+            action: "email_suppression.removed",
+            targetType: "SuppressionEntry",
+            targetId: body.id,
+            summary: `Lifted suppression causes on ${active.entry.emailAddress}.`,
+            metadata: {
+              reason: body.reason,
+              emailAddress: active.entry.emailAddress,
+              scope: active.entry.scope,
+              purposeKey: active.entry.purposeKey,
+              causeIds: active.causeIds,
+              causeReasons: active.reasons,
+              evidenceKind,
+            },
+            tx,
+          });
+
+      const lifted = active.needsApproval
+        ? await runWithAdminApproval(
+            {
+              session,
+              request: req,
+              action: "email_suppression.remove",
+              targetType: "SuppressionEntry",
+              targetId: body.id,
+              // The cause ids are part of what is approved: a cause added after
+              // the request is a different approval.
+              payload: { id: body.id, causeIds: active.causeIds },
+              reason: body.reason,
+            },
+            (context) =>
+              liftSuppressionCauses({
+                entryId: body.id,
+                approvedCauseIds: active.causeIds,
+                action: "approved_admin",
+                evidence: context.approvalId
+                  ? {
+                      kind: "dual_approval",
+                      approvalId: context.approvalId,
+                      authorizationAuditLogId: context.authorizationAuditLogId,
+                    }
+                  : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
+                writeReleaseAudit: releaseAudit(context.approvalId ? "dual_approval" : "sole_admin"),
+              })
+          )
+        : await liftSuppressionCauses({
+            entryId: body.id,
+            approvedCauseIds: active.causeIds,
+            action: "admin",
+            evidence: { kind: "admin" },
+            writeReleaseAudit: releaseAudit("admin"),
+          });
+
+      if (!lifted.removed) {
+        const status =
+          lifted.refusal === "not_found" ? 404 : 409;
+        const error =
+          lifted.refusal === "approval_stale"
+            ? "The suppression changed after this was asked for. Review it again."
+            : lifted.refusal === "unliftable"
+              ? "Nothing here can be lifted from this screen; a privacy request is lifted by the privacy process that created it."
+              : "Not found.";
+        return NextResponse.json({ error, code: lifted.refusal }, { status });
+      }
+      return NextResponse.json({
+        removed: lifted.remaining.length === 0,
+        released: lifted.released,
+        remaining: lifted.remaining,
+        providerListUnchanged: true,
+      });
+    }
 
     // Which reason the *stored* row holds decides whether a second
     // administrator is needed. Deriving that from the request body would let
