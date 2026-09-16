@@ -1010,6 +1010,9 @@ export const estimateCampaignAudience = async (input: {
       purpose: spec.cohort.purpose,
       enabled: true,
       grantedAt: { not: null },
+      // The same confirmed-only cohort the expansion files
+      // (docs/policy/email-double-opt-in.md §6).
+      confirmedAt: { not: null },
     } as const;
     const [consented, active, activeWithEmail] = await Promise.all([
       prisma.user.count({

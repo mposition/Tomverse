@@ -153,9 +153,14 @@ test("a token can only ever turn something off", () => {
     { allowed: false, reason: "token_cannot_enable" }
   );
 
-  // Signed in, re-enabling is ordinary.
+  // Signed in, re-enabling a consent-based purpose takes a confirmation
+  // (docs/policy/email-double-opt-in.md §3 rule 1); with one, it is allowed.
   assert.deepEqual(
     preferenceChangeDecision({ purpose: "newsletter", enabled: true }),
+    { allowed: false, reason: "confirmation_required" }
+  );
+  assert.deepEqual(
+    preferenceChangeDecision({ purpose: "newsletter", enabled: true, confirmed: true }),
     { allowed: true }
   );
 });

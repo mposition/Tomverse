@@ -69,12 +69,17 @@ export type RecordSuppressionInput = {
  * so the row is the same one either way -- what has to be decided is whether
  * the new event says something worse than the old one.
  */
-export async function recordSuppression(input: RecordSuppressionInput) {
+export async function recordSuppression(
+  input: RecordSuppressionInput,
+  // A transaction when the suppression must commit with the change that caused
+  // it -- a withdrawal and its hold are one fact.
+  client: Pick<typeof prisma, "suppressionEntry"> = prisma
+) {
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   const purposeKey = input.purposeKey ?? GLOBAL_PURPOSE_KEY;
   const scope = purposeKey === GLOBAL_PURPOSE_KEY ? "global" : "purpose";
 
-  const existing = await prisma.suppressionEntry.findUnique({
+  const existing = await client.suppressionEntry.findUnique({
     where: {
       emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey },
     },
@@ -107,7 +112,7 @@ export async function recordSuppression(input: RecordSuppressionInput) {
     ...(input.evidence === undefined ? {} : { evidence: input.evidence }),
   };
 
-  const row = await prisma.suppressionEntry.upsert({
+  const row = await client.suppressionEntry.upsert({
     where: {
       emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey },
     },
