@@ -1086,23 +1086,21 @@ route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 
 | 항목 | 이번 판단 |
 | --- | --- |
 | 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
-| 직전 의미 있는 회차 대비 | **약 0%p** — 재현 가능한 무과금 검증 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
+| 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 제품 호출·공개 범위는 그대로이고 재현·중단 복구·source identity 기반이 통합됐다. |
 | C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
 | 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
 | 로컬 검증 | 전용 core/CLI **24/24**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, package-lock dynamic within-cap/exact-cap/over-cap·root-only LF attribute·no-network child trap·replace-object 무시·missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
-| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 **approve**였지만 재현 가능한 nit 2건을 남기고 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종료됐다. 판정 기록은 감사 commit으로 보존했고, 휘발성 lockfile 크기 결속과 비의도적 하위 경로 LF 적용은 exchange 밖 후속 commit으로 수정했다. 다음 gate는 Linux 통합 CI다. |
-| 병합·배포·공개 | 없음. provider/API/model 호출 0, stage/admin writer 없음, 제품 caller·flag·v1 admission 변경 없음 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 **approve**였지만 재현 가능한 nit 2건을 남기고 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종료됐다. 두 nit은 exchange 밖 후속 commit에서 수정했고, 감사 무결성·집중 회귀·전체 회귀의 내부 3중 검증을 모두 PASS했다. PR #1500 Linux CI는 **20 success / 0 fail**이다. |
+| 병합·배포·공개 | PR **#1500**이 `develop`에 merge SHA `ecaad7d9274a4c2be01c9b43b0a612e2383014b4`로 병합됐다. provider/API/model 호출·유료 실행·stage seed/admin writer·제품 caller·flag·`admitted: true`는 없고, 제품 배포·공개 활성화도 없다. |
 
 ### 이 Cycle 다음 권장 순서
 
-1. 최종 독립 검토 승인과 exchange 밖 nit 수정을 포함한 현재 commit을 Linux 통합
-   CI에서 검증한다. exact source, corpus, parser, journal crash/tamper와 root-only LF
-   attribute가 대상이며 이는 실행 승인이 아니다.
-2. 하네스와 durable authority를 연결하는 **새 admission 계약**, stage 생성/admin
-   writer와 content-free runtime receipt 저장을 별도 구현·검토한다. 기존 v1은 수정하지
-   않고 provider 호출도 하지 않는다.
-3. 새 계약과 상한을 별도 비용 승인한 뒤 bounded actual shadow를 정확히 한 번 실행한다.
-4. 실제 모델의 의미 보존·행동상 주입 저항·비용·지연 증거가 승인됐을 때만 writer와
-   제안형 제품 adapter를 연결한다.
-5. 사용자 선택 증거 뒤 Refiner 결과의 Router 결합과 전체 모델 catalogue 선택 품질을
-   별도 실험한다.
+1. provider-free harness evidence를 reservation authority에 연결하는 **별도 admission/admin
+   writer 계약**을 default-off로 구현한다. stage seed는 생성하지 않고 기존 v1
+   admission도 수정하지 않는다.
+2. 새 계약을 독립 검토한 뒤, **명시적 비용 승인** 하에 bounded paid shadow를
+   정확히 1회만 실행해 의미 보존·행동상 주입 저항·비용·지연 증거를 수집한다.
+3. 승인된 증거가 gate를 통과할 때만 suggestion adapter와 UI를 연결하며, writer·flag·제품
+   활성화는 동일한 evidence gate 밖으로 나가지 않는다.
+4. Refiner 제안형 흐름의 사용자 선택 증거 뒤 Router full-catalog 선택 품질 최적화를
+   별도 실험으로 진행한다.
