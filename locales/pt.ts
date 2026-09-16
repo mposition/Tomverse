@@ -1460,6 +1460,8 @@ export const pt = {
         loadMore: "Mostrar mais",
         previousSnapshots: "{count} versões anteriores",
         exportAll: "Baixar tudo (JSON)",
+        exportLockedNote:
+            "Conversas bloqueadas são incluídas sem título nem conteúdo. Desbloqueie-as antes se precisar de tudo.",
         exportFailed: "Falha ao baixar a exportação.",
         viewerRoleUser: "Usuário",
         viewerRoleAssistant: "Assistente",

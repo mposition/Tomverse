@@ -185,7 +185,9 @@ const applyResendEvent = async (input: {
           emailAddress: true,
           lane: true,
           templateVersion: {
-            select: { template: { select: { classification: true } } },
+            // The version it was sent under, not the template row: the row is
+            // history and may carry a classification the code has since moved off.
+            select: { classification: true },
           },
         },
       })
@@ -214,7 +216,7 @@ const applyResendEvent = async (input: {
   const stream =
     delivery?.lane === "credential_sync" ? "transactional" : "standard";
   const classification =
-    delivery?.templateVersion.template.classification ?? null;
+    delivery?.templateVersion.classification ?? null;
 
   if (effect.kind === "soft_bounce") {
     if (delivery) {

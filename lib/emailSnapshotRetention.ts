@@ -33,9 +33,11 @@ export async function purgeExpiredRenderSnapshots(now: Date = new Date()) {
          SET "renderDataSnapshot" = NULL,
              "snapshotPurgedAt" = ${now}
         FROM "TemplateVersion" AS v
-        JOIN "EmailTemplate" AS t ON t."id" = v."templateId"
        WHERE d."templateVersionId" = v."id"
-         AND t."classification" = ${classification}
+         -- The version's classification, not the template row's: the row is
+         -- history and may predate a reclassification, and a legal notice
+         -- purged on a transactional window cannot be restored.
+         AND v."classification" = ${classification}
          AND d."renderDataSnapshot" IS NOT NULL
          AND COALESCE(d."sentAt", d."createdAt") < ${cutoff}
     `;

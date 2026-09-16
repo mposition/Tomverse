@@ -1461,6 +1461,8 @@ export const ko = {
         loadMore: "더 보기",
         previousSnapshots: "이전 버전 {count}개",
         exportAll: "전체 내려받기(JSON)",
+        exportLockedNote:
+            "잠긴 대화는 제목과 내용 없이 포함됩니다. 전체 내용이 필요하면 먼저 잠금을 해제하세요.",
         exportFailed: "내보내기를 다운로드하지 못했습니다.",
         viewerRoleUser: "사용자",
         viewerRoleAssistant: "어시스턴트",

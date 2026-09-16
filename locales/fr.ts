@@ -1458,6 +1458,8 @@ export const fr = {
         loadMore: "Afficher plus",
         previousSnapshots: "{count} versions antérieures",
         exportAll: "Tout télécharger (JSON)",
+        exportLockedNote:
+            "Les conversations verrouillées sont incluses sans titre ni contenu. Déverrouillez-les d'abord si vous avez besoin de tout.",
         exportFailed: "Échec du téléchargement de l'export.",
         viewerRoleUser: "Utilisateur",
         viewerRoleAssistant: "Assistant IA",

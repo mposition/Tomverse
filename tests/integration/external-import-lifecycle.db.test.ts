@@ -693,6 +693,7 @@ test("the export iterator yields every finalized conversation with provenance", 
     }
     assert.equal(exported.length, 3);
     for (const conversation of exported) {
+        assert.equal(conversation.locked, false);
         assert.equal(conversation.provider, "chatgpt");
         assert.equal(conversation.digestVersion, 1);
         assert.match(conversation.conversationDigest, /^[0-9a-f]{64}$/);
@@ -702,6 +703,118 @@ test("the export iterator yields every finalized conversation with provenance", 
             ["user", "assistant"]
         );
     }
+});
+
+test("the export iterator lists a locked snapshot without its title or its messages", async () => {
+    /*
+      docs/policy/external-conversation-import-and-memory.md §13.5. An export
+      is a document that leaves the account, so what it carries outlives the
+      lock; the account data export already sends these rows this way, and
+      this reader was the one that did not.
+
+      Asserted against the serialised document rather than the object: what
+      must not leave is text, and a field renamed or nested somewhere else
+      would pass a key check and still carry it out.
+    */
+    const user = await createUser();
+    await finalizeImport(user.id, [
+        conversationPayload("conv-open"),
+        conversationPayload("conv-locked", [
+            "a sentence only the lock should see",
+            "and the reply to it",
+        ]),
+    ]);
+    const locked = await prisma.externalConversation.findFirstOrThrow({
+        where: { userId: user.id, title: "conversation conv-locked" },
+        select: { id: true, externalStableId: true, conversationDigest: true },
+    });
+    await prisma.externalConversation.update({
+        where: { id: locked.id },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    const exported = [];
+    for await (const conversation of iterateExternalExportConversations(
+        user.id
+    )) {
+        exported.push(conversation);
+    }
+
+    // Still listed: the owner is entitled to know it is there.
+    assert.equal(exported.length, 2);
+    const stubs = exported.filter((conversation) => conversation.locked);
+    assert.equal(stubs.length, 1);
+    assert.deepEqual(Object.keys(stubs[0]).sort(), ["importedAt", "locked"]);
+
+    const document = JSON.stringify(exported);
+    for (const hidden of [
+        "conversation conv-locked",
+        "a sentence only the lock should see",
+        "and the reply to it",
+        locked.externalStableId,
+        locked.conversationDigest,
+        "scrypt$1$test-locked",
+    ]) {
+        assert.ok(
+            !document.includes(hidden),
+            `the export must not carry ${JSON.stringify(hidden)}`
+        );
+    }
+
+    // And the open snapshot is untouched by the other being locked.
+    const open = exported.find((conversation) => !conversation.locked);
+    assert.equal(open?.title, "conversation conv-open");
+    assert.equal(open?.messages.length, 2);
+});
+
+test("a snapshot locked while the export is being sent goes out as a stub", async () => {
+    /*
+      The race the first version of this fix had. The page of rows is read
+      once and the generator then hands entries to a stream that drains at its
+      own pace, so a lock decided from the page is a decision about the past:
+      a snapshot open when the page was read and locked while an earlier entry
+      was being sent went out whole.
+
+      Driven with `next()` so the lock lands exactly between two entries of
+      the same page, which is the only place the old code could not see it.
+    */
+    const user = await createUser();
+    await finalizeImport(user.id, [
+        conversationPayload("conv-first"),
+        conversationPayload("conv-second", [
+            "text that was open when the page was read",
+            "and locked before it was sent",
+        ]),
+    ]);
+
+    const iterator = iterateExternalExportConversations(user.id);
+    const first = await iterator.next();
+    assert.equal(first.done, false);
+    assert.equal(first.value?.locked, false, "fixture: the first entry is open");
+
+    // Whichever conversation has not been sent yet, lock it now.
+    const sentTitle = first.value && !first.value.locked ? first.value.title : null;
+    const pending = await prisma.externalConversation.findFirstOrThrow({
+        where: { userId: user.id, NOT: { title: sentTitle ?? "" } },
+        select: { id: true, title: true },
+    });
+    await prisma.externalConversation.update({
+        where: { id: pending.id },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    const second = await iterator.next();
+    assert.equal(second.done, false);
+    assert.deepEqual(
+        second.value && Object.keys(second.value).sort(),
+        ["importedAt", "locked"],
+        "the entry is decided when it is read, not when its page was"
+    );
+    const document = JSON.stringify(second.value);
+    assert.ok(!document.includes(pending.title));
+    assert.ok(!document.includes("text that was open when the page was read"));
+
+    assert.equal((await iterator.next()).done, true);
 });
 
 test("the rollout flag round-trips through the admin setter", async () => {

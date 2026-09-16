@@ -41,7 +41,8 @@ export const marketingSendCounts = async (
   const rows = await prisma.emailDelivery.groupBy({
     by: ["status"],
     where: {
-      templateVersion: { template: { classification: "marketing" } },
+      // The version a message was sent under decides what it was.
+      templateVersion: { classification: "marketing" },
       status: { in: ["sent", "delivered", "bounced", "complained"] },
       sentAt: { gte: since },
     },

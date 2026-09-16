@@ -5,7 +5,10 @@ import { randomUUID } from "node:crypto";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSecurityEnvironmentStatus } from "@/lib/securityEnvironment";
-import { reportOperationalDependencyStatus } from "@/lib/operationalMonitoring";
+import {
+  reportOperationalDependencyStatus,
+  reportOperationalIncident,
+} from "@/lib/operationalMonitoring";
 import { getImageProviderBudgetReadiness } from "@/lib/imageProviderBudgetReadiness";
 import { getVoiceModelPriceReadiness } from "@/lib/voiceModelPriceReadiness";
 import { getVoiceProviderBudgetReadiness } from "@/lib/voiceProviderBudgetReadiness";
@@ -14,6 +17,7 @@ import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
+import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
@@ -25,6 +29,20 @@ const DATABASE_CHECK_TIMEOUT_MS = 5_000;
 const baseHeaders = {
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
+};
+
+const withDeadline = async <T>(work: Promise<T>, ms: number, message: string) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 };
 
 const checkDatabase = async () => {
@@ -179,6 +197,36 @@ const readinessResponse = async (head = false) => {
   // broken is an error either way.
   const unsubscribeKeyring = unsubscribeKeyringReadiness();
   const emailUnsubscribeKeyring = unsubscribeKeyring.ready;
+  // Whether every unsubscribe key a message sent in the last year
+  // depends on still opens its links (docs/policy/email-notifications.md
+  // §11.4). Unconditional, unlike the keyring check above: it only has
+  // anything to say once a link has been signed, and from then on dropping or
+  // editing that version kills links already in inboxes -- which the recipient
+  // answers with the spam button. Decrypt-only; it never calls the endpoint.
+  // A thrown check is not ready, for the reason the image budget gives.
+  // Skipped when the database check already failed -- asking the same database
+  // again would only queue another probe behind it -- and bounded by the same
+  // deadline when it runs.
+  const unsubscribeRetentionStatus = databaseResult.ready
+    ? await withDeadline(
+        getUnsubscribeKeyRetentionReadiness(),
+        DATABASE_CHECK_TIMEOUT_MS,
+        "The unsubscribe key retention readiness check timed out."
+      ).then(
+        (status) => ({ status, error: null as string | null }),
+        (error: unknown) => ({
+          status: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "The unsubscribe key retention readiness check threw.",
+        })
+      )
+    : {
+        status: null,
+        error: "Skipped: the database readiness check failed.",
+      };
+  const emailUnsubscribeKeyRetention = unsubscribeRetentionStatus.status?.ready ?? false;
   // The marketing consent confirmation keyring (docs/policy/email-double-opt-in.md
   // §11 item 10). Same condition as the unsubscribe keyring above: an error
   // once MARKETING_EMAIL_FROM is set, because from then on a missing key means
@@ -201,7 +249,7 @@ const readinessResponse = async (head = false) => {
     imageProviderBudget && voiceProviderBudget && voiceModelPrice &&
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
-    emailConsentKeyring &&
+    emailUnsubscribeKeyRetention && emailConsentKeyring &&
     emailBusinessIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
@@ -215,6 +263,23 @@ const readinessResponse = async (head = false) => {
     .filter(([, passed]) => !passed)
     .map(([name]) => name);
   after(async () => {
+    // A warning on a healthy check reaches nobody through the dependency
+    // report, which records context only when unhealthy. Mail that is not yet
+    // guarded by an adopted keyring is exactly the state that must not be
+    // mistaken for verified, so it is raised on its own, rate limited.
+    const unguarded = unsubscribeRetentionStatus.status?.warnings.filter(
+      (problem) => problem.code === "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED"
+    );
+    if (unguarded && unguarded.length > 0) {
+      await reportOperationalIncident({
+        code: "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED",
+        title: "Older mail with unsubscribe links is not yet guarded by an adopted keyring",
+        severity: "warning",
+        error: unguarded.map((problem) => problem.message).join(" | "),
+        cooldownMs: 60 * 60 * 1_000,
+        context: { component: "api-ready", route: "/api/ready", traceId },
+      });
+    }
     await Promise.all([
       reportOperationalDependencyStatus({
         dependency: "postgresql",
@@ -462,6 +527,38 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-unsubscribe-key-retention",
+        healthy: emailUnsubscribeKeyRetention,
+        code: "EMAIL_UNSUBSCRIBE_KEY_RETENTION_NOT_READY",
+        title: "An unsubscribe key that recent mail depends on no longer opens its links",
+        error:
+          unsubscribeRetentionStatus.error ??
+          (unsubscribeRetentionStatus.status &&
+          unsubscribeRetentionStatus.status.errors.length > 0
+            ? unsubscribeRetentionStatus.status.errors
+                .map((problem) => problem.message)
+                .join(" | ")
+            : "Every unsubscribe key used in the retention window opens its links."),
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // Version names only, never secrets or tokens. Retirable versions are
+          // listed so an operator rotating keys can see what is safe to drop.
+          failedVersions:
+            unsubscribeRetentionStatus.status?.errors
+              .map((problem) => problem.keyVersion)
+              .join(",") || "none",
+          retirableVersions:
+            unsubscribeRetentionStatus.status?.retirable.join(",") || "none",
+          warnings:
+            unsubscribeRetentionStatus.status?.warnings
+              .map((problem) => `${problem.code}:${problem.keyVersion}`)
+              .join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "email-consent-keyring",
         healthy: emailConsentKeyring,
         code: "EMAIL_CONSENT_KEYRING_NOT_READY",
@@ -523,6 +620,7 @@ const readinessResponse = async (head = false) => {
         emailSendingIdentity,
         emailSnapshotKeyring,
         emailUnsubscribeKeyring,
+        emailUnsubscribeKeyRetention,
         emailConsentKeyring,
         emailBusinessIdentity,
       },

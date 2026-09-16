@@ -4696,6 +4696,16 @@ model TemplateVersion {
   /// Over the three fields above. Detects an edit that bypassed the workflow.
   contentHash String
 
+  /// The send metadata this version was published under. Written once; a
+  /// trigger refuses any change, so a template reclassified in code becomes a
+  /// new version rather than an edited one. The drain compares these to the
+  /// definition it sends under and refuses a mismatch. `EmailTemplate` keeps
+  /// its copies for history only -- nothing decides a send from them.
+  /// Contract: docs/policy/email-notifications.md §10.2.
+  classification      String
+  purpose             String?
+  requiresUnsubscribe Boolean
+
   /// draft | published | retired
   status           String    @default("draft")
   publishedAt      DateTime?
@@ -4709,6 +4719,7 @@ model TemplateVersion {
 
   @@unique([templateId, version, language])
   @@index([templateId, status, language])
+  @@index([classification])
 }
 
 /// What a user currently receives. Mutable; the history lives in ConsentRecord.
@@ -5006,6 +5017,12 @@ model EmailDelivery {
   sentAt      DateTime?
   deliveredAt DateTime?
 
+  /// The EMAIL_UNSUBSCRIBE_KEYS version that signed the unsubscribe link in the
+  /// message as sent. NULL for mail with no link. Readiness refuses to lose a
+  /// version used within the last year
+  /// (docs/policy/email-notifications.md §11.4).
+  unsubscribeKeyVersion String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5015,6 +5032,30 @@ model EmailDelivery {
   @@index([userId, createdAt])
   @@index([emailAddress, createdAt])
   @@index([status, snapshotPurgedAt])
+  @@index([unsubscribeKeyVersion, sentAt])
+}
+
+/// One inert unsubscribe token per key version, minted with that key the first
+/// time it signs a real link. Readiness decrypts each against the live keyring:
+/// a version dropped or changed while mail still depends on it is found before
+/// a recipient finds it. The token acts on nobody and is never sent to the
+/// endpoint. Contract: docs/policy/email-notifications.md §11.4.
+model EmailUnsubscribeKeyCanary {
+  id         String   @id @default(cuid())
+  keyVersion String   @unique
+  token      String
+  createdAt  DateTime @default(now())
+}
+
+/// The one-time adoption of the keyring as the guard for mail sent before key
+/// versions were recorded. At most one row (singleton unique + CHECK). Written
+/// by the first drain that finds such mail. Contract:
+/// docs/policy/email-notifications.md §11.4.
+model EmailUnsubscribeKeyAdoption {
+  id          String   @id @default(cuid())
+  keyVersions String[]
+  adoptedAt   DateTime @default(now())
+  singleton   Boolean  @default(true) @unique
 }
 
 /// Raw provider callbacks, stored before they are acted on.

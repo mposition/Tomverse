@@ -173,7 +173,7 @@ test("classification narrows without needing to know template keys", async () =>
     parseDeliveryFilters({ classification: "legal" })
   );
   assert.equal(legal.rows.length, 1);
-  assert.equal(legal.rows[0].templateVersion.template.classification, "legal");
+  assert.equal(legal.rows[0].templateVersion.classification, "legal");
 });
 
 test("paging walks the whole list without repeating a row", async () => {
