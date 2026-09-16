@@ -1,0 +1,226 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+  "requirement": "Prompt Refiner의 provider-free shadow harness가 남긴 동결 합성 evidence bundle을 불신 입력으로 다시 검증해, 실행 승인이 아닌 content-free admission proposal만 생성한다. 검증은 manifest가 결속한 과거 source/corpus/journal/witness snapshot에 한정되고 현재 checkout·runtime environment를 검증했다고 주장하지 않는다. 성공 상태는 awaiting_explicit_admin_cost_approval이며 executionAdmitted=false, currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true를 구조적으로 고정한다. 기존 v1 shadow harness·evidence bytes는 변경하지 않고, DB/writer/migration/route/script/product/provider/network/credential lookup, stage mutation, flag 활성화와 admitted:true 경로는 추가하지 않는다. author는 codex, reviewer는 claude이며 독립 검토는 Claude Code Max 구독 CLI의 Read·Grep·Glob 읽기 전용으로만 수행한다.",
+  "completionCriteria": [
+    "동결 admission-readiness-v1 manifest는 report·journal·witness의 exact filename, byte size, SHA-256, terminal heads, sourceRef, source identity, corpus digest와 canonical bundle digest를 결속하고, verifier는 checked-in manifest bytes 자체도 exact digest로 pin한다.",
+    "manifest·report·corpus의 raw Uint8Array 입력은 byteLength intrinsic으로 bounds를 먼저 검사한 뒤에만 hash·decode·JSON parse하고, journal·witness도 기존 replay bound보다 먼저 prebound한다. forged byteLength getter, oversized view/backing buffer, detached/resized view와 hash 전후 TOCTOU mutation을 fail-closed한다.",
+    "strict parser는 UTF-8 fatal decode, BOM·duplicate key·extra key·schema drift·정밀도 손실·파일 순서/누락/중복·digest/size mismatch를 거부하며 JSON repair·coercion·부분 salvage를 하지 않는다.",
+    "journal/witness replay는 기존 v1 sourceRef·source identity·corpus digest pin과 chain·witness·terminal invariants를 그대로 재검증하고 completed 16/16, remaining/unknown 0, structural violations 0, behavioral matches 16/16, providerCalls 0, costMicroUsd 0만 받아들인다.",
+    "성공 결과는 status=awaiting_explicit_admin_cost_approval, executionAdmitted=false, currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true인 immutable proposal 하나뿐이며 proposal digest는 canonical content에 결속된다.",
+    "proposal은 기존 reservation stage id·contract digest·request/stage cost ceiling·slot·TTL과 content-free provenance·제약 acknowledgement만 담고 approvedBy, approvedAt, 사용자 prompt, fixture output, refined prompt, per-item content digest 또는 승인 성공 표현을 담지 않는다.",
+    "현재 검증은 historical_evidence_snapshot_only이고 실제 paid shadow·model quality·PLANNER·release·rollout 승인이 아니라는 한계가 코드·운영 문서·정책·진척 기록에 일치한다.",
+    "DB writer·Prisma schema/migration·admin/product route·runtime script·receipt writer·provider SDK·network·credential lookup·stage seed·flag·admitted:true 경로가 없고, 기존 v1 harness와 동결 evidence files는 수정하지 않는다.",
+    "새 evidence·TypeScript·test 경로는 LF로 pin되고 Windows core.autocrlf=true checkout에서도 byte identity가 유지되며 기존 저장소 line-ending 정책을 넓히지 않는다.",
+    "journal·witness·report·manifest·proposal과 검증 오류는 content-free이며 prompt/fixture/refinement/provider 오류문이나 사용자·conversation·session identity를 노출하지 않는다.",
+    "focused admission 14/14, provider-free shadow 24/24, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.",
+    "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다."
+  ],
+  "baseCommit": "c45871f158cb8f2f32ae7442ac7123613b354201",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
+      "commit": "7b9117a6fc726f4a84bd015c583b1d28deee71ee",
+      "filesChanged": [
+        ".gitattributes",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/evidence/README.md",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/promptRefinerShadowAdmissionCore.ts",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs"
+      ],
+      "changeSummary": "(no summary supplied; the diff is the record)",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1030.3681",
+          "durationMs": 1110
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 24312.4171",
+          "durationMs": 24812
+        },
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2350.1361",
+          "durationMs": 2421
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 699
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 40062
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2882
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 891 referenced path(s) across 112 instruction document(s), and 976 path(s) named by comments across 2956 source file(s), all present.",
+          "durationMs": 1450
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+          "durationMs": 1099
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1281
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 719
+        },
+        {
+          "rule": "git diff --check c45871f158cb8f2f32ae7442ac7123613b354201 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 50
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": null,
+      "findings": [],
+      "nextAction": "awaiting the reviewer's verdict"
+    }
+  ],
+  "changeDigest": "sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
+  "commit": "7b9117a6fc726f4a84bd015c583b1d28deee71ee",
+  "changeSummary": "(no summary supplied; the diff is the record)",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs",
+      "passed": true,
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1030.3681",
+      "durationMs": 1110
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run test:prompt-refiner-shadow",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 24312.4171",
+      "durationMs": 24812
+    },
+    {
+      "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+      "passed": true,
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2350.1361",
+      "durationMs": 2421
+    },
+    {
+      "rule": "npm run check:prompt-injection",
+      "passed": true,
+      "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+      "durationMs": 699
+    },
+    {
+      "rule": "npm run typecheck",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 40062
+    },
+    {
+      "rule": "npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 2882
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 891 referenced path(s) across 112 instruction document(s), and 976 path(s) named by comments across 2956 source file(s), all present.",
+      "durationMs": 1450
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+      "durationMs": 1099
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1281
+    },
+    {
+      "rule": "npm run check:data-domain-registry",
+      "passed": true,
+      "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+      "durationMs": 719
+    },
+    {
+      "rule": "git diff --check c45871f158cb8f2f32ae7442ac7123613b354201 HEAD",
+      "passed": true,
+      "detail": "",
+      "durationMs": 50
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand the review prompt (round 0) to the claude reviewer; its verdict must name digest sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
+  "status": "awaiting_review",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-16T23:31:19.497Z",
+  "packagedRounds": 1,
+  "concludedAtRound": null,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "7b9117a6fc726f4a84bd015c583b1d28deee71ee",
+  "worktreeDirty": false,
+  "filesChanged": [
+    ".gitattributes",
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json",
+    "docs/ops/prompt-refiner-shadow-harness.md",
+    "docs/ops/prompt-refiner-shadow/evidence/README.md",
+    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
+    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
+    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
+    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "lib/promptRefinerShadowAdmissionCore.ts",
+    "tests/promptRefinerShadowAdmissionCore.test.mjs"
+  ]
+}

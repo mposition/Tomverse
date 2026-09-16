@@ -1,0 +1,1930 @@
+diff --git a/.gitattributes b/.gitattributes
+index c1382d94..30a18e2f 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -66,3 +66,13 @@ lib/promptInjectionAudit.ts text eol=lf
+ lib/promptRefinerSuggestion.ts text eol=lf
+ lib/routerDevelopmentBenchmark.ts text eol=lf
+ scripts/prompt-refiner-shadow-harness.mjs text eol=lf
++
++# Prompt Refiner admission-readiness evidence is verified as exact bytes.
++#
++# These four paths, and only these four paths in the evidence directory, are
++# digest-bound. The README is explanatory rather than evidence, so pinning a
++# directory-wide glob would silently expand the immutable set.
++/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json text eol=lf
++/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json text eol=lf
++/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl text eol=lf
++/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl text eol=lf
+diff --git a/AGENTS.md b/AGENTS.md
+index 37ea64df..9fc67052 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -1304,8 +1304,10 @@ Before changing the Prompt Refiner surface or request boundary in
+ `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
+ `lib/promptRefinerShadowHarness.ts`, `lib/promptRefinerShadowJournal.ts`,
+ `lib/promptRefinerShadowSource.ts`,
+-`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus, or their
+-tests, read:
++`lib/promptRefinerShadowAdmissionCore.ts`,
++`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus,
++`docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.*`,
++`tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
+ 
+ - `docs/ui-contracts/prompt-refiner-suggestion.md`
+ - `docs/policy/prompt-refiner-observability.md`
+@@ -1420,6 +1422,18 @@ Non-negotiable requirements:
+   zero structural violations must never be described as model compliance or
+   injection resistance. A completed local run is not model-quality, release,
+   admission or rollout evidence.
++- The admission-readiness core is proposal-only and verifies only the immutable
++  historical evidence snapshot named by its checked-in manifest. It does not
++  validate the current checkout or runtime environment and must always emit
++  `currentCheckoutValidated: false`,
++  `runtimeSourceRevalidationRequired: true`, `executionAdmitted: false`, and
++  `awaiting_explicit_admin_cost_approval`. It has no approvedBy/approvedAt
++  input, writer, DB/Prisma mutation, admin/API/script caller, receipt, feature
++  flag, product import, provider, network or credential path. No caller may use
++  this proposal as writer authorization. A future durable writer must re-run
++  exact current source, manifest and environment validation immediately before
++  binding human cost approval; that requirement cannot be satisfied by a
++  caller-supplied identity boolean.
+ 
+ Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
+ `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
+diff --git a/docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json b/docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json
+new file mode 100644
+index 00000000..c427a6a7
+--- /dev/null
++++ b/docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json
+@@ -0,0 +1,35 @@
++{
++  "taskId": "prompt-refiner-shadow-admission-proposal-v1",
++  "requirement": "Prompt Refiner의 provider-free shadow harness가 남긴 동결 합성 evidence bundle을 불신 입력으로 다시 검증해, 실행 승인이 아닌 content-free admission proposal만 생성한다. 검증은 manifest가 결속한 과거 source/corpus/journal/witness snapshot에 한정되고 현재 checkout·runtime environment를 검증했다고 주장하지 않는다. 성공 상태는 awaiting_explicit_admin_cost_approval이며 executionAdmitted=false, currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true를 구조적으로 고정한다. 기존 v1 shadow harness·evidence bytes는 변경하지 않고, DB/writer/migration/route/script/product/provider/network/credential lookup, stage mutation, flag 활성화와 admitted:true 경로는 추가하지 않는다. author는 codex, reviewer는 claude이며 독립 검토는 Claude Code Max 구독 CLI의 Read·Grep·Glob 읽기 전용으로만 수행한다.",
++  "completionCriteria": [
++    "동결 admission-readiness-v1 manifest는 report·journal·witness의 exact filename, byte size, SHA-256, terminal heads, sourceRef, source identity, corpus digest와 canonical bundle digest를 결속하고, verifier는 checked-in manifest bytes 자체도 exact digest로 pin한다.",
++    "manifest·report·corpus의 raw Uint8Array 입력은 byteLength intrinsic으로 bounds를 먼저 검사한 뒤에만 hash·decode·JSON parse하고, journal·witness도 기존 replay bound보다 먼저 prebound한다. forged byteLength getter, oversized view/backing buffer, detached/resized view와 hash 전후 TOCTOU mutation을 fail-closed한다.",
++    "strict parser는 UTF-8 fatal decode, BOM·duplicate key·extra key·schema drift·정밀도 손실·파일 순서/누락/중복·digest/size mismatch를 거부하며 JSON repair·coercion·부분 salvage를 하지 않는다.",
++    "journal/witness replay는 기존 v1 sourceRef·source identity·corpus digest pin과 chain·witness·terminal invariants를 그대로 재검증하고 completed 16/16, remaining/unknown 0, structural violations 0, behavioral matches 16/16, providerCalls 0, costMicroUsd 0만 받아들인다.",
++    "성공 결과는 status=awaiting_explicit_admin_cost_approval, executionAdmitted=false, currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true인 immutable proposal 하나뿐이며 proposal digest는 canonical content에 결속된다.",
++    "proposal은 기존 reservation stage id·contract digest·request/stage cost ceiling·slot·TTL과 content-free provenance·제약 acknowledgement만 담고 approvedBy, approvedAt, 사용자 prompt, fixture output, refined prompt, per-item content digest 또는 승인 성공 표현을 담지 않는다.",
++    "현재 검증은 historical_evidence_snapshot_only이고 실제 paid shadow·model quality·PLANNER·release·rollout 승인이 아니라는 한계가 코드·운영 문서·정책·진척 기록에 일치한다.",
++    "DB writer·Prisma schema/migration·admin/product route·runtime script·receipt writer·provider SDK·network·credential lookup·stage seed·flag·admitted:true 경로가 없고, 기존 v1 harness와 동결 evidence files는 수정하지 않는다.",
++    "새 evidence·TypeScript·test 경로는 LF로 pin되고 Windows core.autocrlf=true checkout에서도 byte identity가 유지되며 기존 저장소 line-ending 정책을 넓히지 않는다.",
++    "journal·witness·report·manifest·proposal과 검증 오류는 content-free이며 prompt/fixture/refinement/provider 오류문이나 사용자·conversation·session identity를 노출하지 않는다.",
++    "focused admission 14/14, provider-free shadow 24/24, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.",
++    "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다."
++  ],
++  "baseCommit": "c45871f158cb8f2f32ae7442ac7123613b354201",
++  "writableScope": [
++    ".gitattributes",
++    "AGENTS.md",
++    "docs/ops/prompt-refiner-shadow-harness.md",
++    "docs/ops/prompt-refiner-shadow/evidence/README.md",
++    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
++    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
++    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
++    "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
++    "docs/ops/tomverse-chat-progress.md",
++    "docs/policy/prompt-refiner-observability.md",
++    "lib/promptRefinerShadowAdmissionCore.ts",
++    "tests/promptRefinerShadowAdmissionCore.test.mjs",
++    "docs/ops/cross-review/packages/"
++  ],
++  "generatedPaths": []
++}
+diff --git a/docs/ops/prompt-refiner-shadow-harness.md b/docs/ops/prompt-refiner-shadow-harness.md
+index ccb8131c..593da672 100644
+--- a/docs/ops/prompt-refiner-shadow-harness.md
++++ b/docs/ops/prompt-refiner-shadow-harness.md
+@@ -134,3 +134,42 @@ mismatch stop, stale lock, truncation 또는 witness disagreement는 새 실행
+ 4. 의미 보존·행동상 주입 저항·비용·지연 증거가 승인됐을 때만 제품 제안형 UI 연결을
+    제안한다.
+ 5. Refiner 결과의 Router 결합과 전체 모델 catalogue 품질은 그 뒤의 별도 실험이다.
++
++## 8. admission-readiness proposal 경계
++
++`admission-readiness-v1` evidence는 source commit
++`f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`에서 이 문서의 provider-free 명령을
++16/16으로 완료해 동결했다. manifest는 report·journal·witness의 정확한 filename,
++byte size, SHA-256, journal/witness terminal head, sourceRef, source identity와 corpus
++digest를 묶고 canonical bundle digest
++`sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159`를
++고정한다. 이 bundle이 만드는 canonical proposal digest는
++`sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2`다.
++파일은 [`evidence/`](prompt-refiner-shadow/evidence/)에 있다.
++
++`promptRefinerShadowAdmissionCore`는 파일을 불신 입력으로 다시 읽어 strict schema,
++byte/UTF-8/BOM/duplicate/extra-key 경계와 raw file digest를 확인한다. 그 뒤 기존 strict
++journal replay API로 chain·witness·terminal을 재검증하고 다음 조건을 모두 요구한다.
++
++- completed 16/16, remaining/unknown 0
++- structural boundary violation 0
++- behavioral fixture match 16/16
++- provider call 0, cost 0
++- 정확히 고정된 harness/journal/corpus/source identity와 checked-in manifest bytes
++
++통과 결과는 `PromptRefinerShadowStageProposal` 하나이며 status는
++`awaiting_explicit_admin_cost_approval`, `executionAdmitted`는 항상 `false`다. proposal은
++`currentCheckoutValidated=false`, `runtimeSourceRevalidationRequired=true`를 고정해 이
++검사가 현재 checkout이나 실행 환경을 검증하지 않았음을 구조적으로 드러낸다. 검증 범위는
++manifest가 가리키는 과거 evidence snapshot 내부의 source/corpus 일치뿐이다. proposal은
++기존 reservation stage id·contract digest·요청/단계 비용·slot·TTL과 content-free
++provenance만 담고 `approvedBy`, `approvedAt`, stage mutation 또는 승인 성공 표현은 담지
++않는다. 이는 합성 구조 prerequisite일 뿐 실제 모델 품질, paid shadow, PLANNER,
++release 또는 rollout 승인 증거가 아니다.
++
++실제 writer는 이번 범위에 없다. 다음 계약은 승인 직전에 현재 checkout의 exact source,
++manifest bytes와 대상 environment를 다시 검증한 결과를 요구하고, 새 migration에서 exact evidence digest,
++명시적 사람 승인과 비용 상한, 대상 environment, 승인 expiry, 실행 manifest를 한 행에
++결속하고 durable admin writer가 그것을 원자적으로 생성하도록 별도 설계·검토해야 한다.
++그 전에는 stage seed, Prisma mutation, admin route/script, receipt writer, product caller,
++provider SDK, 자격증명 조회, flag 활성화 또는 `admitted: true` 경로를 추가하지 않는다.
+diff --git a/docs/ops/prompt-refiner-shadow/evidence/README.md b/docs/ops/prompt-refiner-shadow/evidence/README.md
+new file mode 100644
+index 00000000..9c4055ac
+--- /dev/null
++++ b/docs/ops/prompt-refiner-shadow/evidence/README.md
+@@ -0,0 +1,20 @@
++# Prompt Refiner admission-readiness evidence v1
++
++이 디렉터리의 `admission-readiness-v1` 네 파일은 provider-free 합성 shadow의 고정
++증거다. source commit은 `f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`, canonical bundle
++digest는
++`sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159`다.
++검증 통과 시 생성되는 content-free proposal의 canonical digest는
++`sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2`다.
++
++- `*.report.json`: content-free aggregate
++- `*.journal.jsonl`: append-only 실행 chain
++- `*.journal.jsonl.witness.jsonl`: 별도 terminal registration chain
++- `*.manifest.json`: 세 artifact의 filename·size·SHA-256과 source/corpus/terminal 결속
++
++이 자료는 checked-in 합성 fixture 16개의 구조·parser 회귀만 증명한다. 실제 모델을
++호출하지 않았고 provider call과 cost는 0이다. 모델 품질, paid shadow, PLANNER, release,
++rollout 또는 제품 활성화의 승인이 아니며 stage 생성이나 실행 권한도 부여하지 않는다.
++또한 이 bundle은 위 source commit에서 만든 **과거 snapshot**만 검증한다. 현재 checkout이나
++실행 environment를 검증하지 않으며, 미래 writer는 승인 직전에 현재 source·manifest·
++environment를 exact-byte 기준으로 다시 검증해야 한다.
+diff --git a/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl
+new file mode 100644
+index 00000000..d02ed57c
+--- /dev/null
++++ b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl
+@@ -0,0 +1,34 @@
++{"entryDigest":"b0165a1dd09edf5c6c38f287d33a6526f1c2a5bbc0281ed814ef321899a15d17","event":{"corpusCases":16,"corpusDigest":"bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958","costMicroUsd":0,"harnessVersion":"prompt-refiner-shadow-harness-v1","kind":"header","providerCalls":0,"schemaVersion":"prompt-refiner-shadow-journal-v1","sourceIdentityDigest":"ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39","sourceRef":"f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830"},"previousDigest":null,"seq":0}
++{"entryDigest":"a4009cacc67f53eccbd584ed157424a73092e65b159449ef6d078c9288200080","event":{"caseId":"prsv1-ko-01","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"b0165a1dd09edf5c6c38f287d33a6526f1c2a5bbc0281ed814ef321899a15d17","seq":1}
++{"entryDigest":"c9ef20d84d880f7666ed0f04f677ab4e5309fe20e0fd94cc9d70b3c216f30e2c","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-01","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"a4009cacc67f53eccbd584ed157424a73092e65b159449ef6d078c9288200080","seq":2}
++{"entryDigest":"a0701a06a1bc1fcb9ce0f744df2b0dcdd541fd0b53135f1410b7076974c3d1b9","event":{"caseId":"prsv1-ko-02","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"c9ef20d84d880f7666ed0f04f677ab4e5309fe20e0fd94cc9d70b3c216f30e2c","seq":3}
++{"entryDigest":"c29028f6aa10db87fe553c483d2b4c03cf11de21a355c18efad1e37deb305a13","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-02","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"a0701a06a1bc1fcb9ce0f744df2b0dcdd541fd0b53135f1410b7076974c3d1b9","seq":4}
++{"entryDigest":"191b476e2860716088b71296a6e665034ef540e80c5b02be4abf5a4b8b94ff7d","event":{"caseId":"prsv1-ko-03","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"c29028f6aa10db87fe553c483d2b4c03cf11de21a355c18efad1e37deb305a13","seq":5}
++{"entryDigest":"aca5cf0292c51d52132730121f126459ab23484a854d46c90821ce4faf80d63e","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-03","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"191b476e2860716088b71296a6e665034ef540e80c5b02be4abf5a4b8b94ff7d","seq":6}
++{"entryDigest":"91e5090004ab0c3374f9f25bb7669a8fd292bdcda98d5bc9541b90c6c537f6a6","event":{"caseId":"prsv1-ko-04","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"aca5cf0292c51d52132730121f126459ab23484a854d46c90821ce4faf80d63e","seq":7}
++{"entryDigest":"16741d7aca54a895764602cd167f80ede89319b9c07f237ffa670f8d707b7bda","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-04","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"91e5090004ab0c3374f9f25bb7669a8fd292bdcda98d5bc9541b90c6c537f6a6","seq":8}
++{"entryDigest":"2bab8aa1c4b81d9ddffb208c0dde8bfea34bfa1efad5ff1ef5ad2602a6e3dea0","event":{"caseId":"prsv1-ko-05","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"16741d7aca54a895764602cd167f80ede89319b9c07f237ffa670f8d707b7bda","seq":9}
++{"entryDigest":"73b8b92f707a0abe202e5642bdc45c063a74234c34d6aef0eb35a2349a375414","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-05","costMicroUsd":0,"failureCode":"invalid_response","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"2bab8aa1c4b81d9ddffb208c0dde8bfea34bfa1efad5ff1ef5ad2602a6e3dea0","seq":10}
++{"entryDigest":"59b6ecb8c3267b27d81febc4a2ffd4e15d0beafec04ce3ee8e7486354774b1be","event":{"caseId":"prsv1-ko-06","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"73b8b92f707a0abe202e5642bdc45c063a74234c34d6aef0eb35a2349a375414","seq":11}
++{"entryDigest":"9aa32241f57acb5823f154b5fb9944c634c502ad36f822e5af8f52fca2c3affe","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-06","costMicroUsd":0,"failureCode":"invalid_response","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"59b6ecb8c3267b27d81febc4a2ffd4e15d0beafec04ce3ee8e7486354774b1be","seq":12}
++{"entryDigest":"ee86ff22ce48d0ee28f15af96907ff5f2dcec27500444188ed08d14f8d8685b9","event":{"caseId":"prsv1-ko-07","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"9aa32241f57acb5823f154b5fb9944c634c502ad36f822e5af8f52fca2c3affe","seq":13}
++{"entryDigest":"f5195f2acbe824a2539fe11e88a672c047c3283743bce5461f1de32b06a011ec","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-07","costMicroUsd":0,"failureCode":"empty_response","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"ee86ff22ce48d0ee28f15af96907ff5f2dcec27500444188ed08d14f8d8685b9","seq":14}
++{"entryDigest":"7e0e813b76bef96ad5f300a9a7a767f5a8b46456ee2d03e919beb5e7132702c9","event":{"caseId":"prsv1-ko-08","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"f5195f2acbe824a2539fe11e88a672c047c3283743bce5461f1de32b06a011ec","seq":15}
++{"entryDigest":"a5358ea36635493794cbfdd03d664eb71e5f2f8e4e0f6ab137c819861ee426c5","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-ko-08","costMicroUsd":0,"failureCode":"no_change","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"7e0e813b76bef96ad5f300a9a7a767f5a8b46456ee2d03e919beb5e7132702c9","seq":16}
++{"entryDigest":"4ceff24bc0cbfb37e6768e85866f655e989851541085082ea3ee8f7141980634","event":{"caseId":"prsv1-en-01","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"a5358ea36635493794cbfdd03d664eb71e5f2f8e4e0f6ab137c819861ee426c5","seq":17}
++{"entryDigest":"f4ff9a1e7128e1f0f37d21aadb92ac011e63ea28dfa722d6573db6eb887fa728","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-01","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"4ceff24bc0cbfb37e6768e85866f655e989851541085082ea3ee8f7141980634","seq":18}
++{"entryDigest":"f3a6e9034337cf6b8f34bfbf732fccc595a2a7c60a8da8ce2a0f303739a61819","event":{"caseId":"prsv1-en-02","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"f4ff9a1e7128e1f0f37d21aadb92ac011e63ea28dfa722d6573db6eb887fa728","seq":19}
++{"entryDigest":"8beb8f17754d1ccc9022eb0ea86a8000468677cd43569c06e4250750652a9021","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-02","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"f3a6e9034337cf6b8f34bfbf732fccc595a2a7c60a8da8ce2a0f303739a61819","seq":20}
++{"entryDigest":"22d3b375aa4d5d97f74427f91c29158ac3a18af42a189569fec0911eaa519aaf","event":{"caseId":"prsv1-en-03","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"8beb8f17754d1ccc9022eb0ea86a8000468677cd43569c06e4250750652a9021","seq":21}
++{"entryDigest":"a86d53a17a5084c6575e2eed25f46c8cb56136d557b3c993be3522ec65218d19","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-03","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"22d3b375aa4d5d97f74427f91c29158ac3a18af42a189569fec0911eaa519aaf","seq":22}
++{"entryDigest":"f31ec3692bfe5f103b336a7a26e8e19d43b5866c0811bc4f10883a4603f91862","event":{"caseId":"prsv1-en-04","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"a86d53a17a5084c6575e2eed25f46c8cb56136d557b3c993be3522ec65218d19","seq":23}
++{"entryDigest":"62fa328256f39935c3efb24fd0b3b216648f6e6a58e2604fdc89e0aea68b7334","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-04","costMicroUsd":0,"failureCode":null,"kind":"case_terminal","providerCalls":0,"status":"suggested","structuralBoundaryViolations":0},"previousDigest":"f31ec3692bfe5f103b336a7a26e8e19d43b5866c0811bc4f10883a4603f91862","seq":24}
++{"entryDigest":"9f2c1dc8f1d894927feb58c780aa9c9c62e518d5d3a34c85e8e5c39a0f3744ad","event":{"caseId":"prsv1-en-05","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"62fa328256f39935c3efb24fd0b3b216648f6e6a58e2604fdc89e0aea68b7334","seq":25}
++{"entryDigest":"98b81e35677be78732311872d2f6a5dabd654f9d1039791e6ff1ca250264c3ff","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-05","costMicroUsd":0,"failureCode":"invalid_response","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"9f2c1dc8f1d894927feb58c780aa9c9c62e518d5d3a34c85e8e5c39a0f3744ad","seq":26}
++{"entryDigest":"3e343181cee5a39809d52cb51f2933957bc04a57d4be2d225e126977c1dbaf1b","event":{"caseId":"prsv1-en-06","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"98b81e35677be78732311872d2f6a5dabd654f9d1039791e6ff1ca250264c3ff","seq":27}
++{"entryDigest":"2f1f40e455e5a6e06b701e1609da44c4ab1a02b8ef91d4d75411d04d56db8d0e","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-06","costMicroUsd":0,"failureCode":"invalid_response","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"3e343181cee5a39809d52cb51f2933957bc04a57d4be2d225e126977c1dbaf1b","seq":28}
++{"entryDigest":"2b5b057559b3a270f234197a04e8077b82b586c5e047d3f610fb1a7ac90a2a58","event":{"caseId":"prsv1-en-07","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"2f1f40e455e5a6e06b701e1609da44c4ab1a02b8ef91d4d75411d04d56db8d0e","seq":29}
++{"entryDigest":"ed8269e03fcbe879091c1fd3b421809d2fc9c993eccdc2c6e665050042cd3086","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-07","costMicroUsd":0,"failureCode":"empty_response","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"2b5b057559b3a270f234197a04e8077b82b586c5e047d3f610fb1a7ac90a2a58","seq":30}
++{"entryDigest":"794c97540448753f7d45baad934f8d8d35644ac6ecb4258b547bbf6b2c64b83c","event":{"caseId":"prsv1-en-08","costMicroUsd":0,"kind":"case_intent","providerCalls":0},"previousDigest":"ed8269e03fcbe879091c1fd3b421809d2fc9c993eccdc2c6e665050042cd3086","seq":31}
++{"entryDigest":"9711bbcb55de5b10986456a3206cb1d9ae11f02ae4a75c117ce3d502fecabf26","event":{"behavioralOutcomeMatched":true,"caseId":"prsv1-en-08","costMicroUsd":0,"failureCode":"no_change","kind":"case_terminal","providerCalls":0,"status":"failed","structuralBoundaryViolations":0},"previousDigest":"794c97540448753f7d45baad934f8d8d35644ac6ecb4258b547bbf6b2c64b83c","seq":32}
++{"entryDigest":"e6e7d10d9dfbb854bcc69874393cc2ad1ad362a2ba655ed8f1520863c73e4992","event":{"behavioralOutcomeMatches":16,"behavioralOutcomePopulation":16,"costMicroUsd":0,"kind":"run_completed","processedCases":16,"providerCalls":0,"structuralBoundaryPopulation":16,"structuralBoundaryViolations":0},"previousDigest":"9711bbcb55de5b10986456a3206cb1d9ae11f02ae4a75c117ce3d502fecabf26","seq":33}
+diff --git a/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl
+new file mode 100644
+index 00000000..121ef3c9
+--- /dev/null
++++ b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl
+@@ -0,0 +1,35 @@
++{"corpusDigest":"bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958","harnessVersion":"prompt-refiner-shadow-harness-v1","schemaVersion":"prompt-refiner-shadow-journal-v1","sourceIdentityDigest":"ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39","sourceRef":"f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830"}
++{"entryDigest":"b0165a1dd09edf5c6c38f287d33a6526f1c2a5bbc0281ed814ef321899a15d17","seq":0}
++{"entryDigest":"a4009cacc67f53eccbd584ed157424a73092e65b159449ef6d078c9288200080","seq":1}
++{"entryDigest":"c9ef20d84d880f7666ed0f04f677ab4e5309fe20e0fd94cc9d70b3c216f30e2c","seq":2}
++{"entryDigest":"a0701a06a1bc1fcb9ce0f744df2b0dcdd541fd0b53135f1410b7076974c3d1b9","seq":3}
++{"entryDigest":"c29028f6aa10db87fe553c483d2b4c03cf11de21a355c18efad1e37deb305a13","seq":4}
++{"entryDigest":"191b476e2860716088b71296a6e665034ef540e80c5b02be4abf5a4b8b94ff7d","seq":5}
++{"entryDigest":"aca5cf0292c51d52132730121f126459ab23484a854d46c90821ce4faf80d63e","seq":6}
++{"entryDigest":"91e5090004ab0c3374f9f25bb7669a8fd292bdcda98d5bc9541b90c6c537f6a6","seq":7}
++{"entryDigest":"16741d7aca54a895764602cd167f80ede89319b9c07f237ffa670f8d707b7bda","seq":8}
++{"entryDigest":"2bab8aa1c4b81d9ddffb208c0dde8bfea34bfa1efad5ff1ef5ad2602a6e3dea0","seq":9}
++{"entryDigest":"73b8b92f707a0abe202e5642bdc45c063a74234c34d6aef0eb35a2349a375414","seq":10}
++{"entryDigest":"59b6ecb8c3267b27d81febc4a2ffd4e15d0beafec04ce3ee8e7486354774b1be","seq":11}
++{"entryDigest":"9aa32241f57acb5823f154b5fb9944c634c502ad36f822e5af8f52fca2c3affe","seq":12}
++{"entryDigest":"ee86ff22ce48d0ee28f15af96907ff5f2dcec27500444188ed08d14f8d8685b9","seq":13}
++{"entryDigest":"f5195f2acbe824a2539fe11e88a672c047c3283743bce5461f1de32b06a011ec","seq":14}
++{"entryDigest":"7e0e813b76bef96ad5f300a9a7a767f5a8b46456ee2d03e919beb5e7132702c9","seq":15}
++{"entryDigest":"a5358ea36635493794cbfdd03d664eb71e5f2f8e4e0f6ab137c819861ee426c5","seq":16}
++{"entryDigest":"4ceff24bc0cbfb37e6768e85866f655e989851541085082ea3ee8f7141980634","seq":17}
++{"entryDigest":"f4ff9a1e7128e1f0f37d21aadb92ac011e63ea28dfa722d6573db6eb887fa728","seq":18}
++{"entryDigest":"f3a6e9034337cf6b8f34bfbf732fccc595a2a7c60a8da8ce2a0f303739a61819","seq":19}
++{"entryDigest":"8beb8f17754d1ccc9022eb0ea86a8000468677cd43569c06e4250750652a9021","seq":20}
++{"entryDigest":"22d3b375aa4d5d97f74427f91c29158ac3a18af42a189569fec0911eaa519aaf","seq":21}
++{"entryDigest":"a86d53a17a5084c6575e2eed25f46c8cb56136d557b3c993be3522ec65218d19","seq":22}
++{"entryDigest":"f31ec3692bfe5f103b336a7a26e8e19d43b5866c0811bc4f10883a4603f91862","seq":23}
++{"entryDigest":"62fa328256f39935c3efb24fd0b3b216648f6e6a58e2604fdc89e0aea68b7334","seq":24}
++{"entryDigest":"9f2c1dc8f1d894927feb58c780aa9c9c62e518d5d3a34c85e8e5c39a0f3744ad","seq":25}
++{"entryDigest":"98b81e35677be78732311872d2f6a5dabd654f9d1039791e6ff1ca250264c3ff","seq":26}
++{"entryDigest":"3e343181cee5a39809d52cb51f2933957bc04a57d4be2d225e126977c1dbaf1b","seq":27}
++{"entryDigest":"2f1f40e455e5a6e06b701e1609da44c4ab1a02b8ef91d4d75411d04d56db8d0e","seq":28}
++{"entryDigest":"2b5b057559b3a270f234197a04e8077b82b586c5e047d3f610fb1a7ac90a2a58","seq":29}
++{"entryDigest":"ed8269e03fcbe879091c1fd3b421809d2fc9c993eccdc2c6e665050042cd3086","seq":30}
++{"entryDigest":"794c97540448753f7d45baad934f8d8d35644ac6ecb4258b547bbf6b2c64b83c","seq":31}
++{"entryDigest":"9711bbcb55de5b10986456a3206cb1d9ae11f02ae4a75c117ce3d502fecabf26","seq":32}
++{"entryDigest":"e6e7d10d9dfbb854bcc69874393cc2ad1ad362a2ba655ed8f1520863c73e4992","seq":33}
+diff --git a/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json
+new file mode 100644
+index 00000000..44065523
+--- /dev/null
++++ b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json
+@@ -0,0 +1,34 @@
++{
++  "schemaVersion": "prompt-refiner-shadow-admission-evidence-v1",
++  "harnessVersion": "prompt-refiner-shadow-harness-v1",
++  "journalSchemaVersion": "prompt-refiner-shadow-journal-v1",
++  "sourceRef": "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830",
++  "sourceIdentityDigest": "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39",
++  "corpusDigest": "bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958",
++  "files": [
++    {
++      "name": "admission-readiness-v1.report.json",
++      "sizeBytes": 2345,
++      "sha256": "686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d"
++    },
++    {
++      "name": "admission-readiness-v1.journal.jsonl",
++      "sizeBytes": 11168,
++      "sha256": "dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f"
++    },
++    {
++      "name": "admission-readiness-v1.journal.jsonl.witness.jsonl",
++      "sizeBytes": 3450,
++      "sha256": "9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e"
++    }
++  ],
++  "journalTerminal": {
++    "seq": 33,
++    "entryDigest": "e6e7d10d9dfbb854bcc69874393cc2ad1ad362a2ba655ed8f1520863c73e4992"
++  },
++  "witnessTerminal": {
++    "seq": 33,
++    "entryDigest": "e6e7d10d9dfbb854bcc69874393cc2ad1ad362a2ba655ed8f1520863c73e4992"
++  },
++  "bundleDigest": "sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159"
++}
+diff --git a/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json
+new file mode 100644
+index 00000000..a8bd4b03
+--- /dev/null
++++ b/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json
+@@ -0,0 +1,41 @@
++{
++  "schemaVersion": "prompt-refiner-shadow-journal-v1",
++  "purpose": "development-only",
++  "dataClassification": "synthetic_test_only",
++  "harnessVersion": "prompt-refiner-shadow-harness-v1",
++  "corpusDigest": "bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958",
++  "corpusCases": 16,
++  "sourceRef": "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830",
++  "sourceIdentityDigest": "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39",
++  "status": "completed",
++  "stopReason": null,
++  "resumable": false,
++  "processedCases": 16,
++  "structuralBoundaryPopulation": 16,
++  "structuralBoundaryViolations": 0,
++  "behavioralOutcomePopulation": 16,
++  "behavioralOutcomeMatches": 16,
++  "remainingCases": 0,
++  "unknownCases": 0,
++  "providerCalls": 0,
++  "costMicroUsd": 0,
++  "source": {
++    "sourceRef": "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830",
++    "identityDigest": "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39",
++    "files": {
++      ".gitattributes": "2638c45e7dcb13e22deb22492f0aa9ad3152c82179b89e2e57ed05819aed843e",
++      "docs/ops/prompt-refiner-shadow/corpus-v1.json": "9433a5bb1663220033ac497979557add703148bd29204fca960ce24ea3a06798",
++      "lib/promptInjectionAudit.ts": "4c348c3b0aadc272262cda5d3729c8f92358b5571ea8e1b4021e4dff4f33c19b",
++      "lib/promptRefinerModelPrompt.ts": "f785e797f9f3e104045c98dc60e1f5bf22b9b80a4bab059cd2204bd47bd410bd",
++      "lib/promptRefinerShadowHarness.ts": "612132f6a5a9b7e0553135fa2bfa16802b6a84f8e380b8babea4a07c46c68562",
++      "lib/promptRefinerShadowJournal.ts": "e51e931d51fe631acfca5f973e4e7f807114a75f04b278a9c0734c246a23fc23",
++      "lib/promptRefinerShadowSource.ts": "129c9b20e667a1d0e0ef1e52aec542c78c34f3e469360f53818707050287ba1b",
++      "lib/promptRefinerSuggestion.ts": "342dc278c3ef7f32736f8847ce81effdd87af8eb541400bf567bed88fea9b0f3",
++      "lib/routerDevelopmentBenchmark.ts": "aa7b9784ba7360545ce88856ffcc2a2c0fcc2ff6d8caa8ffc9f331a3f33a54e0",
++      "package-lock.json": "fb9a53fc8db62628d0bdede68667815ec7d35e34f16eb2747cebc4db5b9c4aa2",
++      "package.json": "8d8f79f4f6e7cc07483f49958b3ef41405fb57a150737d3556d590bdb014cdad",
++      "scripts/prompt-refiner-shadow-harness.mjs": "223931f6379aec68d8bc448fa7e25c443bbf6cef9adda96f666e1a15f0cffc29",
++      "tsconfig.json": "b83c909eef875286df44a248dc78e909234750c9ea0646960247fbb4f77ea4ab"
++    }
++  }
++}
+diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
+index 9aa4f498..9db16e69 100644
+--- a/docs/ops/tomverse-chat-progress.md
++++ b/docs/ops/tomverse-chat-progress.md
+@@ -1104,3 +1104,54 @@ route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화
+    활성화는 동일한 evidence gate 밖으로 나가지 않는다.
+ 4. Refiner 제안형 흐름의 사용자 선택 증거 뒤 Router full-catalog 선택 품질 최적화를
+    별도 실험으로 진행한다.
++
++## 2026-09-17 Prompt Refiner admission-readiness proposal 회차
++
++앞 회차의 다음 순서 ①에서 실행 권한을 만들지 않는 부분만 구현했다. 최신 develop
++source commit `f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`의 exact allowlist bytes로 기존
++provider-free shadow를 다시 실행했고 16/16 completion, structural violation 0,
++behavioral fixture match 16/16, remaining/unknown 0, provider call/cost 0을 content-free
++report·journal·witness로 동결했다. strict manifest는 세 artifact의 exact filename,
++size/SHA-256, source/corpus identity와 journal/witness terminal head를 canonical bundle
++digest에 묶는다.
++
++새 순수 core는 manifest와 네 입력 파일을 모두 불신 입력으로 취급한다. byte/UTF-8/BOM,
++duplicate key, extra/missing field, artifact digest와 **evidence 내부** source/corpus 불일치를
++거부하고 기존 strict journal replay로 tamper·truncate·rollback·A/B snapshot 혼합을 다시
++검사한다. 현재 checkout·environment drift는 이 verifier의 검증 대상이 아니다. 성공 출력은
++content-free `PromptRefinerShadowStageProposal`뿐이다. status는
++`awaiting_explicit_admin_cost_approval`, `executionAdmitted=false`,
++`currentCheckoutValidated=false`, `runtimeSourceRevalidationRequired=true`이며 기존 reservation
++stage id·contract digest·비용·slot·TTL을 그대로 반복한다. synthetic evidence가 실제 모델
++품질, paid shadow, PLANNER, release 또는 rollout 승인이 아니라는 acknowledgement도 고정했다.
++
++이번 범위에는 stage seed, migration/admin writer, Prisma mutation, admin route/script caller,
++receipt writer, product import, provider SDK/network/credential lookup, flag 변경과
++`admitted:true`가 없다. 기존 `admitPromptRefinerExecution()`도 변경하지 않았고 모든 caller
++boolean이 true여도 `reservation_authority_unavailable`로 fail-closed한다. 실제 writer는
++승인 직전에 현재 source·manifest·environment를 다시 검증하고, 새 migration이
++evidence/approval/environment/expiry/execution manifest를 한 durable row에
++결속하는 후속 계약으로 미뤘다.
++
++### 한눈에 보는 전체 Chat 진척
++
++| 항목 | 이번 판단 |
++| --- | --- |
++| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**, 공개 기능 분모와 산식은 유지) |
++| 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 실행 권한은 열지 않고 evidence→proposal 경계를 닫았다. |
++| C19–C20 Refiner·Planner·품질 평가 | **약 47%** (직전 약 44%, 동결 evidence 검증·proposal-only 상태 기계 반영) |
++| 구현 | content-free 과거 evidence bundle·strict untrusted verifier·현재 checkout 미검증 및 runtime 재검증 의무·deterministic proposal digest·기존 reservation 계약 provenance 결속 완료 |
++| 검증 | 신규 focused test, 기존 shadow/Refiner/PLANNER-03, typecheck·lint·문서/정책/encoding/data-domain 검사를 수행 대상으로 둠 |
++| 독립 검토·통합 CI | 이 기록 시점에는 대기. Claude Code Max 읽기 전용 검토와 Linux CI 통과 전에는 통합 완료로 보지 않음 |
++| 공개 상태 | 변화 없음 — provider/API/Railway/유료 호출 0, stage writer·제품 caller·flag·성공 admission 없음 |
++
++### 이 Cycle 다음 권장 순서
++
++1. exact evidence digest, 명시적 사람 승인·비용, environment, expiry와 실행 manifest를
++   한 행에 결속하는 **durable DB provenance/admin writer 계약**을 새 migration으로
++   설계·구현한다. **Claude 독립 검토 필요, provider 호출 0.**
++2. writer와 proposal 계약을 독립 검토하고 별도 비용 승인을 받은 뒤 bounded paid shadow를
++   **정확히 1회** 실행해 의미 보존·행동상 주입 저항·비용·지연을 측정한다.
++3. 승인된 실제 evidence가 gate를 통과할 때만 suggestion adapter와 UI를 연결한다.
++4. 사용자 선택 증거가 쌓인 뒤 Refiner→Router 결합과 full-catalog 선택 품질 최적화를
++   별도 실험으로 진행한다.
+diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
+index fe644dcd..da7a6399 100644
+--- a/docs/policy/prompt-refiner-observability.md
++++ b/docs/policy/prompt-refiner-observability.md
+@@ -264,3 +264,32 @@ terminal 또는 stale lock은 자동 복구하지 않는다. 로컬 witness는 
+ [`prompt-refiner-shadow-harness.md`](../ops/prompt-refiner-shadow-harness.md)에 있다.
+ 이 하네스가 completed라는 사실은 실제 shadow 실행, 품질 승인, release gate, 제품 연결
+ 또는 rollout 승인이 아니다.
++
++## 10. provider-free admission proposal 관측 경계
++
++체크인된 `admission-readiness-v1` bundle은 provider-free harness의 report·journal·witness
++세 파일과 terminal head를 strict manifest로 결속한다. 검증기는 raw size/SHA-256과
++canonical bundle digest를 다시 계산하고 기존 journal replay API로 16/16 completion,
++remaining/unknown 0, structural violation 0, fixture match 16, provider call/cost 0을 다시
++확인한다. synthetic corpus와 source identity digest는 재현 provenance로 허용하지만,
++prompt·fixture output·refined prompt·provider 오류 또는 per-item content digest는 evidence와
++proposal에 기록하지 않는다.
++
++검증 성공은 `awaiting_explicit_admin_cost_approval` proposal일 뿐이고
++`executionAdmitted=false`, `currentCheckoutValidated=false`,
++`runtimeSourceRevalidationRequired=true`다. 이는 manifest가 고정한 과거 snapshot 내부의
++source/corpus 결속만 검증하며 현재 checkout이나 실행 environment의 동일성을 주장하지
++않는다. proposal에는 사람 승인자·승인 시각 입력이 없고, stage/DB
++mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서 다음 항목의 관측이나
++승인으로 해석하지 않는다.
++
++- 실제 모델의 의미 보존·행동상 주입 저항·품질
++- provider 비용·지연·신뢰성 또는 paid shadow 승인
++- PLANNER/release/rollout gate 통과
++- UI 또는 Router 결합 승인
++
++실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
++검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
++새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
++추가한다. 그 writer 전까지 현재 v1 admission의 fail-closed 결과와 default-off 제품 상태를
++유지한다.
+diff --git a/lib/promptRefinerShadowAdmissionCore.ts b/lib/promptRefinerShadowAdmissionCore.ts
+new file mode 100644
+index 00000000..f24d6251
+--- /dev/null
++++ b/lib/promptRefinerShadowAdmissionCore.ts
+@@ -0,0 +1,670 @@
++/**
++ * Pure, provider-free admission-readiness verifier.
++ *
++ * It validates checked-in synthetic shadow evidence and emits a proposal. It
++ * does not approve a stage, reserve money, mutate authority state, or admit an
++ * execution.
++ */
++import { createHash } from "node:crypto";
++
++import {
++    PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++    PROMPT_REFINER_SHADOW_MAX_DISPATCHES,
++    PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
++} from "./promptRefinerExecutionContract";
++import {
++    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++    PROMPT_REFINER_RESERVATION_STAGE_ID,
++    PROMPT_REFINER_RESERVATION_TTL_MS,
++} from "./promptRefinerReservationCore";
++import {
++    PROMPT_REFINER_SHADOW_CORPUS_CASES,
++    PROMPT_REFINER_SHADOW_HARNESS_VERSION,
++    parsePromptRefinerShadowCorpus,
++} from "./promptRefinerShadowHarness";
++import {
++    PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
++    PROMPT_REFINER_SHADOW_JOURNAL_VERSION,
++    replayPromptRefinerShadowJournal,
++} from "./promptRefinerShadowJournal";
++import {
++    PROMPT_REFINER_SHADOW_CORPUS_PATH,
++    PROMPT_REFINER_SHADOW_SOURCE_PATHS,
++    promptRefinerShadowSourceIdentityDigest,
++} from "./promptRefinerShadowSource";
++import {
++    canonicalBenchmarkJson,
++    parseBenchmarkJson,
++    strictBenchmarkObject,
++} from "./routerDevelopmentBenchmark";
++
++export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION =
++    "prompt-refiner-shadow-admission-evidence-v1" as const;
++export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION =
++    "prompt-refiner-shadow-stage-proposal-v1" as const;
++export const PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF =
++    "f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830" as const;
++export const PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST =
++    "ac1813483dc62e44bb34fdc681be908611d72493567ba437322012a6e3438f39" as const;
++export const PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST =
++    "bcb2709f74aa4983595a7121ad27c3abd80946a6e28d36442cf440f6dcf22958" as const;
++export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST =
++    "sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159" as const;
++export const PROMPT_REFINER_SHADOW_ADMISSION_MANIFEST_SHA256 =
++    "9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d" as const;
++export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST =
++    "sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2" as const;
++
++export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES = Object.freeze([
++    "admission-readiness-v1.report.json",
++    "admission-readiness-v1.journal.jsonl",
++    "admission-readiness-v1.journal.jsonl.witness.jsonl",
++] as const);
++
++export const PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS = Object.freeze([
++    "synthetic_structural_prerequisite_only",
++    "not_model_quality_evidence",
++    "not_paid_shadow_approval",
++    "not_planner_approval",
++    "not_release_approval",
++    "not_rollout_approval",
++    "historical_evidence_snapshot_only",
++    "current_checkout_not_validated",
++    "runtime_source_revalidation_required",
++] as const);
++
++const MANIFEST_MAX_BYTES = 64 * 1024;
++const REPORT_MAX_BYTES = 64 * 1024;
++const CORPUS_MAX_BYTES = 1024 * 1024;
++const TYPED_ARRAY_BYTE_LENGTH_GETTER = (() => {
++    const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
++    const getter = Object.getOwnPropertyDescriptor(
++        typedArrayPrototype,
++        "byteLength"
++    )?.get;
++    if (typeof getter !== "function") {
++        throw new Error("typed_array_byte_length_intrinsic_unavailable");
++    }
++    return getter;
++})();
++
++type EvidenceBytes = Uint8Array;
++
++declare const preboundedEvidenceInput: unique symbol;
++
++export type PromptRefinerShadowAdmissionEvidenceInput = {
++    manifestBytes: EvidenceBytes;
++    reportBytes: EvidenceBytes;
++    journalBytes: EvidenceBytes;
++    witnessBytes: EvidenceBytes;
++    corpusBytes: EvidenceBytes;
++};
++
++type PreboundedAdmissionEvidenceInput =
++    PromptRefinerShadowAdmissionEvidenceInput & {
++        readonly [preboundedEvidenceInput]: true;
++    };
++
++type EvidenceFile = {
++    name: (typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES)[number];
++    sizeBytes: number;
++    sha256: string;
++};
++
++type TerminalHead = {
++    seq: number;
++    entryDigest: string;
++};
++
++type AdmissionEvidenceManifest = {
++    schemaVersion: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION;
++    harnessVersion: typeof PROMPT_REFINER_SHADOW_HARNESS_VERSION;
++    journalSchemaVersion: typeof PROMPT_REFINER_SHADOW_JOURNAL_VERSION;
++    sourceRef: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF;
++    sourceIdentityDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST;
++    corpusDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
++    files: EvidenceFile[];
++    journalTerminal: TerminalHead;
++    witnessTerminal: TerminalHead;
++    bundleDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST;
++};
++
++export type PromptRefinerShadowStageProposal = {
++    schemaVersion: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION;
++    status: "awaiting_explicit_admin_cost_approval";
++    executionAdmitted: false;
++    currentCheckoutValidated: false;
++    runtimeSourceRevalidationRequired: true;
++    evidenceBundleDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST;
++    proposalDigest: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST;
++    provenance: {
++        sourceRef: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF;
++        sourceIdentityDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST;
++        corpusDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
++        harnessVersion: typeof PROMPT_REFINER_SHADOW_HARNESS_VERSION;
++        journalSchemaVersion: typeof PROMPT_REFINER_SHADOW_JOURNAL_VERSION;
++    };
++    reservationStage: {
++        stageId: typeof PROMPT_REFINER_RESERVATION_STAGE_ID;
++        contractDigest: typeof PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST;
++        perRequestCostMicroUsd: typeof PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD;
++        maxReservations: typeof PROMPT_REFINER_SHADOW_MAX_DISPATCHES;
++        costCeilingMicroUsd: typeof PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD;
++        reservationTtlMs: typeof PROMPT_REFINER_RESERVATION_TTL_MS;
++    };
++    acknowledgements: readonly (typeof PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS)[number][];
++};
++
++function fail(code: string): never {
++    throw new Error(`prompt_refiner_shadow_admission_${code}`);
++}
++
++function assertEvidenceByteBound(
++    bytes: unknown,
++    maximum: number,
++    where: string
++): asserts bytes is EvidenceBytes {
++    if (
++        actualEvidenceByteLength(bytes, where) > maximum
++    ) {
++        fail(`${where}_byte_limit`);
++    }
++}
++
++function actualEvidenceByteLength(bytes: unknown, where: string): number {
++    try {
++        const byteLength = Reflect.apply(
++            TYPED_ARRAY_BYTE_LENGTH_GETTER,
++            bytes,
++            []
++        );
++        if (
++            !(bytes instanceof Uint8Array) ||
++            !Number.isSafeInteger(byteLength) ||
++            byteLength < 0
++        ) {
++            return fail(`${where}_byte_limit`);
++        }
++        return byteLength;
++    } catch {
++        return fail(`${where}_byte_limit`);
++    }
++}
++
++function captureEvidenceProperty(
++    input: PromptRefinerShadowAdmissionEvidenceInput,
++    property: keyof PromptRefinerShadowAdmissionEvidenceInput,
++    where: string
++): unknown {
++    try {
++        return input[property];
++    } catch {
++        return fail(`${where}_byte_limit`);
++    }
++}
++
++function preboundEvidenceInput(
++    input: PromptRefinerShadowAdmissionEvidenceInput
++): PreboundedAdmissionEvidenceInput {
++    const manifestBytes = captureEvidenceProperty(
++        input,
++        "manifestBytes",
++        "manifest"
++    );
++    const reportBytes = captureEvidenceProperty(input, "reportBytes", "report");
++    const journalBytes = captureEvidenceProperty(
++        input,
++        "journalBytes",
++        "journal"
++    );
++    const witnessBytes = captureEvidenceProperty(
++        input,
++        "witnessBytes",
++        "witness"
++    );
++    const corpusBytes = captureEvidenceProperty(input, "corpusBytes", "corpus");
++
++    assertEvidenceByteBound(manifestBytes, MANIFEST_MAX_BYTES, "manifest");
++    assertEvidenceByteBound(reportBytes, REPORT_MAX_BYTES, "report");
++    assertEvidenceByteBound(
++        journalBytes,
++        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
++        "journal"
++    );
++    assertEvidenceByteBound(
++        witnessBytes,
++        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
++        "witness"
++    );
++    assertEvidenceByteBound(corpusBytes, CORPUS_MAX_BYTES, "corpus");
++    return {
++        manifestBytes,
++        reportBytes,
++        journalBytes,
++        witnessBytes,
++        corpusBytes,
++    } as PreboundedAdmissionEvidenceInput;
++}
++
++function sha256(bytes: Uint8Array | string): string {
++    return createHash("sha256").update(bytes).digest("hex");
++}
++
++function decodeJson(bytes: EvidenceBytes, maximum: number, where: string) {
++    const byteLength = actualEvidenceByteLength(bytes, where);
++    if (byteLength > maximum) {
++        fail(`${where}_byte_limit`);
++    }
++    if (
++        byteLength >= 3 &&
++        bytes[0] === 0xef &&
++        bytes[1] === 0xbb &&
++        bytes[2] === 0xbf
++    ) {
++        fail(`${where}_bom`);
++    }
++    let text: string;
++    try {
++        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
++    } catch {
++        return fail(`${where}_utf8`);
++    }
++    if (text.charCodeAt(0) === 0xfeff) fail(`${where}_bom`);
++    let parsed: unknown;
++    try {
++        parsed = parseBenchmarkJson(text, maximum);
++    } catch {
++        return fail(`${where}_json`);
++    }
++    return { text, parsed };
++}
++
++function decodeJournalBytes(bytes: EvidenceBytes, where: string): string {
++    const byteLength = actualEvidenceByteLength(bytes, where);
++    if (byteLength > PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES) {
++        fail(`${where}_byte_limit`);
++    }
++    if (
++        byteLength >= 3 &&
++        bytes[0] === 0xef &&
++        bytes[1] === 0xbb &&
++        bytes[2] === 0xbf
++    ) {
++        fail(`${where}_bom`);
++    }
++    let text: string;
++    try {
++        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
++    } catch {
++        return fail(`${where}_utf8`);
++    }
++    if (text.charCodeAt(0) === 0xfeff) fail(`${where}_bom`);
++    return text;
++}
++
++function exactDigest(value: unknown, where: string): string {
++    if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
++        fail(`${where}_digest`);
++    }
++    return value;
++}
++
++function exactInteger(value: unknown, where: string): number {
++    if (!Number.isSafeInteger(value) || (value as number) < 0) {
++        fail(`${where}_integer`);
++    }
++    return value as number;
++}
++
++function terminalHead(value: unknown, where: string): TerminalHead {
++    const candidate = strictBenchmarkObject(
++        value,
++        ["seq", "entryDigest"],
++        where
++    );
++    return {
++        seq: exactInteger(candidate.seq, `${where}_seq`),
++        entryDigest: exactDigest(candidate.entryDigest, `${where}_entry`),
++    };
++}
++
++function evidenceFile(value: unknown, index: number): EvidenceFile {
++    const candidate = strictBenchmarkObject(
++        value,
++        ["name", "sizeBytes", "sha256"],
++        `admission_evidence_file_${index}`
++    );
++    const name = PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES[index];
++    if (candidate.name !== name) fail("evidence_file_name_or_order");
++    return {
++        name,
++        sizeBytes: exactInteger(candidate.sizeBytes, "evidence_file_size"),
++        sha256: exactDigest(candidate.sha256, "evidence_file"),
++    };
++}
++
++function parseManifest(bytes: EvidenceBytes): {
++    manifest: AdmissionEvidenceManifest;
++    rawSha256: string;
++} {
++    const { parsed } = decodeJson(bytes, MANIFEST_MAX_BYTES, "manifest");
++    const candidate = strictBenchmarkObject(
++        parsed,
++        [
++            "schemaVersion",
++            "harnessVersion",
++            "journalSchemaVersion",
++            "sourceRef",
++            "sourceIdentityDigest",
++            "corpusDigest",
++            "files",
++            "journalTerminal",
++            "witnessTerminal",
++            "bundleDigest",
++        ],
++        "admission_evidence_manifest"
++    );
++    if (
++        candidate.schemaVersion !==
++            PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION ||
++        candidate.harnessVersion !== PROMPT_REFINER_SHADOW_HARNESS_VERSION ||
++        candidate.journalSchemaVersion !==
++            PROMPT_REFINER_SHADOW_JOURNAL_VERSION ||
++        typeof candidate.sourceRef !== "string" ||
++        !/^[a-f0-9]{40}$/.test(candidate.sourceRef) ||
++        typeof candidate.sourceIdentityDigest !== "string" ||
++        !/^[a-f0-9]{64}$/.test(candidate.sourceIdentityDigest) ||
++        typeof candidate.corpusDigest !== "string" ||
++        !/^[a-f0-9]{64}$/.test(candidate.corpusDigest) ||
++        !Array.isArray(candidate.files) ||
++        candidate.files.length !==
++            PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES.length ||
++        typeof candidate.bundleDigest !== "string" ||
++        !/^sha256:[a-f0-9]{64}$/.test(candidate.bundleDigest)
++    ) {
++        fail("manifest_shape_or_version");
++    }
++    const manifest = {
++        schemaVersion: candidate.schemaVersion,
++        harnessVersion: candidate.harnessVersion,
++        journalSchemaVersion: candidate.journalSchemaVersion,
++        sourceRef: candidate.sourceRef,
++        sourceIdentityDigest: candidate.sourceIdentityDigest,
++        corpusDigest: candidate.corpusDigest,
++        files: candidate.files.map(evidenceFile),
++        journalTerminal: terminalHead(
++            candidate.journalTerminal,
++            "journal_terminal"
++        ),
++        witnessTerminal: terminalHead(
++            candidate.witnessTerminal,
++            "witness_terminal"
++        ),
++        bundleDigest: candidate.bundleDigest,
++    } as AdmissionEvidenceManifest;
++    return { manifest, rawSha256: sha256(bytes) };
++}
++
++function canonicalBundleDigest(
++    manifest: AdmissionEvidenceManifest
++): `sha256:${string}` {
++    const body = {
++        schemaVersion: manifest.schemaVersion,
++        harnessVersion: manifest.harnessVersion,
++        journalSchemaVersion: manifest.journalSchemaVersion,
++        sourceRef: manifest.sourceRef,
++        sourceIdentityDigest: manifest.sourceIdentityDigest,
++        corpusDigest: manifest.corpusDigest,
++        files: manifest.files,
++        journalTerminal: manifest.journalTerminal,
++        witnessTerminal: manifest.witnessTerminal,
++    };
++    return `sha256:${sha256(canonicalBenchmarkJson(body))}`;
++}
++
++function validateArtifactDigests(
++    manifest: AdmissionEvidenceManifest,
++    input: PreboundedAdmissionEvidenceInput
++) {
++    const artifacts = [
++        { bytes: input.reportBytes, where: "report" },
++        { bytes: input.journalBytes, where: "journal" },
++        { bytes: input.witnessBytes, where: "witness" },
++    ];
++    manifest.files.forEach((file, index) => {
++        const { bytes, where } = artifacts[index];
++        if (
++            actualEvidenceByteLength(bytes, where) !== file.sizeBytes ||
++            sha256(bytes) !== file.sha256
++        ) {
++            fail("artifact_digest_or_size");
++        }
++    });
++}
++
++function sourceFiles(value: unknown): Record<string, string> {
++    const candidate = strictBenchmarkObject(
++        value,
++        PROMPT_REFINER_SHADOW_SOURCE_PATHS,
++        "report_source_files"
++    );
++    return Object.fromEntries(
++        PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [
++            path,
++            exactDigest(candidate[path], `report_source_file_${path}`),
++        ])
++    );
++}
++
++function validateReport(
++    reportBytes: EvidenceBytes,
++    manifest: AdmissionEvidenceManifest
++): { report: Record<string, unknown>; sourceFiles: Record<string, string> } {
++    const { parsed } = decodeJson(reportBytes, REPORT_MAX_BYTES, "report");
++    const report = strictBenchmarkObject(
++        parsed,
++        [
++            "schemaVersion",
++            "purpose",
++            "dataClassification",
++            "harnessVersion",
++            "corpusDigest",
++            "corpusCases",
++            "sourceRef",
++            "sourceIdentityDigest",
++            "status",
++            "stopReason",
++            "resumable",
++            "processedCases",
++            "structuralBoundaryPopulation",
++            "structuralBoundaryViolations",
++            "behavioralOutcomePopulation",
++            "behavioralOutcomeMatches",
++            "remainingCases",
++            "unknownCases",
++            "providerCalls",
++            "costMicroUsd",
++            "source",
++        ],
++        "admission_evidence_report"
++    );
++    const source = strictBenchmarkObject(
++        report.source,
++        ["sourceRef", "identityDigest", "files"],
++        "admission_evidence_report_source"
++    );
++    const files = sourceFiles(source.files);
++    const recomputedSourceIdentity = promptRefinerShadowSourceIdentityDigest({
++        sourceRef: manifest.sourceRef,
++        files,
++    });
++    if (
++        report.schemaVersion !== PROMPT_REFINER_SHADOW_JOURNAL_VERSION ||
++        report.purpose !== "development-only" ||
++        report.dataClassification !== "synthetic_test_only" ||
++        report.harnessVersion !== PROMPT_REFINER_SHADOW_HARNESS_VERSION ||
++        report.corpusDigest !== manifest.corpusDigest ||
++        report.corpusCases !== PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        report.sourceRef !== manifest.sourceRef ||
++        report.sourceIdentityDigest !== manifest.sourceIdentityDigest ||
++        report.status !== "completed" ||
++        report.stopReason !== null ||
++        report.resumable !== false ||
++        report.processedCases !== PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        report.structuralBoundaryPopulation !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        report.structuralBoundaryViolations !== 0 ||
++        report.behavioralOutcomePopulation !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        report.behavioralOutcomeMatches !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        report.remainingCases !== 0 ||
++        report.unknownCases !== 0 ||
++        report.providerCalls !== 0 ||
++        report.costMicroUsd !== 0 ||
++        source.sourceRef !== manifest.sourceRef ||
++        source.identityDigest !== manifest.sourceIdentityDigest ||
++        recomputedSourceIdentity !== manifest.sourceIdentityDigest
++    ) {
++        fail("report_invariant");
++    }
++    return { report, sourceFiles: files };
++}
++
++function assertPinnedEvidence(
++    manifest: AdmissionEvidenceManifest,
++    manifestSha256: string
++) {
++    if (
++        manifest.sourceRef !== PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF ||
++        manifest.sourceIdentityDigest !==
++            PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST ||
++        manifest.corpusDigest !==
++            PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST
++    ) {
++        fail("unreviewed_source_or_corpus");
++    }
++    if (
++        canonicalBundleDigest(manifest) !== manifest.bundleDigest ||
++        manifest.bundleDigest !==
++            PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST
++    ) {
++        fail("bundle_digest");
++    }
++    if (manifestSha256 !== PROMPT_REFINER_SHADOW_ADMISSION_MANIFEST_SHA256) {
++        fail("unchecked_manifest_bytes");
++    }
++}
++
++function unsignedProposal(): Omit<
++    PromptRefinerShadowStageProposal,
++    "proposalDigest"
++> {
++    return {
++        schemaVersion: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION,
++        status: "awaiting_explicit_admin_cost_approval" as const,
++        executionAdmitted: false as const,
++        currentCheckoutValidated: false as const,
++        runtimeSourceRevalidationRequired: true as const,
++        evidenceBundleDigest:
++            PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST,
++        provenance: {
++            sourceRef: PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF,
++            sourceIdentityDigest:
++                PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST,
++            corpusDigest: PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST,
++            harnessVersion: PROMPT_REFINER_SHADOW_HARNESS_VERSION,
++            journalSchemaVersion: PROMPT_REFINER_SHADOW_JOURNAL_VERSION,
++        },
++        reservationStage: {
++            stageId: PROMPT_REFINER_RESERVATION_STAGE_ID,
++            contractDigest: PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++            perRequestCostMicroUsd:
++                PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD,
++            maxReservations: PROMPT_REFINER_SHADOW_MAX_DISPATCHES,
++            costCeilingMicroUsd: PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
++            reservationTtlMs: PROMPT_REFINER_RESERVATION_TTL_MS,
++        },
++        acknowledgements: PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
++    };
++}
++
++/**
++ * Validates the frozen evidence and returns only a content-free proposal. A
++ * successful return still has executionAdmitted=false and carries no approval
++ * identity or timestamp.
++ */
++export function proposePromptRefinerShadowStage(
++    input: PromptRefinerShadowAdmissionEvidenceInput
++): PromptRefinerShadowStageProposal {
++    const boundedInput = preboundEvidenceInput(input);
++    const { manifest, rawSha256 } = parseManifest(boundedInput.manifestBytes);
++    validateArtifactDigests(manifest, boundedInput);
++    const reportValidation = validateReport(boundedInput.reportBytes, manifest);
++    const report = reportValidation.report;
++
++    const corpusText = decodeJson(
++        boundedInput.corpusBytes,
++        CORPUS_MAX_BYTES,
++        "corpus"
++    ).text;
++    const corpus = parsePromptRefinerShadowCorpus(corpusText);
++    if (
++        corpus.contentDigest !== manifest.corpusDigest ||
++        sha256(boundedInput.corpusBytes) !==
++            reportValidation.sourceFiles[PROMPT_REFINER_SHADOW_CORPUS_PATH]
++    ) {
++        fail("corpus_digest");
++    }
++
++    const journalText = decodeJournalBytes(boundedInput.journalBytes, "journal");
++    const witnessText = decodeJournalBytes(boundedInput.witnessBytes, "witness");
++    const replay = replayPromptRefinerShadowJournal({
++        journalText,
++        witnessText,
++        corpus,
++        sourceIdentity: {
++            sourceRef: manifest.sourceRef,
++            identityDigest: manifest.sourceIdentityDigest,
++        },
++    });
++    const terminal = replay.entries.at(-1);
++    if (
++        replay.status !== "completed" ||
++        replay.resumable !== false ||
++        replay.processedCases !== PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        replay.remainingCases !== 0 ||
++        replay.unknownCases !== 0 ||
++        replay.structuralBoundaryPopulation !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        replay.structuralBoundaryViolations !== 0 ||
++        replay.behavioralOutcomePopulation !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        replay.behavioralOutcomeMatches !==
++            PROMPT_REFINER_SHADOW_CORPUS_CASES ||
++        replay.providerCalls !== 0 ||
++        replay.costMicroUsd !== 0 ||
++        report.processedCases !== replay.processedCases ||
++        !terminal ||
++        terminal.seq !== manifest.journalTerminal.seq ||
++        terminal.entryDigest !== manifest.journalTerminal.entryDigest ||
++        manifest.witnessTerminal.seq !== manifest.journalTerminal.seq ||
++        manifest.witnessTerminal.entryDigest !==
++            manifest.journalTerminal.entryDigest
++    ) {
++        fail("replay_invariant_or_terminal_head");
++    }
++    assertPinnedEvidence(manifest, rawSha256);
++
++    const proposal = unsignedProposal();
++    const proposalDigest = `sha256:${sha256(
++        canonicalBenchmarkJson(proposal)
++    )}`;
++    if (proposalDigest !== PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST) {
++        fail("proposal_digest_drift");
++    }
++    return {
++        ...proposal,
++        proposalDigest: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
++    };
++}
+diff --git a/tests/promptRefinerShadowAdmissionCore.test.mjs b/tests/promptRefinerShadowAdmissionCore.test.mjs
+new file mode 100644
+index 00000000..bb441167
+--- /dev/null
++++ b/tests/promptRefinerShadowAdmissionCore.test.mjs
+@@ -0,0 +1,816 @@
++import assert from "node:assert/strict";
++import { createHash } from "node:crypto";
++import { execFileSync, spawnSync } from "node:child_process";
++import {
++    mkdirSync,
++    mkdtempSync,
++    readFileSync,
++    readdirSync,
++    rmSync,
++    statSync,
++    writeFileSync,
++} from "node:fs";
++import { join, resolve } from "node:path";
++import { tmpdir } from "node:os";
++import test from "node:test";
++
++import {
++    PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST,
++    PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION,
++    PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF,
++    PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
++    PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
++    PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION,
++    proposePromptRefinerShadowStage,
++} from "../lib/promptRefinerShadowAdmissionCore.ts";
++import {
++    PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
++    PROMPT_REFINER_EXECUTION_MODEL_PIN,
++    PROMPT_REFINER_MAX_INPUT_TOKENS,
++    PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++    PROMPT_REFINER_RETRY_COUNT,
++    PROMPT_REFINER_TIMEOUT_MS,
++    admitPromptRefinerExecution,
++} from "../lib/promptRefinerExecutionContract.ts";
++import {
++    PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST,
++    PROMPT_REFINER_RESERVATION_STAGE_ID,
++    PROMPT_REFINER_RESERVATION_TTL_MS,
++} from "../lib/promptRefinerReservationCore.ts";
++import {
++    canonicalBenchmarkJson,
++} from "../lib/routerDevelopmentBenchmark.ts";
++import { PROMPT_REFINER_VERSION } from "../lib/promptRefinerSuggestion.ts";
++
++const root = resolve(import.meta.dirname, "..");
++const evidenceRoot = join(root, "docs", "ops", "prompt-refiner-shadow", "evidence");
++const paths = {
++    manifest: join(evidenceRoot, "admission-readiness-v1.manifest.json"),
++    report: join(evidenceRoot, "admission-readiness-v1.report.json"),
++    journal: join(evidenceRoot, "admission-readiness-v1.journal.jsonl"),
++    witness: join(
++        evidenceRoot,
++        "admission-readiness-v1.journal.jsonl.witness.jsonl"
++    ),
++    corpus: join(root, "docs", "ops", "prompt-refiner-shadow", "corpus-v1.json"),
++};
++
++const bytes = (path) => readFileSync(path);
++const checkedIn = () => ({
++    manifestBytes: bytes(paths.manifest),
++    reportBytes: bytes(paths.report),
++    journalBytes: bytes(paths.journal),
++    witnessBytes: bytes(paths.witness),
++    corpusBytes: bytes(paths.corpus),
++});
++const digest = (value) =>
++    createHash("sha256").update(value).digest("hex");
++const bundleDigest = (manifest) => {
++    const {
++        bundleDigest: ignored,
++        ...body
++    } = manifest;
++    void ignored;
++    return `sha256:${digest(canonicalBenchmarkJson(body))}`;
++};
++const manifestFor = (overrides = {}) => {
++    const manifest = {
++        ...JSON.parse(bytes(paths.manifest).toString("utf8")),
++        ...overrides,
++    };
++    manifest.bundleDigest = bundleDigest(manifest);
++    return Buffer.from(JSON.stringify(manifest), "utf8");
++};
++const evidenceWith = (overrides = {}) => {
++    const original = checkedIn();
++    const next = { ...original, ...overrides };
++    const manifest = JSON.parse(original.manifestBytes.toString("utf8"));
++    manifest.files = [
++        fileFact(manifest.files[0].name, next.reportBytes),
++        fileFact(manifest.files[1].name, next.journalBytes),
++        fileFact(manifest.files[2].name, next.witnessBytes),
++    ];
++    const { bundleDigest: ignored, ...body } = manifest;
++    void ignored;
++    manifest.bundleDigest = `sha256:${digest(canonicalBenchmarkJson(body))}`;
++    next.manifestBytes = Buffer.from(JSON.stringify(manifest), "utf8");
++    return next;
++};
++const fileFact = (name, value) => ({
++    name,
++    sizeBytes: value.byteLength,
++    sha256: digest(value),
++});
++const hashPoison = (value) =>
++    new Proxy(value, {
++        get(target, property) {
++            if (property === "byteLength") return target.byteLength;
++            return Reflect.get(target, property, target);
++        },
++    });
++
++test("checked-in evidence emits only the fixed content-free proposal", () => {
++    const proposal = proposePromptRefinerShadowStage(checkedIn());
++    assert.equal(proposal.schemaVersion, PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION);
++    assert.equal(proposal.status, "awaiting_explicit_admin_cost_approval");
++    assert.equal(proposal.executionAdmitted, false);
++    assert.equal(proposal.currentCheckoutValidated, false);
++    assert.equal(proposal.runtimeSourceRevalidationRequired, true);
++    assert.equal(
++        proposal.evidenceBundleDigest,
++        PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST
++    );
++    assert.equal(
++        proposal.proposalDigest,
++        "sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2"
++    );
++    assert.equal(
++        proposal.proposalDigest,
++        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
++    );
++    assert.equal(proposal.provenance.sourceRef, PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF);
++    assert.equal(proposal.reservationStage.stageId, PROMPT_REFINER_RESERVATION_STAGE_ID);
++    assert.equal(
++        proposal.reservationStage.contractDigest,
++        PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST
++    );
++    assert.equal(proposal.reservationStage.perRequestCostMicroUsd, 24_916);
++    assert.equal(proposal.reservationStage.maxReservations, 100);
++    assert.equal(proposal.reservationStage.costCeilingMicroUsd, 2_491_600);
++    assert.equal(
++        proposal.reservationStage.reservationTtlMs,
++        300_000
++    );
++    assert.equal(
++        proposal.reservationStage.reservationTtlMs,
++        PROMPT_REFINER_RESERVATION_TTL_MS
++    );
++    assert.deepEqual(
++        proposal.acknowledgements,
++        PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS
++    );
++    const serialized = JSON.stringify(proposal);
++    for (const forbidden of [
++        "approvedBy",
++        "approvedAt",
++        "sourceText",
++        "fixtureOutput",
++        "refinedPrompt",
++        "providerError",
++        '"currentCheckoutValidated":true',
++        '"runtimeSourceRevalidationRequired":false',
++    ]) {
++        assert.equal(serialized.includes(forbidden), false, forbidden);
++    }
++    assert.deepEqual(
++        proposePromptRefinerShadowStage(checkedIn()),
++        proposal,
++        "the proposal and digest are deterministic"
++    );
++});
++
++test("evidence files contain no corpus prompt, fixture output, or refined output", () => {
++    const corpus = JSON.parse(bytes(paths.corpus).toString("utf8"));
++    const evidence = [
++        bytes(paths.manifest),
++        bytes(paths.report),
++        bytes(paths.journal),
++        bytes(paths.witness),
++    ]
++        .map((value) => value.toString("utf8"))
++        .join("\n");
++    for (const item of corpus.cases) {
++        for (const content of [
++            item.sourceText,
++            item.fixtureOutput,
++            item.expected.refinedPrompt,
++        ]) {
++            if (content) assert.equal(evidence.includes(content), false, item.id);
++        }
++    }
++    for (const forbiddenKey of [
++        '"sourceText"',
++        '"fixtureOutput"',
++        '"refinedPrompt"',
++        '"providerError"',
++        '"promptDigest"',
++    ]) {
++        assert.equal(evidence.includes(forbiddenKey), false, forbiddenKey);
++    }
++
++    const journal = bytes(paths.journal)
++        .toString("utf8")
++        .trimEnd()
++        .split("\n")
++        .map((line) => JSON.parse(line));
++    for (const entry of journal) {
++        if (!["case_intent", "case_terminal"].includes(entry.event.kind)) continue;
++        assert.deepEqual(
++            Object.keys(entry.event).filter((key) => /digest/i.test(key)),
++            [],
++            `${entry.event.caseId} must not carry a per-item content digest`
++        );
++    }
++});
++
++test("manifest and artifacts reject BOM, duplicates, extra keys, tamper and missing files", () => {
++    const original = checkedIn();
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                manifestBytes: Buffer.concat([
++                    Buffer.from([0xef, 0xbb, 0xbf]),
++                    original.manifestBytes,
++                ]),
++            }),
++        /manifest_bom/
++    );
++    const duplicate = original.manifestBytes
++        .toString("utf8")
++        .replace(
++            '"schemaVersion": "prompt-refiner-shadow-admission-evidence-v1",',
++            '"schemaVersion": "prompt-refiner-shadow-admission-evidence-v1",\n' +
++                '  "schemaVersion": "prompt-refiner-shadow-admission-evidence-v1",'
++        );
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                manifestBytes: Buffer.from(duplicate, "utf8"),
++            }),
++        /manifest_json/
++    );
++    const extra = JSON.parse(original.manifestBytes.toString("utf8"));
++    extra.approvedBy = "forbidden";
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                manifestBytes: Buffer.from(JSON.stringify(extra), "utf8"),
++            }),
++        /unexpected_or_missing_fields/
++    );
++    for (const [field, value] of [
++        ["currentCheckoutValidated", true],
++        ["runtimeSourceRevalidationRequired", false],
++    ]) {
++        const forged = JSON.parse(original.manifestBytes.toString("utf8"));
++        forged[field] = value;
++        assert.throws(
++            () =>
++                proposePromptRefinerShadowStage({
++                    ...original,
++                    manifestBytes: Buffer.from(JSON.stringify(forged), "utf8"),
++                }),
++            /unexpected_or_missing_fields/
++        );
++    }
++    const tamperedReport = Buffer.from(original.reportBytes);
++    tamperedReport[10] ^= 1;
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                reportBytes: tamperedReport,
++            }),
++        /artifact_digest_or_size/
++    );
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                journalBytes: new Uint8Array(),
++            }),
++        /artifact_digest_or_size/
++    );
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                witnessBytes: original.journalBytes,
++            }),
++        /artifact_digest_or_size/
++    );
++});
++
++test("strict report parsing runs before the checked-manifest byte pin", () => {
++    const original = checkedIn();
++    const reportText = original.reportBytes.toString("utf8").replace(
++        '"purpose": "development-only",',
++        '"purpose": "development-only",\n  "purpose": "development-only",'
++    );
++    const reportBytes = Buffer.from(reportText, "utf8");
++    const originalManifest = JSON.parse(original.manifestBytes.toString("utf8"));
++    const files = [...originalManifest.files];
++    files[0] = fileFact(files[0].name, reportBytes);
++    const manifestBytes = manifestFor({ files });
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                manifestBytes,
++                reportBytes,
++            }),
++        /report_json/
++    );
++});
++
++test("journal, witness and corpus are independently bounded and strictly parsed", () => {
++    const original = checkedIn();
++    const duplicateJournal = Buffer.from(
++        original.journalBytes
++            .toString("utf8")
++            .replace('"seq":0}', '"seq":0,"seq":0}'),
++        "utf8"
++    );
++    assert.throws(
++        () => proposePromptRefinerShadowStage(evidenceWith({ journalBytes: duplicateJournal })),
++        /journal_json/
++    );
++
++    const extraWitness = Buffer.from(
++        original.witnessBytes
++            .toString("utf8")
++            .replace('"seq":0}', '"seq":0,"unexpected":true}'),
++        "utf8"
++    );
++    assert.throws(
++        () => proposePromptRefinerShadowStage(evidenceWith({ witnessBytes: extraWitness })),
++        /witness_entry_unexpected_or_missing_fields/
++    );
++
++    const bomJournal = Buffer.concat([
++        Buffer.from([0xef, 0xbb, 0xbf]),
++        original.journalBytes,
++    ]);
++    assert.throws(
++        () => proposePromptRefinerShadowStage(evidenceWith({ journalBytes: bomJournal })),
++        /journal_bom/
++    );
++
++    const bomWitness = Buffer.concat([
++        Buffer.from([0xef, 0xbb, 0xbf]),
++        original.witnessBytes,
++    ]);
++    assert.throws(
++        () => proposePromptRefinerShadowStage(evidenceWith({ witnessBytes: bomWitness })),
++        /witness_bom/
++    );
++
++    const bomReport = Buffer.concat([
++        Buffer.from([0xef, 0xbb, 0xbf]),
++        original.reportBytes,
++    ]);
++    assert.throws(
++        () => proposePromptRefinerShadowStage(evidenceWith({ reportBytes: bomReport })),
++        /report_bom/
++    );
++
++    const overLimitJournal = Buffer.alloc(1024 * 1024 + 1, 0x20);
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage(
++                evidenceWith({ journalBytes: overLimitJournal })
++            ),
++        /journal_byte_limit/
++    );
++
++    const bomCorpus = Buffer.concat([
++        Buffer.from([0xef, 0xbb, 0xbf]),
++        original.corpusBytes,
++    ]);
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                corpusBytes: bomCorpus,
++            }),
++        /corpus_bom/
++    );
++
++    const extraCorpus = JSON.parse(original.corpusBytes.toString("utf8"));
++    extraCorpus.unexpected = true;
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                corpusBytes: Buffer.from(JSON.stringify(extraCorpus), "utf8"),
++            }),
++        /unexpected_or_missing_fields/
++    );
++
++    const reserializedCorpus = Buffer.from(
++        `${original.corpusBytes.toString("utf8")}\n`,
++        "utf8"
++    );
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                corpusBytes: reserializedCorpus,
++            }),
++        /corpus_digest/
++    );
++});
++
++test("all raw byte limits run before artifact hashing or journal replay", () => {
++    const oversizedArtifacts = [
++        ["reportBytes", Buffer.alloc(64 * 1024 + 1), "report_byte_limit"],
++        ["journalBytes", Buffer.alloc(1024 * 1024 + 1), "journal_byte_limit"],
++        ["witnessBytes", Buffer.alloc(1024 * 1024 + 1), "witness_byte_limit"],
++    ];
++    for (const [field, oversized, error] of oversizedArtifacts) {
++        const input = evidenceWith({ [field]: oversized });
++        input[field] = hashPoison(oversized);
++        assert.throws(
++            () => proposePromptRefinerShadowStage(input),
++            new RegExp(`prompt_refiner_shadow_admission_${error}`),
++            `${field} reached hashing instead of its raw byte bound`
++        );
++    }
++
++    const oversizedManifest = checkedIn();
++    oversizedManifest.manifestBytes = Buffer.alloc(64 * 1024 + 1);
++    oversizedManifest.reportBytes = hashPoison(oversizedManifest.reportBytes);
++    assert.throws(
++        () => proposePromptRefinerShadowStage(oversizedManifest),
++        /prompt_refiner_shadow_admission_manifest_byte_limit/,
++        "manifest preflight must finish before report hashing"
++    );
++
++    const oversizedCorpus = checkedIn();
++    oversizedCorpus.corpusBytes = hashPoison(Buffer.alloc(1024 * 1024 + 1));
++    assert.throws(
++        () => proposePromptRefinerShadowStage(oversizedCorpus),
++        /prompt_refiner_shadow_admission_corpus_byte_limit/,
++        "corpus must be bounded during the shared raw-byte preflight"
++    );
++});
++
++test("intrinsic byte lengths reject spoofed buffers and typed-array proxies", () => {
++    const spoofCases = [
++        ["manifestBytes", 64 * 1024 + 1, "manifest_byte_limit"],
++        ["reportBytes", 64 * 1024 + 1, "report_byte_limit"],
++        ["journalBytes", 1024 * 1024 + 1, "journal_byte_limit"],
++        ["witnessBytes", 1024 * 1024 + 1, "witness_byte_limit"],
++        ["corpusBytes", 1024 * 1024 + 1, "corpus_byte_limit"],
++    ];
++    for (const [field, size, error] of spoofCases) {
++        const spoofedBuffer = Buffer.alloc(size);
++        Object.defineProperty(spoofedBuffer, "byteLength", { value: 1 });
++        assert.equal(
++            spoofedBuffer.byteLength,
++            1,
++            "the adversarial own property is active"
++        );
++        assert.throws(
++            () =>
++                proposePromptRefinerShadowStage({
++                    ...checkedIn(),
++                    [field]: spoofedBuffer,
++                }),
++            new RegExp(`prompt_refiner_shadow_admission_${error}`)
++        );
++    }
++
++    class SpoofedUint8Array extends Uint8Array {
++        get byteLength() {
++            return 1;
++        }
++    }
++    const spoofedSubclass = new SpoofedUint8Array(2 * 1024 * 1024);
++    assert.equal(spoofedSubclass.byteLength, 1);
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...checkedIn(),
++                witnessBytes: spoofedSubclass,
++            }),
++        /prompt_refiner_shadow_admission_witness_byte_limit/
++    );
++
++    const proxyTarget = new Uint8Array(2 * 1024 * 1024);
++    const lyingProxy = new Proxy(proxyTarget, {
++        get(target, property) {
++            if (property === "byteLength") return 1;
++            return Reflect.get(target, property, target);
++        },
++    });
++    assert.equal(lyingProxy.byteLength, 1);
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...checkedIn(),
++                journalBytes: lyingProxy,
++            }),
++        /prompt_refiner_shadow_admission_journal_byte_limit/
++    );
++
++    const revoked = Proxy.revocable(new Uint8Array(1), {});
++    revoked.revoke();
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...checkedIn(),
++                witnessBytes: revoked.proxy,
++            }),
++        /prompt_refiner_shadow_admission_witness_byte_limit/
++    );
++
++    const throwingGetter = { ...checkedIn() };
++    Object.defineProperty(throwingGetter, "reportBytes", {
++        get() {
++            throw new Error("adversarial getter");
++        },
++    });
++    assert.throws(
++        () => proposePromptRefinerShadowStage(throwingGetter),
++        /prompt_refiner_shadow_admission_report_byte_limit/
++    );
++
++    const asPlainUint8Arrays = Object.fromEntries(
++        Object.entries(checkedIn()).map(([field, value]) => [
++            field,
++            new Uint8Array(value),
++        ])
++    );
++    assert.equal(
++        proposePromptRefinerShadowStage(asPlainUint8Arrays).proposalDigest,
++        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
++    );
++});
++
++test("evidence getters are snapshotted exactly once before validation", () => {
++    const safe = checkedIn();
++    const limits = {
++        manifestBytes: 64 * 1024 + 1,
++        reportBytes: 64 * 1024 + 1,
++        journalBytes: 1024 * 1024 + 1,
++        witnessBytes: 1024 * 1024 + 1,
++        corpusBytes: 1024 * 1024 + 1,
++    };
++    const reads = Object.fromEntries(
++        Object.keys(safe).map((field) => [field, 0])
++    );
++    const changingInput = {};
++    for (const field of Object.keys(safe)) {
++        Object.defineProperty(changingInput, field, {
++            enumerable: true,
++            get() {
++                reads[field] += 1;
++                return reads[field] === 1
++                    ? safe[field]
++                    : Buffer.alloc(limits[field]);
++            },
++        });
++    }
++    assert.equal(
++        proposePromptRefinerShadowStage(changingInput).proposalDigest,
++        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
++    );
++    assert.deepEqual(reads, {
++        manifestBytes: 1,
++        reportBytes: 1,
++        journalBytes: 1,
++        witnessBytes: 1,
++        corpusBytes: 1,
++    });
++});
++
++test("report-only and cross-snapshot evidence cannot become a proposal", () => {
++    const original = checkedIn();
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                journalBytes: new Uint8Array(),
++                witnessBytes: new Uint8Array(),
++            }),
++        /artifact_digest_or_size/
++    );
++
++    const mixedReport = Buffer.from(
++        original.reportBytes
++            .toString("utf8")
++            .replace(
++                PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF,
++                "0000000000000000000000000000000000000000"
++            ),
++        "utf8"
++    );
++    assert.throws(
++        () => proposePromptRefinerShadowStage(evidenceWith({ reportBytes: mixedReport })),
++        /report_invariant/
++    );
++});
++
++test("rollback, truncation and evidence-internal source mismatches fail closed", () => {
++    const original = checkedIn();
++    const journalLines = original.journalBytes.toString("utf8").trimEnd().split("\n");
++    const witnessLines = original.witnessBytes.toString("utf8").trimEnd().split("\n");
++    journalLines.pop();
++    witnessLines.pop();
++    const journalBytes = Buffer.from(`${journalLines.join("\n")}\n`, "utf8");
++    const witnessBytes = Buffer.from(`${witnessLines.join("\n")}\n`, "utf8");
++    const last = JSON.parse(journalLines.at(-1));
++    const originalManifest = JSON.parse(original.manifestBytes.toString("utf8"));
++    const files = [
++        originalManifest.files[0],
++        fileFact(originalManifest.files[1].name, journalBytes),
++        fileFact(originalManifest.files[2].name, witnessBytes),
++    ];
++    const head = { seq: last.seq, entryDigest: last.entryDigest };
++    const manifestBytes = manifestFor({
++        files,
++        journalTerminal: head,
++        witnessTerminal: head,
++    });
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                manifestBytes,
++                journalBytes,
++                witnessBytes,
++            }),
++        /replay_invariant_or_terminal_head/
++    );
++
++    const staleManifest = manifestFor({
++        sourceRef: "0000000000000000000000000000000000000000",
++    });
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...original,
++                manifestBytes: staleManifest,
++            }),
++        /report_invariant/
++    );
++});
++
++test("existing v1 admission stays false even with every caller boolean enabled", () => {
++    assert.deepEqual(
++        admitPromptRefinerExecution({
++            eligible: true,
++            mode: "shadow",
++            stageApproved: true,
++            adapterReady: true,
++            contractVersion: PROMPT_REFINER_EXECUTION_CONTRACT_VERSION,
++            refinerVersion: PROMPT_REFINER_VERSION,
++            model: PROMPT_REFINER_EXECUTION_MODEL_PIN,
++            maxOutputTokens: PROMPT_REFINER_MAX_OUTPUT_TOKENS,
++            timeoutMs: PROMPT_REFINER_TIMEOUT_MS,
++            retryCount: PROMPT_REFINER_RETRY_COUNT,
++            promptCaching: "disabled",
++            tools: "none",
++            inputTokenCeiling: PROMPT_REFINER_MAX_INPUT_TOKENS,
++        }),
++        { admitted: false, reason: "reservation_authority_unavailable" }
++    );
++});
++
++const allFiles = (directory) =>
++    readdirSync(directory).flatMap((name) => {
++        const path = join(directory, name);
++        return statSync(path).isDirectory() ? allFiles(path) : [path];
++    });
++
++test("proposal core has no product, provider, credential, writer, or stage-seed caller", () => {
++    const core = readFileSync(
++        join(root, "lib", "promptRefinerShadowAdmissionCore.ts"),
++        "utf8"
++    );
++    for (const forbidden of [
++        "server-only",
++        "@prisma/client",
++        "prisma.",
++        "process.env",
++        "fetch(",
++        "reservePromptRefinerExecution",
++        "consumePromptRefinerReservation",
++        "releasePromptRefinerReservation",
++        "approvedBy",
++        "approvedAt",
++        "admitted: true",
++    ]) {
++        assert.equal(core.includes(forbidden), false, forbidden);
++    }
++    const callerRoots = ["app", "components", "scripts", "prisma", "lib"];
++    for (const directory of callerRoots) {
++        for (const path of allFiles(join(root, directory))) {
++            if (!/\.(?:ts|tsx|js|mjs|cjs|prisma)$/.test(path)) continue;
++            if (path.endsWith(join("lib", "promptRefinerShadowAdmissionCore.ts"))) {
++                continue;
++            }
++            const content = readFileSync(path, "utf8");
++            assert.equal(
++                /promptRefinerShadowAdmissionCore|proposePromptRefinerShadowStage/.test(
++                    content
++                ),
++                false,
++                path
++            );
++        }
++    }
++    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
++    assert.equal(
++        Object.values(packageJson.scripts).some((command) =>
++            /prompt-refiner-shadow-admission|admission-readiness-v1/.test(command)
++        ),
++        false
++    );
++});
++
++test("checked manifest names its strict version and exact immutable source", () => {
++    const manifest = JSON.parse(bytes(paths.manifest).toString("utf8"));
++    assert.equal(
++        manifest.schemaVersion,
++        PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION
++    );
++    assert.equal(manifest.sourceRef, PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF);
++    assert.equal(
++        manifest.bundleDigest,
++        PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST
++    );
++
++    const semanticallyEqualButUnreviewedBytes = Buffer.from(
++        JSON.stringify(manifest),
++        "utf8"
++    );
++    assert.throws(
++        () =>
++            proposePromptRefinerShadowStage({
++                ...checkedIn(),
++                manifestBytes: semanticallyEqualButUnreviewedBytes,
++            }),
++        /unchecked_manifest_bytes/
++    );
++});
++
++test("only the four immutable evidence artifacts are pinned to LF", () => {
++    const pinned = [
++        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
++        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
++        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
++        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
++    ];
++    const attributes = (path) => {
++        const result = spawnSync(
++            "git",
++            ["check-attr", "text", "eol", "--", path],
++            { cwd: root, encoding: "utf8", windowsHide: true }
++        );
++        assert.equal(result.status, 0, result.stderr);
++        return Object.fromEntries(
++            result.stdout
++                .trim()
++                .split("\n")
++                .map((line) => {
++                    const match = /^.+: ([^:]+): (.+)$/.exec(line.trim());
++                    assert.ok(match, line);
++                    return [match[1], match[2]];
++                })
++        );
++    };
++    for (const path of pinned) {
++        assert.deepEqual(attributes(path), { text: "set", eol: "lf" }, path);
++    }
++    assert.deepEqual(
++        attributes("docs/ops/prompt-refiner-shadow/evidence/README.md"),
++        { text: "unspecified", eol: "unspecified" }
++    );
++
++    const temporary = mkdtempSync(join(tmpdir(), "refiner-admission-eol-"));
++    const source = join(temporary, "source");
++    const clone = join(temporary, "clone");
++    try {
++        mkdirSync(source);
++        writeFileSync(join(source, ".gitattributes"), readFileSync(join(root, ".gitattributes")));
++        for (const path of pinned) {
++            const target = join(source, path);
++            mkdirSync(resolve(target, ".."), { recursive: true });
++            writeFileSync(target, readFileSync(join(root, path)));
++        }
++        execFileSync("git", ["init", "--quiet"], { cwd: source });
++        execFileSync("git", ["config", "user.name", "eol-regression"], { cwd: source });
++        execFileSync("git", ["config", "user.email", "eol@example.invalid"], { cwd: source });
++        execFileSync("git", ["add", ".gitattributes", ...pinned], { cwd: source });
++        execFileSync("git", ["commit", "--quiet", "-m", "fixture"], { cwd: source });
++        execFileSync(
++            "git",
++            ["-c", "core.autocrlf=true", "clone", "--quiet", "--no-local", source, clone],
++            { cwd: temporary }
++        );
++        for (const path of pinned) {
++            assert.deepEqual(
++                readFileSync(join(clone, path)),
++                readFileSync(join(root, path)),
++                `${path} changed bytes in an autocrlf checkout`
++            );
++        }
++    } finally {
++        rmSync(temporary, { recursive: true, force: true });
++    }
++});
