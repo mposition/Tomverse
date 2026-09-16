@@ -101,8 +101,8 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 | CONT-TITLE-01 | 원문 삭제 후 이어가기 대화명 안정화 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1423 병합 원격 확인 | 완료 범위: 사용자 저장 제목 유지, 삭제 전 별도 이름 저장 선택, 구분 가능한 fallback과 삭제 상태 표시. 재착수 후보에서 제외 |
 | CONT-EXPORT-01A | 이어가기 TXT 파일명·문서 제목 정합성 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1422·main #1421 병합 원격 확인 | 완료 범위: 실제 표시 제목으로 안전한 `[대화창 이름].txt`와 TXT 내부 제목 생성. 원문 포함 01B와 구분하며 재착수 후보에서 제외 |
 | CONT-01 | 한국어 이어가기 seed 창·빈 발췌 개선 | 병행 P1 / 측정 도구 완료: 병합 사용자 확인(2026-09-15), develop #1447·main #1453 병합 원격 확인. 운영 측정 실행·C/B 정책 선택 대기, 제품 수정 미착수 | 운영 DB 읽기 전용 `npm run report:continuation-seed -- --database` 실행 → C/B 선택 → seed 규칙 수정·회귀. 예산 초과로 원문이 비는 사례 해결, 최신 문맥·누락 고지·매 turn 입력 비용의 정합성 |
-| CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | 병행 P1 / 기능 확장 첫 후보, 등록·미착수 | 기존 검색에 연결된 외부 원문 포함 → 출처·일치 발췌 표시 → 해당 원문 위치로 이동. 상세 범위는 C |
-| CONT-EXPORT-01B | 저장된 원문을 포함한 이어가기 TXT 다운로드 | 병행 P1 / 원문 검색 다음, 채택·D4~D6 확정(2026-09-14)·미착수 | 명시적인 원문 포함 다운로드 → 저장 원문 전체와 후속 대화를 출처별로 출력. 내보내기 정책 개정 필요 |
+| CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | 병행 P1 / **코드 develop 병합**(#1465, 2026-09-16 00:43Z 원격 확인), main 미반영. staging B1(잠근 원문이 검색됨) 실패 사용자 보고 → 원인(잠금 쓰기의 grant 발급) develop #1484 수정, **staging 재검증 미실시**. 근사 상한 성능 측정 미실행 | #1484 포함 빌드로 staging B1 재검증 → 근사 상한 측정(`npm run measure:continuation-source-search`, 테스트 DB 필요)과 잠정 3초 원문 조회 예산 확정 → main 반영. 검색 결과에서 Tomverse(native) 메시지 위치로 이동은 미구현. 상세는 C·2026-09-16 갱신 |
+| CONT-EXPORT-01B | 저장된 원문을 포함한 이어가기 TXT 다운로드 | 병행 P1 / **코드 develop 병합**(#1473, 2026-09-16 02:55Z 원격 확인), main 미반영. staging B5(잠근 원문이 원문 포함 TXT에 실림) 실패 사용자 보고 → #1484로 원인 수정, **staging 재검증 미실시**. 대화 메뉴 가로 스크롤 develop #1485 수정 | #1484·#1485 포함 빌드로 staging B5·메뉴 표시 재검증 → main 반영. #1473의 PostgreSQL accounts lane 실패는 이 변경과 무관한 `feedback-lifecycle.db.test.ts` 기대값이며 develop #1481(병합 원격 확인)로 수정 |
 | VOICE-MIX-01 | 한국어·영어 혼용 Voice 인식 정확도 개선 | 병행 P1 / 등록, 미착수 | 혼용 발화 기준 평가와 현재 STT 모델의 제한된 용어 힌트 비교 |
 | CACHE-01 | 전 공급자 Prompt Cache 계측·최적화 및 비용 정합성 점검 | 병행 P1 / 기존 논의 반영, 미착수 | 공급자·모델·경로별 자동/명시 캐시와 계측 공백 확인. 모든 호출에 강제로 캐시하지 않음 |
 | CREDIT-UX-01 | 비용 정보의 점진적 공개·정산 상세 정합성 | CHAT-01 하위 병행 P2 / 수정 후 등록(2026-09-15), UI·정책 결정 대기 | 중복 숫자는 축약하되 실행 전 비용/구매 크레딧 고지·정확한 잔량 접근 유지. 현재 견적과 완료 작업 정산 분리 |
@@ -125,6 +125,37 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 - CONT-01은 **측정 도구만** 완료입니다. 운영 측정 실행, C/B 정책 선택, seed 규칙 수정은
   남아 있으므로 CONT-01 전체를 완료로 바꾸지 않습니다. 배포 환경·배포 SHA는 미기록입니다.
 
+**2026-09-16 상태 갱신(Claude 세션, 2026-09-15~16 작업):** 아래 권장 순서 1~4가 모두
+**develop에 병합**됐습니다. 병합 상태·시각은 GitHub에서, main 미포함은 main `e55812b6`의
+조상 여부로 직접 확인했습니다. **main 반영·배포는 없습니다.** staging 결과는 사용자 보고이며
+배포 SHA는 미기록입니다. 각 PR은 Codex 독립 검토를 거쳤고 DB 동시성 테스트는 CI PostgreSQL
+lane에서 통과했습니다(로컬 DB 없음).
+
+| 코드명 | develop PR (병합 UTC) | 비고 |
+| --- | --- | --- |
+| CONT-SEARCH-01 | [#1465](https://github.com/mposition/Tomverse/pull/1465) (09-16 00:43) | 한·영 2글자 검색 유지, 원문 조회 시간 초과 시 "Tomverse 메시지 결과만 표시" 안내. 3초 예산은 잠정 |
+| task_9d445985 | [#1476](https://github.com/mposition/Tomverse/pull/1476) (01:27) | 두 잠금 순서 cycle 정리 + IMPORT-STAGING-FINALIZE-01 수정 포함 |
+| CONT-EXPORT-01B | [#1473](https://github.com/mposition/Tomverse/pull/1473) (02:55) | 원문 포함 TXT, 크기·개수 상한 초과 시 자르지 않고 거절, 바이트·SHA-256 검증 후 저장 |
+| IMPORT-LOCK-TITLE-01 | [#1475](https://github.com/mposition/Tomverse/pull/1475) (04:03) | 제품 결정: 잠긴 제목은 grant 유무와 무관하게 목록 응답에서 항상 비공개 |
+| (staging B1·B5 대응) | [#1484](https://github.com/mposition/Tomverse/pull/1484) (07:29) | 아래 참조 |
+| (CONT-EXPORT-01B 메뉴) | [#1485](https://github.com/mposition/Tomverse/pull/1485) (05:32) | 대화 컨텍스트 메뉴 가로 스크롤 제거. Codex UX 검토 반영 |
+
+- **staging 검증(사용자 보고 2026-09-16)**: B4(잠긴 제목 비공개) 통과, **B1·B5 실패**.
+  보고받은 항목은 이 셋이며 나머지 체크리스트 결과는 받지 않았으므로 미기록입니다.
+- **B1·B5의 원인**: 검색·내보내기의 잠금 검사 누락이 아니었습니다. 가져온 원문 잠금 쓰기
+  (`PUT /api/external-conversations/[id]/lock`)가 설정·변경 시 30분 열람 grant를 스스로
+  발급했고, 두 표면은 그 grant를 정상적으로 확인했습니다. native 대화 잠금은 처음부터 모든
+  쓰기에서 grant를 지워 왔으므로 두 잠금이 반대로 동작했습니다. **사용자 결정(2026-09-16)으로
+  native와 동일하게 모든 쓰기에서 삭제**하도록 #1484에서 고쳤고, Codex가 찾은 뷰어의
+  진행 중 페이지 요청이 잠금 직후 원문을 되살리는 경합도 함께 수정했습니다. grant 발급은 이제
+  verify route에서만 가능하도록 소스 테스트가 강제합니다. **staging 재검증 전이므로 B1·B5는
+  아직 통과로 바꾸지 않습니다.**
+- **이어가기 시작 버튼 미표시 문의**: 코드상 `feature.externalConversationContinuationEnabled`가
+  꺼진 환경의 정상 동작입니다(기존 대화 열람은 flag와 무관). 해당 환경의 flag 값은 확인하지 않았습니다.
+- **분리된 두 보안 과제**(CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리):
+  `task_c3a7aa47`(Memory 추출이 잠긴 snapshot을 provider에 전송) — 진행 중,
+  `task_7d03656e`(가져온 데이터 JSON 내보내기가 잠긴 snapshot 포함) — 미착수. D 표 참조.
+
 **현재 이어가기 트랙의 권장 착수 순서(2026-09-15 재검토):**
 
 1. **CONT-SEARCH-01** — CONT-01의 운영 측정·C/B 결정과 병행 착수할 수 있습니다.
@@ -132,6 +163,11 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 3. **IMPORT-LOCK-TITLE-01** — 구현은 제품 결정 후입니다. 정책 결정은 지금 병행할 수 있습니다.
 4. **기존 잠금 순서 cycle 2건** — `task_9d445985`의 P2 안정성 작업입니다.
    Run↔Chunk를 먼저, staging 만료↔전체 import 삭제를 다음에 둡니다(D 참조).
+
+> **2026-09-16:** 위 1~4는 모두 develop 병합 완료입니다(위 상태 갱신 참조). 이어지는 자문
+> 순서는 ① #1484·#1485 포함 빌드로 staging B1·B5 재검증 후 main 반영(사람) ②
+> `task_c3a7aa47` 두 단계 착지(1단계 먼저) ③ CONT-SEARCH-01 근사 상한 측정과 3초 예산 확정
+> ④ `task_7d03656e` 정책 결정입니다. 개발·병합·배포 승인이 아닙니다.
 
 이는 개발 착수 승인이 아니라 사용자 제안에 대한 자문 순서입니다. 기존 Chat 주 개발
 투자 순위는 유지합니다. **CONT-01은 취소하거나 P2로 내리지 않고 병행 P1로 유지**합니다.
@@ -434,6 +470,8 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
   검증 → Native → Memory → MCP 순서는 유지합니다. 검색 누락 자체를 데이터 손실이나
   보안 사고로 단정하거나, 현재 사용자가 진행 중인 이어가기 활성화의 새 차단 조건으로
   추가하지 않습니다.
+- **상태 갱신(2026-09-16)**: develop #1465 병합, main 미반영, staging B1 재검증 대기.
+  현재 상태는 B 표와 "2026-09-16 상태 갱신"을 따르며, 아래는 등록 당시 기록입니다.
 - **상태·의존성**: 2026-09-11 사용자 요청으로 등록, 구현 미착수. Memory 추출·주입,
   새 Auto Chat UI, Router Benchmark 완료에 의존하지 않습니다. 현재 이어가기는
   정책상 `productKey=review`인 별도 surface입니다. CHAT-01과 공용 검색/UI 계약은
@@ -552,6 +590,7 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
   01B는 의도적으로 제외하던 저장 원문을 명시적인 사용자 다운로드에 포함하는
   기능 확장입니다. 01A는 2026-09-15 사용자 확인으로 병합·배포 완료 처리했으며,
   01B는 등록·미착수 상태를 유지합니다. 배포 환경·배포 SHA는 미기록입니다.
+  (2026-09-16 갱신: 01B는 develop #1473 병합, main 미반영, staging B5 재검증 대기. B 표 참조)
 - **우선순위**: 01A는 완료되어 재착수 대상에서 제외, 01B는 원문 검색 다음의 병행 P1,
   공개 Share(P2)보다 앞입니다. 사용자가 내 계정 자료를 보관하는 흐름이고 별도의
   공개 문서/링크 수명주기가 없어 Share보다 범위가 작습니다. 주 투자 순위와 기존
@@ -888,10 +927,12 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 
 | ID | 작업 | 우선순위·상태 | 다음 완료 단위 |
 | --- | --- | --- | --- |
-| MEM-SOURCE-DELETE-01 | 원문 삭제와 Memory 추출 저장의 동시 실행 안전성 | 완료(코드) / 병합 사용자 확인(2026-09-15), develop #1448·main #1452 병합 원격 확인. 운영 추출 flag·진행 중 작업 확인은 미확인 | 잔여: 운영 추출 flag·대기/실행 중 run·chunk 읽기 전용 확인(사람). 재착수 후보에서 제외. 검토 중 발견된 기존 잠금 순서 cycle 2건은 별도 후속 과제 |
-| IMPORT-LOCK-TITLE-01 | 잠긴 snapshot 제목의 가져오기 목록 노출 정책 | 정책 P1 / 서버 측 제목 비공개 권장, 제품 결정 대기 | 잠긴 원문 제목의 공개 범위 확정 → 목록 응답·화면·잠금 변경 후 상태 일치 |
-| task_9d445985 | Fix two pre-existing lock-order cycles in memory/import | P2 안정성 / 사용자 제공 칩 ID, 정적 순서 확인·DB 교착 재현 미실시 | Run↔Chunk → staging 만료↔전체 import 삭제 순서로 정리. 같은 transaction의 정산·rollback·lease fencing·재시도 경계 유지 |
-| IMPORT-STAGING-FINALIZE-01 | 만료 sweep의 finalize 완료 상태 덮어쓰기 경합 | 별도 조사 / P2 잠정, DB 재현·운영 발생률 미확인. 이 ID는 목록용이며 외부 칩 생성 아님 | 후보 선별 후 상태 변경의 재현 → 원문 가시성·재시도·삭제 영향 확인 → Import 행 잠금 아래 상태·TTL 재확인. task_9d445985의 두 번째 수정과 조율 |
+| MEM-SOURCE-DELETE-01 | 원문 삭제와 Memory 추출 저장의 동시 실행 안전성 | 완료(코드) / 병합 사용자 확인(2026-09-15), develop #1448·main #1452 병합 원격 확인. **운영 추출 flag는 production에서 켠 적 없음(사용자 확인 2026-09-16)**. 대기/실행 중 run·chunk 확인은 미실시 | 잔여: 대기/실행 중 run·chunk 읽기 전용 확인(사람, flag 미활성으로 우선도 낮음). 재착수 후보에서 제외. 기존 잠금 순서 cycle 2건은 task_9d445985로 develop 수정 |
+| IMPORT-LOCK-TITLE-01 | 잠긴 snapshot 제목의 가져오기 목록 노출 정책 | 완료(코드) / 제품 결정: grant 유무와 무관하게 목록 응답에서 항상 비공개(2026-09-15), develop #1475 병합(2026-09-16 원격 확인), main 미반영. staging B4 통과(사용자 보고 2026-09-16) | main 반영(사람). 재착수 후보에서 제외 |
+| task_9d445985 | Fix two pre-existing lock-order cycles in memory/import | 완료(코드) / develop #1476 병합(2026-09-16 원격 확인), main 미반영. Run 행을 Chunk보다 먼저 fencing해 잠그고, 만료는 Import 행 잠금 아래 snapshot을 id 순으로 잠그도록 정리. 두 실행 순서를 강제한 DB 테스트 CI 통과. 운영 교착 발생 빈도는 미확인 | main 반영(사람). 재착수 후보에서 제외 |
+| IMPORT-STAGING-FINALIZE-01 | 만료 sweep의 finalize 완료 상태 덮어쓰기 경합 | 완료(코드) / task_9d445985와 같은 develop #1476, main 미반영. sweep이 Import 행 잠금 아래 status·두 TTL을 재판정한 뒤에만 만료하고 실제 만료만 집계. "선별 후 finalize 커밋", "선별 후 활동" DB 테스트 2건 CI 통과. 운영 발생률 미확인 | main 반영(사람). 재착수 후보에서 제외 |
+| task_c3a7aa47 | 잠긴 snapshot을 Memory 추출 provider에 보내지 않기 | 진행 중 / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). **production 추출 flag 미활성(사용자 확인)이므로 현재 도달 불가, flag 활성화 전 필수(권고)**. 두 단계, 각 Codex APPROVE: ① provider를 부르지 않은 chunk 과금 제외(`skipped` 상태) develop [#1489](https://github.com/mposition/Tomverse/pull/1489) 열림·병합 대기 ② 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 표시 — 로컬 커밋, PR 전 | ① 병합 → ② develop PR·CI → main 반영. **①이 먼저여야 함**(②만 들어가면 전부 잠긴 chunk가 호출 없이 과금). ①이 고치는 과금 결함은 flag 미활성으로 실제 청구된 적 없음 |
+| task_7d03656e | 가져온 데이터 JSON 내보내기의 잠긴 snapshot 처리 | 보안 후보 / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16), 미착수. 발견 이후 코드 재확인은 하지 않음 | 잠긴 snapshot의 export 표현 결정(존재 metadata만 vs grant 요구) → 구현·테스트. 참고: memory export는 잠긴 evidence 참조를 숨기되 statement는 포함(`docs/policy/external-conversation-import-and-memory.md` §13.2) |
 | SEC-OPS-01 | Tomverse 전체 플랫폼의 정기 Commercial Grade 보안 점검 | 운영 필수 / 목록 등록, 기존 주간 자동화 일시중지 | 대상 자산·검증 기준·안전한 실행 범위를 정리하고 기존 자동화 보강·재개 여부 승인 |
 
 #### 2026-09-15 후속 순서 검토 — 두 교착과 별도의 만료/finalize 경합
@@ -1552,6 +1593,17 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   조회한 main `938816f2`는 #1421 merge를 포함하지만 #1423 merge는 조상에 없어 제목
   작업의 main 병합/배포 경로를 독립 확인했다고 적지 않습니다. 다른 방식의 반영이 없다는
   판정도 아닙니다. 위 과거 대기·조사 기록은 당시 이력으로 남기며 최신 상태는 완료입니다.
+
+- 2026-09-16 (Claude 세션 상태 갱신): 2026-09-15~16 작업을 코드명 기준으로 반영했습니다.
+  CONT-SEARCH-01·CONT-EXPORT-01B·IMPORT-LOCK-TITLE-01·task_9d445985는 develop 병합
+  (#1465·#1473·#1475·#1476), IMPORT-STAGING-FINALIZE-01은 #1476에 함께 수정된 것을
+  develop 코드와 테스트 이름으로 확인해 완료(코드)로 바꿨습니다. 여섯 PR 모두 main에는 없습니다
+  (main `e55812b6` 조상 여부 확인). staging은 사용자 보고로 B4 통과·B1·B5 실패를 기록하고,
+  B1·B5는 원인 수정(#1484)만 병합됐으므로 통과로 바꾸지 않았습니다.
+  `task_c3a7aa47`·`task_7d03656e`를 D에 새로 등록했습니다. MEM-SOURCE-DELETE-01의 운영
+  추출 flag 잔여 항목은 사용자 확인(production 미활성)으로 좁혔고 run·chunk 확인은 남겼습니다.
+  #1473의 PostgreSQL accounts lane 실패가 무관한 기존 테스트라는 점은 실패 run 로그로
+  확인했습니다. CONT-01·주 투자 순위·다른 항목은 바꾸지 않았습니다.
 
 ## VOICE-MIX-01 — 한국어·영어 혼용 Voice 인식 정확도 개선
 
