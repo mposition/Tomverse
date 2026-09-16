@@ -1104,3 +1104,54 @@ route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 
    활성화는 동일한 evidence gate 밖으로 나가지 않는다.
 4. Refiner 제안형 흐름의 사용자 선택 증거 뒤 Router full-catalog 선택 품질 최적화를
    별도 실험으로 진행한다.
+
+## 2026-09-17 Prompt Refiner admission-readiness proposal 회차
+
+앞 회차의 다음 순서 ①에서 실행 권한을 만들지 않는 부분만 구현했다. 최신 develop
+source commit `f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`의 exact allowlist bytes로 기존
+provider-free shadow를 다시 실행했고 16/16 completion, structural violation 0,
+behavioral fixture match 16/16, remaining/unknown 0, provider call/cost 0을 content-free
+report·journal·witness로 동결했다. strict manifest는 세 artifact의 exact filename,
+size/SHA-256, source/corpus identity와 journal/witness terminal head를 canonical bundle
+digest에 묶는다.
+
+새 순수 core는 manifest와 네 입력 파일을 모두 불신 입력으로 취급한다. byte/UTF-8/BOM,
+duplicate key, extra/missing field, artifact digest와 **evidence 내부** source/corpus 불일치를
+거부하고 기존 strict journal replay로 tamper·truncate·rollback·A/B snapshot 혼합을 다시
+검사한다. 현재 checkout·environment drift는 이 verifier의 검증 대상이 아니다. 성공 출력은
+content-free `PromptRefinerShadowStageProposal`뿐이다. status는
+`awaiting_explicit_admin_cost_approval`, `executionAdmitted=false`,
+`currentCheckoutValidated=false`, `runtimeSourceRevalidationRequired=true`이며 기존 reservation
+stage id·contract digest·비용·slot·TTL을 그대로 반복한다. synthetic evidence가 실제 모델
+품질, paid shadow, PLANNER, release 또는 rollout 승인이 아니라는 acknowledgement도 고정했다.
+
+이번 범위에는 stage seed, migration/admin writer, Prisma mutation, admin route/script caller,
+receipt writer, product import, provider SDK/network/credential lookup, flag 변경과
+`admitted:true`가 없다. 기존 `admitPromptRefinerExecution()`도 변경하지 않았고 모든 caller
+boolean이 true여도 `reservation_authority_unavailable`로 fail-closed한다. 실제 writer는
+승인 직전에 현재 source·manifest·environment를 다시 검증하고, 새 migration이
+evidence/approval/environment/expiry/execution manifest를 한 durable row에
+결속하는 후속 계약으로 미뤘다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**, 공개 기능 분모와 산식은 유지) |
+| 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 실행 권한은 열지 않고 evidence→proposal 경계를 닫았다. |
+| C19–C20 Refiner·Planner·품질 평가 | **약 47%** (직전 약 44%, 동결 evidence 검증·proposal-only 상태 기계 반영) |
+| 구현 | content-free 과거 evidence bundle·strict untrusted verifier·현재 checkout 미검증 및 runtime 재검증 의무·deterministic proposal digest·기존 reservation 계약 provenance 결속 완료 |
+| 검증 | 신규 focused test, 기존 shadow/Refiner/PLANNER-03, typecheck·lint·문서/정책/encoding/data-domain 검사를 수행 대상으로 둠 |
+| 독립 검토·통합 CI | 이 기록 시점에는 대기. Claude Code Max 읽기 전용 검토와 Linux CI 통과 전에는 통합 완료로 보지 않음 |
+| 공개 상태 | 변화 없음 — provider/API/Railway/유료 호출 0, stage writer·제품 caller·flag·성공 admission 없음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. exact evidence digest, 명시적 사람 승인·비용, environment, expiry와 실행 manifest를
+   한 행에 결속하는 **durable DB provenance/admin writer 계약**을 새 migration으로
+   설계·구현한다. **Claude 독립 검토 필요, provider 호출 0.**
+2. writer와 proposal 계약을 독립 검토하고 별도 비용 승인을 받은 뒤 bounded paid shadow를
+   **정확히 1회** 실행해 의미 보존·행동상 주입 저항·비용·지연을 측정한다.
+3. 승인된 실제 evidence가 gate를 통과할 때만 suggestion adapter와 UI를 연결한다.
+4. 사용자 선택 증거가 쌓인 뒤 Refiner→Router 결합과 full-catalog 선택 품질 최적화를
+   별도 실험으로 진행한다.

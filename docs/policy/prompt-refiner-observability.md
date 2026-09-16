@@ -264,3 +264,32 @@ terminal 또는 stale lock은 자동 복구하지 않는다. 로컬 witness는 �
 [`prompt-refiner-shadow-harness.md`](../ops/prompt-refiner-shadow-harness.md)에 있다.
 이 하네스가 completed라는 사실은 실제 shadow 실행, 품질 승인, release gate, 제품 연결
 또는 rollout 승인이 아니다.
+
+## 10. provider-free admission proposal 관측 경계
+
+체크인된 `admission-readiness-v1` bundle은 provider-free harness의 report·journal·witness
+세 파일과 terminal head를 strict manifest로 결속한다. 검증기는 raw size/SHA-256과
+canonical bundle digest를 다시 계산하고 기존 journal replay API로 16/16 completion,
+remaining/unknown 0, structural violation 0, fixture match 16, provider call/cost 0을 다시
+확인한다. synthetic corpus와 source identity digest는 재현 provenance로 허용하지만,
+prompt·fixture output·refined prompt·provider 오류 또는 per-item content digest는 evidence와
+proposal에 기록하지 않는다.
+
+검증 성공은 `awaiting_explicit_admin_cost_approval` proposal일 뿐이고
+`executionAdmitted=false`, `currentCheckoutValidated=false`,
+`runtimeSourceRevalidationRequired=true`다. 이는 manifest가 고정한 과거 snapshot 내부의
+source/corpus 결속만 검증하며 현재 checkout이나 실행 environment의 동일성을 주장하지
+않는다. proposal에는 사람 승인자·승인 시각 입력이 없고, stage/DB
+mutation, seed, runtime receipt 또는 제품 호출 효과도 없다. 따라서 다음 항목의 관측이나
+승인으로 해석하지 않는다.
+
+- 실제 모델의 의미 보존·행동상 주입 저항·품질
+- provider 비용·지연·신뢰성 또는 paid shadow 승인
+- PLANNER/release/rollout gate 통과
+- UI 또는 Router 결합 승인
+
+실제 admin writer는 승인 직전에 현재 source·manifest·environment를 exact-byte로 다시
+검증하고, exact evidence digest, 승인자·승인 시각, environment, expiry와 실행 manifest를
+새 durable row에 함께 결속하는 migration과 운영 계약이 독립 검토된 뒤에만
+추가한다. 그 writer 전까지 현재 v1 admission의 fail-closed 결과와 default-off 제품 상태를
+유지한다.

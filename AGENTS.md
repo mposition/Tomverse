@@ -1304,8 +1304,10 @@ Before changing the Prompt Refiner surface or request boundary in
 `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
 `lib/promptRefinerShadowHarness.ts`, `lib/promptRefinerShadowJournal.ts`,
 `lib/promptRefinerShadowSource.ts`,
-`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus, or their
-tests, read:
+`lib/promptRefinerShadowAdmissionCore.ts`,
+`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus,
+`docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.*`,
+`tests/promptRefinerShadowAdmissionCore.test.mjs`, or their tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
 - `docs/policy/prompt-refiner-observability.md`
@@ -1420,6 +1422,18 @@ Non-negotiable requirements:
   zero structural violations must never be described as model compliance or
   injection resistance. A completed local run is not model-quality, release,
   admission or rollout evidence.
+- The admission-readiness core is proposal-only and verifies only the immutable
+  historical evidence snapshot named by its checked-in manifest. It does not
+  validate the current checkout or runtime environment and must always emit
+  `currentCheckoutValidated: false`,
+  `runtimeSourceRevalidationRequired: true`, `executionAdmitted: false`, and
+  `awaiting_explicit_admin_cost_approval`. It has no approvedBy/approvedAt
+  input, writer, DB/Prisma mutation, admin/API/script caller, receipt, feature
+  flag, product import, provider, network or credential path. No caller may use
+  this proposal as writer authorization. A future durable writer must re-run
+  exact current source, manifest and environment validation immediately before
+  binding human cost approval; that requirement cannot be satisfied by a
+  caller-supplied identity boolean.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer
