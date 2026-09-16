@@ -1023,8 +1023,8 @@ flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
 | 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·명시적 UTC DB-owned terminal clock·SQL limit으로 제한된 expiry lock footprint·원자 slot/cost·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
 | 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 17/17, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
 | 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 17개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
-| 독립 검토·통합 CI | 대기 — 구현 완료 뒤 Claude 읽기 전용 검토와 Linux CI 필요 |
-| 병합·배포·공개 | 미수행. provider/API/model 호출 0, stage seed/writer 0, v1 admission·flag 변경 0 |
+| 독립 검토·통합 CI | Claude Code Max Round 2가 digest `sha256:f3aa2c807b6a6dc385f1159cdee4bca23a8a9f499819143607959585a129502f`를 `approve`, findings 0으로 판정했다. PR #1494 통합 CI는 20 successful·1 skipped·0 failing이었고, 초기 `assistantProfileImportCore` 전역 `Restrict` 오탐은 model scope로 수정한 뒤 통과했다. |
+| 병합·배포·공개 | PR #1494가 develop에 squash merge되었고 merge SHA는 `cdc55162e35d0f4ee7b1300293fc0bac66b6f1b0`이다. production 배포/공개, provider/API/model 호출, stage seed/writer, v1 admission/flag 변경은 여전히 없음. |
 
 ### 이 Cycle 다음 권장 순서
 
