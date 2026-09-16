@@ -381,6 +381,7 @@ test("every notification kind names a sender, and the right one", () => {
     feedback_user_received: "support",
     feedback_user_reviewing: "support",
     feedback_user_completed: "support",
+    feedback_user_completed_resend: "support",
     // About an auto-fix case, to the team.
     autofix_review_requested: "operations",
     autofix_production_verified: "operations",

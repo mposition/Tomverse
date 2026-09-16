@@ -50,6 +50,12 @@ type World = {
   emailShouldFail: boolean;
   logs: string[];
   txActive: boolean;
+  /** Suppression rows the send path will read for the reporter's address. */
+  suppressions: Array<{
+    reason: string;
+    sourceStream: string | null;
+    expiresAt: Date | null;
+  }>;
   /** The report's auto-fix case, when it has one. */
   autoFixCase: (Record<string, unknown> & { state: string; inTxClose?: boolean }) | null;
 };
@@ -80,6 +86,7 @@ const freshWorld = (): World => ({
   emailShouldFail: false,
   logs: [],
   txActive: false,
+  suppressions: [],
   autoFixCase: null,
 });
 
@@ -229,6 +236,11 @@ async function loadRoute(): Promise<{
           };
         },
       },
+      // The send path asks whether the address is suppressed before every
+      // attempt (docs/policy/email-notifications.md §13.3).
+      suppressionEntry: {
+        findMany: async () => world.suppressions,
+      },
       feedbackAutoFixCase: {
         updateMany: async ({
           where,
@@ -246,6 +258,27 @@ async function loadRoute(): Promise<{
         },
       },
       notificationDelivery: {
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          world.deliveries.find((entry) => entry.id === where.id) ?? null,
+        updateMany: async ({
+          where,
+          data,
+        }: {
+          where: { id: string; status?: string; nextAttemptAt?: Date };
+          data: Record<string, unknown>;
+        }) => {
+          const row = world.deliveries.find(
+            (entry: Record<string, unknown>) =>
+              entry.id === where.id &&
+              (where.status === undefined || entry.status === where.status) &&
+              (where.nextAttemptAt === undefined ||
+                (entry.nextAttemptAt as Date | undefined)?.getTime() ===
+                  where.nextAttemptAt.getTime())
+          );
+          if (!row) return { count: 0 };
+          Object.assign(row, data);
+          return { count: 1 };
+        },
         upsert: async ({
           create,
         }: {
@@ -262,6 +295,7 @@ async function loadRoute(): Promise<{
             ...create,
             status: "pending",
             attempts: 0,
+            nextAttemptAt: new Date(),
             inTx: world.txActive,
           };
           world.deliveries.push(row);
@@ -520,7 +554,7 @@ test("a second closure changes the status but never re-emails", async () => {
 
 // --- who can be emailed ------------------------------------------------------
 
-test("no consent means the status changes and nothing is queued", async () => {
+test("no consent stops a progress notice, and says which reason it was", async () => {
   const { PATCH } = await loadRoute();
   world.feedback!.emailUpdatesConsent = false;
   const { request, context } = patch(world.feedback!.id, { status: "reviewing" });
@@ -531,24 +565,58 @@ test("no consent means the status changes and nothing is queued", async () => {
   assert.equal(world.feedback!.status, "reviewing");
   assert.deepEqual(body.userNotification, {
     queued: false,
-    reason: "not_notifiable",
+    reason: "not_consented",
   });
   assert.equal(world.deliveries.length, 0);
   assert.equal(world.emails.length, 0);
 });
 
-test("a scrubbed address (account deletion) means nothing is queued", async () => {
+// The 2026-09-15 incident, as a test: an operator writes the answer to a
+// report whose reporter never ticked "email me status updates", and it is
+// sent, because it is the answer to a request they made
+// (docs/policy/email-notifications.md §3).
+test("the answer to a report is sent without the progress-notice tick", async () => {
   const { PATCH } = await loadRoute();
-  world.feedback!.email = null;
-  const { request, context } = patch(world.feedback!.id, { status: "reviewing" });
+  world.feedback!.emailUpdatesConsent = false;
+  const { request, context } = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "We found the cause, fixed it, and the fix is now live.",
+  });
   const response = await withCapturedLogs(() => PATCH(request, context));
 
   assert.equal(response.status, 200);
   assert.deepEqual((await readJson(response)).userNotification, {
-    queued: false,
-    reason: "not_notifiable",
+    queued: true,
+    delivered: true,
   });
-  assert.equal(world.deliveries.length, 0);
+  assert.equal(world.deliveries.length, 1);
+  assert.equal(world.deliveries[0].kind, "feedback_user_completed");
+  assert.equal(world.emails.length, 1);
+  assert.equal(world.emails[0].to, "reporter@example.com");
+  assert.match(world.emails[0].text, /We found the cause/);
+});
+
+test("a scrubbed address (account deletion) means nothing is queued, at any stage", async () => {
+  for (const body of [
+    { status: "reviewing" },
+    { status: "resolved", outcomeCode: "fixed", userReply: "The fix is live now." },
+  ]) {
+    world = freshWorld();
+    const { PATCH } = await loadRoute();
+    world.feedback!.email = null;
+    const { request, context } = patch(world.feedback!.id, body);
+    const response = await withCapturedLogs(() => PATCH(request, context));
+
+    assert.equal(response.status, 200, body.status);
+    assert.deepEqual(
+      (await readJson(response)).userNotification,
+      { queued: false, reason: "no_address" },
+      body.status
+    );
+    assert.equal(world.deliveries.length, 0, body.status);
+    assert.equal(world.emails.length, 0, body.status);
+  }
 });
 
 // --- delivery failure is not a status failure --------------------------------
@@ -641,4 +709,40 @@ test("a non-terminal status change never touches the case", async () => {
   const { request, context } = patch(world.feedback!.id, { status: "reviewing" });
   await withCapturedLogs(() => PATCH(request, context));
   assert.equal(world.autoFixCase.state, "production_verified");
+});
+
+// --- suppression ---------------------------------------------------------------
+
+test("a hard-bounced address is not attempted, and the row says why", async () => {
+  const { PATCH } = await loadRoute();
+  world.suppressions = [{ reason: "hard_bounce", sourceStream: null, expiresAt: null }];
+  const { request, context } = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "The fix is live now, thank you for the report.",
+  });
+  const response = await withCapturedLogs(() => PATCH(request, context));
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await readJson(response)).userNotification, {
+    queued: true,
+    delivered: false,
+  });
+  assert.equal(world.emails.length, 0, "nothing was handed to the provider");
+  assert.equal(world.deliveries[0].status, "abandoned");
+  assert.match(String(world.deliveries[0].lastErrorKind), /suppressed/);
+});
+
+test("an unsubscribe suppression does not block the answer to a report", async () => {
+  const { PATCH } = await loadRoute();
+  world.suppressions = [{ reason: "unsubscribe", sourceStream: "marketing", expiresAt: null }];
+  const { request, context } = patch(world.feedback!.id, {
+    status: "resolved",
+    outcomeCode: "fixed",
+    userReply: "The fix is live now, thank you for the report.",
+  });
+  const response = await withCapturedLogs(() => PATCH(request, context));
+
+  assert.equal(response.status, 200);
+  assert.equal(world.emails.length, 1);
 });
