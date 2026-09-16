@@ -2,7 +2,10 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { ApiSecurityError } from "@/lib/apiSecurity";
-import { LEGACY_CONTINUATION_TITLE } from "@/lib/continuationDisplayTitle";
+import {
+    LEGACY_CONTINUATION_TITLE,
+    readableContinuationSourceTitle,
+} from "@/lib/continuationDisplayTitle";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
 import { SOURCE_LOCK_SUSPENDED_STATUS } from "@/lib/memorySourceLock";
 import {
@@ -356,7 +359,14 @@ export async function listExternalConversations(
             id: row.id,
             importId: row.importId,
             provider: row.provider,
-            title: row.title,
+            // A locked snapshot's title is part of what the lock withholds
+            // (IMPORT-LOCK-TITLE-01), so a list never carries it -- not even to
+            // a browser holding the unlock grant, which keeps this list and
+            // every other place that names the snapshot in agreement
+            // (lib/continuationDisplayTitle.ts). The viewer, past the lock,
+            // shows it.
+            title: readableContinuationSourceTitle(row),
+            titleWithheld: row.password != null,
             externalStableId: row.externalStableId,
             messageCount: row.messageCount,
             contentBytes: asSafeNumber(row.contentBytes),
@@ -889,11 +899,13 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             select: {
                 id: true,
                 title: true,
+                password: true,
                 conversationDigest: true,
                 externalStableId: true,
                 messageCount: true,
                 contentBytes: true,
                 finalized: true,
+                importedAt: true,
                 sourceCreatedAt: true,
                 sourceUpdatedAt: true,
             },
@@ -943,7 +955,12 @@ export async function getExternalImportStatus(userId: string, importId: string) 
             completedAt: row.completedAt?.toISOString() ?? null,
             conversations: staged.map((conversation) => ({
                 id: conversation.id,
-                title: conversation.title,
+                // Withheld for a locked snapshot, as in the list above.
+                title: readableContinuationSourceTitle(conversation),
+                titleWithheld: conversation.password != null,
+                // The date a withheld title is named by, so the screen does not
+                // have to say "locked conversation ( , )".
+                importedAt: conversation.importedAt.toISOString(),
                 conversationDigest: conversation.conversationDigest,
                 externalStableId: conversation.externalStableId,
                 messageCount: conversation.messageCount,

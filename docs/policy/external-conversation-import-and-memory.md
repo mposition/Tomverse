@@ -432,6 +432,12 @@ window·credit·privacy disclosure 적용. 릴리스 B의 memory 사용은 이 b
 - 잠금 해제 시 evidence를 재검증한 뒤 다른 차단 사유가 없으면 이전 상태로
   복귀합니다. lock·unlock·suspension·restore는 audit를 남깁니다.
 - 잠금 상태에서 evidence 원문을 열람하거나 새 chat에서 우회 노출할 수 없습니다.
+- **잠긴 snapshot의 원문 제목도 잠금이 가리는 내용입니다**(IMPORT-LOCK-TITLE-01, 2026-09-15 제품 결정).
+  가져오기 목록(`listExternalConversations`)과 가져오기 상태(`getExternalImportStatus`)는 잠긴 행의
+  `title`을 **보내지 않고**(`null`, `titleWithheld: true`) 브라우저가 해제 grant를 가지고 있어도 같습니다.
+  화면은 공급자·가져온 날짜·잠금 상태로 행을 부릅니다. 제목은 잠금을 통과한 viewer에서만 보이며,
+  이어진 대화 목록·TXT 파일명(`readableContinuationSourceTitle()`)과 같은 규칙입니다. 이미 전달된
+  제목을 회수한다고 약속하지 않으며, 사용자가 직접 저장한 이어진 대화 이름은 이 규칙의 대상이 아닙니다.
 - **삭제는 잠금으로 막지 않습니다.** lock이 지키는 것은 내용 노출이고 삭제는
   내용을 드러내지 않습니다. 반대로 삭제를 막으면 비밀번호를 잊은 snapshot이
   영구히 지워지지 않는 상태가 되어 §13.1의 무조건적 삭제 권리와 §15의

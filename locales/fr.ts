@@ -1435,6 +1435,7 @@ export const fr = {
         viewerMessagesShown: "{shown} messages affichés sur {total}",
         deleteSnapshot: "Supprimer cette version",
         lockedBadge: "Verrouillée",
+        lockedTitle: "Conversation verrouillée ({provider}, {date})",
         lockGateTitle: "Cette conversation est verrouillée",
         lockGateDescription: "Saisissez le mot de passe que vous avez défini pour la lire.",
         lockPasswordLabel: "Mot de passe",
