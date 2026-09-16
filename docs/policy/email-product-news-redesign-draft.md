@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v16)
+# 제품 소식 이메일: 권한과 기계 (초안 v17)
 
 > **이 문서의 지위: 초안입니다.** 승인되지 않았습니다. **S1a는 구현·병합됐습니다**(#1492,
 > [이메일 알림](email-notifications.md) v15).
@@ -14,6 +14,22 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v17 (2026-09-16) — 독립 검토 12회차 반영
+
+12회차(v16 대상)는 C35·C41·C42를 닫힘으로 보고, S1b 세 PR 모두에 남은 결정을 짚어
+reject였습니다. 핵심은 **suppression 한 행이 여러 원인을 담지 못한다**는 것이었고,
+v17은 원인을 따로 보존하는 구조로 바꿉니다. 모두 기술 결정입니다.
+
+| # | 지적 | v17 |
+|---|---|---|
+| **C44** | 순위 하나로 차단 강도와 해제 요건을 함께 표현할 수 없음 | **원인을 append-only로 따로 보존**(`SuppressionCause`). 차단은 활성 원인들의 합, 해제 요건은 가장 강한 원인의 것(7.4) |
+| **C45** | 두 번째 관리자 승인 필요 여부를 잠금 밖에서 판정 | **잠금 안에서** 활성 원인으로 요건을 계산하고, 승인이 **그 원인 id 집합**에 묶여 있어야 삭제. 다르면 `approval_required`(7.4) |
+| **C46** | 삭제 접수 시 "모든 marketing purpose"의 source가 S3에야 생김 | purpose 열거 대신 **`marketing:*` wildcard suppression** — 발송 시 version의 classification이 marketing이면 purpose와 무관하게 막음. 기존 철회도 같은 transaction(7.4) |
+| **C47** | lease 완료·실패 write에 fencing 없음 | claim마다 **`processingLeaseId`** 발급, 성공·실패 갱신은 그 id와 `processedAt IS NULL` 조건부(7.4) |
+| **C48** | provider 재전송 8회로는 10회 종료 조건에 못 닿음 | **내부 sweeper**가 만료된 미처리 행을 claim, 10회에서 `abandonedAt`+incident. 미처리 1시간·webhook 24시간 무수신 incident(7.4) |
+| **C49** | 추가·제거 안내의 template 계약 없음 | **`login_method_linked`·`login_method_unlinked` 두 template**, version은 transaction 전에 확정(7.4) |
+| **C50** | 사건 시각 기준 없음 | 검증된 provider `created_at`, 없으면 최초 `receivedAt`. 원인이 append-only라 덮어쓰기 자체가 없어짐(7.4) |
 
 ### v16 (2026-09-16) — 독립 검토 11회차 반영: S1b 선행 결정
 
@@ -638,13 +654,20 @@ sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은
   manual·privacy request에서 막음, complaint로는 막지 않음 —
   [이메일 알림](email-notifications.md) §13.3)을 받습니다.
 
-**로그인 방법 변경 안내는 standard lane으로 옮깁니다(C36).** 지금은 요청이 끝난 뒤
-직접 보내고 실패하면 incident만 남기므로, 잠금을 못 얻거나 provider가 늦으면 **보안
-안내가 조용히 사라집니다.** 로그인 방법을 추가·제거한 요청의 transaction 안에서
-enqueue하고, 이후 claim·backoff·잠금·시간 예산은 standard lane 규칙을 그대로 따릅니다.
-보안 안내이므로 senderRole은 `security`, 분류는 `transactional`입니다. credential
-lane으로 보내지 않는 이유 — 이것은 자격증명이 아니고, 몇 분 늦어도 의미가 사라지지
-않습니다.
+**로그인 방법 변경 안내는 standard lane으로 옮깁니다(C36, C49).** 지금은 요청이 끝난
+뒤 직접 보내고 실패하면 incident만 남기므로, 잠금을 못 얻거나 provider가 늦으면 **보안
+안내가 조용히 사라집니다.**
+
+- **template은 둘입니다** — `login_method_linked`, `login_method_unlinked`. 추가와
+  제거는 제목·본문이 다르고, registry는 `placeholderPayload` 한 갈래만 해시하므로 한
+  template 안의 분기로는 실제 문안과 `TemplateVersion` artifact가 어긋납니다.
+- 둘 다 `transactional`, senderRole `security`, purpose 없음.
+- **version은 로그인 방법을 바꾸는 transaction 전에 확정**하고(`ensureTemplateVersion`),
+  **변경과 delivery enqueue는 같은 transaction**입니다. 변경이 rollback되면 안내도
+  없고, 변경이 commit되면 안내는 반드시 큐에 있습니다.
+- 이후 claim·backoff·잠금·시간 예산은 standard lane 규칙입니다.
+- credential lane이 아닌 이유 — 이것은 자격증명이 아니고, 몇 분 늦어도 의미가
+  사라지지 않습니다.
 
 **운영자 발송은 모듈로 갈라 둡니다(C41).** 알림 큐 한 파일에 운영자 kind와 고객 kind가
 섞여 있어, 파일 단위 allowlist에 그 파일을 넣으면 같은 파일의 고객 발송이 helper를
@@ -670,7 +693,7 @@ lane으로 보내지 않는 이유 — 이것은 자격증명이 아니고, 몇 
 
 | 요청 유형 | 시점 | 기록 |
 |---|---|---|
-| `deletion` | **접수(생성) transaction 안** | **모든 marketing purpose에 `privacy_request` purpose suppression**, provenance에 request id. `withdrawAllMarketing()`만으로는 부족합니다 — 이미 꺼진 preference는 `already_set`으로 끝나 행을 만들지 않고, `risk_accepted` cohort에는 철회할 동의가 없어 override가 계속 적용됩니다. suppression은 override가 넘지 못하는 blocker입니다(5.6) |
+| `deletion` | **접수(생성) transaction 안** | **`marketing:*` wildcard suppression**(원인 `privacy_request`, provenance에 request id) **그리고** 기존 marketing 철회(preference 끄기, 실제 동의가 있으면 `ConsentRecord(withdrawn)`). 순서: 전역 잠금 → preference·ConsentRecord → suppression, 모두 한 transaction. 철회만으로는 부족합니다 — 이미 꺼진 preference는 행을 만들지 않고, `risk_accepted` cohort에는 철회할 동의가 없어 override가 계속 적용됩니다. suppression은 override가 넘지 못하는 blocker입니다(5.6) |
 | `deletion` | **결과 상태가 `completed && !legalHold`가 되는 모든 갱신** | 전역 `privacy_request` suppression, **같은 transaction**, provenance에 request id. 멱등 — 이미 있으면 그대로 |
 | `access`·`export`·`correction` | — | suppression 없음 |
 
@@ -680,54 +703,84 @@ lane으로 보내지 않는 이유 — 이것은 자격증명이 아니고, 몇 
 - `rejected`로 끝난 삭제 요청은 접수 시의 purpose suppression을 남깁니다. 삭제를
   요청한 사람을 marketing에 되돌리는 것은 보수적인 방향이 아닙니다.
 - `privacy_request` suppression은 기존대로 해제할 수 없는 이유입니다.
+- **`marketing:*`는 purpose가 아니라 분류에 걸립니다.** 발송 판정은 delivery가 고정한
+  `TemplateVersion.classification`이 `marketing`이면 이 행을 적용합니다. 그래서 S3의
+  purpose 표를 기다리지 않고, 나중에 생기는 `release_notes` 같은 purpose도 자동으로
+  막힙니다. `withdrawAllMarketing()`이 purpose마다 따로 transaction을 여는 지금 구조는
+  호출자의 transaction을 받도록 바꿉니다.
 
-**이유 우선순위와 병합(C39)** — suppression 행은 `(address, scope, purposeKey)`마다
-하나라서, 이후 사건이 같은 행을 갱신합니다. 지금은 영구 이유끼리 서로 덮어쓸 수 있어
-`privacy_request`가 hard bounce로 바뀌면 provenance가 사라지고 해제 불가였던 행이
-일반 제거 대상이 됩니다.
+**원인을 따로 보존합니다(C39, C44, C50).** suppression 행은 `(address, scope,
+purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 순위 하나로는 두 가지를
+함께 표현할 수 없습니다 — **발송을 얼마나 막는가**(hard bounce는 transactional도
+막고 complaint는 막지 않음)와 **해제에 무엇이 필요한가**(hard bounce·complaint는 두
+번째 관리자, manual은 한 명). 한쪽으로 병합하면 다른 쪽이 약해집니다.
 
-| 순위 | 이유 | 해제 |
-|---|---|---|
-| 1 | `privacy_request` | 불가 |
-| 2 | `manual` | 관리자 |
-| 3 | `hard_bounce`·`complaint` | 두 번째 관리자 승인 |
-| 4 | `unsubscribe` (purpose) | preference 재활성화 |
-| 5 | `soft_bounce` (만료) | 만료 |
+- **`SuppressionCause`(append-only)** — `(address, scope, purposeKey)`에 대한 원인
+  하나마다 한 행: `reason`, `source`, provenance(delivery·message·request id),
+  `occurredAt`, `expiresAt`, `releasedAt`·`releasedByApprovalId`. 갱신은
+  `releasedAt` 기록뿐입니다.
+- **`SuppressionEntry`는 활성 원인의 요약**이고 원인을 쓰거나 해제하는 같은 잠금
+  안에서 다시 계산합니다. 발송 판정은 요약이 아니라 **활성 원인 목록**을 받습니다 —
+  지금의 `suppressionVerdict()`가 이미 목록을 받는 모양입니다.
+- **차단 효과는 활성 원인들의 합**입니다. hard bounce 뒤에 complaint가 와도
+  transactional은 계속 막힙니다.
+- **해제 요건은 활성 원인 중 가장 강한 것**입니다.
 
-- **새 사건의 순위가 기존보다 낮으면 행을 바꾸지 않습니다.** 같은 순위면 최신
-  사건의 발생 시각·출처로 갱신합니다.
-- **`privacy_request` 행은 어떤 사건으로도 갱신하지 않습니다** — 이유도, provenance의
-  request id도 그대로입니다.
-- 판정은 한 곳(순위 표를 가진 pure 함수)에서 하고 `recordSuppression()`이 부릅니다.
+| 원인 | 해제 요건 |
+|---|---|
+| `privacy_request` | 불가 |
+| `hard_bounce`·`complaint` | 두 번째 관리자 승인 |
+| `manual` | 관리자 |
+| `unsubscribe` (purpose) | preference 재활성화 |
+| `soft_bounce` | 만료 |
 
-**제거도 같은 잠금을 지납니다(C40).**
+- **사건 시각(C50)** — provider 사건은 payload의 `created_at`을 씁니다. ISO 8601로
+  파싱되고 수신 시각보다 5분 넘게 미래가 아닐 때만 받아들이고, 아니면 그 사건이
+  **처음 저장된** `receivedAt`을 씁니다. 원인이 append-only이므로 늦게 온 오래된
+  사건이 새 provenance를 덮는 일 자체가 없습니다. 요약이 "최근 원인"을 보여 줄 때는
+  `occurredAt` 내림차순, 같으면 원인 id 순입니다.
 
-- `removeSuppression()`은 전역(→ purpose) 잠금을 잡고 **잠금 안에서 행과 이유를 다시
-  읽은 뒤** 해제 가능 여부를 판정합니다. 그 사이 privacy request가 같은 행을 강화했으면
-  거절합니다.
-- **preference 재활성화는 자기가 만든 행만 지웁니다** — 그 purpose의 `unsubscribe`
-  이유 행. `manual`·`privacy_request` purpose 행이 있으면 지우지 않고, 켜기 자체를
-  거절합니다(사용자에게는 "이 주소로는 받을 수 없습니다").
+**제거도 같은 잠금을 지나고, 승인은 원인에 묶입니다(C40, C45).**
 
-**webhook 재처리 상태기계(C37)** — 지금은 원본 사건을 먼저 저장하고 적용에 실패하면
-`processingError`만 남깁니다. provider가 재전송하면 unique 충돌이 `duplicate`로 끝나
-**적용을 다시 시도하지 않습니다.** 잠금 대기 초과로 5xx를 돌려도 복구되지 않습니다.
+- `removeSuppression()`은 전역(→ purpose) 잠금을 잡고 **잠금 안에서 활성 원인을 읽어
+  해제 요건을 계산**합니다.
+- **승인은 원인 id 집합에 묶입니다.** 두 번째 관리자 승인 요청은 승인 당시 활성 원인
+  id들을 담고, 삭제는 **잠금 안의 활성 원인 id 집합이 승인이 담은 집합과 같을 때만**
+  진행합니다. 그 사이 원인이 늘었으면(예: soft bounce가 hard bounce로 강화)
+  `approval_required`로 거절하고 새 승인 요청을 시작합니다.
+- 해제는 원인 행에 `releasedAt`·`releasedByApprovalId`를 쓰는 것이고, 요약 행은
+  활성 원인이 없어질 때 사라집니다.
+- **preference 재활성화는 자기가 만든 원인만 해제합니다** — 그 purpose의
+  `unsubscribe` 원인. 같은 purpose 또는 `marketing:*`·전역에 다른 활성 원인이 있으면
+  켜기 자체를 거절합니다(사용자에게는 "이 주소로는 받을 수 없습니다").
+
+**webhook 재처리 상태기계(C37, C47, C48)** — 지금은 원본 사건을 먼저 저장하고 적용에
+실패하면 `processingError`만 남깁니다. provider가 재전송하면 unique 충돌이
+`duplicate`로 끝나 **적용을 다시 시도하지 않습니다.**
 
 | 받은 사건의 행 상태 | 처리 |
 |---|---|
 | 없음 | 새로 만들고 **claim한 상태로** 적용 |
-| `processedAt` 있음 | `duplicate` — 200, 아무것도 안 함 |
-| `processedAt` 없음, claim 없음 또는 lease 만료 | **조건부 UPDATE로 claim** 후 재적용 |
-| `processedAt` 없음, lease 유효 | 다른 처리가 진행 중 — **409**로 응답해 provider가 나중에 재전송 |
+| `processedAt` 또는 `abandonedAt` 있음 | `duplicate` — 200, 아무것도 안 함 |
+| 미처리, claim 없음 또는 lease 만료 | **조건부 UPDATE로 claim** 후 재적용 |
+| 미처리, lease 유효 | 다른 처리가 진행 중 — **409**. sweeper가 뒤를 받칩니다 |
 
-- claim은 `processingStartedAt`(lease 시작)과 `processingAttempts`를 조건부 UPDATE
-  하나로 씁니다. lease는 **writer 잠금 대기(20초) + 여유 = 60초**입니다.
-- 적용이 끝나면 `processedAt`을 쓰고 claim을 비웁니다. 실패하면 `processingError`를
-  쓰고 claim을 비운 뒤 **5xx**를 돌려 provider 재전송을 받습니다.
-- 적용은 멱등이어야 합니다 — suppression은 병합 규칙(위)으로, delivery 상태 갱신은
-  이미 같은 상태면 no-op으로.
-- 같은 사건이 `processingAttempts` 10회를 넘으면 incident를 올리고 더 claim하지
-  않습니다(재전송은 200으로 흡수).
+- **fencing(C47)** — claim은 새 `processingLeaseId`(무작위)·`processingStartedAt`을
+  쓰고 `processingAttempts`를 올리는 조건부 UPDATE 하나입니다. **성공·실패 기록은
+  `WHERE processingLeaseId = 내 id AND processedAt IS NULL`** 조건부이고, 0행이면 그
+  worker의 결과는 버립니다. lease가 만료된 뒤 늦게 끝난 worker는 새 claim을 건드릴 수
+  없습니다.
+- lease는 **60초**(writer 잠금 대기 20초 + 여유).
+- 적용은 멱등이어야 합니다 — 원인은 `(sourceMessageId, reason)` unique로 중복을
+  막고, delivery 상태 갱신은 이미 같은 상태면 no-op입니다.
+- **sweeper(C48)** — provider 재전송은 유한합니다(Resend는 즉시 시도 포함 8회). 그래서
+  **maintenance cron(15분)** 이 `processedAt IS NULL AND abandonedAt IS NULL AND
+  (lease 없음 OR 만료)`인 행을 같은 조건부 claim으로 가져가 재적용합니다.
+- **종료** — `processingAttempts`가 **10**에 이르면 `abandonedAt`을 쓰고 incident를
+  올립니다. 이후 재전송은 200으로 흡수합니다.
+- **incident 두 가지를 더 둡니다** — 수신 후 **1시간** 넘게 미처리인 행이 있을 때, 그리고
+  **24시간 동안 standard·marketing 발송이 있었는데 webhook이 한 건도 오지 않았을 때**
+  (provider가 실패하는 endpoint를 자동 비활성화했을 가능성).
 
 **시간 예산(C31)**
 
@@ -1048,7 +1101,7 @@ EEA·영국을 여는 선행 게이트입니다.
 |---|---|---|---|
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8 | — | 문서 |
 | S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·보존 readiness | **닫힘** | **완료** — #1492 병합. Codex 코드 검토 3회. 보존 기간은 계약대로 1년 |
-| S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, `recordSuppression()` 내부 잠금과 이유 우선순위, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v16) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
+| S1b | **잠금** — 7.4의 writer·remover·sender 목록 전체, `recordSuppression()` 내부 잠금과 이유 우선순위, `sendWithAddressLock()` helper, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard lane 이동, 시간 예산, privacy request suppression(접수·완료·legal hold), webhook 재처리 상태기계 | **닫힘**(7.4, v17) | **착수 가능.** 규모가 커서 PR을 나눕니다(아래). **Codex 검토** |
 | S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
@@ -1062,12 +1115,14 @@ EEA·영국을 여는 선행 게이트입니다.
 
 **S1b의 PR 분할** — 한 PR에 담기에는 경로가 많습니다.
 
-1. **S1b-1** 이유 우선순위, `recordSuppression()`·`removeSuppression()` 잠금, preference
-   재활성화 제한, privacy request suppression(접수·완료·legal hold).
-2. **S1b-2** webhook 재처리 상태기계.
+1. **S1b-1** `SuppressionCause`와 요약 재계산, 원인별 차단·해제 요건,
+   `recordSuppression()`·`removeSuppression()` 잠금과 원인 id에 묶인 승인, preference
+   재활성화 제한, `marketing:*` wildcard, privacy request suppression(접수·완료·legal
+   hold), `withdrawAllMarketing()`의 transaction 수용, provider 사건 시각.
+2. **S1b-2** webhook 재처리 — lease·fencing, sweeper, 종료와 incident 세 가지.
 3. **S1b-3** `sendWithAddressLock()`, standard·credential lane과 알림 큐 고객 kind 전환,
-   시간 예산, 운영자 발송 module 분리와 정적 검사, 로그인 방법 변경 안내의 standard
-   lane 이동.
+   시간 예산, 운영자 발송 module 분리와 정적 검사, `login_method_linked`·
+   `login_method_unlinked` template과 standard lane 이동. S1b-1의 잠금 API 위에 섭니다.
 
 **활성화 전에 닫아야 하는 것** — R3(싱가포르 수신거부 이메일 주소), R2(발송 도메인
 평판). **EEA·영국 soft opt-in 전에** — G.
