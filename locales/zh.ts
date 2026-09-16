@@ -1463,6 +1463,8 @@ export const zh = {
         loadMore: "显示更多",
         previousSnapshots: "{count} 个较早版本",
         exportAll: "全部下载（JSON）",
+        exportLockedNote:
+            "已锁定的对话将不含标题和内容。如需完整内容，请先解锁。",
         exportFailed: "无法下载导出文件。",
         viewerRoleUser: "用户",
         viewerRoleAssistant: "助手",

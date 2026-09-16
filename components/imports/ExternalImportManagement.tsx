@@ -630,6 +630,28 @@ export function ExternalImportManagement() {
                                 </button>
                             )}
                     </div>
+                    {conversationsState.kind === "ready" &&
+                        conversationsState.rows.length > 0 && (
+                            /*
+                              Said before the download, not left for the file
+                              to explain: a locked snapshot leaves as a stub
+                              (docs/policy/external-conversation-import-and-memory.md
+                              §13.5), and someone who took "download all" at its
+                              word could delete the originals believing they had
+                              a full copy.
+
+                              Shown whenever the button is, not only when a
+                              locked row is on screen -- the list is paged, and
+                              a locked snapshot on a page nobody opened is in
+                              the file all the same.
+                            */
+                            <p
+                                className="mt-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400"
+                                data-testid="external-import-export-locked-note"
+                            >
+                                {t("externalImport.exportLockedNote")}
+                            </p>
+                        )}
                     {exportFailed && (
                         <p
                             className="mt-3 text-sm leading-6 text-red-600 dark:text-red-400"
