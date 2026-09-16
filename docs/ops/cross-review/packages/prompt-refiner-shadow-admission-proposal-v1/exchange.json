@@ -115,9 +115,34 @@
       ],
       "guardViolations": [],
       "checkFailures": [],
-      "reviewConclusion": null,
-      "findings": [],
-      "nextAction": "awaiting the reviewer's verdict"
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": ".gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs)",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "Only the four evidence artifacts are LF-pinned; the two new non-evidence paths named by completion criterion 9 (the new TypeScript core and its test) carry no line-ending attribute, so their bytes are not identical in a Windows core.autocrlf=true checkout.",
+          "reproduction": "git check-attr text eol -- lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs → both report \"text: unspecified\" and \"eol: unspecified\", whereas the same command on docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json reports \"text: set\", \"eol: lf\". No digest depends on either new path (neither is in PROMPT_REFINER_SHADOW_SOURCE_PATHS, lib/promptRefinerShadowSource.ts:11-25), and the repo pins only digest-bound paths, so this is a criterion-vs-convention decision for the author rather than a functional break.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The returned proposal is a plain mutable object — only PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS is frozen — so the \"immutable proposal\" property holds at the TypeScript literal-type level but not at runtime for a JS caller.",
+          "reproduction": "node --import tsx -e \"import{proposePromptRefinerShadowStage as p}from './lib/promptRefinerShadowAdmissionCore.ts';import{readFileSync as r}from 'node:fs';const d='docs/ops/prompt-refiner-shadow/evidence/';const x=p({manifestBytes:r(d+'admission-readiness-v1.manifest.json'),reportBytes:r(d+'admission-readiness-v1.report.json'),journalBytes:r(d+'admission-readiness-v1.journal.jsonl'),witnessBytes:r(d+'admission-readiness-v1.journal.jsonl.witness.jsonl'),corpusBytes:r('docs/ops/prompt-refiner-shadow/corpus-v1.json')});x.executionAdmitted=true;x.provenance.corpusDigest='x';console.log(x.executionAdmitted,x.provenance.corpusDigest)\" prints \"true x\". Object.freeze on the proposal and its two nested objects would close this; note existing peers (admitPromptRefinerExecution in lib/promptRefinerExecutionContract.ts) also return unfrozen decisions, so the current shape is consistent with repo practice.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (\".gitattributes\" digest) with .gitattributes:70-78",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The commit that freezes the bundle also edits .gitattributes, which is a member of the bundle's own source allowlist, so the evidence can never be regenerated from this branch — the disclosure is correct, but the bundle is now verify-only rather than reproducible.",
+          "reproduction": "The report pins .gitattributes → 2638c45e7dcb13e22deb22492f0aa9ad3152c82179b89e2e57ed05819aed843e (the f1e1b0c2 bytes). scripts/prompt-refiner-shadow-harness.mjs:140-148 builds `anchored` from `git show <sourceRef>:path` and `current` from the worktree, and lib/promptRefinerShadowSource.ts:84-89 fails `runtime_source_drift` on any inequality; since HEAD adds 10 lines to .gitattributes, re-running the harness with --source-ref f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830 at HEAD fails source-drift instead of reproducing the four files. Nothing to change in this round — docs/ops/prompt-refiner-shadow/evidence/README.md:16-20, docs/ops/prompt-refiner-shadow-harness.md §8 and docs/policy/prompt-refiner-observability.md §10 already state the snapshot-only limitation, and the verifier hard-codes currentCheckoutValidated=false / runtimeSourceRevalidationRequired=true.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: .gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs); open finding: lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return); open finding: docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (\".gitattributes\" digest) with .gitattributes:70-78); the author fixes it and the change is re-reviewed"
     }
   ],
   "changeDigest": "sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
@@ -195,13 +220,38 @@
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand the review prompt (round 0) to the claude reviewer; its verdict must name digest sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
-  "status": "awaiting_review",
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": ".gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs)",
+      "severity": "warning",
+      "basis": "evidence",
+      "claim": "Only the four evidence artifacts are LF-pinned; the two new non-evidence paths named by completion criterion 9 (the new TypeScript core and its test) carry no line-ending attribute, so their bytes are not identical in a Windows core.autocrlf=true checkout.",
+      "reproduction": "git check-attr text eol -- lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs → both report \"text: unspecified\" and \"eol: unspecified\", whereas the same command on docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json reports \"text: set\", \"eol: lf\". No digest depends on either new path (neither is in PROMPT_REFINER_SHADOW_SOURCE_PATHS, lib/promptRefinerShadowSource.ts:11-25), and the repo pins only digest-bound paths, so this is a criterion-vs-convention decision for the author rather than a functional break.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The returned proposal is a plain mutable object — only PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS is frozen — so the \"immutable proposal\" property holds at the TypeScript literal-type level but not at runtime for a JS caller.",
+      "reproduction": "node --import tsx -e \"import{proposePromptRefinerShadowStage as p}from './lib/promptRefinerShadowAdmissionCore.ts';import{readFileSync as r}from 'node:fs';const d='docs/ops/prompt-refiner-shadow/evidence/';const x=p({manifestBytes:r(d+'admission-readiness-v1.manifest.json'),reportBytes:r(d+'admission-readiness-v1.report.json'),journalBytes:r(d+'admission-readiness-v1.journal.jsonl'),witnessBytes:r(d+'admission-readiness-v1.journal.jsonl.witness.jsonl'),corpusBytes:r('docs/ops/prompt-refiner-shadow/corpus-v1.json')});x.executionAdmitted=true;x.provenance.corpusDigest='x';console.log(x.executionAdmitted,x.provenance.corpusDigest)\" prints \"true x\". Object.freeze on the proposal and its two nested objects would close this; note existing peers (admitPromptRefinerExecution in lib/promptRefinerExecutionContract.ts) also return unfrozen decisions, so the current shape is consistent with repo practice.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (\".gitattributes\" digest) with .gitattributes:70-78",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The commit that freezes the bundle also edits .gitattributes, which is a member of the bundle's own source allowlist, so the evidence can never be regenerated from this branch — the disclosure is correct, but the bundle is now verify-only rather than reproducible.",
+      "reproduction": "The report pins .gitattributes → 2638c45e7dcb13e22deb22492f0aa9ad3152c82179b89e2e57ed05819aed843e (the f1e1b0c2 bytes). scripts/prompt-refiner-shadow-harness.mjs:140-148 builds `anchored` from `git show <sourceRef>:path` and `current` from the worktree, and lib/promptRefinerShadowSource.ts:84-89 fails `runtime_source_drift` on any inequality; since HEAD adds 10 lines to .gitattributes, re-running the harness with --source-ref f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830 at HEAD fails source-drift instead of reproducing the four files. Nothing to change in this round — docs/ops/prompt-refiner-shadow/evidence/README.md:16-20, docs/ops/prompt-refiner-shadow-harness.md §8 and docs/policy/prompt-refiner-observability.md §10 already state the snapshot-only limitation, and the verifier hard-codes currentCheckoutValidated=false / runtimeSourceRevalidationRequired=true.",
+      "disposition": "fix_requested"
+    }
+  ],
+  "nextAction": "approved, but a required check failed or a finding is open (open finding: .gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs); open finding: lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return); open finding: docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (\".gitattributes\" digest) with .gitattributes:70-78); the author fixes it and the change is re-reviewed; package round 1 once the change is revised",
+  "status": "awaiting_revision",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-16T23:31:19.497Z",
+  "producedAt": "2026-09-16T23:39:43.477Z",
   "packagedRounds": 1,
   "concludedAtRound": null,
   "lineage": [],
