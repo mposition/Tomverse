@@ -275,6 +275,16 @@ export type Conversation = {
     shareExpiresAt?: string | null;
     messageCount?: number;
     createdAt?: string;
+    /**
+     * Last activity, which is what the sidebar's date headers group by and
+     * what the server already orders the list by.
+     *
+     * Optional because a guest row written before this field existed, and an
+     * image conversation added optimistically before the server answers, do
+     * not have one. `lib/conversationListGrouping.ts` places those where they
+     * claim nothing rather than guessing at today.
+     */
+    updatedAt?: string;
 };
 
 export const MAX_SELECTED_MODELS = 3;

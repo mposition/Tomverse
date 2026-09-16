@@ -1,6 +1,11 @@
 ﻿"use client";
 
 import { Conversation } from "./types";
+import {
+    millisecondsUntilNextDay,
+    partitionConversationRows,
+    type ConversationDateBucket,
+} from "@/lib/conversationListGrouping";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
@@ -186,6 +191,12 @@ export function ChatSidebar({
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
     const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
+    // Collapsed state for the pinned section. Local to the device on purpose:
+    // it is a view preference, not something the account carries.
+    const [isPinnedCollapsed, setIsPinnedCollapsed] = useState(false);
+    // Bumped when the calendar day turns, so a list left open overnight
+    // re-groups instead of calling yesterday "today" until the next render.
+    const [dayTick, setDayTick] = useState(0);
     const [showProjectForm, setShowProjectForm] = useState(false);
     const [projectName, setProjectName] = useState("");
     const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -594,6 +605,14 @@ export function ChatSidebar({
         return () => window.clearTimeout(timer);
     }, [deleteProjectArmedId]);
 
+    useEffect(() => {
+        const timer = window.setTimeout(
+            () => setDayTick((value) => value + 1),
+            millisecondsUntilNextDay()
+        );
+        return () => window.clearTimeout(timer);
+    }, [dayTick]);
+
     const toggleStoredId = (storageKey: string, id: string, setter: (ids: string[]) => void) => {
         let next: string[] = [];
         try {
@@ -817,6 +836,35 @@ export function ChatSidebar({
 
     const projectText = (projectId: string) =>
         projects.find((project) => project.id === projectId)?.name || t("sidebar.uncategorizedProject");
+
+    /*
+      Pinned first, then one header per date.
+
+      Only when the list is showing everything. A filter already narrows the
+      list to one answer, and date headers over a filtered list fragment it into
+      groups of one -- more chrome than rows. The pinned section stays either
+      way: it is where a pinned conversation lives, not a view of the dates.
+    */
+    const showDateHeaders = conversationFilter === "all" && !normalizedSearch;
+    const groupedConversations = partitionConversationRows(
+        filteredConversations.map((conversation) => ({
+            conversation,
+            id: conversation.id,
+            updatedAt: conversation.updatedAt ?? conversation.createdAt ?? null,
+            pinned: pinnedConversationIds.includes(conversation.id),
+        }))
+        // No `now` argument: the clock is read inside the grouping rather than
+        // in this render, which has to stay pure. `dayTick` is what brings the
+        // component back at midnight so that read happens again.
+    );
+    const dateBucketLabel = (bucket: ConversationDateBucket) =>
+        bucket === "today"
+            ? t("sidebar.dateToday")
+            : bucket === "yesterday"
+              ? t("sidebar.dateYesterday")
+              : bucket === "lastSevenDays"
+                ? t("sidebar.dateLastSevenDays")
+                : t("sidebar.dateOlder");
 
     const activeOrganizerSummary = (() => {
         if (conversationFilter === "locked") return helpCopy.lockedFilter;
@@ -1649,7 +1697,57 @@ export function ChatSidebar({
                         {t("sidebar.noConversations")}
                     </div>
                 )}
-                {filteredConversations.map((conv) => {
+                {[
+                    ...(groupedConversations.pinned.length > 0
+                        ? [
+                              {
+                                  key: "pinned",
+                                  header: (
+                                      <button
+                                          type="button"
+                                          data-testid="sidebar-pinned-header"
+                                          aria-expanded={!isPinnedCollapsed}
+                                          onClick={() => setIsPinnedCollapsed((value) => !value)}
+                                          className="flex min-h-8 w-full items-center gap-1.5 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 hover:text-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:text-zinc-200"
+                                      >
+                                          <Pin className="h-3 w-3 shrink-0" aria-hidden="true" />
+                                          <span>{t("sidebar.pinnedSection")}</span>
+                                          <span className="font-semibold text-zinc-400">
+                                              {groupedConversations.pinned.length}
+                                          </span>
+                                          <ChevronDown
+                                              className={`ml-auto h-3.5 w-3.5 shrink-0 transition-transform ${isPinnedCollapsed ? "-rotate-90" : ""}`}
+                                              aria-hidden="true"
+                                          />
+                                      </button>
+                                  ),
+                                  rows: isPinnedCollapsed
+                                      ? []
+                                      : groupedConversations.pinned.map((row) => row.conversation),
+                              },
+                          ]
+                        : []),
+                    ...groupedConversations.groups.map((group) => ({
+                        key: group.bucket,
+                        header: showDateHeaders ? (
+                            <p
+                                data-testid="sidebar-date-header"
+                                data-bucket={group.bucket}
+                                // Sticky so a header costs its height once on
+                                // screen rather than once per group: four groups
+                                // of fixed headers would have eaten the rows the
+                                // shorter row height just bought.
+                                className="sticky top-0 z-[1] bg-zinc-50 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:bg-zinc-950"
+                            >
+                                {dateBucketLabel(group.bucket)}
+                            </p>
+                        ) : null,
+                        rows: group.conversations.map((row) => row.conversation),
+                    })),
+                ].map((section) => (
+                    <div key={section.key} className="space-y-0.5">
+                        {section.header}
+                        {section.rows.map((conv) => {
                     const isActive = currentChatId === conv.id;
                     const isMenuOpen = openMenuId === conv.id;
 
@@ -2156,6 +2254,8 @@ export function ChatSidebar({
                         </div>
                     );
                 })}
+                    </div>
+                ))}
             </div>
 
             {/*

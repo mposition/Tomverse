@@ -83,6 +83,11 @@ export async function GET(req: Request) {
       select: {
         id: true,
         title: true,
+        // Returned because the sidebar groups by it. The list was already
+        // ordered by this column and withheld it, so the client could order
+        // rows it could not date -- and a date header cannot be derived from a
+        // position.
+        updatedAt: true,
         kind: true,
         productKey: true,
         projectId: true,
@@ -172,6 +177,7 @@ export async function GET(req: Request) {
       return {
         id: conv.id,
         title: conv.title,
+        updatedAt: conv.updatedAt.toISOString(),
         kind: conv.kind === "image" ? ("image" as const) : ("chat" as const),
         projectId: conv.projectId || null,
         selectedModels:

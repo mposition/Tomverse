@@ -2795,6 +2795,9 @@ export function ChatPageClient({
           disabledPanels: [],
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
           createdAt: new Date().toISOString(),
+          // A guest row starts its life as its own last activity, so the
+          // sidebar can date it before any answer arrives.
+          updatedAt: new Date().toISOString(),
         };
         setConversations([initialChat]);
         setCurrentChatId(initialChatId);
@@ -3205,6 +3208,9 @@ export function ChatPageClient({
           disabledPanels: [],
           webSearchMode: APP_DEFAULTS.defaultWebSearchMode,
           createdAt: new Date().toISOString(),
+          // A guest row starts its life as its own last activity, so the
+          // sidebar can date it before any answer arrives.
+          updatedAt: new Date().toISOString(),
         };
           setConversations((prev) => [newGuestChat, ...prev]);
         setCurrentChatId(newGuestChat.id);
@@ -4466,6 +4472,9 @@ export function ChatPageClient({
             disabledPanels,
             webSearchMode,
             createdAt: new Date().toISOString(),
+            // A guest row starts its life as its own last activity, so the
+            // sidebar can date it before any answer arrives.
+            updatedAt: new Date().toISOString(),
           };
           justCreatedTitle = initialChat.title;
           setConversations([initialChat]);
