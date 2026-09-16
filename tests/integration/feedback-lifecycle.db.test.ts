@@ -375,6 +375,9 @@ test("account deletion scrubs consent and a pending receipt abandons instead of 
     },
   });
   assert.equal(receipt.status, "abandoned");
-  assert.equal(receipt.lastErrorKind, "source_missing");
+  // Named, not folded into "the source is gone": the address was removed, and
+  // an operator asking why nothing arrived has to be able to tell that from a
+  // deleted report (docs/policy/email-notifications.md §0 v12).
+  assert.equal(receipt.lastErrorKind, "contact_removed");
   assert.equal(unexpectedHostCalls.length, 0, "no send may have been attempted");
 });
