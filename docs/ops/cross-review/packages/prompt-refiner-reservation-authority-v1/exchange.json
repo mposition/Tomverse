@@ -1,0 +1,254 @@
+{
+  "version": "cross-review-v1",
+  "taskId": "prompt-refiner-reservation-authority-v1",
+  "requirement": "Prompt Refiner를 제품에서 활성화하거나 provider를 호출하지 않은 채 첫 shadow 실행을 위한 durable reservation authority를 구현한다. 데이터베이스가 유일한 slot·최악비용 accounting owner여야 하며, 고정 stage 한 개에서 최대 100개의 영구 tombstone과 총 2491600 microUSD만 허용한다. requestId·stageId·canonical contract digest·server-minted reservationId를 정확히 결속하고, stage row→ModelRegistryEntry table SHARE→reservation row 잠금 순서와 잠금 뒤 DB clock을 사용해 runtime model/pricing drift, 5분 TTL, terminal 전이, 1회 consume을 fail-closed한다. 실제 tombstone 집계와 stage counter를 원자적으로 결속하고 direct·batch·unique-conflict·동시 insert가 100-slot/비용 상한을 우회하지 못하게 한다. 기존 Prompt Refiner v1은 admitted:false와 reservation_authority_unavailable을 유지하며 stage seed/admin writer, 제품/API/script runtime caller, provider adapter/model 호출, flag 활성화, Router 결합, 유료 실행은 포함하지 않는다. author는 codex, reviewer는 claude이며 사용자가 승인한 --skip-preflight 예외 아래 Claude Code Max 구독 CLI의 Read·Grep·Glob만 사용한다.",
+  "completionCriteria": [
+    "고정 stage는 prompt-refiner-shadow-v1 한 행뿐이고 0/0 accounting으로 시작한다. 요청당 24916 microUSD, 최대 100개, 총 2491600 microUSD와 approved/closed lifecycle이 DB constraint·trigger·canonical digest에 정확히 고정된다.",
+    "reservation BEFORE INSERT는 정확한 초기 상태·request/stage/digest/cost·5분 TTL을 검증하고 stage를 잠그되 성공 전 accounting을 만들지 않는다. AFTER INSERT statement trigger만 이미 보이는 durable tombstone의 count/sum으로 stage accounting을 갱신하며 direct counter UPDATE, unique conflict, ON CONFLICT DO NOTHING, 다중 insert와 101번째 insert가 phantom slot 또는 초과 지출을 만들지 않는다.",
+    "authority mutation의 잠금 순서는 stage row→ModelRegistryEntry table SHARE→reservation row다. pinned registry row가 없거나 INSERT/UPDATE/DELETE가 경합하는 경우도 runtime model·effective pricing 검증과 consume 사이에 drift가 끼어들 수 없고 실패한 transaction은 reservation과 accounting을 함께 rollback한다.",
+    "requestId·stageId·canonical contract digest·server-minted reservationId 네 identity가 모두 맞아야 한다. 같은 active request는 새 slot 없이 같은 fact를 반환하고 terminal request는 non-success이며 released/expired/consumed tombstone은 삭제·환급·재사용되지 않는다.",
+    "DB trigger가 terminal timestamp를 소유한다. 잠금 뒤 clock_timestamp() 기준으로 조기 expire와 timestamp 위조를 거부하고, deadline을 넘긴 consume/release는 expired tombstone으로 저장하며 consume race에서는 정확히 한 번만 성공한다.",
+    "authority table·반환값은 prompt/content/user/conversation/provider 오류를 저장하지 않는다. migration에는 stage seed가 없고 제품/API/script import, runtime writer, provider/model/API 호출, AppSetting·flag 활성화가 없으며 기존 v1에는 admitted:true 경로가 없다.",
+    "Prisma schema diff는 PromptRefinerReservationStage와 PromptRefinerReservation 신규 model 44줄뿐이고 enum·DB integration lane·bounded retention registry가 migration과 일치한다. 최신 develop의 MemoryExtractionChunk skipped 상태와 다른 기존 계약을 보존한다.",
+    "focused Prompt Refiner 42개, 전체 typecheck, 변경 파일 lint, Prisma validate, model-pricing, enum constraint, DB integration coverage, 문서·정책 참조, strict encoding과 diff whitespace guard가 모두 통과한다. 별도 로컬 PostgreSQL 17에서 최신 112 migrations·drift 0·authority DB 15/15가 확인됐고, full finance 비교의 17개 실패는 base에도 동일한 기존 실패이며 신규 authority 실패는 0이다.",
+    "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 요약을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. 최초 검토와 최대 2회 수정 검토만 허용하며 actionable finding이 남으면 on_hold다.",
+    "Claude 독립 검토는 사용자가 이번 작업에 승인한 --skip-preflight 예외만 사용한다. 같은 프로세스에서 ANTHROPIC_API_KEY와 ANTHROPIC_AUTH_TOKEN을 제거하고 claude auth status가 authMethod=claude.ai, subscriptionType=max임을 확인한 뒤 Claude Code Max 구독 CLI를 Read·Grep·Glob only로 실행한다. Anthropic API key fallback, provider 호출, 과금 benchmark, push·merge·deploy는 승인하지 않는다."
+  ],
+  "baseCommit": "5b4b6c6daead506ffd77a25888abe3a5e932f57c",
+  "roles": {
+    "author": "codex",
+    "reviewer": "claude"
+  },
+  "maxRevisions": 2,
+  "rounds": [
+    {
+      "round": 0,
+      "changeDigest": "sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
+      "commit": "aa270112715c9fbe7c3dd8c8e9efcaf113b53245",
+      "filesChanged": [
+        ".github/workflows/credit-finance-db-integration.yml",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "docs/ui-contracts/prompt-refiner-suggestion.md",
+        "lib/promptRefinerReservationAuthority.ts",
+        "lib/promptRefinerReservationCore.ts",
+        "prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql",
+        "prisma/schema.prisma",
+        "scripts/check-enum-constraints.mjs",
+        "scripts/db-integration-groups.mjs",
+        "scripts/report-unswept-tables-core.mjs",
+        "scripts/run-db-integration-tests.mjs",
+        "tests/integration/prompt-refiner-reservation.db.test.ts",
+        "tests/promptRefinerReservationCore.test.mjs"
+      ],
+      "changeSummary": "Codex가 provider/product 활성화 없이 DB-owned Prompt Refiner reservation authority를 구현했다. 고정 stage는 0/0에서 시작하고 최대 100 tombstone·2491600 microUSD를 AFTER INSERT의 실제 count/sum과 결속한다. exact four-part binding, stage→registry SHARE→reservation 잠금, DB-owned TTL/terminal clock, one-time consume와 영구 tombstone을 구현했으며 v1 admitted:false, no seed/writer/runtime caller/provider를 유지한다. 최신 origin/develop 5b4b6c6d를 merge했고 schema diff는 Prompt Refiner +44/-0이다. 통합 뒤 focused 42/42, typecheck/lint/Prisma/pricing/enum/DB coverage/docs/policy/encoding/diff가 통과했다. 별도 worktree-local PostgreSQL 17에서 fresh 112 migrations, drift 0, authority DB 15/15를 확인하고 삭제했다. full finance 비교의 실패 17개는 base에도 동일한 기존 chat concurrency/rate/image 실패였고 신규 authority 실패는 0이었다. package 생성은 외부 DB, Railway, provider, API, Claude를 호출하지 않는다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1818.0318",
+          "durationMs": 1926
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run typecheck -- --pretty false",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 52739
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 3511
+        },
+        {
+          "rule": "npx prisma validate",
+          "passed": true,
+          "detail": "The schema at prisma\\schema.prisma is valid 🚀",
+          "durationMs": 2268
+        },
+        {
+          "rule": "npm run check:model-pricing",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+          "durationMs": 870
+        },
+        {
+          "rule": "npm run check:enum-constraints",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 93 closed list(s) in the schema — 43 compared against an application list, 16 held only as a TypeScript union, 34 written down only in the database.",
+          "durationMs": 1783
+        },
+        {
+          "rule": "npm run check:db-integration-coverage",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 118 suite(s) in tests/integration/, all 118 named by the runner.",
+          "durationMs": 808
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 868 referenced path(s) across 109 instruction document(s), and 968 path(s) named by comments across 2922 source file(s), all present.",
+          "durationMs": 1633
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4468 citation(s) against 36 policy document(s). 2890 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1351 and 227 predate this change).",
+          "durationMs": 1162
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1771
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.\n   Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 785
+        },
+        {
+          "rule": "node --test tests/unsweptTables.test.mjs",
+          "passed": true,
+          "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 77.6643",
+          "durationMs": 158
+        },
+        {
+          "rule": "git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'",
+          "passed": true,
+          "detail": "",
+          "durationMs": 61
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": null,
+      "findings": [],
+      "nextAction": "awaiting the reviewer's verdict"
+    }
+  ],
+  "changeDigest": "sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
+  "commit": "aa270112715c9fbe7c3dd8c8e9efcaf113b53245",
+  "changeSummary": "Codex가 provider/product 활성화 없이 DB-owned Prompt Refiner reservation authority를 구현했다. 고정 stage는 0/0에서 시작하고 최대 100 tombstone·2491600 microUSD를 AFTER INSERT의 실제 count/sum과 결속한다. exact four-part binding, stage→registry SHARE→reservation 잠금, DB-owned TTL/terminal clock, one-time consume와 영구 tombstone을 구현했으며 v1 admitted:false, no seed/writer/runtime caller/provider를 유지한다. 최신 origin/develop 5b4b6c6d를 merge했고 schema diff는 Prompt Refiner +44/-0이다. 통합 뒤 focused 42/42, typecheck/lint/Prisma/pricing/enum/DB coverage/docs/policy/encoding/diff가 통과했다. 별도 worktree-local PostgreSQL 17에서 fresh 112 migrations, drift 0, authority DB 15/15를 확인하고 삭제했다. full finance 비교의 실패 17개는 base에도 동일한 기존 chat concurrency/rate/image 실패였고 신규 authority 실패는 0이었다. package 생성은 외부 DB, Railway, provider, API, Claude를 호출하지 않는다.",
+  "testResults": [
+    {
+      "command": "node --conditions=react-server --import tsx --test tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+      "passed": true,
+      "output": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1818.0318",
+      "durationMs": 1926
+    }
+  ],
+  "guardRuns": [
+    {
+      "rule": "npm run typecheck -- --pretty false",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false --pretty false\n\nGenerating route types...\n✓ Types generated successfully",
+      "durationMs": 52739
+    },
+    {
+      "rule": "npx eslint lib/promptRefinerReservationAuthority.ts lib/promptRefinerReservationCore.ts scripts/check-enum-constraints.mjs scripts/db-integration-groups.mjs scripts/report-unswept-tables-core.mjs scripts/run-db-integration-tests.mjs tests/integration/prompt-refiner-reservation.db.test.ts tests/promptRefinerReservationCore.test.mjs",
+      "passed": true,
+      "detail": "",
+      "durationMs": 3511
+    },
+    {
+      "rule": "npx prisma validate",
+      "passed": true,
+      "detail": "The schema at prisma\\schema.prisma is valid 🚀",
+      "durationMs": 2268
+    },
+    {
+      "rule": "npm run check:model-pricing",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:model-pricing\n> node --import tsx scripts/check-model-pricing.mjs\n\n\nModel pricing check passed: 36 explicit profiles, 0 model(s) on a conservative fallback, 0 unpriced premium models, 0 register warning(s), 0 expired pending prices.",
+      "durationMs": 870
+    },
+    {
+      "rule": "npm run check:enum-constraints",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:enum-constraints\n> node --conditions=react-server --import tsx scripts/check-enum-constraints.mjs\n\nEnum constraint check passed: 93 closed list(s) in the schema — 43 compared against an application list, 16 held only as a TypeScript union, 34 written down only in the database.",
+      "durationMs": 1783
+    },
+    {
+      "rule": "npm run check:db-integration-coverage",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:db-integration-coverage\n> node scripts/check-db-integration-coverage.mjs\n\nDB integration coverage check passed: 118 suite(s) in tests/integration/, all 118 named by the runner.",
+      "durationMs": 808
+    },
+    {
+      "rule": "npm run check:doc-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 868 referenced path(s) across 109 instruction document(s), and 968 path(s) named by comments across 2922 source file(s), all present.",
+      "durationMs": 1633
+    },
+    {
+      "rule": "npm run check:policy-section-references",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4468 citation(s) against 36 policy document(s). 2890 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1351 and 227 predate this change).",
+      "durationMs": 1162
+    },
+    {
+      "rule": "npm run check:encoding:strict",
+      "passed": true,
+      "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+      "durationMs": 1771
+    },
+    {
+      "rule": "npm run check:data-domain-registry",
+      "passed": true,
+      "detail": "y\\tomverse-chat-data-domain-registry.yaml: 64 data domains, all user-linked models registered.\n   Deletion action: 48 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 55 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+      "durationMs": 785
+    },
+    {
+      "rule": "node --test tests/unsweptTables.test.mjs",
+      "passed": true,
+      "detail": "# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 77.6643",
+      "durationMs": 158
+    },
+    {
+      "rule": "git diff --check 5b4b6c6daead506ffd77a25888abe3a5e932f57c HEAD -- . ':(exclude)docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1'",
+      "passed": true,
+      "detail": "",
+      "durationMs": 61
+    }
+  ],
+  "guardViolations": [],
+  "checkFailures": [],
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand the review prompt (round 0) to the claude reviewer; its verdict must name digest sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
+  "status": "awaiting_review",
+  "failure": null,
+  "holdReason": null,
+  "producedAt": "2026-09-16T09:56:56.200Z",
+  "packagedRounds": 1,
+  "concludedAtRound": null,
+  "lineage": [],
+  "inheritedFindings": [],
+  "headCommit": "aa270112715c9fbe7c3dd8c8e9efcaf113b53245",
+  "worktreeDirty": false,
+  "filesChanged": [
+    ".github/workflows/credit-finance-db-integration.yml",
+    "AGENTS.md",
+    "docs/ops/cross-review/packages/prompt-refiner-reservation-authority-v1.task.json",
+    "docs/ops/tomverse-chat-progress.md",
+    "docs/policy/prompt-refiner-observability.md",
+    "docs/ui-contracts/prompt-refiner-suggestion.md",
+    "lib/promptRefinerReservationAuthority.ts",
+    "lib/promptRefinerReservationCore.ts",
+    "prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql",
+    "prisma/schema.prisma",
+    "scripts/check-enum-constraints.mjs",
+    "scripts/db-integration-groups.mjs",
+    "scripts/report-unswept-tables-core.mjs",
+    "scripts/run-db-integration-tests.mjs",
+    "tests/integration/prompt-refiner-reservation.db.test.ts",
+    "tests/promptRefinerReservationCore.test.mjs"
+  ]
+}
