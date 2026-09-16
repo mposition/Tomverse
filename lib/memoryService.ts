@@ -19,6 +19,8 @@ import {
 } from "@/lib/memoryValidatorCore";
 import { recordMemoryCounter } from "@/lib/memoryMetrics";
 import { lockAccountMemoryItems } from "@/lib/memoryItemLock";
+import { lockCreditAccount } from "@/lib/creditDebt";
+import { settleExtractionRunCredits } from "@/lib/memoryExtractionCredits";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -705,14 +707,44 @@ export async function* iterateMemoryExportItems(userId: string) {
  */
 export async function deleteAllMemories(userId: string) {
     return prisma.$transaction(async (tx) => {
-        // Run rows first, then the memory lock: the order an extraction commit
+        // The credit account first (docs/policy/credit-and-cost-limits.md §9):
+        // cancelling a run refunds its reservation, exactly as a user cancel
+        // does.
+        await lockCreditAccount(tx, userId);
+        // Run rows next, then the memory lock: the order an extraction commit
         // takes them (lib/memoryExtractionCommit.ts locks its run, then
         // persistence takes the memory lock). Taking the memory lock first
         // here made the two transactions wait on each other's first lock.
+        const activeRuns = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "MemoryExtractionRun"
+            WHERE "userId" = ${userId} AND status IN ('pending', 'running')
+            ORDER BY id
+            FOR UPDATE
+        `;
         const cancelledRuns = await tx.memoryExtractionRun.updateMany({
-            where: { userId, status: { in: ["pending", "running"] } },
+            where: {
+                id: { in: activeRuns.map((run) => run.id) },
+                status: { in: ["pending", "running"] },
+            },
             data: { status: "cancelled", leaseExpiresAt: null },
         });
+        /*
+          Settled here, as `cancelMemoryExtractionRun` settles. This used to
+          only mark the runs cancelled: a pending run's reservation then stayed
+          reserved for good, and a running one was settled -- if at all -- by
+          whichever stale worker reported next, which the fenced report in
+          `completeExtractionChunk` no longer lets happen.
+        */
+        for (const run of activeRuns) {
+            const completed = await tx.memoryExtractionChunk.count({
+                where: { runId: run.id, status: "completed" },
+            });
+            await settleExtractionRunCredits(tx, {
+                runId: run.id,
+                outcome: "cancelled",
+                chunksCharged: completed,
+            });
+        }
         await acquireUserMemoryLock(tx, userId);
         const deleted = await tx.memoryItem.deleteMany({ where: { userId } });
         return {
