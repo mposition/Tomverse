@@ -66,6 +66,21 @@ export const suppressionVerdict = (input: {
     return { allowed: false, skipReason: "hard_bounce" };
   }
 
+  if (
+    active.some(
+      (record) =>
+        record.reason === "manual" || record.reason === "privacy_request"
+    )
+  ) {
+    // An operator or a data-subject request said stop. That outranks the
+    // must-reach classes: unlike a bounce or a complaint, it is a decision
+    // somebody made deliberately about this address. Checked before the complaint
+    // branch, which returns for must-reach classes: with several records -- a
+    // global complaint beside a purpose hold, or causes kept apart -- a
+    // complaint must not answer before a hold that outranks it.
+    return { allowed: false, skipReason: "suppressed_complaint" };
+  }
+
   const mustReach =
     input.classification === "transactional" || input.classification === "legal";
 
@@ -91,18 +106,6 @@ export const suppressionVerdict = (input: {
 
   if (active.some((record) => record.reason === "unsubscribe") && !mustReach) {
     return { allowed: false, skipReason: "no_consent" };
-  }
-
-  if (
-    active.some(
-      (record) =>
-        record.reason === "manual" || record.reason === "privacy_request"
-    )
-  ) {
-    // An operator or a data-subject request said stop. That outranks the
-    // must-reach classes: unlike a bounce or a complaint, it is a decision
-    // somebody made deliberately about this address.
-    return { allowed: false, skipReason: "suppressed_complaint" };
   }
 
   return { allowed: true };

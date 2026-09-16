@@ -194,6 +194,8 @@ async function loadRoute(): Promise<{
       suppressionEntry: {
         findMany: async () => [],
       },
+      // The suppression read authority: absent, so entries decide.
+      appSetting: { findUnique: async () => null },
       userSettings: {
         findUnique: async () =>
           world.settingsLanguage ? { language: world.settingsLanguage } : null,

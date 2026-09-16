@@ -10,6 +10,16 @@ import {
   releaseSelectorCauses,
 } from "@/lib/emailSuppressionCauses";
 import {
+  holdSuppressionFence,
+  lockSuppressionAddress,
+  readSuppressionAuthority,
+} from "@/lib/emailSuppressionAuthority";
+import {
+  isActiveCause,
+  releasableBy,
+  removalNeedsApproval,
+} from "@/lib/emailSuppressionAuthorityCore";
+import {
   SOFT_BOUNCE_SUPPRESSION_MS,
   SOFT_BOUNCE_SUPPRESSION_THRESHOLD,
   suppressionVerdict,
@@ -97,6 +107,11 @@ export async function recordSuppression(
   const purposeKey = input.purposeKey ?? GLOBAL_PURPOSE_KEY;
   const scope = purposeKey === GLOBAL_PURPOSE_KEY ? "global" : "purpose";
   const occurredAt = input.occurredAt ?? new Date();
+
+  // Shared fence first: no suppression write may straddle the read-authority
+  // cutover (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  await holdSuppressionFence(client);
+  await lockSuppressionAddress(client, emailAddress);
 
   // The cause first and unconditionally: every event is its own fact, including
   // one the entry's merge rule below declines to record. Marked so the entry
@@ -202,7 +217,11 @@ export const APPROVAL_REQUIRED_SUPPRESSION_REASONS = [
   "complaint",
 ] as const;
 
-export type SuppressionRemovalRefusal = "not_found" | "unliftable";
+/**
+ * `authority_changed`: the read authority moved between choosing a lift path
+ * and taking the fence. Nothing was released; asking again takes the other path.
+ */
+export type SuppressionRemovalRefusal = "not_found" | "unliftable" | "authority_changed";
 
 /**
  * Lifts one suppression, returning what it was so the audit entry can hold it.
@@ -219,6 +238,19 @@ export async function removeSuppression(input: {
   | { removed: false; refusal: SuppressionRemovalRefusal }
 > {
   return prisma.$transaction(async (tx) => {
+    await holdSuppressionFence(tx);
+    // Read under the fence: a cutover that committed after the caller chose
+    // this path means entries no longer decide, and lifting a whole selector
+    // here would release causes the release matrix keeps.
+    if ((await readSuppressionAuthority(tx)) !== "entry") {
+      return { removed: false as const, refusal: "authority_changed" as const };
+    }
+    const found = await tx.suppressionEntry.findUnique({
+      where: { id: input.id },
+      select: { emailAddress: true },
+    });
+    if (!found) return { removed: false as const, refusal: "not_found" as const };
+    await lockSuppressionAddress(tx, found.emailAddress);
     const entry = await tx.suppressionEntry.findUnique({
       where: { id: input.id },
     });
@@ -245,6 +277,129 @@ export async function removeSuppression(input: {
 }
 
 /**
+ * The active causes behind one entry's selector, for deciding how an
+ * administrator may lift it once causes decide.
+ */
+export async function activeCausesForEntry(entryId: string, now: Date = new Date()) {
+  const entry = await prisma.suppressionEntry.findUnique({
+    where: { id: entryId },
+    select: { emailAddress: true, scope: true, purposeKey: true },
+  });
+  if (!entry) return null;
+  const causes = await prisma.suppressionCause.findMany({
+    where: { ...entry, releasedAt: null },
+    select: { id: true, reason: true, expiresAt: true, releasedAt: true },
+    orderBy: { id: "asc" },
+  });
+  const active = causes.filter((cause) => isActiveCause(cause, now));
+  return {
+    entry,
+    causeIds: active.map((cause) => cause.id),
+    reasons: active.map((cause) => cause.reason),
+    needsApproval: removalNeedsApproval(active.map((cause) => cause.reason)),
+  };
+}
+
+export type CauseLiftResult =
+  | {
+      removed: true;
+      entry: Prisma.SuppressionEntryGetPayload<object>;
+      released: Array<{ id: string; reason: string }>;
+      remaining: Array<{ id: string; reason: string }>;
+    }
+  | { removed: false; refusal: SuppressionRemovalRefusal | "approval_stale" };
+
+/**
+ * Lifts an entry's causes by the release matrix, once causes decide.
+ *
+ * Run inside the approved operation. Everything is re-read under the fence and
+ * compared with the cause set the approval was granted for: a cause that
+ * appeared since -- a soft bounce strengthened to a hard bounce -- was not
+ * approved, so the lift is refused and has to be asked for again. The audit
+ * entry and the release are one transaction, so a rolled-back lift leaves no
+ * record of a release that did not happen.
+ *
+ * The entry itself is removed only when no cause remains active; while an
+ * older build may still read entries, an entry with a live cause behind it
+ * keeps blocking there too.
+ */
+export async function liftSuppressionCauses(input: {
+  entryId: string;
+  approvedCauseIds: readonly string[];
+  action: "admin" | "approved_admin";
+  evidence:
+    | { kind: "admin" }
+    | { kind: "dual_approval"; approvalId: string; authorizationAuditLogId: string }
+    | { kind: "sole_admin"; authorizationAuditLogId: string };
+  writeReleaseAudit: (tx: Prisma.TransactionClient) => Promise<string>;
+  now?: Date;
+}): Promise<CauseLiftResult> {
+  const now = input.now ?? new Date();
+  return prisma.$transaction(async (tx) => {
+    await holdSuppressionFence(tx);
+    if ((await readSuppressionAuthority(tx)) !== "causes") {
+      return { removed: false as const, refusal: "authority_changed" as const };
+    }
+    const found = await tx.suppressionEntry.findUnique({
+      where: { id: input.entryId },
+      select: { emailAddress: true },
+    });
+    if (!found) return { removed: false as const, refusal: "not_found" as const };
+    // The address lock before the causes are read, so no cause can appear
+    // between the read and the decision to remove the entry.
+    await lockSuppressionAddress(tx, found.emailAddress);
+    const entry = await tx.suppressionEntry.findUnique({ where: { id: input.entryId } });
+    if (!entry) return { removed: false as const, refusal: "not_found" as const };
+
+    const causes = (
+      await tx.suppressionCause.findMany({
+        where: {
+          emailAddress: entry.emailAddress,
+          scope: entry.scope,
+          purposeKey: entry.purposeKey,
+          releasedAt: null,
+        },
+        select: { id: true, reason: true, expiresAt: true, releasedAt: true },
+        orderBy: { id: "asc" },
+      })
+    ).filter((cause) => isActiveCause(cause, now));
+
+    const current = causes.map((cause) => cause.id).join(",");
+    if (current !== [...input.approvedCauseIds].sort().join(",")) {
+      return { removed: false as const, refusal: "approval_stale" as const };
+    }
+
+    const releasable = causes.filter((cause) => releasableBy(input.action, cause.reason));
+    const remaining = causes.filter((cause) => !releasableBy(input.action, cause.reason));
+    if (releasable.length === 0 && causes.length > 0) {
+      return { removed: false as const, refusal: "unliftable" as const };
+    }
+
+    const releaseAuditLogId = await input.writeReleaseAudit(tx);
+    await markCauseWriter(tx);
+    if (releasable.length > 0) {
+      await tx.suppressionCause.updateMany({
+        where: { id: { in: releasable.map((cause) => cause.id) }, releasedAt: null },
+        data: {
+          releasedAt: now,
+          releaseKind: input.action,
+          releaseEvidence: { ...input.evidence, releaseAuditLogId },
+        },
+      });
+    }
+    if (remaining.length === 0) {
+      await tx.suppressionEntry.delete({ where: { id: entry.id } });
+    }
+    return {
+      removed: true as const,
+      entry,
+      released: releasable.map(({ id, reason }) => ({ id, reason })),
+      remaining: remaining.map(({ id, reason }) => ({ id, reason })),
+    };
+  });
+}
+
+/**
  * Whether this message may go out.
  *
  * Reads every entry for the address -- global and per-purpose -- and hands them
@@ -259,16 +414,35 @@ export async function suppressionCheck(input: {
   now?: Date;
 }): Promise<SuppressionVerdict> {
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
-  const records = await prisma.suppressionEntry.findMany({
-    where: {
-      emailAddress,
-      OR: [
-        { scope: "global" },
-        ...(input.purpose ? [{ scope: "purpose", purposeKey: input.purpose }] : []),
-      ],
-    },
-    select: { reason: true, sourceStream: true, expiresAt: true },
-  });
+  // Which record decides is read on every call; see lib/emailSuppressionAuthority.ts.
+  const authority = await readSuppressionAuthority();
+  const records =
+    authority === "causes"
+      ? await prisma.suppressionCause.findMany({
+          where: {
+            emailAddress,
+            releasedAt: null,
+            OR: [
+              { scope: "global" },
+              // A classification-scope cause stops every message of that
+              // classification, whatever its purpose.
+              { scope: "classification", purposeKey: input.classification },
+              ...(input.purpose ? [{ scope: "purpose", purposeKey: input.purpose }] : []),
+            ],
+          },
+          // Expired soft bounces are filtered by the verdict itself.
+          select: { reason: true, sourceStream: true, expiresAt: true },
+        })
+      : await prisma.suppressionEntry.findMany({
+          where: {
+            emailAddress,
+            OR: [
+              { scope: "global" },
+              ...(input.purpose ? [{ scope: "purpose", purposeKey: input.purpose }] : []),
+            ],
+          },
+          select: { reason: true, sourceStream: true, expiresAt: true },
+        });
 
   return suppressionVerdict({
     classification: input.classification,

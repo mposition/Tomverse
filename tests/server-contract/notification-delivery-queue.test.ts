@@ -92,6 +92,8 @@ const fakePrisma = {
   // Every attempt asks whether the address is suppressed first
   // (docs/policy/email-notifications.md §13.3).
   suppressionEntry: { findMany: async () => [] },
+  // The suppression read authority: absent, so entries decide.
+  appSetting: { findUnique: async () => null },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakePrisma),
   feedback: {
     create: async ({ data }: { data: Record<string, unknown> }) => {

@@ -1,0 +1,107 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-harness-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-shadow-harness-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-shadow-harness-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-16T13:32:04.792Z",
+  "durationMs": 325068,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 18,
+    "cachedInputTokens": 761585,
+    "outputTokens": 24468,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.2354355,
+    "raw": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 119595,
+      "cache_read_input_tokens": 761585,
+      "output_tokens": 24468,
+      "output_tokens_details": {
+        "thinking_tokens": 19536
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 119595,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4938,
+          "cache_read_input_tokens": 112646,
+          "cache_creation_input_tokens": 9749,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 9749
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-16T13:37:29.922Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-harness-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7",
+    "conclusion": "request_changes",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowJournal.ts:487 (eventFrom, run_resumed `resumed.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:665-669 (replay `resumable`) and lib/promptRefinerShadowJournal.ts:847-861 (resume branch appends run_resumed before any remaining-case guard)",
+        "severity": "error",
+        "basis": "evidence",
+        "claim": "A clean interruption after the 16th case terminal but before `run_completed` is reported resumable, yet resuming appends a `run_resumed` event with `remainingCases: 0` that the journal's own replay permanently rejects, so the run can neither complete nor be replayed afterwards — contradicting the documented contract that a clean post-terminal interruption resumes (docs/ops/prompt-refiner-shadow-harness.md section 5).",
+        "reproduction": "In tests/promptRefinerShadowHarness.test.mjs style: `const done = journal(\"final-interruption\"); runPromptRefinerShadowHarness({ corpus, journalPath: done, resume: false }); const full = texts(done); const j = full.journalText.trimEnd().split(\"\\n\"); const w = full.witnessText.trimEnd().split(\"\\n\"); const path = journal(\"final-interrupted\"); const p = promptRefinerShadowPaths(path); writeFileSync(p.journal, j.slice(0, -1).join(\"\\n\") + \"\\n\"); writeFileSync(p.witness, w.slice(0, -1).join(\"\\n\") + \"\\n\");` (drops only the trailing `run_completed` entry and its witness line, i.e. a crash in that window). `replayPromptRefinerShadowJournal` on those two texts reports status `interrupted`, `unknownCases: 0`, `remainingCases: 0`, `resumable: true`. Then `runPromptRefinerShadowHarness({ corpus, journalPath: path, resume: true })` throws `prompt_refiner_shadow_resume_state` *after* writing the new entry, and every later `replayPromptRefinerShadowJournal` of the resulting files throws `prompt_refiner_shadow_resume_state` too. Expected: the resume completes the run, or is refused before any append leaves the journal unreplayable."
+      },
+      {
+        "location": "lib/promptRefinerShadowJournal.ts:446 (eventFrom, run_stopped `stopped.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:902-925 (mismatch stop appends before any remaining-case guard)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "Same root cause on the stop path: a structural or behavioral mismatch on the last corpus case makes the harness write a `run_stopped` event with `remainingCases: 0` that its own replay rejects, so instead of the documented non-resumable `behavioral_fixture_mismatch`/`structural_boundary_violation` stop the operator gets `prompt_refiner_shadow_stop_state` and an unreplayable journal.",
+        "reproduction": "Copy the existing \"a structural or behavioral mismatch stops non-resumably without a call\" test but mutate the last case instead of the first: `const m = structuredClone(corpus); m.cases[15].expected = { status: \"failed\", failureCode: \"invalid_response\", refinedPrompt: null }; redigest(m); const v = validatePromptRefinerShadowCorpus(m); runPromptRefinerShadowHarness({ corpus: v, journalPath: journal(\"last-case-mismatch\"), resume: false });` Actual: throws `prompt_refiner_shadow_stop_state`, and `replayPromptRefinerShadowJournal` on the written files throws the same. Expected: a report with `status: \"stopped\"`, `stopReason: \"behavioral_fixture_mismatch\"`, `resumable: false`, `processedCases: 16`."
+      },
+      {
+        "location": "scripts/prompt-refiner-shadow-harness.mjs:45-51,90-95 (git subprocess) vs tests/promptRefinerShadowHarnessCli.test.mjs:96-104 (in-process network trap)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The no-network trap only patches the CLI process (fetch/http/https/net/tls/dgram), not the `git` child process, so on a partial/blobless clone `git show <sha>:<path>` can lazily fetch objects from the promisor remote — network activity the trap cannot observe or block.",
+        "reproduction": "`git clone --filter=blob:none <remote> shallowish && cd shallowish && npm run shadow:prompt-refiner -- --journal=/tmp/j.jsonl --source-ref=<40-hex>` with the remote reachable; git fetches the allowlisted blobs over the network during the `git show` calls, while the same run under the test's trap reports no network use. A `GIT_NO_LAZY_FETCH=1` / `--filter` guard or an explicit local-objects precondition would close it."
+      },
+      {
+        "location": "scripts/prompt-refiner-shadow-harness.mjs:107",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "`Number(maxCasesText)` accepts non-decimal spellings, so `--max-cases=0x10` and `--max-cases=1e1` are silently taken as 16 and 10 rather than rejected as malformed input (the value is still bounded to 1..16 and safe-integer, so nothing unsafe follows).",
+        "reproduction": "`npm run shadow:prompt-refiner -- --journal=<new.jsonl> --source-ref=<40-hex> --max-cases=0x10` completes all 16 cases; expected an `argument_value_required`-style rejection from a `/^[1-9][0-9]*$/` check."
+      }
+    ],
+    "nextAction": "Guard `remainingCases > 0` before appending `run_resumed`/`run_stopped` (and exclude `remainingCases === 0` from `resumable`, or let that state complete the run) so a final-case interruption or mismatch cannot write an event the replay rejects; re-run the 17 shadow tests with added last-case coverage."
+  }
+}

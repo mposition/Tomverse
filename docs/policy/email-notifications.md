@@ -4,14 +4,45 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v15 (2026-09-16).** 발송 판정 metadata를 `TemplateVersion`으로 옮기고,
-  수신 거부 rate limit과 unsubscribe key 보존 readiness를 고칩니다. 0절 참조.
+- 개정: **v16 (2026-09-17).** suppression 판정의 기준을 원인(`SuppressionCause`)으로
+  옮길 수 있게 합니다 — 런타임 설정, 전환 fence, 해제 행렬. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v16 (2026-09-17) — suppression 판정 기준 전환(배포 B)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+배포 B입니다. 배포 A가 원인을 entry 옆에 쌓았고, 이 배포는 **전환할 수 있게**만 합니다.
+설정을 바꾸기 전까지 동작은 v15와 같습니다.
+
+1. **판정 기준은 AppSetting `email.suppressionReadAuthority`** 입니다. 없거나
+   `causes`가 아니면 `entry`이고, 매 판정마다 읽고 캐시하지 않습니다. `causes`이면
+   활성 원인(해제되지 않고 만료되지 않은 것)을 전역·분류·purpose scope에서 읽습니다.
+2. **전환 fence** — suppression을 쓰거나 해제하는 모든 transaction(`recordSuppression`,
+   `removeSuppression`, 원인 해제, `setPreference`)이 첫 단계에서 공유 advisory 잠금을
+   잡고, 전환 작업이 같은 키를 배타로 잡습니다.
+3. **전환은 `npm run email:suppression-cutover`** — 배타 fence 안에서 entry와 활성
+   원인을 대조하고, **원인이 entry가 막는 발송을 허용하는 selector**(unsafe)가 0이어야
+   설정을 `causes`로 바꿉니다. 원인이 entry보다 더 막는 경우(stricter)는 세지 않습니다 —
+   entry의 병합이 한 영구 이유를 다른 이유로 덮어 잃어버린 기록이고, 그것을 지키는 것이
+   이 변경의 목적입니다. `--repair`는 unsafe selector에 entry의 이유를 원인으로
+   **추가**만 하고 해제하지 않습니다. **배포 B가 모든 인스턴스에 반영된 뒤에만** 실행합니다.
+4. **`causes`에서의 해제는 행위 × 원인 행렬**입니다. 관리자 1명은 manual·soft bounce,
+   승인(이중 또는 1인 예외)은 hard bounce·complaint까지, privacy request는 불가, 사용자의
+   unsubscribe는 preference 재활성화만 풉니다. 승인은 **요청 당시 활성 원인 id 집합**에
+   묶이고, 해제 transaction 안에서 집합이 달라졌으면 `approval_stale`로 거절합니다.
+   해제 감사 행과 원인 해제는 한 transaction이고, 승인 경로는 승인 id와 실행 시작 감사
+   id를 해제 작업에 넘깁니다(`AdminApprovalContext`). 남은 활성 원인이 있으면 entry는
+   지우지 않습니다 — 이전 build가 entry를 읽는 동안에도 막히도록.
+5. **`causes`에서 preference 켜기**는 그 purpose의 unsubscribe만 풀고, 같은 purpose·
+   marketing 분류·전역(soft bounce 제외)에 다른 활성 원인이 있으면 `suppressed`로
+   거절합니다.
+6. **판정 순서 정정** — manual·privacy request를 complaint 분기보다 먼저 봅니다. 기록이
+   여러 개일 때 transactional complaint가 먼저 허용으로 답해 운영자 보류를 넘던 순서였습니다.
 
 ### v15 (2026-09-16) — 템플릿 metadata, 수신 거부 rate limit, key 보존
 

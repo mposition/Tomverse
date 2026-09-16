@@ -2098,6 +2098,7 @@ export const zh = {
             COUNTRY_CONFLICT: "无法确认国家。请选择你目前的居住国家后重试。",
             COUNTRY_UNSUPPORTED: "营销邮件尚未在这个国家开放。",
             CONFIRMATION_UNAVAILABLE: "目前无法确认邮件订阅。请稍后再试。",
+            SUPPRESSED: "此地址无法接收这些邮件。如认为有误，请联系支持团队。",
             SAVE_FAILED: "无法保存邮件设置，请稍后重试。",
         },
         purpose: {
@@ -2146,6 +2147,7 @@ export const zh = {
         doneBody: "谢谢。你可以随时在通知设置中更改或撤回。",
         expiredBody: "此确认链接已失效。请在通知设置中重新发送。",
         invalidBody: "此链接已失效。请打开通知设置选择你要接收的邮件。",
+        suppressedBody: "此地址无法接收这些邮件，因此订阅未确认。如认为有误，请联系支持团队。",
         settingsLink: "打开通知设置",
     },
     privacyPolicy: {

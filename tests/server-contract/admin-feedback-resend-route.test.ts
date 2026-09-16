@@ -151,6 +151,8 @@ async function loadRoute() {
         },
       },
       suppressionEntry: { findMany: async () => [] },
+      // The suppression read authority: absent, so entries decide.
+      appSetting: { findUnique: async () => null },
     };
     mock.module(mod("lib/prisma.ts"), { namedExports: { prisma: fakePrisma } });
   }
