@@ -11,7 +11,6 @@ import {
     clearLockVerificationAttempts,
     clearResourceUnlockCookie,
     consumeLockVerificationAttempt,
-    createResourceUnlockCookie,
     hashConversationPassword,
     lockErrorResponse,
     verifyConversationPassword,
@@ -133,10 +132,21 @@ export async function PUT(
         if (body.password === null && !row.password) {
             // Removing a lock that is not there is not an error worth a code:
             // the caller's intent already holds.
-            return NextResponse.json(
+            //
+            // It still clears the grant. "Every write clears it" has to mean
+            // every write, or the sentence is a description of the paths
+            // somebody happened to check rather than a contract -- and a
+            // caller cannot tell from here whether the lock it is removing was
+            // removed by another tab a moment ago.
+            const settled = NextResponse.json(
                 { locked: false, memoriesSuspended: 0, memoriesRestored: 0, memoriesExpired: 0 },
                 { headers: { "Cache-Control": "no-store" } }
             );
+            settled.headers.append(
+                "Set-Cookie",
+                clearResourceUnlockCookie("external_conversation", conversationId)
+            );
+            return settled;
         }
 
         // Changing or removing an existing lock proves the current password.
@@ -200,24 +210,31 @@ export async function PUT(
         const response = NextResponse.json(result, {
             headers: { "Cache-Control": "no-store" },
         });
-        // Whoever just chose the password has proved it as directly as the
-        // verify endpoint can, so the grant is issued here rather than making
-        // them type it again on the very next read. Removing a lock clears
-        // the grant instead: leaving a stale one behind would silently unlock
-        // a snapshot re-locked with a different password within the TTL.
+        // Every write clears the grant, in all three directions -- set,
+        // change, remove. The native conversation lock has always done this
+        // (`clearConversationUnlockCookie` whenever `password !== undefined`,
+        // app/api/conversations/[conversationId]/route.ts), and this route
+        // used to disagree: it issued a thirty-minute grant on set and on
+        // change, reasoning that whoever just chose the password had proved
+        // it as directly as the verify endpoint can.
+        //
+        // That reasoning is sound about authentication and wrong about what
+        // locking means. The person is not asking to read the snapshot; they
+        // are asking for it to stop being readable. Staging found what the
+        // gap actually looked like: a snapshot locked and then immediately
+        // found by sidebar search, and its text written into a continuation
+        // export -- a file that cannot be recalled, from a grant whose whole
+        // point was to be temporary. Both surfaces were behaving correctly;
+        // they asked whether this browser held a grant, and it did, because
+        // the lock had just handed it one. What was missing was any proof of
+        // the password *after* the lock existed.
+        //
+        // So locking closes the snapshot to its owner too, and the next read
+        // asks for the password. That is the cost, it is the native lock's
+        // cost already, and it is smaller than a lock that does not lock.
         response.headers.append(
             "Set-Cookie",
-            passwordHash
-                ? createResourceUnlockCookie(
-                      "external_conversation",
-                      userId,
-                      conversationId,
-                      passwordHash
-                  )
-                : clearResourceUnlockCookie(
-                      "external_conversation",
-                      conversationId
-                  )
+            clearResourceUnlockCookie("external_conversation", conversationId)
         );
         return response;
     } catch (error) {
