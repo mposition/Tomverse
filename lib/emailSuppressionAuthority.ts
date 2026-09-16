@@ -40,7 +40,7 @@ export async function readSuppressionAuthority(
  * start under one authority and commit under the other.
  */
 export async function holdSuppressionFence(tx: Prisma.TransactionClient) {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${SUPPRESSION_AUTHORITY_FENCE}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${SUPPRESSION_AUTHORITY_FENCE}))`;
 }
 
 /**
@@ -55,10 +55,10 @@ export async function lockSuppressionAddress(
   tx: Prisma.TransactionClient,
   normalizedAddress: string
 ) {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-suppression-address:${normalizedAddress}`}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-suppression-address:${normalizedAddress}`}))`;
 }
 
 /** The cutover's side of the fence: waits for every in-flight writer to finish. */
 export async function holdSuppressionFenceExclusive(tx: Prisma.TransactionClient) {
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${SUPPRESSION_AUTHORITY_FENCE}))`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${SUPPRESSION_AUTHORITY_FENCE}))`;
 }

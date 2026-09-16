@@ -241,6 +241,8 @@ async function loadRoute(): Promise<{
       suppressionEntry: {
         findMany: async () => world.suppressions,
       },
+      // The suppression read authority: absent, so entries decide.
+      appSetting: { findUnique: async () => null },
       feedbackAutoFixCase: {
         updateMany: async ({
           where,
