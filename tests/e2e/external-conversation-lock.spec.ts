@@ -112,7 +112,9 @@ async function mockLockApi(
                         {
                             id: CONVERSATION_ID,
                             provider: "chatgpt",
-                            title: "A locked import",
+                            // Withheld from the list while locked (IMPORT-LOCK-TITLE-01).
+                            title: state.locked ? null : "A locked import",
+                            titleWithheld: state.locked,
                             externalStableId: "stable-1",
                             messageCount: 1,
                             contentBytes: 100,

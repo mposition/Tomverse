@@ -20,6 +20,7 @@ import {
     type ServerReview,
 } from "@/lib/externalImportWizard";
 import { discardResponseBody } from "@/lib/discardResponseBody";
+import { importedConversationTitle } from "@/components/imports/importedConversationTitle";
 
 /**
  * /settings/imports/[importId] — one import's outcome, or the place a sealed
@@ -49,7 +50,9 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 
 type DetailConversation = {
     id: string;
-    title: string;
+    /** `null` for a locked snapshot: the server does not send its title. */
+    title: string | null;
+    importedAt: string;
     conversationDigest: string;
     messageCount: number;
     contentBytes: number;
@@ -151,7 +154,8 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                             // parsed the archive, and the resume screen has no
                             // use for it.
                             rawExternalConversationId: "",
-                            title: conversation.title,
+                            // Unfinalized rows cannot be locked, so a title is always present here.
+                            title: conversation.title ?? "",
                             conversationDigest: conversation.conversationDigest,
                             messageCount: conversation.messageCount,
                             contentBytes: conversation.contentBytes,
@@ -503,7 +507,14 @@ export function ExternalImportDetail({ importId }: { importId: string }) {
                                             className="block rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950/60 dark:hover:bg-zinc-900"
                                         >
                                             <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                                                {conversation.title}
+                                                {importedConversationTitle(
+                                                    {
+                                                        title: conversation.title,
+                                                        provider: detail.provider,
+                                                        importedAt: conversation.importedAt,
+                                                    },
+                                                    t
+                                                )}
                                             </p>
                                             <p className="mt-0.5 text-xs leading-5 text-zinc-500">
                                                 {interpolate(

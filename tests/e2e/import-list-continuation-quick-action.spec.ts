@@ -41,7 +41,9 @@ const listRow = (row: Row) => ({
     id: row.id,
     importId: "qa-import",
     provider: "chatgpt",
-    title: row.title,
+    // As the server answers (IMPORT-LOCK-TITLE-01): a locked row carries no title.
+    title: row.locked ? null : row.title,
+    titleWithheld: row.locked ?? false,
     externalStableId: `stable-${row.id}`,
     messageCount: 6,
     contentBytes: 1024,
@@ -313,6 +315,13 @@ test.describe("continuation quick action in the imports list", () => {
         });
 
         await page.goto("/settings/imports");
+        // Named by what the owner may still see, never by the withheld title.
+        const link = page.getByTestId("external-import-conversation-link");
+        await expect(link).toContainText("잠긴 대화 (ChatGPT,");
+        await expect(link).not.toContainText("Locked source");
+        await expect(
+            page.getByTestId("continuation-quick-action-locked")
+        ).toHaveAttribute("aria-label", /잠긴 대화/);
         await expect(
             page.getByTestId("continuation-quick-action-create")
         ).toHaveCount(0);

@@ -1470,6 +1470,7 @@ export const de = {
         viewerMessagesShown: "{shown} von {total} Nachrichten angezeigt",
         deleteSnapshot: "Diese Version löschen",
         lockedBadge: "Gesperrt",
+        lockedTitle: "Gesperrte Unterhaltung ({provider}, {date})",
         lockGateTitle: "Diese Unterhaltung ist gesperrt",
         lockGateDescription: "Gib das von dir gesetzte Passwort ein, um sie zu lesen.",
         lockPasswordLabel: "Passwort",
