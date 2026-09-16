@@ -81,7 +81,7 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string) => void;
+    onDownload: (id: string, title: string, options?: { includeSource?: boolean }) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
@@ -2080,8 +2080,57 @@ export function ChatSidebar({
                                             </button>
                                         )}
 
+                                        {conv.sourceState && (
+                                            /*
+                                              A continuation's original is a
+                                              separate half of the same
+                                              conversation, so it is a separate
+                                              choice rather than a setting:
+                                              what the file contains is decided
+                                              before it is made, and the item
+                                              that includes it says so and says
+                                              that the file cannot be recalled
+                                              (docs/policy/external-conversation-continuation.md §9).
+                                            */
+                                            <button
+                                                type="button"
+                                                data-testid="conversation-download-with-source"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (canDownload && conv.sourceState !== "deleted") {
+                                                        onDownload(conv.id, conv.title, { includeSource: true });
+                                                        setOpenMenuId(null);
+                                                    }
+                                                }}
+                                                disabled={!canDownload || conv.sourceState === "deleted"}
+                                                className={`${menuItemBase} ${!canDownload || conv.sourceState === "deleted" ? menuItemDisabled : menuItemEnabled}`}
+                                                title={
+                                                    isGuestMode
+                                                        ? t("sidebar.loginRequired")
+                                                        : conv.sourceState === "deleted"
+                                                          ? t("sidebar.downloadSourceDeleted")
+                                                          : !canDownload
+                                                            ? t("modelStatusReasons.upgradeRequired")
+                                                            : ""
+                                                }
+                                            >
+                                                <span className="flex min-w-0 flex-col items-start gap-0.5">
+                                                    <span className="flex items-center gap-2">
+                                                        <Download className={menuIconClass} />
+                                                        <span>{t("sidebar.downloadWithSourceTxt")}</span>
+                                                    </span>
+                                                    <span className="pl-6 text-[11px] font-normal leading-4 text-zinc-500 dark:text-zinc-400">
+                                                        {conv.sourceState === "deleted"
+                                                            ? t("sidebar.downloadSourceDeleted")
+                                                            : t("sidebar.downloadWithSourceHint")}
+                                                    </span>
+                                                </span>
+                                                {!canDownload && <Crown className={crownClass} />}
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
+                                            data-testid="conversation-download"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (canDownload) {
@@ -2095,7 +2144,11 @@ export function ChatSidebar({
                                         >
                                             <span className="flex items-center gap-2">
                                                 <Download className={menuIconClass} />
-                                                <span>{t("sidebar.downloadTxt")}</span>
+                                                <span>
+                                                    {conv.sourceState
+                                                        ? t("sidebar.downloadContinuationOnlyTxt")
+                                                        : t("sidebar.downloadTxt")}
+                                                </span>
                                             </span>
                                             {!canDownload && <Crown className={crownClass} />}
                                         </button>

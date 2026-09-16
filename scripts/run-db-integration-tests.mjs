@@ -353,6 +353,9 @@ run(
     // match cannot take an authorised hit's candidate slot is a property of
     // the SQL and the snapshot it runs in, not of the ranking function.
     "tests/integration/conversation-search.db.test.ts",
+    // The TXT that carries the imported original: one snapshot of two halves,
+    // and permission decided after the bytes exist.
+    "tests/integration/continuation-source-export.db.test.ts",
     "tests/integration/context-manifest-retention.db.test.ts",
     // The only unauthenticated route that serves a customer's transcript.
     "tests/integration/public-share-route.db.test.ts",

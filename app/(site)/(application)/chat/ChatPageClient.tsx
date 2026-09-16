@@ -16,7 +16,7 @@ import { MobileChatShell } from "@/components/chat/MobileChatShell";
 import { prepareChatContextBundle } from "@/lib/chatContextBundleClient";
 import { consumePendingChatProfile } from "@/lib/assistantProfileReturn";
 import { discardResponseBody } from "@/lib/discardResponseBody";
-import { saveResponseAsFile } from "@/lib/browserDownload";
+import { saveResponseAsFile, saveVerifiedResponseAsFile } from "@/lib/browserDownload";
 import { createSharedPendingRequest } from "@/lib/sharedPendingRequest";
 import {
   ComparisonReviewDialog,
@@ -5413,22 +5413,57 @@ export function ChatPageClient({
   
     const blendedConversations = conversations; 
   
-    const handleDownloadConversation = async (convId: string) => {
+    const handleDownloadConversation = async (
+        convId: string,
+        // The sidebar passes the row title it already has; the file is named by
+        // the server from the same row, so it is accepted and ignored here.
+        _title?: string,
+        options: { includeSource?: boolean } = {}
+    ) => {
         if (isGuestMode) return;
         // Fetched and saved from here rather than navigated to. Assigning
         // `location.href` handed the whole outcome to the browser, including
         // the failures: a refusal became a JSON error page the user was
         // navigated to, with the chat gone. See lib/browserDownload.ts.
         try {
-            const response = await fetch(`/api/conversations/${convId}/export`, {
-                cache: "no-store",
-                // The file is named with the date and words the list shows
-                // (lib/continuationTitleContext.ts).
-                headers: exportNamingHeaders(lang),
-            });
+            const response = await fetch(
+                `/api/conversations/${convId}/export${options.includeSource ? "?include=source" : ""}`,
+                {
+                    cache: "no-store",
+                    // The file is named with the date and words the list shows
+                    // (lib/continuationTitleContext.ts).
+                    headers: exportNamingHeaders(lang),
+                }
+            );
             if (!response.ok) {
-                await discardResponseBody(response);
-                showToast(t("sidebar.downloadFailed"), "error");
+                // Each refusal is its own next step: unlock the original, or
+                // download without it. A generic failure would leave the
+                // reader pressing the same item again.
+                const code = await response
+                    .json()
+                    .then((body: { code?: unknown }) => body?.code)
+                    .catch(() => undefined);
+                showToast(
+                    t(
+                        code === "EXPORT_SOURCE_LOCKED"
+                            ? "sidebar.downloadSourceLocked"
+                            : code === "EXPORT_SOURCE_DELETED"
+                              ? "sidebar.downloadSourceDeleted"
+                              : code === "EXPORT_TOO_LARGE"
+                                ? "sidebar.downloadTooLarge"
+                                : "sidebar.downloadFailed"
+                    ),
+                    "error"
+                );
+                return;
+            }
+            if (options.includeSource) {
+                // Verified before it is saved: a partly received transcript
+                // reads as a complete one.
+                const saved = await saveVerifiedResponseAsFile(response, "conversation.txt");
+                if (!saved.saved) {
+                    showToast(t("sidebar.downloadVerifyFailed"), "error");
+                }
                 return;
             }
             await saveResponseAsFile(response, "conversation.txt");
