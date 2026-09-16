@@ -239,6 +239,9 @@ run(
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
+    // The double opt-in against the tables: request, history and queued mail
+    // commit together, and only the click turns a marketing purpose on.
+    "tests/integration/email-consent-confirmation.db.test.ts",
     "tests/integration/email-jurisdiction-policy.db.test.ts",
     // The snapshot purge: which rows lose their personalisation inputs, which
     // keep them, and what survives either way.

@@ -45,10 +45,27 @@ export const EMAIL_CAMPAIGNS_FLAG_KEY = "feature.emailCampaignsEnabled";
 export const EMAIL_CONSENT_RECONFIRM_FLAG_KEY =
   "feature.emailConsentReconfirmEnabled";
 
+/**
+ * The marketing consent confirmation step (double opt-in, §15.2).
+ *
+ * Contract: docs/policy/email-double-opt-in.md.
+ *
+ * What it switches is narrow: whether the preference centre may *ask* for a
+ * confirmation mail. It does not switch the rule. With it off, a consent-based
+ * purpose still cannot be turned on without a confirmation -- the request is
+ * refused rather than recorded as single opt-in -- and the send gate still
+ * refuses an unconfirmed row. So off means "consent cannot be collected yet",
+ * never "consent is collected without confirmation". It is turned on after
+ * `EMAIL_CONSENT_KEYS` is deployed and before marketing is.
+ */
+export const EMAIL_CONSENT_CONFIRMATION_FLAG_KEY =
+  "feature.emailConsentConfirmationEnabled";
+
 export const EMAIL_FEATURE_FLAG_KEYS = [
   EMAIL_MARKETING_FLAG_KEY,
   EMAIL_CAMPAIGNS_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
+  EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
 ] as const;
 
 export type EmailFeatureFlagKey = (typeof EMAIL_FEATURE_FLAG_KEYS)[number];

@@ -799,6 +799,13 @@ npm run check:sending-identity -- --env
      형식과 생성법은 `EMAIL_SNAPSHOT_KEYS`와 같습니다 —
      `docs/ops/email-snapshot-keyring.md` §1~2를 그대로 쓰되 변수 이름만 바꿉니다.
      키가 하나면 `EMAIL_UNSUBSCRIBE_KEY_VERSION`은 두지 않습니다.
+   - **`EMAIL_CONSENT_KEYS`** (2026-09-15 추가) — marketing 동의 확인 링크의 키링.
+     `EMAIL_UNSUBSCRIBE_KEYS`와 **같은 조건으로** `MARKETING_EMAIL_FROM`이 있으면
+     `/api/ready`의 필수 항목입니다(`lib/emailConsentReadiness.ts`). 수신거부 키와
+     **다른 값**을 씁니다 — 두 토큰이 서로를 대신할 수 없어야 하기 때문입니다
+     (docs/policy/email-double-opt-in.md §4.3). production은 이미
+     `MARKETING_EMAIL_FROM`이 있으므로 **double opt-in 코드를 배포하기 전에** 이
+     변수를 먼저 넣습니다.
    - `EMAIL_BUSINESS_*`는 **하나라도 비면 footer 전체가 사라지고** 그 profile의
      모든 메일이 거부됩니다(`lib/emailBusinessIdentity.ts`).
    - `EMAIL_BUSINESS_REGISTRATION_NUMBER`와

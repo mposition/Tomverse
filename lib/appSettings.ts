@@ -35,6 +35,7 @@ import {
 } from "@/lib/voiceInputAccess";
 import {
   EMAIL_CAMPAIGNS_FLAG_KEY,
+  EMAIL_CONSENT_CONFIRMATION_FLAG_KEY,
   EMAIL_CONSENT_RECONFIRM_FLAG_KEY,
   EMAIL_MARKETING_FLAG_KEY,
   emailFeatureEnabledFromValue,
@@ -508,6 +509,20 @@ export async function isEmailCampaignsEnabled(): Promise<boolean> {
  * exist. Exported anyway so the ADR's name resolves to a real accessor rather
  * than to a search with no results, which is the EM-05 finding.
  */
+/**
+ * Whether the preference centre may ask for a marketing consent confirmation
+ * (docs/policy/email-double-opt-in.md). Off does not relax the confirmation
+ * rule; it only means a confirmation cannot be requested yet.
+ */
+export async function isEmailConsentConfirmationEnabled(): Promise<boolean> {
+  if (e2eDatabaseDisabled()) return false;
+  const row = await prisma.appSetting.findUnique({
+    where: { key: EMAIL_CONSENT_CONFIRMATION_FLAG_KEY },
+    select: { value: true },
+  });
+  return emailFeatureEnabledFromValue(row?.value);
+}
+
 export async function isEmailConsentReconfirmEnabled(): Promise<boolean> {
   if (e2eDatabaseDisabled()) return false;
   const row = await prisma.appSetting.findUnique({

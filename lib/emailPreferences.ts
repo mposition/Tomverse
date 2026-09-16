@@ -9,13 +9,16 @@ import {
   EMAIL_PURPOSES,
   LOCKED_EMAIL_PURPOSES,
   consentActionFor,
+  consentConfirmationState,
   defaultPreferenceEnabled,
   preferenceChangeDecision,
   recordsConsent,
+  type ConsentConfirmationState,
   type EmailPurpose,
   type PreferenceChangeRefusal,
 } from "@/lib/emailPreferenceCore";
 import { normalizeCountry } from "@/lib/emailJurisdictionCore";
+import { CONSENT_CONFIRMATION_TTL_MS, consentAddressDigest } from "@/lib/emailConsentToken";
 import {
   normalizeSuppressionAddress,
   recordSuppression,
@@ -61,7 +64,11 @@ export type ConsentCapture =
 export type PreferenceChangeResult =
   | { changed: true; purpose: EmailPurpose; enabled: boolean }
   | { changed: false; reason: PreferenceChangeRefusal["reason"] }
-  | { changed: false; reason: "already_set" };
+  | { changed: false; reason: "already_set" }
+  /** The confirmation named a request that is no longer the latest one. */
+  | { changed: false; reason: "superseded" }
+  /** The account's address is not the one the confirmation link was sent to. */
+  | { changed: false; reason: "address_changed" };
 
 /**
  * Creates the rows a new account starts with.
@@ -98,6 +105,13 @@ export type PreferenceState = {
   locked: boolean;
   grantedAt: Date | null;
   nextConfirmationNoticeAt: Date | null;
+  /**
+   * The double opt-in state for a consent-based purpose, null otherwise
+   * (docs/policy/email-double-opt-in.md §4.1).
+   */
+  confirmation: ConsentConfirmationState | null;
+  /** When the latest confirmation link stops working, while one is pending. */
+  confirmationExpiresAt: Date | null;
 };
 
 export async function readPreferences(userId: string): Promise<PreferenceState[]> {
@@ -109,6 +123,8 @@ export async function readPreferences(userId: string): Promise<PreferenceState[]
       enabled: true,
       grantedAt: true,
       nextConfirmationNoticeAt: true,
+      confirmedAt: true,
+      confirmationRequestedAt: true,
     },
   });
   const byPurpose = new Map(rows.map((row) => [row.purpose, row]));
@@ -117,12 +133,25 @@ export async function readPreferences(userId: string): Promise<PreferenceState[]
   // cannot end up listing them in insertion order.
   return EMAIL_PURPOSES.map((purpose) => {
     const row = byPurpose.get(purpose);
+    const enabled = row?.enabled ?? defaultPreferenceEnabled(purpose);
+    const confirmation = recordsConsent(purpose)
+      ? consentConfirmationState({
+          enabled,
+          confirmedAt: row?.confirmedAt ?? null,
+          confirmationRequestedAt: row?.confirmationRequestedAt ?? null,
+        })
+      : null;
     return {
       purpose,
-      enabled: row?.enabled ?? defaultPreferenceEnabled(purpose),
+      enabled,
       locked: LOCKED_EMAIL_PURPOSES.has(purpose),
       grantedAt: row?.grantedAt ?? null,
       nextConfirmationNoticeAt: row?.nextConfirmationNoticeAt ?? null,
+      confirmation,
+      confirmationExpiresAt:
+        confirmation === "pending" && row?.confirmationRequestedAt
+          ? new Date(row.confirmationRequestedAt.getTime() + CONSENT_CONFIRMATION_TTL_MS)
+          : null,
     };
   });
 }
@@ -141,6 +170,33 @@ export async function readPreferences(userId: string): Promise<PreferenceState[]
  * account and signs up again does not quietly start receiving newsletters
  * because a fresh preference row defaulted them back on.
  */
+/**
+ * Takes the row lock for one preference inside a transaction. Every transition
+ * of a consent-based preference goes through this, so reads and writes of the
+ * confirmation state cannot interleave.
+ */
+export async function lockUserEmail(
+  tx: Prisma.TransactionClient,
+  userId: string
+): Promise<string | null> {
+  const rows = await tx.$queryRaw<Array<{ email: string | null }>>`SELECT "email" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+  return rows[0]?.email ?? null;
+}
+
+/**
+ * Takes the row lock for one preference inside a transaction. Every transition
+ * of a consent-based preference goes through this, so reads and writes of the
+ * confirmation state cannot interleave. Always after `lockUserEmail()`, so the
+ * two locks are taken in one order everywhere.
+ */
+export async function lockEmailPreferenceRow(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  purpose: string
+) {
+  await tx.$queryRaw`SELECT "id" FROM "EmailPreference" WHERE "userId" = ${userId} AND "purpose" = ${purpose} FOR UPDATE`;
+}
+
 export async function setPreference(input: {
   userId: string;
   purpose: string;
@@ -156,12 +212,34 @@ export async function setPreference(input: {
   consentWording?: string | null;
   /** The country the person confirmed in the same opt-in action. */
   confirmedCountry?: string | null;
+  /**
+   * The checked confirmation that authorises switching a consent-based purpose
+   * on (docs/policy/email-double-opt-in.md §5 step 5).
+   *
+   * Only `confirmConsent()` in lib/emailConsentConfirmation.ts passes this, and
+   * only after it has opened a confirmation token. It is honoured only while
+   * `requestId` is still the row's `confirmationRequestId`, checked under the
+   * row lock below, so a token superseded by a newer request -- or cancelled by
+   * switching the purpose off -- confirms nothing. `policyVersionId` is the
+   * policy the request was made under, and it is what the consent record
+   * names: the person agreed under the policy they were shown, not whichever
+   * one is active when they click.
+   */
+  confirmation?: {
+    tokenVersion: string;
+    requestedAt: Date;
+    requestId: string;
+    policyVersionId: string;
+    /** The mailbox the link was sent to, re-checked under the user row lock. */
+    addressDigest: string;
+  };
   now?: Date;
 }): Promise<PreferenceChangeResult> {
   const decision = preferenceChangeDecision({
     purpose: input.purpose,
     enabled: input.enabled,
     ...(input.viaToken === undefined ? {} : { viaToken: input.viaToken }),
+    confirmed: Boolean(input.confirmation),
   });
   if (!decision.allowed) return { changed: false, reason: decision.reason };
 
@@ -178,22 +256,70 @@ export async function setPreference(input: {
   });
   if (!user?.email) return { changed: false, reason: "unknown_purpose" };
 
-  const policyVersionId = await ensureBootstrapPolicyVersion();
+  const policyVersionId =
+    input.confirmation?.policyVersionId ?? (await ensureBootstrapPolicyVersion());
   await ensureDefaultPreferences(input.userId);
 
-  const existing = await prisma.emailPreference.findUnique({
-    where: { userId_purpose: { userId: input.userId, purpose } },
-    select: { enabled: true },
-  });
+  const consentBased = recordsConsent(purpose);
 
-  // Idempotent: the unsubscribe link is followed twice, the form is
-  // double-submitted, the one-click header and the confirmation page both
-  // fire. None of those should add a second withdrawal to the history.
-  if (existing && existing.enabled === input.enabled) {
-    return { changed: false, reason: "already_set" };
-  }
+  // Every transition of this row -- request, confirm, cancel, withdraw --
+  // happens under one row lock, read and write together. Without it a double
+  // click grants twice, a request racing a confirmation undoes it, and a cancel
+  // racing a confirmation leaves `enabled` true with no confirmation.
+  const outcome = await prisma.$transaction(async (tx) => {
+    // The address is read under the user row lock and everything below uses
+    // that value, so a confirmation cannot be recorded against an address that
+    // changed after the link was checked, and a withdrawal suppresses the
+    // address that actually withdrew.
+    const email = await lockUserEmail(tx, input.userId);
+    if (!email) return "no_address" as const;
+    if (
+      input.confirmation &&
+      consentAddressDigest(email) !== input.confirmation.addressDigest
+    ) {
+      return "address_changed" as const;
+    }
+    await lockEmailPreferenceRow(tx, input.userId, purpose);
+    const existing = await tx.emailPreference.findUnique({
+      where: { userId_purpose: { userId: input.userId, purpose } },
+      select: { enabled: true, confirmedAt: true, confirmationRequestId: true },
+    });
+    if (!existing) throw new Error("The preference row was not created.");
 
-  await prisma.$transaction(async (tx) => {
+    if (input.confirmation) {
+      if (existing.confirmationRequestId !== input.confirmation.requestId) {
+        return "superseded" as const;
+      }
+      // A second click on the link that already worked.
+      if (existing.enabled && existing.confirmedAt) return "already_set" as const;
+    } else if (existing.enabled === input.enabled) {
+      // Switching off while only a confirmation is pending: nothing was ever
+      // consented to, so there is nothing to withdraw and no history to write.
+      // Clearing the request is what makes the mailed link stop working.
+      if (!input.enabled && existing.confirmationRequestId) {
+        await tx.emailPreference.update({
+          where: { userId_purpose: { userId: input.userId, purpose } },
+          data: {
+            confirmationRequestedAt: null,
+            confirmationRequestId: null,
+            confirmedAt: null,
+          },
+        });
+        return "cancelled" as const;
+      }
+      // Idempotent: the unsubscribe link is followed twice, the form is
+      // double-submitted, the one-click header and the confirmation page both
+      // fire. None of those should add a second entry to the history.
+      return "already_set" as const;
+    }
+
+    // For a consent-based purpose, "was it on" means "was it confirmed". A row
+    // switched on before the confirmation step existed was never consent in the
+    // sense the send gate uses, so confirming it is the grant, not a re-grant.
+    const wasEffectivelyEnabled = consentBased
+      ? existing.enabled && existing.confirmedAt !== null
+      : existing.enabled;
+
     if (confirmedCountry) {
       await tx.userSettings.upsert({
         where: { userId: input.userId },
@@ -217,26 +343,38 @@ export async function setPreference(input: {
         enabled: input.enabled,
         source: input.source,
         grantedAt: input.enabled ? now : null,
-        ...(input.enabled ? {} : { nextConfirmationNoticeAt: null }),
+        ...(input.enabled
+          ? consentBased
+            ? { confirmedAt: now }
+            : {}
+          : {
+              nextConfirmationNoticeAt: null,
+              // docs/policy/email-double-opt-in.md §8: switching back on after
+              // switching off needs a fresh confirmation.
+              confirmedAt: null,
+              confirmationRequestedAt: null,
+              confirmationRequestId: null,
+            }),
       },
     });
 
-    if (recordsConsent(purpose)) {
+    if (consentBased) {
       await tx.consentRecord.create({
         data: {
           userId: input.userId,
           // The address as it is now. Consent attaches to a mailbox, so a later
-          // address change must not rewrite what this row says (§13.4).
-          emailAddress: normalizeSuppressionAddress(user.email!),
+          // address change must not rewrite what this row says
+          // (docs/policy/email-notifications.md §13.4).
+          emailAddress: normalizeSuppressionAddress(email),
           purpose,
           action: consentActionFor({
-            wasEnabled: existing?.enabled ?? null,
+            wasEnabled: wasEffectivelyEnabled,
             nowEnabled: input.enabled,
           }),
           occurredAt: now,
           // Unresolved rather than guessed. Marketing needs a confirmed
-          // jurisdiction before it sends (§6.3), and recording a guess here
-          // would launder it into evidence.
+          // jurisdiction before it sends (docs/policy/email-notifications.md
+          // §6.3), and recording a guess here would launder it into evidence.
           jurisdiction: input.jurisdiction ?? "ZZ",
           jurisdictionSource: input.jurisdictionSource ?? "unresolved",
           policyVersionId,
@@ -246,6 +384,14 @@ export async function setPreference(input: {
               ? { wordingHash: evidenceHash("wording", input.consentWording) }
               : {}),
             ...(input.deliveryId ? { deliveryId: input.deliveryId } : {}),
+            ...(input.confirmation
+              ? {
+                  confirmedVia: "link",
+                  tokenVersion: input.confirmation.tokenVersion,
+                  requestedAt: input.confirmation.requestedAt.toISOString(),
+                  requestId: input.confirmation.requestId,
+                }
+              : {}),
             via: input.source,
           },
           ipHash: evidenceHash("ip", input.ip),
@@ -253,34 +399,42 @@ export async function setPreference(input: {
         },
       });
     }
+
+    if (!input.enabled) {
+      await recordSuppression(
+        {
+          emailAddress: email,
+          purposeKey: purpose,
+          reason: "unsubscribe",
+          source:
+            input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center",
+          sourceDeliveryId: input.deliveryId ?? null,
+          occurredAt: now,
+        },
+        tx
+      );
+    } else {
+      // Re-enabling clears only this purpose's own hold. A global suppression --
+      // a hard bounce, a complaint, an operator decision -- is not something a
+      // preference toggle may lift (docs/policy/email-notifications.md §12.4).
+      // deleteMany rather than delete: a missing row must not abort the
+      // transaction.
+      await tx.suppressionEntry.deleteMany({
+        where: {
+          emailAddress: normalizeSuppressionAddress(email),
+          scope: "purpose",
+          purposeKey: purpose,
+        },
+      });
+    }
+    return "changed" as const;
   });
 
-  if (!input.enabled) {
-    await recordSuppression({
-      emailAddress: user.email,
-      purposeKey: purpose,
-      reason: "unsubscribe",
-      source:
-        input.source === "unsubscribe_link" ? "unsubscribe_link" : "preference_center",
-      sourceDeliveryId: input.deliveryId ?? null,
-      occurredAt: now,
-    });
-  } else {
-    // Re-enabling clears only this purpose's own hold. A global suppression --
-    // a hard bounce, a complaint, an operator decision -- is not something a
-    // preference toggle may lift, and §12.4 requires dual approval to remove.
-    await prisma.suppressionEntry
-      .delete({
-        where: {
-          emailAddress_scope_purposeKey: {
-            emailAddress: normalizeSuppressionAddress(user.email),
-            scope: "purpose",
-            purposeKey: purpose,
-          },
-        },
-      })
-      .catch(() => undefined);
-  }
+  if (outcome === "no_address") return { changed: false, reason: "unknown_purpose" };
+  if (outcome === "address_changed") return { changed: false, reason: "address_changed" };
+  if (outcome === "superseded") return { changed: false, reason: "superseded" };
+  if (outcome === "already_set") return { changed: false, reason: "already_set" };
+  if (outcome === "cancelled") return { changed: true, purpose, enabled: false };
 
   return { changed: true, purpose, enabled: input.enabled };
 }

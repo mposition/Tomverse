@@ -14,6 +14,7 @@ import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
+import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
   getActiveProviders,
@@ -178,6 +179,12 @@ const readinessResponse = async (head = false) => {
   // broken is an error either way.
   const unsubscribeKeyring = unsubscribeKeyringReadiness();
   const emailUnsubscribeKeyring = unsubscribeKeyring.ready;
+  // The marketing consent confirmation keyring (docs/policy/email-double-opt-in.md
+  // §11 item 10). Same condition as the unsubscribe keyring above: an error
+  // once MARKETING_EMAIL_FROM is set, because from then on a missing key means
+  // nobody can confirm a consent and no marketing can ever be sent.
+  const consentKeyring = consentKeyringReadiness();
+  const emailConsentKeyring = consentKeyring.ready;
   // Who the footer says sent the message. Conditional in the same shape as the
   // unsubscribe keyring, and for the same reason: an unset value drops the
   // whole footer rather than one line, but transactional mail is deliberately
@@ -194,6 +201,7 @@ const readinessResponse = async (head = false) => {
     imageProviderBudget && voiceProviderBudget && voiceModelPrice &&
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
+    emailConsentKeyring &&
     emailBusinessIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
@@ -454,6 +462,27 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-consent-keyring",
+        healthy: emailConsentKeyring,
+        code: "EMAIL_CONSENT_KEYRING_NOT_READY",
+        title: "Marketing consent cannot be confirmed",
+        error:
+          consentKeyring.errors.length > 0
+            ? consentKeyring.errors.map((problem) => problem.message).join(" | ")
+            : consentKeyring.required
+              ? "The consent keyring is configured."
+              : "Marketing sending is not configured, so no consent keyring is required yet.",
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          required: consentKeyring.required,
+          warnings:
+            consentKeyring.warnings.map((problem) => problem.code).join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "security-environment",
         healthy: securityEnvironment,
         code: "SECURITY_ENVIRONMENT_NOT_READY",
@@ -494,6 +523,7 @@ const readinessResponse = async (head = false) => {
         emailSendingIdentity,
         emailSnapshotKeyring,
         emailUnsubscribeKeyring,
+        emailConsentKeyring,
         emailBusinessIdentity,
       },
       traceId,
