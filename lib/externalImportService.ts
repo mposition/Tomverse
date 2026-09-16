@@ -161,10 +161,22 @@ async function loadOwnedImport(
     return row;
 }
 
+/**
+ * Expires one open import.
+ *
+ * Caller contract: the `ExternalImport` row is already held `FOR UPDATE` in
+ * `tx`. Every caller does -- append, seal and finalize through
+ * `loadOwnedImport(..., { forUpdate: true })`, the sweep explicitly -- so the
+ * order is Import, then its snapshots by id, the order `deleteExternalImport`
+ * takes. Deleting the snapshots first, as this used to, held the children while
+ * waiting for the parent a concurrent delete already held while waiting for
+ * the children (task_9d445985).
+ */
 async function expireStagingImport(
     tx: Prisma.TransactionClient,
     importId: string
 ) {
+    await tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE "importId" = ${importId} AND finalized = false ORDER BY id FOR UPDATE`;
     await tx.externalConversation.deleteMany({
         where: { importId, finalized: false },
     });
@@ -1767,15 +1779,32 @@ export async function reconcileExpiredExternalImportStaging(now = new Date()) {
         },
         select: { id: true },
     });
+    let expired = 0;
     for (const row of stale) {
-        await prisma.$transaction(async (tx) => {
+        /*
+          Decided again under the row lock. The candidates were read outside
+          any transaction, and in between the import may have been finalized
+          (IMPORT-STAGING-FINALIZE-01: expiring it then overwrote `completed`
+          with `failed`), deleted, cancelled, or touched by a new batch that
+          moved its idle clock. Only a row that is still open and still past a
+          deadline is expired, and only those are counted.
+        */
+        const didExpire = await prisma.$transaction(async (tx) => {
+            const [current] = await tx.$queryRaw<
+                Array<{ status: string; createdAt: Date; updatedAt: Date }>
+            >`SELECT status, "createdAt", "updatedAt" FROM "ExternalImport" WHERE id = ${row.id} FOR UPDATE`;
+            if (!current || !isOpenImportStatus(current.status) || !isStagingExpired(current, now)) {
+                return false;
+            }
             await expireStagingImport(tx, row.id);
+            return true;
         });
+        if (didExpire) expired += 1;
     }
-    if (stale.length > 0) {
+    if (expired > 0) {
         // §22 staging-cleanup metric. A counter rather than a row aggregate:
         // the expired rows stay owner-deletable, so only the counter survives.
-        await recordExternalImportCounter("staging_expired", stale.length, now);
+        await recordExternalImportCounter("staging_expired", expired, now);
     }
-    return { expiredImports: stale.length };
+    return { expiredImports: expired };
 }
