@@ -130,29 +130,29 @@ type AdmissionEvidenceManifest = {
 };
 
 export type PromptRefinerShadowStageProposal = {
-    schemaVersion: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION;
-    status: "awaiting_explicit_admin_cost_approval";
-    executionAdmitted: false;
-    currentCheckoutValidated: false;
-    runtimeSourceRevalidationRequired: true;
-    evidenceBundleDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST;
-    proposalDigest: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST;
-    provenance: {
+    readonly schemaVersion: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION;
+    readonly status: "awaiting_explicit_admin_cost_approval";
+    readonly executionAdmitted: false;
+    readonly currentCheckoutValidated: false;
+    readonly runtimeSourceRevalidationRequired: true;
+    readonly evidenceBundleDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST;
+    readonly proposalDigest: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST;
+    readonly provenance: Readonly<{
         sourceRef: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF;
         sourceIdentityDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST;
         corpusDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
         harnessVersion: typeof PROMPT_REFINER_SHADOW_HARNESS_VERSION;
         journalSchemaVersion: typeof PROMPT_REFINER_SHADOW_JOURNAL_VERSION;
-    };
-    reservationStage: {
+    }>;
+    readonly reservationStage: Readonly<{
         stageId: typeof PROMPT_REFINER_RESERVATION_STAGE_ID;
         contractDigest: typeof PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST;
         perRequestCostMicroUsd: typeof PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD;
         maxReservations: typeof PROMPT_REFINER_SHADOW_MAX_DISPATCHES;
         costCeilingMicroUsd: typeof PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD;
         reservationTtlMs: typeof PROMPT_REFINER_RESERVATION_TTL_MS;
-    };
-    acknowledgements: readonly (typeof PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS)[number][];
+    }>;
+    readonly acknowledgements: readonly (typeof PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS)[number][];
 };
 
 function fail(code: string): never {
@@ -589,6 +589,41 @@ function unsignedProposal(): Omit<
     };
 }
 
+function freezeTrustedProposal(
+    proposal: Omit<PromptRefinerShadowStageProposal, "proposalDigest">
+): PromptRefinerShadowStageProposal {
+    const provenance = Object.freeze({
+        sourceRef: proposal.provenance.sourceRef,
+        sourceIdentityDigest: proposal.provenance.sourceIdentityDigest,
+        corpusDigest: proposal.provenance.corpusDigest,
+        harnessVersion: proposal.provenance.harnessVersion,
+        journalSchemaVersion: proposal.provenance.journalSchemaVersion,
+    });
+    const reservationStage = Object.freeze({
+        stageId: proposal.reservationStage.stageId,
+        contractDigest: proposal.reservationStage.contractDigest,
+        perRequestCostMicroUsd:
+            proposal.reservationStage.perRequestCostMicroUsd,
+        maxReservations: proposal.reservationStage.maxReservations,
+        costCeilingMicroUsd: proposal.reservationStage.costCeilingMicroUsd,
+        reservationTtlMs: proposal.reservationStage.reservationTtlMs,
+    });
+    const acknowledgements = Object.freeze([...proposal.acknowledgements]);
+    return Object.freeze({
+        schemaVersion: proposal.schemaVersion,
+        status: proposal.status,
+        executionAdmitted: proposal.executionAdmitted,
+        currentCheckoutValidated: proposal.currentCheckoutValidated,
+        runtimeSourceRevalidationRequired:
+            proposal.runtimeSourceRevalidationRequired,
+        evidenceBundleDigest: proposal.evidenceBundleDigest,
+        proposalDigest: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
+        provenance,
+        reservationStage,
+        acknowledgements,
+    });
+}
+
 /**
  * Validates the frozen evidence and returns only a content-free proposal. A
  * successful return still has executionAdmitted=false and carries no approval
@@ -663,8 +698,5 @@ export function proposePromptRefinerShadowStage(
     if (proposalDigest !== PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST) {
         fail("proposal_digest_drift");
     }
-    return {
-        ...proposal,
-        proposalDigest: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
-    };
+    return freezeTrustedProposal(proposal);
 }

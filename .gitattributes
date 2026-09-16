@@ -76,3 +76,8 @@ scripts/prompt-refiner-shadow-harness.mjs text eol=lf
 /docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json text eol=lf
 /docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl text eol=lf
 /docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl text eol=lf
+
+# Admission proposal implementation paths are pinned narrowly for reproducible
+# review bytes without changing the rest of lib/, tests/, or nested docs.
+/lib/promptRefinerShadowAdmissionCore.ts text eol=lf
+/tests/promptRefinerShadowAdmissionCore.test.mjs text eol=lf

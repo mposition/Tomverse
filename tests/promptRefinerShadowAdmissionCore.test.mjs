@@ -169,6 +169,56 @@ test("checked-in evidence emits only the fixed content-free proposal", () => {
     );
 });
 
+test("the trusted proposal is deeply immutable without freezing shared constants", () => {
+    const proposal = proposePromptRefinerShadowStage(checkedIn());
+    const before = JSON.stringify(proposal);
+    assert.equal(Object.isFrozen(proposal), true);
+    assert.equal(Object.isFrozen(proposal.provenance), true);
+    assert.equal(Object.isFrozen(proposal.reservationStage), true);
+    assert.equal(Object.isFrozen(proposal.acknowledgements), true);
+    assert.notEqual(
+        proposal.acknowledgements,
+        PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
+        "the returned array must be a frozen clone, not the exported constant"
+    );
+
+    const mutations = [
+        () => {
+            proposal.status = "mutated";
+        },
+        () => {
+            proposal.provenance = {};
+        },
+        () => {
+            proposal.provenance.corpusDigest = "mutated";
+        },
+        () => {
+            proposal.reservationStage = {};
+        },
+        () => {
+            proposal.reservationStage.costCeilingMicroUsd = 0;
+        },
+        () => {
+            proposal.acknowledgements = [];
+        },
+        () => {
+            proposal.acknowledgements[0] = "mutated";
+        },
+        () => {
+            proposal.acknowledgements.push("mutated");
+        },
+    ];
+    for (const mutate of mutations) {
+        assert.throws(mutate, TypeError);
+    }
+    assert.equal(JSON.stringify(proposal), before);
+    assert.equal(
+        proposal.proposalDigest,
+        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
+    );
+    assert.deepEqual(proposePromptRefinerShadowStage(checkedIn()), proposal);
+});
+
 test("evidence files contain no corpus prompt, fixture output, or refined output", () => {
     const corpus = JSON.parse(bytes(paths.corpus).toString("utf8"));
     const evidence = [
@@ -749,13 +799,18 @@ test("checked manifest names its strict version and exact immutable source", () 
     );
 });
 
-test("only the four immutable evidence artifacts are pinned to LF", () => {
-    const pinned = [
+test("only the admission evidence and implementation paths are pinned to LF", () => {
+    const evidencePinned = [
         "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
         "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
         "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
         "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
     ];
+    const implementationPinned = [
+        "lib/promptRefinerShadowAdmissionCore.ts",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs",
+    ];
+    const pinned = [...evidencePinned, ...implementationPinned];
     const attributes = (path) => {
         const result = spawnSync(
             "git",
@@ -779,6 +834,14 @@ test("only the four immutable evidence artifacts are pinned to LF", () => {
     }
     assert.deepEqual(
         attributes("docs/ops/prompt-refiner-shadow/evidence/README.md"),
+        { text: "unspecified", eol: "unspecified" }
+    );
+    assert.deepEqual(
+        attributes("docs/ops/prompt-refiner-shadow/evidence/nested/example.md"),
+        { text: "unspecified", eol: "unspecified" }
+    );
+    assert.deepEqual(
+        attributes("docs/ops/prompt-refiner-shadow/nested/example.md"),
         { text: "unspecified", eol: "unspecified" }
     );
 
