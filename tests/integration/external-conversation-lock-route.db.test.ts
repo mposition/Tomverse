@@ -197,7 +197,7 @@ after(async () => {
 
 /* --------------------------------------------------------------- setting it */
 
-test("setting a lock stores it, suspends the memory and returns a usable grant", async () => {
+test("setting a lock stores it, suspends the memory and closes the read", async () => {
     const { conversation, memory, user } = await seedAccount();
 
     const response = await lockRoute.PUT(
@@ -214,18 +214,24 @@ test("setting a lock stores it, suspends the memory and returns a usable grant",
     });
     assert.equal(await statusOf(memory.id), "suspended_by_source_lock");
 
-    // The grant is issued here rather than making the owner retype the
-    // password they just chose, so it has to actually open the read.
+    // Locking closes the snapshot to the person who locked it, exactly as the
+    // native conversation lock does. This route used to hand back a live
+    // thirty-minute grant here, and the read below is the reason that was
+    // wrong rather than merely inconsistent: a grant reaches every surface
+    // that consults one, so a snapshot locked a second ago stayed searchable
+    // and stayed exportable into a file that cannot be recalled.
     const cookie = grantFrom(response);
-    assert.ok(cookie);
+    assert.ok(cookie, "the route still speaks about the grant");
+    assert.ok(cookie.endsWith("="), `expected a cleared cookie, got ${cookie}`);
     assert.ok(cookie.startsWith("tomverse_unlock_external_conversation_"));
-    const view = await getExternalConversation(user.id, conversation.id, {
-        request: new Request("https://tomverse.test/", {
-            headers: { cookie },
+    await assert.rejects(
+        getExternalConversation(user.id, conversation.id, {
+            request: new Request("https://tomverse.test/", {
+                headers: { cookie },
+            }),
         }),
-    });
-    assert.equal(view.locked, true);
-    assert.equal(view.messages.length, 1);
+        (error: { code?: string }) => error.code === "CONVERSATION_LOCKED"
+    );
 });
 
 test("setting a lock does not ask for a password that does not exist yet", async () => {
@@ -321,7 +327,7 @@ test("a change with no password at all does not spend an attempt", async () => {
     assert.equal(verify.status, 200, "the budget was never touched");
 });
 
-test("changing a lock with the current password issues a grant for the new one", async () => {
+test("changing a lock replaces the password and hands back no grant", async () => {
     const { conversation } = await seedAccount();
     await lockRoute.PUT(
         jsonRequest({ password: PASSWORD }),
@@ -336,6 +342,8 @@ test("changing a lock with the current password issues a grant for the new one",
         context(conversation.id)
     );
     assert.equal(response.status, 200);
+    const cookie = grantFrom(response);
+    assert.ok(cookie?.endsWith("="), `expected a cleared cookie, got ${cookie}`);
 
     const stale = await verifyRoute.POST(
         jsonRequest({ password: PASSWORD }),
@@ -408,6 +416,13 @@ test("removing a lock that is not set is a no-op, not an error", async () => {
         memoriesRestored: 0,
         memoriesExpired: 0,
     });
+    // This branch returns before the write, and it clears the grant anyway.
+    // "Every write clears it" has to hold on the path nobody thinks about, or
+    // it is a description of the paths somebody checked rather than a rule --
+    // and the caller cannot know the lock was not removed by another tab a
+    // moment before this request arrived.
+    const cookie = grantFrom(response);
+    assert.ok(cookie?.endsWith("="), `expected a cleared cookie, got ${cookie}`);
 });
 
 /* -------------------------------------------------------------- verifying it */
