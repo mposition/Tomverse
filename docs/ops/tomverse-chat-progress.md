@@ -1022,7 +1022,7 @@ flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
 | C19–C20 Refiner·Planner·품질 평가 | **약 41%** (직전 약 38%, durable authority 구현 반영) |
 | 구현 | 성공한 INSERT와 실제 tombstone 집계에 결속된 DB accounting·stage/reservation lifecycle 포함 고정 digest·stage→registry→reservation 잠금·명시적 UTC DB-owned terminal clock·SQL limit으로 제한된 expiry lock footprint·원자 slot/cost·active/terminal idempotency·1회 consume·영구 tombstone 구현 |
 | 로컬 검증 | Prompt Refiner focused 42/42, 신규 DB integration 17/17, 최신 `origin/develop` 동기화 뒤 전용 로컬 PostgreSQL fresh migration 112개·drift 0, typecheck·대상 lint·enum/DB coverage 통과. 같은 Prisma formatter를 pristine `origin/develop`에 적용해도 기존 구간 54행씩 바뀌는 baseline drift를 확인했으며, 이 변경은 그 unrelated churn을 포함하지 않고 신규 model block만 canonical style로 유지 |
-| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 15개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
+| 전체 finance lane | 직전 trigger 설계에서 203개 중 186 pass·17 fail이었고 당시 authority 13개는 모두 통과했다. 이번 최종 DB 경계 보강 뒤에는 전용 17개 suite를 fresh DB에서 통과시켰으며 full lane 재실행은 통합 CI 몫이다. 기존 실패 17개는 변경 범위 밖 chat concurrency/rate/image concurrency 항목이었다. |
 | 독립 검토·통합 CI | 대기 — 구현 완료 뒤 Claude 읽기 전용 검토와 Linux CI 필요 |
 | 병합·배포·공개 | 미수행. provider/API/model 호출 0, stage seed/writer 0, v1 admission·flag 변경 0 |
 
