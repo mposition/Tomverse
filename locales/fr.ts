@@ -2070,6 +2070,7 @@ export const fr = {
             COUNTRY_CONFLICT: "Le pays n'a pas pu être confirmé. Sélectionnez votre résidence actuelle et réessayez.",
             COUNTRY_UNSUPPORTED: "Les e-mails marketing ne sont pas encore disponibles dans ce pays.",
             CONFIRMATION_UNAVAILABLE: "Les abonnements par e-mail ne peuvent pas être confirmés pour le moment. Réessayez plus tard.",
+            SUPPRESSED: "Cette adresse ne peut pas recevoir ces e-mails. Contactez le support si vous pensez qu'il s'agit d'une erreur.",
             SAVE_FAILED: "Impossible d'enregistrer vos réglages e-mail. Réessayez dans un instant.",
         },
         purpose: {
@@ -2118,6 +2119,7 @@ export const fr = {
         doneBody: "Merci. Vous pouvez modifier ou retirer ce choix à tout moment dans vos paramètres de notification.",
         expiredBody: "Ce lien de confirmation a expiré. Envoyez-en un nouveau depuis vos paramètres de notification.",
         invalidBody: "Ce lien n'est plus valide. Ouvrez vos paramètres de notification pour choisir ce que vous recevez.",
+        suppressedBody: "Cette adresse ne peut pas recevoir ces e-mails, l'abonnement n'a donc pas été confirmé. Contactez le support si vous pensez qu'il s'agit d'une erreur.",
         settingsLink: "Ouvrir les paramètres de notification",
     },
     privacyPolicy: {

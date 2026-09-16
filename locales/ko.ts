@@ -2069,6 +2069,7 @@ export const ko = {
             COUNTRY_CONFLICT: "국가를 확인하지 못했습니다. 현재 거주 국가를 선택하고 다시 시도해 주세요.",
             COUNTRY_UNSUPPORTED: "이 국가에는 아직 마케팅 이메일을 제공하지 않습니다.",
             CONFIRMATION_UNAVAILABLE: "지금은 이메일 수신 동의를 확인할 수 없습니다. 나중에 다시 시도해 주세요.",
+            SUPPRESSED: "이 주소로는 이 이메일을 받을 수 없습니다. 잘못된 것 같다면 고객지원에 문의해 주세요.",
             SAVE_FAILED: "이메일 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.",
         },
         purpose: {
@@ -2117,6 +2118,7 @@ export const ko = {
         doneBody: "감사합니다. 알림 설정에서 언제든지 변경하거나 철회할 수 있습니다.",
         expiredBody: "확인 링크가 만료되었습니다. 알림 설정에서 새 확인 메일을 보내 주세요.",
         invalidBody: "더 이상 유효하지 않은 링크입니다. 알림 설정에서 받을 이메일을 선택해 주세요.",
+        suppressedBody: "이 주소로는 이 이메일을 받을 수 없어 수신 동의가 확인되지 않았습니다. 잘못된 것 같다면 고객지원에 문의해 주세요.",
         settingsLink: "알림 설정 열기",
     },
     privacyPolicy: {

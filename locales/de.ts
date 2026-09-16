@@ -2073,6 +2073,7 @@ export const de = {
             COUNTRY_CONFLICT: "Das Land konnte nicht bestätigt werden. Wählen Sie Ihren aktuellen Wohnsitz und versuchen Sie es erneut.",
             COUNTRY_UNSUPPORTED: "Für dieses Land sind Marketing-E-Mails noch nicht verfügbar.",
             CONFIRMATION_UNAVAILABLE: "E-Mail-Abonnements können derzeit nicht bestätigt werden. Versuchen Sie es später erneut.",
+            SUPPRESSED: "Diese Adresse kann diese E-Mails nicht empfangen. Wenden Sie sich an den Support, falls das ein Fehler ist.",
             SAVE_FAILED: "Ihre E-Mail-Einstellungen konnten nicht gespeichert werden. Versuchen Sie es gleich noch einmal.",
         },
         purpose: {
@@ -2121,6 +2122,7 @@ export const de = {
         doneBody: "Vielen Dank. Sie können dies jederzeit in Ihren Benachrichtigungseinstellungen ändern oder widerrufen.",
         expiredBody: "Dieser Bestätigungslink ist abgelaufen. Senden Sie einen neuen über Ihre Benachrichtigungseinstellungen.",
         invalidBody: "Dieser Link ist nicht mehr gültig. Öffnen Sie Ihre Benachrichtigungseinstellungen, um auszuwählen, was Sie erhalten.",
+        suppressedBody: "Diese Adresse kann diese E-Mails nicht empfangen, daher wurde das Abonnement nicht bestätigt. Wenden Sie sich an den Support, falls das ein Fehler ist.",
         settingsLink: "Benachrichtigungseinstellungen öffnen",
     },
     privacyPolicy: {

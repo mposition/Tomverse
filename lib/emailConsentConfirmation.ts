@@ -261,6 +261,7 @@ export type ConsentConfirmResult =
         | "superseded"
         | "address_changed"
         | "country_not_allowed"
+        | "suppressed"
         | "disabled"
         | "keys_missing";
     };
@@ -355,5 +356,6 @@ export async function confirmConsent(input: {
     return { confirmed: true, purpose: payload.purpose, alreadyConfirmed: true };
   }
   if (result.reason === "address_changed") return { confirmed: false, reason: "address_changed" };
+  if (result.reason === "suppressed") return { confirmed: false, reason: "suppressed" };
   return { confirmed: false, reason: "superseded" };
 }

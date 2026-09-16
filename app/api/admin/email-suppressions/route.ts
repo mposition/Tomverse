@@ -23,10 +23,13 @@ import { suppressionRemovalProblem } from "@/lib/adminEmailDeliveryFilters";
 import {
   APPROVAL_REQUIRED_SUPPRESSION_REASONS,
   GLOBAL_PURPOSE_KEY,
+  activeCausesForEntry,
+  liftSuppressionCauses,
   normalizeSuppressionAddress,
   recordSuppression,
   removeSuppression,
 } from "@/lib/emailSuppression";
+import { readSuppressionAuthority } from "@/lib/emailSuppressionAuthority";
 
 /**
  * Adding and lifting suppressions, both audited.
@@ -69,6 +72,16 @@ const removeSchema = z.object({
 });
 
 const requestSchema = z.discriminatedUnion("action", [addSchema, removeSchema]);
+
+/** A lift refused inside an approved operation; see the causes-mode branch. */
+class SuppressionLiftRefused extends Error {
+  constructor(
+    readonly refusal: "not_found" | "unliftable" | "authority_changed" | "approval_stale"
+  ) {
+    super(`Suppression lift refused: ${refusal}`);
+    this.name = "SuppressionLiftRefused";
+  }
+}
 
 /** The caller's Idempotency-Key when it is a sane token, otherwise a fresh id. */
 const adminIdempotencyKey = (req: Request) => {
@@ -183,6 +196,104 @@ export async function POST(req: Request) {
       { minute: 5, day: 50 }
     );
 
+    // Once causes decide, a lift releases causes by the release matrix and the
+    // approval is bound to the exact set of active causes it was asked for
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+    if ((await readSuppressionAuthority()) === "causes") {
+      const active = await activeCausesForEntry(body.id);
+      if (!active) {
+        return NextResponse.json({ error: "Not found." }, { status: 404 });
+      }
+      const releaseAudit =
+        (evidenceKind: string) => (tx: Parameters<typeof writeAdminAuditLog>[0]["tx"]) =>
+          writeAdminAuditLog({
+            session,
+            request: req,
+            action: "email_suppression.removed",
+            targetType: "SuppressionEntry",
+            targetId: body.id,
+            summary: `Lifted suppression causes on ${active.entry.emailAddress}.`,
+            metadata: {
+              reason: body.reason,
+              emailAddress: active.entry.emailAddress,
+              scope: active.entry.scope,
+              purposeKey: active.entry.purposeKey,
+              causeIds: active.causeIds,
+              causeReasons: active.reasons,
+              evidenceKind,
+            },
+            tx,
+          });
+
+      // A refused lift inside an approved operation is thrown, not returned, so
+      // the approval path records it as a failed execution rather than as one
+      // that ran; outside that path the result is handled directly.
+      let lifted: Awaited<ReturnType<typeof liftSuppressionCauses>>;
+      try {
+        lifted = active.needsApproval
+          ? await runWithAdminApproval(
+              {
+                session,
+                request: req,
+                action: "email_suppression.remove",
+                targetType: "SuppressionEntry",
+                targetId: body.id,
+                // The cause ids are part of what is approved: a cause added after
+                // the request is a different approval.
+                payload: { id: body.id, causeIds: active.causeIds },
+                reason: body.reason,
+              },
+              async (context) => {
+                const outcome = await liftSuppressionCauses({
+                  entryId: body.id,
+                  approvedCauseIds: active.causeIds,
+                  action: "approved_admin",
+                  evidence: context.approvalId
+                    ? {
+                        kind: "dual_approval",
+                        approvalId: context.approvalId,
+                        authorizationAuditLogId: context.authorizationAuditLogId,
+                      }
+                    : { kind: "sole_admin", authorizationAuditLogId: context.authorizationAuditLogId },
+                  writeReleaseAudit: releaseAudit(context.approvalId ? "dual_approval" : "sole_admin"),
+                });
+                if (!outcome.removed) throw new SuppressionLiftRefused(outcome.refusal);
+                return outcome;
+              }
+            )
+          : await liftSuppressionCauses({
+              entryId: body.id,
+              approvedCauseIds: active.causeIds,
+              action: "admin",
+              evidence: { kind: "admin" },
+              writeReleaseAudit: releaseAudit("admin"),
+            });
+      } catch (error) {
+        if (!(error instanceof SuppressionLiftRefused)) throw error;
+        lifted = { removed: false, refusal: error.refusal };
+      }
+
+      if (!lifted.removed) {
+        const status =
+          lifted.refusal === "not_found" ? 404 : 409;
+        const error =
+          lifted.refusal === "authority_changed"
+            ? "Suppression decisions changed over while this was in progress. Try again."
+            : lifted.refusal === "approval_stale"
+            ? "The suppression changed after this was asked for. Review it again."
+            : lifted.refusal === "unliftable"
+              ? "Nothing here can be lifted from this screen; a privacy request is lifted by the privacy process that created it."
+              : "Not found.";
+        return NextResponse.json({ error, code: lifted.refusal }, { status });
+      }
+      return NextResponse.json({
+        removed: lifted.remaining.length === 0,
+        released: lifted.released,
+        remaining: lifted.remaining,
+        providerListUnchanged: true,
+      });
+    }
+
     // Which reason the *stored* row holds decides whether a second
     // administrator is needed. Deriving that from the request body would let
     // the caller choose its own approval requirement, and the row is read again
@@ -217,6 +328,15 @@ export async function POST(req: Request) {
       : await lift();
 
     if (!result.removed) {
+      if (result.refusal === "authority_changed") {
+        return NextResponse.json(
+          {
+            error: "Suppression decisions changed over while this was in progress. Try again.",
+            code: "authority_changed",
+          },
+          { status: 409 }
+        );
+      }
       return NextResponse.json(
         {
           error:

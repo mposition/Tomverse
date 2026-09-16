@@ -118,6 +118,7 @@
     "check:email-provider-port": "node --import tsx scripts/check-email-provider-port.mjs",
     "report:cost-bucket-corrections": "node --conditions=react-server --import tsx scripts/report-cost-bucket-corrections.mjs",
     "report:model-credit-weights": "node --conditions=react-server --import tsx scripts/report-model-credit-weights.mjs",
+    "email:suppression-cutover": "node --conditions=react-server --import tsx scripts/email-suppression-cutover.mjs",
     "report:email-template-metadata": "node --conditions=react-server --import tsx scripts/report-email-template-metadata.mjs",
     "report:model-token-limits": "node --conditions=react-server --import tsx scripts/report-model-token-limits.mjs",
     "report:continuation-seed": "node --import tsx scripts/report-continuation-seed.mjs",

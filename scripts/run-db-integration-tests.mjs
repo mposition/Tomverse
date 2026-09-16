@@ -303,6 +303,10 @@ run(
     // the trigger carrying an unmarked build's writes, and append-only causes.
     // The trigger and the constraints exist only in the database.
     "tests/integration/email-suppression-causes.db.test.ts",
+    // Deploy B: the read authority setting, the cutover under the exclusive
+    // fence, and lifting causes by the release matrix. The fence, the setting
+    // row and the audit row sharing a transaction are all database facts.
+    "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.
