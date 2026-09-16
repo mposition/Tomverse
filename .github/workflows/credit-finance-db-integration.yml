@@ -19,17 +19,27 @@ on:
       - "app/api/chat/deep-research/**"
       - "lib/perplexityDeepResearch.ts"
       # The suite outgrew its name: it also runs the feedback lifecycle, the
-      # notification queue and the suppression scenarios. Those paths were
-      # missing here, and on 2026-09-16 a change to the reply-delivery rules
-      # went through two pull requests without this suite running once --
-      # then failed on the push to develop and again on main, where it looked
-      # like the next person's problem. A path filter is only as good as the
-      # list of what the suite actually covers.
+      # notification queue, the marketing lane and the jurisdiction policy
+      # scenarios. A path filter is only as good as the list of what the suite
+      # actually covers, and naming modules one at a time has now failed twice
+      # in one day -- on 2026-09-16 a reply-delivery change went through two
+      # pull requests without this suite running, and hours later the Korean
+      # quiet-hours change did the same and left develop red for everyone.
+      #
+      # So these are prefixes, not names. A new lib/email*.ts or a new
+      # marketing module is covered on the day it is written rather than on the
+      # day somebody remembers this file. The list that would not drift at all
+      # is one derived from what the suite imports; until then, err wide -- a
+      # run that was not needed costs minutes, a run that was skipped costs a
+      # red release branch.
+      - "lib/email*.ts"
+      - "lib/marketing*.ts"
       - "lib/feedbackLifecycle*.ts"
       - "lib/notificationDeliveries.ts"
       - "lib/notificationRetryCore.ts"
-      - "lib/emailSuppression*.ts"
+      - "lib/productAnnouncementEmail.ts"
       - "lib/accountDeletion.ts"
+      - "prisma/seed*.ts"
       - "app/api/feedback/**"
       - "app/api/admin/feedback/**"
       - "tests/integration/**"

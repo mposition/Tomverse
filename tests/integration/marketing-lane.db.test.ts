@@ -205,20 +205,65 @@ test("an account that never opted in is not sent product news", async () => {
   assert.equal(delivery.skipReason, "no_consent");
 });
 
-test("marketing to a Korean recipient at night waits for 08:00 Seoul time", async () => {
-  // docs/policy/email-notifications.md §5.2 E5, §12.6: deferred, not skipped,
-  // and waiting does not spend an attempt.
+/**
+ * The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after a row's
+ * own nextAttemptAt, so the row is due and the clock sits deep inside the old
+ * night-time window whatever time of day the suite runs.
+ */
+const nextSeoulNight = () => {
+  const at = new Date(Date.now() + 60 * 60 * 1_000);
+  at.setUTCMinutes(0, 0, 0);
+  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  return at;
+};
+
+test("a Korean recipient at night is sent: email left the night-time rule", async () => {
+  // docs/policy/email-notifications.md §0 v13: 시행령 제61조제2항 excludes
+  // electronic mail from the media the Network Act's 21:00-08:00 rule names,
+  // so the Korean profile carries no window and 23:00 in Seoul is an ordinary
+  // send. The lane keeps the machinery -- the test below exercises it against
+  // a version that does carry a window.
+  process.env.MARKETING_EMAIL_FROM = "Tomverse <news@news.tomverse.app>";
+  process.env.MARKETING_RESEND_API_KEY = "test-marketing-key";
   await activatePolicy();
   const calls = stubProvider();
   const user = await subscriber({ country: "KR" });
   const rows = await queue(user);
 
-  // The next 23:00 in Seoul (UTC+9, no daylight saving) strictly after the
-  // row's own nextAttemptAt, so the row is due and the clock is inside the
-  // window whatever time of day the suite runs.
-  const at = new Date(Date.now() + 60 * 60 * 1_000);
-  at.setUTCMinutes(0, 0, 0);
-  while ((at.getUTCHours() + 9) % 24 !== 23) at.setUTCHours(at.getUTCHours() + 1);
+  await drainStandardEmailDeliveries({ limit: 1, now: nextSeoulNight() });
+
+  assert.equal(calls.length, 1, "no window means nothing to wait for");
+  const delivery = await prisma.emailDelivery.findUniqueOrThrow({
+    where: { id: rows.deliveryId },
+    select: { status: true, deferReason: true, skipReason: true },
+  });
+  assert.deepEqual(delivery, { status: "sent", deferReason: null, skipReason: null });
+});
+
+test("a window on the active version still holds a message until it ends", async () => {
+  // docs/policy/email-notifications.md §5.2 E5, §12.6: deferred, not skipped,
+  // and waiting does not spend an attempt.
+  //
+  // No seeded profile has carried a window since v13, so this writes one onto
+  // the version under test rather than borrowing a jurisdiction's. A window is
+  // policy-version data, not code: the day a jurisdiction needs one it is a
+  // seed line, and this is the path it will take through the lane.
+  const draft = await ensureJurisdictionPolicyDraft();
+  await prisma.jurisdictionProfile.updateMany({
+    where: { policyVersionId: draft.version.id, profileKey: "KR" },
+    data: { quietHours: { start: "21:00", end: "08:00", tz: "Asia/Seoul" } },
+  });
+  await activatePolicyVersion({
+    versionId: draft.version.id,
+    actorId: randomUUID(),
+    actorEmail: "ops@example.test",
+  });
+
+  const calls = stubProvider();
+  const user = await subscriber({ country: "KR" });
+  const rows = await queue(user);
+
+  const at = nextSeoulNight();
   const morning = new Date(at.getTime() + 9 * 60 * 60 * 1_000);
 
   await drainStandardEmailDeliveries({ limit: 1, now: at });
