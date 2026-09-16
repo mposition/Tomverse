@@ -138,7 +138,8 @@ async function mockLockApi(
                 // Every write clears the grant, in all three directions. The
                 // route used to leave the setter holding a live one, which is
                 // what let a just-locked snapshot stay searchable and stay
-                // exportable (policy §21).
+                // exportable
+                // (docs/policy/external-conversation-import-and-memory.md §21).
                 state.unlocked = false;
                 return route.fulfill(
                     json({
