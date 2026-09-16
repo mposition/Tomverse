@@ -552,8 +552,8 @@ suppression 판정 시각**, **provider 제출 시각**, `legalAllowed`, 그리�
 
 | # | 불변식 | 현재 상태 |
 |---|---|---|
-| 1 | **marketing 분류에는 예외 없이 수신거부** | **부분** — 재분류 시 구멍(7.2) |
-| 2 | 로그인·개인정보 없는 one-click | **있음.** rate limit 조정 필요(7.3) |
+| 1 | **marketing 분류에는 예외 없이 수신거부** | **있음(S1a)** — metadata를 version에 고정, drain이 불일치를 거부(7.2) |
+| 2 | 로그인·개인정보 없는 one-click | **있음.** rate limit은 S1a에서 유효 token을 출처로 막지 않게 조정(7.3) |
 | 3 | **철회 후 발송 0건** | **없음** — 경합 구간(7.4) |
 | 4 | 수신거부 주소가 발송 후 30일 이상 유효 — 계약은 이전 key 1년 보존 | **있음(S1a)** — keyring canary readiness, 보존 1년(7.5) |
 | 5 | 전체 수신거부 선택지 | **부분 구현** — `withdrawAllMarketing()` 범위. **S3**의 purpose classification 표로 닫음 |
