@@ -200,6 +200,9 @@ run(
     "tests/integration/chat-attempt-usage.db.test.ts",
     "tests/integration/routing-attempt-sweep.db.test.ts",
     "tests/integration/model-registry.db.test.ts",
+    // Prompt Refiner authority: stage-first locking, runtime price drift,
+    // one-time consume and the permanent 100-slot/cost ceiling.
+    "tests/integration/prompt-refiner-reservation.db.test.ts",
     "tests/integration/admin-security.db.test.ts",
     "tests/integration/admin-users.db.test.ts",
     "tests/integration/login-methods.db.test.ts",

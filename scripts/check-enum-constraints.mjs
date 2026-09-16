@@ -436,6 +436,20 @@ const REGISTRY = {
     reason:
       "The reservation lifecycle, written by the credit paths as literals inside the transactions that move it.",
   },
+  PromptRefinerReservationStage_status_check: {
+    owner: "list",
+    module: "lib/promptRefinerReservationCore.ts",
+    list: "PROMPT_REFINER_RESERVATION_STAGE_STATUSES",
+    reason:
+      "The separately approved shadow stage is either open for exact reservations or permanently closed. The authority validates the same list before every state transition.",
+  },
+  PromptRefinerReservation_status_check: {
+    owner: "list",
+    module: "lib/promptRefinerReservationCore.ts",
+    list: "PROMPT_REFINER_RESERVATION_STATUSES",
+    reason:
+      "The one-way reservation lifecycle. Terminal rows remain tombstones and the server-only authority branches on these exact values.",
+  },
   AccountDataExportRequest_status_check: {
     owner: "database",
     reason:

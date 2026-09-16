@@ -117,13 +117,25 @@ accepted+kept-original을 각각 분모로 쓴다. 서로 다른 분모를 한 c
 provider adapter와 자동 요청을 활성화하려면 다음이 별도로 필요하다.
 
 1. 비용이 고정된 Refiner 모델·출력 cap·timeout·재시도 0 계약
-   (provider-independent 사전등록은 구현됨. 예약 authority가 없으므로 admission은
-   항상 dispatch 전에 거절하며 실제 adapter·비용 예약·dispatch 권한은 없음.
+   (provider-independent 사전등록과 server-only 원자 예약 authority는 구현됨. 단,
+   stage seed/admin writer·제품 caller가 없고 v1 admission은 변경하지 않아 항상
+   `reservation_authority_unavailable`로 dispatch 전에 거절하며 실제 adapter·dispatch
+   권한은 없음. authority는 stage→model registry table `SHARE`→reservation 순서로
+   잠그고 requestId·stage·canonical contract digest·server reservationId를 결속하며
+   잠금 뒤 DB clock 만료·1회 consume·영구 tombstone을 강제함. BEFORE INSERT는 검증·잠금만,
+   AFTER INSERT는 성공한 tombstone 집계와 counter 결속만 맡으며 stage는 반드시 0/0에서
+   시작함. direct stage counter UPDATE, direct/unique/101번째 insert 우회는 거부 또는 함께
+   rollback됨. naive timestamp의 clock은 명시적 UTC이며 terminal timestamp도 DB가
+   소유하고 늦은 consume/release는 expired가 됨. expiry sweep의 SQL limit은 update와
+   row-lock footprint를 함께 제한함.
+   기존 request는 active와 terminal을 구분하며 terminal은 usable lease가 아님.
    정적 profile과 `resolveModelPricing()`의 effective input/output rate가 모두 exact
    pin과 일치하고 effective output cap은 4,096 이상이어야 함. 더 큰 capability에도
    adapter는 계약 cap 4,096을 명시하며 generic cached/reservation 설정을 이 계약의
-   비용·예약량으로 바꾸지 않음. 미래 authority도 runtime row를 전달해
-   예약·dispatch 전에 이 gate를 다시 통과해야 함)
+   비용·예약량으로 바꾸지 않음. reserve와 consume은 모두 runtime row를 전달해
+   critical path 안에서 이 gate를 다시 통과함. 미래 dispatch는 consume 결과의 exact
+   digest와 checked-in execution/reservation contract constants를 사용하고 registry를 다시
+   읽어 재해석하지 않음)
 2. request/receipt와 사용자 선택률·stale·실패·지연 계측 (provider-independent
    schema와 오프라인 집계는 구현됨; writer·저장소·제품 수집은 미구현)
 3. 원문 대비 제안문 주입·의미 보존 평가
