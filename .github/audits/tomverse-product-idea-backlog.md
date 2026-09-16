@@ -153,8 +153,33 @@ lane에서 통과했습니다(로컬 DB 없음).
 - **이어가기 시작 버튼 미표시 문의**: 코드상 `feature.externalConversationContinuationEnabled`가
   꺼진 환경의 정상 동작입니다(기존 대화 열람은 flag와 무관). 해당 환경의 flag 값은 확인하지 않았습니다.
 - **분리된 두 보안 과제**(CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리):
-  `task_c3a7aa47`(Memory 추출이 잠긴 snapshot을 provider에 전송) — 진행 중,
-  `task_7d03656e`(가져온 데이터 JSON 내보내기가 잠긴 snapshot 포함) — 미착수. D 표 참조.
+  `task_c3a7aa47`(Memory 추출이 잠긴 snapshot을 provider에 전송),
+  `task_7d03656e`(가져온 데이터 JSON 내보내기가 잠긴 snapshot 포함). **같은 날 두 과제 모두
+  develop 병합(아래 추가 갱신)**. D 표 참조.
+
+**2026-09-16 추가 갱신(같은 세션, 이후 작업):** 아래 세 PR의 병합 상태를 GitHub에서, main
+미포함을 main `e55812b6` 조상 여부로 확인했습니다. 세 PR 모두 필수 검사 21개가 통과했고
+**main 반영·배포는 없습니다.**
+
+| 코드명 | develop PR (병합 UTC) | 비고 |
+| --- | --- | --- |
+| task_c3a7aa47 ① | [#1489](https://github.com/mposition/Tomverse/pull/1489) (09-16 08:48) | provider를 부르지 않은 chunk를 `skipped`로 두고 과금에서 제외. production flag 미활성으로 실제 청구는 없었음 |
+| task_c3a7aa47 ② | [#1490](https://github.com/mposition/Tomverse/pull/1490) (09:08) | 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 |
+| task_7d03656e | [#1491](https://github.com/mposition/Tomverse/pull/1491) (10:43) | 잠긴 snapshot은 `{locked, importedAt}`만, 항목별 snapshot 읽기, 형식 v2, 다운로드 전 안내 |
+
+- **task_7d03656e는 정책 질문 없이 진행했습니다.** 목록에는 "존재 metadata만 vs grant 요구"
+  결정이 필요하다고 적었지만, 같은 행을 계정 데이터 export가 이미 grant와 무관하게 존재
+  metadata로만 내보내고 memory export(§13.2)도 같은 규칙이어서, 이 경로 하나만 기존 규칙을
+  따르지 않은 것으로 판단했습니다. Codex가 이 판단을 별도로 확인했습니다. 파일 형식이
+  `tomverse.external-conversations.v2`로 바뀌었습니다.
+- **task_c3a7aa47 설계 중 뒤집은 결정**: provider 호출 뒤 잠긴 원문의 결과를
+  `suspended_by_source_lock`으로 저장하려던 초안은 해제 시 미승인 후보를 `active`로 승격시켜
+  해로웠으므로, 평소대로 `candidate`로 저장합니다. 채팅 주입 차단은 검색 쿼리의 읽기 시점
+  필터가 보장합니다. 설계 기록: develop의 `.github/audits/memory-extraction-locked-source-design-2026-09-16.md`.
+- **새 후속 후보(Codex 제안, 미착수)**: 뷰어·timeline도 "잠금 확인 후 메시지를 별도 조회"하는
+  구조라 확인과 조회 사이의 재잠금에 대한 TOCTOU 감사가 필요합니다. 계정 밖으로 나가는 파일이
+  아니라 소유자 화면에 한 페이지가 보이는 수준이므로 우선순위는 낮게 봅니다. D의
+  `LOCK-READ-TOCTOU-01` 참조.
 
 **현재 이어가기 트랙의 권장 착수 순서(2026-09-15 재검토):**
 
@@ -168,6 +193,11 @@ lane에서 통과했습니다(로컬 DB 없음).
 > 순서는 ① #1484·#1485 포함 빌드로 staging B1·B5 재검증 후 main 반영(사람) ②
 > `task_c3a7aa47` 두 단계 착지(1단계 먼저) ③ CONT-SEARCH-01 근사 상한 측정과 3초 예산 확정
 > ④ `task_7d03656e` 정책 결정입니다. 개발·병합·배포 승인이 아닙니다.
+>
+> **같은 날 추가:** ②·④는 develop 병합으로 끝났습니다(④는 선례 적용으로 결정 불필요).
+> 남은 순서는 ① staging 재검증 — #1484·#1485에 더해 잠금 관련 #1489·#1490·#1491을 함께
+> 확인하면 한 번에 끝납니다 — 후 main 반영(사람) ② CONT-SEARCH-01 근사 상한 측정(테스트 DB 필요)
+> ③ `LOCK-READ-TOCTOU-01` 감사(낮은 우선순위)입니다.
 
 이는 개발 착수 승인이 아니라 사용자 제안에 대한 자문 순서입니다. 기존 Chat 주 개발
 투자 순위는 유지합니다. **CONT-01은 취소하거나 P2로 내리지 않고 병행 P1로 유지**합니다.
@@ -931,8 +961,9 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 | IMPORT-LOCK-TITLE-01 | 잠긴 snapshot 제목의 가져오기 목록 노출 정책 | 완료(코드) / 제품 결정: grant 유무와 무관하게 목록 응답에서 항상 비공개(2026-09-15), develop #1475 병합(2026-09-16 원격 확인), main 미반영. staging B4 통과(사용자 보고 2026-09-16) | main 반영(사람). 재착수 후보에서 제외 |
 | task_9d445985 | Fix two pre-existing lock-order cycles in memory/import | 완료(코드) / develop #1476 병합(2026-09-16 원격 확인), main 미반영. Run 행을 Chunk보다 먼저 fencing해 잠그고, 만료는 Import 행 잠금 아래 snapshot을 id 순으로 잠그도록 정리. 두 실행 순서를 강제한 DB 테스트 CI 통과. 운영 교착 발생 빈도는 미확인 | main 반영(사람). 재착수 후보에서 제외 |
 | IMPORT-STAGING-FINALIZE-01 | 만료 sweep의 finalize 완료 상태 덮어쓰기 경합 | 완료(코드) / task_9d445985와 같은 develop #1476, main 미반영. sweep이 Import 행 잠금 아래 status·두 TTL을 재판정한 뒤에만 만료하고 실제 만료만 집계. "선별 후 finalize 커밋", "선별 후 활동" DB 테스트 2건 CI 통과. 운영 발생률 미확인 | main 반영(사람). 재착수 후보에서 제외 |
-| task_c3a7aa47 | 잠긴 snapshot을 Memory 추출 provider에 보내지 않기 | 진행 중 / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). **production 추출 flag 미활성(사용자 확인)이므로 현재 도달 불가, flag 활성화 전 필수(권고)**. 두 단계, 각 Codex APPROVE: ① provider를 부르지 않은 chunk 과금 제외(`skipped` 상태) develop [#1489](https://github.com/mposition/Tomverse/pull/1489) 열림·병합 대기 ② 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 표시 — 로컬 커밋, PR 전 | ① 병합 → ② develop PR·CI → main 반영. **①이 먼저여야 함**(②만 들어가면 전부 잠긴 chunk가 호출 없이 과금). ①이 고치는 과금 결함은 flag 미활성으로 실제 청구된 적 없음 |
-| task_7d03656e | 가져온 데이터 JSON 내보내기의 잠긴 snapshot 처리 | 보안 후보 / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16), 미착수. 발견 이후 코드 재확인은 하지 않음 | 잠긴 snapshot의 export 표현 결정(존재 metadata만 vs grant 요구) → 구현·테스트. 참고: memory export는 잠긴 evidence 참조를 숨기되 statement는 포함(`docs/policy/external-conversation-import-and-memory.md` §13.2) |
+| task_c3a7aa47 | 잠긴 snapshot을 Memory 추출 provider에 보내지 않기 | 완료(코드) / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). 두 단계 모두 develop 병합(원격 확인): ① provider를 부르지 않은 chunk 과금 제외(`skipped` 상태) [#1489](https://github.com/mposition/Tomverse/pull/1489) ② 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 [#1490](https://github.com/mposition/Tomverse/pull/1490). 각 Codex APPROVE, 생성 경합·워커 잠금 DB 테스트 CI 통과. main 미반영. production 추출 flag 미활성(사용자 확인)이라 ①의 과금 결함은 실제 청구된 적 없음 | main 반영(사람, ①과 ②를 함께 또는 ① 먼저). 추출 flag 활성화 전에 반영돼 있어야 함(권고). 재착수 후보에서 제외 |
+| task_7d03656e | 가져온 데이터 JSON 내보내기의 잠긴 snapshot 처리 | 완료(코드) / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). develop [#1491](https://github.com/mposition/Tomverse/pull/1491) 병합(원격 확인), main 미반영. 잠긴 snapshot은 `{locked, importedAt}`만, 메시지는 읽지 않음. 항목별 READ ONLY snapshot으로 전송 중 잠금 경합 차단, 형식 `tomverse.external-conversations.v2`, 다운로드 전 안내(7개 locale). 정책 결정은 선례 적용으로 불필요 판단, Codex 확인 | main 반영(사람). v1 형식을 읽는 외부 도구가 있다면 v2 대응 필요. 재착수 후보에서 제외 |
+| LOCK-READ-TOCTOU-01 | 뷰어·timeline의 잠금 확인 후 별도 메시지 조회 경합 | 후속 후보 / 낮은 우선순위, 미착수. task_7d03656e 검토 중 Codex 제안(2026-09-16). 이 ID는 목록용이며 외부 칩 생성 아님. 재현·코드 재확인 안 함 | 확인과 조회 사이에 잠금이 커밋되는 순서를 재현 → 소유자 화면에 한 페이지가 보이는 수준인지 판정 → 필요하면 같은 snapshot 안에서 판정·조회. 계정 밖으로 나가는 경로는 아님 |
 | SEC-OPS-01 | Tomverse 전체 플랫폼의 정기 Commercial Grade 보안 점검 | 운영 필수 / 목록 등록, 기존 주간 자동화 일시중지 | 대상 자산·검증 기준·안전한 실행 범위를 정리하고 기존 자동화 보강·재개 여부 승인 |
 
 #### 2026-09-15 후속 순서 검토 — 두 교착과 별도의 만료/finalize 경합
@@ -1604,6 +1635,13 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   추출 flag 잔여 항목은 사용자 확인(production 미활성)으로 좁혔고 run·chunk 확인은 남겼습니다.
   #1473의 PostgreSQL accounts lane 실패가 무관한 기존 테스트라는 점은 실패 run 로그로
   확인했습니다. CONT-01·주 투자 순위·다른 항목은 바꾸지 않았습니다.
+
+- 2026-09-16 (같은 세션, 추가 갱신): `task_c3a7aa47`(#1489·#1490)과 `task_7d03656e`(#1491)를
+  develop 병합 원격 확인 후 완료(코드)로 바꿨습니다. 세 PR 모두 main에 없습니다(main
+  `e55812b6`). 앞 갱신에서 `task_7d03656e`를 "정책 결정 필요"로 적은 것은 발견 당시 칩 설명에
+  따른 것이었고, 코드를 확인한 결과 계정 데이터 export와 §13.2에 이미 같은 규칙이 있어 선례
+  적용으로 정정했습니다. Codex 제안 후속 후보 `LOCK-READ-TOCTOU-01`을 D에 낮은 우선순위로
+  등록했습니다(재현·코드 재확인 안 함). 다른 항목·주 투자 순위는 바꾸지 않았습니다.
 
 ## VOICE-MIX-01 — 한국어·영어 혼용 Voice 인식 정확도 개선
 
