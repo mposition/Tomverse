@@ -8,6 +8,7 @@ import {
   ensureTemplateVersion,
 } from "@/lib/emailTemplateRegistry";
 import {
+  adoptUnsubscribeKeyringForUnattributedMail,
   ensureUnsubscribeKeyCanary,
   getUnsubscribeKeyRetentionReadiness,
 } from "@/lib/emailUnsubscribeKeyRetention";
@@ -28,7 +29,7 @@ const DAY = 24 * 60 * 60 * 1_000;
 const reset = () =>
   prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "EmailUnsubscribeKeyCanary", "EmailDelivery", "EmailEvent",
+      "EmailUnsubscribeKeyCanary", "EmailUnsubscribeKeyAdoption", "EmailDelivery", "EmailEvent",
       "TemplateVersion", "EmailTemplate", "EmailPolicyVersion"
     RESTART IDENTITY CASCADE
   `);
@@ -96,7 +97,7 @@ test("dropping a version with a recent send is not ready", async () => {
 test("an old send does not hold a version, however many unsent rows name it", async () => {
   const now = new Date();
   await ensureUnsubscribeKeyCanary(readUnsubscribeKeyring(env("v1:secret-one", "v1"))!);
-  await sentDelivery({ keyVersion: "v1", sentAt: new Date(now.getTime() - 45 * DAY) });
+  await sentDelivery({ keyVersion: "v1", sentAt: new Date(now.getTime() - 400 * DAY) });
   await sentDelivery({ keyVersion: "v1", sentAt: null });
 
   const verdict = await getUnsubscribeKeyRetentionReadiness(now, env("v2:secret-two", "v2"));
@@ -107,11 +108,19 @@ test("an old send does not hold a version, however many unsent rows name it", as
 test("the newest send per version is the one that counts", async () => {
   const now = new Date();
   await ensureUnsubscribeKeyCanary(readUnsubscribeKeyring(env("v1:secret-one", "v1"))!);
-  await sentDelivery({ keyVersion: "v1", sentAt: new Date(now.getTime() - 45 * DAY) });
+  await sentDelivery({ keyVersion: "v1", sentAt: new Date(now.getTime() - 400 * DAY) });
   await sentDelivery({ keyVersion: "v1", sentAt: new Date(now.getTime() - 1 * DAY) });
 
   const verdict = await getUnsubscribeKeyRetentionReadiness(now, env("v2:secret-two", "v2"));
   assert.equal(verdict.ready, false);
+});
+
+test("a recorded recent send whose canary is missing is not ready", async () => {
+  const now = new Date();
+  await sentDelivery({ keyVersion: "v1", sentAt: new Date(now.getTime() - 2 * DAY) });
+  const verdict = await getUnsubscribeKeyRetentionReadiness(now, env("v1:secret-one", "v1"));
+  assert.equal(verdict.ready, false);
+  assert.equal(verdict.errors[0].code, "EMAIL_UNSUBSCRIBE_KEY_CANARY_MISSING");
 });
 
 test("mail from before versions were recorded adopts every listed version", async () => {
@@ -144,6 +153,19 @@ test("mail from before versions were recorded adopts every listed version", asyn
   });
 
   const listed = env("v1:secret-one,v2:secret-two", "v2");
+
+  // Before adoption the check reads only: it warns, and writes nothing.
+  const before = await getUnsubscribeKeyRetentionReadiness(now, listed);
+  assert.equal(before.warnings[0].code, "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED");
+  assert.equal(await prisma.emailUnsubscribeKeyCanary.count(), 0);
+
+  // The drain adopts, once; a second adoption is a no-op.
+  assert.equal(await adoptUnsubscribeKeyringForUnattributedMail(now, listed), "adopted");
+  assert.equal(
+    await adoptUnsubscribeKeyringForUnattributedMail(now, env("v3:secret-three", "v3")),
+    "already_adopted"
+  );
+  assert.equal(await prisma.emailUnsubscribeKeyAdoption.count(), 1);
   const first = await getUnsubscribeKeyRetentionReadiness(now, listed);
   assert.equal(first.ready, true);
   assert.deepEqual(

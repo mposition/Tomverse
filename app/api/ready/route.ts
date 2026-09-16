@@ -194,7 +194,7 @@ const readinessResponse = async (head = false) => {
   // broken is an error either way.
   const unsubscribeKeyring = unsubscribeKeyringReadiness();
   const emailUnsubscribeKeyring = unsubscribeKeyring.ready;
-  // Whether every unsubscribe key a message sent in the last thirty days
+  // Whether every unsubscribe key a message sent in the last year
   // depends on still opens its links (docs/policy/email-notifications.md
   // §11.4). Unconditional, unlike the keyring check above: it only has
   // anything to say once a link has been signed, and from then on dropping or

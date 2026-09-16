@@ -241,6 +241,7 @@ mock.module(mod("lib/emailUnsubscribeKeyRetention.ts"), {
             };
         },
         ensureUnsubscribeKeyCanary: async () => undefined,
+        adoptUnsubscribeKeyringForUnattributedMail: async () => "not_needed",
     },
 });
 

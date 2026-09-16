@@ -22,7 +22,10 @@ import {
   suppressionCheck,
 } from "@/lib/emailSuppression";
 import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
-import { ensureUnsubscribeKeyCanary } from "@/lib/emailUnsubscribeKeyRetention";
+import {
+  adoptUnsubscribeKeyringForUnattributedMail,
+  ensureUnsubscribeKeyCanary,
+} from "@/lib/emailUnsubscribeKeyRetention";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
 import {
@@ -1087,6 +1090,23 @@ export async function drainStandardEmailDeliveries(options?: {
 }): Promise<StandardDrainResult> {
   const limit = options?.limit ?? 50;
   const deadline = Date.now() + (options?.timeBudgetMs ?? 20_000);
+
+  // Once, ever: adopt the keyring as the guard for mail sent before unsubscribe
+  // key versions were recorded (docs/policy/email-notifications.md §11.4). Here
+  // and not in the readiness check, so a probe never records and passes on the
+  // same call. A failure costs the adoption, not the drain.
+  try {
+    await adoptUnsubscribeKeyringForUnattributedMail(options?.now ?? new Date());
+  } catch (error) {
+    await reportOperationalIncident({
+      code: "EMAIL_UNSUBSCRIBE_KEY_ADOPTION_FAILED",
+      title: "The unsubscribe keyring could not be adopted for older mail",
+      severity: "warning",
+      error: error instanceof Error ? error.message : String(error),
+      cooldownMs: 60 * 60 * 1_000,
+      context: { component: "standard-email-lane" },
+    });
+  }
   const result: StandardDrainResult = {
     claimed: 0,
     sent: 0,

@@ -12,7 +12,7 @@
 -- message that was actually sent. `EmailUnsubscribeKeyCanary` holds one inert
 -- token per version, minted with that key the first time it signs a real link.
 -- Readiness decrypts every canary against the live keyring and refuses a
--- deployment that dropped or changed a version used in the last thirty days.
+-- deployment that dropped or changed a version used in the last year (docs/policy/email-notifications.md §11.4).
 --
 -- The canary acts on nobody: its subject is not an account id and its purpose
 -- is not a purpose. The check only decrypts it and never calls the endpoint.
@@ -33,3 +33,24 @@ CREATE TABLE "EmailUnsubscribeKeyCanary" (
 
 CREATE UNIQUE INDEX "EmailUnsubscribeKeyCanary_keyVersion_key"
     ON "EmailUnsubscribeKeyCanary"("keyVersion");
+
+-- The one-time record that the keyring listed at a moment was adopted as the
+-- guard for mail sent before versions were recorded. Written once, by the
+-- first drain that finds such mail; nothing before it can be verified by any
+-- mechanism, and the readiness check says so rather than claiming otherwise.
+CREATE TABLE "EmailUnsubscribeKeyAdoption" (
+    "id" TEXT NOT NULL,
+    "keyVersions" TEXT[] NOT NULL,
+    "adoptedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "EmailUnsubscribeKeyAdoption_pkey" PRIMARY KEY ("id")
+);
+
+-- At most one adoption: a singleton key rather than a count check, so two
+-- drains racing to adopt cannot both succeed.
+ALTER TABLE "EmailUnsubscribeKeyAdoption"
+    ADD COLUMN "singleton" BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE "EmailUnsubscribeKeyAdoption"
+    ADD CONSTRAINT "EmailUnsubscribeKeyAdoption_singleton_check" CHECK ("singleton");
+CREATE UNIQUE INDEX "EmailUnsubscribeKeyAdoption_singleton_key"
+    ON "EmailUnsubscribeKeyAdoption"("singleton");

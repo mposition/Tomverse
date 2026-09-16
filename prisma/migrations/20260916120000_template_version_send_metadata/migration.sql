@@ -23,18 +23,6 @@
 -- code and row disagree, `npm run report:email-template-metadata` lists it and
 -- nothing here corrects it.
 
-ALTER TABLE "TemplateVersion"
-    ADD COLUMN "classification" TEXT,
-    ADD COLUMN "purpose" TEXT,
-    ADD COLUMN "requiresUnsubscribe" BOOLEAN;
-
-UPDATE "TemplateVersion" AS tv
-   SET "classification" = t."classification",
-       "purpose" = t."purpose",
-       "requiresUnsubscribe" = t."requiresUnsubscribe"
-  FROM "EmailTemplate" AS t
- WHERE tv."templateId" = t."id";
-
 -- Deploy compatibility, transitional. Migrations run before the new build takes
 -- traffic, so for a moment the previous build is still inserting versions --
 -- the first login code in a new language, the first send after a copy change --
@@ -45,6 +33,10 @@ UPDATE "TemplateVersion" AS tv
 -- what the previous build's drain would have read. The current build always
 -- supplies all three, so this never decides a value for it. Remove it in a
 -- later migration once no build older than this one can be running.
+--
+-- Created before the columns exist: PL/pgSQL resolves column names when the
+-- function first runs, not when it is created, and nothing runs it until the
+-- trigger below is installed.
 CREATE OR REPLACE FUNCTION "template_version_send_metadata_legacy_insert"()
 RETURNS trigger AS $$
 BEGIN
@@ -58,14 +50,37 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER "template_version_send_metadata_legacy_insert"
-    BEFORE INSERT ON "TemplateVersion"
-    FOR EACH ROW
-    EXECUTE FUNCTION "template_version_send_metadata_legacy_insert"();
+-- One statement, so one transaction whatever the migration runner does. The
+-- column, the compatibility trigger, the backfill and the NOT NULL either all
+-- happen or none do, and the ACCESS EXCLUSIVE lock the first ALTER takes is
+-- held to the end -- so a previous-build insert either lands before this
+-- starts (and is backfilled) or waits until it is done (and meets the trigger).
+-- As separate statements, an insert between the backfill and the trigger would
+-- be left NULL and fail the NOT NULL.
+DO $$
+BEGIN
+    ALTER TABLE "TemplateVersion"
+        ADD COLUMN "classification" TEXT,
+        ADD COLUMN "purpose" TEXT,
+        ADD COLUMN "requiresUnsubscribe" BOOLEAN;
 
-ALTER TABLE "TemplateVersion"
-    ALTER COLUMN "classification" SET NOT NULL,
-    ALTER COLUMN "requiresUnsubscribe" SET NOT NULL;
+    CREATE TRIGGER "template_version_send_metadata_legacy_insert"
+        BEFORE INSERT ON "TemplateVersion"
+        FOR EACH ROW
+        EXECUTE FUNCTION "template_version_send_metadata_legacy_insert"();
+
+    UPDATE "TemplateVersion" AS tv
+       SET "classification" = t."classification",
+           "purpose" = t."purpose",
+           "requiresUnsubscribe" = t."requiresUnsubscribe"
+      FROM "EmailTemplate" AS t
+     WHERE tv."templateId" = t."id";
+
+    ALTER TABLE "TemplateVersion"
+        ALTER COLUMN "classification" SET NOT NULL,
+        ALTER COLUMN "requiresUnsubscribe" SET NOT NULL;
+END;
+$$;
 
 -- The same two rules `EmailTemplate` holds, for the same reasons.
 ALTER TABLE "TemplateVersion" ADD CONSTRAINT "TemplateVersion_unsubscribe_check"

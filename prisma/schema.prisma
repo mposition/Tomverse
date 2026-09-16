@@ -5019,7 +5019,7 @@ model EmailDelivery {
 
   /// The EMAIL_UNSUBSCRIBE_KEYS version that signed the unsubscribe link in the
   /// message as sent. NULL for mail with no link. Readiness refuses to lose a
-  /// version used within the last thirty days
+  /// version used within the last year
   /// (docs/policy/email-notifications.md §11.4).
   unsubscribeKeyVersion String?
 
@@ -5045,6 +5045,17 @@ model EmailUnsubscribeKeyCanary {
   keyVersion String   @unique
   token      String
   createdAt  DateTime @default(now())
+}
+
+/// The one-time adoption of the keyring as the guard for mail sent before key
+/// versions were recorded. At most one row (singleton unique + CHECK). Written
+/// by the first drain that finds such mail. Contract:
+/// docs/policy/email-notifications.md §11.4.
+model EmailUnsubscribeKeyAdoption {
+  id          String   @id @default(cuid())
+  keyVersions String[]
+  adoptedAt   DateTime @default(now())
+  singleton   Boolean  @default(true) @unique
 }
 
 /// Raw provider callbacks, stored before they are acted on.

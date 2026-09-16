@@ -5,19 +5,25 @@ import {
 } from "@/lib/unsubscribeToken";
 
 /**
- * Whether every unsubscribe key a recent message depends on still opens its
- * links.
+ * Whether every unsubscribe key recent mail depends on still opens its links.
  *
  * Contract: docs/policy/email-notifications.md §11.4.
  *
- * Pure: the caller supplies the canaries, the last send per version and the
- * clock. This is a keyring check and nothing more -- it decrypts, it does not
- * call the endpoint, touch a rate limit or write a preference. Whether the
- * endpoint itself works end to end is a separate check.
+ * Pure: the caller supplies the canaries, the sends and the clock. This is a
+ * keyring check and nothing more -- it decrypts, it does not call the endpoint,
+ * touch a rate limit or write a preference. Whether the endpoint itself works
+ * end to end is a separate check.
  */
 
-/** CAN-SPAM's floor for how long an opt-out mechanism must keep working. */
-export const UNSUBSCRIBE_KEY_RETENTION_DAYS = 30;
+/**
+ * How long a key version stays required after the last message signed with it.
+ *
+ * The approved contract keeps previous versions verifiable for a year after
+ * rotation (§11.4), well past CAN-SPAM's thirty-day floor: tokens never expire,
+ * people unsubscribe from old mail, and a secret deleted too early cannot be
+ * brought back.
+ */
+export const UNSUBSCRIBE_KEY_RETENTION_DAYS = 365;
 const RETENTION_MS = UNSUBSCRIBE_KEY_RETENTION_DAYS * 24 * 60 * 60 * 1_000;
 
 /** The subject and purpose of a canary. Neither is an account id or a purpose. */
@@ -33,7 +39,8 @@ export type KeyRetentionProblem = {
     | "EMAIL_UNSUBSCRIBE_KEY_RETIRED_TOO_EARLY"
     | "EMAIL_UNSUBSCRIBE_KEY_CHANGED"
     | "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL"
-    | "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNPROTECTED";
+    | "EMAIL_UNSUBSCRIBE_KEY_CANARY_MISSING"
+    | "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED";
   keyVersion: string;
   message: string;
 };
@@ -41,15 +48,18 @@ export type KeyRetentionProblem = {
 export type KeyRetentionInput = {
   keyring: UnsubscribeKeyring | null;
   canaries: Array<{ keyVersion: string; token: string }>;
-  /** Most recent `sentAt` per key version; absent means never sent. */
+  /** Most recent `sentAt` per recorded key version; absent means never sent. */
   lastSentAt: Record<string, Date | null | undefined>;
   /**
    * Most recent send of a message that carried an unsubscribe link but records
-   * no key version -- everything sent before versions were recorded. Nobody can
-   * say which version signed it, so it holds *every* canaried version until it
-   * ages out of the window.
+   * no key version -- everything sent before versions were recorded.
    */
   unattributedLastSentAt?: Date | null;
+  /**
+   * The versions adopted as the guard for that mail, or null if no adoption has
+   * happened. Adoption is done once by the drain, never by this check.
+   */
+  adoptedKeyVersions?: string[] | null;
   now: Date;
 };
 
@@ -57,9 +67,12 @@ export type KeyRetentionVerdict = {
   ready: boolean;
   errors: KeyRetentionProblem[];
   warnings: KeyRetentionProblem[];
-  /** Versions no message sent in the retention window depends on. */
+  /** Versions no mail in the retention window depends on. */
   retirable: string[];
 };
+
+const retainUntil = (sentAt: Date | null) =>
+  sentAt ? new Date(sentAt.getTime() + RETENTION_MS) : null;
 
 export const unsubscribeKeyRetentionVerdict = (
   input: KeyRetentionInput
@@ -67,38 +80,56 @@ export const unsubscribeKeyRetentionVerdict = (
   const errors: KeyRetentionProblem[] = [];
   const warnings: KeyRetentionProblem[] = [];
   const retirable: string[] = [];
-  const unattributed = input.unattributedLastSentAt ?? null;
-  const unattributedRequired =
-    unattributed !== null && input.now.getTime() < unattributed.getTime() + RETENTION_MS;
 
-  // Mail that depends on a key nobody recorded, with nothing standing guard over
-  // any key. Fail closed: whatever the keyring looks like, it cannot be shown
-  // to still open those links.
-  if (unattributed && unattributedRequired && (input.canaries.length === 0 || !input.keyring)) {
-    const until = new Date(unattributed.getTime() + RETENTION_MS).toISOString();
-    errors.push({
-      severity: "error",
-      code: input.keyring
-        ? "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNPROTECTED"
-        : "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL",
+  const unattributed = input.unattributedLastSentAt ?? null;
+  const unattributedUntil = retainUntil(unattributed);
+  const unattributedRequired = unattributedUntil !== null && input.now < unattributedUntil;
+  const adopted = new Set(input.adoptedKeyVersions ?? []);
+  const canaryVersions = new Set(input.canaries.map((canary) => canary.keyVersion));
+
+  // Mail sent before versions were recorded, not yet adopted. A warning and not
+  // an error, deliberately: nothing that happened before this code shipped can
+  // be verified by any mechanism, the first drain after deploy adopts the
+  // keyring, and refusing readiness here would refuse the very deployment that
+  // starts recording. It is reported so it is not mistaken for verified.
+  if (unattributed && unattributedRequired && input.adoptedKeyVersions == null) {
+    warnings.push({
+      severity: "warning",
+      code: "EMAIL_UNSUBSCRIBE_UNATTRIBUTED_MAIL_UNADOPTED",
       keyVersion: "unattributed",
-      message: input.keyring
-        ? `Mail with unsubscribe links sent before key versions were recorded (last ${unattributed.toISOString()}) has no canary guarding its key. Keep every current version until ${until}.`
-        : `EMAIL_UNSUBSCRIBE_KEYS is unset, but mail with unsubscribe links was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days; its links are dead until ${until}.`,
+      message: `Mail with unsubscribe links was sent before key versions were recorded (last ${unattributed.toISOString()}) and the keyring has not been adopted as its guard yet. Do not remove or edit any key version until the next email drain has run.`,
     });
+  }
+
+  // A version recent mail was recorded under must have a canary. Without one the
+  // check below has nothing to decrypt, and silence would read as verified.
+  for (const [keyVersion, sentAt] of Object.entries(input.lastSentAt).sort(([a], [b]) =>
+    a.localeCompare(b)
+  )) {
+    const until = retainUntil(sentAt ?? null);
+    if (until && input.now < until && !canaryVersions.has(keyVersion)) {
+      errors.push({
+        severity: "error",
+        code: "EMAIL_UNSUBSCRIBE_KEY_CANARY_MISSING",
+        keyVersion,
+        message: `Mail signed with unsubscribe key version "${keyVersion}" was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days, but no canary exists for it, so nothing proves the version still opens its links.`,
+      });
+    }
   }
 
   for (const canary of [...input.canaries].sort((a, b) =>
     a.keyVersion.localeCompare(b.keyVersion)
   )) {
     const own = input.lastSentAt[canary.keyVersion] ?? null;
+    // Unattributed mail holds only the versions adopted for it.
+    const inherited = adopted.has(canary.keyVersion) ? unattributed : null;
     const lastSent =
-      own && unattributed
-        ? new Date(Math.max(own.getTime(), unattributed.getTime()))
-        : (own ?? unattributed);
-    const retainUntil = lastSent ? new Date(lastSent.getTime() + RETENTION_MS) : null;
-    const required = retainUntil !== null && input.now < retainUntil;
-    const until = retainUntil?.toISOString() ?? "";
+      own && inherited
+        ? new Date(Math.max(own.getTime(), inherited.getTime()))
+        : (own ?? inherited);
+    const until = retainUntil(lastSent);
+    const required = until !== null && input.now < until;
+    const untilText = until?.toISOString() ?? "";
 
     if (!input.keyring) {
       if (required) {
@@ -106,7 +137,7 @@ export const unsubscribeKeyRetentionVerdict = (
           severity: "error",
           code: "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL",
           keyVersion: canary.keyVersion,
-          message: `EMAIL_UNSUBSCRIBE_KEYS is unset, but mail signed with version "${canary.keyVersion}" was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days; its unsubscribe links are dead until ${until}.`,
+          message: `EMAIL_UNSUBSCRIBE_KEYS is unset, but mail depending on version "${canary.keyVersion}" was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days; its unsubscribe links are dead until the version is restored.`,
         });
       } else {
         retirable.push(canary.keyVersion);
@@ -130,7 +161,7 @@ export const unsubscribeKeyRetentionVerdict = (
           severity: "error",
           code: "EMAIL_UNSUBSCRIBE_KEY_RETIRED_TOO_EARLY",
           keyVersion: canary.keyVersion,
-          message: `Unsubscribe key version "${canary.keyVersion}" was removed, but mail signed with it was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days. Restore it; it can be removed after ${until}.`,
+          message: `Unsubscribe key version "${canary.keyVersion}" was removed, but mail depending on it was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days. Restore it; it can be removed after ${untilText}.`,
         });
       } else {
         retirable.push(canary.keyVersion);
@@ -140,8 +171,7 @@ export const unsubscribeKeyRetentionVerdict = (
 
     // Listed, but it no longer opens what it signed: the secret behind the
     // version name was replaced. Every link of that vintage is dead just as if
-    // the version were gone, and a rename of the version is the only safe way
-    // to rotate.
+    // the version were gone; rotate by adding a version, never by editing one.
     const problem: KeyRetentionProblem = {
       severity: required ? "error" : "warning",
       code: "EMAIL_UNSUBSCRIBE_KEY_CHANGED",
@@ -149,6 +179,17 @@ export const unsubscribeKeyRetentionVerdict = (
       message: `Unsubscribe key version "${canary.keyVersion}" is listed but no longer opens tokens it signed; its secret was changed. Rotate by adding a new version, not by editing an existing one.`,
     };
     (required ? errors : warnings).push(problem);
+  }
+
+  // Without a keyring and without canaries there is nothing to decrypt, but
+  // unattributed mail still needs a key.
+  if (unattributed && unattributedRequired && !input.keyring && input.canaries.length === 0) {
+    errors.push({
+      severity: "error",
+      code: "EMAIL_UNSUBSCRIBE_KEYRING_ABSENT_WITH_RECENT_MAIL",
+      keyVersion: "unattributed",
+      message: `EMAIL_UNSUBSCRIBE_KEYS is unset, but mail with unsubscribe links was sent within ${UNSUBSCRIBE_KEY_RETENTION_DAYS} days; its links are dead.`,
+    });
   }
 
   return { ready: errors.length === 0, errors, warnings, retirable };

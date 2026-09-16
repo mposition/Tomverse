@@ -32,19 +32,29 @@ S1a 세 항목입니다. 셋 다 소유자 결정이 필요 없는 기계 보강
    - 기존 version은 **당시 `EmailTemplate` 값**으로 backfill했습니다. 현재 코드값을
      복사하면 과거를 고쳐 쓰게 됩니다. 차이는
      `npm run report:email-template-metadata`가 목록으로 보여 주고 고치지 않습니다.
+   - 배포 중 이전 build가 세 컬럼 없이 version을 insert해도 실패하지 않도록, 빈 값을
+     템플릿 행에서 채우는 **전환용 trigger**를 둡니다. 컬럼 추가·trigger·backfill·NOT
+     NULL은 한 문장(`DO` 블록)으로 원자적으로 실행합니다.
 2. **유효한 수신 거부 요청은 출처로 막지 않습니다(11.3).** IP당 20회/분 제한이 token을
    읽기 전에 걸려, 한 NAT나 메일 사업자의 one-click 요청이 실제 수신 거부를 429로
    만들 수 있었습니다. 이제 token을 먼저 열고, **유효하지 않은 요청만** 출처 제한을
    받습니다. 유효한 token은 subject·purpose 단위로 30회/분·300회/일입니다.
-3. **최근 메일이 쓰는 unsubscribe key는 지울 수 없습니다(11.4).** token은 만료되지
+3. **1년 안에 발송된 메일이 쓰는 unsubscribe key는 지울 수 없습니다(11.4).** token은 만료되지
    않지만 key version이 목록에 있을 때만 열립니다. 어떤 version으로 보냈는지 기록이
    없었고 token도 보관하지 않으므로, 언제 지워도 되는지 알 수 없었습니다.
    - `EmailDelivery.unsubscribeKeyVersion`에 실제 발송된 링크의 version을 남깁니다.
    - version마다 **아무것도 끄지 않는 canary token**을 한 번 저장합니다.
    - `/api/ready`의 `emailUnsubscribeKeyRetention`이 canary를 **복호화만** 해서,
-     최근 30일 안에 발송한 version이 빠졌거나 secret이 바뀌었으면 거부합니다. 지워도
-     되는 version은 `retirableVersions`로 보고합니다. endpoint를 호출하는 end-to-end
-     점검은 이것과 별개입니다.
+     **1년**(아래 11.4의 이전 버전 보존 기간) 안에 발송한 version이 빠졌거나 secret이
+     바뀌었거나 canary가 없으면 거부합니다. 지워도 되는 version은
+     `retirableVersions`로 보고합니다. 이 검사는 읽기만 합니다.
+   - **version 기록 이전에 나간 메일**은 어떤 key로 서명됐는지 알 수 없습니다. 그런
+     메일이 있으면 **drain이 한 번** 그때 목록에 있는 모든 version을 채택하고
+     (`EmailUnsubscribeKeyAdoption`, 단일 행), 이후 그 version들을 그 메일 기준으로
+     보존합니다. 채택 전 상태는 경고로만 보고합니다 — 이 코드가 배포되기 전의 일은
+     어떤 방법으로도 검증할 수 없고, 오류로 막으면 기록을 시작하는 배포 자체가 막히기
+     때문입니다.
+   - endpoint를 호출하는 end-to-end 점검은 이것과 별개입니다.
 
 ### v14 (2026-09-16) — 운영자가 한 건의 안내를 보류할 수 있음
 
@@ -2069,7 +2079,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 | 열거 불가 | payload에 `userId` 대신 **불투명 식별자**. 이메일 주소 평문 금지 |
 | 범위 제한 | `{ subjectId, purpose, deliveryId, version }`만 서명. **다른 사용자 설정 변경 불가** |
 | 만료 | **만료하지 않음.** CAN-SPAM은 최소 30일 동작을 요구하고, 오래된 메일에서 눌러도 동작해야 합니다. 대신 secret 회전 시 이전 버전 검증을 1년간 유지 |
-| key 보존 | **v15.** 발송마다 `EmailDelivery.unsubscribeKeyVersion`을 남기고, version마다 아무것도 끄지 않는 canary token을 저장합니다. readiness가 canary를 복호화해 **최근 30일 안에 쓴 version이 빠졌거나 secret이 바뀌면** 거부합니다. 회전은 version 이름을 새로 추가하는 방식만 안전합니다 |
+| key 보존 | **v15.** 발송마다 `EmailDelivery.unsubscribeKeyVersion`을 남기고, version마다 아무것도 끄지 않는 canary token을 저장합니다. readiness가 canary를 복호화해 **1년 안에 쓴 version이 빠졌거나 secret이 바뀌거나 canary가 없으면** 거부합니다. 회전은 version 이름을 새로 추가하는 방식만 안전합니다 |
 | 재사용 | 멱등. 이미 거부 상태면 같은 결과 |
 | 로그 유출 | **token은 URL 쿼리에 남습니다.** 접근 로그·Sentry·Referer에서 마스킹 필수 |
 | 권한 상승 불가 | token으로는 **끄기만** 가능. 켜기는 로그인 필요 |
