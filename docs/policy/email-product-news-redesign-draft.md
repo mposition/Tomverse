@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v18)
+# 제품 소식 이메일: 권한과 기계 (초안 v19)
 
 > **이 문서의 지위: 초안입니다.** 승인되지 않았습니다. **S1a는 구현·병합됐습니다**(#1492,
 > [이메일 알림](email-notifications.md) v15).
@@ -14,6 +14,21 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v19 (2026-09-16) — 독립 검토 14회차 반영
+
+14회차(v18 대상)는 C53·C55·C59·C60을 닫고 7건을 남겼습니다(10 → 7). 모두 기술
+결정이고, S1b-3은 "자체 계약에 남은 결정은 없고 S1b-1 위에 선다"는 판정이었습니다.
+
+| # | 지적 | v19 |
+|---|---|---|
+| **C61** | 기존 `SuppressionEntry`를 원인으로 옮기는 migration 없음 | 같은 migration에서 **행마다 원인 하나로 backfill**(`legacy:suppression:<entryId>`), 건수 대조가 다르면 migration 실패. 코드 배포 전에 끝남(7.4) |
+| **C62** | 관리자 1명 해제의 감사 id를 원자적으로 얻을 경로 없음 | **감사 행과 원인 해제를 한 transaction**에서 씀. `writeAdminAuditLog`가 transaction과 id 반환을 지원. 세 해제 종류 모두 같은 방식(7.4) |
+| **C63** | "preference 전이 기록" 모델이 없음 | append-only **`EmailPreferenceTransition`** 을 추가, 모든 켜기·끄기가 같은 transaction에서 씀(7.4) |
+| **C64** | 늦게 처리된 오래된 delivered가 이후 bounce 원인을 지움 | **`occurredAt`이 delivered보다 이르거나 같은 soft bounce 원인만** 해제 — 같으면 해제하지 않음(7.4) |
+| **C65** | complaint가 어느 사용자의 preference를 바꾸는지 없음 | **originating delivery의 `userId`**, User 행 잠금 후 현재 주소가 같을 때만. 다르거나 없으면 주소 기준 원인만(7.4) |
+| **C66** | 만료를 누가 기록하는지 없음 | 발송 판정·관리자 화면은 **원인을 직접 읽어 만료를 제외**하고, 15분 runner가 만료 원인에 해제를 기록하고 요약을 수선(7.4) |
+| **C67** | 계정별 침묵 판정의 발송 증거 source 없음 | **`EmailDelivery.sentAt`으로 좁힘**, 제외 경로를 이름으로 적고 시계는 DB `now()` 하나(7.4) |
 
 ### v18 (2026-09-16) — 독립 검토 13회차 반영
 
@@ -738,8 +753,21 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   request id), `occurredAt`, `expiresAt`, 그리고 해제 기록 `releasedAt`·
   `releaseKind`·`releaseEvidence`. 갱신은 해제 기록 한 번뿐입니다.
 - **`SuppressionEntry`는 활성 원인의 요약**이고 원인을 쓰거나 해제하는 같은 잠금
-  안에서 다시 계산합니다. 발송 판정은 요약이 아니라 **활성 원인 목록**을 받습니다 —
-  지금의 `suppressionVerdict()`가 이미 목록을 받는 모양입니다.
+  안에서 다시 계산합니다. **발송 판정과 관리자 화면은 요약이 아니라 원인을 직접
+  읽고**, 활성의 정의는 하나입니다 — `releasedAt IS NULL AND (expiresAt IS NULL OR
+  expiresAt > now())`. 지금의 `suppressionVerdict()`가 이미 목록을 받는 모양입니다.
+- **기존 행의 이전(C61)** — 원인 테이블을 만드는 **같은 migration**에서 기존
+  `SuppressionEntry` 행마다 원인 하나를 만듭니다: reason·source·provenance·
+  `occurredAt`·`expiresAt`을 그대로, `sourceEventKey`는 `legacy:suppression:<entryId>`.
+  migration 끝에서 **원인 건수와 entry 건수가 다르면 예외로 실패**합니다(`DO` 블록).
+  migration은 새 코드보다 먼저 끝나므로, 원인을 읽는 코드가 도는 시점에 backfill은
+  이미 완료돼 있습니다. 이전 build는 여전히 entry를 읽고 씁니다 — 전환 중 이전 build가
+  새로 쓴 entry는 새 코드의 첫 15분 runner가 같은 규칙으로 원인을 채웁니다(대응
+  원인이 없는 entry만).
+- **만료의 기록(C66)** — 판정은 위 활성 정의로 만료를 즉시 제외하므로 기다리지
+  않습니다. **15분 runner**가 만료된 활성 원인에 `releasedAt`·`releaseKind: expired`·
+  `releaseEvidence: { kind: "expiry" }`를 쓰고 요약을 수선합니다. 오래 발송이 없는
+  주소도 이 sweep이 처리하므로 요약이 영원히 낡지 않습니다.
 - **차단 효과는 활성 원인들의 합**입니다. hard bounce 뒤에 complaint가 와도
   transactional은 계속 막힙니다.
 
@@ -770,9 +798,12 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
 | `unsubscribe` (purpose) | — | — | **해제** | — | — |
 | `soft_bounce` | **해제** | **해제** | — | **해제** | **해제** |
 
-- **delivered 사건(C57)** — v15 계약대로 성공 시 해제합니다. 그 주소로 provider가
-  delivered를 보고하면 **같은 주소의 활성 `soft_bounce` 원인만** 잠금 안에서 해제하고
-  요약을 다시 계산합니다.
+- **delivered 사건(C57, C64)** — v15 계약대로 성공 시 해제합니다. 그 주소로 provider가
+  delivered를 보고하면 **같은 주소의 활성 `soft_bounce` 원인 중 `occurredAt`이
+  delivered 사건의 `occurredAt`보다 이른 것만** 잠금 안에서 해제하고 요약을 다시
+  계산합니다. **같은 시각이면 해제하지 않습니다** — 순서를 알 수 없을 때 막힌 쪽에
+  둡니다. sweeper가 늦게 재처리한 오래된 delivered가 이후의 연속 bounce를 지우지
+  못합니다. 시험: 순서를 뒤집은 replay.
 - preference 재활성화는 그 purpose의 `unsubscribe` 원인만 풀고, 같은 purpose·그
   분류·전역에 다른 활성 원인이 남아 있으면 **켜기 자체를 거절**합니다.
 
@@ -780,9 +811,17 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
 id를 넘기지 않고, 1인 관리자 경로(`soleApproverAllowed`)는 승인 행을 만들지 않습니다.
 1인 조직에서 1인 경로를 금지하면 hard bounce는 영영 풀 수 없으므로 금지하지 않습니다.
 
-- **`releaseEvidence`는 둘 중 하나**입니다 — `{ kind: "dual_approval", approvalId }`
-  또는 `{ kind: "sole_admin", auditLogId }`. 관리자 1명 행위는
-  `{ kind: "admin", auditLogId }`.
+- **`releaseEvidence`** — `{ kind: "dual_approval", approvalId, auditLogId }`,
+  `{ kind: "sole_admin", auditLogId }`, `{ kind: "admin", auditLogId }`,
+  `{ kind: "preference", transitionId }`, `{ kind: "delivered", webhookEventId }`,
+  `{ kind: "expiry" }`.
+- **감사 행과 해제는 한 transaction입니다(C62).** 지금은 해제 뒤에 감사 로그를 쓰고
+  `writeAdminAuditLog()`가 id를 돌려주지 않아 증거를 원자적으로 만들 수 없습니다.
+  `writeAdminAuditLog()`가 **transaction client를 받고 id를 반환**하도록 바꾸고, 관리자
+  해제 세 종류 모두 **잠금 → 재검증 → 감사 행 생성 → 원인 해제(그 id) → 요약 재계산**
+  을 한 transaction에서 합니다. rollback되면 감사 행도 없습니다 — 일어나지 않은 해제를
+  기록하지 않습니다. 해제 시도 자체의 기록이 필요하면 transaction 밖의 기존
+  `*_started` 감사 사건을 씁니다.
 - **승인 callback이 승인 문맥을 받습니다** — `runWithAdminApproval()`이 operation에
   `{ approvalId | null, soleAdminAuditLogId | null, approvedPayload }`를 넘기도록
   바꿉니다. 승인 요청 payload에는 **요청 당시 활성 원인 id 집합**이 들어갑니다.
@@ -797,18 +836,36 @@ sourceEventKey)`이고 `sourceEventKey`는 NOT NULL입니다.
 | webhook 사건 | `webhook:<ProviderWebhookEvent.id>` |
 | soft bounce 임계 | `softbounce:<deliveryId>` (임계를 넘긴 delivery) |
 | privacy request | `privacy:<requestId>:intake` · `privacy:<requestId>:completed` |
-| preference 끄기 | `preference:<ConsentRecord.id>` — 동의 기록이 없으면 이번에 쓰는 preference 전이 기록의 id |
+| preference 끄기 | `preference:<EmailPreferenceTransition.id>` |
 | 관리자 수동 | `admin:<요청 idempotency key>` — 클라이언트가 요청마다 생성해 보냄 |
 
 - **사건 시각(C50)** — provider 사건은 payload의 `created_at`(ISO 8601, 수신 시각보다
   5분 넘게 미래가 아닐 때)을, 아니면 그 사건이 처음 저장된 `receivedAt`을 씁니다.
   요약이 "최근 원인"을 보여 줄 때는 `occurredAt` 내림차순, 같으면 원인 id 순입니다.
 
+**preference 전이 기록(C63).** `service_status`처럼 동의가 필요 없는 purpose의 철회는
+`ConsentRecord`를 만들지 않으므로, 원인의 키로 쓸 영속 id가 없습니다.
+
+- append-only **`EmailPreferenceTransition`** — `id`, `userId`, `purpose`,
+  `fromEnabled`, `toEnabled`, `source`, `occurredAt`, 그리고 동의 기록이 있으면
+  `consentRecordId`.
+- `setPreference()`가 **값이 실제로 바뀔 때만** 같은 transaction에서 씁니다. 같은 요청의
+  재시도는 `already_set`으로 끝나 전이도 원인도 새로 만들지 않으므로, 첫 시도의 원인이
+  그대로 멱등 결과입니다.
+- 보존은 `EmailPreference`와 같습니다 — 계정 삭제 시 함께 지웁니다. 원인 행의
+  `sourceEventKey` 문자열은 주소 기준 suppression과 함께 남습니다.
+
 **complaint는 목적 opt-out도 함께입니다(C58).** v15 목록 위생 계약은 complaint에
 영구 suppression과 **그 목적의 opt-out**을 요구합니다. webhook 효과 처리에서:
 
-- originating delivery의 `TemplateVersion.purpose`가 있으면 **같은 transaction**에서
-  그 purpose의 preference를 끄고, 실제 동의가 있었으면 `ConsentRecord(withdrawn,
+- **사용자 귀속(C65)** — preference와 동의는 사용자 기준입니다. 대상은 **originating
+  delivery의 `userId`** 하나입니다. User 행을 잠근 뒤 그 사용자가 존재하고 **현재
+  주소(정규화)가 delivery의 주소와 같을 때만** preference·동의를 바꿉니다. 사용자가
+  없거나(계정 삭제) 주소가 바뀌었거나(재사용 포함) `userId`가 없으면 **사용자 기록은
+  건드리지 않고** 주소 기준 원인만 씁니다 — purpose scope 원인도 주소 기준이므로 그
+  purpose의 발송은 여전히 막힙니다.
+- originating delivery의 `TemplateVersion.purpose`가 있고 위 조건이 맞으면 **같은
+  transaction**에서 그 purpose의 preference를 끄고, 실제 동의가 있었으면 `ConsentRecord(withdrawn,
   source: complaint)`를 남기고, purpose scope `unsubscribe` 원인
   (`sourceEventKey` `webhook:<id>:purpose`)을 추가합니다. 나중에 관리자가 complaint
   원인을 풀어도 preference는 꺼진 채입니다.
@@ -867,9 +924,17 @@ sourceEventKey)`이고 `sourceEventKey`는 NOT NULL입니다.
   - `ProviderWebhookEvent.providerAccount`에 그 stream을 남기고, unique는
     `(provider, providerAccount, providerEventId)`입니다.
 - **incident 두 가지를 더 둡니다** — 수신 후 **1시간** 넘게 미처리인 행이 있을 때, 그리고
-  **계정별로** 24시간 동안 **그 stream의 발송**이 있었는데 **그 계정의 webhook**이 한 건도
-  오지 않았을 때(provider가 endpoint를 자동 비활성화했을 가능성). 평가는 API key와
-  webhook secret이 **둘 다 설정된 계정만** 합니다.
+  **계정별 침묵**(provider가 endpoint를 자동 비활성화했을 가능성).
+  - **발송 증거는 `EmailDelivery.sentAt`뿐입니다(C67).** stream은 delivery가 고정한
+    `TemplateVersion.classification`에서 유도합니다. standard·credential lane이 여기에
+    들어갑니다.
+  - **제외 경로**(delivery 행이 없음): 알림 큐(`lib/notificationDeliveries.ts`), 운영자
+    알림, 관리자 테스트 메일. 이들만 발송된 날은 침묵을 판정하지 않습니다.
+  - **창과 시계** — DB `now()` 하나를 기준으로 `[now() − 24시간, now())`. 발송은
+    `sentAt`, webhook은 `ProviderWebhookEvent.receivedAt`으로 셉니다.
+  - **조건** — 그 계정의 발송이 창 안에 **5건 이상**이고 그 계정의 webhook이 **0건**.
+    소량일 때의 우연을 경보로 만들지 않기 위한 하한입니다.
+  - 평가는 API key와 webhook secret이 **둘 다 설정된 계정만** 합니다.
 
 **시간 예산(C31)**
 
@@ -1204,9 +1269,10 @@ EEA·영국을 여는 선행 게이트입니다.
 
 **S1b의 PR 분할** — 한 PR에 담기에는 경로가 많습니다.
 
-1. **S1b-1** `SuppressionCause`와 요약 재계산, scope 셋(classification 포함)과 CHECK,
+1. **S1b-1** `SuppressionCause`와 기존 행 backfill, 요약 재계산과 만료 sweep, scope 셋(classification 포함)과 CHECK,
    해제 행위 × 원인 행렬, 해제 증거와 `runWithAdminApproval()` 승인 문맥, 원인별
-   `sourceEventKey`, 총잠금 순서, preference 재활성화 제한, privacy request
+   `sourceEventKey`와 `EmailPreferenceTransition`, 감사 행과 해제의 단일 transaction,
+   총잠금 순서, preference 재활성화 제한, privacy request
    suppression(접수·완료·legal hold), `withdrawAllMarketing()`의 transaction 수용,
    complaint의 목적 opt-out, delivered 사건의 soft bounce 해제, provider 사건 시각.
 2. **S1b-2** webhook 재처리 — stream별 endpoint·secret·`providerAccount`, lease·fencing,
