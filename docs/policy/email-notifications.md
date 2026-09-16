@@ -4,14 +4,47 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v14 (2026-09-16).** 운영자가 신고 한 건을 안내 없이 닫을 수 있습니다
-  (기본은 안내). 0절 참조.
+- 개정: **v15 (2026-09-16).** 발송 판정 metadata를 `TemplateVersion`으로 옮기고,
+  수신 거부 rate limit과 unsubscribe key 보존 readiness를 고칩니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v15 (2026-09-16) — 템플릿 metadata, 수신 거부 rate limit, key 보존
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md)의
+S1a 세 항목입니다. 셋 다 소유자 결정이 필요 없는 기계 보강입니다.
+
+1. **발송 판정 metadata는 `TemplateVersion`에 있습니다(10.2).**
+   `ensureTemplateVersion()`이 `EmailTemplate`을 `update: {}`로 upsert하므로, 코드에서
+   분류를 바꿔도 행은 옛 값으로 남았습니다. drain은 분류를 코드에서, 수신 거부
+   여부를 그 행에서 읽었으므로 **marketing으로 재분류된 템플릿이 수신 거부 링크 없이
+   나갈 수 있었습니다.**
+   - `classification`·`purpose`·`requiresUnsubscribe`를 각 version에 한 번 쓰고
+     trigger로 수정을 거부합니다. 같은 CHECK 두 개를 version에도 둡니다.
+   - registry는 이 셋을 조회 조건에 넣으므로, 본문이 같아도 metadata가 다르면 새
+     version을 만듭니다.
+   - drain과 webhook은 version 값을 씁니다. drain은 코드 정의와 **정확히** 비교해
+     다르면 `template_metadata_mismatch`로 실패 처리하고 incident를 올립니다.
+   - 기존 version은 **당시 `EmailTemplate` 값**으로 backfill했습니다. 현재 코드값을
+     복사하면 과거를 고쳐 쓰게 됩니다. 차이는
+     `npm run report:email-template-metadata`가 목록으로 보여 주고 고치지 않습니다.
+2. **유효한 수신 거부 요청은 출처로 막지 않습니다(11.3).** IP당 20회/분 제한이 token을
+   읽기 전에 걸려, 한 NAT나 메일 사업자의 one-click 요청이 실제 수신 거부를 429로
+   만들 수 있었습니다. 이제 token을 먼저 열고, **유효하지 않은 요청만** 출처 제한을
+   받습니다. 유효한 token은 subject·purpose 단위로 30회/분·300회/일입니다.
+3. **최근 메일이 쓰는 unsubscribe key는 지울 수 없습니다(11.4).** token은 만료되지
+   않지만 key version이 목록에 있을 때만 열립니다. 어떤 version으로 보냈는지 기록이
+   없었고 token도 보관하지 않으므로, 언제 지워도 되는지 알 수 없었습니다.
+   - `EmailDelivery.unsubscribeKeyVersion`에 실제 발송된 링크의 version을 남깁니다.
+   - version마다 **아무것도 끄지 않는 canary token**을 한 번 저장합니다.
+   - `/api/ready`의 `emailUnsubscribeKeyRetention`이 canary를 **복호화만** 해서,
+     최근 30일 안에 발송한 version이 빠졌거나 secret이 바뀌었으면 거부합니다. 지워도
+     되는 version은 `retirableVersions`로 보고합니다. endpoint를 호출하는 end-to-end
+     점검은 이것과 별개입니다.
 
 ### v14 (2026-09-16) — 운영자가 한 건의 안내를 보류할 수 있음
 
@@ -1692,11 +1725,18 @@ TemplateVersion:
   language           String   // 언어별 행
   subject, bodyHtml, bodyText
   contentHash        String   // 불변성 검증
+  classification     String   // v15. 이 version이 게시된 분류. trigger로 수정 불가
+  purpose            String?  // v15. 같은 규칙
+  requiresUnsubscribe Boolean // v15. 같은 규칙
   status             "draft" | "published" | "retired"
   publishedAt, publishedById
   @@unique([templateId, version, language])
 ```
 - **published 이후 수정 불가.** 고치려면 새 버전. `contentHash`가 이를 검증합니다.
+- **발송 판정은 version의 metadata를 씁니다(v15).** `EmailTemplate`의 세 필드는 처음
+  등록될 때 한 번 쓰이는 이력이고, 어떤 발송도 그 행으로 결정하지 않습니다. registry는
+  `contentHash`와 세 metadata를 함께 조회 조건으로 쓰고, drain은 코드 정의와 다르면
+  보내지 않습니다.
 
 **`EmailEvent`** (outbox)
 ```
@@ -2015,6 +2055,11 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
   끈다"입니다.
 - 처리 후 "되돌리기" 링크를 30분간 제공(오클릭 구제). **재구독을 유도하는 마케팅
   문구는 넣지 않습니다.**
+- **rate limit은 유효하지 않은 요청에만 출처 기준으로 겁니다(v15).** token을 먼저
+  열고(로컬 복호화, DB 없음), 실패한 요청만 출처당 20회/분·200회/일을 씁니다. 유효한
+  token은 끄기만 할 수 있으므로 출처로 막지 않고, subject·purpose 단위
+  30회/분·300회/일로만 묶습니다. 한 NAT나 메일 사업자 뒤의 수신자들이 서로를 막으면
+  안 됩니다.
 
 ### 11.4 unsubscribe token 보안
 
@@ -2024,6 +2069,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 | 열거 불가 | payload에 `userId` 대신 **불투명 식별자**. 이메일 주소 평문 금지 |
 | 범위 제한 | `{ subjectId, purpose, deliveryId, version }`만 서명. **다른 사용자 설정 변경 불가** |
 | 만료 | **만료하지 않음.** CAN-SPAM은 최소 30일 동작을 요구하고, 오래된 메일에서 눌러도 동작해야 합니다. 대신 secret 회전 시 이전 버전 검증을 1년간 유지 |
+| key 보존 | **v15.** 발송마다 `EmailDelivery.unsubscribeKeyVersion`을 남기고, version마다 아무것도 끄지 않는 canary token을 저장합니다. readiness가 canary를 복호화해 **최근 30일 안에 쓴 version이 빠졌거나 secret이 바뀌면** 거부합니다. 회전은 version 이름을 새로 추가하는 방식만 안전합니다 |
 | 재사용 | 멱등. 이미 거부 상태면 같은 결과 |
 | 로그 유출 | **token은 URL 쿼리에 남습니다.** 접근 로그·Sentry·Referer에서 마스킹 필수 |
 | 권한 상승 불가 | token으로는 **끄기만** 가능. 켜기는 로그인 필요 |

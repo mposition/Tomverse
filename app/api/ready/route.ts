@@ -14,6 +14,7 @@ import { getSendingIdentityReadiness } from "@/lib/emailSendingIdentity";
 import { snapshotKeyringReadiness } from "@/lib/emailSnapshotCrypto";
 import { businessIdentityReadiness } from "@/lib/emailBusinessIdentity";
 import { unsubscribeKeyringReadiness } from "@/lib/emailUnsubscribeReadiness";
+import { getUnsubscribeKeyRetentionReadiness } from "@/lib/emailUnsubscribeKeyRetention";
 import { consentKeyringReadiness } from "@/lib/emailConsentReadiness";
 import { AVAILABLE_MODELS } from "@/lib/models";
 import {
@@ -179,6 +180,24 @@ const readinessResponse = async (head = false) => {
   // broken is an error either way.
   const unsubscribeKeyring = unsubscribeKeyringReadiness();
   const emailUnsubscribeKeyring = unsubscribeKeyring.ready;
+  // Whether every unsubscribe key a message sent in the last thirty days
+  // depends on still opens its links (docs/policy/email-notifications.md
+  // §11.4). Unconditional, unlike the keyring check above: it only has
+  // anything to say once a link has been signed, and from then on dropping or
+  // editing that version kills links already in inboxes -- which the recipient
+  // answers with the spam button. Decrypt-only; it never calls the endpoint.
+  // A thrown check is not ready, for the reason the image budget gives.
+  const unsubscribeRetentionStatus = await getUnsubscribeKeyRetentionReadiness().then(
+    (status) => ({ status, error: null as string | null }),
+    (error: unknown) => ({
+      status: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The unsubscribe key retention readiness check threw.",
+    })
+  );
+  const emailUnsubscribeKeyRetention = unsubscribeRetentionStatus.status?.ready ?? false;
   // The marketing consent confirmation keyring (docs/policy/email-double-opt-in.md
   // §11 item 10). Same condition as the unsubscribe keyring above: an error
   // once MARKETING_EMAIL_FROM is set, because from then on a missing key means
@@ -201,7 +220,7 @@ const readinessResponse = async (head = false) => {
     imageProviderBudget && voiceProviderBudget && voiceModelPrice &&
     searchProviderBudget &&
     emailSendingIdentity && emailSnapshotKeyring && emailUnsubscribeKeyring &&
-    emailConsentKeyring &&
+    emailUnsubscribeKeyRetention && emailConsentKeyring &&
     emailBusinessIdentity;
   const headers = ready
     ? { ...baseHeaders, "X-Tomverse-Trace-Id": traceId }
@@ -462,6 +481,38 @@ const readinessResponse = async (head = false) => {
         },
       }),
       reportOperationalDependencyStatus({
+        dependency: "email-unsubscribe-key-retention",
+        healthy: emailUnsubscribeKeyRetention,
+        code: "EMAIL_UNSUBSCRIBE_KEY_RETENTION_NOT_READY",
+        title: "An unsubscribe key that recent mail depends on no longer opens its links",
+        error:
+          unsubscribeRetentionStatus.error ??
+          (unsubscribeRetentionStatus.status &&
+          unsubscribeRetentionStatus.status.errors.length > 0
+            ? unsubscribeRetentionStatus.status.errors
+                .map((problem) => problem.message)
+                .join(" | ")
+            : "Every unsubscribe key used in the retention window opens its links."),
+        severity: "fatal",
+        context: {
+          component: "api-ready",
+          route: "/api/ready",
+          // Version names only, never secrets or tokens. Retirable versions are
+          // listed so an operator rotating keys can see what is safe to drop.
+          failedVersions:
+            unsubscribeRetentionStatus.status?.errors
+              .map((problem) => problem.keyVersion)
+              .join(",") || "none",
+          retirableVersions:
+            unsubscribeRetentionStatus.status?.retirable.join(",") || "none",
+          warnings:
+            unsubscribeRetentionStatus.status?.warnings
+              .map((problem) => `${problem.code}:${problem.keyVersion}`)
+              .join(",") || "none",
+          traceId,
+        },
+      }),
+      reportOperationalDependencyStatus({
         dependency: "email-consent-keyring",
         healthy: emailConsentKeyring,
         code: "EMAIL_CONSENT_KEYRING_NOT_READY",
@@ -523,6 +574,7 @@ const readinessResponse = async (head = false) => {
         emailSendingIdentity,
         emailSnapshotKeyring,
         emailUnsubscribeKeyring,
+        emailUnsubscribeKeyRetention,
         emailConsentKeyring,
         emailBusinessIdentity,
       },

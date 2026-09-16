@@ -16,11 +16,13 @@ import {
   type EmailClassification,
 } from "@/lib/emailTemplateDefinitions";
 import { ensureBootstrapPolicyVersion, ensureTemplateVersion } from "@/lib/emailTemplateRegistry";
+import { templateMetadataMismatches } from "@/lib/emailTemplateMetadataCore";
 import {
   reportProviderSuppression,
   suppressionCheck,
 } from "@/lib/emailSuppression";
 import { unsubscribeHeaders, unsubscribeUrl } from "@/lib/emailUnsubscribeHeaders";
+import { ensureUnsubscribeKeyCanary } from "@/lib/emailUnsubscribeKeyRetention";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { isEmailMarketingEnabled } from "@/lib/appSettings";
 import {
@@ -326,7 +328,11 @@ type ClaimedDelivery = {
   jurisdictionProfileKey: string;
   event: { referenceType: string | null; referenceId: string | null };
   templateVersion: {
-    template: { key: string; classification: string; requiresUnsubscribe: boolean };
+    id: string;
+    classification: string;
+    purpose: string | null;
+    requiresUnsubscribe: boolean;
+    template: { key: string };
   };
 };
 
@@ -379,9 +385,11 @@ const claimDueDelivery = async (now: Date): Promise<ClaimedDelivery | null> => {
       event: { select: { referenceType: true, referenceId: true } },
       templateVersion: {
         select: {
-          template: {
-            select: { key: true, classification: true, requiresUnsubscribe: true },
-          },
+          id: true,
+          classification: true,
+          purpose: true,
+          requiresUnsubscribe: true,
+          template: { select: { key: true } },
         },
       },
     },
@@ -397,6 +405,8 @@ const recordOutcome = async (
     classification: EmailClassification;
     rendered: { subject: string; html: string; text: string };
     status: number | null;
+    /** Recorded on a successful send only; see §11.4. */
+    unsubscribeKeyVersion?: string | null;
   }
 ) => {
   if (outcome.kind === "delivered") {
@@ -413,6 +423,7 @@ const recordOutcome = async (
         renderedSubject: context.rendered.subject,
         renderedHash: renderedBodyHash(context.rendered),
         renderedHashKeyVersion: EMAIL_AUDIT_HASH_KEY_VERSION,
+        unsubscribeKeyVersion: context.unsubscribeKeyVersion ?? null,
       },
     });
     return "sent" as const;
@@ -559,6 +570,45 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // Filled for marketing only; re-checked immediately before the provider call.
   let quietHourWindows: Array<{ profileKey: string; quietHours: unknown }> = [];
   const definition = emailTemplateDefinition(delivery.templateVersion.template.key);
+
+  // The version this row was pinned to must still describe the message the code
+  // is about to send. A template reclassified after enqueue -- or a version
+  // backfilled from a row that had already drifted -- would otherwise go out
+  // with headers, footer and stream decided by one classification and
+  // suppression decided by another. Refused before anything else, including the
+  // suppression check, because every later step reads the definition.
+  const metadataMismatches = templateMetadataMismatches(
+    delivery.templateVersion,
+    definition
+  );
+  if (metadataMismatches.length > 0) {
+    await reportOperationalIncident({
+      code: "EMAIL_TEMPLATE_METADATA_MISMATCH",
+      title: "A queued message was refused because its template version no longer matches the code",
+      severity: "error",
+      error: metadataMismatches
+        .map((m) => `${m.field}: stored ${String(m.stored)}, code ${String(m.expected)}`)
+        .join("; "),
+      context: {
+        component: "standard-email-lane",
+        deliveryId: delivery.id,
+        templateKey: definition.key,
+        templateVersionId: delivery.templateVersion.id,
+      },
+    });
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "failed",
+        attempts: delivery.attempts,
+        lastErrorKind: "template_metadata_mismatch",
+        nextAttemptAt: null,
+        claimedAt: null,
+        deferReason: null,
+      },
+    });
+    return { outcome: "failed" as const, classification: definition.classification };
+  }
 
   // Checked at send time, not at enqueue: a message queued yesterday may be for
   // an address that complained this morning, and the decision that matters is
@@ -757,7 +807,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   // the database holds as a CHECK against the classification, so a message
   // cannot acquire an unsubscribe header by being sent from the wrong place.
   const unsubscribeTarget = {
-    requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
+    requiresUnsubscribe: delivery.templateVersion.requiresUnsubscribe,
     userId: delivery.userId,
     purpose: definition.purpose,
     deliveryId: delivery.id,
@@ -803,6 +853,12 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
   }
   const unsubscribeLink = link.url;
   const headers = unsubscribeHeaders(unsubscribeLink);
+  // The version this message will depend on for as long as it sits in an
+  // inbox, and a canary proving that version still opens what it signs. Stored
+  // before the send: a canary for a version that then failed to send is
+  // harmless, a sent message whose version has no canary is not checkable.
+  const unsubscribeKeyVersion = link.keyring?.activeVersion ?? null;
+  if (link.keyring) await ensureUnsubscribeKeyCanary(link.keyring);
 
   // The subject prefix and the jurisdiction footer, from the profile this row
   // was pinned to at enqueue (EM-04). Read from the pinned policy version and
@@ -826,7 +882,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
 
   const composed = composeJurisdictionalMessage({
     classification: definition.classification,
-    requiresUnsubscribe: delivery.templateVersion.template.requiresUnsubscribe,
+    requiresUnsubscribe: delivery.templateVersion.requiresUnsubscribe,
     profile: profile
       ? {
           profileKey: profile.profileKey,
@@ -1010,6 +1066,7 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     classification: definition.classification,
     rendered: forAudit(rendered),
     status: response.ok ? null : (response.status ?? null),
+    unsubscribeKeyVersion,
   });
   return { outcome: recorded, classification: definition.classification };
 };

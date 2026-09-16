@@ -210,6 +210,40 @@ mock.module(mod("lib/searchProviderBudgetReadiness.ts"), {
     },
 });
 
+/**
+ * The unsubscribe key retention readiness the route folds in.
+ *
+ * Mocked because the real check reads delivery and canary rows this suite does
+ * not own; its verdict is unit-tested in
+ * tests/emailUnsubscribeKeyRetentionCore.test.mjs and against a database in
+ * tests/integration/email-unsubscribe-key-retention.db.test.ts. `null` stands
+ * for "the check threw", which the route must answer as not ready.
+ */
+let keyRetention: { ready: boolean } | null = { ready: true };
+mock.module(mod("lib/emailUnsubscribeKeyRetention.ts"), {
+    namedExports: {
+        getUnsubscribeKeyRetentionReadiness: async () => {
+            if (!keyRetention) throw new Error("key retention check exploded");
+            return {
+                ready: keyRetention.ready,
+                errors: keyRetention.ready
+                    ? []
+                    : [
+                          {
+                              severity: "error",
+                              code: "EMAIL_UNSUBSCRIBE_KEY_RETIRED_TOO_EARLY",
+                              keyVersion: "v0",
+                              message: "v0 removed too early",
+                          },
+                      ],
+                warnings: [],
+                retirable: [],
+            };
+        },
+        ensureUnsubscribeKeyCanary: async () => undefined,
+    },
+});
+
 /** Dependency reports the route files after answering. */
 let reported: Array<{ dependency: string; healthy: boolean }> = [];
 mock.module(mod("lib/operationalMonitoring.ts"), {
@@ -282,6 +316,7 @@ beforeEach(() => {
     voiceBudget = { ready: true, flagEnabled: false };
     voiceModelPrice = { ready: true, flagEnabled: false };
     searchBudget = { ready: true };
+    keyRetention = { ready: true };
     setBusinessIdentity(true);
     sendingIdentityReady = true;
     snapshotKeyringReady = true;
@@ -308,6 +343,7 @@ type ReadinessBody = {
         emailSendingIdentity: boolean;
         emailSnapshotKeyring: boolean;
         emailUnsubscribeKeyring: boolean;
+        emailUnsubscribeKeyRetention: boolean;
         emailConsentKeyring: boolean;
         emailBusinessIdentity: boolean;
         searchProviderBudget: boolean;
@@ -341,6 +377,7 @@ test("a healthy deployment is ready, and says which checks passed", async () => 
         emailSendingIdentity: true,
         emailSnapshotKeyring: true,
         emailUnsubscribeKeyring: true,
+        emailUnsubscribeKeyRetention: true,
         emailConsentKeyring: true,
         emailBusinessIdentity: true,
         searchProviderBudget: true,
@@ -430,6 +467,21 @@ test("each dependency alone sinks the verdict, and the others still report", asy
             },
         },
         {
+            // A key version that mail sent in the last thirty days depends on
+            // was dropped or edited: links already in inboxes are dead.
+            name: "emailUnsubscribeKeyRetention",
+            arrange: () => {
+                keyRetention = { ready: false };
+            },
+        },
+        {
+            // The same check throwing is not ready either.
+            name: "emailUnsubscribeKeyRetention",
+            arrange: () => {
+                keyRetention = null;
+            },
+        },
+        {
             // The marketing consent confirmation keyring
             // (docs/policy/email-double-opt-in.md §11 item 10): required on the
             // same condition as the unsubscribe keyring, with those keys present
@@ -467,6 +519,7 @@ test("each dependency alone sinks the verdict, and the others still report", asy
         voiceBudget = { ready: true, flagEnabled: false };
         voiceModelPrice = { ready: true, flagEnabled: false };
         searchBudget = { ready: true };
+        keyRetention = { ready: true };
         sendingIdentityReady = true;
         snapshotKeyringReady = true;
         delete process.env.MARKETING_EMAIL_FROM;
