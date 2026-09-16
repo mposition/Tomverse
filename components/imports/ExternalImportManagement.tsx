@@ -32,6 +32,7 @@ import {
     secondaryButtonClass,
     sectionClass,
 } from "@/components/imports/importFormatting";
+import { importedConversationTitle } from "@/components/imports/importedConversationTitle";
 import {
     groupConversationsByLineage,
     type LineageGroup,
@@ -129,7 +130,9 @@ type HistoryState =
 export type ViewerConversationRow = {
     id: string;
     provider: string;
-    title: string;
+    /** `null` for a locked snapshot: the server does not send its title. */
+    title: string | null;
+    titleWithheld?: boolean;
     externalStableId: string;
     messageCount: number;
     contentBytes: number;
@@ -961,7 +964,7 @@ function ConversationRow({
                 data-testid="external-import-conversation-link"
             >
                 <span className="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                    {row.title}
+                    {importedConversationTitle(row, t)}
                 </span>
                 {/* Said in the list, not only on the page it guards: opening a
                     snapshot to find a password prompt is a worse answer than
@@ -988,7 +991,7 @@ function ConversationRow({
             {continuationEnabled ? (
                 <ContinuationQuickAction
                     externalConversationId={row.id}
-                    sourceTitle={row.title}
+                    sourceTitle={importedConversationTitle(row, t)}
                     locked={row.locked === true}
                     continuationCount={row.continuationCount ?? 0}
                     latestContinuationId={row.latestContinuationId ?? null}

@@ -1469,6 +1469,7 @@ export const pt = {
         viewerMessagesShown: "{shown} de {total} mensagens exibidas",
         deleteSnapshot: "Excluir esta versão",
         lockedBadge: "Bloqueada",
+        lockedTitle: "Conversa bloqueada ({provider}, {date})",
         lockGateTitle: "Esta conversa está bloqueada",
         lockGateDescription: "Digite a senha que você definiu para lê-la.",
         lockPasswordLabel: "Senha",
