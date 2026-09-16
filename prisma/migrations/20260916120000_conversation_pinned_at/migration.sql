@@ -11,6 +11,9 @@
 -- nothing is written on a page load nobody asked to change anything on.
 ALTER TABLE "Conversation" ADD COLUMN "pinnedAt" TIMESTAMP(3);
 
--- The sidebar asks "which of this account's conversations are pinned" on every
--- list read.
-CREATE INDEX "Conversation_userId_pinnedAt_idx" ON "Conversation"("userId", "pinnedAt");
+-- No index. The list already reads a user's conversations by `userId` and
+-- orders them by `updatedAt`; nothing filters or sorts on `pinnedAt`, so an
+-- index on it would buy no plan and cost every write -- and creating it
+-- non-concurrently would take a write lock on a production table for the
+-- length of the build. The day a query needs one, it comes with that query and
+-- with `CONCURRENTLY`.

@@ -106,10 +106,16 @@ its own rules. They exist to buy rows, never to buy them from the reader.
   rather than once per group, and they are drawn only when the list is showing
   everything (`lib/conversationListGrouping.ts`). A filtered list is already one
   answer; dates over it fragment it into groups of one.
-- **Pinning is account state** (`Conversation.pinnedAt`), written without
-  touching `updatedAt`: the headers group by that column, so a pin that bumped
-  it would tell the reader a conversation was answered when it was only moved.
-  A guest's pins stay in the browser, because a guest's conversations do.
+- **The date headers say last change, not last answer.** They group by
+  `Conversation.updatedAt`, which is the column the list is ordered by, so a
+  rename or a share link moves a row to 오늘 as an answer does. Narrowing them
+  to answers would need a second timestamp, the list re-ordered by it, a
+  backfill and an index: a separate change, and until it exists the headers
+  must not claim more than the column holds.
+- **Pinning is account state** (`Conversation.pinnedAt`), and the one write that
+  does not count as a change: it moves where the list puts a conversation, not
+  the conversation, so it leaves `updatedAt` alone and an integration test holds
+  that. A guest's pins stay in the browser, because a guest's conversations do.
 - **The conversation menu keeps its own 44px target** inside a row that is
   itself the click target.
 

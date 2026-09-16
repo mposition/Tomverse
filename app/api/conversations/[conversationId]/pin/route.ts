@@ -59,7 +59,7 @@ export async function PUT(
       : await prisma.$executeRaw`
           UPDATE "Conversation"
           SET "pinnedAt" = NULL
-          WHERE "id" = ${conversationId} AND "userId" = ${userId}
+          WHERE "id" = ${conversationId} AND "userId" = ${userId} AND "pinnedAt" IS NOT NULL
         `;
 
     if (affected === 0) {

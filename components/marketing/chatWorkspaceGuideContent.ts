@@ -58,8 +58,7 @@ export const chatWorkspaceGuideContent: Record<
       { term: "New chat", detail: "Starts a separate conversation with the currently selected default models." },
       { term: "Search conversations", detail: "Searches conversation titles and, for signed-in accounts, matching saved message text." },
       { term: "Status filters", detail: "Shows conversations that are Locked or currently have a Shared link." },
-      { term: "Personal labels", detail: "Filters the browser-local Work, Research, and Personal labels." },
-      { term: "Projects", detail: "Groups account conversations into folders for organization." },
+            { term: "Projects", detail: "Groups account conversations into folders for organization." },
       { term: "Conversation menu", detail: "Renames, pins, favorites, labels, moves, shares, downloads, locks, or deletes a conversation." },
     ],
     sections: [
@@ -88,17 +87,6 @@ export const chatWorkspaceGuideContent: Record<
           { term: "Remove from a project", detail: "Open the same menu and choose Remove from project." },
           { term: "Delete a project", detail: "Confirm the project delete action. Its conversations remain in the account and become uncategorized." },
           { term: "Context boundary", detail: "A project is a folder, not a shared prompt, file library, or cross-chat memory." },
-        ],
-      },
-      {
-        id: sectionIds.labels,
-        title: "4. Use personal labels",
-        description: "Open a conversation's menu and choose Work, Research, or Personal. Select the active label again to remove it.",
-        items: [
-          { term: "Example project", detail: "2026 Tomverse launch" },
-          { term: "Example label", detail: "Work" },
-          { term: "Use together", detail: "One conversation can be in the launch project and also carry the Work label." },
-          { term: "Device scope", detail: "Labels, pins, and favorites stay in the current browser and may not appear on another device." },
         ],
       },
       {
@@ -186,7 +174,7 @@ export const chatWorkspaceGuideContent: Record<
   ko: {
     eyebrow: "도움말 센터 · Chat 워크스페이스",
     title: "Tomverse Chat 워크스페이스 사용 가이드",
-    description: "대화, 프로젝트, 개인 라벨, 잠금, 공유, 모델 패널, AI Review, 파일과 크레딧을 실제 화면 기준으로 설명합니다.",
+    description: "대화, 프로젝트, 잠금, 공유, 모델 패널, AI Review, 파일과 크레딧을 실제 화면 기준으로 설명합니다.",
     updated: "2026년 7월 16일 업데이트",
     contents: "이 페이지의 내용",
     tourTitle: "1. Chat 화면 둘러보기",
@@ -195,19 +183,15 @@ export const chatWorkspaceGuideContent: Record<
       { term: "새 대화", detail: "현재 기본 모델 선택으로 서로 독립된 새 대화를 시작합니다." },
       { term: "대화 검색", detail: "대화 제목을 검색하고 로그인 계정에서는 저장된 메시지의 일치 내용도 찾습니다." },
       { term: "상태 필터", detail: "잠겼거나 현재 공유 링크가 활성화된 대화를 표시합니다." },
-      { term: "개인 라벨", detail: "현재 브라우저에 저장된 업무·리서치·개인 라벨로 필터링합니다." },
-      { term: "프로젝트", detail: "계정의 관련 대화를 폴더처럼 묶어 정리합니다." },
-      { term: "대화 메뉴", detail: "이름 변경, 고정, 즐겨찾기, 라벨, 이동, 공유, 다운로드, 잠금, 삭제를 실행합니다." },
+            { term: "프로젝트", detail: "계정의 관련 대화를 폴더처럼 묶어 정리합니다." },
+      { term: "대화 메뉴", detail: "이름 변경, 고정, 이동, 공유, 다운로드, 잠금, 삭제를 실행합니다." },
     ],
     sections: [
-      { id: sectionIds.states, title: "2. 대화 상태·라벨·프로젝트의 차이", description: "한 대화에 함께 표시될 수 있지만 각각 의미가 다릅니다.", items: [
+      { id: sectionIds.states, title: "2. 대화 상태와 프로젝트의 차이", description: "한 대화에 함께 표시될 수 있지만 각각 의미가 다릅니다.", items: [
         { term: "잠김", detail: "보호된 읽기와 작업 전에 비밀번호 확인이 필요한 대화입니다." },
         { term: "공유됨", detail: "읽기 전용 공개 스냅샷 링크가 활성화된 상태입니다." },
-        { term: "업무", detail: "업무 대화를 구분하는 브라우저 개인 라벨입니다." },
-        { term: "리서치", detail: "조사·연구 대화를 구분하는 브라우저 개인 라벨입니다." },
-        { term: "개인", detail: "개인적인 대화를 정리하는 브라우저 개인 라벨입니다." },
-        { term: "프로젝트", detail: "관련 대화를 묶는 계정 기반 폴더입니다." },
-      ], note: "프로젝트에 포함된 대화들이 서로의 내용, 파일 또는 AI 메모리를 자동 공유하지 않습니다. 업무·리서치·개인 라벨은 현재 브라우저에 저장되며 AI 답변 방식이나 공개 범위를 바꾸지 않습니다." },
+                                { term: "프로젝트", detail: "관련 대화를 묶는 계정 기반 폴더입니다." },
+      ], note: "프로젝트에 포함된 대화들이 서로의 내용, 파일 또는 AI 메모리를 자동 공유하지 않습니다." },
       { id: sectionIds.projects, title: "3. 프로젝트 사용 방법", description: "프로젝트를 만든 뒤 각 대화 메뉴에서 이동합니다.", items: [
         { term: "생성", detail: "프로젝트 옆 새 프로젝트를 누르고 이름을 입력해 확인합니다." },
         { term: "이름 변경", detail: "프로젝트 이름 옆 연필 버튼을 사용합니다." },
@@ -215,11 +199,6 @@ export const chatWorkspaceGuideContent: Record<
         { term: "프로젝트에서 제거", detail: "같은 메뉴에서 프로젝트에서 제거를 선택합니다." },
         { term: "프로젝트 삭제", detail: "삭제를 확인해도 대화는 계정에 남고 미분류 상태가 됩니다." },
         { term: "컨텍스트 제한", detail: "프로젝트는 폴더이며 공용 프롬프트, 파일 보관함 또는 대화 간 메모리가 아닙니다." },
-      ] },
-      { id: sectionIds.labels, title: "4. 대화 라벨 사용 방법", description: "대화의 ⋮ 메뉴에서 업무·리서치·개인을 선택합니다. 적용 중인 라벨을 다시 누르면 제거됩니다.", items: [
-        { term: "프로젝트 예시", detail: "2026 Tomverse 출시" }, { term: "라벨 예시", detail: "업무" },
-        { term: "동시 사용", detail: "하나의 대화가 출시 프로젝트에 들어가면서 동시에 업무 라벨을 가질 수 있습니다." },
-        { term: "기기 범위", detail: "라벨·고정·즐겨찾기는 현재 브라우저에 저장되어 다른 기기에는 보이지 않을 수 있습니다." },
       ] },
       { id: sectionIds.lockShare, title: "5. 잠금과 공유", description: "잠금은 저장된 대화 작업을 보호하고, 공유는 범위가 제한된 읽기 전용 스냅샷을 공개합니다.", items: [
         { term: "잠금", detail: "대화 메뉴에서 비밀번호를 설정합니다. 열기, 공유, 다운로드, 수정 등 보호 작업 전에 확인이 필요합니다." },
@@ -272,19 +251,16 @@ export const chatWorkspaceGuideContent: Record<
     allHelp: "전체 도움말 보기",
   },
   zh: {
-    eyebrow: "帮助中心 · Chat 工作区", title: "Tomverse Chat 工作区使用指南", description: "了解对话、项目、个人标签、锁定、分享、模型面板、AI Review、文件和积分。", updated: "更新于 2026 年 7 月 16 日", contents: "本页内容", tourTitle: "1. Chat 界面导览", tourDescription: "选择工作区地图中的编号即可跳到说明。地图不显示任何私人对话内容。",
+    eyebrow: "帮助中心 · Chat 工作区", title: "Tomverse Chat 工作区使用指南", description: "了解对话、项目、锁定、分享、模型面板、AI Review、文件和积分。", updated: "更新于 2026 年 7 月 16 日", contents: "本页内容", tourTitle: "1. Chat 界面导览", tourDescription: "选择工作区地图中的编号即可跳到说明。地图不显示任何私人对话内容。",
     tourItems: [
-      { term: "新对话", detail: "使用当前默认模型开始一个独立对话。" }, { term: "搜索对话", detail: "搜索标题；登录后也可搜索已保存消息中的匹配内容。" }, { term: "状态筛选", detail: "显示已锁定或已启用分享链接的对话。" }, { term: "个人标签", detail: "按当前浏览器中的工作、研究和个人标签筛选。" }, { term: "项目", detail: "像文件夹一样整理账户对话。" }, { term: "对话菜单", detail: "重命名、置顶、收藏、加标签、移动、分享、下载、锁定或删除。" },
+      { term: "新对话", detail: "使用当前默认模型开始一个独立对话。" }, { term: "搜索对话", detail: "搜索标题；登录后也可搜索已保存消息中的匹配内容。" }, { term: "状态筛选", detail: "显示已锁定或已启用分享链接的对话。" }, { term: "项目", detail: "像文件夹一样整理账户对话。" }, { term: "对话菜单", detail: "重命名、置顶、收藏、加标签、移动、分享、下载、锁定或删除。" },
     ],
     sections: [
-      { id: sectionIds.states, title: "2. 状态、标签和项目", description: "它们可以同时出现，但含义不同。", items: [
-        { term: "已锁定", detail: "受保护的读取和操作前需要密码验证。" }, { term: "已分享", detail: "只读公开快照链接当前有效。" }, { term: "工作", detail: "浏览器本地的工作分类标签。" }, { term: "研究", detail: "浏览器本地的研究分类标签。" }, { term: "个人", detail: "浏览器本地的个人分类标签。" }, { term: "项目", detail: "账户中用于归组相关对话的文件夹。" },
-      ], note: "项目不会自动共享对话内容、文件或 AI 记忆。个人标签只保存在当前浏览器，不改变 AI 行为或公开范围。" },
+      { id: sectionIds.states, title: "2. 状态和项目", description: "它们可以同时出现，但含义不同。", items: [
+        { term: "已锁定", detail: "受保护的读取和操作前需要密码验证。" }, { term: "已分享", detail: "只读公开快照链接当前有效。" }, { term: "项目", detail: "账户中用于归组相关对话的文件夹。" },
+      ], note: "项目不会自动共享对话内容、文件或 AI 记忆。" },
       { id: sectionIds.projects, title: "3. 使用项目", description: "先创建项目，再从每个对话的菜单移动。", items: [
         { term: "创建", detail: "选择项目旁的新建，输入名称并确认。" }, { term: "重命名", detail: "使用项目名称旁的铅笔按钮。" }, { term: "移动对话", detail: "打开 ⋮ 菜单，在移动到项目中选择目标。" }, { term: "移出", detail: "在同一菜单选择从项目移除。" }, { term: "删除项目", detail: "对话不会被删除，而会回到未分类。" }, { term: "上下文边界", detail: "项目只是文件夹，不是共享提示词、文件库或跨对话记忆。" },
-      ] },
-      { id: sectionIds.labels, title: "4. 使用个人标签", description: "在 ⋮ 菜单选择工作、研究或个人；再次选择当前标签即可移除。", items: [
-        { term: "项目示例", detail: "2026 Tomverse 发布" }, { term: "标签示例", detail: "工作" }, { term: "可同时使用", detail: "一个对话可以属于发布项目，同时带有工作标签。" }, { term: "设备范围", detail: "标签、置顶和收藏保存在当前浏览器，其他设备可能看不到。" },
       ] },
       { id: sectionIds.lockShare, title: "5. 锁定与分享", description: "锁定保护已保存对话的操作；分享发布有范围限制的只读快照。", items: [
         { term: "锁定", detail: "从菜单设置密码；打开、分享、下载、编辑等受保护操作需验证。" }, { term: "解锁", detail: "选择解锁并输入密码；连续错误可能被限速。" }, { term: "忘记密码", detail: "Tomverse 无法显示或恢复原密码，请安全保存并向支持咨询可用的数据选项。" }, { term: "不是加密", detail: "锁定是访问控制，不会阻止生成回答时把必要内容发送给 AI 提供商。" }, { term: "分享", detail: "持有链接的人可在到期或撤销前读取快照，请勿分享敏感内容。" }, { term: "刷新或撤销", detail: "刷新会生成新快照和链接；撤销会停用当前链接。" },
@@ -308,19 +284,16 @@ export const chatWorkspaceGuideContent: Record<
     reviewVideoTitle: "AI Review 流程示例", openChat: "打开 Tomverse Chat", allHelp: "查看全部帮助指南",
   },
   fr: {
-    eyebrow: "Centre d’aide · Espace Chat", title: "Guide de l’espace Chat Tomverse", description: "Maîtrisez conversations, projets, libellés personnels, verrouillage, partage, panneaux de modèles, AI Review, fichiers et crédits.", updated: "Mis à jour le 16 juillet 2026", contents: "Dans cette page", tourTitle: "1. Découvrir l’écran Chat", tourDescription: "Sélectionnez un numéro dans la carte pour rejoindre son explication, sans afficher de conversation privée.",
+    eyebrow: "Centre d’aide · Espace Chat", title: "Guide de l’espace Chat Tomverse", description: "Maîtrisez conversations, projets, verrouillage, partage, panneaux de modèles, AI Review, fichiers et crédits.", updated: "Mis à jour le 16 juillet 2026", contents: "Dans cette page", tourTitle: "1. Découvrir l’écran Chat", tourDescription: "Sélectionnez un numéro dans la carte pour rejoindre son explication, sans afficher de conversation privée.",
     tourItems: [
-      { term: "Nouveau chat", detail: "Démarre une conversation indépendante avec les modèles par défaut." }, { term: "Rechercher", detail: "Recherche les titres et, une fois connecté, le texte correspondant dans les messages enregistrés." }, { term: "États", detail: "Filtre les conversations verrouillées ou avec un lien partagé actif." }, { term: "Libellés personnels", detail: "Filtre Travail, Recherche et Personnel stockés dans ce navigateur." }, { term: "Projets", detail: "Regroupe les conversations du compte comme des dossiers." }, { term: "Menu de conversation", detail: "Renommer, épingler, favoriser, étiqueter, déplacer, partager, télécharger, verrouiller ou supprimer." },
+      { term: "Nouveau chat", detail: "Démarre une conversation indépendante avec les modèles par défaut." }, { term: "Rechercher", detail: "Recherche les titres et, une fois connecté, le texte correspondant dans les messages enregistrés." }, { term: "États", detail: "Filtre les conversations verrouillées ou avec un lien partagé actif." }, { term: "Projets", detail: "Regroupe les conversations du compte comme des dossiers." }, { term: "Menu de conversation", detail: "Renommer, épingler, favoriser, étiqueter, déplacer, partager, télécharger, verrouiller ou supprimer." },
     ],
     sections: [
-      { id: sectionIds.states, title: "2. États, libellés et projets", description: "Ils peuvent coexister mais n’ont pas le même rôle.", items: [
-        { term: "Verrouillé", detail: "Mot de passe requis pour les lectures et actions protégées." }, { term: "Partagé", detail: "Un lien public vers un instantané en lecture seule est actif." }, { term: "Travail", detail: "Libellé local pour les conversations professionnelles." }, { term: "Recherche", detail: "Libellé local pour les travaux de recherche." }, { term: "Personnel", detail: "Libellé local pour l’organisation personnelle." }, { term: "Projet", detail: "Dossier lié au compte pour regrouper des conversations." },
-      ], note: "Un projet ne partage pas automatiquement contenu, fichiers ou mémoire IA entre conversations. Les libellés restent dans ce navigateur et ne modifient ni les réponses ni la visibilité." },
+      { id: sectionIds.states, title: "2. États et projets", description: "Ils peuvent coexister mais n’ont pas le même rôle.", items: [
+        { term: "Verrouillé", detail: "Mot de passe requis pour les lectures et actions protégées." }, { term: "Partagé", detail: "Un lien public vers un instantané en lecture seule est actif." }, { term: "Projet", detail: "Dossier lié au compte pour regrouper des conversations." },
+      ], note: "Un projet ne partage pas automatiquement contenu, fichiers ou mémoire IA entre conversations." },
       { id: sectionIds.projects, title: "3. Utiliser les projets", description: "Créez un projet puis déplacez-y les conversations depuis leur menu.", items: [
         { term: "Créer", detail: "Choisissez Nouveau près de Projets, saisissez un nom et confirmez." }, { term: "Renommer", detail: "Utilisez le crayon près du nom." }, { term: "Déplacer", detail: "Dans le menu ⋮, choisissez Déplacer vers le projet." }, { term: "Retirer", detail: "Choisissez Retirer du projet dans le même menu." }, { term: "Supprimer", detail: "Les conversations restent dans le compte et redeviennent non classées." }, { term: "Limite de contexte", detail: "Un projet est un dossier, pas une invite, bibliothèque de fichiers ou mémoire partagée." },
-      ] },
-      { id: sectionIds.labels, title: "4. Utiliser les libellés", description: "Dans ⋮, choisissez Travail, Recherche ou Personnel; sélectionnez à nouveau pour retirer.", items: [
-        { term: "Projet exemple", detail: "Lancement Tomverse 2026" }, { term: "Libellé exemple", detail: "Travail" }, { term: "Utilisation conjointe", detail: "Une conversation peut appartenir au projet et porter aussi le libellé Travail." }, { term: "Portée appareil", detail: "Libellés, épingles et favoris sont propres au navigateur." },
       ] },
       { id: sectionIds.lockShare, title: "5. Verrouillage et partage", description: "Le verrou protège les actions; le partage publie un instantané limité en lecture seule.", items: [
         { term: "Verrouiller", detail: "Définissez un mot de passe; ouverture, partage, téléchargement et modification exigent une vérification." }, { term: "Déverrouiller", detail: "Saisissez le mot de passe; les erreurs répétées peuvent être limitées." }, { term: "Mot de passe oublié", detail: "Tomverse ne peut ni afficher ni récupérer l’original; contactez le support pour les options disponibles." }, { term: "Pas un chiffrement", detail: "Le fournisseur IA reçoit toujours les données nécessaires à la génération." }, { term: "Partager", detail: "Toute personne avec le lien peut lire l’instantané jusqu’à expiration ou révocation." }, { term: "Actualiser ou révoquer", detail: "Actualiser crée un nouvel instantané et lien; révoquer désactive le lien courant." },
@@ -344,19 +317,16 @@ export const chatWorkspaceGuideContent: Record<
     reviewVideoTitle: "Exemple du flux AI Review", openChat: "Ouvrir Tomverse Chat", allHelp: "Voir tout le Centre d’aide",
   },
   de: {
-    eyebrow: "Hilfe · Chat-Workspace", title: "Leitfaden für den Tomverse Chat-Workspace", description: "Erklärungen zu Chats, Projekten, persönlichen Labels, Sperren, Freigaben, Modell-Panels, AI Review, Dateien und Credits.", updated: "Aktualisiert am 16. Juli 2026", contents: "Auf dieser Seite", tourTitle: "1. Chat-Oberfläche kennenlernen", tourDescription: "Wählen Sie eine Nummer in der Workspace-Karte, ohne private Chatinhalte anzuzeigen.",
+    eyebrow: "Hilfe · Chat-Workspace", title: "Leitfaden für den Tomverse Chat-Workspace", description: "Erklärungen zu Chats, Projekten, Sperren, Freigaben, Modell-Panels, AI Review, Dateien und Credits.", updated: "Aktualisiert am 16. Juli 2026", contents: "Auf dieser Seite", tourTitle: "1. Chat-Oberfläche kennenlernen", tourDescription: "Wählen Sie eine Nummer in der Workspace-Karte, ohne private Chatinhalte anzuzeigen.",
     tourItems: [
-      { term: "Neuer Chat", detail: "Startet eine unabhängige Unterhaltung mit den Standardmodellen." }, { term: "Chats suchen", detail: "Sucht Titel und angemeldet auch passende gespeicherte Nachrichtentexte." }, { term: "Statusfilter", detail: "Zeigt gesperrte oder aktuell geteilte Chats." }, { term: "Persönliche Labels", detail: "Filtert Arbeit, Recherche und Privat im aktuellen Browser." }, { term: "Projekte", detail: "Ordnet Konto-Chats wie Ordner." }, { term: "Chat-Menü", detail: "Umbenennen, anheften, favorisieren, labeln, verschieben, teilen, laden, sperren oder löschen." },
+      { term: "Neuer Chat", detail: "Startet eine unabhängige Unterhaltung mit den Standardmodellen." }, { term: "Chats suchen", detail: "Sucht Titel und angemeldet auch passende gespeicherte Nachrichtentexte." }, { term: "Statusfilter", detail: "Zeigt gesperrte oder aktuell geteilte Chats." }, { term: "Projekte", detail: "Ordnet Konto-Chats wie Ordner." }, { term: "Chat-Menü", detail: "Umbenennen, anheften, favorisieren, labeln, verschieben, teilen, laden, sperren oder löschen." },
     ],
     sections: [
-      { id: sectionIds.states, title: "2. Status, Labels und Projekte", description: "Sie können gleichzeitig erscheinen, bedeuten aber Unterschiedliches.", items: [
-        { term: "Gesperrt", detail: "Passwortprüfung für geschützte Lese- und Änderungsaktionen." }, { term: "Geteilt", detail: "Ein öffentlicher Nur-Lese-Snapshot-Link ist aktiv." }, { term: "Arbeit", detail: "Browserlokales Label für Arbeitschats." }, { term: "Recherche", detail: "Browserlokales Label für Forschung." }, { term: "Privat", detail: "Browserlokales Label für persönliche Ordnung." }, { term: "Projekt", detail: "Kontobasierter Ordner für zusammengehörige Chats." },
-      ], note: "Projekte teilen Inhalte, Dateien oder KI-Gedächtnis nicht automatisch. Labels bleiben im Browser und ändern weder Antwortverhalten noch Sichtbarkeit." },
+      { id: sectionIds.states, title: "2. Status und Projekte", description: "Sie können gleichzeitig erscheinen, bedeuten aber Unterschiedliches.", items: [
+        { term: "Gesperrt", detail: "Passwortprüfung für geschützte Lese- und Änderungsaktionen." }, { term: "Geteilt", detail: "Ein öffentlicher Nur-Lese-Snapshot-Link ist aktiv." }, { term: "Projekt", detail: "Kontobasierter Ordner für zusammengehörige Chats." },
+      ], note: "Projekte teilen Inhalte, Dateien oder KI-Gedächtnis nicht automatisch." },
       { id: sectionIds.projects, title: "3. Projekte verwenden", description: "Projekt erstellen und Chats über ihr Menü verschieben.", items: [
         { term: "Erstellen", detail: "Neu neben Projekte wählen, Namen eingeben, bestätigen." }, { term: "Umbenennen", detail: "Stift neben dem Projektnamen verwenden." }, { term: "Verschieben", detail: "Im ⋮-Menü Zu Projekt verschieben wählen." }, { term: "Entfernen", detail: "Im selben Menü Aus Projekt entfernen." }, { term: "Projekt löschen", detail: "Chats bleiben im Konto und werden unkategorisiert." }, { term: "Kontextgrenze", detail: "Ein Projekt ist kein gemeinsamer Prompt, Dateispeicher oder Cross-Chat-Gedächtnis." },
-      ] },
-      { id: sectionIds.labels, title: "4. Persönliche Labels", description: "Im ⋮-Menü Arbeit, Recherche oder Privat wählen; erneut wählen zum Entfernen.", items: [
-        { term: "Projektbeispiel", detail: "Tomverse-Launch 2026" }, { term: "Labelbeispiel", detail: "Arbeit" }, { term: "Gleichzeitig", detail: "Ein Chat kann im Launch-Projekt liegen und das Label Arbeit tragen." }, { term: "Geräteumfang", detail: "Labels, Pins und Favoriten sind browserlokal." },
       ] },
       { id: sectionIds.lockShare, title: "5. Sperren und Teilen", description: "Sperren schützt Aktionen; Teilen veröffentlicht einen begrenzten Nur-Lese-Snapshot.", items: [
         { term: "Sperren", detail: "Passwort festlegen; Öffnen, Teilen, Download und Bearbeitung erfordern Prüfung." }, { term: "Entsperren", detail: "Passwort eingeben; wiederholte Fehler können begrenzt werden." }, { term: "Passwort vergessen", detail: "Tomverse kann das Original nicht anzeigen oder wiederherstellen; Support zu verfügbaren Datenoptionen fragen." }, { term: "Keine Verschlüsselung", detail: "Der KI-Anbieter erhält weiterhin für die Generierung nötige Daten." }, { term: "Teilen", detail: "Jeder mit aktivem Link kann den Snapshot bis Ablauf oder Widerruf lesen." }, { term: "Aktualisieren/Widerrufen", detail: "Aktualisieren erstellt Snapshot und Link neu; Widerrufen deaktiviert den Link." },
@@ -380,19 +350,16 @@ export const chatWorkspaceGuideContent: Record<
     reviewVideoTitle: "Beispiel für AI Review", openChat: "Tomverse Chat öffnen", allHelp: "Alle Hilfeartikel ansehen",
   },
   es: {
-    eyebrow: "Centro de ayuda · Espacio Chat", title: "Guía del espacio Chat de Tomverse", description: "Aprende conversaciones, proyectos, etiquetas personales, bloqueo, compartir, paneles, AI Review, archivos y créditos.", updated: "Actualizado el 16 de julio de 2026", contents: "En esta página", tourTitle: "1. Recorrido por Chat", tourDescription: "Selecciona un número del mapa para ir a su explicación sin mostrar conversaciones privadas.",
+    eyebrow: "Centro de ayuda · Espacio Chat", title: "Guía del espacio Chat de Tomverse", description: "Aprende conversaciones, proyectos, bloqueo, compartir, paneles, AI Review, archivos y créditos.", updated: "Actualizado el 16 de julio de 2026", contents: "En esta página", tourTitle: "1. Recorrido por Chat", tourDescription: "Selecciona un número del mapa para ir a su explicación sin mostrar conversaciones privadas.",
     tourItems: [
-      { term: "Nuevo chat", detail: "Inicia una conversación independiente con los modelos predeterminados." }, { term: "Buscar", detail: "Busca títulos y, con sesión iniciada, texto coincidente en mensajes guardados." }, { term: "Estados", detail: "Filtra chats bloqueados o con enlace compartido activo." }, { term: "Etiquetas", detail: "Filtra Trabajo, Investigación y Personal guardadas en este navegador." }, { term: "Proyectos", detail: "Agrupa chats de la cuenta como carpetas." }, { term: "Menú", detail: "Renombrar, fijar, marcar favorito, etiquetar, mover, compartir, descargar, bloquear o eliminar." },
+      { term: "Nuevo chat", detail: "Inicia una conversación independiente con los modelos predeterminados." }, { term: "Buscar", detail: "Busca títulos y, con sesión iniciada, texto coincidente en mensajes guardados." }, { term: "Estados", detail: "Filtra chats bloqueados o con enlace compartido activo." }, { term: "Proyectos", detail: "Agrupa chats de la cuenta como carpetas." }, { term: "Menú", detail: "Renombrar, fijar, mover, compartir, descargar, bloquear o eliminar." },
     ],
     sections: [
-      { id: sectionIds.states, title: "2. Estados, etiquetas y proyectos", description: "Pueden coexistir, pero significan cosas distintas.", items: [
-        { term: "Bloqueado", detail: "Requiere contraseña para lecturas y acciones protegidas." }, { term: "Compartido", detail: "Hay un enlace público de instantánea de solo lectura activo." }, { term: "Trabajo", detail: "Etiqueta local para chats laborales." }, { term: "Investigación", detail: "Etiqueta local para chats de investigación." }, { term: "Personal", detail: "Etiqueta local para organización personal." }, { term: "Proyecto", detail: "Carpeta vinculada a la cuenta." },
-      ], note: "Los proyectos no comparten automáticamente contenido, archivos ni memoria de IA. Las etiquetas quedan en el navegador y no cambian respuestas ni visibilidad." },
+      { id: sectionIds.states, title: "2. Estados y proyectos", description: "Pueden coexistir, pero significan cosas distintas.", items: [
+        { term: "Bloqueado", detail: "Requiere contraseña para lecturas y acciones protegidas." }, { term: "Compartido", detail: "Hay un enlace público de instantánea de solo lectura activo." }, { term: "Personal", detail: "Etiqueta local para organización personal." }, { term: "Proyecto", detail: "Carpeta vinculada a la cuenta." },
+      ], note: "Los proyectos no comparten automáticamente contenido, archivos ni memoria de IA." },
       { id: sectionIds.projects, title: "3. Usar proyectos", description: "Crea un proyecto y mueve chats desde su menú.", items: [
         { term: "Crear", detail: "Elige Nuevo junto a Proyectos, escribe un nombre y confirma." }, { term: "Renombrar", detail: "Usa el lápiz junto al nombre." }, { term: "Mover", detail: "En ⋮, abre Mover al proyecto y elige destino." }, { term: "Quitar", detail: "Elige Quitar del proyecto en el mismo menú." }, { term: "Eliminar", detail: "Los chats permanecen en la cuenta y quedan sin categoría." }, { term: "Límite de contexto", detail: "Es una carpeta, no un prompt, biblioteca o memoria compartida." },
-      ] },
-      { id: sectionIds.labels, title: "4. Usar etiquetas", description: "En ⋮ elige Trabajo, Investigación o Personal; repite para quitarla.", items: [
-        { term: "Proyecto de ejemplo", detail: "Lanzamiento Tomverse 2026" }, { term: "Etiqueta", detail: "Trabajo" }, { term: "Uso conjunto", detail: "Un chat puede estar en el proyecto y tener a la vez la etiqueta Trabajo." }, { term: "Ámbito", detail: "Etiquetas, fijados y favoritos son locales al navegador." },
       ] },
       { id: sectionIds.lockShare, title: "5. Bloquear y compartir", description: "El bloqueo protege acciones; compartir publica una instantánea limitada de solo lectura.", items: [
         { term: "Bloquear", detail: "Define contraseña; abrir, compartir, descargar y editar requieren verificación." }, { term: "Desbloquear", detail: "Introduce la contraseña; errores repetidos pueden limitarse." }, { term: "Contraseña olvidada", detail: "Tomverse no puede mostrar ni recuperar la original; consulta soporte sobre opciones de datos." }, { term: "No es cifrado", detail: "El proveedor de IA sigue recibiendo lo necesario para generar." }, { term: "Compartir", detail: "Cualquiera con el enlace puede leer hasta que caduque o se revoque." }, { term: "Actualizar/revocar", detail: "Actualizar crea nueva instantánea y enlace; revocar desactiva el actual." },
@@ -416,19 +383,16 @@ export const chatWorkspaceGuideContent: Record<
     reviewVideoTitle: "Ejemplo del flujo AI Review", openChat: "Abrir Tomverse Chat", allHelp: "Ver todo el Centro de ayuda",
   },
   pt: {
-    eyebrow: "Centro de ajuda · Workspace Chat", title: "Guia do workspace Chat do Tomverse", description: "Aprenda conversas, projetos, etiquetas pessoais, bloqueio, partilha, painéis, AI Review, ficheiros e créditos.", updated: "Atualizado em 16 de julho de 2026", contents: "Nesta página", tourTitle: "1. Conhecer o ecrã Chat", tourDescription: "Selecione um número no mapa para ir à explicação, sem mostrar conversas privadas.",
+    eyebrow: "Centro de ajuda · Workspace Chat", title: "Guia do workspace Chat do Tomverse", description: "Aprenda conversas, projetos, bloqueio, partilha, painéis, AI Review, ficheiros e créditos.", updated: "Atualizado em 16 de julho de 2026", contents: "Nesta página", tourTitle: "1. Conhecer o ecrã Chat", tourDescription: "Selecione um número no mapa para ir à explicação, sem mostrar conversas privadas.",
     tourItems: [
-      { term: "Novo chat", detail: "Inicia uma conversa independente com os modelos padrão." }, { term: "Pesquisar", detail: "Pesquisa títulos e, com sessão iniciada, texto correspondente nas mensagens guardadas." }, { term: "Estados", detail: "Filtra chats bloqueados ou com ligação partilhada ativa." }, { term: "Etiquetas", detail: "Filtra Trabalho, Pesquisa e Pessoal guardadas neste navegador." }, { term: "Projetos", detail: "Agrupa chats da conta como pastas." }, { term: "Menu", detail: "Renomear, fixar, favoritar, etiquetar, mover, partilhar, descarregar, bloquear ou eliminar." },
+      { term: "Novo chat", detail: "Inicia uma conversa independente com os modelos padrão." }, { term: "Pesquisar", detail: "Pesquisa títulos e, com sessão iniciada, texto correspondente nas mensagens guardadas." }, { term: "Estados", detail: "Filtra chats bloqueados ou com ligação partilhada ativa." }, { term: "Projetos", detail: "Agrupa chats da conta como pastas." }, { term: "Menu", detail: "Renomear, fixar, mover, partilhar, descarregar, bloquear ou eliminar." },
     ],
     sections: [
-      { id: sectionIds.states, title: "2. Estados, etiquetas e projetos", description: "Podem coexistir, mas têm significados diferentes.", items: [
-        { term: "Bloqueado", detail: "Exige palavra-passe para leituras e ações protegidas." }, { term: "Partilhado", detail: "Está ativa uma ligação pública para um snapshot só de leitura." }, { term: "Trabalho", detail: "Etiqueta local para chats de trabalho." }, { term: "Pesquisa", detail: "Etiqueta local para investigação." }, { term: "Pessoal", detail: "Etiqueta local para organização pessoal." }, { term: "Projeto", detail: "Pasta associada à conta." },
-      ], note: "Projetos não partilham automaticamente conteúdo, ficheiros ou memória de IA. As etiquetas ficam no navegador e não mudam respostas nem visibilidade." },
+      { id: sectionIds.states, title: "2. Estados e projetos", description: "Podem coexistir, mas têm significados diferentes.", items: [
+        { term: "Bloqueado", detail: "Exige palavra-passe para leituras e ações protegidas." }, { term: "Partilhado", detail: "Está ativa uma ligação pública para um snapshot só de leitura." }, { term: "Projeto", detail: "Pasta associada à conta." },
+      ], note: "Projetos não partilham automaticamente conteúdo, ficheiros ou memória de IA." },
       { id: sectionIds.projects, title: "3. Usar projetos", description: "Crie um projeto e mova chats pelo respetivo menu.", items: [
         { term: "Criar", detail: "Escolha Novo junto de Projetos, introduza o nome e confirme." }, { term: "Renomear", detail: "Use o lápis junto do nome." }, { term: "Mover", detail: "No menu ⋮, escolha Mover para projeto." }, { term: "Remover", detail: "Escolha Remover do projeto no mesmo menu." }, { term: "Eliminar", detail: "Os chats permanecem na conta e ficam sem categoria." }, { term: "Limite de contexto", detail: "É uma pasta, não um prompt, biblioteca ou memória partilhada." },
-      ] },
-      { id: sectionIds.labels, title: "4. Usar etiquetas", description: "No ⋮ escolha Trabalho, Pesquisa ou Pessoal; escolha novamente para remover.", items: [
-        { term: "Projeto exemplo", detail: "Lançamento Tomverse 2026" }, { term: "Etiqueta", detail: "Trabalho" }, { term: "Em conjunto", detail: "Um chat pode estar no projeto e ter também a etiqueta Trabalho." }, { term: "Escopo", detail: "Etiquetas, fixados e favoritos são locais ao navegador." },
       ] },
       { id: sectionIds.lockShare, title: "5. Bloqueio e partilha", description: "O bloqueio protege ações; a partilha publica um snapshot limitado só de leitura.", items: [
         { term: "Bloquear", detail: "Defina palavra-passe; abrir, partilhar, descarregar e editar exigem verificação." }, { term: "Desbloquear", detail: "Introduza a palavra-passe; erros repetidos podem ser limitados." }, { term: "Esquecida", detail: "O Tomverse não mostra nem recupera a original; consulte o suporte sobre opções de dados." }, { term: "Não é encriptação", detail: "O fornecedor de IA continua a receber o necessário para gerar." }, { term: "Partilhar", detail: "Quem tem a ligação pode ler até expirar ou ser revogada." }, { term: "Atualizar/revogar", detail: "Atualizar cria novo snapshot e ligação; revogar desativa a atual." },

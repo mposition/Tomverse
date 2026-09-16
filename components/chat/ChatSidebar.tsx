@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { Conversation } from "./types";
+import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import {
     millisecondsUntilNextDay,
     partitionConversationRows,
@@ -95,7 +96,21 @@ type ChatSidebarProps = {
     autoCollapseSuggested?: boolean;
 };
 
-type ConversationFilter = "all" | "locked" | "shared" | `project:${string}`;
+type ConversationFilter =
+    | "all"
+    | "locked"
+    | "shared"
+    // Conversations that answer with more than one model. This is the row's
+    // "3 models" chip as a filter: the chip is the first thing a narrow list
+    // drops, so the fact has to be findable somewhere that does not depend on
+    // how wide the sidebar is.
+    | "comparison"
+    | `project:${string}`
+    // One model id. "Runs this model", present tense: the conversation's
+    // current selection is what the repository stores, and which model answered
+    // some earlier turn is not recorded anywhere, so the filter must not
+    // pretend to know it.
+    | `model:${string}`;
 
 type ConversationProject = {
     id: string;
@@ -190,6 +205,9 @@ export function ChatSidebar({
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
+    // Read for one thing: turning a model id in a filter chip into the name
+    // the reader knows it by.
+    const { models: AVAILABLE_MODELS } = useModelCatalog();
     const [conversationFilter, setConversationFilter] = useState<ConversationFilter>("all");
     // Collapsed state for the pinned section. Local to the device on purpose:
     // it is a view preference, not something the account carries.
@@ -227,15 +245,48 @@ export function ChatSidebar({
         }
     });
     /*
-      What a toggle has claimed before the server has answered it.
+      What a toggle has claimed, settled with the server's own answer.
 
       Optimistic rather than awaited: a pin is a list arrangement, and a list
-      that rearranges a beat after the tap reads as a slow list. On success the
-      server's own answer arrives in `conversations` and says the same thing;
-      on failure the entry is flipped back, so the row returns rather than
-      showing a pin the account does not have.
+      that rearranges a beat after the tap reads as a slow list. The entry is
+      then replaced by what the response says the column holds, so two devices
+      toggling the same conversation agree; on failure it flips back, so the
+      row returns rather than showing a pin the account does not have.
+
+      Cleared when the identity changes: one account's arrangement is not
+      another's, and a guest's is neither.
     */
     const [pinOverrides, setPinOverrides] = useState<Record<string, boolean>>({});
+    /** The newest toggle per conversation, so a slow answer cannot win. */
+    const pinRequestSeq = useRef(new Map<string, number>());
+    const { data: pinSession } = useSession();
+    const pinIdentity = isGuestMode ? "guest" : (pinSession?.user?.id ?? "anonymous");
+    const [pinOverridesIdentity, setPinOverridesIdentity] = useState(pinIdentity);
+    if (pinOverridesIdentity !== pinIdentity) {
+        // Render-phase reset, the React-sanctioned way to drop state that
+        // belongs to a previous value: one account's arrangement is not
+        // another's, and a guest's is neither.
+        setPinOverridesIdentity(pinIdentity);
+        setPinOverrides({});
+    }
+
+    const readLocalPins = (): string[] => {
+        try {
+            const stored = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
+            return Array.isArray(stored)
+                ? stored.filter((item): item is string => typeof item === "string")
+                : [];
+        } catch {
+            return [];
+        }
+    };
+    const writeLocalPins = (ids: string[]) => {
+        try {
+            localStorage.setItem("tomverse_pinned_conversations", JSON.stringify(ids));
+        } catch {
+            // A browser that refuses storage still has the server's column.
+        }
+    };
 
     /*
       Pinned, as answered by whichever side knows: this toggle first, then the
@@ -452,8 +503,14 @@ export function ChatSidebar({
             conversationFilter === "all" ||
             (conversationFilter === "locked" && conversation.isLocked) ||
             (conversationFilter === "shared" && conversation.shareEnabled) ||
+            (conversationFilter === "comparison" && conversationModelCount(conversation) > 1) ||
             (conversationFilter.startsWith("project:") &&
-                getConversationProjectId(conversation) === conversationFilter.slice("project:".length));
+                getConversationProjectId(conversation) === conversationFilter.slice("project:".length)) ||
+            (conversationFilter.startsWith("model:") &&
+                conversation.kind !== "image" &&
+                (conversation.selectedModels ?? []).includes(
+                    conversationFilter.slice("model:".length)
+                ));
 
         return matchesSearch && matchesFilter;
     }).sort((a, b) =>
@@ -684,20 +741,29 @@ export function ChatSidebar({
             return;
         }
 
+        // One number per conversation, so a slow first request cannot land on
+        // top of a fast second one. Two taps in a row used to be two answers
+        // racing, and the loser could leave the screen saying the opposite of
+        // the row.
+        const requestId = (pinRequestSeq.current.get(id) ?? 0) + 1;
+        pinRequestSeq.current.set(id, requestId);
+        const isLatest = () => pinRequestSeq.current.get(id) === requestId;
+
         setPinOverrides((current) => ({ ...current, [id]: shouldPin }));
-        // Whatever the server answers, this conversation is no longer one this
-        // browser holds an opinion about: the account's column is the answer
-        // from here on, and two sources that can disagree is the defect being
-        // removed.
-        setLocallyPinnedIds((current) => current.filter((item) => item !== id));
-        try {
-            const stored = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
-            const values = Array.isArray(stored)
-                ? stored.filter((item): item is string => typeof item === "string" && item !== id)
-                : [];
-            localStorage.setItem("tomverse_pinned_conversations", JSON.stringify(values));
-        } catch {
-            localStorage.removeItem("tomverse_pinned_conversations");
+        // The browser's old entry for this conversation goes now, but it is
+        // kept in hand: if the request fails, it goes back, or a reload would
+        // show a pin the reader had before the tap and no longer has.
+        const hadLocalPin = locallyPinnedIds.includes(id);
+        const restoreLocalPin = () => {
+            if (!hadLocalPin) return;
+            setLocallyPinnedIds((current) =>
+                current.includes(id) ? current : [id, ...current]
+            );
+            writeLocalPins([id, ...readLocalPins().filter((item) => item !== id)]);
+        };
+        if (hadLocalPin) {
+            setLocallyPinnedIds((current) => current.filter((item) => item !== id));
+            writeLocalPins(readLocalPins().filter((item) => item !== id));
         }
 
         void fetch(`/api/conversations/${id}/pin`, {
@@ -705,17 +771,29 @@ export function ChatSidebar({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ pinned: shouldPin }),
         })
-            .then((response) => {
-                // On success the override already says what the server now
-                // holds, and the next list read replaces it with the same
-                // answer.
-                if (response.ok) return;
-                // Put the row back rather than leaving a pin the account does
-                // not have.
-                setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
+            .then(async (response) => {
+                if (!response.ok) {
+                    await discardResponseBody(response);
+                    if (!isLatest()) return;
+                    // Put the row back rather than leaving a pin the account
+                    // does not have.
+                    setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
+                    restoreLocalPin();
+                    return;
+                }
+                // The server's own answer, not the request's hope: two devices
+                // toggling at once settle on what the column actually holds.
+                const body = (await response.json().catch(() => null)) as
+                    | { pinned?: unknown }
+                    | null;
+                if (!isLatest()) return;
+                const settled = typeof body?.pinned === "boolean" ? body.pinned : shouldPin;
+                setPinOverrides((current) => ({ ...current, [id]: settled }));
             })
             .catch(() => {
+                if (!isLatest()) return;
                 setPinOverrides((current) => ({ ...current, [id]: !shouldPin }));
+                restoreLocalPin();
             });
     };
     useEffect(() => {
@@ -923,6 +1001,30 @@ export function ChatSidebar({
         );
     };
 
+    /*
+      The models this account's conversations are set to run, most used first.
+
+      Built from the list already on screen rather than from the catalogue: a
+      filter offering a model no conversation uses is a row that always answers
+      "nothing here", which is not a filter but a dead end. Image conversations
+      are excluded -- their model is fixed by the image layer and their rows say
+      so already.
+    */
+    const modelFilterOptions = (() => {
+        const counts = new Map<string, number>();
+        for (const conversation of conversations) {
+            if (conversation.kind === "image") continue;
+            for (const modelId of conversation.selectedModels ?? []) {
+                counts.set(modelId, (counts.get(modelId) ?? 0) + 1);
+            }
+        }
+        return [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([modelId, count]) => ({ modelId, count }));
+    })();
+    const modelFilterLabel = (modelId: string) =>
+        AVAILABLE_MODELS.find((model) => model.id === modelId)?.name ?? modelId;
+
     const projectText = (projectId: string) =>
         projects.find((project) => project.id === projectId)?.name || t("sidebar.uncategorizedProject");
 
@@ -958,6 +1060,10 @@ export function ChatSidebar({
     const activeOrganizerSummary = (() => {
         if (conversationFilter === "locked") return helpCopy.lockedFilter;
         if (conversationFilter === "shared") return helpCopy.sharedFilter;
+        if (conversationFilter === "comparison") return t("sidebar.comparisonFilter");
+        if (conversationFilter.startsWith("model:")) {
+            return modelFilterLabel(conversationFilter.slice("model:".length));
+        }
         if (conversationFilter.startsWith("project:")) {
             return projectText(conversationFilter.slice("project:".length));
         }
@@ -1371,8 +1477,11 @@ export function ChatSidebar({
                         >
                 <div
                     data-testid="sidebar-status-filters"
+                    // Step 1 of two: the tour lost its labels step with the
+                    // labels, and an index that outlived its step highlights
+                    // nothing while the tour keeps talking.
                     className={`mt-2 rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
-                        sidebarTourStep === 2 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
+                        sidebarTourStep === 1 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
                     }`}
                 >
                     <div className="flex items-center gap-1">
@@ -1394,6 +1503,7 @@ export function ChatSidebar({
                         {[
                             ["locked", helpCopy.lockedFilter],
                             ["shared", isMobileDrawer ? helpCopy.sharedBadge : helpCopy.sharedFilter],
+                            ["comparison", t("sidebar.comparisonFilter")],
                         ].map(([value, label]) => (
                             <button
                                 key={value}
@@ -1415,6 +1525,56 @@ export function ChatSidebar({
                         ))}
                     </div>
                 </div>
+                {modelFilterOptions.length > 1 && (
+                    /*
+                      Which model a conversation runs is no longer written on
+                      its row: in a list where nearly every conversation runs
+                      the same selection, the name said nothing and cost a line.
+                      Finding "the one I was running on Claude" is a real
+                      question though, so it is asked here instead, once, of the
+                      models this account actually uses.
+
+                      Hidden entirely when there is only one model in the list:
+                      a filter whose single option selects everything is a
+                      control that cannot change the answer.
+                    */
+                    <div
+                        data-testid="sidebar-model-filters"
+                        className={`${isMobileDrawer ? "mt-2" : "mt-3"} rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950`}
+                    >
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
+                            {t("sidebar.modelFilterTitle")}
+                        </span>
+                        <div className="mt-1 flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
+                            {modelFilterOptions.map(({ modelId, count }) => {
+                                const value = `model:${modelId}` as ConversationFilter;
+                                const isActive = conversationFilter === value;
+                                return (
+                                    <button
+                                        key={modelId}
+                                        type="button"
+                                        data-testid="sidebar-model-filter"
+                                        data-model-id={modelId}
+                                        onClick={() =>
+                                            setConversationFilter((current) =>
+                                                current === value ? "all" : value
+                                            )
+                                        }
+                                        className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
+                                            isActive
+                                                ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                                                : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                                        }`}
+                                        aria-pressed={isActive}
+                                    >
+                                        <span className="max-w-[9rem] truncate">{modelFilterLabel(modelId)}</span>
+                                        <span className="font-semibold text-zinc-400 dark:text-zinc-500">{count}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
                 <div
                     data-testid="sidebar-projects"
                     className={`${isMobileDrawer ? "mt-2" : "mt-3"} rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
@@ -1943,8 +2103,26 @@ export function ChatSidebar({
                                         );
                                     }
                                     if (conv.isLocked || conv.kind === "image") {
+                                        // A locked row draws the lock, because that
+                                        // is what the reader can act on. If it is
+                                        // also a continuation, the provenance and
+                                        // the deleted source are still said in the
+                                        // accessible name: locking a conversation
+                                        // hides its contents, not where it came
+                                        // from, and a reader who cannot see the
+                                        // provider mark was relying on this text.
+                                        const lockedProvenance =
+                                            conv.isLocked && conv.surface === "continuation"
+                                                ? `${t("continuation.importedFrom").replaceAll(
+                                                      "{provider}",
+                                                      providerLabel(conv.sourceProvider ?? "")
+                                                  )}${sourceDeleted ? ` · ${t("continuation.sourceDeletedBadge")}` : ""}`
+                                                : null;
                                         return (
                                             <span
+                                                data-source-deleted={
+                                                    lockedProvenance && sourceDeleted ? "true" : undefined
+                                                }
                                                 className={`flex h-5 w-5 shrink-0 items-center justify-center ${conv.isLocked ? "text-amber-500" : "text-accent-image-500"}`}
                                             >
                                                 {conv.isLocked ? (
@@ -1953,7 +2131,11 @@ export function ChatSidebar({
                                                     <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
                                                 )}
                                                 <span className="sr-only">
-                                                    {conv.isLocked ? helpCopy.lockedBadge : t("sidebar.imageConversation")}
+                                                    {conv.isLocked
+                                                        ? [helpCopy.lockedBadge, lockedProvenance]
+                                                              .filter(Boolean)
+                                                              .join(" · ")
+                                                        : t("sidebar.imageConversation")}
                                                 </span>
                                             </span>
                                         );

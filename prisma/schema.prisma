@@ -404,7 +404,6 @@ model Conversation {
   @@unique([userId, importedGuestKey])
   @@index([userId, projectId])
   @@index([userId, kind])
-  @@index([userId, pinnedAt])
 }
 
 model ConversationProject {

@@ -10,14 +10,16 @@ test("chat workspace guide is complete in every supported language", () => {
   for (const language of languages) {
     const copy = chatWorkspaceGuideContent[language];
     assert.ok(copy.title.length > 10, `${language} title is missing`);
-    assert.equal(copy.tourItems.length, 6, `${language} tour must explain six controls`);
-    assert.equal(copy.sections.length, 9, `${language} guide must contain ten sections including the tour`);
+    // Five since the labels filter went with the labels feature (2026-09-16),
+    // and every language has to lose the same one: a tour that explains a
+    // control one language no longer has is a tour that lies in that language.
+    assert.equal(copy.tourItems.length, 5, `${language} tour must explain five controls`);
+    assert.equal(copy.sections.length, 8, `${language} guide must contain nine sections including the tour`);
     assert.deepEqual(
       copy.sections.map((section) => section.id),
       [
         "states-and-labels",
         "projects",
-        "labels",
         "lock-and-share",
         "models-and-panels",
         "ai-review",

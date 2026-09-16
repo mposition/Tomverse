@@ -52,6 +52,10 @@ type HelpTopic =
 
 const topicForSection = (sectionId: string): HelpTopic => {
   if (sectionId === "projects") return "project";
+  // Both anchors are legacy: the labels feature was removed on 2026-09-16 and
+  // its section with it, but "#labels" and "#states-and-labels" are in links
+  // people already have, and the analytics topic keeps its recorded name so a
+  // rename does not split one series into two.
   if (sectionId === "states-and-labels" || sectionId === "labels") {
     return "labels";
   }

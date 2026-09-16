@@ -63,6 +63,55 @@ test("a stamp from a clock that runs ahead stays at the top", () => {
   assert.equal(conversationDateBucket("2026-09-17T02:00:00Z", at()), "today");
 });
 
+// Daylight saving is where "a day" stops being 24 hours, and it is the case
+// an independent review found the first implementation getting wrong: it
+// subtracted milliseconds, so on the spring-forward morning the previous
+// calendar day fell out of "yesterday" entirely.
+const NEW_YORK = "America/New_York";
+
+test("the spring-forward day is still 오늘 and 어제", () => {
+  // 2026-03-08 is the US spring-forward day: local midnight to midnight is 23
+  // hours. At 00:30 on the 9th, the 8th is yesterday and the 7th is two days
+  // back, whatever the clocks did in between.
+  const now = new Date("2026-03-09T05:30:00Z"); // 00:30 in New York
+  const at = { now, timeZone: NEW_YORK };
+  assert.equal(conversationDateBucket("2026-03-09T05:10:00Z", at), "today");
+  assert.equal(conversationDateBucket("2026-03-08T20:00:00Z", at), "yesterday");
+  assert.equal(conversationDateBucket("2026-03-07T20:00:00Z", at), "lastSevenDays");
+});
+
+test("the autumn day that lasts 25 hours groups the same way", () => {
+  // 2026-11-01 falls back. At 00:30 on the 2nd, the 1st is yesterday.
+  const now = new Date("2026-11-02T05:30:00Z"); // 00:30 in New York
+  const at = { now, timeZone: NEW_YORK };
+  assert.equal(conversationDateBucket("2026-11-02T05:10:00Z", at), "today");
+  assert.equal(conversationDateBucket("2026-11-01T18:00:00Z", at), "yesterday");
+  assert.equal(conversationDateBucket("2026-10-31T18:00:00Z", at), "lastSevenDays");
+});
+
+for (const [label, now] of [
+  ["spring forward", new Date("2026-03-08T12:00:00Z")],
+  ["autumn back", new Date("2026-11-01T12:00:00Z")],
+  ["an ordinary day", new Date("2026-06-15T12:00:00Z")],
+]) {
+  test(`the midnight timer lands on the real boundary: ${label}`, () => {
+    const options = { now, timeZone: NEW_YORK };
+    const delay = millisecondsUntilNextDay(options);
+    const justBefore = new Date(now.getTime() + delay - 2 * 60 * 1000);
+    const justAfter = new Date(now.getTime() + delay);
+    assert.equal(
+      conversationDateBucket(now.toISOString(), { now: justBefore, timeZone: NEW_YORK }),
+      "today",
+      "two minutes before the timer, the day has not turned yet"
+    );
+    assert.equal(
+      conversationDateBucket(now.toISOString(), { now: justAfter, timeZone: NEW_YORK }),
+      "yesterday",
+      "when the timer fires, the day has turned"
+    );
+  });
+}
+
 test("a pinned row is lifted out and never printed twice", () => {
   const rows = [
     { id: "pinned-old", updatedAt: "2026-08-01T02:00:00Z", pinned: true },

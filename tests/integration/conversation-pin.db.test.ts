@@ -96,12 +96,27 @@ test("unpinning clears the column and still does not count as activity", async (
   const pinned = await readRow();
   const affected = await prisma.$executeRaw`
     UPDATE "Conversation" SET "pinnedAt" = NULL
-    WHERE "id" = ${conversationId} AND "userId" = ${ownerId}
+    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NOT NULL
   `;
   assert.equal(affected, 1);
   const cleared = await readRow();
   assert.equal(cleared.pinnedAt, null);
   assert.equal(cleared.updatedAt.getTime(), pinned.updatedAt.getTime());
+});
+
+test("unpinning something already unpinned writes nothing", async () => {
+  // The same shape as the double pin above: idempotent on both sides, so two
+  // devices agreeing does not become a row rewrite -- and a rewrite here would
+  // be the one thing this column must never do, which is move `updatedAt`.
+  const before = await readRow();
+  const affected = await prisma.$executeRaw`
+    UPDATE "Conversation" SET "pinnedAt" = NULL
+    WHERE "id" = ${conversationId} AND "userId" = ${ownerId} AND "pinnedAt" IS NOT NULL
+  `;
+  assert.equal(affected, 0);
+  const after = await readRow();
+  assert.equal(after.pinnedAt, null);
+  assert.equal(after.updatedAt.getTime(), before.updatedAt.getTime());
 });
 
 test("another account's pin statement matches no row at all", async () => {

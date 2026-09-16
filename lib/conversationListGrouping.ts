@@ -8,11 +8,25 @@
  *
  * ## What "when" means here
  *
- * **Last activity, not creation.** The list is ordered by `updatedAt`
- * (`app/api/conversations/route.ts`), so grouping by anything else would print
- * headers a reader could not reconcile with the order beneath them: a
- * conversation created three weeks ago and answered this morning belongs under
- * 오늘 where its position already puts it.
+ * **Last change, not creation** -- and "change" is exactly `Conversation.updatedAt`,
+ * which the list is already ordered by (`app/api/conversations/route.ts`).
+ * Grouping by anything else would print headers a reader cannot reconcile with
+ * the order beneath them, which is the defect this replaced: rows ordered by a
+ * column the client was never sent.
+ *
+ * So a rename, a lock, a share link or a model change moves a conversation to
+ * 오늘, because Prisma's `@updatedAt` counts those as changes. That is a wider
+ * meaning than "answered today", and it is the honest one for this column: the
+ * row did move, and it moved to where its position in the list already puts it.
+ * Narrowing the headers to answers alone would need a second timestamp written
+ * by the message writers *and* the list re-ordered by it -- with a backfill, an
+ * index, and every writer kept honest -- which is a separate piece of work, not
+ * a comment.
+ *
+ * **Pinning is the one write that does not count.** It changes where the list
+ * puts a conversation, not the conversation, and the row it moves is the row
+ * the header would then mis-date. `app/api/conversations/[conversationId]/pin/route.ts`
+ * keeps `updatedAt` still for that reason, and an integration test holds it.
  *
  * **Calendar days in the reader's own zone**, never a fixed number of hours.
  * "Yesterday" at 00:30 means the calendar day before, which may be forty
@@ -67,8 +81,21 @@ const dayKeyFormatter = (timeZone: string): Intl.DateTimeFormat => {
 const dayKey = (value: Date, timeZone: string): string =>
   dayKeyFormatter(timeZone).format(value);
 
-const addDays = (value: Date, days: number): Date =>
-  new Date(value.getTime() + days * 24 * 60 * 60 * 1000);
+/**
+ * How many calendar days apart two days are.
+ *
+ * Counted on the calendar, never by dividing milliseconds: on a DST changeover
+ * a local day is 23 or 25 hours long, so "yesterday" is not "24 hours ago". The
+ * day keys are already `YYYY-MM-DD` in the reader's zone, and `Date.UTC` turns
+ * two of those into a difference in whole days with no zone left in it.
+ */
+const calendarDaysBetween = (fromDayKey: string, toDayKey: string): number => {
+  const asUtc = (key: string) => {
+    const [year, month, day] = key.split("-").map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((asUtc(toDayKey) - asUtc(fromDayKey)) / (24 * 60 * 60 * 1000));
+};
 
 export type BucketOptions = {
   /** Defaults to now; passed in so tests and a midnight re-render agree. */
@@ -102,17 +129,13 @@ export const conversationDateBucket = (
 
   const now = options.now ?? new Date();
   const timeZone = resolveTimeZone(options.timeZone);
-  const stampDay = dayKey(stamp, timeZone);
-  const todayDay = dayKey(now, timeZone);
-  if (stampDay === todayDay) return "today";
-  if (stampDay === dayKey(addDays(now, -1), timeZone)) return "yesterday";
+  const daysAgo = calendarDaysBetween(dayKey(stamp, timeZone), dayKey(now, timeZone));
   // A future stamp -- a clock that is behind, a row written by another device
   // -- reads as today rather than as "older", which would bury it under rows it
   // is newer than.
-  if (stampDay > todayDay) return "today";
-  for (let back = 2; back <= 7; back += 1) {
-    if (stampDay === dayKey(addDays(now, -back), timeZone)) return "lastSevenDays";
-  }
+  if (daysAgo <= 0) return "today";
+  if (daysAgo === 1) return "yesterday";
+  if (daysAgo <= 7) return "lastSevenDays";
   return "older";
 };
 
@@ -184,12 +207,27 @@ export const millisecondsUntilNextDay = (options: BucketOptions = {}): number =>
   // `hour12: false` still renders midnight as 24 in some locales.
   const hour = part("hour") % 24;
   const secondsSinceMidnight = hour * 3600 + part("minute") * 60 + part("second");
-  const remaining = 24 * 3600 - secondsSinceMidnight;
+  const today = dayKey(now, timeZone);
+  let remaining = 24 * 3600 - secondsSinceMidnight;
+  // The wall clock says how far midnight is *if* the day is 24 hours long. On a
+  // DST changeover it is 23 or 25, so the estimate is checked against the
+  // calendar and walked to the real boundary in five-minute steps: too early
+  // and the headers stay stale for an hour, too late and they turn an hour
+  // after the day did.
+  const dayAt = (secondsFromNow: number) =>
+    dayKey(new Date(now.getTime() + secondsFromNow * 1000), timeZone);
+  if (dayAt(remaining) === today) {
+    // Spring forward: the day is shorter than the clock arithmetic assumed.
+    for (let step = 0; step <= 24 && dayAt(remaining) === today; step += 1) {
+      remaining += 300;
+    }
+  } else {
+    // Autumn: back off to the last moment that is still today, then step over.
+    while (remaining > 300 && dayAt(remaining - 300) !== today) {
+      remaining -= 300;
+    }
+  }
   // A second past the turn, never a second before it: a timer that fires early
-  // re-renders the same grouping and then sits there until the next tick.
-  //
-  // On a DST day the real distance is an hour more or less than this. The
-  // caller re-reads the clock when the timer fires and schedules again, so the
-  // worst case is one extra re-render, not a header that stays wrong.
+  // re-renders the same grouping and then waits again.
   return Math.max(1_000, remaining * 1000 + 1_000);
 };

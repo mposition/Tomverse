@@ -112,7 +112,7 @@ test("font-black is reserved for headline-sized customer text", () => {
     // then down three more when the landing redesign moved the shared stage
     // copy from `proof` to `preview` and the destructure above grew a comment
     // explaining where it went.
-    "components/marketing/ChatWorkspaceGuide.tsx:193",
+    "components/marketing/ChatWorkspaceGuide.tsx:197",
   ]);
 
   const violations = [];
