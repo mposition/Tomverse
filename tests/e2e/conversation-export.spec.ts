@@ -180,7 +180,10 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
   };
 
   /** A conversation list with one continuation row, as the server answers it. */
-  const mockContinuationList = (page: Page) =>
+  const mockContinuationList = (
+    page: Page,
+    sourceState: "available" | "deleted" = "available"
+  ) =>
     page.route("**/api/conversations", (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       return route.fulfill({
@@ -200,7 +203,7 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
             shareExpiresAt: null,
             messageCount: 2,
             surface: "continuation",
-            sourceState: "available",
+            sourceState,
             sourceProvider: "chatgpt",
             sourceTitle: "Imported original",
             fallbackTitleDate: "2026-07-02",
@@ -228,6 +231,82 @@ test.describe("downloading a continuation with its original @ui-risk", () => {
     await menu.click();
     await expect(page.getByTestId("conversation-menu-panel")).toBeVisible();
   };
+
+  /*
+    The menu holds translated labels, and the panel used to be a fixed 224px
+    with `whitespace-nowrap` on every row, so the overflow arrived as a
+    horizontal scrollbar with the labels cut mid-word. A string assertion
+    cannot see that -- the text is all present in the DOM, just not on screen --
+    so what is asserted here is geometry.
+
+    Both source states, because they put different copy in the same row, and
+    two text scales, because a wrapping fix that only holds at 100% is a fix
+    that holds until somebody enlarges their text.
+  */
+  for (const sourceState of ["available", "deleted"] as const) {
+    for (const textScale of [100, 200]) {
+      test(`the menu never scrolls sideways (${sourceState} original, ${textScale}% text)`, async ({
+        page,
+      }) => {
+        await mockAuthenticatedApi(page);
+        await mockUserUsage(page, {
+          plan: "Pro",
+          limits: { allowDownloads: true },
+        });
+        await mockContinuationList(page, sourceState);
+        if (textScale !== 100) {
+          await page.addInitScript((scale) => {
+            document.documentElement.style.fontSize = `${scale}%`;
+          }, textScale);
+        }
+
+        await page.goto("/chat");
+        await expect(page.getByTestId("chat-input")).toBeVisible();
+        await openMenuForContinuation(page);
+
+        const panel = page.getByTestId("conversation-menu-panel");
+        const viewport = page.viewportSize();
+        expect(viewport).not.toBeNull();
+
+        const measured = await panel.evaluate((element) => ({
+          scrollWidth: element.scrollWidth,
+          clientWidth: element.clientWidth,
+          scrollLeft: element.scrollLeft,
+          left: element.getBoundingClientRect().left,
+          right: element.getBoundingClientRect().right,
+          // Every row, not just the panel: a row can overflow its own box
+          // while the panel reports itself clean.
+          rowOverflow: Array.from(element.querySelectorAll("button")).filter(
+            (row) => row.scrollWidth > row.clientWidth + 1
+          ).length,
+        }));
+
+        expect(measured.scrollWidth).toBeLessThanOrEqual(
+          measured.clientWidth + 1
+        );
+        expect(measured.scrollLeft).toBe(0);
+        expect(measured.rowOverflow).toBe(0);
+        // And it is inside the viewport rather than merely not scrolling.
+        expect(measured.left).toBeGreaterThanOrEqual(0);
+        expect(measured.right).toBeLessThanOrEqual(viewport!.width);
+
+        // The last action is still reachable: a panel that grew taller while
+        // its labels wrapped must still let the bottom item be clicked, and
+        // `toBeVisible` would pass on something another layer covers.
+        const lastItem = panel.locator("button").last();
+        await lastItem.scrollIntoViewIfNeeded();
+        const reachable = await lastItem.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            box.left + box.width / 2,
+            box.top + box.height / 2
+          );
+          return element.contains(hit) || element === hit;
+        });
+        expect(reachable).toBe(true);
+      });
+    }
+  }
 
   test("both files are offered, and the one with the original is verified before it is saved", async ({
     page,

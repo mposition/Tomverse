@@ -100,12 +100,32 @@ type ConversationProject = {
 };
 
 type ConversationMenuPosition = {
-    left: number;
     maxHeight: number;
+    /**
+     * How wide the panel may grow, in pixels. Not how wide it is -- the panel
+     * asks its own content for that, between `MENU_MIN_WIDTH` and this.
+     *
+     * The width used to be a constant 224 chosen in JS, and every menu item
+     * carried `whitespace-nowrap`. Seven locales translate this menu, and all
+     * seven overflow 224 on the two download items; the German hint line needs
+     * roughly six hundred pixels on one line. Because the panel also scrolls
+     * vertically, CSS computed its `overflow-x` from `visible` to `auto`, so
+     * the overflow arrived as a horizontal scrollbar with the labels cut
+     * mid-word rather than as anything anybody would notice in review.
+     */
+    maxWidth: number;
     placement: "above" | "below";
+    /** Distance from the viewport's right edge; see `toggleConversationMenu`. */
+    right: number;
     verticalOffset: number;
-    width: number;
 };
+
+/**
+ * The panel's floor, and the width every menu had before this became a range.
+ * A menu of short items should not become a thin column just because nothing
+ * in it happens to be long.
+ */
+const MENU_MIN_WIDTH = 224;
 
 const SIDEBAR_TOUR_STORAGE_KEY = "tomverse_sidebar_tour_v1";
 const ORGANIZER_STORAGE_KEY = "tomverse_sidebar_organizer_v1";
@@ -344,8 +364,13 @@ export function ChatSidebar({
     const canDownload =
         !isGuestMode && accountUsage?.limits.allowDownloads !== false;
     const displayedPlan: UserPlan | "Guest" | null = isGuestMode ? "Guest" : accountUsage?.plan || null;
+    // `items-start` and no `whitespace-nowrap`: a label past the panel's cap
+    // wraps rather than scrolling, and the icon and any trailing crown sit on
+    // the label's first line instead of floating to the vertical centre of a
+    // two-line row. `text-left` because a wrapped line has a second edge and
+    // the button's default centring would show it.
     const menuItemBase =
-        "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
+        "flex w-full items-start justify-between gap-2 rounded px-3 py-2 text-left text-sm transition-colors";
 
     const menuItemEnabled =
         "cursor-pointer text-zinc-900 hover:bg-zinc-100 hover:text-black dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white";
@@ -364,8 +389,10 @@ export function ChatSidebar({
         window.dispatchEvent(new Event(ORGANIZER_CHANGE_EVENT));
     };
 
-    const menuIconClass = "h-3.5 w-3.5 shrink-0";
-    const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
+    // `mt-[3px]` centres a 14px icon against the first 20px line of a wrapped
+    // label, which `items-start` alone would leave sitting slightly high.
+    const menuIconClass = "mt-[3px] h-3.5 w-3.5 shrink-0";
+    const crownClass = "mt-[3px] h-3.5 w-3.5 shrink-0 text-amber-400";
     const normalizedSearch = searchQuery.trim().toLowerCase();
     /*
       Which conversations exist and which are locked, as one string. A lock or
@@ -889,7 +916,6 @@ export function ChatSidebar({
 
         const viewportPadding = 8;
         const menuGap = 4;
-        const menuWidth = Math.min(224, Math.max(0, window.innerWidth - viewportPadding * 2));
         const anchorRect = anchor.getBoundingClientRect();
         const availableBelow = Math.max(
             0,
@@ -905,22 +931,39 @@ export function ChatSidebar({
                 ? "below"
                 : "above";
         const availableHeight = placement === "below" ? availableBelow : availableAbove;
-        const maximumLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
-        const left = Math.min(
-            Math.max(viewportPadding, anchorRect.right - menuWidth),
-            maximumLeft
+
+        // Anchored by its right edge rather than its left, which is what lets
+        // the width stop being a number this function has to know. Pinning
+        // `left` meant computing `anchorRect.right - width`, so the content
+        // could never be the thing that decided the width; pinning `right`
+        // asks only where the trigger is. CSS then clamps: the panel grows
+        // leftwards as far as its content wants and no further than the
+        // viewport allows.
+        //
+        // The ceiling is therefore the room to the left of the trigger, and in
+        // the 320px sidebar that is about 296px rather than the 352px a wider
+        // cap would suggest. Codex's UX review preferred letting a wide menu
+        // shift right over the chat column to reach 352; it is not taken here
+        // because a shift either displaces every short menu too, or needs a
+        // measure-then-reposition pass, and 352 does not save the Korean
+        // labels from wrapping anyway (they want about 390). Wrapping is the
+        // accepted answer for those two rows; this only decides how often.
+        const right = Math.max(viewportPadding, window.innerWidth - anchorRect.right);
+        const maxWidth = Math.max(
+            MENU_MIN_WIDTH,
+            window.innerWidth - right - viewportPadding
         );
 
         conversationMenuAnchorRef.current = anchor;
         setConversationMenuPosition({
-            left,
             maxHeight: availableHeight,
+            maxWidth,
             placement,
+            right,
             verticalOffset:
                 placement === "below"
                     ? anchorRect.bottom + menuGap
                     : window.innerHeight - anchorRect.top + menuGap,
-            width: menuWidth,
         });
         setOpenMenuId(conversationId);
     };
@@ -1897,10 +1940,16 @@ export function ChatSidebar({
                                          role="group"
                                          aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                          onClick={(event) => event.stopPropagation()}
-                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                                         // `w-max` asks the content; `overflow-x-hidden` is
+                                         // stated rather than left to the default, because
+                                         // `overflow-y-auto` alone computes the x axis from
+                                         // `visible` to `auto` and that is where the
+                                         // horizontal scrollbar came from.
+                                         className="context-menu-wrapper fixed z-[120] flex w-max flex-col overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
                                          style={{
-                                             left: conversationMenuPosition.left,
-                                             width: conversationMenuPosition.width,
+                                             right: conversationMenuPosition.right,
+                                             minWidth: MENU_MIN_WIDTH,
+                                             maxWidth: conversationMenuPosition.maxWidth,
                                              maxHeight: conversationMenuPosition.maxHeight,
                                              ...(conversationMenuPosition.placement === "below"
                                                  ? { top: conversationMenuPosition.verticalOffset }
@@ -1917,7 +1966,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Pencil className={menuIconClass} />
                                                 <span>{t("sidebar.rename")}</span>
                                             </span>
@@ -1932,7 +1981,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Pin className={menuIconClass} />
                                                 <span>{pinnedConversationIds.includes(conv.id) ? t("sidebar.unpinChat") : t("sidebar.pinChat")}</span>
                                             </span>
@@ -1947,7 +1996,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Star className={menuIconClass} />
                                                 <span>{favoriteConversationIds.includes(conv.id) ? t("sidebar.removeFavorite") : t("sidebar.favoriteChat")}</span>
                                             </span>
@@ -1971,7 +2020,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     {conversationLabels[conv.id] === label ? (
                                                         <Check className={`${menuIconClass} text-blue-400`} />
                                                     ) : (
@@ -2021,7 +2070,7 @@ export function ChatSidebar({
                                                         }}
                                                         className={`${menuItemBase} ${menuItemEnabled}`}
                                                     >
-                                                        <span className="flex items-center gap-2">
+                                                        <span className="flex min-w-0 items-start gap-2">
                                                             <X className={menuIconClass} />
                                                             <span>{t("sidebar.removeProject")}</span>
                                                         </span>
@@ -2052,7 +2101,7 @@ export function ChatSidebar({
                                             className={`${menuItemBase} ${!canShare ? menuItemDisabled : menuItemEnabled}`}
                                             title={isGuestMode ? t("sidebar.loginRequired") : !canShare ? t("modelStatusReasons.upgradeRequired") : ""}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Share2 className={menuIconClass} />
                                                 <span>
                                                     {conv.shareEnabled
@@ -2073,7 +2122,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Link2Off className={menuIconClass} />
                                                     <span>{t("sidebar.revokeShare")}</span>
                                                 </span>
@@ -2115,7 +2164,7 @@ export function ChatSidebar({
                                                 }
                                             >
                                                 <span className="flex min-w-0 flex-col items-start gap-0.5">
-                                                    <span className="flex items-center gap-2">
+                                                    <span className="flex min-w-0 items-start gap-2">
                                                         <Download className={menuIconClass} />
                                                         <span>{t("sidebar.downloadWithSourceTxt")}</span>
                                                     </span>
@@ -2142,7 +2191,7 @@ export function ChatSidebar({
                                             className={`${menuItemBase} ${!canDownload ? menuItemDisabled : menuItemEnabled}`}
                                             title={isGuestMode ? t("sidebar.loginRequired") : !canDownload ? t("modelStatusReasons.upgradeRequired") : ""}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Download className={menuIconClass} />
                                                 <span>
                                                     {conv.sourceState
@@ -2164,7 +2213,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} cursor-pointer text-red-400 hover:bg-zinc-800 hover:text-red-300`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Trash2 className={menuIconClass} />
                                                 <span>{t("sidebar.delete")}</span>
                                             </span>
@@ -2177,7 +2226,7 @@ export function ChatSidebar({
                                                 className={`${menuItemBase} ${menuItemDisabled}`}
                                                 title={t("sidebar.loginRequired")}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Lock className={menuIconClass} />
                                                     <span>{t("sidebar.lock")}</span>
                                                 </span>
@@ -2193,7 +2242,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Unlock className={menuIconClass} />
                                                     <span>{t("sidebar.unlock")}</span>
                                                 </span>
@@ -2213,7 +2262,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Lock className={menuIconClass} />
                                                     <span>{t("sidebar.lock")}</span>
                                                 </span>
