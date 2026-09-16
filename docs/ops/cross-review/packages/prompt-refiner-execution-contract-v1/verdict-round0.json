@@ -1,0 +1,114 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-execution-contract-v1",
+  "round": 0,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-chat-refiner-execution-contract-20260916 shell:default)"
+  ],
+  "startedAt": "2026-09-15T22:08:19.039Z",
+  "durationMs": 280341,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 30,
+    "cachedInputTokens": 1175988,
+    "outputTokens": 21296,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 2.266145,
+    "raw": {
+      "input_tokens": 30,
+      "cache_creation_input_tokens": 112354,
+      "cache_read_input_tokens": 1175988,
+      "output_tokens": 21296,
+      "output_tokens_details": {
+        "thinking_tokens": 16238
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 112354,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4026,
+          "cache_read_input_tokens": 110627,
+          "cache_creation_input_tokens": 4527,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4527
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-15T22:12:59.434Z",
+  "verdict": {
+    "taskId": "prompt-refiner-execution-contract-v1",
+    "round": 0,
+    "reviewedDigest": "sha256:dd073b8a582f13fbf5bbaa6a4897fe5cbe1cff2c5e986f4c9cc8ab7db24f19f1",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerReceiptCore.ts:64 and :274 (FAILURE_LAYER_BY_CODE / expectedFailureLayer !== undefined)",
+        "severity": "warning",
+        "basis": "evidence",
+        "claim": "The new failure-code/layer invariant is fail-open on drift: the table is typed `Map<string, string>` and an unmapped code silently skips the check, so a failure code added to `PROMPT_REFINER_FAILURE_CODES` but omitted from the table accepts any `failureLayer`, which is exactly the combination criterion 5 asks the strict schema to validate.",
+        "reproduction": "Add `\"budget_exhausted\"` to `PROMPT_REFINER_FAILURE_CODES` (lib/promptRefinerReceiptCore.ts:35) and to `PRE_DISPATCH_ONLY_FAILURE_CODES` (:49), leaving `FAILURE_LAYER_BY_CODE` unchanged. `npm run typecheck` still passes, and `promptRefinerExecutionReceiptSchema.safeParse(execution({ outcome: \"refused_before_dispatch\", suggestionId: null, provider: null, modelId: null, adapterVersion: null, dispatchedAt: null, completedAt: \"2026-09-15T00:00:00.050Z\", preparationLatencyMs: 50, inputTokens: null, cachedInputTokens: null, outputTokens: null, reasoningTokens: null, actualCostMicroUsd: null, failureCode: \"budget_exhausted\", failureLayer: \"adapter\" }))` returns `success: true`; expected `false`. Typing the table as `Record<Exclude<FailureCode, \"cancelled\">, FailureLayer>` and treating an unmapped code as an issue makes the omission a compile error instead."
+      },
+      {
+        "location": "lib/promptRefinerExecutionContract.ts:397 (PROMPT_REFINER_TERMINAL_REASONS)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "`as const satisfies readonly PromptRefinerTerminalReason[]` only checks that each listed element is a valid reason, not that every reason is listed, so the exported list and the bijection test can silently miss a reason even though the switch is exhaustiveness-checked.",
+        "reproduction": "Add `| \"provider_refused\"` to the `PromptRefinerTerminalReason` union (:385) and a matching `case` in `promptRefinerTerminalReceiptFacts` (:455) without touching the array. `npm run typecheck` passes and `tests/promptRefinerExecutionContract.test.mjs` still passes, yet `PROMPT_REFINER_TERMINAL_REASONS` omits the new reason. A coverage assertion such as `const _cover: Record<PromptRefinerTerminalReason, true>` built from the array would fail instead."
+      },
+      {
+        "location": "lib/promptRefinerExecutionContract.ts:426 (PromptRefinerTerminalReceiptFacts.failureCode)",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The failure-code union here hand-duplicates `PROMPT_REFINER_FAILURE_CODES` in lib/promptRefinerReceiptCore.ts with no type-level link, so the two can diverge without a compile error even though the mapping is the thing that must agree with the receipt schema.",
+        "reproduction": "Delete `\"no_change\"` from `PROMPT_REFINER_FAILURE_CODES` (lib/promptRefinerReceiptCore.ts:35). `npm run typecheck` reports no error in lib/promptRefinerExecutionContract.ts; only the runtime test fails. Deriving the union from the receipt-core `const` array (e.g. `(typeof PROMPT_REFINER_FAILURE_CODES)[number]`) turns the divergence into a typecheck failure."
+      },
+      {
+        "location": "docs/policy/prompt-refiner-observability.md:24",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "Section 1 still describes the execution receipt as recording a \"retry 수\" without stating that the schema now pins `retryCount` to literal 0, so the policy document is less precise than AGENTS.md and the progress note on the retry-zero freeze.",
+        "reproduction": "Compare docs/policy/prompt-refiner-observability.md:24 with lib/promptRefinerReceiptCore.ts:130 (`retryCount: z.literal(0)`) and AGENTS.md:1334 (\"retry zero ... frozen\"); the policy text admits a reading where a non-zero retry count is recordable."
+      },
+      {
+        "location": "AGENTS.md:1295-1299",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The file list now reads \"..., `lib/promptRefinerModelPrompt.ts`, or `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or their tests\", carrying two `or`s in one list.",
+        "reproduction": "Read AGENTS.md:1295-1299; dropping the first `or` (before `lib/promptRefinerReceiptCore.ts`) restores a single list."
+      }
+    ],
+    "nextAction": "Approve as it stands; optionally harden the failure-code/layer table and the terminal-reason list against silent drift in a follow-up, since the current lists are complete and every completion criterion, test and guard passes."
+  }
+}

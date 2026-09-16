@@ -931,3 +931,50 @@ AppSetting writer, flag 활성화와 품질·rollout 승인을 추가하지 않�
    측정하고, 통과했을 때만 durable writer·제품 adapter 연결을 제안한다.
 5. 사람에게 보이는 제안형 rollout 증거를 얻은 뒤 Refiner 결과의 Router 결합과
    전체 카탈로그 선택 품질을 별도 실험으로 판단한다.
+
+## 2026-09-16 Prompt Refiner 실행 사전등록 계약 회차
+
+앞 회차의 다음 순서 ②를 외부 호출 없이 구현했다. 순수 계약 모듈은 Refiner
+contract/refiner/model/catalog/pricing identity를 정확히 고정하고, 입력 100,000 tokens,
+출력 4,096 tokens, timeout 15초, retry 0을 요구한다. 고정 standard 가격으로 계산한
+요청당 최악 비용은 24,916 microUSD이며, 최대 100 dispatch의 단계 상한은
+2,491,600 microUSD다. 후속 결함 수정은 정적 profile에 더해 실제 비용 경로와 같은
+`resolveModelPricing()` 결과의 input/output rate도 0.2/1.2와 정확히 비교한다. 따라서
+per-model 환경 override나 전달된 runtime registry row가 가격을 바꾸면 계약 drift로
+거절한다. continuation 수정은 effective output cap도 최소 4,096인지 확인한다. 더 큰
+cap은 허용하되 Refiner 요청은 여전히 4,096으로 고정하며, cache disabled와 generic
+reservation cap은 이 계약의 비용·예약량을 바꾸지 않는다. 미래 예약 authority도 이
+gate를 예약·dispatch 전 같은 critical path에서 호출해야 한다. 다만 requestId
+결속·만료·1회 consume을 갖춘 원자 예약
+authority는 아직 없다. caller가 만든 lease/boolean은 받지 않고, eligibility·별도 단계
+승인·adapter readiness·계약이 모두 맞아도 `reservation_authority_unavailable`로
+dispatch 전에 거절한다. 따라서 현재 성공 admission 경로는 구조적으로 없다.
+
+terminal reason은 성공, admission/adapter 거절, dispatch 후 provider/response 검증
+실패와 cancellation을 content-free receipt 사실과 disposition 단계로 한 번만 매핑한다.
+receipt schema의 retry도 literal 0으로 좁혔다. 이 회차는 runtime writer, 비용 예약기,
+provider adapter/API/model 호출, product mode, Router 배선, AppSetting writer, flag
+활성화를 추가하지 않았다. 따라서 실행 계약 구현은 운영 실행이나 공개 진척으로
+계산하지 않는다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 실행 사전등록은 닫혔지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 38%** (직전 약 37%, 예약 authority 미구현을 반영한 보수적 추정) |
+| 구현 | 순수 실행 사전등록·effective 가격/output-cap drift·authority 부재 fail-closed·terminal mapping 구현 |
+| 로컬 검증 | env·registry-row 가격/output-cap 격리 테스트 포함 focused 32/32 및 hostile-env 32/32; 전체 lint·typecheck, pricing·문서·정책 참조·strict encoding 통과 |
+| 독립 검토·통합 CI | continuation round 1은 approve+재현 가능한 test-design nit 2건으로 수정 대기; 이 final revision은 아직 미검토 |
+| 병합·배포·공개 | 모두 미실행 — product adapter 없음, flag default-off, provider 호출 0 |
+
+### 이 Cycle 다음 권장 순서
+
+1. 종료 exchange 기록은 바꾸지 말고 이 후속 좁은 diff를 새 내부 검토와 Linux 통합 CI로 검증한다.
+2. provider 호출이 없는 동결 corpus·output parser·중단 규칙의 shadow harness를 만든다.
+3. 별도 과금 승인과 원자적 단계 budget reservation이 준비된 뒤에만 작은 shadow를
+   실행해 의미 보존·주입 저항·비용·지연을 측정한다.
+4. 승인된 관측 뒤 durable writer·제품 adapter를 별도 회차로 연결한다.
+5. 제안형 rollout 증거 뒤 Refiner 결과의 Router 결합을 별도 ROUTE-03 실험으로
+   판단한다.
