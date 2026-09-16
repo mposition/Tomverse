@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v22)
+# 제품 소식 이메일: 권한과 기계 (초안 v23)
 
 > **이 문서의 지위: 초안입니다.** 승인되지 않았습니다. **S1a는 구현·병합됐습니다**(#1492,
 > [이메일 알림](email-notifications.md) v15).
@@ -14,6 +14,17 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v23 (2026-09-16) — 독립 검토 18회차 반영
+
+18회차(v22 대상)는 C83~C89의 나머지를 닫고 **결정 1건(C90)과 구현 세부 2건**만
+남겼습니다. S1b-2·S1b-3은 계속 "자체 계약은 착수 가능"입니다.
+
+| # | 지적 | v23 |
+|---|---|---|
+| **C90** | C가 설정을 지우면 남은 B가 기본값 `entry`로 되돌아감 | **C는 설정 `causes`를 유지**하고, 모든 B가 사라진 뒤 **D(cleanup)** 에서 설정과 그 읽기를 제거. rollback 하한을 배포마다 명시(7.4) |
+| C91 (구현) | trigger가 reason·만료 외의 provenance 갱신을 놓침 | 원인 provenance가 바뀐 **모든 실제 UPDATE**를 원인으로, 키는 행 쓰기마다 고유(7.4) |
+| C92 (구현) | 원인의 `sourceDomain`을 발송 뒤 설정에서 유도하면 틀림 | **`EmailDelivery`에 실제 발송 from·domain 고정**, matched 원인은 그 값, legacy·unmatched는 NULL(7.4) |
 
 ### v22 (2026-09-16) — 독립 검토 17회차 반영
 
@@ -801,7 +812,10 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   `purposeKey`, `reason`, `source`, **`sourceEventKey`**, `occurredAt`, `expiresAt`, 그리고
   **판정용 provenance를 명시 컬럼으로(C73)** — `sourceStream`, `sourceDomain`,
   `sourceClassification`, `sourceDeliveryId`, `sourceMessageId`, `providerAccount`,
-  `sourceRequestId`, `evidence`(JSON). 지금 판정은 complaint의 `sourceStream`으로
+  `sourceRequestId`, `evidence`(JSON). **`sourceDomain`은 발송 뒤 설정에서 유도하지
+  않습니다(C92)** — 실제 provider 응답의 from과 그 domain을 `EmailDelivery.sentFrom`·
+  `sentDomain`에 발송 시 고정하고, matched webhook 원인은 그 값을 씁니다. legacy 행과
+  unmatched 사건은 NULL입니다. 지금 판정은 complaint의 `sourceStream`으로
   transactional 경보를 가르므로, delivery id만 남기면 정리된 delivery의 출처를 잃습니다.
   unmatched webhook의 `sourceStream`은 **서명이 검증된 endpoint의 계정**에서 정합니다.
   해제 기록은 `releasedAt`·`releaseKind`·`releaseEvidence`이고, 갱신은 그 한 번뿐입니다.
@@ -824,15 +838,19 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
   |---|---|---|---|---|
   | **A (shadow)** | entry — 지금과 같음 | **지금의 병합 규칙 그대로** | 새 build의 writer가 같은 transaction에서 **함께** 씀. **지금 build의 쓰기는 trigger가 옮김** | 지금 build. 둘 다 entry를 읽음 |
   | **B (설정 전환 가능)** | **런타임 설정 `email.suppressionReadAuthority`** — 기본 `entry`, gate 뒤 `causes` | 계속 지금 규칙 | 계속, trigger 유지 | A. A는 설정과 무관하게 entry를 읽으므로, **설정은 B가 모두 배포된 뒤에만** 바꿉니다 |
-  | **C (정리)** | 원인 — 설정 제거 | **중단** | 계속, **trigger 제거** | B(설정 `causes`). 같은 기준 |
+  | **C (정리)** | 원인 — **설정 `causes`는 그대로 두고** 코드는 설정과 무관하게 원인을 읽음 | **중단** | 계속, **trigger 제거** | B. B는 설정 `causes`를 읽으므로 같은 기준 |
+  | **D (설정 제거)** | 원인 | — | 계속 | C. 둘 다 설정과 무관하게 원인을 읽음 |
 
   - **A의 trigger(C83)** — A migration이 `SuppressionEntry`에 AFTER INSERT·UPDATE·
     DELETE trigger를 둡니다. 새 build는 자기 transaction에서
     `SET LOCAL app.suppression_writer = 'causes'`를 걸고, trigger는 이 값이 없는 쓰기(=
     지금 build)만 처리합니다.
-    - INSERT, 그리고 `reason`·`expiresAt`이 바뀐 UPDATE → 그 selector에 **새 reason의
-      원인**을 만듭니다. `sourceEventKey`는 `legacy-trigger:<entryId>:<txid>`, provenance는
-      entry의 새 값.
+    - INSERT, 그리고 **원인 provenance가 하나라도 바뀐 UPDATE**(C91) — `reason`,
+      `expiresAt`, `occurredAt`, `source`, `sourceStream`·`sourceDomain`·
+      `sourceClassification`·`sourceDeliveryId`·`sourceMessageId`, `evidence` — → 그
+      selector에 새 값으로 원인을 만듭니다. `sourceEventKey`는 **행 쓰기마다 고유**
+      (`legacy-trigger:<entryId>:<무작위 uuid>`) — 한 transaction 안의 여러 갱신도 충돌하지
+      않습니다. 값이 그대로인 UPDATE는 무시합니다.
     - DELETE → 그 selector의 활성 원인을 모두 해제합니다(`releaseKind: legacy_delete`,
       `releaseEvidence: { kind: "legacy_entry_delete", entryId }`). 지금 build의 삭제는
       지금 규칙의 승인을 이미 거쳤고, 판정이 entry인 동안의 의미(그 selector 전체 해제)와
@@ -848,7 +866,14 @@ purposeKey)`마다 하나라서 이후 사건이 같은 행을 갱신합니다. 
     transaction입니다. 해제 행위 × 원인 행렬과 원인별 승인은 **설정이 `causes`가 된
     순간부터** 적용됩니다.
   - **C로 넘어가는 gate** — 설정이 `causes`이고 B가 모두 배포되었을 때. C는 entry 쓰기와
-    trigger, 설정을 제거합니다.
+    trigger를 제거하고 **설정은 `causes`로 남겨 둡니다**(C90) — 공존하는 B가 매 판정마다
+    설정을 읽기 때문입니다.
+  - **D로 넘어가는 gate** — C가 모두 배포되었을 때. D는 설정 행과 그 읽기 코드를 지웁니다.
+  - **rollback 하한** — A 배포 중에는 지금 build까지. B 배포 중·설정 `entry`인 동안은
+    A까지. 설정을 `causes`로 바꾼 뒤에는 **B까지**(A는 설정을 읽지 않으므로 금지). C 배포
+    중·후에는 B까지(설정 `causes` 유지). D 배포 중·후에는 C까지(B는 설정 부재 시 `entry`로
+    되돌아가므로 금지). 설정을 다시 `entry`로 돌리는 것은 C 이후 금지입니다 — entry 쓰기가
+    없습니다.
 
 
 - **만료의 기록(C66)** — 판정은 위 활성 정의로 만료를 즉시 제외하므로 기다리지
@@ -1437,7 +1462,8 @@ EEA·영국을 여는 선행 게이트입니다.
    suppression(접수·완료·legal hold), `withdrawAllMarketing()`의 transaction 수용,
    complaint의 목적 opt-out과 `provider_complaint` 표현, delivered·bounce 사건 시각의 단조
    규칙과 사건 순서 표, provider 사건 시각, 원인 provenance 컬럼, **3단계 배포의 A(shadow)와
-   entry trigger**, B의 런타임 설정과 대조·보정 보고,
+   entry trigger**, B의 런타임 설정과 대조·보정 보고, `EmailDelivery.sentFrom`·`sentDomain`,
+   C·D 배포와 rollback 하한(각 gate 뒤 별도 PR),
    **`EmailDelivery.providerAccount`와 `(providerAccount, providerMessageId)` 결속**
    (C81 — complaint 귀속과 단조 규칙이 필요로 함). B·C는 각 gate 뒤 별도 PR.
 2. **S1b-2** webhook 재처리 — stream별 endpoint·secret·`ProviderWebhookEvent.providerAccount`,
