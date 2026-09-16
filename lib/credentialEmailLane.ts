@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { deliverEmailOnce } from "@/lib/email";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { suppressionCheck } from "@/lib/emailSuppression";
+import { sentDomainOf } from "@/lib/emailSentIdentityCore";
 import {
   AUTH_LOGIN_CODE_TEMPLATE,
   emailTemplateDefinition,
@@ -296,6 +297,11 @@ export async function sendCredentialEmailNow(input: {
           renderedSubject: input.subject,
           renderedHash,
           renderedHashKeyVersion: EMAIL_AUDIT_HASH_KEY_VERSION,
+          // Fixed at send: the account and the identity the provider accepted.
+          providerAccount: "transactional",
+          ...(response.ok
+            ? { sentFrom: response.from, sentDomain: sentDomainOf(response.from) }
+            : {}),
         },
       });
       return { sent: true, providerMessageId: outcome.providerMessageId };

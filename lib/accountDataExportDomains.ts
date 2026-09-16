@@ -98,6 +98,12 @@ export const EXPORT_DOMAIN_DECLARATIONS: ExportDomainDeclaration[] = [
     prismaModel: "EmailPreference",
     state: "included",
   },
+  {
+    domain: "emailPreferenceTransition",
+    publicName: "email_preference_changes",
+    prismaModel: "EmailPreferenceTransition",
+    state: "included",
+  },
 
   // --- the user's data mixed with Tomverse's internals ----------------------
   {

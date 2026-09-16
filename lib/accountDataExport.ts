@@ -466,6 +466,20 @@ const FETCHERS: Record<string, (userId: string) => Promise<unknown[]>> = {
       take: EXPORT_ROW_CAP,
     }),
 
+  emailPreferenceTransition: (userId) =>
+    prisma.emailPreferenceTransition.findMany({
+      where: { userId },
+      orderBy: { occurredAt: "asc" },
+      select: {
+        purpose: true,
+        fromEnabled: true,
+        toEnabled: true,
+        source: true,
+        occurredAt: true,
+      },
+      take: EXPORT_ROW_CAP,
+    }),
+
   emailPreference: (userId) =>
     prisma.emailPreference.findMany({
       where: { userId },

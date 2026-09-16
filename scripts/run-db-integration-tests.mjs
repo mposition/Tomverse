@@ -299,6 +299,10 @@ run(
     // per version however many sends race to store it, and the newest sentAt
     // per version from rows only the table holds.
     "tests/integration/email-unsubscribe-key-retention.db.test.ts",
+    // Suppression causes beside entries: this build's same-transaction cause,
+    // the trigger carrying an unmarked build's writes, and append-only causes.
+    // The trigger and the constraints exist only in the database.
+    "tests/integration/email-suppression-causes.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.

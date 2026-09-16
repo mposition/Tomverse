@@ -194,6 +194,7 @@ test("a complaint about marketing does not stop transactional mail", async () =>
   const address = `${randomUUID()}@example.com`;
 
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "complaint",
     source: "provider_webhook",
@@ -227,6 +228,7 @@ test("a complaint about marketing does not stop transactional mail", async () =>
 test("a hard-bounced address stops receiving even transactional mail", async () => {
   const address = `${randomUUID()}@example.com`;
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "provider_webhook",
@@ -262,6 +264,7 @@ test("suppression is checked at send time, not at enqueue time", async () => {
   // The address bounces after the message was queued. The decision that
   // matters is the one true when it goes out.
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "provider_webhook",
@@ -278,11 +281,13 @@ test("a permanent entry is not downgraded by a later transient one", async () =>
   const address = `${randomUUID()}@example.com`;
 
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "provider_webhook",
   });
   const downgrade = await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "soft_bounce",
     source: "provider_webhook",
@@ -300,6 +305,7 @@ test("a permanent entry is not downgraded by a later transient one", async () =>
 test("addresses are matched case-insensitively", async () => {
   const address = `${randomUUID()}@Example.COM`;
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "admin",

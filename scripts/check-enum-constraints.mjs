@@ -439,6 +439,31 @@ const REGISTRY = {
     reason:
       "SendClassification narrowed to the two streams a provider event can be attributed to. Nullable, because a manual or privacy-request entry has no originating stream to name -- and inventing one would make the provenance columns a report that always has an answer and is sometimes wrong.",
   },
+  SuppressionCause_reason_check: {
+    owner: "type_only",
+    reason:
+      "The same six reasons as SuppressionEntry_reason_check (SuppressionReason in lib/emailSuppressionCore.ts). A cause is one event behind a suppression, so it names the same things; the two lists move together until entries are retired (docs/policy/email-product-news-redesign-draft.md, section 7.4).",
+  },
+  SuppressionCause_source_stream_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts, nullable for the same reason as SuppressionEntry_source_stream_check: a manual or privacy-request cause has no originating stream.",
+  },
+  SuppressionCause_provider_account_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts: the provider account is one per stream (A18). Nullable, because a cause carried from an entry written before accounts were recorded does not know which it was.",
+  },
+  EmailDelivery_provider_account_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts, fixed at send from the template version's classification. Nullable for rows never sent and rows from before the column existed.",
+  },
+  EmailPreferenceTransition_source_check: {
+    owner: "type_only",
+    reason:
+      "setPreference()'s source union in lib/emailPreferences.ts plus consent_confirmation, and two sources reserved for writers the redesign draft names -- privacy_request and provider_complaint (docs/policy/email-product-news-redesign-draft.md, section 7.4). A transition whose origin the code cannot name would be history nobody can read.",
+  },
   EmailTemplate_classification_check: {
     owner: "type_only",
     reason:
