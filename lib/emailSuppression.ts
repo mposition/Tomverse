@@ -89,7 +89,7 @@ export async function recordSuppression(
   // it -- a withdrawal and its hold are one fact. Without one, the entry and its
   // cause still commit together in a transaction of their own.
   client?: Prisma.TransactionClient
-): Promise<{ id: string; changed: boolean }> {
+): Promise<{ id: string | null; changed: boolean; duplicate?: true }> {
   if (!client) {
     return prisma.$transaction((tx) => recordSuppression(input, tx));
   }
@@ -102,7 +102,7 @@ export async function recordSuppression(
   // one the entry's merge rule below declines to record. Marked so the entry
   // trigger does not add a second cause for the same write.
   await markCauseWriter(client);
-  await recordSuppressionCause(client, {
+  const recorded = await recordSuppressionCause(client, {
     emailAddress,
     scope,
     purposeKey,
@@ -120,6 +120,18 @@ export async function recordSuppression(
     occurredAt,
     expiresAt: input.expiresAt ?? null,
   });
+
+  // The same event again -- a redelivered webhook, a retried admin request. It
+  // is a no-op for the entry too: re-merging it would restamp the entry with the
+  // retry's time and provenance while the cause keeps the first, and the two
+  // records would disagree about one event.
+  if (!recorded) {
+    const current = await client.suppressionEntry.findUnique({
+      where: { emailAddress_scope_purposeKey: { emailAddress, scope, purposeKey } },
+      select: { id: true },
+    });
+    return { id: current?.id ?? null, changed: false, duplicate: true };
+  }
 
   const existing = await client.suppressionEntry.findUnique({
     where: {

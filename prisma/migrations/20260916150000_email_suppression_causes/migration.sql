@@ -88,7 +88,8 @@ ALTER TABLE "SuppressionCause" ADD CONSTRAINT "SuppressionCause_release_check"
 CREATE OR REPLACE FUNCTION "suppression_cause_is_append_only"()
 RETURNS trigger AS $$
 BEGIN
-    IF NEW."emailAddress" IS DISTINCT FROM OLD."emailAddress"
+    IF NEW."id" IS DISTINCT FROM OLD."id"
+       OR NEW."emailAddress" IS DISTINCT FROM OLD."emailAddress"
        OR NEW."scope" IS DISTINCT FROM OLD."scope"
        OR NEW."purposeKey" IS DISTINCT FROM OLD."purposeKey"
        OR NEW."reason" IS DISTINCT FROM OLD."reason"
@@ -276,7 +277,7 @@ UPDATE "EmailDelivery" AS d
    SET "providerAccount" = CASE WHEN v."classification" = 'marketing' THEN 'marketing' ELSE 'transactional' END
   FROM "TemplateVersion" AS v
  WHERE d."templateVersionId" = v."id"
-   AND d."providerMessageId" IS NOT NULL;
+   AND d."sentAt" IS NOT NULL;
 
 CREATE INDEX "EmailDelivery_providerAccount_providerMessageId_idx"
     ON "EmailDelivery"("providerAccount", "providerMessageId");

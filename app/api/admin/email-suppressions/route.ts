@@ -154,7 +154,7 @@ export async function POST(req: Request) {
         request: req,
         action: "email_suppression.added",
         targetType: "SuppressionEntry",
-        targetId: result.id,
+        targetId: result.id ?? emailAddress,
         summary: `Suppressed ${emailAddress} for ${purposeKey === GLOBAL_PURPOSE_KEY ? "all mail" : purposeKey}.`,
         metadata: {
           emailAddress,

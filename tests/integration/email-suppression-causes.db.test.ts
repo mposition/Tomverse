@@ -50,8 +50,20 @@ test("a suppression writes its cause once, however often the event is replayed",
     sourceStream: "transactional",
     sourceEventKey: `webhook:${randomUUID()}`,
   };
-  await recordSuppression(input);
-  await recordSuppression(input);
+  await recordSuppression({ ...input, occurredAt: new Date("2026-09-16T00:00:00.000Z") });
+  const entryBefore = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
+  const replay = await recordSuppression({
+    ...input,
+    occurredAt: new Date("2026-09-16T01:00:00.000Z"),
+    sourceMessageId: "a-retry",
+  });
+  assert.equal(replay.duplicate, true);
+  const entryAfter = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress } });
+  assert.deepEqual(
+    [entryAfter.occurredAt.toISOString(), entryAfter.sourceMessageId],
+    [entryBefore.occurredAt.toISOString(), entryBefore.sourceMessageId],
+    "a replayed event must not restamp the entry"
+  );
 
   const causes = await causesFor(emailAddress);
   assert.equal(causes.length, 1, "the marked write must not also be carried by the trigger");
@@ -131,7 +143,7 @@ test("lifting an entry releases every cause behind it", async () => {
     sourceEventKey: `softbounce:${randomUUID()}`,
   });
 
-  const result = await removeSuppression({ id: entry.id });
+  const result = await removeSuppression({ id: entry.id! });
   assert.equal(result.removed, true);
 
   const causes = await causesFor(emailAddress);
@@ -204,6 +216,11 @@ test("a cause is append-only: no edit, no delete, one release", async () => {
   await assert.rejects(
     () =>
       prisma.suppressionCause.update({ where: { id: cause.id }, data: { reason: "complaint" } }),
+    /append-only/
+  );
+  await assert.rejects(
+    () =>
+      prisma.suppressionCause.update({ where: { id: cause.id }, data: { id: randomUUID() } }),
     /append-only/
   );
   await assert.rejects(
