@@ -16,21 +16,23 @@
  * Act, and the message will be opened somewhere else again tomorrow. So the IP
  * country is recorded as an observation and never decides anything.
  *
- * ## Conflicts are held, not resolved
+ * ## Conflicts are held until the person resolves them
  *
  * v1 of the contract said to "apply the stricter jurisdiction" when signals
  * disagree. There is no such ordering: Korea requires a `(광고)` subject prefix
  * and Singapore requires `<ADV>`, and applying both produces a third string
  * that satisfies neither. Footer block sets are not nested either. So a
  * genuine conflict holds marketing back and asks the person, which is a
- * question with an answer rather than a comparison without one.
+ * question with an answer rather than a comparison without one. A declaration
+ * made after the billing signal is that answer: it says where the person lives
+ * now, while a card can remain registered elsewhere.
  *
  * The cost of asking is bounded because marketing opt-in collects the country
  * in the first place (§6.3 rule 2) -- a hold happens when a *later* signal
  * disagrees, not on the ordinary path.
  */
 
-/** The eight profiles. Countries map onto these; the EEA is thirty to one. */
+/** The nine profiles. Countries map onto these; the EEA is thirty to one. */
 export const JURISDICTION_PROFILES = [
   "KR",
   "US",
@@ -61,13 +63,74 @@ export type JurisdictionProfileKey = (typeof JURISDICTION_PROFILES)[number];
  * carries happen to match the EEA one, which is exactly when two rows matter:
  * one source can change without dragging the other with it.
  */
-const EU_PROFILE_COUNTRIES = new Set([
+const EU_PROFILE_COUNTRY_CODES = [
   "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR",
   "GR", "HR", "HU", "IE", "IS", "IT", "LI", "LT", "LU", "LV", "MT", "NL",
   "NO", "PL", "PT", "RO", "SE", "SI", "SK",
-]);
+] as const;
 
-const DIRECT_PROFILE_COUNTRIES = new Set(["KR", "US", "CA", "AU", "GB", "SG", "CH"]);
+const DIRECT_PROFILE_COUNTRY_CODES = [
+  "KR", "US", "CA", "AU", "GB", "SG", "CH",
+] as const;
+
+const EU_PROFILE_COUNTRIES = new Set<string>(EU_PROFILE_COUNTRY_CODES);
+const DIRECT_PROFILE_COUNTRIES = new Set<string>(DIRECT_PROFILE_COUNTRY_CODES);
+
+/**
+ * Every country that resolves to a profile other than `ZZ`.
+ *
+ * This is the rendering map: which footer and labelling rules a message is
+ * composed under. It is what the seeded `JurisdictionCountryMap` holds, and it
+ * applies to transactional and legal mail as much as to marketing. It is **not**
+ * the list of countries marketing may reach -- that is
+ * `MARKETING_ALLOWED_COUNTRY_CODES` below, and the two answer different
+ * questions.
+ */
+export const JURISDICTION_MAPPED_COUNTRY_CODES = [
+  ...DIRECT_PROFILE_COUNTRY_CODES,
+  ...EU_PROFILE_COUNTRY_CODES,
+] as const;
+
+/**
+ * The countries where marketing may be consented to and sent. Decided
+ * 2026-09-15: docs/policy/email-eea-marketing-review-2026-09-14.md §7 condition 7.
+ *
+ * A profile answers "which rules would apply"; this list answers "has anybody
+ * checked that those rules are enough for this country". The EEA review read
+ * DE, FR and AT (and Switzerland, which is not in the EEA) country by country,
+ * and covered the other twenty-seven EEA states with a judgement that the
+ * common baseline exceeds their floor. Its own limits section
+ * (docs/policy/email-eea-marketing-review-2026-09-14.md §5) makes that judgement
+ * insufficient on its own: a country with no country-level record is not a marketing
+ * destination. So the twenty-seven keep the `EU` profile -- their transactional
+ * footer is unchanged -- and are simply not here.
+ *
+ * KR, US, CA, AU, GB and SG are here because each profile covers exactly its own
+ * country and was written from that country's sources
+ * (docs/policy/email-notifications.md §4.3), so there is no wider set being
+ * stood in for.
+ *
+ * Checked at the opt-in boundary *and* at send time. The send-time check is the
+ * one that matters for consent stored before this list existed: a person who
+ * opted in from a country outside it is skipped rather than grandfathered.
+ *
+ * Austria is here on explicit opt-in only. The ECG-Liste condition attaches to
+ * the existing-customer exception, which C8 does not use; the review still asks
+ * for a country record before the first Austrian send.
+ *
+ * Adding a country means a country-level record first, then a line here.
+ */
+export const MARKETING_ALLOWED_COUNTRY_CODES = [
+  "KR", "US", "CA", "AU", "GB", "SG", "DE", "FR", "AT", "CH",
+] as const;
+
+const MARKETING_ALLOWED_COUNTRIES = new Set<string>(MARKETING_ALLOWED_COUNTRY_CODES);
+
+/** Whether marketing may reach a person resident in this country. */
+export const isMarketingAllowedCountry = (country: string | null | undefined) => {
+  const normalized = normalizeCountry(country);
+  return normalized !== null && MARKETING_ALLOWED_COUNTRIES.has(normalized);
+};
 
 export const normalizeCountry = (value: string | null | undefined) => {
   const candidate = value?.trim().toUpperCase();
@@ -93,11 +156,38 @@ export const profileForCountry = (
   return "ZZ";
 };
 
+export type MarketingOptInCountryDecision =
+  | { allowed: true; countryCode: string; profileKey: JurisdictionProfileKey }
+  | { allowed: false; reason: "country_required" | "country_unsupported" };
+
+/**
+ * Whether a country can accompany a new marketing consent.
+ *
+ * The decision is separate from jurisdiction confidence: this is the request
+ * boundary, where the person must supply a country and that country must be on
+ * the marketing allowlist before an opt-in can be stored. A mapped country that
+ * is not on it is refused the same way as an unmapped one -- from the person's
+ * side both mean "not available here yet".
+ */
+export const marketingOptInCountryDecision = (
+  country: string | null | undefined
+): MarketingOptInCountryDecision => {
+  const countryCode = normalizeCountry(country);
+  if (!countryCode) return { allowed: false, reason: "country_required" };
+  const profileKey = profileForCountry(countryCode);
+  if (profileKey === "ZZ" || !MARKETING_ALLOWED_COUNTRIES.has(countryCode)) {
+    return { allowed: false, reason: "country_unsupported" };
+  }
+  return { allowed: true, countryCode, profileKey };
+};
+
 export type JurisdictionSignals = {
   /** Priority 2. What the payment method's country said. */
   billingCountry?: string | null;
+  billingCountryUpdatedAt?: Date | null;
   /** Priority 3. What the person told us themselves. */
   selfDeclaredCountry?: string | null;
+  selfDeclaredCountryUpdatedAt?: Date | null;
   /** Priority 4. What was resolved when they last consented. */
   consentCountry?: string | null;
   /** Priority 5, together. Circumstantial, never decisive on its own. */
@@ -162,9 +252,30 @@ export const resolveEmailJurisdiction = (
   const consent = normalizeCountry(signals.consentCountry);
   const observedIpCountry = normalizeCountry(signals.ipCountry);
 
-  // Both high-confidence signals present and disagreeing. Neither is adopted:
-  // picking one would be the ordering this contract says does not exist.
+  // Both high-confidence signals present and disagreeing. A declaration made
+  // after the billing signal is the person's explicit resolution of that
+  // conflict. Without that temporal evidence, neither is adopted: picking one
+  // would be the ordering this contract says does not exist. Strictly after:
+  // two different countries stamped at the same instant say nothing about
+  // which came second, so they stay a conflict.
   if (billing && declared && billing !== declared) {
+    const billingAt = signals.billingCountryUpdatedAt?.getTime();
+    const declaredAt = signals.selfDeclaredCountryUpdatedAt?.getTime();
+    if (
+      declaredAt !== undefined &&
+      Number.isFinite(declaredAt) &&
+      (billingAt === undefined || !Number.isFinite(billingAt) || declaredAt > billingAt)
+    ) {
+      return {
+        countryCode: declared,
+        profileKey: profileForCountry(declared),
+        confidence: "high",
+        source: "self_declared",
+        conflicts: [],
+        observedIpCountry,
+      };
+    }
+
     return {
       countryCode: "ZZ",
       profileKey: "ZZ",
@@ -226,7 +337,13 @@ export const resolveEmailJurisdiction = (
 
 export type MarketingJurisdictionVerdict =
   | { allowed: true }
-  | { allowed: false; skipReason: "jurisdiction_conflict" | "jurisdiction_unconfirmed" };
+  | {
+      allowed: false;
+      skipReason:
+        | "jurisdiction_conflict"
+        | "jurisdiction_unconfirmed"
+        | "marketing_country_not_allowed";
+    };
 
 /**
  * Whether marketing may go out under this resolution.
@@ -235,11 +352,19 @@ export type MarketingJurisdictionVerdict =
  * country: an inferred jurisdiction is a guess, and sending advertising under a
  * guessed set of labelling rules is exactly the thing §6.3 rule 1 declines to
  * do. Transactional and legal mail never consult this at all.
+ *
+ * A confirmed country outside `MARKETING_ALLOWED_COUNTRY_CODES` is refused with
+ * its own reason. It is not "unconfirmed" -- we know where the person lives --
+ * and support answering "why did they not get it" needs to tell the two apart.
  */
 export const marketingJurisdictionVerdict = (
   resolved: ResolvedJurisdiction
 ): MarketingJurisdictionVerdict => {
-  if (resolved.confidence === "high") return { allowed: true };
+  if (resolved.confidence === "high" && resolved.profileKey !== "ZZ") {
+    return MARKETING_ALLOWED_COUNTRIES.has(resolved.countryCode)
+      ? { allowed: true }
+      : { allowed: false, skipReason: "marketing_country_not_allowed" };
+  }
   return {
     allowed: false,
     skipReason:
@@ -251,4 +376,4 @@ export const marketingJurisdictionVerdict = (
 
 /** Whether the preference centre should ask the person to confirm a country. */
 export const needsCountryConfirmation = (resolved: ResolvedJurisdiction) =>
-  resolved.confidence !== "high";
+  !marketingJurisdictionVerdict(resolved).allowed;

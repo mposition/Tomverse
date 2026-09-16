@@ -15,6 +15,7 @@ import {
   type EmailPurpose,
   type PreferenceChangeRefusal,
 } from "@/lib/emailPreferenceCore";
+import { normalizeCountry } from "@/lib/emailJurisdictionCore";
 import {
   normalizeSuppressionAddress,
   recordSuppression,
@@ -153,6 +154,8 @@ export async function setPreference(input: {
   ip?: string | null;
   userAgent?: string | null;
   consentWording?: string | null;
+  /** The country the person confirmed in the same opt-in action. */
+  confirmedCountry?: string | null;
   now?: Date;
 }): Promise<PreferenceChangeResult> {
   const decision = preferenceChangeDecision({
@@ -164,6 +167,10 @@ export async function setPreference(input: {
 
   const purpose = input.purpose as EmailPurpose;
   const now = input.now ?? new Date();
+  const confirmedCountry = normalizeCountry(input.confirmedCountry);
+  if (input.confirmedCountry !== undefined && !confirmedCountry) {
+    throw new Error("A confirmed country must be a two-letter country code.");
+  }
 
   const user = await prisma.user.findUnique({
     where: { id: input.userId },
@@ -187,6 +194,23 @@ export async function setPreference(input: {
   }
 
   await prisma.$transaction(async (tx) => {
+    if (confirmedCountry) {
+      await tx.userSettings.upsert({
+        where: { userId: input.userId },
+        create: {
+          userId: input.userId,
+          country: confirmedCountry,
+          countrySource: "self_declared",
+          countryUpdatedAt: now,
+        },
+        update: {
+          country: confirmedCountry,
+          countrySource: "self_declared",
+          countryUpdatedAt: now,
+        },
+      });
+    }
+
     await tx.emailPreference.update({
       where: { userId_purpose: { userId: input.userId, purpose } },
       data: {
