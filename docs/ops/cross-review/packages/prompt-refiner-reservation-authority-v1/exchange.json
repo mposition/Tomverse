@@ -265,9 +265,26 @@
       ],
       "guardViolations": [],
       "checkFailures": [],
-      "reviewConclusion": null,
-      "findings": [],
-      "nextAction": "awaiting the reviewer's verdict"
+      "reviewConclusion": "request_changes",
+      "findings": [
+        {
+          "location": "docs/ops/tomverse-chat-progress.md:1025",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The finance-lane row still reports \"전용 15개 suite를 fresh DB에서 통과시켰으며\", which contradicts line 1024 of the same table (\"신규 DB integration 17/17\") and the 17 cases actually shipped in the new suite, leaving a self-contradicting verification record in the change.",
+          "reproduction": "Read docs/ops/tomverse-chat-progress.md lines 1024-1025 (one row says 17/17, the next says 15), then count the suite: `Select-String -Path tests/integration/prompt-refiner-reservation.db.test.ts -Pattern '^test\\(' | Measure-Object` → 17. Expected: both rows state the same, actual, count.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerReservationAuthority.ts:328-337 vs. the author's round-1 account",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The author's account states the sweep applies \"FOR UPDATE SKIP LOCKED·LIMIT\", but the shipped SQL uses plain `FOR UPDATE` with no `SKIP LOCKED`, so the audit record overstates the implemented locking clause (the LIMIT placement itself is correct and no code change is required).",
+          "reproduction": "`Select-String -Path lib/promptRefinerReservationAuthority.ts -Pattern 'SKIP LOCKED'` returns nothing; lines 335-336 read `LIMIT ${limit}` then `FOR UPDATE`. Expected: the round-1 summary/package text matches the shipped clause.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "Both round-0 findings are fixed and verified — every authority DB-clock comparison and terminal timestamp now uses `clock_timestamp() AT TIME ZONE 'UTC'` (migration.sql:169-171, 226, 271-283) with a dedicated non-UTC-session integration test, and the sweep applies the expiry predicate, `ORDER BY \"expiresAt\", \"id\"` and the caller `LIMIT` in SQL before `FOR UPDATE` so at most `limit` rows are locked (authority:328-337, asserted by tests/promptRefinerReservationCore.test.mjs); correct the stale \"15개\" verification count (and the SKIP LOCKED wording in the round-1 record) and this can be approved in round 2 with no code change."
     }
   ],
   "changeDigest": "sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7",
@@ -357,13 +374,30 @@
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand the review prompt (round 1) to the claude reviewer; its verdict must name digest sha256:a5f0919eaae5f83bbb3cda4bdbaf7d6c09c756fecac9c467e85bbc4864af30a7",
-  "status": "awaiting_review",
+  "reviewConclusion": "request_changes",
+  "findings": [
+    {
+      "location": "docs/ops/tomverse-chat-progress.md:1025",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The finance-lane row still reports \"전용 15개 suite를 fresh DB에서 통과시켰으며\", which contradicts line 1024 of the same table (\"신규 DB integration 17/17\") and the 17 cases actually shipped in the new suite, leaving a self-contradicting verification record in the change.",
+      "reproduction": "Read docs/ops/tomverse-chat-progress.md lines 1024-1025 (one row says 17/17, the next says 15), then count the suite: `Select-String -Path tests/integration/prompt-refiner-reservation.db.test.ts -Pattern '^test\\(' | Measure-Object` → 17. Expected: both rows state the same, actual, count.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "lib/promptRefinerReservationAuthority.ts:328-337 vs. the author's round-1 account",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The author's account states the sweep applies \"FOR UPDATE SKIP LOCKED·LIMIT\", but the shipped SQL uses plain `FOR UPDATE` with no `SKIP LOCKED`, so the audit record overstates the implemented locking clause (the LIMIT placement itself is correct and no code change is required).",
+      "reproduction": "`Select-String -Path lib/promptRefinerReservationAuthority.ts -Pattern 'SKIP LOCKED'` returns nothing; lines 335-336 read `LIMIT ${limit}` then `FOR UPDATE`. Expected: the round-1 summary/package text matches the shipped clause.",
+      "disposition": "fix_requested"
+    }
+  ],
+  "nextAction": "Both round-0 findings are fixed and verified — every authority DB-clock comparison and terminal timestamp now uses `clock_timestamp() AT TIME ZONE 'UTC'` (migration.sql:169-171, 226, 271-283) with a dedicated non-UTC-session integration test, and the sweep applies the expiry predicate, `ORDER BY \"expiresAt\", \"id\"` and the caller `LIMIT` in SQL before `FOR UPDATE` so at most `limit` rows are locked (authority:328-337, asserted by tests/promptRefinerReservationCore.test.mjs); correct the stale \"15개\" verification count (and the SKIP LOCKED wording in the round-1 record) and this can be approved in round 2 with no code change.; package round 2 once the change is revised",
+  "status": "awaiting_revision",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-16T10:27:53.957Z",
+  "producedAt": "2026-09-16T10:43:34.165Z",
   "packagedRounds": 2,
   "concludedAtRound": null,
   "lineage": [],
