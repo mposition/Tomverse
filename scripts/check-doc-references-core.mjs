@@ -124,6 +124,26 @@ export const sourceCommentReferences = (source) =>
  * what the reader has already been told.
  */
 export const PLANNED_REFERENCES = {
+    // The product-news redesign names three modules it proposes. The draft says
+    // in its own first paragraph that none of them exists and that nothing is
+    // built until section 12 is approved, so building empty modules to satisfy
+    // this check would put files in the tree that no decision has authorised.
+    "lib/emailReleaseNotes.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed gate for the release_notes purpose. Section 9 lists it as new; section 12 lists the approvals that would authorise it.",
+    },
+    "lib/releaseNotesContentRules.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed content rules for release notes (D5). Not built: the classification it enforces is itself awaiting approval B.",
+    },
+    "lib/emailCollectionNotice.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed record of the at-collection notice (D3). Not built: it only has a purpose if approval A reopens C8.",
+    },
+    "tests/releaseNotesContentRules.test.mjs": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "The test that would enforce D5 across seven locales, named so the design can say what proves the rule rather than leaving it to review.",
+    },
     // An entry here is a document telling the reader about something that does
     // not exist yet. Empty is the healthy state; `lib/marketingMemoryClaims.ts`
     // was the last one and now exists, so the boundary in
