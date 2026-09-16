@@ -287,6 +287,18 @@ run(
     // covers are lost or won by the database's own unique indexes, so a single
     // process proves nothing about either.
     "tests/integration/email-template-registry-race.db.test.ts",
+    // The send metadata on TemplateVersion: written once from the definition,
+    // refused by a trigger when edited, and compared by the drain. The trigger
+    // and the CHECKs exist only in the database.
+    "tests/integration/email-template-version-metadata.db.test.ts",
+    // Which unsubscribe requests the origin limit charges. The buckets are rows,
+    // so whether sixty valid one-clicks from one NAT all get through is a
+    // question only the table can answer.
+    "tests/integration/email-unsubscribe-rate-limit.db.test.ts",
+    // Which unsubscribe key versions recent mail still depends on: one canary
+    // per version however many sends race to store it, and the newest sentAt
+    // per version from rows only the table holds.
+    "tests/integration/email-unsubscribe-key-retention.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.

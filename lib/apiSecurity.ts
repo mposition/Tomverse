@@ -89,11 +89,20 @@ export async function consumeApiRateLimit(
   request: Request,
   userId: string,
   scope: string,
-  limits: { minute: number; day: number }
+  limits: { minute: number; day: number },
+  options: {
+    /**
+     * Skip the per-IP leg. Only for a subject key that is not the caller's
+     * address: a valid unsubscribe token is keyed on what it acts on, and many
+     * recipients behind one corporate NAT, or one mail provider's one-click
+     * fetcher, must not throttle each other.
+     */
+    skipIpBucket?: boolean;
+  } = {}
 ) {
   const now = new Date();
   const userKey = `api:${hashKey(scope, "user", userId)}`;
-  const clientIp = getTrustedClientIp(request);
+  const clientIp = options.skipIpBucket ? "unknown" : getTrustedClientIp(request);
   // A resolvable IP is checked as a secondary, coarser bucket on top of the
   // per-user one. When it's not resolvable (misconfigured trusted-proxy
   // header), skip that leg instead of keying it on the shared "unknown"
