@@ -3,11 +3,15 @@ import { createHash } from "node:crypto";
 
 export const PROMPT_REFINER_SHADOW_CORPUS_PATH =
     "docs/ops/prompt-refiner-shadow/corpus-v1.json" as const;
+export const PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH =
+    "package-lock.json" as const;
+export const PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES = 4 * 1024 * 1024;
+export const PROMPT_REFINER_SHADOW_OTHER_SOURCE_MAX_BYTES = 1024 * 1024;
 
 export const PROMPT_REFINER_SHADOW_SOURCE_PATHS = Object.freeze([
     ".gitattributes",
     "package.json",
-    "package-lock.json",
+    PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH,
     "tsconfig.json",
     PROMPT_REFINER_SHADOW_CORPUS_PATH,
     "lib/promptRefinerShadowHarness.ts",

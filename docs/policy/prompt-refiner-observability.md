@@ -220,6 +220,14 @@ Git bytes로 만든다. Git child는 caller env보다 우선한 `GIT_NO_LAZY_FET
 `GIT_NO_REPLACE_OBJECTS=1`과 비대화형 설정 아래에서만 실행하고 commit·allowlist blob의
 로컬 존재를 먼저 확인한다. replace ref는 고정 SHA 해석에 관여할 수 없고,
 partial/blobless promisor clone의 누락 객체를 원격에서 가져오는 것도 허용하지 않는다.
+source cap은 corpus 전용 cap, `package-lock.json` 4 MiB, 나머지 allowlist 1 MiB이고,
+Git capture는 8 MiB로 제한한다. blob 크기를 먼저 검사하므로 cap 초과는 모호한 child
+buffer 실패가 아니라 `source_file_byte_limit`으로 기록된다.
+
+source identity에는 sourceRef, pinned repository paths와 `package-lock.json` bytes가
+들어간다. 설치된 `node_modules`의 실제 bytes, package-manager cache, install 환경·명령,
+registry 응답 또는 install attestation은 포함하지 않는다. 이 provider-free 결과는
+dependency installation provenance나 설치 결과 동일성의 증거가 아니다.
 
 모델 모양의 fixture output은 `parseBenchmarkJson()`의 syntax·duplicate key·complexity
 제한, `strictBenchmarkObject(["refinedPrompt"])`의 exact field 검사, 기존 prompt

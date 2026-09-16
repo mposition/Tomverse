@@ -40,6 +40,17 @@ identity digest는 journal·witness 최초 header에 함께 고정되며, 재개
 Windows `core.autocrlf=true`의 정상 checkout도 Git blob bytes와 같게 유지한다. 테스트는
 그 checkout과 네트워크 child trap 아래 CLI를 실행한다.
 
+source byte cap은 corpus의 기존 전용 cap, `package-lock.json` **4 MiB**, 그 밖의
+allowlist 파일 **1 MiB**로 명시한다. Git blob 크기를 `cat-file -s`로 먼저 검사한 뒤
+최대 **8 MiB** capture buffer 안에서만 읽으므로, lockfile이 4 MiB를 넘으면 child buffer
+오류가 아니라 `source_file_byte_limit`으로 닫힌다. 현재 lockfile은 568,011 bytes다.
+
+source identity가 결속하는 것은 sourceRef와 이 고정 repository path들의 bytes이며,
+그중 `package-lock.json`도 포함된다. 실제 설치된 `node_modules` 파일 bytes, package
+manager cache, install command·platform·registry 응답 또는 설치 attestation은 읽거나
+결속하지 않는다. 따라서 completed 결과는 dependency installation provenance나 실제
+runtime dependency tree의 동일성을 증명하지 않는다.
+
 ## 3. 출력 파서
 
 fixture output은 실제 모델 모양의 불신 입력으로 취급한다.

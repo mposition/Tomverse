@@ -17,7 +17,11 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { after } from "node:test";
-import { PROMPT_REFINER_SHADOW_SOURCE_PATHS } from "../lib/promptRefinerShadowSource.ts";
+import {
+  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES,
+  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH,
+  PROMPT_REFINER_SHADOW_SOURCE_PATHS,
+} from "../lib/promptRefinerShadowSource.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const temporary = mkdtempSync(join(tmpdir(), "prompt-refiner-shadow-cli-"));
@@ -246,6 +250,88 @@ test("a normal core.autocrlf=true checkout preserves every pinned source byte", 
     );
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).status, "completed");
+  } finally {
+    assert.ok(lstatSync(cloneDependencies).isSymbolicLink());
+    unlinkSync(cloneDependencies);
+  }
+});
+
+test("package-lock has a bounded dedicated cap and just-over-limit fails clearly", () => {
+  assert.equal(
+    lstatSync(join(root, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH)).size,
+    568_011
+  );
+  assert.ok(568_011 < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);
+
+  const clone = join(temporary, "package-lock-cap-checkout");
+  execFileSync("git", ["clone", "--quiet", "--no-local", checkout, clone], {
+    cwd: temporary,
+    env: cleanEnvironment,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const cloneDependencies = join(clone, "node_modules");
+  symlinkSync(
+    realpathSync(join(root, "node_modules")),
+    cloneDependencies,
+    process.platform === "win32" ? "junction" : "dir"
+  );
+  const cloneGit = (args) =>
+    execFileSync("git", args, {
+      cwd: clone,
+      env: cleanEnvironment,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  try {
+    cloneGit(["config", "--local", "user.name", "Offline Size Fixture"]);
+    cloneGit(["config", "--local", "user.email", "size-fixture@example.invalid"]);
+    const lockPath = join(clone, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH);
+    const original = readFileSync(lockPath);
+    const atLimit = Buffer.concat([
+      original,
+      Buffer.alloc(PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES - original.length, 0x20),
+    ]);
+    assert.equal(atLimit.length, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);
+    writeFileSync(lockPath, atLimit);
+    cloneGit(["add", "--", PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH]);
+    cloneGit(["commit", "--quiet", "--no-gpg-sign", "-m", "Package lock at exact cap"]);
+    const atLimitRef = cloneGit(["rev-parse", "HEAD"]).trim();
+    const accepted = run(
+      [
+        `--journal=${join(temporary, "package-lock-at-limit.jsonl")}`,
+        `--source-ref=${atLimitRef}`,
+      ],
+      {},
+      clone
+    );
+    assert.equal(accepted.status, 0, accepted.stderr);
+
+    writeFileSync(lockPath, Buffer.concat([atLimit, Buffer.from(" ")]));
+    const currentTooLarge = run(
+      [
+        `--journal=${join(temporary, "package-lock-current-too-large.jsonl")}`,
+        `--source-ref=${atLimitRef}`,
+      ],
+      {},
+      clone
+    );
+    assert.equal(currentTooLarge.status, 1);
+    assert.match(currentTooLarge.stderr, /source_file_byte_limit/);
+
+    cloneGit(["add", "--", PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH]);
+    cloneGit(["commit", "--quiet", "--no-gpg-sign", "-m", "Package lock one byte over cap"]);
+    const overLimitRef = cloneGit(["rev-parse", "HEAD"]).trim();
+    const anchoredTooLarge = run(
+      [
+        `--journal=${join(temporary, "package-lock-anchored-too-large.jsonl")}`,
+        `--source-ref=${overLimitRef}`,
+      ],
+      {},
+      clone
+    );
+    assert.equal(anchoredTooLarge.status, 1);
+    assert.match(anchoredTooLarge.stderr, /source_file_byte_limit/);
   } finally {
     assert.ok(lstatSync(cloneDependencies).isSymbolicLink());
     unlinkSync(cloneDependencies);

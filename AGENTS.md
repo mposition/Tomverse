@@ -1406,6 +1406,11 @@ Non-negotiable requirements:
   digest; a different source snapshot can never resume the run. Git child reads
   must disable lazy fetch and replacement objects, and fail closed unless every
   pinned object is local;
+  `package-lock.json` has a dedicated 4 MiB source cap, other non-corpus source
+  files have a 1 MiB cap, and Git capture remains bounded above both. The source
+  identity binds pinned repository bytes, not installed `node_modules`, package
+  manager caches, install environments, or an installation attestation; a local
+  completion is not dependency-installation provenance.
   `max-cases` accepts only unsigned ASCII decimal notation. A clean interruption
   after the final terminal finalizes completion without a zero-remaining resume,
   while a final-case mismatch remains a replayable non-resumable stop. Structural message

@@ -16,18 +16,33 @@ import {
 import { runPromptRefinerShadowHarness } from "../lib/promptRefinerShadowJournal.ts";
 import {
   PROMPT_REFINER_SHADOW_CORPUS_PATH,
+  PROMPT_REFINER_SHADOW_OTHER_SOURCE_MAX_BYTES,
+  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES,
+  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH,
   PROMPT_REFINER_SHADOW_SOURCE_PATHS,
   validatePromptRefinerShadowSource,
 } from "../lib/promptRefinerShadowSource.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const GIT_CAPTURE_MAX_BYTES = 8 * 1024 * 1024;
+
+function sourceByteLimit(path) {
+  if (path === PROMPT_REFINER_SHADOW_CORPUS_PATH) {
+    return PROMPT_REFINER_SHADOW_MAX_CORPUS_BYTES;
+  }
+  if (path === PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH) {
+    return PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES;
+  }
+  return PROMPT_REFINER_SHADOW_OTHER_SOURCE_MAX_BYTES;
+}
 
 function readBoundedUtf8(path, maximum) {
   if (lstatSync(path).isSymbolicLink()) throw new Error("source_symlink");
   const descriptor = openSync(path, "r");
   try {
     const stat = fstatSync(descriptor);
-    if (!stat.isFile() || stat.size > maximum) throw new Error("source_file_size_or_type");
+    if (!stat.isFile()) throw new Error("source_file_type");
+    if (stat.size > maximum) throw new Error("source_file_byte_limit");
     const bytes = Buffer.alloc(stat.size + 1);
     let offset = 0;
     while (offset < bytes.length) {
@@ -54,7 +69,7 @@ const git = (args) =>
     cwd: root,
     env: gitEnvironment,
     encoding: "utf8",
-    maxBuffer: 4 * 1024 * 1024,
+    maxBuffer: GIT_CAPTURE_MAX_BYTES,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -63,6 +78,17 @@ function requireLocalGitObject(objectName) {
     git(["cat-file", "-e", objectName]);
   } catch {
     throw new Error("source_object_missing_no_lazy_fetch");
+  }
+}
+
+function requireAnchoredSourceWithinLimit(sourceRef, path) {
+  const sizeText = git(["cat-file", "-s", `${sourceRef}:${path}`]).trim();
+  if (!/^(?:0|[1-9][0-9]*)$/.test(sizeText)) {
+    throw new Error("source_object_size_invalid");
+  }
+  const size = Number(sizeText);
+  if (!Number.isSafeInteger(size) || size > sourceByteLimit(path)) {
+    throw new Error("source_file_byte_limit");
   }
 }
 
@@ -109,6 +135,7 @@ function main() {
   }
   for (const path of PROMPT_REFINER_SHADOW_SOURCE_PATHS) {
     requireLocalGitObject(`${sourceRef}:${path}`);
+    requireAnchoredSourceWithinLimit(sourceRef, path);
   }
   const anchored = Object.fromEntries(
     PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [path, git(["show", `${sourceRef}:${path}`])])
@@ -116,9 +143,7 @@ function main() {
   const current = Object.fromEntries(
     PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [
       path,
-      readBoundedUtf8(resolve(root, path), path === PROMPT_REFINER_SHADOW_CORPUS_PATH
-        ? PROMPT_REFINER_SHADOW_MAX_CORPUS_BYTES
-        : 1024 * 1024),
+      readBoundedUtf8(resolve(root, path), sourceByteLimit(path)),
     ])
   );
   const source = validatePromptRefinerShadowSource({ sourceRef, anchored, current });
