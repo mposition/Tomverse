@@ -720,6 +720,23 @@ export function FeedbackButton({
                         {t("feedback.emailUpdatesAccountHint")}
                       </p>
                     ) : null}
+                    {/*
+                      What the box does *not* decide. The answer to the report
+                      is the reply to a request the person made, so it is sent
+                      whenever there is an address; the box governs the receipt
+                      and the "in review" notice. Saying so here is the half of
+                      the 2026-09-15 incident that lives on this side of the
+                      product: a reporter who left no address never learns why
+                      no answer came.
+                    */}
+                    <p
+                      data-testid="feedback-reply-promise"
+                      className="mt-1.5 text-xs leading-5 text-zinc-500 break-keep dark:text-zinc-400"
+                    >
+                      {isGuest
+                        ? t("feedback.replyNeedsAddress")
+                        : t("feedback.replyAlwaysAccount")}
+                    </p>
                     {needsNotifyEmail ? (
                       <>
                         <label

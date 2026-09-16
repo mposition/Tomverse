@@ -1027,6 +1027,12 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **security·billing 수신 설정은 끌 수 없습니다**(`LOCKED_EMAIL_PURPOSES`,
   DB CHECK). marketing은 동의가 있어야 보내고, 동의 철회는 purpose 범위
   suppression을 함께 씁니다.
+- **신고 처리 결과 답변은 동의가 아니라 주소로 판정합니다**(정책 v12,
+  docs/policy/email-notifications.md §3). 신고자가 시작한 요청에 대한 응답이므로
+  transactional이고, 접수·검토중 알림만 동의 기반입니다. 세 단계를 한 조건으로
+  묶지 않습니다 — `feedbackStageRecipient()`가 유일한 판정이고, 운영자 화면은
+  "보낼 수 있는가"를 그 함수로 말해야 합니다. 2026-09-15에 세 단계를 하나로 묶은
+  조건 때문에 운영자가 쓴 답변이 아무에게도 가지 않았습니다.
 - **suppression은 주소 기준이라 계정 삭제 후에도 남습니다.** transactional은
   hard bounce에서만 막고 complaint로는 막지 않습니다(§13.3). Resend의 suppression은
   계정·region 전체 범위라는 확인된 제약이 있으므로, marketing 활성화 전에

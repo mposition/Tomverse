@@ -23,6 +23,7 @@ import {
   FEEDBACK_CLOSURE_OUTCOMES,
   FEEDBACK_USER_REPLY_MAX_LENGTH,
   FEEDBACK_USER_REPLY_MIN_LENGTH,
+  feedbackStageRecipient,
   feedbackUserReplyState,
   isTerminalFeedbackStatus,
   type FeedbackClosureOutcome,
@@ -70,6 +71,24 @@ export type FeedbackRow = {
     state: string;
     classification: string | null;
     ineligibilityReason: string | null;
+    updatedAt: string;
+  } | null;
+  /**
+   * The completion record the reply email renders from -- what a re-send
+   * would actually put in front of the reporter. Null until the report has
+   * been closed once.
+   */
+  completionSnapshot: { outcomeCode: string | null; userReply: string | null } | null;
+  /**
+   * What happened to the completion reply's email, when one was queued.
+   * `null` means nothing was ever queued for this report.
+   */
+  replyDelivery: {
+    resent: boolean;
+    status: string;
+    attempts: number;
+    lastErrorKind: string | null;
+    acceptedAt: string | null;
     updatedAt: string;
   } | null;
   /** The exactly-linked evidence occurrence, when verification made one. */
@@ -156,7 +175,10 @@ type Props = {
 /** The server's account of what happened to the submitter email, verbatim. */
 type UserNotificationResult =
   | { queued: true; delivered: boolean }
-  | { queued: false; reason: "no_stage" | "already_notified" | "not_notifiable" };
+  | {
+      queued: false;
+      reason: "no_stage" | "already_notified" | "no_address" | "not_consented";
+    };
 
 const statuses = ["open", "reviewing", "resolved", "closed"] as const;
 
@@ -174,9 +196,20 @@ const SHADOW_CASE_STATES = new Set([
   "closed",
 ]);
 
-/** Whether lifecycle emails can reach this reporter at all. */
-const isNotifiable = (feedback: FeedbackRow) =>
-  Boolean(feedback.email) && feedback.emailUpdatesConsent;
+/**
+ * Whether the *answer* to this report can reach the reporter: an address is
+ * all it needs (lib/feedbackLifecycleCore.ts,
+ * docs/policy/email-notifications.md §3). The tick the
+ * row also carries governs the receipt and the "in review" notice, which is a
+ * different question and no longer this one -- reading them as one is what
+ * made an operator's reply disappear on 2026-09-15.
+ */
+const canEmailReply = (feedback: FeedbackRow) =>
+  feedbackStageRecipient({
+    stage: "completed",
+    email: feedback.email,
+    emailUpdatesConsent: feedback.emailUpdatesConsent,
+  }).canSend;
 
 /**
  * The sentence the toast adds about the submitter email. A failed send is
@@ -191,10 +224,35 @@ const userNotificationSentence = (
   if (result.queued) {
     return result.delivered ? sentences.delivered : sentences.queued;
   }
-  if (result.reason === "already_notified") {
-    return sentences.alreadyNotified;
+  // Every outcome says something. Silence read as "sent" once, and the
+  // reporter never got the reply.
+  if (result.reason === "already_notified") return sentences.alreadyNotified;
+  if (result.reason === "no_address") return sentences.noAddress;
+  if (result.reason === "not_consented") return sentences.notConsented;
+  return sentences.noStage;
+};
+
+/** One sentence for what became of a reply's email, in the reporter's row. */
+const replyDeliverySentence = (
+  feedback: FeedbackRow,
+  copy: FeedbackInboxMessages["replyDelivery"]
+) => {
+  const delivery = feedback.replyDelivery;
+  if (!delivery) return copy.none;
+  const suffix = delivery.resent ? copy.resent : "";
+  if (delivery.status === "delivered") {
+    return `${copy.accepted(dateLabel(delivery.acceptedAt || delivery.updatedAt))}${suffix}`;
   }
-  return "";
+  if (delivery.status === "abandoned") {
+    const raw = delivery.lastErrorKind || "";
+    const reason =
+      copy.reasons[raw] ||
+      copy.reasons[raw.split(":")[0]] ||
+      raw ||
+      copy.reasons.source_missing;
+    return `${copy.abandoned(reason)}${suffix}`;
+  }
+  return `${copy.pending(delivery.attempts)}${suffix}`;
 };
 
 const statusClass = (status: string) => {
@@ -344,6 +402,39 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
       return false;
     } finally {
       setBusyId(null);
+    }
+  };
+
+  /**
+   * Sends a completion reply that was written but never sent -- reports closed
+   * before the answer stopped needing the reporter's progress-notice tick.
+   * The server re-checks everything and sends the stored text unchanged.
+   */
+  const resendReply = async (feedback: FeedbackRow) => {
+    if (busyId) return;
+    setBusyId(feedback.id);
+    try {
+      const response = await fetch(`/api/admin/feedback/${feedback.id}/resend-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = (await response.json().catch(() => null)) as {
+        code?: string;
+      } | null;
+      if (!response.ok) {
+        dispatchAppToast(
+          (data?.code && m.replyDelivery.resendRefused[data.code]) ||
+            m.replyDelivery.resendFailed,
+          "error"
+        );
+        return;
+      }
+      dispatchAppToast(m.replyDelivery.resendDone, "success");
+    } catch {
+      dispatchAppToast(m.replyDelivery.resendFailed, "error");
+    } finally {
+      setBusyId(null);
+      refreshInbox();
     }
   };
 
@@ -508,20 +599,21 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                         {dateLabel(feedback.createdAt)} UTC
                       </span>
                       {/*
-                        Whether lifecycle emails can reach this reporter. A
-                        capability flag only -- the address itself is already
-                        shown once below and is not repeated here.
+                        Whether the reporter asked for *progress* notices. The
+                        answer to their report is a separate question with a
+                        separate rule (canEmailReply), and conflating the two
+                        is the defect this badge used to feed.
                       */}
                       <span
                         data-testid="feedback-notify-badge"
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${
-                          isNotifiable(feedback)
+                          feedback.emailUpdatesConsent
                             ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                             : "border-zinc-700 bg-zinc-950 text-zinc-500"
                         }`}
                       >
                         <BellRing className="h-3 w-3" />
-                        {isNotifiable(feedback)
+                        {feedback.emailUpdatesConsent
                           ? m.emailUpdatesOn
                           : m.noEmailUpdates}
                       </span>
@@ -614,7 +706,50 @@ export function FeedbackInboxPanel({ rows, rowLimit }: Props) {
                   ) : null;
                 })()}
 
-                {isNotifiable(feedback) && feedback.status === "open" ? (
+                {isTerminalFeedbackStatus(feedback.status) ? (
+                  <div
+                    data-testid="feedback-reply-delivery"
+                    className="mt-3 flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-950/70 p-3 text-xs leading-5 text-zinc-300 md:flex-row md:items-center md:justify-between"
+                  >
+                    <span>
+                      <span className="text-zinc-500">{m.replyDelivery.label}: </span>
+                      {replyDeliverySentence(feedback, m.replyDelivery)}
+                    </span>
+                    {canEmailReply(feedback) &&
+                    feedback.completionSnapshot?.userReply &&
+                    (!feedback.replyDelivery ||
+                      feedback.replyDelivery.status === "abandoned") ? (
+                      <span className="flex flex-col items-start gap-1 md:max-w-md md:items-end">
+                        {/*
+                          The text the mail will carry, read from the same
+                          record the renderer uses -- not the row's latest
+                          reply, which can differ once a report has been
+                          closed twice.
+                        */}
+                        <span
+                          data-testid="feedback-reply-resend-preview"
+                          className="w-full whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-900/70 p-2 text-left text-zinc-200"
+                        >
+                          <span className="block text-zinc-500">{m.replyDelivery.previewLabel}</span>
+                          {feedback.completionSnapshot.userReply}
+                        </span>
+                        <button
+                          type="button"
+                          data-testid="feedback-reply-resend"
+                          disabled={busy}
+                          onClick={() => resendReply(feedback)}
+                          className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 font-bold text-blue-100 transition hover:bg-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+                          {busy ? m.replyDelivery.resending : m.replyDelivery.resend}
+                        </button>
+                        <span className="text-zinc-500">{m.replyDelivery.resendHint}</span>
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {feedback.emailUpdatesConsent && feedback.email && feedback.status === "open" ? (
                   <p
                     data-testid="feedback-reviewing-email-hint"
                     className="mt-2 text-xs font-semibold leading-5 text-blue-200/80"
@@ -805,7 +940,7 @@ function FeedbackCompletionDialog({
 
   const replyState = feedbackUserReplyState(userReply);
   const replyValid = replyState === "empty" || replyState === "ready";
-  const notifiable = isNotifiable(feedback);
+  const notifiable = canEmailReply(feedback);
   const alreadyCompleted =
     isTerminalFeedbackStatus(feedback.status) || Boolean(feedback.closureOutcome);
   const preview = useMemo(
@@ -843,12 +978,15 @@ function FeedbackCompletionDialog({
             <h3 className="text-lg font-black capitalize text-white">
               {m.dialog.title(m.statuses[status])}
             </h3>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">
+            <p
+              data-testid="feedback-completion-email-intent"
+              className="mt-1 text-xs leading-5 text-zinc-400"
+            >
               {notifiable
                 ? alreadyCompleted
                   ? m.dialog.alreadyCompleted
-                  : m.dialog.willEmail
-                : m.dialog.noEmail}
+                  : m.dialog.willSendTo(feedback.email as string)
+                : m.dialog.cannotSend}
             </p>
           </div>
           <button
@@ -882,7 +1020,7 @@ function FeedbackCompletionDialog({
         </label>
 
         <label className="mt-4 block text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">
-          {m.dialog.reply}
+          {notifiable && !alreadyCompleted ? m.dialog.reply : m.dialog.replyInternal}
           <textarea
             data-testid="feedback-completion-reply"
             value={userReply}
@@ -945,7 +1083,9 @@ function FeedbackCompletionDialog({
               ? notifiable && !alreadyCompleted && userReply.trim()
                 ? m.autoFixDraft.sendAndResolve
                 : m.autoFixDraft.resolveOnly
-              : m.dialog.confirm(m.statuses[status])}
+              : notifiable && !alreadyCompleted
+                ? m.dialog.confirm(m.statuses[status])
+                : m.dialog.confirmWithoutEmail}
           </button>
         </div>
       </div>

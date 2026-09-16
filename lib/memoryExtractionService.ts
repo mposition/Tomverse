@@ -725,6 +725,36 @@ export async function completeExtractionChunk(
         // that branch would mean a transaction that sometimes reserves
         // credits without it.
         await acquireCreditAccountLock(tx, lease.userId);
+        /*
+          The run row next, and fenced -- before any chunk row.
+
+          `claimMemoryExtractionRun` takes the run and then resets the chunks
+          a dead generation left running, so a report that locked its chunk
+          first and the run second could wait on a reclaim that is waiting on
+          it. Run before chunk is also the order an extraction commit takes
+          (lib/memoryExtractionCommit.ts).
+
+          The fence is in the lock itself. A generation that was superseded,
+          cancelled or wiped by delete-all matches no row here -- under READ
+          COMMITTED the WHERE is re-checked after the wait -- and leaves
+          without touching its chunk or settling anything. The run that
+          replaced it, or the cancel that ended it, owns the settlement.
+        */
+        const fenced = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "MemoryExtractionRun"
+            WHERE id = ${lease.runId}
+              AND "userId" = ${lease.userId}
+              AND status = 'running'
+              AND "leaseGeneration" = ${lease.leaseGeneration}
+            FOR UPDATE
+        `;
+        if (fenced.length === 0) {
+            const run = await tx.memoryExtractionRun.findUnique({
+                where: { id: lease.runId },
+                select: { status: true },
+            });
+            return { applied: false, runStatus: run?.status ?? "unknown" };
+        }
         const chunk = await tx.memoryExtractionChunk.findUnique({
             where: { runId_chunkIndex: { runId: lease.runId, chunkIndex } },
             select: { attemptCount: true },
@@ -784,7 +814,7 @@ export async function completeExtractionChunk(
                 : completed >= run.chunkTotal
                   ? ("completed" as const)
                   : null;
-        await tx.memoryExtractionRun.updateMany({
+        const advanced = await tx.memoryExtractionRun.updateMany({
             where: {
                 id: lease.runId,
                 status: "running",
@@ -802,6 +832,12 @@ export async function completeExtractionChunk(
                     : { leaseExpiresAt: leaseDeadline(now) }),
             },
         });
+        if (advanced.count !== 1) {
+            // Unreachable while this transaction holds the fenced run row. If
+            // it ever happens, the whole report rolls back rather than
+            // settling a run it did not advance.
+            throw new Error("Memory extraction run changed under its own lock.");
+        }
         if (terminal) {
             // Settled in the same transaction that made the run terminal, so
             // a run can never come to rest with credits still reserved
@@ -1132,9 +1168,32 @@ export async function driveMemoryExtractionRunSlice(input: {
  * through `driveMemoryExtractionRunSlice` lands with the driver wiring.
  */
 export async function reconcileExpiredMemoryExtractionRuns(now = new Date()) {
-    const reclaimed = await prisma.memoryExtractionRun.updateMany({
-        where: { status: "running", leaseExpiresAt: { lte: now } },
-        data: { status: "pending", leaseExpiresAt: null },
+    /*
+      Rows locked in id order, and never waited for.
+
+      A bare `updateMany` takes its row locks in whatever order the plan
+      visits them, while delete-all locks one account's active runs by id --
+      two expired runs could be taken in opposite orders by the two. Skipping a
+      row another transaction holds (a claim, a report, a delete-all) removes
+      the wait altogether; a run skipped here is still expired next cycle, and
+      the holder is usually about to change it anyway.
+    */
+    const reclaimed = await prisma.$transaction(async (tx) => {
+        const expired = await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM "MemoryExtractionRun"
+            WHERE status = 'running' AND "leaseExpiresAt" <= ${now}
+            ORDER BY id
+            FOR UPDATE SKIP LOCKED
+        `;
+        if (expired.length === 0) return { count: 0 };
+        return tx.memoryExtractionRun.updateMany({
+            where: {
+                id: { in: expired.map((row) => row.id) },
+                status: "running",
+                leaseExpiresAt: { lte: now },
+            },
+            data: { status: "pending", leaseExpiresAt: null },
+        });
     });
     if (reclaimed.count > 0) {
         console.info(

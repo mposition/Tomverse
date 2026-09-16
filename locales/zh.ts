@@ -880,6 +880,10 @@ export const zh = {
         messageCounter: "{count} / {max}",
         errorReportHint: "不填写补充说明也可以发送，错误详情会自动一起提交。",
         traceOptionalHint: "追踪 ID 是可选的，不填也可以发送。",
+        replyAlwaysAccount:
+          "无论此处如何选择，本次反馈的处理结果答复都会发送到你的账户邮箱。",
+        replyNeedsAddress:
+          "如需收到本次反馈的处理结果答复，请勾选上方选项并留下电子邮箱地址。",
         emailUpdatesLabel: "通过电子邮件接收处理状态",
         emailUpdatesAccountHint: "此报告的受理与处理状态通知将发送到你的账户邮箱。",
         emailUpdatesEmailLabel: "接收通知的邮箱",

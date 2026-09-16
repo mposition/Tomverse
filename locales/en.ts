@@ -862,6 +862,10 @@ export const en = {
         messageCounter: "{count} / {max}",
         errorReportHint: "You can send this without adding anything. The error details are attached either way.",
         traceOptionalHint: "The trace ID is optional. You can send without it.",
+        replyAlwaysAccount:
+          "Whatever you choose here, the answer to this report goes to your account email.",
+        replyNeedsAddress:
+          "To receive the answer to this report, tick the box above and leave an email address.",
         emailUpdatesLabel: "Email me status updates",
         emailUpdatesAccountHint:
           "A receipt and status updates for this report will go to your account email.",
