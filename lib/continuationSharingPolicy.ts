@@ -82,6 +82,13 @@ export const continuationExportProvenance = (input: {
     providerLabel: string;
     importedAt: Date | string;
     sourceDeleted: boolean;
+    /**
+     * Whether this file is the `?include=source` one, which carries the
+     * stored original above the divider. The sentence changes because the
+     * default one -- "downloaded separately" -- would be false here, and the
+     * reader has to know what the file does and does not contain.
+     */
+    includesSource?: boolean;
 }): string[] => {
     const importedAt =
         input.importedAt instanceof Date
@@ -91,7 +98,9 @@ export const continuationExportProvenance = (input: {
         `Continued from an imported ${input.providerLabel} conversation (imported ${importedAt}).`,
         input.sourceDeleted
             ? "The imported original has since been deleted from this account."
-            : "The imported original is not included here: it is stored separately and is downloaded from the imported-data export.",
+            : input.includesSource
+              ? "The imported original is included below as Tomverse stored it; anything shortened or not stored at import is not recoverable here."
+              : "The imported original is not included here: it is stored separately and is downloaded from the imported-data export.",
         "Only the Tomverse turns below were produced by Tomverse.",
     ];
 };

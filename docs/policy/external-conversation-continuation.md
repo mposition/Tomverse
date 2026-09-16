@@ -48,7 +48,7 @@ viewer의 즉흥 bridge, 전체 transcript의 첫 요청 첨부.
 
 | 범위 | 명시적 비목표 |
 |---|---|
-| 하나의 immutable snapshot을 지목하는 bridge, 새 `productKey=review` Conversation, **선택한 모델마다 같은 seed로 답하는 다중 모델 비교**, deterministic bounded context seed, source-backed timeline 화면, 삭제·lock·share·export 의미, 전용 feature flag | LLM 요약 seed, memory 연동, lineage 최신 snapshot 자동 추적, 공개 share, 게스트, 외부 첨부 복제, 외부 원문의 일반 export 포함 |
+| 하나의 immutable snapshot을 지목하는 bridge, 새 `productKey=review` Conversation, **선택한 모델마다 같은 seed로 답하는 다중 모델 비교**, deterministic bounded context seed, source-backed timeline 화면, 삭제·lock·share·export 의미, 전용 feature flag | LLM 요약 seed, memory 연동, lineage 최신 snapshot 자동 추적, 공개 share, 게스트, 외부 첨부 복제, 사용자가 고르지 않은 원문 포함(일반 export는 그대로 원문 없이 나갑니다) |
 
 - 이 기능은 **memory 릴리스와 독립적으로 동작해야 합니다.** `memoryExtractionEnabled`
   · `memoryInjectionEnabled`가 모두 꺼진 상태에서 전 기능이 성립합니다. 승인되지
@@ -619,7 +619,43 @@ composer는 mobile composer 계약의 형태를 따릅니다 — textarea가 전
 - **export에는 provenance를 넣습니다** — source provider, import 시점, 원본은 별도
   export 대상이라는 설명. 원본이 이미 삭제됐으면 그 사실을 씁니다.
 - **외부 원문 전체를 일반 Conversation export에 복사하지 않습니다.** 그것이 이
-  조항이 막는 조용한 확장입니다.
+  조항이 막는 조용한 확장입니다. 기본 다운로드와 일괄 export의 바이트는 그대로입니다.
+
+### 9.1 원문 포함 다운로드 (CONT-EXPORT-01B)
+
+사용자가 **그 파일을 고른 경우에만** 저장된 원문이 파일에 들어갑니다. §9의 금지는
+"사용자 동의 없는 포함"이며, 명시적으로 고른 다운로드는 그 동의입니다(§13 차단
+조건도 같은 문장으로 읽습니다).
+
+- **메뉴는 두 항목입니다.** "원문과 이어진 대화 다운로드 (.txt)"(보조 설명: 저장된
+  원문 포함, 내려받은 파일은 회수 불가)와 "Tomverse에서 이어진 부분만 다운로드
+  (.txt)". 후자는 기존 호출과 **같은 요청**이며, 원문 포함은 `?include=source`
+  하나로만 일어납니다. 일괄 export·공유에는 없습니다.
+- **파일은 보내기 전에 완성합니다.** 대화 행·표시 제목·bridge·snapshot·양쪽 메시지를
+  하나의 READ ONLY REPEATABLE READ snapshot에서 읽고(`lib/continuationSourceExport.ts`),
+  조립·상한 검사·SHA-256을 그 뒤에 합니다. 여러 transaction으로 읽으면 이름 변경·새 답변·
+  원문 삭제가 중간에 끼어 **어느 시점에도 존재한 적 없는 파일**이 만들어집니다.
+- **순서**: 표시 제목·출처 안내 → 저장된 원문(ordinal 오름차순, 원본 공급자·원본 모델
+  라벨·원본 시각, 잘린 메시지는 그 사실을 표시) → 경계 구분선 → Tomverse 대화 →
+  완결 표식(원문 N개·Tomverse M개). 원문 turn은 native formatter를 쓰지 않습니다 —
+  runtime 모델 id 해석은 이 앱이 서비스하지 않는 모델을 우리 모델처럼 보이게 합니다.
+- **권한은 마지막 확인 시점 기준**입니다. snapshot을 읽은 뒤 transaction 밖에서 대화·
+  bridge·snapshot·두 잠금(및 password 변경 여부)을 다시 확인하고, 그 사이 삭제·재잠금된
+  경우 거절합니다. 이미 전송된 파일은 회수할 수 없으며 메뉴가 그렇게 적습니다.
+- **거절은 각자의 코드**입니다: bridge 없음 400 `EXPORT_SOURCE_NOT_CONTINUATION`,
+  삭제·미완료 409 `EXPORT_SOURCE_DELETED`, 잠김 423 `EXPORT_SOURCE_LOCKED`,
+  상한 초과 413 `EXPORT_TOO_LARGE`, 개수·순서 불일치 500 `EXPORT_INCONSISTENT`.
+  원문을 조용히 빼고 "성공"으로 저장하지 않습니다.
+- **상한은 완성된 파일에 겁니다** — UTF-8 10 MiB, 합산 메시지 10,000개(검증 시작값,
+  `lib/continuationSourceExport.ts`). 가져오기 한도를 빌려오지 않고, 초과는 잘라서
+  성공시키지 않고 거절합니다.
+- **완결 검증은 클라이언트가 합니다.** 응답의 `X-Export-Bytes`·`X-Export-SHA256`과
+  받은 바이트를 대조해 일치할 때만 저장합니다. header가 없거나 형식이 틀리면 저장하지
+  않습니다(선택적 검증 금지). 원문 미포함 모드와 기존 호출에는 이 header를 강제하지 않습니다.
+- **"원문 전체"는 Tomverse에 저장된 텍스트 전체**입니다. 가져올 때 잘린 내용과 저장하지
+  않은 첨부는 복원되지 않으며, 파일이 그렇게 적습니다.
+- 다운로드는 공개 share가 아닙니다. 링크를 만들지 않으며 `allowDownloads`·rate limit·
+  `no-store`는 그대로입니다. 서버에 export 사본을 남기지 않습니다.
 
 ## 10. Lock과 권한
 
@@ -706,7 +742,9 @@ USD를 싣지 않습니다.
 - 한 모델의 실패가 다른 모델의 답변·예약·정산·환급을 손상시킴(§5.1)
 - migration이 기존 continuation의 `selectedModels`를 바꿈(§15)
 - flag off가 ordinary chat을 깨뜨리거나 사용자 새 메시지를 숨김
-- share·export를 통해 외부 원문이 사용자 동의 없이 공개됨
+- share·export를 통해 외부 원문이 사용자 동의 없이 공개됨(§9.1의 명시적 선택은 그 동의이며,
+  기본 다운로드·일괄 export·share에는 원문이 들어가지 않습니다)
+- 원문 포함 다운로드가 잠긴·삭제된 원문을 싣거나, 일부만 담긴 파일을 완전한 파일처럼 저장함(§9.1)
 - 메시지 검색이 잠긴·권한 없는·다른 계정·미완료 원문의 본문·제목·존재·개수를 드러내거나,
   잠긴 자료가 결과의 순서·개수·`truncated`·원문 시간 초과 여부를 바꿈(§8.2.1)
 
