@@ -227,8 +227,9 @@ test("a chunk's answer is stored with the pair that produced it", async () => {
 test("a chunk reads only its own account's conversations", async () => {
     // The chunk plan is stored data. A stored id is not by itself a statement
     // that the account still owns that conversation, so the load is scoped to
-    // the owner as well -- and with nothing readable the chunk completes
-    // rather than failing forever.
+    // the owner as well -- and with nothing readable the chunk is skipped
+    // rather than failing forever. Skipped, not completed: nothing called the
+    // provider, and a completed chunk is one the account is charged for.
     const { run } = await seedRun();
     const { lease, chunk } = await claimFirstChunk(run.id);
     const stranger = await createUser();
@@ -246,7 +247,7 @@ test("a chunk reads only its own account's conversations", async () => {
         register: APPROVED_REGISTER,
         adapterFactory: answeringAdapter("Should never be stored."),
     });
-    assert.deepEqual(result, { outcome: "completed" });
+    assert.deepEqual(result, { outcome: "skipped" });
     assert.equal(await prisma.memoryItem.count(), 0);
 });
 

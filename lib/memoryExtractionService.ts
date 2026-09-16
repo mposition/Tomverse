@@ -716,7 +716,10 @@ export async function claimNextExtractionChunk(
 export async function completeExtractionChunk(
     lease: Pick<MemoryExtractionLease, "runId" | "userId" | "leaseGeneration">,
     chunkIndex: number,
-    result: { outcome: "completed" } | { outcome: "failed"; code: string },
+    result:
+        | { outcome: "completed" }
+        | { outcome: "skipped" }
+        | { outcome: "failed"; code: string },
     now: Date = new Date()
 ): Promise<{ applied: boolean; runStatus: string; chunkStatus?: string }> {
     return prisma.$transaction(async (tx) => {
@@ -761,10 +764,21 @@ export async function completeExtractionChunk(
         });
         if (!chunk) return { applied: false, runStatus: "unknown" };
 
+        /*
+          `skipped` is terminal and never goes through `chunkFailureDisposition`.
+          It is not a failure that ran out of attempts: there is nothing to
+          retry, because the thing the chunk was going to read is gone. The
+          `attemptCount` the claim already incremented stays as it is — it
+          records that a worker took this chunk, which is true.
+        */
         const disposition =
             result.outcome === "completed"
                 ? ({ status: "completed" } as const)
-                : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+                : result.outcome === "skipped"
+                  ? ({ status: "skipped" } as const)
+                  : chunkFailureDisposition({ attemptCount: chunk.attemptCount });
+        const settledNow =
+            disposition.status === "completed" || disposition.status === "skipped";
 
         const updated = await tx.memoryExtractionChunk.updateMany({
             where: {
@@ -776,8 +790,7 @@ export async function completeExtractionChunk(
             data: {
                 status: disposition.status,
                 failureCode: result.outcome === "failed" ? result.code : null,
-                completedAt:
-                    disposition.status === "completed" ? now : null,
+                completedAt: settledNow ? now : null,
                 // A chunk going back to pending releases its fence so the next
                 // slice — possibly a different worker — can claim it.
                 leaseGeneration:
@@ -795,14 +808,30 @@ export async function completeExtractionChunk(
             return { applied: false, runStatus: run?.status ?? "unknown" };
         }
 
-        const [completed, failed] = await Promise.all([
+        /*
+          Two counts, because they answer two different questions and folding
+          them into one was the defect.
+
+          `processed` is how far the run has got: a chunk whose sources were
+          all gone is as finished as one that called the provider, and a run
+          waiting for it would never end.
+
+          `completed` is what the account pays for. The settlement contract
+          says so in as many words -- "the two really did call the provider"
+          (lib/memoryExtractionCredits.ts) -- and a skipped chunk did not.
+        */
+        const [completed, skipped, failed] = await Promise.all([
             tx.memoryExtractionChunk.count({
                 where: { runId: lease.runId, status: "completed" },
+            }),
+            tx.memoryExtractionChunk.count({
+                where: { runId: lease.runId, status: "skipped" },
             }),
             tx.memoryExtractionChunk.count({
                 where: { runId: lease.runId, status: "failed" },
             }),
         ]);
+        const processed = completed + skipped;
         const run = await tx.memoryExtractionRun.findUniqueOrThrow({
             where: { id: lease.runId },
             select: { chunkTotal: true },
@@ -811,7 +840,7 @@ export async function completeExtractionChunk(
         const terminal =
             failed > 0
                 ? ("failed" as const)
-                : completed >= run.chunkTotal
+                : processed >= run.chunkTotal
                   ? ("completed" as const)
                   : null;
         const advanced = await tx.memoryExtractionRun.updateMany({
@@ -821,7 +850,7 @@ export async function completeExtractionChunk(
                 leaseGeneration: lease.leaseGeneration,
             },
             data: {
-                chunkCompleted: completed,
+                chunkCompleted: processed,
                 ...(terminal
                     ? {
                           status: terminal,
@@ -843,7 +872,8 @@ export async function completeExtractionChunk(
             // a run can never come to rest with credits still reserved
             // against it. `completed` is what the account is charged for: a
             // run that failed after two of five chunks keeps two, because
-            // those two really did call the provider.
+            // those two really did call the provider. A skipped chunk did
+            // not, so it is in `processed` above and not here.
             await settleExtractionRunCredits(tx, {
                 runId: lease.runId,
                 outcome: terminal,
@@ -910,7 +940,11 @@ export type ExtractionChunkHandler = (input: {
      * not started yet; what records the rest is the provider-call ledger.
      */
     signal: AbortSignal;
-}) => Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }>;
+}) => Promise<
+    | { outcome: "completed" }
+    | { outcome: "skipped" }
+    | { outcome: "failed"; code: string }
+>;
 
 export type ExtractionSliceResult = {
     chunksProcessed: number;
