@@ -1,4 +1,4 @@
-# 제품 소식 이메일: 권한과 기계 (초안 v14)
+# 제품 소식 이메일: 권한과 기계 (초안 v15)
 
 > **이 문서의 지위: 초안입니다. 승인되지 않았고, 코드는 하나도 없습니다.**
 > **S0와 S1a는 착수할 수 있습니다**(12절) — G는 EEA·영국 soft opt-in만 막습니다.
@@ -13,6 +13,23 @@
   [EEA·스위스 검토](email-eea-marketing-review-2026-09-14.md)
 
 ## 0. 개정 이력
+
+### v15 (2026-09-16) — 독립 검토 10회차 반영
+
+10회차(v14 대상)는 **S1a 착수 가능**으로 보고, S1b와 나머지에 남은 것을 짚어
+reject였습니다. 코드에서 직접 확인한 사실 셋이 설계를 넓혔습니다 — 로그인 방법
+변경·환불 메일은 suppression을 보지 않고, admin suppression route는 이유를 항상
+`manual`로 쓰며, privacy request workflow는 suppression을 만들지 않습니다.
+
+| # | 지적 | v15 |
+|---|---|---|
+| **C28** | DOI 확인 요청 메일은 동의가 일어나기 전에 나가므로 처리결과 통지가 될 수 없음 | **클릭이 성공한 transaction에서** 별도 `consent_result_notice`를 enqueue, 반복 클릭은 한 번(7.7) |
+| **C29** | 고객 대상 sender 목록이 불완전 | 고객 대상 sender 전체를 적고 **공용 잠금 helper**로 모음. 운영자 알림만 예외. 직접 provider 호출을 막는 정적 검사(7.4) |
+| **C30** | `privacy_request` suppression을 만드는 곳이 실제로 없음 | **삭제 요청 접수 시 marketing 전체 철회, 완료 시 전역 suppression** — 같은 transaction, request id provenance(7.4) |
+| **C31** | provider·transaction·lock timeout 수치 없음 | 수치와 timeout 시 상태를 확정. credential은 3초 예산 안에서 잠금 대기를 빼고 남은 시간으로 provider timeout 계산(7.4) |
+| **C32** | 가입일 anchor의 source 필드·member 불변성·기한 감시·문구 | `noticeAnchorSource` 불변 필드, 승인과 member를 한 transaction으로 seal, 감시는 수신자별 `실제 동의일 ?? noticeAnchorAt`, 문구는 기준일과 수신 시작일을 구분(7.7) |
+| **C33** | `requiredDisplayVersion` 정의 없음 | **`displayContractHash`** 를 정의하고 delivery에 고정, idempotency key는 root + generation + hash 앞 16자(7.6) |
+| **C34** | 의무가 적용되지 않는 후보의 의미 | 의무 key별로 **적용 후보만** 합성, 비적용은 중립(5.3) |
 
 ### v14 (2026-09-16) — 독립 검토 9회차 반영
 
@@ -375,7 +392,10 @@ v9는 국가를 DOI 확인 화면에서만 받아, **체크하지 않은 사용�
      가입 흐름의 장치는 **후보 rule들 중 가장 엄격한 장치**를 보여 주고 그 문안
      해시를 후보마다 남깁니다.
    - **표시 의무는 후보들의 합집합**입니다 — footer block, 수신거부 안내, 제목
-     접두어를 모두 붙입니다. `waived` 의무는 **모든 후보에서 waived일 때만** 생략합니다.
+     접두어를 모두 붙입니다.
+   - **합성은 의무 key별로 적용 후보만** 봅니다. 그 의무가 없는 rule(예: KR+US 후보에서
+     US에 `(광고)` 의무는 없음)은 **중립**입니다. 적용 rule 중 하나라도 상태가 빠져
+     있으면 미결 blocker, **적용 rule이 모두 `waived`일 때만** 생략, 그 밖에는 붙입니다.
    - **합성할 수 없으면 fail-closed** — 서로 다른 제목 접두어 두 개가 둘 다 필요한
      경우처럼 한 메일이 두 후보를 동시에 충족할 수 없으면 `display_unsatisfiable`로
      보내지 않습니다.
@@ -485,7 +505,7 @@ DOI 확인 화면은 동의한 사람의 **주소 확인**만 담당합니다. �
 | **`ConsentRecord`** (기존) | **명시적 동의**의 생애 — 요청·부여·철회·재확인 |
 | **`EmailPermissionEvent`** (신규, append-only) | 고지와 관계의 사실 — `notice_shown`, `objected`, `relationship_started`, `relationship_ended`, `basis_ended` |
 | **`EmailPermissionDecision`** (신규) | **발송별 판정** — 어떤 authority를 어떤 evidence로 통과했는지 |
-| **`EmailSendApproval`** (신규, 본문 불변) | **사람의 결정** — `risk_accepted` override(5.6)와 의무 `waived`(7.8). 승인자·일시·유형·**범위(policy version·rule·country·obligation key 또는 cohort)**·사유·재검토 조건. cohort는 `EmailSendApprovalMember`(`userId`, 주소 digest, `noticeAnchorAt`). **철회는 append-only `EmailSendApprovalRevocation`** — 승인 행을 갱신하지 않습니다 |
+| **`EmailSendApproval`** (신규, 본문 불변) | **사람의 결정** — `risk_accepted` override(5.6)와 의무 `waived`(7.8). 승인자·일시·유형·**범위(policy version·rule·country·obligation key 또는 cohort)**·사유·재검토 조건. cohort는 `EmailSendApprovalMember`(`userId`, 주소 digest, `noticeAnchorAt`, `noticeAnchorSource`). **승인 행과 member 전체는 한 transaction에서 쓰고 `sealedAt`으로 닫으며, 이후 둘 다 갱신·추가·삭제하지 않습니다**(DB trigger로 강제). **철회는 append-only `EmailSendApprovalRevocation`** |
 
 **두 장부가 같은 사실의 경쟁 source가 되지 않습니다.** 동의는 `ConsentRecord`
 하나가 말하고, 나머지 사실은 `EmailPermissionEvent`가 말합니다.
@@ -517,7 +537,7 @@ suppression 판정 시각**, **provider 제출 시각**, `legalAllowed`, 그리�
 | 3 | **철회 후 발송 0건** | **없음** — 경합 구간(7.4) |
 | 4 | 수신거부 주소가 발송 후 30일 이상 유효 | **증명 불가** — canary 토큰(7.5) |
 | 5 | 전체 수신거부 선택지 | **부분 구현** — `withdrawAllMarketing()` 범위. **S3**의 purpose classification 표로 닫음 |
-| 6 | suppression이 **고객 대상 lane** 모든 발송보다 우선 | **부분** — purpose 철회뿐 아니라 **주소 전역 suppression에도 경합**(7.4) |
+| 6 | suppression이 **고객 대상 sender 전체**(7.4의 목록, 운영자 알림 제외)의 모든 발송보다 우선 | **부분** — 경합이 있고, **환불·로그인 방법 변경 안내는 검사하지 않습니다**(7.4) |
 | 7 | 재구독 권유 금지 — **수신거부한 주소에 재구독을 요청하는 메일을 보내지 않음**. 수신거부 확인 페이지의 즉시 "되돌리기"는 본인 조작이라 허용 | **suppression이 이미 강제.** 추가로 S3의 purpose 표에 재구독 요청용 purpose를 두지 않음을 정적 검사 |
 | 8 | 관계 종료 시 중단 | **없음** — 4.4 선행 |
 | 9 | **법적 발신자 정보가 없으면 marketing은 fail-closed** — 한국은 별표 6의 명칭·**전자우편주소·전화번호**·주소 | **부분** — 한국 footer에 **전화번호 block이 없습니다. S6** |
@@ -582,24 +602,54 @@ sender가 관측하고 중단하고, sender가 먼저 이기면 철회 응답은
 | writer | `setPreference()`의 purpose 철회 (`lib/emailPreferences.ts`) | 전역 → purpose |
 | writer | hard bounce·complaint (`lib/emailWebhookProcessing.ts`) | 전역 |
 | writer | soft bounce 임계 (`recordSoftBounce()`, `lib/emailSuppression.ts`) | 전역 |
-| writer | admin 수동·privacy request (`app/api/admin/email-suppressions/route.ts`) | 전역 (purpose 지정 시 → purpose) |
+| writer | admin 수동 (`app/api/admin/email-suppressions/route.ts`) — **이유는 항상 `manual`** | 전역 (purpose 지정 시 → purpose) |
+| writer | **privacy request** (`app/api/admin/privacy-requests/route.ts`) — **신규**, 아래 | 전역 |
 | sender | standard lane (`lib/standardEmailLane.ts`) | 전역 → purpose |
 | sender | credential lane (`lib/credentialEmailLane.ts`) | 전역 |
+| sender | 알림 큐의 고객 대상 kind — `feedback_user_*`, 환불 안내 (`lib/notificationDeliveries.ts`) | 전역 |
+| sender | 로그인 방법 변경 안내 (`sendLoginMethodChangedEmail()`, `lib/emailLoginEmails.ts`) | 전역 |
 
-- 모든 writer는 `recordSuppression()`을 거치므로 **잠금은 그 함수 안에서** 잡습니다.
-  새 writer가 잠금을 빠뜨릴 수 없게 하기 위해서입니다.
-- sender는 **provider 시도마다** 잠금 → 최종 재조회 → provider 제출을 한 범위에서
-  하고, **retry 대기는 잠금 밖**입니다.
-- **credential lane도 범위 안입니다(C23).** v13은 "수신자가 같은 요청에서 스스로
-  요청했다"는 이유로 뺐지만, 로그인 코드 요청은 인증 없이 **임의 주소**로 시작할 수
-  있고, 이 lane이 존중하는 suppression에는 hard bounce뿐 아니라 **manual·privacy
-  request**가 있습니다. 지금은 첫 시도 전에 한 번만 검사하므로 재시도가 그 사이
-  커밋된 privacy request를 넘습니다.
-  - **provider 시도마다** 전역 잠금 → suppression 재조회 → provider 제출.
-  - 동기 요청이므로 잠금 대기는 **짧은 `lock_timeout`** 으로 묶고, 잠금을 얻지 못한
-    시도는 기존 재시도 예산 안에서 실패로 처리합니다. provider 호출은 이미 요청
-    예산으로 제한되어 있어 writer가 기다리는 시간도 그 예산을 넘지 않습니다.
-  - retry 대기는 잠금 밖입니다.
+**고객 대상 sender는 하나의 helper를 지납니다(C29).** `sendWithAddressLock()`이
+전역(→ purpose) 잠금 → suppression 재조회 → provider 제출을 한 범위에서 합니다.
+
+- 환불 안내와 로그인 방법 변경 안내는 지금 **suppression을 보지 않습니다.** 이들도
+  transactional 판정(hard bounce·manual·privacy request에서 막음, complaint로는
+  막지 않음 — [이메일 알림](email-notifications.md) §13.3)을 받습니다.
+- **예외는 운영자 알림뿐**입니다 — `lib/operationalMonitoring.ts`,
+  `lib/providerMonitoring.ts`, 알림 큐의 운영자 kind. 수신자가 고객이 아니라 우리
+  운영 주소입니다.
+- **정적 검사** — `deliverEmailOnce`·`sendTransactionalEmail`·`emailProvider().send`
+  를 import하는 파일은 helper와 위 운영자 알림 allowlist뿐이어야 합니다.
+
+**privacy request가 만드는 suppression(C30)** — 지금은 아무 곳도 만들지 않습니다.
+
+| 요청 유형 | 시점 | 기록 |
+|---|---|---|
+| `deletion` | **접수(생성) 시** | `withdrawAllMarketing()` — 처리 중에도 marketing이 나가지 않게 |
+| `deletion` | **`completed` 전환 시**, legal hold가 없을 때 | `recordSuppression(reason: "privacy_request")` 전역, **상태 변경과 같은 transaction**, provenance에 request id |
+| `access`·`export`·`correction` | — | suppression 없음 |
+
+- `rejected`로 끝난 삭제 요청은 접수 시의 marketing 철회만 남깁니다.
+- `privacy_request` suppression은 기존대로 해제할 수 없는 이유입니다.
+
+**시간 예산(C31)**
+
+| 항목 | standard lane·알림 큐·로그인 방법 변경 | credential lane |
+|---|---|---|
+| 잠금 대기(`lock_timeout`) | **2초** | **300ms**, 3초 요청 예산(`CREDENTIAL_SEND_BUDGET_MS`) 안에 포함 |
+| provider 호출 timeout | **10초** — 지금 standard lane은 `timeoutMs`를 넘기지 않으므로 명시 | **남은 예산 − 100ms**, 상한 `CREDENTIAL_ATTEMPT_TIMEOUT_MS`(2.5초) |
+| transaction timeout | **15초** | 남은 예산 |
+| 잠금을 못 얻으면 | claim 해제, **기존 backoff로 재시도**, 시도 횟수는 올리지 않음 | 그 시도는 재시도 가능한 실패, 예산 안에서 다음 시도 |
+| provider timeout | 기존 retryable 오류 처리(같은 idempotency key로 재시도) | 기존 처리 |
+| writer 쪽 잠금 대기 | **20초**. 넘으면 오류 — webhook은 5xx로 provider 재전송, 사용자 요청은 재시도 안내 | 같음 |
+
+- sender는 **provider 시도마다** 잠금을 잡고 **retry 대기는 잠금 밖**입니다.
+- 잠금은 모든 writer가 `recordSuppression()`을 거치므로 **그 함수 안에서** 잡습니다.
+
+**credential lane이 범위 안인 이유(C23)** — 로그인 코드 요청은 인증 없이 **임의
+주소**로 시작할 수 있고, 이 lane이 존중하는 suppression에는 hard bounce뿐 아니라
+**manual·privacy request**가 있습니다. 지금은 첫 시도 전에 한 번만 검사하므로
+재시도가 그 사이 커밋된 privacy request를 넘습니다.
 
 보장 문구는 관측 가능한 사건으로 적습니다 — **"고객 대상 lane에서 철회 또는 suppression 커밋
 이후 시작된 provider 제출 0건"**, 그리고 두 시각을 `EmailPermissionDecision`에
@@ -660,8 +710,14 @@ releaseNotesAuthorizationVerdict({
   - **skip과 replacement 생성은 한 transaction**입니다.
   - replacement는 `supersedesDeliveryId`를 갖고 그 컬럼은 **unique** — 한 delivery의
     replacement는 최대 하나입니다.
-  - idempotency key는 `원래 key + ":display:" + requiredDisplayVersion`으로
-    결정적입니다. crash 후 재처리해도 같은 key라 두 번째가 생기지 않습니다.
+  - **`displayContractHash`** — 표시 계약의 canonical JSON(키 정렬) SHA-256입니다.
+    담는 것: 후보별 `ruleVersion`(정렬), 표시 의무 key마다 합성된 상태와 값,
+    **유효한 waiver 승인 id**(정렬), 제목 접두어, footer block id 목록, 수신거부 안내
+    metadata, `TemplateVersion` id. enqueue 때 delivery에 고정하고, send 때 현재 값으로
+    다시 계산해 다르면 `display_contract_changed`입니다.
+  - idempotency key는 **`rootDeliveryId + ":g" + generation + ":" + hash 앞 16자`** 로
+    결정적이고 provider 한도(256자) 안입니다. crash 후 재처리해도 같은 key라 두 번째가
+    생기지 않습니다. replacement는 **현재 `TemplateVersion`과 현재 계약**으로 렌더합니다.
   - 현재 `(event, recipient)` unique를 넘기 위해 delivery에 `generation`을 두고
     unique를 `(event, recipient, generation)`으로 바꿉니다.
   - 두 snapshot은 `supersedesDeliveryId`로 이어집니다.
@@ -697,28 +753,35 @@ releaseNotesAuthorizationVerdict({
 **가입일**이 기준입니다.
 
 - 기준일은 **`EmailSendApprovalMember.noticeAnchorAt`** 에 둡니다. 값은 계정의
-  `createdAt`이고 출처는 `signup_date_deemed`로 적습니다. **`ConsentRecord(granted)`는
+  `createdAt`이고 출처는 불변 필드 **`noticeAnchorSource = signup_date_deemed`** 입니다. **`ConsentRecord(granted)`는
   여전히 쓰지 않습니다** — 동의 장부에는 실제 동의만 남고, 간주는 승인 원장에
   승인의 일부로 남습니다.
-- 기존 78계정의 가입일은 전부 2026년이므로 첫 기한은 2028년이고, 7.7의 연기와
-  같은 기한 감시에 들어갑니다.
-- 고지 문안(S2)은 이 기준일을 적되, 문구는 승인 대상입니다. 권장은 "수신동의일"
-  대신 **"가입일(YYYY-MM-DD)부터 수신 중"** 처럼 사실만 적는 표현입니다 — 수신자가
-  받아 보는 문서에 동의하지 않은 날짜를 동의일로 적으면, 그 문장 자체가 지어낸
-  기록이 됩니다.
+- 기존 78계정의 가입일은 전부 2026년이므로 첫 기한은 2028년입니다. 기한 감시는
+  **수신자별 `실제 동의일 ?? noticeAnchorAt` + 2년**의 최솟값을 씁니다(아래 2년 고지).
+- 고지 문안(S2)은 이 기준일을 적되, 문구는 승인 대상입니다. 권장은 **"2년 고지
+  기준일: 가입일(YYYY-MM-DD)"** 처럼 기준일이 가입일이라는 사실만 적는 표현입니다.
+  "수신동의일"도, "가입일부터 수신 중"도 쓰지 않습니다 — 앞은 동의하지 않은 날을
+  동의일로 적고, 뒤는 실제 수신 시작일(첫 발송)과 다릅니다.
 - 동의 결과 통지(동의 시점)는 이 cohort에 해당하지 않습니다. 수신거부 결과 통지와
   표시 항목은 동의 여부와 무관하게 적용됩니다.
 - cohort 계정이 실제로 동의하면 **그 `ConsentRecord`의 동의일이 기준일로 우선**합니다.
   member 행의 `noticeAnchorAt`은 고치지 않습니다.
 
-**14일 통지 — 구현합니다.** 수신동의는 DOI 확인 메일이 같은 역할을 하므로,
-그 메일에 **전송자 명칭·동의 사실과 날짜·처리 결과**가 들어가게 문안을 맞춥니다.
-수신거부·철회는 **짧은 transactional 확인 메일**을 보냅니다(수신거부한 주소에도
+**14일 통지 — 구현합니다.**
+
+- **수신동의** — DOI 확인 **요청** 메일은 동의가 일어나기 전에 나가므로 통지가 될 수
+  없습니다(C28). **확인 링크 클릭이 성공한 transaction**에서, 방금 쓴
+  `ConsentRecord(granted)`를 참조하는 별도 transactional delivery
+  `consent_result_notice`를 함께 enqueue합니다. 내용은 전송자 명칭·동의 사실과
+  날짜·처리 결과입니다. 반복 클릭은 `(consentRecordId)` idempotency key로 한 번만
+  생깁니다.
+- 수신거부·철회는 **짧은 transactional 확인 메일**을 보냅니다(수신거부한 주소에도
 나가는 service 메일입니다). `risk_accepted`로 받던 사람이 수신거부해도 같습니다.
 
 **2년 고지 — 연기합니다.** 가장 이른 동의가 들어오는 날부터 첫 기한은 2028년입니다.
-지금 만들지 않되, **잊지 않는 장치는 지금 둡니다** — readiness가 "가장 이른
-한국 동의일 + 2년 − 60일"을 넘기면 경고하고, 기한을 넘기면 한국 rule을 막습니다.
+지금 만들지 않되, **잊지 않는 장치는 지금 둡니다** — readiness가 한국 수신자마다
+**`실제 동의일 ?? noticeAnchorAt` + 2년**을 계산하고, 그 최솟값 − 60일을 넘기면
+경고, 최솟값을 넘기면 한국 rule을 막습니다.
 구현할 때의 증거 기준은 v11과 같습니다(provider 접수 이후에만
 `ConsentRecord(confirmation_notice_sent)`, Asia/Seoul 달력, 2월 29일 동의는 2월 28일).
 
@@ -885,12 +948,12 @@ EEA·영국을 여는 선행 게이트입니다.
 |---|---|---|---|
 | S0 | 상위 계약 개정 — 분류표, **IP 추정 국가(이메일 알림 6.1·6.2와 `AGENTS.md`)**, 기록 세 층, 4.3의 표, 7.7·7.8 | — | 문서 |
 | S1a | **독립 기계** — 7.2 TemplateVersion metadata와 backfill, 7.3 rate limit, 7.5 keyring canary·key version·30일 readiness | **닫힘** | **착수 가능.** **Codex 검토** |
-| S1b | **잠금** — 7.4의 목록 전체, `recordSuppression()` 내부 잠금, standard·credential lane의 시도별 잠금·재조회 | **닫힘**(7.4) | S1a 뒤. **Codex 검토** |
+| S1b | **잠금** — 7.4의 writer·sender 목록 전체, `recordSuppression()` 내부 잠금, `sendWithAddressLock()` helper와 정적 검사, 시간 예산, privacy request suppression | **닫힘**(7.4) | S1a 뒤. **Codex 검토** |
 | S2 | **법적 문안 초안과 승인** — `/privacy`·`/terms`·가입 두 장치·한국 동의 화면·7.7의 통지 문안, 7개 언어 | R5 동의 유효 기간 | 해시할 문안이 먼저 |
 | S3 | `EmailPermissionEvent`·`Decision`·**`EmailSendApproval`(+Member)** + purpose classification 표 + DB CHECK. 불변식 5·7 | — | **Codex 검토** |
 | S4 | `SignupConsentAttempt` + 두 가입 경로 finalize + **IP 추정 국가 기록과 설정의 국가 정정**(5.3). 별도 `collectionEnabled` 게이트 | S0의 관할권 계약 개정 | **Codex 검토** |
 | S5 | `ReleaseNotesCountryRule` + 이중 authority + 호주 관계 lifecycle | **R4** 유지·휴면 기준, OAuth 주소가 "직접 제공"을 충족하는 방법 | |
-| S6 | 의무 상태 기록(7.8) + 한국 `implemented` 항목 — `contact_phone`(불변식 9), 한·영 안내, 14일 통지 + 2년 고지 기한 경고 | S3(승인 원장) | 2년 배치는 기한 전 별도 |
+| S6 | 의무 상태 기록(7.8) + 한국 `implemented` 항목 — `contact_phone`(불변식 9), 한·영 안내, 14일 통지(`consent_result_notice` 포함) + 2년 고지 수신자별 기한 경고 | S3(승인 원장) | 2년 배치는 기한 전 별도 |
 | S7 | 템플릿 + 구조화 payload + 링크 표 | — | |
 | S8 | 기존 사용자 제품 내 동의 안내(5.4) + 기존 계정 IP 추정 국가 기록(5.3) + 제품 내 안내 화면(9절) + 78계정 승인·cohort 기록과 admin 표시 | S3 | |
 | S9 | **7.6 판정 함수와 두 snapshot**, 표시 계약 비교·재enqueue, DB 오류 재시도(불변식 11), 전용 flag를 `createStandardDeliveryRows`·`expandEmailEvent`·drain에서 검사, audience·estimate·drain 공유, 행 없는 미리보기 | S3·S5·S8 | **Codex 검토** |
