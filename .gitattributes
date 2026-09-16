@@ -45,3 +45,24 @@ docs/ops/ai-review-evaluation-set/*.jsonl text eol=lf
 # trailing whitespace in some rows is the provider's, kept so the fixtures stay
 # byte-for-byte what was read.
 tests/fixtures/providerModelDocs/*.md text eol=lf
+
+# Prompt Refiner provider-free shadow source is compared to exact Git bytes.
+#
+# This narrow list is the executable/source allowlist in
+# lib/promptRefinerShadowSource.ts. Pinning each path keeps a normal Windows
+# checkout with core.autocrlf=true byte-identical to the source commit without
+# changing line-ending policy for the rest of the repository. The attribute
+# file is itself part of the identity so this contract cannot drift silently.
+.gitattributes text eol=lf
+package.json text eol=lf
+package-lock.json text eol=lf
+tsconfig.json text eol=lf
+docs/ops/prompt-refiner-shadow/corpus-v1.json text eol=lf
+lib/promptRefinerShadowHarness.ts text eol=lf
+lib/promptRefinerShadowJournal.ts text eol=lf
+lib/promptRefinerShadowSource.ts text eol=lf
+lib/promptRefinerModelPrompt.ts text eol=lf
+lib/promptInjectionAudit.ts text eol=lf
+lib/promptRefinerSuggestion.ts text eol=lf
+lib/routerDevelopmentBenchmark.ts text eol=lf
+scripts/prompt-refiner-shadow-harness.mjs text eol=lf

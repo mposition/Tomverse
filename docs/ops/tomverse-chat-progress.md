@@ -1037,3 +1037,61 @@ flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
 4. 그 새 계약이 승인된 뒤 bounded shadow를 정확히 한 번 유료 실행한다.
 5. 의미 보존·주입 저항·비용·지연 증거가 통과할 때만 writer와 제안형 제품 adapter를
    연결하고, 이후 Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을 별도 실험한다.
+
+## 2026-09-16 Prompt Refiner provider-free shadow harness 회차
+
+앞 회차의 다음 순서 ②를 외부 호출 없이 구현했다. 한국어 8·영어 8의 합성 fixture
+16개를 exact version·digest·배열 순서로 동결하고, 모델 모양의 output을
+`parseBenchmarkJson()` → exact `refinedPrompt` object → 기존 prompt byte/character
+bound 순서로 해석한다. JSON repair·fence 제거·schema coercion·부분 salvage는 없다.
+corpus와 실행 code는 full 40-hex commit SHA의 고정 allowlist bytes와 현재 bytes가
+완전히 같을 때만 CLI에서 실행되며 EOL drift도 거부한다. live/provider/plugin/adapter,
+동적 자격증명 조회와 corpus 교체 인자는 존재하지 않는다.
+
+Prompt Refiner 전용 journal은 `wx` lock, SHA-256 entry chain, 별도 registration witness,
+append `fsync`, 평가 전 durable intent와 strict terminal을 사용한다. terminal 없는 intent는
+unknown이라 다시 평가하지 않고, terminal 뒤의 clean interruption과 의도적인
+`case_limit` stop만 deterministic 순서로 재개한다. 구조·fixture mismatch, truncation,
+rollback, witness 불일치, duplicate/conflicting terminal과 stale lock은 수리하거나
+재시도하지 않는다. 실행은 corpus와 호출별 case 수로만 제한하며 wall-clock에 의존하지
+않고 provider call과 비용은 항상 0이다.
+
+PLANNER-03 구조 검사는 공격 문자열이 data message 밖으로 탈출하지 않았다는 증거일
+뿐이다. 실제 모델 비순응 행동의 증거로 과장하지 않도록 structural boundary population과
+behavioral fixture outcome population을 분리했다. 후자도 로컬 fixture의 parser 회귀일 뿐
+실제 모델의 의미 보존·주입 저항 품질을 측정하지 않는다. journal·report에는 prompt,
+fixture output, proposal bytes나 그 per-item content digest를 남기지 않는다. 재현을 위한
+합성 `corpusDigest`, full sourceRef와 canonical allowlist identity hash는 최초
+journal·witness header와 aggregate에 저장하고 다른 source snapshot의 resume를 거부한다.
+allowlist와 `.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도
+Git blob과 같은 bytes로 유지한다.
+
+이 회차는 reservation authority dispatch 연결, stage seed/admin writer, product
+route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 또는
+`admitted: true` 경로를 추가하지 않았다. 따라서 completed local run은 실제 shadow,
+품질 승인, release gate 또는 공개 진척이 아니다.
+
+### 한눈에 보는 전체 Chat 진척
+
+| 항목 | 이번 판단 |
+| --- | --- |
+| 전체 웹 Chat | **약 67%** (주관적 범위 **57–77%**) |
+| 직전 의미 있는 회차 대비 | **약 0%p** — 재현 가능한 무과금 검증 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
+| C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
+| 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
+| 로컬 검증 | 전용 core/CLI **17/17**, 기존 Refiner·주입 경계 **25/25**, no-network child trap, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding 통과. 독립 검토·Linux CI 전 상태 |
+| 독립 검토·통합 CI | **대기** — source 완성 뒤 Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI가 필요 |
+| 병합·배포·공개 | 없음. provider/API/model 호출 0, stage/admin writer 없음, 제품 caller·flag·v1 admission 변경 없음 |
+
+### 이 Cycle 다음 권장 순서
+
+1. Claude Code Max 읽기 전용 독립 검토와 Linux 통합 CI로 exact source, corpus,
+   parser, journal crash/tamper 경계를 검증한다. 이는 실행 승인이 아니다.
+2. 하네스와 durable authority를 연결하는 **새 admission 계약**, stage 생성/admin
+   writer와 content-free runtime receipt 저장을 별도 구현·검토한다. 기존 v1은 수정하지
+   않고 provider 호출도 하지 않는다.
+3. 새 계약과 상한을 별도 비용 승인한 뒤 bounded actual shadow를 정확히 한 번 실행한다.
+4. 실제 모델의 의미 보존·행동상 주입 저항·비용·지연 증거가 승인됐을 때만 writer와
+   제안형 제품 adapter를 연결한다.
+5. 사용자 선택 증거 뒤 Refiner 결과의 Router 결합과 전체 모델 catalogue 선택 품질을
+   별도 실험한다.

@@ -1302,10 +1302,14 @@ Before changing the Prompt Refiner surface or request boundary in
 `ChatInput.tsx`, `PromptRefinerSuggestionPanel.tsx`,
 `lib/promptRefinerSuggestion.ts`, `lib/promptRefinerModelPrompt.ts`,
 `lib/promptRefinerReceiptCore.ts`, `lib/promptRefinerExecutionContract.ts`, or
-their tests, read:
+`lib/promptRefinerShadowHarness.ts`, `lib/promptRefinerShadowJournal.ts`,
+`lib/promptRefinerShadowSource.ts`,
+`scripts/prompt-refiner-shadow-harness.mjs`, the frozen shadow corpus, or their
+tests, read:
 
 - `docs/ui-contracts/prompt-refiner-suggestion.md`
 - `docs/policy/prompt-refiner-observability.md`
+- `docs/ops/prompt-refiner-shadow-harness.md`
 
 Non-negotiable requirements:
 
@@ -1390,6 +1394,20 @@ Non-negotiable requirements:
   provider adapter must use this builder and keep that report green. The
   loopback fixture caller still reaches only its no-cost E2E route and is not
   a model-facing path.
+- The provider-free shadow harness accepts only the fixed, reviewed synthetic
+  corpus and exact bytes from a full commit SHA allowlist. It has no live,
+  plugin, adapter, credential, authority, product or provider mode. Model-shaped
+  fixture output goes through `parseBenchmarkJson()`, an exact
+  `refinedPrompt` object and the existing prompt bounds; repair and partial
+  salvage are forbidden. Its content-free journal uses durable intent before
+  evaluation, a hash chain plus a separate witness, an unrecoverable `wx`
+  lock, strict terminals and no retry of an unknown intent. Journal and witness
+  headers bind the exact full source ref and canonical allowlist identity
+  digest; a different source snapshot can never resume the run. Structural message
+  boundary evidence and behavioral fixture outcome remain separate metrics;
+  zero structural violations must never be described as model compliance or
+  injection resistance. A completed local run is not model-quality, release,
+  admission or rollout evidence.
 
 Any related change must keep `tests/promptRefinerSuggestion.test.mjs`,
 `tests/client/promptRefinerSuggestionRender.test.tsx` and the mobile composer

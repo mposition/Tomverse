@@ -1,0 +1,274 @@
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import test, { after } from "node:test";
+import { PROMPT_REFINER_SHADOW_SOURCE_PATHS } from "../lib/promptRefinerShadowSource.ts";
+
+const root = resolve(import.meta.dirname, "..");
+const temporary = mkdtempSync(join(tmpdir(), "prompt-refiner-shadow-cli-"));
+const checkout = join(temporary, "checkout");
+const dependencyLink = join(checkout, "node_modules");
+let dependenciesLinked = false;
+
+after(() => {
+  const target = resolve(temporary);
+  assert.equal(dirname(target), resolve(tmpdir()));
+  assert.ok(basename(target).startsWith("prompt-refiner-shadow-cli-"));
+  if (dependenciesLinked) {
+    assert.equal(dirname(dirname(resolve(dependencyLink))), target);
+    assert.ok(lstatSync(dependencyLink).isSymbolicLink());
+    unlinkSync(dependencyLink);
+  }
+  rmSync(target, { recursive: true });
+});
+
+const cleanEnvironment = {
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !/^(GIT_|.*API_KEY$|ANTHROPIC_AUTH_TOKEN$)/i.test(key)
+    )
+  ),
+  GIT_ATTR_NOSYSTEM: "1",
+};
+
+mkdirSync(checkout);
+const emptyHooks = join(temporary, "empty-hooks-and-template");
+const emptyAttributes = join(temporary, "empty-attributes");
+mkdirSync(emptyHooks);
+writeFileSync(emptyAttributes, "");
+const git = (args) =>
+  execFileSync("git", args, {
+    cwd: checkout,
+    env: cleanEnvironment,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+git(["init", "--quiet", `--template=${emptyHooks}`]);
+for (const [key, value] of Object.entries({
+  "core.autocrlf": "false",
+  "core.eol": "lf",
+  "core.attributesFile": emptyAttributes,
+  "core.hooksPath": emptyHooks,
+  "commit.gpgsign": "false",
+  "user.name": "Offline Prompt Refiner Fixture",
+  "user.email": "prompt-refiner-fixture@example.invalid",
+})) {
+  git(["config", "--local", key, value]);
+}
+for (const path of PROMPT_REFINER_SHADOW_SOURCE_PATHS) {
+  const destination = join(checkout, path);
+  mkdirSync(dirname(destination), { recursive: true });
+  copyFileSync(join(root, path), destination);
+}
+git(["add", "--", ...PROMPT_REFINER_SHADOW_SOURCE_PATHS]);
+git(["commit", "--quiet", "--no-gpg-sign", "-m", "Synthetic offline shadow source"]);
+const sourceRef = git(["rev-parse", "HEAD"]).trim();
+symlinkSync(
+  realpathSync(join(root, "node_modules")),
+  dependencyLink,
+  process.platform === "win32" ? "junction" : "dir"
+);
+dependenciesLinked = true;
+
+const trap = join(temporary, "no-network.mjs");
+writeFileSync(
+  trap,
+  `import http from 'node:http'; import https from 'node:https'; import net from 'node:net'; import tls from 'node:tls'; import dgram from 'node:dgram'; import {syncBuiltinESMExports} from 'node:module';
+const blocked=()=>{throw new Error('PROMPT_REFINER_SHADOW_NETWORK_FORBIDDEN');};
+globalThis.fetch=blocked;http.request=blocked;http.get=blocked;https.request=blocked;https.get=blocked;net.connect=blocked;net.createConnection=blocked;net.Socket.prototype.connect=blocked;tls.connect=blocked;dgram.createSocket=blocked;syncBuiltinESMExports();`
+);
+
+const run = (args, overrides = {}, cwd = checkout) =>
+  spawnSync(
+    process.execPath,
+    [
+      "--conditions=react-server",
+      "--import",
+      "tsx",
+      "--import",
+      pathToFileURL(trap).href,
+      "scripts/prompt-refiner-shadow-harness.mjs",
+      ...args,
+    ],
+    {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      env: {
+        ...cleanEnvironment,
+        OPENAI_API_KEY: "test-only-never-read",
+        ANTHROPIC_API_KEY: "test-only-never-read",
+        ...overrides,
+      },
+    }
+  );
+
+test("CLI completes the fixed corpus under an active network trap", () => {
+  const journal = join(temporary, "complete.jsonl");
+  const result = run([`--journal=${journal}`, `--source-ref=${sourceRef}`]);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.status, "completed");
+  assert.equal(report.processedCases, 16);
+  assert.equal(report.structuralBoundaryViolations, 0);
+  assert.equal(report.behavioralOutcomeMatches, 16);
+  assert.equal(report.providerCalls, 0);
+  assert.equal(report.costMicroUsd, 0);
+  assert.equal(report.source.sourceRef, sourceRef);
+  assert.match(report.source.identityDigest, /^[a-f0-9]{64}$/);
+  assert.equal(report.sourceIdentityDigest, report.source.identityDigest);
+  assert.doesNotMatch(result.stdout + result.stderr, /test-only-never-read/);
+  assert.doesNotMatch(result.stdout, /sourceText|fixtureOutput|refinedPrompt/);
+});
+
+test("CLI controlled stop requires explicit resume", () => {
+  const journal = join(temporary, "resume.jsonl");
+  const first = run([
+    `--journal=${journal}`,
+    `--source-ref=${sourceRef}`,
+    "--max-cases=3",
+  ]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(JSON.parse(first.stdout).status, "stopped");
+  assert.equal(JSON.parse(first.stdout).processedCases, 3);
+
+  const withoutResume = run([`--journal=${journal}`, `--source-ref=${sourceRef}`]);
+  assert.equal(withoutResume.status, 1);
+  assert.match(withoutResume.stderr, /existing_journal_requires_resume/);
+
+  const resumed = run([
+    `--journal=${journal}`,
+    `--source-ref=${sourceRef}`,
+    "--resume",
+  ]);
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal(JSON.parse(resumed.stdout).status, "completed");
+});
+
+test("CLI has no live, plugin, corpus override or credential mode", () => {
+  for (const args of [
+    [],
+    ["--live"],
+    ["--provider=openai"],
+    ["--plugin=untrusted.mjs"],
+    ["--corpus=untrusted.json"],
+    ["--adapter=untrusted.mjs"],
+    ["--help", "--resume"],
+    [`--journal=${join(temporary, "bad-ref.jsonl")}`, "--source-ref=HEAD"],
+  ]) {
+    const result = run(args);
+    assert.equal(result.status, 1, JSON.stringify(args));
+    assert.doesNotMatch(result.stdout + result.stderr, /test-only-never-read/);
+  }
+  assert.equal(run(["--help"]).status, 0);
+});
+
+test("CLI refuses exact-byte source drift including EOL-only drift", () => {
+  const path = join(checkout, PROMPT_REFINER_SHADOW_SOURCE_PATHS[0]);
+  const original = readFileSync(path, "utf8");
+  try {
+    writeFileSync(path, `${original}\n`);
+    const drift = run([
+      `--journal=${join(temporary, "drift.jsonl")}`,
+      `--source-ref=${sourceRef}`,
+    ]);
+    assert.equal(drift.status, 1);
+    assert.match(drift.stderr, /runtime_source_drift/);
+  } finally {
+    writeFileSync(path, original);
+  }
+});
+
+test("a normal core.autocrlf=true checkout preserves every pinned source byte", () => {
+  const clone = join(temporary, "autocrlf-checkout");
+  execFileSync(
+    "git",
+    [
+      "-c",
+      "core.autocrlf=true",
+      "clone",
+      "--quiet",
+      "--no-local",
+      checkout,
+      clone,
+    ],
+    {
+      cwd: temporary,
+      env: cleanEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+  const cloneDependencies = join(clone, "node_modules");
+  symlinkSync(
+    realpathSync(join(root, "node_modules")),
+    cloneDependencies,
+    process.platform === "win32" ? "junction" : "dir"
+  );
+  try {
+    for (const path of PROMPT_REFINER_SHADOW_SOURCE_PATHS) {
+      assert.equal(readFileSync(join(clone, path), "utf8"), git(["show", `${sourceRef}:${path}`]));
+    }
+    const result = run(
+      [
+        `--journal=${join(temporary, "autocrlf.jsonl")}`,
+        `--source-ref=${sourceRef}`,
+      ],
+      {},
+      clone
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, "completed");
+  } finally {
+    assert.ok(lstatSync(cloneDependencies).isSymbolicLink());
+    unlinkSync(cloneDependencies);
+  }
+});
+
+test("a source A partial journal cannot resume under exact source B", () => {
+  const journal = join(temporary, "source-bound-resume.jsonl");
+  const first = run([
+    `--journal=${journal}`,
+    `--source-ref=${sourceRef}`,
+    "--max-cases=2",
+  ]);
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(JSON.parse(first.stdout).status, "stopped");
+  const journalBefore = readFileSync(journal, "utf8");
+  const witnessBefore = readFileSync(`${journal}.witness.jsonl`, "utf8");
+
+  const path = join(checkout, "tsconfig.json");
+  const original = readFileSync(path, "utf8");
+  try {
+    writeFileSync(path, `${original}\n`);
+    git(["add", "--", "tsconfig.json"]);
+    git(["commit", "--quiet", "--no-gpg-sign", "-m", "Synthetic source B"]);
+    const sourceB = git(["rev-parse", "HEAD"]).trim();
+    assert.notEqual(sourceB, sourceRef);
+    const resumed = run([
+      `--journal=${journal}`,
+      `--source-ref=${sourceB}`,
+      "--resume",
+    ]);
+    assert.equal(resumed.status, 1);
+    assert.match(resumed.stderr, /journal_identity|witness_identity/);
+    assert.equal(readFileSync(journal, "utf8"), journalBefore);
+    assert.equal(readFileSync(`${journal}.witness.jsonl`, "utf8"), witnessBefore);
+  } finally {
+    writeFileSync(path, original);
+  }
+});

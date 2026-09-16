@@ -205,3 +205,46 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
 3. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
 4. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
 5. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
+
+## 9. provider-free shadow harness 관측 경계
+
+`npm run shadow:prompt-refiner`는 체크인된 `prompt-refiner-shadow-corpus-v1`
+합성 fixture 16개만 처리한다. corpus version·content digest·배열 순서와 실행 source의
+full commit SHA 및 고정 allowlist exact bytes를 함께 고정한다. provider/model/API,
+credential lookup, 예약 authority, stage writer, 제품 caller와 연결하지 않으므로
+`providerCalls = 0`, `costMicroUsd = 0`은 알려진 사실이다.
+sourceRef와 정렬된 allowlist file-hash map의 canonical identity digest는 journal과
+witness 최초 header에 함께 기록하며 resume 때 exact match를 강제한다. allowlist와
+`.gitattributes` 자체의 LF pin은 Windows `core.autocrlf=true` 정상 checkout도 같은
+Git bytes로 만든다.
+
+모델 모양의 fixture output은 `parseBenchmarkJson()`의 syntax·duplicate key·complexity
+제한, `strictBenchmarkObject(["refinedPrompt"])`의 exact field 검사, 기존 prompt
+byte/character bound 순서로 fail-closed한다. repair, coercion, fence 제거 또는 부분
+salvage는 없다. audit output과 journal에는 사용자 prompt·fixture output·proposal
+bytes 또는 그 **per-item content digest**, 사용자·conversation·session 정보와 provider
+오류문을 쓰지 않는다. 체크인된 합성 집합의 `corpusDigest`와 source identity hash는
+재현 provenance로 저장하며 사용자 콘텐츠 receipt로 취급하지 않는다.
+
+하네스 관측은 다음 두 값을 섞지 않는다.
+
+- structural boundary: sourceText가 canonical JSON data message 밖으로 벗어났는지의
+  구조 검사다.
+- behavioral fixture outcome: 로컬 fixture output 파싱 결과가 동결 expected와 같은지의
+  deterministic 회귀 검사다.
+
+structural violation 0은 실제 모델의 instruction compliance 또는 행동상 prompt
+injection resistance를 증명하지 않는다. behavioral match도 실제 모델 품질을 측정하지
+않는다. 각 값은 독립 population과 분자를 가진다.
+
+journal은 intent-before-evaluation, SHA-256 chain, 별도 registration witness, `wx` lock,
+append 후 `fsync`와 strict terminal state를 사용한다. terminal 없는 intent는 unknown으로
+남겨 재평가하지 않는다. clean interruption과 `case_limit` stop만 재개 가능하고,
+structural/behavioral mismatch, truncation, chain/witness disagreement, duplicate/conflicting
+terminal 또는 stale lock은 자동 복구하지 않는다. 로컬 witness는 악의적인 관리자나 두
+파일의 동시 rollback을 막는 외부 원장이 아니므로 실제 실행 권한의 대체물이 아니다.
+
+세부 운영 계약과 정확한 digest는
+[`prompt-refiner-shadow-harness.md`](../ops/prompt-refiner-shadow-harness.md)에 있다.
+이 하네스가 completed라는 사실은 실제 shadow 실행, 품질 승인, release gate, 제품 연결
+또는 rollout 승인이 아니다.
