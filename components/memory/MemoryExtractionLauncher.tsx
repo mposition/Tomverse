@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Lock, Sparkles } from "lucide-react";
 import { useLanguage } from "@/components/LanguageProvider";
 import {
     formatBytes,
@@ -18,6 +18,7 @@ import {
     selectionSignature,
     startGate,
     summarizeSelection,
+    withoutLockedSelection,
     type ExtractionPairChoice,
     type LaunchEstimate,
 } from "@/lib/memoryExtractionLaunch";
@@ -65,6 +66,13 @@ type ConversationRow = {
     importedAt?: string;
     messageCount: number;
     contentBytes: number;
+    /**
+     * The server has always sent this; the row type used to drop it, which is
+     * how a locked snapshot came to be selectable here. A locked snapshot
+     * cannot be sent to a provider
+     * (docs/policy/external-conversation-import-and-memory.md §7.1).
+     */
+    locked?: boolean;
 };
 
 type PairsState =
@@ -94,7 +102,8 @@ type LaunchError =
     | "generic"
     | "estimate_changed"
     | "pair_unavailable"
-    | "budget";
+    | "budget"
+    | "locked";
 
 const errorKey = (error: LaunchError) =>
     error === "estimate_changed"
@@ -103,11 +112,20 @@ const errorKey = (error: LaunchError) =>
           ? "memoryExtraction.errorPairUnavailable"
           : error === "budget"
             ? "memoryExtraction.errorBudget"
-            : "memoryExtraction.errorGeneric";
+            : error === "locked"
+              ? "memoryExtraction.errorLocked"
+              : "memoryExtraction.errorGeneric";
 
 const failureToError = (status: number, code: string | null): LaunchError => {
     if (code === "MEMORY_ESTIMATE_CHANGED") return "estimate_changed";
     if (code === "MEMORY_EXTRACTION_PAIR_UNAVAILABLE") return "pair_unavailable";
+    // The server's answer when a selected snapshot is locked -- the same 423
+    // every other surface gives a locked snapshot
+    // (docs/policy/external-conversation-import-and-memory.md §21). It reaches
+    // here when the lock happened after the list loaded, or on a page the user
+    // never scrolled to. Without its own branch it read as "something went
+    // wrong, try again", and trying again gets the same answer.
+    if (status === 423 || code === "CONVERSATION_LOCKED") return "locked";
     if (status === 503) return "budget";
     return "generic";
 };
@@ -204,6 +222,14 @@ export function MemoryExtractionLauncher() {
                 total: number;
                 conversations: ConversationRow[];
             };
+            // A row can be selected and then locked in another tab. Dropped
+            // from the selection here rather than left checked behind a
+            // disabled box, where it would be the one choice the user could
+            // not undo.
+            setSelectedIds((current) => {
+                const kept = withoutLockedSelection(current, body.conversations);
+                return kept === current ? current : [...kept];
+            });
             setListState((current) => ({
                 kind: "ready",
                 total: body.total,
@@ -241,6 +267,11 @@ export function MemoryExtractionLauncher() {
         [rows, selectedIds]
     );
 
+    const lockedConversationIds = useMemo(
+        () => rows.filter((row) => row.locked).map((row) => row.id),
+        [rows]
+    );
+
     const launchInput = {
         featureEnabled: pairsState.kind !== "unavailable",
         availablePairs: pairRows,
@@ -248,6 +279,7 @@ export function MemoryExtractionLauncher() {
         selectedConversationIds: selectedIds,
         activeRunId,
         busy,
+        lockedConversationIds,
     };
     const canEstimate = estimateGate(launchInput);
     const canStart = startGate({ ...launchInput, estimate });
@@ -476,7 +508,13 @@ export function MemoryExtractionLauncher() {
                                             setSelectedIds((current) => [
                                                 ...new Set([
                                                     ...current,
-                                                    ...rows.map((row) => row.id),
+                                                    // "All visible" means all
+                                                    // that can be chosen: a
+                                                    // locked row is visible
+                                                    // and cannot be.
+                                                    ...rows
+                                                        .filter((row) => !row.locked)
+                                                        .map((row) => row.id),
                                                 ]),
                                             ]);
                                             setError(null);
@@ -498,7 +536,73 @@ export function MemoryExtractionLauncher() {
                                 </div>
 
                                 <ul className="mt-3 max-h-80 space-y-1 overflow-y-auto">
-                                    {rows.map((row) => (
+                                    {rows.map((row) =>
+                                        row.locked ? (
+                                        /*
+                                          A locked row is shown, not hidden:
+                                          this is the user's own list of
+                                          imports, and a row that vanished
+                                          would be unexplained and would put
+                                          the count out of step with the total.
+                                          It is disabled rather than merely
+                                          unselected, says why, and offers the
+                                          way out -- a control that only
+                                          refuses reads as broken.
+
+                                          A `div` with sibling controls rather
+                                          than the `label` the other rows use:
+                                          a link inside a label is one
+                                          interactive element inside another.
+                                        */
+                                        <li key={row.id}>
+                                            <div
+                                                className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm"
+                                                data-testid="memory-extraction-conversation-row"
+                                                data-locked="true"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    className="mt-1"
+                                                    checked={false}
+                                                    disabled
+                                                    aria-label={importedConversationTitle(row, t)}
+                                                    aria-describedby={`memory-extraction-locked-${row.id}`}
+                                                    readOnly
+                                                />
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="flex min-w-0 items-center gap-1.5">
+                                                        <span className="truncate font-medium text-zinc-500 dark:text-zinc-400">
+                                                            {importedConversationTitle(row, t)}
+                                                        </span>
+                                                        <span
+                                                            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                                                            data-testid="memory-extraction-conversation-locked"
+                                                        >
+                                                            <Lock className="h-3 w-3" aria-hidden="true" />
+                                                            {t("externalImport.lockedBadge")}
+                                                        </span>
+                                                    </span>
+                                                    <span
+                                                        id={`memory-extraction-locked-${row.id}`}
+                                                        className="block text-xs text-zinc-500 dark:text-zinc-400"
+                                                    >
+                                                        {t("memoryExtraction.lockedRowHint")}
+                                                    </span>
+                                                </span>
+                                                <Link
+                                                    href={`/settings/imports/conversations/${encodeURIComponent(row.id)}`}
+                                                    className={`${smallButtonClass} shrink-0`}
+                                                    aria-label={interpolate(
+                                                        t("externalImport.quickUnlockFor"),
+                                                        { title: importedConversationTitle(row, t) }
+                                                    )}
+                                                    data-testid="memory-extraction-conversation-unlock"
+                                                >
+                                                    {t("externalImport.quickUnlock")}
+                                                </Link>
+                                            </div>
+                                        </li>
+                                        ) : (
                                         <li key={row.id}>
                                             <label
                                                 className="flex items-start gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-900"
@@ -535,7 +639,8 @@ export function MemoryExtractionLauncher() {
                                                 </span>
                                             </label>
                                         </li>
-                                    ))}
+                                        )
+                                    )}
                                 </ul>
 
                                 {listState.kind === "ready" &&
@@ -576,6 +681,20 @@ export function MemoryExtractionLauncher() {
                                             t("memoryExtraction.selectionHidden"),
                                             { count: summary.hiddenCount }
                                         )}
+                                    </p>
+                                ) : null}
+                                {!canEstimate.allow &&
+                                canEstimate.reason === "locked_selection" ? (
+                                    // Normally unreachable -- a page that
+                                    // arrives drops locked rows from the
+                                    // selection -- but the gate can still say
+                                    // it, and a gate that blocks silently is a
+                                    // button that does nothing.
+                                    <p
+                                        className="text-xs font-semibold text-red-600 dark:text-red-400"
+                                        data-testid="memory-extraction-selection-locked"
+                                    >
+                                        {t("memoryExtraction.errorLocked")}
                                     </p>
                                 ) : null}
                                 {!canEstimate.allow &&

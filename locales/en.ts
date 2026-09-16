@@ -2006,6 +2006,9 @@ export const en = {
         errorEstimateChanged:
             "The selected conversations changed, so the estimate no longer matches. Check it again before starting.",
         errorPairUnavailable: "That model is not available right now.",
+        errorLocked:
+            "One of the selected conversations is locked, so extraction can't start. Refresh the list and select again.",
+        lockedRowHint: "Locked conversations can't be used for extraction.",
         errorBudget:
             "Extraction capacity is temporarily full. Please try again shortly.",
         runTitle: "Extraction progress",

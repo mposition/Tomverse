@@ -1999,6 +1999,9 @@ export const de = {
         errorEstimateChanged:
             "Die ausgewählten Unterhaltungen haben sich geändert, die Schätzung passt nicht mehr. Bitte vor dem Start erneut prüfen.",
         errorPairUnavailable: "Dieses Modell ist zurzeit nicht verfügbar.",
+        errorLocked:
+            "Eine der ausgewählten Unterhaltungen ist gesperrt, daher kann die Extraktion nicht starten. Bitte die Liste aktualisieren und erneut auswählen.",
+        lockedRowHint: "Gesperrte Unterhaltungen können nicht für die Extraktion verwendet werden.",
         errorBudget:
             "Die Extraktionskapazität ist vorübergehend erschöpft. Bitte kurz später erneut versuchen.",
         runTitle: "Fortschritt der Extraktion",

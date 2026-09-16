@@ -1979,6 +1979,9 @@ export const zh = {
         errorEstimateChanged:
             "所选对话已更改，估算不再匹配。请重新确认后再开始。",
         errorPairUnavailable: "该模型目前不可用。",
+        errorLocked:
+            "所选对话中有已锁定的对话，无法开始提取。请刷新列表后重新选择。",
+        lockedRowHint: "已锁定的对话不能用于提取。",
         errorBudget: "提取容量暂时已满，请稍后再试。",
         runTitle: "提取进度",
         runBack: "返回记忆设置",

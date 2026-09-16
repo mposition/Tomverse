@@ -1996,6 +1996,9 @@ export const ko = {
         errorEstimateChanged:
             "선택한 대화가 바뀌어 견적이 달라졌습니다. 다시 확인한 뒤 시작해 주세요.",
         errorPairUnavailable: "선택한 모델은 지금 사용할 수 없습니다.",
+        errorLocked:
+            "선택한 대화 중 잠긴 대화가 있어 시작할 수 없습니다. 목록을 새로 고친 뒤 다시 선택해 주세요.",
+        lockedRowHint: "잠긴 대화는 기억 추출에 쓸 수 없습니다.",
         errorBudget:
             "추출 용량이 일시적으로 가득 찼습니다. 잠시 후 다시 시도해 주세요.",
         runTitle: "기억 추출 진행 상태",

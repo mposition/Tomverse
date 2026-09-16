@@ -153,6 +153,36 @@ export async function resolveEffectiveExtractionPair(input: {
 }
 
 /**
+ * Refuses a selection that holds a locked snapshot.
+ *
+ * Extraction sends a snapshot's title and every message to a provider, which
+ * is exactly the exposure a lock exists to prevent
+ * (docs/policy/external-conversation-import-and-memory.md §7.1).
+ *
+ * One decision, two readers. The estimate reads plainly, because it reserves
+ * nothing. The create path reads under `FOR UPDATE` inside the transaction
+ * that writes the run and its reservation -- the estimate it re-runs first is
+ * outside that transaction, so a snapshot locked in between would otherwise
+ * produce a run and a charge. Both call this, so the rule cannot drift apart.
+ *
+ * The answer is the 423 every other surface gives a locked snapshot (§21),
+ * all-or-nothing for the request, and it deliberately does not say *which*
+ * snapshot: the caller already knows what it selected, and a list of locked
+ * ids is information the refusal has no reason to hand out.
+ */
+function refuseLockedSelection(
+    rows: readonly { password: string | null }[]
+): void {
+    if (rows.some((row) => row.password !== null)) {
+        throw new ApiSecurityError(
+            423,
+            "CONVERSATION_LOCKED",
+            "A selected conversation is locked."
+        );
+    }
+}
+
+/**
  * The §11 pre-run figure: chunk plan and credit/cost estimate over the
  * user's finalized conversations. Pure math over stored byte counts — no
  * provider contact, no reservation.
@@ -179,7 +209,12 @@ export async function estimateMemoryExtraction(input: {
             userId: input.userId,
             finalized: true,
         },
-        select: { id: true, messageCount: true, contentBytes: true },
+        select: {
+            id: true,
+            messageCount: true,
+            contentBytes: true,
+            password: true,
+        },
     });
     if (
         selected.length === 0 ||
@@ -187,6 +222,9 @@ export async function estimateMemoryExtraction(input: {
     ) {
         throw new ApiSecurityError(404, "NOT_FOUND", "Conversation not found.");
     }
+    // After the 404, never before it: "not yours" and "locked" must not be
+    // told apart for an id the caller does not own.
+    refuseLockedSelection(selected);
 
     // Sorted by id before planning. Chunk boundaries depend on the order the
     // conversations arrive in, and `findMany` makes no ordering promise, so
@@ -376,6 +414,33 @@ export async function createMemoryExtractionRun(input: {
         // transaction ends in reserveExtractionRunCredits().
         await acquireCreditAccountLock(tx, input.userId);
         await acquireUserRunLock(tx, input.userId);
+        /*
+          The lock check again, and this time holding the rows.
+
+          The estimate above already refused a locked selection, but it ran
+          outside this transaction: a snapshot locked between that read and
+          this one would otherwise get a run and a reservation. Taking the
+          rows here serialises against the lock write, which updates the same
+          row -- whichever commits first, the other sees it.
+
+          `ORDER BY id ASC ... FOR UPDATE` in SQL, not a sorted list: Prisma's
+          `orderBy` orders the result set and promises nothing about the order
+          row locks are acquired in, and a consistent acquisition order is the
+          only thing that keeps two of these from deadlocking each other.
+
+          After the credit and run locks and before anything touches memory,
+          so the canonical order in
+          docs/policy/external-conversation-import-and-memory.md §13.1 holds:
+          a snapshot row is always taken before the memory lock, never after.
+        */
+        const current = await tx.$queryRaw<Array<{ password: string | null }>>`
+            SELECT password FROM "ExternalConversation"
+            WHERE id = ANY(${sourceSelection}::text[])
+              AND "userId" = ${input.userId}
+            ORDER BY id ASC
+            FOR UPDATE
+        `;
+        refuseLockedSelection(current);
         const active = await tx.memoryExtractionRun.findFirst({
             where: {
                 userId: input.userId,

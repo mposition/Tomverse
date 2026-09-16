@@ -1996,6 +1996,9 @@ export const fr = {
         errorEstimateChanged:
             "Les conversations sélectionnées ont changé, l'estimation ne correspond plus. Vérifiez-la avant de lancer.",
         errorPairUnavailable: "Ce modèle n'est pas disponible actuellement.",
+        errorLocked:
+            "Une des conversations sélectionnées est verrouillée, l'extraction ne peut donc pas démarrer. Actualisez la liste et sélectionnez à nouveau.",
+        lockedRowHint: "Les conversations verrouillées ne peuvent pas servir à l'extraction.",
         errorBudget:
             "La capacité d'extraction est temporairement saturée. Réessayez sous peu.",
         runTitle: "Progression de l'extraction",
