@@ -4740,6 +4740,7 @@ model EmailPreference {
   enabled Boolean
 
   /// signup | preference_center | unsubscribe_link | admin | system_default
+  ///   | privacy_request | provider_complaint
   source String
 
   /// When the current enabled state began. Not the row's creation.
@@ -4804,6 +4805,7 @@ model ConsentRecord {
   policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
 
   /// signup_form | preference_center | unsubscribe_page | import | admin
+  ///   | provider_complaint
   capturedVia String
 
   /// Consent wording hash, screen identifier, request metadata. Never the raw

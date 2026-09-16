@@ -7,6 +7,13 @@ import { authOptions } from "@/lib/auth";
 import { writeAdminAuditLog } from "@/lib/adminAudit";
 import { hasAdminPermission, isAdminSession } from "@/lib/adminAuth";
 import { apiSecurityResponse, consumeApiRateLimit, readLimitedJson } from "@/lib/apiSecurity";
+import {
+  lockPrivacyIntake,
+  preparePrivacyIntake,
+  recordPrivacyCompletion,
+  recordPrivacyIntake,
+} from "@/lib/emailPrivacySuppression";
+import { holdSuppressionFence } from "@/lib/emailSuppressionAuthority";
 import { prisma } from "@/lib/prisma";
 
 const createSchema = z.object({
@@ -101,17 +108,39 @@ export async function POST(req: Request) {
     if (body.userId && !user) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
-    const privacyRequest = await prisma.privacyRequest.create({
-      data: {
-        userId: user?.id || null,
-        email: user?.email || body.email.toLowerCase(),
-        requestType: body.requestType,
-        dueAt: new Date(body.dueAt),
-        note: body.note || null,
-        handledById: session.user.id,
-        handledByEmail: session.user.email || null,
+    const userId = user?.id || null;
+    const deletion = body.requestType === "deletion";
+    const now = new Date();
+    // A deletion request stops marketing in the transaction that records it
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+    const prepared = deletion ? await preparePrivacyIntake({ userId }) : null;
+    const privacyRequest = await prisma.$transaction(
+      async (tx) => {
+        if (deletion) await lockPrivacyIntake(tx, { userId });
+        const created = await tx.privacyRequest.create({
+          data: {
+            userId,
+            email: user?.email || body.email.toLowerCase(),
+            requestType: body.requestType,
+            dueAt: new Date(body.dueAt),
+            note: body.note || null,
+            handledById: session.user.id,
+            handledByEmail: session.user.email || null,
+          },
+        });
+        if (prepared) {
+          await recordPrivacyIntake(tx, {
+            requestId: created.id,
+            userId,
+            emailAddress: created.email,
+            policyVersionId: prepared.policyVersionId,
+            now,
+          });
+        }
+        return created;
       },
-    });
+      { timeout: 20_000 }
+    );
     await writeAdminAuditLog({
       session,
       request: req,
@@ -144,19 +173,30 @@ export async function PATCH(req: Request) {
       day: 300,
     });
     const body = await readLimitedJson(req, 8 * 1024, updateSchema);
-    const privacyRequest = await prisma.privacyRequest.update({
-      where: { id: body.id },
-      data: {
-        status: body.status,
-        dueAt: new Date(body.dueAt),
-        legalHold: body.legalHold,
-        legalHoldReason: body.legalHold ? body.legalHoldReason : null,
-        note: body.note,
-        completedAt: body.status === "completed" ? new Date() : null,
-        handledById: session.user.id,
-        handledByEmail: session.user.email || null,
+    // Every update of a deletion request that leaves it completed with no legal
+    // hold stops all mail to the address, in the same transaction; saving that
+    // state again records nothing new.
+    const privacyRequest = await prisma.$transaction(
+      async (tx) => {
+        await holdSuppressionFence(tx);
+        const updated = await tx.privacyRequest.update({
+          where: { id: body.id },
+          data: {
+            status: body.status,
+            dueAt: new Date(body.dueAt),
+            legalHold: body.legalHold,
+            legalHoldReason: body.legalHold ? body.legalHoldReason : null,
+            note: body.note,
+            completedAt: body.status === "completed" ? new Date() : null,
+            handledById: session.user.id,
+            handledByEmail: session.user.email || null,
+          },
+        });
+        await recordPrivacyCompletion(tx, updated, new Date());
+        return updated;
       },
-    });
+      { timeout: 20_000 }
+    );
     await writeAdminAuditLog({
       session,
       request: req,

@@ -65,6 +65,14 @@ export type RecordSuppressionInput = {
   reason: SuppressionReason;
   source: SuppressionSource;
   purposeKey?: string;
+  /**
+   * `classification` records a cause that stops every message of that
+   * classification (only `marketing`, named by `purposeKey`). It has no entry:
+   * the entry table knows only global and purpose scopes, so the cause is the
+   * whole record and it decides once causes are the read authority
+   * (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+   */
+  scope?: "classification";
   expiresAt?: Date | null;
   sourceStream?: string | null;
   sourceDomain?: string | null;
@@ -77,7 +85,7 @@ export type RecordSuppressionInput = {
    * Stable per writer, so a retried event records one cause
    * (docs/policy/email-product-news-redesign-draft.md, section 7.4):
    * webhook:<eventId>, softbounce:<deliveryId>, preference:<transitionId>,
-   * admin:<idempotency key>.
+   * admin:<idempotency key>, privacy:<requestId>:intake|completed.
    */
   sourceEventKey: string;
   sourceRequestId?: string | null;
@@ -105,7 +113,15 @@ export async function recordSuppression(
   }
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   const purposeKey = input.purposeKey ?? GLOBAL_PURPOSE_KEY;
-  const scope = purposeKey === GLOBAL_PURPOSE_KEY ? "global" : "purpose";
+  const scope =
+    input.scope === "classification"
+      ? "classification"
+      : purposeKey === GLOBAL_PURPOSE_KEY
+        ? "global"
+        : "purpose";
+  if (scope === "classification" && purposeKey !== "marketing") {
+    throw new Error("A classification suppression names the marketing classification.");
+  }
   const occurredAt = input.occurredAt ?? new Date();
 
   // Shared fence first: no suppression write may straddle the read-authority
@@ -136,6 +152,11 @@ export async function recordSuppression(
     expiresAt: input.expiresAt ?? null,
   });
 
+  // No entry for a classification cause; see RecordSuppressionInput.scope.
+  if (scope === "classification") {
+    return recorded ? { id: null, changed: true } : { id: null, changed: false, duplicate: true };
+  }
+
   // The same event again -- a redelivered webhook, a retried admin request. It
   // is a no-op for the entry too: re-merging it would restamp the entry with the
   // retry's time and provenance while the cause keeps the first, and the two
@@ -160,6 +181,14 @@ export async function recordSuppression(
     reason === "complaint" ||
     reason === "manual" ||
     reason === "privacy_request";
+
+  if (existing?.reason === "privacy_request" && input.reason !== "privacy_request") {
+    // A data-subject request is never overwritten, not even by another permanent
+    // reason: the entry would then read as liftable and the only record of the
+    // request would be gone (docs/policy/email-product-news-redesign-draft.md,
+    // section 7.4). The new event is still its own cause above.
+    return { id: existing.id, changed: false };
+  }
 
   if (existing && permanent(existing.reason) && !permanent(input.reason)) {
     // The stored entry already says something stronger. Leaving it alone is the

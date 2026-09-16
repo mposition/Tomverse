@@ -4,14 +4,43 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v16 (2026-09-17).** suppression 판정의 기준을 원인(`SuppressionCause`)으로
-  옮길 수 있게 합니다 — 런타임 설정, 전환 fence, 해제 행렬. 0절 참조.
+- 개정: **v17 (2026-09-17).** 삭제 요청과 spam complaint가 suppression을 씁니다 —
+  삭제 접수는 marketing 분류 전체, 완료는 전역, complaint는 그 purpose의 opt-out까지.
+  0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v17 (2026-09-17) — privacy request와 complaint의 suppression(S1b-1c)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+privacy request 표와 "complaint는 목적 opt-out도 함께"를 구현합니다.
+
+1. **삭제 요청 접수** — 요청 행을 만드는 transaction 안에서 classification scope
+   `marketing` 원인(`privacy_request`, `privacy:<requestId>:intake`)을 쓰고, 계정의
+   marketing purpose를 모두 끕니다(preference `source`·전이 `source` `privacy_request`).
+   판정 기준이 아직 `entry`이면 entry는 분류 scope를 읽지 못하므로 marketing purpose마다
+   `privacy_request` purpose 원인·entry(`privacy:<requestId>:intake:<purpose>`)도 씁니다.
+2. **삭제 요청 갱신** — 갱신 **후** 상태가 `completed && !legalHold`이면 같은
+   transaction에서 전역 `privacy_request`(`privacy:<requestId>:completed`)를 씁니다.
+   legal hold 해제도 여기에 해당하고, 같은 상태를 다시 저장하면 새 원인이 없습니다.
+3. **entry의 `privacy_request`는 어떤 이유로도 덮어쓰지 않습니다.** 뒤이은 hard bounce는
+   자기 원인만 남깁니다 — entry가 승인으로 풀 수 있는 이유로 바뀌면 요청의 기록이
+   사라지기 때문입니다.
+4. **complaint** — 전역 complaint 원인과 한 transaction에서, delivery의
+   `TemplateVersion.purpose`가 끌 수 있는 purpose(security·billing 제외)이면 purpose
+   `unsubscribe` 원인(`webhook:<eventId>:purpose`)을 씁니다. delivery의 `userId` 계정이
+   있고 **현재 주소가 delivery 주소와 같을 때만** 그 purpose preference를 끄고
+   (`source` `provider_complaint`), 동의 철회 기록은 `capturedVia` `provider_complaint`,
+   delivery가 고정한 `policyVersionId`·`jurisdictionCountry`, `jurisdictionSource`
+   `delivery_pinned`입니다.
+5. **잠금 순서** — `setPreference`가 fence → User 행 → 주소 → preference 행 순서로
+   잡습니다(이전: preference 행 뒤에 주소). CHECK는 `EmailPreference_source_check`에
+   `privacy_request`·`provider_complaint`, `ConsentRecord_captured_via_check`에
+   `provider_complaint`를 더합니다(확장만).
 
 ### v16 (2026-09-17) — suppression 판정 기준 전환(배포 B)
 
