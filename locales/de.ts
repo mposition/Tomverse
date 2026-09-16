@@ -849,6 +849,10 @@ export const de = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Sie können ohne Ergänzung senden. Die Fehlerdetails werden ohnehin angehängt.",
         traceOptionalHint: "Die Trace ID ist optional. Sie können auch ohne sie senden.",
+        replyAlwaysAccount:
+          "Unabhängig von dieser Auswahl geht die Antwort auf diese Meldung an deine Konto-E-Mail.",
+        replyNeedsAddress:
+          "Um die Antwort auf diese Meldung zu erhalten, aktiviere das Kästchen oben und hinterlasse eine E-Mail-Adresse.",
         emailUpdatesLabel: "Statusupdates per E-Mail erhalten",
         emailUpdatesAccountHint:
           "Eingangsbestätigung und Statusupdates zu dieser Meldung gehen an Ihre Konto-E-Mail-Adresse.",

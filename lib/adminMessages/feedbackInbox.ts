@@ -23,9 +23,41 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       ambiguousTrace: "Multiple occurrences share this trace — no exact link",
     },
     notification: {
-      delivered: " The reporter was emailed.",
-      queued: " Reporter email queued; delivery will be retried.",
+      delivered: " The reply was accepted by the mail provider.",
+      queued: " Reply queued; delivery will be retried.",
       alreadyNotified: " This stage was already announced -- no new email.",
+      noAddress: " Nothing was emailed: this report carries no address.",
+      notConsented: " Nothing was emailed: the reporter did not ask for progress notices.",
+      noStage: " Nothing was emailed: this status announces nothing.",
+    },
+    replyDelivery: {
+      label: "Reply email",
+      accepted: (at: string) => `accepted by the mail provider ${at}`,
+      resent: " (re-sent)",
+      pending: (attempts: number) =>
+        `not sent yet -- ${attempts} attempt(s), the queue is retrying`,
+      abandoned: (reason: string) => `not delivered -- the queue gave up (${reason})`,
+      none: "never queued",
+      reasons: {
+        contact_removed: "the address was removed",
+        not_consented: "the reporter did not ask for this notice",
+        source_missing: "the report or its record is gone",
+        suppressed: "the address is suppressed",
+      } as Record<string, string>,
+      previewLabel: "This is what the email will say:",
+      resend: "Send this reply now",
+      resending: "Sending…",
+      resendHint:
+        "Sends the text above, once, exactly as it was recorded when the report was completed. To send anything else, use the mail app.",
+      resendDone: "The reply was queued for delivery.",
+      resendFailed: "The reply could not be queued.",
+      resendRefused: {
+        NO_ADDRESS: "This report has no address to answer.",
+        NOT_COMPLETED: "This report has no completion record yet.",
+        ALREADY_SENT: "This reply was already sent.",
+        ALREADY_QUEUED: "This reply is already queued.",
+        ALREADY_RESENT: "This reply was already re-sent once.",
+      } as Record<string, string>,
     },
     statuses: {
       all: "all",
@@ -97,9 +129,14 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
         "This report was already closed once. The completion email is sent only for the first closure, so no new email will go out.",
       willEmail:
         "The reporter opted into email updates. Confirming sends the completion email previewed below.",
-      noEmail: "This reporter has no email updates. The status changes without sending anything.",
+      noEmail: "This report carries no address. The status changes and nothing is emailed.",
       outcome: "Outcome",
       reply: "Reply to the reporter (optional, included in the email)",
+      replyInternal: "Reply (kept as an internal record -- nothing is emailed)",
+      willSendTo: (address: string) =>
+        `Pressing confirm emails this reply to ${address}.`,
+      cannotSend: "Nothing will be emailed: this report carries no address. The reply is kept as an internal record.",
+      confirmWithoutEmail: "Mark closed without emailing",
       replyTooShort: (min: number) =>
         `A reply needs at least ${min} characters, or leave it empty.`,
       replyHint: (length: number, max: number) =>
@@ -129,9 +166,40 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
       ambiguousTrace: "여러 발생 건이 이 trace를 공유함 — 정확한 연결 없음",
     },
     notification: {
-      delivered: " 신고자에게 이메일을 보냈습니다.",
-      queued: " 신고자 이메일을 대기열에 넣었으며 발송을 재시도합니다.",
-      alreadyNotified: " 이 단계는 이미 안내되어 새 이메일을 보내지 않습니다.",
+      delivered: " 답변이 메일 제공자에 접수되었습니다.",
+      queued: " 답변을 대기열에 넣었습니다. 발송은 재시도됩니다.",
+      alreadyNotified: " 이 단계는 이미 안내되어 새 이메일은 없습니다.",
+      noAddress: " 이메일은 보내지 않았습니다. 이 신고에는 주소가 없습니다.",
+      notConsented: " 이메일은 보내지 않았습니다. 신고자가 진행 알림을 요청하지 않았습니다.",
+      noStage: " 이메일은 보내지 않았습니다. 이 상태는 안내 대상이 아닙니다.",
+    },
+    replyDelivery: {
+      label: "답변 메일",
+      accepted: (at: string) => `메일 제공자 접수됨 ${at}`,
+      resent: " (다시 보냄)",
+      pending: (attempts: number) => `아직 발송되지 않음 — ${attempts}회 시도, 재시도 중`,
+      abandoned: (reason: string) => `전달되지 않음 — 큐가 포기했습니다 (${reason})`,
+      none: "대기열에 넣은 적 없음",
+      reasons: {
+        contact_removed: "주소가 삭제됨",
+        not_consented: "신고자가 이 안내를 요청하지 않음",
+        source_missing: "신고 또는 기록이 사라짐",
+        suppressed: "수신 차단된 주소",
+      } as Record<string, string>,
+      previewLabel: "메일에 들어갈 내용:",
+      resend: "이 답변 지금 보내기",
+      resending: "보내는 중…",
+      resendHint:
+        "위 내용을 완료 시점에 기록된 그대로 한 번 보냅니다. 다른 내용을 보내려면 메일 앱을 쓰세요.",
+      resendDone: "답변을 발송 대기열에 넣었습니다.",
+      resendFailed: "답변을 대기열에 넣지 못했습니다.",
+      resendRefused: {
+        NO_ADDRESS: "이 신고에는 답변할 주소가 없습니다.",
+        NOT_COMPLETED: "이 신고에는 아직 완료 기록이 없습니다.",
+        ALREADY_SENT: "이 답변은 이미 발송되었습니다.",
+        ALREADY_QUEUED: "이 답변은 이미 대기열에 있습니다.",
+        ALREADY_RESENT: "이 답변은 이미 한 번 다시 보냈습니다.",
+      } as Record<string, string>,
     },
     statuses: {
       all: "전체",
@@ -203,9 +271,13 @@ export const adminFeedbackInboxMessages = defineAdminMessages({
         "이 신고는 이미 한 번 종료되었습니다. 완료 이메일은 첫 종료 때만 발송되므로 새 이메일은 나가지 않습니다.",
       willEmail:
         "신고자가 이메일 알림을 선택했습니다. 확인하면 아래 미리보기의 완료 이메일이 발송됩니다.",
-      noEmail: "이 신고자는 이메일 알림을 받지 않습니다. 아무것도 발송하지 않고 상태만 바뀝니다.",
+      noEmail: "이 신고에는 주소가 없습니다. 아무것도 발송하지 않고 상태만 바뀝니다.",
       outcome: "처리 결과",
       reply: "신고자에게 보낼 답변 (선택, 이메일에 포함)",
+      replyInternal: "답변 (내부 기록용 — 발송되지 않습니다)",
+      willSendTo: (address: string) => `확인을 누르면 이 답변을 ${address}로 보냅니다.`,
+      cannotSend: "이메일은 발송되지 않습니다. 이 신고에는 주소가 없습니다. 답변은 내부 기록으로만 남습니다.",
+      confirmWithoutEmail: "발송 없이 종료 상태로 변경",
       replyTooShort: (min: number) =>
         `답변은 ${min}자 이상이어야 합니다. 아니면 비워 두세요.`,
       replyHint: (length: number, max: number) =>

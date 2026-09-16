@@ -89,6 +89,9 @@ const nextSendOutcome = () =>
 
 /** A tiny in-memory stand-in for the two tables this contract touches. */
 const fakePrisma = {
+  // Every attempt asks whether the address is suppressed first
+  // (docs/policy/email-notifications.md §13.3).
+  suppressionEntry: { findMany: async () => [] },
   $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(fakePrisma),
   feedback: {
     create: async ({ data }: { data: Record<string, unknown> }) => {
@@ -120,6 +123,8 @@ const fakePrisma = {
     findUnique: async () => null,
   },
   notificationDelivery: {
+    findUnique: async ({ where }: { where: { id: string } }) =>
+      world.deliveries.find((entry) => entry.id === where.id) ?? null,
     upsert: async ({
       where,
       create,
@@ -520,4 +525,42 @@ test("nothing about a failed delivery reaches the log but its classification", a
   assert.ok(!logged.includes("MY-CONFIDENTIAL-COMPLAINT-42"));
   assert.ok(!logged.includes("support@tomverse.app"));
   assert.ok(logged.includes("http_500"));
+});
+
+// --- the inline attempt is a claim, like every other attempt -----------------
+//
+// The submission path sends inline so the common case notifies at once, and a
+// drain can be running at the same moment. Both now win the row the same way,
+// so exactly one of them sends (independent review 2026-09-16, F5).
+
+test("an inline attempt and a drain never send the same notification twice", async () => {
+  const { queue, job } = await loadModules();
+  const feedback = await fakePrisma.feedback.create({
+    data: { message: "a report whose notice races a drain", type: "bug", email: "r@example.com" },
+  });
+  const delivery = await queue.enqueueNotificationDelivery(fakePrisma as never, {
+    kind: "support_feedback",
+    referenceId: feedback.id,
+  });
+
+  const [inline, drain] = await withCapturedLogs(() =>
+    Promise.all([
+      queue.deliverNotificationNow({
+        deliveryId: delivery.id,
+        kind: "support_feedback",
+        referenceId: feedback.id,
+      }),
+      job.runNotificationDeliveryDrain({ now: new Date() }),
+    ])
+  );
+
+  assert.equal(world.sends.length, 1, "exactly one of them sent");
+  const inlineWon = inline.errorKind !== "not_claimed";
+  assert.equal(
+    inlineWon ? drain.claimed : 1,
+    inlineWon ? 0 : 1,
+    "the one that did not send says it never claimed the row"
+  );
+  assert.equal(world.deliveries[0].status, "delivered");
+  assert.equal(world.deliveries[0].attempts, 1);
 });

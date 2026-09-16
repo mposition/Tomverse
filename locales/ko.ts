@@ -853,6 +853,10 @@ export const ko = {
         messageCounter: "{count} / {max}자",
         errorReportHint: "추가 설명을 입력하지 않아도 보낼 수 있습니다. 오류 내용은 자동으로 함께 전송됩니다.",
         traceOptionalHint: "추적 ID는 선택 사항입니다. 입력하지 않아도 전송됩니다.",
+        replyAlwaysAccount:
+          "여기서 무엇을 선택하든, 이 신고의 처리 결과 답변은 계정 이메일로 보내 드립니다.",
+        replyNeedsAddress:
+          "이 신고의 처리 결과 답변을 받으시려면 위 항목을 선택하고 이메일 주소를 남겨 주세요.",
         emailUpdatesLabel: "처리 상태를 이메일로 받기",
         emailUpdatesAccountHint:
           "이 신고 건의 접수 및 처리 상태 안내를 계정 이메일로 보내드립니다.",

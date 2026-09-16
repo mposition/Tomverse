@@ -849,6 +849,10 @@ export const pt = {
         messageCounter: "{count} / {max}",
         errorReportHint: "Você pode enviar sem acrescentar nada: os detalhes do erro vão anexados de qualquer forma.",
         traceOptionalHint: "O trace ID é opcional. Você pode enviar sem ele.",
+        replyAlwaysAccount:
+          "Independentemente desta escolha, a resposta a este relato vai para o e-mail da sua conta.",
+        replyNeedsAddress:
+          "Para receber a resposta a este relato, marque a caixa acima e deixe um endereço de e-mail.",
         emailUpdatesLabel: "Receber o estado por e-mail",
         emailUpdatesAccountHint:
           "O recibo e as atualizações deste relatório serão enviados para o e-mail da sua conta.",
