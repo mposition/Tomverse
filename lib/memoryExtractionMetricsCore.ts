@@ -12,8 +12,11 @@
  *
  * - is the dispatcher keeping up, or is a queue building behind it
  * - is one approved pair failing where the others are not
- * - what are chunks failing *of* -- a provider outage and a deleted source
+ * - what are chunks failing *of* -- a provider outage and a malformed answer
  *   look identical in a success rate and need different responses
+ * - how many chunks had nothing to read -- a deleted source is not a failure
+ *   and is not charged, so it is counted as `skipped` rather than hidden
+ *   inside either of the other two
  * - are runs being charged for work they did not do
  */
 
@@ -136,8 +139,20 @@ export type ExtractionMetricsSummary = {
     chunks: {
         total: number;
         completed: number;
+        /**
+         * Finished without calling the provider, because every conversation
+         * the plan named had gone. Counted apart from `completed` for the same
+         * reason settlement counts them apart: these cost nothing and produced
+         * nothing, so folding them in would make both the spend and the yield
+         * read wrong.
+         */
+        skipped: number;
         failed: number;
-        /** Why chunks failed. A provider outage and a deleted source differ. */
+        /**
+         * Why chunks failed. A provider outage and a malformed answer differ.
+         * A deleted source is not here: it is `skipped`, which is not a
+         * failure and carries no code.
+         */
         failureCodes: Record<string, number>;
         /** Chunks that needed more than one attempt, over chunks attempted. */
         retryRate: number | null;
@@ -156,9 +171,19 @@ export type ExtractionMetricsSummary = {
         settledCredits: number;
         refundedCredits: number;
         /**
-         * Reservations settled for fewer chunks than they reserved. Expected
-         * to be non-zero -- cancellation is a feature -- but a jump means runs
-         * are dying rather than being cancelled.
+         * Reservations settled for fewer chunks than they reserved -- a count
+         * of runs, and deliberately neutral about why. Three different things
+         * produce it, and only one of them is trouble:
+         *
+         *   - a cancelled run, which is a feature;
+         *   - a failed run, which is the one to watch;
+         *   - a run that finished cleanly but skipped a chunk whose sources
+         *     had all been deleted, which charged exactly what it should.
+         *
+         * So a rise here is not by itself a sign that runs are dying. Split it
+         * by `runs.byStatus` first. `chunks.skipped` does not reconcile against
+         * it one-for-one either: that is a count of chunks, this is a count of
+         * runs, and one run can skip several.
          */
         partiallySettled: number;
         /**
@@ -314,11 +339,13 @@ export function summarizeMemoryExtraction(input: {
 
     const failureCodes: Record<string, number> = {};
     let chunksCompleted = 0;
+    let chunksSkipped = 0;
     let chunksFailed = 0;
     let chunksAttempted = 0;
     let chunksRetried = 0;
     for (const chunk of input.chunks) {
         if (chunk.status === "completed") chunksCompleted += 1;
+        if (chunk.status === "skipped") chunksSkipped += 1;
         if (chunk.status === "failed") {
             chunksFailed += 1;
             const code = chunk.failureCode ?? "unknown";
@@ -362,6 +389,7 @@ export function summarizeMemoryExtraction(input: {
         chunks: {
             total: input.chunks.length,
             completed: chunksCompleted,
+            skipped: chunksSkipped,
             failed: chunksFailed,
             failureCodes,
             retryRate:

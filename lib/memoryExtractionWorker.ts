@@ -254,7 +254,11 @@ export async function handleMemoryExtractionChunk({
     adapterFactory?: ExtractionAdapterFactory;
     register?: readonly MemoryExtractionEvalEntry[];
     environment?: Record<string, string | undefined>;
-}): Promise<{ outcome: "completed" } | { outcome: "failed"; code: string }> {
+}): Promise<
+    | { outcome: "completed" }
+    | { outcome: "skipped" }
+    | { outcome: "failed"; code: string }
+> {
     const failed = (code: string) => ({ outcome: "failed" as const, code });
 
     // Cheapest possible exit: the slice may already have given up before this
@@ -266,11 +270,23 @@ export async function handleMemoryExtractionChunk({
         chunk.conversationIds
     );
     if (conversations.length === 0) {
-        // The plan named conversations that are gone — deleted, or their
-        // import removed — so there is nothing to extract and nothing to
-        // retry. Completing rather than failing lets the run finish; §13.1
-        // already decided that deleting a source does not strand the run.
-        return { outcome: "completed" };
+        /*
+          The plan named conversations that are gone — deleted, or their
+          import removed — so there is nothing to extract and nothing to
+          retry. Not failing, because
+          docs/policy/external-conversation-import-and-memory.md §13.1 already
+          decided that deleting a source does not strand the run.
+
+          `skipped` rather than `completed`, which is what this returned
+          before. The two look interchangeable from here and are not:
+          `completed` is the count settlement charges, and its contract says in
+          as many words that those chunks "really did call the provider"
+          (lib/memoryExtractionCredits.ts). This one did not, and charging for
+          it was a defect rather than a decision — nothing in that section says
+          a user who deletes a source should pay for the calls that deletion
+          made impossible.
+        */
+        return { outcome: "skipped" };
     }
 
     const owner = await prisma.user.findUnique({
