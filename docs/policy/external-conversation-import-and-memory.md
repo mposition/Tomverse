@@ -1163,6 +1163,33 @@ composer·comparison rail contract를 침범하지 않습니다.
   `tests/memoryReleaseContracts.test.mjs`(제3자 경로 배제),
   `tests/e2e/chat-memory-context.spec.ts`(생성 중·재조회 양쪽 표시).
 
+### 13.5 imported data export의 잠긴 snapshot
+
+`GET /api/imports/external/export`(릴리스 A imported data export)는 **잠긴 snapshot을
+존재 metadata로만 내보냅니다** — `{ "locked": true, "importedAt": ... }`이고 제목·
+provider·`externalStableId`·digest·원본 시각·model label·메시지는 싣지 않습니다(2026-09-16).
+메시지는 쿼리 단계에서 읽지도 않습니다.
+
+- **새 정책이 아니라 기존 규칙의 누락 적용입니다.** 같은 행이 계정 데이터 export
+  (`lib/accountDataExport.ts`)에서는 이미 이 방식으로 나가고, 잠긴 source의 memory
+  evidence도 §13.2에서 그렇습니다. 이 경로 하나만 모든 finalized snapshot의 제목과
+  메시지 전문을 내보내고 있었습니다(CONT-SEARCH-01 검토 중 발견).
+- **이유는 §13.2와 같습니다.** export는 계정 밖으로 나가는 문서라 거기 담긴 제목·
+  메시지는 잠금이 풀리든 말든 남습니다. 세션을 가진 사람은 누구나 export를 요청할 수
+  있고, 잠금은 세션만으로는 부족하게 하려고 존재합니다.
+- **grant가 있어도 stub입니다.** grant는 비밀번호를 증명한 뒤에 받는 추가 권한이므로
+  세션과 같지 않습니다. 그래서 잠긴 snapshot 하나의 전문을 의도적으로 내려받는
+  원문 포함 이어가기 export(`docs/policy/external-conversation-continuation.md` §9.1)는
+  grant를 확인한 뒤 허용합니다. 이 경로가 grant를 보지 않는 이유는 그것과 다른
+  종류의 문서이기 때문입니다 — 계정 전체의 일괄 export이고, 같은 행을 내보내는 계정
+  데이터 export가 이미 grant 유무와 무관하게 stub만 내보냅니다. 두 일괄 export가 서로
+  다른 규칙을 가지면, 어느 쪽을 누르느냐에 따라 잠금의 의미가 달라집니다.
+- **항목은 계속 목록에 남깁니다.** 사용자는 계정에 무엇이 있는지 알 권리가 있고, 그것이
+  존재 metadata의 뜻입니다. 잠긴 snapshot의 전문이 필요하면 잠금을 해제한 뒤 export합니다.
+- **형식은 `tomverse.external-conversations.v2`입니다.** v1의 모든 항목에는
+  `messages`가 있었으므로, 모양이 다른 항목이 생긴 것을 v1 reader가 알아채지 못하고
+  실패하지 않도록 버전을 올렸습니다. 모든 항목에 `locked`가 있습니다.
+
 ## 14. Assistant Profile (릴리스 C)
 
 - private only. public marketplace·공유·판매·Actions·OAuth·코드 실행·외부

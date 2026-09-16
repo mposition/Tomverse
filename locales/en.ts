@@ -1435,6 +1435,8 @@ export const en = {
         loadMore: "Show more",
         previousSnapshots: "{count} earlier versions",
         exportAll: "Download all (JSON)",
+        exportLockedNote:
+            "Locked conversations are included without their title or content. Unlock them first if you need everything.",
         exportFailed: "Failed to download the export.",
         viewerRoleUser: "User",
         viewerRoleAssistant: "Assistant",

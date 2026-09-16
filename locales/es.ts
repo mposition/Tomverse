@@ -1428,6 +1428,8 @@ export const es = {
         loadMore: "Mostrar más",
         previousSnapshots: "{count} versiones anteriores",
         exportAll: "Descargar todo (JSON)",
+        exportLockedNote:
+            "Las conversaciones bloqueadas se incluyen sin título ni contenido. Desbloquéalas antes si necesitas todo.",
         exportFailed: "No se pudo descargar la exportación.",
         viewerRoleUser: "Usuario",
         viewerRoleAssistant: "Asistente",

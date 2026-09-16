@@ -400,7 +400,7 @@ async function mockImportApi(
             'attachment; filename="tomverse-external-conversations.json"',
         },
         body: JSON.stringify({
-          format: "tomverse.external-conversations.v1",
+          format: "tomverse.external-conversations.v2",
           conversations: [],
         }),
       });
@@ -961,6 +961,13 @@ test.describe("external import settings", () => {
     await expect(
       page.getByTestId("external-import-conversation-link")
     ).toHaveCount(3);
+
+    // Before the download, the screen says what "all" leaves out: a locked
+    // snapshot goes into the file as a stub, and someone who took the label at
+    // its word could delete the originals believing they had a full copy.
+    await expect(
+      page.getByTestId("external-import-export-locked-note")
+    ).toBeVisible();
 
     // The page fetches the export and saves the blob itself, so the download
     // is observable on every engine -- mobile WebKit used to render the
