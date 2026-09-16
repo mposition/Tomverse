@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-shadow-harness-v1, round 1
+# Independent review — task prompt-refiner-shadow-harness-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -21,7 +21,7 @@ Prompt Refiner를 제품·reservation authority·provider에 연결하지 않은
 - 전용 shadow 17/17, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, 변경 파일 lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.
 - Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다.
 
-## Change under review — digest sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee, commit 6d5d2fd87f3def76c5070e71ac6d521490d67c6e
+## Change under review — digest sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c, commit 8f20ea1f5ba44013d3c71b85d21b27313e13b4bc
 
 ```diff
 diff --git a/.gitattributes b/.gitattributes
@@ -54,7 +54,7 @@ index 73433577..1fde2690 100644
 +lib/routerDevelopmentBenchmark.ts text eol=lf
 +scripts/prompt-refiner-shadow-harness.mjs text eol=lf
 diff --git a/AGENTS.md b/AGENTS.md
-index 57d286c1..dc3bd0c9 100644
+index 57d286c1..4ad9cdf5 100644
 --- a/AGENTS.md
 +++ b/AGENTS.md
 @@ -1302,10 +1302,14 @@ Before changing the Prompt Refiner surface or request boundary in
@@ -73,7 +73,7 @@ index 57d286c1..dc3bd0c9 100644
  
  Non-negotiable requirements:
  
-@@ -1390,6 +1394,25 @@ Non-negotiable requirements:
+@@ -1390,6 +1394,30 @@ Non-negotiable requirements:
    provider adapter must use this builder and keep that report green. The
    loopback fixture caller still reaches only its no-cost E2E route and is not
    a model-facing path.
@@ -89,6 +89,11 @@ index 57d286c1..dc3bd0c9 100644
 +  digest; a different source snapshot can never resume the run. Git child reads
 +  must disable lazy fetch and replacement objects, and fail closed unless every
 +  pinned object is local;
++  `package-lock.json` has a dedicated 4 MiB source cap, other non-corpus source
++  files have a 1 MiB cap, and Git capture remains bounded above both. The source
++  identity binds pinned repository bytes, not installed `node_modules`, package
++  manager caches, install environments, or an installation attestation; a local
++  completion is not dependency-installation provenance.
 +  `max-cases` accepts only unsigned ASCII decimal notation. A clean interruption
 +  after the final terminal finalizes completion without a zero-remaining resume,
 +  while a final-case mismatch remains a replayable non-resumable stop. Structural message
@@ -142,10 +147,10 @@ index 00000000..afb1125b
 +}
 diff --git a/docs/ops/prompt-refiner-shadow-harness.md b/docs/ops/prompt-refiner-shadow-harness.md
 new file mode 100644
-index 00000000..9898147b
+index 00000000..522dd2b4
 --- /dev/null
 +++ b/docs/ops/prompt-refiner-shadow-harness.md
-@@ -0,0 +1,124 @@
+@@ -0,0 +1,135 @@
 +# Prompt Refiner provider-free shadow harness
 +
 +## 1. 목적과 비목적
@@ -187,6 +192,17 @@ index 00000000..9898147b
 +같아야 한다. 고정 allowlist의 모든 경로와 `.gitattributes` 자체를 `eol=lf`로 pin해
 +Windows `core.autocrlf=true`의 정상 checkout도 Git blob bytes와 같게 유지한다. 테스트는
 +그 checkout과 네트워크 child trap 아래 CLI를 실행한다.
++
++source byte cap은 corpus의 기존 전용 cap, `package-lock.json` **4 MiB**, 그 밖의
++allowlist 파일 **1 MiB**로 명시한다. Git blob 크기를 `cat-file -s`로 먼저 검사한 뒤
++최대 **8 MiB** capture buffer 안에서만 읽으므로, lockfile이 4 MiB를 넘으면 child buffer
++오류가 아니라 `source_file_byte_limit`으로 닫힌다. 현재 lockfile은 568,011 bytes다.
++
++source identity가 결속하는 것은 sourceRef와 이 고정 repository path들의 bytes이며,
++그중 `package-lock.json`도 포함된다. 실제 설치된 `node_modules` 파일 bytes, package
++manager cache, install command·platform·registry 응답 또는 설치 attestation은 읽거나
++결속하지 않는다. 따라서 completed 결과는 dependency installation provenance나 실제
++runtime dependency tree의 동일성을 증명하지 않는다.
 +
 +## 3. 출력 파서
 +
@@ -494,10 +510,10 @@ index 00000000..67bb2d91
 +  ]
 +}
 diff --git a/docs/ops/tomverse-chat-progress.md b/docs/ops/tomverse-chat-progress.md
-index 9e314526..2af9a863 100644
+index 9e314526..aeb0870d 100644
 --- a/docs/ops/tomverse-chat-progress.md
 +++ b/docs/ops/tomverse-chat-progress.md
-@@ -1037,3 +1037,65 @@ flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
+@@ -1037,3 +1037,70 @@ flag 활성화는 추가하지 않았다. 기존 v1의 `admitted: false`와
  4. 그 새 계약이 승인된 뒤 bounded shadow를 정확히 한 번 유료 실행한다.
  5. 의미 보존·주입 저항·비용·지연 증거가 통과할 때만 writer와 제안형 제품 adapter를
     연결하고, 이후 Refiner 결과의 Router 결합과 전체 카탈로그 선택 품질을 별도 실험한다.
@@ -533,6 +549,11 @@ index 9e314526..2af9a863 100644
 +확정하고 후자는 remaining 0인 non-resumable stop으로 재생한다. Git child에는 caller
 +env보다 우선한 `GIT_NO_LAZY_FETCH=1`, `GIT_NO_REPLACE_OBJECTS=1`과 로컬 객체 선행조건을
 +강제하고 `max-cases`는 ASCII 10진 정수만 받는다.
++`package-lock.json`은 현재 568,011 bytes이며 전용 4 MiB cap, 나머지 non-corpus source는
++1 MiB cap, Git capture는 8 MiB로 제한했다. just-over-cap은 명시적 source-domain 오류다.
++source identity는 pinned repository bytes와 lockfile을 결속하지만 실제 `node_modules`,
++package-manager cache·설치 환경·install attestation은 결속하지 않으므로 설치 provenance
++증거가 아니다.
 +
 +이 회차는 reservation authority dispatch 연결, stage seed/admin writer, product
 +route/runtime caller, provider/API/model 호출, receipt writer, flag 활성화 또는
@@ -547,8 +568,8 @@ index 9e314526..2af9a863 100644
 +| 직전 의미 있는 회차 대비 | **약 0%p** — 재현 가능한 무과금 검증 기반은 생겼지만 제품 호출·공개 범위는 그대로 |
 +| C19–C20 Refiner·Planner·품질 평가 | **약 44%** (직전 약 41%, provider-free 실행·중단/재개 기반 반영) |
 +| 구현 | 동결 합성 corpus·strict parser·content-free append-only journal/witness·unknown no-redispatch·exact source bytes CLI 구현 |
-+| 로컬 검증 | 전용 core/CLI **22/22**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, no-network child trap, replace-object 무시, missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
-+| 독립 검토·통합 CI | Claude Code Max 읽기 전용 round 0은 request_changes 4건. 판정 기록은 별도 감사 commit으로 보존했고 4건을 수정했으며 재검토·Linux 통합 CI 전 상태 |
++| 로컬 검증 | 전용 core/CLI **23/23**, 기존 Refiner·주입 경계 **59/59**, suggestion UI **9/9**, package-lock exact/over-cap·no-network child trap·replace-object 무시·missing-blob promisor fail-closed, Windows `core.autocrlf=true` exact-byte checkout, source A→B resume 거부, PLANNER-03 report, typecheck·대상 lint·문서/정책 참조·strict encoding·data-domain 통과 |
++| 독립 검토·통합 CI | Claude Code Max round 0의 4건은 수정했고 round 1은 approve와 nit 2건을 반환했다. 두 판정 기록을 각각 감사 commit으로 보존했으며 nit 2건 수정 뒤 재검토·Linux 통합 CI 전 상태 |
 +| 병합·배포·공개 | 없음. provider/API/model 호출 0, stage/admin writer 없음, 제품 caller·flag·v1 admission 변경 없음 |
 +
 +### 이 Cycle 다음 권장 순서
@@ -564,10 +585,10 @@ index 9e314526..2af9a863 100644
 +5. 사용자 선택 증거 뒤 Refiner 결과의 Router 결합과 전체 모델 catalogue 선택 품질을
 +   별도 실험한다.
 diff --git a/docs/policy/prompt-refiner-observability.md b/docs/policy/prompt-refiner-observability.md
-index b4d5db3a..1b36de58 100644
+index b4d5db3a..7673171a 100644
 --- a/docs/policy/prompt-refiner-observability.md
 +++ b/docs/policy/prompt-refiner-observability.md
-@@ -205,3 +205,52 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
+@@ -205,3 +205,60 @@ provider 호출 없이 동결된 bundle을 읽는다. `--json`은 같은 aggrega
  3. 품질·비용·지연 증거가 승인된 뒤 제품 adapter와 서버 receipt writer를 붙인다.
  4. 제안형 UI가 실제로 제공될 때만 disposition API와 선택·stale 관측을 연결한다.
  5. 그 뒤에도 Refiner 결과의 Router 결합은 ROUTE-03의 별도 실험이다.
@@ -586,6 +607,14 @@ index b4d5db3a..1b36de58 100644
 +`GIT_NO_REPLACE_OBJECTS=1`과 비대화형 설정 아래에서만 실행하고 commit·allowlist blob의
 +로컬 존재를 먼저 확인한다. replace ref는 고정 SHA 해석에 관여할 수 없고,
 +partial/blobless promisor clone의 누락 객체를 원격에서 가져오는 것도 허용하지 않는다.
++source cap은 corpus 전용 cap, `package-lock.json` 4 MiB, 나머지 allowlist 1 MiB이고,
++Git capture는 8 MiB로 제한한다. blob 크기를 먼저 검사하므로 cap 초과는 모호한 child
++buffer 실패가 아니라 `source_file_byte_limit`으로 기록된다.
++
++source identity에는 sourceRef, pinned repository paths와 `package-lock.json` bytes가
++들어간다. 설치된 `node_modules`의 실제 bytes, package-manager cache, install 환경·명령,
++registry 응답 또는 install attestation은 포함하지 않는다. 이 provider-free 결과는
++dependency installation provenance나 설치 결과 동일성의 증거가 아니다.
 +
 +모델 모양의 fixture output은 `parseBenchmarkJson()`의 syntax·duplicate key·complexity
 +제한, `strictBenchmarkObject(["refinedPrompt"])`의 exact field 검사, 기존 prompt
@@ -2087,20 +2116,24 @@ index 00000000..4b7bc7b3
 +}
 diff --git a/lib/promptRefinerShadowSource.ts b/lib/promptRefinerShadowSource.ts
 new file mode 100644
-index 00000000..0bbc28cd
+index 00000000..33d7b43e
 --- /dev/null
 +++ b/lib/promptRefinerShadowSource.ts
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,98 @@
 +/** Fixed source allowlist for the provider-free Prompt Refiner shadow harness. */
 +import { createHash } from "node:crypto";
 +
 +export const PROMPT_REFINER_SHADOW_CORPUS_PATH =
 +    "docs/ops/prompt-refiner-shadow/corpus-v1.json" as const;
++export const PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH =
++    "package-lock.json" as const;
++export const PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES = 4 * 1024 * 1024;
++export const PROMPT_REFINER_SHADOW_OTHER_SOURCE_MAX_BYTES = 1024 * 1024;
 +
 +export const PROMPT_REFINER_SHADOW_SOURCE_PATHS = Object.freeze([
 +    ".gitattributes",
 +    "package.json",
-+    "package-lock.json",
++    PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH,
 +    "tsconfig.json",
 +    PROMPT_REFINER_SHADOW_CORPUS_PATH,
 +    "lib/promptRefinerShadowHarness.ts",
@@ -2200,10 +2233,10 @@ index 55d6b1af..efb1e962 100644
      "check:conversation-writers": "node scripts/check-conversation-writers.mjs",
 diff --git a/scripts/prompt-refiner-shadow-harness.mjs b/scripts/prompt-refiner-shadow-harness.mjs
 new file mode 100644
-index 00000000..f0e233f0
+index 00000000..881128b6
 --- /dev/null
 +++ b/scripts/prompt-refiner-shadow-harness.mjs
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,174 @@
 +// Provider-free deterministic fixtures only. There is no live/provider mode.
 +import {
 +  closeSync,
@@ -2222,18 +2255,33 @@ index 00000000..f0e233f0
 +import { runPromptRefinerShadowHarness } from "../lib/promptRefinerShadowJournal.ts";
 +import {
 +  PROMPT_REFINER_SHADOW_CORPUS_PATH,
++  PROMPT_REFINER_SHADOW_OTHER_SOURCE_MAX_BYTES,
++  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES,
++  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH,
 +  PROMPT_REFINER_SHADOW_SOURCE_PATHS,
 +  validatePromptRefinerShadowSource,
 +} from "../lib/promptRefinerShadowSource.ts";
 +
 +const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
++const GIT_CAPTURE_MAX_BYTES = 8 * 1024 * 1024;
++
++function sourceByteLimit(path) {
++  if (path === PROMPT_REFINER_SHADOW_CORPUS_PATH) {
++    return PROMPT_REFINER_SHADOW_MAX_CORPUS_BYTES;
++  }
++  if (path === PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH) {
++    return PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES;
++  }
++  return PROMPT_REFINER_SHADOW_OTHER_SOURCE_MAX_BYTES;
++}
 +
 +function readBoundedUtf8(path, maximum) {
 +  if (lstatSync(path).isSymbolicLink()) throw new Error("source_symlink");
 +  const descriptor = openSync(path, "r");
 +  try {
 +    const stat = fstatSync(descriptor);
-+    if (!stat.isFile() || stat.size > maximum) throw new Error("source_file_size_or_type");
++    if (!stat.isFile()) throw new Error("source_file_type");
++    if (stat.size > maximum) throw new Error("source_file_byte_limit");
 +    const bytes = Buffer.alloc(stat.size + 1);
 +    let offset = 0;
 +    while (offset < bytes.length) {
@@ -2260,7 +2308,7 @@ index 00000000..f0e233f0
 +    cwd: root,
 +    env: gitEnvironment,
 +    encoding: "utf8",
-+    maxBuffer: 4 * 1024 * 1024,
++    maxBuffer: GIT_CAPTURE_MAX_BYTES,
 +    stdio: ["ignore", "pipe", "pipe"],
 +  });
 +
@@ -2269,6 +2317,17 @@ index 00000000..f0e233f0
 +    git(["cat-file", "-e", objectName]);
 +  } catch {
 +    throw new Error("source_object_missing_no_lazy_fetch");
++  }
++}
++
++function requireAnchoredSourceWithinLimit(sourceRef, path) {
++  const sizeText = git(["cat-file", "-s", `${sourceRef}:${path}`]).trim();
++  if (!/^(?:0|[1-9][0-9]*)$/.test(sizeText)) {
++    throw new Error("source_object_size_invalid");
++  }
++  const size = Number(sizeText);
++  if (!Number.isSafeInteger(size) || size > sourceByteLimit(path)) {
++    throw new Error("source_file_byte_limit");
 +  }
 +}
 +
@@ -2315,6 +2374,7 @@ index 00000000..f0e233f0
 +  }
 +  for (const path of PROMPT_REFINER_SHADOW_SOURCE_PATHS) {
 +    requireLocalGitObject(`${sourceRef}:${path}`);
++    requireAnchoredSourceWithinLimit(sourceRef, path);
 +  }
 +  const anchored = Object.fromEntries(
 +    PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [path, git(["show", `${sourceRef}:${path}`])])
@@ -2322,9 +2382,7 @@ index 00000000..f0e233f0
 +  const current = Object.fromEntries(
 +    PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [
 +      path,
-+      readBoundedUtf8(resolve(root, path), path === PROMPT_REFINER_SHADOW_CORPUS_PATH
-+        ? PROMPT_REFINER_SHADOW_MAX_CORPUS_BYTES
-+        : 1024 * 1024),
++      readBoundedUtf8(resolve(root, path), sourceByteLimit(path)),
 +    ])
 +  );
 +  const source = validatePromptRefinerShadowSource({ sourceRef, anchored, current });
@@ -2979,10 +3037,10 @@ index 00000000..fdeafc5a
 +});
 diff --git a/tests/promptRefinerShadowHarnessCli.test.mjs b/tests/promptRefinerShadowHarnessCli.test.mjs
 new file mode 100644
-index 00000000..aa2940bc
+index 00000000..093197bc
 --- /dev/null
 +++ b/tests/promptRefinerShadowHarnessCli.test.mjs
-@@ -0,0 +1,367 @@
+@@ -0,0 +1,453 @@
 +import assert from "node:assert/strict";
 +import { execFileSync, spawnSync } from "node:child_process";
 +import {
@@ -3002,7 +3060,11 @@ index 00000000..aa2940bc
 +import { basename, dirname, join, resolve } from "node:path";
 +import { pathToFileURL } from "node:url";
 +import test, { after } from "node:test";
-+import { PROMPT_REFINER_SHADOW_SOURCE_PATHS } from "../lib/promptRefinerShadowSource.ts";
++import {
++  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES,
++  PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH,
++  PROMPT_REFINER_SHADOW_SOURCE_PATHS,
++} from "../lib/promptRefinerShadowSource.ts";
 +
 +const root = resolve(import.meta.dirname, "..");
 +const temporary = mkdtempSync(join(tmpdir(), "prompt-refiner-shadow-cli-"));
@@ -3237,6 +3299,88 @@ index 00000000..aa2940bc
 +  }
 +});
 +
++test("package-lock has a bounded dedicated cap and just-over-limit fails clearly", () => {
++  assert.equal(
++    lstatSync(join(root, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH)).size,
++    568_011
++  );
++  assert.ok(568_011 < PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);
++
++  const clone = join(temporary, "package-lock-cap-checkout");
++  execFileSync("git", ["clone", "--quiet", "--no-local", checkout, clone], {
++    cwd: temporary,
++    env: cleanEnvironment,
++    stdio: ["ignore", "pipe", "pipe"],
++  });
++  const cloneDependencies = join(clone, "node_modules");
++  symlinkSync(
++    realpathSync(join(root, "node_modules")),
++    cloneDependencies,
++    process.platform === "win32" ? "junction" : "dir"
++  );
++  const cloneGit = (args) =>
++    execFileSync("git", args, {
++      cwd: clone,
++      env: cleanEnvironment,
++      encoding: "utf8",
++      maxBuffer: 16 * 1024 * 1024,
++      stdio: ["ignore", "pipe", "pipe"],
++    });
++  try {
++    cloneGit(["config", "--local", "user.name", "Offline Size Fixture"]);
++    cloneGit(["config", "--local", "user.email", "size-fixture@example.invalid"]);
++    const lockPath = join(clone, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH);
++    const original = readFileSync(lockPath);
++    const atLimit = Buffer.concat([
++      original,
++      Buffer.alloc(PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES - original.length, 0x20),
++    ]);
++    assert.equal(atLimit.length, PROMPT_REFINER_SHADOW_PACKAGE_LOCK_MAX_BYTES);
++    writeFileSync(lockPath, atLimit);
++    cloneGit(["add", "--", PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH]);
++    cloneGit(["commit", "--quiet", "--no-gpg-sign", "-m", "Package lock at exact cap"]);
++    const atLimitRef = cloneGit(["rev-parse", "HEAD"]).trim();
++    const accepted = run(
++      [
++        `--journal=${join(temporary, "package-lock-at-limit.jsonl")}`,
++        `--source-ref=${atLimitRef}`,
++      ],
++      {},
++      clone
++    );
++    assert.equal(accepted.status, 0, accepted.stderr);
++
++    writeFileSync(lockPath, Buffer.concat([atLimit, Buffer.from(" ")]));
++    const currentTooLarge = run(
++      [
++        `--journal=${join(temporary, "package-lock-current-too-large.jsonl")}`,
++        `--source-ref=${atLimitRef}`,
++      ],
++      {},
++      clone
++    );
++    assert.equal(currentTooLarge.status, 1);
++    assert.match(currentTooLarge.stderr, /source_file_byte_limit/);
++
++    cloneGit(["add", "--", PROMPT_REFINER_SHADOW_PACKAGE_LOCK_PATH]);
++    cloneGit(["commit", "--quiet", "--no-gpg-sign", "-m", "Package lock one byte over cap"]);
++    const overLimitRef = cloneGit(["rev-parse", "HEAD"]).trim();
++    const anchoredTooLarge = run(
++      [
++        `--journal=${join(temporary, "package-lock-anchored-too-large.jsonl")}`,
++        `--source-ref=${overLimitRef}`,
++      ],
++      {},
++      clone
++    );
++    assert.equal(anchoredTooLarge.status, 1);
++    assert.match(anchoredTooLarge.stderr, /source_file_byte_limit/);
++  } finally {
++    assert.ok(lstatSync(cloneDependencies).isSymbolicLink());
++    unlinkSync(cloneDependencies);
++  }
++});
++
 +test("a Git replacement cannot attribute source B bytes to pinned source A", () => {
 +  const clone = join(temporary, "replace-object-checkout");
 +  execFileSync(
@@ -3355,72 +3499,70 @@ index 00000000..aa2940bc
 
 ## Test results (run by the control program)
 
-- PASS `npm run test:prompt-refiner-shadow` (19473ms)
+- PASS `npm run test:prompt-refiner-shadow` (27055ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 18967.3362
+  ℹ duration_ms 26524.248
 
 ## Guard results (run by the control program)
 
-- PASS `git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD` (49ms)
-- PASS `node -e 'const fs=require("fs"),c=require("child_process");const t=JSON.parse(fs.readFileSync("docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json","utf8"));const n=c.execFileSync("git",["diff","--name-only","d16093c550564eb36bcc49aded1d263ce6130914","--"],{encoding:"utf8"}).trim().split(/\r?\n/).filter(Boolean).map(x=>x.replaceAll("\\\\","/"));const u=(f,s)=>f===s.replace(/\/$/,"")||f.startsWith(s.replace(/\/$/,"")+"/");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error("outside scope: "+o.join(","));console.log("latest-base names in existing writableScope: "+n.length+", outside: 0")'` (98ms)
-  latest-base names in existing writableScope: 21, outside: 0
-- PASS `node -e 'const fs=require("fs"),c=require("child_process"),h=require("crypto");const t=JSON.parse(fs.readFileSync("docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json","utf8"));const s=t.writableScope.map(x=>":(literal)"+x).concat([":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1"]);const d=b=>c.execFileSync("git",["diff",b,"--",...s],{maxBuffer:33554432});const a=d("cea66ca8d025dc19daed085669dc8cfbceeb6460"),n=d("d16093c550564eb36bcc49aded1d263ce6130914");const x=h.createHash("sha256").update(a).digest("hex"),y=h.createHash("sha256").update(n).digest("hex");if(!a.equals(n)||x!=="067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee")throw Error("scoped diff mismatch "+x+" "+y);console.log("old/latest literal scoped diff equal: "+a.length+" bytes sha256:"+x)'` (129ms)
-  old/latest literal scoped diff equal: 134099 bytes sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee
-- PASS `node -e 'const fs=require("fs"),h=require("crypto"),p="docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/";const e={"change-round0.diff":"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7","package-round0.json":"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d","review-round0.events.jsonl":"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072","verdict-round0.json":"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf"};for(const [f,x] of Object.entries(e)){const a=h.createHash("sha256").update(fs.readFileSync(p+f)).digest("hex");if(a!==x)throw Error("round0 changed: "+f)}console.log("round0 numbered artifacts and verdict immutable: 4")'` (73ms)
-  round0 numbered artifacts and verdict immutable: 4
-- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (2559ms)
+- PASS `git merge-base --is-ancestor d16093c550564eb36bcc49aded1d263ce6130914 HEAD` (51ms)
+- PASS `node -e "const fs=require(\"fs\"),c=require(\"child_process\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const n=c.execFileSync(\"git\",[\"diff\",\"--name-only\",\"d16093c550564eb36bcc49aded1d263ce6130914\",\"--\"],{encoding:\"utf8\"}).trim().split(/\\r?\\n/).filter(Boolean).map(x=>x.replaceAll(\"\\\\\",\"/\"));const u=(f,s)=>f===s.replace(/\\/$/,\"\")||f.startsWith(s.replace(/\\/$/,\"\")+\"/\");const o=n.filter(f=>!t.writableScope.some(s=>u(f,s)));if(o.length)throw Error(\"outside scope: \"+o.join(\",\"));console.log(\"latest-base names in existing writableScope: \"+n.length+\", outside: 0\")"` (113ms)
+  latest-base names in existing writableScope: 25, outside: 0
+- PASS `node -e "const fs=require(\"fs\"),c=require(\"child_process\"),h=require(\"crypto\");const t=JSON.parse(fs.readFileSync(\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1.task.json\",\"utf8\"));const s=t.writableScope.map(x=>\":(literal)\"+x).concat([\":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1\"]);const d=b=>c.execFileSync(\"git\",[\"diff\",b,\"--\",...s],{maxBuffer:33554432});const a=d(\"cea66ca8d025dc19daed085669dc8cfbceeb6460\"),n=d(\"d16093c550564eb36bcc49aded1d263ce6130914\");const x=h.createHash(\"sha256\").update(a).digest(\"hex\"),y=h.createHash(\"sha256\").update(n).digest(\"hex\");if(!a.equals(n)||x!==\"442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c\")throw Error(\"scoped diff mismatch \"+x+\" \"+y);console.log(\"old/latest literal scoped diff equal: \"+a.length+\" bytes sha256:\"+x)"` (141ms)
+  old/latest literal scoped diff equal: 140842 bytes sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c
+- PASS `node -e "const fs=require(\"fs\"),h=require(\"crypto\"),p=\"docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1/\";const e={\"change-round0.diff\":\"c99a979edcbb919602a61d4e7f6c342701be5ee809ba9978fc1a825e20de3fc7\",\"package-round0.json\":\"29401a4a75d6930904460f6c06e3390fec3272d9249b8d374bb7aace5a623d8d\",\"review-round0.events.jsonl\":\"162f67ea19c20bbfc0d4224bb8b11089b7bbd6559fff1287aeab5bd550837072\",\"verdict-round0.json\":\"2fb6258d535e9cae44bb1b8e165d782c6dd879a50d4da445b942f53795348ddf\",\"change-round1.diff\":\"067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee\",\"package-round1.json\":\"4e9682bdf96a9511f28b3c69ac8a37703f3d9f4493de041b6e9249d6b73fe2b7\",\"review-round1.events.jsonl\":\"2a5df6dd2989983d0445ed780bd81a9b1bca9cb76ea76eab9e4358304f58ae2f\",\"verdict-round1.json\":\"16caa031559f643228ff981ef9475ff3734e3adffbcd2c882d358c34f65a24a8\"};for(const [f,x] of Object.entries(e)){const a=h.createHash(\"sha256\").update(fs.readFileSync(p+f)).digest(\"hex\");if(a!==x)throw Error(\"prior round changed: \"+f)}console.log(\"round0/1 numbered artifacts, verdicts and events immutable: 8\")"` (83ms)
+  round0/1 numbered artifacts, verdicts and events immutable: 8
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (2818ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 2480.7797
-- PASS `npm run check:prompt-injection` (733ms)
+  ℹ duration_ms 2735.9655
+- PASS `npm run check:prompt-injection` (784ms)
   adversarial_retrieved_content_instruction_precedence_violations = 0
   18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)
   not exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)
   Untrusted content stayed data at every fenced and role-separated boundary.
-- PASS `npm run typecheck` (43855ms)
+- PASS `npm run typecheck` (49274ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs` (3163ms)
-- PASS `npm run check:doc-references` (1513ms)
+- PASS `npx eslint lib/promptRefinerShadowHarness.ts lib/promptRefinerShadowJournal.ts lib/promptRefinerShadowSource.ts scripts/prompt-refiner-shadow-harness.mjs tests/promptRefinerShadowHarness.test.mjs tests/promptRefinerShadowHarnessCli.test.mjs` (4772ms)
+- PASS `npm run check:doc-references` (3432ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
   Document reference check passed: 884 referenced path(s) across 111 instruction document(s), and 971 path(s) named by comments across 2941 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1144ms)
+- PASS `npm run check:policy-section-references` (3108ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).
-- PASS `npm run check:encoding:strict` (1898ms)
+- PASS `npm run check:encoding:strict` (3973ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `npm run check:data-domain-registry` (886ms)
+- PASS `npm run check:data-domain-registry` (2549ms)
   y\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.
      Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.
      Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.
      2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.
-- PASS `git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . ':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1'` (59ms)
+- PASS `git diff --check d16093c550564eb36bcc49aded1d263ce6130914..HEAD -- . ":(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-harness-v1"` (179ms)
 
 ## Findings from the previous round (check each was addressed)
 
-- [error/evidence] lib/promptRefinerShadowJournal.ts:487 (eventFrom, run_resumed `resumed.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:665-669 (replay `resumable`) and lib/promptRefinerShadowJournal.ts:847-861 (resume branch appends run_resumed before any remaining-case guard): A clean interruption after the 16th case terminal but before `run_completed` is reported resumable, yet resuming appends a `run_resumed` event with `remainingCases: 0` that the journal's own replay permanently rejects, so the run can neither complete nor be replayed afterwards — contradicting the documented contract that a clean post-terminal interruption resumes (docs/ops/prompt-refiner-shadow-harness.md section 5).
-- [warning/evidence] lib/promptRefinerShadowJournal.ts:446 (eventFrom, run_stopped `stopped.remainingCases <= 0`) with lib/promptRefinerShadowJournal.ts:902-925 (mismatch stop appends before any remaining-case guard): Same root cause on the stop path: a structural or behavioral mismatch on the last corpus case makes the harness write a `run_stopped` event with `remainingCases: 0` that its own replay rejects, so instead of the documented non-resumable `behavioral_fixture_mismatch`/`structural_boundary_violation` stop the operator gets `prompt_refiner_shadow_stop_state` and an unreplayable journal.
-- [nit/judgement] scripts/prompt-refiner-shadow-harness.mjs:45-51,90-95 (git subprocess) vs tests/promptRefinerShadowHarnessCli.test.mjs:96-104 (in-process network trap): The no-network trap only patches the CLI process (fetch/http/https/net/tls/dgram), not the `git` child process, so on a partial/blobless clone `git show <sha>:<path>` can lazily fetch objects from the promisor remote — network activity the trap cannot observe or block.
-- [nit/judgement] scripts/prompt-refiner-shadow-harness.mjs:107: `Number(maxCasesText)` accepts non-decimal spellings, so `--max-cases=0x10` and `--max-cases=1e1` are silently taken as 16 and 10 rather than rejected as malformed input (the value is still bounded to 1..16 and safe-integer, so nothing unsafe follows).
+- [nit/judgement] scripts/prompt-refiner-shadow-harness.mjs:119-122 (readBoundedUtf8 non-corpus bound) and :57 (execFileSync maxBuffer): Every non-corpus allowlist path shares a hard 1,048,576-byte read bound and a 4 MiB git maxBuffer, and package-lock.json already consumes most of that headroom, so ordinary dependency growth will make the harness unrunnable with an error code that names a size problem rather than the lockfile.
+- [nit/judgement] lib/promptRefinerShadowSource.ts:7-21 (PROMPT_REFINER_SHADOW_SOURCE_PATHS) with docs/ops/prompt-refiner-shadow-harness.md section 2: The canonical source identity binds package-lock.json but not the installed dependency bytes the harness actually executes (tsx, zod via lib/promptRefinerSuggestion.ts:1, server-only via lib/promptRefinerModelPrompt.ts:1), and neither the ops doc nor the policy doc states that limit, so "exact source identity" reads stronger than what is verified.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: latest develop base sync only; 19 outside-scope email paths belong to base d16093c5 and are not authored here; old/latest literal scoped diff is byte-equal at sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee; round0 numbered artifacts/verdict remain immutable; all four round0 findings are fixed plus GIT_NO_REPLACE_OBJECTS adversarial hardening.
+Summary: round1 approve의 nit 2건을 모두 닫았다: package-lock.json에는 명시적 4 MiB cap, Git child capture에는 bounded 8 MiB buffer를 적용하고 current/anchored 경계 초과를 source_file_byte_limit domain error로 검증한다. sourceIdentity는 pinned repo paths, package-lock bytes, sourceRef를 결속하지만 installed node_modules 실제 bytes, package-manager cache/install environment, registry/install attestation은 결속하지 않으며 이 provider-free 증거가 dependency installation provenance가 아니라는 한계를 문서화했다. round0 네 finding과 추가 Git replace hardening은 계속 유지된다. origin/develop d16093c5는 HEAD의 ancestor이고 브랜치는 0 behind이며, old/current literal scoped diff는 140842 bytes, sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c로 exact equal이다. round0/1 numbered artifacts, verdict, events는 불변이다.
 
 ## Answer format
 
@@ -3429,8 +3571,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-shadow-harness-v1",
-  "round": 1,
-  "reviewedDigest": "sha256:067a3f857a63f23a11297d3b3f67477c17309feeb857a4e955c5ab525227a0ee",
+  "round": 2,
+  "reviewedDigest": "sha256:442d4161bcb4e519a12d3af727aff8415f7bd91792ec5ad474def02ed92d898c",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
