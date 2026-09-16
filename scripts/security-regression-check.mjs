@@ -941,7 +941,7 @@ const checks = [
   },
   {
     name: "Conversation search filters locked results by unlock grant",
-    file: "app/api/conversations/search/route.ts",
+    file: "lib/conversationSearch.ts",
     /*
       The guarantee, not the formatting.
 
@@ -959,14 +959,32 @@ const checks = [
       rule was satisfied by the import line alone, so replacing the call with
       anything else while keeping the import passed it. Verified by mutation --
       dropping `password` from the select fails, and renaming the call fails.
+
+      CONT-SEARCH-01 moved the query into lib/conversationSearch.ts and added
+      imported transcripts, which carry a second, independent lock. So the
+      rule now also requires the external grant, and requires the locked rows
+      to be excluded inside the candidate queries (`notIn: denied…`) -- the
+      order that keeps a locked match from deciding which authorised hits are
+      returned.
     */
     test: (source) =>
-      /conversation:\s*\{\s*select:\s*\{[\s\S]*?\bpassword:\s*true\b/.test(
+      // Both lock columns are read, inside the one snapshot the candidates are
+      // read from...
+      /readOnlySnapshotTransaction\(/.test(source) &&
+      /where:\s*\{\s*userId,\s*password:\s*\{\s*not:\s*null\s*\}\s*\},\s*select:\s*\{\s*id:\s*true,\s*password:\s*true\s*\}/.test(
         source
       ) &&
-      /hasConversationUnlockGrant\([^)]*message\.conversation\.password[^)]*\)/.test(
+      /externalConversation:\s*\{\s*select:\s*\{\s*password:\s*true\s*\}\s*\}/.test(source) &&
+      // ...each is passed to its own grant check...
+      /resourceUnlockAccess\(\s*"conversation"[^)]*row\.password[^)]*\)/.test(source) &&
+      /resourceUnlockAccess\(\s*"external_conversation"[^)]*bridge\.externalConversation\.password[^)]*\)/.test(
         source
-      ),
+      ) &&
+      // ...and the decision is inside the candidate queries, before any cap:
+      // denied conversations excluded, imported text read only from the
+      // authorised snapshots.
+      /NOT \(c\.id = ANY\(\$\{deniedConversationIds\}::text\[\]\)\)/.test(source) &&
+      /"externalConversationId" = ANY\(\$\{authorizedSnapshotIds\}::text\[\]\)/.test(source),
   },
   {
     name: "Bulk conversation deletion requires unlock grants",

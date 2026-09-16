@@ -5,6 +5,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { useSession } from "next-auth/react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
@@ -43,6 +44,13 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { providerLabel } from "@/components/imports/importFormatting";
+import { SearchSnippetText } from "@/components/chat/SearchSnippetText";
+import { requestContinuationFocus } from "@/lib/continuationFocusHandoff";
+
+/** A search answer resting on unlock grants is dropped this long before they lapse. */
+const SEARCH_GRANT_MARGIN_MS = 5_000;
+/** And asked again this long after, when the server no longer honours them. */
+const SEARCH_REASK_DELAY_MS = 1_000;
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -203,7 +211,12 @@ export function ChatSidebar({
         }
     });
     const [messageSearchResults, setMessageSearchResults] = useState<Array<{
+        /** Absent from an older server; treated as native. */
+        kind?: "native" | "imported";
         id: string;
+        /** Set on an imported hit: the `ExternalMessage` to open the transcript at. */
+        externalMessageId?: string;
+        snippetHighlight?: { start: number; end: number } | null;
         conversationId: string;
         /** The conversation's stored title; resolved for display below. */
         conversationTitle: string;
@@ -218,6 +231,24 @@ export function ChatSidebar({
          */
         surface?: ConversationSurface;
     } & Partial<ContinuationRowNaming>>>([]);
+    /** Whether the answer is incomplete, and whether the imported half timed out. */
+    const [messageSearchMeta, setMessageSearchMeta] = useState<{
+        truncated: boolean;
+        sourceTimedOut: boolean;
+    }>({ truncated: false, sourceTimedOut: false });
+    const [showAllMessageMatches, setShowAllMessageMatches] = useState(false);
+    /** The access signature (below) the held answer was read under. */
+    const [messageSearchAccess, setMessageSearchAccess] = useState<string | null>(null);
+    /*
+      When the unlock grants behind the held answer lapse (the server's
+      `validUntil`), and how many times that has happened. Past it the answer
+      quotes text the viewer can no longer open, so it is hidden and asked
+      again -- the counter is what re-runs the search.
+    */
+    const [messageSearchValidUntil, setMessageSearchValidUntil] = useState<number | null>(null);
+    const [messageSearchExpiries, setMessageSearchExpiries] = useState(0);
+    /** The last request failed (rate limit, network, server): not "no matches". */
+    const [messageSearchFailed, setMessageSearchFailed] = useState(false);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
     /**
@@ -336,7 +367,32 @@ export function ChatSidebar({
     const menuIconClass = "h-3.5 w-3.5 shrink-0";
     const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
     const normalizedSearch = searchQuery.trim().toLowerCase();
-    const messageMatchedIds = new Set(messageSearchResults.map((result) => result.conversationId));
+    /*
+      Which conversations exist and which are locked, as one string. A lock or
+      a deletion changes it, and an answer read under a different one may name
+      or quote what the viewer can no longer open. So the answer is shown only
+      while it matches -- a derivation, not a clearing effect, so it is gone in
+      the same render the change arrives in -- and the effect below asks again.
+    */
+    const { data: searchSession } = useSession();
+    const searchAccessSignature = [
+        // Whose answer it is: an account switch changes this before the new
+        // account's list arrives, so the previous account's hits are never
+        // drawn against it.
+        searchSession?.user?.id ?? "anonymous",
+        ...conversations.map(
+            (conversation) =>
+                `${conversation.id}:${conversation.isLocked ? 1 : 0}:${conversation.sourceState ?? "-"}`
+        ),
+    ].join(",");
+    // Lapsed grants are handled by the timer below, which drops the access the
+    // answer was read under; a render cannot read the clock.
+    const messageSearchCurrent = messageSearchAccess === searchAccessSignature;
+    const visibleMessageSearchResults = messageSearchCurrent ? messageSearchResults : [];
+    const visibleMessageSearchMeta = messageSearchCurrent
+        ? messageSearchMeta
+        : { truncated: false, sourceTimedOut: false };
+    const messageMatchedIds = new Set(visibleMessageSearchResults.map((result) => result.conversationId));
     const getConversationProjectId = (conversation: Conversation) =>
         Object.prototype.hasOwnProperty.call(conversationProjectOverrides, conversation.id)
             ? conversationProjectOverrides[conversation.id]
@@ -374,29 +430,113 @@ export function ChatSidebar({
 
     useEffect(() => {
         if (isGuestMode || normalizedSearch.length < 2) {
-            const timer = window.setTimeout(() => setMessageSearchResults([]), 0);
+            const timer = window.setTimeout(() => {
+                setMessageSearchResults([]);
+                setMessageSearchMeta({ truncated: false, sourceTimedOut: false });
+                setShowAllMessageMatches(false);
+                setMessageSearchFailed(false);
+            }, 0);
             return () => window.clearTimeout(timer);
         }
         const controller = new AbortController();
+        const readUnder = searchAccessSignature;
         const timer = window.setTimeout(() => {
             void fetch(`/api/conversations/search?q=${encodeURIComponent(searchQuery.trim())}`, {
                 signal: controller.signal,
                 cache: "no-store",
                 headers: displayTimeZoneHeaders(),
             })
-                .then((response) =>
-                    response.ok
-                        ? response.json()
-                        : discardResponseBody(response).then(() => ({ results: [] }))
-                )
-                .then((data) => setMessageSearchResults(Array.isArray(data.results) ? data.results : []))
+                .then(async (response) => {
+                    if (response.ok) return response.json();
+                    // A refusal is not an empty answer. The held results are
+                    // dropped (they may rest on grants this refusal cannot
+                    // confirm) and the reason is said on screen; a rate limit
+                    // also says when it will accept another.
+                    const retryAfter = Number(response.headers.get("Retry-After"));
+                    await discardResponseBody(response);
+                    setMessageSearchAccess(null);
+                    setMessageSearchValidUntil(null);
+                    setMessageSearchFailed(true);
+                    if (response.status === 429 && Number.isFinite(retryAfter) && retryAfter > 0) {
+                        window.setTimeout(
+                            () => setMessageSearchExpiries((count) => count + 1),
+                            Math.min(retryAfter, 120) * 1_000
+                        );
+                    }
+                    return null;
+                })
+                .then((data) => {
+                    if (data === null) return;
+                    setMessageSearchFailed(false);
+                    const validUntil =
+                        typeof data.validUntil === "string" ? Date.parse(data.validUntil) : NaN;
+                    if (Number.isFinite(validUntil) && validUntil - SEARCH_GRANT_MARGIN_MS <= Date.now()) {
+                        // Lapsed (or about to) before it could be drawn: never
+                        // shown. Asked again only once the grant has actually
+                        // lapsed -- before then the server would return the
+                        // same answer, and re-asking at once would spin.
+                        setMessageSearchAccess(null);
+                        setMessageSearchValidUntil(validUntil);
+                        return;
+
+                    }
+                    setMessageSearchResults(Array.isArray(data.results) ? data.results : []);
+                    setMessageSearchMeta({
+                        truncated: data.truncated === true,
+                        // Said on screen whenever it happened, so a short list is
+                        // never read as "the originals had nothing".
+                        sourceTimedOut: data.sourceSearch === "timed_out",
+                    });
+                    setShowAllMessageMatches(false);
+                    setMessageSearchAccess(readUnder);
+                    setMessageSearchValidUntil(Number.isFinite(validUntil) ? validUntil : null);
+                })
                 .catch(() => {});
         }, 250);
         return () => {
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [isGuestMode, normalizedSearch.length, searchQuery]);
+    }, [isGuestMode, normalizedSearch.length, searchQuery, searchAccessSignature, messageSearchExpiries]);
+
+    useEffect(() => {
+        if (messageSearchValidUntil === null) return;
+        const lapseAt = messageSearchValidUntil;
+        // Hidden early by a margin, so ordinary timer latency cannot keep a
+        // lapsed excerpt on screen.
+        const hide = () => setMessageSearchAccess(null);
+        // Asked again just after the grant has really lapsed, once.
+        const reask = () => {
+            setMessageSearchAccess(null);
+            setMessageSearchValidUntil(null);
+            setMessageSearchExpiries((count) => count + 1);
+        };
+        const hideTimer = window.setTimeout(
+            hide,
+            Math.max(0, lapseAt - SEARCH_GRANT_MARGIN_MS - Date.now())
+        );
+        const reaskTimer = window.setTimeout(
+            reask,
+            Math.max(0, lapseAt + SEARCH_REASK_DELAY_MS - Date.now())
+        );
+        // A throttled or suspended tab runs its timers late, so the clock is
+        // checked again the moment the page is seen.
+        const recheck = () => {
+            const now = Date.now();
+            if (now >= lapseAt + SEARCH_REASK_DELAY_MS) reask();
+            else if (now >= lapseAt - SEARCH_GRANT_MARGIN_MS) hide();
+        };
+        document.addEventListener("visibilitychange", recheck);
+        window.addEventListener("pageshow", recheck);
+        window.addEventListener("focus", recheck);
+        return () => {
+            window.clearTimeout(hideTimer);
+            window.clearTimeout(reaskTimer);
+            document.removeEventListener("visibilitychange", recheck);
+            window.removeEventListener("pageshow", recheck);
+            window.removeEventListener("focus", recheck);
+        };
+    }, [messageSearchValidUntil]);
 
     useEffect(() => {
         if (!showHelpMenu) return;
@@ -1450,22 +1590,59 @@ export function ChatSidebar({
                           }`
                 }`}
             >
-                {messageSearchResults.length > 0 && (
-                    <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
+                {messageSearchFailed && normalizedSearch.length >= 2 && !isGuestMode && (
+                    <p
+                        data-testid="message-search-failed"
+                        role="status"
+                        className="mb-2 rounded-xl border border-zinc-200 bg-white px-2 py-1.5 text-[11px] leading-4 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                    >
+                        {t("sidebar.searchFailed")}
+                    </p>
+                )}
+                {(visibleMessageSearchResults.length > 0 || visibleMessageSearchMeta.sourceTimedOut) && (
+                    <div
+                        data-testid="message-search-results"
+                        className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20"
+                    >
                         <p className="px-1 pb-1 font-bold text-blue-700 dark:text-blue-300">
                             {t("sidebar.messageMatches")}
                         </p>
-                        {messageSearchResults.slice(0, 4).map((result) => (
+                        {visibleMessageSearchMeta.sourceTimedOut && (
+                            <p
+                                data-testid="message-search-source-timeout"
+                                role="status"
+                                className="px-1 pb-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+                            >
+                                {t("sidebar.sourceSearchTimedOut")}
+                            </p>
+                        )}
+                        {(showAllMessageMatches
+                            ? visibleMessageSearchResults
+                            : visibleMessageSearchResults.slice(0, 4)
+                        ).map((result) => (
                             <button
-                                key={result.id}
+                                // One imported message can be shown under more
+                                // than one continuation, so the id alone repeats.
+                                key={`${result.id}:${result.conversationId}`}
                                 type="button"
-                                onClick={() =>
+                                data-testid="message-search-result"
+                                data-result-kind={result.kind ?? "native"}
+                                onClick={() => {
+                                    if (result.kind === "imported" && result.externalMessageId) {
+                                        requestContinuationFocus(
+                                            result.conversationId,
+                                            result.externalMessageId,
+                                            // Already on screen: selecting it again changes no
+                                            // open conversation, so it has arrived now.
+                                            { alreadyOpen: currentChatId === result.conversationId }
+                                        );
+                                    }
                                     onSelectConversation(
                                         result.conversationId,
                                         false,
                                         result.surface
-                                    )
-                                }
+                                    );
+                                }}
                                 className="block w-full rounded-lg px-2 py-1.5 text-left text-zinc-600 hover:bg-white dark:text-zinc-300 dark:hover:bg-zinc-900"
                             >
                                 <span className="block truncate font-bold">
@@ -1483,9 +1660,46 @@ export function ChatSidebar({
                                         continuationTitleCopy(t)
                                     )}
                                 </span>
-                                <span className="block truncate text-[11px] text-zinc-400">{result.snippet}</span>
+                                {result.kind === "imported" && result.sourceProvider && (
+                                    <span
+                                        data-testid="message-search-imported-badge"
+                                        className="mt-0.5 inline-block rounded-full bg-zinc-200/70 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                                    >
+                                        {t("sidebar.importedMatchBadge").replaceAll(
+                                            "{provider}",
+                                            providerLabel(result.sourceProvider)
+                                        )}
+                                    </span>
+                                )}
+                                <span className="block truncate text-[11px] text-zinc-400">
+                                    <SearchSnippetText
+                                        text={result.snippet}
+                                        highlight={result.snippetHighlight ?? null}
+                                    />
+                                </span>
                             </button>
                         ))}
+                        {visibleMessageSearchResults.length > 4 && (
+                            <button
+                                type="button"
+                                data-testid="message-search-toggle-all"
+                                aria-expanded={showAllMessageMatches}
+                                onClick={() => setShowAllMessageMatches((value) => !value)}
+                                className="mt-1 min-h-11 w-full rounded-lg px-2 text-left text-[11px] font-semibold text-blue-700 hover:bg-white dark:text-blue-300 dark:hover:bg-zinc-900"
+                            >
+                                {showAllMessageMatches
+                                    ? t("sidebar.showFewerMatches")
+                                    : t("sidebar.showAllMatches").replaceAll(
+                                          "{count}",
+                                          String(visibleMessageSearchResults.length)
+                                      )}
+                            </button>
+                        )}
+                        {visibleMessageSearchMeta.truncated && (
+                            <p className="px-1 pt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                                {t("sidebar.partialMatches")}
+                            </p>
+                        )}
                     </div>
                 )}
                 {filteredConversations.length === 0 && (
