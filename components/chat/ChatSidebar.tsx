@@ -1,7 +1,6 @@
 ﻿"use client";
 
 import { Conversation } from "./types";
-import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
@@ -10,7 +9,7 @@ import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
 import Link from "next/link";
-import { AlertTriangle, Check, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Star, Tag, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
@@ -91,7 +90,7 @@ type ChatSidebarProps = {
     autoCollapseSuggested?: boolean;
 };
 
-type ConversationFilter = "all" | "locked" | "shared" | "work" | "research" | "personal" | `project:${string}`;
+type ConversationFilter = "all" | "locked" | "shared" | `project:${string}`;
 
 type ConversationProject = {
     id: string;
@@ -183,7 +182,6 @@ export function ChatSidebar({
     isMobileDrawer = false,
     autoCollapseSuggested = false,
 }: ChatSidebarProps) {
-    const { getModel } = useModelCatalog();
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [conversationMenuPosition, setConversationMenuPosition] = useState<ConversationMenuPosition | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
@@ -197,34 +195,10 @@ export function ChatSidebar({
     const [projects, setProjects] = useState<ConversationProject[]>([]);
     const [isCreatingProject, setIsCreatingProject] = useState(false);
     const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
-    const [conversationLabels, setConversationLabels] = useState<Record<string, string>>(() => {
-        if (typeof window === "undefined") return {};
-        try {
-            const saved = JSON.parse(localStorage.getItem("tomverse_conversation_labels") || "{}");
-            if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
-            return Object.fromEntries(
-                Object.entries(saved).filter(
-                    (entry): entry is [string, string] =>
-                        typeof entry[0] === "string" && typeof entry[1] === "string"
-                )
-            );
-        } catch {
-            return {};
-        }
-    });
     const [pinnedConversationIds, setPinnedConversationIds] = useState<string[]>(() => {
         if (typeof window === "undefined") return [];
         try {
             const saved = JSON.parse(localStorage.getItem("tomverse_pinned_conversations") || "[]");
-            return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
-        } catch {
-            return [];
-        }
-    });
-    const [favoriteConversationIds, setFavoriteConversationIds] = useState<string[]>(() => {
-        if (typeof window === "undefined") return [];
-        try {
-            const saved = JSON.parse(localStorage.getItem("tomverse_favorite_conversations") || "[]");
             return Array.isArray(saved) ? saved.filter((item): item is string => typeof item === "string") : [];
         } catch {
             return [];
@@ -433,27 +407,18 @@ export function ChatSidebar({
             conversationFilter === "all" ||
             (conversationFilter === "locked" && conversation.isLocked) ||
             (conversationFilter === "shared" && conversation.shareEnabled) ||
-            (conversationFilter.startsWith("project:")
-                ? getConversationProjectId(conversation) === conversationFilter.slice("project:".length)
-                : conversationLabels[conversation.id] === conversationFilter);
+            (conversationFilter.startsWith("project:") &&
+                getConversationProjectId(conversation) === conversationFilter.slice("project:".length));
 
         return matchesSearch && matchesFilter;
-    }).sort((a, b) => {
-        const pinnedDelta =
-            Number(pinnedConversationIds.includes(b.id)) -
-            Number(pinnedConversationIds.includes(a.id));
-        if (pinnedDelta !== 0) return pinnedDelta;
-        const favoriteDelta =
-            Number(favoriteConversationIds.includes(b.id)) -
-            Number(favoriteConversationIds.includes(a.id));
-        return favoriteDelta;
-    });
-    const activeLabelFilter =
-        conversationFilter === "work" ||
-        conversationFilter === "research" ||
-        conversationFilter === "personal"
-            ? conversationFilter
-            : null;
+    }).sort((a, b) =>
+        // Pinned first, and nothing else: the list already arrives newest-first.
+        // Favourites used to be a second key here, doing pinning's job under a
+        // second name with no filter of its own, so nobody could tell the two
+        // apart. Removed rather than kept as a quieter duplicate.
+        Number(pinnedConversationIds.includes(b.id)) -
+        Number(pinnedConversationIds.includes(a.id))
+    );
 
     useEffect(() => {
         if (isGuestMode || normalizedSearch.length < 2) {
@@ -645,19 +610,6 @@ export function ChatSidebar({
 
     const togglePinned = (id: string) =>
         toggleStoredId("tomverse_pinned_conversations", id, setPinnedConversationIds);
-    const toggleFavorite = (id: string) =>
-        toggleStoredId("tomverse_favorite_conversations", id, setFavoriteConversationIds);
-
-    const setConversationLabel = (id: string, label: "work" | "research" | "personal" | null) => {
-        setConversationLabels((current) => {
-            const next = { ...current };
-            if (label) next[id] = label;
-            else delete next[id];
-            localStorage.setItem("tomverse_conversation_labels", JSON.stringify(next));
-            return next;
-        });
-    };
-
     useEffect(() => {
         if (isGuestMode) {
             const timer = window.setTimeout(() => setProjects([]), 0);
@@ -863,44 +815,32 @@ export function ChatSidebar({
         );
     };
 
-    const labelText = (label: string) => {
-        if (label === "work") return t("sidebar.labelWork");
-        if (label === "research") return t("sidebar.labelResearch");
-        if (label === "personal") return t("sidebar.labelPersonal");
-        return label;
-    };
-
     const projectText = (projectId: string) =>
         projects.find((project) => project.id === projectId)?.name || t("sidebar.uncategorizedProject");
 
     const activeOrganizerSummary = (() => {
         if (conversationFilter === "locked") return helpCopy.lockedFilter;
         if (conversationFilter === "shared") return helpCopy.sharedFilter;
-        if (
-            conversationFilter === "work" ||
-            conversationFilter === "research" ||
-            conversationFilter === "personal"
-        ) {
-            return labelText(conversationFilter);
-        }
         if (conversationFilter.startsWith("project:")) {
             return projectText(conversationFilter.slice("project:".length));
         }
         return t("sidebar.organizerNoFilter");
     })();
 
-    const getConversationModelSummary = (conversation: Conversation) => {
-        // Image conversations store selectedModels as "[]" by invariant; the
-        // fixed image model is the only thing that could be named here.
-        if (conversation.kind === "image") return t("sidebar.imageConversation");
-        const models = conversation.selectedModels
-            ?.map((modelId) => getModel(modelId)?.name)
-            .filter(Boolean);
+    /*
+      How many models this conversation answers with, and nothing more.
 
-        if (!models?.length) return t("sidebar.noModelInfo");
-        if (models.length === 1) return models[0];
-        return `${models[0]} +${models.length - 1}`;
-    };
+      The row used to name the model on every line. In a list where almost
+      every conversation runs the same selection that named nothing, and on an
+      imported row it named the model that will answer *next* rather than the
+      one that produced the transcript anybody is reading. What is left is the
+      one fact a name could not carry: that this conversation is a comparison.
+
+      Image conversations keep selectedModels as "[]" by invariant, so they
+      count 0 and show no chip; the glyph already says what they are.
+    */
+    const conversationModelCount = (conversation: Conversation) =>
+        conversation.kind === "image" ? 0 : conversation.selectedModels?.length ?? 0;
 
     const closeConversationMenu = useCallback(() => {
         setOpenMenuId(null);
@@ -1339,53 +1279,6 @@ export function ChatSidebar({
                     </div>
                 </div>
                 <div
-                    data-testid="sidebar-label-filters"
-                    className={`mt-2 rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
-                        sidebarTourStep === 1 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
-                    }`}
-                >
-                    <div className="flex items-center gap-1">
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500">
-                            {helpCopy.labelsTitle}
-                        </span>
-                        <FeatureHelpPopover
-                            title={helpCopy.labelsTitle}
-                            description={helpCopy.labelsDescription}
-                            buttonLabel={helpCopy.helpAboutLabels}
-                            learnMoreLabel={helpCopy.learnMore}
-                            topic="label"
-                            href={chatWorkspaceGuideHref(lang, "labels")}
-                            mobile={isMobileDrawer}
-                            testId="labels-help"
-                        />
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-900">
-                        {[
-                            ["work", t("sidebar.labelWork")],
-                            ["research", t("sidebar.labelResearch")],
-                            ["personal", t("sidebar.labelPersonal")],
-                        ].map(([value, label]) => (
-                            <button
-                                key={value}
-                                type="button"
-                                onClick={() =>
-                                    setConversationFilter((current) =>
-                                        current === value ? "all" : (value as ConversationFilter)
-                                    )
-                                }
-                                className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors ${
-                                    conversationFilter === value
-                                        ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                                        : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-                                }`}
-                                aria-pressed={conversationFilter === value}
-                            >
-                                {label}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-                <div
                     data-testid="sidebar-projects"
                     className={`${isMobileDrawer ? "mt-2" : "mt-3"} rounded-xl border border-zinc-200 bg-white p-2 transition dark:border-zinc-800 dark:bg-zinc-950 ${
                         sidebarTourStep === 0 ? "ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-zinc-950" : ""
@@ -1625,7 +1518,12 @@ export function ChatSidebar({
                 // list a scroller: a drag that runs out of list chains into the
                 // drawer instead of dead-ending, and the drawer's own
                 // `overscroll-contain` still stops it before the page behind.
-                className={`min-h-[10rem] touch-pan-y space-y-1 p-2 [scrollbar-gutter:stable] ${
+                // `@container/sidebar`: the rows below drop their chip when this
+                // list is narrower than 17rem, so the title keeps its floor on a
+                // 320px drawer and at 200% text. A media query would have asked
+                // about the window instead, and the window is not what the row
+                // is laid out in.
+                className={`@container/sidebar min-h-[10rem] touch-pan-y space-y-0.5 p-2 [scrollbar-gutter:stable] ${
                     isSingleScrollDrawer
                         ? "flex-none overflow-visible"
                         : `flex-1 overflow-y-auto ${
@@ -1748,24 +1646,7 @@ export function ChatSidebar({
                 {filteredConversations.length === 0 && (
                     <div className="flex min-h-32 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-200 px-4 py-4 text-center text-xs text-zinc-400 dark:border-zinc-800">
                         <MessageSquare className="mb-2 h-5 w-5" />
-                        {activeLabelFilter && !normalizedSearch ? (
-                            <>
-                                <p className="font-bold text-zinc-600 dark:text-zinc-300">
-                                    {helpCopy.emptyLabels[activeLabelFilter]}
-                                </p>
-                                <p className="mt-1 leading-5">{helpCopy.emptyLabelBody}</p>
-                                <Link
-                                    href={chatWorkspaceGuideHref(lang, "labels")}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="mt-2 font-bold text-blue-600 hover:text-blue-500 dark:text-blue-300"
-                                >
-                                    {helpCopy.labelGuide}
-                                </Link>
-                            </>
-                        ) : (
-                            t("sidebar.noConversations")
-                        )}
+                        {t("sidebar.noConversations")}
                     </div>
                 )}
                 {filteredConversations.map((conv) => {
@@ -1795,116 +1676,159 @@ export function ChatSidebar({
                                 }
                             }}
                             onClick={() => onSelectConversation(conv.id)}
-                            className={`relative group flex items-center justify-between rounded-xl px-3 py-2.5 text-xs cursor-pointer transition-all border ${isMenuOpen ? "z-20" : "z-10"} ${isActive
+                            // A minimum, never a fixed height: at 200% text the
+                            // row has to grow with its title. 48px on the drawer
+                            // keeps the 44px touch target with room for the
+                            // focus ring; the desktop row has a pointer and
+                            // takes 40.
+                            className={`relative group flex items-center justify-between rounded-xl px-2.5 py-1.5 text-xs cursor-pointer transition-all border ${isMobileDrawer ? "min-h-12" : "min-h-10"} ${isMenuOpen ? "z-20" : "z-10"} ${isActive
                                     ? "bg-zinc-200 border-zinc-300 text-zinc-900 font-semibold dark:bg-zinc-800 dark:border-zinc-700/80 dark:text-zinc-100"
                                     : "bg-transparent border-transparent text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200"
                                 }`}
                             title={isGuestMode ? t("sidebar.loginRequired") : ""}
                         >
-                            <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2.5 ${isMobileDrawer ? "pr-11" : "pr-6"}`}>
+                            <div className={`cursor-pointer flex min-w-0 flex-1 items-center gap-2 ${isMobileDrawer ? "pr-11" : "pr-7"}`}>
                                 {(() => {
                                     /*
-                                      A continued conversation wears the icon
-                                      of the service it was imported from.
+                                      A glyph only where it says something.
 
-                                      The row is otherwise indistinguishable
-                                      from every other one, and where a
-                                      transcript came from is the single fact
-                                      that tells its owner which of their
-                                      conversations this is -- more than the
-                                      title does, since the title is the
-                                      source's own and they may have several.
+                                      Every row used to carry a 32px plate, and
+                                      because the plate was taller than the
+                                      title it -- not the text -- decided how
+                                      tall a row was. On a phone that is the
+                                      difference between six conversations on
+                                      screen and ten. The plain chat bubble was
+                                      also the least informative of them: it
+                                      marked "this is a chat" in a list of
+                                      chats.
 
-                                      The catalogue's own logos
-                                      (`lib/modelBranding.ts`, via
-                                      `externalProviderBrand`), never a new
-                                      asset and never a hard-coded brand
-                                      colour: the same three companies already
-                                      have marks in this app, and a second copy
-                                      would be a second thing to update.
+                                      So the glyph is kept for the three rows
+                                      that are not like the others -- imported,
+                                      image, locked -- and dropped everywhere
+                                      else.
 
-                                      The generic bubble stays the fallback for
-                                      a provider this build does not recognise.
-                                      A deleted snapshot is not that case --
-                                      the bridge keeps `provider` on purpose,
-                                      so a continuation says where it came from
-                                      for as long as it exists.
+                                      A continuation wears the mark of the
+                                      service it came from (`lib/modelBranding.ts`
+                                      via `externalProviderBrand`), which is
+                                      the single fact that tells its owner which
+                                      of their conversations this is: the title
+                                      is the source's own and they may have
+                                      several.
+
+                                      When that source has since been deleted
+                                      the same mark is drawn muted rather than
+                                      given a row of its own. The badge that used
+                                      to sit under the title made imported rows
+                                      79px against 57px, and what it said is
+                                      already said where it is acted on -- the
+                                      tombstone in the transcript
+                                      (components/chat/ChatMessageList.tsx) and
+                                      the provenance block in the export. Here
+                                      it is the accessible name, and the
+                                      organizer keeps a filter for finding them.
                                     */
                                     const importedBrand =
                                         !conv.isLocked && conv.surface === "continuation"
                                             ? externalProviderBrand(conv.sourceProvider)
                                             : null;
+                                    const sourceDeleted = conv.sourceState === "deleted";
                                     if (importedBrand) {
                                         return (
                                             <span
                                                 data-testid="sidebar-conversation-provider-icon"
                                                 data-provider={conv.sourceProvider ?? ""}
-                                                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-500/10"
+                                                data-source-deleted={sourceDeleted ? "true" : undefined}
+                                                className={`flex h-5 w-5 shrink-0 items-center justify-center ${sourceDeleted ? "opacity-40" : ""}`}
                                             >
                                                 <ModelLogo provider={importedBrand} size="sm" />
-                                                <span className="sr-only">
-                                                    {t("continuation.importedFrom").replaceAll(
-                                                        "{provider}",
-                                                        providerLabel(conv.sourceProvider ?? "")
-                                                    )}
+                                                <span className="sr-only" data-testid={sourceDeleted ? "conversation-source-deleted" : undefined}>
+                                                    {sourceDeleted
+                                                        ? `${t("continuation.importedFrom").replaceAll(
+                                                              "{provider}",
+                                                              providerLabel(conv.sourceProvider ?? "")
+                                                          )} · ${t("continuation.sourceDeletedBadge")}`
+                                                        : t("continuation.importedFrom").replaceAll(
+                                                              "{provider}",
+                                                              providerLabel(conv.sourceProvider ?? "")
+                                                          )}
                                                 </span>
                                             </span>
                                         );
                                     }
-                                    return (
-                                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conv.isLocked ? "bg-amber-500/10 text-amber-500" : conv.kind === "image" ? "bg-accent-image-500/10 text-accent-image-500" : "bg-blue-500/10 text-blue-500"}`}>
-                                    {conv.isLocked ? (
-                                        <Lock className="h-3.5 w-3.5" />
-                                    ) : conv.kind === "image" ? (
-                                        <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                                    ) : (
-                                        <MessageSquare className="h-3.5 w-3.5" />
-                                    )}
-                                </span>
-                                    );
+                                    if (conv.isLocked || conv.kind === "image") {
+                                        return (
+                                            <span
+                                                className={`flex h-5 w-5 shrink-0 items-center justify-center ${conv.isLocked ? "text-amber-500" : "text-accent-image-500"}`}
+                                            >
+                                                {conv.isLocked ? (
+                                                    <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+                                                ) : (
+                                                    <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                                                )}
+                                                <span className="sr-only">
+                                                    {conv.isLocked ? helpCopy.lockedBadge : t("sidebar.imageConversation")}
+                                                </span>
+                                            </span>
+                                        );
+                                    }
+                                    return null;
                                 })()}
-                                <span className="min-w-0 flex flex-col gap-1">
-                                    <span className="truncate text-[13px] leading-4">{conv.title}</span>
-                                    {/* Only when the source was deleted -- a locked or
-                                        untitled source also leaves the row on its
-                                        fallback name, and calling that "deleted" would
-                                        be false (lib/continuationTitleContext.ts). */}
-                                    {conv.sourceState === "deleted" && (
-                                        <span
-                                            data-testid="conversation-source-deleted"
-                                            className="inline-flex w-fit items-center rounded-full bg-zinc-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300"
-                                        >
-                                            {t("continuation.sourceDeletedBadge")}
+                                {/*
+                                  The title owns the row.
+
+                                  `min-w-[14ch]` is the floor a chip may not
+                                  push past: the chips used to be `shrink-0`
+                                  beside a title that could shrink to nothing,
+                                  and a project called "신규 서비스" left two
+                                  characters of the title on a 320px drawer.
+                                  Now the chip cluster is the side that gives
+                                  way, and below 17rem of sidebar it is not
+                                  drawn at all -- what it said is in the
+                                  organizer's filters, one tap away.
+                                */}
+                                <span className="min-w-[14ch] flex-1 truncate text-sm leading-5">{conv.title}</span>
+                                <span className="flex min-w-0 shrink items-center justify-end gap-1.5">
+                                    {(() => {
+                                        const projectId = getConversationProjectId(conv);
+                                        if (projectId) {
+                                            return (
+                                                <span className="hidden min-w-0 max-w-[32%] truncate rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-bold text-purple-500 @[17rem]/sidebar:inline-block">
+                                                    {projectText(projectId)}
+                                                </span>
+                                            );
+                                        }
+                                        const comparedModels = conversationModelCount(conv);
+                                        if (comparedModels > 1) {
+                                            return (
+                                                <span
+                                                    data-testid="sidebar-conversation-model-count"
+                                                    className="hidden shrink-0 rounded-full bg-zinc-500/10 px-1.5 py-0.5 text-[11px] font-bold text-zinc-600 dark:text-zinc-300 @[17rem]/sidebar:inline-block"
+                                                >
+                                                    {t("sidebar.modelCount").replaceAll("{count}", String(comparedModels))}
+                                                </span>
+                                            );
+                                        }
+                                        return null;
+                                    })()}
+                                    {/*
+                                      Status is two icons at most, and each one
+                                      carries its own name for a reader who
+                                      cannot see it. A stack of chips grew the
+                                      row by a line each; these do not grow it
+                                      at all.
+                                    */}
+                                    {pinnedConversationIds.includes(conv.id) && (
+                                        <span className="shrink-0 text-blue-500">
+                                            <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+                                            <span className="sr-only">{t("sidebar.pinnedBadge")}</span>
                                         </span>
                                     )}
-                                    {conversationLabels[conv.id] && (
-                                        <span className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-bold text-blue-500">
-                                            <Tag className="h-2.5 w-2.5" />
-                                            {labelText(conversationLabels[conv.id])}
+                                    {conv.shareEnabled && (
+                                        <span className="shrink-0 text-blue-500">
+                                            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                                            <span className="sr-only">{helpCopy.sharedBadge}</span>
                                         </span>
                                     )}
-                                    {getConversationProjectId(conv) && (
-                                        <span className="inline-flex w-fit max-w-full items-center gap-1 rounded-full bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-bold text-purple-500">
-                                            <Folder className="h-2.5 w-2.5 shrink-0" />
-                                            <span className="truncate">{projectText(getConversationProjectId(conv) || "")}</span>
-                                        </span>
-                                    )}
-                                    <span className="flex items-center gap-1.5 truncate text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-                                        {pinnedConversationIds.includes(conv.id) && <Pin className="h-3 w-3 shrink-0 text-blue-500" />}
-                                        {favoriteConversationIds.includes(conv.id) && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400" />}
-                                        <Sparkles className="h-3 w-3 shrink-0" />
-                                        <span className="truncate">{getConversationModelSummary(conv)}</span>
-                                        {conv.shareEnabled && (
-                                            <span className="shrink-0 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-blue-500">
-                                                {helpCopy.sharedBadge}
-                                            </span>
-                                        )}
-                                        {conv.isLocked && (
-                                            <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-500">
-                                                {helpCopy.lockedBadge}
-                                            </span>
-                                        )}
-                                    </span>
                                 </span>
                             </div>
 
@@ -1987,49 +1911,6 @@ export function ChatSidebar({
                                             </span>
                                         </button>
 
-                                        <button
-                                            type="button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                toggleFavorite(conv.id);
-                                                setOpenMenuId(null);
-                                            }}
-                                            className={`${menuItemBase} ${menuItemEnabled}`}
-                                        >
-                                            <span className="flex min-w-0 items-start gap-2">
-                                                <Star className={menuIconClass} />
-                                                <span>{favoriteConversationIds.includes(conv.id) ? t("sidebar.removeFavorite") : t("sidebar.favoriteChat")}</span>
-                                            </span>
-                                        </button>
-
-                                        <div className="my-1 border-t border-zinc-800" />
-                                        <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
-                                            {helpCopy.labelAssignment}
-                                        </div>
-                                        {(["work", "research", "personal"] as const).map((label) => (
-                                            <button
-                                                key={label}
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setConversationLabel(
-                                                        conv.id,
-                                                        conversationLabels[conv.id] === label ? null : label
-                                                    );
-                                                    setOpenMenuId(null);
-                                                }}
-                                                className={`${menuItemBase} ${menuItemEnabled}`}
-                                            >
-                                                <span className="flex min-w-0 items-start gap-2">
-                                                    {conversationLabels[conv.id] === label ? (
-                                                        <Check className={`${menuIconClass} text-blue-400`} />
-                                                    ) : (
-                                                        <Tag className={menuIconClass} />
-                                                    )}
-                                                    <span>{labelText(label)}</span>
-                                                </span>
-                                            </button>
-                                        ))}
                                         <div className="my-1 border-t border-zinc-800" />
                                         <div className="px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">
                                             {t("sidebar.moveToProject")}
