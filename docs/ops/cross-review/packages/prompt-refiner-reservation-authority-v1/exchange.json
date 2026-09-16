@@ -128,9 +128,27 @@
       ],
       "guardViolations": [],
       "checkFailures": [],
-      "reviewConclusion": null,
-      "findings": [],
-      "nextAction": "awaiting the reviewer's verdict"
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275",
+          "severity": "warning",
+          "basis": "evidence",
+          "claim": "Every DB-clock comparison mixes `clock_timestamp()` (timestamptz) with `TIMESTAMP(3)` (without time zone) columns/variables, so the whole TTL, expiry-ownership and late-consume-becomes-expired contract silently depends on the server's `TimeZone` GUC being UTC: on a non-UTC database inserts always fail closed, and if the GUC has a negative offset the guard accepts a post-deadline consume for |offset| hours instead of writing the required expired tombstone.",
+          "reproduction": "On a database migrated with this change, in psql: (a) `SET TIME ZONE 'America/New_York'; INSERT INTO \"PromptRefinerReservation\"(\"id\",\"stageId\",\"requestId\",\"contractDigest\",\"status\",\"reservedCostMicroUsd\",\"createdAt\",\"expiresAt\",\"updatedAt\") VALUES ('tz_probe','prompt-refiner-shadow-v1','tz_probe','sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f','reserved',24916,(clock_timestamp() AT TIME ZONE 'UTC'),(clock_timestamp() AT TIME ZONE 'UTC')+INTERVAL '5 minutes',(clock_timestamp() AT TIME ZONE 'UTC'));` — these are exactly the naive-UTC values Prisma writes for `timestamp` columns, yet it raises `PromptRefinerReservation contract binding is invalid`; repeating it after `SET TIME ZONE 'UTC'` succeeds. (b) With a row inserted under UTC whose `expiresAt` is one hour in the past, run `SET TIME ZONE 'America/New_York'; UPDATE \"PromptRefinerReservation\" SET \"status\"='consumed' WHERE \"id\"='tz_probe';` and observe `status='consumed'` with a shifted `consumedAt` instead of the expired tombstone the same statement produces under `SET TIME ZONE 'UTC'`. Fix: write `clock_timestamp() AT TIME ZONE 'UTC'` at those five sites. Non-blocking because the repo already assumes a UTC server everywhere (Prisma's own `DEFAULT CURRENT_TIMESTAMP` on `TIMESTAMP(3)` columns has the identical dependence), and on the reviewed UTC configuration every criterion holds.",
+          "note": "Recorded as hardening; no completion criterion is violated on a UTC database.",
+          "disposition": "fix_requested"
+        },
+        {
+          "location": "lib/promptRefinerReservationAuthority.ts:328-339",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The doc comment says \"Expires active rows in bounded batches\", but the `SELECT ... FOR UPDATE` has no `LIMIT`: it locks every `reserved` row for the stage and `limit` is only applied by `.slice()` after the client-side filter, so `limit` bounds the writes but not the lock footprint.",
+          "reproduction": "Call `expirePromptRefinerReservations({ limit: 1 })` with 100 reserved rows present and observe in `pg_locks` that 100 tuple locks are held, not 1. Harmless here because the table is capped at 100 rows; either push `LIMIT`/`expiresAt <= clock_timestamp()` into the SQL or soften the comment.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275; open finding: lib/promptRefinerReservationAuthority.ts:328-339); the author fixes it and the change is re-reviewed"
     }
   ],
   "changeDigest": "sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
@@ -220,13 +238,31 @@
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand the review prompt (round 0) to the claude reviewer; its verdict must name digest sha256:5cbe921076472d012dd5c4619ad61a84d227e08d284f00f3ec36f62013584169",
-  "status": "awaiting_review",
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275",
+      "severity": "warning",
+      "basis": "evidence",
+      "claim": "Every DB-clock comparison mixes `clock_timestamp()` (timestamptz) with `TIMESTAMP(3)` (without time zone) columns/variables, so the whole TTL, expiry-ownership and late-consume-becomes-expired contract silently depends on the server's `TimeZone` GUC being UTC: on a non-UTC database inserts always fail closed, and if the GUC has a negative offset the guard accepts a post-deadline consume for |offset| hours instead of writing the required expired tombstone.",
+      "reproduction": "On a database migrated with this change, in psql: (a) `SET TIME ZONE 'America/New_York'; INSERT INTO \"PromptRefinerReservation\"(\"id\",\"stageId\",\"requestId\",\"contractDigest\",\"status\",\"reservedCostMicroUsd\",\"createdAt\",\"expiresAt\",\"updatedAt\") VALUES ('tz_probe','prompt-refiner-shadow-v1','tz_probe','sha256:c5cc412eb47821d56f6eed2e837d11086a9ab744069715e90d33ea37a378d55f','reserved',24916,(clock_timestamp() AT TIME ZONE 'UTC'),(clock_timestamp() AT TIME ZONE 'UTC')+INTERVAL '5 minutes',(clock_timestamp() AT TIME ZONE 'UTC'));` — these are exactly the naive-UTC values Prisma writes for `timestamp` columns, yet it raises `PromptRefinerReservation contract binding is invalid`; repeating it after `SET TIME ZONE 'UTC'` succeeds. (b) With a row inserted under UTC whose `expiresAt` is one hour in the past, run `SET TIME ZONE 'America/New_York'; UPDATE \"PromptRefinerReservation\" SET \"status\"='consumed' WHERE \"id\"='tz_probe';` and observe `status='consumed'` with a shifted `consumedAt` instead of the expired tombstone the same statement produces under `SET TIME ZONE 'UTC'`. Fix: write `clock_timestamp() AT TIME ZONE 'UTC'` at those five sites. Non-blocking because the repo already assumes a UTC server everywhere (Prisma's own `DEFAULT CURRENT_TIMESTAMP` on `TIMESTAMP(3)` columns has the identical dependence), and on the reviewed UTC configuration every criterion holds.",
+      "note": "Recorded as hardening; no completion criterion is violated on a UTC database.",
+      "disposition": "fix_requested"
+    },
+    {
+      "location": "lib/promptRefinerReservationAuthority.ts:328-339",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The doc comment says \"Expires active rows in bounded batches\", but the `SELECT ... FOR UPDATE` has no `LIMIT`: it locks every `reserved` row for the stage and `limit` is only applied by `.slice()` after the client-side filter, so `limit` bounds the writes but not the lock footprint.",
+      "reproduction": "Call `expirePromptRefinerReservations({ limit: 1 })` with 100 reserved rows present and observe in `pg_locks` that 100 tuple locks are held, not 1. Harmless here because the table is capped at 100 rows; either push `LIMIT`/`expiresAt <= clock_timestamp()` into the SQL or soften the comment.",
+      "disposition": "fix_requested"
+    }
+  ],
+  "nextAction": "approved, but a required check failed or a finding is open (open finding: prisma/migrations/20260916120000_prompt_refiner_reservation_authority/migration.sql:169-171, :226, :246, :271-275; open finding: lib/promptRefinerReservationAuthority.ts:328-339); the author fixes it and the change is re-reviewed; package round 1 once the change is revised",
+  "status": "awaiting_revision",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-16T09:56:56.200Z",
+  "producedAt": "2026-09-16T10:04:58.805Z",
   "packagedRounds": 1,
   "concludedAtRound": null,
   "lineage": [],
