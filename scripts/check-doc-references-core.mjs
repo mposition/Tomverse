@@ -128,6 +128,14 @@ export const PLANNED_REFERENCES = {
     // in its own first paragraph that none of them exists and that nothing is
     // built until section 12 is approved, so building empty modules to satisfy
     // this check would put files in the tree that no decision has authorised.
+    "lib/emailPermission.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed permissionVerdict() that replaces the global consent-required set (D1). Not built: section 12 approval B decides whether the split exists at all.",
+    },
+    "lib/emailAustralianLink.ts": {
+        document: "docs/policy/email-product-news-redesign-draft.md",
+        reason: "Proposed sender-side overlay for the Spam Act (D2a). Not built, and the first round of independent review is what established it was missing.",
+    },
     "lib/emailReleaseNotes.ts": {
         document: "docs/policy/email-product-news-redesign-draft.md",
         reason: "Proposed gate for the release_notes purpose. Section 9 lists it as new; section 12 lists the approvals that would authorise it.",
