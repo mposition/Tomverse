@@ -1356,7 +1356,7 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 | 순서 | ID | 작업 | 우선순위·다음 완료 단위 |
 | --- | --- | --- | --- |
 | 1 | AEO-01 | 검색봇 접근·크롤 정책 관리 | 성장 P1 / 기존 robots·edge 검사 확장, 검색봇 및 비공개 경로 보호, 책임자·검토일 명시. 기존 staging Access 재개발 안 함 |
-| 단기 병행 | SEO-I18N-01 | 중국어 hreflang `zh-CN` → `zh-Hans` | 작은 병행 P1 / **코드 완료, develop [#1516](https://github.com/mposition/Tomverse/pull/1516) 병합(2026-09-17 02:28Z 원격 확인)**. `lib/seo.ts` 매핑 한 곳 변경. production build에서 `/`·`/zh`·`/en`·`/ko/compare-ai-models`·`/zh/ai-answer-review` alternate 8개 모두 `zh-Hans`→`/zh…`, `zh-CN` hreflang 0, canonical·`og:locale zh_CN` 유지, sitemap `zh-Hans` 40·`zh-CN` 0·자기 참조 누락 0 확인. 새 unit test 5건(옛 매핑에서 3건 실패 확인). 배포 후 공개 응답 확인 전 | develop 병합 → main 반영 → 공개 `/zh`·sitemap 응답 확인 |
+| 단기 병행 | SEO-I18N-01 | 중국어 hreflang `zh-CN` → `zh-Hans` | 작은 병행 P1 / **코드 완료, develop [#1516](https://github.com/mposition/Tomverse/pull/1516) 병합(2026-09-17 02:28Z 원격 확인)**. `lib/seo.ts` 매핑 한 곳 변경. production build에서 `/`·`/zh`·`/en`·`/ko/compare-ai-models`·`/zh/ai-answer-review` alternate 8개 모두 `zh-Hans`→`/zh…`, `zh-CN` hreflang 0, canonical·`og:locale zh_CN` 유지, sitemap `zh-Hans` 40·`zh-CN` 0·자기 참조 누락 0 확인. 새 unit test 5건(옛 매핑에서 3건 실패 확인). staging 검증 통과(2026-09-17, `view-source:` sitemap에서 `zh-CN` 0·`zh-Hans` 40, 기록 [#1528](https://github.com/mposition/Tomverse/pull/1528)). production 공개 응답 확인 전 | main 반영 → 공개 `/zh`·sitemap 응답 확인 |
 | 2 | AEO-02 | 가격·무료/유료 범위의 공개 정보 정합성 | 성장 P1 / /pricing 본문·기계 판독 정보가 실제 공개 가격·통화·청구 주기와 일치. 0 가격을 오류로 단정하지 않음 |
 | 3 | AEO-03 | AI 유입·인용·전환 기준선 | 성장 P1 / 1·2와 병행 가능. GA4 AI Assistant·GSC 전용 보고서 확인부터, 질의 표본과 인용/추천·가입/첫 사용 분리 |
 | 4 | AEO-04 | sitemap 변경일 정확성 | 성장 P1 / 실제 의미 있는 변경일과 연결, 신뢰할 날짜가 없으면 생략. 매 요청 현재 시각으로 바꾸지 않음 |
@@ -1469,10 +1469,10 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 | ID | 작업 | 우선순위·상태 | 다음 완료 단위 |
 | --- | --- | --- | --- |
 | STARTER-COMPARE-01 | "세 모델 답 나란히 비교" 카드가 로그인 1개 모델 계정에서 모델을 늘리지 않음 | CHAT-ONBOARD-01 하위 **P1** / 등록, 미착수, 제품 결정 대기 | 7개 locale이 "세 모델"을 약속하지만 seed가 모델을 바꾸지 않음(`suggestedModelIds` 미사용). 모델 3개로 맞춤(계약 §4 개정)·안내 표시·문구 축소 중 결정 → 로그인 1개/게스트 3개/이미 2개 상태 E2E. production flag 활성화 전 수정 권장 |
-| COMPOSER-REFLOW-01 | 페이지 확대·낮은 높이에서 보내기 버튼·카드·주의 문구에 닿지 못함 | CHAT-01 하위 **P1**(접근성) / **코드 완료, develop [#1517](https://github.com/mposition/Tomverse/pull/1517) 병합(2026-09-17 03:15Z 원격 확인)**. 원인 네 개를 production build에서 측정해 수정: 빈 입력란이 두 줄 안내 문구 아래 한 줄 높이로 남아 자체 스크롤이 되어 드래그를 가져감(자동 높이를 폭·안내 문구 변경 때도 재계산), 주의 문구 말줄임(줄바꿈), 대화 영역이 0px까지 줄어듦(4rem 최소 높이), 모델 버튼 라벨 `nowrap`이 120px에서 화살표를 잘라냄(두 줄 허용). 계약에 275×493·206×370·137×247·568×320 page-zoom 절 추가, raw touch drag·중심점 hit-test 회귀 19건. Codex 3회(REVISE→REVISE→APPROVE). 실기기 Edge 확대 재확인 미실시 | develop 병합 확인 → staging에서 Edge 150/200/300% 실기기 확인(사람) → main 반영 |
+| COMPOSER-REFLOW-01 | 페이지 확대·낮은 높이에서 보내기 버튼·카드·주의 문구에 닿지 못함 | CHAT-01 하위 **P1**(접근성) / **코드 완료, develop [#1517](https://github.com/mposition/Tomverse/pull/1517) 병합(2026-09-17 03:15Z 원격 확인)**. 원인 네 개를 production build에서 측정해 수정: 빈 입력란이 두 줄 안내 문구 아래 한 줄 높이로 남아 자체 스크롤이 되어 드래그를 가져감(자동 높이를 폭·안내 문구 변경 때도 재계산), 주의 문구 말줄임(줄바꿈), 대화 영역이 0px까지 줄어듦(4rem 최소 높이), 모델 버튼 라벨 `nowrap`이 120px에서 화살표를 잘라냄(두 줄 허용). 계약에 275×493·206×370·137×247·568×320 page-zoom 절 추가, raw touch drag·중심점 hit-test 회귀 19건. Codex 3회(REVISE→REVISE→APPROVE). **staging 검증 통과(2026-09-17, Galaxy S25+ Edge 100/150/200/300%, 서명 mposition, 기록 develop [#1528](https://github.com/mposition/Tomverse/pull/1528))** | main 반영. 검증 중 발견은 아래 "composer 확대 staging 검증 후속" |
 | CONT-TITLE-LOCALE-01 | 이어온 대화 제목이 새로고침 사이 한국어↔영어로 바뀜 | 병행 **P2**(버그) / 등록, 미착수 | locale 변경으로 목록 요청이 두 번 나가고 늦게 온 이전 locale 응답이 제목을 덮음(추정) → 표시 문자열을 렌더 시점에 만들거나 늦은 응답 폐기 → 응답 순서 역전 테스트. CONT-TITLE-01(완료)과 별개 결함 |
 | STARTER-LOCK-COPY-01 | 잠긴 카드를 누른 뒤 도착 화면이 그 기능을 말하지 않음 | CHAT-ONBOARD-01 하위 **P2** / 등록, 미착수 | 게스트 로그인 모달이 다중 모델용 고정 문구(사유 인자 없음, 분석 태그도 `guest_multi_model`), 요금제 페이지 플랜 목록에 이미지 생성 없음, 마케팅 헤더 "Review로 돌아가기"가 `/chat`으로 감 → 사유별 문구·플랜 경계 표시·CTA 이름 정정 |
-| MOBILE-KB-INSET-01 | 키보드가 열린 Edge에서 입력란 아래 약 100px 빈 띠 | CHAT-01 하위 **P2** / 재현·검토(2026-09-17), 수정 미착수. 에뮬레이션에서 layout viewport가 줄어든 상태에 URL 표시줄 56px을 visual viewport가 빼서 보고하는 경우를 만들면 shell padding 56px이 들어가지만 끝까지 스크롤한 상태의 빈 띠는 0px — 이 조건만으로는 재현되지 않음. 약 100px은 브라우저가 실제로 보고하는 `innerHeight`·`visualViewport.height`·`offsetTop` 값과 safe-area 이중 여백에 달려 있어 실기기 수치가 필요 | 실기기(Edge·Chrome·Samsung Internet)에서 키보드를 올린 상태의 세 값 관측(사람) → 그 값으로 spec 조건 작성 → 수정 |
+| MOBILE-KB-INSET-01 | 키보드가 열린 Edge에서 입력란 아래 빈 띠 | CHAT-01 하위 **P2** / 원인 가설 수정(2026-09-17), 수정 미착수. staging 캡처(K2, 100%, 기존 대화)로 잰 빈 띠는 키보드 올림 약 39 CSS px, 내림 약 16 CSS px — **늘어난 폭 약 23 CSS px**(기기 폭 384px 가정, ±15%). `useKeyboardInset()`은 48px 미만을 0으로 보고하므로(`components/chat/useVisualViewport.ts` `MIN_KEYBOARD_INSET`) 처음 의심한 inset padding 이중 보정이 원인일 가능성은 낮음. 더 유력한 가설: 키보드가 제스처 영역을 덮은 뒤에도 `env(safe-area-inset-bottom)`이 그대로 보고되어, 주의 문구 `pb-[calc(0.4rem+env(safe-area-inset-bottom))]`(`AiDisclaimerNotice.tsx:51`)와 composer `pb-[calc(0.3rem+env(safe-area-inset-bottom))]`(`ChatInput.tsx:3071`)의 safe-area 여백이 남음. 두 여백은 키보드가 없을 때도 겹쳐 들어감. Chromium 에뮬레이션은 `env(safe-area-inset-*)`를 설정할 수 없어 자동 재현 불가 | 키보드가 열린 동안(`useCompactBottomDock` 신호) dock의 safe-area 여백을 한 번만, 또는 0으로 → staging에서 같은 K2 캡처로 전후 비교(사람). 기록 [#1528](https://github.com/mposition/Tomverse/pull/1528) |
 | STARTER-LAYOUT-01 | 카드 아래 안내 문장이 첫 화면에서 dock에 걸려 잘림, 한국어 라벨 단어 중간 줄바꿈 | CHAT-ONBOARD-01 하위 **P3** / 등록, 미착수 | 환영 영역 아래 여백·scroll-padding 부재, 라벨에 `break-keep` 없음 → `displayHeadingClass()` 관례를 카드에만 적용, 안내 문장 가시성 spec 추가 |
 | STARTER-FINDER-01 | 카드가 채운 문장이 Model Finder의 유료 모델·크레딧 안내를 띄움 | CHAT-ONBOARD-01 하위 **P3** / 결정 대기 | 키워드 매칭이라 직접 입력해도 같음, 카드 계약 위반 아님. 카드 초안에서 추천을 끌지 판단한 뒤에만 수정 |
 | STARTER-CHECKLIST-02 | starter staging 체크리스트·설정 감사 로그 공백 | 운영 **P3** / 등록, 미착수 | 전제 SHA를 #1460 이후로, E-3에 브라우저 페이지 확대 조건 추가, 음성 flag 읽는 실제 경로 명시(Admin 저장 경로에 없음) → `templateRevision`과 `_record-template.md` 함께 갱신. `app_settings` 감사 metadata의 변경 전후 값은 별도 결정 |
@@ -1481,6 +1481,24 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
   규칙 대상(시작 카드·랜딩)이 아니어서 등록하지 않았습니다.
 - 상세 원인·`file:line` 근거·결정 선택지:
   [starter staging 검증 발견 분석](./tomverse-chat-starter-staging-findings-review-2026-09-17.md).
+
+#### composer 확대 staging 검증 후속 — 2026-09-17 발견 분석
+
+- **출처**: COMPOSER-REFLOW-01·SEO-I18N-01 staging 검증(Galaxy S25+ Edge, 판정 통과, 서명 mposition, 기록 develop [#1528](https://github.com/mposition/Tomverse/pull/1528)).
+  모두 비차단이며 그 판정을 뒤집지 않습니다. 코드 기준 origin/develop `53a24764`.
+- **분석 방식**: 캡처와 해당 코드·계약을 대조했습니다. 캡처 픽셀의 CSS px 환산은 기기 폭 384px 가정이며 실기기 재측정은 하지 않았습니다.
+
+| ID | 작업 | 우선순위·상태 | 원인과 다음 완료 단위 |
+| --- | --- | --- | --- |
+| COMPOSER-FOCUS-CLIP-01 | 입력란 포커스 테두리 윗부분·모서리가 입력창에 잘림 | CHAT-01 하위 **P2**(접근성) / 등록, 미착수 | 전역 규칙 `:where(… textarea …):focus-visible { outline: 2px; outline-offset: 2px }`(`app/globals.css:445`)가 textarea 바깥 4px에 테두리를 그리는데, composer 루트가 `overflow-hidden`(`ChatInput.tsx:3071`)이고 textarea 행이 composer 위쪽 `py-1`(4px) 안에 있어 잘림. **모바일 composer 계약이 이미 "Focus indicators … must not be clipped by the composer's overflow-hidden"을 요구**하지만 이를 재는 test가 없어 놓침(R7·K2, 100%에서도 모서리 잘림). → textarea 전용 안쪽 포커스 표시(예: 음수 offset 또는 composer `focus-within` 테두리) + 포커스 테두리 사각형이 composer 클립 영역 안에 있는지 재는 spec |
+| MOBILE-HEADER-NARROW-01 | 300% 확대(약 137px)에서 헤더의 새 대화 버튼이 오른쪽 끝에서 잘림 | CHAT-01 하위 **P3** / 등록, 미착수 | 헤더 행(`MobileChatShell.tsx` `mobile-chat-header`)이 메뉴 44px + 제목(`flex-1`) + 모델 버튼(`shrink-0`, `max-w-[52%]`) + 새 대화 44px + 간격·좌우 여백으로 최소 약 180px이 필요한데 화면은 약 137px, 헤더 `overflow-hidden`이 넘친 버튼을 자름. 새 대화는 drawer에서도 시작할 수 있어 기능이 막히지는 않음. → 좁은 폭에서 모델 버튼이 아이콘 크기까지 줄어들게(`shrink-0` 해제, 최소 44px) + 137px 헤더 컨트롤 도달 spec. `mobile-header-spacing` 계약 폭(320px 이상) 밖 |
+| COMPOSER-NOTICE-WRAP-01 | 확대 시 주의 문구가 어절 중간("입력 금 / 지")에서 끊기고 세 줄을 차지함 | CHAT-ONBOARD-01 하위 **P3** / 등록, **결정 필요** | #1517에서 말줄임을 줄바꿈으로 바꾼 뒤 드러남. `lib/displayHeading.ts` 주석이 **"chat disclaimer가 입력 / 은으로 끊길 수 있는 것은 실수가 아니라 본문은 기본 줄바꿈으로 둔다는 결정"**이라고 적고 있고, 전역 `keep-all` 규칙은 두 번 되돌려짐. 같은 주석이 "특정 surface에 어절 유지가 필요하면 그 요소에 `displayHeadingClass()`를 주라"고 허용. 주의 문구는 한 문장짜리 UI 라벨이고 이제 여러 줄이 되므로 그 예외에 해당하는지 결정 필요. 적용하면 150%에서 "입력 금지"가 한 덩어리로 넘어가 줄 수가 줄 가능성. "자세히"를 문장 끝에 붙이는 배치는 그다음 판단 |
+
+- **작업 불필요로 판단**:
+  - 입력 안내 문구 "도와드릴까 / 요?"(R3): textarea placeholder이며, `keep-all`을 textarea에 주면 사용자가 입력하는 본문까지 바뀜.
+    `displayHeading.ts`의 결정(사용자 콘텐츠는 기본 줄바꿈)에 따라 등록하지 않음.
+  - 답변 말풍선의 어절 중간 줄바꿈(R8): 모델 답변은 같은 결정으로 기본 줄바꿈 유지.
+- **기존 항목에 합침**: 키보드 사용 시 빈 띠(K2)는 새 ID 없이 MOBILE-KB-INSET-01 행을 갱신.
 
 #### HELP-NAV-01 — 제품 내 도움말·설정 안내 도우미
 
@@ -1985,6 +2003,12 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   **측정·조사 기록(이 브랜치)**: 이어가기 검색 상한·seed fixture 비교, 캐시·지연 계측 조사, 파일 통합 검증 조사.
   MOBILE-KB-INSET-01은 에뮬레이션 재현을 시도해 실기기 수치가 필요하다고 판단했습니다. 유료 호출·운영 DB 조회·
   flag 변경·배포는 하지 않았습니다. 탐색 에이전트 조사 결과는 핵심 주장만 직접 대조했습니다. 주 투자 순위는 바꾸지 않았습니다.
+
+- 2026-09-17 (Claude 세션, composer 확대 staging 검증 후속): 사용자 요청("검증중 발견/관측한것들중 분석후 작업이
+  필요한 부분들은 작업 목록에 입력")에 따라 검증 기록 [#1528](https://github.com/mposition/Tomverse/pull/1528)의 발견 5건을 코드와 대조했습니다. 새로 등록 3건
+  (COMPOSER-FOCUS-CLIP-01 P2, MOBILE-HEADER-NARROW-01 P3, COMPOSER-NOTICE-WRAP-01 P3·결정 필요), 기존 MOBILE-KB-INSET-01
+  원인 가설 수정, 작업 불필요 2건(placeholder·답변 말풍선 줄바꿈, 기존 결정). COMPOSER-REFLOW-01·SEO-I18N-01 행에
+  staging 통과를 반영했습니다. 제품 코드·flag·배포는 바꾸지 않았고 주 투자 순위는 그대로입니다.
 
 ## VOICE-MIX-01 — 한국어·영어 혼용 Voice 인식 정확도 개선
 
