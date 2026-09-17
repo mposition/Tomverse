@@ -12,7 +12,7 @@
     "DB writer·Prisma schema/migration·admin/product route·runtime script·receipt writer·provider SDK·network·credential lookup·stage seed·flag·admitted:true 경로가 없고, 기존 v1 harness와 동결 evidence files는 수정하지 않는다.",
     "새 evidence·TypeScript·test 경로는 LF로 pin되고 Windows core.autocrlf=true checkout에서도 byte identity가 유지되며 기존 저장소 line-ending 정책을 넓히지 않는다.",
     "journal·witness·report·manifest·proposal과 검증 오류는 content-free이며 prompt/fixture/refinement/provider 오류문이나 사용자·conversation·session identity를 노출하지 않는다.",
-    "focused admission 14/14, provider-free shadow 24/24, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.",
+    "focused admission suite가 통과한다(package 기록은 현재 개수를 보존하며 테스트 수는 증가할 수 있음). provider-free shadow 24/24, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사도 모두 통과한다.",
     "Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다."
   ],
   "baseCommit": "c45871f158cb8f2f32ae7442ac7123613b354201",

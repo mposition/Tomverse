@@ -1141,9 +1141,16 @@ evidence/approval/environment/expiry/execution manifest를 한 durable row에
 | 이 회차 증분 | **제품·공개 +0%p / 검증 인프라 +3%p** — 실행 권한은 열지 않고 evidence→proposal 경계를 닫았다. |
 | C19–C20 Refiner·Planner·품질 평가 | **약 47%** (직전 약 44%, 동결 evidence 검증·proposal-only 상태 기계 반영) |
 | 구현 | content-free 과거 evidence bundle·strict untrusted verifier·현재 checkout 미검증 및 runtime 재검증 의무·deterministic proposal digest·기존 reservation 계약 provenance 결속 완료 |
-| 검증 | 신규 focused test, 기존 shadow/Refiner/PLANNER-03, typecheck·lint·문서/정책/encoding/data-domain 검사를 수행 대상으로 둠 |
-| 독립 검토·통합 CI | 이 기록 시점에는 대기. Claude Code Max 읽기 전용 검토와 Linux CI 통과 전에는 통합 완료로 보지 않음 |
+| 검증 | focused admission **19/19**, 기존 shadow **24/24**, Refiner·injection **59/59**, PLANNER-03 위반 0, typecheck·lint·문서/정책/encoding/data-domain·diff 검사를 모두 통과 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 digest `sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a`를 **approve**했다. 재현 가능한 선택적 nit 2건을 남긴 채 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종결했고, 두 nit은 exchange 밖 후속에서 보강했다. Linux 통합 CI는 다음 단계다. |
 | 공개 상태 | 변화 없음 — provider/API/Railway/유료 호출 0, stage writer·제품 caller·flag·성공 admission 없음 |
+
+최종 검토의 두 nit은 동작 결함이나 승인 차단 finding이 아니었다. 그래도 plain genuine
+Buffer/Uint8Array의 cap+1이 각 raw byte bound에서 먼저 거부됨을 직접 고정하고, focused
+suite 개수가 증가해도 다시 낡지 않는 완료 기준으로 task 문구를 바꿨다. 이 보강은 종료된
+exchange 밖에서 수행했으며 `package-round0..2.json`, `verdict-round0..2.json`, numbered
+events와 최종 `exchange.json`의 감사 기록은 수정하지 않았다. 검토 당시 task bytes는
+`package-round2.json`에 그대로 남는다.
 
 ### 이 Cycle 다음 권장 순서
 

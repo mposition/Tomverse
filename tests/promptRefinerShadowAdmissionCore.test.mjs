@@ -659,7 +659,33 @@ test("journal, witness and corpus are independently bounded and strictly parsed"
     );
 });
 
-test("all raw byte limits run before artifact hashing or journal replay", () => {
+test("plain oversized evidence bytes hit each bound before digest or replay", () => {
+    const oversizedFields = [
+        ["manifestBytes", 64 * 1024 + 1, "manifest_byte_limit"],
+        ["reportBytes", 64 * 1024 + 1, "report_byte_limit"],
+        ["journalBytes", 1024 * 1024 + 1, "journal_byte_limit"],
+        ["witnessBytes", 1024 * 1024 + 1, "witness_byte_limit"],
+        ["corpusBytes", 1024 * 1024 + 1, "corpus_byte_limit"],
+    ];
+    for (const [field, size, taxonomy] of oversizedFields) {
+        for (const oversized of [Buffer.alloc(size), new Uint8Array(size)]) {
+            assert.throws(
+                () =>
+                    proposePromptRefinerShadowStage({
+                        ...checkedIn(),
+                        [field]: oversized,
+                    }),
+                (error) =>
+                    error instanceof Error &&
+                    error.message ===
+                        `prompt_refiner_shadow_admission_${taxonomy}`,
+                `${field} did not stop at its raw byte bound`
+            );
+        }
+    }
+});
+
+test("poisoned evidence also fails before artifact hashing or journal replay", () => {
     const oversizedArtifacts = [
         ["reportBytes", Buffer.alloc(64 * 1024 + 1), "report_byte_limit"],
         ["journalBytes", Buffer.alloc(1024 * 1024 + 1), "journal_byte_limit"],
