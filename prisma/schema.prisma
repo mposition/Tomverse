@@ -5214,6 +5214,17 @@ model ProviderWebhookEvent {
 
   processingError String?
 
+  /// The claim of the worker applying the event: a random lease id, when it
+  /// started, and how many claims there have been. Every outcome a worker
+  /// records is fenced on its lease id, so one whose lease expired changes
+  /// nothing. Out of attempts after ten, the row is abandoned; processed and
+  /// abandoned never both hold
+  /// (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  processingLeaseId   String?
+  processingStartedAt DateTime?
+  processingAttempts  Int       @default(0)
+  abandonedAt         DateTime?
+
   @@unique([provider, providerEventId])
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])

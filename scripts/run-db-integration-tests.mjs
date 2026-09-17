@@ -243,6 +243,9 @@ run(
     // Provider events applied in their own order, every permutation to one state,
     // and the sweep that records expired causes as released.
     "tests/integration/email-provider-event-order.db.test.ts",
+    // The stored event state machine: leases, retries, waiting for a delivery,
+    // and abandonment after ten attempts.
+    "tests/integration/email-webhook-processing-lease.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
     // A deletion request and a spam complaint: the suppression and the preference
     // withdrawal commit in one transaction, keyed so a retry records nothing new.

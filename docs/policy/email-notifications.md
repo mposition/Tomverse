@@ -4,15 +4,53 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v18 (2026-09-17).** provider 사건을 도착 순서가 아니라 사건 순서로 적용하고,
-  delivered가 그보다 이른 soft bounce를 풀며, 만료된 원인을 15분 runner가 해제로
-  기록합니다. 0절 참조.
+- 개정: **v19 (2026-09-17).** 저장된 provider 사건을 lease 아래에서 처리하고, 실패한
+  사건은 재전송과 15분 sweeper가 다시 적용하며, delivery가 아직 기록되지 않은 사건은
+  15분까지 기다립니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v19 (2026-09-17) — webhook 재처리 상태기계(S1b-2a)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"webhook 재처리 상태기계"와 "아직 결속되지 않은 사건"을 구현합니다. 이전에는 적용에
+실패한 사건이 `processingError`만 남기고, 재전송은 unique 충돌로 `duplicate`가 되어
+**다시 적용되지 않았습니다.**
+
+1. **claim** — 사건 행은 무작위 `processingLeaseId`·`processingStartedAt`과 시도 횟수
+   +1을 한 조건부 UPDATE로 가져갑니다(새 사건은 행을 만들 때 claim한 상태). 조건은
+   미처리·미포기, 시도 10 미만, lease 없음 또는 60초 지남입니다.
+2. **fenced 기록** — 성공(`processedAt`, lease 비움), 실패(lease 비움, 오류 분류, 10번째면
+   같은 write에서 `abandonedAt`), 대기(아래)는 모두 `processingLeaseId = 내 lease`이고
+   미처리·미포기인 행에만 씁니다. lease를 잃은 worker의 기록은 버려집니다. 적용 자체는
+   원인 키와 사건 순서로 멱등입니다.
+3. **재전송** — 처리됐거나 포기된 사건은 `duplicate`(200). 미처리면 claim해서 다시
+   적용하고, 살아 있는 lease가 있으면 **409**(provider가 다시 보냄)입니다. 시도가 다 됐지만
+   아직 포기가 기록되지 않은 행은 `duplicate`로 흡수합니다.
+4. **delivery 대기** — 사건이 provider message id를 가졌는데 delivery가 없고 수신 후
+   **15분**이 지나지 않았으면 `awaiting_delivery`로 둡니다: lease를 비우고 claim이 올린
+   시도를 되돌리며, provider에는 200입니다. 15분이 지나면 주소 기준 효과로 확정합니다.
+   경계는 `receivedAt`과 DB `now()`이고, 새 행의 `receivedAt`·lease 시작도 DB 시계로
+   씁니다 — 앱 서버 시계가 어긋나도 lease가 곧바로 만료돼 보이거나 새 사건이 15분 지난
+   것으로 보이지 않도록.
+5. **sweeper** — 15분 runner가 시도가 다 됐고 lease가 없거나 만료된 행에 `abandonedAt`을
+   쓰고(오래된 순 최대 50건, incident `EMAIL_WEBHOOK_ABANDONED`), 미처리 행을 오래된
+   수신순으로 최대 50건 claim해 적용합니다. 20초는 **새 사건을 시작하는 기준**이며, 이미 시작한
+   사건은 자기 transaction timeout 안에서 끝까지 갑니다(초과는 사건 하나만큼). 수신 후
+   **1시간** 넘게 미처리인 행이 있으면 incident `EMAIL_WEBHOOK_BACKLOG`입니다.
+   재전송이 claim하지 못하면 행을 DB 시계로 다시 읽어 판정합니다 — 끝났거나 시도가 다
+   됐고 아무도 쥐지 않았으면 200, 살아 있는 lease면 시도 횟수와 무관하게 409입니다.
+   90일 보관 purge는 한 문장으로, 살아 있는 lease가 있는 행은 지우지 않습니다.
+   **효과와 기록은 한 transaction이 아닙니다.** lease가 만료된 뒤 늦게 끝난 worker의 효과는
+   남을 수 있지만(원인 키·사건 순서로 멱등이고 사실은 참), 행의 처리 기록은 먼저 커밋한
+   쪽의 것입니다. 새 index는 두지 않습니다(기존 `processedAt` index, 쓰기 잠금 회피).
+6. **CHECK** — `processedAt`과 `abandonedAt`은 함께 있을 수 없고, lease id와 시작 시각은
+   함께 있거나 함께 없으며, 시도는 0–10입니다.
+7. stream별 endpoint·secret, 계정 기준 delivery 결속, 계정별 침묵 incident는 S1b-2b입니다.
 
 ### v18 (2026-09-17) — provider 사건 순서와 만료 기록(S1b-1d)
 
