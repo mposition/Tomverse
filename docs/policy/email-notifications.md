@@ -48,14 +48,14 @@
    `releaseKind` `expired`·`releaseEvidence {kind: "expiry"}`를 쓰고, entry를 위와 같은 규칙으로
    맞춥니다. 한 번에 원인 200행(만료 시각·id순), 주소마다 fence와 주소 잠금 안에서, 연결 대기와
    실행을 합쳐 남은 20초 예산 안이며 2초 미만이 남으면 멈춥니다.
+6. **배포 중 공존** — 배포가 겹치는 동안 이전 build가 처리한 사건은 순서 키를 남기지 않고
+   delivered 해제도 하지 않습니다. 결과는 soft bounce 원인이 만료(24시간)까지 남는 **과차단**이나
+   관리 화면의 상태 표시 차이이며, 다음 사건에서 기대 원인으로 다시 맞춰집니다.
 7. **hard bounce 판정 정정** — Resend는 hard bounce를 `data.bounce.type` `Permanent`로,
    soft bounce를 `Transient`, 판정 불가를 `Undetermined`로 보냅니다. 이전 판정은 `hard`만
    영구로 읽어 **실제 영구 bounce를 모두 soft bounce로 처리**했습니다. 이제 `Permanent`와
    `hard`가 영구이고 나머지는 soft입니다. 이미 soft로 기록된 과거 영구 bounce를 hard bounce
    원인으로 되살리는 일은 별도 작업입니다(보관 중인 사건에서만 가능).
-6. **배포 중 공존** — 배포가 겹치는 동안 이전 build가 처리한 사건은 순서 키를 남기지 않고
-   delivered 해제도 하지 않습니다. 결과는 soft bounce 원인이 만료(24시간)까지 남는 **과차단**이나
-   관리 화면의 상태 표시 차이이며, 다음 사건에서 기대 원인으로 다시 맞춰집니다.
 
 ### v17 (2026-09-17) — privacy request와 complaint의 suppression(S1b-1c)
 

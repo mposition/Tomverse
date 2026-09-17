@@ -407,15 +407,29 @@ export async function releaseExpiredSuppressionCauses(options?: {
 }) {
   const now = options?.now ?? new Date();
   // At most 200 whatever the caller asks: the pass has a fixed budget.
-  const limit = Math.min(Math.max(1, Math.floor(options?.limit ?? 200)), 200);
-  const deadline = Date.now() + (options?.timeBudgetMs ?? 20_000);
+  const requested = Number(options?.limit ?? 200);
+  const limit = Number.isFinite(requested) ? Math.min(Math.max(1, Math.floor(requested)), 200) : 200;
+  const budget = Number(options?.timeBudgetMs ?? 20_000);
+  const deadline = Date.now() + (Number.isFinite(budget) && budget > 0 ? Math.min(budget, 20_000) : 20_000);
 
-  const due = await prisma.suppressionCause.findMany({
-    where: { reason: "soft_bounce", releasedAt: null, expiresAt: { lte: now } },
-    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
-    take: limit,
-    select: { id: true, emailAddress: true },
-  });
+  // The selection is inside the budget too: the connection wait and the query
+  // are both bounded, the query by a statement timeout the database enforces.
+  const selectBudget = Math.max(1_000, Math.floor((deadline - Date.now()) / 4));
+  const selectWait = Math.floor(selectBudget / 4);
+  const due = await prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRawUnsafe(
+        `SET LOCAL statement_timeout = ${Math.max(250, selectBudget - selectWait)}`
+      );
+      return tx.suppressionCause.findMany({
+        where: { reason: "soft_bounce", releasedAt: null, expiresAt: { lte: now } },
+        orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
+        take: limit,
+        select: { id: true, emailAddress: true },
+      });
+    },
+    { maxWait: Math.max(250, selectWait), timeout: Math.max(250, selectBudget - selectWait) }
+  );
   const byAddress = new Map<string, string[]>();
   for (const cause of due) {
     byAddress.set(cause.emailAddress, [...(byAddress.get(cause.emailAddress) ?? []), cause.id]);
