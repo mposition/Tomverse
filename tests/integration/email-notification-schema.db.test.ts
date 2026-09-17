@@ -404,7 +404,12 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
     SELECT indexdef FROM pg_indexes WHERE indexname = 'ProviderWebhookEvent_account_event_key'
   `;
   assert.ok(index, "the per-account unique exists");
-  assert.match(index.indexdef, /UNIQUE INDEX .*\("provider", "providerAccount", "providerEventId"\)/);
+  // PostgreSQL quotes an identifier only when it needs to: `provider` is lower
+  // case and comes back bare, the camel-case columns come back quoted.
+  assert.match(
+    index.indexdef,
+    /UNIQUE INDEX .*\(\s*"?provider"?,\s*"providerAccount",\s*"providerEventId"\s*\)/
+  );
 
   await rejectsWithEither(["ProviderWebhookEvent_account_event_key", "ProviderWebhookEvent_provider_providerEventId_key"], () =>
     prisma.providerWebhookEvent.create({
