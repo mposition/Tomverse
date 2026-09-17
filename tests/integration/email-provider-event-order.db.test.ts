@@ -76,7 +76,7 @@ type Event = {
 };
 
 const send = (event: Event) =>
-  processResendWebhook({
+  processResendWebhook({ providerAccount: "transactional",
     providerEventId: event.id,
     payload: {
       type: event.type,
