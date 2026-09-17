@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert } from "lucide-react";
+import { Bot, BrainCircuit, Database, Image as ImageIcon, KeyRound, Loader2, RefreshCw, Save, Settings2, ShieldAlert, Sparkles } from "lucide-react";
 import {
   canUseModelWithPlan,
   getModelUsageProfile,
@@ -42,6 +42,7 @@ type AdminAppSettingsResponse = {
   externalConversationContinuationEnabled?: boolean;
   assistantProfilesEnabled?: boolean;
   assistantKnowledgeEnabled?: boolean;
+  chatStarterEnabled?: boolean;
   memoryExtractionEnabled?: boolean;
   memoryInjectionEnabled?: boolean;
   memoryApprovedPairCount?: number;
@@ -76,6 +77,15 @@ type Props = {
    */
   assistantKnowledgeEnabled: boolean;
   /**
+   * The Chat welcome screen's starter catalogue
+   * (docs/ui-contracts/chat-starter-catalog.md). An ordinary rollout flag:
+   * it has a control here, unlike the memory flags below, because turning
+   * it on calls no provider and can advertise nothing the build does not
+   * already do -- `npm run check:starter-catalog` settles that before the
+   * commit exists, so there is no procedure for this checkbox to skip.
+   */
+  chatStarterEnabled: boolean;
+  /**
    * Release B (account memory), reported and never edited here. Enabling
    * either one is the import/memory policy §12.4 human procedure, so this
    * screen has no control for them -- and `/api/admin/app-settings` refuses a
@@ -101,6 +111,7 @@ export function PlatformSettingsPanel({
   externalConversationContinuationEnabled: initialExternalContinuationEnabled,
   assistantProfilesEnabled: initialAssistantProfilesEnabled,
   assistantKnowledgeEnabled: initialAssistantKnowledgeEnabled,
+  chatStarterEnabled: initialChatStarterEnabled,
   memoryExtractionEnabled: initialMemoryExtractionEnabled,
   memoryInjectionEnabled: initialMemoryInjectionEnabled,
   memoryApprovedPairCount: initialMemoryApprovedPairCount,
@@ -139,6 +150,9 @@ export function PlatformSettingsPanel({
   const [assistantKnowledgeEnabled, setAssistantKnowledgeEnabled] = useState(
     initialAssistantKnowledgeEnabled
   );
+  const [chatStarterEnabled, setChatStarterEnabled] = useState(
+    initialChatStarterEnabled
+  );
   // One state object rather than three: they are read together and are only
   // ever meaningful together, and no control writes any of them.
   const [memoryStatus, setMemoryStatus] = useState<MemoryReleaseStatus>({
@@ -171,7 +185,8 @@ export function PlatformSettingsPanel({
     nextExternalImportEnabled?: boolean,
     nextExternalContinuationEnabled?: boolean,
     nextAssistantProfilesEnabled?: boolean,
-    nextAssistantKnowledgeEnabled?: boolean
+    nextAssistantKnowledgeEnabled?: boolean,
+    nextChatStarterEnabled?: boolean
   ) => {
     setGuestDefaultModelId(nextSettings.guestDefaultModelId);
     setAiChatEnabled(nextSettings.aiChatEnabled);
@@ -191,6 +206,9 @@ export function PlatformSettingsPanel({
     }
     if (typeof nextAssistantKnowledgeEnabled === "boolean") {
       setAssistantKnowledgeEnabled(nextAssistantKnowledgeEnabled);
+    }
+    if (typeof nextChatStarterEnabled === "boolean") {
+      setChatStarterEnabled(nextChatStarterEnabled);
     }
     setLastSyncedAt(new Date().toLocaleTimeString());
   };
@@ -237,7 +255,8 @@ export function PlatformSettingsPanel({
         data.externalConversationImportEnabled,
         data.externalConversationContinuationEnabled,
         data.assistantProfilesEnabled,
-        data.assistantKnowledgeEnabled
+        data.assistantKnowledgeEnabled,
+        data.chatStarterEnabled
       );
       applyMemoryStatus(data);
       dispatchAppToast(m.toast.reloaded, "success");
@@ -265,6 +284,7 @@ export function PlatformSettingsPanel({
           externalConversationContinuationEnabled: externalContinuationEnabled,
           assistantProfilesEnabled,
           assistantKnowledgeEnabled,
+          chatStarterEnabled,
         }),
       });
       const data = (await response.json().catch(() => null)) as
@@ -312,7 +332,8 @@ export function PlatformSettingsPanel({
         data.externalConversationImportEnabled,
         data.externalConversationContinuationEnabled,
         data.assistantProfilesEnabled,
-        data.assistantKnowledgeEnabled
+        data.assistantKnowledgeEnabled,
+        data.chatStarterEnabled
       );
       applyMemoryStatus(data);
       dispatchAppToast(m.toast.saved, "success");
@@ -445,6 +466,30 @@ export function PlatformSettingsPanel({
                   </label>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 xl:col-span-2">
+          <div className="flex items-start gap-4">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-blue-500/30 bg-blue-500/10 text-blue-300">
+              <Sparkles className="h-5 w-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-300">{m.chatStarter.eyebrow}</p>
+              <h3 className="mt-2 text-xl font-black text-white">{m.chatStarter.title}</h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-400">
+                {m.chatStarter.description}
+              </p>
+              <label className="mt-4 flex w-fit cursor-pointer items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-3 text-sm font-bold text-white">
+                <input
+                  type="checkbox"
+                  data-testid="admin-chat-starter-flag"
+                  checked={chatStarterEnabled}
+                  onChange={(event) => setChatStarterEnabled(event.target.checked)}
+                  className="h-5 w-5 accent-blue-600"
+                />
+                <span>{m.chatStarter.toggle}</span>
+              </label>
             </div>
           </div>
         </div>

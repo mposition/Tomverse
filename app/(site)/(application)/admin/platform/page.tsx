@@ -6,6 +6,7 @@ import {
   getPublicAppSettings,
   isAssistantKnowledgeEnabled,
   isAssistantProfilesEnabled,
+  isChatStarterEnabled,
   isExternalContinuationEnabled,
   isExternalImportEnabled,
   isImageGenerationEnabled,
@@ -22,6 +23,7 @@ export default async function AdminPlatformSettingsPage() {
     externalConversationContinuationEnabled,
     assistantProfilesEnabled,
     assistantKnowledgeEnabled,
+    chatStarterEnabled,
     memoryExtractionEnabled,
     memoryInjectionEnabled,
     revokedPairs,
@@ -32,6 +34,7 @@ export default async function AdminPlatformSettingsPage() {
     isExternalContinuationEnabled(),
     isAssistantProfilesEnabled(),
     isAssistantKnowledgeEnabled(),
+    isChatStarterEnabled(),
     // Read, never written from this screen: the two Release B flags are the
     // policy §12.4 human procedure and the panel reports them without offering
     // to change them. See the PATCH schema in /api/admin/app-settings.
@@ -50,6 +53,7 @@ export default async function AdminPlatformSettingsPage() {
       }
       assistantProfilesEnabled={assistantProfilesEnabled}
       assistantKnowledgeEnabled={assistantKnowledgeEnabled}
+      chatStarterEnabled={chatStarterEnabled}
       memoryExtractionEnabled={memoryExtractionEnabled}
       memoryInjectionEnabled={memoryInjectionEnabled}
       memoryApprovedPairCount={injectableExtractionPairs(revokedPairs).length}

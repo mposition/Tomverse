@@ -16,6 +16,12 @@
 
 export const STAGING_VERIFICATION_FEATURES = [
     {
+        key: "chat-starter-catalog",
+        label: "Chat starter catalogue (welcome screen entry point)",
+        checklist: "docs/ops/chat-starter-catalog-staging-checklist.md",
+        records: "docs/ops/chat-starter-catalog-staging-verification-records",
+    },
+    {
         key: "external-import",
         label: "external conversation import (release A)",
         checklist: "docs/ops/external-import-staging-checklist.md",

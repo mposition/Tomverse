@@ -250,7 +250,6 @@ export const fr = {
         inactivePanel: "Aucun panneau IA actif.",
         chooseModel: "Sélectionnez un modèle à droite du champ de saisie ci-dessous.",
         inUsed: " (utilisé)",
-        recentConversationsLabel: "Reprendre une conversation récente",
         onGuestMode: "Mode invité activé",
         guestModeMessage: "En mode invité, les données du chat sont enregistrées dans votre navigateur et non sur le serveur.",
         guestModeLimitMessage: "(20 réponses IA gratuites par jour, partagées entre vos modèles sélectionnés)",
@@ -750,8 +749,7 @@ export const fr = {
         quickDifferenceSummaryLoadingStage2: "Synthèse des différences...",
         quickDifferenceSummaryShort: "Différences",
         readingFileStatus: "Lecture du fichier…",
-        recentConversationsDisclosure: "Voir {count} discussions récentes",
-        recentConversationsDisclosureOne: "Voir 1 discussion récente",
+        recentConversationsDisclosure: "Voir les conversations récentes",
         regenerate: "Régénérer",
         removeDeepResearchChip: "Masquer l'état de Deep Research",
         removeWebSearchMode: "Désactiver la recherche web",
@@ -2166,5 +2164,60 @@ export const fr = {
         changesTitle: "Modifications de cette politique",
         changes: "Nous pouvons mettre à jour cette politique lorsque le service ou les exigences légales changent et afficherons la nouvelle date d'entrée en vigueur.",
         back: "Retour à Tomverse",
+    },
+    chatStarter: {
+        title: "Ce que vous pouvez faire ici",
+        hint: "Choisissez une carte pour remplir le champ ci-dessous. Rien n'est envoyé tant que vous n'appuyez pas sur envoyer.",
+        lockedSignIn: "Connectez-vous pour l'utiliser",
+        lockedPlan: "Nécessite le forfait {plan}",
+        lockedSignInShort: "Connexion requise",
+        lockedPlanShort: "{plan} requis",
+        cards: {
+            compareAnswers: {
+                label: "Comparez trois réponses côte à côte",
+                outcome: "Posez une question et lisez la réponse de trois modèles côte à côte",
+                seed: "Expliquez simplement à quoi sert une base de données vectorielle, en 200 mots environ.",
+            },
+            documentQuestions: {
+                label: "Interrogez plusieurs modèles sur un PDF",
+                outcome: "Joignez un PDF de 18 pages et posez la même question à plusieurs modèles",
+                seed: "J'ai joint un document. Résumez ce qu'il me demande de décider et listez toutes les échéances qu'il cite.",
+            },
+            sourcedAnswer: {
+                label: "Obtenez une réponse sourcée",
+                outcome: "Obtenez une réponse accompagnée des liens sources utilisés",
+                seed: "Qu'est-ce qui a changé cette année dans l'application du règlement européen sur l'IA ? Indiquez les sources utilisées.",
+            },
+            debugStackTrace: {
+                label: "Trouvez la ligne fautive d'une trace",
+                outcome: "Collez une trace d'erreur et obtenez la ligne fautive et un correctif à tester",
+                seed: "Voici une trace d'erreur de mon build. Dites-moi quelle ligne a échoué et quoi changer.",
+            },
+            spreadsheetFromAnswer: {
+                label: "Obtenez un fichier .xlsx",
+                outcome: "Transformez une réponse en fichier .xlsx téléchargeable",
+                seed: "Créez un budget mensuel avec catégorie, montant prévu et montant réel, puis enregistrez-le comme fichier tableur.",
+            },
+            readAScreenshot: {
+                label: "Comprenez l'erreur d'une capture",
+                outcome: "Joignez une capture d'écran et demandez ce que signifie l'erreur",
+                seed: "J'ai joint la capture d'une boîte de dialogue d'erreur. Dites-moi ce qu'elle signifie et quoi faire ensuite.",
+            },
+            translateAndCompare: {
+                label: "Comparez deux traductions",
+                outcome: "Traduisez un brouillon et comparez les versions de deux modèles",
+                seed: "Traduisez le texte ci-dessous en anglais en gardant un ton formel :",
+            },
+            compareImageModels: {
+                label: "Comparez des modèles d'image",
+                outcome: "Envoyez une phrase à plusieurs modèles d'image et comparez leurs rendus",
+                seed: "Une salle de lecture calme à l'aube, lumière chaude par de hautes fenêtres, style photographique.",
+            },
+            speakAQuestion: {
+                label: "Dictez une question, corrigez le texte",
+                outcome: "Dictez une longue question au lieu de la taper, et corrigez le texte avant l'envoi",
+                seed: "Transformez ce que je vais dire en une liste d'instructions courte et claire.",
+            },
+        },
     },
 } satisfies typeof en;

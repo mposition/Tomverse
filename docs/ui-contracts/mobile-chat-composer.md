@@ -26,7 +26,7 @@ The message canvas may be optimized for additional vertical space, but the prima
 | Mobile shell detection | `components/chat/useIsMobileShell.ts` |
 | Visible-viewport measurement (keyboard inset, visible height) | `components/chat/useVisualViewport.ts` |
 | Provider outage banner above the composer | `components/chat/ProviderStatusBanner.tsx` |
-| New-chat welcome surface the composer portals into | `components/chat/ChatWelcomeScreen.tsx` |
+| New-chat welcome surface above the dock (holds no composer) | `components/chat/ChatWelcomeScreen.tsx` |
 
 The contract binds the mobile shell (`useIsMobileShell()`) and every compact/responsive layout that renders the same composer, including landscape phones, keyboard-open states and browser zoom levels that produce a phone-width layout viewport.
 
@@ -71,19 +71,27 @@ As implemented, that is:
 The composer is only usable if the user can reach it, so reaching it is part of
 this contract, not a separate concern.
 
-- **At most one active scroll owner on the way to the composer.** Whichever
-  surface the composer is portalled into — the bottom dock of an ongoing
-  conversation, or the welcome screen of a new one — there must never be a
-  second scrolling ancestor between it and the shell. Two nested scrollers means
-  the user has to work out which surface to drag, and a test (or a user) that
-  drags the inner one can leave the composer under the keyboard.
+- **The composer is in the bottom dock in every state, a new chat included.**
+  It is never portalled into the welcome screen (amended 2026-09-15,
+  `docs/ui-contracts/chat-starter-catalog.md` section 6), and it keeps
+  `variant="bar"` before and after the first send, so sending does not move or
+  restyle it.
+- **At most one active scroll owner on the way to the composer.** There must
+  never be a second scrolling ancestor between the composer and the shell. Two
+  nested scrollers means the user has to work out which surface to drag, and a
+  test (or a user) that drags the inner one can leave the composer under the
+  keyboard. A scroller that is *not* the composer's ancestor — the answer list,
+  or the new-chat welcome region — is not on that path.
 - **The page behind the shell is never that path.** `document`/`body` scrolling
   is not an acceptable substitute for the shell's own scroll region.
-- **The new-chat welcome surface is normal flow and never shrinks.** It carries
-  the composer, so a flex rule that lets it collapse (`min-h-0 flex-1` under
-  `shrink-0` siblings that overrun the viewport) removes the composer from the
-  page entirely — clipped to a zero-height box, with `elementFromPoint`
-  returning the element painted behind it.
+- **Nothing that can shrink may contain the composer.** When the composer lived
+  in the welcome surface, a flex rule that let that surface collapse
+  (`min-h-0 flex-1` under `shrink-0` siblings that overran the viewport) removed
+  the composer from the page entirely — clipped to a zero-height box, with
+  `elementFromPoint` returning the element painted behind it (REFLOW-P1-01).
+  The welcome region may now shrink and scroll inside itself precisely because
+  the composer is no longer in it; moving the composer back into any shrinking
+  region reopens that defect.
 - **Anything sized as a fraction of "the screen" measures the visible viewport,
   never `dvh`, `vh` or `window.innerHeight`.** With the on-screen keyboard up,
   iOS Safari and Android Chrome's default mode keep the layout viewport at the

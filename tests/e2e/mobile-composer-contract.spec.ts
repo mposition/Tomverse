@@ -632,6 +632,56 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
     await expectComposerContract(page, "390x680 at 200% text");
   });
 
+  for (const width of [320, 360]) {
+    test(`200% text at ${width}px keeps the actions row's controls apart`, async ({
+      page,
+    }) => {
+      // The textarea checks above do not look at the actions row itself. At
+      // 200% text its 44px circles outgrew the space beside "+", and the
+      // right-hand group overflowed leftwards over that button instead of
+      // wrapping (2026-09-15). Controls that share pixels are a tap on the
+      // wrong one.
+      await enterMobileComposer(page, { viewport: { width, height: 680 } });
+      await page.evaluate(() => {
+        document.documentElement.style.fontSize = "32px";
+      });
+      await expect(page.getByTestId("chat-send-button")).toBeVisible();
+
+      // Polled, because the row reflows over a few frames after the root font
+      // size changes (the textarea re-measures its own height). What must hold
+      // is the settled layout, and a real overlap never settles away.
+      const readOverlaps = () => page.evaluate(() => {
+        const composer = document.querySelector('[data-testid="chat-input"]')!;
+        const composerBox = composer.getBoundingClientRect();
+        const boxes = Array.from(composer.querySelectorAll("button"))
+          .map((button) => ({ button, box: button.getBoundingClientRect() }))
+          .filter(({ box }) => box.width > 0 && box.height > 0);
+        const found: string[] = [];
+        boxes.forEach((a, i) => {
+          if (a.box.left < composerBox.left - 1 || a.box.right > composerBox.right + 1) {
+            found.push(`${a.button.dataset.testid ?? a.button.getAttribute("aria-label")} leaves the composer`);
+          }
+          boxes.slice(i + 1).forEach((b) => {
+            if (a.button.contains(b.button) || b.button.contains(a.button)) return;
+            const w = Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left);
+            const h = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
+            if (w > 1 && h > 1) {
+              found.push(
+                `${a.button.dataset.testid ?? a.button.getAttribute("aria-label")} x ${
+                  b.button.dataset.testid ?? b.button.getAttribute("aria-label")
+                }`
+              );
+            }
+          });
+        });
+        return found;
+      });
+      await expect
+        .poll(readOverlaps, { message: `${width}px at 200% text`, timeout: 3_000 })
+        .toEqual([]);
+    });
+  }
+
   test("200% page zoom (a 195px layout viewport) keeps the contract", async ({
     page,
   }) => {

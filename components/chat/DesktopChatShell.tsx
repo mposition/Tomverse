@@ -195,6 +195,15 @@ type DesktopChatShellProps = {
   hasConversationPrelude?: boolean;
   /** The hint is a search result's server-decided surface, for a row the list has not loaded. */
   onSelectConversation: (id: string, skipLockCheck?: boolean, surfaceHint?: ConversationSurface) => void;
+  /**
+   * The Chat starter catalogue, already resolved for this viewer.
+   *
+   * A node, not a flag: `ChatPageClient` owns the plan, the deployment flags
+   * and this request's capabilities, and the shells own layout. `undefined`
+   * renders nothing, which is the whole of the flag-off state
+   * (docs/ui-contracts/chat-starter-catalog.md).
+   */
+  starterGallery?: React.ReactNode;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   onLock: (id: string, password: string) => void;
@@ -365,6 +374,7 @@ export function DesktopChatShell({
   importedTranscript,
   hasConversationPrelude = false,
   onSelectConversation,
+  starterGallery,
   onRename,
   onDelete,
   onLock,
@@ -433,21 +443,6 @@ export function DesktopChatShell({
     enabledModels: ENABLED_MODELS,
   } = useModelCatalog();
   const { t, lang } = useLanguage();
-  const recentConversations = useMemo(
-    () =>
-      conversations
-        // The chat you are already in is not a chat to return to -- a brand
-        // new guest conversation exists from the first render, and offering it
-        // back to the user was both meaningless and (on mobile) the only thing
-        // keeping the recent-chats row on screen for someone with no history.
-        .filter(
-          (conversation) =>
-            !conversation.isLocked && conversation.id !== currentChatId
-        )
-        .slice(0, 3)
-        .map((conversation) => ({ id: conversation.id, title: conversation.title })),
-    [conversations, currentChatId]
-  );
   // Identity of the conversation currently on screen, used to scope
   // per-conversation UI state (the active tab below).
   const conversationStateKey = currentChatId || "new";
@@ -654,23 +649,18 @@ export function DesktopChatShell({
   // stops rendering.
   const [conversationDropSurface, setConversationDropSurface] =
     useState<HTMLDivElement | null>(null);
-  const [welcomeInputSlot, setWelcomeInputSlot] = useState<HTMLDivElement | null>(null);
+  // The composer lives in the bottom dock in every state, a new chat included
+  // (docs/ui-contracts/chat-starter-catalog.md section 6). It used to portal
+  // into the welcome screen and move to the dock on the first send; now the
+  // welcome screen is only the greeting and the starters above the dock, and
+  // the first message leaves the composer where it was.
   const [bottomInputSlot, setBottomInputSlot] = useState<HTMLDivElement | null>(null);
-  const inputPortalTarget = showsWelcomeSurface
-    ? welcomeInputSlot ?? bottomInputSlot
-    : bottomInputSlot ?? welcomeInputSlot;
-  // STG-F003: portal into a host we move between the two slots, never into
-  // the slots themselves -- switching containers would rebuild the composer
-  // and drop whatever the user had just typed into it.
-  const composerPortalHost = useComposerPortalHost(inputPortalTarget);
-  // Mirrors inputPortalTarget above: the composer (and so the consent
-  // notice slot right next to it) lives in one of two DOM positions
-  // depending on whether the welcome screen is showing.
-  const [welcomeConsentSlot, setWelcomeConsentSlot] = useState<HTMLDivElement | null>(null);
+  // STG-F003: portal into a host rather than into the slot itself, so a slot
+  // that remounts never rebuilds the composer and drops a draft in progress.
+  const composerPortalHost = useComposerPortalHost(bottomInputSlot);
+  // The consent notice sits directly above the composer, so it follows it.
   const [bottomConsentSlot, setBottomConsentSlot] = useState<HTMLDivElement | null>(null);
-  const consentSlotTarget = showsWelcomeSurface
-    ? welcomeConsentSlot ?? bottomConsentSlot
-    : bottomConsentSlot ?? welcomeConsentSlot;
+  const consentSlotTarget = bottomConsentSlot;
   const registerChatConsentSlot = useChatConsentSlotRef();
   useEffect(() => {
     registerChatConsentSlot(consentSlotTarget);
@@ -948,13 +938,16 @@ export function DesktopChatShell({
             // Matching the light alpha is the smallest change that restores
             // it; the welcome text sits on its own surfaces inside
             // ChatWelcomeScreen, so its contrast is unaffected either way.
-            <div className="absolute inset-0 z-10 bg-zinc-100/80 dark:bg-zinc-950/80">
-              <ChatWelcomeScreen
-                recentConversations={recentConversations}
-                onSelectConversation={onSelectConversation}
-                inputSlotRef={setWelcomeInputSlot}
-                consentSlotRef={setWelcomeConsentSlot}
-              />
+            // `overflow-y-auto`: the overlay is `inset-0`, so its height is
+            // the surface's and nothing inside it could scroll. At 200% text
+            // scaling on a short desktop window the starters outgrow it. The
+            // composer is in the bottom dock, outside this overlay, so this
+            // scroller is never on the way to it.
+            //
+            // No recent-conversation cards here: the sidebar next to this
+            // screen already lists the same conversations.
+            <div className="absolute inset-0 z-10 overflow-y-auto bg-zinc-100/80 dark:bg-zinc-950/80">
+              <ChatWelcomeScreen starterGallery={starterGallery} />
             </div>
           )}
           {selectedModels.length === 0 && (
@@ -1004,11 +997,11 @@ export function DesktopChatShell({
                 // mouse user could not -- every one of them covered on screen.
                 //
                 // The start screen carries the pre-chat controls itself: the
-                // composer, and with it the model picker, portal into
-                // ChatWelcomeScreen (see inputPortalTarget above), so choosing
-                // models and discovering locked ones before the first question
-                // goes through the front of the screen rather than through a
-                // selector hidden behind it. That is what makes this safe to
+                // composer, and with it the model picker, sits in the bottom
+                // dock below this surface (see composerPortalHost above), so
+                // choosing models and discovering locked ones before the first
+                // question goes through a control on screen rather than through
+                // a selector hidden behind it. That is what makes this safe to
                 // close -- an earlier attempt inerted the panels while that
                 // front path was the only thing keeping the capability, and it
                 // broke a real one. The capability is not in the panels.
@@ -1330,7 +1323,9 @@ export function DesktopChatShell({
               guestPreviewMode={guestPreviewMode}
               guestMessageCount={guestMessageCount}
               maxGuestMessages={maxGuestMessages}
-              variant={showsWelcomeSurface ? "floating" : "bar"}
+              // One variant in every state: a new chat and an ongoing one
+              // share the dock, so the first send must not restyle it.
+              variant="bar"
               hideTopBorder={comparisonReadiness.isVisible}
               conversationDropSurface={conversationDropSurface}
             />,

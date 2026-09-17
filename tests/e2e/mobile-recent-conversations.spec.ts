@@ -60,7 +60,7 @@ test.describe("mobile recent-chat disclosure", () => {
   });
 
   for (const count of [1, 3]) {
-    test(`${count} recent chat(s): a counted row, and no titles on screen`, async ({
+    test(`${count} recent chat(s): one row, no titles and no count on screen`, async ({
       page,
     }) => {
       const titles = [SENSITIVE_TITLE, "Tax return questions", "Divorce paperwork"].slice(
@@ -73,9 +73,12 @@ test.describe("mobile recent-chat disclosure", () => {
       const disclosure = page.getByTestId("recent-conversations-disclosure");
       await expect(disclosure).toBeVisible();
       await expect(disclosure).toHaveAttribute("data-recent-count", String(count));
-      await expect(disclosure).toHaveAccessibleName(
-        count === 1 ? "View 1 recent chat" : `View ${count} recent chats`
-      );
+      // The row opens the drawer's whole conversation list, so it names that
+      // rather than this screen's own three-item slice. The count stays in the
+      // data attribute above, where it describes the fixture instead of
+      // promising the reader a number the drawer will not honour.
+      await expect(disclosure).toHaveAccessibleName("View recent chats");
+      expect(await disclosure.innerText()).not.toMatch(/\d/);
 
       // No title card, and no title text anywhere in the welcome screen's DOM.
       await expect(page.getByTestId("recent-conversation-card")).toHaveCount(0);
@@ -146,22 +149,30 @@ test.describe("mobile recent-chat disclosure", () => {
   });
 });
 
-test.describe("desktop recent-chat cards are unchanged", () => {
+test.describe("desktop welcome screen lists no recent chats", () => {
   test.beforeEach(async ({ page }, testInfo) => {
     test.skip(
       !testInfo.project.name.startsWith("desktop"),
-      "Desktop keeps the existing recent-conversation cards."
+      "Only the desktop shell has a sidebar beside the welcome screen."
     );
     await prepareGuestPage(page, "en");
   });
 
-  test("the welcome screen still lists recent conversations as cards", async ({
+  test("the sidebar lists recent conversations and the welcome screen does not repeat them", async ({
     page,
   }) => {
     await seedGuestConversations(page, ["First chat", "Second chat"]);
     await page.goto("/chat?lang=en");
 
-    await expect(page.getByTestId("recent-conversation-card")).toHaveCount(2);
+    // The sidebar beside the welcome screen is the one list; a second copy in
+    // the middle of the screen was the same information twice.
+    await expect(
+      page.getByTestId("sidebar-conversation-item").filter({ hasText: "First chat" })
+    ).toBeVisible();
+    await expect(page.getByTestId("recent-conversation-card")).toHaveCount(0);
     await expect(page.getByTestId("recent-conversations-disclosure")).toHaveCount(0);
+    const welcomeText = await page.getByTestId("chat-empty-state").innerText();
+    expect(welcomeText).not.toContain("First chat");
+    expect(welcomeText).not.toContain("Second chat");
   });
 });

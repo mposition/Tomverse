@@ -250,7 +250,6 @@ export const de = {
         inactivePanel: "Kein aktives KI-Panel.",
         chooseModel: "Bitte wählen Sie rechts neben dem Eingabefeld ein Modell aus.",
         inUsed: " (in Verwendung)",
-        recentConversationsLabel: "Einen letzten Chat fortsetzen",
         onGuestMode: "Gastmodus aktiviert",
         guestModeMessage: "Im Gastmodus werden Chatdaten im Browser gespeichert und nicht auf dem Server aufgezeichnet.",
         guestModeLimitMessage: "(20 kostenlose KI-Antworten pro Tag, aufgeteilt auf Ihre ausgewählten Modelle)",
@@ -750,8 +749,7 @@ export const de = {
         quickDifferenceSummaryLoadingStage2: "Die Unterschiede werden zusammengefasst …",
         quickDifferenceSummaryShort: "Unterschiede",
         readingFileStatus: "Datei wird gelesen …",
-        recentConversationsDisclosure: "{count} letzte Chats ansehen",
-        recentConversationsDisclosureOne: "1 letzten Chat ansehen",
+        recentConversationsDisclosure: "Letzte Chats ansehen",
         regenerate: "Neu erzeugen",
         removeDeepResearchChip: "Deep-Research-Status ausblenden",
         removeWebSearchMode: "Websuche ausschalten",
@@ -2169,5 +2167,60 @@ export const de = {
         changesTitle: "Änderungen dieser Richtlinie",
         changes: "Wir können diese Richtlinie aktualisieren, wenn sich der Dienst oder rechtliche Anforderungen ändern, und zeigen das geänderte Datum an.",
         back: "Zurück zu Tomverse",
+    },
+    chatStarter: {
+        title: "Was hier möglich ist",
+        hint: "Wählen Sie eine Karte, um das Feld unten zu füllen. Gesendet wird erst, wenn Sie auf Senden klicken.",
+        lockedSignIn: "Zum Verwenden anmelden",
+        lockedPlan: "Erfordert den Tarif {plan}",
+        lockedSignInShort: "Anmeldung nötig",
+        lockedPlanShort: "{plan} nötig",
+        cards: {
+            compareAnswers: {
+                label: "Drei Antworten nebeneinander lesen",
+                outcome: "Eine Frage stellen und die Antworten von drei Modellen nebeneinander lesen",
+                seed: "Erklären Sie in einfachen Worten, wofür eine Vektordatenbank gedacht ist, in etwa 200 Wörtern.",
+            },
+            documentQuestions: {
+                label: "Mehrere Modelle zu einem PDF fragen",
+                outcome: "Ein PDF mit 18 Seiten anhängen und mehreren Modellen dieselbe Frage dazu stellen",
+                seed: "Ich habe ein Dokument angehängt. Fassen Sie zusammen, worüber ich entscheiden soll, und nennen Sie alle Fristen darin.",
+            },
+            sourcedAnswer: {
+                label: "Antwort mit Quellen erhalten",
+                outcome: "Eine Antwort mit den Quellenlinks erhalten, auf denen sie beruht",
+                seed: "Was hat sich dieses Jahr bei der Durchsetzung des EU-KI-Gesetzes geändert? Nennen Sie die verwendeten Quellen.",
+            },
+            debugStackTrace: {
+                label: "Fehlerzeile im Stacktrace finden",
+                outcome: "Einen Stacktrace einfügen und die fehlerhafte Zeile samt Lösungsvorschlag erhalten",
+                seed: "Hier ist ein Stacktrace aus meinem Build. Sagen Sie mir, welche Zeile fehlgeschlagen ist und was ich ändern soll.",
+            },
+            spreadsheetFromAnswer: {
+                label: ".xlsx-Datei erhalten",
+                outcome: "Eine Antwort in eine herunterladbare .xlsx-Datei verwandeln",
+                seed: "Erstellen Sie eine Monatsbudget-Tabelle mit Kategorie, geplantem Betrag und tatsächlichem Betrag und speichern Sie sie als Tabellendatei.",
+            },
+            readAScreenshot: {
+                label: "Fehler auf einem Screenshot erklären",
+                outcome: "Einen Screenshot anhängen und fragen, was die Fehlermeldung bedeutet",
+                seed: "Ich habe einen Screenshot eines Fehlerdialogs angehängt. Sagen Sie mir, was er bedeutet und was ich als Nächstes tun soll.",
+            },
+            translateAndCompare: {
+                label: "Zwei Übersetzungen vergleichen",
+                outcome: "Einen Entwurf übersetzen und die Fassungen zweier Modelle vergleichen",
+                seed: "Übersetzen Sie den folgenden Text ins Englische und behalten Sie einen förmlichen Ton bei:",
+            },
+            compareImageModels: {
+                label: "Bildmodelle vergleichen",
+                outcome: "Einen Satz an mehrere Bildmodelle schicken und die Ergebnisse vergleichen",
+                seed: "Ein ruhiger Lesesaal im Morgengrauen, warmes Licht durch hohe Fenster, fotografisch.",
+            },
+            speakAQuestion: {
+                label: "Frage diktieren, Text bearbeiten",
+                outcome: "Eine lange Frage diktieren statt tippen und den Text vor dem Senden bearbeiten",
+                seed: "Verwandeln Sie das, was ich gleich sage, in eine kurze und klare Anleitung.",
+            },
+        },
     },
 } satisfies typeof en;

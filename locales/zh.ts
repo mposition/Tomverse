@@ -255,7 +255,6 @@ export const zh = {
         compareTabsLabel: "模型比较标签页",
         panelModelSelectLabel: "比较面板 {position} 的模型",
         inUsed: "（使用中）",
-        recentConversationsLabel: "继续最近的对话",
         onGuestMode: "访客模式已启用",
         guestModeMessage: "在访客模式下，所有聊天信息保存在你的浏览器中，不会记录到服务器。",
         guestModeLimitMessage: "（每天 20 次免费 AI 回复，由所选模型共同分摊）",
@@ -773,8 +772,7 @@ export const zh = {
         quickDifferenceSummaryLoadingStage2: "正在归纳差异…",
         quickDifferenceSummaryShort: "差异",
         readingFileStatus: "正在读取文件…",
-        recentConversationsDisclosure: "查看最近 {count} 条对话",
-        recentConversationsDisclosureOne: "查看最近 1 条对话",
+        recentConversationsDisclosure: "查看最近对话",
         regenerate: "重新生成",
         searchingWebStatus: "正在联网搜索…",
         stop: "停止",
@@ -2145,5 +2143,60 @@ export const zh = {
         changesTitle: "政策变更",
         changes: "当服务或法律要求发生变化时，我们可能更新本政策，并显示修订后的生效日期。",
         back: "返回 Tomverse",
-    }
+    },
+    chatStarter: {
+        title: "在这里可以做什么",
+        hint: "选择一张卡片即可填入下方输入框。在你点击发送之前不会发出任何内容。",
+        lockedSignIn: "登录后可使用",
+        lockedPlan: "需要 {plan} 方案",
+        lockedSignInShort: "需要登录",
+        lockedPlanShort: "需要 {plan}",
+        cards: {
+            compareAnswers: {
+                label: "并排比较三个回答",
+                outcome: "提一个问题，并排阅读三个模型的回答",
+                seed: "用通俗的语言解释向量数据库用来解决什么问题，大约 200 字。",
+            },
+            documentQuestions: {
+                label: "就一份 PDF 问多个模型",
+                outcome: "上传一份 18 页的 PDF，向多个模型提出同一个问题",
+                seed: "我上传了一份文档。请概括它要我做出什么决定，并列出其中提到的所有截止日期。",
+            },
+            sourcedAnswer: {
+                label: "获得附带来源的回答",
+                outcome: "获得一份附带来源链接的回答",
+                seed: "今年欧盟人工智能法案的执行有哪些变化？请附上你使用的来源。",
+            },
+            debugStackTrace: {
+                label: "从堆栈跟踪找到出错行",
+                outcome: "粘贴一段堆栈跟踪，得到出错的那一行和可尝试的修复",
+                seed: "这是我构建时的堆栈跟踪。请告诉我哪一行出错，以及应该改什么。",
+            },
+            spreadsheetFromAnswer: {
+                label: "生成 .xlsx 文件",
+                outcome: "把回答变成可下载的 .xlsx 文件",
+                seed: "帮我建立一份月度预算表，包含类别、计划金额和实际金额，并保存为电子表格文件。",
+            },
+            readAScreenshot: {
+                label: "询问截图里的错误",
+                outcome: "上传一张截图，询问上面的错误是什么意思",
+                seed: "我上传了一张错误对话框的截图。请告诉我它是什么意思，以及接下来该怎么做。",
+            },
+            translateAndCompare: {
+                label: "并排比较两份译文",
+                outcome: "翻译一段草稿，并排比较两个模型的版本",
+                seed: "把下面的文字翻译成英文，保持正式的语气：",
+            },
+            compareImageModels: {
+                label: "比较图像模型",
+                outcome: "把同一句话发给多个图像模型，比较各自的结果",
+                seed: "清晨安静的阅览室，暖光从高窗照入，摄影风格。",
+            },
+            speakAQuestion: {
+                label: "用语音提问，再改文字",
+                outcome: "用语音说出较长的问题，在发送前再修改文字",
+                seed: "把我接下来说的话整理成一份简短清晰的操作说明。",
+            },
+        },
+    },
 } satisfies typeof en;

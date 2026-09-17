@@ -250,7 +250,6 @@ export const es = {
         inactivePanel: "No hay panel de IA activo.",
         chooseModel: "Selecciona un modelo a la derecha del campo de entrada inferior.",
         inUsed: " (en uso)",
-        recentConversationsLabel: "Continuar un chat reciente",
         onGuestMode: "Modo invitado activado",
         guestModeMessage: "En modo invitado, la información del chat se guarda en tu navegador y no se registra en el servidor.",
         guestModeLimitMessage: "(20 respuestas de IA gratis por día, compartidas entre tus modelos seleccionados)",
@@ -750,8 +749,7 @@ export const es = {
         quickDifferenceSummaryLoadingStage2: "Resumiendo las diferencias...",
         quickDifferenceSummaryShort: "Diferencias",
         readingFileStatus: "Leyendo el archivo…",
-        recentConversationsDisclosure: "Ver {count} chats recientes",
-        recentConversationsDisclosureOne: "Ver 1 chat reciente",
+        recentConversationsDisclosure: "Ver chats recientes",
         regenerate: "Regenerar",
         removeDeepResearchChip: "Ocultar el estado de Deep Research",
         removeWebSearchMode: "Desactivar la búsqueda web",
@@ -2166,5 +2164,60 @@ export const es = {
         changesTitle: "Cambios en esta política",
         changes: "Podemos actualizar esta política cuando cambien el servicio o los requisitos legales y mostraremos la fecha revisada.",
         back: "Volver a Tomverse",
+    },
+    chatStarter: {
+        title: "Lo que puedes hacer aquí",
+        hint: "Elige una tarjeta para rellenar el campo de abajo. No se envía nada hasta que pulses enviar.",
+        lockedSignIn: "Inicia sesión para usarlo",
+        lockedPlan: "Requiere el plan {plan}",
+        lockedSignInShort: "Requiere iniciar sesión",
+        lockedPlanShort: "Requiere {plan}",
+        cards: {
+            compareAnswers: {
+                label: "Compara tres respuestas en paralelo",
+                outcome: "Haz una pregunta y lee cómo la responden tres modelos en paralelo",
+                seed: "Explica en lenguaje sencillo para qué sirve una base de datos vectorial, en unas 200 palabras.",
+            },
+            documentQuestions: {
+                label: "Pregunta a varios modelos por un PDF",
+                outcome: "Adjunta un PDF de 18 páginas y haz la misma pregunta a varios modelos",
+                seed: "He adjuntado un documento. Resume qué me pide decidir y enumera todos los plazos que menciona.",
+            },
+            sourcedAnswer: {
+                label: "Recibe una respuesta con fuentes",
+                outcome: "Recibe una respuesta con los enlaces de las fuentes que usó",
+                seed: "¿Qué ha cambiado este año en la aplicación del reglamento europeo de IA? Incluye las fuentes que uses.",
+            },
+            debugStackTrace: {
+                label: "Encuentra la línea que falla en una traza",
+                outcome: "Pega una traza de error y obtén la línea que falló y un arreglo que probar",
+                seed: "Esta es una traza de error de mi compilación. Dime qué línea falló y qué debo cambiar.",
+            },
+            spreadsheetFromAnswer: {
+                label: "Recibe un archivo .xlsx",
+                outcome: "Convierte una respuesta en un archivo .xlsx que puedes descargar",
+                seed: "Crea una hoja de presupuesto mensual con categoría, importe previsto e importe real, y guárdala como archivo de hoja de cálculo.",
+            },
+            readAScreenshot: {
+                label: "Pregunta qué significa un error en una captura",
+                outcome: "Adjunta una captura de pantalla y pregunta qué significa el error",
+                seed: "He adjuntado la captura de un cuadro de diálogo de error. Dime qué significa y qué hacer a continuación.",
+            },
+            translateAndCompare: {
+                label: "Compara dos traducciones",
+                outcome: "Traduce un borrador y compara las versiones de dos modelos",
+                seed: "Traduce el texto de abajo al inglés y mantén un tono formal:",
+            },
+            compareImageModels: {
+                label: "Compara modelos de imagen",
+                outcome: "Envía una frase a varios modelos de imagen y compara lo que devuelve cada uno",
+                seed: "Una sala de lectura tranquila al amanecer, luz cálida por ventanales altos, estilo fotográfico.",
+            },
+            speakAQuestion: {
+                label: "Dicta una pregunta y edita el texto",
+                outcome: "Dicta una pregunta larga en vez de escribirla y edita el texto antes de enviarlo",
+                seed: "Convierte lo que voy a decir en una lista de instrucciones corta y clara.",
+            },
+        },
     },
 } satisfies typeof en;

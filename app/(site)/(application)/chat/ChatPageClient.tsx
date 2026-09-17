@@ -94,6 +94,20 @@ import { LEGACY_REVIEW_PATH } from "@/lib/productSurfaceRoutes";
 import { ImageGenerationWorkspace } from "@/components/images/ImageGenerationWorkspace";
 import { IMAGE_GROUP_MAX_MODELS_BOUNDS } from "@/lib/imageGroupLimits";
 import { planAllowsImageGeneration } from "@/lib/imageGenerationAccess";
+import { ChatStarterGallery } from "@/components/chat/ChatStarterGallery";
+import {
+  type ChatStarterEntry,
+  type StarterCapability,
+} from "@/lib/chatStarterCatalog";
+import {
+  selectVisibleStarterCards,
+  type StarterLockReason,
+} from "@/lib/chatStarterAvailability";
+import {
+  applyStarterSeed,
+  EMPTY_STARTER_SEED_MEMORIES,
+  type StarterSeedMemories,
+} from "@/lib/chatStarterSeed";
 import {
   useLanguage,
   type Language,
@@ -566,6 +580,10 @@ export function ChatPageClient({
   voiceInputEnabled = false,
   imageGroupMaxModels: imageGroupMaxModelsProp = IMAGE_GROUP_MAX_MODELS_BOUNDS.fallback,
   webSearchBackendReadiness = NO_WEB_SEARCH_BACKENDS,
+  chatStarterEnabled = false,
+  chatStarterKnownFlagKeys = [],
+  chatStarterEnabledFlagKeys = [],
+  chatStarterCapabilities = [],
   initialConversationId = null,
   mountedSurface = "workspace",
 }: {
@@ -600,6 +618,34 @@ export function ChatPageClient({
    * and the same default the context itself carries.
    */
   webSearchBackendReadiness?: WebSearchBackendReadiness;
+  /**
+   * Whether this deployment offers the Chat starter catalogue at all: the
+   * rollout flag AND its kill switch, folded on the server
+   * (docs/ui-contracts/chat-starter-catalog.md section 5).
+   *
+   * Defaulted to `false` so a caller that has not been wired to it renders no
+   * gallery rather than one built on a guess. `false` renders nothing at all,
+   * never a disabled teaser.
+   */
+  chatStarterEnabled?: boolean;
+  /**
+   * Which of the catalogue's flag keys this deployment can answer, and which
+   * of those are on.
+   *
+   * Two lists, because "off" and "nobody reads that flag" are different
+   * answers and only the first is a rollout state. A key in neither is a
+   * wiring gap, and its cards stay hidden instead of quietly reading as off.
+   */
+  chatStarterKnownFlagKeys?: readonly string[];
+  chatStarterEnabledFlagKeys?: readonly string[];
+  /**
+   * Which starter capabilities resolved on this request, as ids.
+   *
+   * Resolved on the server (`resolveChatStarterCapabilities`) for the reason
+   * `webSearchBackendReadiness` is: the client cannot answer it, and what
+   * crosses is a list of ids, never a key, a backend name or a budget.
+   */
+  chatStarterCapabilities?: readonly StarterCapability[];
   /**
    * The conversation this mount opens with, when the URL named one.
    *
@@ -760,6 +806,7 @@ export function ChatPageClient({
   // one store, so switching between desktop and mobile is not a draft
   // boundary either. In-memory for this tab only -- see the hook's docstring.
   const {
+    activeDraftKey,
     draftText: inputValue,
     draftAttachments: attachments,
     setDraftText: setInputValue,
@@ -2848,11 +2895,21 @@ export function ChatPageClient({
     const handleStartImageDraft = (
         draftText: string,
         modelId?: string,
-        options?: { fromImageRequest?: boolean }
+        options?: { fromImageRequest?: boolean; chatDraftOnReturn?: string }
     ) => {
         setChatDraftBeforeImage({
             scopeId: currentChatIdRef.current,
-            text: draftText,
+            /*
+              What the chat composer gets back if the image draft is cancelled.
+
+              The composer hands over its own draft, so there the seed and the
+              sentence to restore are the same string and the default is right.
+              A starter card hands over a seed that was never in the chat box,
+              and restoring it would put an image prompt in the chat composer --
+              against this handler's own promise below that the chat draft comes
+              back exactly as it was.
+            */
+            text: options?.chatDraftOnReturn ?? draftText,
         });
         setImageDraftAutoGenerate(
             Boolean(options?.fromImageRequest) && imageHandoffAutoGenerate
@@ -6212,6 +6269,154 @@ export function ChatPageClient({
     // Same destination the locked model rows use.
     router.push("/pricing");
   };
+  /*
+    The starter catalogue, resolved for this viewer
+    (docs/ui-contracts/chat-starter-catalog.md).
+
+    Resolved here rather than in the welcome screen because this component is
+    where the three inputs already live: the deployment's flags and this
+    request's capabilities arrived as props from the server shell, and the plan
+    arrives from `useUserUsage`. The screen owns layout and nothing else.
+
+    `chatStarterEnabled === false` produces an empty list, and an empty list
+    renders nothing at all -- no heading, no frame, no row height. That is the
+    whole of the flag-off state, and it is deliberately not a disabled teaser.
+  */
+  const starterCards = useMemo(() => {
+    if (!chatStarterEnabled) return [];
+    return selectVisibleStarterCards({
+      signedIn: !isGuestMode,
+      // `null` is not "Free": a signed-in account whose usage has not loaded
+      // yet has an unresolved plan, and a plan-gated card stays hidden for
+      // that frame rather than being shown as locked and then unlocking.
+      plan: isGuestMode ? null : accountUsage?.plan ?? null,
+      enabledFlags: new Set(chatStarterEnabledFlagKeys),
+      knownFlags: new Set(chatStarterKnownFlagKeys),
+      modelCapabilities: new Set(chatStarterCapabilities),
+    });
+  }, [
+    accountUsage?.plan,
+    chatStarterCapabilities,
+    chatStarterEnabled,
+    chatStarterEnabledFlagKeys,
+    chatStarterKnownFlagKeys,
+    isGuestMode,
+  ]);
+
+  /**
+   * What the last starter seed wrote: the draft text and the toggles.
+   *
+   * Read by the seed handler below to tell "the box still holds a seed nobody
+   * edited" from "the box holds something this person wrote". Picking a second
+   * card replaces the first one's sentence; it never replaces typed work.
+   *
+   * Remembered rather than recognised against the catalogue's sentences in the
+   * active locale: that set lost the sentence already in the box whenever the
+   * language changed, and the next card could then neither replace it nor put
+   * back the search it had armed (cross review round 2, 2026-09-15).
+   *
+   * Kept per draft scope, the key the draft store files this conversation's
+   * draft under: one record for the whole page let conversation A trust a
+   * record conversation B wrote, and put A's search back to B's value (cross
+   * review v2 round 0).
+   *
+   * A ref rather than state: nothing renders from it, and it must not make the
+   * seed handler a new function on every draft or toggle change.
+   * `applyStarterSeed` only trusts a scope's record while that scope's live
+   * draft and mode still match what it recorded writing, so a stale record
+   * fails toward leaving the composer alone.
+   */
+  const starterSeedMemoriesRef = useRef<StarterSeedMemories>(
+    EMPTY_STARTER_SEED_MEMORIES
+  );
+
+  /*
+    A click seeds and stops.
+
+    The rule is docs/ui-contracts/chat-starter-catalog.md section 4: a surface that fills the box offers a starting point, and a
+    surface that sends spends a credit on a sentence the user has not read yet.
+    So this writes a draft, arms the composer controls the card declares, moves
+    focus, and does nothing else -- no request, no reservation, no conversation
+    row.
+
+    The seed travels through `setInputValue`, which is the existing draft store
+    (lib/conversationDraftStore.ts). There is no second draft path.
+  */
+  const handleStarterSeed = (entry: ChatStarterEntry) => {
+    const seedText = t(entry.seed.promptSeedKey);
+    // Text and toggles are decided together (lib/chatStarterSeed.ts). They used
+    // to be decided apart, and the half that did not think about ownership
+    // armed web search on somebody's own sentence and never disarmed it --
+    // found in staging, at 9 credits a send instead of 1.
+    //
+    // Which product the seed lands in is decided AFTER this, never before. The
+    // image card branched first and so skipped the ownership test altogether:
+    // it took over a composer holding typed work, and it never put back the
+    // search a previous card had armed. That is the staging defect again, on
+    // the one path the staging fix did not cover.
+    const handsToStudio = entry.seed.productKey === "studio";
+    const application = applyStarterSeed({
+      scope: activeDraftKey,
+      draft: inputValue,
+      // What the chat composer is left holding: an image card hands its
+      // sentence to the image workspace and empties the chat box (below).
+      seedText: handsToStudio ? "" : seedText,
+      wantsWebSearch: Boolean(entry.seed.webSearch),
+      currentWebSearchMode: webSearchMode,
+      memories: starterSeedMemoriesRef.current,
+    });
+    if (!application.applies) {
+      // The box holds the person's writing, so nothing of the seed lands. The
+      // focus move stays: the click returns them to what they were typing
+      // rather than reading as a control that did nothing.
+      setFocusToken((value) => value + 1);
+      return;
+    }
+    starterSeedMemoriesRef.current = application.memories;
+    setWebSearchMode(application.webSearchMode);
+    if (handsToStudio) {
+      // An image card belongs to the image workspace, and `handleStartImageDraft`
+      // is how the composer already hands a sentence over. Called without
+      // `fromImageRequest`, so `imageDraftAutoGenerate` stays false: the draft
+      // is seeded and the person still presses generate.
+      //
+      // The chat composer is left empty rather than holding a previous card's
+      // sentence: that seed was withdrawn together with its toggle just above,
+      // and a seed is applied as a unit or not at all.
+      setInputValue("");
+      handleStartImageDraft(seedText, entry.seed.suggestedModelIds?.[0], {
+        chatDraftOnReturn: "",
+      });
+      return;
+    }
+    setInputValue(seedText);
+    setFocusToken((value) => value + 1);
+  };
+
+  /*
+    A locked card routes to the requirement it named, and never seeds.
+
+    Same two destinations the locked image entry points use, for the same
+    reason: the requirement was stated on the card, so the click is the user
+    acting on a fact they already had rather than discovering one.
+  */
+  const handleStarterLocked = (reason: StarterLockReason) => {
+    if (reason === "sign_in_required") {
+      setShowGuestSignInPrompt(true);
+      return;
+    }
+    router.push("/pricing");
+  };
+
+  const starterGalleryElement =
+    starterCards.length > 0 ? (
+      <ChatStarterGallery
+        cards={starterCards}
+        onSeed={handleStarterSeed}
+        onLocked={handleStarterLocked}
+      />
+    ) : null;
+
   const imageWorkspaceElement = isImageWorkspaceActive ? (
     <ImageGenerationWorkspace
       // Remount on switch: the workspace's local timeline, draft prompt and
@@ -6420,6 +6625,7 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
+          starterGallery={starterGalleryElement}
           hasImportedTranscript={hasConversationPrelude}
           importedMessages={importedMessages}
           importedTranscript={importedTranscript}
@@ -6543,6 +6749,7 @@ export function ChatPageClient({
           onLockedImageClick={handleLockedImageClick}
           onStartImageDraft={canOfferNewImage ? handleStartImageDraft : undefined}
           imageWorkspace={imageWorkspaceElement}
+          starterGallery={starterGalleryElement}
           hasImportedTranscript={hasConversationPrelude}
           importedMessages={importedMessages}
           importedTranscript={importedTranscript}
@@ -6642,7 +6849,11 @@ export function ChatPageClient({
         />
       )}
     {showGuestSignInPrompt && isGuestMode && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"
@@ -6722,7 +6933,11 @@ export function ChatPageClient({
       </div>
     )}
     {upgradeModelPrompt && accountUsage && (
-      <div className="fixed inset-0 z-[78] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      // Above the model picker (z-[100]) and its catalogue (z-[105]): both
+      // prompts open from a click inside them, and the composer -- with its
+      // picker -- is in the bottom dock, outside any lower stacking context,
+      // on every screen. At z-[78] the catalogue covered this decision.
+      <div className="fixed inset-0 z-[112] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
         <section
           role="dialog"
           aria-modal="true"
