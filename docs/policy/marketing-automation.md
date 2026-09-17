@@ -8,7 +8,7 @@ approvedBy: mposition · approvedAt: 2026-09-17 · 정책 버전: 2 (개정안 3
 |---|---|---|
 | 1 | 2026-09-17 mposition | 최초 승인 |
 | 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14). **O15**: API로 게시를 내릴 수 없는 Instagram·TikTok은 항상 승인 모드(§1, §6.1, §8.2, §15) |
-| 3 | **대기** | 실행 위치와 게시 권한을 공통 Agent 기준에 맞춤. **에이전트 코드는 GitHub Actions가 아니라 Railway 실행 서비스에서** 돌고(A2·AI 노출 측정 이전), 실행 서비스에는 제품 DB 자격증명이 없다. cron 전체 실행 hard timeout과 마지막 성공 알림, 초안 접수 전 secret scan, PR Publisher GitHub App의 Workflows 권한 금지와 ruleset 제한, **SEO PR은 Guard 통과 후에만 생성**하고 PR·병합 관측을 본 앱에 기록, 마케팅 화면은 Admin Console 공통 Agent 그룹 아래(§2, §3, §4, §5, §6, §6.1, §9.2, §14) |
+| 3 | **대기** | **실행 위치와 실행 안전장치만** 확정한다. 에이전트 코드는 GitHub Actions가 아니라 **Railway 실행 서비스**에서 돌고(A2·AI 노출 측정 포함), 실행 서비스에는 제품 DB·GitHub 쓰기 자격증명이 없으며, 제품 상태는 본 앱 내부 route로만 바꾼다. 서비스별 실행 모델·전체 실행 hard timeout·독립 watchdog·마지막 성공 경보, 초안 접수 전 secret scan, Admin 화면 위치(Operations > Automation)를 정한다. **SEO·랜딩의 PR 게시 경로(§9.2)는 이 버전에서 확정하지 않고 S5 전 버전 4로 미룬다**(§2, §3, §4, §5, §6, §6.1, §8.3, §9.2, §12.2, §14) |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
 Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-changes, 요구 변경 반영)를 옮긴 것이다.
@@ -75,9 +75,9 @@ Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-chan
 | # | 에이전트 | 하는 일 | 실행 위치 | 최대 권한 |
 |---|---|---|---|---|
 | A1 | 리드·분석가 | 주간 KPI·브리프, 실험 판정, 120일 측정 | Railway 생성 서비스 | 보고 |
-| A2 | SEO·AI 검색 | SEO 코드·콘텐츠 PR, AI 노출 측정 | Railway 생성·검증 서비스 + PR Publisher(§9.2) | PR → 졸업 후 develop 자동 병합(허용 파일만) |
+| A2 | SEO·AI 검색 | SEO 코드·콘텐츠 PR, AI 노출 측정 | Railway 생성·검증 서비스. PR 게시 경로는 §9.2(버전 4에서 확정) | PR → 졸업 후 develop 자동 병합(허용 파일만) |
 | A3 | 시장 정보 | 경쟁사·모델 출시 추적 | Railway 생성 서비스 | 보고(게시 권한 없음) |
-| A4 | 랜딩 실험 | 문구 변형·실험 설계·결과 분석 | Railway 생성 서비스 + PR Publisher(§9.2) | 초안 → 졸업 후 실험 자율 시작 |
+| A4 | 랜딩 실험 | 문구 변형·실험 설계·결과 분석 | Railway 생성 서비스. 승자 반영 PR은 §9.2(버전 4에서 확정) | 초안 → 졸업 후 실험 자율 시작 |
 | A5 | 콘텐츠·소셜 | 계정별 게시물, RedNote 패키지, 댓글 위험 요약 | Railway 생성 서비스 | 초안 → 졸업 계정만 템플릿 자율 게시 |
 
 그 위에 결정적 게이트(Guard, §7)가 있다. Guard는 에이전트가 아니다.
@@ -110,9 +110,22 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
   이 저장소 한정 읽기 전용 토큰을 쓴다.
 - **cron 실행 한도:** Railway cron은 이전 실행이 끝나지 않으면 다음 회차를 건너뛰고 이전 실행을 끝내지 않는다.
   그래서 멈춘 외부 호출 하나가 이후 회차를 조용히 막는다. 모든 cron 서비스는 **전체 실행 hard timeout**을 두고 끝나면
-  종료하며, 본 앱이 서비스별 마지막 성공 시각을 기록하고 정해진 주기를 넘기면 운영자에게 알린다(알림은 링크만).
+  종료하며, 본 앱이 서비스별 마지막 성공 시각을 기록한다. **멈춘 cron은 자기 경보를 보낼 수 없으므로**, 경보는 그
+  서비스가 아니라 **기존 유지보수 cron(watchdog)** 이 마지막 성공 시각을 보고 낸다(알림은 링크만, §8.3).
+- **서비스별 실행 모델:** 각 서비스는 아래를 정하고 구현 단계에서 지킨다. 회차 누락이 허용되지 않거나 한 회차가
+  주기보다 길어질 수 있으면 cron이 작업만 넣고 worker가 처리한다(작업은 본 앱 소유 테이블, 멱등 키 필수).
+
+| 서비스 | 모델 | 주기 | 회차 누락 | 전체 hard timeout | 비고 |
+|---|---|---|---|---|---|
+| marketing-generator (A1·A3·A5 초안·보고) | cron | 일 1회 이상, 단계에서 확정 | 허용 | 회차 주기의 1/3 이하 | 초안은 본 앱 접수 route로 제출 |
+| marketing-publisher | cron | 5분 이상 | 허용(다음 회차가 이어받음) | 5분 | 대상은 lease·claim으로 잡는다 |
+| SEO·AI 노출 측정 | cron | 일 1회 | 허용 | 회차 주기의 1/3 이하 | 결과는 본 앱 내부 route로 제출 |
+
+  외부 호출이 길어 회차를 넘길 수 있으면 그 서비스만 queue+worker로 바꾸고, 재시도 상한과 dead-letter 처리를
+  구현 단계에서 정한다.
 - **초안 접수 검사:** 본 앱 접수 route는 크기·건수 상한(64KB·20건)과 스키마 검증에 더해 **저장 전 secret scan**을 한다.
-  비밀값 패턴이 나오면 저장하지 않고 거절하며, 거절 로그에 본문을 남기지 않는다.
+  비밀값 패턴이 나오면 저장하지 않고 거절하며, 거절 로그에 본문을 남기지 않는다. 검사기와 규칙 버전을 기록에 남기고,
+  **통과를 "공개해도 안전"으로 읽지 않는다**(§9.2의 공개 경로는 별도 조건을 갖는다).
 
 ## 5. 데이터 (마케팅 전용 테이블 4개)
 
@@ -143,9 +156,10 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - **감사:** 사람 행위와 시스템 행위 모두 `lib/adminAudit.ts`의 **기존 해시 체인**에 같은 트랜잭션으로
   기록한다. 시스템 actor용 writer는 기존 writer와 체인 잠금·해시 계산 경로를 공유한다.
   감사 테이블 직접 insert는 금지다.
-- **Admin Console:** 마케팅 화면은 Admin Console의 **공통 Agent 그룹 아래 첫 영역**으로 둔다. 이후 다른 업무 에이전트의
-  대기열·승인·digest 화면이 같은 그룹에 들어오며, 에이전트마다 따로 최상위 영역을 만들지 않는다.
-  `docs/ui-contracts/admin-console-ia.md`를 따른다. 대기 건수 badge는
+- **Admin Console:** 마케팅 화면은 **Operations > Automation의 `agents` 탭**으로 둔다(승인된 IA의 여섯 그룹·열일곱 항목을
+  바꾸지 않는 배치, 운영자 결정 2026-09-18). 이후 다른 업무 에이전트의 대기열·digest도 같은 탭 아래로 들어오고,
+  에이전트마다 최상위 항목을 만들지 않는다. 승인 대기 건수는 기존 Command Center > Work queue의 `approvals`에서도
+  보이게 한다. `docs/ui-contracts/admin-console-ia.md`를 따른다. 대기 건수 badge는
   `lib/adminNavigationCounts.ts` 규율(실패 시 미표시), 로케일은 `tests/adminLocale.test.mjs` 검사 대상이다.
   알림은 링크만 보내고 승인 행위는 Admin Console에서만 한다.
 
@@ -286,6 +300,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 플랫폼 제거·정책 경고 | 1시간 상태 조회(3시간 무응답 시 정지). webhook은 §8.1.1 상태 반영 기능이 켜진 뒤에만 추가 출처 | 계정 |
 | 위험 댓글 알림 24시간 미처리 | 1시간 댓글 조회 | 계정 |
 | 게시 직접 의존성(DB·어댑터) 실패 | 게시 전 점검 | 전체 |
+| 실행 서비스의 마지막 성공이 허용 간격 초과 | watchdog(유지보수 cron)이 본 앱 기록 조회 | 그 서비스가 담당하는 기능 |
 | claim·자산 목록 버전 변경 | 목록 버전 | 해당 claim을 쓴 초안만 무효 |
 | 가격 카탈로그 변경 | 저장 행 갱신 시각 | 가격 claim 무효 |
 | 본토 접근 차단 해제 감지 | 주 1회 조회(설정 무변경) | RedNote 패키지 생성 중단 |
@@ -307,26 +322,29 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 - 구현 전 캐시·CSP·rewrite 스파이크를 E2E로 통과해야 하며, 실패하면 실험은 연기한다.
 
 ### 9.2 SEO 코드
-- **실행 위치:** LLM 단계와 검증 단계는 Railway SEO 서비스에서 돈다(§2, §4). GitHub Actions에서 에이전트 코드를 실행하지 않는다.
-- LLM 단계: 저장소 코드 읽기와 LLM 키만, 도구는 읽기·편집만, 저장소 설정·MCP·hook 미로드, 버전·무결성 고정, 턴·예산 상한.
+- **실행 위치(버전 3에서 확정):** LLM 단계와 검증 단계는 **Railway SEO 서비스**에서 돈다(§2, §4). GitHub Actions에서 에이전트 코드를 실행하지 않는다.
+  이 서비스에는 저장소 코드 읽기와 LLM 키만 있고 GitHub 쓰기 자격증명은 없다.
+- LLM 단계: 도구는 읽기·편집만, 저장소 설정·MCP·hook 미로드, 버전·무결성 고정, 턴·예산 상한.
 - 검증 단계: 허용 파일 정확히 4개(`lib/seo.ts`, `components/seo/StructuredData.tsx`, `app/sitemap.ts`, `app/llms.txt/route.ts` — 마지막은 아직 없는 예정 파일)
-  밖의 변경·rename·삭제·바이너리·symlink·mode 변경 거부, 500줄 이하, lint·typecheck·테스트, **base 커밋의 정책 테스트로** 판정.
+  밖의 변경·rename·삭제·바이너리·symlink·mode 변경 거부, 500줄 이하, **base 커밋의 정책 테스트로** 판정.
   판정 테스트는 사람 소유 파일이며 허용 목록에 없다.
-- **PR 생성 전 Guard:** PR은 병합 전에도 공개 저장소에 노출된다. 그래서 변경에 담긴 문구·주장(구조화 데이터의 가격·기능·
-  제공 모델 표현, `llms.txt` 문구 등)은 **PR을 만들기 전에** Guard(§7)를 통과해야 한다. 거절이면 PR을 만들지 않고,
-  승인 필요이면 본 앱 승인 큐에서 승인된 뒤에만 만든다. Guard 결과와 검증 산출물 digest는 본 앱이 기록한다.
-- **PR 생성:** 이 저장소 전용 **PR Publisher GitHub App**만 한다(생성·검증 서비스는 GitHub 쓰기 권한이 없다).
-  권한은 Contents·Pull requests 쓰기뿐이며 **Workflows 권한은 주지 않는다** — 이 권한 없이는 GitHub가 `.github/workflows`
-  변경 push를 거부한다. 저장소 ruleset으로 이 App이 push할 수 있는 브랜치를 `marketing-agent/**`로 제한한다.
-  push는 검증 산출 tree hash와 push 내용이 일치할 때만.
 - 브랜치: 졸업 전 `marketing-agent/<topic>`(자동화 권한 없음, 사람 병합). 졸업 후
   `marketing-agent/to-develop/<topic>`으로 표준 `Auto PR to Develop`이 PR을 만들고 **그 실행에서만** auto-merge를 켠다
-  (`scripts/auto-pr-branch-policy.mjs`). 마케팅 서비스·Publisher는 auto-merge를 직접 켜지 않는다. develop까지만.
-- **승인과 기록:** 졸업 전에는 보호 브랜치에서 **사람이 한 병합이 승인**이다. 본 앱은 PR 번호, head SHA, 검증 산출물 digest,
-  병합 여부·병합 SHA·병합한 사람을 읽기 전용으로 관측해 기록하고, 졸업 통계와 자동 병합 판정은 이 기록으로 한다.
-  GitHub label·comment는 상태나 승인 근거로 쓰지 않는다.
+  (`scripts/auto-pr-branch-policy.mjs`). 마케팅 서비스는 auto-merge를 직접 켜지 않는다. develop까지만.
 - robots·AI 크롤러 정책(`lib/robotsPolicyCore.ts`)과 workflow·게이트 파일은 항상 사람.
 - 공유 백로그의 AEO 결정(`llms.txt`는 선택 실험, 신뢰할 변경일이 없으면 sitemap 날짜 생략, FAQ 리치결과 비목표)을 따른다.
+
+#### 9.2.1 PR 게시 경로는 버전 4에서 확정한다 [미결정]
+
+S5 착수 전에 별도 개정으로 아래를 한꺼번에 정하고 승인받는다. 그 전에는 **SEO·랜딩의 어떤 자동 PR도 만들지 않는다.**
+
+1. **공개 전 판정.** PR은 물론 **최초 원격 push 전에** Guard·허용 경로·크기·secret scan·patch 적용 가능성이 통과해야 한다(push 순간 공개된다). 브랜치 이름은 서버가 만든 opaque run id, force-push 금지.
+2. **실행이 필요한 검증의 위치.** lint·typecheck·테스트는 PR CI의 required check로 돌리고, 그 workflow가 받는 secret 목록과 배포·쓰기 자격증명 부재를 함께 적는다.
+3. **신뢰 경계.** 판정 코드는 base(또는 고정 SHA)에서 불러오고, 토큰은 검증 뒤 필요한 step에만 준다. 현재 표준 `Auto PR to Develop`이 이 조건을 만족하는지 먼저 확인한다.
+4. **게시 주체와 권한.** PR 생성 전용 GitHub App(Contents·Pull requests 쓰기, **Workflows 권한 없음**), 저장소 ruleset·보호 브랜치로 브랜치 namespace와 사람 병합을 강제. 실제 저장소에서 구성 가능 여부를 확인한 뒤 적는다.
+5. **결속과 기록.** 승인·자동 병합은 `base SHA + head SHA + tree/diff digest + 검증기 버전 + 정책 버전`에 묶고, 본 앱이 읽기 전용 토큰으로 PR·required check·병합(주체·method·결과 SHA)을 관측해 기록한다. 저장 모델(어느 테이블), 보존 기간, 병합 주체 식별자의 개인정보 판정과 data-domain 등록 여부를 함께 정한다.
+6. **자동 병합 스위치.** 표준 workflow가 fail-closed 저장소 스위치를 직접 확인하게 한다.
+7. **실패 시 동작.** 관측 지연·rate limit·검증 SHA 불일치·병합 주체 미확인은 §8.3 자동 정지로 연결한다.
 
 ## 10. 측정
 
@@ -387,6 +405,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 실험 결과·120일 측정 | 36개월 | 삭제 |
 | 댓글 알림 | 90일 | 삭제 |
 | 본토 차단 점검·보유 실행 기록 | 12개월 | 삭제 |
+| 실행 서비스 마지막 성공·회차 기록 | 90일 | 삭제 |
 | AI 노출 측정 | 24개월 | 삭제 |
 | 공개 버킷 이미지 | 게시 확인 후 7일 또는 게시 취소 즉시 | 삭제 |
 | 분석 전용 식별자 | 계정 삭제 시 즉시 | 삭제 + GA4 삭제 요청 |
@@ -419,9 +438,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | S0 | 게시 도구 기술 검증(테스트 계정) | Claude → Codex | 채널별 복구 계약 표 확정 |
 | S1 | 테이블, Guard와 우회 공격 테스트, 목록, 기능별 스위치, `marketing:write`, 시스템 감사 writer | Codex → Claude | 우회 코퍼스·가격 출처·권한 매트릭스 테스트 |
 | S2 | Admin Console, 게시 도구 어댑터, 게시기, webhook | Claude → Codex | Admin IA 전부, 승인 경쟁·webhook replay 테스트, **§8.1.1 조건 1–5를 활성화할 `event type × 채널` 조합별로 staging shadow 처리로 통과, production(또는 환경 판정 불가)에서 shadow 활성화가 거절됨을 관측, shadow 처리 전후 `MarketingPost`·`MarketingChannel`·공개 여부·자동 정지 상태가 변하지 않고 shadow 기록만 바뀜을 관측, 운영자 서명 기록(S0 C9 이관분)** |
-| S3 | 생성 서비스, A1·A3·A5, 승인 모드 운영과 120일 측정 시작 | Codex → Claude | 첫 주간 보고서, 첫 승인 게시, 실행 서비스 자격증명 목록에 제품 DB·GitHub 쓰기 없음 확인, cron hard timeout·마지막 성공 알림 장애 주입, 초안 secret scan 거절 테스트 |
+| S3 | 생성 서비스, A1·A3·A5, 승인 모드 운영과 120일 측정 시작 | Codex → Claude | 첫 주간 보고서, 첫 승인 게시, 실행 서비스 자격증명 목록에 제품 DB·GitHub 쓰기 없음 확인, 서비스별 hard timeout과 watchdog 경보 장애 주입(멈춘 cron 포함), 초안 secret scan 거절 테스트 |
 | S4 | 졸업, 댓글 모니터링, 자동 정지 | Claude → Codex | 응답 유실 등 장애 주입 테스트 (§12.1 선행 필수) |
-| S5 | 랜딩 실험(스파이크 먼저), SEO PR·자동 병합, AI 노출 측정 | Codex → Claude | 캐시 누수 E2E 0건, 브랜치 정책 shell 테스트, SEO·측정 서비스가 Railway에서 동작하고 GitHub Actions에 에이전트 실행 workflow 없음, Publisher App 권한(Workflows 없음)·ruleset 관측, PR 생성 전 Guard 거절·승인 필요 경로 테스트, PR·병합 관측 기록 |
+| S5 | 랜딩 실험(스파이크 먼저), SEO PR·자동 병합, AI 노출 측정 | Codex → Claude | **§9.2.1이 버전 4로 승인된 뒤에만 착수.** 캐시 누수 E2E 0건, 브랜치 정책 shell 테스트, SEO·측정 서비스가 Railway에서 동작하고 GitHub Actions에 에이전트 실행 workflow 없음, 그 개정이 정한 게시 경로 조건의 관측 |
 | S6 | GA4 User-ID | Claude → Codex | 동의 게이트 테스트 (§10.2 선행 필수) |
 
 ## 15. 알려진 제약
