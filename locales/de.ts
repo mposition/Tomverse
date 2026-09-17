@@ -2225,4 +2225,99 @@ export const de = {
             },
         },
     },
+    // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
+    helpGuide: {
+        menuItem: "Anleitung finden",
+        title: "Was möchten Sie tun?",
+        intro: "Wählen Sie eine Aufgabe, um zu sehen, wo sie erledigt wird. Diese Hilfe zeigt nur den Weg: Sie liest keine Chats oder Dateien und ändert keine Einstellungen.",
+        back: "Alle Aufgaben",
+        close: "Schließen",
+        whereToGo: "Wohin",
+        opensInNewTab: "Öffnet sich in einem neuen Tab",
+        signInRequired: "Melden Sie sich an, um dies zu nutzen.",
+        signIn: "Anmelden",
+        unavailable: "Derzeit nicht verfügbar.",
+        stepUnavailable: "Derzeit nicht verfügbar",
+        stepsTitle: "Schritte",
+        intents: {
+            importedConversations: {
+                label: "Chats aus einer anderen KI übernehmen",
+                guide: "Importieren Sie Chats, die Sie aus einem anderen KI-Dienst exportiert haben, und setzen Sie einen davon hier fort.",
+            },
+            manageMemory: {
+                label: "Gespeichertes Wissen ansehen oder löschen",
+                guide: "In den Memory-Einstellungen sehen Sie, was Ihr Konto sich merkt, und können es korrigieren oder löschen.",
+            },
+            chooseModels: {
+                label: "KI-Modelle wählen oder vergleichen",
+                guide: "Wählen Sie ein Modell für eine fokussierte Antwort oder bis zu drei, um Antworten nebeneinander zu vergleichen.",
+            },
+            aiReview: {
+                label: "Antworten mit AI Review gegenprüfen",
+                guide: "Wenn zwei oder drei Antworten fertig sind, öffnen Sie AI Review, prüfen die geschätzten Credits und starten es.",
+            },
+            attachFiles: {
+                label: "Dateien oder Google Drive anhängen",
+                guide: "Fügen Sie einer Frage im Eingabefeld Dateien oder Google-Drive-Dokumente hinzu.",
+            },
+            projects: {
+                label: "Chats in einem Projekt bündeln",
+                guide: "Erstellen Sie ein Projekt und verschieben Sie Chats über ihr Menü dorthin.",
+            },
+            lockOrShare: {
+                label: "Chat sperren oder freigeben",
+                guide: "Sperren Sie einen gespeicherten Chat mit einem Passwort oder teilen Sie einen begrenzten, schreibgeschützten Snapshot.",
+            },
+            creditsAndPlan: {
+                label: "Credits und Tarife verstehen",
+                guide: "Sehen Sie, wie Credits funktionieren, prüfen Sie Ihren Tarif oder vergleichen Sie Tarife.",
+            },
+            billingAndRefund: {
+                label: "Erstattungen und Abrechnung",
+                guide: "Lesen Sie die Erstattungsrichtlinie und finden Sie, wo Tarif und Abrechnung verwaltet werden.",
+            },
+            emailNotifications: {
+                label: "E-Mails auswählen",
+                guide: "In den E-Mail-Einstellungen wählen Sie, welche Nachrichten Ihr Konto erhält.",
+            },
+            exportOrDeleteAccountData: {
+                label: "Daten herunterladen oder Konto löschen",
+                guide: "In den Kontodaten-Einstellungen laden Sie Ihre Daten herunter oder löschen Ihr Konto.",
+            },
+            reportAProblem: {
+                label: "Problem melden",
+                guide: "Versuchen Sie es einmal im kleinsten Umfang erneut und melden Sie dann, was passiert ist.",
+            },
+        },
+        steps: {
+            import: "Chats importieren",
+            continue: "Importierten Chat fortsetzen",
+        },
+        destinations: {
+            settingsSection: {
+                externalImport: "Chat-Import öffnen",
+                memory: "Memory-Einstellungen öffnen",
+                emailNotifications: "E-Mail-Einstellungen öffnen",
+                accountData: "Kontodaten öffnen",
+            },
+            settingsTab: {
+                plan: "Tarif und Abrechnung öffnen",
+            },
+            guideSection: {
+                modelsAndPanels: "Lesen: KI-Modelle und Antwort-Panels",
+                aiReview: "Lesen: AI Review verwenden",
+                filesAndDrive: "Lesen: Dateien und Google Drive",
+                projects: "Lesen: Projekte verwenden",
+                lockAndShare: "Lesen: Sperren und Freigeben",
+                creditsAndPlans: "Lesen: Credits und Tarife",
+                troubleshooting: "Lesen: Fehlerbehebung",
+            },
+            publicRoute: {
+                pricing: "Tarife vergleichen",
+                refund: "Erstattungsrichtlinie lesen",
+                helpCentre: "Hilfecenter öffnen",
+            },
+            feedback: "Meldung schreiben",
+        },
+    },
 } satisfies typeof en;

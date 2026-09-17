@@ -106,6 +106,12 @@ type Script = {
    * stream and then says nothing at all -- the stall this file is about.
    */
   text: string | null;
+  /** CHAT-LATENCY-01: the provider stream errors before any chunk. */
+  errorBeforeChunk?: boolean;
+  /** CHAT-LATENCY-01: one empty delta, then silence. */
+  emptyThenStall?: boolean;
+  /** CHAT-LATENCY-01: the provider call itself throws, before any stream exists. */
+  throwOnDispatch?: boolean;
 };
 
 let script: Script = { text: "The answer." };
@@ -116,9 +122,21 @@ let sourceCancelReason: unknown = null;
 mock.module("ai", {
   namedExports: {
     ...aiModule,
-    streamText: () => ({
+    streamText: () => {
+      if (script.throwOnDispatch) {
+        throw new Error("provider call refused before a stream existed");
+      }
+      return {
       textStream: new ReadableStream<string>({
         start(controller) {
+          if (script.emptyThenStall) {
+            controller.enqueue("");
+            return; // and then nothing, ever
+          }
+          if (script.errorBeforeChunk) {
+            controller.error(new Error("provider stream broke before its first chunk"));
+            return;
+          }
           if (script.text === null) return; // never resolves on its own
           controller.enqueue(script.text);
           controller.close();
@@ -144,7 +162,8 @@ mock.module("ai", {
       rawFinishReason: Promise.resolve("end_turn"),
       content: Promise.resolve([]),
       providerMetadata: Promise.resolve({}),
-    }),
+      };
+    },
   },
 });
 
@@ -377,6 +396,7 @@ const until = async (what: string, ready: () => boolean): Promise<void> => {
 
 const ask = async (next: Script) => {
   script = next;
+  timingLines.length = 0;
   sourceCancelReason = null;
   world.messages = [];
   ledger.settlements = [];
@@ -416,6 +436,29 @@ const { splitStreamKeepaliveSignal } = require(
 const countKeepalives = (body: string) =>
   body.split("TOMVERSE_STREAM_KEEPALIVE").length - 1;
 
+/*
+  CHAT-LATENCY-01. The route writes one `chat_turn_timing` line per turn with
+  `console.info`. Captured, not silenced: every other line still reaches the
+  runner's output.
+*/
+type TimingLine = {
+  event: string;
+  outcome: string;
+  firstVisibleChunkSent: boolean;
+  serverMsToFirstVisibleChunk: number | null;
+  serverMsToSettlement: number;
+  [key: string]: unknown;
+};
+const timingLines: TimingLine[] = [];
+const realInfo = console.info.bind(console);
+console.info = (...args: unknown[]) => {
+  if (typeof args[0] === "string" && args[0].includes('"chat_turn_timing"')) {
+    timingLines.push(JSON.parse(args[0]) as TimingLine);
+    return;
+  }
+  realInfo(...args);
+};
+
 /* -------------------------------------------------------------------------- */
 
 test("a provider that never produces a token is kept alive, then given up on", async () => {
@@ -441,6 +484,15 @@ test("a provider that never produces a token is kept alive, then given up on", a
   // Every keepalive is out-of-band, so the answer the user would see is
   // empty rather than a wall of markers.
   assert.equal(split.text, "");
+
+  // CHAT-LATENCY-01: one timing line, a failure with no visible chunk. The
+  // keepalives went out, but they are not something the user saw.
+  await until("the timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].outcome, "failed");
+  assert.equal(timingLines[0].firstVisibleChunkSent, false);
+  assert.equal(timingLines[0].serverMsToFirstVisibleChunk, null);
+  assert.ok(timingLines[0].serverMsToSettlement >= 0);
 });
 
 test("giving up cancels the provider stream, settles and releases the lease", async () => {
@@ -477,6 +529,67 @@ test("a turn that answers is never marked stalled, and reads clean", async () =>
   assert.equal(ledger.settlements.length, 1);
   assert.equal(ledger.settlements[0].outcome, "completed");
   assert.equal(ledger.releases.length >= 1, true);
+
+  // CHAT-LATENCY-01: the first visible chunk was sent, before the end, and
+  // the line says nothing about what it said.
+  await until("the timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  const [line] = timingLines;
+  assert.equal(line.outcome, "completed");
+  assert.equal(line.firstVisibleChunkSent, true);
+  assert.ok(typeof line.serverMsToFirstVisibleChunk === "number");
+  assert.ok((line.serverMsToFirstVisibleChunk as number) <= line.serverMsToSettlement);
+  assert.equal(JSON.stringify(line).includes("The answer."), false);
+  assert.equal(JSON.stringify(line).includes("분석"), false);
+});
+
+test("an empty answer and a stream that breaks before its first chunk send no visible chunk", async () => {
+  // CHAT-LATENCY-01. Neither turn put anything the user could see on the
+  // stream, so neither may report a first-chunk time -- and each is written
+  // exactly once.
+  await ask({ text: "" });
+  await until("the empty turn's timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].firstVisibleChunkSent, false);
+  assert.equal(timingLines[0].serverMsToFirstVisibleChunk, null);
+  assert.notEqual(timingLines[0].outcome, "completed");
+
+  // The broken stream may surface to the reader as an error of its own;
+  // what is under test is the line the route wrote, not how the body ended.
+  // It broke inside the response stream, so it settles as a failed turn.
+  await ask({ text: null, errorBeforeChunk: true }).catch(() => undefined);
+  await until("the broken turn's timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].outcome, "failed");
+  assert.equal(timingLines[0].firstVisibleChunkSent, false);
+  assert.equal(timingLines[0].serverMsToFirstVisibleChunk, null);
+});
+
+test("an empty delta followed by silence still meets the first-token deadline", async () => {
+  // CHAT-LATENCY-01. An empty delta is not a visible token. If it stopped the
+  // watchdog, this turn would hang with the keepalive off and never end.
+  const { body } = await ask({ text: null, emptyThenStall: true });
+  const split = splitStreamKeepaliveSignal(body);
+  assert.equal(split.signal?.state, "stalled");
+  assert.equal(split.signal?.code, "CHAT_FIRST_RESPONSE_TIMEOUT");
+  await until("the stalled turn's timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].outcome, "failed");
+  assert.equal(timingLines[0].firstVisibleChunkSent, false);
+});
+
+test("a provider call that throws before any stream is one failed_before_stream line", async () => {
+  // CHAT-LATENCY-01. The request failure path, not the stream's settlement.
+  let status = 0;
+  await ask({ text: null, throwOnDispatch: true }).catch((error: Error) => {
+    status = Number(/status (\d+)/.exec(error.message)?.[1] ?? 0);
+  });
+  assert.ok(status >= 400, `expected a failed request, got ${status}`);
+  await until("the refused turn's timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].outcome, "failed_before_stream");
+  assert.equal(timingLines[0].firstVisibleChunkSent, false);
+  assert.equal(timingLines[0].serverMsToFirstVisibleChunk, null);
 });
 
 test("a client that walks away stops the keepalive writer", async () => {
@@ -487,6 +600,7 @@ test("a client that walks away stops the keepalive writer", async () => {
   sourceCancelReason = null;
   ledger.settlements = [];
   ledger.releases = [];
+  timingLines.length = 0;
 
   const { POST } = await loadRoute();
   const response = await POST(
@@ -513,4 +627,10 @@ test("a client that walks away stops the keepalive writer", async () => {
   assert.equal(ledger.settlements.length, 1);
   assert.equal(ledger.settlements[0].outcome, "cancelled");
   assert.equal(ledger.releases.length >= 1, true);
+
+  // CHAT-LATENCY-01: a walk-away is recorded as a cancellation, once.
+  await until("the timing line", () => timingLines.length > 0);
+  assert.equal(timingLines.length, 1);
+  assert.equal(timingLines[0].outcome, "cancelled");
+  assert.equal(timingLines[0].firstVisibleChunkSent, false);
 });

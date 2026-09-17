@@ -1,10 +1,20 @@
 # HELP-NAV-01 — 제품 내 도움말 도우미 준비물
 
-- 상태: **준비 단계.** 화면·launcher·질문 매칭·provider 호출은 없습니다. 모바일 composer 안정화와
-  온보딩 변경 뒤에 UI를 붙입니다.
+- 상태: **선택형 안내 1차.** 사이드바 도움말 메뉴의 "하고 싶은 작업 찾기"에서 등록된 12개 의도 중 하나를 고르면 어디서 하는지와 이동할 곳을 보여 줍니다. **자유 입력(질문 매칭)은 화면에 연결하지 않습니다.** provider 호출·데이터 읽기·설정 변경은 없습니다.
 - 등록부: `lib/helpNavigationIntents.ts` (`help-nav-intents-v2`)
-- 정답지: `docs/ops/help-nav/answer-key.v2.json` (`help-nav-answer-key-v2`)
-- 검사: `tests/helpNavigationIntents.test.mjs`
+- 선택형 안내: `lib/helpGuide.ts`(목적지별 열림·로그인 필요·사용할 수 없음, 여는 방식), `components/chat/HelpGuideDialog.tsx`, 문구는 7개 locale의 `helpGuide`
+- 정답지: `docs/ops/help-nav/answer-key.v2.json` (`help-nav-answer-key-v2`) — 자유 입력용이며 선택형 안내의 출시 조건이 아닙니다
+- 검사: `tests/helpNavigationIntents.test.mjs`, `tests/helpGuide.test.mjs`, `tests/e2e/help-guide.spec.ts`
+
+## 선택형 안내가 지키는 것
+
+- **페이지를 이동시키지 않습니다.** 입력창의 보내지 않은 초안은 메모리에만 있으므로, 설정은 화면 안 설정 창으로 열고(`SETTINGS_SECTION_TAB`), 안내 페이지·공개 페이지·로그인은 새 탭으로, 문제 신고는 기존 신고 창을 열기만 합니다(자동 제출 없음).
+- **목적지마다 조건을 따로 판단합니다.** 기능 flag가 꺼져 있으면 "지금은 사용할 수 없음"(로그인 안내보다 먼저), 로그인이 필요한 목적지는 게스트에게 로그인만 안내합니다. flag 값은 서버(`ReviewWorkspaceShell`)가 요청마다 읽어 넘깁니다.
+- 모달 대화상자입니다: 열리면 창 안으로 포커스, Escape로 닫힘, 닫히면 도움말 버튼으로 포커스 복귀, 모든 컨트롤 44px.
+
+## 자유 입력
+
+모델 호출 없는 매처를 한 차례 시도했습니다(dev 22/22, holdout 12/21). 독립 검토 다섯 번 모두 정규식 거절 규칙에서 새 우회·과잉 거절 표현을 찾아 사용자 화면에는 연결하지 않았고, 작업과 채점 결과는 별도 브랜치에 보존했습니다. 자유 입력을 다시 도입할 때는 새 holdout(v3)을 독립 작성·고정해 별도로 평가하며, 기존 v2 holdout은 회귀 시료로 남깁니다.
 
 ## 등록부가 정하는 것
 
@@ -23,9 +33,9 @@
 - 매칭 규칙을 만들 때는 dev만 보고, holdout은 판정에만 씁니다. holdout은 제품 용어를 덜 쓰고, 비슷하지만 없는 기능(메모장)·관리자 경로·대화 본문을 읽어 달라는 요청처럼 거절해야 하는 경우를 따로 담았습니다.
 - 구매 요청(크레딧 충전해 주세요)은 되묻기가 아니라 `credits-and-plan` 안내입니다. 어디서 사는지 알려 주고 사지는 않습니다.
 
-## 아직 정하지 않은 것 (구현 전에 필요)
+## 남은 것
 
-- 매칭 방식(동의어·검색). 1차는 provider 호출 없이 합니다.
-- 안내 문장 원문. 등록부의 `summary`는 검토용 초안이며, 확정 문구는 7개 locale에 넣습니다.
-- 계측. 허용된 intent id와 결과 분류만 남기고 질문 원문·대화 id·개인 경로는 남기지 않습니다.
-- 데스크톱 launcher 위치와 모바일 진입점. 모바일 composer·drawer 계약과 함께 검증합니다.
+- 안내 문구 확정. 7개 locale의 `helpGuide` 문구는 이 변경의 초안이며, 사람이 staging에서 읽고 확정합니다.
+- 계측. 넣는다면 선택한 intent id와 이동 결과 분류만 남기고, 대화 id·개인 경로는 남기지 않습니다. 이번 변경에는 계측이 없습니다.
+- 진입점. 이번에는 사이드바(데스크톱 펼침·모바일 drawer) 머리의 도움말 메뉴 한 곳입니다. 접힌 데스크톱 rail과 입력창 근처 진입점은 모바일 composer·drawer 계약과 함께 따로 정합니다.
+- 자유 입력 재도입 여부와 v3 holdout(위 "자유 입력").

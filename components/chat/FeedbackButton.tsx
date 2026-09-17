@@ -1,5 +1,6 @@
 "use client";
 
+import { FEEDBACK_DIALOG_OPEN_EVENT, type FeedbackDialogOpenDetail } from "@/lib/feedbackDialogEvents";
 import {
   useCallback,
   useEffect,
@@ -96,6 +97,7 @@ export function FeedbackButton({
   triggerLabel,
   triggerClassName,
   triggerTestId,
+  respondsToOpenRequests = false,
 }: {
   currentModelId?: string | null;
   currentPlan?: string | null;
@@ -116,6 +118,12 @@ export function FeedbackButton({
   triggerLabel?: string;
   triggerClassName?: string;
   triggerTestId?: string;
+  /**
+   * Opens this dialog when `openFeedbackDialog()` asks (HELP-NAV-01's "report a
+   * problem" destination). Only the page's general feedback button sets it, so
+   * one request opens one dialog and never a per-message error report.
+   */
+  respondsToOpenRequests?: boolean;
 }) {
   const { t, lang } = useLanguage();
   const { status } = useSession();
@@ -291,6 +299,22 @@ export function FeedbackButton({
     // cleared the moment a new submission starts.
     setOpen(true);
   };
+
+  const openDialogRef = useRef(openDialog);
+  useEffect(() => {
+    openDialogRef.current = openDialog;
+  });
+  useEffect(() => {
+    if (!respondsToOpenRequests || isErrorReport) return;
+    const onRequest = (event: Event) => {
+      const detail = (event as CustomEvent<FeedbackDialogOpenDetail>).detail;
+      if (!detail || detail.handled) return;
+      detail.handled = true;
+      openDialogRef.current();
+    };
+    window.addEventListener(FEEDBACK_DIALOG_OPEN_EVENT, onRequest);
+    return () => window.removeEventListener(FEEDBACK_DIALOG_OPEN_EVENT, onRequest);
+  }, [respondsToOpenRequests, isErrorReport]);
 
   // --- dialog behaviour -----------------------------------------------------
 
