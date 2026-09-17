@@ -66,7 +66,7 @@
  *    driver (`pg` and friends), which bypass Prisma entirely. A spelling that
  *    is not on this list is not inventoried.
  *
- * ## What this check is for, and what enforces the rest
+ * ## What this check is for, and what remains outside it
  *
  * A text check over a general-purpose language cannot follow every alias: a
  * client renamed and then indexed with a key assembled at run time
