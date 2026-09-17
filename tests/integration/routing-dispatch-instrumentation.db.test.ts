@@ -186,6 +186,47 @@ for (const [outcome, expected, layer] of [
   });
 }
 
+// CHAT-LATENCY-01. The route passes the moment the first visible chunk left,
+// and the run's firstTokenMs is derived from it on the same clock as
+// totalLatencyMs. Before this, no caller passed either field and every run
+// read as having no first token at all.
+test("a first visible token reaches both the attempt and the run", async () => {
+  const record = await authorise(await begin());
+  await recordDispatched(record);
+  const firstVisibleTokenAt = new Date();
+  await completeInstrumentedDispatch(record, {
+    outcome: "succeeded",
+    settlementOutcome: "completed",
+    firstVisibleTokenAt,
+  });
+
+  const attempt = await prisma.routingAttempt.findUniqueOrThrow({
+    where: { id: record!.attemptId },
+  });
+  assert.equal(attempt.firstVisibleTokenAt?.getTime(), firstVisibleTokenAt.getTime());
+  const run = await prisma.routingRun.findUniqueOrThrow({ where: { id: record!.runId } });
+  assert.equal(typeof run.firstTokenMs, "number");
+  assert.ok((run.firstTokenMs ?? -1) >= 0);
+  assert.ok((run.firstTokenMs ?? 0) <= (run.totalLatencyMs ?? -1));
+});
+
+test("a turn that never showed a token leaves the first-token columns empty", async () => {
+  const record = await authorise(await begin());
+  await recordDispatched(record);
+  await completeInstrumentedDispatch(record, {
+    outcome: "failed_pre_token",
+    failureLayer: "provider",
+    settlementOutcome: "failed",
+    firstVisibleTokenAt: null,
+  });
+  const attempt = await prisma.routingAttempt.findUniqueOrThrow({
+    where: { id: record!.attemptId },
+  });
+  assert.equal(attempt.firstVisibleTokenAt, null);
+  const run = await prisma.routingRun.findUniqueOrThrow({ where: { id: record!.runId } });
+  assert.equal(run.firstTokenMs, null);
+});
+
 // The plan asks what the extra writes cost time-to-first-token. An answer
 // nobody recorded is an opinion, so the overhead is stored.
 test("the instrumentation records what it cost the request", async () => {
