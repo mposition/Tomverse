@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-shadow-admission-proposal-v1, round 1
+# Independent review — task prompt-refiner-shadow-admission-proposal-v1, round 2
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -22,7 +22,7 @@ Prompt Refiner의 provider-free shadow harness가 남긴 동결 합성 evidence 
 - focused admission 14/14, provider-free shadow 24/24, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.
 - Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다.
 
-## Change under review — digest sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd, commit 721339e67db9569e8592fc580572cdd294c645b7
+## Change under review — digest sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a, commit 09537f9201b2f76f72b5f0b7dc47698d894f545f
 
 ```diff
 diff --git a/.gitattributes b/.gitattributes
@@ -464,10 +464,10 @@ index fe644dcd..da7a6399 100644
 +유지한다.
 diff --git a/lib/promptRefinerShadowAdmissionCore.ts b/lib/promptRefinerShadowAdmissionCore.ts
 new file mode 100644
-index 00000000..3a9eafa1
+index 00000000..0b5d3cf7
 --- /dev/null
 +++ b/lib/promptRefinerShadowAdmissionCore.ts
-@@ -0,0 +1,776 @@
+@@ -0,0 +1,790 @@
 +/**
 + * Pure, provider-free admission-readiness verifier.
 + *
@@ -517,6 +517,10 @@ index 00000000..3a9eafa1
 +const INTRINSIC_REFLECT_APPLY = Reflect.apply;
 +const INTRINSIC_ARRAY_IS_ARRAY = Array.isArray;
 +const INTRINSIC_NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
++// RegExp.prototype.test dynamically dispatches through the receiver's current
++// exec property. Capture the native exec implementation itself so a caller
++// cannot replace either ambient method after this module has initialized.
++const INTRINSIC_REGEXP_EXEC = RegExp.prototype.exec;
 +const INTRINSIC_UINT8_ARRAY = Uint8Array;
 +const INTRINSIC_UINT8_ARRAY_SET = Uint8Array.prototype.set;
 +const INTRINSIC_TEXT_DECODER = TextDecoder;
@@ -533,6 +537,9 @@ index 00000000..3a9eafa1
 +const HASH_PROTOTYPE = Object.getPrototypeOf(createHash("sha256"));
 +const INTRINSIC_HASH_UPDATE = HASH_PROTOTYPE.update;
 +const INTRINSIC_HASH_DIGEST = HASH_PROTOTYPE.digest;
++const FULL_SHA_PATTERN = /^[a-f0-9]{40}$/;
++const HEX_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
++const PREFIXED_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 +
 +if (
 +    typeof RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER !== "function" ||
@@ -675,6 +682,13 @@ index 00000000..3a9eafa1
 +    throw new Error(`prompt_refiner_shadow_admission_${code}`);
 +}
 +
++function matches(pattern: RegExp, value: string): boolean {
++    return (
++        INTRINSIC_REFLECT_APPLY(INTRINSIC_REGEXP_EXEC, pattern, [value]) !==
++        null
++    );
++}
++
 +function actualEvidenceByteLength(bytes: unknown, where: string): number {
 +    try {
 +        const byteLength = INTRINSIC_REFLECT_APPLY(
@@ -800,7 +814,7 @@ index 00000000..3a9eafa1
 +    } catch {
 +        return fail(`${where}_utf8`);
 +    }
-+    if (text.charCodeAt(0) === 0xfeff) fail(`${where}_bom`);
++    if (text[0] === "\ufeff") fail(`${where}_bom`);
 +    let parsed: unknown;
 +    try {
 +        parsed = parseBenchmarkJson(text, maximum);
@@ -834,19 +848,19 @@ index 00000000..3a9eafa1
 +    } catch {
 +        return fail(`${where}_utf8`);
 +    }
-+    if (text.charCodeAt(0) === 0xfeff) fail(`${where}_bom`);
++    if (text[0] === "\ufeff") fail(`${where}_bom`);
 +    return text;
 +}
 +
 +function exactDigest(value: unknown, where: string): string {
-+    if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
++    if (typeof value !== "string" || !matches(HEX_DIGEST_PATTERN, value)) {
 +        fail(`${where}_digest`);
 +    }
 +    return value;
 +}
 +
 +function exactInteger(value: unknown, where: string): number {
-+    if (!Number.isSafeInteger(value) || (value as number) < 0) {
++    if (!INTRINSIC_NUMBER_IS_SAFE_INTEGER(value) || (value as number) < 0) {
 +        fail(`${where}_integer`);
 +    }
 +    return value as number;
@@ -907,16 +921,16 @@ index 00000000..3a9eafa1
 +        candidate.journalSchemaVersion !==
 +            PROMPT_REFINER_SHADOW_JOURNAL_VERSION ||
 +        typeof candidate.sourceRef !== "string" ||
-+        !/^[a-f0-9]{40}$/.test(candidate.sourceRef) ||
++        !matches(FULL_SHA_PATTERN, candidate.sourceRef) ||
 +        typeof candidate.sourceIdentityDigest !== "string" ||
-+        !/^[a-f0-9]{64}$/.test(candidate.sourceIdentityDigest) ||
++        !matches(HEX_DIGEST_PATTERN, candidate.sourceIdentityDigest) ||
 +        typeof candidate.corpusDigest !== "string" ||
-+        !/^[a-f0-9]{64}$/.test(candidate.corpusDigest) ||
++        !matches(HEX_DIGEST_PATTERN, candidate.corpusDigest) ||
 +        !INTRINSIC_ARRAY_IS_ARRAY(candidate.files) ||
 +        candidate.files.length !==
 +            INTERNAL_ADMISSION_EVIDENCE_FILES.length ||
 +        typeof candidate.bundleDigest !== "string" ||
-+        !/^sha256:[a-f0-9]{64}$/.test(candidate.bundleDigest)
++        !matches(PREFIXED_DIGEST_PATTERN, candidate.bundleDigest)
 +    ) {
 +        fail("manifest_shape_or_version");
 +    }
@@ -1246,10 +1260,10 @@ index 00000000..3a9eafa1
 +}
 diff --git a/tests/promptRefinerShadowAdmissionCore.test.mjs b/tests/promptRefinerShadowAdmissionCore.test.mjs
 new file mode 100644
-index 00000000..d1b23124
+index 00000000..d4df7cec
 --- /dev/null
 +++ b/tests/promptRefinerShadowAdmissionCore.test.mjs
-@@ -0,0 +1,958 @@
+@@ -0,0 +1,1074 @@
 +import assert from "node:assert/strict";
 +import { createHash } from "node:crypto";
 +import { execFileSync, spawnSync } from "node:child_process";
@@ -1506,6 +1520,122 @@ index 00000000..d1b23124
 +    assert.equal(
 +        `sha256:${digest(canonicalBenchmarkJson(unsigned))}`,
 +        proposalDigest
++    );
++});
++
++test("captured scalar validators resist post-import RegExp exec, test and Number patches", () => {
++    const originalTest = RegExp.prototype.test;
++    const originalExec = RegExp.prototype.exec;
++    const originalSafeInteger = Number.isSafeInteger;
++    let validProposal;
++    const errors = {};
++    const exactScalarPattern = (pattern) =>
++        pattern.source === "^[a-f0-9]{40}$" ||
++        pattern.source === "^[a-f0-9]{64}$" ||
++        pattern.source === "^sha256:[a-f0-9]{64}$";
++    try {
++        RegExp.prototype.test = function misleadingTest(value) {
++            if (exactScalarPattern(this)) return true;
++            return Reflect.apply(originalTest, this, [value]);
++        };
++        RegExp.prototype.exec = function misleadingExec(value) {
++            if (exactScalarPattern(this)) {
++                return [String(value)];
++            }
++            return Reflect.apply(originalExec, this, [value]);
++        };
++        Number.isSafeInteger = () => true;
++        validProposal = proposePromptRefinerShadowStage(checkedIn());
++
++        const invalidCases = [
++            [
++                "source",
++                (manifest) => {
++                    manifest.sourceRef = "not-a-source";
++                },
++                "manifest_shape_or_version",
++            ],
++            [
++                "sourceIdentityDigest",
++                (manifest) => {
++                    manifest.sourceIdentityDigest = "not-a-digest";
++                },
++                "manifest_shape_or_version",
++            ],
++            [
++                "corpusDigest",
++                (manifest) => {
++                    manifest.corpusDigest = "not-a-digest";
++                },
++                "manifest_shape_or_version",
++            ],
++            [
++                "bundleDigest",
++                (manifest) => {
++                    manifest.bundleDigest = "not-a-digest";
++                },
++                "manifest_shape_or_version",
++            ],
++            [
++                "fileDigest",
++                (manifest) => {
++                    manifest.files[0].sha256 = "not-a-digest";
++                },
++                "evidence_file_digest",
++            ],
++            [
++                "journalDigest",
++                (manifest) => {
++                    manifest.journalTerminal.entryDigest = "not-a-digest";
++                },
++                "journal_terminal_entry_digest",
++            ],
++            [
++                "witnessDigest",
++                (manifest) => {
++                    manifest.witnessTerminal.entryDigest = "not-a-digest";
++                },
++                "witness_terminal_entry_digest",
++            ],
++            [
++                "integer",
++                (manifest) => {
++                    manifest.journalTerminal.seq = "33";
++                },
++                "journal_terminal_seq_integer",
++            ],
++        ];
++        for (const [name, mutate, taxonomy] of invalidCases) {
++            const invalid = JSON.parse(
++                bytes(paths.manifest).toString("utf8")
++            );
++            mutate(invalid);
++            if (name !== "bundleDigest") {
++                invalid.bundleDigest = bundleDigest(invalid);
++            }
++            try {
++                proposePromptRefinerShadowStage({
++                    ...checkedIn(),
++                    manifestBytes: Buffer.from(JSON.stringify(invalid)),
++                });
++            } catch (error) {
++                errors[name] = error;
++            }
++            assert.match(
++                errors[name]?.message ?? "",
++                new RegExp(`^prompt_refiner_shadow_admission_${taxonomy}$`),
++                `${name} did not fail at its exact scalar taxonomy`
++            );
++        }
++    } finally {
++        RegExp.prototype.test = originalTest;
++        RegExp.prototype.exec = originalExec;
++        Number.isSafeInteger = originalSafeInteger;
++    }
++
++    assert.equal(
++        validProposal.proposalDigest,
++        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
 +    );
 +});
 +
@@ -2213,77 +2343,75 @@ index 00000000..d1b23124
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs` (1245ms)
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs` (1452ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 1170.9005
+  ℹ duration_ms 1375.5304
 
 ## Guard results (run by the control program)
 
-- PASS `npm run test:prompt-refiner-shadow` (23273ms)
+- PASS `npm run test:prompt-refiner-shadow` (26374ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 22804.6847
-- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (2504ms)
+  ℹ duration_ms 25853.4553
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (2640ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 2428.9087
-- PASS `npm run check:prompt-injection` (742ms)
+  ℹ duration_ms 2562.1738
+- PASS `npm run check:prompt-injection` (754ms)
   adversarial_retrieved_content_instruction_precedence_violations = 0
   18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)
   not exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)
   Untrusted content stayed data at every fenced and role-separated boundary.
-- PASS `npm run typecheck` (36981ms)
+- PASS `npm run typecheck` (41061ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs` (2714ms)
-- PASS `npm run check:doc-references` (1314ms)
+- PASS `npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs` (2896ms)
+- PASS `npm run check:doc-references` (1516ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
-  Document reference check passed: 891 referenced path(s) across 112 instruction document(s), and 976 path(s) named by comments across 2959 source file(s), all present.
-- PASS `npm run check:policy-section-references` (967ms)
+  Document reference check passed: 891 referenced path(s) across 112 instruction document(s), and 977 path(s) named by comments across 2959 source file(s), all present.
+- PASS `npm run check:policy-section-references` (1127ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).
-- PASS `npm run check:encoding:strict` (1240ms)
+- PASS `npm run check:encoding:strict` (1374ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `npm run check:data-domain-registry` (676ms)
+- PASS `npm run check:data-domain-registry` (728ms)
   y\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.
      Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.
      Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.
      2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.
-- PASS `node -e "require('child_process').execFileSync('git',['diff','--check','827bfcb68998f5d08a7d16a3e276c6203bce79c4','HEAD','--','.',':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1'],{stdio:'inherit'})"` (87ms)
-- PASS `node -e "const fs=require('fs'),h=require('crypto');const e={'docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json':'686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl':'dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl':'9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json':'9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff':'0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json':'56ad55538b49a7ba5e0afd14b3d3b3317b082063d243bcc119c7f93f00dabcde','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json':'71d1d325424896535b688019c81bc7606738b196a228468c687c52da749132f2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl':'1ac1371a9f530ac21b3d8adbff61b8df7e58dbace59e91d93bc12029e7fe07d2'};for(const [p,x] of Object.entries(e)){const a=h.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(a!==x)throw Error('immutable drift: '+p)}console.log('historical evidence and round0 numbered records immutable: 8')"` (67ms)
-  historical evidence and round0 numbered records immutable: 8
-- PASS `node -e "const fs=require('fs'),c=require('child_process'),h=require('crypto');const t=JSON.parse(fs.readFileSync('docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json','utf8')),ex='docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1',s=t.writableScope.map(x=>':(literal)'+x).concat([':(exclude,literal)'+ex]),d=b=>c.execFileSync('git',['diff',b,'HEAD','--',...s],{maxBuffer:67108864}),a=d(t.baseCommit),n=d('827bfcb68998f5d08a7d16a3e276c6203bce79c4'),sha=x=>h.createHash('sha256').update(x).digest('hex');if(!a.equals(n))throw Error('scoped diff bytes differ');if(sha(a)!=='233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd')throw Error('scoped diff digest drift');console.log('old/latest literal scoped diff byte-identical')"` (113ms)
-  old/latest literal scoped diff byte-identical
-- PASS `git merge-base --is-ancestor 827bfcb68998f5d08a7d16a3e276c6203bce79c4 HEAD` (40ms)
-- PASS `node -e "const c=require('child_process'),p=['lib/promptRefinerShadowAdmissionCore.ts','tests/promptRefinerShadowAdmissionCore.test.mjs','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl'],a=c.execFileSync('git',['check-attr','-z','text','eol','--',...p],{encoding:'utf8'}).split('\0').filter(Boolean);for(let i=0;i<a.length;i+=3){if(a[i+1]==='text'&&a[i+2]!=='set')throw Error(a[i]+' text=' + a[i+2]);if(a[i+1]==='eol'&&a[i+2]!=='lf')throw Error(a[i]+' eol=' + a[i+2]);}console.log('LF pins verified: '+p.length)"` (78ms)
+- PASS `node -e "require('child_process').execFileSync('git',['diff','--check','de346b81bba9cf69e110236699f1eeb585bb3021','HEAD','--','.',':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1'],{stdio:'inherit'})"` (89ms)
+- PASS `node -e "const fs=require('fs'),h=require('crypto');const e={'docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json':'686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl':'dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl':'9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json':'9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff':'0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json':'56ad55538b49a7ba5e0afd14b3d3b3317b082063d243bcc119c7f93f00dabcde','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json':'71d1d325424896535b688019c81bc7606738b196a228468c687c52da749132f2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl':'1ac1371a9f530ac21b3d8adbff61b8df7e58dbace59e91d93bc12029e7fe07d2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round1.diff':'233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round1.json':'6e87156c2ea8c734998f6022a763d74bd1199907eb5f5a065901b91e4ca319e8','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round1.json':'2db1833463f0d64780871714904212f7679b90023cc49b780d43dc70ea92ef28','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round1.events.jsonl':'0adadd785dae8c8e556bbbe6f0619cd4d893026f6e4eed8a7a4e369d3941833c'};for(const [p,x] of Object.entries(e)){const a=h.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(a!==x)throw Error('immutable drift: '+p)}console.log('historical evidence and round0/1 numbered records immutable: 12')"` (79ms)
+  historical evidence and round0/1 numbered records immutable: 12
+- PASS `node -e "const fs=require('fs'),c=require('child_process'),h=require('crypto');const t=JSON.parse(fs.readFileSync('docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json','utf8')),ex='docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1',s=t.writableScope.map(x=>':(literal)'+x).concat([':(exclude,literal)'+ex]),d=b=>c.execFileSync('git',['diff',b,'HEAD','--',...s],{maxBuffer:67108864}),a=d(t.baseCommit),n=d('de346b81bba9cf69e110236699f1eeb585bb3021'),sha=x=>h.createHash('sha256').update(x).digest('hex');if(!a.equals(n))throw Error('scoped diff bytes differ');if(sha(a)!=='d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a')throw Error('scoped diff digest drift');console.log('old/current literal scoped diff byte-identical')"` (118ms)
+  old/current literal scoped diff byte-identical
+- PASS `git merge-base --is-ancestor de346b81bba9cf69e110236699f1eeb585bb3021 HEAD` (44ms)
+- PASS `node -e "const c=require('child_process'),p=['lib/promptRefinerShadowAdmissionCore.ts','tests/promptRefinerShadowAdmissionCore.test.mjs','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl'],a=c.execFileSync('git',['check-attr','-z','text','eol','--',...p],{encoding:'utf8'}).split('\0').filter(Boolean);for(let i=0;i<a.length;i+=3){if(a[i+1]==='text'&&a[i+2]!=='set')throw Error(a[i]+' text=' + a[i+2]);if(a[i+1]==='eol'&&a[i+2]!=='lf')throw Error(a[i]+' eol=' + a[i+2]);}console.log('LF pins verified: '+p.length)"` (87ms)
   LF pins verified: 6
 
 ## Findings from the previous round (check each was addressed)
 
-- [warning/evidence] .gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs): Only the four evidence artifacts are LF-pinned; the two new non-evidence paths named by completion criterion 9 (the new TypeScript core and its test) carry no line-ending attribute, so their bytes are not identical in a Windows core.autocrlf=true checkout.
-- [nit/judgement] lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return): The returned proposal is a plain mutable object — only PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS is frozen — so the "immutable proposal" property holds at the TypeScript literal-type level but not at runtime for a JS caller.
-- [nit/evidence] docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (".gitattributes" digest) with .gitattributes:70-78: The commit that freezes the bundle also edits .gitattributes, which is a member of the bundle's own source allowlist, so the evidence can never be regenerated from this branch — the disclosure is correct, but the bundle is now verify-only rather than reproducible.
+- [nit/judgement] lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials): The module captures primordials at import time for its byte/hash/decode path but the manifest field validators still use ambient `Number.isSafeInteger` and `RegExp.prototype.test`, so the stated capture discipline is not uniform (every reachable outcome is still fail-closed downstream, so this is defense-in-depth consistency only).
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: latest develop 827bfcb6를 충돌 없이 통합했고 origin/develop은 HEAD의 ancestor다. task의 old base c45871f1와 latest develop을 기준으로 package directory만 제외한 literal scoped diff는 104122 bytes, sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd로 byte-identical하다. round0 finding의 구현·test LF pin과 runtime deep freeze를 반영했고, untrusted evidence는 bounds-before-copy/hash/decode, stable snapshot, captured primordials로 TOCTOU·ambient mutation 경계를 강화했다. historical evidence sourceRef f1e1b0c2 및 report/journal/witness/manifest bytes와 round0 numbered package/verdict/events는 변경하지 않았다. 이 증거는 historical snapshot만 검증하며 currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true, executionAdmitted=false 한계를 유지한다.
+Summary: latest develop de346b81를 충돌 없이 통합했고 origin/develop은 HEAD의 ancestor다. task old base c45871f1와 current develop을 기준으로 package directory만 제외한 literal scoped diff는 108858 bytes, sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a로 byte-identical하며 outside-scope branch change는 0이다. round0 finding의 구현·test LF pin과 runtime deep freeze를 반영했고 historical evidence snapshot은 verify-only라는 한계를 currentCheckoutValidated=false와 runtimeSourceRevalidationRequired=true로 유지해 수용했다. bounds-before-copy/hash/decode와 stable snapshot으로 TOCTOU를 닫고 captured primordials로 ambient mutation을 제한했다. round1 scalar-validator finding은 Number.isSafeInteger와 정규식 실행을 캡처하고 RegExp.prototype.test의 동적 exec dispatch를 피하도록 native RegExp.prototype.exec 자체를 호출해 닫았다. historical evidence sourceRef f1e1b0c2 및 4 artifact bytes, round0·1 numbered package/verdict/events bytes는 변경하지 않았다. executionAdmitted=false이며 DB/writer/provider/runtime activation은 없다.
 
 ## Answer format
 
@@ -2292,8 +2420,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-shadow-admission-proposal-v1",
-  "round": 1,
-  "reviewedDigest": "sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd",
+  "round": 2,
+  "reviewedDigest": "sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {

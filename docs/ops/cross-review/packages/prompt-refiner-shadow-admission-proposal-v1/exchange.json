@@ -279,140 +279,266 @@
         }
       ],
       "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)); the author fixes it and the change is re-reviewed"
+    },
+    {
+      "round": 2,
+      "changeDigest": "sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
+      "commit": "09537f9201b2f76f72b5f0b7dc47698d894f545f",
+      "filesChanged": [
+        ".gitattributes",
+        "AGENTS.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round1.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change.diff",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/exchange.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round1.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-prompt.md",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round1.events.jsonl",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json",
+        "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round1.json",
+        "docs/ops/prompt-refiner-shadow-harness.md",
+        "docs/ops/prompt-refiner-shadow/evidence/README.md",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
+        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
+        "docs/ops/tomverse-chat-progress.md",
+        "docs/policy/prompt-refiner-observability.md",
+        "lib/promptRefinerShadowAdmissionCore.ts",
+        "tests/promptRefinerShadowAdmissionCore.test.mjs"
+      ],
+      "changeSummary": "latest develop de346b81를 충돌 없이 통합했고 origin/develop은 HEAD의 ancestor다. task old base c45871f1와 current develop을 기준으로 package directory만 제외한 literal scoped diff는 108858 bytes, sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a로 byte-identical하며 outside-scope branch change는 0이다. round0 finding의 구현·test LF pin과 runtime deep freeze를 반영했고 historical evidence snapshot은 verify-only라는 한계를 currentCheckoutValidated=false와 runtimeSourceRevalidationRequired=true로 유지해 수용했다. bounds-before-copy/hash/decode와 stable snapshot으로 TOCTOU를 닫고 captured primordials로 ambient mutation을 제한했다. round1 scalar-validator finding은 Number.isSafeInteger와 정규식 실행을 캡처하고 RegExp.prototype.test의 동적 exec dispatch를 피하도록 native RegExp.prototype.exec 자체를 호출해 닫았다. historical evidence sourceRef f1e1b0c2 및 4 artifact bytes, round0·1 numbered package/verdict/events bytes는 변경하지 않았다. executionAdmitted=false이며 DB/writer/provider/runtime activation은 없다.",
+      "testResults": [
+        {
+          "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1375.5304",
+          "durationMs": 1452
+        }
+      ],
+      "guardRuns": [
+        {
+          "rule": "npm run test:prompt-refiner-shadow",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 25853.4553",
+          "durationMs": 26374
+        },
+        {
+          "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
+          "passed": true,
+          "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2562.1738",
+          "durationMs": 2640
+        },
+        {
+          "rule": "npm run check:prompt-injection",
+          "passed": true,
+          "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
+          "durationMs": 754
+        },
+        {
+          "rule": "npm run typecheck",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
+          "durationMs": 41061
+        },
+        {
+          "rule": "npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "passed": true,
+          "detail": "",
+          "durationMs": 2896
+        },
+        {
+          "rule": "npm run check:doc-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 891 referenced path(s) across 112 instruction document(s), and 977 path(s) named by comments across 2959 source file(s), all present.",
+          "durationMs": 1516
+        },
+        {
+          "rule": "npm run check:policy-section-references",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
+          "durationMs": 1127
+        },
+        {
+          "rule": "npm run check:encoding:strict",
+          "passed": true,
+          "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
+          "durationMs": 1374
+        },
+        {
+          "rule": "npm run check:data-domain-registry",
+          "passed": true,
+          "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
+          "durationMs": 728
+        },
+        {
+          "rule": "node -e \"require('child_process').execFileSync('git',['diff','--check','de346b81bba9cf69e110236699f1eeb585bb3021','HEAD','--','.',':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1'],{stdio:'inherit'})\"",
+          "passed": true,
+          "detail": "",
+          "durationMs": 89
+        },
+        {
+          "rule": "node -e \"const fs=require('fs'),h=require('crypto');const e={'docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json':'686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl':'dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl':'9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json':'9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff':'0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json':'56ad55538b49a7ba5e0afd14b3d3b3317b082063d243bcc119c7f93f00dabcde','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json':'71d1d325424896535b688019c81bc7606738b196a228468c687c52da749132f2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl':'1ac1371a9f530ac21b3d8adbff61b8df7e58dbace59e91d93bc12029e7fe07d2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round1.diff':'233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round1.json':'6e87156c2ea8c734998f6022a763d74bd1199907eb5f5a065901b91e4ca319e8','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round1.json':'2db1833463f0d64780871714904212f7679b90023cc49b780d43dc70ea92ef28','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round1.events.jsonl':'0adadd785dae8c8e556bbbe6f0619cd4d893026f6e4eed8a7a4e369d3941833c'};for(const [p,x] of Object.entries(e)){const a=h.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(a!==x)throw Error('immutable drift: '+p)}console.log('historical evidence and round0/1 numbered records immutable: 12')\"",
+          "passed": true,
+          "detail": "historical evidence and round0/1 numbered records immutable: 12",
+          "durationMs": 79
+        },
+        {
+          "rule": "node -e \"const fs=require('fs'),c=require('child_process'),h=require('crypto');const t=JSON.parse(fs.readFileSync('docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json','utf8')),ex='docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1',s=t.writableScope.map(x=>':(literal)'+x).concat([':(exclude,literal)'+ex]),d=b=>c.execFileSync('git',['diff',b,'HEAD','--',...s],{maxBuffer:67108864}),a=d(t.baseCommit),n=d('de346b81bba9cf69e110236699f1eeb585bb3021'),sha=x=>h.createHash('sha256').update(x).digest('hex');if(!a.equals(n))throw Error('scoped diff bytes differ');if(sha(a)!=='d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a')throw Error('scoped diff digest drift');console.log('old/current literal scoped diff byte-identical')\"",
+          "passed": true,
+          "detail": "old/current literal scoped diff byte-identical",
+          "durationMs": 118
+        },
+        {
+          "rule": "git merge-base --is-ancestor de346b81bba9cf69e110236699f1eeb585bb3021 HEAD",
+          "passed": true,
+          "detail": "",
+          "durationMs": 44
+        },
+        {
+          "rule": "node -e \"const c=require('child_process'),p=['lib/promptRefinerShadowAdmissionCore.ts','tests/promptRefinerShadowAdmissionCore.test.mjs','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl'],a=c.execFileSync('git',['check-attr','-z','text','eol','--',...p],{encoding:'utf8'}).split('\\0').filter(Boolean);for(let i=0;i<a.length;i+=3){if(a[i+1]==='text'&&a[i+2]!=='set')throw Error(a[i]+' text=' + a[i+2]);if(a[i+1]==='eol'&&a[i+2]!=='lf')throw Error(a[i]+' eol=' + a[i+2]);}console.log('LF pins verified: '+p.length)\"",
+          "passed": true,
+          "detail": "LF pins verified: 6",
+          "durationMs": 87
+        }
+      ],
+      "guardViolations": [],
+      "checkFailures": [],
+      "reviewConclusion": null,
+      "findings": [],
+      "nextAction": "awaiting the reviewer's verdict"
     }
   ],
-  "changeDigest": "sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd",
-  "commit": "721339e67db9569e8592fc580572cdd294c645b7",
-  "changeSummary": "latest develop 827bfcb6를 충돌 없이 통합했고 origin/develop은 HEAD의 ancestor다. task의 old base c45871f1와 latest develop을 기준으로 package directory만 제외한 literal scoped diff는 104122 bytes, sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd로 byte-identical하다. round0 finding의 구현·test LF pin과 runtime deep freeze를 반영했고, untrusted evidence는 bounds-before-copy/hash/decode, stable snapshot, captured primordials로 TOCTOU·ambient mutation 경계를 강화했다. historical evidence sourceRef f1e1b0c2 및 report/journal/witness/manifest bytes와 round0 numbered package/verdict/events는 변경하지 않았다. 이 증거는 historical snapshot만 검증하며 currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true, executionAdmitted=false 한계를 유지한다.",
+  "changeDigest": "sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
+  "commit": "09537f9201b2f76f72b5f0b7dc47698d894f545f",
+  "changeSummary": "latest develop de346b81를 충돌 없이 통합했고 origin/develop은 HEAD의 ancestor다. task old base c45871f1와 current develop을 기준으로 package directory만 제외한 literal scoped diff는 108858 bytes, sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a로 byte-identical하며 outside-scope branch change는 0이다. round0 finding의 구현·test LF pin과 runtime deep freeze를 반영했고 historical evidence snapshot은 verify-only라는 한계를 currentCheckoutValidated=false와 runtimeSourceRevalidationRequired=true로 유지해 수용했다. bounds-before-copy/hash/decode와 stable snapshot으로 TOCTOU를 닫고 captured primordials로 ambient mutation을 제한했다. round1 scalar-validator finding은 Number.isSafeInteger와 정규식 실행을 캡처하고 RegExp.prototype.test의 동적 exec dispatch를 피하도록 native RegExp.prototype.exec 자체를 호출해 닫았다. historical evidence sourceRef f1e1b0c2 및 4 artifact bytes, round0·1 numbered package/verdict/events bytes는 변경하지 않았다. executionAdmitted=false이며 DB/writer/provider/runtime activation은 없다.",
   "testResults": [
     {
       "command": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs",
       "passed": true,
-      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1170.9005",
-      "durationMs": 1245
+      "output": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1375.5304",
+      "durationMs": 1452
     }
   ],
   "guardRuns": [
     {
       "rule": "npm run test:prompt-refiner-shadow",
       "passed": true,
-      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 22804.6847",
-      "durationMs": 23273
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 25853.4553",
+      "durationMs": 26374
     },
     {
       "rule": "node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs",
       "passed": true,
-      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2428.9087",
-      "durationMs": 2504
+      "detail": "ℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 2562.1738",
+      "durationMs": 2640
     },
     {
       "rule": "npm run check:prompt-injection",
       "passed": true,
       "detail": "\nadversarial_retrieved_content_instruction_precedence_violations = 0\n18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)\nnot exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)\nUntrusted content stayed data at every fenced and role-separated boundary.",
-      "durationMs": 742
+      "durationMs": 754
     },
     {
       "rule": "npm run typecheck",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 typecheck\n> next typegen && tsc --noEmit --incremental false\n\nGenerating route types...\n✓ Types generated successfully",
-      "durationMs": 36981
+      "durationMs": 41061
     },
     {
       "rule": "npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs",
       "passed": true,
       "detail": "",
-      "durationMs": 2714
+      "durationMs": 2896
     },
     {
       "rule": "npm run check:doc-references",
       "passed": true,
-      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 891 referenced path(s) across 112 instruction document(s), and 976 path(s) named by comments across 2959 source file(s), all present.",
-      "durationMs": 1314
+      "detail": "> ai-chat-hub@0.1.0 check:doc-references\n> node scripts/check-doc-references.mjs\n\nDocument reference check passed: 891 referenced path(s) across 112 instruction document(s), and 977 path(s) named by comments across 2959 source file(s), all present.",
+      "durationMs": 1516
     },
     {
       "rule": "npm run check:policy-section-references",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:policy-section-references\n> node scripts/check-policy-section-references.mjs\n\nPolicy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).",
-      "durationMs": 967
+      "durationMs": 1127
     },
     {
       "rule": "npm run check:encoding:strict",
       "passed": true,
       "detail": "> ai-chat-hub@0.1.0 check:encoding:strict\n> node scripts/check-text-encoding.mjs --strict\n\nText encoding check passed. No mojibake markers found.",
-      "durationMs": 1240
+      "durationMs": 1374
     },
     {
       "rule": "npm run check:data-domain-registry",
       "passed": true,
       "detail": "y\\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.\n   Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.\n   Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.\n   2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.",
-      "durationMs": 676
+      "durationMs": 728
     },
     {
-      "rule": "node -e \"require('child_process').execFileSync('git',['diff','--check','827bfcb68998f5d08a7d16a3e276c6203bce79c4','HEAD','--','.',':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1'],{stdio:'inherit'})\"",
+      "rule": "node -e \"require('child_process').execFileSync('git',['diff','--check','de346b81bba9cf69e110236699f1eeb585bb3021','HEAD','--','.',':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1'],{stdio:'inherit'})\"",
       "passed": true,
       "detail": "",
-      "durationMs": 87
+      "durationMs": 89
     },
     {
-      "rule": "node -e \"const fs=require('fs'),h=require('crypto');const e={'docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json':'686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl':'dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl':'9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json':'9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff':'0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json':'56ad55538b49a7ba5e0afd14b3d3b3317b082063d243bcc119c7f93f00dabcde','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json':'71d1d325424896535b688019c81bc7606738b196a228468c687c52da749132f2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl':'1ac1371a9f530ac21b3d8adbff61b8df7e58dbace59e91d93bc12029e7fe07d2'};for(const [p,x] of Object.entries(e)){const a=h.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(a!==x)throw Error('immutable drift: '+p)}console.log('historical evidence and round0 numbered records immutable: 8')\"",
+      "rule": "node -e \"const fs=require('fs'),h=require('crypto');const e={'docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json':'686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl':'dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl':'9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json':'9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff':'0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json':'56ad55538b49a7ba5e0afd14b3d3b3317b082063d243bcc119c7f93f00dabcde','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json':'71d1d325424896535b688019c81bc7606738b196a228468c687c52da749132f2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl':'1ac1371a9f530ac21b3d8adbff61b8df7e58dbace59e91d93bc12029e7fe07d2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round1.diff':'233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round1.json':'6e87156c2ea8c734998f6022a763d74bd1199907eb5f5a065901b91e4ca319e8','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round1.json':'2db1833463f0d64780871714904212f7679b90023cc49b780d43dc70ea92ef28','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round1.events.jsonl':'0adadd785dae8c8e556bbbe6f0619cd4d893026f6e4eed8a7a4e369d3941833c'};for(const [p,x] of Object.entries(e)){const a=h.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(a!==x)throw Error('immutable drift: '+p)}console.log('historical evidence and round0/1 numbered records immutable: 12')\"",
       "passed": true,
-      "detail": "historical evidence and round0 numbered records immutable: 8",
-      "durationMs": 67
+      "detail": "historical evidence and round0/1 numbered records immutable: 12",
+      "durationMs": 79
     },
     {
-      "rule": "node -e \"const fs=require('fs'),c=require('child_process'),h=require('crypto');const t=JSON.parse(fs.readFileSync('docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json','utf8')),ex='docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1',s=t.writableScope.map(x=>':(literal)'+x).concat([':(exclude,literal)'+ex]),d=b=>c.execFileSync('git',['diff',b,'HEAD','--',...s],{maxBuffer:67108864}),a=d(t.baseCommit),n=d('827bfcb68998f5d08a7d16a3e276c6203bce79c4'),sha=x=>h.createHash('sha256').update(x).digest('hex');if(!a.equals(n))throw Error('scoped diff bytes differ');if(sha(a)!=='233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd')throw Error('scoped diff digest drift');console.log('old/latest literal scoped diff byte-identical')\"",
+      "rule": "node -e \"const fs=require('fs'),c=require('child_process'),h=require('crypto');const t=JSON.parse(fs.readFileSync('docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json','utf8')),ex='docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1',s=t.writableScope.map(x=>':(literal)'+x).concat([':(exclude,literal)'+ex]),d=b=>c.execFileSync('git',['diff',b,'HEAD','--',...s],{maxBuffer:67108864}),a=d(t.baseCommit),n=d('de346b81bba9cf69e110236699f1eeb585bb3021'),sha=x=>h.createHash('sha256').update(x).digest('hex');if(!a.equals(n))throw Error('scoped diff bytes differ');if(sha(a)!=='d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a')throw Error('scoped diff digest drift');console.log('old/current literal scoped diff byte-identical')\"",
       "passed": true,
-      "detail": "old/latest literal scoped diff byte-identical",
-      "durationMs": 113
+      "detail": "old/current literal scoped diff byte-identical",
+      "durationMs": 118
     },
     {
-      "rule": "git merge-base --is-ancestor 827bfcb68998f5d08a7d16a3e276c6203bce79c4 HEAD",
+      "rule": "git merge-base --is-ancestor de346b81bba9cf69e110236699f1eeb585bb3021 HEAD",
       "passed": true,
       "detail": "",
-      "durationMs": 40
+      "durationMs": 44
     },
     {
       "rule": "node -e \"const c=require('child_process'),p=['lib/promptRefinerShadowAdmissionCore.ts','tests/promptRefinerShadowAdmissionCore.test.mjs','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl'],a=c.execFileSync('git',['check-attr','-z','text','eol','--',...p],{encoding:'utf8'}).split('\\0').filter(Boolean);for(let i=0;i<a.length;i+=3){if(a[i+1]==='text'&&a[i+2]!=='set')throw Error(a[i]+' text=' + a[i+2]);if(a[i+1]==='eol'&&a[i+2]!=='lf')throw Error(a[i]+' eol=' + a[i+2]);}console.log('LF pins verified: '+p.length)\"",
       "passed": true,
       "detail": "LF pins verified: 6",
-      "durationMs": 78
+      "durationMs": 87
     }
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": "approve",
-  "findings": [
-    {
-      "location": "lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)",
-      "severity": "nit",
-      "basis": "judgement",
-      "claim": "The module captures primordials at import time for its byte/hash/decode path but the manifest field validators still use ambient `Number.isSafeInteger` and `RegExp.prototype.test`, so the stated capture discipline is not uniform (every reachable outcome is still fail-closed downstream, so this is defense-in-depth consistency only).",
-      "reproduction": "In a scratch ESM file: `import {proposePromptRefinerShadowStage} from '../lib/promptRefinerShadowAdmissionCore.ts';` then `Number.isSafeInteger = () => true;` and call it with the checked-in evidence but a manifest whose `journalTerminal.seq` is the string `\"33\"` (with `bundleDigest` recomputed as in tests/promptRefinerShadowAdmissionCore.test.mjs:64-71). Expected with captured intrinsics: `prompt_refiner_shadow_admission_journal_terminal_seq_integer`; actual: the strict integer check is bypassed and rejection falls through to `replay_invariant_or_terminal_head`. Contrast line 222, which uses INTRINSIC_NUMBER_IS_SAFE_INTEGER and is unaffected by the same patch.",
-      "disposition": "fix_requested"
-    }
-  ],
-  "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)); the author fixes it and the change is re-reviewed; package round 2 once the change is revised",
-  "status": "awaiting_revision",
+  "reviewConclusion": null,
+  "findings": [],
+  "nextAction": "hand the review prompt (round 2) to the claude reviewer; its verdict must name digest sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
+  "status": "awaiting_review",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-17T00:25:03.640Z",
-  "packagedRounds": 2,
+  "producedAt": "2026-09-17T00:43:46.793Z",
+  "packagedRounds": 3,
   "concludedAtRound": null,
   "lineage": [],
   "inheritedFindings": [],
-  "headCommit": "721339e67db9569e8592fc580572cdd294c645b7",
+  "headCommit": "09537f9201b2f76f72b5f0b7dc47698d894f545f",
   "worktreeDirty": false,
   "filesChanged": [
     ".gitattributes",
     "AGENTS.md",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round1.diff",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change.diff",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/exchange.json",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round1.json",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-prompt.md",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round1.events.jsonl",
     "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json",
+    "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round1.json",
     "docs/ops/prompt-refiner-shadow-harness.md",
     "docs/ops/prompt-refiner-shadow/evidence/README.md",
     "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
