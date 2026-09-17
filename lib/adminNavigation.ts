@@ -96,9 +96,16 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
     id: "analytics",
     label: "Analytics",
     href: "/admin/analytics",
-    description: "Product funnel, activation, and import/memory metrics",
+    description: "Active users, usage, model share, product funnel, and import/memory metrics",
     group: "Command Center",
     aliases: [
+      "usage",
+      "active users",
+      "dau",
+      "mau",
+      "model share",
+      "geography",
+      "language",
       "funnel",
       "activation",
       "conversion",
@@ -113,6 +120,11 @@ export const ADMIN_NAVIGATION: readonly AdminNavItem[] = [
       "reviewer",
     ],
     tabs: [
+      {
+        id: "usage",
+        label: "Usage",
+        description: "Active users, messages, model share, and when and where people use Tomverse",
+      },
       {
         id: "product",
         label: "Product analytics",
