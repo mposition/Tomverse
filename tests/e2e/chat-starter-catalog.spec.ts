@@ -58,7 +58,7 @@ test.describe("Chat starter catalogue", () => {
   }) => {
     // Not a disabled teaser, not an empty heading, not a reserved row: the
     // surface is absent. A person who cannot use a feature is not told about
-    // it (docs/ui-contracts/prompt-refiner-suggestion.md section 1).
+    // it (docs/ui-contracts/chat-starter-catalog.md section 5).
     await mockAuthenticatedApi(page);
     await mockUserUsage(page, { plan: "Pro" });
     await openWelcome(page);

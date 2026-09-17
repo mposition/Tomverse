@@ -66,8 +66,8 @@ export const chatStarterKillSwitchEngaged = (
  * The two inputs folded into the one answer every surface uses.
  *
  * `offered=false` renders nothing -- not a disabled teaser, not a greyed row.
- * The rule is `docs/ui-contracts/prompt-refiner-suggestion.md` section 1,
- * applied here for the same reason: a surface that promises a feature to
+ * The rule is `docs/ui-contracts/chat-starter-catalog.md` section 5, for this
+ * reason: a surface that promises a feature to
  * somebody who cannot reach it is worse than no surface at all.
  */
 export const chatStarterAvailable = (input: {

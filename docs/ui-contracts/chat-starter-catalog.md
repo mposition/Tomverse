@@ -160,8 +160,7 @@ quieter").
 
 ## 4. 씨앗은 전송이 아니다
 
-카드 클릭은 composer 초안을 채우고 멈춘다. 규칙은
-`docs/ui-contracts/prompt-refiner-suggestion.md` §1과 같다 — 상자를 채우는
+카드 클릭은 composer 초안을 채우고 멈춘다. 상자를 채우는
 표면은 출발점을 주는 것이고, 전송하는 표면은 사용자가 읽지 않은 문장에 크레딧을
 쓰는 것이다.
 
@@ -241,8 +240,7 @@ quieter").
   같은 규칙을 세 번째로 적은 것이 아니라, 세 모듈이 같은 모양을 유지한다.
 
 `offered=false`는 **아무것도 렌더하지 않는다.** 비활성 teaser도, 회색 행도,
-제목만 남은 빈 구획도 아니다. `docs/ui-contracts/prompt-refiner-suggestion.md`
-§1과 같은 이유다 — 실제로 쓸 수 없는 사람에게 기능을 약속하는 상태를 만들지
+제목만 남은 빈 구획도 아니다. 실제로 쓸 수 없는 사람에게 기능을 약속하는 상태를 만들지
 않는다.
 
 flag와 capability는 **서버에서 해석해 prop으로 건넨다**
@@ -338,8 +336,7 @@ composer · AI 고지 · 동의 안내            하단 dock (대화 중과 같
 ### 무엇이 일부러 빠져 있는가
 
 - **Prompt Refiner 카드 없음.** 이름 댈 `AppSetting` flag 상수가 저장소에
-  없다(`docs/ui-contracts/prompt-refiner-suggestion.md`가 "연결됨, 미제공"으로
-  기록). 요구사항을 적을 수 없는 카드는 무조건 제공되는 카드가 되고, flag key를
+  없다(이 브랜치에는 Prompt Refiner 자체가 없고, develop에서는 "연결됨, 미제공"이다). 요구사항을 적을 수 없는 카드는 무조건 제공되는 카드가 되고, flag key를
   리터럴로 적으면 gate는 통과하고 약속은 거짓이 된다.
 - **Deep Research 카드 없음.** 같은 이유로 flag 상수가 없다.
 

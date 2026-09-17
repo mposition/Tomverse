@@ -36,7 +36,7 @@ type StarterLock = Extract<StarterAvailability, { state: "locked" }>;
  * ## What this component is not allowed to do
  *
  * **It does not send.** A click seeds the composer draft and stops. The rule
- * is `docs/ui-contracts/prompt-refiner-suggestion.md` section 1's: a surface
+ * is `docs/ui-contracts/chat-starter-catalog.md` section 4's: a surface
  * that fills the box is offering a starting point, and a surface that sends is
  * spending a credit on the user's behalf on a sentence they have not read.
  *

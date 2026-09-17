@@ -6284,8 +6284,7 @@ export function ChatPageClient({
   /*
     A click seeds and stops.
 
-    The rule is the Prompt Refiner's (docs/ui-contracts/prompt-refiner-suggestion.md
-    section 1): a surface that fills the box offers a starting point, and a
+    The rule is docs/ui-contracts/chat-starter-catalog.md section 4: a surface that fills the box offers a starting point, and a
     surface that sends spends a credit on a sentence the user has not read yet.
     So this writes a draft, arms the composer controls the card declares, moves
     focus, and does nothing else -- no request, no reservation, no conversation

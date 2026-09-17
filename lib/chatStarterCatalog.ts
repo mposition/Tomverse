@@ -206,8 +206,8 @@ export type ChatStarterEntry = {
  * ## What is deliberately absent
  *
  * *Prompt Refiner* has no card. It has no `AppSetting` flag constant to name
- * (`docs/ui-contracts/prompt-refiner-suggestion.md` records it as wired but
- * not offered), and a card whose requirement cannot be written down is a card
+ * (on this branch it does not exist at all; on develop it is wired but not
+ * offered), and a card whose requirement cannot be written down is a card
  * that would be offered unconditionally. Writing the flag key out as a string
  * literal here would have made the gate pass and the promise false.
  *
