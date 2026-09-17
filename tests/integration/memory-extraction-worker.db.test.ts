@@ -481,12 +481,11 @@ const issuingAdapter = (
             candidates: [
                 {
                     kind: "preference",
-                    polarity: "affirmed",
                     statement,
                     confidence: 0.9,
                     sensitivity: "standard",
                     expiresAt: null,
-                    evidence: [{ messageLabel: "m1", quote: "formal Korean" }],
+                    evidence: ["m1"],
                 },
             ],
         }),
