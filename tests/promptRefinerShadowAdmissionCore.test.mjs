@@ -373,57 +373,107 @@ test("captured scalar validators resist post-import RegExp exec, test and Number
     );
 });
 
-test("private byte snapshots survive synchronous mutation before decode", async () => {
-    const descriptor = Object.getOwnPropertyDescriptor(
-        TextDecoder.prototype,
-        "decode"
-    );
-    const originalDecode = descriptor.value;
-    let mutateOriginals = () => {};
-    Object.defineProperty(TextDecoder.prototype, "decode", {
-        ...descriptor,
-        value(input, options) {
-            mutateOriginals();
-            return Reflect.apply(originalDecode, this, [input, options]);
-        },
-    });
+test("private byte snapshots survive synchronous mutation before decode", () => {
+    // A fresh process is the portable isolation boundary here. A query-string
+    // import makes `tsx` return an empty CommonJS namespace on Linux even
+    // though it works on Windows, so it cannot prove that the core captured
+    // the patched decoder during its first evaluation.
+    const probe = `
+        import { readFileSync } from "node:fs";
+        import { join } from "node:path";
 
-    let isolatedNamespace;
-    try {
-        isolatedNamespace = await import(
-            "../lib/promptRefinerShadowAdmissionCore.ts?snapshot-toctou"
+        const descriptor = Object.getOwnPropertyDescriptor(
+            TextDecoder.prototype,
+            "decode"
         );
-    } finally {
-        Object.defineProperty(TextDecoder.prototype, "decode", descriptor);
-    }
+        const originalDecode = descriptor.value;
+        let mutateOriginals = () => {};
+        Object.defineProperty(TextDecoder.prototype, "decode", {
+            ...descriptor,
+            value(input, options) {
+                mutateOriginals();
+                return Reflect.apply(originalDecode, this, [input, options]);
+            },
+        });
 
-    // `tsx` exposes a cache-busted CommonJS module as named exports on
-    // Windows and under `default` on Linux. Both namespaces refer to the same
-    // freshly evaluated module; normalise that loader-only difference before
-    // exercising the byte-snapshot boundary.
-    const isolated =
-        typeof isolatedNamespace.proposePromptRefinerShadowStage === "function"
-            ? isolatedNamespace
-            : isolatedNamespace.default;
-    assert.equal(
-        typeof isolated?.proposePromptRefinerShadowStage,
-        "function",
-        "the cache-busted core must expose its proposal function"
+        let namespace;
+        try {
+            namespace = await import("./lib/promptRefinerShadowAdmissionCore.ts");
+        } finally {
+            Object.defineProperty(TextDecoder.prototype, "decode", descriptor);
+        }
+        const isolated =
+            typeof namespace.proposePromptRefinerShadowStage === "function"
+                ? namespace
+                : namespace.default;
+        if (typeof isolated?.proposePromptRefinerShadowStage !== "function") {
+            throw new Error("snapshot_probe_core_export_unavailable");
+        }
+
+        const evidenceRoot = join(
+            process.cwd(),
+            "docs",
+            "ops",
+            "prompt-refiner-shadow",
+            "evidence"
+        );
+        const originals = {
+            manifestBytes: readFileSync(join(evidenceRoot, "admission-readiness-v1.manifest.json")),
+            reportBytes: readFileSync(join(evidenceRoot, "admission-readiness-v1.report.json")),
+            journalBytes: readFileSync(join(evidenceRoot, "admission-readiness-v1.journal.jsonl")),
+            witnessBytes: readFileSync(join(evidenceRoot, "admission-readiness-v1.journal.jsonl.witness.jsonl")),
+            corpusBytes: readFileSync(join(
+                process.cwd(),
+                "docs",
+                "ops",
+                "prompt-refiner-shadow",
+                "corpus-v1.json"
+            )),
+        };
+        let mutationCount = 0;
+        mutateOriginals = () => {
+            mutationCount += 1;
+            for (const value of Object.values(originals)) value.fill(0);
+        };
+        const proposal = isolated.proposePromptRefinerShadowStage(originals);
+        process.stdout.write(JSON.stringify({
+            mutationCount,
+            originalsZeroed: Object.values(originals).every((value) =>
+                value.every((byte) => byte === 0)
+            ),
+            proposalDigest: proposal.proposalDigest,
+        }));
+    `;
+    const result = spawnSync(
+        process.execPath,
+        [
+            "--conditions=react-server",
+            "--import",
+            "tsx",
+            "--input-type=module",
+            "--eval",
+            probe,
+        ],
+        {
+            cwd: root,
+            encoding: "utf8",
+            timeout: 30_000,
+            windowsHide: true,
+        }
     );
-
-    const originals = checkedIn();
-    let mutationCount = 0;
-    mutateOriginals = () => {
-        mutationCount += 1;
-        for (const value of Object.values(originals)) value.fill(0);
-    };
-    const proposal = isolated.proposePromptRefinerShadowStage(originals);
-    assert.ok(mutationCount > 0, "the decode boundary must trigger mutation");
-    for (const value of Object.values(originals)) {
-        assert.equal(value.every((byte) => byte === 0), true);
-    }
     assert.equal(
-        proposal.proposalDigest,
+        result.status,
+        0,
+        result.error?.message ?? result.stderr ?? "snapshot probe failed"
+    );
+    const observed = JSON.parse(result.stdout);
+    assert.ok(
+        observed.mutationCount > 0,
+        "the decode boundary must trigger mutation"
+    );
+    assert.equal(observed.originalsZeroed, true);
+    assert.equal(
+        observed.proposalDigest,
         PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
     );
 });
