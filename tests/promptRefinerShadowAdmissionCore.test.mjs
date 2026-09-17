@@ -219,6 +219,85 @@ test("the trusted proposal is deeply immutable without freezing shared constants
     assert.deepEqual(proposePromptRefinerShadowStage(checkedIn()), proposal);
 });
 
+test("captured freeze and private acknowledgements resist post-import ambient patches", () => {
+    const originalFreeze = Object.freeze;
+    const originalIterator = Array.prototype[Symbol.iterator];
+    let proposal;
+    let thrown;
+    try {
+        Object.freeze = (value) => value;
+        Array.prototype[Symbol.iterator] = function patchedIterator() {
+            if (this === PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS) {
+                return originalIterator.call(["attacker_acknowledgement"]);
+            }
+            return originalIterator.call(this);
+        };
+        proposal = proposePromptRefinerShadowStage(checkedIn());
+    } catch (error) {
+        thrown = error;
+    } finally {
+        Object.freeze = originalFreeze;
+        Array.prototype[Symbol.iterator] = originalIterator;
+    }
+    if (thrown) throw thrown;
+
+    assert.deepEqual(
+        proposal.acknowledgements,
+        PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS
+    );
+    assert.equal(Object.isFrozen(proposal), true);
+    assert.equal(Object.isFrozen(proposal.provenance), true);
+    assert.equal(Object.isFrozen(proposal.reservationStage), true);
+    assert.equal(Object.isFrozen(proposal.acknowledgements), true);
+    assert.throws(() => proposal.acknowledgements.push("mutated"), TypeError);
+    const { proposalDigest, ...unsigned } = proposal;
+    assert.equal(
+        `sha256:${digest(canonicalBenchmarkJson(unsigned))}`,
+        proposalDigest
+    );
+});
+
+test("private byte snapshots survive synchronous mutation before decode", async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+        TextDecoder.prototype,
+        "decode"
+    );
+    const originalDecode = descriptor.value;
+    let mutateOriginals = () => {};
+    Object.defineProperty(TextDecoder.prototype, "decode", {
+        ...descriptor,
+        value(input, options) {
+            mutateOriginals();
+            return Reflect.apply(originalDecode, this, [input, options]);
+        },
+    });
+
+    let isolated;
+    try {
+        isolated = await import(
+            "../lib/promptRefinerShadowAdmissionCore.ts?snapshot-toctou"
+        );
+    } finally {
+        Object.defineProperty(TextDecoder.prototype, "decode", descriptor);
+    }
+
+    const originals = checkedIn();
+    let mutationCount = 0;
+    mutateOriginals = () => {
+        mutationCount += 1;
+        for (const value of Object.values(originals)) value.fill(0);
+    };
+    const proposal = isolated.proposePromptRefinerShadowStage(originals);
+    assert.ok(mutationCount > 0, "the decode boundary must trigger mutation");
+    for (const value of Object.values(originals)) {
+        assert.equal(value.every((byte) => byte === 0), true);
+    }
+    assert.equal(
+        proposal.proposalDigest,
+        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
+    );
+});
+
 test("evidence files contain no corpus prompt, fixture output, or refined output", () => {
     const corpus = JSON.parse(bytes(paths.corpus).toString("utf8"));
     const evidence = [

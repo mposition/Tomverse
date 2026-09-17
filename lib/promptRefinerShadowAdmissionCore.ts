@@ -38,6 +38,44 @@ import {
     strictBenchmarkObject,
 } from "./routerDevelopmentBenchmark";
 
+// Security boundary: these primordials are captured at module initialization.
+// Runtime callers may supply hostile evidence and may later replace ambient
+// globals, but application bootstrap must load this module before modifying
+// JavaScript intrinsics. Imported strict parsers share that bootstrap boundary.
+const INTRINSIC_OBJECT_FREEZE = Object.freeze;
+const INTRINSIC_OBJECT_DEFINE_PROPERTY = Object.defineProperty;
+const INTRINSIC_REFLECT_APPLY = Reflect.apply;
+const INTRINSIC_ARRAY_IS_ARRAY = Array.isArray;
+const INTRINSIC_NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
+const INTRINSIC_UINT8_ARRAY = Uint8Array;
+const INTRINSIC_UINT8_ARRAY_SET = Uint8Array.prototype.set;
+const INTRINSIC_TEXT_DECODER = TextDecoder;
+const INTRINSIC_TEXT_DECODER_DECODE = TextDecoder.prototype.decode;
+const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype);
+const RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+    TYPED_ARRAY_PROTOTYPE,
+    "byteLength"
+)?.get;
+const RAW_TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(
+    TYPED_ARRAY_PROTOTYPE,
+    Symbol.toStringTag
+)?.get;
+const HASH_PROTOTYPE = Object.getPrototypeOf(createHash("sha256"));
+const INTRINSIC_HASH_UPDATE = HASH_PROTOTYPE.update;
+const INTRINSIC_HASH_DIGEST = HASH_PROTOTYPE.digest;
+
+if (
+    typeof RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER !== "function" ||
+    typeof RAW_TYPED_ARRAY_TAG_GETTER !== "function" ||
+    typeof INTRINSIC_HASH_UPDATE !== "function" ||
+    typeof INTRINSIC_HASH_DIGEST !== "function"
+) {
+    throw new Error("prompt_refiner_shadow_admission_intrinsic_unavailable");
+}
+const TYPED_ARRAY_BYTE_LENGTH_GETTER =
+    RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER as () => number;
+const TYPED_ARRAY_TAG_GETTER = RAW_TYPED_ARRAY_TAG_GETTER as () => string;
+
 export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION =
     "prompt-refiner-shadow-admission-evidence-v1" as const;
 export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION =
@@ -55,13 +93,20 @@ export const PROMPT_REFINER_SHADOW_ADMISSION_MANIFEST_SHA256 =
 export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST =
     "sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2" as const;
 
-export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES = Object.freeze([
+const INTERNAL_ADMISSION_EVIDENCE_FILES = INTRINSIC_OBJECT_FREEZE([
     "admission-readiness-v1.report.json",
     "admission-readiness-v1.journal.jsonl",
     "admission-readiness-v1.journal.jsonl.witness.jsonl",
 ] as const);
 
-export const PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS = Object.freeze([
+export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES =
+    INTRINSIC_OBJECT_FREEZE([
+        INTERNAL_ADMISSION_EVIDENCE_FILES[0],
+        INTERNAL_ADMISSION_EVIDENCE_FILES[1],
+        INTERNAL_ADMISSION_EVIDENCE_FILES[2],
+    ] as const);
+
+const INTERNAL_STAGE_ACKNOWLEDGEMENTS = INTRINSIC_OBJECT_FREEZE([
     "synthetic_structural_prerequisite_only",
     "not_model_quality_evidence",
     "not_paid_shadow_approval",
@@ -73,21 +118,22 @@ export const PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS = Object.freeze([
     "runtime_source_revalidation_required",
 ] as const);
 
+export const PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS =
+    INTRINSIC_OBJECT_FREEZE([
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[0],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[1],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[2],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[3],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[4],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[5],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[6],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[7],
+        INTERNAL_STAGE_ACKNOWLEDGEMENTS[8],
+    ] as const);
+
 const MANIFEST_MAX_BYTES = 64 * 1024;
 const REPORT_MAX_BYTES = 64 * 1024;
 const CORPUS_MAX_BYTES = 1024 * 1024;
-const TYPED_ARRAY_BYTE_LENGTH_GETTER = (() => {
-    const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
-    const getter = Object.getOwnPropertyDescriptor(
-        typedArrayPrototype,
-        "byteLength"
-    )?.get;
-    if (typeof getter !== "function") {
-        throw new Error("typed_array_byte_length_intrinsic_unavailable");
-    }
-    return getter;
-})();
-
 type EvidenceBytes = Uint8Array;
 
 declare const preboundedEvidenceInput: unique symbol;
@@ -159,28 +205,21 @@ function fail(code: string): never {
     throw new Error(`prompt_refiner_shadow_admission_${code}`);
 }
 
-function assertEvidenceByteBound(
-    bytes: unknown,
-    maximum: number,
-    where: string
-): asserts bytes is EvidenceBytes {
-    if (
-        actualEvidenceByteLength(bytes, where) > maximum
-    ) {
-        fail(`${where}_byte_limit`);
-    }
-}
-
 function actualEvidenceByteLength(bytes: unknown, where: string): number {
     try {
-        const byteLength = Reflect.apply(
+        const byteLength = INTRINSIC_REFLECT_APPLY(
             TYPED_ARRAY_BYTE_LENGTH_GETTER,
             bytes,
             []
         );
+        const tag = INTRINSIC_REFLECT_APPLY(
+            TYPED_ARRAY_TAG_GETTER,
+            bytes,
+            []
+        );
         if (
-            !(bytes instanceof Uint8Array) ||
-            !Number.isSafeInteger(byteLength) ||
+            tag !== "Uint8Array" ||
+            !INTRINSIC_NUMBER_IS_SAFE_INTEGER(byteLength) ||
             byteLength < 0
         ) {
             return fail(`${where}_byte_limit`);
@@ -191,13 +230,29 @@ function actualEvidenceByteLength(bytes: unknown, where: string): number {
     }
 }
 
-function captureEvidenceProperty(
+function snapshotEvidenceProperty(
     input: PromptRefinerShadowAdmissionEvidenceInput,
     property: keyof PromptRefinerShadowAdmissionEvidenceInput,
+    maximum: number,
     where: string
-): unknown {
+): EvidenceBytes {
+    let original: unknown;
     try {
-        return input[property];
+        original = input[property];
+    } catch {
+        return fail(`${where}_byte_limit`);
+    }
+    const byteLength = actualEvidenceByteLength(original, where);
+    if (byteLength > maximum) fail(`${where}_byte_limit`);
+    try {
+        const snapshot = new INTRINSIC_UINT8_ARRAY(byteLength);
+        INTRINSIC_REFLECT_APPLY(INTRINSIC_UINT8_ARRAY_SET, snapshot, [
+            original,
+        ]);
+        if (actualEvidenceByteLength(snapshot, where) !== byteLength) {
+            return fail(`${where}_byte_limit`);
+        }
+        return snapshot;
     } catch {
         return fail(`${where}_byte_limit`);
     }
@@ -206,37 +261,36 @@ function captureEvidenceProperty(
 function preboundEvidenceInput(
     input: PromptRefinerShadowAdmissionEvidenceInput
 ): PreboundedAdmissionEvidenceInput {
-    const manifestBytes = captureEvidenceProperty(
+    const manifestBytes = snapshotEvidenceProperty(
         input,
         "manifestBytes",
+        MANIFEST_MAX_BYTES,
         "manifest"
     );
-    const reportBytes = captureEvidenceProperty(input, "reportBytes", "report");
-    const journalBytes = captureEvidenceProperty(
+    const reportBytes = snapshotEvidenceProperty(
+        input,
+        "reportBytes",
+        REPORT_MAX_BYTES,
+        "report"
+    );
+    const journalBytes = snapshotEvidenceProperty(
         input,
         "journalBytes",
+        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
         "journal"
     );
-    const witnessBytes = captureEvidenceProperty(
+    const witnessBytes = snapshotEvidenceProperty(
         input,
         "witnessBytes",
-        "witness"
-    );
-    const corpusBytes = captureEvidenceProperty(input, "corpusBytes", "corpus");
-
-    assertEvidenceByteBound(manifestBytes, MANIFEST_MAX_BYTES, "manifest");
-    assertEvidenceByteBound(reportBytes, REPORT_MAX_BYTES, "report");
-    assertEvidenceByteBound(
-        journalBytes,
-        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
-        "journal"
-    );
-    assertEvidenceByteBound(
-        witnessBytes,
         PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
         "witness"
     );
-    assertEvidenceByteBound(corpusBytes, CORPUS_MAX_BYTES, "corpus");
+    const corpusBytes = snapshotEvidenceProperty(
+        input,
+        "corpusBytes",
+        CORPUS_MAX_BYTES,
+        "corpus"
+    );
     return {
         manifestBytes,
         reportBytes,
@@ -247,7 +301,9 @@ function preboundEvidenceInput(
 }
 
 function sha256(bytes: Uint8Array | string): string {
-    return createHash("sha256").update(bytes).digest("hex");
+    const hash = createHash("sha256");
+    INTRINSIC_REFLECT_APPLY(INTRINSIC_HASH_UPDATE, hash, [bytes]);
+    return INTRINSIC_REFLECT_APPLY(INTRINSIC_HASH_DIGEST, hash, ["hex"]);
 }
 
 function decodeJson(bytes: EvidenceBytes, maximum: number, where: string) {
@@ -265,7 +321,12 @@ function decodeJson(bytes: EvidenceBytes, maximum: number, where: string) {
     }
     let text: string;
     try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const decoder = new INTRINSIC_TEXT_DECODER("utf-8", { fatal: true });
+        text = INTRINSIC_REFLECT_APPLY(
+            INTRINSIC_TEXT_DECODER_DECODE,
+            decoder,
+            [bytes]
+        );
     } catch {
         return fail(`${where}_utf8`);
     }
@@ -294,7 +355,12 @@ function decodeJournalBytes(bytes: EvidenceBytes, where: string): string {
     }
     let text: string;
     try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const decoder = new INTRINSIC_TEXT_DECODER("utf-8", { fatal: true });
+        text = INTRINSIC_REFLECT_APPLY(
+            INTRINSIC_TEXT_DECODER_DECODE,
+            decoder,
+            [bytes]
+        );
     } catch {
         return fail(`${where}_utf8`);
     }
@@ -334,7 +400,7 @@ function evidenceFile(value: unknown, index: number): EvidenceFile {
         ["name", "sizeBytes", "sha256"],
         `admission_evidence_file_${index}`
     );
-    const name = PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES[index];
+    const name = INTERNAL_ADMISSION_EVIDENCE_FILES[index];
     if (candidate.name !== name) fail("evidence_file_name_or_order");
     return {
         name,
@@ -376,9 +442,9 @@ function parseManifest(bytes: EvidenceBytes): {
         !/^[a-f0-9]{64}$/.test(candidate.sourceIdentityDigest) ||
         typeof candidate.corpusDigest !== "string" ||
         !/^[a-f0-9]{64}$/.test(candidate.corpusDigest) ||
-        !Array.isArray(candidate.files) ||
+        !INTRINSIC_ARRAY_IS_ARRAY(candidate.files) ||
         candidate.files.length !==
-            PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES.length ||
+            INTERNAL_ADMISSION_EVIDENCE_FILES.length ||
         typeof candidate.bundleDigest !== "string" ||
         !/^sha256:[a-f0-9]{64}$/.test(candidate.bundleDigest)
     ) {
@@ -391,7 +457,11 @@ function parseManifest(bytes: EvidenceBytes): {
         sourceRef: candidate.sourceRef,
         sourceIdentityDigest: candidate.sourceIdentityDigest,
         corpusDigest: candidate.corpusDigest,
-        files: candidate.files.map(evidenceFile),
+        files: [
+            evidenceFile(candidate.files[0], 0),
+            evidenceFile(candidate.files[1], 1),
+            evidenceFile(candidate.files[2], 2),
+        ],
         journalTerminal: terminalHead(
             candidate.journalTerminal,
             "journal_terminal"
@@ -431,7 +501,12 @@ function validateArtifactDigests(
         { bytes: input.journalBytes, where: "journal" },
         { bytes: input.witnessBytes, where: "witness" },
     ];
-    manifest.files.forEach((file, index) => {
+    for (
+        let index = 0;
+        index < INTERNAL_ADMISSION_EVIDENCE_FILES.length;
+        index += 1
+    ) {
+        const file = manifest.files[index];
         const { bytes, where } = artifacts[index];
         if (
             actualEvidenceByteLength(bytes, where) !== file.sizeBytes ||
@@ -439,7 +514,7 @@ function validateArtifactDigests(
         ) {
             fail("artifact_digest_or_size");
         }
-    });
+    }
 }
 
 function sourceFiles(value: unknown): Record<string, string> {
@@ -448,12 +523,19 @@ function sourceFiles(value: unknown): Record<string, string> {
         PROMPT_REFINER_SHADOW_SOURCE_PATHS,
         "report_source_files"
     );
-    return Object.fromEntries(
-        PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [
-            path,
-            exactDigest(candidate[path], `report_source_file_${path}`),
-        ])
-    );
+    const files: Record<string, string> = {};
+    for (
+        let index = 0;
+        index < PROMPT_REFINER_SHADOW_SOURCE_PATHS.length;
+        index += 1
+    ) {
+        const path = PROMPT_REFINER_SHADOW_SOURCE_PATHS[index];
+        files[path] = exactDigest(
+            candidate[path],
+            `report_source_file_${path}`
+        );
+    }
+    return files;
 }
 
 function validateReport(
@@ -556,7 +638,7 @@ function assertPinnedEvidence(
     }
 }
 
-function unsignedProposal(): Omit<
+function trustedUnsignedProposal(): Omit<
     PromptRefinerShadowStageProposal,
     "proposalDigest"
 > {
@@ -585,43 +667,35 @@ function unsignedProposal(): Omit<
             costCeilingMicroUsd: PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
             reservationTtlMs: PROMPT_REFINER_RESERVATION_TTL_MS,
         },
-        acknowledgements: PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
+        acknowledgements: [
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[0],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[1],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[2],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[3],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[4],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[5],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[6],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[7],
+            INTERNAL_STAGE_ACKNOWLEDGEMENTS[8],
+        ],
     };
 }
 
 function freezeTrustedProposal(
     proposal: Omit<PromptRefinerShadowStageProposal, "proposalDigest">
 ): PromptRefinerShadowStageProposal {
-    const provenance = Object.freeze({
-        sourceRef: proposal.provenance.sourceRef,
-        sourceIdentityDigest: proposal.provenance.sourceIdentityDigest,
-        corpusDigest: proposal.provenance.corpusDigest,
-        harnessVersion: proposal.provenance.harnessVersion,
-        journalSchemaVersion: proposal.provenance.journalSchemaVersion,
+    INTRINSIC_OBJECT_DEFINE_PROPERTY(proposal, "proposalDigest", {
+        value: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
+        enumerable: true,
+        configurable: false,
+        writable: false,
     });
-    const reservationStage = Object.freeze({
-        stageId: proposal.reservationStage.stageId,
-        contractDigest: proposal.reservationStage.contractDigest,
-        perRequestCostMicroUsd:
-            proposal.reservationStage.perRequestCostMicroUsd,
-        maxReservations: proposal.reservationStage.maxReservations,
-        costCeilingMicroUsd: proposal.reservationStage.costCeilingMicroUsd,
-        reservationTtlMs: proposal.reservationStage.reservationTtlMs,
-    });
-    const acknowledgements = Object.freeze([...proposal.acknowledgements]);
-    return Object.freeze({
-        schemaVersion: proposal.schemaVersion,
-        status: proposal.status,
-        executionAdmitted: proposal.executionAdmitted,
-        currentCheckoutValidated: proposal.currentCheckoutValidated,
-        runtimeSourceRevalidationRequired:
-            proposal.runtimeSourceRevalidationRequired,
-        evidenceBundleDigest: proposal.evidenceBundleDigest,
-        proposalDigest: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
-        provenance,
-        reservationStage,
-        acknowledgements,
-    });
+    INTRINSIC_OBJECT_FREEZE(proposal.provenance);
+    INTRINSIC_OBJECT_FREEZE(proposal.reservationStage);
+    INTRINSIC_OBJECT_FREEZE(proposal.acknowledgements);
+    return INTRINSIC_OBJECT_FREEZE(
+        proposal
+    ) as PromptRefinerShadowStageProposal;
 }
 
 /**
@@ -663,7 +737,7 @@ export function proposePromptRefinerShadowStage(
             identityDigest: manifest.sourceIdentityDigest,
         },
     });
-    const terminal = replay.entries.at(-1);
+    const terminal = replay.entries[replay.entries.length - 1];
     if (
         replay.status !== "completed" ||
         replay.resumable !== false ||
@@ -691,7 +765,7 @@ export function proposePromptRefinerShadowStage(
     }
     assertPinnedEvidence(manifest, rawSha256);
 
-    const proposal = unsignedProposal();
+    const proposal = trustedUnsignedProposal();
     const proposalDigest = `sha256:${sha256(
         canonicalBenchmarkJson(proposal)
     )}`;
