@@ -104,7 +104,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
   webhook 해석·댓글 조회·채널별 capability다.
 - 플랫폼 OAuth 토큰은 Zernio가 보관한다. Tomverse는 저장하지 않는다.
 - 마케팅 이미지는 기존 private R2 버킷과 **분리된 전용 공개 버킷**과 전용 자격증명을 쓴다.
-- **실행 서비스:** generator, publisher, SEO 생성·검증, AI 노출 측정은 모두 Railway 서비스다. 각 서비스가 가진
+- **실행 서비스:** generator, landing, publisher, SEO 생성·검증, AI 노출 측정은 모두 Railway 서비스다. 각 서비스가 가진
   자격증명은 LLM 키·외부 측정 키·제출용 secret뿐이고, 제품 DB·Zernio·이미지 버킷·GitHub 쓰기 자격증명은 없다.
   공개 저장소 코드는 배포 빌드가 가져오므로 실행 중 GitHub 토큰이 필요 없다. GitHub API를 읽어야 할 때만
   이 저장소 한정 읽기 전용 토큰을 쓴다.
@@ -118,7 +118,9 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
   기록한다(구조화 값만, §5). 서비스별 마지막 성공은 이 기록에서 읽고, 판정은 **마지막 성공**으로 한다(마지막 시작이
   아니다 — 계속 실패하는 실행이 살아 있는 것처럼 보이면 안 된다). 자동 정지의 latch는 기능별 스위치와 같은 자리
   (`AppSetting`)에 두고, 해제는 `marketing:write` + step-up route로만 한다. 정지·해제는 상태 변경과 같은 트랜잭션에서
-  감사 기록을 남기며, 시스템 actor는 `marketing-watchdog`이다(닫힌 actor 목록에 추가한다).
+  감사 기록을 남긴다. 시스템 latch는 시스템 actor `marketing-watchdog`(닫힌 actor 목록에 추가한다)로
+  `marketing_service.halted`, 사람 해제는 `marketing_service.resumed`로 남기고, 두 기록 모두 target은 서비스 이름이며
+  metadata에 사유 코드와 판정에 쓴 마지막 성공 시각을 담는다.
 - **서비스별 실행 모델:** 각 서비스는 아래를 정하고 구현 단계에서 지킨다. 회차 누락이 허용되지 않거나 한 회차가
   주기보다 길어질 수 있으면 cron이 작업만 넣고 worker가 처리한다(작업은 본 앱 소유 테이블, 멱등 키 필수).
 
@@ -126,12 +128,18 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 |---|---|---|---|---|---|---|
 | marketing-generator (A1·A3·A5 초안·보고) | cron | `0 2 * * *` | 36시간 | 48시간 | 20분 | 초안 접수 |
 | marketing-landing (A4 실험 설계·분석) | cron | `0 4 * * *` | 36시간 | 48시간 | 20분 | 실험 활성화 |
-| marketing-publisher | cron | `*/5 * * * *` | 30분 | 60분 | 4분 | 승인 모드 게시·자율 게시 |
+| marketing-publisher | cron | `*/5 * * * *` | 30분 | 60분 | 4분 | 승인 모드 게시·자율 게시·댓글 조회 |
 | marketing-seo (LLM·검증 단계) | cron | `0 6 * * 1` | 10일 | 14일 | 30분 | SEO 초안 생성 |
 | marketing-ai-visibility (AI 노출 측정) | cron | `0 5 * * *` | 36시간 | 48시간 | 20분 | AI 노출 측정 |
 
-  주기는 코드 상수이고 운영 설정으로는 **빈도를 낮추는 방향으로만** 바꾼다. hard timeout은 항상 주기보다 짧다.
-  "성공"은 그 회차의 모든 단계가 끝난 것이고, 처리 대상이 0건인 회차도 성공이다. 부분 실패는 성공이 아니다.
+  주기·최대 침묵·유예는 **함께** 바뀐다. cron만 느리게 바꾸면 정상 서비스가 침묵으로 판정되므로, 빈도 변경은 이 표와
+  IaC를 같이 고치는 정책 변경으로만 한다. 운영 설정 하나로 주기만 바꾸는 override는 두지 않는다. hard timeout은 항상
+  주기보다 짧다. "성공"은 그 회차의 모든 단계가 끝난 것이고, 처리 대상이 0건인 회차도 성공이다. 부분 실패는 성공이 아니다.
+
+  **감시 시작 시각은 heartbeat가 아니라 서버가 가진 값이다.** 운영자가 그 서비스를 활성화할 때 본 앱이
+  `watchdogArmedAt`(서버 시각)을 같은 트랜잭션에서 기록하고 감사에 남긴다. 최대 침묵은
+  `max(watchdogArmedAt + 유예, 마지막 성공)` 기준으로 재며, 그래서 **한 번도 성공하지 못한 서비스도 유예가 지나면
+  정지된다.** 활성화 기록이 없는 서비스는 감시 대상이 아니라 아직 켜지지 않은 것이다.
 
 - **서비스별 자격증명(이 목록 밖은 주지 않는다):**
 
@@ -139,7 +147,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 |---|---|---|---|---|
 | marketing-generator | LLM 키, 자기 제출 secret | 초안 접수, 보고 제출 | LLM provider | 제품 DB, GitHub, Zernio, 이미지 버킷 |
 | marketing-landing | LLM 키, 자기 제출 secret | 실험 설계·결과 제출 | LLM provider | 같음 |
-| marketing-publisher | 자기 제출 secret | 게시 실행, 상태 보고 | 없음(본 앱 경유) | LLM 키, 제품 DB, Zernio 키, GitHub |
+| marketing-publisher | 자기 제출 secret | 게시 실행, 상태 보고, **댓글 조회 실행**(§12.1) | 없음(본 앱 경유) | LLM 키, 제품 DB, Zernio 키, GitHub |
 | marketing-seo | 저장소 읽기(빌드), LLM 키, 자기 제출 secret | SEO 초안 제출 | LLM provider | 제품 DB, GitHub 쓰기 |
 | marketing-ai-visibility | 측정 대상 서비스 키, 자기 제출 secret | 측정 결과 제출 | 측정 대상 엔진 | LLM 키, 제품 DB, GitHub |
 
@@ -181,8 +189,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 - **감사:** 사람 행위와 시스템 행위 모두 `lib/adminAudit.ts`의 **기존 해시 체인**에 같은 트랜잭션으로
   기록한다. 시스템 actor용 writer는 기존 writer와 체인 잠금·해시 계산 경로를 공유한다.
   감사 테이블 직접 insert는 금지다.
-- **Admin Console:** 마케팅 화면은 **Operations > Automation의 `agents` 탭**으로 둔다(승인된 IA의 여섯 그룹·열일곱 항목을
-  바꾸지 않는 배치, 운영자 결정 2026-09-18). 이후 다른 업무 에이전트의 대기열·digest도 같은 탭 아래로 들어오고,
+- **Admin Console:** 마케팅 화면은 **Operations > Automation의 `agents` 탭**으로 둔다(그룹과 항목을 늘리지 않는 배치, 운영자 결정 2026-09-18). 이후 다른 업무 에이전트의 대기열·digest도 같은 탭 아래로 들어오고,
   에이전트마다 최상위 항목을 만들지 않는다. 승인 대기 건수는 기존 Command Center > Work queue의 `approvals`에서도
   보이게 한다. `docs/ui-contracts/admin-console-ia.md`를 따르되, S2 착수 전에 그 계약에 `agents` 탭을 추가하고 현재 문서의 항목 수 서술을 실제 항목 수에 맞게 정정한다(별도 변경). 마케팅 승인은 `AdminActionApproval`이 아니므로 Work queue의 대기 건수에는 별도 조회로 합성한다. 대기 건수 badge는
   `lib/adminNavigationCounts.ts` 규율(실패 시 미표시), 로케일은 `tests/adminLocale.test.mjs` 검사 대상이다.
@@ -365,7 +372,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 
 1. **표면별 범위.** SEO 코드·SEO 콘텐츠·랜딩 승자 반영 각각의 정확한 파일 허용 목록, Guard 대상, 졸업 단위.
 2. **공개 전 판정.** PR이 아니라 **최초 원격 push 전에** Guard·허용 경로·크기·secret scan·patch 적용 가능성이 통과해야 한다. 브랜치 이름은 서버가 만든 opaque run id, 첫 push 뒤 update·force-push 금지.
-3. **실행이 필요한 검증의 위치.** lint·typecheck·테스트를 PR CI의 required check로 돌릴지, 자격증명 없는 별도 실행 환경을 둘지. required check 이름과 expected App, 그 workflow가 받는 secret 목록.
+3. **실행이 필요한 검증.** lint·typecheck·테스트는 **PR CI의 required check로만** 돌린다(공통 기준의 결정: 생성된 코드를 미리 실행하는 별도 서비스는 두지 않는다). 버전 4가 정하는 것은 required check의 정확한 이름, expected App, 그 workflow가 받는 secret 목록이다.
 4. **신뢰 경계.** 판정 코드는 base(또는 고정 SHA)에서 불러오고 토큰은 검증 뒤 필요한 step에만 준다. 현재 표준 `Auto PR to Develop`의 수정·교체를 선행 조건으로 둘지 정한다.
 5. **게시 주체와 권한.** PR 생성 전용 GitHub App(Contents·Pull requests 쓰기, Workflows 권한 없음), ruleset·보호 브랜치 구성, 그 구성이 실제로 걸리는지 확인.
 6. **승인 증거.** 수동 모드는 권한 있는 사람의 required review, 졸업 모드는 사전 운영자 승인 + 그 회차의 결정적 gate. 두 가지를 따로 기록한다.
@@ -417,6 +424,9 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 ## 12. 개인정보·보유
 
 ### 12.1 댓글 모니터링
+- 댓글 조회는 **게시기의 5분 회차 안에서** 한다. 별도 서비스를 만들지 않는다. 각 회차는 조회 주기(§8.3의 1시간)가
+  지난 계정만 고르고, 조회에 실패한 계정이 있으면 그 회차는 **부분 실패**여서 heartbeat 성공이 아니다. 계정 단위
+  실패는 §8.3의 계정 정지 규칙을 그대로 따른다.
 - 댓글은 게시기가 조회해 **메모리에서만** 분류한다. 모델을 쓰면 작성자 식별자를 제거한 본문만 보낸다.
   로그에 본문·handle·댓글 URL을 남기지 않는다.
 - 저장은 게시물 단위 알림(건수·위험 코드·최초 감지 시각, 게시물 URL)뿐이며 90일 후 삭제한다.
