@@ -1190,7 +1190,8 @@ const channelsOf = (entry) => {
  * empty because verdicts are for a person.
  */
 /**
- * Which recovery window a recorded outcome is evidence for (§4.1). Attempt 2
+ * Which recovery window a recorded outcome is evidence for (the S0 runbook's
+ * time-window state machine). Attempt 2
  * and a same-id replay are W1; attempt 3 and a resume in the content-hash window
  * are W2; a lookup, or a resume past both windows, is W3.
  */
