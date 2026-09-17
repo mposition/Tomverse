@@ -329,6 +329,10 @@ run(
     // reads of the same table -- the newest-N window and the single-row read --
     // so a single process with no database proves neither.
     "tests/integration/admin-audit-row-by-id.db.test.ts",
+    // The audit chain writer on real rows: the database clock, the previous
+    // hash read and the verifier agree, inside and outside a caller's
+    // transaction, and a rolled-back caller leaves no entry behind.
+    "tests/integration/admin-audit-chain-writer.db.test.ts",
     // The daily model lifecycle report on the standard lane: that it enqueues
     // rather than sends, that the operator address is its own recipient
     // identity, and that a lane refusal costs the mail and not the scan.
