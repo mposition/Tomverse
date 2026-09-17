@@ -459,6 +459,11 @@ const REGISTRY = {
     reason:
       "SendingStream in lib/emailSendingIdentityCore.ts, fixed at send from the template version's classification. Nullable for rows never sent and rows from before the column existed.",
   },
+  ProviderWebhookEvent_provider_account_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts: the account whose webhook endpoint and signing secret an event came through (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56). Not nullable -- the route knows its account before it stores anything, and events from before the column existed all came through the transactional endpoint.",
+  },
   EmailPreferenceTransition_source_check: {
     owner: "type_only",
     reason:

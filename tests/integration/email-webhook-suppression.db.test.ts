@@ -80,7 +80,7 @@ const deliverOne = async (emailAddress: string) => {
 };
 
 const webhook = (type: string, data: Record<string, unknown>) =>
-  processResendWebhook({
+  processResendWebhook({ providerAccount: "transactional",
     providerEventId: `msg_${randomUUID()}`,
     payload: { type, data },
   });
@@ -114,13 +114,13 @@ test("a redelivered webhook changes nothing the second time", async () => {
     data: { email_id: messageId, to: [address], bounce: { type: "Hard" } },
   };
 
-  const first = await processResendWebhook({ providerEventId, payload });
+  const first = await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
   assert.equal(first.handled, true);
 
   // Providers redeliver. The svix-id is stable across retries, so the second
   // one has to stop before touching anything -- otherwise every retry
   // re-applies a state change.
-  const second = await processResendWebhook({ providerEventId, payload });
+  const second = await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
   assert.deepEqual(second, { handled: false, reason: "duplicate" });
 
   assert.equal(await prisma.providerWebhookEvent.count(), 1);
@@ -339,7 +339,7 @@ test("an event we do not collect is recorded and does nothing", async () => {
 test("an event for a message we never sent is handled, not retried forever", async () => {
   // Received long enough ago that it no longer waits for its delivery to be
   // recorded: it settles as unmatched rather than retrying.
-  const result = await processResendWebhook({
+  const result = await processResendWebhook({ providerAccount: "transactional",
     providerEventId: `msg_${randomUUID()}`,
     payload: { type: "email.delivered", data: { email_id: "resend-unknown", to: ["stranger@example.com"] } },
     receivedAt: new Date(Date.now() - 20 * 60_000),

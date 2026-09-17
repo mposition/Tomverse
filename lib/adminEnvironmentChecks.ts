@@ -219,6 +219,15 @@ export function adminEnvironmentChecks(): AdminEnvCheck[] {
         "until it is set, so bounced addresses keep being sent to.",
     },
     {
+      name: "MARKETING_RESEND_WEBHOOK_SECRET",
+      configured: isConfigured(process.env.MARKETING_RESEND_WEBHOOK_SECRET),
+      description:
+        "Svix signing secret for the marketing Resend account's webhook, at " +
+        "/api/webhooks/email/resend/marketing. Separate from RESEND_WEBHOOK_SECRET " +
+        "and never borrowed from it: without it that endpoint answers 503, so " +
+        "marketing bounces and complaints queue at the provider.",
+    },
+    {
       name: "EMAIL_UNSUBSCRIBE_KEYS",
       configured: isConfigured(process.env.EMAIL_UNSUBSCRIBE_KEYS),
       // The same conditional severity `unsubscribeKeyringProblems()` applies,

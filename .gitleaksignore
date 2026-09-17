@@ -92,3 +92,17 @@ fc1e3368e4d14f3d3552c677184a9a88b7a05697:tests/assistantPackageReview.test.mjs:g
 # Scope: exactly these two findings in that one commit -- nothing wider.
 866e0693603aee6d1b315d7e82d7889d82b1736e:scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1:generic-api-key:205
 866e0693603aee6d1b315d7e82d7889d82b1736e:scripts/ops/Test-InvokeMobileAuthDeploymentVerify.ps1:generic-api-key:206
+
+# Synthetic webhook signing secrets in a server-contract test, not credentials.
+#
+# Commits bd8584ca and 048dd1c9 added tests/server-contract/email-provider-port.test.ts
+# cases that set RESEND_WEBHOOK_SECRET and MARKETING_RESEND_WEBHOOK_SECRET to
+# invented `whsec_` strings (base64 of plain words) to test that one secret on
+# both accounts verifies nothing and that marketing never borrows the
+# transactional secret. They never belonged to any system. The follow-up
+# commit builds the values from plain words, so no later edit of the line
+# recreates the finding under a new commit.
+#
+# Scope: exactly these findings in those two commits -- nothing wider.
+bd8584ca778a3f1774740f39b2af8568afa16d71:tests/server-contract/email-provider-port.test.ts:generic-api-key:217
+048dd1c9380a53d1210ca6ba2b4936ec1f056d74:tests/server-contract/email-provider-port.test.ts:generic-api-key:217
