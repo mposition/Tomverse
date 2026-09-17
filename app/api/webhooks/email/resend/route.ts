@@ -67,12 +67,21 @@ export async function POST(req: Request) {
   }
 
   try {
-    await processResendWebhook({
+    const result = await processResendWebhook({
       providerEventId: verification.id,
       payload: verification.payload as Parameters<
         typeof processResendWebhook
       >[0]["payload"],
     });
+    if (!result.handled && result.reason === "in_progress") {
+      // Another worker holds a live lease on this event. A 409 asks the
+      // provider to try again later; the sweeper backs that up
+      // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+      return NextResponse.json(
+        { error: "Already processing." },
+        { status: 409, headers: { "Cache-Control": "no-store" } }
+      );
+    }
     // Acknowledgement only. The provider needs to know we accepted it; our
     // delivery ids and effect names are of no use to it and echoing internal
     // identifiers to an external caller is a habit worth not forming.
