@@ -108,7 +108,7 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 |---|---|---|
 | `MarketingChannel` | **계정 단위** 연결·모드·졸업 | 재연결·scope·정책 버전 변경 시 승인 모드로 복귀하고 졸업 epoch 증가. 졸업 통계는 현재 epoch만 |
 | `MarketingPost` | 초안·승인·예약·게시·결과 단일 원장 | 고정 논리 키로 중복 차단, 승인·게시 직전 envelope digest 일치, lease·CAS 원자 claim, 일·주 슬롯 원자 예약, append-only history(버전 CAS) |
-| `MarketingReport` | 보고서·경쟁사 사실·실험 결과·댓글 알림·보유 실행 기록 | 집계와 구조화 사실만 |
+| `MarketingReport` | 보고서·경쟁사 사실·실험 결과·댓글 알림·보유 실행 기록·webhook shadow 기록(§8.1.1) | 집계와 구조화 사실만 |
 | `AiVisibilityRun` | AI 답변 노출 측정 | 답변 본문 미저장, digest·인용 URL·플래그만 |
 
 - 유입 기록은 새 테이블이 아니라 기존 분석 이벤트에 `marketing_touch`를 추가한다(§10).
@@ -225,14 +225,18 @@ kill switch 환경변수는 기록 열람을 제외한 전부를 끈다.
 #### 8.1.1 webhook 검증과 활성화
 webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6.1).
 - **shadow 처리(staging 검증용):** 서명 검증을 통과한 이벤트를 event id 중복 제거·저장·상태 매핑까지 **실제 코드 경로 그대로**
-  처리하되, 결과를 게시 원장·계정 모드·공개 여부·자동 정지와 **분리된 shadow 기록**에만 쓴다. 게시 상태에는 어떤 경우에도
+  처리하되, 결과를 게시 원장·계정 모드·공개 여부·자동 정지와 **분리된 shadow 기록**(`MarketingReport`의 전용 유형)에만 쓴다.
+  shadow 기록에는 event id digest, event type, 채널, 도출 상태, 상태 조회 대조 결과만 두고 raw body·게시 본문·댓글·계정 handle은
+  저장하지 않는다. 90일 뒤 삭제한다(§12.2). 게시 상태에는 어떤 경우에도
   영향을 주지 않는다. **staging에서만** 켤 수 있고, production에서는 환경 판정으로 거절한다. 아래 조건 3–5는 이 기록으로 관측한다.
 - **상태 반영(운영 활성화):** 검증된 이벤트를 상태 판정의 추가 출처로 쓴다. 운영자가 아래 기록을 확인한 뒤에만 켠다.
   스위치 값에 **허용 event type 목록과 채널 범위**를 함께 저장하고, 목록 밖의 이벤트는 켜진 뒤에도 판정에 쓰지 않는다.
-  켜기·범위 변경·끄기는 `marketing:write` + step-up과 시스템 감사 기록(검증 기록 참조, 허용 범위, 배포 SHA 포함)으로만 한다.
+  켜기·범위 변경·끄기는 `marketing:write` + step-up으로만 하고, 같은 트랜잭션에서 **운영자를 actor로** 기존 해시 체인 감사 기록에
+  남긴다(검증 기록 참조, 허용 범위, 배포 SHA 포함). 시스템 actor writer로 기록하지 않는다.
   kill switch는 이 기능도 끈다.
 
-**범위.** 통과는 검증에서 실제로 받은 event type에만, 채널별 차이가 관측되면 그 채널에만 적용된다.
+**범위.** 허용 범위는 운영자가 서명한 검증 기록에 **실제로 관측된 `event type × MarketingChannel` 조합의 부분집합**이다.
+검증하지 않은 채널·계정이나 event type으로 통과를 넓히지 않는다. 넓히려면 그 조합을 새로 검증해 기록한다.
 
 **통과 조건 — 활성화할 범위의 event type마다 아래가 모두 staging에서 관측될 것:**
 1. 유효 서명(`X-Zernio-Signature`, raw body HMAC-SHA256)의 Zernio 이벤트는 수락되고 shadow 기록에 남는다.
@@ -352,6 +356,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 | 게시·승인·주장 근거 | 게시 후 24개월 | 본문 삭제, digest·지표 유지 |
 | 거절·만료 초안 | 90일 | 삭제 |
 | history의 webhook id·시도 세부 | 90일 | 요약으로 치환 |
+| webhook shadow 기록(§8.1.1) | 90일 | 삭제 |
 | 주간 보고·브리프·시장 정보 | 24개월 | 삭제 |
 | 실험 결과·120일 측정 | 36개월 | 삭제 |
 | 댓글 알림 | 90일 | 삭제 |
@@ -387,7 +392,7 @@ webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6
 |---|---|---|---|
 | S0 | 게시 도구 기술 검증(테스트 계정) | Claude → Codex | 채널별 복구 계약 표 확정 |
 | S1 | 테이블, Guard와 우회 공격 테스트, 목록, 기능별 스위치, `marketing:write`, 시스템 감사 writer | Codex → Claude | 우회 코퍼스·가격 출처·권한 매트릭스 테스트 |
-| S2 | Admin Console, 게시 도구 어댑터, 게시기, webhook | Claude → Codex | Admin IA 전부, 승인 경쟁·webhook replay 테스트, **§8.1.1 조건 1–5를 활성화할 범위별로 staging shadow 처리로 통과하고 운영자 서명 기록(S0 C9 이관분)** |
+| S2 | Admin Console, 게시 도구 어댑터, 게시기, webhook | Claude → Codex | Admin IA 전부, 승인 경쟁·webhook replay 테스트, **§8.1.1 조건 1–5를 활성화할 `event type × 채널` 조합별로 staging shadow 처리로 통과, production(또는 환경 판정 불가)에서 shadow 활성화가 거절됨을 관측, shadow 처리 전후 `MarketingPost`·`MarketingChannel`·공개 여부·자동 정지 상태가 변하지 않고 shadow 기록만 바뀜을 관측, 운영자 서명 기록(S0 C9 이관분)** |
 | S3 | 생성 서비스, A1·A3·A5, 승인 모드 운영과 120일 측정 시작 | Codex → Claude | 첫 주간 보고서, 첫 승인 게시 |
 | S4 | 졸업, 댓글 모니터링, 자동 정지 | Claude → Codex | 응답 유실 등 장애 주입 테스트 (§12.1 선행 필수) |
 | S5 | 랜딩 실험(스파이크 먼저), SEO PR·자동 병합, AI 노출 측정 | Codex → Claude | 캐시 누수 E2E 0건, 브랜치 정책 shell 테스트 |
