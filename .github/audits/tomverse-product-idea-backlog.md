@@ -103,8 +103,8 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 | CONT-TITLE-01 | 원문 삭제 후 이어가기 대화명 안정화 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1423 병합 원격 확인 | 완료 범위: 사용자 저장 제목 유지, 삭제 전 별도 이름 저장 선택, 구분 가능한 fallback과 삭제 상태 표시. 재착수 후보에서 제외 |
 | CONT-EXPORT-01A | 이어가기 TXT 파일명·문서 제목 정합성 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1422·main #1421 병합 원격 확인 | 완료 범위: 실제 표시 제목으로 안전한 `[대화창 이름].txt`와 TXT 내부 제목 생성. 원문 포함 01B와 구분하며 재착수 후보에서 제외 |
 | CONT-01 | 한국어 이어가기 seed 창·빈 발췌 개선 | 병행 P1 / 측정 도구 완료: 병합 사용자 확인(2026-09-15), develop #1447·main #1453 병합 원격 확인. 운영 측정 실행·C/B 정책 선택 대기, 제품 수정 미착수 | 운영 DB 읽기 전용 `npm run report:continuation-seed -- --database` 실행 → C/B 선택 → seed 규칙 수정·회귀. 예산 초과로 원문이 비는 사례 해결, 최신 문맥·누락 고지·매 turn 입력 비용의 정합성 |
-| CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | 병행 P1 / **코드 develop 병합**(#1465, 2026-09-16 00:43Z 원격 확인), main 미반영. staging B1(잠근 원문이 검색됨) 실패 사용자 보고 → 원인(잠금 쓰기의 grant 발급) develop #1484 수정, **staging 재검증 미실시**. 근사 상한 성능 측정 미실행 | #1484 포함 빌드로 staging B1 재검증 → 근사 상한 측정(`npm run measure:continuation-source-search`, 테스트 DB 필요)과 잠정 3초 원문 조회 예산 확정 → main 반영. 검색 결과에서 Tomverse(native) 메시지 위치로 이동은 미구현. 상세는 C·2026-09-16 갱신 |
-| CONT-EXPORT-01B | 저장된 원문을 포함한 이어가기 TXT 다운로드 | 병행 P1 / **코드 develop 병합**(#1473, 2026-09-16 02:55Z 원격 확인), main 미반영. staging B5(잠근 원문이 원문 포함 TXT에 실림) 실패 사용자 보고 → #1484로 원인 수정, **staging 재검증 미실시**. 대화 메뉴 가로 스크롤 develop #1485 수정 | #1484·#1485 포함 빌드로 staging B5·메뉴 표시 재검증 → main 반영. #1473의 PostgreSQL accounts lane 실패는 이 변경과 무관한 `feedback-lifecycle.db.test.ts` 기대값이며 develop #1481(병합 원격 확인)로 수정 |
+| CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | **완료** / develop #1465, #1484(B1 원인 수정) 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B1·B2·B3 통과, N2(시간 초과 안내)는 재현 어려워 건너뜀. main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기). 근사 상한 성능 측정 미실행 | main PR 병합(사람). 잔여: 근사 상한 측정(`npm run measure:continuation-source-search`, 테스트 DB 필요)과 잠정 3초 원문 조회 예산 확정, 같은 원문의 이어가기 둘이 같은 결과로 두 번 보이는 문제(N1 후속). native 메시지 위치 이동은 미구현 |
+| CONT-EXPORT-01B | 저장된 원문을 포함한 이어가기 TXT 다운로드 | **완료** / develop #1473·#1484·#1485 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B5·B6·N3·N4·N6 통과, 원문 **삭제** 경우의 B6은 미실행. main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기) | main PR 병합(사람). 후속(비차단): 잠긴 원문 거절 사유가 화면 맨 아래 토스트로 떠 동작하지 않는 것처럼 보임 → 메뉴 안 표시로 수정 중(`claude/to-develop/source-export-refusal-inline`, Codex REVISE 반영 중, 미병합), 두 다운로드 항목이 인접해 헷갈림(미착수) |
 | VOICE-MIX-01 | 한국어·영어 혼용 Voice 인식 정확도 개선 | 병행 P1 / 등록, 미착수 | 혼용 발화 기준 평가와 현재 STT 모델의 제한된 용어 힌트 비교 |
 | CACHE-01 | 전 공급자 Prompt Cache 계측·최적화 및 비용 정합성 점검 | 병행 P1 / 기존 논의 반영, 미착수 | 공급자·모델·경로별 자동/명시 캐시와 계측 공백 확인. 모든 호출에 강제로 캐시하지 않음 |
 | CREDIT-UX-01 | 비용 정보의 점진적 공개·정산 상세 정합성 | CHAT-01 하위 병행 P2 / 수정 후 등록(2026-09-15), UI·정책 결정 대기 | 중복 숫자는 축약하되 실행 전 비용/구매 크레딧 고지·정확한 잔량 접근 유지. 현재 견적과 완료 작업 정산 분리 |
@@ -200,6 +200,12 @@ lane에서 통과했습니다(로컬 DB 없음).
 > 남은 순서는 ① staging 재검증 — #1484·#1485에 더해 잠금 관련 #1489·#1490·#1491을 함께
 > 확인하면 한 번에 끝납니다 — 후 main 반영(사람) ② CONT-SEARCH-01 근사 상한 측정(테스트 DB 필요)
 > ③ `LOCK-READ-TOCTOU-01` 감사(낮은 우선순위)입니다.
+>
+> **2026-09-17:** ①의 staging 재검증은 통과했고(기록 #1506), 대상 9개 PR을 main PR #1508로
+> 올렸습니다(병합은 사람). 남은 자문 순서는 ① #1508 병합 ② 잠긴 원문 거절 사유를 메뉴 안에
+> 표시(develop 수정 진행 중) ③ 가져오기 목록에서 바로 비밀번호로 잠금 해제(사용자 결정 완료,
+> 미착수) ④ CONT-SEARCH-01 근사 상한 측정 ⑤ `LOCK-READ-TOCTOU-01`입니다. 개발·병합·배포
+> 승인이 아닙니다.
 
 이는 개발 착수 승인이 아니라 사용자 제안에 대한 자문 순서입니다. 기존 Chat 주 개발
 투자 순위는 유지합니다. **CONT-01은 취소하거나 P2로 내리지 않고 병행 P1로 유지**합니다.
@@ -960,11 +966,11 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 | ID | 작업 | 우선순위·상태 | 다음 완료 단위 |
 | --- | --- | --- | --- |
 | MEM-SOURCE-DELETE-01 | 원문 삭제와 Memory 추출 저장의 동시 실행 안전성 | 완료(코드) / 병합 사용자 확인(2026-09-15), develop #1448·main #1452 병합 원격 확인. **운영 추출 flag는 production에서 켠 적 없음(사용자 확인 2026-09-16)**. 대기/실행 중 run·chunk 확인은 미실시 | 잔여: 대기/실행 중 run·chunk 읽기 전용 확인(사람, flag 미활성으로 우선도 낮음). 재착수 후보에서 제외. 기존 잠금 순서 cycle 2건은 task_9d445985로 develop 수정 |
-| IMPORT-LOCK-TITLE-01 | 잠긴 snapshot 제목의 가져오기 목록 노출 정책 | 완료(코드) / 제품 결정: grant 유무와 무관하게 목록 응답에서 항상 비공개(2026-09-15), develop #1475 병합(2026-09-16 원격 확인), main 미반영. staging B4 통과(사용자 보고 2026-09-16) | main 반영(사람). 재착수 후보에서 제외 |
-| task_9d445985 | Fix two pre-existing lock-order cycles in memory/import | 완료(코드) / develop #1476 병합(2026-09-16 원격 확인), main 미반영. Run 행을 Chunk보다 먼저 fencing해 잠그고, 만료는 Import 행 잠금 아래 snapshot을 id 순으로 잠그도록 정리. 두 실행 순서를 강제한 DB 테스트 CI 통과. 운영 교착 발생 빈도는 미확인 | main 반영(사람). 재착수 후보에서 제외 |
-| IMPORT-STAGING-FINALIZE-01 | 만료 sweep의 finalize 완료 상태 덮어쓰기 경합 | 완료(코드) / task_9d445985와 같은 develop #1476, main 미반영. sweep이 Import 행 잠금 아래 status·두 TTL을 재판정한 뒤에만 만료하고 실제 만료만 집계. "선별 후 finalize 커밋", "선별 후 활동" DB 테스트 2건 CI 통과. 운영 발생률 미확인 | main 반영(사람). 재착수 후보에서 제외 |
-| task_c3a7aa47 | 잠긴 snapshot을 Memory 추출 provider에 보내지 않기 | 완료(코드) / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). 두 단계 모두 develop 병합(원격 확인): ① provider를 부르지 않은 chunk 과금 제외(`skipped` 상태) [#1489](https://github.com/mposition/Tomverse/pull/1489) ② 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 [#1490](https://github.com/mposition/Tomverse/pull/1490). 각 Codex APPROVE, 생성 경합·워커 잠금 DB 테스트 CI 통과. main 미반영. production 추출 flag 미활성(사용자 확인)이라 ①의 과금 결함은 실제 청구된 적 없음 | main 반영(사람, ①과 ②를 함께 또는 ① 먼저). 추출 flag 활성화 전에 반영돼 있어야 함(권고). 재착수 후보에서 제외 |
-| task_7d03656e | 가져온 데이터 JSON 내보내기의 잠긴 snapshot 처리 | 완료(코드) / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). develop [#1491](https://github.com/mposition/Tomverse/pull/1491) 병합(원격 확인), main 미반영. 잠긴 snapshot은 `{locked, importedAt}`만, 메시지는 읽지 않음. 항목별 READ ONLY snapshot으로 전송 중 잠금 경합 차단, 형식 `tomverse.external-conversations.v2`, 다운로드 전 안내(7개 locale). 정책 결정은 선례 적용으로 불필요 판단, Codex 확인 | main 반영(사람). v1 형식을 읽는 외부 도구가 있다면 v2 대응 필요. 재착수 후보에서 제외 |
+| IMPORT-LOCK-TITLE-01 | 잠긴 snapshot 제목의 가져오기 목록 노출 정책 | **완료** / 제품 결정: grant 유무와 무관하게 목록 응답에서 항상 비공개(2026-09-15), develop #1475. staging B4 통과(2026-09-16), staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): N5 가져오기 목록 통과, 기억 추출 선택 화면은 flag 꺼짐으로 도달 불가해 건너뜀. main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기) | main PR 병합(사람). 추출 flag 활성화 전 검증에서 기억 추출 선택 화면 확인. 재착수 후보에서 제외 |
+| task_9d445985 | Fix two pre-existing lock-order cycles in memory/import | **완료** / develop #1476. Run 행을 Chunk보다 먼저 fencing해 잠그고, 만료는 Import 행 잠금 아래 snapshot을 id 순으로 잠그도록 정리. 두 실행 순서를 강제한 DB 테스트 CI 통과. 같은 staging 회차의 대상 빌드에 포함돼 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합)(이 변경을 겨냥한 화면 항목은 없음). main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기). 운영 교착 발생 빈도는 미확인 | main PR 병합(사람). 재착수 후보에서 제외 |
+| IMPORT-STAGING-FINALIZE-01 | 만료 sweep의 finalize 완료 상태 덮어쓰기 경합 | **완료** / task_9d445985와 같은 develop #1476, main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기). sweep이 Import 행 잠금 아래 status·두 TTL을 재판정한 뒤에만 만료하고 실제 만료만 집계. "선별 후 finalize 커밋", "선별 후 활동" DB 테스트 2건 CI 통과. 운영 발생률 미확인 | main PR 병합(사람). 재착수 후보에서 제외 |
+| task_c3a7aa47 | 잠긴 snapshot을 Memory 추출 provider에 보내지 않기 | **완료** / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). 두 단계 모두 develop 병합(원격 확인): ① provider를 부르지 않은 chunk 과금 제외(`skipped` 상태) [#1489](https://github.com/mposition/Tomverse/pull/1489) ② 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 [#1490](https://github.com/mposition/Tomverse/pull/1490). 각 Codex APPROVE, 생성 경합·워커 잠금 DB 테스트 CI 통과. staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합) — 단 staging 추출 flag가 꺼져 있어 추출 화면·실행은 확인하지 못함. main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기)(①·② 함께). production 추출 flag 미활성(사용자 확인)이라 ①의 과금 결함은 실제 청구된 적 없음 | main PR 병합(사람). 추출 flag 활성화 전 별도 검증 체크리스트에서 잠긴 행 표시·423 확인. 재착수 후보에서 제외 |
+| task_7d03656e | 가져온 데이터 JSON 내보내기의 잠긴 snapshot 처리 | **완료** / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). develop [#1491](https://github.com/mposition/Tomverse/pull/1491) 병합(원격 확인). staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): J1(잠근 상태 전체 내려받기에 잠긴 대화 제목·메시지 없음, 형식 v2)·N7 통과. main PR [#1508](https://github.com/mposition/Tomverse/pull/1508) 열림(수동 이식, 병합 대기). 잠긴 snapshot은 `{locked, importedAt}`만, 메시지는 읽지 않음. 항목별 READ ONLY snapshot으로 전송 중 잠금 경합 차단, 형식 `tomverse.external-conversations.v2`, 다운로드 전 안내(7개 locale). 정책 결정은 선례 적용으로 불필요 판단, Codex 확인 | main PR 병합(사람). v1 형식을 읽는 외부 도구가 있다면 v2 대응 필요. 재착수 후보에서 제외 |
 | LOCK-READ-TOCTOU-01 | 뷰어·timeline의 잠금 확인 후 별도 메시지 조회 경합 | 후속 후보 / 낮은 우선순위, 미착수. task_7d03656e 검토 중 Codex 제안(2026-09-16). 이 ID는 목록용이며 외부 칩 생성 아님. 재현·코드 재확인 안 함 | 확인과 조회 사이에 잠금이 커밋되는 순서를 재현 → 소유자 화면에 한 페이지가 보이는 수준인지 판정 → 필요하면 같은 snapshot 안에서 판정·조회. 계정 밖으로 나가는 경로는 아님 |
 | SEC-OPS-01 | Tomverse 전체 플랫폼의 정기 Commercial Grade 보안 점검 | 운영 필수 / 목록 등록, 기존 주간 자동화 일시중지 | 대상 자산·검증 기준·안전한 실행 범위를 정리하고 기존 자동화 보강·재개 여부 승인 |
 
@@ -1710,6 +1716,17 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   따른 것이었고, 코드를 확인한 결과 계정 데이터 export와 §13.2에 이미 같은 규칙이 있어 선례
   적용으로 정정했습니다. Codex 제안 후속 후보 `LOCK-READ-TOCTOU-01`을 D에 낮은 우선순위로
   등록했습니다(재현·코드 재확인 안 함). 다른 항목·주 투자 순위는 바꾸지 않았습니다.
+
+- 2026-09-17 (Claude 세션 상태 갱신): 사용자 요청("판정 통과된 부분은 main으로 PR 작성 후
+  완료로 업데이트")에 따라 CONT-SEARCH-01·CONT-EXPORT-01B·IMPORT-LOCK-TITLE-01·task_9d445985·
+  IMPORT-STAGING-FINALIZE-01·task_c3a7aa47·task_7d03656e를 **완료**로 바꿨습니다. 근거는 staging
+  검증 기록 `.github/audits/staging-verification-continuation-lock-2026-09-17.md`(판정 통과,
+  서명 mposition, develop #1506 병합 원격 확인)입니다. 대상 PR은 #1465·#1476·#1473·#1475·
+  #1485·#1484·#1489·#1490·#1491입니다. **main에는 아직 없습니다** — main이 develop보다 약 1,630
+  commit 뒤라 PR별 변경만 cherry-pick으로 옮긴 main PR #1508을 열었고(Codex APPROVE, 병합 대기),
+  그 조합은 staging에서 검증한 develop 빌드와 같지 않습니다(PR 본문에 차이 명시). 건너뛴 범위
+  (N2, N5 기억 추출 화면, B6 원문 삭제 경우)와 후속 결함 4건은 각 행에 남겼습니다. 주 투자
+  순위와 다른 항목은 바꾸지 않았습니다.
 
 ## VOICE-MIX-01 — 한국어·영어 혼용 Voice 인식 정확도 개선
 
