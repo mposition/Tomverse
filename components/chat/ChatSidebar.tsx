@@ -5,6 +5,7 @@ import { useModelCatalog } from "@/components/ModelCatalogProvider";
 import { AuthButton } from "@/components/auth/AuthButton";
 import { SidebarAccountRailButton } from "@/components/chat/SidebarAccountRailButton";
 import { useCallback, useState, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { useSession } from "next-auth/react";
 import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
@@ -43,6 +44,13 @@ import { discardResponseBody } from "@/lib/discardResponseBody";
 import { ModelLogo } from "@/components/chat/ModelLogo";
 import { externalProviderBrand } from "@/lib/externalProviderBranding";
 import { providerLabel } from "@/components/imports/importFormatting";
+import { SearchSnippetText } from "@/components/chat/SearchSnippetText";
+import { requestContinuationFocus } from "@/lib/continuationFocusHandoff";
+
+/** A search answer resting on unlock grants is dropped this long before they lapse. */
+const SEARCH_GRANT_MARGIN_MS = 5_000;
+/** And asked again this long after, when the server no longer honours them. */
+const SEARCH_REASK_DELAY_MS = 1_000;
 
 type ChatSidebarProps = {
     conversations: Conversation[];
@@ -73,7 +81,7 @@ type ChatSidebarProps = {
     onUnlock?: (id: string) => void;
     onShare: (id: string, title: string) => void;
     onRevokeShare: (id: string) => void;
-    onDownload: (id: string, title: string) => void;
+    onDownload: (id: string, title: string, options?: { includeSource?: boolean }) => void;
     currentModelId?: string | null;
     attachmentCount?: number;
     isMobileDrawer?: boolean;
@@ -92,12 +100,32 @@ type ConversationProject = {
 };
 
 type ConversationMenuPosition = {
-    left: number;
     maxHeight: number;
+    /**
+     * How wide the panel may grow, in pixels. Not how wide it is -- the panel
+     * asks its own content for that, between `MENU_MIN_WIDTH` and this.
+     *
+     * The width used to be a constant 224 chosen in JS, and every menu item
+     * carried `whitespace-nowrap`. Seven locales translate this menu, and all
+     * seven overflow 224 on the two download items; the German hint line needs
+     * roughly six hundred pixels on one line. Because the panel also scrolls
+     * vertically, CSS computed its `overflow-x` from `visible` to `auto`, so
+     * the overflow arrived as a horizontal scrollbar with the labels cut
+     * mid-word rather than as anything anybody would notice in review.
+     */
+    maxWidth: number;
     placement: "above" | "below";
+    /** Distance from the viewport's right edge; see `toggleConversationMenu`. */
+    right: number;
     verticalOffset: number;
-    width: number;
 };
+
+/**
+ * The panel's floor, and the width every menu had before this became a range.
+ * A menu of short items should not become a thin column just because nothing
+ * in it happens to be long.
+ */
+const MENU_MIN_WIDTH = 224;
 
 const SIDEBAR_TOUR_STORAGE_KEY = "tomverse_sidebar_tour_v1";
 const ORGANIZER_STORAGE_KEY = "tomverse_sidebar_organizer_v1";
@@ -203,7 +231,12 @@ export function ChatSidebar({
         }
     });
     const [messageSearchResults, setMessageSearchResults] = useState<Array<{
+        /** Absent from an older server; treated as native. */
+        kind?: "native" | "imported";
         id: string;
+        /** Set on an imported hit: the `ExternalMessage` to open the transcript at. */
+        externalMessageId?: string;
+        snippetHighlight?: { start: number; end: number } | null;
         conversationId: string;
         /** The conversation's stored title; resolved for display below. */
         conversationTitle: string;
@@ -218,6 +251,24 @@ export function ChatSidebar({
          */
         surface?: ConversationSurface;
     } & Partial<ContinuationRowNaming>>>([]);
+    /** Whether the answer is incomplete, and whether the imported half timed out. */
+    const [messageSearchMeta, setMessageSearchMeta] = useState<{
+        truncated: boolean;
+        sourceTimedOut: boolean;
+    }>({ truncated: false, sourceTimedOut: false });
+    const [showAllMessageMatches, setShowAllMessageMatches] = useState(false);
+    /** The access signature (below) the held answer was read under. */
+    const [messageSearchAccess, setMessageSearchAccess] = useState<string | null>(null);
+    /*
+      When the unlock grants behind the held answer lapse (the server's
+      `validUntil`), and how many times that has happened. Past it the answer
+      quotes text the viewer can no longer open, so it is hidden and asked
+      again -- the counter is what re-runs the search.
+    */
+    const [messageSearchValidUntil, setMessageSearchValidUntil] = useState<number | null>(null);
+    const [messageSearchExpiries, setMessageSearchExpiries] = useState(0);
+    /** The last request failed (rate limit, network, server): not "no matches". */
+    const [messageSearchFailed, setMessageSearchFailed] = useState(false);
     const [renameTarget, setRenameTarget] = useState<Conversation | null>(null);
     const [shareTarget, setShareTarget] = useState<Conversation | null>(null);
     /**
@@ -313,8 +364,13 @@ export function ChatSidebar({
     const canDownload =
         !isGuestMode && accountUsage?.limits.allowDownloads !== false;
     const displayedPlan: UserPlan | "Guest" | null = isGuestMode ? "Guest" : accountUsage?.plan || null;
+    // `items-start` and no `whitespace-nowrap`: a label past the panel's cap
+    // wraps rather than scrolling, and the icon and any trailing crown sit on
+    // the label's first line instead of floating to the vertical centre of a
+    // two-line row. `text-left` because a wrapped line has a second edge and
+    // the button's default centring would show it.
     const menuItemBase =
-        "flex w-full items-center justify-between whitespace-nowrap rounded px-3 py-2 text-sm transition-colors";
+        "flex w-full items-start justify-between gap-2 rounded px-3 py-2 text-left text-sm transition-colors";
 
     const menuItemEnabled =
         "cursor-pointer text-zinc-900 hover:bg-zinc-100 hover:text-black dark:text-zinc-200 dark:hover:bg-zinc-800 dark:hover:text-white";
@@ -333,10 +389,37 @@ export function ChatSidebar({
         window.dispatchEvent(new Event(ORGANIZER_CHANGE_EVENT));
     };
 
-    const menuIconClass = "h-3.5 w-3.5 shrink-0";
-    const crownClass = "h-3.5 w-3.5 shrink-0 text-amber-400";
+    // `mt-[3px]` centres a 14px icon against the first 20px line of a wrapped
+    // label, which `items-start` alone would leave sitting slightly high.
+    const menuIconClass = "mt-[3px] h-3.5 w-3.5 shrink-0";
+    const crownClass = "mt-[3px] h-3.5 w-3.5 shrink-0 text-amber-400";
     const normalizedSearch = searchQuery.trim().toLowerCase();
-    const messageMatchedIds = new Set(messageSearchResults.map((result) => result.conversationId));
+    /*
+      Which conversations exist and which are locked, as one string. A lock or
+      a deletion changes it, and an answer read under a different one may name
+      or quote what the viewer can no longer open. So the answer is shown only
+      while it matches -- a derivation, not a clearing effect, so it is gone in
+      the same render the change arrives in -- and the effect below asks again.
+    */
+    const { data: searchSession } = useSession();
+    const searchAccessSignature = [
+        // Whose answer it is: an account switch changes this before the new
+        // account's list arrives, so the previous account's hits are never
+        // drawn against it.
+        searchSession?.user?.id ?? "anonymous",
+        ...conversations.map(
+            (conversation) =>
+                `${conversation.id}:${conversation.isLocked ? 1 : 0}:${conversation.sourceState ?? "-"}`
+        ),
+    ].join(",");
+    // Lapsed grants are handled by the timer below, which drops the access the
+    // answer was read under; a render cannot read the clock.
+    const messageSearchCurrent = messageSearchAccess === searchAccessSignature;
+    const visibleMessageSearchResults = messageSearchCurrent ? messageSearchResults : [];
+    const visibleMessageSearchMeta = messageSearchCurrent
+        ? messageSearchMeta
+        : { truncated: false, sourceTimedOut: false };
+    const messageMatchedIds = new Set(visibleMessageSearchResults.map((result) => result.conversationId));
     const getConversationProjectId = (conversation: Conversation) =>
         Object.prototype.hasOwnProperty.call(conversationProjectOverrides, conversation.id)
             ? conversationProjectOverrides[conversation.id]
@@ -374,29 +457,113 @@ export function ChatSidebar({
 
     useEffect(() => {
         if (isGuestMode || normalizedSearch.length < 2) {
-            const timer = window.setTimeout(() => setMessageSearchResults([]), 0);
+            const timer = window.setTimeout(() => {
+                setMessageSearchResults([]);
+                setMessageSearchMeta({ truncated: false, sourceTimedOut: false });
+                setShowAllMessageMatches(false);
+                setMessageSearchFailed(false);
+            }, 0);
             return () => window.clearTimeout(timer);
         }
         const controller = new AbortController();
+        const readUnder = searchAccessSignature;
         const timer = window.setTimeout(() => {
             void fetch(`/api/conversations/search?q=${encodeURIComponent(searchQuery.trim())}`, {
                 signal: controller.signal,
                 cache: "no-store",
                 headers: displayTimeZoneHeaders(),
             })
-                .then((response) =>
-                    response.ok
-                        ? response.json()
-                        : discardResponseBody(response).then(() => ({ results: [] }))
-                )
-                .then((data) => setMessageSearchResults(Array.isArray(data.results) ? data.results : []))
+                .then(async (response) => {
+                    if (response.ok) return response.json();
+                    // A refusal is not an empty answer. The held results are
+                    // dropped (they may rest on grants this refusal cannot
+                    // confirm) and the reason is said on screen; a rate limit
+                    // also says when it will accept another.
+                    const retryAfter = Number(response.headers.get("Retry-After"));
+                    await discardResponseBody(response);
+                    setMessageSearchAccess(null);
+                    setMessageSearchValidUntil(null);
+                    setMessageSearchFailed(true);
+                    if (response.status === 429 && Number.isFinite(retryAfter) && retryAfter > 0) {
+                        window.setTimeout(
+                            () => setMessageSearchExpiries((count) => count + 1),
+                            Math.min(retryAfter, 120) * 1_000
+                        );
+                    }
+                    return null;
+                })
+                .then((data) => {
+                    if (data === null) return;
+                    setMessageSearchFailed(false);
+                    const validUntil =
+                        typeof data.validUntil === "string" ? Date.parse(data.validUntil) : NaN;
+                    if (Number.isFinite(validUntil) && validUntil - SEARCH_GRANT_MARGIN_MS <= Date.now()) {
+                        // Lapsed (or about to) before it could be drawn: never
+                        // shown. Asked again only once the grant has actually
+                        // lapsed -- before then the server would return the
+                        // same answer, and re-asking at once would spin.
+                        setMessageSearchAccess(null);
+                        setMessageSearchValidUntil(validUntil);
+                        return;
+
+                    }
+                    setMessageSearchResults(Array.isArray(data.results) ? data.results : []);
+                    setMessageSearchMeta({
+                        truncated: data.truncated === true,
+                        // Said on screen whenever it happened, so a short list is
+                        // never read as "the originals had nothing".
+                        sourceTimedOut: data.sourceSearch === "timed_out",
+                    });
+                    setShowAllMessageMatches(false);
+                    setMessageSearchAccess(readUnder);
+                    setMessageSearchValidUntil(Number.isFinite(validUntil) ? validUntil : null);
+                })
                 .catch(() => {});
         }, 250);
         return () => {
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [isGuestMode, normalizedSearch.length, searchQuery]);
+    }, [isGuestMode, normalizedSearch.length, searchQuery, searchAccessSignature, messageSearchExpiries]);
+
+    useEffect(() => {
+        if (messageSearchValidUntil === null) return;
+        const lapseAt = messageSearchValidUntil;
+        // Hidden early by a margin, so ordinary timer latency cannot keep a
+        // lapsed excerpt on screen.
+        const hide = () => setMessageSearchAccess(null);
+        // Asked again just after the grant has really lapsed, once.
+        const reask = () => {
+            setMessageSearchAccess(null);
+            setMessageSearchValidUntil(null);
+            setMessageSearchExpiries((count) => count + 1);
+        };
+        const hideTimer = window.setTimeout(
+            hide,
+            Math.max(0, lapseAt - SEARCH_GRANT_MARGIN_MS - Date.now())
+        );
+        const reaskTimer = window.setTimeout(
+            reask,
+            Math.max(0, lapseAt + SEARCH_REASK_DELAY_MS - Date.now())
+        );
+        // A throttled or suspended tab runs its timers late, so the clock is
+        // checked again the moment the page is seen.
+        const recheck = () => {
+            const now = Date.now();
+            if (now >= lapseAt + SEARCH_REASK_DELAY_MS) reask();
+            else if (now >= lapseAt - SEARCH_GRANT_MARGIN_MS) hide();
+        };
+        document.addEventListener("visibilitychange", recheck);
+        window.addEventListener("pageshow", recheck);
+        window.addEventListener("focus", recheck);
+        return () => {
+            window.clearTimeout(hideTimer);
+            window.clearTimeout(reaskTimer);
+            document.removeEventListener("visibilitychange", recheck);
+            window.removeEventListener("pageshow", recheck);
+            window.removeEventListener("focus", recheck);
+        };
+    }, [messageSearchValidUntil]);
 
     useEffect(() => {
         if (!showHelpMenu) return;
@@ -749,7 +916,6 @@ export function ChatSidebar({
 
         const viewportPadding = 8;
         const menuGap = 4;
-        const menuWidth = Math.min(224, Math.max(0, window.innerWidth - viewportPadding * 2));
         const anchorRect = anchor.getBoundingClientRect();
         const availableBelow = Math.max(
             0,
@@ -765,22 +931,39 @@ export function ChatSidebar({
                 ? "below"
                 : "above";
         const availableHeight = placement === "below" ? availableBelow : availableAbove;
-        const maximumLeft = Math.max(viewportPadding, window.innerWidth - menuWidth - viewportPadding);
-        const left = Math.min(
-            Math.max(viewportPadding, anchorRect.right - menuWidth),
-            maximumLeft
+
+        // Anchored by its right edge rather than its left, which is what lets
+        // the width stop being a number this function has to know. Pinning
+        // `left` meant computing `anchorRect.right - width`, so the content
+        // could never be the thing that decided the width; pinning `right`
+        // asks only where the trigger is. CSS then clamps: the panel grows
+        // leftwards as far as its content wants and no further than the
+        // viewport allows.
+        //
+        // The ceiling is therefore the room to the left of the trigger, and in
+        // the 320px sidebar that is about 296px rather than the 352px a wider
+        // cap would suggest. Codex's UX review preferred letting a wide menu
+        // shift right over the chat column to reach 352; it is not taken here
+        // because a shift either displaces every short menu too, or needs a
+        // measure-then-reposition pass, and 352 does not save the Korean
+        // labels from wrapping anyway (they want about 390). Wrapping is the
+        // accepted answer for those two rows; this only decides how often.
+        const right = Math.max(viewportPadding, window.innerWidth - anchorRect.right);
+        const maxWidth = Math.max(
+            MENU_MIN_WIDTH,
+            window.innerWidth - right - viewportPadding
         );
 
         conversationMenuAnchorRef.current = anchor;
         setConversationMenuPosition({
-            left,
             maxHeight: availableHeight,
+            maxWidth,
             placement,
+            right,
             verticalOffset:
                 placement === "below"
                     ? anchorRect.bottom + menuGap
                     : window.innerHeight - anchorRect.top + menuGap,
-            width: menuWidth,
         });
         setOpenMenuId(conversationId);
     };
@@ -1450,22 +1633,59 @@ export function ChatSidebar({
                           }`
                 }`}
             >
-                {messageSearchResults.length > 0 && (
-                    <div className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20">
+                {messageSearchFailed && normalizedSearch.length >= 2 && !isGuestMode && (
+                    <p
+                        data-testid="message-search-failed"
+                        role="status"
+                        className="mb-2 rounded-xl border border-zinc-200 bg-white px-2 py-1.5 text-[11px] leading-4 text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                    >
+                        {t("sidebar.searchFailed")}
+                    </p>
+                )}
+                {(visibleMessageSearchResults.length > 0 || visibleMessageSearchMeta.sourceTimedOut) && (
+                    <div
+                        data-testid="message-search-results"
+                        className="mb-2 rounded-xl border border-blue-200 bg-blue-50 p-2 text-xs dark:border-blue-900/50 dark:bg-blue-950/20"
+                    >
                         <p className="px-1 pb-1 font-bold text-blue-700 dark:text-blue-300">
                             {t("sidebar.messageMatches")}
                         </p>
-                        {messageSearchResults.slice(0, 4).map((result) => (
+                        {visibleMessageSearchMeta.sourceTimedOut && (
+                            <p
+                                data-testid="message-search-source-timeout"
+                                role="status"
+                                className="px-1 pb-1 text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+                            >
+                                {t("sidebar.sourceSearchTimedOut")}
+                            </p>
+                        )}
+                        {(showAllMessageMatches
+                            ? visibleMessageSearchResults
+                            : visibleMessageSearchResults.slice(0, 4)
+                        ).map((result) => (
                             <button
-                                key={result.id}
+                                // One imported message can be shown under more
+                                // than one continuation, so the id alone repeats.
+                                key={`${result.id}:${result.conversationId}`}
                                 type="button"
-                                onClick={() =>
+                                data-testid="message-search-result"
+                                data-result-kind={result.kind ?? "native"}
+                                onClick={() => {
+                                    if (result.kind === "imported" && result.externalMessageId) {
+                                        requestContinuationFocus(
+                                            result.conversationId,
+                                            result.externalMessageId,
+                                            // Already on screen: selecting it again changes no
+                                            // open conversation, so it has arrived now.
+                                            { alreadyOpen: currentChatId === result.conversationId }
+                                        );
+                                    }
                                     onSelectConversation(
                                         result.conversationId,
                                         false,
                                         result.surface
-                                    )
-                                }
+                                    );
+                                }}
                                 className="block w-full rounded-lg px-2 py-1.5 text-left text-zinc-600 hover:bg-white dark:text-zinc-300 dark:hover:bg-zinc-900"
                             >
                                 <span className="block truncate font-bold">
@@ -1483,9 +1703,46 @@ export function ChatSidebar({
                                         continuationTitleCopy(t)
                                     )}
                                 </span>
-                                <span className="block truncate text-[11px] text-zinc-400">{result.snippet}</span>
+                                {result.kind === "imported" && result.sourceProvider && (
+                                    <span
+                                        data-testid="message-search-imported-badge"
+                                        className="mt-0.5 inline-block rounded-full bg-zinc-200/70 px-1.5 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                                    >
+                                        {t("sidebar.importedMatchBadge").replaceAll(
+                                            "{provider}",
+                                            providerLabel(result.sourceProvider)
+                                        )}
+                                    </span>
+                                )}
+                                <span className="block truncate text-[11px] text-zinc-400">
+                                    <SearchSnippetText
+                                        text={result.snippet}
+                                        highlight={result.snippetHighlight ?? null}
+                                    />
+                                </span>
                             </button>
                         ))}
+                        {visibleMessageSearchResults.length > 4 && (
+                            <button
+                                type="button"
+                                data-testid="message-search-toggle-all"
+                                aria-expanded={showAllMessageMatches}
+                                onClick={() => setShowAllMessageMatches((value) => !value)}
+                                className="mt-1 min-h-11 w-full rounded-lg px-2 text-left text-[11px] font-semibold text-blue-700 hover:bg-white dark:text-blue-300 dark:hover:bg-zinc-900"
+                            >
+                                {showAllMessageMatches
+                                    ? t("sidebar.showFewerMatches")
+                                    : t("sidebar.showAllMatches").replaceAll(
+                                          "{count}",
+                                          String(visibleMessageSearchResults.length)
+                                      )}
+                            </button>
+                        )}
+                        {visibleMessageSearchMeta.truncated && (
+                            <p className="px-1 pt-1 text-[11px] leading-4 text-zinc-500 dark:text-zinc-400">
+                                {t("sidebar.partialMatches")}
+                            </p>
+                        )}
                     </div>
                 )}
                 {filteredConversations.length === 0 && (
@@ -1683,10 +1940,16 @@ export function ChatSidebar({
                                          role="group"
                                          aria-label={`${t("chat.moreActions")}: ${conv.title}`}
                                          onClick={(event) => event.stopPropagation()}
-                                         className="context-menu-wrapper fixed z-[120] flex flex-col overflow-y-auto overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                                         // `w-max` asks the content; `overflow-x-hidden` is
+                                         // stated rather than left to the default, because
+                                         // `overflow-y-auto` alone computes the x axis from
+                                         // `visible` to `auto` and that is where the
+                                         // horizontal scrollbar came from.
+                                         className="context-menu-wrapper fixed z-[120] flex w-max flex-col overflow-y-auto overflow-x-hidden overscroll-contain rounded-lg border border-zinc-200 bg-white p-1.5 text-xs text-zinc-700 shadow-2xl animate-fadeIn dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
                                          style={{
-                                             left: conversationMenuPosition.left,
-                                             width: conversationMenuPosition.width,
+                                             right: conversationMenuPosition.right,
+                                             minWidth: MENU_MIN_WIDTH,
+                                             maxWidth: conversationMenuPosition.maxWidth,
                                              maxHeight: conversationMenuPosition.maxHeight,
                                              ...(conversationMenuPosition.placement === "below"
                                                  ? { top: conversationMenuPosition.verticalOffset }
@@ -1703,7 +1966,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Pencil className={menuIconClass} />
                                                 <span>{t("sidebar.rename")}</span>
                                             </span>
@@ -1718,7 +1981,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Pin className={menuIconClass} />
                                                 <span>{pinnedConversationIds.includes(conv.id) ? t("sidebar.unpinChat") : t("sidebar.pinChat")}</span>
                                             </span>
@@ -1733,7 +1996,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} ${menuItemEnabled}`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Star className={menuIconClass} />
                                                 <span>{favoriteConversationIds.includes(conv.id) ? t("sidebar.removeFavorite") : t("sidebar.favoriteChat")}</span>
                                             </span>
@@ -1757,7 +2020,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     {conversationLabels[conv.id] === label ? (
                                                         <Check className={`${menuIconClass} text-blue-400`} />
                                                     ) : (
@@ -1807,7 +2070,7 @@ export function ChatSidebar({
                                                         }}
                                                         className={`${menuItemBase} ${menuItemEnabled}`}
                                                     >
-                                                        <span className="flex items-center gap-2">
+                                                        <span className="flex min-w-0 items-start gap-2">
                                                             <X className={menuIconClass} />
                                                             <span>{t("sidebar.removeProject")}</span>
                                                         </span>
@@ -1838,7 +2101,7 @@ export function ChatSidebar({
                                             className={`${menuItemBase} ${!canShare ? menuItemDisabled : menuItemEnabled}`}
                                             title={isGuestMode ? t("sidebar.loginRequired") : !canShare ? t("modelStatusReasons.upgradeRequired") : ""}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Share2 className={menuIconClass} />
                                                 <span>
                                                     {conv.shareEnabled
@@ -1859,15 +2122,64 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Link2Off className={menuIconClass} />
                                                     <span>{t("sidebar.revokeShare")}</span>
                                                 </span>
                                             </button>
                                         )}
 
+                                        {conv.sourceState && (
+                                            /*
+                                              A continuation's original is a
+                                              separate half of the same
+                                              conversation, so it is a separate
+                                              choice rather than a setting:
+                                              what the file contains is decided
+                                              before it is made, and the item
+                                              that includes it says so and says
+                                              that the file cannot be recalled
+                                              (docs/policy/external-conversation-continuation.md §9).
+                                            */
+                                            <button
+                                                type="button"
+                                                data-testid="conversation-download-with-source"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (canDownload && conv.sourceState !== "deleted") {
+                                                        onDownload(conv.id, conv.title, { includeSource: true });
+                                                        setOpenMenuId(null);
+                                                    }
+                                                }}
+                                                disabled={!canDownload || conv.sourceState === "deleted"}
+                                                className={`${menuItemBase} ${!canDownload || conv.sourceState === "deleted" ? menuItemDisabled : menuItemEnabled}`}
+                                                title={
+                                                    isGuestMode
+                                                        ? t("sidebar.loginRequired")
+                                                        : conv.sourceState === "deleted"
+                                                          ? t("sidebar.downloadSourceDeleted")
+                                                          : !canDownload
+                                                            ? t("modelStatusReasons.upgradeRequired")
+                                                            : ""
+                                                }
+                                            >
+                                                <span className="flex min-w-0 flex-col items-start gap-0.5">
+                                                    <span className="flex min-w-0 items-start gap-2">
+                                                        <Download className={menuIconClass} />
+                                                        <span>{t("sidebar.downloadWithSourceTxt")}</span>
+                                                    </span>
+                                                    <span className="pl-6 text-[11px] font-normal leading-4 text-zinc-500 dark:text-zinc-400">
+                                                        {conv.sourceState === "deleted"
+                                                            ? t("sidebar.downloadSourceDeleted")
+                                                            : t("sidebar.downloadWithSourceHint")}
+                                                    </span>
+                                                </span>
+                                                {!canDownload && <Crown className={crownClass} />}
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
+                                            data-testid="conversation-download"
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 if (canDownload) {
@@ -1879,9 +2191,13 @@ export function ChatSidebar({
                                             className={`${menuItemBase} ${!canDownload ? menuItemDisabled : menuItemEnabled}`}
                                             title={isGuestMode ? t("sidebar.loginRequired") : !canDownload ? t("modelStatusReasons.upgradeRequired") : ""}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Download className={menuIconClass} />
-                                                <span>{t("sidebar.downloadTxt")}</span>
+                                                <span>
+                                                    {conv.sourceState
+                                                        ? t("sidebar.downloadContinuationOnlyTxt")
+                                                        : t("sidebar.downloadTxt")}
+                                                </span>
                                             </span>
                                             {!canDownload && <Crown className={crownClass} />}
                                         </button>
@@ -1897,7 +2213,7 @@ export function ChatSidebar({
                                             }}
                                             className={`${menuItemBase} cursor-pointer text-red-400 hover:bg-zinc-800 hover:text-red-300`}
                                         >
-                                            <span className="flex items-center gap-2">
+                                            <span className="flex min-w-0 items-start gap-2">
                                                 <Trash2 className={menuIconClass} />
                                                 <span>{t("sidebar.delete")}</span>
                                             </span>
@@ -1910,7 +2226,7 @@ export function ChatSidebar({
                                                 className={`${menuItemBase} ${menuItemDisabled}`}
                                                 title={t("sidebar.loginRequired")}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Lock className={menuIconClass} />
                                                     <span>{t("sidebar.lock")}</span>
                                                 </span>
@@ -1926,7 +2242,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Unlock className={menuIconClass} />
                                                     <span>{t("sidebar.unlock")}</span>
                                                 </span>
@@ -1946,7 +2262,7 @@ export function ChatSidebar({
                                                 }}
                                                 className={`${menuItemBase} ${menuItemEnabled}`}
                                             >
-                                                <span className="flex items-center gap-2">
+                                                <span className="flex min-w-0 items-start gap-2">
                                                     <Lock className={menuIconClass} />
                                                     <span>{t("sidebar.lock")}</span>
                                                 </span>

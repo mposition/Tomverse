@@ -80,6 +80,15 @@ export type LaunchInput = {
     activeRunId: string | null;
     /** True while an estimate or a create request is in flight. */
     busy: boolean;
+    /**
+     * Snapshots this screen knows to be locked.
+     *
+     * Only what the loaded pages show. A selected id on a page nobody has
+     * scrolled to cannot be judged here, and is not pretended to be: the
+     * server refuses it with 423 and the screen says so then. This gate is
+     * the early answer for the rows in front of the user, not the boundary.
+     */
+    lockedConversationIds?: readonly string[];
 };
 
 export type LaunchBlockReason =
@@ -88,6 +97,7 @@ export type LaunchBlockReason =
     | "no_pair_selected"
     | "no_selection"
     | "selection_too_large"
+    | "locked_selection"
     | "run_in_progress"
     | "busy";
 
@@ -107,9 +117,40 @@ const commonBlock = (input: LaunchInput): LaunchBlockReason | null => {
     if (input.selectedConversationIds.length > MEMORY_EXTRACTION_MAX_SELECTION) {
         return "selection_too_large";
     }
+    // A locked snapshot cannot be sent to a provider
+    // (docs/policy/external-conversation-import-and-memory.md §7.1), so a
+    // selection holding one cannot even be priced. Asked after the size check
+    // because "too many" is the answer that applies whatever is selected.
+    if (input.lockedConversationIds?.length) {
+        const locked = new Set(input.lockedConversationIds);
+        if (input.selectedConversationIds.some((id) => locked.has(id))) {
+            return "locked_selection";
+        }
+    }
     if (input.busy) return "busy";
     return null;
 };
+
+/**
+ * The selection without the snapshots now known to be locked.
+ *
+ * Applied when a page of the list arrives, because a row can be selected and
+ * then locked in another tab. Leaving it `checked` behind a disabled checkbox
+ * would make it the one selection the user cannot undo, and it would block the
+ * whole launch with a reason they could not act on.
+ *
+ * Returns the same array when nothing changed, so a caller setting state from
+ * it does not re-render for no reason.
+ */
+export function withoutLockedSelection(
+    selectedIds: readonly string[],
+    rows: readonly { id: string; locked?: boolean }[]
+): readonly string[] {
+    const locked = new Set(rows.filter((row) => row.locked).map((row) => row.id));
+    if (locked.size === 0) return selectedIds;
+    const kept = selectedIds.filter((id) => !locked.has(id));
+    return kept.length === selectedIds.length ? selectedIds : kept;
+}
 
 /** May the user ask what this selection would cost? */
 export function estimateGate(input: LaunchInput): Gate<LaunchBlockReason> {

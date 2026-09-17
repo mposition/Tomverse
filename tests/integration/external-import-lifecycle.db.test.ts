@@ -559,6 +559,48 @@ test("the viewer lists finalized conversations only, in import order", async () 
     assert.equal(paged.conversations.length, 1);
 });
 
+test("a locked snapshot's title is withheld from the list and the import status", async () => {
+    // IMPORT-LOCK-TITLE-01: the title is part of what the lock withholds, so
+    // neither list-shaped response carries it -- whatever grant the browser holds.
+    const user = await createUser();
+    const { importId, conversationIds } = await finalizeImport(user.id, [
+        conversationPayload("conv-open"),
+        conversationPayload("conv-locked"),
+    ]);
+    const locked = await prisma.externalConversation.findFirstOrThrow({
+        where: { id: { in: conversationIds }, title: "conversation conv-locked" },
+    });
+    await prisma.externalConversation.update({
+        where: { id: locked.id },
+        data: { password: "scrypt-hash-placeholder" },
+    });
+
+    const listed = await listExternalConversations(user.id, {});
+    const listedLocked = listed.conversations.find((row) => row.id === locked.id)!;
+    const listedOpen = listed.conversations.find((row) => row.id !== locked.id)!;
+    assert.equal(listedLocked.title, null);
+    assert.equal(listedLocked.titleWithheld, true);
+    assert.equal(listedLocked.locked, true);
+    assert.equal(listedOpen.title, "conversation conv-open");
+    assert.equal(listedOpen.titleWithheld, false);
+
+    const status = await getExternalImportStatus(user.id, importId);
+    const statusLocked = status.conversations.find((row) => row.id === locked.id)!;
+    assert.equal(statusLocked.title, null);
+    assert.equal(statusLocked.titleWithheld, true);
+    // The date the screen names a withheld title by.
+    assert.ok(Date.parse(statusLocked.importedAt) > 0);
+    assert.ok(!JSON.stringify({ listed, status }).includes("conv-locked"));
+
+    // Unlocking brings it back on the next read; nothing was copied or lost.
+    await prisma.externalConversation.update({ where: { id: locked.id }, data: { password: null } });
+    const relisted = await listExternalConversations(user.id, {});
+    assert.equal(
+        relisted.conversations.find((row) => row.id === locked.id)!.title,
+        "conversation conv-locked"
+    );
+});
+
 test("the viewer reads one conversation with message pages, owner-scoped", async () => {
     const user = await createUser();
     const other = await createUser();
@@ -651,6 +693,7 @@ test("the export iterator yields every finalized conversation with provenance", 
     }
     assert.equal(exported.length, 3);
     for (const conversation of exported) {
+        assert.equal(conversation.locked, false);
         assert.equal(conversation.provider, "chatgpt");
         assert.equal(conversation.digestVersion, 1);
         assert.match(conversation.conversationDigest, /^[0-9a-f]{64}$/);
@@ -660,6 +703,118 @@ test("the export iterator yields every finalized conversation with provenance", 
             ["user", "assistant"]
         );
     }
+});
+
+test("the export iterator lists a locked snapshot without its title or its messages", async () => {
+    /*
+      docs/policy/external-conversation-import-and-memory.md §13.5. An export
+      is a document that leaves the account, so what it carries outlives the
+      lock; the account data export already sends these rows this way, and
+      this reader was the one that did not.
+
+      Asserted against the serialised document rather than the object: what
+      must not leave is text, and a field renamed or nested somewhere else
+      would pass a key check and still carry it out.
+    */
+    const user = await createUser();
+    await finalizeImport(user.id, [
+        conversationPayload("conv-open"),
+        conversationPayload("conv-locked", [
+            "a sentence only the lock should see",
+            "and the reply to it",
+        ]),
+    ]);
+    const locked = await prisma.externalConversation.findFirstOrThrow({
+        where: { userId: user.id, title: "conversation conv-locked" },
+        select: { id: true, externalStableId: true, conversationDigest: true },
+    });
+    await prisma.externalConversation.update({
+        where: { id: locked.id },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    const exported = [];
+    for await (const conversation of iterateExternalExportConversations(
+        user.id
+    )) {
+        exported.push(conversation);
+    }
+
+    // Still listed: the owner is entitled to know it is there.
+    assert.equal(exported.length, 2);
+    const stubs = exported.filter((conversation) => conversation.locked);
+    assert.equal(stubs.length, 1);
+    assert.deepEqual(Object.keys(stubs[0]).sort(), ["importedAt", "locked"]);
+
+    const document = JSON.stringify(exported);
+    for (const hidden of [
+        "conversation conv-locked",
+        "a sentence only the lock should see",
+        "and the reply to it",
+        locked.externalStableId,
+        locked.conversationDigest,
+        "scrypt$1$test-locked",
+    ]) {
+        assert.ok(
+            !document.includes(hidden),
+            `the export must not carry ${JSON.stringify(hidden)}`
+        );
+    }
+
+    // And the open snapshot is untouched by the other being locked.
+    const open = exported.find((conversation) => !conversation.locked);
+    assert.equal(open?.title, "conversation conv-open");
+    assert.equal(open?.messages.length, 2);
+});
+
+test("a snapshot locked while the export is being sent goes out as a stub", async () => {
+    /*
+      The race the first version of this fix had. The page of rows is read
+      once and the generator then hands entries to a stream that drains at its
+      own pace, so a lock decided from the page is a decision about the past:
+      a snapshot open when the page was read and locked while an earlier entry
+      was being sent went out whole.
+
+      Driven with `next()` so the lock lands exactly between two entries of
+      the same page, which is the only place the old code could not see it.
+    */
+    const user = await createUser();
+    await finalizeImport(user.id, [
+        conversationPayload("conv-first"),
+        conversationPayload("conv-second", [
+            "text that was open when the page was read",
+            "and locked before it was sent",
+        ]),
+    ]);
+
+    const iterator = iterateExternalExportConversations(user.id);
+    const first = await iterator.next();
+    assert.equal(first.done, false);
+    assert.equal(first.value?.locked, false, "fixture: the first entry is open");
+
+    // Whichever conversation has not been sent yet, lock it now.
+    const sentTitle = first.value && !first.value.locked ? first.value.title : null;
+    const pending = await prisma.externalConversation.findFirstOrThrow({
+        where: { userId: user.id, NOT: { title: sentTitle ?? "" } },
+        select: { id: true, title: true },
+    });
+    await prisma.externalConversation.update({
+        where: { id: pending.id },
+        data: { password: "scrypt$1$test-locked" },
+    });
+
+    const second = await iterator.next();
+    assert.equal(second.done, false);
+    assert.deepEqual(
+        second.value && Object.keys(second.value).sort(),
+        ["importedAt", "locked"],
+        "the entry is decided when it is read, not when its page was"
+    );
+    const document = JSON.stringify(second.value);
+    assert.ok(!document.includes(pending.title));
+    assert.ok(!document.includes("text that was open when the page was read"));
+
+    assert.equal((await iterator.next()).done, true);
 });
 
 test("the rollout flag round-trips through the admin setter", async () => {
@@ -1140,10 +1295,10 @@ test("the status endpoint gives a resumed screen what the wizard's review had", 
     // Per-conversation truncation counts, so the resumed confirmation can
     // name the shortened conversations exactly as the wizard's review did.
     const plain = status.conversations.find((row) =>
-        row.title.includes("resume-plain")
+        row.title?.includes("resume-plain")
     )!;
     const long = status.conversations.find((row) =>
-        row.title.includes("resume-long")
+        row.title?.includes("resume-long")
     )!;
     assert.equal(plain.truncatedMessageCount, 0);
     assert.equal(long.truncatedMessageCount, 1);
@@ -1257,4 +1412,155 @@ test("an expired unsealed import still reads as expired, not unsealed", async ()
         }),
         expectCode("EXTERNAL_IMPORT_STAGING_EXPIRED")
     );
+});
+
+/*
+  task_9d445985 (second cycle) and IMPORT-STAGING-FINALIZE-01.
+
+  Both are about what happens between the sweep choosing a candidate and the
+  sweep writing it. Interleavings are forced: a holder keeps a lock, and the
+  test waits until PostgreSQL reports each contender waiting before starting
+  the next.
+*/
+
+const waitForLockWaiters = async (count: number) => {
+    const deadline = Date.now() + 15_000;
+    for (;;) {
+        const [row] = await prisma.$queryRaw<Array<{ waiting: number }>>`
+            SELECT count(*)::int AS waiting FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+        `;
+        if (row.waiting >= count) return;
+        if (Date.now() > deadline) throw new Error(`expected ${count} lock waiters, saw ${row.waiting}`);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+};
+
+const holdLock = (
+    take: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<unknown>,
+    beforeCommit?: (tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]) => Promise<unknown>
+) => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let acquired!: () => void;
+    const holding = new Promise<void>((resolve) => {
+        acquired = resolve;
+    });
+    const done = prisma.$transaction(
+        async (tx) => {
+            await take(tx);
+            acquired();
+            await released;
+            await beforeCommit?.(tx);
+        },
+        { timeout: 30_000, maxWait: 30_000 }
+    );
+    return { holding, release, done };
+};
+
+const openStaleImport = async () => {
+    const user = await createUser();
+    const created = await createExternalImport({
+        userId: user.id,
+        provider: "chatgpt",
+        parserVersion: "test-1",
+    });
+    await appendExternalImportBatch({
+        userId: user.id,
+        importId: created.id,
+        sequence: 0,
+        batchDigest: "digest-0",
+        conversations: [conversationPayload("conv-a"), conversationPayload("conv-b")],
+    });
+    await prisma.$executeRaw`
+      UPDATE "ExternalImport"
+      SET "updatedAt" = NOW() - INTERVAL '25 hours'
+      WHERE id = ${created.id}
+    `;
+    return { user, importId: created.id };
+};
+
+/** The day counter the sweep reports into, summed across periods. */
+const stagingExpiredCounter = async () => {
+    const rows = await prisma.chatUsageBucket.findMany({
+        // lib/externalImportMetrics.ts counterKey("staging_expired"), in the day period.
+        where: { key: "external-import:staging-expired", period: "external-import-day" },
+        select: { count: true },
+    });
+    return rows.reduce((sum, row) => sum + Number(row.count), 0);
+};
+
+test("a delete queued behind a sweep on the same open import does not deadlock", async () => {
+    // Old order: the sweep waited on the snapshots with nothing held; the
+    // delete took the import and waited on the snapshots; once released the
+    // sweep deleted the snapshots and waited on the import the delete held.
+    const { user, importId } = await openStaleImport();
+    const counterBefore = await stagingExpiredCounter();
+    const holder = holdLock((tx) =>
+        tx.$queryRaw`SELECT id FROM "ExternalConversation" WHERE "importId" = ${importId} ORDER BY id FOR UPDATE`
+    );
+    await holder.holding;
+
+    const sweep = reconcileExpiredExternalImportStaging();
+    await waitForLockWaiters(1);
+    const deletion = deleteExternalImport(user.id, importId);
+    await waitForLockWaiters(2);
+    holder.release();
+    await holder.done;
+
+    const [sweepResult, deleteResult] = await Promise.all([sweep, deletion]);
+    assert.equal(sweepResult.expiredImports, 1);
+    // The counter the skip tests compare against really moves when an import expires.
+    assert.equal(await stagingExpiredCounter(), counterBefore + 1);
+    // The sweep committed first, so the delete found a failed import and
+    // removed it outright.
+    assert.equal(deleteResult.outcome, "deleted");
+    assert.equal(await prisma.externalImport.count({ where: { id: importId } }), 0);
+    assert.equal(await prisma.externalConversation.count({ where: { importId } }), 0);
+});
+
+test("a finalize that commits after the sweep chose the import keeps it completed and uncounted", async () => {
+    const { importId } = await openStaleImport();
+    const counterBefore = await stagingExpiredCounter();
+    const holder = holdLock(
+        (tx) => tx.$queryRaw`SELECT id FROM "ExternalImport" WHERE id = ${importId} FOR UPDATE`,
+        (tx) => tx.$executeRaw`UPDATE "ExternalImport" SET status = 'completed' WHERE id = ${importId}`
+    );
+    await holder.holding;
+
+    // The sweep reads the import as an open, stale candidate, then waits for
+    // the row while the holder completes it.
+    const sweep = reconcileExpiredExternalImportStaging();
+    await waitForLockWaiters(1);
+    holder.release();
+    await holder.done;
+
+    assert.equal((await sweep).expiredImports, 0, "a skipped candidate is not counted");
+    const row = await prisma.externalImport.findUniqueOrThrow({ where: { id: importId } });
+    assert.equal(row.status, "completed");
+    assert.equal(row.failureCode, null);
+    assert.equal(await prisma.externalConversation.count({ where: { importId } }), 2);
+    assert.equal(await stagingExpiredCounter(), counterBefore);
+});
+
+test("an import touched after the candidate read is not expired", async () => {
+    const { importId } = await openStaleImport();
+    const counterBefore = await stagingExpiredCounter();
+    const holder = holdLock(
+        (tx) => tx.$queryRaw`SELECT id FROM "ExternalImport" WHERE id = ${importId} FOR UPDATE`,
+        (tx) => tx.$executeRaw`UPDATE "ExternalImport" SET "updatedAt" = NOW() WHERE id = ${importId}`
+    );
+    await holder.holding;
+    const sweep = reconcileExpiredExternalImportStaging();
+    await waitForLockWaiters(1);
+    holder.release();
+    await holder.done;
+
+    assert.equal((await sweep).expiredImports, 0);
+    const row = await prisma.externalImport.findUniqueOrThrow({ where: { id: importId } });
+    assert.equal(row.status, "staging");
+    assert.equal(await prisma.externalConversation.count({ where: { importId } }), 2);
+    assert.equal(await stagingExpiredCounter(), counterBefore);
 });

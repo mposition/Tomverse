@@ -285,6 +285,34 @@ test("delete-all takes the run rows before the memory lock, the order an extract
   assert.ok(commit.indexOf('FROM "MemoryExtractionRun"') < commit.indexOf("persistExtractionChunkDecisions("));
 });
 
+test("staging expiry takes the import before its snapshots, and the sweep re-decides under that lock", () => {
+  // task_9d445985 and IMPORT-STAGING-FINALIZE-01.
+  const service = readFileSync("lib/externalImportService.ts", "utf8");
+  const expireStart = service.indexOf("async function expireStagingImport(");
+  const expire = service.slice(expireStart, service.indexOf("\n}\n", expireStart));
+  assert.ok(
+    expire.indexOf('FROM "ExternalConversation"') < expire.indexOf("tx.externalConversation.deleteMany("),
+    "snapshots are locked by id before they are deleted"
+  );
+  assert.match(expire, /ORDER BY id FOR UPDATE/);
+
+  const sweepStart = service.indexOf("export async function reconcileExpiredExternalImportStaging(");
+  const sweep = service.slice(sweepStart, service.indexOf("\n}\n", sweepStart));
+  const importLock = sweep.indexOf('FROM "ExternalImport" WHERE id');
+  assert.ok(importLock > 0 && importLock < sweep.indexOf("expireStagingImport(tx"), "the import row first");
+  assert.match(sweep, /isOpenImportStatus\(current\.status\)/);
+  assert.match(sweep, /isStagingExpired\(current, now\)/);
+  assert.match(sweep, /recordExternalImportCounter\("staging_expired", expired, now\)/);
+
+  // Every other caller already holds the import row when it expires.
+  for (const match of service.matchAll(/await expireStagingImport\(tx, (\w+)\.id\)/g)) {
+    const before = service.slice(0, match.index);
+    const enclosing = before.slice(before.lastIndexOf("export async function"));
+    if (enclosing.startsWith("export async function reconcileExpiredExternalImportStaging(")) continue;
+    assert.match(enclosing, /forUpdate: true/, "caller holds the import row");
+  }
+});
+
 test("a source deletion transitions a lock-suspended memory instead of leaving it to be restored", () => {
   const service = readFileSync("lib/externalImportService.ts", "utf8");
   const start = service.indexOf("const SUSPENDABLE_MEMORY_STATUSES = [");

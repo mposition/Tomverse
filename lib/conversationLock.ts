@@ -299,6 +299,41 @@ export const clearResourceUnlockCookie = (
 export const clearConversationUnlockCookie = (conversationId: string) =>
     clearResourceUnlockCookie(NATIVE_RESOURCE, conversationId);
 
+/**
+ * When the grant this request holds for a locked resource stops being valid,
+ * in epoch seconds; `null` when it holds none (or the resource is unlocked,
+ * which needs no grant and has no expiry). The same checks as
+ * `hasResourceUnlockGrant`, for a caller that hands out something derived
+ * from the grant and must stop showing it when the grant lapses.
+ */
+export const resourceUnlockGrantExpiry = (
+    resourceType: LockResourceType,
+    request: Request,
+    userId: string,
+    resourceId: string,
+    storedPassword: string | null
+): number | null =>
+    storedPassword
+        ? validUnlockGrantExpiry(resourceType, request, userId, resourceId, storedPassword)
+        : null;
+
+/**
+ * Access to a resource and, when it rests on a grant, when that grant lapses --
+ * decided by one read of the cookie against one clock reading, so the two can
+ * never disagree across a second boundary.
+ */
+export const resourceUnlockAccess = (
+    resourceType: LockResourceType,
+    request: Request,
+    userId: string,
+    resourceId: string,
+    storedPassword: string | null
+): { granted: boolean; expiresAt: number | null } => {
+    if (!storedPassword) return { granted: true, expiresAt: null };
+    const expiresAt = validUnlockGrantExpiry(resourceType, request, userId, resourceId, storedPassword);
+    return { granted: expiresAt !== null, expiresAt };
+};
+
 export const hasResourceUnlockGrant = (
     resourceType: LockResourceType,
     request: Request,
@@ -307,10 +342,20 @@ export const hasResourceUnlockGrant = (
     storedPassword: string | null
 ) => {
     if (!storedPassword) return true;
+    return validUnlockGrantExpiry(resourceType, request, userId, resourceId, storedPassword) !== null;
+};
 
+/** The grant's expiry in epoch seconds when it is valid now, otherwise null. */
+const validUnlockGrantExpiry = (
+    resourceType: LockResourceType,
+    request: Request,
+    userId: string,
+    resourceId: string,
+    storedPassword: string
+): number | null => {
     const conversationId = resourceId;
     const token = readCookie(request, unlockCookieName(resourceType, resourceId));
-    if (!token) return false;
+    if (!token) return null;
 
     const [expiresValue, signature, ...extra] = token.split(".");
     const expiresAt = Number(expiresValue);
@@ -319,7 +364,7 @@ export const hasResourceUnlockGrant = (
         !Number.isSafeInteger(expiresAt) ||
         expiresAt <= Math.floor(Date.now() / 1000)
     ) {
-        return false;
+        return null;
     }
 
     // The stored password is part of what is signed, so a changed password
@@ -334,10 +379,10 @@ export const hasResourceUnlockGrant = (
     );
     const actualBuffer = Buffer.from(signature || "");
     const expectedBuffer = Buffer.from(expected);
-    return (
-        actualBuffer.length === expectedBuffer.length &&
+    return actualBuffer.length === expectedBuffer.length &&
         timingSafeEqual(actualBuffer, expectedBuffer)
-    );
+        ? expiresAt
+        : null;
 };
 
 /** The native shape, unchanged. */

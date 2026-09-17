@@ -19,6 +19,12 @@ export const dynamic = "force-dynamic";
  * part of the same never-strand-imported-data rollback contract (§15).
  * Distinct from the Release B memory export (§13.2), which has its own
  * re-authentication rules — nothing here is memory data.
+ *
+ * `v2` since a locked snapshot became an entry of a different shape
+ * (`{ locked: true, importedAt }`, no title and no messages —
+ * docs/policy/external-conversation-import-and-memory.md §13.5). Every `v1`
+ * entry carried `messages`, so a reader written against it would fail on the
+ * new entry rather than notice it; the version is how it gets to notice.
  */
 export async function GET(req: Request) {
     try {
@@ -39,7 +45,7 @@ export async function GET(req: Request) {
                 try {
                     controller.enqueue(
                         encoder.encode(
-                            `{"format":"tomverse.external-conversations.v1",` +
+                            `{"format":"tomverse.external-conversations.v2",` +
                                 `"digestVersion":${EXTERNAL_IMPORT_DIGEST_VERSION},` +
                                 `"generatedAt":${JSON.stringify(new Date().toISOString())},` +
                                 `"conversations":[`

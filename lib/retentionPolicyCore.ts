@@ -328,7 +328,7 @@ export const retentionCutoff = (key: string, now: Date = new Date()) => {
 /**
  * How long a row may sit past its cutoff before it is late rather than normal.
  *
- * The sweep is a daily cron (`railway.maintenance.json`, 03:00 UTC), so a row
+ * The sweep is a daily cron (`Maintenance Cron` in .railway/scheduled-jobs.ts, 03:00 UTC), so a row
  * crosses its cutoff and then waits up to a day for the run that takes it.
  * That wait is the design working, not a fault, and an alarm that fires on it
  * is on almost all day: `databaseSnapshot()` warned whenever *any* provider
