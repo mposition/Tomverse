@@ -596,6 +596,130 @@ test.describe("Mobile composer: input remains reviewable", { tag: "@ui-risk" }, 
   });
 });
 
+/**
+ * COMPOSER-FOCUS-CLIP-01. "Focus indicators must remain visible and must not
+ * be clipped by the composer's overflow-hidden" had no test, and the global
+ * `:focus-visible` outline drew 4px outside the textarea, where the rounded,
+ * clipped composer cut it off.
+ *
+ * Measured, not eyeballed, within stated limits: an outline on the textarea
+ * or on the composer is turned into a rectangle, which must lie inside every
+ * clipping ancestor -- including the rounded corners, which a plain rectangle
+ * test would pass. An outline counts as drawn only with a non-zero width and a
+ * colour that is not transparent. This is clipping geometry, not contrast, and
+ * it does not detect a descendant painted over the outline. A box-shadow ring
+ * is not counted at all: forced-colors mode removes box-shadow, so a ring
+ * cannot be the only indicator.
+ */
+async function readFocusIndicator(page: Page) {
+  return page.evaluate(() => {
+    const textarea = document.querySelector<HTMLElement>('[data-testid="chat-textarea"]')!;
+    const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]')!;
+    const px = (value: string) => Number.parseFloat(value) || 0;
+
+    type Box = { left: number; top: number; right: number; bottom: number };
+    const indicators: Array<{ owner: string; kind: string; box: Box }> = [];
+    for (const [owner, element] of [
+      ["textarea", textarea],
+      ["composer", composer],
+    ] as const) {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const width = px(style.outlineWidth);
+      const colour = style.outlineColor.replace(/\s+/g, "");
+      const transparent =
+        colour === "transparent" || /^rgba\(\d+,\d+,\d+,0\)$/.test(colour) || /\/0\)$/.test(colour);
+      if (style.outlineStyle !== "none" && width > 0 && !transparent) {
+        const grow = width + px(style.outlineOffset);
+        indicators.push({
+          owner,
+          kind: "outline",
+          box: {
+            left: rect.left - grow,
+            top: rect.top - grow,
+            right: rect.right + grow,
+            bottom: rect.bottom + grow,
+          },
+        });
+      }
+    }
+
+    const escapes: string[] = [];
+    for (const indicator of indicators) {
+      // The element that owns an outline does not clip it; its ancestors do.
+      const start = indicator.owner === "textarea" ? textarea.parentElement : composer.parentElement;
+      for (let node = start; node && node !== document.body; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.overflowX === "visible" && style.overflowY === "visible") continue;
+        const rect = node.getBoundingClientRect();
+        const inner = {
+          left: rect.left + px(style.borderLeftWidth),
+          top: rect.top + px(style.borderTopWidth),
+          right: rect.right - px(style.borderRightWidth),
+          bottom: rect.bottom - px(style.borderBottomWidth),
+        };
+        const box = indicator.box;
+        const tolerance = 0.5;
+        if (
+          box.left < inner.left - tolerance ||
+          box.top < inner.top - tolerance ||
+          box.right > inner.right + tolerance ||
+          box.bottom > inner.bottom + tolerance
+        ) {
+          escapes.push(`${indicator.owner} ${indicator.kind} outside ${node.dataset.testid ?? node.tagName} rect`);
+          continue;
+        }
+        const radius = Math.max(0, px(style.borderTopLeftRadius) - px(style.borderLeftWidth));
+        if (radius === 0) continue;
+        const corners = [
+          [box.left, box.top, inner.left + radius, inner.top + radius, box.left < inner.left + radius && box.top < inner.top + radius],
+          [box.right, box.top, inner.right - radius, inner.top + radius, box.right > inner.right - radius && box.top < inner.top + radius],
+          [box.left, box.bottom, inner.left + radius, inner.bottom - radius, box.left < inner.left + radius && box.bottom > inner.bottom - radius],
+          [box.right, box.bottom, inner.right - radius, inner.bottom - radius, box.right > inner.right - radius && box.bottom > inner.bottom - radius],
+        ] as const;
+        for (const [x, y, cx, cy, inZone] of corners) {
+          if (inZone && Math.hypot(x - cx, y - cy) > radius + tolerance) {
+            escapes.push(`${indicator.owner} ${indicator.kind} cut by ${node.dataset.testid ?? node.tagName} corner`);
+          }
+        }
+      }
+    }
+    return {
+      focused: document.activeElement === textarea,
+      indicators: indicators.map((indicator) => `${indicator.owner}:${indicator.kind}`),
+      escapes,
+    };
+  });
+}
+
+test.describe("Mobile composer: focus indicator", { tag: "@ui-risk" }, () => {
+  for (const [width, webSearchMode, forcedColors] of [
+    [320, "off", "none"],
+    [390, "off", "none"],
+    [390, "always", "none"],
+    // Windows high contrast: box-shadow is removed, outlines are kept.
+    [320, "off", "active"],
+  ] as const) {
+    // With web search off no chip row sits above the input, so the textarea is
+    // the composer's first row -- inside the rounded corners.
+    test(`the textarea's focus indicator is drawn and not clipped at ${width}px, web search ${webSearchMode}, forced colors ${forcedColors}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ forcedColors });
+      await enterMobileComposer(page, { viewport: { width, height: 700 }, webSearchMode });
+      const before = await readFocusIndicator(page);
+      expect(before.indicators, "an indicator is drawn before focus").toEqual([]);
+
+      await page.getByTestId("chat-textarea").focus();
+      const focused = await readFocusIndicator(page);
+      console.log(`[composer-focus] ${width} ${JSON.stringify(focused)}`);
+      expect(focused.focused).toBe(true);
+      expect(focused.indicators.length, "no focus indicator is drawn").toBeGreaterThan(0);
+      expect(focused.escapes).toEqual([]);
+    });
+  }
+});
+
 test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-risk" }, () => {
   test("an on-screen keyboard does not collapse the input row", async ({ page }) => {
     await enterMobileComposer(page, { viewport: { width: 390, height: 680 } });

@@ -241,14 +241,14 @@ const OVERRIDES: Record<string, Record<string, (args: never) => unknown>> = {
       id: CONVERSATION_ID,
       userId: USER_ID,
       password: null,
-      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID]),
+      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID, "mistral-small-4"]),
       kind: "chat",
     }),
     findFirst: () => ({
       id: CONVERSATION_ID,
       userId: USER_ID,
       password: null,
-      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID]),
+      selectedModels: JSON.stringify([MODEL_ID, REASONING_MODEL_ID, "mistral-small-4"]),
       kind: "chat",
     }),
   },
@@ -372,6 +372,66 @@ mock.module(mod("lib/chatSecurity.ts"), {
   },
 });
 
+/*
+  Auto's decision, forced (CHAT-ART-01).
+
+  The real selection routes only a conversation in `auto` mode, inside the
+  cohort, past the readiness gates -- none of which is this contract. So the
+  selection is replaced by one that answers exactly what the real one answers
+  (every existing test above leaves `forcedAutoRoute` null and gets the real
+  decision), and a test that needs a routed turn names the model Auto chose.
+  What is under test is everything after the decision: that the tools, the
+  system block and the card follow the model that will actually answer.
+*/
+const realAutoSelection = require(resolve(ROOT, "lib/autoModelSelection.ts")) as {
+  selectAutoModel: (input: unknown) => unknown;
+};
+const { ROUTER_VERSIONS } = require(resolve(ROOT, "lib/routerDecision.ts")) as {
+  ROUTER_VERSIONS: unknown;
+};
+
+let forcedAutoRoute: string | null = null;
+
+const routedSelection = (modelId: string) => ({
+  routed: true,
+  modelId,
+  sticky: { modelId, turnsFavouringChallenger: 0 },
+  fallbackCandidateModelIds: [],
+  versions: ROUTER_VERSIONS,
+  cohort: { eligible: true, bucket: 0, version: "test", salt: "test" },
+  record: {
+    versions: ROUTER_VERSIONS,
+    taskKind: "writing",
+    taskConfidence: "high",
+    needsCurrentInformation: false,
+    expectedOutputLength: "medium",
+    scripts: [],
+    signals: [],
+    reservedInputTokens: 0,
+    requestOutputCapTokens: 0,
+    consideredModelCount: 1,
+    eligibleModelIds: [modelId],
+    rejections: [],
+    selectedModelId: modelId,
+    selectionReason: "only_candidate",
+    selectionMargin: 0,
+    selectionDecidedBy: null,
+    challengerModelId: null,
+    turnsFavouringChallenger: 0,
+    decisionLatencyMs: 0,
+  },
+});
+
+mock.module(mod("lib/autoModelSelection.ts"), {
+  namedExports: {
+    ...realAutoSelection,
+    selectAutoModel: (input: unknown) =>
+      forcedAutoRoute
+        ? routedSelection(forcedAutoRoute)
+        : realAutoSelection.selectAutoModel(input),
+  },
+});
+
 // Constructing a provider client reads API keys and is not what is under test.
 mock.module(mod("lib/activeAiModel.ts"), {
   namedExports: { getActiveAiModel: () => ({ modelId: MODEL_ID }) },
@@ -466,8 +526,12 @@ const loadRoute = async (): Promise<RouteModule> => {
 
 const ask = async (
   next: Partial<StreamScript>,
-  { modelId = MODEL_ID }: { modelId?: string } = {}
+  {
+    modelId = MODEL_ID,
+    autoRoutedTo = null,
+  }: { modelId?: string; autoRoutedTo?: string | null } = {}
 ) => {
+  forcedAutoRoute = autoRoutedTo;
   script = {
     begins: [],
     executes: [],
@@ -716,4 +780,71 @@ test("more begun calls than an answer may attach still yields at most three card
     [0, 1, 2]
   );
   assert.equal(world.artifactRows.length, 3);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Auto chose the model (CHAT-ART-01)                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A model with no verified artifact tool support that every plan can select,
+ * and no reasoning setting, so nothing else about the turn changes with it.
+ */
+const UNVERIFIED_MODEL_ID = "mistral-small-4";
+
+/** The words the provider receives outside the tool definitions. */
+const promptText = () =>
+  JSON.stringify(lastStreamTextOptions ?? {}, (key, value) =>
+    key === "tools" ? undefined : value
+  );
+
+test("Auto routing to a verified model registers the file tools for that model", async () => {
+  // The user's own model is one the tools are off for. If the plan read the
+  // requested model instead of the routed one, no tool would be registered.
+  const { trailer } = await ask(
+    {
+      begins: [beganTextFile],
+      executes: [beganTextFile.toolCallId],
+      finishReason: "stop",
+      rawFinishReason: "end_turn",
+    },
+    { modelId: UNVERIFIED_MODEL_ID, autoRoutedTo: MODEL_ID }
+  );
+
+  const tools = lastStreamTextOptions!.tools as Record<string, unknown>;
+  assert.ok(tools.create_text_file, "the routed model's file tool was not registered");
+  assert.equal(trailer?.artifacts?.length, 1);
+  assert.equal(trailer?.artifacts?.[0]!.status, "ready");
+  // The card and its row name the model that made the file.
+  assert.equal(trailer?.artifacts?.[0]!.modelId, MODEL_ID);
+  assert.equal(world.artifactRows[0]!.modelId, MODEL_ID);
+});
+
+test("Auto routing to an unverified model registers no file tool and says Auto chose it", async () => {
+  await ask({}, { modelId: MODEL_ID, autoRoutedTo: UNVERIFIED_MODEL_ID });
+
+  const tools = (lastStreamTextOptions!.tools ?? {}) as Record<string, unknown>;
+  for (const name of [
+    "create_text_file",
+    "create_document",
+    "create_spreadsheet",
+    "create_presentation",
+    "create_archive",
+  ]) {
+    assert.equal(tools[name], undefined, `${name} was registered for an unverified model`);
+  }
+  // The remedy names what the user can actually change: Auto made this
+  // choice, so "choose a different model" alone would point at a picker the
+  // user did not use.
+  assert.match(promptText(), /instead of Auto/);
+  assert.deepEqual(world.artifactRows, []);
+});
+
+test("a manual turn on an unverified model keeps the plain remedy, with no mention of Auto", async () => {
+  await ask({}, { modelId: UNVERIFIED_MODEL_ID });
+
+  const tools = (lastStreamTextOptions!.tools ?? {}) as Record<string, unknown>;
+  assert.equal(tools.create_text_file, undefined);
+  assert.match(promptText(), /choosing a different model/);
+  assert.doesNotMatch(promptText(), /instead of Auto/);
 });

@@ -192,6 +192,7 @@ Requirements:
 - Tool-state details must remain available through `aria-label`, `aria-describedby`, or an accessible disclosure.
 - Disabled actions must expose their specific reason (not through `title` alone).
 - Focus indicators must remain visible and must not be clipped by the composer's `overflow-hidden`.
+  The textarea opts out of the global outline (`data-focus-ring="container"`) and the composer draws an outline inside its own border for it instead: the textarea's outline was drawn outside it and cut off by the rounded corners whenever the input was the composer's first row (COMPOSER-FOCUS-CLIP-01). It is an outline, not a box-shadow ring, because forced-colors mode removes box-shadow. `tests/e2e/mobile-composer-contract.spec.ts` checks that a visible outline exists on focus, including under forced colors, and that its rectangle lies inside each clipping ancestor, corners included; it measures geometry, not contrast.
 - Interactive targets must be at least 44×44px.
 - Status updates must not repeatedly interrupt typing through an excessively noisy live region.
 - Quick-comparison and AI cross-review must each carry their own `aria-describedby`, so two different credit costs are never described by one shared sentence.

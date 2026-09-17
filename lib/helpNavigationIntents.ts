@@ -2,11 +2,11 @@
  * HELP-NAV-01: the reviewed registry of "I want to do X" intents an in-product
  * help assistant may answer, and where each one is allowed to send the user.
  *
- * Preparation only. Nothing renders this yet and nothing matches questions
- * against it; the launcher and sheet wait for the mobile composer work
- * (docs/ops/help-nav/README.md). What exists now is the part that has to be
- * right before any UI: which intents are answered at all, which destination
- * each resolves to, and what has to be true for that destination to be offered.
+ * The guided help (`lib/helpGuide.ts`, `components/chat/HelpGuideDialog.tsx`)
+ * renders exactly these intents for the user to pick from; nothing matches
+ * typed questions against them (docs/ops/help-nav/README.md). This file
+ * decides which intents are answered at all, which destination each resolves
+ * to, and what has to be true for that destination to be offered.
  *
  * ## Destinations are ids, never URLs
  *
