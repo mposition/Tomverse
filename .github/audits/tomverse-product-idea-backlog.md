@@ -1255,7 +1255,7 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 | --- | --- | --- | --- |
 | 1 | CHAT-LATENCY-01 | 제품 작업 완료 시간 계측 보완 | CHAT-01 하위 P1 / 기존 dispatch·Review duration·이벤트의 coverage 확인 → 단일 Chat/다중 Review/첫 성공의 기준선. 신규 계측 플랫폼 전체 개발 아님 |
 | 1과 비개발 병행 | MARKET-KO-01 | 한국어 핵심 업무 시장·포지셔닝 검증 | 시장 검증 P1 / 한국어 문서 비교·검토 실무자라는 가설 하나 → 동일 업무 대안 비교 → 사실 기반 카피·시료·지원 실험. 한국어 1등 선언·7개 언어 축소 아님 |
-| 2 | CHAT-ONBOARD-01 | 신규 사용자 첫 성공 흐름 완성 | CHAT-01 하위 P1 / quick start·ModelFinder·starter의 중복/이탈 검증 → 첫 유효 답변·저장·후속 질문. 기존 starter staging 검증과 통합 |
+| 2 | CHAT-ONBOARD-01 | 신규 사용자 첫 성공 흐름 완성 | CHAT-01 하위 P1 / quick start·ModelFinder·starter의 중복/이탈 검증 → 첫 유효 답변·저장·후속 질문. starter staging 검증은 **통과**(2026-09-17, 서명 mposition, develop [#1510](https://github.com/mposition/Tomverse/pull/1510)); 후속 발견은 아래 "starter staging 검증 후속" |
 | 온보딩 연계 | HELP-NAV-01 | 원하는 작업을 설정·사용법으로 연결하는 도움말 도우미 | 병행 P2 / 승인된 도움말·설정 이동 규칙으로 자연어 질문 → 짧은 절차·근거·명시적 이동 버튼. 자유 생성·자동 실행 제외; 세부 범위는 아래 |
 | 3 | REVIEW-RESULT-01 | 읽을 수 있는 Review 결과 페이지 | 후속 P2 / 소유자 비공개 결과 화면부터, 링크 공유는 버전·권한·미리보기·철회 정책 확정 후. Chat의 강제 3모델화·새 Artifacts 엔진 아님 |
 | 작은 독립 개선 | TRUST-01 | 공개 신뢰 정보의 의미·가시성 보완 | 병행 P2 / 이미 연결된 proof-metrics·상태 페이지의 설명·최신성·노출 확인. 별도 지표 플랫폼 아님 |
@@ -1290,6 +1290,32 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
   실패했으며 registry의 pending을 미구현으로 판정하지 않았습니다.
 - 상세 근거·완료 조건·공식 출처:
   [한국어 집중·제품 경험 전략 검토](./tomverse-korean-focus-and-product-experience-review-2026-09-15.md).
+
+#### starter staging 검증 후속 — 2026-09-17 발견 분석
+
+- **출처**: Chat 시작 카탈로그 staging 검증(staging `c45871f1`, 판정 통과, 서명 mposition,
+  기록 develop [#1510](https://github.com/mposition/Tomverse/pull/1510)). 차단 구획 A·B·C 실패
+  0건이며 아래는 기록에서 비차단으로 정리한 발견을 코드와 대조해 묶은 것입니다.
+  production flag 활성화의 새 차단 조건이 아니며, 구현·flag 변경·배포 승인도 아닙니다.
+- **코드 기준**: origin/develop `de346b81`. 두 원인(CONT-TITLE-LOCALE-01 요청 경합,
+  MOBILE-KB-INSET-01 이중 보정)은 코드 분석에 근거한 추정이며 재현 전입니다.
+- **main 상태**: 시작 카탈로그는 main에 없습니다. 통과한 기능의 main 이식 PR을 준비 중입니다.
+
+| ID | 작업 | 우선순위·상태 | 다음 완료 단위 |
+| --- | --- | --- | --- |
+| STARTER-COMPARE-01 | "세 모델 답 나란히 비교" 카드가 로그인 1개 모델 계정에서 모델을 늘리지 않음 | CHAT-ONBOARD-01 하위 **P1** / 등록, 미착수, 제품 결정 대기 | 7개 locale이 "세 모델"을 약속하지만 seed가 모델을 바꾸지 않음(`suggestedModelIds` 미사용). 모델 3개로 맞춤(계약 §4 개정)·안내 표시·문구 축소 중 결정 → 로그인 1개/게스트 3개/이미 2개 상태 E2E. production flag 활성화 전 수정 권장 |
+| COMPOSER-REFLOW-01 | 페이지 확대·낮은 높이에서 보내기 버튼·카드·주의 문구에 닿지 못함 | CHAT-01 하위 **P1**(접근성) / 등록, 미착수 | Edge 300%에서 보내기 버튼이 화면 밖·스크롤 불가, 200%에서 카드 사라짐, 150%부터 "민감정보 입력 금지" 말줄임. composer 낮은 높이 규칙 부재 → 도달 경로·주의 문구 줄바꿈 → 137×300·568×320 기준을 계약과 spec에 추가. 계약 폭 320px 밖이라 기존 계약 위반은 아님 |
+| CONT-TITLE-LOCALE-01 | 이어온 대화 제목이 새로고침 사이 한국어↔영어로 바뀜 | 병행 **P2**(버그) / 등록, 미착수 | locale 변경으로 목록 요청이 두 번 나가고 늦게 온 이전 locale 응답이 제목을 덮음(추정) → 표시 문자열을 렌더 시점에 만들거나 늦은 응답 폐기 → 응답 순서 역전 테스트. CONT-TITLE-01(완료)과 별개 결함 |
+| STARTER-LOCK-COPY-01 | 잠긴 카드를 누른 뒤 도착 화면이 그 기능을 말하지 않음 | CHAT-ONBOARD-01 하위 **P2** / 등록, 미착수 | 게스트 로그인 모달이 다중 모델용 고정 문구(사유 인자 없음, 분석 태그도 `guest_multi_model`), 요금제 페이지 플랜 목록에 이미지 생성 없음, 마케팅 헤더 "Review로 돌아가기"가 `/chat`으로 감 → 사유별 문구·플랜 경계 표시·CTA 이름 정정 |
+| MOBILE-KB-INSET-01 | 키보드가 열린 Edge에서 입력란 아래 약 100px 빈 띠 | CHAT-01 하위 **P2** / 등록, 미착수 | `resizes-content`와 keyboard inset padding의 이중 보정, safe-area 여백 중복 추정 → 실기기 원인 확정 → 두 viewport가 함께 줄어드는 조건 spec 추가 → 제거 |
+| STARTER-LAYOUT-01 | 카드 아래 안내 문장이 첫 화면에서 dock에 걸려 잘림, 한국어 라벨 단어 중간 줄바꿈 | CHAT-ONBOARD-01 하위 **P3** / 등록, 미착수 | 환영 영역 아래 여백·scroll-padding 부재, 라벨에 `break-keep` 없음 → `displayHeadingClass()` 관례를 카드에만 적용, 안내 문장 가시성 spec 추가 |
+| STARTER-FINDER-01 | 카드가 채운 문장이 Model Finder의 유료 모델·크레딧 안내를 띄움 | CHAT-ONBOARD-01 하위 **P3** / 결정 대기 | 키워드 매칭이라 직접 입력해도 같음, 카드 계약 위반 아님. 카드 초안에서 추천을 끌지 판단한 뒤에만 수정 |
+| STARTER-CHECKLIST-02 | starter staging 체크리스트·설정 감사 로그 공백 | 운영 **P3** / 등록, 미착수 | 전제 SHA를 #1460 이후로, E-3에 브라우저 페이지 확대 조건 추가, 음성 flag 읽는 실제 경로 명시(Admin 저장 경로에 없음) → `templateRevision`과 `_record-template.md` 함께 갱신. `app_settings` 감사 metadata의 변경 전후 값은 별도 결정 |
+
+- 작업 불필요로 판단: 영어 주의 문구의 ` -- `는 locale 전반의 표기 관례이고 dash 금지
+  규칙 대상(시작 카드·랜딩)이 아니어서 등록하지 않았습니다.
+- 상세 원인·`file:line` 근거·결정 선택지:
+  [starter staging 검증 발견 분석](./tomverse-chat-starter-staging-findings-review-2026-09-17.md).
 
 #### HELP-NAV-01 — 제품 내 도움말·설정 안내 도우미
 
@@ -1573,6 +1599,10 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
 
 ### 목록 정정 기록
 
+- 2026-09-17: Chat 시작 카탈로그 staging 검증(판정 통과, develop #1510)의 발견을 코드와
+  대조해 F에 "starter staging 검증 후속" 여덟 항목을 추가했습니다. P1은 STARTER-COMPARE-01과
+  COMPOSER-REFLOW-01이며, 주 투자 순위와 기존 항목은 바꾸지 않았습니다. 제품 구현 없이
+  분석 문서와 목록만 갱신했습니다.
 - 2026-09-17: 제품 내 도움말 도우미를 HELP-NAV-01로 추가했습니다. 기존 도움말·설정
   이동 기능을 재사용하는 안내 MVP만 CHAT-ONBOARD-01 연계 P2로 채택했습니다.
   자유 생성·자동 실행·외부 지원 SaaS 도입은 포함하지 않았고 주 투자 순위는 유지합니다.
