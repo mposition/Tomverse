@@ -147,6 +147,9 @@ export type ProviderEventEffect =
  * wrongly-permanent suppression is invisible and a wrongly-transient one is
  * self-correcting.
  */
+/** `data.bounce.type` values that mean the mailbox will never accept mail, lowercased. */
+export const PERMANENT_BOUNCE_TYPES: ReadonlySet<string> = new Set(["permanent", "hard"]);
+
 export const providerEventEffect = (input: {
   type: string;
   bounceType?: string | null;
@@ -164,7 +167,10 @@ export const providerEventEffect = (input: {
         temporary: false,
       };
     case "email.bounced": {
-      const hard = (input.bounceType || "").toLowerCase() === "hard";
+      // Resend names a hard bounce `Permanent` (and a soft one `Transient`, an
+      // unclassifiable one `Undetermined`); `hard` is kept for the older form.
+      // Matching only `hard` read every real permanent bounce as a soft one.
+      const hard = PERMANENT_BOUNCE_TYPES.has((input.bounceType || "").toLowerCase());
       return hard
         ? {
             kind: "suppress",

@@ -134,7 +134,8 @@ test("a hard bounce suppresses the address permanently", async () => {
   await webhook("email.bounced", {
     email_id: messageId,
     to: [address],
-    bounce: { type: "Hard" },
+    // Resend's own value for a hard bounce.
+    bounce: { type: "Permanent" },
   });
 
   const entry = await prisma.suppressionEntry.findFirstOrThrow();
