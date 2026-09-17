@@ -36,6 +36,87 @@
   확인된 긴급 취약점은 영향과 악용 가능성에 따라 별도 대응하며, 단순한 경고 개수나
   점검표 미완성을 이유로 전체 개발을 일괄 차단하지 않습니다.
 
+## 현재 권장 병행 배분 — 2026-09-17
+
+사용자 요청: "작업 목록 리뷰하셔서 지금 병행할수 있는 작업 권장 순서 제시해주세요".
+아래는 **지금 추가로 배정할 작은 작업의 순서**이며, A의 제품 투자 순위를 바꾸거나
+구현·유료 평가·병합·배포·flag 변경을 승인한 것이 아닙니다.
+
+### 먼저 중복 착수에서 뺄 것
+
+- CONT-SEARCH-01·CONT-EXPORT-01B·IMPORT-LOCK-TITLE-01·두 잠금 cycle·만료/finalize
+  수정은 재개발하지 않습니다. staging 기록 #1506과 main 이식 PR
+  [#1508](https://github.com/mposition/Tomverse/pull/1508)을 확인했으며, 조회 시점에는
+  **OPEN**이었습니다. 남은 main 반영은 출시 담당의 별도 마무리입니다. 이번에 병합하거나
+  production 배포·flag를 확인하지 않았습니다.
+- starter 검증 기록 [#1510](https://github.com/mposition/Tomverse/pull/1510)은 이번 조사 중
+  develop 병합을 확인했습니다. 통과 기록과 비차단 후속 결함을 구분하고, 후속을 등록했다는
+  이유로 기존 pass를 뒤집지 않습니다.
+- 잠긴 원문 TXT의 메뉴 안 거절 사유 표시는 기록상 이미 별도 작업에서 진행 중입니다.
+  원격 브랜치/열린 PR은 이번 조회에서 찾지 못했으므로 완료나 중단을 단정하지 않고,
+  현재 담당 작업과 확인하기 전 새 구현을 중복 배정하지 않습니다.
+- Chat 핵심의 Prompt Refiner 증거/admission 계약은 기존 작업에서 진행 중입니다.
+  Router Benchmark v2도 corpus·execution contract·offline bridge가 이미 있으므로
+  "v2 처음부터 구축"을 새 일감으로 만들지 않습니다. 합성 실행은 실제 모델 품질 승인과 다릅니다.
+
+### 추가 작업 배정 순서
+
+| 순서 | 작업 | 지금 가능한 완료 단위 | 병행 조건·대기 경계 |
+| --- | --- | --- | --- |
+| 1 | **COMPOSER-REFLOW-01** — 입력·전송 접근성 | 확대/낮은 높이에서 보내기 버튼에 닿도록 재현·수정·회귀. 같은 담당이 MOBILE-KB-INSET-01을 재현하고, 원인이 확인되면 이어서 수정 | `MobileChatShell`·composer·viewport hook은 한 담당이 소유. STARTER-LAYOUT-01은 같은 영역의 작은 후속으로 묶되 첫 수정을 기다리게 하지 않음 |
+| 2 | **SEO-I18N-01** — 지역 중립 중국어 metadata | 공통 hreflang의 `zh-CN` → `zh-Hans`, HTML/sitemap 자기·상호 참조 회귀. 작은 독립 PR | Chat 실행·DB·과금과 분리. `/zh`·내부 locale·Open Graph 일괄 치환 금지. AEO-04는 같은 SEO 담당의 다음 작업으로 두어 sitemap 중복 수정 방지 |
+| 3 | **CONT-01 측정·정책 선택 준비** / CONT-SEARCH-01 성능 잔여 | 기존 seed 측정 도구로 후보 비교·결정표를 준비. 검색은 기존 근사 상한 측정기를 별도 격리 테스트 DB에서 사용 | 운영 seed 통계는 승인된 읽기 전용 DB 접근 필요, 검색 측정 DB는 fixture 쓰기 대상이므로 운영 DB 사용 금지. C/B 변경은 결과·제품 결정 후. 검색 구현을 다시 하지 않음 |
+| 4 | **VOICE-MIX-01** — 혼용 음성 평가 | 대본·허용 표기·숫자 정답지·채점기·한정 용어 힌트 비교 설계 | STT 경로로 한정하고 Chat shell/녹음 UI 전면 수정 제외. 실제 음성/유료 비교는 시료·호출 수·예산 승인 후. 모델 교체부터 하지 않음 |
+| 5 | **CACHE-01 + CHAT-LATENCY-01** — 비용·체감 지연의 기준선 | 기존 usage adapter·정산·dispatch 지표를 읽어 캐시 집계 공백과 첫 답변/전체 종료 시간의 측정 경계를 정리 | **계측 조사부터** 병행. 전 공급자 캐시 강제 활성화·청구 수정·Router/Refiner 실행 변경은 제외. 요청/과금 공용 파일의 구현은 기존 핵심 담당과 순서 조율 |
+| 6 | **CHAT-ART-01** — 기존 파일의 Chat 통합 | 지원 모델×검색 조합, 권한·다운로드·재진입 테스트 표와 기존 통합 공백 확인 | 기본 Auto/단일 답변 UI와 저장·스트림 계약이 준비된 범위만 실제 통합. Auto GA·Memory 전체 완료를 기다릴 필요는 없으나 미리보기/버전 엔진을 새로 만들지 않음 |
+| 7 | **HELP-NAV-01** — 도움말 도우미 준비 | 질문 의도·승인된 안내·설정 목적지 표와 정답지 준비 | P2 유지. launcher/시트는 1번 UI 안정화 및 온보딩 변경과 순서 조율 후. 자유 생성·자동 설정 실행은 이번 완료 단위에서 제외 |
+
+**UI 담당 안의 다음 순서**는 COMPOSER-REFLOW-01 → STARTER-COMPARE-01(제품 결정 후)
+→ STARTER-LOCK-COPY-01입니다. MOBILE-KB-INSET-01과 STARTER-LAYOUT-01은 같은 파일의
+회귀 범위로 조율합니다. 비교 카드가 모델을 자동으로 세 개 선택할지, 현재 선택을 존중하며
+모델 선택을 유도할지, 문구를 줄일지는 아직 결정되지 않았습니다. **현재 선택 보존 + 명시적
+선택 안내**를 우선 검토할 것을 권하지만 이번에 결정으로 확정하거나 계약을 바꾸지 않습니다.
+CONT-TITLE-LOCALE-01은 응답 경합이 추정 단계이므로 응답 순서 역전 재현부터, UI 담당과
+`ChatPageClient` 변경 순서를 맞춥니다. 이어가기 목록 잠금 해제·검색 중복 구별·다운로드
+배치는 별도의 기존 이어가기 담당 후속으로 유지하며 위 완료된 기능 전체를 다시 열지 않습니다.
+
+### 실제 동시 운영 권고
+
+- **기존 핵심 작업 1개 유지**: Router/Refiner·admission·과금 공용 경계. 별도 세션에 같은 구현을 맡기지 않음.
+- **UI 작업 1개 추가/연결**: 먼저 1번. 기존 UI 담당이 있다면 새 복제 작업 대신 그 담당에게 연결.
+- **작은 독립 작업 1개**: 먼저 2번, 끝나면 3→4→5의 준비/측정 단위로 교대. 접근·결정 대기면 다음 준비 단위를 진행.
+- 평가 시료·문서 준비는 코드 충돌이 적지만 검토·CI·병합·사용자 승인도 공유 자원이므로,
+  위 일곱 작업을 모두 동시에 실행할 것을 권하지 않습니다.
+
+CODE-01은 별도 저장소여서 기술적으로 병행 가능하고 투자 2순위를 유지합니다. 다만 이번
+회차에 TomverseCode 최신 구현이나 잔여 구독 절감액을 재검증하지 않았으므로 즉시 착수
+가능한 세부 개발을 새로 지정하지 않습니다. 별도 담당 여력이 있으면 내부 대체 검증을 유지하고,
+없으면 위 작은 독립 작업과 교대하며 전체 외부 출시로 확대하지 않습니다.
+NATIVE-01은 웹 저장소에 `chat-ui`·`api-client`가 아직 없으므로 Chat 화면 복제로 병행하지
+않습니다. 공용 계약·인증/재접속 요구사항 준비는 가능하지만 실제 앱 MVP의 준비 완료로 세지 않습니다.
+Memory 유료 평가·MCP·Review Agent/Task orchestrator·산출물 버전/편집·이어가기 공개 공유는
+기존 승인/의존성 조건을 유지합니다. SEC-OPS-01은 별도 운영 트랙이며 이번에 예약을 재개하거나
+운영 점검을 실행하지 않았습니다. 발견된 긴급 위험이 있으면 그때 영향을 근거로 재배치합니다.
+
+### 확인 근거와 한계
+
+- 코드 분석: 원격 fetch → 새 분석 worktree → develop `de346b81` 조사 후, #1510 문서만
+  추가된 `1e72cd710ffcaa2dcc90e24c1b39d154fa0e5ad1`까지 fast-forward 확인.
+  main `0afd55ebfb4a3352d419eec570334261c57ea118`. 공유 목록 기준은 `666db48b`입니다.
+- `npm run report:issue-backlog` 실행: 열린 11건 중 후보 7건, 코드 착지·완료 미확인 4건
+  (#881·#882·#1247·#1285). 후자에서 새 일을 고르지 않았습니다. 전자의 비용 승인·운영 DB·
+  외부 의존성도 자동 착수 승인으로 보지 않으며 이슈 전체를 새 우선순위로 대체하지 않았습니다.
+- `npm run report:release-gate-evidence` 실행: 수동 매핑상 미구축 9·측정 없음 7·명명된
+  근거 존재 20·조건 미확인 4. 이 결과는 통과/실패나 자동 완료 판정이 아니며, Router v2처럼
+  실제 모듈이 있어도 해당 게이트 증거 형식과 다를 수 있어 직접 경로와 대조했습니다.
+- 위 보고서는 `de346b81`에서 실행했고 그 뒤 추가된 #1510은 staging 기록 한 파일뿐입니다.
+  기존 로컬 의존성을 분석 worktree에 연결해 실행했으며 clean install/build 검증은 아닙니다.
+  유료 turn·운영 DB 조회·실기기 재현은 이번에 하지 않았습니다.
+- [starter staging 기록](https://github.com/mposition/Tomverse/blob/1e72cd710ffcaa2dcc90e24c1b39d154fa0e5ad1/docs/ops/chat-starter-catalog-staging-verification-records/2026-09-16__c45871f158cb8f2f32ae7442ac7123613b354201.md),
+  [이어가기 검증 기록](https://github.com/mposition/Tomverse/blob/1e72cd710ffcaa2dcc90e24c1b39d154fa0e5ad1/.github/audits/staging-verification-continuation-lock-2026-09-17.md),
+  [Chat 진행 기록](https://github.com/mposition/Tomverse/blob/1e72cd710ffcaa2dcc90e24c1b39d154fa0e5ad1/docs/ops/tomverse-chat-progress.md),
+  [Router 개발 benchmark 범위](https://github.com/mposition/Tomverse/blob/1e72cd710ffcaa2dcc90e24c1b39d154fa0e5ad1/docs/ops/router-development-benchmark/README.md).
+
 ## 통합 작업 목록
 
 ### A. 주 개발 투자 우선순위
