@@ -1493,6 +1493,24 @@ export function MobileChatShell({
         // The fix then was to lay the welcome surface out in normal flow and
         // never let it shrink. That fix is no longer needed because its premise
         // -- a composer inside this section -- is gone.
+        //
+        // COMPOSER-REFLOW-01. `min-h-0` alone let the section reach 0 when the
+        // header and the dock outgrew the screen on their own: 9px at Edge's
+        // 200% page zoom (206x370) and 0px at 300% (137x247), where the
+        // starters -- and in a conversation, the answers -- had no box to be
+        // drawn in and no way to scroll to. It now keeps the floor the banner
+        // budget already reserves for it (`MIN_CONVERSATION_AREA_REM`). A
+        // `min-height` never adds height, so this changes nothing on a screen
+        // with room to spare; on one without, the shell -- the composer's one
+        // scroll owner -- scrolls past the section to the dock instead.
+        //
+        // The floor does not follow focus. Dropping it while the dock held
+        // focus moved every dock control on the press that focused it, so on
+        // a short screen the release landed somewhere else: the comparison
+        // rail's disclosure stopped expanding, and a blur on the way to Send
+        // would have moved Send the same way. A focused textarea is scrolled
+        // into view by the browser instead.
+        style={{ minHeight: `${MIN_CONVERSATION_AREA_REM}rem` }}
         className={`relative flex min-h-0 flex-1 flex-col bg-zinc-50 dark:bg-zinc-950 ${
           showWelcomeSurface ? "overflow-y-auto overscroll-contain" : "overflow-hidden"
         }`}

@@ -2262,11 +2262,34 @@ export function ChatInput({
     // 10rem rather than a fixed 160px: at 200% text scaling the auto-grow cap
     // has to grow with the text, or the box stops one line short of what the
     // reader can actually see.
-    const rootFontSize =
-      Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, rootFontSize * 10)}px`;
-  }, [value]);
+    const fit = () => {
+      const rootFontSize =
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, rootFontSize * 10)}px`;
+    };
+    fit();
+
+    // COMPOSER-REFLOW-01. The draft is not the only thing that changes how
+    // tall the box has to be. An empty textarea's scrollHeight is its
+    // placeholder's, and the placeholder wraps as the box narrows -- at Edge's
+    // 300% page zoom (a ~137px layout viewport) "무엇을 도와드릴까요?" takes two
+    // lines. Fitted only when `value` changed, the box kept the height it had
+    // before the width or the placeholder moved: the second line was cut off,
+    // and the empty box became a scroller of its own that took a drag meant
+    // for the shell, so a drag started on it could not bring Send into view.
+    // Refitting on a width change and on a new placeholder keeps the box as
+    // tall as what it shows.
+    if (typeof ResizeObserver === "undefined") return;
+    let lastWidth = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (textarea.clientWidth === lastWidth) return;
+      lastWidth = textarea.clientWidth;
+      fit();
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [value, placeholderText]);
 
   useEffect(() => {
     if (focusToken === undefined) return;
@@ -3725,9 +3748,16 @@ export function ChatInput({
                 {activeSelectedModels.length}
               </span>
             )}
+            {/* COMPOSER-REFLOW-01. Allowed a second line rather than `nowrap`.
+                A label that could not wrap made this button's minimum width
+                the whole label, and the group beside "+" keeps its default
+                minimum on purpose (see above), so at a ~120px viewport the
+                group was 111px in a 90px row and the composer's
+                `overflow-hidden` cut the chevron off. Where the label fits,
+                which is every phone at default zoom, it is still one line. */}
             <span
               data-testid="composer-active-model-count"
-              className="min-w-0 truncate whitespace-nowrap"
+              className="min-w-0 line-clamp-2 break-keep"
             >
               {modelsSelectedLabel(activeSelectedModels.length)}
             </span>
