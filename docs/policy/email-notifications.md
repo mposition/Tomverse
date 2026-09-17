@@ -21,17 +21,27 @@ v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처�
 
 1. **`npm run email:recover-permanent-bounces`** — 기본은 dry run(읽기만)이고 `--apply`가
    씁니다. 출력은 개수뿐이며 주소·메일 id를 싣지 않습니다.
-2. **대상** — 처리된 `email.bounced` 사건 중 `data.bounce.type`이 `Permanent`(또는 `hard`)이고
-   **정정된 handler가 썼을 원인(`webhook:<사건 행 id>`, `hard_bounce`)이 없는** 것. 주소는
-   사건 계정 안에서 정확히 하나로 결속되는 delivery의 주소, 없으면 payload 수신자입니다.
-   원인은 정정된 handler와 같은 키·출처·사건 시각으로 쓰고 `evidence`에
+2. **대상** — 실행 시각까지 받은(스냅샷) 처리된 `email.bounced` 사건 중 `data.bounce.type`이
+   정확히 **`Permanent`** 인 것만입니다. `hard`는 원래 올바르게 처리됐으므로 대상이 아닙니다.
+   이 사건 키(`webhook:<사건 행 id>`) **또는 같은 메일 id**로 `hard_bounce` 원인이 이미 있으면
+   `alreadyRecorded`입니다. 주소는 사건 계정 안에서 정확히 하나로 결속되는 delivery의 주소,
+   없으면 payload 수신자입니다. 원인은 정정된 handler와 같은 키·출처로 쓰고 `evidence`에
    `recoveredFrom: permanent_bounce_misclassified_as_soft`를 남깁니다.
-3. **제외** — 그 bounce **이후 같은 주소에 delivered가 보고된** 경우는 쓰지 않습니다
-   (`deliveredSince`). 메일함이 지금은 받고 있으므로 막으면 살아 있는 주소를 끊습니다.
-   주소가 없는 사건은 `unaddressed`로 셉니다.
-4. **멱등** — 같은 키로 쓰므로 다시 실행하거나 정정된 handler가 이미 기록한 사건은
-   `alreadyRecorded`로 건너뜁니다. 보고는 쓰기 전 상태를 기준으로 셉니다.
-5. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
+3. **보수적 제외** — 살아 있는 메일함을 막는 것이 이 결함보다 나쁘기 때문입니다.
+   - provider 사건 시각(`created_at`)이 없거나 믿을 수 없는 사건은 쓰지 않습니다
+     (`indeterminateTime`) — 수신 시각으로는 이후 delivery와 선후를 판정할 수 없습니다.
+   - 같은 주소에 **bounce 5분 전 이후** delivered가 보고된 적이 있으면 쓰지 않습니다
+     (`deliveredSince`). 오래된 delivery 시각은 수신 시각이라 그 오차를 여유로 둡니다.
+   - 쓰기는 사건마다 fence와 주소 잠금 안에서 **그 검사를 다시 한 뒤**에만 합니다 —
+     delivered 기록도 같은 잠금을 잡으므로, 실행 중에 들어온 delivery를 봅니다
+     (`deliveredDuringRun`).
+   - 주소가 없는 사건은 `unaddressed`로 셉니다.
+4. **entry** — 원인은 항상 추가하지만 entry는 **없거나 soft bounce일 때만** hard bounce로
+   올립니다(`entriesRaised`). complaint·manual·privacy request·기존 hard bounce entry는 그대로
+   둡니다. 여러 사건이 한 entry를 올리면 사건 시각이 늦은 것이 남습니다.
+5. **멱등** — 같은 키로 쓰므로 다시 실행하면 `alreadyRecorded`로 건너뜁니다. 보고의 개수는
+   쓰기 전 상태 기준입니다.
+6. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
    창을 보여 줍니다).
 
 ### v20 (2026-09-17) — 계정별 webhook(S1b-2b)
