@@ -68,6 +68,7 @@ export async function verifyAdminAuditIntegrity() {
       keyEntryCounts: [] as number[],
       legacyOrderEntries: 0,
       unverifiedPrefix: 0,
+      unhashedEntriesAfterChainStart: 0,
       message: "ADMIN_AUDIT_INTEGRITY_KEY or NEXTAUTH_SECRET is not configured.",
     };
   }
@@ -161,6 +162,19 @@ export async function verifyAdminAuditIntegrity() {
     previousEntryHash = row.entryHash;
   }
 
+  // Rows without a hash are outside the chain, so the walk above never sees
+  // them. Before the chain started that is simply history; after it, the
+  // writer hashes every entry whenever a key is configured, so an unhashed
+  // row dated after the first hashed one was written some other way. It is
+  // counted rather than folded into `valid`: the chain itself is still
+  // intact, and the operator needs to see the rows, not a changed verdict.
+  // docs/policy/marketing-automation.md §6.
+  const unhashedEntriesAfterChainStart = rows[0]
+    ? await prisma.adminAuditLog.count({
+        where: { entryHash: null, createdAt: { gt: rows[0].createdAt } },
+      })
+    : 0;
+
   const firstInvalid = failures[0] ?? null;
   const valid = failures.length === 0;
   const keysUsedCount = keyEntryCounts.filter((count) => count > 0).length;
@@ -202,6 +216,7 @@ export async function verifyAdminAuditIntegrity() {
     keyEntryCounts,
     legacyOrderEntries,
     unverifiedPrefix,
+    unhashedEntriesAfterChainStart,
     message: valid
       ? rows.length === 0
         ? "No hash-chained audit entries exist yet."

@@ -169,10 +169,14 @@ test("a system entry rolls back with the change it describes", async () => {
   assert.equal(await prisma.adminAuditLog.count(), 0);
 });
 
-// The database half of "the writer is the only way in"
-// (20260918090000_admin_audit_log_append_only). These writes deliberately go
-// around lib/adminAudit.ts -- tests are outside the static check's scan -- to
-// show that the triggers refuse them however they are spelled.
+// What the database adds (20260918090000_admin_audit_log_append_only). These
+// writes deliberately go around lib/adminAudit.ts -- tests are outside the
+// static check's scan -- to show what the triggers refuse however the write is
+// spelled. The guarantee is deliberately narrower than "only the writer can
+// write" (operator decision 2026-09-17): the application uses one database
+// role, so code that sets out to evade can still insert an unhashed row or a
+// head-linked row with a forged HMAC. Those are made visible -- the verifier
+// counts the first and fails the second -- rather than impossible.
 
 const writeTwo = async () => {
   await writeAdminAuditLog({
@@ -283,9 +287,40 @@ test("concurrent writers still produce one linear chain", async () => {
   assert.equal(report.linkageBreaks, 0);
 });
 
-test("an unhashed entry, as written without an integrity key, is still accepted", async () => {
+test("an unhashed entry is accepted, and one written after the chain started is reported", async () => {
+  // Accepted: a database with no integrity key writes unhashed rows, and so do
+  // test fixtures.
   await prisma.adminAuditLog.create({
     data: { action: "example.unkeyed", targetType: "Example", summary: "No key." },
   });
-  assert.equal(await prisma.adminAuditLog.count(), 1);
+  assert.equal((await verifyAdminAuditIntegrity()).unhashedEntriesAfterChainStart, 0);
+
+  // Reported: once hashed entries exist, a later unhashed row did not come from
+  // the writer with a key configured.
+  await writeTwo();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await prisma.adminAuditLog.create({
+    data: { action: "example.bypass", targetType: "Example", summary: "Around the writer." },
+  });
+  const report = await verifyAdminAuditIntegrity();
+  assert.equal(report.unhashedEntriesAfterChainStart, 1);
+  assert.equal(report.valid, true, "the chain itself is intact");
+});
+
+test("a head-linked entry with a forged hash is accepted by the database and failed by the verifier", async () => {
+  const rows = await writeTwo();
+  const head = rows[rows.length - 1];
+  await prisma.adminAuditLog.create({
+    data: {
+      action: "example.forged",
+      targetType: "Example",
+      summary: "Forged.",
+      previousHash: head.entryHash,
+      entryHash: "f".repeat(64),
+      createdAt: new Date(head.createdAt.getTime() + 1),
+    },
+  });
+  const report = await verifyAdminAuditIntegrity();
+  assert.equal(report.valid, false);
+  assert.equal(report.invalidEntries, 1);
 });

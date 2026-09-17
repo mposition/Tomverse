@@ -74,16 +74,29 @@
  * would never end, and it would still not be an authenticity control -- any
  * code in the application can call the writer itself with invented content.
  *
- * So the work is split. This check catches the direct writes ordinary code
- * actually contains and the specific evasions reviewed so far, and keeps every
- * route to runtime-built SQL on a reviewed inventory. The database enforces
- * the property for everything else: for AdminAuditLog, the
- * 20260918090000_admin_audit_log_append_only migration refuses UPDATE and
- * DELETE and makes every hashed INSERT take the chain lock and link to the
- * current head, however the row arrived. A protected table added to this
- * registry gets the same kind of trigger in its own migration; the marketing
- * tables' triggers are part of S1c. Deliberately obfuscated code is a review
- * finding, not something a gate can rule out.
+ * ## The guarantee, as decided (operator, 2026-09-17)
+ *
+ * Mistakes and ordinary code are stopped; deliberate evasion is detected and
+ * reviewed, not made impossible. Concretely:
+ *
+ * - This check refuses the direct writes ordinary code contains and the
+ *   evasions found in review so far, and keeps every route to runtime-built
+ *   SQL on a reviewed inventory.
+ * - For AdminAuditLog, 20260918090000_admin_audit_log_append_only refuses
+ *   UPDATE and DELETE and makes every hashed INSERT take the chain lock and
+ *   land strictly after the current head, however the row arrived.
+ * - What remains possible for code that sets out to evade -- an unhashed
+ *   insert, a head-linked insert with a forged HMAC, TRUNCATE, or disabling a
+ *   trigger, all from the one database role the application uses -- is
+ *   surfaced rather than prevented: the verifier fails a forged hash and
+ *   counts unhashed rows written after the chain started, and the code that
+ *   did it is a review finding.
+ * - Preventing those as well needs a separate non-owner runtime database role
+ *   with direct DML, TRUNCATE and trigger changes revoked. That is a recorded
+ *   follow-up, not part of this slice.
+ *
+ * A protected table added to this registry gets the same kind of trigger in
+ * its own migration; the marketing tables' triggers are part of S1c.
  *
  * Tests are not scanned. Integration suites truncate and seed these tables by
  * design, and a fixture that had to go through the writer could only prove the

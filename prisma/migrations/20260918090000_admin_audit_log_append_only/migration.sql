@@ -33,7 +33,13 @@
 -- Both functions pin search_path to the schema they were created in, so a
 -- caller's search_path cannot point the head read at another table.
 --
--- What it does not do: verify the HMAC. The key lives in the application, not
+-- What it does not do (operator decision 2026-09-17: mistakes are stopped,
+-- deliberate evasion is detected): stop code using the application's own
+-- database role from disabling these triggers, truncating the table, or
+-- inserting a head-linked row with a forged hash. The verifier fails a forged
+-- hash and counts unhashed rows written after the chain started; preventing
+-- the rest needs a separate non-owner runtime role, a recorded follow-up.
+-- Nor does it verify the HMAC. The key lives in the application, not
 -- the database. A row with no entryHash (written where no integrity key is
 -- configured, or by a test fixture) is accepted and, as before, is not part of
 -- what verification covers.

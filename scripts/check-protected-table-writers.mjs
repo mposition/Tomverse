@@ -59,7 +59,7 @@ if (findings.length > 0) {
 console.log(
   `Protected table writer check passed: ${sources.length} source file(s) analysed; ` +
     PROTECTED_TABLES.map(
-      (entry) => `${entry.table} is written only by ${entry.writers.join(", ")}`
+      (entry) => `no direct ${entry.table} write found outside ${entry.writers.join(", ")}`
     ).join("; ") +
     "."
 );
