@@ -32,11 +32,20 @@ test("the notice that ends the mobile dock reserves it, once", () => {
     assert.equal(row[1].split(INSET).length - 1, 1);
 });
 
-test("the notice is still the mobile dock's last row", () => {
+test("the notice is still the mobile dock's last row, after the bar composer", () => {
     const shell = read("components/chat/MobileChatShell.tsx");
+    const dockOpen = shell.indexOf('data-testid="mobile-bottom-dock"');
     const notice = shell.indexOf('<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" />');
-    const composer = shell.indexOf("<ChatInput");
-    assert.ok(notice > composer && composer > 0, "the notice no longer follows the composer in the dock");
+    const composer = shell.indexOf("<ChatInput", dockOpen);
+    assert.ok(dockOpen > 0 && composer > dockOpen && notice > composer, "the notice no longer follows the dock's composer");
+    // The dock's composer is the bar variant, the one whose padding this pins.
+    assert.match(shell.slice(composer, notice), /variant="bar"/);
+    // Neither the dock wrapper nor anything between it and the notice pays the
+    // inset a second time.
+    const wrapper = /data-testid="mobile-bottom-dock"\s+className="([^"]*)"/.exec(shell);
+    assert.ok(wrapper, "the dock wrapper's className was not found");
+    assert.equal(wrapper[1].includes(INSET), false);
+    assert.equal(shell.slice(dockOpen, notice).includes(INSET), false);
     // Nothing else is rendered between the notice and the dock's closing tag.
     assert.match(shell.slice(notice), /^<AiDisclaimerNotice testId="chat-ai-disclaimer-mobile" \/>\s*<\/div>/);
 });
