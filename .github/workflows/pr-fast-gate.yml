@@ -494,6 +494,15 @@ jobs:
         timeout-minutes: 5
         run: npm run check:conversation-writers
 
+      # The audit chain proves nothing about a row that reached the table some
+      # other way, so the writer module has to be the only way in
+      # (docs/policy/marketing-automation.md §6). Direct delegate writes, raw SQL
+      # naming a protected table beside a write verb, and any new runtime-built
+      # SQL call all fail here.
+      - name: Protected table writers
+        timeout-minutes: 5
+        run: npm run check:protected-table-writers
+
       # The readiness register is the only thing standing between "Auto works
       # in shadow" and "Auto answers a real person", which makes it worth
       # attacking, and the attack is one word: pending -> passed. So a passed

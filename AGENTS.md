@@ -1067,7 +1067,8 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
 - **사람 감사와 시스템 감사는 하나의 해시 체인입니다.** 두 writer 모두
   `lib/adminAudit.ts`의 같은 append 함수를 지나며, 감사 테이블에 직접 쓰지
   않습니다. 시스템 기록은 `writeSystemAuditLog()`만 쓰고, 호출자의
-  트랜잭션이 필수입니다.
+  트랜잭션이 필수입니다. `npm run check:protected-table-writers`가 writer 밖의
+  직접 쓰기와 새 runtime SQL 호출을 PR Fast Gate에서 막습니다.
 - **시스템 actor는 닫힌 목록입니다**(`lib/adminAuditSystemActors.ts`).
   `metadata.systemActor`는 예약 키라서 두 writer 모두 호출자가 넣은 값을
   거절합니다. "사람이 승인했는가"를 묻는 검사는 `auditRowActorKind()`로 판정하고
