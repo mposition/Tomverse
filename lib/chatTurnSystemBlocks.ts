@@ -70,6 +70,8 @@ export type ChatTurnSystemBlocksInput = {
    * workflow this job cannot run is priced input with no use.
    */
   isDeepResearchTurn: boolean;
+  /** Whether Auto chose `modelId` (see ArtifactToolPlanInput.autoRouted). */
+  autoRouted?: boolean;
   isAuthenticated: boolean;
   /**
    * Whether this turn can persist an assistant message, which is what the
@@ -189,6 +191,7 @@ export const buildChatTurnSystemBlocks = (
 
   const artifactPlan = planGeneratedArtifactTool({
     modelId: input.modelId,
+    autoRouted: input.autoRouted === true,
     provider: input.provider,
     isAuthenticated: input.isAuthenticated,
     canPersist: input.canPersist,
