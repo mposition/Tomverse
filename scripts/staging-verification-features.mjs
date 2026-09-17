@@ -16,6 +16,12 @@
 
 export const STAGING_VERIFICATION_FEATURES = [
     {
+        key: "admin-usage-analytics",
+        label: "Admin Console usage tab (active users, model share, time, geography)",
+        checklist: "docs/ops/admin-usage-analytics-staging-checklist.md",
+        records: "docs/ops/admin-usage-analytics-staging-verification-records",
+    },
+    {
         key: "chat-starter-catalog",
         label: "Chat starter catalogue (welcome screen entry point)",
         checklist: "docs/ops/chat-starter-catalog-staging-checklist.md",
