@@ -251,18 +251,26 @@ test("waiting for a delivery gives back the attempt, even the ninth", async () =
   assert.equal(row.abandonedAt, null);
 });
 
-test("a new event is dated by the database and waits when fresh", async () => {
-  const providerEventId = `msg_${randomUUID()}`;
-  const before = Date.now();
-  const result = await processResendWebhook({
-    providerEventId,
-    payload: { type: "email.delivered", data: { email_id: `resend-${randomUUID()}`, to: ["x@example.com"] } },
-  });
-  assert.equal(result.handled && result.effect, AWAITING_DELIVERY);
-  const row = await prisma.providerWebhookEvent.findFirstOrThrow();
-  // Within a generous window of the test's own clock: the point is that it was
-  // set at all without the caller passing it.
-  assert.ok(Math.abs(row.receivedAt.getTime() - before) < 5 * 60_000);
+test("a new event is dated by the database, so a slow application clock does not age it", async () => {
+  // The application clock runs twenty minutes slow. Dated by it, the event
+  // would already be past its fifteen-minute wait and settle as unmatched; dated
+  // by the database, it waits for its delivery.
+  mock.timers.enable({ apis: ["Date"], now: Date.now() - 20 * 60_000 });
+  let result;
+  try {
+    result = await processResendWebhook({
+      providerEventId: `msg_${randomUUID()}`,
+      payload: { type: "email.delivered", data: { email_id: `resend-${randomUUID()}`, to: ["x@example.com"] } },
+    });
+  } finally {
+    mock.timers.reset();
+  }
+  assert.deepEqual(result, { handled: true, effect: AWAITING_DELIVERY, deliveryId: null });
+  const [{ lag }] = await prisma.$queryRaw<Array<{ lag: number }>>`
+    SELECT EXTRACT(EPOCH FROM ((now() AT TIME ZONE 'UTC') - "receivedAt"))::float8 AS "lag"
+      FROM "ProviderWebhookEvent"
+  `;
+  assert.ok(lag >= 0 && lag < 60, `received ${lag}s before the database's now`);
 });
 
 test("purging past retention leaves a row a worker holds", async () => {

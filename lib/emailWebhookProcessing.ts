@@ -20,7 +20,10 @@ import {
 } from "@/lib/emailProviderEvents";
 
 /**
- * Turns one Resend webhook into state, exactly once.
+ * Turns one Resend webhook into state, with effects that converge however often
+ * it is applied. Not exactly once: a worker whose lease expired may still
+ * apply its effects after another has taken the row, and each effect is
+ * idempotent by its cause key and the event order, so the state converges.
  *
  * Contract: docs/policy/email-notifications.md §9.6.
  *
@@ -78,6 +81,9 @@ export async function purgeExpiredWebhookEvents(options?: {
              SELECT "id" FROM "ProviderWebhookEvent"
               WHERE "provider" = ${RESEND_PROVIDER}
                 AND "receivedAt" < (${cutoff.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+                AND NOT ("processingLeaseId" IS NOT NULL
+                         AND "processingStartedAt" >= (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer)))
+              ORDER BY "receivedAt" ASC, "id" ASC
               LIMIT CAST(${limit} AS integer)
               FOR UPDATE SKIP LOCKED
            )
@@ -206,7 +212,7 @@ const reportAbandoned = (count: number) =>
   reportOperationalIncident({
     code: "EMAIL_WEBHOOK_ABANDONED",
     title: "Email provider events were abandoned after repeated failures",
-    error: `${count} provider event(s) failed ${WEBHOOK_MAX_ATTEMPTS} times and will not be applied`,
+    error: `${count} provider event(s) failed ${WEBHOOK_MAX_ATTEMPTS} times; marked abandoned and not retried automatically, though their effects may already have been applied`,
     severity: "error",
     cooldownMs: 30 * 60 * 1_000,
     context: { component: "email-webhook", abandoned: count },
