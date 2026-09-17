@@ -4811,6 +4811,18 @@ model EmailDelivery {
   sentAt      DateTime?
   deliveredAt DateTime?
 
+  /// The last provider event that moved this delivery's status, as its order
+  /// key (occurredAt, rank, provider event id). An event whose key is not later
+  /// leaves the status alone, so events processed out of order converge. All
+  /// three are set together or not at all
+  /// (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  providerEventAt   DateTime?
+  providerEventRank Int?
+  providerEventId   String?
+  /// When the latest soft bounce or deferral reported for this delivery
+  /// happened. deliveredAt is likewise the latest delivered event's own time.
+  softBounceAt      DateTime?
+
   /// The EMAIL_UNSUBSCRIBE_KEYS version that signed the unsubscribe link in the
   /// message as sent. NULL for mail with no link. Readiness refuses to lose a
   /// version used within the last year

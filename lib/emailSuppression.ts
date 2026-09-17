@@ -20,8 +20,6 @@ import {
   removalNeedsApproval,
 } from "@/lib/emailSuppressionAuthorityCore";
 import {
-  SOFT_BOUNCE_SUPPRESSION_MS,
-  SOFT_BOUNCE_SUPPRESSION_THRESHOLD,
   suppressionVerdict,
   type SendClassification,
   type SuppressionReason,
@@ -478,60 +476,6 @@ export async function suppressionCheck(input: {
     records: records as Parameters<typeof suppressionVerdict>[0]["records"],
     ...(input.now ? { now: input.now } : {}),
   });
-}
-
-/**
- * Counts a soft bounce and suppresses once a run of them says the mailbox is
- * not accepting mail.
- *
- * A run rather than a count: one deferral is a full mailbox or a greylisting
- * pass and means nothing, so any successful delivery resets the tally. Without
- * the reset a long-lived address would creep toward suppression over months of
- * unrelated hiccups.
- *
- * The counter lives in the delivery history rather than in its own table --
- * consecutive soft bounces are exactly the recent rows for this address, and a
- * separate counter would be a second source of truth to keep in step.
- */
-export async function recordSoftBounce(input: {
-  emailAddress: string;
-  deliveryId?: string | null;
-  /** The webhook event, for the cause key when there is no delivery. */
-  webhookEventId: string;
-  sourceStream?: string | null;
-  sourceMessageId?: string | null;
-  now?: Date;
-}) {
-  const emailAddress = normalizeSuppressionAddress(input.emailAddress);
-  const now = input.now ?? new Date();
-
-  const recent = await prisma.emailDelivery.findMany({
-    where: { emailAddress, status: { in: ["bounced", "delivered", "sent"] } },
-    orderBy: { createdAt: "desc" },
-    take: SOFT_BOUNCE_SUPPRESSION_THRESHOLD,
-    select: { status: true },
-  });
-
-  const consecutive = recent.findIndex((row) => row.status !== "bounced");
-  const run = consecutive === -1 ? recent.length : consecutive;
-  if (run < SOFT_BOUNCE_SUPPRESSION_THRESHOLD) {
-    return { suppressed: false, run };
-  }
-
-  await recordSuppression({
-    emailAddress,
-    reason: "soft_bounce",
-    source: "provider_webhook",
-    expiresAt: new Date(now.getTime() + SOFT_BOUNCE_SUPPRESSION_MS),
-    sourceStream: input.sourceStream ?? null,
-    sourceDeliveryId: input.deliveryId ?? null,
-    sourceMessageId: input.sourceMessageId ?? null,
-    occurredAt: now,
-    sourceEventKey: input.deliveryId
-      ? `softbounce:${input.deliveryId}`
-      : `softbounce:webhook:${input.webhookEventId}`,
-  });
-  return { suppressed: true, run };
 }
 
 /**
