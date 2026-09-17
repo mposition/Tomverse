@@ -56,14 +56,15 @@
  *    mentions and write verbs, so adding a real statement to an allowlisted
  *    file changes a count and fails, and an entry that stops matching fails.
  *
- * 5. **runtime-sql.** The routes to runtime-built SQL listed here are
- *    inventoried per file with a reviewed count, failing in both directions:
- *    `$executeRawUnsafe` / `$queryRawUnsafe` however reached (member,
- *    computed, destructured, or named by a string), `Prisma.raw` /
- *    `Prisma["raw"]`, `$executeRaw` / `$queryRaw` called with anything but an
- *    inline `Prisma.sql` template, `$extends` (a client extension can add
- *    writes under any name), and imports of a database driver (`pg` and
- *    friends), which bypass Prisma entirely.
+ * 5. **runtime-sql.** The spellings listed here are inventoried per file
+ *    with a reviewed count, failing in both directions:
+ *    `$executeRawUnsafe` / `$queryRawUnsafe` reached as a member, a computed
+ *    member, a destructured binding or a string naming the method;
+ *    `Prisma.raw` / `Prisma["raw"]`; `$executeRaw` / `$queryRaw` called with
+ *    anything but an inline `Prisma.sql` template; `$extends` (a client
+ *    extension can add writes under any name); and imports of a database
+ *    driver (`pg` and friends), which bypass Prisma entirely. A spelling that
+ *    is not on this list is not inventoried.
  *
  * ## What this check is for, and what enforces the rest
  *
@@ -80,17 +81,18 @@
  * reviewed, not made impossible. Concretely:
  *
  * - This check refuses the direct writes ordinary code contains and the
- *   evasions found in review so far, and keeps every route to runtime-built
- *   SQL on a reviewed inventory.
+ *   evasions found in review so far, and keeps the runtime-SQL spellings
+ *   listed in rule 5 on a reviewed inventory.
  * - For AdminAuditLog, 20260918090000_admin_audit_log_append_only refuses
  *   UPDATE and DELETE and makes every hashed INSERT take the chain lock and
  *   land strictly after the current head, however the row arrived.
- * - What remains possible for code that sets out to evade -- an unhashed
- *   insert, a head-linked insert with a forged HMAC, TRUNCATE, or disabling a
- *   trigger, all from the one database role the application uses -- is
- *   surfaced rather than prevented: the verifier fails a forged hash and
- *   counts unhashed rows dated after the first hashed one, and the code that
- *   did it is a review finding.
+ * - What remains possible for code that sets out to evade -- an aliased
+ *   delegate reached with a runtime key, a runtime-SQL spelling not listed in
+ *   rule 5, an unhashed insert, a head-linked insert with a forged HMAC,
+ *   TRUNCATE, or disabling a trigger, all from the one database role the
+ *   application uses -- is surfaced rather than prevented: the verifier fails
+ *   a forged hash and counts unhashed rows dated after the first hashed one,
+ *   and the code that did it is a review finding.
  * - Preventing those as well needs a separate non-owner runtime database role
  *   with direct DML, TRUNCATE and trigger changes revoked. That is a recorded
  *   follow-up, not part of this slice.

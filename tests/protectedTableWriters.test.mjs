@@ -248,7 +248,7 @@ test("an allowlisted raw SQL file that gains a statement fails", () => {
   assert.equal(extended[0].rule, "raw-sql");
 });
 
-test("runtime-built SQL is inventoried however it is reached, in both directions", () => {
+test("the listed runtime-SQL spellings are inventoried, in both directions", () => {
   const cases = {
     "lib/new.ts": "await tx.$executeRawUnsafe(sql, ...values)",
     "lib/prisma-raw.ts": "await tx.$queryRaw`SELECT ${Prisma.raw(column)}`",

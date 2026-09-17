@@ -63,11 +63,13 @@ type AuditChainEntry = {
 /**
  * Appends one entry to the audit hash chain on `client`.
  *
- * The only place a row joins the chain. Every writer -- the administrator
+ * The application's shared append path. Every writer -- the administrator
  * writer below and any system-actor writer -- goes through here, so the lock,
  * the database clock, the previous-hash read and the HMAC input cannot drift
  * apart between them (docs/policy/marketing-automation.md §6). The sequence is
- * pinned by tests/server-contract/admin-audit-chain-writer.test.ts.
+ * pinned by tests/server-contract/admin-audit-chain-writer.test.ts. It is the
+ * intended way in, not a boundary: what stops other writes is the static check
+ * and the database's own triggers, within the limits both state.
  *
  * `integritySecret` is resolved by the caller before any transaction opens,
  * as it always was, so reading the environment is not part of the locked span.

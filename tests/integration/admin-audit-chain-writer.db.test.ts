@@ -307,6 +307,22 @@ test("an unhashed entry is accepted, and one dated after the first hashed entry 
   const report = await verifyAdminAuditIntegrity();
   assert.equal(report.unhashedEntriesDatedAfterFirstHash, 1);
   assert.equal(report.valid, true, "the chain itself is intact");
+
+  // Not counted: the count reads a createdAt the inserter chooses, so a row
+  // dated before the first hashed entry stays invisible to it. That is what
+  // the field name says and the limit the operator accepted.
+  await prisma.adminAuditLog.create({
+    data: {
+      action: "example.backdated",
+      targetType: "Example",
+      summary: "Dated before the chain.",
+      createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    },
+  });
+  assert.equal(
+    (await verifyAdminAuditIntegrity()).unhashedEntriesDatedAfterFirstHash,
+    1
+  );
 });
 
 test("a head-linked entry with a forged hash is accepted by the database and failed by the verifier", async () => {
