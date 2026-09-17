@@ -65,16 +65,26 @@ export async function purgeExpiredWebhookEvents(options?: {
   const cutoff = new Date(
     now.getTime() - WEBHOOK_EVENT_RETENTION_DAYS * 24 * 60 * 60_000
   );
-  const stale = await prisma.providerWebhookEvent.findMany({
-    where: { provider: RESEND_PROVIDER, receivedAt: { lt: cutoff } },
-    select: { id: true },
-    take: options?.limit ?? 1_000,
-  });
-  if (stale.length === 0) return { purged: 0 };
-  const result = await prisma.providerWebhookEvent.deleteMany({
-    where: { id: { in: stale.map((row) => row.id) } },
-  });
-  return { purged: result.count };
+  const requested = Number(options?.limit ?? 1_000);
+  const limit = Number.isFinite(requested) ? Math.min(Math.max(1, Math.floor(requested)), 1_000) : 1_000;
+  // One statement, and never a row a worker holds a live lease on: a row
+  // claimed between choosing and deleting would otherwise lose its bookkeeping
+  // after its effects were applied. An unprocessed row past retention is
+  // purged too -- ninety days on, nothing will apply it, and it still names
+  // the recipient.
+  const purged = await prisma.$executeRaw`
+    DELETE FROM "ProviderWebhookEvent"
+     WHERE "id" IN (
+             SELECT "id" FROM "ProviderWebhookEvent"
+              WHERE "provider" = ${RESEND_PROVIDER}
+                AND "receivedAt" < (${cutoff.toISOString()}::timestamptz AT TIME ZONE 'UTC')
+              LIMIT CAST(${limit} AS integer)
+              FOR UPDATE SKIP LOCKED
+           )
+       AND NOT ("processingLeaseId" IS NOT NULL
+                AND "processingStartedAt" >= (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer)))
+  `;
+  return { purged };
 }
 
 type ResendEventPayload = {
@@ -137,11 +147,11 @@ const claimStoredEvent = async (id: string): Promise<Claim | null> => {
      WHERE "id" = ${id}
        AND "processedAt" IS NULL
        AND "abandonedAt" IS NULL
-       AND "processingAttempts" < ${WEBHOOK_MAX_ATTEMPTS}
+       AND "processingAttempts" < CAST(${WEBHOOK_MAX_ATTEMPTS} AS integer)
        AND ("processingLeaseId" IS NULL
-            OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => ${WEBHOOK_LEASE_SECONDS}))
+            OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer)))
     RETURNING "processingAttempts" AS "attempts",
-              ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => ${WEBHOOK_AWAIT_DELIVERY_MINUTES})) AS "awaitExpired"
+              ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => CAST(${WEBHOOK_AWAIT_DELIVERY_MINUTES} AS integer))) AS "awaitExpired"
   `;
   const row = rows[0];
   return row ? { leaseId, attempts: Number(row.attempts), awaitExpired: row.awaitExpired } : null;
@@ -183,7 +193,7 @@ const failClaim = async (id: string, leaseId: string, errorKind: string) => {
        SET "processingLeaseId" = NULL,
            "processingStartedAt" = NULL,
            "processingError" = ${errorKind},
-           "abandonedAt" = CASE WHEN "processingAttempts" >= ${WEBHOOK_MAX_ATTEMPTS}
+           "abandonedAt" = CASE WHEN "processingAttempts" >= CAST(${WEBHOOK_MAX_ATTEMPTS} AS integer)
                                 THEN (now() AT TIME ZONE 'UTC') ELSE NULL END
      WHERE "id" = ${id} AND "processingLeaseId" = ${leaseId}
        AND "processedAt" IS NULL AND "abandonedAt" IS NULL
@@ -247,40 +257,42 @@ export async function processResendWebhook(input: {
   payload: ResendEventPayload;
   receivedAt?: Date;
 }): Promise<WebhookProcessResult> {
-  const receivedAt = input.receivedAt ?? new Date();
   const eventType = typeof input.payload.type === "string" ? input.payload.type : "unknown";
 
+  // Written with the database's clock, like every later lease and waiting
+  // decision, so an application host whose clock drifts cannot make a fresh
+  // lease look expired or a fresh event look fifteen minutes old. The claim is
+  // part of the insert; a conflict is a redelivery.
   const leaseId = randomUUID();
-  try {
-    const stored = await prisma.providerWebhookEvent.create({
-      data: {
-        provider: RESEND_PROVIDER,
+  const inserted = await prisma.$queryRaw<
+    Array<{ id: string; receivedAt: Date; awaitExpired: boolean }>
+  >`
+    INSERT INTO "ProviderWebhookEvent" (
+      "id", "provider", "providerEventId", "eventType", "receivedAt", "payload",
+      "processingLeaseId", "processingStartedAt", "processingAttempts"
+    ) VALUES (
+      ${randomUUID()}, ${RESEND_PROVIDER}, ${input.providerEventId}, ${eventType},
+      COALESCE((${input.receivedAt?.toISOString() ?? null}::timestamptz AT TIME ZONE 'UTC'),
+               (now() AT TIME ZONE 'UTC')),
+      ${JSON.stringify(input.payload)}::jsonb,
+      ${leaseId}, (now() AT TIME ZONE 'UTC'), 1
+    )
+    ON CONFLICT ("provider", "providerEventId") DO NOTHING
+    RETURNING "id", "receivedAt",
+              ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => CAST(${WEBHOOK_AWAIT_DELIVERY_MINUTES} AS integer))) AS "awaitExpired"
+  `;
+  const created = inserted[0];
+  if (created) {
+    return runClaimedEvent(
+      {
+        id: created.id,
         providerEventId: input.providerEventId,
         eventType,
-        receivedAt,
-        payload: input.payload as never,
-        processingLeaseId: leaseId,
-        processingStartedAt: new Date(),
-        processingAttempts: 1,
+        receivedAt: created.receivedAt,
+        payload: input.payload,
       },
-      select: { id: true },
-    });
-    return runClaimedEvent(
-      { id: stored.id, providerEventId: input.providerEventId, eventType, receivedAt, payload: input.payload },
-      {
-        leaseId,
-        attempts: 1,
-        awaitExpired: receivedAt.getTime() <= Date.now() - WEBHOOK_AWAIT_DELIVERY_MINUTES * 60_000,
-      }
+      { leaseId, attempts: 1, awaitExpired: created.awaitExpired }
     );
-  } catch (error) {
-    if (
-      typeof error !== "object" ||
-      error === null ||
-      (error as { code?: unknown }).code !== "P2002"
-    ) {
-      throw error;
-    }
   }
 
   // The same event again. Processed or abandoned: nothing to do. Otherwise it
@@ -297,17 +309,28 @@ export async function processResendWebhook(input: {
       payload: true,
       processedAt: true,
       abandonedAt: true,
-      processingAttempts: true,
     },
   });
   if (!existing || existing.processedAt || existing.abandonedAt) return { handled: false, reason: "duplicate" };
   const claim = await claimStoredEvent(existing.id);
   if (!claim) {
-    // Out of attempts and waiting for the sweeper to record the abandonment is
-    // as final as abandoned; a live lease is work in progress.
-    return existing.processingAttempts >= WEBHOOK_MAX_ATTEMPTS
-      ? { handled: false, reason: "duplicate" }
-      : { handled: false, reason: "in_progress" };
+    // Read again, with the database's clock: the row may have been completed,
+    // abandoned or claimed since it was read above.
+    const [now] = await prisma.$queryRaw<
+      Array<{ terminal: boolean; leaseLive: boolean; exhausted: boolean }>
+    >`
+      SELECT ("processedAt" IS NOT NULL OR "abandonedAt" IS NOT NULL) AS "terminal",
+             ("processingLeaseId" IS NOT NULL
+              AND "processingStartedAt" >= (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer))) AS "leaseLive",
+             ("processingAttempts" >= CAST(${WEBHOOK_MAX_ATTEMPTS} AS integer)) AS "exhausted"
+        FROM "ProviderWebhookEvent" WHERE "id" = ${existing.id}
+    `;
+    // Finished, or out of attempts with nobody holding it (the sweeper records
+    // the abandonment): nothing for the provider to retry. A live lease is work
+    // in progress whatever the attempt count.
+    if (!now || now.terminal) return { handled: false, reason: "duplicate" };
+    if (now.leaseLive) return { handled: false, reason: "in_progress" };
+    return now.exhausted ? { handled: false, reason: "duplicate" } : { handled: false, reason: "in_progress" };
   }
   return runClaimedEvent(
     {
@@ -328,7 +351,9 @@ export async function processResendWebhook(input: {
  * unprocessed an hour after receipt.
  *
  * Runs on the 15-minute runner. Oldest first, at most 50 events, and no new
- * event is started once the 20-second budget is spent.
+ * event is started once the 20-second budget is spent. The budget admits work
+ * rather than cutting it off: an event already started runs to completion under
+ * its own transaction timeouts, so a pass can overrun by at most one event.
  */
 export async function sweepProviderWebhookEvents(options?: { limit?: number; timeBudgetMs?: number }) {
   const requestedLimit = Number(options?.limit ?? 50);
@@ -336,15 +361,26 @@ export async function sweepProviderWebhookEvents(options?: { limit?: number; tim
   const budget = Number(options?.timeBudgetMs ?? 20_000);
   const deadline = Date.now() + (Number.isFinite(budget) ? Math.min(Math.max(budget, 0), 20_000) : 20_000);
 
+  // At most `limit` rows, oldest first, skipping any a worker holds right now.
   const abandonedRows = await prisma.$queryRaw<Array<{ id: string }>>`
     UPDATE "ProviderWebhookEvent"
        SET "abandonedAt" = (now() AT TIME ZONE 'UTC'),
            "processingLeaseId" = NULL,
            "processingStartedAt" = NULL
-     WHERE "processedAt" IS NULL AND "abandonedAt" IS NULL
-       AND "processingAttempts" >= ${WEBHOOK_MAX_ATTEMPTS}
+     WHERE "id" IN (
+             SELECT "id" FROM "ProviderWebhookEvent"
+              WHERE "processedAt" IS NULL AND "abandonedAt" IS NULL
+                AND "processingAttempts" >= CAST(${WEBHOOK_MAX_ATTEMPTS} AS integer)
+                AND ("processingLeaseId" IS NULL
+                     OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer)))
+              ORDER BY "receivedAt" ASC, "id" ASC
+              LIMIT CAST(${limit} AS integer)
+              FOR UPDATE SKIP LOCKED
+           )
+       AND "processedAt" IS NULL AND "abandonedAt" IS NULL
+       AND "processingAttempts" >= CAST(${WEBHOOK_MAX_ATTEMPTS} AS integer)
        AND ("processingLeaseId" IS NULL
-            OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => ${WEBHOOK_LEASE_SECONDS}))
+            OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer)))
     RETURNING "id"
   `;
   if (abandonedRows.length > 0) await reportAbandoned(abandonedRows.length);
@@ -353,11 +389,11 @@ export async function sweepProviderWebhookEvents(options?: { limit?: number; tim
     SELECT "id" FROM "ProviderWebhookEvent"
      WHERE "provider" = ${RESEND_PROVIDER}
        AND "processedAt" IS NULL AND "abandonedAt" IS NULL
-       AND "processingAttempts" < ${WEBHOOK_MAX_ATTEMPTS}
+       AND "processingAttempts" < CAST(${WEBHOOK_MAX_ATTEMPTS} AS integer)
        AND ("processingLeaseId" IS NULL
-            OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => ${WEBHOOK_LEASE_SECONDS}))
+            OR "processingStartedAt" < (now() AT TIME ZONE 'UTC') - make_interval(secs => CAST(${WEBHOOK_LEASE_SECONDS} AS integer)))
      ORDER BY "receivedAt" ASC, "id" ASC
-     LIMIT ${limit}
+     LIMIT CAST(${limit} AS integer)
   `;
 
   let processed = 0;

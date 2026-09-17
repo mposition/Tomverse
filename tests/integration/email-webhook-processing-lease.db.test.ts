@@ -5,6 +5,8 @@ import { after, beforeEach, mock, test } from "node:test";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import {
   AWAITING_DELIVERY,
+  WEBHOOK_EVENT_RETENTION_DAYS,
+  purgeExpiredWebhookEvents,
   WEBHOOK_MAX_ATTEMPTS,
   processResendWebhook,
   sweepProviderWebhookEvents,
@@ -215,4 +217,71 @@ test("processed and abandoned cannot both hold", async () => {
       data: { processedAt: new Date(), abandonedAt: new Date() },
     })
   );
+});
+
+test("a live lease is in progress even on the last attempt", async () => {
+  const providerEventId = `msg_${randomUUID()}`;
+  const payload = { type: "email.sent", data: { email_id: `resend-${randomUUID()}`, to: ["a@example.com"] } };
+  await storeUnprocessed({
+    providerEventId,
+    payload,
+    attempts: WEBHOOK_MAX_ATTEMPTS,
+    lease: { id: "last-worker", startedAt: new Date() },
+  });
+  assert.deepEqual(await processResendWebhook({ providerEventId, payload }), {
+    handled: false,
+    reason: "in_progress",
+  });
+  // Nor does the sweeper abandon it while the lease is live.
+  assert.equal((await sweepProviderWebhookEvents()).abandoned, 0);
+});
+
+test("waiting for a delivery gives back the attempt, even the ninth", async () => {
+  const providerEventId = `msg_${randomUUID()}`;
+  const payload = {
+    type: "email.delivered",
+    data: { email_id: `resend-${randomUUID()}`, to: ["someone@example.com"] },
+  };
+  await storeUnprocessed({ providerEventId, payload, attempts: WEBHOOK_MAX_ATTEMPTS - 1 });
+  const result = await processResendWebhook({ providerEventId, payload });
+  assert.deepEqual(result, { handled: true, effect: AWAITING_DELIVERY, deliveryId: null });
+  const row = await prisma.providerWebhookEvent.findFirstOrThrow();
+  assert.equal(row.processingAttempts, WEBHOOK_MAX_ATTEMPTS - 1);
+  assert.equal(row.processingLeaseId, null);
+  assert.equal(row.abandonedAt, null);
+});
+
+test("a new event is dated by the database and waits when fresh", async () => {
+  const providerEventId = `msg_${randomUUID()}`;
+  const before = Date.now();
+  const result = await processResendWebhook({
+    providerEventId,
+    payload: { type: "email.delivered", data: { email_id: `resend-${randomUUID()}`, to: ["x@example.com"] } },
+  });
+  assert.equal(result.handled && result.effect, AWAITING_DELIVERY);
+  const row = await prisma.providerWebhookEvent.findFirstOrThrow();
+  // Within a generous window of the test's own clock: the point is that it was
+  // set at all without the caller passing it.
+  assert.ok(Math.abs(row.receivedAt.getTime() - before) < 5 * 60_000);
+});
+
+test("purging past retention leaves a row a worker holds", async () => {
+  const old = new Date(Date.now() - (WEBHOOK_EVENT_RETENTION_DAYS + 1) * 86_400_000);
+  await storeUnprocessed({
+    providerEventId: `msg_${randomUUID()}`,
+    payload: { type: "email.sent", data: {} },
+    attempts: 1,
+    receivedAt: old,
+    lease: { id: "busy", startedAt: new Date() },
+  });
+  await storeUnprocessed({
+    providerEventId: `msg_${randomUUID()}`,
+    payload: { type: "email.sent", data: {} },
+    attempts: 2,
+    receivedAt: old,
+  });
+  const result = await purgeExpiredWebhookEvents();
+  assert.equal(result.purged, 1);
+  const left = await prisma.providerWebhookEvent.findFirstOrThrow();
+  assert.equal(left.processingLeaseId, "busy");
 });

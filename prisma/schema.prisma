@@ -5228,7 +5228,6 @@ model ProviderWebhookEvent {
   @@unique([provider, providerEventId])
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])
-  @@index([processedAt, abandonedAt, receivedAt])
 }
 
 /// The one row that says a Tomverse Conversation was started from an imported

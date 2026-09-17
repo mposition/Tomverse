@@ -34,11 +34,20 @@
 4. **delivery 대기** — 사건이 provider message id를 가졌는데 delivery가 없고 수신 후
    **15분**이 지나지 않았으면 `awaiting_delivery`로 둡니다: lease를 비우고 claim이 올린
    시도를 되돌리며, provider에는 200입니다. 15분이 지나면 주소 기준 효과로 확정합니다.
-   경계는 `receivedAt`과 DB `now()`입니다(새로 만든 행은 방금 받은 사건이므로 대기).
+   경계는 `receivedAt`과 DB `now()`이고, 새 행의 `receivedAt`·lease 시작도 DB 시계로
+   씁니다 — 앱 서버 시계가 어긋나도 lease가 곧바로 만료돼 보이거나 새 사건이 15분 지난
+   것으로 보이지 않도록.
 5. **sweeper** — 15분 runner가 시도가 다 됐고 lease가 없거나 만료된 행에 `abandonedAt`을
-   쓰고(incident `EMAIL_WEBHOOK_ABANDONED`), 미처리 행을 오래된 수신순으로 최대 50건,
-   20초 안에서 claim해 적용합니다. 수신 후 **1시간** 넘게 미처리인 행이 있으면 incident
-   `EMAIL_WEBHOOK_BACKLOG`입니다.
+   쓰고(오래된 순 최대 50건, incident `EMAIL_WEBHOOK_ABANDONED`), 미처리 행을 오래된
+   수신순으로 최대 50건 claim해 적용합니다. 20초는 **새 사건을 시작하는 기준**이며, 이미 시작한
+   사건은 자기 transaction timeout 안에서 끝까지 갑니다(초과는 사건 하나만큼). 수신 후
+   **1시간** 넘게 미처리인 행이 있으면 incident `EMAIL_WEBHOOK_BACKLOG`입니다.
+   재전송이 claim하지 못하면 행을 DB 시계로 다시 읽어 판정합니다 — 끝났거나 시도가 다
+   됐고 아무도 쥐지 않았으면 200, 살아 있는 lease면 시도 횟수와 무관하게 409입니다.
+   90일 보관 purge는 한 문장으로, 살아 있는 lease가 있는 행은 지우지 않습니다.
+   **효과와 기록은 한 transaction이 아닙니다.** lease가 만료된 뒤 늦게 끝난 worker의 효과는
+   남을 수 있지만(원인 키·사건 순서로 멱등이고 사실은 참), 행의 처리 기록은 먼저 커밋한
+   쪽의 것입니다. 새 index는 두지 않습니다(기존 `processedAt` index, 쓰기 잠금 회피).
 6. **CHECK** — `processedAt`과 `abandonedAt`은 함께 있을 수 없고, lease id와 시작 시각은
    함께 있거나 함께 없으며, 시도는 0–10입니다.
 7. stream별 endpoint·secret, 계정 기준 delivery 결속, 계정별 침묵 incident는 S1b-2b입니다.

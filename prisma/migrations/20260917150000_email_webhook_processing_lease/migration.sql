@@ -28,5 +28,7 @@ ALTER TABLE "ProviderWebhookEvent" ADD CONSTRAINT "ProviderWebhookEvent_attempts
     CHECK ("processingAttempts" BETWEEN 0 AND 10) NOT VALID;
 ALTER TABLE "ProviderWebhookEvent" VALIDATE CONSTRAINT "ProviderWebhookEvent_attempts_check";
 
-CREATE INDEX "ProviderWebhookEvent_processedAt_abandonedAt_receivedAt_idx"
-    ON "ProviderWebhookEvent"("processedAt", "abandonedAt", "receivedAt");
+-- No new index. The sweeper reads unprocessed rows, which the existing
+-- processedAt index already finds and which are few; building one here would
+-- hold a write lock on the table webhooks are arriving at for the length of the
+-- build.
