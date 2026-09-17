@@ -6,7 +6,7 @@ approvedBy: mposition · approvedAt: 2026-09-17 · 정책 버전: 2
 | 버전 | 승인 | 변경 |
 |---|---|---|
 | 1 | 2026-09-17 mposition | 최초 승인 |
-| 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 통과 기준·기본 꺼짐·기록자를 정함(§8.1, §8.1.1, §8.3, §14) |
+| 2 | 2026-09-17 mposition | webhook 검증 위치를 S0 로컬 도구에서 **S2 staging 수신 route**로 옮기고, 그 검증 전에는 webhook 이벤트를 게시 상태 판정에 쓰지 않는다. 검증용 shadow 처리와 운영 활성화를 나누고 통과 기준·범위 강제·기록·재검증 범위를 정함(§6.1, §8.1, §8.1.1, §8.3, §14) |
 
 운영자 결정(아래 §1)은 운영자가 대화 세션에서 내린 것이고, 나머지 계약은 Claude가 설계하고
 Codex가 11회에 걸쳐 독립 검토한 설계(최종 판정 approve-with-changes, 요구 변경 반영)를 옮긴 것이다.
@@ -147,6 +147,8 @@ Admin Console 승인 큐             marketing-publisher (Railway cron)
 | 졸업 | `marketing:write` + step-up · O3 · 댓글 모니터링 동작 |
 | 실험 활성화 | 실험 스위치 · kill switch 아님 · 캐시·CSP 스파이크 통과 기록 · (승인 모드) `marketing:write` + step-up / (자율) 표면 졸업 |
 | SEO 자동 병합 | 저장소 변수 · 표면 졸업 상태 조회 성공 |
+| webhook shadow 처리 | shadow 스위치 · staging 환경 · kill switch 아님 · 서명 검증 통과 (§8.1.1) |
+| webhook 상태 반영 | 상태 반영 스위치 · kill switch 아님 · 이벤트가 스위치의 허용 event type·채널 범위 안 · 운영자 서명된 §8.1.1 기록이 있고 그 뒤 해당 코드·설정·스키마 변경 없음 |
 
 kill switch 환경변수는 기록 열람을 제외한 전부를 끈다.
 
@@ -217,23 +219,32 @@ kill switch 환경변수는 기록 열람을 제외한 전부를 끈다.
 - **webhook은 받는 곳에서 검증한다.** 수신 route는 Railway의 본 앱에 두며, **S2에서 staging의 실제 수신 route로** 검증한다
   (S0 check C9를 이관). 그 검증이 통과하기 전에는 webhook 이벤트를 게시 상태·공개 여부·자동 정지 판정의 근거로 쓰지 않고,
   상태 조회와 요청 키 lookup만 쓴다.
-
-#### 8.1.1 webhook 검증 통과 기준
-- **기본값은 꺼짐.** webhook 이벤트를 상태 판정에 쓰는 소비 경로는 §6.1 기능별 스위치로 기본 비활성이다.
-  수신 route는 서명 검증과 기록까지만 하고, 스위치를 켜는 것은 아래 기록을 확인한 **운영자**다.
-- **범위는 event type 단위.** 통과는 검증에 실제로 받은 event type(예: `post.published`, `post.failed`, `post.platform.deleted`)에만
-  적용된다. 받지 않은 type은 계속 판정에 쓰지 않는다. 채널별 차이가 관측되면 채널 단위로 좁힌다.
-- **통과 조건 — 아래가 모두 staging에서 관측될 것:**
-  1. 유효 서명(`X-Zernio-Signature`, raw body HMAC-SHA256)의 Zernio 이벤트는 수락되고 기록된다.
-  2. 서명이 없거나 틀린 요청, body를 한 바이트 바꾼 요청은 **파싱·기록 전에** 거절되고 상태를 바꾸지 않는다.
-  3. **이미 처리한** event id를 다시 받으면(Zernio redeliver 포함) 상태를 두 번 바꾸지 않는다.
-  4. **처리가 확정되지 않은** event(수신 후 저장 전에 실패시킨 경우)를 Zernio가 재전송하면 **정확히 한 번** 처리된다.
-     3과 4는 같은 성공 event를 두 번 보내는 것으로 동시에 통과시킬 수 없다.
-  5. 같은 게시물에 대해 webhook이 말한 상태와 상태 조회 결과가 일치한다.
-- **기록:** 검증 실행자는 staging 배포 commit SHA, 검증한 event type, 조건 1–5의 관측과 증거를
-  운영 검증 기록(`docs/ops/` 아래 marketing webhook 검증 기록)에 남기고, **판정과 서명은 운영자**가 한다.
-  수신 route나 서명 검증 코드가 바뀌면 기록은 그 SHA까지만 유효하며 재검증한다.
 - 채널별 중복·복구 계약(native idempotency / exact lookup / recovery 불가)은 S0 검증에서 확정하며, 확정 전에는 자율 게시 불가.
+
+#### 8.1.1 webhook 검증과 활성화
+webhook 소비는 **두 기능으로 나누고 둘 다 기본 꺼짐**이다(§6.1).
+- **shadow 처리(staging 검증용):** 서명 검증을 통과한 이벤트를 event id 중복 제거·저장·상태 매핑까지 **실제 코드 경로 그대로**
+  처리하되, 결과를 게시 원장·계정 모드·공개 여부·자동 정지와 **분리된 shadow 기록**에만 쓴다. 게시 상태에는 어떤 경우에도
+  영향을 주지 않는다. **staging에서만** 켤 수 있고, production에서는 환경 판정으로 거절한다. 아래 조건 3–5는 이 기록으로 관측한다.
+- **상태 반영(운영 활성화):** 검증된 이벤트를 상태 판정의 추가 출처로 쓴다. 운영자가 아래 기록을 확인한 뒤에만 켠다.
+  스위치 값에 **허용 event type 목록과 채널 범위**를 함께 저장하고, 목록 밖의 이벤트는 켜진 뒤에도 판정에 쓰지 않는다.
+  켜기·범위 변경·끄기는 `marketing:write` + step-up과 시스템 감사 기록(검증 기록 참조, 허용 범위, 배포 SHA 포함)으로만 한다.
+  kill switch는 이 기능도 끈다.
+
+**범위.** 통과는 검증에서 실제로 받은 event type에만, 채널별 차이가 관측되면 그 채널에만 적용된다.
+
+**통과 조건 — 활성화할 범위의 event type마다 아래가 모두 staging에서 관측될 것:**
+1. 유효 서명(`X-Zernio-Signature`, raw body HMAC-SHA256)의 Zernio 이벤트는 수락되고 shadow 기록에 남는다.
+2. 서명이 없거나 틀린 요청, body를 한 바이트 바꾼 요청은 **파싱·기록 전에** 거절되고 shadow 기록도 바꾸지 않는다.
+3. **이미 처리한** event id를 다시 받으면(Zernio redeliver 포함) shadow 상태를 두 번 바꾸지 않는다.
+4. **처리가 확정되지 않은** event(수신 후 저장 전에 실패시킨 경우)를 Zernio가 재전송하면 **정확히 한 번** 처리된다.
+   3과 4는 같은 성공 event를 두 번 보내는 것으로 동시에 통과시킬 수 없다.
+5. 같은 게시물에 대해 shadow가 도출한 상태와 상태 조회 결과가 일치한다.
+
+**기록.** 검증 실행자는 staging 배포 commit SHA, 검증한 event type·채널, 조건 1–5의 관측과 증거를
+운영 검증 기록(`docs/ops/` 아래 marketing webhook 검증 기록)에 남기고, **판정과 서명은 운영자**가 한다.
+**조건 1–5의 결과에 영향을 주는 코드·설정·스키마**(수신 route, 서명 검증, event id 중복 제거, 저장 트랜잭션, 상태 매핑,
+상태 조회 대조)가 바뀌면 기록은 그 SHA까지만 유효하고, 상태 반영 기능은 재검증 전까지 판정에 쓰지 않는다.
 
 ### 8.2 계정 모드
 | 현재 | 사건 | 다음 |
@@ -251,7 +262,7 @@ kill switch 환경변수는 기록 열람을 제외한 전부를 끈다.
 | Guard 거절률 30% 초과(최근 20건) | 게시 원장 | 계정 |
 | 연속 실패 3회, `outcome_unknown` 1회 | 게시 원장 | 계정 |
 | 운영자의 삭제·문제 표시 | Admin Console | 계정 |
-| 플랫폼 제거·정책 경고 | 1시간 상태 조회(3시간 무응답 시 정지). webhook은 §8.1의 staging 검증 통과 후에만 추가 출처 | 계정 |
+| 플랫폼 제거·정책 경고 | 1시간 상태 조회(3시간 무응답 시 정지). webhook은 §8.1.1 상태 반영 기능이 켜진 뒤에만 추가 출처 | 계정 |
 | 위험 댓글 알림 24시간 미처리 | 1시간 댓글 조회 | 계정 |
 | 게시 직접 의존성(DB·어댑터) 실패 | 게시 전 점검 | 전체 |
 | claim·자산 목록 버전 변경 | 목록 버전 | 해당 claim을 쓴 초안만 무효 |
@@ -375,7 +386,7 @@ kill switch 환경변수는 기록 열람을 제외한 전부를 끈다.
 |---|---|---|---|
 | S0 | 게시 도구 기술 검증(테스트 계정) | Claude → Codex | 채널별 복구 계약 표 확정 |
 | S1 | 테이블, Guard와 우회 공격 테스트, 목록, 기능별 스위치, `marketing:write`, 시스템 감사 writer | Codex → Claude | 우회 코퍼스·가격 출처·권한 매트릭스 테스트 |
-| S2 | Admin Console, 게시 도구 어댑터, 게시기, webhook | Claude → Codex | Admin IA 전부, 승인 경쟁·webhook replay 테스트, **staging 수신 route로 webhook 서명·위조 거절·중복 무시·재전송 실측(S0 C9 이관분)** |
+| S2 | Admin Console, 게시 도구 어댑터, 게시기, webhook | Claude → Codex | Admin IA 전부, 승인 경쟁·webhook replay 테스트, **§8.1.1 조건 1–5를 활성화할 범위별로 staging shadow 처리로 통과하고 운영자 서명 기록(S0 C9 이관분)** |
 | S3 | 생성 서비스, A1·A3·A5, 승인 모드 운영과 120일 측정 시작 | Codex → Claude | 첫 주간 보고서, 첫 승인 게시 |
 | S4 | 졸업, 댓글 모니터링, 자동 정지 | Claude → Codex | 응답 유실 등 장애 주입 테스트 (§12.1 선행 필수) |
 | S5 | 랜딩 실험(스파이크 먼저), SEO PR·자동 병합, AI 노출 측정 | Codex → Claude | 캐시 누수 E2E 0건, 브랜치 정책 shell 테스트 |
