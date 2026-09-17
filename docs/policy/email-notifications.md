@@ -34,8 +34,12 @@
    `(provider, providerEventId)`로 충돌을 판정하므로, 그 unique와 컬럼 default
    `transactional`은 남깁니다(이전 build의 endpoint는 transactional뿐이라 default가 곧
    사실이고, 기존 행의 backfill이기도 합니다). 옛 unique와 default 제거는 이전 build가 없어진
-   뒤의 별도 migration입니다. 그 전까지는 두 계정에서 같은 사건 id가 오면 옛 unique에
-   걸립니다 — provider 사건 id는 계정을 넘어 고유하므로 실제로 일어나지 않을 것으로 봅니다.
+   뒤의 별도 migration입니다. 두 unique가 함께 있는 동안 INSERT는 **충돌 대상을 지정하지 않은
+   `ON CONFLICT DO NOTHING`** 입니다 — 대상을 지정하면 다른 unique의 충돌(같은 새 사건의 동시
+   도착 포함)은 예외가 됩니다. 삽입되지 않았으면 그 계정의 행을 찾고, 없으면 **다른 계정에 같은
+   사건 id가 있는 것**이므로 `duplicate`로 응답하지 않고 incident
+   `EMAIL_WEBHOOK_EVENT_ID_COLLISION`과 함께 실패(provider 재시도)합니다. provider 사건 id는
+   계정을 넘어 고유하므로 실제로는 일어나지 않을 것으로 봅니다.
 3. **결속** — delivery는 `(providerAccount, providerMessageId)`로만 찾습니다. 다른 계정이
    같은 메일 id를 보고하면 그 발송이 아닙니다 — 15분 대기 뒤 주소 기준으로 확정합니다.
    **같은 계정에서 한 메일 id로 delivery가 둘 이상**이면 어느 쪽도 고르지 않고 주소 기준으로만

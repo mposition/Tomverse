@@ -370,3 +370,32 @@ test("an account that sent mail and heard nothing for a day is silent", async ()
   await prisma.providerWebhookEvent.deleteMany();
   assert.deepEqual(await silentProviderAccounts({ RESEND_API_KEY: "key" }), []);
 });
+
+test("the same new event arriving twice at once is recorded once and applied once", async () => {
+  const address = `${randomUUID()}@example.com`;
+  const messageId = await deliverOne(address);
+  const providerEventId = `msg_${randomUUID()}`;
+  const payload = deliveredPayload(messageId, address);
+  const results = await Promise.all([
+    processResendWebhook({ providerAccount: "transactional", providerEventId, payload }),
+    processResendWebhook({ providerAccount: "transactional", providerEventId, payload }),
+  ]);
+  assert.equal(results.filter((result) => result.handled).length, 1, JSON.stringify(results));
+  assert.ok(
+    results.every(
+      (result) => result.handled || result.reason === "in_progress" || result.reason === "duplicate"
+    )
+  );
+  assert.equal(await prisma.providerWebhookEvent.count(), 1);
+});
+
+test("an event id already recorded for the other account fails rather than being acknowledged", async () => {
+  const providerEventId = `msg_${randomUUID()}`;
+  const payload = { type: "email.sent", data: { email_id: `resend-${randomUUID()}`, to: ["c@example.com"] } };
+  await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
+  await assert.rejects(
+    processResendWebhook({ providerAccount: "marketing", providerEventId, payload }),
+    /other account/
+  );
+  assert.equal(await prisma.providerWebhookEvent.count(), 1);
+});

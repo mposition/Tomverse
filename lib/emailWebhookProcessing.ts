@@ -291,9 +291,12 @@ export async function processResendWebhook(input: {
       ${JSON.stringify(input.payload)}::jsonb,
       ${leaseId}, (now() AT TIME ZONE 'UTC'), 1
     )
-    -- Event ids are unique per account, not across them: two accounts' events
-    -- with one id are two events.
-    ON CONFLICT ("provider", "providerAccount", "providerEventId") DO NOTHING
+    -- No conflict target while the old (provider, providerEventId) unique still
+    -- exists beside the per-account one: a target names one arbiter, and a
+    -- conflict on the other would raise instead of doing nothing -- as when
+    -- two workers insert the same new event at once. Which row conflicted is
+    -- established by the lookup below.
+    ON CONFLICT DO NOTHING
     RETURNING "id", "receivedAt",
               ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => CAST(${WEBHOOK_AWAIT_DELIVERY_MINUTES} AS integer))) AS "awaitExpired"
   `;
@@ -332,7 +335,23 @@ export async function processResendWebhook(input: {
       abandonedAt: true,
     },
   });
-  if (!existing || existing.processedAt || existing.abandonedAt) return { handled: false, reason: "duplicate" };
+  if (!existing) {
+    // Not this account's event: the same id is on file for the other account,
+    // and the old unique refuses a second row for it. Not a duplicate to
+    // acknowledge -- the event has not been recorded -- so it fails, the
+    // provider retries, and somebody is told. Provider event ids are unique
+    // across accounts in practice; this is the case that says otherwise.
+    await reportOperationalIncident({
+      code: "EMAIL_WEBHOOK_EVENT_ID_COLLISION",
+      title: "A provider event id arrived on both accounts",
+      error: "An event id already recorded for one provider account arrived for the other and could not be stored",
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "email-webhook", account: providerAccount },
+    });
+    throw new Error("Provider event id is already recorded for the other account");
+  }
+  if (existing.processedAt || existing.abandonedAt) return { handled: false, reason: "duplicate" };
   const claim = await claimStoredEvent(existing.id);
   if (!claim) {
     // Read again, with the database's clock: the row may have been completed,
