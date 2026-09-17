@@ -3065,10 +3065,16 @@ export function ChatInput({
   const keyboardInset = useKeyboardInset();
   const compactSheetKeyboardInset = isMobileModelMenu ? keyboardInset : 0;
 
+  // MOBILE-KB-INSET-01. The bar adds no safe-area inset of its own. It is
+  // only below md inside MobileChatShell, whose dock always ends with
+  // AiDisclaimerNotice, and that last row already pads for the inset -- adding
+  // it here too reserved the home-indicator space twice, once above the notice.
+  // (Above md the bar's md:pb-3 applies and no inset was ever added.) The
+  // dock's bottom edge is the only place the inset belongs.
   return (
       <div className={variant === "floating"
         ? "w-full max-w-full shrink-0 overflow-hidden px-0 py-0 md:overflow-visible"
-        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[calc(0.3rem+env(safe-area-inset-bottom))] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
+        : `w-full max-w-full shrink-0 overflow-hidden bg-zinc-50/95 px-2 py-1 pb-[0.3rem] transition-colors dark:bg-zinc-950 md:overflow-visible md:px-6 md:py-3 md:pb-3 ${
             hideTopBorder ? "" : "border-t border-zinc-200 dark:border-zinc-800"
           }`
       }>
