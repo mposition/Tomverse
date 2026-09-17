@@ -1064,6 +1064,11 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 | task_c3a7aa47 | 잠긴 snapshot을 Memory 추출 provider에 보내지 않기 | **완료** / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). 두 단계 모두 develop 병합(원격 확인): ① provider를 부르지 않은 chunk 과금 제외(`skipped` 상태) [#1489](https://github.com/mposition/Tomverse/pull/1489) ② 견적·생성 423, 생성 트랜잭션 안 행 잠금 재검사, 실행 중 잠긴 source 제외, 요청 직전 재검사, 런처 잠긴 행 [#1490](https://github.com/mposition/Tomverse/pull/1490). 각 Codex APPROVE, 생성 경합·워커 잠금 DB 테스트 CI 통과. staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합) — 단 staging 추출 flag가 꺼져 있어 추출 화면·실행은 확인하지 못함. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인(①·② 함께). production 추출 flag 미활성(사용자 확인)이라 ①의 과금 결함은 실제 청구된 적 없음 | 실제 배포·운영 확인은 별도. 추출 flag 활성화 전 별도 검증 체크리스트에서 잠긴 행 표시·423 확인. 재착수 후보에서 제외 |
 | task_7d03656e | 가져온 데이터 JSON 내보내기의 잠긴 snapshot 처리 | **완료** / CONT-SEARCH-01 검토 중 Codex 발견, 사용자 결정으로 분리(2026-09-16). develop [#1491](https://github.com/mposition/Tomverse/pull/1491) 병합(원격 확인). staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): J1(잠근 상태 전체 내려받기에 잠긴 대화 제목·메시지 없음, 형식 v2)·N7 통과. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인. 잠긴 snapshot은 `{locked, importedAt}`만, 메시지는 읽지 않음. 항목별 READ ONLY snapshot으로 전송 중 잠금 경합 차단, 형식 `tomverse.external-conversations.v2`, 다운로드 전 안내(7개 locale). 정책 결정은 선례 적용으로 불필요 판단, Codex 확인 | 실제 배포·운영 확인은 별도. v1 형식을 읽는 외부 도구가 있다면 v2 대응 필요. 재착수 후보에서 제외 |
 | LOCK-READ-TOCTOU-01 | 뷰어·timeline의 잠금 확인 후 별도 메시지 조회 경합 | 후속 후보 / 낮은 우선순위, 미착수. task_7d03656e 검토 중 Codex 제안(2026-09-16). 이 ID는 목록용이며 외부 칩 생성 아님. 재현·코드 재확인 안 함 | 확인과 조회 사이에 잠금이 커밋되는 순서를 재현 → 소유자 화면에 한 페이지가 보이는 수준인지 판정 → 필요하면 같은 snapshot 안에서 판정·조회. 계정 밖으로 나가는 경로는 아님 |
+| FIN-RETAIN-01 | 계정 영구 삭제 시 금융 기록 7년 보존(가명 대리키) | 설계 중 / 승인 대기. 설계 문서 r9 `docs/policy/financial-record-retention.md`, 로컬 브랜치 `claude/to-develop/financial-record-retention`(미push). Codex 독립 검토 8회 모두 reject, 회차마다 이전 지적은 해소되고 인접 경로에서 새 지적. 사용자 결정(2026-09-17): 무차단까지 설계 검토 계속. 운영자 답변: EU OSS·UK VAT 미등록(7년), 진행 중 분쟁 없음, 유료 회원 없음 | 무차단 판정 → Release 0(영구 삭제 일시중지·측정 보고) 구현. 아래 네 결함 중 BILLING-ASYNC-PAID-01이 설계의 Release 1a 전제 |
+| BILLING-ASYNC-PAID-01 | 구독 checkout 완료 처리가 결제 상태를 확인하지 않음 | **P1(유료 결제 개시 전)** / 미착수. FIN-RETAIN-01 검토 중 발견(2026-09-17), 코드 읽기로 확인, 재현·Stripe 설정 확인 안 함 | Stripe 계정의 지연 결제 수단 활성 여부 확인(사람) → 구독 경로도 `payment_status = paid`에서만 기록, `async_payment_failed` 처리, redemption 기록 실패를 삼키지 않기 |
+| BILLING-WEBHOOK-UNMATCHED-01 | 대응 행이 없는 Stripe 환불·분쟁 이벤트를 조용히 성공 처리 | **P1(유료 결제 개시 전)** / 미착수. FIN-RETAIN-01 검토 중 발견, 코드 읽기로 확인. 구독 결제의 분쟁이 계정 위험 표시로 이어지지 않는 점 포함. 재처리 route의 무조건 `processed` 기록도 여기에 묶음 | 구독 결제 환불·분쟁의 현재 영향(접근 유지·위험 표시 없음)을 제품 결정으로 확인 → 미매칭 이벤트의 보존·재조정 설계 → 재처리 결과 기반 status. 삭제 계정 경로는 FIN-RETAIN-01이 다룸 |
+| PROMO-DELETE-CASCADE-01 | 관리자 billing 저장이 목록에서 빠진 프로모션과 그 할인 적용 기록을 함께 삭제 | P2 / 미착수. FIN-RETAIN-01 검토 중 발견, 코드 읽기로 확인. 운영 발생 여부 미확인 | 사용 중인 프로모션 삭제 거절(비활성화로 유도), upsert·삭제 단일 트랜잭션, FK `Cascade → Restrict`. FIN-RETAIN-01 Release 0에 포함 예정 |
+| LEDGER-EXPIRE-LOCK-01 | 크레딧 lot 만료가 계정 잠금 없이 전 계정을 한 트랜잭션에서 갱신 | P3 / 미착수. FIN-RETAIN-01 검토 중 Codex 지적, 코드 읽기로 확인. 경합 재현 안 함 | 만료 경계 시각의 예약과 겹치는 순서 재현 → 계정별 트랜잭션에서 `lockCreditAccount` 후 재조회 |
 | SEC-OPS-01 | Tomverse 전체 플랫폼의 정기 Commercial Grade 보안 점검 | 운영 필수 / 목록 등록, 기존 주간 자동화 일시중지 | 대상 자산·검증 기준·안전한 실행 범위를 정리하고 기존 자동화 보강·재개 여부 승인 |
 
 #### 2026-09-15 후속 순서 검토 — 두 교착과 별도의 만료/finalize 경합
@@ -1195,6 +1200,74 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
   구분합니다. 이를 원문 잠금 때문에 무조건 감추거나 삭제하는 정책으로 확대하지 않습니다.
 - 정책 결정 후 적용·회귀 검증할 별도 과제이며, 코드·정책·production 설정은 이번에
   변경하지 않았습니다. 사용자 메모리 수집이나 유료 모델 호출도 수행하지 않았습니다.
+
+#### FIN-RETAIN-01 검토 중 발견한 기존 결제 결함 — 2026-09-17
+
+- **검토 기준**: 원격 fetch 후 develop `53a2476489b3ee38e639e5dacb6045adcaed62e1`,
+  main `0e841cc01d39a790e0fe9238bc52479942becc04`. 아래 파일은 두 브랜치에서 동일합니다:
+  `lib/stripeWebhookProcessing.ts`, `lib/creditPurchase.ts`, `lib/creditLedger.ts`,
+  `app/api/admin/billing/route.ts`, `app/api/admin/webhooks/[webhookId]/reprocess/route.ts`.
+  확인 방법은 코드 읽기뿐입니다. DB 동시성 재현, Stripe 대시보드 설정, 운영 데이터·로그는 확인하지
+  않았습니다. **현재 유료 회원이 없다는 운영자 확인(2026-09-17)**에 따라 실제 청구·손실 발생은
+  단정하지 않으며, 유료 결제를 열기 전에 처리할 항목을 P1로 둡니다.
+- **분리 사유**: 네 결함 모두 계정 삭제와 무관하게 지금 코드에 있습니다. 사용자 결정(2026-09-17)으로
+  설계 문서에 섞지 않고 이 목록에서 따로 추적합니다. 설계는 BILLING-ASYNC-PAID-01을 Release 1a의
+  전제 조건으로만 참조합니다.
+
+**BILLING-ASYNC-PAID-01 — 구독 checkout 완료 처리**
+
+- `processStripeEvent()`는 `checkout.session.completed`와 `checkout.session.async_payment_succeeded`를
+  같은 `handleCheckoutCompleted()`로 보냅니다. 크레딧팩 경로(`grantCreditPackFromCheckout`)는
+  `payment_status !== "paid"`면 반환하지만, **구독 경로는 결제 상태를 보지 않고** promotion
+  redemption 기록 → `syncSubscription` → `BillingTransaction`(`status: "paid"`) → 청구 국가 →
+  환영 메일 → 분석 이벤트 순으로 진행합니다. `checkout.session.async_payment_failed`는 처리 목록에
+  없습니다.
+- 지연 결제 수단(예: 호주 BECS Direct Debit)이 Checkout에 노출되면, 돈이 들어오기 전의 `completed`
+  (unpaid)가 paid 거래·할인 적용·환영 메일을 남길 수 있습니다. checkout 생성은
+  `payment_method_types`를 지정하지 않으므로 **노출 여부는 Stripe 대시보드 설정이 정하며 확인하지
+  않았습니다.** 플랜 접근 자체는 `syncSubscription`이 Stripe 구독 상태를 다시 읽으므로 이 경로만으로
+  열린다고 단정하지 않습니다.
+- 같은 함수는 `recordPromotionRedemptionFromCheckout()` 실패를 로그만 남기고 삼킵니다. 할인이 Stripe에
+  적용된 결제의 로컬 적용 기록이 영구히 빠질 수 있습니다.
+- **다음 완료 단위**: Stripe 계정의 Checkout 결제 수단 설정 확인(사람) → 구독 경로를 `payment_status`로
+  분기, `async_payment_failed` 처리, redemption·거래 기록을 한 트랜잭션으로 묶고 실패 시 webhook 재시도.
+  지연 결제 순서(completed unpaid → succeeded / failed) DB 테스트.
+
+**BILLING-WEBHOOK-UNMATCHED-01 — 대응 행 없는 환불·분쟁 이벤트**
+
+- `charge.refunded`·`charge.dispute.*`는 `handleCreditPack*`로만 가고, 이 함수들은 `CreditPurchase`를
+  찾지 못하면 `false`를 반환합니다. webhook route는 예외가 없으면 `processed`로 기록합니다.
+  따라서 다음 셋이 흔적 없이 끝납니다: (a) **구독 결제의 환불·분쟁 전부** — 계정의
+  `billingRiskStatus`도 바뀌지 않음, (b) `checkout.session.completed`보다 먼저 도착한 크레딧팩 환불·분쟁
+  (Stripe는 순서를 보장하지 않음), (c) 계정 삭제 후 이벤트.
+- 관리자 재처리 route(`app/api/admin/webhooks/[webhookId]/reprocess/route.ts`)는 handler 결과와 무관하게
+  `status: "processed"`로 덮고 `payloadSummary`를 교체합니다. handler가 "처리하지 않음"을 알릴 수단이
+  없는 것이 근본 원인이라 이 항목에 묶었습니다.
+- **판단 보류**: 구독 결제의 전액 환불·분쟁 뒤에도 구독이 Stripe에서 살아 있으면 접근이 유지됩니다. 이것이
+  의도된 운영 방식(사람이 구독을 해지)인지 결함인지는 **제품 결정**이며 확인하지 않았습니다.
+- **다음 완료 단위**: (a)의 의도 확인(사람) → handler가 `processed | unmatched`를 반환하고 route·재처리가
+  그대로 기록 → 순서 역전 재조정. (c)는 FIN-RETAIN-01 설계가 다룹니다.
+
+**PROMO-DELETE-CASCADE-01 — 프로모션 삭제가 할인 적용 기록을 지움**
+
+- `app/api/admin/billing/route.ts`는 요청에 없는 프로모션을 `billingPromotion.deleteMany`로 지우고,
+  `BillingPromotionRedemption.promotion`이 `onDelete: Cascade`라 redemption도 삭제됩니다. 프로모션
+  upsert와 삭제는 한 트랜잭션이 아닙니다.
+- 반증·한계: internal pass의 플랜 접근은 `effectivePlanForAccess()`가 읽을 때마다 기간을 판정하므로
+  redemption이 지워져도 접근이 계속 열리지는 않습니다. 잃는 것은 할인 적용 증거, 만료 안내 메일
+  대상, 계정당 1회 사용 기록입니다.
+- **다음 완료 단위**: redemption이 있는 프로모션 삭제를 어떤 write보다 먼저 409로 거절, 단일 트랜잭션,
+  FK `Restrict`. FIN-RETAIN-01 Release 0에 포함할 예정이므로 따로 착수하면 중복입니다.
+
+**LEDGER-EXPIRE-LOCK-01 — 잠금 없는 lot 만료**
+
+- `expireCreditLots()`는 `status = active AND expiresAt <= now`인 전 계정 lot을 한 트랜잭션에서
+  0으로 만들고 ledger를 씁니다. `lockCreditAccount()`를 잡지 않아 `docs/policy/credit-and-cost-limits.md`
+  §9의 "크레딧 계정 잠금이 가장 먼저"와 맞지 않습니다.
+- 예약(`reserveAddOnCredits`)은 `expiresAt > now`로 읽으므로 두 경로가 겹치는 창은 만료 경계 시각 부근으로
+  좁습니다. 겹치면 예약의 차감이 0이 된 lot에 적용될 수 있으나, `CreditLot` non-negative CHECK
+  (NOT VALID, 신규 쓰기에 적용)가 그 트랜잭션을 실패시킬 가능성이 높습니다. 재현하지 않았습니다.
+- **다음 완료 단위**: 경계 시각 경합 재현 → 계정별 트랜잭션·잠금 후 재조회.
 
 #### SEC-OPS-01 — 범위와 운영 기준
 
@@ -1736,6 +1809,11 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   [첨부 토론 원문 전체](./tomverse-intelligence-platform-proposal-original-2026-09-17.md).
 
 ### 목록 정정 기록
+
+- 2026-09-17: 계정 삭제 시 금융 기록 보존 설계를 FIN-RETAIN-01로 D에 추가하고, 그 검토 중 발견한
+  기존 결제 결함 네 건(BILLING-ASYNC-PAID-01, BILLING-WEBHOOK-UNMATCHED-01, PROMO-DELETE-CASCADE-01,
+  LEDGER-EXPIRE-LOCK-01)을 코드 대조 후 분리 등록했습니다. 사용자 요청에 따른 것이며 주 투자 순위와
+  기존 항목은 바꾸지 않았습니다. 제품 구현 없이 목록만 갱신했습니다.
 
 - 2026-09-17: Chat·Review·Code·Studio의 공통 추론/승인된 정보 연결 제안을 최신 웹·Code와
   대조해 L에 INT-BOUNDARY/CORE/GATEWAY/MEMORY/CODE-SYNC/API 여섯 후보로 나눴습니다.
