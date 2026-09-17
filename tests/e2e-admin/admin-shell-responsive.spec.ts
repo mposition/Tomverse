@@ -250,7 +250,14 @@ test.describe("admin console on a narrow viewport", () => {
       await page.setViewportSize({ width, height: 844 });
       for (const period of ["today", "last30"]) {
         await page.goto(`/admin/analytics?tab=usage&period=${period}`);
-        await expect(page.getByTestId("admin-usage-analytics")).toBeVisible();
+        // The admin pages stream behind loading.tsx, so for a moment the
+        // report exists twice: the streamed copy outside #main-content and the
+        // one being swapped in. Waiting for a single copy is also what makes
+        // the width below the settled page's width.
+        await expect(page.getByTestId("admin-usage-analytics")).toHaveCount(1);
+        await expect(
+          page.locator("#main-content").getByTestId("admin-usage-analytics")
+        ).toBeVisible();
 
         const overflow = await page.evaluate(() => ({
           viewport: document.documentElement.clientWidth,
