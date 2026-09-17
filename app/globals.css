@@ -442,7 +442,13 @@ html[data-consent-pending] [data-testid="marketing-consent-slot"] {
    indication of focus. `:where()` keeps specificity at 0 so any component that
    does define its own `focus:`/`focus-visible:` ring still wins, and targeting
    `:focus-visible` avoids drawing rings on mouse clicks. */
-:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+/* An element marked data-focus-ring="container" has its indicator drawn by a
+   container instead (COMPOSER-FOCUS-CLIP-01): the chat textarea sits inside a
+   rounded, overflow-hidden composer, which cut this outline off at its
+   corners. The composer draws an outline inside its own border for it; see
+   ChatInput.tsx. The exclusion is inside :where() so this rule keeps the zero
+   specificity the comment above relies on. */
+:where(a, button, input, select, textarea, summary, [tabindex]):where(:not([data-focus-ring="container"])):focus-visible {
   outline: 2px solid var(--color-blue-500);
   outline-offset: 2px;
 }

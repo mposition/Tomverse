@@ -3026,7 +3026,7 @@ export function ChatInput({
             onDragOver={handleDropZoneDragOver}
             onDragLeave={handleDropZoneDragLeave}
             onDrop={handleDropZoneDrop}
-            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-[1.4rem] border bg-white p-1.5 shadow-lg shadow-zinc-200/50 transition-colors dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
+            className={`relative mx-auto w-full max-w-4xl overflow-hidden rounded-[1.4rem] border bg-white p-1.5 shadow-lg shadow-zinc-200/50 transition-colors has-[textarea[data-focus-ring=container]:focus-visible]:outline-2 has-[textarea[data-focus-ring=container]:focus-visible]:-outline-offset-3 has-[textarea[data-focus-ring=container]:focus-visible]:outline-blue-500 dark:bg-zinc-900 dark:shadow-black/20 md:overflow-visible md:rounded-2xl md:p-3 ${
               isDragActive
                 ? "border-blue-500 bg-blue-50/70 dark:border-blue-400 dark:bg-blue-950/30"
                 : "border-zinc-200 dark:border-zinc-800"
@@ -3509,8 +3509,18 @@ export function ChatInput({
           docs/ui-contracts/mobile-chat-composer.md.
         */}
         <div data-testid="composer-textarea-row" className="flex w-full min-w-0">
+        {/*
+          COMPOSER-FOCUS-CLIP-01. The global focus outline is drawn outside the
+          textarea, and this composer is rounded and overflow-hidden, so the
+          outline was cut at the corners whenever the input was the first row.
+          The composer draws the indicator instead: an outline pulled 3px inside
+          its own border, which its own overflow does not clip. An outline and
+          not a box-shadow ring, because forced-colors mode removes box-shadow
+          and keeps outlines.
+        */}
         <textarea
           data-testid="chat-textarea"
+          data-focus-ring="container"
           ref={textareaRef}
           value={value}
           wrap={preserveFormatting ? "off" : "soft"}
