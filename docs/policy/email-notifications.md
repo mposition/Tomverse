@@ -4,15 +4,46 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v20 (2026-09-17).** provider 계정마다 webhook endpoint와 signing secret이
-  따로이고, 사건은 그 계정으로 저장되어 그 계정이 보낸 발송에만 결속됩니다. 계정별
-  침묵을 incident로 올립니다. 0절 참조.
+- 개정: **v21 (2026-09-17).** soft bounce로 잘못 처리된 영구 bounce를 보관 중인 사건에서
+  hard bounce 원인으로 기록하는 일회성 복구 절차를 둡니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v21 (2026-09-17) — 잘못 분류된 영구 bounce 복구
+
+v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처리되어, 없는 메일함에도
+최대 24시간 뒤 다시 발송했습니다. 원본 사건은 90일 보관되므로 그 안의 것은 복구할 수
+있습니다.
+
+1. **`npm run email:recover-permanent-bounces`** — 기본은 dry run(읽기만)이고 `--apply`가
+   씁니다. 출력은 개수뿐이며 주소·메일 id를 싣지 않습니다.
+2. **대상** — 실행 시각까지 받은(스냅샷) 처리된 `email.bounced` 사건 중 `data.bounce.type`이
+   정확히 **`Permanent`** 인 것만입니다. `hard`는 원래 올바르게 처리됐으므로 대상이 아닙니다.
+   이 사건 키(`webhook:<사건 행 id>`) **또는 같은 메일 id**로 `hard_bounce` 원인이 이미 있으면
+   `alreadyRecorded`입니다. 주소는 사건 계정 안에서 정확히 하나로 결속되는 delivery의 주소,
+   없으면 payload 수신자입니다. 원인은 정정된 handler와 같은 키·출처로 쓰고 `evidence`에
+   `recoveredFrom: permanent_bounce_misclassified_as_soft`를 남깁니다.
+3. **보수적 제외** — 살아 있는 메일함을 막는 것이 이 결함보다 나쁘기 때문입니다.
+   - provider 사건 시각(`created_at`)이 없거나 믿을 수 없는 사건은 쓰지 않습니다
+     (`indeterminateTime`) — 수신 시각으로는 이후 delivery와 선후를 판정할 수 없습니다.
+   - 같은 주소에 **bounce 5분 전 이후** delivered가 보고된 적이 있으면 쓰지 않습니다
+     (`deliveredSince`). 오래된 delivery 시각은 수신 시각이라 그 오차를 여유로 둡니다.
+   - 쓰기는 사건마다 fence와 주소 잠금 안에서 **그 검사를 다시 한 뒤**에만 합니다 —
+     delivered 기록도 같은 잠금을 잡으므로, 실행 중에 들어온 delivery를 봅니다
+     (`deliveredDuringRun`).
+   - 주소가 없는 사건은 `unaddressed`로 셉니다.
+4. **entry** — 원인은 항상 추가하지만 entry는 **없거나 soft bounce일 때만** hard bounce로
+   올립니다(`entriesRaised`). complaint·manual·privacy request·기존 hard bounce entry는 그대로
+   둡니다. 쓰기는 **최신 사건부터** 하므로 한 주소의 entry에는 가장 최근 bounce가 남습니다.
+5. **멱등** — 같은 키로 쓰므로 다시 실행하면 `alreadyRecorded`로 건너뜁니다. 한 실행 안에서
+   같은 메일 id의 사건이 둘이면 쓰기 직전 재확인으로 하나만 씁니다(`duplicatesInRun`).
+   보고의 개수는 쓰기 전 상태 기준입니다.
+6. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
+   창을 보여 줍니다).
 
 ### v20 (2026-09-17) — 계정별 webhook(S1b-2b)
 
