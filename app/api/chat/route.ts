@@ -2378,6 +2378,7 @@ async function handleChatPost(
         const turnSystemBlocks = buildChatTurnSystemBlocks({
             modelId: modelConfig.id,
             provider: modelConfig.provider,
+            autoRouted: autoSelection.routed,
             isDeepResearchTurn,
             isAuthenticated: Boolean(session?.user?.id),
             canPersist: Boolean(
