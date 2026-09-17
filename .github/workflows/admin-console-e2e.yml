@@ -23,11 +23,13 @@ name: Admin Console E2E
 # fast-gate means without touching branch protection, which is a repository
 # setting this file cannot edit.
 #
-# So this is a visible check, not a required one. Making it required is a
-# branch protection change: add "Admin Console E2E (PostgreSQL)" to the
-# required checks for develop and main. Because the job now reports on every
-# pull request (see the trigger note below), it can be made required without
-# leaving unrelated pull requests waiting on a check that never runs.
+# It is a required check of its own instead: branch protection on develop and
+# main lists "Admin Console E2E (PostgreSQL)" next to the fast-gate name (read
+# from the branch protection API on 2026-09-17). That is a repository setting,
+# so this comment can go stale again; the API is the source, not this file.
+# Being required is only safe because the job reports on every pull request
+# (see the trigger note below) -- a required check that a path filter skipped
+# would leave unrelated pull requests waiting on a run that never comes.
 
 # Runs on every pull request, with no `paths` filter, for two reasons.
 #
