@@ -5229,12 +5229,16 @@ model ProviderWebhookEvent {
   /// signing secret the event came through. Event ids are unique per account,
   /// and a message id is matched only within the account that sent it
   /// (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56).
-  providerAccount String
+  /// The default is for the previous build, which does not write the column
+  /// and only ever served the transactional account; it goes with the old
+  /// unique in a later migration.
+  providerAccount String @default("transactional")
 
-  @@unique([provider, providerAccount, providerEventId])
+  @@unique([provider, providerEventId])
+  @@unique([provider, providerAccount, providerEventId], map: "ProviderWebhookEvent_account_event_key")
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])
-  @@index([providerAccount, receivedAt])
+  @@index([provider, providerAccount, receivedAt], map: "ProviderWebhookEvent_provider_account_receivedAt_idx")
 }
 
 /// The one row that says a Tomverse Conversation was started from an imported

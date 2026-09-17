@@ -68,6 +68,11 @@ export class ResendProvider implements EmailProviderPort {
     stream: SendingStream
   ): WebhookVerification {
     const secret = webhookSecretFor(stream, process.env);
+    // One secret on both accounts would let an event signed for one be
+    // recorded as the other's. Refused as unconfigured, so events queue at the
+    // provider until the secrets are told apart.
+    const other = webhookSecretFor(stream === "marketing" ? "transactional" : "marketing", process.env);
+    if (secret && other && secret === other) return { ok: false, reason: "secret_missing" };
     // Distinct from a bad signature. Nothing is wrong with the request, so the
     // endpoint answers 503 and the provider keeps retrying -- events queue at
     // Resend rather than being dropped while a deployment misses its secret.

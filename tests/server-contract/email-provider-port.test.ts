@@ -213,6 +213,15 @@ test("a missing webhook secret is its own reason, not a bad signature", async ()
   if (!verification.ok) assert.equal(verification.reason, "secret_missing");
 });
 
+test("one secret set on both accounts verifies nothing", async () => {
+  setEnv({ RESEND_WEBHOOK_SECRET: "whsec_c2FtZQ==", MARKETING_RESEND_WEBHOOK_SECRET: "whsec_c2FtZQ==" });
+  for (const stream of ["transactional", "marketing"] as const) {
+    const verification = port.emailProvider().verifyWebhook("{}", new Headers(), stream);
+    assert.equal(verification.ok, false);
+    if (!verification.ok) assert.equal(verification.reason, "secret_missing");
+  }
+});
+
 test("the marketing webhook never borrows the transactional secret", async () => {
   setEnv({ RESEND_WEBHOOK_SECRET: "whsec_dHJhbnNhY3Rpb25hbA==" });
   const verification = port

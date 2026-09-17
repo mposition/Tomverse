@@ -195,8 +195,8 @@ test("a replayed webhook adds no second cause", async () => {
   const emailAddress = address();
   const payload = { type: "email.bounced", data: { to: [emailAddress], bounce: { type: "Hard" } } };
   const providerEventId = `msg_${randomUUID()}`;
-  await processResendWebhook({ providerEventId, payload });
-  await processResendWebhook({ providerEventId, payload });
+  await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
+  await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
 
   const causes = await causesFor(emailAddress);
   assert.equal(causes.length, 1);

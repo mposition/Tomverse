@@ -264,17 +264,14 @@ const runClaimedEvent = async (
  * by the sweeper when the provider has given up.
  */
 export async function processResendWebhook(input: {
-  /**
-   * The account the event was verified for. The original endpoint serves the
-   * transactional account, which is what an event without one came through.
-   */
-  providerAccount?: SendingStream;
+  /** The account whose endpoint and signing secret verified the event. */
+  providerAccount: SendingStream;
   providerEventId: string;
   payload: ResendEventPayload;
   receivedAt?: Date;
 }): Promise<WebhookProcessResult> {
   const eventType = typeof input.payload.type === "string" ? input.payload.type : "unknown";
-  const providerAccount: SendingStream = input.providerAccount ?? "transactional";
+  const providerAccount = input.providerAccount;
 
   // Written with the database's clock, like every later lease and waiting
   // decision, so an application host whose clock drifts cannot make a fresh
@@ -475,7 +472,7 @@ export async function sweepProviderWebhookEvents(options?: { limit?: number; tim
   const silent = await silentProviderAccounts();
   for (const account of silent) {
     await reportOperationalIncident({
-      code: "EMAIL_WEBHOOK_SILENT",
+      code: `EMAIL_WEBHOOK_SILENT_${account.stream.toUpperCase()}`,
       title: "An email provider account sent mail but reported no events in a day",
       error: `The ${account.stream} account sent ${account.sent} message(s) in 24 hours and no webhook arrived; its endpoint may have been disabled`,
       severity: "warning",
@@ -521,7 +518,8 @@ export async function silentProviderAccounts(env: Readonly<Record<string, string
             AND "sentAt" >= (now() AT TIME ZONE 'UTC') - interval '24 hours'
             AND "sentAt" < (now() AT TIME ZONE 'UTC')) AS "sent",
         (SELECT count(*) FROM "ProviderWebhookEvent"
-          WHERE "providerAccount" = ${stream}
+          WHERE "provider" = ${RESEND_PROVIDER}
+            AND "providerAccount" = ${stream}
             AND "receivedAt" >= (now() AT TIME ZONE 'UTC') - interval '24 hours'
             AND "receivedAt" < (now() AT TIME ZONE 'UTC')) AS "received"
     `;
@@ -572,11 +570,13 @@ const applyResendEvent = async (input: {
   // Matched by the provider's own message id. Falling back to the address
   // would attach a bounce to whichever message happened to be most recent,
   // which is a different message from the one that bounced.
-  const delivery = providerMessageId
-    ? await prisma.emailDelivery.findFirst({
+  const candidates = providerMessageId
+    ? await prisma.emailDelivery.findMany({
         // Within the account that sent it: message ids are the provider's, and
         // two accounts can issue the same one.
         where: { providerAccount: input.providerAccount, providerMessageId },
+        // Two rows means the message id does not identify a delivery.
+        take: 2,
         select: {
           id: true,
           userId: true,
@@ -593,9 +593,24 @@ const applyResendEvent = async (input: {
           },
         },
       })
-    : null;
+    : [];
 
-  if (!delivery && providerMessageId && input.awaitDelivery) {
+  // Two deliveries for one message id in one account cannot be told apart, and
+  // guessing would attribute a complaint to the wrong person. The event settles
+  // on its address alone, and somebody is told.
+  if (candidates.length > 1) {
+    await reportOperationalIncident({
+      code: "EMAIL_WEBHOOK_AMBIGUOUS_DELIVERY",
+      title: "A provider event matched more than one delivery",
+      error: "Two deliveries share a provider message id within one account; the event was applied to its address only",
+      severity: "error",
+      cooldownMs: 30 * 60 * 1_000,
+      context: { component: "email-webhook", account: input.providerAccount },
+    });
+  }
+  const delivery = candidates.length === 1 ? candidates[0] : null;
+
+  if (!delivery && candidates.length === 0 && providerMessageId && input.awaitDelivery) {
     return { effect: AWAITING_DELIVERY, deliveryId: null };
   }
 

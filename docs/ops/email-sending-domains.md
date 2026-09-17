@@ -893,8 +893,9 @@ MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>
   찾습니다(docs/policy/email-product-news-redesign-draft.md 7.4, C56·C72).
 - 기존 transactional 등록 URL은 바꾸지 않아도 됩니다. 바꾸려면 새 경로를 먼저 추가하고
   사건이 들어오는 것을 확인한 뒤 옛 경로를 지웁니다.
-- 계정이 하루 5통 넘게 보냈는데 webhook이 0건이면 incident `EMAIL_WEBHOOK_SILENT`가
+- 계정이 하루 5통 이상 보냈는데 webhook이 0건이면 incident `EMAIL_WEBHOOK_SILENT_<계정>`이
   올라옵니다 — Resend가 실패가 반복된 endpoint를 비활성화했을 가능성을 먼저 봅니다.
+- 두 secret 변수에 같은 값을 넣으면 두 endpoint가 모두 503입니다. 계정마다 자기 webhook의 secret을 넣습니다.
 
 ---
 
