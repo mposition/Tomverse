@@ -337,9 +337,12 @@ test("an event we do not collect is recorded and does nothing", async () => {
 });
 
 test("an event for a message we never sent is handled, not retried forever", async () => {
-  const result = await webhook("email.delivered", {
-    email_id: "resend-unknown",
-    to: ["stranger@example.com"],
+  // Received long enough ago that it no longer waits for its delivery to be
+  // recorded: it settles as unmatched rather than retrying.
+  const result = await processResendWebhook({
+    providerEventId: `msg_${randomUUID()}`,
+    payload: { type: "email.delivered", data: { email_id: "resend-unknown", to: ["stranger@example.com"] } },
+    receivedAt: new Date(Date.now() - 20 * 60_000),
   });
 
   assert.deepEqual(result, { handled: true, effect: "unmatched", deliveryId: null });

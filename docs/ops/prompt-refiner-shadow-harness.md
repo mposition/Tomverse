@@ -134,3 +134,42 @@ mismatch stop, stale lock, truncation 또는 witness disagreement는 새 실행�
 4. 의미 보존·행동상 주입 저항·비용·지연 증거가 승인됐을 때만 제품 제안형 UI 연결을
    제안한다.
 5. Refiner 결과의 Router 결합과 전체 모델 catalogue 품질은 그 뒤의 별도 실험이다.
+
+## 8. admission-readiness proposal 경계
+
+`admission-readiness-v1` evidence는 source commit
+`f1e1b0c23fd93cfa9dbaa0a68abe603d989c3830`에서 이 문서의 provider-free 명령을
+16/16으로 완료해 동결했다. manifest는 report·journal·witness의 정확한 filename,
+byte size, SHA-256, journal/witness terminal head, sourceRef, source identity와 corpus
+digest를 묶고 canonical bundle digest
+`sha256:61d66909a0d493c9b0bfae5faaa3e79ad827a6cba8598f39167ecf506176a159`를
+고정한다. 이 bundle이 만드는 canonical proposal digest는
+`sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2`다.
+파일은 [`evidence/`](prompt-refiner-shadow/evidence/)에 있다.
+
+`promptRefinerShadowAdmissionCore`는 파일을 불신 입력으로 다시 읽어 strict schema,
+byte/UTF-8/BOM/duplicate/extra-key 경계와 raw file digest를 확인한다. 그 뒤 기존 strict
+journal replay API로 chain·witness·terminal을 재검증하고 다음 조건을 모두 요구한다.
+
+- completed 16/16, remaining/unknown 0
+- structural boundary violation 0
+- behavioral fixture match 16/16
+- provider call 0, cost 0
+- 정확히 고정된 harness/journal/corpus/source identity와 checked-in manifest bytes
+
+통과 결과는 `PromptRefinerShadowStageProposal` 하나이며 status는
+`awaiting_explicit_admin_cost_approval`, `executionAdmitted`는 항상 `false`다. proposal은
+`currentCheckoutValidated=false`, `runtimeSourceRevalidationRequired=true`를 고정해 이
+검사가 현재 checkout이나 실행 환경을 검증하지 않았음을 구조적으로 드러낸다. 검증 범위는
+manifest가 가리키는 과거 evidence snapshot 내부의 source/corpus 일치뿐이다. proposal은
+기존 reservation stage id·contract digest·요청/단계 비용·slot·TTL과 content-free
+provenance만 담고 `approvedBy`, `approvedAt`, stage mutation 또는 승인 성공 표현은 담지
+않는다. 이는 합성 구조 prerequisite일 뿐 실제 모델 품질, paid shadow, PLANNER,
+release 또는 rollout 승인 증거가 아니다.
+
+실제 writer는 이번 범위에 없다. 다음 계약은 승인 직전에 현재 checkout의 exact source,
+manifest bytes와 대상 environment를 다시 검증한 결과를 요구하고, 새 migration에서 exact evidence digest,
+명시적 사람 승인과 비용 상한, 대상 environment, 승인 expiry, 실행 manifest를 한 행에
+결속하고 durable admin writer가 그것을 원자적으로 생성하도록 별도 설계·검토해야 한다.
+그 전에는 stage seed, Prisma mutation, admin route/script, receipt writer, product caller,
+provider SDK, 자격증명 조회, flag 활성화 또는 `admitted: true` 경로를 추가하지 않는다.

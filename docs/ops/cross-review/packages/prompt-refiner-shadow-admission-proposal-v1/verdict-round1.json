@@ -1,0 +1,86 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+  "round": 1,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-shadow-admission-proposal-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-shadow-admission-proposal-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-17T00:22:14.830Z",
+  "durationMs": 168747,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 18,
+    "cachedInputTokens": 691908,
+    "outputTokens": 12158,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.6530779999999996,
+    "raw": {
+      "input_tokens": 18,
+      "cache_creation_input_tokens": 95904,
+      "cache_read_input_tokens": 691908,
+      "output_tokens": 12158,
+      "output_tokens_details": {
+        "thinking_tokens": 9349
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 95904,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4795,
+          "cache_read_input_tokens": 98630,
+          "cache_creation_input_tokens": 2016,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 2016
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-17T00:25:03.637Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+    "round": 1,
+    "reviewedDigest": "sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)",
+        "severity": "nit",
+        "basis": "judgement",
+        "claim": "The module captures primordials at import time for its byte/hash/decode path but the manifest field validators still use ambient `Number.isSafeInteger` and `RegExp.prototype.test`, so the stated capture discipline is not uniform (every reachable outcome is still fail-closed downstream, so this is defense-in-depth consistency only).",
+        "reproduction": "In a scratch ESM file: `import {proposePromptRefinerShadowStage} from '../lib/promptRefinerShadowAdmissionCore.ts';` then `Number.isSafeInteger = () => true;` and call it with the checked-in evidence but a manifest whose `journalTerminal.seq` is the string `\"33\"` (with `bundleDigest` recomputed as in tests/promptRefinerShadowAdmissionCore.test.mjs:64-71). Expected with captured intrinsics: `prompt_refiner_shadow_admission_journal_terminal_seq_integer`; actual: the strict integer check is bypassed and rejection falls through to `replay_invariant_or_terminal_head`. Contrast line 222, which uses INTRINSIC_NUMBER_IS_SAFE_INTEGER and is unaffected by the same patch."
+      }
+    ],
+    "nextAction": "Round 0 finding 1 is fixed (.gitattributes:80-83 pins lib/promptRefinerShadowAdmissionCore.ts and tests/promptRefinerShadowAdmissionCore.test.mjs to LF, confirmed by the check-attr guard and the autocrlf clone test) and finding 2 is fixed (freezeTrustedProposal deep-freezes the proposal, its nested objects and a cloned acknowledgements array); finding 3 stands as an accepted disclosure — the bundle remains verify-only because this commit edits .gitattributes, which is inside the bundle's own source allowlist — so merge as is and take the intrinsic-consistency nit only if the durable writer contract reuses these validators."
+  }
+}
