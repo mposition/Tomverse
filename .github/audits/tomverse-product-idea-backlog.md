@@ -1067,7 +1067,7 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 | FIN-RETAIN-01 | 계정 영구 삭제 시 금융 기록 7년 보존(가명 대리키) | 설계 중 / 승인 대기. 설계 문서 r9 `docs/policy/financial-record-retention.md`, 로컬 브랜치 `claude/to-develop/financial-record-retention`(미push). Codex 독립 검토 8회 모두 reject, 회차마다 이전 지적은 해소되고 인접 경로에서 새 지적. 사용자 결정(2026-09-17): 무차단까지 설계 검토 계속. 운영자 답변: EU OSS·UK VAT 미등록(7년), 진행 중 분쟁 없음, 유료 회원 없음 | 무차단 판정 → Release 0(영구 삭제 일시중지·측정 보고) 구현. 아래 네 결함 중 BILLING-ASYNC-PAID-01이 설계의 Release 1a 전제 |
 | BILLING-ASYNC-PAID-01 | 구독 checkout 완료 처리가 결제 상태를 확인하지 않음 | **P1(유료 결제 개시 전)** / 미착수. FIN-RETAIN-01 검토 중 발견(2026-09-17), 코드 읽기로 확인, 재현·Stripe 설정 확인 안 함 | Stripe 계정의 지연 결제 수단 활성 여부 확인(사람) → 구독 경로도 `payment_status = paid`에서만 기록, `async_payment_failed` 처리, redemption 기록 실패를 삼키지 않기 |
 | BILLING-WEBHOOK-UNMATCHED-01 | 대응 행이 없는 Stripe 환불·분쟁 이벤트를 조용히 성공 처리 | **P1(유료 결제 개시 전)** / 미착수. FIN-RETAIN-01 검토 중 발견, 코드 읽기로 확인. 구독 결제의 분쟁이 계정 위험 표시로 이어지지 않는 점 포함. 재처리 route의 무조건 `processed` 기록도 여기에 묶음 | 구독 결제 환불·분쟁의 현재 영향(접근 유지·위험 표시 없음)을 제품 결정으로 확인 → 미매칭 이벤트의 보존·재조정 설계 → 재처리 결과 기반 status. 삭제 계정 경로는 FIN-RETAIN-01이 다룸 |
-| PROMO-DELETE-CASCADE-01 | 관리자 billing 저장이 목록에서 빠진 프로모션과 그 할인 적용 기록을 함께 삭제 | P2 / 미착수. FIN-RETAIN-01 검토 중 발견, 코드 읽기로 확인. 운영 발생 여부 미확인 | 사용 중인 프로모션 삭제 거절(비활성화로 유도), upsert·삭제 단일 트랜잭션, FK `Cascade → Restrict`. FIN-RETAIN-01 Release 0에 포함 예정 |
+| PROMO-DELETE-CASCADE-01 | 관리자 billing 저장이 목록에서 빠진 프로모션과 그 할인 적용 기록을 함께 삭제 | P2 / 미착수. FIN-RETAIN-01 검토 중 발견, 코드 읽기로 확인. 운영 발생 여부 미확인 | FIN-RETAIN-01 설계 r10 결정: 프로모션 **하드 삭제 제거**(목록에서 빠지면 비활성화), 저장 단일 트랜잭션, FK `Cascade → Restrict`. FIN-RETAIN-01 Release 0에 포함 예정 |
 | LEDGER-EXPIRE-LOCK-01 | 크레딧 lot 만료가 계정 잠금 없이 전 계정을 한 트랜잭션에서 갱신 | P3 / 미착수. FIN-RETAIN-01 검토 중 Codex 지적, 코드 읽기로 확인. 경합 재현 안 함 | 만료 경계 시각의 예약과 겹치는 순서 재현 → 계정별 트랜잭션에서 `lockCreditAccount` 후 재조회 |
 | SEC-OPS-01 | Tomverse 전체 플랫폼의 정기 Commercial Grade 보안 점검 | 운영 필수 / 목록 등록, 기존 주간 자동화 일시중지 | 대상 자산·검증 기준·안전한 실행 범위를 정리하고 기존 자동화 보강·재개 여부 승인 |
 
@@ -1256,8 +1256,8 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 - 반증·한계: internal pass의 플랜 접근은 `effectivePlanForAccess()`가 읽을 때마다 기간을 판정하므로
   redemption이 지워져도 접근이 계속 열리지는 않습니다. 잃는 것은 할인 적용 증거, 만료 안내 메일
   대상, 계정당 1회 사용 기록입니다.
-- **다음 완료 단위**: redemption이 있는 프로모션 삭제를 어떤 write보다 먼저 409로 거절, 단일 트랜잭션,
-  FK `Restrict`. FIN-RETAIN-01 Release 0에 포함할 예정이므로 따로 착수하면 중복입니다.
+- **다음 완료 단위**: 하드 삭제를 비활성화로 대체(설계 r10에서 삭제 거절 방식은 checkout·지연 결제와의
+  경합이 반복돼 철회), 단일 트랜잭션, FK `Restrict`. FIN-RETAIN-01 Release 0에 포함할 예정이므로 따로 착수하면 중복입니다.
 
 **LEDGER-EXPIRE-LOCK-01 — 잠금 없는 lot 만료**
 
