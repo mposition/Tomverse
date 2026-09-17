@@ -33,8 +33,7 @@ import {
 // deploys it, and every deployed cron service against the table.
 //
 // Two kinds of test below. The first reads the Railway cron declarations
-// themselves -- .railway/scheduled-jobs.ts, which .railway/railway.ts deploys,
-// and while they still exist the legacy railway.*.json Config as Code files --
+// themselves -- .railway/scheduled-jobs.ts, which .railway/railway.ts deploys --
 // so the TypeScript catalogue cannot drift from the deployed schedule again
 // without going red. The second pins the timing decisions on a fixed clock,
 // including the exact boundaries the old values got wrong.
@@ -162,39 +161,17 @@ test("the IaC entry point stays a pass-through owning only the scheduled-jobs pa
   }
 });
 
-// Which legacy Config as Code file each Railway service reads, as found on
-// 2026-09-17 in every deployment's `meta.configFile`.
-const LEGACY_CONFIG_FILES = {
-  "railway.credit-reconciliation.json": "Credit Reconciliation",
-  "railway.provider-probe.json": "Provider Probe",
-  "railway.maintenance.json": "Maintenance Cron",
-  "railway.provider-model-catalog.json": "Provider Model Catalog",
-  "railway.provider-usage-sync.json": "Provider Usage Sync",
-};
-
-test("the legacy railway.*.json cron files, while they remain, agree with the IaC table", () => {
-  // Transitional. Railway keeps reading these Config as Code files until the
-  // Config File Path is cleared on each service, or 2026-12-01, whichever is
-  // first -- so during the switch the file is what runs and the table is what
-  // will run. They must say the same thing, file by file, or the cutover
-  // changes a schedule nobody reviewed. They go together or not at all: one
-  // deleted early would be a service reading a file that no longer exists.
-  const legacyFiles = readdirSync(process.cwd()).filter((entry) =>
-    /^railway\..+\.(json|toml)$/.test(entry)
+test("no Railway Config as Code file comes back", () => {
+  // The five railway.*.json cron files were removed on 2026-09-17, after both
+  // environments were applied from .railway/railway.ts and detached from them
+  // (docs/ops/railway-iac-scheduled-jobs.md). Railway stops reading Config as
+  // Code on 2026-12-01, and until then a file named here would be silently
+  // honoured by any service whose Config File Path still points at it -- a
+  // second source of truth for a schedule the IaC table already owns.
+  const configAsCode = readdirSync(process.cwd()).filter((entry) =>
+    /^railway(\..+)?\.(json|toml)$/.test(entry)
   );
-  if (legacyFiles.length === 0) return;
-  assert.deepEqual(
-    [...legacyFiles].sort(),
-    Object.keys(LEGACY_CONFIG_FILES).sort(),
-    "legacy Config as Code files must all remain until the cutover, then all go"
-  );
-  for (const [file, serviceName] of Object.entries(LEGACY_CONFIG_FILES)) {
-    const deploy = JSON.parse(readFileSync(join(process.cwd(), file), "utf8"))?.deploy ?? {};
-    const job = railwayCronService(serviceName);
-    assert.equal(deploy.startCommand, job.startCommand, `${file} vs ${serviceName} startCommand`);
-    assert.equal(deploy.cronSchedule, job.cronSchedule, `${file} vs ${serviceName} cronSchedule`);
-    assert.equal(deploy.restartPolicyType, "NEVER", `${file} restartPolicyType`);
-  }
+  assert.deepEqual(configAsCode, [], "declare cron services in .railway/scheduled-jobs.ts instead");
 });
 
 test("every job's silence budget outlasts one cycle of its own trigger", () => {

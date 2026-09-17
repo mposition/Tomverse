@@ -173,6 +173,9 @@ test("nothing in the repository runs the reconciliation by itself", () => {
     "Dockerfile",
     "railway.json",
     "railway.toml",
+    // Cron start commands live here since the move off Config as Code.
+    ".railway/scheduled-jobs.ts",
+    ".railway/railway.ts",
     "Procfile",
   ];
 

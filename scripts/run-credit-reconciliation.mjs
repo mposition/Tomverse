@@ -41,7 +41,7 @@ try {
  * answers -- a result, a 503 this script already treats as a deferral, or a
  * timeout from the server side -- instead of an abort this process chose.
  * The margin covers a cold start and the network. The cron fires every fifteen
- * minutes (`railway.credit-reconciliation.json`), so a run this long never
+ * minutes (`Credit Reconciliation` in .railway/scheduled-jobs.ts), so a run this long never
  * overlaps the next. `tests/cronClientTimeouts.test.mjs` fails if this ever
  * falls back under the route's limit.
  */
