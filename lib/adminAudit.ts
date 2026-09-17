@@ -38,6 +38,90 @@ type AuditInput = {
 
 const safeSummary = (value: string) => value.trim().slice(0, 500);
 
+/**
+ * One entry as it is about to be chained: every value already normalized, so
+ * the function below hashes and stores exactly what it is given.
+ */
+type AuditChainEntry = {
+  actorUserId: string | null;
+  actorEmail: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  summary: string;
+  metadata: Prisma.InputJsonValue | null | undefined;
+  ipAddress: string | null;
+  userAgent: string | null;
+};
+
+/**
+ * Appends one entry to the audit hash chain on `client`.
+ *
+ * The only place a row joins the chain. Every writer -- the administrator
+ * writer below and any system-actor writer -- goes through here, so the lock,
+ * the database clock, the previous-hash read and the HMAC input cannot drift
+ * apart between them (docs/policy/marketing-automation.md §6). The sequence is
+ * pinned by tests/server-contract/admin-audit-chain-writer.test.ts.
+ *
+ * `integritySecret` is resolved by the caller before any transaction opens,
+ * as it always was, so reading the environment is not part of the locked span.
+ */
+async function appendAuditChainEntry(
+  client: Prisma.TransactionClient,
+  entry: AuditChainEntry,
+  integritySecret: string | undefined
+): Promise<string> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
+  const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
+    SELECT clock_timestamp() AS "createdAt"
+  `;
+  const createdAt = timestampRows[0]?.createdAt || new Date();
+  const previous = integritySecret
+    ? await client.adminAuditLog.findFirst({
+        where: { entryHash: { not: null } },
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        select: { entryHash: true },
+      })
+    : null;
+  const previousHash = previous?.entryHash || null;
+  const entryHash = integritySecret
+    ? computeAdminAuditEntryHash(
+        {
+          previousHash,
+          actorUserId: entry.actorUserId,
+          actorEmail: entry.actorEmail,
+          action: entry.action,
+          targetType: entry.targetType,
+          targetId: entry.targetId,
+          summary: entry.summary,
+          metadata: entry.metadata || null,
+          ipAddress: entry.ipAddress,
+          userAgent: entry.userAgent,
+          createdAt: createdAt.toISOString(),
+        },
+        integritySecret
+      )
+    : null;
+  const created = await client.adminAuditLog.create({
+    select: { id: true },
+    data: {
+      actorUserId: entry.actorUserId,
+      actorEmail: entry.actorEmail,
+      action: entry.action,
+      targetType: entry.targetType,
+      targetId: entry.targetId,
+      summary: entry.summary,
+      metadata: entry.metadata || undefined,
+      ipAddress: entry.ipAddress,
+      userAgent: entry.userAgent,
+      previousHash,
+      entryHash,
+      createdAt,
+    },
+  });
+  return created.id;
+}
+
 export async function writeAdminAuditLog({
   session,
   request,
@@ -48,68 +132,23 @@ export async function writeAdminAuditLog({
   metadata,
   tx,
 }: AuditInput): Promise<string> {
-  const actorUserId = session.user?.id || null;
-  const actorEmail = session.user?.email || null;
-  const normalizedTargetId = targetId || null;
-  const normalizedSummary = safeSummary(summary);
-  const ipAddress = request ? getTrustedClientIp(request) : null;
-  const userAgent = request?.headers.get("user-agent")?.slice(0, 500) || null;
+  const entry: AuditChainEntry = {
+    actorUserId: session.user?.id || null,
+    actorEmail: session.user?.email || null,
+    action,
+    targetType,
+    targetId: targetId || null,
+    summary: safeSummary(summary),
+    metadata,
+    ipAddress: request ? getTrustedClientIp(request) : null,
+    userAgent: request?.headers.get("user-agent")?.slice(0, 500) || null,
+  };
   // The first key, never a historical one: `ADMIN_AUDIT_INTEGRITY_PREVIOUS_KEYS`
   // exists so old entries can still be *verified*, and signing a new entry with
   // a retired key would put fresh rows in a span that is on its way out.
   const integritySecret = adminAuditIntegrityKeys(process.env)[0];
-
-  const write = async (client: Prisma.TransactionClient) => {
-    await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))`;
-    const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
-      SELECT clock_timestamp() AS "createdAt"
-    `;
-    const createdAt = timestampRows[0]?.createdAt || new Date();
-    const previous = integritySecret
-      ? await client.adminAuditLog.findFirst({
-          where: { entryHash: { not: null } },
-          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-          select: { entryHash: true },
-        })
-      : null;
-    const previousHash = previous?.entryHash || null;
-    const entryHash = integritySecret
-      ? computeAdminAuditEntryHash(
-          {
-            previousHash,
-            actorUserId,
-            actorEmail,
-            action,
-            targetType,
-            targetId: normalizedTargetId,
-            summary: normalizedSummary,
-            metadata: metadata || null,
-            ipAddress,
-            userAgent,
-            createdAt: createdAt.toISOString(),
-          },
-          integritySecret
-        )
-      : null;
-    const created = await client.adminAuditLog.create({
-      select: { id: true },
-      data: {
-        actorUserId,
-        actorEmail,
-        action,
-        targetType,
-        targetId: normalizedTargetId,
-        summary: normalizedSummary,
-        metadata: metadata || undefined,
-        ipAddress,
-        userAgent,
-        previousHash,
-        entryHash,
-        createdAt,
-      },
-    });
-    return created.id;
-  };
+  const write = (client: Prisma.TransactionClient) =>
+    appendAuditChainEntry(client, entry, integritySecret);
 
   // The id is returned so a caller can name this entry as evidence in the same
   // transaction (docs/policy/email-product-news-redesign-draft.md, section 7.4).
