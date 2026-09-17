@@ -2250,4 +2250,99 @@ export const zh = {
             },
         },
     },
+    // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
+    helpGuide: {
+        menuItem: "查找操作方法",
+        title: "你想做什么？",
+        intro: "选择一项任务，查看在哪里完成。本指南只指路，不会读取你的对话或文件，也不会更改任何设置。",
+        back: "全部任务",
+        close: "关闭",
+        whereToGo: "前往",
+        opensInNewTab: "在新标签页中打开",
+        signInRequired: "登录后即可使用。",
+        signIn: "登录",
+        unavailable: "目前不可用。",
+        stepUnavailable: "目前不可用",
+        stepsTitle: "步骤",
+        intents: {
+            importedConversations: {
+                label: "导入其他 AI 的对话",
+                guide: "导入你从其他 AI 服务导出的对话，然后在这里继续其中一个对话。",
+            },
+            manageMemory: {
+                label: "查看或删除记忆内容",
+                guide: "在记忆设置中查看账户记住的内容，并可更正或删除。",
+            },
+            chooseModels: {
+                label: "选择或比较 AI 模型",
+                guide: "专注回答选择一个模型，并排比较最多选择三个模型。",
+            },
+            aiReview: {
+                label: "用 AI Review 交叉核对回答",
+                guide: "两到三个回答完成后，打开 AI Review，确认预计积分后运行。",
+            },
+            attachFiles: {
+                label: "附加文件或 Google Drive",
+                guide: "在输入框中为问题添加文件或 Google Drive 文档。",
+            },
+            projects: {
+                label: "把对话归入项目",
+                guide: "先创建项目，再从每个对话的菜单中移入。",
+            },
+            lockOrShare: {
+                label: "锁定或分享对话",
+                guide: "用密码锁定已保存的对话，或分享有范围限制的只读快照。",
+            },
+            creditsAndPlan: {
+                label: "了解积分和方案",
+                guide: "了解积分如何使用，查看你的方案或比较方案。",
+            },
+            billingAndRefund: {
+                label: "退款和账单",
+                guide: "阅读退款政策，并找到管理方案和账单的位置。",
+            },
+            emailNotifications: {
+                label: "选择接收哪些邮件",
+                guide: "在邮件设置中选择账户接收哪些邮件。",
+            },
+            exportOrDeleteAccountData: {
+                label: "下载数据或删除账户",
+                guide: "在账户数据设置中下载你的数据或删除账户。",
+            },
+            reportAProblem: {
+                label: "报告问题",
+                guide: "先以最小范围重试一次，然后报告发生了什么。",
+            },
+        },
+        steps: {
+            import: "导入对话",
+            continue: "继续已导入的对话",
+        },
+        destinations: {
+            settingsSection: {
+                externalImport: "打开对话导入",
+                memory: "打开记忆设置",
+                emailNotifications: "打开邮件设置",
+                accountData: "打开账户数据设置",
+            },
+            settingsTab: {
+                plan: "打开方案和账单",
+            },
+            guideSection: {
+                modelsAndPanels: "阅读：AI 模型和回答面板",
+                aiReview: "阅读：使用 AI Review",
+                filesAndDrive: "阅读：文件和 Google Drive",
+                projects: "阅读：使用项目",
+                lockAndShare: "阅读：锁定与分享",
+                creditsAndPlans: "阅读：积分和方案",
+                troubleshooting: "阅读：故障排除",
+            },
+            publicRoute: {
+                pricing: "比较方案",
+                refund: "阅读退款政策",
+                helpCentre: "打开帮助中心",
+            },
+            feedback: "填写报告",
+        },
+    },
 } satisfies typeof en;
