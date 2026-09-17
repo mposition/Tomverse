@@ -114,32 +114,34 @@ const report = runs.map((run) => {
   return { arm: run.arm ?? null, model: run.model ?? null, aggregates, items: scores };
 });
 
+// Written and left to exit on its own: process.exit() right after a large
+// write to a pipe can end the process before stdout has been flushed.
 if (json) {
   console.log(JSON.stringify({ corpus: corpus.version, pipelineCheck, runs: report }, null, 2));
-  process.exit(0);
-}
+} else {
 
-const share = (found, total) => (total === 0 ? "n/a" : `${found}/${total}`);
-const errorRate = (value) =>
-  value.rate === null ? "n/a" : `${(value.rate * 100).toFixed(1)}% (${value.errors}/${value.units})`;
-console.log(`Voice mix evaluation -- ${corpus.version}`);
-if (pipelineCheck) console.log("PIPELINE CHECK: dev items, no manifest. Not evidence of recognition quality.");
-console.log("Each line is its own measure; none of them is a combined recognition rate.");
-for (const run of report) {
-  console.log(`\narm ${run.arm ?? "?"}, model ${run.model ?? "?"}`);
-  for (const aggregate of run.aggregates) {
-    console.log(`  ${aggregate.split} / ${aggregate.stratum} (${aggregate.transcripts} transcripts, ${aggregate.scoringVersion})`);
-    console.log(`    Korean character error rate  ${errorRate(aggregate.koreanCharErrorRate)}`);
-    console.log(`    English word error rate      ${errorRate(aggregate.englishWordErrorRate)}`);
-    console.log(`    key terms kept               ${share(aggregate.keyTerms.found, aggregate.keyTerms.total)}`);
-    console.log(`    meaning kept                 ${share(aggregate.meaning.found, aggregate.meaning.total)}`);
-    console.log(`    number order kept            ${share(aggregate.numberOrder.kept, aggregate.numberOrder.total)}`);
-    console.log(
-      `    omitted segments             ko ${share(aggregate.omittedSegments.ko.omitted, aggregate.omittedSegments.ko.total)}, en ${share(aggregate.omittedSegments.en.omitted, aggregate.omittedSegments.en.total)}`
-    );
-    console.log(
-      `    likely translated            ${aggregate.likelyTranslated.segments} of ${aggregate.likelyTranslated.omittedEnglishSegments} omitted English segments (${aggregate.likelyTranslated.transliterated} were accepted transliterations)`
-    );
-    console.log(`    hint terms inserted          ${aggregate.hintInsertion.terms} in ${aggregate.hintInsertion.transcripts} transcripts`);
+  const share = (found, total) => (total === 0 ? "n/a" : `${found}/${total}`);
+  const errorRate = (value) =>
+    value.rate === null ? "n/a" : `${(value.rate * 100).toFixed(1)}% (${value.errors}/${value.units})`;
+  console.log(`Voice mix evaluation -- ${corpus.version}`);
+  if (pipelineCheck) console.log("PIPELINE CHECK: dev items, no manifest. Not evidence of recognition quality.");
+  console.log("Each line is its own measure; none of them is a combined recognition rate.");
+  for (const run of report) {
+    console.log(`\narm ${run.arm ?? "?"}, model ${run.model ?? "?"}`);
+    for (const aggregate of run.aggregates) {
+      console.log(`  ${aggregate.split} / ${aggregate.stratum} (${aggregate.transcripts} transcripts, ${aggregate.scoringVersion})`);
+      console.log(`    Korean character error rate  ${errorRate(aggregate.koreanCharErrorRate)}`);
+      console.log(`    English word error rate      ${errorRate(aggregate.englishWordErrorRate)}`);
+      console.log(`    key terms kept               ${share(aggregate.keyTerms.found, aggregate.keyTerms.total)}`);
+      console.log(`    meaning kept                 ${share(aggregate.meaning.found, aggregate.meaning.total)}`);
+      console.log(`    number order kept            ${share(aggregate.numberOrder.kept, aggregate.numberOrder.total)}`);
+      console.log(
+        `    omitted segments             ko ${share(aggregate.omittedSegments.ko.omitted, aggregate.omittedSegments.ko.total)}, en ${share(aggregate.omittedSegments.en.omitted, aggregate.omittedSegments.en.total)}`
+      );
+      console.log(
+        `    likely translated            ${aggregate.likelyTranslated.segments} of ${aggregate.likelyTranslated.omittedEnglishSegments} omitted English segments (${aggregate.likelyTranslated.transliterated} were accepted transliterations)`
+      );
+      console.log(`    hint terms inserted          ${aggregate.hintInsertion.terms} in ${aggregate.hintInsertion.transcripts} transcripts`);
+    }
   }
 }
