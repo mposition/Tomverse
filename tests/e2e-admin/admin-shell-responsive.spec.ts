@@ -240,6 +240,30 @@ test.describe("admin console on a narrow viewport", () => {
     }
   });
 
+  test("the usage report does not push the page sideways", async ({
+    page,
+  }) => {
+    // The report carries a 25-column heatmap, a wide model table and a
+    // screen-reader copy of the trend chart. The first two scroll inside their
+    // own boxes; the third once widened the whole document at phone widths.
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 844 });
+      for (const period of ["today", "last30"]) {
+        await page.goto(`/admin/analytics?tab=usage&period=${period}`);
+        await expect(page.getByTestId("admin-usage-analytics")).toBeVisible();
+
+        const overflow = await page.evaluate(() => ({
+          viewport: document.documentElement.clientWidth,
+          content: document.documentElement.scrollWidth,
+        }));
+        expect(
+          overflow.content,
+          `horizontal overflow on the usage tab (${period}) at ${width}px`
+        ).toBeLessThanOrEqual(overflow.viewport + 1);
+      }
+    }
+  });
+
   test("a consolidated page's tab strip is reachable and does not overflow", async ({
     page,
   }) => {

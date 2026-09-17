@@ -369,28 +369,33 @@ function TrendChart({
         <span>{days.length ? f.day(days[days.length - 1].day) : ""}</span>
       </figcaption>
       {/* The bars' <title>s are not reachable by a screen reader; the same
-          numbers are here as a table. */}
-      <table className="sr-only">
-        <caption>{m.trendTableCaption}</caption>
-        <thead>
-          <tr>
-            <th scope="col">{m.trendColumns.day}</th>
-            <th scope="col">{m.trendColumns.accounts}</th>
-            <th scope="col">{m.trendColumns.guests}</th>
-            <th scope="col">{m.trendColumns.messages}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {days.map((day) => (
-            <tr key={day.day}>
-              <th scope="row">{f.day(day.day)}</th>
-              <td>{f.count(day.accounts)}</td>
-              <td>{f.count(day.guests)}</td>
-              <td>{f.count(day.messages)}</td>
+          numbers are here as a table. The table sits inside an sr-only div
+          rather than carrying the class itself: width and overflow do not
+          shrink a table box, so an sr-only table keeps its full invisible
+          width and pushes the whole page into horizontal scroll on a phone. */}
+      <div className="sr-only">
+        <table>
+          <caption>{m.trendTableCaption}</caption>
+          <thead>
+            <tr>
+              <th scope="col">{m.trendColumns.day}</th>
+              <th scope="col">{m.trendColumns.accounts}</th>
+              <th scope="col">{m.trendColumns.guests}</th>
+              <th scope="col">{m.trendColumns.messages}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {days.map((day) => (
+              <tr key={day.day}>
+                <th scope="row">{f.day(day.day)}</th>
+                <td>{f.count(day.accounts)}</td>
+                <td>{f.count(day.guests)}</td>
+                <td>{f.count(day.messages)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }
