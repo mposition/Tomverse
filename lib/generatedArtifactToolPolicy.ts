@@ -135,6 +135,15 @@ export type ArtifactToolPlanInput = {
   /** "chat" conversations only; the image workspace has its own domain. */
   conversationKind: "chat" | "image";
   /**
+   * Whether Auto chose `modelId` for this turn rather than the user.
+   *
+   * CHAT-ART-01. Only the wording of the unverified-model notice reads it:
+   * telling someone who let Auto choose to "choose a different model" names
+   * a choice they did not make. What Auto may choose is the Router's
+   * decision, not this plan's.
+   */
+  autoRouted?: boolean;
+  /**
    * The files the user attached to the turn being answered, in order.
    *
    * Handles only -- `att_1`, `att_2` -- plus the name and media type the card
@@ -294,7 +303,7 @@ const SIGN_IN_PROMPT = [
   "asked for.",
 ].join("\n");
 
-const offPrompt = (reason: ArtifactToolOffReason): string => {
+const offPrompt = (reason: ArtifactToolOffReason, autoRouted = false): string => {
   const why =
     reason === "native_search_conflict"
       ? "because web search is active for this turn"
@@ -312,7 +321,9 @@ const offPrompt = (reason: ArtifactToolOffReason): string => {
     reason === "native_search_conflict"
       ? "(turning web search off for this question)."
       : reason === "model_unverified"
-        ? "(choosing a different model)."
+        ? autoRouted
+          ? "(choosing a model for this request themselves instead of Auto, one that can create files)."
+          : "(choosing a different model)."
         : "(starting the request again from a saved conversation).",
     "",
     "Do not write a file path, a download link, base64, or code that claims to",
@@ -419,7 +430,7 @@ export const planGeneratedArtifactTool = (
       offReason: "model_unverified",
       registerTool: false,
       registerDocumentBatch: false,
-      systemPrompt: offPrompt("model_unverified"),
+      systemPrompt: offPrompt("model_unverified", input.autoRouted === true),
     };
   }
 
