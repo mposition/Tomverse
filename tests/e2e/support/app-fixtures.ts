@@ -1596,13 +1596,31 @@ export async function openRecentConversation(
   if (!(await disclosure.count()) && !(await cards.count())) {
     // Open the list the way a person would, then put the rail back so the
     // rest of the spec measures the layout it asked for.
+    //
+    // "Back" is the preference the page started with, not a click on the
+    // collapse button. Expanding and collapsing are both explicit, sticky
+    // choices (components/chat/useSidebarCollapse.ts), so clicking collapse
+    // turned an "auto" window into a "collapsed" one: a spec that then opened
+    // a one-model conversation found the rail still shut and read it as the
+    // layout's decision. This path became the common one when the desktop
+    // welcome screen stopped listing recent conversations
+    // (docs/ui-contracts/chat-starter-catalog.md section 6).
+    const startingPreference = await page.evaluate(() =>
+      localStorage.getItem("tomverse_sidebar_collapsed_v1")
+    );
     await expandSidebar.click();
     const card = options.title
       ? cards.filter({ hasText: options.title })
       : cards.first();
     await card.click();
-    await page.getByTestId("sidebar-collapse-button").click();
-    await expect(expandSidebar).toBeVisible();
+    await page.evaluate((stored) => {
+      if (stored === null) {
+        localStorage.removeItem("tomverse_sidebar_collapsed_v1");
+      } else {
+        localStorage.setItem("tomverse_sidebar_collapsed_v1", stored);
+      }
+      window.dispatchEvent(new Event("tomverse-sidebar-collapsed-change"));
+    }, startingPreference);
     return;
   }
 
