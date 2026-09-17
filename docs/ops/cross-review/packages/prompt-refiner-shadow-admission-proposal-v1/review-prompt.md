@@ -1,4 +1,4 @@
-# Independent review — task prompt-refiner-shadow-admission-proposal-v1, round 0
+# Independent review — task prompt-refiner-shadow-admission-proposal-v1, round 1
 
 Review the change against the original requirement below. Read the requirement and the diff before anything else.
 Do not take the author's summary as a description of what the change does; the diff is.
@@ -22,14 +22,14 @@ Prompt Refiner의 provider-free shadow harness가 남긴 동결 합성 evidence 
 - focused admission 14/14, provider-free shadow 24/24, 기존 Prompt Refiner·injection 59/59, PLANNER-03 report, 전체 typecheck, lint, 문서·정책 참조, strict encoding, data-domain registry와 diff whitespace 검사가 모두 통과한다.
 - Claude reviewer는 요구사항과 실제 diff를 먼저 읽고 검사 기록과 작성자 설명을 뒤에 읽는다. verdict는 package digest를 정확히 명시하고 finding마다 location·severity·basis·재현 절차를 제공한다. Claude 호출 전에는 사용자에게 독립 검토 필요성을 알리고 승인된 skip-preflight 예외만 사용하며 Anthropic API key나 provider 호출로 전환하지 않는다.
 
-## Change under review — digest sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c, commit 7b9117a6fc726f4a84bd015c583b1d28deee71ee
+## Change under review — digest sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd, commit 721339e67db9569e8592fc580572cdd294c645b7
 
 ```diff
 diff --git a/.gitattributes b/.gitattributes
-index c1382d94..30a18e2f 100644
+index c1382d94..f7a24bb7 100644
 --- a/.gitattributes
 +++ b/.gitattributes
-@@ -66,3 +66,13 @@ lib/promptInjectionAudit.ts text eol=lf
+@@ -66,3 +66,18 @@ lib/promptInjectionAudit.ts text eol=lf
  lib/promptRefinerSuggestion.ts text eol=lf
  lib/routerDevelopmentBenchmark.ts text eol=lf
  scripts/prompt-refiner-shadow-harness.mjs text eol=lf
@@ -43,6 +43,11 @@ index c1382d94..30a18e2f 100644
 +/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json text eol=lf
 +/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl text eol=lf
 +/docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl text eol=lf
++
++# Admission proposal implementation paths are pinned narrowly for reproducible
++# review bytes without changing the rest of lib/, tests/, or nested docs.
++/lib/promptRefinerShadowAdmissionCore.ts text eol=lf
++/tests/promptRefinerShadowAdmissionCore.test.mjs text eol=lf
 diff --git a/AGENTS.md b/AGENTS.md
 index 37ea64df..9fc67052 100644
 --- a/AGENTS.md
@@ -459,10 +464,10 @@ index fe644dcd..da7a6399 100644
 +유지한다.
 diff --git a/lib/promptRefinerShadowAdmissionCore.ts b/lib/promptRefinerShadowAdmissionCore.ts
 new file mode 100644
-index 00000000..f24d6251
+index 00000000..3a9eafa1
 --- /dev/null
 +++ b/lib/promptRefinerShadowAdmissionCore.ts
-@@ -0,0 +1,670 @@
+@@ -0,0 +1,776 @@
 +/**
 + * Pure, provider-free admission-readiness verifier.
 + *
@@ -503,6 +508,44 @@ index 00000000..f24d6251
 +    strictBenchmarkObject,
 +} from "./routerDevelopmentBenchmark";
 +
++// Security boundary: these primordials are captured at module initialization.
++// Runtime callers may supply hostile evidence and may later replace ambient
++// globals, but application bootstrap must load this module before modifying
++// JavaScript intrinsics. Imported strict parsers share that bootstrap boundary.
++const INTRINSIC_OBJECT_FREEZE = Object.freeze;
++const INTRINSIC_OBJECT_DEFINE_PROPERTY = Object.defineProperty;
++const INTRINSIC_REFLECT_APPLY = Reflect.apply;
++const INTRINSIC_ARRAY_IS_ARRAY = Array.isArray;
++const INTRINSIC_NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
++const INTRINSIC_UINT8_ARRAY = Uint8Array;
++const INTRINSIC_UINT8_ARRAY_SET = Uint8Array.prototype.set;
++const INTRINSIC_TEXT_DECODER = TextDecoder;
++const INTRINSIC_TEXT_DECODER_DECODE = TextDecoder.prototype.decode;
++const TYPED_ARRAY_PROTOTYPE = Object.getPrototypeOf(Uint8Array.prototype);
++const RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
++    TYPED_ARRAY_PROTOTYPE,
++    "byteLength"
++)?.get;
++const RAW_TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(
++    TYPED_ARRAY_PROTOTYPE,
++    Symbol.toStringTag
++)?.get;
++const HASH_PROTOTYPE = Object.getPrototypeOf(createHash("sha256"));
++const INTRINSIC_HASH_UPDATE = HASH_PROTOTYPE.update;
++const INTRINSIC_HASH_DIGEST = HASH_PROTOTYPE.digest;
++
++if (
++    typeof RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER !== "function" ||
++    typeof RAW_TYPED_ARRAY_TAG_GETTER !== "function" ||
++    typeof INTRINSIC_HASH_UPDATE !== "function" ||
++    typeof INTRINSIC_HASH_DIGEST !== "function"
++) {
++    throw new Error("prompt_refiner_shadow_admission_intrinsic_unavailable");
++}
++const TYPED_ARRAY_BYTE_LENGTH_GETTER =
++    RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER as () => number;
++const TYPED_ARRAY_TAG_GETTER = RAW_TYPED_ARRAY_TAG_GETTER as () => string;
++
 +export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_VERSION =
 +    "prompt-refiner-shadow-admission-evidence-v1" as const;
 +export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION =
@@ -520,13 +563,20 @@ index 00000000..f24d6251
 +export const PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST =
 +    "sha256:75198565b0bcc1e481c89c6ac8946d11793d28b7afbd96e18d36a03a27f06cc2" as const;
 +
-+export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES = Object.freeze([
++const INTERNAL_ADMISSION_EVIDENCE_FILES = INTRINSIC_OBJECT_FREEZE([
 +    "admission-readiness-v1.report.json",
 +    "admission-readiness-v1.journal.jsonl",
 +    "admission-readiness-v1.journal.jsonl.witness.jsonl",
 +] as const);
 +
-+export const PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS = Object.freeze([
++export const PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES =
++    INTRINSIC_OBJECT_FREEZE([
++        INTERNAL_ADMISSION_EVIDENCE_FILES[0],
++        INTERNAL_ADMISSION_EVIDENCE_FILES[1],
++        INTERNAL_ADMISSION_EVIDENCE_FILES[2],
++    ] as const);
++
++const INTERNAL_STAGE_ACKNOWLEDGEMENTS = INTRINSIC_OBJECT_FREEZE([
 +    "synthetic_structural_prerequisite_only",
 +    "not_model_quality_evidence",
 +    "not_paid_shadow_approval",
@@ -538,21 +588,22 @@ index 00000000..f24d6251
 +    "runtime_source_revalidation_required",
 +] as const);
 +
++export const PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS =
++    INTRINSIC_OBJECT_FREEZE([
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[0],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[1],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[2],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[3],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[4],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[5],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[6],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[7],
++        INTERNAL_STAGE_ACKNOWLEDGEMENTS[8],
++    ] as const);
++
 +const MANIFEST_MAX_BYTES = 64 * 1024;
 +const REPORT_MAX_BYTES = 64 * 1024;
 +const CORPUS_MAX_BYTES = 1024 * 1024;
-+const TYPED_ARRAY_BYTE_LENGTH_GETTER = (() => {
-+    const typedArrayPrototype = Object.getPrototypeOf(Uint8Array.prototype);
-+    const getter = Object.getOwnPropertyDescriptor(
-+        typedArrayPrototype,
-+        "byteLength"
-+    )?.get;
-+    if (typeof getter !== "function") {
-+        throw new Error("typed_array_byte_length_intrinsic_unavailable");
-+    }
-+    return getter;
-+})();
-+
 +type EvidenceBytes = Uint8Array;
 +
 +declare const preboundedEvidenceInput: unique symbol;
@@ -595,57 +646,50 @@ index 00000000..f24d6251
 +};
 +
 +export type PromptRefinerShadowStageProposal = {
-+    schemaVersion: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION;
-+    status: "awaiting_explicit_admin_cost_approval";
-+    executionAdmitted: false;
-+    currentCheckoutValidated: false;
-+    runtimeSourceRevalidationRequired: true;
-+    evidenceBundleDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST;
-+    proposalDigest: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST;
-+    provenance: {
++    readonly schemaVersion: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_VERSION;
++    readonly status: "awaiting_explicit_admin_cost_approval";
++    readonly executionAdmitted: false;
++    readonly currentCheckoutValidated: false;
++    readonly runtimeSourceRevalidationRequired: true;
++    readonly evidenceBundleDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_BUNDLE_DIGEST;
++    readonly proposalDigest: typeof PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST;
++    readonly provenance: Readonly<{
 +        sourceRef: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_REF;
 +        sourceIdentityDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_SOURCE_IDENTITY_DIGEST;
 +        corpusDigest: typeof PROMPT_REFINER_SHADOW_ADMISSION_CORPUS_DIGEST;
 +        harnessVersion: typeof PROMPT_REFINER_SHADOW_HARNESS_VERSION;
 +        journalSchemaVersion: typeof PROMPT_REFINER_SHADOW_JOURNAL_VERSION;
-+    };
-+    reservationStage: {
++    }>;
++    readonly reservationStage: Readonly<{
 +        stageId: typeof PROMPT_REFINER_RESERVATION_STAGE_ID;
 +        contractDigest: typeof PROMPT_REFINER_RESERVATION_CONTRACT_DIGEST;
 +        perRequestCostMicroUsd: typeof PROMPT_REFINER_PER_REQUEST_COST_CEILING_MICRO_USD;
 +        maxReservations: typeof PROMPT_REFINER_SHADOW_MAX_DISPATCHES;
 +        costCeilingMicroUsd: typeof PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD;
 +        reservationTtlMs: typeof PROMPT_REFINER_RESERVATION_TTL_MS;
-+    };
-+    acknowledgements: readonly (typeof PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS)[number][];
++    }>;
++    readonly acknowledgements: readonly (typeof PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS)[number][];
 +};
 +
 +function fail(code: string): never {
 +    throw new Error(`prompt_refiner_shadow_admission_${code}`);
 +}
 +
-+function assertEvidenceByteBound(
-+    bytes: unknown,
-+    maximum: number,
-+    where: string
-+): asserts bytes is EvidenceBytes {
-+    if (
-+        actualEvidenceByteLength(bytes, where) > maximum
-+    ) {
-+        fail(`${where}_byte_limit`);
-+    }
-+}
-+
 +function actualEvidenceByteLength(bytes: unknown, where: string): number {
 +    try {
-+        const byteLength = Reflect.apply(
++        const byteLength = INTRINSIC_REFLECT_APPLY(
 +            TYPED_ARRAY_BYTE_LENGTH_GETTER,
 +            bytes,
 +            []
 +        );
++        const tag = INTRINSIC_REFLECT_APPLY(
++            TYPED_ARRAY_TAG_GETTER,
++            bytes,
++            []
++        );
 +        if (
-+            !(bytes instanceof Uint8Array) ||
-+            !Number.isSafeInteger(byteLength) ||
++            tag !== "Uint8Array" ||
++            !INTRINSIC_NUMBER_IS_SAFE_INTEGER(byteLength) ||
 +            byteLength < 0
 +        ) {
 +            return fail(`${where}_byte_limit`);
@@ -656,13 +700,29 @@ index 00000000..f24d6251
 +    }
 +}
 +
-+function captureEvidenceProperty(
++function snapshotEvidenceProperty(
 +    input: PromptRefinerShadowAdmissionEvidenceInput,
 +    property: keyof PromptRefinerShadowAdmissionEvidenceInput,
++    maximum: number,
 +    where: string
-+): unknown {
++): EvidenceBytes {
++    let original: unknown;
 +    try {
-+        return input[property];
++        original = input[property];
++    } catch {
++        return fail(`${where}_byte_limit`);
++    }
++    const byteLength = actualEvidenceByteLength(original, where);
++    if (byteLength > maximum) fail(`${where}_byte_limit`);
++    try {
++        const snapshot = new INTRINSIC_UINT8_ARRAY(byteLength);
++        INTRINSIC_REFLECT_APPLY(INTRINSIC_UINT8_ARRAY_SET, snapshot, [
++            original,
++        ]);
++        if (actualEvidenceByteLength(snapshot, where) !== byteLength) {
++            return fail(`${where}_byte_limit`);
++        }
++        return snapshot;
 +    } catch {
 +        return fail(`${where}_byte_limit`);
 +    }
@@ -671,37 +731,36 @@ index 00000000..f24d6251
 +function preboundEvidenceInput(
 +    input: PromptRefinerShadowAdmissionEvidenceInput
 +): PreboundedAdmissionEvidenceInput {
-+    const manifestBytes = captureEvidenceProperty(
++    const manifestBytes = snapshotEvidenceProperty(
 +        input,
 +        "manifestBytes",
++        MANIFEST_MAX_BYTES,
 +        "manifest"
 +    );
-+    const reportBytes = captureEvidenceProperty(input, "reportBytes", "report");
-+    const journalBytes = captureEvidenceProperty(
++    const reportBytes = snapshotEvidenceProperty(
++        input,
++        "reportBytes",
++        REPORT_MAX_BYTES,
++        "report"
++    );
++    const journalBytes = snapshotEvidenceProperty(
 +        input,
 +        "journalBytes",
++        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
 +        "journal"
 +    );
-+    const witnessBytes = captureEvidenceProperty(
++    const witnessBytes = snapshotEvidenceProperty(
 +        input,
 +        "witnessBytes",
-+        "witness"
-+    );
-+    const corpusBytes = captureEvidenceProperty(input, "corpusBytes", "corpus");
-+
-+    assertEvidenceByteBound(manifestBytes, MANIFEST_MAX_BYTES, "manifest");
-+    assertEvidenceByteBound(reportBytes, REPORT_MAX_BYTES, "report");
-+    assertEvidenceByteBound(
-+        journalBytes,
-+        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
-+        "journal"
-+    );
-+    assertEvidenceByteBound(
-+        witnessBytes,
 +        PROMPT_REFINER_SHADOW_JOURNAL_MAX_BYTES,
 +        "witness"
 +    );
-+    assertEvidenceByteBound(corpusBytes, CORPUS_MAX_BYTES, "corpus");
++    const corpusBytes = snapshotEvidenceProperty(
++        input,
++        "corpusBytes",
++        CORPUS_MAX_BYTES,
++        "corpus"
++    );
 +    return {
 +        manifestBytes,
 +        reportBytes,
@@ -712,7 +771,9 @@ index 00000000..f24d6251
 +}
 +
 +function sha256(bytes: Uint8Array | string): string {
-+    return createHash("sha256").update(bytes).digest("hex");
++    const hash = createHash("sha256");
++    INTRINSIC_REFLECT_APPLY(INTRINSIC_HASH_UPDATE, hash, [bytes]);
++    return INTRINSIC_REFLECT_APPLY(INTRINSIC_HASH_DIGEST, hash, ["hex"]);
 +}
 +
 +function decodeJson(bytes: EvidenceBytes, maximum: number, where: string) {
@@ -730,7 +791,12 @@ index 00000000..f24d6251
 +    }
 +    let text: string;
 +    try {
-+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
++        const decoder = new INTRINSIC_TEXT_DECODER("utf-8", { fatal: true });
++        text = INTRINSIC_REFLECT_APPLY(
++            INTRINSIC_TEXT_DECODER_DECODE,
++            decoder,
++            [bytes]
++        );
 +    } catch {
 +        return fail(`${where}_utf8`);
 +    }
@@ -759,7 +825,12 @@ index 00000000..f24d6251
 +    }
 +    let text: string;
 +    try {
-+        text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
++        const decoder = new INTRINSIC_TEXT_DECODER("utf-8", { fatal: true });
++        text = INTRINSIC_REFLECT_APPLY(
++            INTRINSIC_TEXT_DECODER_DECODE,
++            decoder,
++            [bytes]
++        );
 +    } catch {
 +        return fail(`${where}_utf8`);
 +    }
@@ -799,7 +870,7 @@ index 00000000..f24d6251
 +        ["name", "sizeBytes", "sha256"],
 +        `admission_evidence_file_${index}`
 +    );
-+    const name = PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES[index];
++    const name = INTERNAL_ADMISSION_EVIDENCE_FILES[index];
 +    if (candidate.name !== name) fail("evidence_file_name_or_order");
 +    return {
 +        name,
@@ -841,9 +912,9 @@ index 00000000..f24d6251
 +        !/^[a-f0-9]{64}$/.test(candidate.sourceIdentityDigest) ||
 +        typeof candidate.corpusDigest !== "string" ||
 +        !/^[a-f0-9]{64}$/.test(candidate.corpusDigest) ||
-+        !Array.isArray(candidate.files) ||
++        !INTRINSIC_ARRAY_IS_ARRAY(candidate.files) ||
 +        candidate.files.length !==
-+            PROMPT_REFINER_SHADOW_ADMISSION_EVIDENCE_FILES.length ||
++            INTERNAL_ADMISSION_EVIDENCE_FILES.length ||
 +        typeof candidate.bundleDigest !== "string" ||
 +        !/^sha256:[a-f0-9]{64}$/.test(candidate.bundleDigest)
 +    ) {
@@ -856,7 +927,11 @@ index 00000000..f24d6251
 +        sourceRef: candidate.sourceRef,
 +        sourceIdentityDigest: candidate.sourceIdentityDigest,
 +        corpusDigest: candidate.corpusDigest,
-+        files: candidate.files.map(evidenceFile),
++        files: [
++            evidenceFile(candidate.files[0], 0),
++            evidenceFile(candidate.files[1], 1),
++            evidenceFile(candidate.files[2], 2),
++        ],
 +        journalTerminal: terminalHead(
 +            candidate.journalTerminal,
 +            "journal_terminal"
@@ -896,7 +971,12 @@ index 00000000..f24d6251
 +        { bytes: input.journalBytes, where: "journal" },
 +        { bytes: input.witnessBytes, where: "witness" },
 +    ];
-+    manifest.files.forEach((file, index) => {
++    for (
++        let index = 0;
++        index < INTERNAL_ADMISSION_EVIDENCE_FILES.length;
++        index += 1
++    ) {
++        const file = manifest.files[index];
 +        const { bytes, where } = artifacts[index];
 +        if (
 +            actualEvidenceByteLength(bytes, where) !== file.sizeBytes ||
@@ -904,7 +984,7 @@ index 00000000..f24d6251
 +        ) {
 +            fail("artifact_digest_or_size");
 +        }
-+    });
++    }
 +}
 +
 +function sourceFiles(value: unknown): Record<string, string> {
@@ -913,12 +993,19 @@ index 00000000..f24d6251
 +        PROMPT_REFINER_SHADOW_SOURCE_PATHS,
 +        "report_source_files"
 +    );
-+    return Object.fromEntries(
-+        PROMPT_REFINER_SHADOW_SOURCE_PATHS.map((path) => [
-+            path,
-+            exactDigest(candidate[path], `report_source_file_${path}`),
-+        ])
-+    );
++    const files: Record<string, string> = {};
++    for (
++        let index = 0;
++        index < PROMPT_REFINER_SHADOW_SOURCE_PATHS.length;
++        index += 1
++    ) {
++        const path = PROMPT_REFINER_SHADOW_SOURCE_PATHS[index];
++        files[path] = exactDigest(
++            candidate[path],
++            `report_source_file_${path}`
++        );
++    }
++    return files;
 +}
 +
 +function validateReport(
@@ -1021,7 +1108,7 @@ index 00000000..f24d6251
 +    }
 +}
 +
-+function unsignedProposal(): Omit<
++function trustedUnsignedProposal(): Omit<
 +    PromptRefinerShadowStageProposal,
 +    "proposalDigest"
 +> {
@@ -1050,8 +1137,35 @@ index 00000000..f24d6251
 +            costCeilingMicroUsd: PROMPT_REFINER_STAGE_COST_CEILING_MICRO_USD,
 +            reservationTtlMs: PROMPT_REFINER_RESERVATION_TTL_MS,
 +        },
-+        acknowledgements: PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
++        acknowledgements: [
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[0],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[1],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[2],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[3],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[4],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[5],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[6],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[7],
++            INTERNAL_STAGE_ACKNOWLEDGEMENTS[8],
++        ],
 +    };
++}
++
++function freezeTrustedProposal(
++    proposal: Omit<PromptRefinerShadowStageProposal, "proposalDigest">
++): PromptRefinerShadowStageProposal {
++    INTRINSIC_OBJECT_DEFINE_PROPERTY(proposal, "proposalDigest", {
++        value: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
++        enumerable: true,
++        configurable: false,
++        writable: false,
++    });
++    INTRINSIC_OBJECT_FREEZE(proposal.provenance);
++    INTRINSIC_OBJECT_FREEZE(proposal.reservationStage);
++    INTRINSIC_OBJECT_FREEZE(proposal.acknowledgements);
++    return INTRINSIC_OBJECT_FREEZE(
++        proposal
++    ) as PromptRefinerShadowStageProposal;
 +}
 +
 +/**
@@ -1093,7 +1207,7 @@ index 00000000..f24d6251
 +            identityDigest: manifest.sourceIdentityDigest,
 +        },
 +    });
-+    const terminal = replay.entries.at(-1);
++    const terminal = replay.entries[replay.entries.length - 1];
 +    if (
 +        replay.status !== "completed" ||
 +        replay.resumable !== false ||
@@ -1121,24 +1235,21 @@ index 00000000..f24d6251
 +    }
 +    assertPinnedEvidence(manifest, rawSha256);
 +
-+    const proposal = unsignedProposal();
++    const proposal = trustedUnsignedProposal();
 +    const proposalDigest = `sha256:${sha256(
 +        canonicalBenchmarkJson(proposal)
 +    )}`;
 +    if (proposalDigest !== PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST) {
 +        fail("proposal_digest_drift");
 +    }
-+    return {
-+        ...proposal,
-+        proposalDigest: PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST,
-+    };
++    return freezeTrustedProposal(proposal);
 +}
 diff --git a/tests/promptRefinerShadowAdmissionCore.test.mjs b/tests/promptRefinerShadowAdmissionCore.test.mjs
 new file mode 100644
-index 00000000..bb441167
+index 00000000..d1b23124
 --- /dev/null
 +++ b/tests/promptRefinerShadowAdmissionCore.test.mjs
-@@ -0,0 +1,816 @@
+@@ -0,0 +1,958 @@
 +import assert from "node:assert/strict";
 +import { createHash } from "node:crypto";
 +import { execFileSync, spawnSync } from "node:child_process";
@@ -1307,6 +1418,135 @@ index 00000000..bb441167
 +        proposePromptRefinerShadowStage(checkedIn()),
 +        proposal,
 +        "the proposal and digest are deterministic"
++    );
++});
++
++test("the trusted proposal is deeply immutable without freezing shared constants", () => {
++    const proposal = proposePromptRefinerShadowStage(checkedIn());
++    const before = JSON.stringify(proposal);
++    assert.equal(Object.isFrozen(proposal), true);
++    assert.equal(Object.isFrozen(proposal.provenance), true);
++    assert.equal(Object.isFrozen(proposal.reservationStage), true);
++    assert.equal(Object.isFrozen(proposal.acknowledgements), true);
++    assert.notEqual(
++        proposal.acknowledgements,
++        PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS,
++        "the returned array must be a frozen clone, not the exported constant"
++    );
++
++    const mutations = [
++        () => {
++            proposal.status = "mutated";
++        },
++        () => {
++            proposal.provenance = {};
++        },
++        () => {
++            proposal.provenance.corpusDigest = "mutated";
++        },
++        () => {
++            proposal.reservationStage = {};
++        },
++        () => {
++            proposal.reservationStage.costCeilingMicroUsd = 0;
++        },
++        () => {
++            proposal.acknowledgements = [];
++        },
++        () => {
++            proposal.acknowledgements[0] = "mutated";
++        },
++        () => {
++            proposal.acknowledgements.push("mutated");
++        },
++    ];
++    for (const mutate of mutations) {
++        assert.throws(mutate, TypeError);
++    }
++    assert.equal(JSON.stringify(proposal), before);
++    assert.equal(
++        proposal.proposalDigest,
++        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
++    );
++    assert.deepEqual(proposePromptRefinerShadowStage(checkedIn()), proposal);
++});
++
++test("captured freeze and private acknowledgements resist post-import ambient patches", () => {
++    const originalFreeze = Object.freeze;
++    const originalIterator = Array.prototype[Symbol.iterator];
++    let proposal;
++    let thrown;
++    try {
++        Object.freeze = (value) => value;
++        Array.prototype[Symbol.iterator] = function patchedIterator() {
++            if (this === PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS) {
++                return originalIterator.call(["attacker_acknowledgement"]);
++            }
++            return originalIterator.call(this);
++        };
++        proposal = proposePromptRefinerShadowStage(checkedIn());
++    } catch (error) {
++        thrown = error;
++    } finally {
++        Object.freeze = originalFreeze;
++        Array.prototype[Symbol.iterator] = originalIterator;
++    }
++    if (thrown) throw thrown;
++
++    assert.deepEqual(
++        proposal.acknowledgements,
++        PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS
++    );
++    assert.equal(Object.isFrozen(proposal), true);
++    assert.equal(Object.isFrozen(proposal.provenance), true);
++    assert.equal(Object.isFrozen(proposal.reservationStage), true);
++    assert.equal(Object.isFrozen(proposal.acknowledgements), true);
++    assert.throws(() => proposal.acknowledgements.push("mutated"), TypeError);
++    const { proposalDigest, ...unsigned } = proposal;
++    assert.equal(
++        `sha256:${digest(canonicalBenchmarkJson(unsigned))}`,
++        proposalDigest
++    );
++});
++
++test("private byte snapshots survive synchronous mutation before decode", async () => {
++    const descriptor = Object.getOwnPropertyDescriptor(
++        TextDecoder.prototype,
++        "decode"
++    );
++    const originalDecode = descriptor.value;
++    let mutateOriginals = () => {};
++    Object.defineProperty(TextDecoder.prototype, "decode", {
++        ...descriptor,
++        value(input, options) {
++            mutateOriginals();
++            return Reflect.apply(originalDecode, this, [input, options]);
++        },
++    });
++
++    let isolated;
++    try {
++        isolated = await import(
++            "../lib/promptRefinerShadowAdmissionCore.ts?snapshot-toctou"
++        );
++    } finally {
++        Object.defineProperty(TextDecoder.prototype, "decode", descriptor);
++    }
++
++    const originals = checkedIn();
++    let mutationCount = 0;
++    mutateOriginals = () => {
++        mutationCount += 1;
++        for (const value of Object.values(originals)) value.fill(0);
++    };
++    const proposal = isolated.proposePromptRefinerShadowStage(originals);
++    assert.ok(mutationCount > 0, "the decode boundary must trigger mutation");
++    for (const value of Object.values(originals)) {
++        assert.equal(value.every((byte) => byte === 0), true);
++    }
++    assert.equal(
++        proposal.proposalDigest,
++        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
 +    );
 +});
 +
@@ -1890,13 +2130,18 @@ index 00000000..bb441167
 +    );
 +});
 +
-+test("only the four immutable evidence artifacts are pinned to LF", () => {
-+    const pinned = [
++test("only the admission evidence and implementation paths are pinned to LF", () => {
++    const evidencePinned = [
 +        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json",
 +        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json",
 +        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl",
 +        "docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl",
 +    ];
++    const implementationPinned = [
++        "lib/promptRefinerShadowAdmissionCore.ts",
++        "tests/promptRefinerShadowAdmissionCore.test.mjs",
++    ];
++    const pinned = [...evidencePinned, ...implementationPinned];
 +    const attributes = (path) => {
 +        const result = spawnSync(
 +            "git",
@@ -1920,6 +2165,14 @@ index 00000000..bb441167
 +    }
 +    assert.deepEqual(
 +        attributes("docs/ops/prompt-refiner-shadow/evidence/README.md"),
++        { text: "unspecified", eol: "unspecified" }
++    );
++    assert.deepEqual(
++        attributes("docs/ops/prompt-refiner-shadow/evidence/nested/example.md"),
++        { text: "unspecified", eol: "unspecified" }
++    );
++    assert.deepEqual(
++        attributes("docs/ops/prompt-refiner-shadow/nested/example.md"),
 +        { text: "unspecified", eol: "unspecified" }
 +    );
 +
@@ -1960,64 +2213,77 @@ index 00000000..bb441167
 
 ## Test results (run by the control program)
 
-- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs` (1110ms)
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptRefinerShadowAdmissionCore.test.mjs` (1245ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 1030.3681
+  ℹ duration_ms 1170.9005
 
 ## Guard results (run by the control program)
 
-- PASS `npm run test:prompt-refiner-shadow` (24812ms)
+- PASS `npm run test:prompt-refiner-shadow` (23273ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 24312.4171
-- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (2421ms)
+  ℹ duration_ms 22804.6847
+- PASS `node --conditions=react-server --import tsx --test --test-concurrency=1 --test-reporter=spec tests/promptInjectionAudit.test.mjs tests/promptRefinerAccess.test.mjs tests/promptRefinerExecutionContract.test.mjs tests/promptRefinerReceiptCore.test.mjs tests/promptRefinerReservationCore.test.mjs tests/promptRefinerSuggestion.test.mjs` (2504ms)
   ℹ fail 0
   ℹ cancelled 0
   ℹ skipped 0
   ℹ todo 0
-  ℹ duration_ms 2350.1361
-- PASS `npm run check:prompt-injection` (699ms)
+  ℹ duration_ms 2428.9087
+- PASS `npm run check:prompt-injection` (742ms)
   adversarial_retrieved_content_instruction_precedence_violations = 0
   18 adversarial payload(s) through memory (18), attachment (18), attachment-filename (18), profile-knowledge (18), prompt-refiner (18)
   not exercised: project (ConversationProject has a name and no instruction text, so no prompt path exists)
   Untrusted content stayed data at every fenced and role-separated boundary.
-- PASS `npm run typecheck` (40062ms)
+- PASS `npm run typecheck` (36981ms)
   > ai-chat-hub@0.1.0 typecheck
   > next typegen && tsc --noEmit --incremental false
   
   Generating route types...
   ✓ Types generated successfully
-- PASS `npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs` (2882ms)
-- PASS `npm run check:doc-references` (1450ms)
+- PASS `npx eslint lib/promptRefinerShadowAdmissionCore.ts tests/promptRefinerShadowAdmissionCore.test.mjs` (2714ms)
+- PASS `npm run check:doc-references` (1314ms)
   > ai-chat-hub@0.1.0 check:doc-references
   > node scripts/check-doc-references.mjs
   
-  Document reference check passed: 891 referenced path(s) across 112 instruction document(s), and 976 path(s) named by comments across 2956 source file(s), all present.
-- PASS `npm run check:policy-section-references` (1099ms)
+  Document reference check passed: 891 referenced path(s) across 112 instruction document(s), and 976 path(s) named by comments across 2959 source file(s), all present.
+- PASS `npm run check:policy-section-references` (967ms)
   > ai-chat-hub@0.1.0 check:policy-section-references
   > node scripts/check-policy-section-references.mjs
   
   Policy section reference check passed: 4491 citation(s) against 37 policy document(s). 2930 resolve to a named document and none point at a section that does not exist. No added line introduces an unscoped or ambiguous one (1334 and 227 predate this change).
-- PASS `npm run check:encoding:strict` (1281ms)
+- PASS `npm run check:encoding:strict` (1240ms)
   > ai-chat-hub@0.1.0 check:encoding:strict
   > node scripts/check-text-encoding.mjs --strict
   
   Text encoding check passed. No mojibake markers found.
-- PASS `npm run check:data-domain-registry` (719ms)
+- PASS `npm run check:data-domain-registry` (676ms)
   y\tomverse-chat-data-domain-registry.yaml: 65 data domains, all user-linked models registered.
      Deletion action: 49 delete, 9 anonymise, 2 unverified, 5 retain.
      Retention policy: 56 immediate, 2 unverified, 2 ttl, 2 statutory, 3 legal_hold.
      2 domain(s) have an unverified deletion path and 2 an unverified export state; PRIVACY-01/02 stay blocked until each is traced or recorded as retained.
-- PASS `git diff --check c45871f158cb8f2f32ae7442ac7123613b354201 HEAD` (50ms)
+- PASS `node -e "require('child_process').execFileSync('git',['diff','--check','827bfcb68998f5d08a7d16a3e276c6203bce79c4','HEAD','--','.',':(exclude,literal)docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1'],{stdio:'inherit'})"` (87ms)
+- PASS `node -e "const fs=require('fs'),h=require('crypto');const e={'docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json':'686c2bcd2b2bfa9427bbff37628d99dd352f0c2df8b714228cf7a751b400620d','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl':'dda1da10ecc42ce9b9a71f3f27dbade690ab70fa49f09ffbdaaecd06b19cdb6f','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl':'9aae8fd1cc9a354adc90113eb09d69216c1e15c56bcfc0c63e78cc5263d6a64e','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json':'9e15f6413083dd980fbd9003d9396d2c8519cacedba20fcb4bb951a796a7b73d','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/change-round0.diff':'0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/package-round0.json':'56ad55538b49a7ba5e0afd14b3d3b3317b082063d243bcc119c7f93f00dabcde','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/verdict-round0.json':'71d1d325424896535b688019c81bc7606738b196a228468c687c52da749132f2','docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1/review-round0.events.jsonl':'1ac1371a9f530ac21b3d8adbff61b8df7e58dbace59e91d93bc12029e7fe07d2'};for(const [p,x] of Object.entries(e)){const a=h.createHash('sha256').update(fs.readFileSync(p)).digest('hex');if(a!==x)throw Error('immutable drift: '+p)}console.log('historical evidence and round0 numbered records immutable: 8')"` (67ms)
+  historical evidence and round0 numbered records immutable: 8
+- PASS `node -e "const fs=require('fs'),c=require('child_process'),h=require('crypto');const t=JSON.parse(fs.readFileSync('docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json','utf8')),ex='docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1',s=t.writableScope.map(x=>':(literal)'+x).concat([':(exclude,literal)'+ex]),d=b=>c.execFileSync('git',['diff',b,'HEAD','--',...s],{maxBuffer:67108864}),a=d(t.baseCommit),n=d('827bfcb68998f5d08a7d16a3e276c6203bce79c4'),sha=x=>h.createHash('sha256').update(x).digest('hex');if(!a.equals(n))throw Error('scoped diff bytes differ');if(sha(a)!=='233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd')throw Error('scoped diff digest drift');console.log('old/latest literal scoped diff byte-identical')"` (113ms)
+  old/latest literal scoped diff byte-identical
+- PASS `git merge-base --is-ancestor 827bfcb68998f5d08a7d16a3e276c6203bce79c4 HEAD` (40ms)
+- PASS `node -e "const c=require('child_process'),p=['lib/promptRefinerShadowAdmissionCore.ts','tests/promptRefinerShadowAdmissionCore.test.mjs','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.manifest.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl','docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.journal.jsonl.witness.jsonl'],a=c.execFileSync('git',['check-attr','-z','text','eol','--',...p],{encoding:'utf8'}).split('\0').filter(Boolean);for(let i=0;i<a.length;i+=3){if(a[i+1]==='text'&&a[i+2]!=='set')throw Error(a[i]+' text=' + a[i+2]);if(a[i+1]==='eol'&&a[i+2]!=='lf')throw Error(a[i]+' eol=' + a[i+2]);}console.log('LF pins verified: '+p.length)"` (78ms)
+  LF pins verified: 6
+
+## Findings from the previous round (check each was addressed)
+
+- [warning/evidence] .gitattributes:70-78 (vs lib/promptRefinerShadowAdmissionCore.ts, tests/promptRefinerShadowAdmissionCore.test.mjs): Only the four evidence artifacts are LF-pinned; the two new non-evidence paths named by completion criterion 9 (the new TypeScript core and its test) carry no line-ending attribute, so their bytes are not identical in a Windows core.autocrlf=true checkout.
+- [nit/judgement] lib/promptRefinerShadowAdmissionCore.ts:666-669 (proposePromptRefinerShadowStage return): The returned proposal is a plain mutable object — only PROMPT_REFINER_SHADOW_STAGE_ACKNOWLEDGEMENTS is frozen — so the "immutable proposal" property holds at the TypeScript literal-type level but not at runtime for a JS caller.
+- [nit/evidence] docs/ops/prompt-refiner-shadow/evidence/admission-readiness-v1.report.json:31 (".gitattributes" digest) with .gitattributes:70-78: The commit that freezes the bundle also edits .gitattributes, which is a member of the bundle's own source allowlist, so the evidence can never be regenerated from this branch — the disclosure is correct, but the bundle is now verify-only rather than reproducible.
 
 ## Author's account (read last; a claim, not a finding)
 
-Summary: (no summary supplied; the diff is the record)
+Summary: latest develop 827bfcb6를 충돌 없이 통합했고 origin/develop은 HEAD의 ancestor다. task의 old base c45871f1와 latest develop을 기준으로 package directory만 제외한 literal scoped diff는 104122 bytes, sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd로 byte-identical하다. round0 finding의 구현·test LF pin과 runtime deep freeze를 반영했고, untrusted evidence는 bounds-before-copy/hash/decode, stable snapshot, captured primordials로 TOCTOU·ambient mutation 경계를 강화했다. historical evidence sourceRef f1e1b0c2 및 report/journal/witness/manifest bytes와 round0 numbered package/verdict/events는 변경하지 않았다. 이 증거는 historical snapshot만 검증하며 currentCheckoutValidated=false, runtimeSourceRevalidationRequired=true, executionAdmitted=false 한계를 유지한다.
 
 ## Answer format
 
@@ -2026,8 +2292,8 @@ Reply with exactly one JSON document and nothing else:
 ```json
 {
   "taskId": "prompt-refiner-shadow-admission-proposal-v1",
-  "round": 0,
-  "reviewedDigest": "sha256:0318d227870b72e203949cd79508c41045b3b654f528b1eb4b0697369789c48c",
+  "round": 1,
+  "reviewedDigest": "sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd",
   "conclusion": "approve | request_changes | blocked",
   "findings": [
     {
