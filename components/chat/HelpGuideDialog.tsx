@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, ChevronRight, ExternalLink, X } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -26,7 +27,17 @@ import { withChatLanguage } from "@/lib/localizedCallbackUrl";
  * lives in memory. Settings open in the in-page settings dialog, reading pages
  * and sign-in open in a new tab, and a report opens the page's own feedback
  * dialog for the user to write. See `lib/helpGuide.ts`.
+ *
+ * Rendered into document.body, not where it is mounted. It is opened from the
+ * sidebar, which on a phone lives inside the drawer panel; a `fixed` element
+ * left there is laid out and stacked inside that panel, so the guide came up
+ * drawer-wide with the conversation list painted over it (staging H7). The
+ * feedback dialog portals for the same reason.
  */
+const subscribeToNothing = () => () => {};
+const getPortalContainer = () => document.body;
+const getServerPortalContainer = () => null;
+
 export function HelpGuideDialog({
     open,
     onClose,
@@ -51,6 +62,11 @@ export function HelpGuideDialog({
     const headingRef = useRef<HTMLHeadingElement | null>(null);
     /** The intent button to return focus to when going back to the list. */
     const lastIntentRef = useRef<string | null>(null);
+    const container = useSyncExternalStore<HTMLElement | null>(
+        subscribeToNothing,
+        getPortalContainer,
+        getServerPortalContainer
+    );
 
     const close = useCallback(() => {
         setIntentId(null);
@@ -83,7 +99,7 @@ export function HelpGuideDialog({
         return () => cancelAnimationFrame(frame);
     }, [intentId, open]);
 
-    if (!open) return null;
+    if (!open || !container) return null;
 
     const act = (offer: HelpGuideOffer) => {
         if (offer.availability !== "open") return;
@@ -108,7 +124,7 @@ export function HelpGuideDialog({
     const rowClass =
         "flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-bold text-zinc-800 transition hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-zinc-100 dark:hover:bg-zinc-800";
 
-    return (
+    return createPortal(
         <div
             ref={dialogRef}
             role="dialog"
@@ -274,6 +290,7 @@ export function HelpGuideDialog({
                     </section>
                 )}
             </div>
-        </div>
+        </div>,
+        container
     );
 }
