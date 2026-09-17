@@ -2232,4 +2232,99 @@ export const en = {
             },
         },
     },
+    // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
+    helpGuide: {
+        menuItem: "Find how to do something",
+        title: "What do you want to do?",
+        intro: "Pick a task to see where it is done. This guide only points the way: it does not read your conversations or files, or change any setting.",
+        back: "All tasks",
+        close: "Close",
+        whereToGo: "Where to go",
+        opensInNewTab: "Opens in a new tab",
+        signInRequired: "Sign in to use this.",
+        signIn: "Sign in",
+        unavailable: "Not available right now.",
+        stepUnavailable: "Not available right now",
+        stepsTitle: "Steps",
+        intents: {
+            importedConversations: {
+                label: "Bring in conversations from another AI",
+                guide: "Import conversations you exported from another AI service, then continue one of them here.",
+            },
+            manageMemory: {
+                label: "See or delete what Tomverse remembers",
+                guide: "Memory settings show what your account remembers, and let you correct or delete it.",
+            },
+            chooseModels: {
+                label: "Choose or compare AI models",
+                guide: "Pick one model for a focused answer, or up to three to compare answers side by side.",
+            },
+            aiReview: {
+                label: "Cross-check answers with AI Review",
+                guide: "When two or three answers are finished, open AI Review, check the estimated credits, and run it.",
+            },
+            attachFiles: {
+                label: "Attach files or Google Drive",
+                guide: "Add files or Google Drive documents to a question from the composer.",
+            },
+            projects: {
+                label: "Group conversations into a project",
+                guide: "Create a project, then move conversations into it from each conversation's menu.",
+            },
+            lockOrShare: {
+                label: "Lock or share a conversation",
+                guide: "Lock a saved conversation with a password, or share a limited read-only snapshot.",
+            },
+            creditsAndPlan: {
+                label: "Understand credits and plans",
+                guide: "See how credits work, check your plan, or compare plans.",
+            },
+            billingAndRefund: {
+                label: "Refunds and billing",
+                guide: "Read the refund policy, and find where your plan and billing are managed.",
+            },
+            emailNotifications: {
+                label: "Choose which emails you get",
+                guide: "Email settings let you choose which messages your account receives.",
+            },
+            exportOrDeleteAccountData: {
+                label: "Download your data or delete your account",
+                guide: "Account data settings let you download your data or delete your account.",
+            },
+            reportAProblem: {
+                label: "Report a problem",
+                guide: "Try once more in the smallest scope, then send a report with what happened.",
+            },
+        },
+        steps: {
+            import: "Import conversations",
+            continue: "Continue an imported conversation",
+        },
+        destinations: {
+            settingsSection: {
+                externalImport: "Open conversation import",
+                memory: "Open memory settings",
+                emailNotifications: "Open email settings",
+                accountData: "Open account data settings",
+            },
+            settingsTab: {
+                plan: "Open plan and billing",
+            },
+            guideSection: {
+                modelsAndPanels: "Read: AI models and answer panels",
+                aiReview: "Read: using AI Review",
+                filesAndDrive: "Read: files and Google Drive",
+                projects: "Read: using projects",
+                lockAndShare: "Read: locking and sharing",
+                creditsAndPlans: "Read: credits and plans",
+                troubleshooting: "Read: troubleshooting",
+            },
+            publicRoute: {
+                pricing: "Compare plans",
+                refund: "Read the refund policy",
+                helpCentre: "Open the help centre",
+            },
+            feedback: "Write a report",
+        },
+    },
 };

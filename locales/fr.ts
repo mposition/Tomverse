@@ -2222,4 +2222,99 @@ export const fr = {
             },
         },
     },
+    // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
+    helpGuide: {
+        menuItem: "Trouver comment faire",
+        title: "Que voulez-vous faire ?",
+        intro: "Choisissez une tâche pour voir où la réaliser. Ce guide indique seulement le chemin : il ne lit pas vos conversations ni vos fichiers et ne modifie aucun réglage.",
+        back: "Toutes les tâches",
+        close: "Fermer",
+        whereToGo: "Où aller",
+        opensInNewTab: "S’ouvre dans un nouvel onglet",
+        signInRequired: "Connectez-vous pour utiliser cette fonction.",
+        signIn: "Se connecter",
+        unavailable: "Indisponible pour le moment.",
+        stepUnavailable: "Indisponible pour le moment",
+        stepsTitle: "Étapes",
+        intents: {
+            importedConversations: {
+                label: "Importer des conversations d’une autre IA",
+                guide: "Importez les conversations exportées d’un autre service d’IA, puis poursuivez-en une ici.",
+            },
+            manageMemory: {
+                label: "Voir ou supprimer ce que Tomverse retient",
+                guide: "Les réglages de mémoire montrent ce que votre compte retient et permettent de le corriger ou de le supprimer.",
+            },
+            chooseModels: {
+                label: "Choisir ou comparer des modèles",
+                guide: "Choisissez un modèle pour une réponse ciblée, ou jusqu’à trois pour comparer les réponses côte à côte.",
+            },
+            aiReview: {
+                label: "Vérifier les réponses avec AI Review",
+                guide: "Quand deux ou trois réponses sont terminées, ouvrez AI Review, vérifiez les crédits estimés et lancez-le.",
+            },
+            attachFiles: {
+                label: "Joindre des fichiers ou Google Drive",
+                guide: "Ajoutez des fichiers ou des documents Google Drive à une question depuis la zone de saisie.",
+            },
+            projects: {
+                label: "Regrouper des conversations en projet",
+                guide: "Créez un projet, puis déplacez-y les conversations depuis leur menu.",
+            },
+            lockOrShare: {
+                label: "Verrouiller ou partager une conversation",
+                guide: "Verrouillez une conversation enregistrée par mot de passe, ou partagez un instantané limité en lecture seule.",
+            },
+            creditsAndPlan: {
+                label: "Comprendre crédits et offres",
+                guide: "Découvrez le fonctionnement des crédits, consultez votre offre ou comparez les offres.",
+            },
+            billingAndRefund: {
+                label: "Remboursements et facturation",
+                guide: "Lisez la politique de remboursement et trouvez où gérer votre offre et votre facturation.",
+            },
+            emailNotifications: {
+                label: "Choisir les e-mails reçus",
+                guide: "Les réglages e-mail permettent de choisir les messages que reçoit votre compte.",
+            },
+            exportOrDeleteAccountData: {
+                label: "Télécharger vos données ou supprimer le compte",
+                guide: "Les réglages des données du compte permettent de télécharger vos données ou de supprimer votre compte.",
+            },
+            reportAProblem: {
+                label: "Signaler un problème",
+                guide: "Réessayez une fois au plus petit périmètre, puis envoyez un signalement décrivant ce qui s’est passé.",
+            },
+        },
+        steps: {
+            import: "Importer des conversations",
+            continue: "Poursuivre une conversation importée",
+        },
+        destinations: {
+            settingsSection: {
+                externalImport: "Ouvrir l’import de conversations",
+                memory: "Ouvrir les réglages de mémoire",
+                emailNotifications: "Ouvrir les réglages e-mail",
+                accountData: "Ouvrir les données du compte",
+            },
+            settingsTab: {
+                plan: "Ouvrir offre et facturation",
+            },
+            guideSection: {
+                modelsAndPanels: "Lire : modèles IA et panneaux",
+                aiReview: "Lire : utiliser AI Review",
+                filesAndDrive: "Lire : fichiers et Google Drive",
+                projects: "Lire : utiliser les projets",
+                lockAndShare: "Lire : verrouillage et partage",
+                creditsAndPlans: "Lire : crédits et offres",
+                troubleshooting: "Lire : dépannage",
+            },
+            publicRoute: {
+                pricing: "Comparer les offres",
+                refund: "Lire la politique de remboursement",
+                helpCentre: "Ouvrir le centre d’aide",
+            },
+            feedback: "Rédiger un signalement",
+        },
+    },
 } satisfies typeof en;
