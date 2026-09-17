@@ -4,6 +4,11 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { deliverEmailOnce } from "@/lib/email";
+import { sendWithAddressLock } from "@/lib/emailSendLock";
+import {
+  SEND_LOCK_RETRY_MS,
+  STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+} from "@/lib/emailSendLockCore";
 import { isLanguage } from "@/lib/language";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
@@ -620,9 +625,10 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     return { outcome: "failed" as const, classification: definition.classification };
   }
 
-  // Checked at send time, not at enqueue: a message queued yesterday may be for
-  // an address that complained this morning, and the decision that matters is
-  // the one true when it goes out.
+  // Checked before the work of rendering, so a suppressed address costs a
+  // template read rather than a composed message. It is not the decision the
+  // send is made on: that one is taken again under the address lock,
+  // immediately before the provider call (lib/emailSendLock.ts).
   const verdict = await suppressionCheck({
     emailAddress: delivery.emailAddress,
     classification: definition.classification,
@@ -641,21 +647,6 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
       },
     });
     return { outcome: "suppressed" as const, classification: definition.classification };
-  }
-  if (verdict.raiseIncident === "transactional_complaint") {
-    await reportOperationalIncident({
-      code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
-      title: "Sending to an address that reported transactional mail as spam",
-      error:
-        "The message is going out anyway -- withholding it would lock the " +
-        "account holder out -- but the complaint needs a person to look at it.",
-      severity: "warning",
-      cooldownMs: 60 * 60 * 1_000,
-      context: {
-        component: "standard-email-lane",
-        classification: definition.classification,
-      },
-    });
   }
 
   // A preference is a different question from a suppression: suppression is
@@ -1001,24 +992,103 @@ const sendClaimedDelivery = async (delivery: ClaimedDelivery, now: Date) => {
     return { outcome: "pending" as const, classification: definition.classification };
   }
 
-  const response = await deliverEmailOnce({
-    to: delivery.emailAddress,
-    ...rendered,
-    idempotencyKey: delivery.idempotencyKey,
-    // Marketing sends from its own domain or does not send. Derived from the
-    // template's classification rather than passed by the enqueuing caller,
-    // for the same reason the classification itself is: a caller that could
-    // choose would eventually choose wrong, and a promotion sent from the
-    // transactional domain has no symptom until login codes stop arriving
-    // (docs/policy/email-notifications.md §5.3, §14.1).
-    stream: streamForClassification(definition.classification),
-    // From the definition too, and for the same reason: the drain looks the
-    // template up by key on every attempt, so a retry hours later resolves the
-    // sender the first attempt used rather than one recomputed from what the
-    // retry happens to know (docs/policy/email-notifications.md §14.1a).
-    senderRole: definition.senderRole,
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  // The lock, the last suppression word and the submission, in one scope
+  // (docs/policy/email-product-news-redesign-draft.md section 7.4, C29).
+  // Everything above -- the template read, the render, the footer, the quiet
+  // hour wait -- happened outside it, and anything committed during it is what
+  // this re-check is for.
+  const submitted = await sendWithAddressLock({
+    emailAddress: delivery.emailAddress,
+    classification: definition.classification,
+    purpose: definition.purpose,
+    userId: delivery.userId,
+    now,
+    submit: () =>
+      deliverEmailOnce({
+        to: delivery.emailAddress,
+        ...rendered,
+        idempotencyKey: delivery.idempotencyKey,
+        // Marketing sends from its own domain or does not send. Derived from the
+        // template's classification rather than passed by the enqueuing caller,
+        // for the same reason the classification itself is: a caller that could
+        // choose would eventually choose wrong, and a promotion sent from the
+        // transactional domain has no symptom until login codes stop arriving
+        // (docs/policy/email-notifications.md §5.3, §14.1).
+        stream: streamForClassification(definition.classification),
+        // From the definition too, and for the same reason: the drain looks the
+        // template up by key on every attempt, so a retry hours later resolves the
+        // sender the first attempt used rather than one recomputed from what the
+        // retry happens to know (docs/policy/email-notifications.md §14.1a).
+        senderRole: definition.senderRole,
+        // Stated here because the lane now waits for this call holding a lock;
+        // the transaction budget is sized to outlast it (lib/emailSendLockCore.ts).
+        timeoutMs: STANDARD_SEND_PROVIDER_TIMEOUT_MS,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+      }),
   });
+
+  if (submitted.ok === false && submitted.reason === "lock_unavailable") {
+    // Nothing was submitted. The claim is released and the row comes back on
+    // the curve it was already on, with its attempt count untouched: waiting
+    // for a lock is not a failed attempt, and counting it would spend a
+    // message's abandonment budget on somebody else's withdrawal
+    // (docs/policy/email-product-news-redesign-draft.md section 7.4).
+    // The delay this message would have waited had the attempt happened and
+    // failed -- ten seconds for a receipt, a minute for a maintenance notice.
+    // `attempts` on the row stays where it was; only the wait is borrowed.
+    const backoff = nextStandardAttempt({
+      attemptsMade: delivery.attempts + 1,
+      classification: definition.classification,
+    });
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "pending",
+        attempts: delivery.attempts,
+        nextAttemptAt: new Date(
+          now.getTime() + (backoff.retry ? backoff.delayMs : SEND_LOCK_RETRY_MS)
+        ),
+        claimedAt: null,
+        deferReason: "send_lock",
+      },
+    });
+    return { outcome: "pending" as const, classification: definition.classification };
+  }
+
+  if (submitted.ok === false) {
+    // A suppression committed while this message was being prepared. The row
+    // records it as the send-time decision it is, not as a provider failure.
+    await prisma.emailDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: "suppressed",
+        skipReason: submitted.skipReason,
+        attempts: delivery.attempts,
+        nextAttemptAt: null,
+        claimedAt: null,
+        deferReason: null,
+      },
+    });
+    return { outcome: "suppressed" as const, classification: definition.classification };
+  }
+
+  if (submitted.raiseIncident === "transactional_complaint") {
+    await reportOperationalIncident({
+      code: "EMAIL_TRANSACTIONAL_COMPLAINT_SEND",
+      title: "Sending to an address that reported transactional mail as spam",
+      error:
+        "The message is going out anyway -- withholding it would lock the " +
+        "account holder out -- but the complaint needs a person to look at it.",
+      severity: "warning",
+      cooldownMs: 60 * 60 * 1_000,
+      context: {
+        component: "standard-email-lane",
+        classification: definition.classification,
+      },
+    });
+  }
+
+  const response = submitted.value;
 
   if (response.ok === false && response.identityRefusal) {
     // Permanent, and reported once per delivery rather than retried: no amount

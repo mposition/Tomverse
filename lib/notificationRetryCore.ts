@@ -59,6 +59,13 @@ export type NotificationAttemptOutcome =
    * abandonment raises the incident that says so.
    */
   | { kind: "not_configured" }
+  /**
+   * A writer holds the recipient address, so nothing was submitted. Not an
+   * attempt: the send never happened, and counting it would spend the queue's
+   * abandonment budget on somebody else's withdrawal
+   * (docs/policy/email-product-news-redesign-draft.md section 7.4).
+   */
+  | { kind: "lock_unavailable" }
   | { kind: "failed"; errorKind: string; permanent: boolean };
 
 export type NotificationDeliveryTransition = {
@@ -134,6 +141,20 @@ export const nextNotificationDeliveryState = ({
       attempts,
       nextAttemptAt: null,
       lastErrorKind: null,
+    };
+  }
+
+  if (outcome.kind === "lock_unavailable") {
+    // The row goes back on the curve it was already on. `attempts` arrives
+    // here including the attempt being recorded, so the one that never
+    // happened is taken back off again -- and the delay is the one the row
+    // would have waited anyway.
+    const made = Math.max(attempts - 1, 0);
+    return {
+      status: NOTIFICATION_DELIVERY_STATUS.pending,
+      attempts: made,
+      nextAttemptAt: nextNotificationAttemptAt(made, now),
+      lastErrorKind: "send_lock_unavailable",
     };
   }
 

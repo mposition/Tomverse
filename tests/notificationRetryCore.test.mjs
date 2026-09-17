@@ -455,3 +455,79 @@ test("a queue that is not keeping up says so before anything abandons", () => {
     /result\.pending >= NOTIFICATION_QUEUE_DEPTH_ALERT \|\| !result\.exhausted/
   );
 });
+
+// ---------------------------------------------------------------------------
+// The address lock
+// ---------------------------------------------------------------------------
+
+test("losing the address lock is not an attempt", () => {
+  // The send never happened: nothing was submitted and nothing was written.
+  // Counting it would spend the queue's six attempts on somebody else's
+  // withdrawal (docs/policy/email-product-news-redesign-draft.md section 7.4).
+  const state = at({ kind: "lock_unavailable" }, 1);
+  assert.equal(state.status, "pending");
+  assert.equal(state.attempts, 0);
+  assert.equal(state.lastErrorKind, "send_lock_unavailable");
+  assert.equal(
+    state.nextAttemptAt.getTime(),
+    NOW.getTime() + NOTIFICATION_RETRY_DELAYS_MS[0]
+  );
+});
+
+test("a row that lost the lock waits the delay it was already on", () => {
+  // Three attempts made, the fourth never happened: it comes back on the delay
+  // that follows the third, not on the first step of the curve.
+  const state = at({ kind: "lock_unavailable" }, 4);
+  assert.equal(state.attempts, 3);
+  assert.equal(
+    state.nextAttemptAt.getTime(),
+    NOW.getTime() + NOTIFICATION_RETRY_DELAYS_MS[2]
+  );
+});
+
+test("a row at its last attempt is not abandoned for losing the lock", () => {
+  // Abandonment is for deliveries that were tried and failed. This one was not
+  // tried, so it stays pending however many attempts are behind it.
+  const state = at({ kind: "lock_unavailable" }, NOTIFICATION_MAX_ATTEMPTS);
+  assert.equal(state.status, "pending");
+  assert.notEqual(state.nextAttemptAt, null);
+});
+
+test("every customer-facing notification kind goes through the address lock", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  // Every kind is classified, so a kind added without a decision about who
+  // receives it fails the build rather than inheriting a branch by name.
+  assert.match(queue, /isCustomerNotificationKind\(kind\)/);
+  assert.match(queue, /sendWithAddressLock\(/);
+  const table = queue.slice(
+    queue.indexOf("export const NOTIFICATION_AUDIENCE"),
+    queue.indexOf("export const isCustomerNotificationKind")
+  );
+  for (const kind of [
+    "refundRequestReceived",
+    "refundRequestApproved",
+    "refundRequestRejected",
+    "feedbackUserReceived",
+    "feedbackUserReviewing",
+    "feedbackUserCompleted",
+    "feedbackUserCompletedResend",
+  ]) {
+    assert.match(table, new RegExp(`NOTIFICATION_KIND\\.${kind}\\]: "customer"`));
+  }
+  // The operator alerts are about somebody else's record and go to our own
+  // mailboxes; a customer's suppression must not silence them.
+  for (const kind of [
+    "supportFeedback",
+    "autoFixReviewRequested",
+    "autoFixProductionVerified",
+    "autoFixPromotionFailed",
+  ]) {
+    assert.match(table, new RegExp(`NOTIFICATION_KIND\\.${kind}\\]: "operator"`));
+  }
+});
+
+test("a customer notice reports a complaint it was told about under the lock", () => {
+  const queue = read("lib/notificationDeliveries.ts");
+  assert.match(queue, /submitted\.raiseIncident === "transactional_complaint"/);
+  assert.match(queue, /EMAIL_TRANSACTIONAL_COMPLAINT_SEND/);
+});
