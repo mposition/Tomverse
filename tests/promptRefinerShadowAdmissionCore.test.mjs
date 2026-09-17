@@ -257,69 +257,119 @@ test("captured freeze and private acknowledgements resist post-import ambient pa
     );
 });
 
-test("captured scalar validators resist post-import RegExp and Number patches", () => {
+test("captured scalar validators resist post-import RegExp exec, test and Number patches", () => {
     const originalTest = RegExp.prototype.test;
+    const originalExec = RegExp.prototype.exec;
     const originalSafeInteger = Number.isSafeInteger;
     let validProposal;
-    let digestError;
-    let integerError;
+    const errors = {};
+    const exactScalarPattern = (pattern) =>
+        pattern.source === "^[a-f0-9]{40}$" ||
+        pattern.source === "^[a-f0-9]{64}$" ||
+        pattern.source === "^sha256:[a-f0-9]{64}$";
     try {
         RegExp.prototype.test = function misleadingTest(value) {
-            if (
-                this.source === "^[a-f0-9]{40}$" ||
-                this.source === "^[a-f0-9]{64}$" ||
-                this.source === "^sha256:[a-f0-9]{64}$"
-            ) {
-                return true;
-            }
+            if (exactScalarPattern(this)) return true;
             return Reflect.apply(originalTest, this, [value]);
+        };
+        RegExp.prototype.exec = function misleadingExec(value) {
+            if (exactScalarPattern(this)) {
+                return [String(value)];
+            }
+            return Reflect.apply(originalExec, this, [value]);
         };
         Number.isSafeInteger = () => true;
         validProposal = proposePromptRefinerShadowStage(checkedIn());
 
-        const invalidDigest = JSON.parse(
-            bytes(paths.manifest).toString("utf8")
-        );
-        invalidDigest.files[0].sha256 = "not-a-digest";
-        invalidDigest.bundleDigest = bundleDigest(invalidDigest);
-        try {
-            proposePromptRefinerShadowStage({
-                ...checkedIn(),
-                manifestBytes: Buffer.from(JSON.stringify(invalidDigest)),
-            });
-        } catch (error) {
-            digestError = error;
-        }
-
-        const invalidInteger = JSON.parse(
-            bytes(paths.manifest).toString("utf8")
-        );
-        invalidInteger.journalTerminal.seq = "33";
-        invalidInteger.bundleDigest = bundleDigest(invalidInteger);
-        try {
-            proposePromptRefinerShadowStage({
-                ...checkedIn(),
-                manifestBytes: Buffer.from(JSON.stringify(invalidInteger)),
-            });
-        } catch (error) {
-            integerError = error;
+        const invalidCases = [
+            [
+                "source",
+                (manifest) => {
+                    manifest.sourceRef = "not-a-source";
+                },
+                "manifest_shape_or_version",
+            ],
+            [
+                "sourceIdentityDigest",
+                (manifest) => {
+                    manifest.sourceIdentityDigest = "not-a-digest";
+                },
+                "manifest_shape_or_version",
+            ],
+            [
+                "corpusDigest",
+                (manifest) => {
+                    manifest.corpusDigest = "not-a-digest";
+                },
+                "manifest_shape_or_version",
+            ],
+            [
+                "bundleDigest",
+                (manifest) => {
+                    manifest.bundleDigest = "not-a-digest";
+                },
+                "manifest_shape_or_version",
+            ],
+            [
+                "fileDigest",
+                (manifest) => {
+                    manifest.files[0].sha256 = "not-a-digest";
+                },
+                "evidence_file_digest",
+            ],
+            [
+                "journalDigest",
+                (manifest) => {
+                    manifest.journalTerminal.entryDigest = "not-a-digest";
+                },
+                "journal_terminal_entry_digest",
+            ],
+            [
+                "witnessDigest",
+                (manifest) => {
+                    manifest.witnessTerminal.entryDigest = "not-a-digest";
+                },
+                "witness_terminal_entry_digest",
+            ],
+            [
+                "integer",
+                (manifest) => {
+                    manifest.journalTerminal.seq = "33";
+                },
+                "journal_terminal_seq_integer",
+            ],
+        ];
+        for (const [name, mutate, taxonomy] of invalidCases) {
+            const invalid = JSON.parse(
+                bytes(paths.manifest).toString("utf8")
+            );
+            mutate(invalid);
+            if (name !== "bundleDigest") {
+                invalid.bundleDigest = bundleDigest(invalid);
+            }
+            try {
+                proposePromptRefinerShadowStage({
+                    ...checkedIn(),
+                    manifestBytes: Buffer.from(JSON.stringify(invalid)),
+                });
+            } catch (error) {
+                errors[name] = error;
+            }
+            assert.match(
+                errors[name]?.message ?? "",
+                new RegExp(`^prompt_refiner_shadow_admission_${taxonomy}$`),
+                `${name} did not fail at its exact scalar taxonomy`
+            );
         }
     } finally {
         RegExp.prototype.test = originalTest;
+        RegExp.prototype.exec = originalExec;
         Number.isSafeInteger = originalSafeInteger;
     }
 
     assert.equal(
         validProposal.proposalDigest,
         PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
-    );
-    assert.match(
-        digestError.message,
-        /prompt_refiner_shadow_admission_evidence_file_digest/
-    );
-    assert.match(
-        integerError.message,
-        /prompt_refiner_shadow_admission_journal_terminal_seq_integer/
     );
 });
 

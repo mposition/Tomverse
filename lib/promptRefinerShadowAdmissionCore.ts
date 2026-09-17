@@ -47,7 +47,10 @@ const INTRINSIC_OBJECT_DEFINE_PROPERTY = Object.defineProperty;
 const INTRINSIC_REFLECT_APPLY = Reflect.apply;
 const INTRINSIC_ARRAY_IS_ARRAY = Array.isArray;
 const INTRINSIC_NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
-const INTRINSIC_REGEXP_TEST = RegExp.prototype.test;
+// RegExp.prototype.test dynamically dispatches through the receiver's current
+// exec property. Capture the native exec implementation itself so a caller
+// cannot replace either ambient method after this module has initialized.
+const INTRINSIC_REGEXP_EXEC = RegExp.prototype.exec;
 const INTRINSIC_UINT8_ARRAY = Uint8Array;
 const INTRINSIC_UINT8_ARRAY_SET = Uint8Array.prototype.set;
 const INTRINSIC_TEXT_DECODER = TextDecoder;
@@ -210,7 +213,10 @@ function fail(code: string): never {
 }
 
 function matches(pattern: RegExp, value: string): boolean {
-    return INTRINSIC_REFLECT_APPLY(INTRINSIC_REGEXP_TEST, pattern, [value]);
+    return (
+        INTRINSIC_REFLECT_APPLY(INTRINSIC_REGEXP_EXEC, pattern, [value]) !==
+        null
+    );
 }
 
 function actualEvidenceByteLength(bytes: unknown, where: string): number {
