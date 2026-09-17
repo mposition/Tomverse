@@ -127,7 +127,18 @@ const applyToDelivery = async (
 const syncSoftBounceEntry = async (tx: Tx, emailAddress: string, now: Date) => {
   const entry = await tx.suppressionEntry.findUnique({
     where: { emailAddress_scope_purposeKey: { emailAddress, scope: "global", purposeKey: "*" } },
-    select: { id: true, reason: true, expiresAt: true, sourceDeliveryId: true },
+    select: {
+      id: true,
+      reason: true,
+      source: true,
+      expiresAt: true,
+      occurredAt: true,
+      sourceStream: true,
+      sourceDomain: true,
+      sourceClassification: true,
+      sourceDeliveryId: true,
+      sourceMessageId: true,
+    },
   });
   if (!entry || entry.reason !== "soft_bounce") return;
 
@@ -135,6 +146,7 @@ const syncSoftBounceEntry = async (tx: Tx, emailAddress: string, now: Date) => {
     await tx.suppressionCause.findMany({
       where: { emailAddress, scope: "global", purposeKey: "*", releasedAt: null },
       select: {
+        id: true,
         reason: true,
         source: true,
         expiresAt: true,
@@ -154,31 +166,37 @@ const syncSoftBounceEntry = async (tx: Tx, emailAddress: string, now: Date) => {
     await tx.suppressionEntry.delete({ where: { id: entry.id } });
     return;
   }
+  // The latest-expiring soft bounce; at the same expiry the latest to occur,
+  // then the cause id, so the choice never rests on the order rows come back in.
   const soft = active
     .filter((cause) => cause.reason === "soft_bounce")
-    .sort((a, b) => (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0))[0];
+    .sort(
+      (a, b) =>
+        (b.expiresAt?.getTime() ?? 0) - (a.expiresAt?.getTime() ?? 0) ||
+        b.occurredAt.getTime() - a.occurredAt.getTime() ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    )[0];
   // Another reason is active but the entry still reads soft bounce: left for
   // the merge that wrote that reason, which never downgrades to soft bounce.
   if (!soft) return;
-  if (
-    entry.expiresAt?.getTime() === soft.expiresAt?.getTime() &&
-    entry.sourceDeliveryId === soft.sourceDeliveryId
-  ) {
+  const data = {
+    source: soft.source,
+    expiresAt: soft.expiresAt,
+    occurredAt: soft.occurredAt,
+    sourceStream: soft.sourceStream,
+    sourceDomain: soft.sourceDomain,
+    sourceClassification: soft.sourceClassification,
+    sourceDeliveryId: soft.sourceDeliveryId,
+    sourceMessageId: soft.sourceMessageId,
+  };
+  const same = (a: Date | string | null, b: Date | string | null) =>
+    a instanceof Date || b instanceof Date
+      ? (a as Date | null)?.getTime() === (b as Date | null)?.getTime()
+      : a === b;
+  if ((Object.keys(data) as Array<keyof typeof data>).every((key) => same(entry[key], data[key]))) {
     return;
   }
-  await tx.suppressionEntry.update({
-    where: { id: entry.id },
-    data: {
-      source: soft.source,
-      expiresAt: soft.expiresAt,
-      occurredAt: soft.occurredAt,
-      sourceStream: soft.sourceStream,
-      sourceDomain: soft.sourceDomain,
-      sourceClassification: soft.sourceClassification,
-      sourceDeliveryId: soft.sourceDeliveryId,
-      sourceMessageId: soft.sourceMessageId,
-    },
-  });
+  await tx.suppressionEntry.update({ where: { id: entry.id }, data });
 };
 
 /**
@@ -388,7 +406,8 @@ export async function releaseExpiredSuppressionCauses(options?: {
   timeBudgetMs?: number;
 }) {
   const now = options?.now ?? new Date();
-  const limit = options?.limit ?? 200;
+  // At most 200 whatever the caller asks: the pass has a fixed budget.
+  const limit = Math.min(Math.max(1, Math.floor(options?.limit ?? 200)), 200);
   const deadline = Date.now() + (options?.timeBudgetMs ?? 20_000);
 
   const due = await prisma.suppressionCause.findMany({

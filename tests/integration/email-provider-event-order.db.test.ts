@@ -207,7 +207,7 @@ test("a hard bounce older than a delivery still suppresses, without rolling the 
   await send({
     id: "evt-hard",
     type: "email.bounced",
-    bounce: "Hard",
+    bounce: "Permanent",
     messageId,
     address,
     createdAt: second(5),

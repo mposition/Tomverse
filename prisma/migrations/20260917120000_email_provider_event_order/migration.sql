@@ -67,7 +67,7 @@ WITH ev AS (
             WHEN 'email.delivered' THEN 1
             WHEN 'email.delivery_delayed' THEN 2
             WHEN 'email.bounced' THEN
-                CASE WHEN lower(COALESCE(e."payload"->'data'->'bounce'->>'type', '')) = 'hard'
+                CASE WHEN lower(COALESCE(e."payload"->'data'->'bounce'->>'type', '')) IN ('permanent', 'hard')
                      THEN 3 ELSE 2 END
             WHEN 'email.complained' THEN 4
         END AS rank,
