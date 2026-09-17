@@ -5,6 +5,8 @@ import { after, beforeEach, mock, test } from "node:test";
 import { ACCOUNT_WELCOME_TEMPLATE } from "@/lib/emailTemplateDefinitions";
 import {
   AWAITING_DELIVERY,
+  WEBHOOK_SILENCE_MIN_SENDS,
+  silentProviderAccounts,
   WEBHOOK_EVENT_RETENTION_DAYS,
   purgeExpiredWebhookEvents,
   WEBHOOK_MAX_ATTEMPTS,
@@ -81,6 +83,7 @@ const storeUnprocessed = (input: {
   prisma.providerWebhookEvent.create({
     data: {
       provider: "resend",
+      providerAccount: "transactional",
       providerEventId: input.providerEventId,
       eventType: (input.payload as { type: string }).type,
       payload: input.payload,
@@ -292,4 +295,47 @@ test("purging past retention leaves a row a worker holds", async () => {
   assert.equal(result.purged, 1);
   const left = await prisma.providerWebhookEvent.findFirstOrThrow();
   assert.equal(left.processingLeaseId, "busy");
+});
+
+test("one event id from two accounts is two events, each matched within its own account", async () => {
+  const address = `${randomUUID()}@example.com`;
+  const messageId = await deliverOne(address);
+  const providerEventId = `msg_${randomUUID()}`;
+  const payload = deliveredPayload(messageId, address);
+
+  const transactional = await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
+  assert.equal(transactional.handled && transactional.effect, "delivered");
+
+  // The welcome mail went out on the transactional account. The same message
+  // id reported by the marketing account is not that delivery.
+  const marketing = await processResendWebhook({ providerAccount: "marketing", providerEventId, payload });
+  assert.deepEqual(marketing, { handled: true, effect: AWAITING_DELIVERY, deliveryId: null });
+  assert.equal(await prisma.providerWebhookEvent.count(), 2);
+});
+
+test("an account that sent mail and heard nothing for a day is silent", async () => {
+  const env = {
+    RESEND_API_KEY: "key",
+    RESEND_WEBHOOK_SECRET: "whsec_x",
+  };
+  for (let i = 0; i < WEBHOOK_SILENCE_MIN_SENDS; i += 1) {
+    await deliverOne(`${randomUUID()}@example.com`);
+  }
+  assert.deepEqual(
+    (await silentProviderAccounts(env)).map((account) => account.stream),
+    ["transactional"]
+  );
+  // Marketing has no key or secret here, so it is not judged.
+
+  // One event from that account in the window is enough.
+  await processResendWebhook({
+    providerAccount: "transactional",
+    providerEventId: `msg_${randomUUID()}`,
+    payload: { type: "email.opened", data: {} },
+  });
+  assert.deepEqual(await silentProviderAccounts(env), []);
+
+  // Without a webhook secret the account is not judged at all.
+  await prisma.providerWebhookEvent.deleteMany();
+  assert.deepEqual(await silentProviderAccounts({ RESEND_API_KEY: "key" }), []);
 });

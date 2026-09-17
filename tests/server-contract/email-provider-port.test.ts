@@ -34,6 +34,7 @@ const ENV_KEYS = [
   "MARKETING_EMAIL_FROM",
   "EMAIL_BUSINESS_CONTACT_EMAIL",
   "RESEND_WEBHOOK_SECRET",
+  "MARKETING_RESEND_WEBHOOK_SECRET",
 ] as const;
 const originalEnv: Record<string, string | undefined> = {};
 
@@ -207,7 +208,16 @@ test("a missing webhook secret is its own reason, not a bad signature", async ()
   setEnv({});
   const verification = port
     .emailProvider()
-    .verifyWebhook("{}", new Headers());
+    .verifyWebhook("{}", new Headers(), "transactional");
+  assert.equal(verification.ok, false);
+  if (!verification.ok) assert.equal(verification.reason, "secret_missing");
+});
+
+test("the marketing webhook never borrows the transactional secret", async () => {
+  setEnv({ RESEND_WEBHOOK_SECRET: "whsec_dHJhbnNhY3Rpb25hbA==" });
+  const verification = port
+    .emailProvider()
+    .verifyWebhook("{}", new Headers(), "marketing");
   assert.equal(verification.ok, false);
   if (!verification.ok) assert.equal(verification.reason, "secret_missing");
 });

@@ -5225,9 +5225,16 @@ model ProviderWebhookEvent {
   processingAttempts  Int       @default(0)
   abandonedAt         DateTime?
 
-  @@unique([provider, providerEventId])
+  /// transactional | marketing -- the provider account whose endpoint and
+  /// signing secret the event came through. Event ids are unique per account,
+  /// and a message id is matched only within the account that sent it
+  /// (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56).
+  providerAccount String
+
+  @@unique([provider, providerAccount, providerEventId])
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])
+  @@index([providerAccount, receivedAt])
 }
 
 /// The one row that says a Tomverse Conversation was started from an imported

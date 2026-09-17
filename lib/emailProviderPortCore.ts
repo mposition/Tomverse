@@ -159,7 +159,12 @@ export interface EmailProviderPort {
     message: RenderedMessage,
     options: SendOptions
   ): Promise<ProviderSendResult>;
-  verifyWebhook(rawBody: string, headers: Headers): WebhookVerification;
+  /**
+   * Verifies an event against the signing secret of the account it claims to
+   * come from. Each account's webhook has its own endpoint and secret, so an
+   * event signed for one account cannot be recorded as the other's.
+   */
+  verifyWebhook(rawBody: string, headers: Headers, stream: SendingStream): WebhookVerification;
 }
 
 /**
@@ -210,6 +215,25 @@ export const EMAIL_PROVIDER_API_KEY_ENV_KEYS = {
 } as const satisfies Record<SendingStream, readonly string[]>;
 
 export type ProviderEnv = Readonly<Record<string, string | undefined>>;
+
+/**
+ * The webhook signing secret of each provider account
+ * (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56). Like
+ * the API key, marketing has no fallback: a marketing endpoint verified with
+ * the transactional secret would accept one account's events as the other's.
+ */
+export const EMAIL_WEBHOOK_SECRET_ENV_KEYS = {
+  transactional: ["RESEND_WEBHOOK_SECRET"],
+  marketing: ["MARKETING_RESEND_WEBHOOK_SECRET"],
+} as const satisfies Record<SendingStream, readonly string[]>;
+
+export const webhookSecretFor = (stream: SendingStream, env: ProviderEnv): string | null => {
+  for (const key of EMAIL_WEBHOOK_SECRET_ENV_KEYS[stream]) {
+    const value = env[key]?.trim();
+    if (value) return value;
+  }
+  return null;
+};
 
 /**
  * A provider key read straight off an environment, found in source text.

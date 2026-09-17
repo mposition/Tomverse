@@ -375,20 +375,33 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
   await prisma.providerWebhookEvent.create({
     data: {
       provider: "resend",
+      providerAccount: "transactional",
       providerEventId,
       eventType: "email.bounced",
       payload: {},
     },
   });
 
-  await rejects("ProviderWebhookEvent_provider_providerEventId_key", () =>
+  await rejects("ProviderWebhookEvent_provider_providerAccount_providerEventId_key", () =>
     prisma.providerWebhookEvent.create({
       data: {
         provider: "resend",
+        providerAccount: "transactional",
         providerEventId,
         eventType: "email.bounced",
         payload: {},
       },
     })
   );
+
+  // The same id from the other account is a different event.
+  await prisma.providerWebhookEvent.create({
+    data: {
+      provider: "resend",
+      providerAccount: "marketing",
+      providerEventId,
+      eventType: "email.bounced",
+      payload: {},
+    },
+  });
 });

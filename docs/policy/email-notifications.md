@@ -4,15 +4,41 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v19 (2026-09-17).** 저장된 provider 사건을 lease 아래에서 처리하고, 실패한
-  사건은 재전송과 15분 sweeper가 다시 적용하며, delivery가 아직 기록되지 않은 사건은
-  15분까지 기다립니다. 0절 참조.
+- 개정: **v20 (2026-09-17).** provider 계정마다 webhook endpoint와 signing secret이
+  따로이고, 사건은 그 계정으로 저장되어 그 계정이 보낸 발송에만 결속됩니다. 계정별
+  침묵을 incident로 올립니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v20 (2026-09-17) — 계정별 webhook(S1b-2b)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"계정이 둘입니다(C56)", "delivery와의 결속(C72)", 계정별 침묵 incident(C67, C94)를
+구현합니다. 운영 절차는 docs/ops/email-sending-domains.md 4.3입니다.
+
+1. **endpoint** — `POST /api/webhooks/email/resend/transactional`과
+   `/api/webhooks/email/resend/marketing`. 각각 `RESEND_WEBHOOK_SECRET`,
+   `MARKETING_RESEND_WEBHOOK_SECRET`으로만 검증하고 서로의 secret을 빌리지 않습니다(없으면
+   503). 기존 `/api/webhooks/email/resend`는 transactional 계정으로 계속 받습니다. 그 밖의
+   경로 조각은 404입니다.
+2. **저장** — `ProviderWebhookEvent.providerAccount`(CHECK `transactional`·`marketing`,
+   NOT NULL)에 받은 계정을 남기고, 재전송 guard의 unique는
+   `(provider, providerAccount, providerEventId)`입니다. 이 변경 전 사건은 모두 하나였던
+   endpoint(transactional)로 들어왔으므로 transactional로 backfill합니다.
+3. **결속** — delivery는 `(providerAccount, providerMessageId)`로만 찾습니다. 다른 계정이
+   같은 메일 id를 보고하면 그 발송이 아닙니다 — 15분 대기 뒤 주소 기준으로 확정합니다.
+   delivery가 없는 사건의 원인 `sourceStream`·`providerAccount`는 검증된 계정입니다.
+4. **침묵** — 15분 sweeper가 API key와 webhook secret이 **둘 다** 있는 계정마다, DB 시계
+   기준 지난 24시간에 `EmailDelivery.sentAt`이 있는 그 계정 발송이 **5건 이상**이고 그 계정의
+   webhook 수신이 **0건**이면 incident `EMAIL_WEBHOOK_SILENT`를 올립니다. delivery 행이 없는
+   발송(운영자 알림, 관리자 테스트 메일)은 세지 않습니다.
+5. `(providerAccount, providerMessageId)` **partial unique는 이번에 두지 않습니다.**
+   기존 index로 조회하며, unique는 운영 데이터에 중복이 없음을 읽기 전용으로 확인한 뒤
+   별도 migration으로 둡니다 — 확인 없이 만들면 production migration이 실패할 수 있습니다.
 
 ### v19 (2026-09-17) — webhook 재처리 상태기계(S1b-2a)
 

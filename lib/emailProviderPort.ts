@@ -4,6 +4,7 @@ import { replyToForRole, senderIdentityFor } from "@/lib/emailSendingIdentity";
 import {
   postToResend,
   providerApiKeyFor,
+  webhookSecretFor,
   verifyResendWebhook,
   type EmailProviderPort,
   type ProviderSendResult,
@@ -11,6 +12,7 @@ import {
   type SendOptions,
   type WebhookVerification,
 } from "@/lib/emailProviderPortCore";
+import type { SendingStream } from "@/lib/emailSendingIdentityCore";
 
 /**
  * The one provider implementation, bound to this deployment's environment.
@@ -60,8 +62,12 @@ export class ResendProvider implements EmailProviderPort {
     });
   }
 
-  verifyWebhook(rawBody: string, headers: Headers): WebhookVerification {
-    const secret = process.env.RESEND_WEBHOOK_SECRET;
+  verifyWebhook(
+    rawBody: string,
+    headers: Headers,
+    stream: SendingStream
+  ): WebhookVerification {
+    const secret = webhookSecretFor(stream, process.env);
     // Distinct from a bad signature. Nothing is wrong with the request, so the
     // endpoint answers 503 and the provider keeps retrying -- events queue at
     // Resend rather than being dropped while a deployment misses its secret.

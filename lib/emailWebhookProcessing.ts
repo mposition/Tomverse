@@ -8,6 +8,8 @@ import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { recordProviderComplaint } from "@/lib/emailComplaintSuppression";
 import { recordSuppression, type RecordSuppressionInput } from "@/lib/emailSuppression";
 import { providerEventEffect } from "@/lib/emailSuppressionCore";
+import { providerApiKeyFor, webhookSecretFor } from "@/lib/emailProviderPortCore";
+import type { SendingStream } from "@/lib/emailSendingIdentityCore";
 import {
   providerEventOccurredAt,
   providerEventRank,
@@ -134,6 +136,8 @@ export const WEBHOOK_AWAIT_DELIVERY_MINUTES = 15;
 
 type StoredEvent = {
   id: string;
+  /** The account whose endpoint and secret the event arrived through. */
+  providerAccount: SendingStream;
   providerEventId: string;
   eventType: string;
   receivedAt: Date;
@@ -229,6 +233,7 @@ const runClaimedEvent = async (
       payload: event.payload,
       receivedAt: event.receivedAt,
       webhookEventId: event.id,
+      providerAccount: event.providerAccount,
       providerEventId: event.providerEventId,
       awaitDelivery: !claim.awaitExpired,
     });
@@ -259,11 +264,17 @@ const runClaimedEvent = async (
  * by the sweeper when the provider has given up.
  */
 export async function processResendWebhook(input: {
+  /**
+   * The account the event was verified for. The original endpoint serves the
+   * transactional account, which is what an event without one came through.
+   */
+  providerAccount?: SendingStream;
   providerEventId: string;
   payload: ResendEventPayload;
   receivedAt?: Date;
 }): Promise<WebhookProcessResult> {
   const eventType = typeof input.payload.type === "string" ? input.payload.type : "unknown";
+  const providerAccount: SendingStream = input.providerAccount ?? "transactional";
 
   // Written with the database's clock, like every later lease and waiting
   // decision, so an application host whose clock drifts cannot make a fresh
@@ -274,16 +285,18 @@ export async function processResendWebhook(input: {
     Array<{ id: string; receivedAt: Date; awaitExpired: boolean }>
   >`
     INSERT INTO "ProviderWebhookEvent" (
-      "id", "provider", "providerEventId", "eventType", "receivedAt", "payload",
+      "id", "provider", "providerAccount", "providerEventId", "eventType", "receivedAt", "payload",
       "processingLeaseId", "processingStartedAt", "processingAttempts"
     ) VALUES (
-      ${randomUUID()}, ${RESEND_PROVIDER}, ${input.providerEventId}, ${eventType},
+      ${randomUUID()}, ${RESEND_PROVIDER}, ${providerAccount}, ${input.providerEventId}, ${eventType},
       COALESCE((${input.receivedAt?.toISOString() ?? null}::timestamptz AT TIME ZONE 'UTC'),
                (now() AT TIME ZONE 'UTC')),
       ${JSON.stringify(input.payload)}::jsonb,
       ${leaseId}, (now() AT TIME ZONE 'UTC'), 1
     )
-    ON CONFLICT ("provider", "providerEventId") DO NOTHING
+    -- Event ids are unique per account, not across them: two accounts' events
+    -- with one id are two events.
+    ON CONFLICT ("provider", "providerAccount", "providerEventId") DO NOTHING
     RETURNING "id", "receivedAt",
               ("receivedAt" <= (now() AT TIME ZONE 'UTC') - make_interval(mins => CAST(${WEBHOOK_AWAIT_DELIVERY_MINUTES} AS integer))) AS "awaitExpired"
   `;
@@ -292,6 +305,7 @@ export async function processResendWebhook(input: {
     return runClaimedEvent(
       {
         id: created.id,
+        providerAccount,
         providerEventId: input.providerEventId,
         eventType,
         receivedAt: created.receivedAt,
@@ -306,7 +320,11 @@ export async function processResendWebhook(input: {
   // apply it -- unless a live lease says another worker is on it now.
   const existing = await prisma.providerWebhookEvent.findUnique({
     where: {
-      provider_providerEventId: { provider: RESEND_PROVIDER, providerEventId: input.providerEventId },
+      provider_providerAccount_providerEventId: {
+        provider: RESEND_PROVIDER,
+        providerAccount,
+        providerEventId: input.providerEventId,
+      },
     },
     select: {
       id: true,
@@ -341,6 +359,7 @@ export async function processResendWebhook(input: {
   return runClaimedEvent(
     {
       id: existing.id,
+      providerAccount,
       providerEventId: input.providerEventId,
       eventType: existing.eventType,
       receivedAt: existing.receivedAt,
@@ -413,13 +432,14 @@ export async function sweepProviderWebhookEvents(options?: { limit?: number; tim
     claimed += 1;
     const row = await prisma.providerWebhookEvent.findUnique({
       where: { id },
-      select: { providerEventId: true, eventType: true, receivedAt: true, payload: true },
+      select: { providerAccount: true, providerEventId: true, eventType: true, receivedAt: true, payload: true },
     });
     if (!row) continue;
     try {
       const result = await runClaimedEvent(
         {
           id,
+          providerAccount: row.providerAccount === "marketing" ? "marketing" : "transactional",
           providerEventId: row.providerEventId,
           eventType: row.eventType,
           receivedAt: row.receivedAt,
@@ -452,7 +472,65 @@ export async function sweepProviderWebhookEvents(options?: { limit?: number; tim
     });
   }
 
-  return { claimed, processed, awaiting, failed, abandoned: abandonedRows.length, stale };
+  const silent = await silentProviderAccounts();
+  for (const account of silent) {
+    await reportOperationalIncident({
+      code: "EMAIL_WEBHOOK_SILENT",
+      title: "An email provider account sent mail but reported no events in a day",
+      error: `The ${account.stream} account sent ${account.sent} message(s) in 24 hours and no webhook arrived; its endpoint may have been disabled`,
+      severity: "warning",
+      cooldownMs: 6 * 60 * 60 * 1_000,
+      context: { component: "email-webhook", account: account.stream, sent: account.sent },
+    });
+  }
+
+  return {
+    claimed,
+    processed,
+    awaiting,
+    failed,
+    abandoned: abandonedRows.length,
+    stale,
+    silentAccounts: silent.map((account) => account.stream),
+  };
+}
+
+/** At least this many sends in the window before silence is worth an incident. */
+export const WEBHOOK_SILENCE_MIN_SENDS = 5;
+
+/**
+ * Accounts that sent mail in the last day and received no webhook in it -- the
+ * shape of a provider that has disabled the endpoint after repeated failures
+ * (docs/policy/email-product-news-redesign-draft.md, section 7.4, C67, C94).
+ *
+ * Sends are deliveries this system recorded as sent, by the account fixed on
+ * the delivery; mail with no delivery row (operator notifications, the admin
+ * test mail) does not count. One database clock for both sides of the window.
+ * Only accounts with both an API key and a webhook secret are judged: an
+ * account that cannot send, or has nowhere to report, is not silent.
+ */
+export async function silentProviderAccounts(env: Readonly<Record<string, string | undefined>> = process.env) {
+  const streams: SendingStream[] = ["transactional", "marketing"];
+  const silent: Array<{ stream: SendingStream; sent: number }> = [];
+  for (const stream of streams) {
+    if (!providerApiKeyFor(stream, env) || !webhookSecretFor(stream, env)) continue;
+    const [row] = await prisma.$queryRaw<Array<{ sent: bigint; received: bigint }>>`
+      SELECT
+        (SELECT count(*) FROM "EmailDelivery"
+          WHERE "providerAccount" = ${stream}
+            AND "sentAt" >= (now() AT TIME ZONE 'UTC') - interval '24 hours'
+            AND "sentAt" < (now() AT TIME ZONE 'UTC')) AS "sent",
+        (SELECT count(*) FROM "ProviderWebhookEvent"
+          WHERE "providerAccount" = ${stream}
+            AND "receivedAt" >= (now() AT TIME ZONE 'UTC') - interval '24 hours'
+            AND "receivedAt" < (now() AT TIME ZONE 'UTC')) AS "received"
+    `;
+    const sent = Number(row?.sent ?? 0);
+    if (sent >= WEBHOOK_SILENCE_MIN_SENDS && Number(row?.received ?? 0) === 0) {
+      silent.push({ stream, sent });
+    }
+  }
+  return silent;
 }
 
 /** The effect of an event whose delivery is not recorded yet; see awaitDelivery. */
@@ -464,6 +542,8 @@ const applyResendEvent = async (input: {
   receivedAt: Date;
   /** The stored event row; keys the suppression cause so a replay adds none. */
   webhookEventId: string;
+  /** The account the event came through; scopes the delivery lookup. */
+  providerAccount: SendingStream;
   /** The provider's event id, the last tie-break of the event order. */
   providerEventId: string;
   /**
@@ -494,7 +574,9 @@ const applyResendEvent = async (input: {
   // which is a different message from the one that bounced.
   const delivery = providerMessageId
     ? await prisma.emailDelivery.findFirst({
-        where: { providerMessageId },
+        // Within the account that sent it: message ids are the provider's, and
+        // two accounts can issue the same one.
+        where: { providerAccount: input.providerAccount, providerMessageId },
         select: {
           id: true,
           userId: true,
@@ -593,14 +675,19 @@ const applyResendEvent = async (input: {
     source: "provider_webhook",
     // Which stream drew the complaint is what §13.3 decides on, so it is
     // recorded from the message rather than inferred later.
-    sourceStream: classification === "marketing" ? "marketing" : "transactional",
+    // An event matched to no delivery takes its stream from the verified account.
+    sourceStream: classification
+      ? classification === "marketing"
+        ? "marketing"
+        : "transactional"
+      : input.providerAccount,
     sourceClassification: classification,
     sourceDeliveryId: delivery?.id ?? null,
     sourceMessageId: providerMessageId,
     // The domain and account the message actually went out through, fixed on
     // the delivery at send; NULL for a message sent before they were recorded.
     sourceDomain: delivery?.sentDomain ?? null,
-    providerAccount: delivery?.providerAccount ?? null,
+    providerAccount: delivery?.providerAccount ?? input.providerAccount,
     occurredAt: key.occurredAt,
     sourceEventKey: `webhook:${input.webhookEventId}`,
   };
