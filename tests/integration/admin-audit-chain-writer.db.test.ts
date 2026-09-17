@@ -175,8 +175,8 @@ test("a system entry rolls back with the change it describes", async () => {
 // spelled. The guarantee is deliberately narrower than "only the writer can
 // write" (operator decision 2026-09-17): the application uses one database
 // role, so code that sets out to evade can still insert an unhashed row or a
-// head-linked row with a forged HMAC. Those are made visible -- the verifier
-// counts the first and fails the second -- rather than impossible.
+// head-linked row with a forged HMAC. The verifier fails the second and counts
+// the first when it is dated after the chain started; neither is prevented.
 
 const writeTwo = async () => {
   await writeAdminAuditLog({
@@ -287,23 +287,25 @@ test("concurrent writers still produce one linear chain", async () => {
   assert.equal(report.linkageBreaks, 0);
 });
 
-test("an unhashed entry is accepted, and one written after the chain started is reported", async () => {
+test("an unhashed entry is accepted, and one dated after the first hashed entry is counted", async () => {
   // Accepted: a database with no integrity key writes unhashed rows, and so do
   // test fixtures.
   await prisma.adminAuditLog.create({
     data: { action: "example.unkeyed", targetType: "Example", summary: "No key." },
   });
-  assert.equal((await verifyAdminAuditIntegrity()).unhashedEntriesAfterChainStart, 0);
+  assert.equal((await verifyAdminAuditIntegrity()).unhashedEntriesDatedAfterFirstHash, 0);
 
-  // Reported: once hashed entries exist, a later unhashed row did not come from
-  // the writer with a key configured.
+  // Counted: once hashed entries exist, a later-dated unhashed row did not come
+  // from the writer with a key configured. A back-dated one is not counted --
+  // the count reads createdAt, which the inserter chooses -- and nothing
+  // renders either yet.
   await writeTwo();
   await new Promise((resolve) => setTimeout(resolve, 5));
   await prisma.adminAuditLog.create({
     data: { action: "example.bypass", targetType: "Example", summary: "Around the writer." },
   });
   const report = await verifyAdminAuditIntegrity();
-  assert.equal(report.unhashedEntriesAfterChainStart, 1);
+  assert.equal(report.unhashedEntriesDatedAfterFirstHash, 1);
   assert.equal(report.valid, true, "the chain itself is intact");
 });
 

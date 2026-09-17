@@ -495,10 +495,11 @@ jobs:
         run: npm run check:conversation-writers
 
       # The audit chain proves nothing about a row that reached the table some
-      # other way, so the writer module has to be the only way in
+      # other way, so a protected table has one writer module
       # (docs/policy/marketing-automation.md §6). Direct delegate writes, raw SQL
-      # naming a protected table beside a write verb, and any new runtime-built
-      # SQL call all fail here.
+      # naming a protected table beside a write verb, and any new route to
+      # runtime-built SQL fail here; the database enforces the rest
+      # (prisma/migrations/20260918090000_admin_audit_log_append_only).
       - name: Protected table writers
         timeout-minutes: 5
         run: npm run check:protected-table-writers

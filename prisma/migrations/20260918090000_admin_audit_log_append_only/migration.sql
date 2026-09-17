@@ -2,12 +2,12 @@
 -- chain at its head.
 --
 -- Contract: docs/policy/marketing-automation.md §6 -- human and system actions
--- share one hash chain written through lib/adminAudit.ts, and direct writes to
--- the table are forbidden. `npm run check:protected-table-writers` refuses the
--- direct writes it can read in source; this migration makes the property hold
--- for writes it cannot read -- a delegate reached through an alias, a
--- transaction callback, or SQL assembled at run time -- because the database
--- checks every row however it arrived.
+-- share one hash chain written through lib/adminAudit.ts.
+-- `npm run check:protected-table-writers` refuses the direct writes it can read
+-- in source; this migration adds checks the database applies to every row
+-- however it arrived, including writes that check cannot read -- a delegate
+-- reached through an alias, a transaction callback, or SQL assembled at run
+-- time.
 --
 -- What it enforces:
 --
@@ -30,23 +30,25 @@
 --    transaction. An inserter that skips the lock or links to an older entry is
 --    refused instead of forking the chain.
 --
--- Both functions pin search_path to the schema they were created in, so a
--- caller's search_path cannot point the head read at another table.
+-- The head is read from `TG_RELID`, the table the trigger is attached to, so no
+-- search path and no same-named temporary table can point the read at another
+-- relation; both functions run with `search_path = pg_catalog, pg_temp` and
+-- call built-ins by their schema.
 --
 -- What it does not do (operator decision 2026-09-17: mistakes are stopped,
 -- deliberate evasion is detected): stop code using the application's own
 -- database role from disabling these triggers, truncating the table, or
 -- inserting a head-linked row with a forged hash. The verifier fails a forged
--- hash and counts unhashed rows written after the chain started; preventing
+-- hash and counts unhashed rows dated after the first hashed one; preventing
 -- the rest needs a separate non-owner runtime role, a recorded follow-up.
--- Nor does it verify the HMAC. The key lives in the application, not
--- the database. A row with no entryHash (written where no integrity key is
+-- Nor does it verify the HMAC. The key lives in the application, not the
+-- database. A row with no entryHash (written where no integrity key is
 -- configured, or by a test fixture) is accepted and, as before, is not part of
 -- what verification covers.
 
 CREATE OR REPLACE FUNCTION "admin_audit_log_is_append_only"()
 RETURNS trigger
-SET search_path FROM CURRENT
+SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
     RAISE EXCEPTION 'AdminAuditLog is append-only: % of entry % refused', TG_OP, OLD."id"
@@ -61,7 +63,7 @@ CREATE TRIGGER "admin_audit_log_is_append_only"
 
 CREATE OR REPLACE FUNCTION "admin_audit_log_links_to_head"()
 RETURNS trigger
-SET search_path FROM CURRENT
+SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
     head_hash TEXT;
@@ -77,14 +79,14 @@ BEGIN
 
     -- Same lock as lib/adminAudit.ts, so the head read below cannot race
     -- another hashed insert.
-    PERFORM pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'));
+    PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('tomverse-admin-audit-chain'));
 
-    SELECT "entryHash", "createdAt"
-      INTO head_hash, head_created_at
-      FROM "AdminAuditLog"
-     WHERE "entryHash" IS NOT NULL
-     ORDER BY "createdAt" DESC, "id" DESC
-     LIMIT 1;
+    -- The trigger's own table by oid, not by name.
+    EXECUTE pg_catalog.format(
+        'SELECT "entryHash", "createdAt" FROM %s WHERE "entryHash" IS NOT NULL'
+        || ' ORDER BY "createdAt" DESC, "id" DESC LIMIT 1',
+        TG_RELID::pg_catalog.regclass
+    ) INTO head_hash, head_created_at;
 
     IF NEW."previousHash" IS DISTINCT FROM head_hash THEN
         RAISE EXCEPTION 'AdminAuditLog entry % does not link to the chain head', NEW."id"

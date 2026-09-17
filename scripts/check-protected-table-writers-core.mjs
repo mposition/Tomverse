@@ -5,10 +5,10 @@
  * recorded in the existing hash-chained audit log, the system writer shares
  * the administrator writer's lock and hash path, and "감사 테이블 직접 insert는
  * 금지다". The chain proves nothing about a row that reached the table some
- * other way -- an entry inserted beside the writer either breaks verification
- * for everyone after it or, if the inserter holds the key, is indistinguishable
- * from a real one. So the writer has to be the only way in, and this check is
- * what makes that true rather than intended.
+ * other way -- an entry inserted beside the writer breaks verification for
+ * everyone after it. This check refuses the direct writes it can read in
+ * source; what it can and cannot promise is set out under "The guarantee"
+ * below.
  *
  * The table list is a registry because the same rule is coming for the
  * marketing tables (one store module per S1c of the marketing plan); adding
@@ -56,7 +56,7 @@
  *    mentions and write verbs, so adding a real statement to an allowlisted
  *    file changes a count and fails, and an entry that stops matching fails.
  *
- * 5. **runtime-sql.** Everything that runs SQL this check cannot read is
+ * 5. **runtime-sql.** The routes to runtime-built SQL listed here are
  *    inventoried per file with a reviewed count, failing in both directions:
  *    `$executeRawUnsafe` / `$queryRawUnsafe` however reached (member,
  *    computed, destructured, or named by a string), `Prisma.raw` /
@@ -89,7 +89,7 @@
  *   insert, a head-linked insert with a forged HMAC, TRUNCATE, or disabling a
  *   trigger, all from the one database role the application uses -- is
  *   surfaced rather than prevented: the verifier fails a forged hash and
- *   counts unhashed rows written after the chain started, and the code that
+ *   counts unhashed rows dated after the first hashed one, and the code that
  *   did it is a review finding.
  * - Preventing those as well needs a separate non-owner runtime database role
  *   with direct DML, TRUNCATE and trigger changes revoked. That is a recorded
@@ -250,7 +250,7 @@ export const RAW_SQL_ALLOWLIST = [
   {
     path: "prisma/migrations/20260918090000_admin_audit_log_append_only/migration.sql",
     table: "AdminAuditLog",
-    tableMentions: 7,
+    tableMentions: 6,
     writeVerbs: 4,
     reason:
       "The append-only and chain-head triggers themselves: they name UPDATE, DELETE and INSERT to refuse or constrain them, and write nothing.",
@@ -259,6 +259,12 @@ export const RAW_SQL_ALLOWLIST = [
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "prisma/migrations/20260918090000_admin_audit_log_append_only/migration.sql",
+    count: 1,
+    reason:
+      "The chain-head trigger reads the head with EXECUTE over TG_RELID::regclass -- the table the trigger is attached to -- so no search path or same-named temporary table can redirect the read. It builds no table name from input.",
+  },
   {
     path: "lib/prisma.ts",
     sha256: "c3245196e95f7c9198b0d6834f221969eeede43b9bf59bf01c8d77000056bedc",
@@ -914,13 +920,15 @@ export const describeFindings = (findings) =>
         `  [${finding.rule}] ${finding.path}${finding.line ? `:${finding.line}` : ""}  ${finding.detail}`
     ),
     "",
-    "Protected tables are written only by their writer module:",
+    "Protected tables have one writer module each:",
     ...PROTECTED_TABLES.map(
       (entry) => `  ${entry.table}: ${entry.writers.join(", ")} (${entry.contract})`
     ),
     "",
     "For the audit log, record an administrator action with writeAdminAuditLog and a",
     "system action with writeSystemAuditLog, in the transaction of the change.",
+    "This check refuses the direct writes it can read; it does not by itself prove",
+    "no other write exists (see \"The guarantee\" in this file).",
     "A reviewed exception goes in scripts/check-protected-table-writers-core.mjs with",
     "its exact count and the reason it cannot reach a protected table.",
   ].join("\n");

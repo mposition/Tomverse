@@ -1,6 +1,8 @@
-// Fails when a file other than a protected table's writer module can write
-// that table. See scripts/check-protected-table-writers-core.mjs for the
-// rules, the allowlists and why each entry is there.
+// Fails when a scanned file other than a protected table's writer module
+// contains a write this check can read: a delegate write, raw SQL naming the
+// table beside a write verb, or a new route to runtime-built SQL. See
+// scripts/check-protected-table-writers-core.mjs for the rules, the
+// allowlists, and what the check does and does not promise.
 //
 // Usage:
 //   npm run check:protected-table-writers
