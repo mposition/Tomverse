@@ -63,11 +63,13 @@ type AuditChainEntry = {
 /**
  * Appends one entry to the audit hash chain on `client`.
  *
- * The only place a row joins the chain. Every writer -- the administrator
+ * The application's shared append path. Every writer -- the administrator
  * writer below and any system-actor writer -- goes through here, so the lock,
  * the database clock, the previous-hash read and the HMAC input cannot drift
  * apart between them (docs/policy/marketing-automation.md §6). The sequence is
- * pinned by tests/server-contract/admin-audit-chain-writer.test.ts.
+ * pinned by tests/server-contract/admin-audit-chain-writer.test.ts. It is the
+ * intended way in, not a boundary: what stops other writes is the static check
+ * and the database's own triggers, within the limits both state.
  *
  * `integritySecret` is resolved by the caller before any transaction opens,
  * as it always was, so reading the environment is not part of the locked span.
@@ -81,14 +83,23 @@ async function appendAuditChainEntry(
   const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
     SELECT clock_timestamp() AS "createdAt"
   `;
-  const createdAt = timestampRows[0]?.createdAt || new Date();
+  const databaseNow = timestampRows[0]?.createdAt || new Date();
   const previous = integritySecret
     ? await client.adminAuditLog.findFirst({
         where: { entryHash: { not: null } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: { entryHash: true },
+        select: { entryHash: true, createdAt: true },
       })
     : null;
+  // The chain is ordered by (createdAt, id) and ids are random, so an entry
+  // stamped in the same millisecond as the head could sort before it and fork
+  // the chain for the next writer. A hashed entry therefore always lands at
+  // least one millisecond after the head; the database refuses anything else
+  // (20260918090000_admin_audit_log_append_only).
+  const createdAt =
+    previous && databaseNow.getTime() <= previous.createdAt.getTime()
+      ? new Date(previous.createdAt.getTime() + 1)
+      : databaseNow;
   const previousHash = previous?.entryHash || null;
   const entryHash = integritySecret
     ? computeAdminAuditEntryHash(
