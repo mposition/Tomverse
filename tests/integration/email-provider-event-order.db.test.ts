@@ -61,7 +61,10 @@ const deliverOne = async (emailAddress: string) => {
   return providerMessageId;
 };
 
-const second = (n: number) => new Date(Date.UTC(2026, 8, 17, 0, 0, n)).toISOString();
+// Event times a few minutes in the past, so a soft bounce hold computed from them
+// has not expired whenever the suite runs.
+const base = Date.now() - 10 * 60_000;
+const second = (n: number) => new Date(base + n * 1_000).toISOString();
 
 type Event = {
   id: string;
@@ -84,8 +87,6 @@ const send = (event: Event) =>
         ...(event.bounce ? { bounce: { type: event.bounce } } : {}),
       },
     },
-    // Received well after every event happened, so none is disbelieved.
-    receivedAt: new Date(Date.UTC(2026, 8, 17, 1, 0, 0)),
   });
 
 const permutations = <T>(list: T[]): T[][] =>
@@ -250,4 +251,116 @@ test("the sweep releases expired causes and the entries left with nothing behind
 
   const again = await releaseExpiredSuppressionCauses();
   assert.equal(again.released, 0);
+});
+
+/**
+ * Five deliveries to one address, a soft bounce on each at the given seconds,
+ * and a delivery on a sixth at `deliveredAt`; replayed in each given order.
+ * Returns the distinct end states.
+ */
+const replayRun = async (input: { bounceSeconds: number[]; deliveredAt: number; orders: number[][] }) => {
+  const states = new Set<string>();
+  for (const order of input.orders) {
+    await reset();
+    const address = `${randomUUID()}@example.com`;
+    const events: Event[] = [];
+    for (const [i, at] of input.bounceSeconds.entries()) {
+      events.push({
+        id: `evt-bounce-${i}`,
+        type: "email.bounced",
+        bounce: "Transient",
+        messageId: await deliverOne(address),
+        address,
+        createdAt: second(at),
+      });
+    }
+    events.push({
+      id: "evt-delivered",
+      type: "email.delivered",
+      messageId: await deliverOne(address),
+      address,
+      createdAt: second(input.deliveredAt),
+    });
+    for (const index of order) await send(events[index]);
+
+    const active = await prisma.suppressionCause.findMany({
+      where: { emailAddress: address, releasedAt: null },
+      select: { reason: true, occurredAt: true, expiresAt: true },
+    });
+    const entry = await prisma.suppressionEntry.findFirst({
+      where: { emailAddress: address },
+      select: { reason: true, expiresAt: true },
+    });
+    const allowed = (await suppressionCheck({ emailAddress: address, classification: "marketing" })).allowed;
+    states.add(
+      JSON.stringify({
+        active: active.map((cause) => [cause.reason, cause.occurredAt.getTime() - base, cause.expiresAt?.getTime()]),
+        entry: entry ? [entry.reason, entry.expiresAt?.getTime()] : null,
+        allowed,
+      })
+    );
+  }
+  return [...states];
+};
+
+// Event 5 is the delivery; 0..4 are the bounces.
+const ORDERS = [
+  [0, 1, 2, 3, 4, 5],
+  [5, 0, 1, 2, 3, 4],
+  [0, 1, 5, 2, 3, 4],
+  [4, 3, 2, 1, 0, 5],
+  [5, 4, 3, 2, 1, 0],
+  [2, 5, 4, 0, 3, 1],
+];
+
+test("a delivery in the middle of a run ends the same in every order: too short to suppress", async () => {
+  assert.equal(SOFT_BOUNCE_SUPPRESSION_THRESHOLD, 5);
+  const states = await replayRun({ bounceSeconds: [1, 2, 3, 4, 5], deliveredAt: 3, orders: ORDERS });
+  assert.deepEqual(states, [JSON.stringify({ active: [], entry: null, allowed: true })]);
+});
+
+test("a run that still crosses the threshold after a delivery ends with one cause, dated by the crossing", async () => {
+  const states = await replayRun({ bounceSeconds: [3, 4, 5, 6, 7], deliveredAt: 3, orders: ORDERS });
+  assert.equal(states.length, 1, states.join("\n"));
+  const state = JSON.parse(states[0]);
+  assert.equal(state.allowed, false);
+  assert.equal(state.active.length, 1);
+  assert.equal(state.active[0][0], "soft_bounce");
+  assert.equal(state.active[0][1], 7_000);
+});
+
+test("a soft bounce matched to no delivery never suppresses", async () => {
+  const address = `${randomUUID()}@example.com`;
+  for (let i = 0; i < SOFT_BOUNCE_SUPPRESSION_THRESHOLD - 1; i += 1) {
+    await send({
+      id: `evt-bounce-${i}`,
+      type: "email.bounced",
+      bounce: "Transient",
+      messageId: await deliverOne(address),
+      address,
+      createdAt: second(i + 1),
+    });
+  }
+  const result = await send({
+    id: "evt-unmatched",
+    type: "email.bounced",
+    bounce: "Transient",
+    messageId: `resend-${randomUUID()}`,
+    address,
+    createdAt: second(9),
+  });
+  assert.equal(result.handled, true);
+  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: address } }), 0);
+});
+
+test("a delivery whose status predates event keys is not rolled back by an older event", async () => {
+  const address = `${randomUUID()}@example.com`;
+  const messageId = await deliverOne(address);
+  await prisma.emailDelivery.updateMany({
+    data: { status: "delivered", deliveredAt: new Date(base + 20_000) },
+  });
+  await send({ id: "evt-old-sent", type: "email.sent", messageId, address, createdAt: second(5) });
+  const row = await prisma.emailDelivery.findFirstOrThrow();
+  assert.equal(row.status, "delivered");
+  assert.equal(row.providerEventId, null);
 });

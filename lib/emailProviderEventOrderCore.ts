@@ -93,39 +93,34 @@ export const providerEventAdvancesStatus = (
 ) => last === null || compareProviderEventKeys(event, last) > 0;
 
 /**
- * The run of soft bounces that counts toward suppression: deliveries of the
- * address whose latest soft bounce is after its latest delivered event.
+ * The soft bounce that puts the address over the threshold, computed from facts
+ * every processing order converges on: each delivery's latest soft bounce and
+ * the address's latest delivered event.
  *
- * Compared by time with the rank tie-break folded in -- a soft bounce ranks
- * after a delivery -- so a soft bounce at the same instant as the latest
- * delivery counts, and one strictly earlier does not.
+ * The run is the deliveries whose latest soft bounce is at or after that
+ * delivery -- a soft bounce ranks after a delivery at the same instant, so it
+ * counts, and one strictly earlier does not. The crossing is the threshold-th
+ * of them in time order (delivery id breaks ties); the cause it calls for
+ * happened then. Null while the run is shorter than the threshold.
  */
-export const softBounceRun = (input: {
-  softBounceTimes: Array<Date | null>;
+export const canonicalSoftBounceCrossing = (input: {
+  deliveries: Array<{ id: string; softBounceAt: Date | null }>;
   latestDeliveredAt: Date | null;
-}) =>
-  input.softBounceTimes.filter(
-    (at) =>
-      at !== null &&
-      (input.latestDeliveredAt === null || at.getTime() >= input.latestDeliveredAt.getTime())
-  ).length;
-
-/**
- * Whether a soft bounce may record a cause: not when the address has a later
- * delivered event. The same instant counts as later for the bounce.
- */
-export const softBounceStillCurrent = (input: {
-  occurredAt: Date;
-  latestDeliveredAt: Date | null;
-}) =>
-  input.latestDeliveredAt === null ||
-  input.occurredAt.getTime() >= input.latestDeliveredAt.getTime();
-
-/**
- * Whether a delivered event releases a soft bounce cause: only one strictly
- * earlier. A bounce at the same instant ranks after the delivery and stands.
- */
-export const deliveredReleasesSoftBounce = (input: {
-  deliveredAt: Date;
-  causeOccurredAt: Date;
-}) => input.causeOccurredAt.getTime() < input.deliveredAt.getTime();
+  threshold: number;
+}): { deliveryId: string; softBounceAt: Date; run: number } | null => {
+  const run = input.deliveries
+    .filter(
+      (row): row is { id: string; softBounceAt: Date } =>
+        row.softBounceAt !== null &&
+        (input.latestDeliveredAt === null ||
+          row.softBounceAt.getTime() >= input.latestDeliveredAt.getTime())
+    )
+    .sort(
+      (a, b) =>
+        a.softBounceAt.getTime() - b.softBounceAt.getTime() ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    );
+  if (run.length < input.threshold) return null;
+  const crossing = run[input.threshold - 1];
+  return { deliveryId: crossing.id, softBounceAt: crossing.softBounceAt, run: run.length };
+};

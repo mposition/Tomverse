@@ -6,7 +6,9 @@
 -- (event order, C71, C77, C85).
 --
 -- Nullable additions only: existing rows have no ordered event yet, and the
--- first event after this deploy sets the key.
+-- first event after this deploy sets the key. The CHECK is added NOT VALID and
+-- validated in its own statement, so existing rows are scanned under
+-- VALIDATE's lighter lock rather than the ADD's.
 
 ALTER TABLE "EmailDelivery"
     ADD COLUMN "providerEventAt" TIMESTAMP(3),
@@ -19,4 +21,6 @@ ALTER TABLE "EmailDelivery" ADD CONSTRAINT "EmailDelivery_provider_event_key_che
         ("providerEventAt" IS NULL AND "providerEventRank" IS NULL AND "providerEventId" IS NULL)
         OR ("providerEventAt" IS NOT NULL AND "providerEventRank" BETWEEN 0 AND 4
             AND "providerEventId" IS NOT NULL)
-    );
+    ) NOT VALID;
+
+ALTER TABLE "EmailDelivery" VALIDATE CONSTRAINT "EmailDelivery_provider_event_key_check";

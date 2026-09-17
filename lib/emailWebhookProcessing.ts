@@ -273,8 +273,6 @@ const applyResendEvent = async (input: {
       deliveryId: delivery?.id ?? null,
       key,
       webhookEventId: input.webhookEventId,
-      sourceStream: classification === "marketing" ? "marketing" : "transactional",
-      sourceMessageId: providerMessageId,
     });
     return {
       effect: outcome.suppressed ? "soft_bounce_suppressed" : "soft_bounce",

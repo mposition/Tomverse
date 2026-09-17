@@ -3,13 +3,11 @@ import { test } from "node:test";
 
 import {
   PROVIDER_EVENT_RANK,
+  canonicalSoftBounceCrossing,
   compareProviderEventKeys,
-  deliveredReleasesSoftBounce,
   providerEventAdvancesStatus,
   providerEventOccurredAt,
   providerEventRank,
-  softBounceRun,
-  softBounceStillCurrent,
 } from "../lib/emailProviderEventOrderCore.ts";
 
 // Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4
@@ -91,30 +89,34 @@ test("a status moves only for a later event, whatever order they are processed i
   assert.deepEqual([...finals], ["delivered:delivered-2"]);
 });
 
-test("a soft bounce at the same instant as a delivery counts and stands; an earlier one does not", () => {
-  const delivered = at("2026-09-17T00:00:05.000Z");
-  assert.equal(softBounceStillCurrent({ occurredAt: delivered, latestDeliveredAt: delivered }), true);
-  assert.equal(
-    softBounceStillCurrent({ occurredAt: at("2026-09-17T00:00:04.999Z"), latestDeliveredAt: delivered }),
-    false
-  );
-  assert.equal(softBounceStillCurrent({ occurredAt: delivered, latestDeliveredAt: null }), true);
+test("the soft bounce crossing depends only on the facts, not on the order they were written", () => {
+  const t = (n) => new Date(Date.UTC(2026, 8, 17, 0, 0, n));
+  const deliveries = [1, 2, 3, 4, 5].map((n) => ({ id: `d${n}`, softBounceAt: t(n) }));
 
-  assert.equal(deliveredReleasesSoftBounce({ deliveredAt: delivered, causeOccurredAt: delivered }), false);
+  // A delivery at 3: bounces at 1 and 2 are before it, 3 (same instant) counts.
   assert.equal(
-    deliveredReleasesSoftBounce({ deliveredAt: delivered, causeOccurredAt: at("2026-09-17T00:00:04.999Z") }),
-    true
+    canonicalSoftBounceCrossing({ deliveries, latestDeliveredAt: t(3), threshold: 5 }),
+    null
+  );
+  assert.deepEqual(
+    canonicalSoftBounceCrossing({ deliveries, latestDeliveredAt: t(3), threshold: 3 }),
+    { deliveryId: "d5", softBounceAt: t(5), run: 3 }
+  );
+  assert.deepEqual(
+    canonicalSoftBounceCrossing({ deliveries, latestDeliveredAt: null, threshold: 5 }),
+    { deliveryId: "d5", softBounceAt: t(5), run: 5 }
   );
 
-  assert.equal(
-    softBounceRun({
-      softBounceTimes: [at("2026-09-17T00:00:04.000Z"), delivered, at("2026-09-17T00:00:06.000Z"), null],
-      latestDeliveredAt: delivered,
-    }),
-    2
-  );
-  assert.equal(
-    softBounceRun({ softBounceTimes: [at("2026-09-17T00:00:04.000Z"), null], latestDeliveredAt: null }),
-    1
-  );
+  // Input order does not matter; ties at one instant break by delivery id.
+  const tied = [
+    { id: "b", softBounceAt: t(9) },
+    { id: "a", softBounceAt: t(9) },
+    { id: "c", softBounceAt: null },
+  ];
+  for (const order of [tied, [...tied].reverse()]) {
+    assert.deepEqual(
+      canonicalSoftBounceCrossing({ deliveries: order, latestDeliveredAt: t(9), threshold: 1 }),
+      { deliveryId: "a", softBounceAt: t(9), run: 2 }
+    );
+  }
 });

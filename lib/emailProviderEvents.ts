@@ -3,10 +3,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 
 import {
-  deliveredReleasesSoftBounce,
+  PROVIDER_EVENT_RANK,
+  canonicalSoftBounceCrossing,
   providerEventAdvancesStatus,
-  softBounceRun,
-  softBounceStillCurrent,
   type ProviderEventKey,
 } from "@/lib/emailProviderEventOrderCore";
 import { normalizeSuppressionAddress, recordSuppression } from "@/lib/emailSuppression";
@@ -30,26 +29,63 @@ import { prisma } from "@/lib/prisma";
  * (event order, C71, C77, C85; delivered releases, C57, C64).
  *
  * Every write here happens under the address lock, so two events for one
- * address are applied one after the other, and each one decides from the facts
- * the other left rather than from whichever finished first.
+ * address are applied one after the other, and each decides from the facts the
+ * other left rather than from whichever finished first.
  */
 
 type Tx = Prisma.TransactionClient;
 
+const TRANSACTION_TIMEOUT_MS = 20_000;
+
 /** Opens the fence and the address lock, in the order every writer takes them. */
-const underAddress = <T>(emailAddress: string, work: (tx: Tx) => Promise<T>) =>
+const underAddress = <T>(
+  emailAddress: string,
+  work: (tx: Tx) => Promise<T>,
+  timeoutMs = TRANSACTION_TIMEOUT_MS
+) =>
   prisma.$transaction(
     async (tx) => {
       await holdSuppressionFence(tx);
       await lockSuppressionAddress(tx, normalizeSuppressionAddress(emailAddress));
       return work(tx);
     },
-    { timeout: 20_000 }
+    { timeout: timeoutMs, maxWait: timeoutMs }
   );
 
 /**
+ * The order key standing in for a delivery whose status was set before event
+ * keys were recorded. Its status came from an event, so a late event older than
+ * that status must not roll it back; the row's own timestamps are the best
+ * record of when that happened.
+ */
+const legacyKey = (row: {
+  status: string;
+  lastErrorKind: string | null;
+  deliveredAt: Date | null;
+  updatedAt: Date;
+}): ProviderEventKey | null => {
+  switch (row.status) {
+    case "delivered":
+      return { occurredAt: row.deliveredAt ?? row.updatedAt, rank: PROVIDER_EVENT_RANK.delivered, eventId: "" };
+    case "bounced":
+      return {
+        occurredAt: row.updatedAt,
+        rank:
+          row.lastErrorKind === "soft_bounce"
+            ? PROVIDER_EVENT_RANK.soft_bounce
+            : PROVIDER_EVENT_RANK.hard_bounce,
+        eventId: "",
+      };
+    case "complained":
+      return { occurredAt: row.updatedAt, rank: PROVIDER_EVENT_RANK.complaint, eventId: "" };
+    default:
+      return null;
+  }
+};
+
+/**
  * Moves a delivery's status when the event is later than the last one that did,
- * and records the event's own facts either way.
+ * and records the event's own facts either way. Returns whether the status moved.
  */
 const applyToDelivery = async (
   tx: Tx,
@@ -57,7 +93,6 @@ const applyToDelivery = async (
     deliveryId: string;
     key: ProviderEventKey;
     status: string;
-    lastErrorKind?: string;
     deliveredAt?: Date;
     softBounceAt?: Date;
   }
@@ -65,6 +100,9 @@ const applyToDelivery = async (
   const row = await tx.emailDelivery.findUnique({
     where: { id: input.deliveryId },
     select: {
+      status: true,
+      lastErrorKind: true,
+      updatedAt: true,
       providerEventAt: true,
       providerEventRank: true,
       providerEventId: true,
@@ -74,9 +112,9 @@ const applyToDelivery = async (
   });
   if (!row) return false;
   const last =
-    row.providerEventAt && row.providerEventRank !== null && row.providerEventId
+    row.providerEventAt && row.providerEventRank !== null && row.providerEventId !== null
       ? { occurredAt: row.providerEventAt, rank: row.providerEventRank, eventId: row.providerEventId }
-      : null;
+      : legacyKey(row);
   const advances = providerEventAdvancesStatus(input.key, last);
   const later = (current: Date | null, next: Date | undefined) =>
     next && (!current || next.getTime() > current.getTime()) ? next : undefined;
@@ -90,7 +128,9 @@ const applyToDelivery = async (
       ...(advances
         ? {
             status: input.status,
-            ...(input.lastErrorKind ? { lastErrorKind: input.lastErrorKind } : {}),
+            // Written on every move, so the error kind always describes the
+            // status it sits beside whatever order the events came in.
+            lastErrorKind: input.key.rank === PROVIDER_EVENT_RANK.soft_bounce ? "soft_bounce" : null,
             providerEventAt: input.key.occurredAt,
             providerEventRank: input.key.rank,
             providerEventId: input.key.eventId,
@@ -103,13 +143,125 @@ const applyToDelivery = async (
   return advances;
 };
 
-/** The latest delivered event's time across every delivery to the address. */
-const latestDeliveredAt = async (tx: Tx, emailAddress: string) => {
-  const row = await tx.emailDelivery.aggregate({
-    where: { emailAddress: normalizeSuppressionAddress(emailAddress) },
+/**
+ * Brings the address's soft bounce cause to the one its delivery facts call for.
+ *
+ * The cause is not whatever happened to cross the threshold when it was
+ * processed -- that depends on arrival order. It is computed from the facts
+ * every ordering converges on: each delivery's latest soft bounce, and the
+ * address's latest delivery. A cause that no longer matches is released and the
+ * matching one written, so any order of the same events leaves the same active
+ * cause.
+ */
+const reconcileSoftBounceCause = async (
+  tx: Tx,
+  input: { emailAddress: string; webhookEventId: string; trigger: "delivered" | "soft_bounce" }
+) => {
+  const emailAddress = input.emailAddress;
+  const now = new Date();
+  const deliveredMax = await tx.emailDelivery.aggregate({
+    where: { emailAddress },
     _max: { deliveredAt: true },
   });
-  return row._max.deliveredAt ?? null;
+  const latestDeliveredAt = deliveredMax._max.deliveredAt ?? null;
+  const candidates = await tx.emailDelivery.findMany({
+    where: {
+      emailAddress,
+      softBounceAt: latestDeliveredAt ? { gte: latestDeliveredAt } : { not: null },
+    },
+    select: {
+      id: true,
+      softBounceAt: true,
+      providerMessageId: true,
+      templateVersion: { select: { classification: true } },
+    },
+  });
+  const crossing = canonicalSoftBounceCrossing({
+    deliveries: candidates.map((row) => ({ id: row.id, softBounceAt: row.softBounceAt })),
+    latestDeliveredAt,
+    threshold: SOFT_BOUNCE_SUPPRESSION_THRESHOLD,
+  });
+  const desired =
+    crossing &&
+    crossing.softBounceAt.getTime() + SOFT_BOUNCE_SUPPRESSION_MS > now.getTime()
+      ? crossing
+      : null;
+
+  const active = (
+    await tx.suppressionCause.findMany({
+      where: {
+        emailAddress,
+        scope: "global",
+        purposeKey: "*",
+        reason: "soft_bounce",
+        source: "provider_webhook",
+        releasedAt: null,
+      },
+      select: { id: true, occurredAt: true, expiresAt: true, releasedAt: true },
+    })
+  ).filter((cause) => isActiveCause(cause, now));
+
+  const keep = desired
+    ? active.find((cause) => cause.occurredAt.getTime() === desired.softBounceAt.getTime())
+    : undefined;
+  const stale = active.filter((cause) => cause !== keep);
+
+  if (stale.length > 0) {
+    await markCauseWriter(tx);
+    await tx.suppressionCause.updateMany({
+      where: { id: { in: stale.map((cause) => cause.id) }, releasedAt: null },
+      data: {
+        releasedAt: now,
+        releaseKind: input.trigger === "delivered" ? "delivered" : "superseded",
+        releaseEvidence: {
+          kind: input.trigger === "delivered" ? "delivered" : "superseded",
+          webhookEventId: input.webhookEventId,
+        },
+      },
+    });
+  }
+
+  if (desired && !keep) {
+    const row = candidates.find((candidate) => candidate.id === desired.deliveryId);
+    const base = `softbounce:${desired.deliveryId}:${desired.softBounceAt.getTime()}`;
+    // A key released earlier cannot be written again; the next free suffix
+    // records the same fact anew.
+    const taken = await tx.suppressionCause.count({
+      where: { emailAddress, sourceEventKey: { startsWith: base } },
+    });
+    await recordSuppression(
+      {
+        emailAddress,
+        reason: "soft_bounce",
+        source: "provider_webhook",
+        expiresAt: new Date(desired.softBounceAt.getTime() + SOFT_BOUNCE_SUPPRESSION_MS),
+        sourceStream: row?.templateVersion.classification === "marketing" ? "marketing" : "transactional",
+        sourceDeliveryId: desired.deliveryId,
+        sourceMessageId: row?.providerMessageId ?? null,
+        occurredAt: desired.softBounceAt,
+        sourceEventKey: taken === 0 ? base : `${base}:${taken}`,
+      },
+      tx
+    );
+  }
+
+  // The entry is a soft bounce only while one is its latest reason. Removed when
+  // nothing active remains behind the selector, so an older build reading
+  // entries stops holding mail the causes already let through -- the cutover
+  // would otherwise count it as a mismatch.
+  if (!desired && stale.length > 0) {
+    const remaining = await tx.suppressionCause.findMany({
+      where: { emailAddress, scope: "global", purposeKey: "*", releasedAt: null },
+      select: { expiresAt: true, releasedAt: true },
+    });
+    if (!remaining.some((cause) => isActiveCause(cause, now))) {
+      await markCauseWriter(tx);
+      await tx.suppressionEntry.deleteMany({
+        where: { emailAddress, scope: "global", purposeKey: "*", reason: "soft_bounce" },
+      });
+    }
+  }
+  return { suppressed: desired !== null };
 };
 
 /** `sent`, and the status side of a hard bounce or a complaint. */
@@ -124,10 +276,7 @@ export async function recordProviderStatusEvent(input: {
   );
 }
 
-/**
- * A delivered event: the status, the delivery's delivered time, and the release
- * of every soft bounce for the address that happened strictly before it.
- */
+/** A delivered event: the status, the delivery's delivered time, and the soft bounce cause brought up to date. */
 export async function recordDeliveredEvent(input: {
   emailAddress: string;
   deliveryId: string;
@@ -142,122 +291,61 @@ export async function recordDeliveredEvent(input: {
       status: "delivered",
       deliveredAt: input.key.occurredAt,
     });
-
-    const active = await tx.suppressionCause.findMany({
-      where: { emailAddress, scope: "global", reason: "soft_bounce", releasedAt: null },
-      select: { id: true, occurredAt: true, expiresAt: true, releasedAt: true },
+    return reconcileSoftBounceCause(tx, {
+      emailAddress,
+      webhookEventId: input.webhookEventId,
+      trigger: "delivered",
     });
-    const releasable = active.filter((cause) =>
-      deliveredReleasesSoftBounce({
-        deliveredAt: input.key.occurredAt,
-        causeOccurredAt: cause.occurredAt,
-      })
-    );
-    if (releasable.length === 0) return { released: 0 };
-
-    await markCauseWriter(tx);
-    const released = await tx.suppressionCause.updateMany({
-      where: { id: { in: releasable.map((cause) => cause.id) }, releasedAt: null },
-      data: {
-        releasedAt: new Date(),
-        releaseKind: "delivered",
-        releaseEvidence: { kind: "delivered", webhookEventId: input.webhookEventId },
-      },
-    });
-
-    // The entry is a soft bounce only while one is its latest reason. Removed
-    // when nothing active remains behind it, so an older build reading entries
-    // stops holding mail the causes already let through -- the cutover would
-    // otherwise count it as a mismatch.
-    const remaining = await tx.suppressionCause.findMany({
-      where: { emailAddress, scope: "global", purposeKey: "*", releasedAt: null },
-      select: { expiresAt: true, releasedAt: true },
-    });
-    if (!remaining.some((cause) => isActiveCause(cause, new Date()))) {
-      await tx.suppressionEntry.deleteMany({
-        where: { emailAddress, scope: "global", purposeKey: "*", reason: "soft_bounce" },
-      });
-    }
-    return { released: released.count };
   });
 }
 
 /**
- * A soft bounce or a deferral: the status, the delivery's soft bounce time, and
- * a suppression once the address has a run of them since its latest delivery.
- *
- * A soft bounce older than the address's latest delivered event is a fact about
- * a mailbox that has since accepted mail, and records nothing.
+ * A soft bounce or a deferral for a delivery: the status, the delivery's soft
+ * bounce time, and the soft bounce cause brought up to date.
  *
  * A run rather than a count: one deferral is a full mailbox or a greylisting
  * pass and means nothing, so a delivery resets the tally. Only a delivered event
  * resets it -- a message accepted for sending says nothing about the mailbox.
+ *
+ * An event matched to no delivery changes nothing here: it cannot be placed in
+ * any delivery's history, and counting it against the address would let one
+ * stray event re-suppress an address from an old run.
  */
 export async function recordSoftBounceEvent(input: {
   emailAddress: string;
   deliveryId: string | null;
   key: ProviderEventKey;
   webhookEventId: string;
-  sourceStream?: string | null;
-  sourceMessageId?: string | null;
 }) {
+  if (!input.deliveryId) return { suppressed: false, unmatched: true };
+  const deliveryId = input.deliveryId;
   const emailAddress = normalizeSuppressionAddress(input.emailAddress);
   return underAddress(emailAddress, async (tx) => {
-    if (input.deliveryId) {
-      await applyToDelivery(tx, {
-        deliveryId: input.deliveryId,
-        key: input.key,
-        status: "bounced",
-        lastErrorKind: "soft_bounce",
-        softBounceAt: input.key.occurredAt,
-      });
-    }
-
-    const delivered = await latestDeliveredAt(tx, emailAddress);
-    if (!softBounceStillCurrent({ occurredAt: input.key.occurredAt, latestDeliveredAt: delivered })) {
-      return { suppressed: false, run: 0 };
-    }
-
-    const deliveries = await tx.emailDelivery.findMany({
-      where: {
-        emailAddress,
-        softBounceAt: delivered ? { gte: delivered } : { not: null },
-      },
-      select: { softBounceAt: true },
+    await applyToDelivery(tx, {
+      deliveryId,
+      key: input.key,
+      status: "bounced",
+      softBounceAt: input.key.occurredAt,
     });
-    const run = softBounceRun({
-      softBounceTimes: deliveries.map((row) => row.softBounceAt),
-      latestDeliveredAt: delivered,
-    });
-    if (run < SOFT_BOUNCE_SUPPRESSION_THRESHOLD) return { suppressed: false, run };
-
-    await recordSuppression(
-      {
+    return {
+      ...(await reconcileSoftBounceCause(tx, {
         emailAddress,
-        reason: "soft_bounce",
-        source: "provider_webhook",
-        expiresAt: new Date(input.key.occurredAt.getTime() + SOFT_BOUNCE_SUPPRESSION_MS),
-        sourceStream: input.sourceStream ?? null,
-        sourceDeliveryId: input.deliveryId,
-        sourceMessageId: input.sourceMessageId ?? null,
-        occurredAt: input.key.occurredAt,
-        sourceEventKey: input.deliveryId
-          ? `softbounce:${input.deliveryId}`
-          : `softbounce:webhook:${input.webhookEventId}`,
-      },
-      tx
-    );
-    return { suppressed: true, run };
+        webhookEventId: input.webhookEventId,
+        trigger: "soft_bounce",
+      })),
+      unmatched: false,
+    };
   });
 }
 
 /**
- * Records the release of causes whose expiry has passed.
+ * Records the release of soft bounce causes whose expiry has passed -- the only
+ * reason that expires.
  *
  * The send check already ignores an expired cause, so nothing waits on this;
  * it keeps an address that is never mailed again from holding causes that read
- * as active forever. Per address, under the fence and the address lock, oldest
- * expiry first, within a row and a time budget.
+ * as active. At most `limit` causes a pass, oldest expiry first, each address
+ * under the fence and its lock, and no transaction outliving the time budget.
  *
  * Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4
  * (recording expiry, C66).
@@ -272,52 +360,58 @@ export async function releaseExpiredSuppressionCauses(options?: {
   const deadline = Date.now() + (options?.timeBudgetMs ?? 20_000);
 
   const due = await prisma.suppressionCause.findMany({
-    where: { releasedAt: null, expiresAt: { lte: now } },
-    orderBy: { expiresAt: "asc" },
+    where: { reason: "soft_bounce", releasedAt: null, expiresAt: { lte: now } },
+    orderBy: [{ expiresAt: "asc" }, { id: "asc" }],
     take: limit,
-    select: { emailAddress: true },
+    select: { id: true, emailAddress: true },
   });
-  const addresses = [...new Set(due.map((row) => row.emailAddress))];
+  const byAddress = new Map<string, string[]>();
+  for (const cause of due) {
+    byAddress.set(cause.emailAddress, [...(byAddress.get(cause.emailAddress) ?? []), cause.id]);
+  }
 
   let released = 0;
   let entriesRemoved = 0;
   let addressesDone = 0;
-  for (const emailAddress of addresses) {
-    if (Date.now() > deadline) break;
-    const outcome = await underAddress(emailAddress, async (tx) => {
-      await markCauseWriter(tx);
-      const result = await tx.suppressionCause.updateMany({
-        where: { emailAddress, releasedAt: null, expiresAt: { lte: now } },
-        data: {
-          releasedAt: now,
-          releaseKind: "expired",
-          releaseEvidence: { kind: "expiry" },
-        },
-      });
-      // An expired entry with nothing active behind its selector is removed
-      // too, so the summary stops describing a hold that no longer exists.
-      const expiredEntries = await tx.suppressionEntry.findMany({
-        where: { emailAddress, expiresAt: { lte: now } },
-        select: { id: true, scope: true, purposeKey: true },
-      });
-      let removed = 0;
-      for (const entry of expiredEntries) {
-        const behind = await tx.suppressionCause.findMany({
-          where: {
-            emailAddress,
-            scope: entry.scope,
-            purposeKey: entry.purposeKey,
-            releasedAt: null,
+  for (const [emailAddress, ids] of byAddress) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs < 1_000) break;
+    const outcome = await underAddress(
+      emailAddress,
+      async (tx) => {
+        await markCauseWriter(tx);
+        const result = await tx.suppressionCause.updateMany({
+          where: { id: { in: ids }, releasedAt: null, expiresAt: { lte: now } },
+          data: {
+            releasedAt: now,
+            releaseKind: "expired",
+            releaseEvidence: { kind: "expiry" },
           },
+        });
+        // An expired soft bounce entry with nothing active behind its selector
+        // is removed too, so the summary stops describing a hold that no longer
+        // exists.
+        const behind = await tx.suppressionCause.findMany({
+          where: { emailAddress, scope: "global", purposeKey: "*", releasedAt: null },
           select: { expiresAt: true, releasedAt: true },
         });
-        if (behind.some((cause) => isActiveCause(cause, now))) continue;
-        removed += (
-          await tx.suppressionEntry.deleteMany({ where: { id: entry.id, expiresAt: { lte: now } } })
-        ).count;
-      }
-      return { released: result.count, removed };
-    });
+        const removed = behind.some((cause) => isActiveCause(cause, now))
+          ? 0
+          : (
+              await tx.suppressionEntry.deleteMany({
+                where: {
+                  emailAddress,
+                  scope: "global",
+                  purposeKey: "*",
+                  reason: "soft_bounce",
+                  expiresAt: { lte: now },
+                },
+              })
+            ).count;
+        return { released: result.count, removed };
+      },
+      Math.min(TRANSACTION_TIMEOUT_MS, remainingMs)
+    );
     released += outcome.released;
     entriesRemoved += outcome.removed;
     addressesDone += 1;
@@ -326,6 +420,6 @@ export async function releaseExpiredSuppressionCauses(options?: {
     released,
     entriesRemoved,
     addresses: addressesDone,
-    exhausted: addressesDone === addresses.length && due.length < limit,
+    exhausted: addressesDone === byAddress.size && due.length < limit,
   };
 }
