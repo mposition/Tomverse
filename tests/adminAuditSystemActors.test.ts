@@ -20,7 +20,10 @@ import {
 
 const ROOT = resolve(import.meta.dirname, "..");
 
-test("the system actor list is exactly the marketing actors the policy names", () => {
+test("the system actor list is closed and changes only by review", () => {
+  // The policy names the publisher (docs/policy/marketing-automation.md §4);
+  // retention and guard are the S1 plan's other two writers. This pins the
+  // reviewed list, not a quotation of the policy.
   assert.deepEqual([...SYSTEM_AUDIT_ACTORS], [
     "marketing-publisher",
     "marketing-retention",
@@ -101,6 +104,8 @@ test("no administrator audit call site names the reserved key", () => {
   // when this was written (a repository search found the word only in the two
   // audit modules); this keeps every file that calls the administrator writer
   // free of it, so a future caller that needs both has to come through review.
+  // It reads source text only: metadata built at runtime (a parsed body, a
+  // result object) is covered by the writer's own refusal, not by this scan.
   const allowed = new Set(["lib/adminAudit.ts", "lib/adminAuditSystemActors.ts"]);
   const callSites = ["app", "lib", "components", "scripts", "packages"]
     .flatMap((top) => walk(resolve(ROOT, top)))

@@ -76,6 +76,10 @@ const rootClient = {
   ...recordingClient("root"),
   $transaction: async (fn: (client: unknown) => Promise<unknown>) => {
     world.calls.push({ kind: "transaction" });
+    // The integrity key is read before the transaction opens. Swapping it here
+    // makes a writer that reads it inside the locked span sign with the wrong
+    // key, which the hash assertion then catches.
+    process.env.ADMIN_AUDIT_INTEGRITY_KEY = "key-changed-inside-the-transaction-000";
     return fn(recordingClient("transaction"));
   },
 };
@@ -234,6 +238,73 @@ test("without a caller transaction the writer opens its own and does everything 
     "findFirst",
     "create",
   ]);
+});
+
+test("without a caller transaction the key is resolved before the transaction opens", async () => {
+  await writer({
+    session,
+    action: "example.updated",
+    targetType: "Example",
+    summary: "Own transaction.",
+  });
+  assert.equal(
+    createCall().data.entryHash,
+    computeAdminAuditEntryHash(
+      {
+        previousHash: "previous-entry-hash",
+        actorUserId: "admin-1",
+        actorEmail: "owner@example.test",
+        action: "example.updated",
+        targetType: "Example",
+        targetId: null,
+        summary: "Own transaction.",
+        metadata: null,
+        ipAddress: null,
+        userAgent: null,
+        createdAt: DATABASE_NOW.toISOString(),
+      },
+      SECRET
+    )
+  );
+});
+
+test("falsy JSON metadata is hashed as null and not stored", async () => {
+  // `metadata || null` and `metadata || undefined`, not `??`: false, 0 and ""
+  // have always been dropped. Changing that changes the HMAC input of rows
+  // written from then on, so it is pinned rather than left to a tidy-up.
+  for (const metadata of [false, 0, ""]) {
+    world.calls = [];
+    await writer({
+      session,
+      action: "example.updated",
+      targetType: "Example",
+      summary: "Falsy.",
+      metadata,
+      tx: recordingClient("caller-tx") as never,
+    });
+    const { data } = createCall();
+    assert.equal(data.metadata, undefined, String(metadata));
+    assert.equal(
+      data.entryHash,
+      computeAdminAuditEntryHash(
+        {
+          previousHash: "previous-entry-hash",
+          actorUserId: "admin-1",
+          actorEmail: "owner@example.test",
+          action: "example.updated",
+          targetType: "Example",
+          targetId: null,
+          summary: "Falsy.",
+          metadata: null,
+          ipAddress: null,
+          userAgent: null,
+          createdAt: DATABASE_NOW.toISOString(),
+        },
+        SECRET
+      ),
+      String(metadata)
+    );
+  }
 });
 
 test("the first hashed entry links to nothing", async () => {
