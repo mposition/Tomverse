@@ -4,15 +4,35 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v20 (2026-09-17).** provider 계정마다 webhook endpoint와 signing secret이
-  따로이고, 사건은 그 계정으로 저장되어 그 계정이 보낸 발송에만 결속됩니다. 계정별
-  침묵을 incident로 올립니다. 0절 참조.
+- 개정: **v21 (2026-09-17).** soft bounce로 잘못 처리된 영구 bounce를 보관 중인 사건에서
+  hard bounce 원인으로 기록하는 일회성 복구 절차를 둡니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v21 (2026-09-17) — 잘못 분류된 영구 bounce 복구
+
+v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처리되어, 없는 메일함에도
+최대 24시간 뒤 다시 발송했습니다. 원본 사건은 90일 보관되므로 그 안의 것은 복구할 수
+있습니다.
+
+1. **`npm run email:recover-permanent-bounces`** — 기본은 dry run(읽기만)이고 `--apply`가
+   씁니다. 출력은 개수뿐이며 주소·메일 id를 싣지 않습니다.
+2. **대상** — 처리된 `email.bounced` 사건 중 `data.bounce.type`이 `Permanent`(또는 `hard`)이고
+   **정정된 handler가 썼을 원인(`webhook:<사건 행 id>`, `hard_bounce`)이 없는** 것. 주소는
+   사건 계정 안에서 정확히 하나로 결속되는 delivery의 주소, 없으면 payload 수신자입니다.
+   원인은 정정된 handler와 같은 키·출처·사건 시각으로 쓰고 `evidence`에
+   `recoveredFrom: permanent_bounce_misclassified_as_soft`를 남깁니다.
+3. **제외** — 그 bounce **이후 같은 주소에 delivered가 보고된** 경우는 쓰지 않습니다
+   (`deliveredSince`). 메일함이 지금은 받고 있으므로 막으면 살아 있는 주소를 끊습니다.
+   주소가 없는 사건은 `unaddressed`로 셉니다.
+4. **멱등** — 같은 키로 쓰므로 다시 실행하거나 정정된 handler가 이미 기록한 사건은
+   `alreadyRecorded`로 건너뜁니다. 보고는 쓰기 전 상태를 기준으로 셉니다.
+5. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
+   창을 보여 줍니다).
 
 ### v20 (2026-09-17) — 계정별 webhook(S1b-2b)
 
