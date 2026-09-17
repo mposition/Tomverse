@@ -1489,3 +1489,62 @@ Non-negotiable requirements:
 - A card that promises a feature this build does not have is a release blocker.
   Everything else here is ordinary review.
 <!-- END:chat-starter-catalog-invariant -->
+
+<!-- BEGIN:agent-delegation-policy -->
+# 작업을 어느 모델에 보낼지
+
+**모델 선택은 비용 결정이 아니라 복구 가능성 결정입니다.** 이 저장소에는 틀려도
+고쳐서 배포하면 끝나는 변경과, 고칠 수 없는 변경이 섞여 있습니다. 앞쪽에 최상위
+모델을 쓰는 것은 낭비이고, 뒤쪽에 저가 모델을 쓰는 것은 사고입니다. 기준은
+"검증 범위는 되돌릴 수 없는 것에 비례합니다" 절과 같습니다.
+
+역할 정의는 두 도구에 같은 내용으로 들어 있습니다.
+
+- Codex: `.codex/agents/*.toml`
+- Claude Code: `.claude/agents/*.md`
+
+| 역할 | Codex | Claude Code | 무엇을 맡는가 |
+|---|---|---|---|
+| `contract` | `gpt-5.6-sol` / xhigh | `opus` / xhigh | 되돌릴 수 없는 변경 |
+| `impl` | `gpt-5.3-codex` / medium | `sonnet` / high | 그 밖의 모든 코드 변경 |
+| `chore` | `gpt-5.3-codex` / low | `haiku` | 판단이 필요 없는 기계적 작업 |
+| `review` | — | `opus` / xhigh (read-only) | 다른 역할이 만든 diff 검토 |
+
+## `contract` 로 보내는 것
+
+아래 중 하나라도 걸리면 `contract` 입니다. 애매하면 `contract` 입니다 --
+잘못 올리면 비용이 들고, 잘못 내리면 복구가 안 됩니다.
+
+- `lib/modelPricing.ts`, `lib/credit*`, `lib/chatCostGuardrails.ts`,
+  `lib/models.ts` 의 `creditWeight`·`maxOutputTokens`·`reservationOutputTokens`
+- `prisma/migrations/**`, schema 의 CHECK 제약, `VALIDATE CONSTRAINT`,
+  `NOT NULL` 전환
+- `Conversation.productKey` 와 그것을 쓰는 생성 경로
+- `docs/ui-contracts/` 가 이름을 댄 파일 -- 위반이 release blocker 로
+  적혀 있는 것들
+- 프로모션 할인, 가격 카탈로그 default, 플랜 변경, 이메일 발송 경로
+
+## `chore` 의 경계
+
+`chore` 는 **판단이 필요 없을 때만** 씁니다. 어느 파일을 고칠지 스스로 정해야
+하거나, 정책 문서를 읽어야 답이 나오거나, 기존 코드에 없는 패턴을 만들어야
+하면 `impl` 입니다. 역할 정의에도 같은 조건이 적혀 있고, 해당하면 멈추고
+올리라고 지시돼 있습니다.
+
+## 모델을 내려도 게이트는 내려가지 않습니다
+
+역할을 나눠도 통과 기준은 하나입니다. 어느 역할이 만든 변경이든 PR Fast Gate 의
+static 단계를 그대로 지납니다 -- `npm run lint`, `check:accent-tokens`,
+`check:model-pricing`, `check:enum-constraints`, `check:default-models`,
+`check:starter-catalog`, `check:shared-packages`, 그리고 해당 기능의 e2e spec.
+
+**저가 모델을 쓴다는 것은 검증을 줄인다는 뜻이 아닙니다.** 게이트가 기계적으로
+같은 것을 묻기 때문에, 실행 모델이 무엇이든 통과선은 움직이지 않습니다.
+
+## 자동 위임을 과신하지 않습니다
+
+Claude Code 는 `description` 을 보고 자동 위임하지만 보장되지 않고, Codex 는
+대체로 명시적 지시를 필요로 합니다. 중요한 작업은 역할을 직접 지목하십시오 --
+"이건 contract 로", "impl 에 맡겨". 자동 분류에 기대다가 계약 파일이 `impl` 로
+가는 것이 이 정책이 막으려는 실패입니다.
+<!-- END:agent-delegation-policy -->

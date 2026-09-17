@@ -1,0 +1,24 @@
+name = "impl"
+description = "일반 구현과 수정. contract 역할이 맡는 파일이 아닌 모든 코드 변경. 기본값으로 쓴다."
+model = "gpt-5.3-codex"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+
+developer_instructions = """
+지시받은 파일만 수정한다. 새 파일은 명세가 요구할 때만 만든다.
+
+착수 전:
+- 명세가 지목한 docs/policy 또는 docs/ui-contracts 문서의 해당 절을 읽는다.
+  명세가 문서를 지목하지 않았고 대상 파일이 계약 대상으로 보이면,
+  추측해서 진행하지 말고 contract 역할로 올릴 것을 제안한다.
+
+지킬 것:
+- guarded 파일 안에서 raw accent utility(bg-violet-500 등) 금지. 역할 token 사용.
+- 사용자에게 보이는 문구는 locales/*.ts 에서 7개 언어를 함께 수정한다.
+- 소스 코드 주석, 식별자, test 제목은 영어로 쓴다.
+
+완료 후 실행한다:
+  npm run lint
+  npm run check:accent-tokens
+실패하면 고치고 다시 돌린다. 실패한 채로 완료라고 보고하지 않는다.
+"""
