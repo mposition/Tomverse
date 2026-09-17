@@ -407,9 +407,26 @@
       ],
       "guardViolations": [],
       "checkFailures": [],
-      "reviewConclusion": null,
-      "findings": [],
-      "nextAction": "awaiting the reviewer's verdict"
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "tests/promptRefinerShadowAdmissionCore.test.mjs:662-694 (\"all raw byte limits run before artifact hashing or journal replay\") with the hashPoison helper at :104-110",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The oversized-artifact loop and the corpus case wrap their buffers in hashPoison, which is a Proxy and is therefore rejected unconditionally by actualEvidenceByteLength (lib/promptRefinerShadowAdmissionCore.ts:222-245, where the %TypedArray%.prototype.byteLength getter throws RequireInternalSlot on a Proxy receiver), so the assertion is satisfied by proxy rejection alone and does not discriminate 'the size bound ran before hashing' — only the oversizedManifest case at :678-685 uses a real Buffer and actually demonstrates ordering.",
+          "reproduction": "Add to the test file: `test(\"probe\", () => { const input = checkedIn(); input.reportBytes = hashPoison(input.reportBytes); assert.throws(() => proposePromptRefinerShadowStage(input), /report_byte_limit/); });` and run `node --conditions=react-server --import tsx --test tests/promptRefinerShadowAdmissionCore.test.mjs`. It passes with a correctly-sized, unmodified report buffer, showing the `_byte_limit` taxonomy asserted in the loop is produced by the Proxy, not by the 64 KiB/1 MiB bound. Strengthening it means passing the plain oversized Buffer (no hashPoison) in the loop, as :679 already does.",
+          "disposition": "unresolved_on_hold"
+        },
+        {
+          "location": "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json:23 (completion criterion \"focused admission 14/14\") vs tests/promptRefinerShadowAdmissionCore.test.mjs",
+          "severity": "nit",
+          "basis": "evidence",
+          "claim": "The focused suite now declares 18 top-level tests, not the 14 named by the completion criterion; every one passes, so the criterion's intent is met and exceeded, but the recorded count is stale.",
+          "reproduction": "`Select-String -Path tests/promptRefinerShadowAdmissionCore.test.mjs -Pattern '^test\\(' | Measure-Object` returns 18, against the criterion text \"focused admission 14/14\" in the task package.",
+          "disposition": "unresolved_on_hold"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: tests/promptRefinerShadowAdmissionCore.test.mjs:662-694 (\"all raw byte limits run before artifact hashing or journal replay\") with the hashPoison helper at :104-110; open finding: docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json:23 (completion criterion \"focused admission 14/14\") vs tests/promptRefinerShadowAdmissionCore.test.mjs) and no revision remains"
     }
   ],
   "changeDigest": "sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
@@ -511,15 +528,32 @@
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand the review prompt (round 2) to the claude reviewer; its verdict must name digest sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
-  "status": "awaiting_review",
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "tests/promptRefinerShadowAdmissionCore.test.mjs:662-694 (\"all raw byte limits run before artifact hashing or journal replay\") with the hashPoison helper at :104-110",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The oversized-artifact loop and the corpus case wrap their buffers in hashPoison, which is a Proxy and is therefore rejected unconditionally by actualEvidenceByteLength (lib/promptRefinerShadowAdmissionCore.ts:222-245, where the %TypedArray%.prototype.byteLength getter throws RequireInternalSlot on a Proxy receiver), so the assertion is satisfied by proxy rejection alone and does not discriminate 'the size bound ran before hashing' — only the oversizedManifest case at :678-685 uses a real Buffer and actually demonstrates ordering.",
+      "reproduction": "Add to the test file: `test(\"probe\", () => { const input = checkedIn(); input.reportBytes = hashPoison(input.reportBytes); assert.throws(() => proposePromptRefinerShadowStage(input), /report_byte_limit/); });` and run `node --conditions=react-server --import tsx --test tests/promptRefinerShadowAdmissionCore.test.mjs`. It passes with a correctly-sized, unmodified report buffer, showing the `_byte_limit` taxonomy asserted in the loop is produced by the Proxy, not by the 64 KiB/1 MiB bound. Strengthening it means passing the plain oversized Buffer (no hashPoison) in the loop, as :679 already does.",
+      "disposition": "unresolved_on_hold"
+    },
+    {
+      "location": "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json:23 (completion criterion \"focused admission 14/14\") vs tests/promptRefinerShadowAdmissionCore.test.mjs",
+      "severity": "nit",
+      "basis": "evidence",
+      "claim": "The focused suite now declares 18 top-level tests, not the 14 named by the completion criterion; every one passes, so the criterion's intent is met and exceeded, but the recorded count is stale.",
+      "reproduction": "`Select-String -Path tests/promptRefinerShadowAdmissionCore.test.mjs -Pattern '^test\\(' | Measure-Object` returns 18, against the criterion text \"focused admission 14/14\" in the task package.",
+      "disposition": "unresolved_on_hold"
+    }
+  ],
+  "nextAction": "approved by the reviewer with 2 reproducible finding(s) still open after 2 revision(s); a person decides",
+  "status": "on_hold",
   "failure": null,
-  "holdReason": null,
-  "producedAt": "2026-09-17T00:43:46.793Z",
+  "holdReason": "revisions_exhausted",
+  "producedAt": "2026-09-17T00:49:14.414Z",
   "packagedRounds": 3,
-  "concludedAtRound": null,
+  "concludedAtRound": 2,
   "lineage": [],
   "inheritedFindings": [],
   "headCommit": "09537f9201b2f76f72b5f0b7dc47698d894f545f",

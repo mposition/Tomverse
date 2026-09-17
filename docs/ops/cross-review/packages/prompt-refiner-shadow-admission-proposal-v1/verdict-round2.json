@@ -1,0 +1,93 @@
+{
+  "version": "cross-review-verdict-v2",
+  "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+  "round": 2,
+  "reviewer": "claude",
+  "toolVersion": "2.1.261 (Claude Code)",
+  "command": [
+    "claude",
+    "--print",
+    "--safe-mode",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Grep,Glob",
+    "--allowedTools",
+    "Read,Grep,Glob",
+    "--strict-mcp-config"
+  ],
+  "sandboxSignature": "claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-shadow-admission-proposal-20260917 shell:default",
+  "codexShell": "default",
+  "codexAuth": "login",
+  "preflight": null,
+  "overrides": [
+    "skip-preflight: no preflight is recorded for this sandbox signature (claude --print --safe-mode --output-format json --tools Read,Grep,Glob --allowedTools Read,Grep,Glob --strict-mcp-config @ H:\\Project\\tomverse-prompt-refiner-shadow-admission-proposal-20260917 shell:default)"
+  ],
+  "startedAt": "2026-09-17T00:46:03.357Z",
+  "durationMs": 190986,
+  "usage": {
+    "tool": "claude",
+    "inputTokens": 24,
+    "cachedInputTokens": 996661,
+    "outputTokens": 13743,
+    "reasoningOutputTokens": null,
+    "totalCostUsd": 1.9099265,
+    "raw": {
+      "input_tokens": 24,
+      "cache_creation_input_tokens": 102233,
+      "cache_read_input_tokens": 996661,
+      "output_tokens": 13743,
+      "output_tokens_details": {
+        "thinking_tokens": 10397
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 102233,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 2943,
+          "cache_read_input_tokens": 102179,
+          "cache_creation_input_tokens": 4796,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 4796
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard"
+    }
+  },
+  "receivedAt": "2026-09-17T00:49:14.409Z",
+  "verdict": {
+    "taskId": "prompt-refiner-shadow-admission-proposal-v1",
+    "round": 2,
+    "reviewedDigest": "sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a",
+    "conclusion": "approve",
+    "findings": [
+      {
+        "location": "tests/promptRefinerShadowAdmissionCore.test.mjs:662-694 (\"all raw byte limits run before artifact hashing or journal replay\") with the hashPoison helper at :104-110",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The oversized-artifact loop and the corpus case wrap their buffers in hashPoison, which is a Proxy and is therefore rejected unconditionally by actualEvidenceByteLength (lib/promptRefinerShadowAdmissionCore.ts:222-245, where the %TypedArray%.prototype.byteLength getter throws RequireInternalSlot on a Proxy receiver), so the assertion is satisfied by proxy rejection alone and does not discriminate 'the size bound ran before hashing' — only the oversizedManifest case at :678-685 uses a real Buffer and actually demonstrates ordering.",
+        "reproduction": "Add to the test file: `test(\"probe\", () => { const input = checkedIn(); input.reportBytes = hashPoison(input.reportBytes); assert.throws(() => proposePromptRefinerShadowStage(input), /report_byte_limit/); });` and run `node --conditions=react-server --import tsx --test tests/promptRefinerShadowAdmissionCore.test.mjs`. It passes with a correctly-sized, unmodified report buffer, showing the `_byte_limit` taxonomy asserted in the loop is produced by the Proxy, not by the 64 KiB/1 MiB bound. Strengthening it means passing the plain oversized Buffer (no hashPoison) in the loop, as :679 already does."
+      },
+      {
+        "location": "docs/ops/cross-review/packages/prompt-refiner-shadow-admission-proposal-v1.task.json:23 (completion criterion \"focused admission 14/14\") vs tests/promptRefinerShadowAdmissionCore.test.mjs",
+        "severity": "nit",
+        "basis": "evidence",
+        "claim": "The focused suite now declares 18 top-level tests, not the 14 named by the completion criterion; every one passes, so the criterion's intent is met and exceeded, but the recorded count is stale.",
+        "reproduction": "`Select-String -Path tests/promptRefinerShadowAdmissionCore.test.mjs -Pattern '^test\\(' | Measure-Object` returns 18, against the criterion text \"focused admission 14/14\" in the task package."
+      }
+    ],
+    "nextAction": "Integrate as-is; optionally replace hashPoison with the plain oversized Buffer in the raw-byte-limit loop and refresh the recorded focused-test count to 18, neither of which changes any verified behaviour."
+  }
+}
