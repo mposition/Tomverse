@@ -22,10 +22,18 @@ export const LOCALIZED_SEO_PATHS = [
   "/ai-for-file-analysis",
 ] as const;
 
+// SEO-I18N-01 (2026-09-17). `zh` is Simplified Chinese for readers
+// anywhere, so its hreflang names the script, not a region: `zh-Hans`.
+// `zh-CN` targeted mainland China, which Tomverse does not serve. This is
+// the one place the tag is written -- page metadata and app/sitemap.ts both
+// read it through localizedLanguageAlternates() -- so the pages that point at
+// /zh change with it. The URL (/zh), the stored language key, the Open Graph
+// locale below (a different, language_TERRITORY format) and the zh-CN used to
+// format dates and prices are separate decisions and are not changed here.
 const hreflangByLocale: Record<Language, string> = {
   en: "en",
   ko: "ko",
-  zh: "zh-CN",
+  zh: "zh-Hans",
   fr: "fr",
   de: "de",
   es: "es",

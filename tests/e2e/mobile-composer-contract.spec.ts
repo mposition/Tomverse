@@ -694,6 +694,303 @@ test.describe("Mobile composer: keyboard, zoom and text scaling", { tag: "@ui-ri
 });
 
 // ---------------------------------------------------------------------------
+// Page zoom and short screens (COMPOSER-REFLOW-01).
+//
+// Staging, 2026-09-17, Galaxy S25+ / Edge "Default zoom": at 150% the notice
+// under the composer was cut at "민감정…", at 200% the starters had no room at
+// all, and at 300% (a ~137px layout viewport) Send, the credit estimate and
+// the microphone were below the screen and the user could not drag them into
+// view. Three causes, each measured here rather than inferred from classes:
+//
+//   - the empty textarea kept a one-line height while its placeholder wrapped
+//     to two, so the box scrolled itself and took the drag meant for the shell;
+//   - the notice was one truncated line;
+//   - the conversation section could flex down to 0, leaving the starters (or
+//     the answers) nothing to be drawn in.
+//
+// The sizes are Edge's zoom levels on that phone in CSS pixels, plus a
+// landscape phone. `isMobile` because Chromium only turns a CDP touch drag
+// into a scroll under mobile emulation; the drag is dispatched as raw touch
+// points, which is what a finger does, and `elementFromPoint` at the control's
+// centre is the reachability test, as in the sidebar drawer contract.
+// ---------------------------------------------------------------------------
+
+const ZOOM_VIEWPORTS = [
+  { label: "150% page zoom", width: 275, height: 493 },
+  { label: "200% page zoom", width: 206, height: 370 },
+  { label: "300% page zoom", width: 137, height: 247 },
+  { label: "landscape phone", width: 568, height: 320 },
+];
+
+const STARTER_COOKIE_URL = "http://127.0.0.1:3100";
+
+async function touchDrag(page: Page, x: number, y: number, dy: number) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x, y }],
+  });
+  const steps = 12;
+  for (let step = 1; step <= steps; step += 1) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y + (dy * step) / steps }],
+    });
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.detach();
+}
+
+/** Whether the control's centre is on screen and is the control itself. */
+async function isReachableAtCentre(page: Page, testId: string) {
+  return page.evaluate((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    if (!element) return false;
+    const box = element.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false;
+    const hit = document.elementFromPoint(x, y);
+    return Boolean(hit && (hit === element || element.contains(hit)));
+  }, testId);
+}
+
+async function enterZoomedWelcome(page: Page, viewport: { width: number; height: number }) {
+  await prepareGuestPage(page, "en");
+  await page.context().addCookies([
+    { name: "__tomverse_e2e_chat_starter", value: "1", url: STARTER_COOKIE_URL },
+  ]);
+  await mockAuthenticatedApi(page, { selectedModels: [MODEL_C] });
+  await setDeterministicTheme(page, "light");
+  await suppressTransientUi(page);
+  await page.setViewportSize(viewport);
+  await page.goto("/chat?lang=ko");
+  await expect(page.getByTestId("chat-empty-state")).toBeAttached();
+  await expect(page.getByTestId("chat-textarea")).toBeVisible();
+  await freezeAnimations(page);
+}
+
+test.describe("Mobile composer: page zoom and short screens", { tag: "@ui-risk" }, () => {
+  test.use({ isMobile: true });
+
+  for (const viewport of ZOOM_VIEWPORTS) {
+    const size = `${viewport.width}x${viewport.height}`;
+
+    test(`${viewport.label} (${size}): a drag started on the empty input brings Send into view`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, viewport);
+
+      // The empty box has no vertical overflow: nothing of its placeholder is
+      // cut off, and there is nothing inside it to scroll. The placeholder
+      // arrives in its final language after mount, so this also fails if the
+      // box is fitted only when the draft changes.
+      const clipped = await page
+        .getByTestId("chat-textarea")
+        .evaluate((node: HTMLTextAreaElement) => node.scrollHeight - node.clientHeight);
+      expect(clipped, `${size}: the placeholder is cut off inside the input`).toBeLessThanOrEqual(1);
+      await expectComposerContract(page, `${size} (${viewport.label}, new chat)`);
+
+      // The textarea is the largest target in the dock at this size, so a
+      // drag that starts on it is the one a user makes.
+      const input = await page.getByTestId("chat-textarea").boundingBox();
+      if (!input) throw new Error("chat-textarea has no box");
+      const startX = Math.round(input.x + input.width / 2);
+      const startY = Math.round(Math.min(input.y + input.height / 2, viewport.height - 8));
+      const startsOnInput = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.getAttribute("data-testid") === "chat-textarea",
+        [startX, startY]
+      );
+      expect(startsOnInput, `${size}: the drag does not start on the input`).toBe(true);
+      const sendReachableBefore = await isReachableAtCentre(page, "chat-send-button");
+      const shellScrollTop = () =>
+        page.getByTestId("mobile-chat-shell").evaluate((node) => node.scrollTop);
+      const shellTopBefore = await shellScrollTop();
+      await touchDrag(page, startX, startY, -viewport.height);
+
+      await expect
+        .poll(() => isReachableAtCentre(page, "chat-send-button"), {
+          message: `${size}: Send is not reachable after one drag`,
+          timeout: 3_000,
+        })
+        .toBe(true);
+      // Through the shell, the composer's one scroll owner -- never the page.
+      expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0);
+      if (!sendReachableBefore) {
+        // Where Send started off screen (300%), it is the shell that brought it.
+        expect(
+          await shellScrollTop(),
+          `${size}: Send became reachable without the shell scrolling`
+        ).toBeGreaterThan(shellTopBefore);
+      }
+    });
+
+    test(`${viewport.label} (${size}): the sensitive-data notice is never cut off`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, viewport);
+
+      const notice = page.getByTestId("chat-ai-disclaimer-mobile");
+      const truncated = await notice.evaluate((node) =>
+        Array.from(node.querySelectorAll("span")).some(
+          (span) => span.scrollWidth > span.clientWidth + 1
+        )
+      );
+      expect(truncated, `${size}: the notice is truncated`).toBe(false);
+      const details = page.getByTestId("chat-ai-disclaimer-details");
+      await details.scrollIntoViewIfNeeded();
+      const detailsBox = await details.boundingBox();
+      const noticeBox = await notice.boundingBox();
+      if (!detailsBox || !noticeBox) throw new Error("notice has no box");
+      // "Details" wraps inside the notice rather than being pushed past it.
+      expect(detailsBox.x + detailsBox.width).toBeLessThanOrEqual(noticeBox.x + noticeBox.width + 1);
+    });
+
+    test(`${viewport.label} (${size}): the starters keep a box to be reached in`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, viewport);
+
+      const floor = await page.evaluate(
+        () => 4 * (Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16)
+      );
+      const surface = await page.getByTestId("mobile-conversation-surface").boundingBox();
+      expect(surface?.height ?? 0, `${size}: the conversation section collapsed`).toBeGreaterThanOrEqual(
+        floor - 1
+      );
+
+      // Reached through the section's own scroller, which is not an ancestor
+      // of the composer.
+      const firstCard = page.getByTestId("chat-starter-card").first();
+      const cardIsReachable = () =>
+        firstCard.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const section = document
+            .querySelector('[data-testid="mobile-conversation-surface"]')
+            ?.getBoundingClientRect();
+          if (!section) return false;
+          // A card taller than the section is reached once part of it is
+          // drawn inside the section and hit-testable, so measure the middle
+          // of the part the section actually shows.
+          const top = Math.max(box.top, section.top, 0);
+          const bottom = Math.min(box.bottom, section.bottom, window.innerHeight);
+          if (bottom - top < 8) return false;
+          const x = box.left + box.width / 2;
+          const y = (top + bottom) / 2;
+          if (x < 0 || x > window.innerWidth) return false;
+          const hit = document.elementFromPoint(x, y);
+          return Boolean(hit && (hit === element || element.contains(hit)));
+        });
+      // Drag inside the section until a card is drawn there, as a finger
+      // would; bounded so a card that can never arrive fails rather than hangs.
+      for (let drag = 0; drag < 40 && !(await cardIsReachable()); drag += 1) {
+        const box = await page.getByTestId("mobile-conversation-surface").boundingBox();
+        if (!box) throw new Error("mobile-conversation-surface has no box");
+        const x = Math.round(box.x + box.width / 2);
+        const y = Math.round(Math.max(box.y, 0) + Math.min(box.height, viewport.height) * 0.75);
+        const startsInSection = await page.evaluate(
+          ([px, py]) => {
+            const section = document.querySelector('[data-testid="mobile-conversation-surface"]');
+            const hit = document.elementFromPoint(px, py);
+            return Boolean(section && hit && section.contains(hit));
+          },
+          [x, y]
+        );
+        expect(startsInSection, `${size}: the drag does not start in the section`).toBe(true);
+        await touchDrag(page, x, y, -Math.round(box.height / 2));
+      }
+      expect(await cardIsReachable(), `${size}: no starter card can be reached`).toBe(true);
+    });
+  }
+
+  test("zooming in after the page loaded refits the empty input", async ({ page }) => {
+    // Page zoom changed while the chat is open: the width moves and the draft
+    // does not, which is the path a value-only fit never ran on.
+    await enterZoomedWelcome(page, { width: 390, height: 780 });
+    await page.setViewportSize({ width: 137, height: 247 });
+    await expect
+      .poll(
+        () =>
+          page
+            .getByTestId("chat-textarea")
+            .evaluate((node: HTMLTextAreaElement) => node.scrollHeight - node.clientHeight),
+        { message: "the placeholder is cut off after zooming in", timeout: 3_000 }
+      )
+      .toBeLessThanOrEqual(1);
+  });
+
+  for (const width of [137, 120]) {
+    test(`the model button and its chevron stay inside the composer at ${width}px`, async ({
+      page,
+    }) => {
+      await enterZoomedWelcome(page, { width, height: 247 });
+      await page.getByTestId("composer-model-select").scrollIntoViewIfNeeded();
+      const measured = await page.evaluate(() => {
+        const composer = document.querySelector<HTMLElement>('[data-testid="chat-input"]')!;
+        const button = document.querySelector<HTMLElement>('[data-testid="composer-model-select"]')!;
+        const icons = button.querySelectorAll("svg");
+        const chevron = icons[icons.length - 1].getBoundingClientRect();
+        const outer = composer.getBoundingClientRect();
+        const style = getComputedStyle(composer);
+        // The padding box: what the composer's overflow-hidden clips to.
+        const clipRight = outer.right - (Number.parseFloat(style.borderRightWidth) || 0);
+        const x = chevron.left + chevron.width / 2;
+        const y = chevron.top + chevron.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        return {
+          buttonRight: button.getBoundingClientRect().right,
+          chevronRight: chevron.right,
+          clipRight,
+          chevronHit: Boolean(hit && button.contains(hit)),
+        };
+      });
+      expect(measured.buttonRight, JSON.stringify(measured)).toBeLessThanOrEqual(measured.clipRight + 0.5);
+      expect(measured.chevronRight, JSON.stringify(measured)).toBeLessThanOrEqual(measured.clipRight + 0.5);
+      expect(measured.chevronHit, JSON.stringify(measured)).toBe(true);
+    });
+  }
+
+  test("300% page zoom: focusing a dock control does not move the dock under the press", async ({
+    page,
+  }) => {
+    await enterZoomedWelcome(page, { width: 137, height: 247 });
+    const tools = page.getByTestId("composer-tools-button");
+    await tools.scrollIntoViewIfNeeded();
+    const before = await tools.boundingBox();
+
+    // Focus is what a press gives the control before its release lands; the
+    // layout may not change in between, or the release hits something else.
+    await tools.focus();
+    const after = await tools.boundingBox();
+    expect(after?.y).toBe(before?.y);
+
+    // And a focused input is on screen without a second scroll.
+    await page.getByTestId("chat-textarea").focus();
+    await expect
+      .poll(() => isReachableAtCentre(page, "chat-textarea"), { timeout: 3_000 })
+      .toBe(true);
+  });
+
+  test("an ongoing conversation at 300% page zoom keeps its answers a box too", async ({
+    page,
+  }) => {
+    await enterMobileComposer(page, {
+      viewport: { width: 137, height: 247 },
+      webSearchMode: "off",
+    });
+    const surface = await page.getByTestId("mobile-conversation-surface").boundingBox();
+    expect(surface?.height ?? 0).toBeGreaterThanOrEqual(63);
+
+    const header = await page.getByTestId("mobile-chat-header").boundingBox();
+    if (!header) throw new Error("header has no box");
+    await touchDrag(page, 68, Math.round(header.y + header.height / 2), -247);
+    await expect
+      .poll(() => isReachableAtCentre(page, "chat-send-button"), { timeout: 3_000 })
+      .toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Guest attachments.
 //
 // Guests can now attach one local file, which puts a new chip, a new error
