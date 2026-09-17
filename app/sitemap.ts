@@ -6,8 +6,16 @@ import {
   localizedLanguageAlternates,
   localizedPath,
 } from "@/lib/seo";
+import { SITEMAP_CONTENT_EVIDENCE } from "@/lib/sitemapContentDates";
 
-const contentUpdated = new Date("2026-07-15T00:00:00.000Z");
+/**
+ * `lastModified` only where a page's content date is evidenced, and absent
+ * everywhere else (AEO-04). See lib/sitemapContentDates.ts for what counts.
+ */
+const lastModifiedFor = (path: string) => {
+  const date = SITEMAP_CONTENT_EVIDENCE[path]?.date;
+  return date ? { lastModified: new Date(`${date}T00:00:00.000Z`) } : {};
+};
 const publicPages: Array<{
   path: string;
   changeFrequency: "daily" | "weekly" | "monthly" | "yearly";
@@ -37,14 +45,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
     return [
       {
         url: `${SITE_ORIGIN}${basePath}`,
-        lastModified: contentUpdated,
+        ...lastModifiedFor(basePath),
         changeFrequency: "weekly" as const,
         priority,
         alternates,
       },
       ...SEO_LOCALES.map((locale) => ({
         url: `${SITE_ORIGIN}${localizedPath(locale, basePath)}`,
-        lastModified: contentUpdated,
+        ...lastModifiedFor(basePath),
         changeFrequency: "weekly" as const,
         priority,
         alternates,
@@ -56,7 +64,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     ...localizedEntries,
     ...publicPages.map((page) => ({
       url: `${SITE_ORIGIN}${page.path}`,
-      lastModified: contentUpdated,
+      ...lastModifiedFor(page.path),
       changeFrequency: page.changeFrequency,
       priority: page.priority,
     })),
