@@ -123,6 +123,41 @@ test.describe("guided help", { tag: "@ui-risk" }, () => {
     await expectDraftKept(page, testInfo);
   });
 
+  test("opened from the mobile drawer, the guide covers the page and nothing is painted over it", async ({
+    page,
+  }, testInfo) => {
+    // Staging H7: inside the drawer panel the fixed dialog was laid out and
+    // stacked in that panel, drawer-wide, with the conversation list painted
+    // over its rows. Measured the way the drawer contract measures reach: the
+    // element actually hit at each control's centre.
+    test.skip(!isMobile(testInfo), "The drawer only exists on the mobile shell.");
+    await prepareGuestPage(page, "ko");
+    await page.goto("/chat?lang=ko");
+    await expect(page.getByTestId("chat-textarea")).toBeVisible();
+    const dialog = await openGuide(page, testInfo);
+
+    const placement = await dialog.evaluate((element) => ({
+      insideDrawer: Boolean(element.closest('[data-testid="mobile-sidebar-drawer"]')),
+      width: element.getBoundingClientRect().width,
+      viewport: window.innerWidth,
+    }));
+    expect(placement.insideDrawer).toBe(false);
+    expect(Math.abs(placement.width - placement.viewport)).toBeLessThanOrEqual(1);
+
+    const misses = await dialog.locator("button, a").evaluateAll((elements) =>
+      elements
+        .filter((element) => (element as HTMLElement).tabIndex >= 0)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return hit && (hit === element || element.contains(hit)) ? null : (element.textContent ?? "").trim() || element.getAttribute("aria-label");
+        })
+        .filter(Boolean)
+    );
+    expect(misses).toEqual([]);
+    await expectNoHorizontalOverflow(page);
+  });
+
   test("Escape closes the guide and returns focus", async ({ page }, testInfo) => {
     await prepareGuestPage(page, "en");
     await page.goto("/chat?lang=en");
