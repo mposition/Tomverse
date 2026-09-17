@@ -388,14 +388,28 @@ test("private byte snapshots survive synchronous mutation before decode", async 
         },
     });
 
-    let isolated;
+    let isolatedNamespace;
     try {
-        isolated = await import(
+        isolatedNamespace = await import(
             "../lib/promptRefinerShadowAdmissionCore.ts?snapshot-toctou"
         );
     } finally {
         Object.defineProperty(TextDecoder.prototype, "decode", descriptor);
     }
+
+    // `tsx` exposes a cache-busted CommonJS module as named exports on
+    // Windows and under `default` on Linux. Both namespaces refer to the same
+    // freshly evaluated module; normalise that loader-only difference before
+    // exercising the byte-snapshot boundary.
+    const isolated =
+        typeof isolatedNamespace.proposePromptRefinerShadowStage === "function"
+            ? isolatedNamespace
+            : isolatedNamespace.default;
+    assert.equal(
+        typeof isolated?.proposePromptRefinerShadowStage,
+        "function",
+        "the cache-busted core must expose its proposal function"
+    );
 
     const originals = checkedIn();
     let mutationCount = 0;
