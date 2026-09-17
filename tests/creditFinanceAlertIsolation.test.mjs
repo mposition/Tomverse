@@ -50,6 +50,19 @@ test("the lanes that run the checked-out tree reference no secret", () => {
     assert.doesNotMatch(lanes, /notify-release-lane-failure/);
 });
 
+test("the token the checked-out tree runs with can only read", () => {
+    // No secret is only half of it: a write scope on the workflow's
+    // GITHUB_TOKEN would hand the code under test a credential too.
+    assert.deepEqual(workflow.permissions, { contents: "read" });
+    for (const [jobId, job] of Object.entries(workflow.jobs)) {
+        if (job.permissions === undefined) continue;
+        for (const [scope, level] of Object.entries(job.permissions)) {
+            assert.notEqual(level, "write", `${jobId} grants ${scope}: write`);
+        }
+    }
+    assert.equal(workflow.jobs["credit-finance-db"].permissions, undefined);
+});
+
 test("no job other than the alert job references a secret", () => {
     for (const jobId of Object.keys(workflow.jobs)) {
         if (jobId === "report-red-lane") continue;
@@ -102,7 +115,14 @@ test("the notifier the alert job checks out imports only its own core", () => {
     // was reviewed to run.
     const notifier = readFileSync(resolve(ROOT, "scripts", "notify-release-lane-failure.mjs"), "utf8");
     const core = readFileSync(resolve(ROOT, "scripts", "notify-release-lane-failure-core.mjs"), "utf8");
-    const importsOf = (text) => [...text.matchAll(/^\s*import\b[\s\S]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
+    // Both forms: `import { x } from "..."` and a side-effect `import "..."`.
+    const importsOf = (text) =>
+        [...text.matchAll(/^\s*import\s*(?:[^"';]*?\bfrom\s*)?["']([^"']+)["']/gm)].map((m) => m[1]);
+    assert.deepEqual(importsOf('import "node:child_process";\nimport { a } from "./b.mjs";'), [
+        "node:child_process",
+        "./b.mjs",
+    ]);
+    assert.doesNotMatch(notifier + core, /^\s*export\s*(?:\*(?:\s*as\s+\w+)?|\{[^}]*\})\s*from\s*["']/m);
     assert.deepEqual(importsOf(notifier), ["./notify-release-lane-failure-core.mjs"]);
     assert.deepEqual(importsOf(core), []);
     assert.doesNotMatch(notifier + core, /\bimport\s*\(|\brequire\s*\(/);
