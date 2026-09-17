@@ -1019,11 +1019,11 @@ and disabling attachments still permits deletion.
 ## Scheduled Maintenance
 
 The cron services below are declared in `.railway/scheduled-jobs.ts` and
-applied with Railway Infrastructure as Code (`.railway/railway.ts`). The
-`railway.*.json` Config File Paths this section names are the legacy setup:
-Railway stops reading them on 2026-12-01 and new services cannot opt into them.
-The switch-over and the rules for adding a cron service or one of its variables
-are in `docs/ops/railway-iac-scheduled-jobs.md`.
+applied with Railway Infrastructure as Code (`.railway/railway.ts`, run with
+`npm run railway:iac:plan` / `railway:iac:apply`). A new cron service or a new
+variable on one goes into that table first -- an apply deletes what the table
+does not declare. The rules, and the 2026-09-17 move off the `railway.*.json`
+Config as Code files, are in `docs/ops/railway-iac-scheduled-jobs.md`.
 
 Set the same secret on the web service and the Railway Cron service:
 
@@ -1032,9 +1032,7 @@ MAINTENANCE_SECRET=<random value with at least 32 characters>
 MAINTENANCE_URL=https://tomverse.app
 ```
 
-Create a separate Railway Cron service and set its Config File Path to
-`/railway.maintenance.json`. The checked-in configuration runs this command
-daily at 03:00 UTC:
+The `Maintenance Cron` service runs this command daily at 03:00 UTC:
 
 ```text
 npm run maintenance:cleanup
@@ -1044,9 +1042,8 @@ Run it once per day. It sends Founding Tester Pass expiry notices, returns
 expired pass accounts to Free, deletes expired usage buckets and request leases,
 and removes expired or revoked share tokens and snapshots.
 
-Create a second Railway Cron service for durable AI-credit reservation recovery
-and set its Config File Path to `/railway.credit-reconciliation.json`. It runs
-every fifteen minutes:
+The `Credit Reconciliation` service handles durable AI-credit reservation
+recovery. It runs every fifteen minutes:
 
 ```text
 npm run maintenance:credit-reservations
@@ -1088,8 +1085,7 @@ scheduled-job row in Admin. Dashboard-only advisories such as Railway
 `suppressedAdvisories`) without an alert; the `alerts` count covers only
 incidents that were actually reported.
 
-Create a third Railway Cron service for the daily operations summary and
-set its Config File Path to `/railway.provider-usage-sync.json`. It runs at
+The `Provider Usage Sync` service sends the daily operations summary. It runs at
 00:30 UTC (10:30 Australia/Brisbane). The same run refreshes the Infrastructure
 dashboard sources and sends two managed Slack reports: the previous UTC day's
 provider usage/balance summary and the latest Railway, R2, PostgreSQL, and
@@ -1106,9 +1102,8 @@ channel, or it falls back to `SLACK_WEBHOOK_URL`. Infrastructure reports use
 `INFRASTRUCTURE_SLACK_WEBHOOK_URL` when configured and otherwise use
 `SLACK_WEBHOOK_URL`.
 
-Create a fourth Railway Cron service for Provider model lifecycle and discovery
-monitoring and set its Config File Path to
-`/railway.provider-model-catalog.json`. It runs at 00:00 UTC, which is 10:00
+The `Provider Model Catalog` service monitors Provider model lifecycle and
+discovery. It runs at 00:00 UTC, which is 10:00
 Australia/Brisbane year-round:
 
 ```text
@@ -1144,9 +1139,8 @@ API failures. Admin Scheduled Jobs records the latest run, result counts,
 delay, and failure state. Admin Alerts also exposes the managed Slack template
 and a safe test payload.
 
-Create a fifth Railway Cron service for the synthetic provider health probe
-(AUD-R001) and set its Config File Path to `/railway.provider-probe.json`. It
-runs every 10 minutes:
+The `Provider Probe` service runs the synthetic provider health probe
+(AUD-R001) every 10 minutes:
 
 ```text
 npm run maintenance:provider-probe

@@ -29,7 +29,7 @@ import {
 // per provider (see lib/providerProbe.ts), fixed non-sensitive prompt,
 // minimal output tokens, no tools/search/image/file/deep-research, a hard
 // per-call timeout, and no client-side retry loop -- the next cron tick 10
-// minutes later is the retry (see railway.provider-probe.json).
+// minutes later is the retry (see `Provider Probe` in .railway/scheduled-jobs.ts).
 
 // Half the cron cadence: guards against two near-simultaneous invocations
 // (a slow previous run overlapping the next tick) recording duplicate runs,
