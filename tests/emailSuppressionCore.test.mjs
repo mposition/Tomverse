@@ -113,10 +113,26 @@ test("a bounce is only permanent when the provider says it is", () => {
     }
   );
 
+  // Resend's own value for a hard bounce. Reading only "Hard" treated every real
+  // one as soft.
+  assert.deepEqual(
+    providerEventEffect({ type: "email.bounced", bounceType: "Permanent" }),
+    {
+      kind: "suppress",
+      reason: "hard_bounce",
+      deliveryStatus: "bounced",
+      temporary: false,
+    }
+  );
+
   // A full mailbox is not a dead one. Treating it as permanent throws away a
   // real recipient over a transient condition.
   assert.deepEqual(
     providerEventEffect({ type: "email.bounced", bounceType: "Transient" }),
+    { kind: "soft_bounce" }
+  );
+  assert.deepEqual(
+    providerEventEffect({ type: "email.bounced", bounceType: "Undetermined" }),
     { kind: "soft_bounce" }
   );
 
