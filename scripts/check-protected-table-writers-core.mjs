@@ -132,7 +132,7 @@ export const WRITE_OPERATIONS = new Set([
 export const CLIENT_RECEIVER_PATTERN = /^(prisma|prismaClient|client|db|tx|trx|transaction)$/i;
 
 export const WRITE_VERB_PATTERN =
-  /\b(insert|update|delete|merge|upsert|copy|truncate|alter)\b/g;
+  /\b(insert|update|delete|merge|upsert|copy|truncate|alter|drop|disable)\b/g;
 
 export const SCANNED_EXTENSIONS = [
   ".ts",
@@ -230,7 +230,7 @@ export const RAW_SQL_ALLOWLIST = [
     path: "prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key/migration.sql",
     table: "AdminAuditLog",
     tableMentions: 1,
-    writeVerbs: 1,
+    writeVerbs: 2,
     reason:
       "Drops the actorUserId foreign key so ON DELETE SET NULL can no longer rewrite hashed rows. Applied history.",
   },

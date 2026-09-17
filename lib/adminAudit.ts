@@ -81,14 +81,23 @@ async function appendAuditChainEntry(
   const timestampRows = await client.$queryRaw<Array<{ createdAt: Date }>>`
     SELECT clock_timestamp() AS "createdAt"
   `;
-  const createdAt = timestampRows[0]?.createdAt || new Date();
+  const databaseNow = timestampRows[0]?.createdAt || new Date();
   const previous = integritySecret
     ? await client.adminAuditLog.findFirst({
         where: { entryHash: { not: null } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        select: { entryHash: true },
+        select: { entryHash: true, createdAt: true },
       })
     : null;
+  // The chain is ordered by (createdAt, id) and ids are random, so an entry
+  // stamped in the same millisecond as the head could sort before it and fork
+  // the chain for the next writer. A hashed entry therefore always lands at
+  // least one millisecond after the head; the database refuses anything else
+  // (20260918090000_admin_audit_log_append_only).
+  const createdAt =
+    previous && databaseNow.getTime() <= previous.createdAt.getTime()
+      ? new Date(previous.createdAt.getTime() + 1)
+      : databaseNow;
   const previousHash = previous?.entryHash || null;
   const entryHash = integritySecret
     ? computeAdminAuditEntryHash(

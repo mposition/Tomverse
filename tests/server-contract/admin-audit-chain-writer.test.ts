@@ -36,6 +36,7 @@ type World = {
   calls: Call[];
   databaseNow: Date | null;
   previousHash: string | null;
+  previousCreatedAt: Date;
   clientIp: string | null;
   ipRequests: Request[];
 };
@@ -60,7 +61,9 @@ const recordingClient = (label: string) => ({
   adminAuditLog: {
     findFirst: async (args: unknown) => {
       world.calls.push({ kind: "findFirst", args });
-      return world.previousHash ? { entryHash: world.previousHash } : null;
+      return world.previousHash
+        ? { entryHash: world.previousHash, createdAt: world.previousCreatedAt }
+        : null;
     },
     create: async (args: {
       data: Record<string, unknown>;
@@ -94,6 +97,7 @@ beforeEach(async () => {
     calls: [],
     databaseNow: DATABASE_NOW,
     previousHash: "previous-entry-hash",
+    previousCreatedAt: new Date("2026-09-17T01:00:00.000Z"),
     clientIp: "203.0.113.7",
     ipRequests: [],
   };
@@ -167,7 +171,7 @@ test("inside a caller's transaction: lock, database clock, previous hash, insert
   assert.deepEqual(previous.kind === "findFirst" && previous.args, {
     where: { entryHash: { not: null } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { entryHash: true },
+    select: { entryHash: true, createdAt: true },
   });
 });
 
@@ -591,4 +595,39 @@ test("a nested key of the same name is ordinary metadata for the administrator w
   assert.deepEqual(createCall().data.metadata, {
     detail: { systemActor: "free text" },
   });
+});
+
+test("an entry stamped at or before the chain head lands one millisecond after it", async () => {
+  // Ids are random, so a same-millisecond entry could sort before the head and
+  // fork the chain for the next writer; the database now refuses it too.
+  world.previousCreatedAt = new Date(DATABASE_NOW.getTime());
+  await writer({
+    session,
+    action: "example.updated",
+    targetType: "Example",
+    summary: "Same millisecond.",
+    tx: recordingClient("caller-tx") as never,
+  });
+  const bumped = new Date(DATABASE_NOW.getTime() + 1);
+  const { data } = createCall();
+  assert.deepEqual(data.createdAt, bumped);
+  assert.equal(
+    data.entryHash,
+    computeAdminAuditEntryHash(
+      {
+        previousHash: "previous-entry-hash",
+        actorUserId: "admin-1",
+        actorEmail: "owner@example.test",
+        action: "example.updated",
+        targetType: "Example",
+        targetId: null,
+        summary: "Same millisecond.",
+        metadata: null,
+        ipAddress: null,
+        userAgent: null,
+        createdAt: bumped.toISOString(),
+      },
+      SECRET
+    )
+  );
 });

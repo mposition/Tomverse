@@ -244,7 +244,15 @@ test("a hashed entry that does not link to the chain head is refused", async () 
         createdAt: new Date(head.createdAt.getTime() - 60_000),
       },
     }),
-    /dated before the chain head/
+    /not dated after the chain head/
+  );
+  // Linking to the head in the head's own millisecond: with a random id it
+  // could sort before the head and fork the chain.
+  await assert.rejects(
+    prisma.adminAuditLog.create({
+      data: { ...base, id: "0000-sorts-first", previousHash: head.entryHash, createdAt: head.createdAt },
+    }),
+    /not dated after the chain head/
   );
   // A previous hash with no entry hash.
   await assert.rejects(
