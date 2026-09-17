@@ -4,8 +4,8 @@
   `feature.chatStarterEnabled`는 default-off이고 **production에서 켜진 적이
   없다.** staging에서는 검증을 위해 운영자가 켰고 kill switch로 다시 사라지는
   것까지 확인했다. 그것은 검증 행위이지 공개가 아니며, 현재 staging의 flag
-  상태는 이 저장소가 답할 수 없다. 회차별 상태는
-  `docs/ops/tomverse-chat-progress.md`가 적는다.
+  상태는 이 저장소가 답할 수 없다. staging 검증 회차는
+  `docs/ops/chat-starter-catalog-staging-verification-records/`에 남는다.
 - 표: `lib/chatStarterCatalog.ts`
 - 판정: `lib/chatStarterAvailability.ts`
 - 런타임 capability 해석: `lib/chatStarterCapabilityResolution.ts`
