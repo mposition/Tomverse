@@ -158,7 +158,10 @@ test.describe("admin read surfaces", () => {
     await page.goto("/admin/analytics");
 
     await expect(consoleHeading(page)).toHaveText("Analytics");
-    await expect(page.getByTestId("admin-usage-analytics")).toBeVisible();
+    // Streamed behind loading.tsx: wait for the one settled copy.
+    await expect(page.getByTestId("admin-usage-analytics")).toHaveCount(1);
+    const usage = page.locator("#main-content");
+    await expect(usage.getByTestId("admin-usage-analytics")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Who is using Tomverse" })
     ).toBeVisible();
@@ -166,9 +169,9 @@ test.describe("admin read surfaces", () => {
     await expect(
       page.getByRole("link", { name: "Today", exact: true })
     ).toHaveAttribute("aria-current", "page");
-    await expect(page.getByTestId("admin-usage-models")).toBeVisible();
-    await expect(page.getByTestId("admin-usage-activity")).toBeVisible();
-    await expect(page.getByTestId("admin-usage-segments")).toBeVisible();
+    await expect(usage.getByTestId("admin-usage-models")).toBeVisible();
+    await expect(usage.getByTestId("admin-usage-activity")).toBeVisible();
+    await expect(usage.getByTestId("admin-usage-segments")).toBeVisible();
     // A failed read renders a banner instead of the numbers; the seeded
     // database must never take that path.
     await expect(
