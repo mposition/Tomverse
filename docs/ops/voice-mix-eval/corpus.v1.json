@@ -1,0 +1,765 @@
+{
+  "version": "voice-mix-corpus-v1",
+  "hintVocabulary": [
+    "Tomverse",
+    "Auto Router",
+    "API",
+    "staging",
+    "production",
+    "timeout",
+    "GPT",
+    "MCP"
+  ],
+  "hintPrompt": "Tomverse, Auto Router, API, staging, production, timeout, GPT, MCP",
+  "items": [
+    {
+      "id": "dev-01",
+      "split": "dev",
+      "script": "Tomverse에서 Auto Router를 켜고 다음 질문을 이어가 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "Tomverse"
+        },
+        {
+          "language": "ko",
+          "text": "에서"
+        },
+        {
+          "language": "en",
+          "text": "Auto Router"
+        },
+        {
+          "language": "ko",
+          "text": "를 켜고 다음 질문을 이어가 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "Tomverse",
+          "accept": [
+            "Tomverse",
+            "톰버스"
+          ]
+        },
+        {
+          "label": "Auto Router",
+          "accept": [
+            "Auto Router",
+            "오토 라우터",
+            "AutoRouter"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "turn on",
+          "accept": [
+            "켜고",
+            "켜"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "dev-02",
+      "split": "dev",
+      "script": "staging에서 확인한 다음 production에는 아직 배포하지 마세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "staging"
+        },
+        {
+          "language": "ko",
+          "text": "에서 확인한 다음"
+        },
+        {
+          "language": "en",
+          "text": "production"
+        },
+        {
+          "language": "ko",
+          "text": "에는 아직 배포하지 마세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "staging",
+          "accept": [
+            "staging",
+            "스테이징"
+          ]
+        },
+        {
+          "label": "production",
+          "accept": [
+            "production",
+            "프로덕션"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "do not deploy",
+          "accept": [
+            "배포하지 마세요",
+            "배포하지마세요",
+            "배포하지 말"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "dev-03",
+      "split": "dev",
+      "script": "이 API의 timeout을 삼십 초에서 육십 초로 바꿔 주세요.",
+      "segments": [
+        {
+          "language": "ko",
+          "text": "이"
+        },
+        {
+          "language": "en",
+          "text": "API"
+        },
+        {
+          "language": "ko",
+          "text": "의"
+        },
+        {
+          "language": "en",
+          "text": "timeout"
+        },
+        {
+          "language": "ko",
+          "text": "을 삼십 초에서 육십 초로 바꿔 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "API",
+          "accept": [
+            "API",
+            "에이피아이"
+          ]
+        },
+        {
+          "label": "timeout",
+          "accept": [
+            "timeout",
+            "time out",
+            "타임아웃"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "change",
+          "accept": [
+            "바꿔",
+            "변경"
+          ]
+        }
+      ],
+      "numbers": [
+        {
+          "label": "30",
+          "accept": [
+            "삼십",
+            "30"
+          ]
+        },
+        {
+          "label": "60",
+          "accept": [
+            "육십",
+            "60"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "dev-04",
+      "split": "dev",
+      "script": "Please keep the API name in English, 설명은 한국어로 해 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "Please keep the API name in English,"
+        },
+        {
+          "language": "ko",
+          "text": "설명은 한국어로 해 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "API",
+          "accept": [
+            "API"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "keep in English",
+          "accept": [
+            "in English"
+          ]
+        },
+        {
+          "label": "explain in Korean",
+          "accept": [
+            "한국어로"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "dev-05",
+      "split": "dev",
+      "script": "GPT와 MCP는 서로 다른 약어입니다.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "GPT"
+        },
+        {
+          "language": "ko",
+          "text": "와"
+        },
+        {
+          "language": "en",
+          "text": "MCP"
+        },
+        {
+          "language": "ko",
+          "text": "는 서로 다른 약어입니다."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "GPT",
+          "accept": [
+            "GPT",
+            "지피티"
+          ]
+        },
+        {
+          "label": "MCP",
+          "accept": [
+            "MCP",
+            "엠씨피"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "different",
+          "accept": [
+            "서로 다른",
+            "다른"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "holdout-01",
+      "split": "holdout",
+      "script": "Claude 답변을 요약하고 GPT 답변과 다른 점만 알려 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "Claude"
+        },
+        {
+          "language": "ko",
+          "text": "답변을 요약하고"
+        },
+        {
+          "language": "en",
+          "text": "GPT"
+        },
+        {
+          "language": "ko",
+          "text": "답변과 다른 점만 알려 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "Claude",
+          "accept": [
+            "Claude",
+            "클로드"
+          ]
+        },
+        {
+          "label": "GPT",
+          "accept": [
+            "GPT",
+            "지피티"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "summarise",
+          "accept": [
+            "요약"
+          ]
+        },
+        {
+          "label": "only differences",
+          "accept": [
+            "다른 점만"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "holdout-02",
+      "split": "holdout",
+      "script": "회의록 파일을 올릴 테니 action item을 세 개로 정리해 주세요.",
+      "segments": [
+        {
+          "language": "ko",
+          "text": "회의록 파일을 올릴 테니"
+        },
+        {
+          "language": "en",
+          "text": "action item"
+        },
+        {
+          "language": "ko",
+          "text": "을 세 개로 정리해 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "action item",
+          "accept": [
+            "action item",
+            "액션 아이템"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "organise",
+          "accept": [
+            "정리"
+          ]
+        }
+      ],
+      "numbers": [
+        {
+          "label": "3",
+          "accept": [
+            "세 개",
+            "3개",
+            "세개"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-03",
+      "split": "holdout",
+      "script": "The deadline is Friday, 그러니까 목요일까지 초안을 보내 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "The deadline is Friday,"
+        },
+        {
+          "language": "ko",
+          "text": "그러니까 목요일까지 초안을 보내 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "deadline",
+          "accept": [
+            "deadline",
+            "데드라인"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "Friday",
+          "accept": [
+            "Friday",
+            "금요일"
+          ]
+        },
+        {
+          "label": "by Thursday",
+          "accept": [
+            "목요일까지"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "holdout-04",
+      "split": "holdout",
+      "script": "React 컴포넌트에서 useEffect를 쓰지 않는 방법을 알려 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "React"
+        },
+        {
+          "language": "ko",
+          "text": "컴포넌트에서"
+        },
+        {
+          "language": "en",
+          "text": "useEffect"
+        },
+        {
+          "language": "ko",
+          "text": "를 쓰지 않는 방법을 알려 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "React",
+          "accept": [
+            "React",
+            "리액트"
+          ]
+        },
+        {
+          "label": "useEffect",
+          "accept": [
+            "useEffect",
+            "use effect",
+            "유즈 이펙트"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "without using",
+          "accept": [
+            "쓰지 않는",
+            "사용하지 않는"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "holdout-05",
+      "split": "holdout",
+      "script": "크레딧이 이십 개 남았으면 알림을 보내고 다섯 개 남으면 멈춰 주세요.",
+      "segments": [
+        {
+          "language": "ko",
+          "text": "크레딧이 이십 개 남았으면 알림을 보내고 다섯 개 남으면 멈춰 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "credit",
+          "accept": [
+            "크레딧",
+            "크레디트",
+            "credit"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "notify",
+          "accept": [
+            "알림"
+          ]
+        },
+        {
+          "label": "stop",
+          "accept": [
+            "멈춰",
+            "중지"
+          ]
+        }
+      ],
+      "numbers": [
+        {
+          "label": "20",
+          "accept": [
+            "이십",
+            "20"
+          ]
+        },
+        {
+          "label": "5",
+          "accept": [
+            "다섯",
+            "5"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-06",
+      "split": "holdout",
+      "script": "Let's compare three models side by side and pick the cheapest one.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "Let's compare three models side by side and pick the cheapest one."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "side by side",
+          "accept": [
+            "side by side"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "compare",
+          "accept": [
+            "compare"
+          ]
+        },
+        {
+          "label": "cheapest",
+          "accept": [
+            "cheapest"
+          ]
+        }
+      ],
+      "numbers": [
+        {
+          "label": "3",
+          "accept": [
+            "three",
+            "3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-07",
+      "split": "holdout",
+      "script": "PDF에서 표만 뽑아서 CSV로 만들어 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "PDF"
+        },
+        {
+          "language": "ko",
+          "text": "에서 표만 뽑아서"
+        },
+        {
+          "language": "en",
+          "text": "CSV"
+        },
+        {
+          "language": "ko",
+          "text": "로 만들어 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "PDF",
+          "accept": [
+            "PDF",
+            "피디에프"
+          ]
+        },
+        {
+          "label": "CSV",
+          "accept": [
+            "CSV",
+            "씨에스브이"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "only tables",
+          "accept": [
+            "표만"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "holdout-08",
+      "split": "holdout",
+      "script": "이 문장은 번역하지 말고 그대로 적어 주세요, do not translate.",
+      "segments": [
+        {
+          "language": "ko",
+          "text": "이 문장은 번역하지 말고 그대로 적어 주세요,"
+        },
+        {
+          "language": "en",
+          "text": "do not translate."
+        }
+      ],
+      "keyTerms": [],
+      "meaning": [
+        {
+          "label": "do not translate (ko)",
+          "accept": [
+            "번역하지 말고",
+            "번역하지말고"
+          ]
+        },
+        {
+          "label": "do not translate (en)",
+          "accept": [
+            "do not translate",
+            "don't translate"
+          ]
+        }
+      ],
+      "numbers": []
+    },
+    {
+      "id": "holdout-09",
+      "split": "holdout",
+      "script": "production 로그에서 timeout 오류가 열두 번 났는지 확인해 주세요.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "production"
+        },
+        {
+          "language": "ko",
+          "text": "로그에서"
+        },
+        {
+          "language": "en",
+          "text": "timeout"
+        },
+        {
+          "language": "ko",
+          "text": "오류가 열두 번 났는지 확인해 주세요."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "production",
+          "accept": [
+            "production",
+            "프로덕션"
+          ]
+        },
+        {
+          "label": "timeout",
+          "accept": [
+            "timeout",
+            "time out",
+            "타임아웃"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "check",
+          "accept": [
+            "확인"
+          ]
+        }
+      ],
+      "numbers": [
+        {
+          "label": "12",
+          "accept": [
+            "열두 번",
+            "12번",
+            "열두번"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "holdout-10",
+      "split": "holdout",
+      "script": "Tomverse의 MCP 연결은 staging에 먼저 올리고 금요일 전에는 배포하지 않습니다.",
+      "segments": [
+        {
+          "language": "en",
+          "text": "Tomverse"
+        },
+        {
+          "language": "ko",
+          "text": "의"
+        },
+        {
+          "language": "en",
+          "text": "MCP"
+        },
+        {
+          "language": "ko",
+          "text": "연결은"
+        },
+        {
+          "language": "en",
+          "text": "staging"
+        },
+        {
+          "language": "ko",
+          "text": "에 먼저 올리고 금요일 전에는 배포하지 않습니다."
+        }
+      ],
+      "keyTerms": [
+        {
+          "label": "Tomverse",
+          "accept": [
+            "Tomverse",
+            "톰버스"
+          ]
+        },
+        {
+          "label": "MCP",
+          "accept": [
+            "MCP",
+            "엠씨피"
+          ]
+        },
+        {
+          "label": "staging",
+          "accept": [
+            "staging",
+            "스테이징"
+          ]
+        }
+      ],
+      "meaning": [
+        {
+          "label": "not before Friday",
+          "accept": [
+            "배포하지 않습니다",
+            "배포하지않습니다"
+          ]
+        },
+        {
+          "label": "Friday",
+          "accept": [
+            "금요일"
+          ]
+        }
+      ],
+      "numbers": []
+    }
+  ]
+}
