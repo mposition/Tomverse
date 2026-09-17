@@ -3,7 +3,12 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
-import { recordSoftBounce, recordSuppression } from "@/lib/emailSuppression";
+import { recordProviderComplaint } from "@/lib/emailComplaintSuppression";
+import {
+  recordSoftBounce,
+  recordSuppression,
+  type RecordSuppressionInput,
+} from "@/lib/emailSuppression";
 import { providerEventEffect } from "@/lib/emailSuppressionCore";
 
 /**
@@ -192,14 +197,17 @@ const applyResendEvent = async (input: {
         where: { providerMessageId },
         select: {
           id: true,
+          userId: true,
           emailAddress: true,
           lane: true,
           providerAccount: true,
           sentDomain: true,
+          policyVersionId: true,
+          jurisdictionCountry: true,
           templateVersion: {
             // The version it was sent under, not the template row: the row is
             // history and may carry a classification the code has since moved off.
-            select: { classification: true },
+            select: { classification: true, purpose: true },
           },
         },
       })
@@ -258,7 +266,7 @@ const applyResendEvent = async (input: {
     });
   }
 
-  await recordSuppression({
+  const suppression: RecordSuppressionInput = {
     emailAddress,
     reason: effect.reason,
     source: "provider_webhook",
@@ -274,7 +282,30 @@ const applyResendEvent = async (input: {
     providerAccount: delivery?.providerAccount ?? null,
     occurredAt: input.receivedAt,
     sourceEventKey: `webhook:${input.webhookEventId}`,
-  });
+  };
+
+  if (effect.reason === "complaint") {
+    // A complaint is also an opt-out from the purpose of the message, recorded
+    // with the suppression in one transaction
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+    await recordProviderComplaint({
+      suppression,
+      delivery: delivery
+        ? {
+            id: delivery.id,
+            userId: delivery.userId,
+            emailAddress: delivery.emailAddress,
+            purpose: delivery.templateVersion.purpose,
+            policyVersionId: delivery.policyVersionId,
+            jurisdictionCountry: delivery.jurisdictionCountry,
+          }
+        : null,
+      webhookEventId: input.webhookEventId,
+      occurredAt: input.receivedAt,
+    });
+  } else {
+    await recordSuppression(suppression);
+  }
 
   if (classification === "marketing") {
     // Evaluated here as well as before each send, so the switch trips on the

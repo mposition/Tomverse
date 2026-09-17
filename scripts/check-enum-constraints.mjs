@@ -412,7 +412,7 @@ const REGISTRY = {
   EmailPreference_source_check: {
     owner: "database",
     reason:
-      "Where a preference row came from: signup, preference_center, unsubscribe_link, admin, system_default. Written as literals at each write site in lib/emailPreferences.ts. It is audit provenance rather than a value anything branches on, which is why there is no runtime list to compare against -- and why a sixth value has to be argued for here before it can be written.",
+      "Where a preference row came from: signup, preference_center, unsubscribe_link, admin, system_default, privacy_request, provider_complaint. The last two are the deletion intake and the spam-complaint opt-out (docs/policy/email-product-news-redesign-draft.md, section 7.4). Written as literals at each write site in lib/emailPreferences.ts and its callers. It is audit provenance rather than a value anything branches on, which is why there is no runtime list to compare against -- and why a sixth value has to be argued for here before it can be written.",
   },
   ConsentRecord_action_check: {
     owner: "type_only",
@@ -422,7 +422,7 @@ const REGISTRY = {
   ConsentRecord_captured_via_check: {
     owner: "database",
     reason:
-      "Which surface captured the consent, kept because the evidence a regulator asks for is where and how, not only when. Written as a literal by each surface; there is no runtime list.",
+      "Which surface captured the consent, kept because the evidence a regulator asks for is where and how, not only when. provider_complaint is a withdrawal the complaint itself made, pinned to the delivery complained about (docs/policy/email-product-news-redesign-draft.md, section 7.4). Written as a literal by each surface; there is no runtime list.",
   },
   SuppressionEntry_scope_check: {
     owner: "database",

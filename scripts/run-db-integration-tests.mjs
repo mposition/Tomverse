@@ -239,6 +239,9 @@ run(
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
+    // A deletion request and a spam complaint: the suppression and the preference
+    // withdrawal commit in one transaction, keyed so a retry records nothing new.
+    "tests/integration/email-privacy-complaint-suppression.db.test.ts",
     // The double opt-in against the tables: request, history and queued mail
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
