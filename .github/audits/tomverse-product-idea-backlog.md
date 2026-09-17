@@ -62,15 +62,15 @@
 
 ### 추가 작업 배정 순서
 
-| 순서 | 작업 | 지금 가능한 완료 단위 | 병행 조건·대기 경계 |
-| --- | --- | --- | --- |
-| 1 | **COMPOSER-REFLOW-01** — 입력·전송 접근성 | 확대/낮은 높이에서 보내기 버튼에 닿도록 재현·수정·회귀. 같은 담당이 MOBILE-KB-INSET-01을 재현하고, 원인이 확인되면 이어서 수정 | `MobileChatShell`·composer·viewport hook은 한 담당이 소유. STARTER-LAYOUT-01은 같은 영역의 작은 후속으로 묶되 첫 수정을 기다리게 하지 않음 |
-| 2 | **SEO-I18N-01** — 지역 중립 중국어 metadata | 공통 hreflang의 `zh-CN` → `zh-Hans`, HTML/sitemap 자기·상호 참조 회귀. 작은 독립 PR | Chat 실행·DB·과금과 분리. `/zh`·내부 locale·Open Graph 일괄 치환 금지. AEO-04는 같은 SEO 담당의 다음 작업으로 두어 sitemap 중복 수정 방지 |
-| 3 | **CONT-01 측정·정책 선택 준비** / CONT-SEARCH-01 성능 잔여 | 기존 seed 측정 도구로 후보 비교·결정표를 준비. 검색은 기존 근사 상한 측정기를 별도 격리 테스트 DB에서 사용 | 운영 seed 통계는 승인된 읽기 전용 DB 접근 필요, 검색 측정 DB는 fixture 쓰기 대상이므로 운영 DB 사용 금지. C/B 변경은 결과·제품 결정 후. 검색 구현을 다시 하지 않음 |
-| 4 | **VOICE-MIX-01** — 혼용 음성 평가 | 대본·허용 표기·숫자 정답지·채점기·한정 용어 힌트 비교 설계 | STT 경로로 한정하고 Chat shell/녹음 UI 전면 수정 제외. 실제 음성/유료 비교는 시료·호출 수·예산 승인 후. 모델 교체부터 하지 않음 |
-| 5 | **CACHE-01 + CHAT-LATENCY-01** — 비용·체감 지연의 기준선 | 기존 usage adapter·정산·dispatch 지표를 읽어 캐시 집계 공백과 첫 답변/전체 종료 시간의 측정 경계를 정리 | **계측 조사부터** 병행. 전 공급자 캐시 강제 활성화·청구 수정·Router/Refiner 실행 변경은 제외. 요청/과금 공용 파일의 구현은 기존 핵심 담당과 순서 조율 |
-| 6 | **CHAT-ART-01** — 기존 파일의 Chat 통합 | 지원 모델×검색 조합, 권한·다운로드·재진입 테스트 표와 기존 통합 공백 확인 | 기본 Auto/단일 답변 UI와 저장·스트림 계약이 준비된 범위만 실제 통합. Auto GA·Memory 전체 완료를 기다릴 필요는 없으나 미리보기/버전 엔진을 새로 만들지 않음 |
-| 7 | **HELP-NAV-01** — 도움말 도우미 준비 | 질문 의도·승인된 안내·설정 목적지 표와 정답지 준비 | P2 유지. launcher/시트는 1번 UI 안정화 및 온보딩 변경과 순서 조율 후. 자유 생성·자동 설정 실행은 이번 완료 단위에서 제외 |
+| 순서 | 작업 | 지금 가능한 완료 단위 | 병행 조건·대기 경계 | 진행 상태 |
+| --- | --- | --- | --- | --- |
+| 1 | **COMPOSER-REFLOW-01** — 입력·전송 접근성 | 확대/낮은 높이에서 보내기 버튼에 닿도록 재현·수정·회귀. 같은 담당이 MOBILE-KB-INSET-01을 재현하고, 원인이 확인되면 이어서 수정 | `MobileChatShell`·composer·viewport hook은 한 담당이 소유. STARTER-LAYOUT-01은 같은 영역의 작은 후속으로 묶되 첫 수정을 기다리게 하지 않음 | **완료** (2026-09-17) — develop [#1517](https://github.com/mposition/Tomverse/pull/1517) 병합, staging 통과(기록 [#1528](https://github.com/mposition/Tomverse/pull/1528)). main 이식 진행 중 |
+| 2 | **SEO-I18N-01** — 지역 중립 중국어 metadata | 공통 hreflang의 `zh-CN` → `zh-Hans`, HTML/sitemap 자기·상호 참조 회귀. 작은 독립 PR | Chat 실행·DB·과금과 분리. `/zh`·내부 locale·Open Graph 일괄 치환 금지. AEO-04는 같은 SEO 담당의 다음 작업으로 두어 sitemap 중복 수정 방지 | **완료** (2026-09-17) — develop [#1516](https://github.com/mposition/Tomverse/pull/1516) 병합, staging 통과(기록 [#1528](https://github.com/mposition/Tomverse/pull/1528)). main 이식 진행 중 |
+| 3 | **CONT-01 측정·정책 선택 준비** / CONT-SEARCH-01 성능 잔여 | 기존 seed 측정 도구로 후보 비교·결정표를 준비. 검색은 기존 근사 상한 측정기를 별도 격리 테스트 DB에서 사용 | 운영 seed 통계는 승인된 읽기 전용 DB 접근 필요, 검색 측정 DB는 fixture 쓰기 대상이므로 운영 DB 사용 금지. C/B 변경은 결과·제품 결정 후. 검색 구현을 다시 하지 않음 | **완료** (2026-09-17, 코드 변경 없음) — seed 후보 fixture 비교와 검색 상한 측정 기록 작성. 남은 것: 운영 DB 읽기 측정(사람)·C/B 결정·3초 예산 결정 |
+| 4 | **VOICE-MIX-01** — 혼용 음성 평가 | 대본·허용 표기·숫자 정답지·채점기·한정 용어 힌트 비교 설계 | STT 경로로 한정하고 Chat shell/녹음 UI 전면 수정 제외. 실제 음성/유료 비교는 시료·호출 수·예산 승인 후. 모델 교체부터 하지 않음 | **완료** (2026-09-17) — 평가 키트 develop [#1518](https://github.com/mposition/Tomverse/pull/1518) 병합. 남은 것: 유료 비교 승인·실제 발화 녹음(사람) |
+| 5 | **CACHE-01 + CHAT-LATENCY-01** — 비용·체감 지연의 기준선 | 기존 usage adapter·정산·dispatch 지표를 읽어 캐시 집계 공백과 첫 답변/전체 종료 시간의 측정 경계를 정리 | **계측 조사부터** 병행. 전 공급자 캐시 강제 활성화·청구 수정·Router/Refiner 실행 변경은 제외. 요청/과금 공용 파일의 구현은 기존 핵심 담당과 순서 조율 | **완료** (2026-09-17, 코드 변경 없음) — 캐시·지연 계측 조사 기록 작성. 구현(TTFT 기록·캐시 보고서)은 미착수 |
+| 6 | **CHAT-ART-01** — 기존 파일의 Chat 통합 | 지원 모델×검색 조합, 권한·다운로드·재진입 테스트 표와 기존 통합 공백 확인 | 기본 Auto/단일 답변 UI와 저장·스트림 계약이 준비된 범위만 실제 통합. Auto GA·Memory 전체 완료를 기다릴 필요는 없으나 미리보기/버전 엔진을 새로 만들지 않음 | **완료** (2026-09-17, 코드 변경 없음) — 통합 검증 준비 조사 기록 작성. 결정(Auto 후보 정책)·통합 구현·실측은 미착수 |
+| 7 | **HELP-NAV-01** — 도움말 도우미 준비 | 질문 의도·승인된 안내·설정 목적지 표와 정답지 준비 | P2 유지. launcher/시트는 1번 UI 안정화 및 온보딩 변경과 순서 조율 후. 자유 생성·자동 설정 실행은 이번 완료 단위에서 제외 | **완료** (2026-09-17) — 의도·목적지 등록부와 정답지 develop [#1519](https://github.com/mposition/Tomverse/pull/1519) 병합. UI는 미착수 |
 
 **UI 담당 안의 다음 순서**는 COMPOSER-REFLOW-01 → STARTER-COMPARE-01(제품 결정 후)
 → STARTER-LOCK-COPY-01입니다. MOBILE-KB-INSET-01과 STARTER-LAYOUT-01은 같은 파일의
@@ -191,11 +191,11 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 | --- | --- | --- | --- |
 | CONT-TITLE-01 | 원문 삭제 후 이어가기 대화명 안정화 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1423 병합 원격 확인 | 완료 범위: 사용자 저장 제목 유지, 삭제 전 별도 이름 저장 선택, 구분 가능한 fallback과 삭제 상태 표시. 재착수 후보에서 제외 |
 | CONT-EXPORT-01A | 이어가기 TXT 파일명·문서 제목 정합성 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1422·main #1421 병합 원격 확인 | 완료 범위: 실제 표시 제목으로 안전한 `[대화창 이름].txt`와 TXT 내부 제목 생성. 원문 포함 01B와 구분하며 재착수 후보에서 제외 |
-| CONT-01 | 한국어 이어가기 seed 창·빈 발췌 개선 | 병행 P1 / 측정 도구 완료(develop #1447·main #1453). **fixture 후보 비교 완료(2026-09-17)**: 현재 규칙은 예산 넘는 한글 답변에서 seed 0개 재현, B6000·B8000은 빈 seed를 없애지만 한글 10교환 입력이 약 1.9·2.3배, C-head·C-tail은 예산을 지키지만 각각 끝의 결론·앞의 사실을 잃는 fixture가 있음. 운영 통계·C/B 선택 대기, 제품 수정 미착수 | 운영 DB 읽기 전용 `npm run report:continuation-seed -- --database` 실행(사람) → C/B 선택 → seed 규칙 수정·회귀. 측정표: [이어가기 측정 기록](./tomverse-continuation-measurement-2026-09-17.md) |
+| CONT-01 | 한국어 이어가기 seed 창·빈 발췌 개선 | 병행 P1 / **2026-09-17 측정 작업 완료(코드 변경 없음)** · 측정 도구 완료(develop #1447·main #1453). **fixture 후보 비교 완료(2026-09-17)**: 현재 규칙은 예산 넘는 한글 답변에서 seed 0개 재현, B6000·B8000은 빈 seed를 없애지만 한글 10교환 입력이 약 1.9·2.3배, C-head·C-tail은 예산을 지키지만 각각 끝의 결론·앞의 사실을 잃는 fixture가 있음. 운영 통계·C/B 선택 대기, 제품 수정 미착수 | 운영 DB 읽기 전용 `npm run report:continuation-seed -- --database` 실행(사람) → C/B 선택 → seed 규칙 수정·회귀. 측정표: [이어가기 측정 기록](./tomverse-continuation-measurement-2026-09-17.md) |
 | CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | **완료** / develop #1465, #1484(B1 원인 수정) 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B1·B2·B3 통과, N2(시간 초과 안내)는 재현 어려워 건너뜀. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인. 근사 상한 측정 완료(2026-09-17, 로컬 격리 DB: 단독 p95 0.51초, 10개 동시 p95 1.54초, 시간 초과 0/380 — 운영 시간 아님, [측정 기록](./tomverse-continuation-measurement-2026-09-17.md)) | 실제 배포·운영 확인은 별도. 잔여: 3초 원문 조회 예산 결정(권장: staging 전용 test DB 재측정 → 운영 `timed_out` 비율 관측), 같은 원문의 이어가기 둘이 같은 결과로 두 번 보이는 문제(N1 후속). native 메시지 위치 이동은 미구현 |
 | CONT-EXPORT-01B | 저장된 원문을 포함한 이어가기 TXT 다운로드 | **완료** / develop #1473·#1484·#1485 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B5·B6·N3·N4·N6 통과, 원문 **삭제** 경우의 B6은 미실행. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인 | 실제 배포·운영 확인은 별도. 후속(비차단): 잠긴 원문 거절 사유가 화면 맨 아래 토스트로 떠 동작하지 않는 것처럼 보임 → 메뉴 안 표시로 수정 중(`claude/to-develop/source-export-refusal-inline`, Codex REVISE 반영 중, 미병합), 두 다운로드 항목이 인접해 헷갈림(미착수) |
 | VOICE-MIX-01 | 한국어·영어 혼용 Voice 인식 정확도 개선 | 병행 P1 / **평가 준비 완료, develop [#1518](https://github.com/mposition/Tomverse/pull/1518) 병합(2026-09-17 04:38Z 원격 확인)**. 대본 dev 5·holdout 10, 허용 표기·의미·숫자 순서 정답지, 순서 정렬 기반 채점기(`voice-mix-scoring-v3`, 오류율·용어·의미·숫자 순서·구간 누락·번역 의심·힌트 삽입을 따로 보고), dev에서만 가져온 고정 힌트 문장, manifest와 정확히 같은 실행만 채점. Codex 4회(REVISE×3→APPROVE). 유료 호출 0 | 승인 요청: 녹음 40개 × 2 arm × 3회 = 240회(+파이프라인 10회), 추정 US$0.07~0.13, 상한 US$1.00 → 실제 발화 녹음·운영 모델 확인(사람) → 실행·기록 초안 → 판정 |
-| CACHE-01 | 전 공급자 Prompt Cache 계측·최적화 및 비용 정합성 점검 | 병행 P1 / **계측 조사 완료(2026-09-17)**, 구현 미착수. 명시 캐시는 Anthropic 직접 `chat_turn` 한 경로뿐, 나머지는 공급자 자동 캐시를 정산 경로에서만 반영. 공백 11건: 앱 데이터로 캐시 적중률을 보는 보고 없음, 경로 구분 불가(`source` 2종), 제목·probe·검증이 cache read를 버림, 기억 추출에 캐시 필드 없음, MiniMax 미가격 write 비가시, 비용 버킷 보정이 write 무시 등 | 캐시 적중률 읽기 전용 보고서(provider×model×source) → 보정 도구의 write 반영 → 보조 경로 cache read 전달(과금 계약 검토). [캐시·지연 조사](./tomverse-cache-latency-instrumentation-survey-2026-09-17.md) |
+| CACHE-01 | 전 공급자 Prompt Cache 계측·최적화 및 비용 정합성 점검 | 병행 P1 / **계측 조사 완료(2026-09-17, 코드 변경 없음)**, 구현 미착수. 명시 캐시는 Anthropic 직접 `chat_turn` 한 경로뿐, 나머지는 공급자 자동 캐시를 정산 경로에서만 반영. 공백 11건: 앱 데이터로 캐시 적중률을 보는 보고 없음, 경로 구분 불가(`source` 2종), 제목·probe·검증이 cache read를 버림, 기억 추출에 캐시 필드 없음, MiniMax 미가격 write 비가시, 비용 버킷 보정이 write 무시 등 | 캐시 적중률 읽기 전용 보고서(provider×model×source) → 보정 도구의 write 반영 → 보조 경로 cache read 전달(과금 계약 검토). [캐시·지연 조사](./tomverse-cache-latency-instrumentation-survey-2026-09-17.md) |
 | CREDIT-UX-01 | 비용 정보의 점진적 공개·정산 상세 정합성 | CHAT-01 하위 병행 P2 / 수정 후 등록(2026-09-15), UI·정책 결정 대기 | 중복 숫자는 축약하되 실행 전 비용/구매 크레딧 고지·정확한 잔량 접근 유지. 현재 견적과 완료 작업 정산 분리 |
 | CREDIT-CAP-01 | 작업 단위 지출 상한의 승인·서버 강제 계약 | 후속 P2 / 설계 후보·제품/청구 정책 결정 대기 | Memory 확인 패턴을 참고해 승인 금액·범위·변경/재시도 계약 확인. Agent 부분 실패 정산은 하위 AGENT-BILL-01로 구체화하며 공수 중복 집계하지 않음 |
 | AGENT-BILL-01 | Agent 산출 단위 부분 실패 정산·재개 과금 | CREDIT-CAP-01 하위 P2 / 수정 후 등록(2026-09-15), 유료 REVIEW-AGENT-01 출시 전 필수·정책 미승인 | 청구 가능한 결과 정의 → 동결 단가/승인 상한 → 원자적 정산·단위별 재과금 방지 → 실패 원가/유계 재시도·실제 정산 표시. 상세는 I |
@@ -1418,7 +1418,7 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 
 | 이번 제안 내 순서 | ID | 작업 | 우선순위·다음 완료 단위 |
 | --- | --- | --- | --- |
-| 1 | CHAT-LATENCY-01 | 제품 작업 완료 시간 계측 보완 | CHAT-01 하위 P1 / **계측 조사 완료(2026-09-17)**, 구현 미착수. TTFT 컬럼(`firstVisibleTokenAt`·`firstTokenMs`)은 있으나 어떤 호출도 값을 넘기지 않음, 유일한 turn 시간(`totalLatencyMs`)은 계측 모드 기본 off, 요청 수신·스트림 종료 시점·Chat 완료 로그·다중 모델 묶음 key·첫 성공 서버 표식 없음, 캐시된 Review 미기록 등 공백 12건. 다음: TTFT 배선과 Chat 완료 구조화 로그 → staging `observe` 기준선. [캐시·지연 조사](./tomverse-cache-latency-instrumentation-survey-2026-09-17.md) |
+| 1 | CHAT-LATENCY-01 | 제품 작업 완료 시간 계측 보완 | CHAT-01 하위 P1 / **계측 조사 완료(2026-09-17, 코드 변경 없음)**, 구현 미착수. TTFT 컬럼(`firstVisibleTokenAt`·`firstTokenMs`)은 있으나 어떤 호출도 값을 넘기지 않음, 유일한 turn 시간(`totalLatencyMs`)은 계측 모드 기본 off, 요청 수신·스트림 종료 시점·Chat 완료 로그·다중 모델 묶음 key·첫 성공 서버 표식 없음, 캐시된 Review 미기록 등 공백 12건. 다음: TTFT 배선과 Chat 완료 구조화 로그 → staging `observe` 기준선. [캐시·지연 조사](./tomverse-cache-latency-instrumentation-survey-2026-09-17.md) |
 | 1과 비개발 병행 | MARKET-KO-01 | 한국어 핵심 업무 시장·포지셔닝 검증 | 시장 검증 P1 / 한국어 문서 비교·검토 실무자라는 가설 하나 → 동일 업무 대안 비교 → 사실 기반 카피·시료·지원 실험. 한국어 1등 선언·7개 언어 축소 아님 |
 | 2 | CHAT-ONBOARD-01 | 신규 사용자 첫 성공 흐름 완성 | CHAT-01 하위 P1 / quick start·ModelFinder·starter의 중복/이탈 검증 → 첫 유효 답변·저장·후속 질문. starter staging 검증은 **통과**(2026-09-17, 서명 mposition, develop [#1510](https://github.com/mposition/Tomverse/pull/1510)); 후속 발견은 아래 "starter staging 검증 후속" |
 | 온보딩 연계 | HELP-NAV-01 | 원하는 작업을 설정·사용법으로 연결하는 도움말 도우미 | 병행 P2 / **준비물 완료, develop [#1519](https://github.com/mposition/Tomverse/pull/1519) 병합(2026-09-17 02:55Z 원격 확인)**: 의도 12개·목적지 id·목적지별 접근 조건·기계 검사 가능한 금지 태그 등록부와 합성 정답지(dev 22·holdout 21). launcher·시트·매칭은 모바일 UI 안정화 후. Codex 3회(REVISE→REVISE→APPROVE); 세부 범위는 아래 |
@@ -2009,6 +2009,10 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   (COMPOSER-FOCUS-CLIP-01 P2, MOBILE-HEADER-NARROW-01 P3, COMPOSER-NOTICE-WRAP-01 P3·결정 필요), 기존 MOBILE-KB-INSET-01
   원인 가설 수정, 작업 불필요 2건(placeholder·답변 말풍선 줄바꿈, 기존 결정). COMPOSER-REFLOW-01·SEO-I18N-01 행에
   staging 통과를 반영했습니다. 제품 코드·flag·배포는 바꾸지 않았고 주 투자 순위는 그대로입니다.
+
+- 2026-09-17 (Claude 세션, 상태 표시): 사용자 요청("코드 변경 없더라도 작업 옆에 완료 했으면 했다고 표시")에 따라
+  "추가 작업 배정 순서" 표에 진행 상태 열을 추가하고 1~7번 모두 완료로 표시했습니다. 코드 변경이 없던 3·5·6번은
+  그렇게 밝혔고, 완료가 가리키는 범위(이번 완료 단위)와 남은 사람 작업·결정을 같은 칸에 적었습니다.
 
 ## VOICE-MIX-01 — 한국어·영어 혼용 Voice 인식 정확도 개선
 
