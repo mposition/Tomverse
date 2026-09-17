@@ -4,12 +4,18 @@ import { prisma } from "@/lib/prisma";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import { evaluateMarketingSendHealth } from "@/lib/marketingSendHealth";
 import { recordProviderComplaint } from "@/lib/emailComplaintSuppression";
-import {
-  recordSoftBounce,
-  recordSuppression,
-  type RecordSuppressionInput,
-} from "@/lib/emailSuppression";
+import { recordSuppression, type RecordSuppressionInput } from "@/lib/emailSuppression";
 import { providerEventEffect } from "@/lib/emailSuppressionCore";
+import {
+  providerEventOccurredAt,
+  providerEventRank,
+  type ProviderEventKey,
+} from "@/lib/emailProviderEventOrderCore";
+import {
+  recordDeliveredEvent,
+  recordProviderStatusEvent,
+  recordSoftBounceEvent,
+} from "@/lib/emailProviderEvents";
 
 /**
  * Turns one Resend webhook into state, exactly once.
@@ -137,6 +143,7 @@ export async function processResendWebhook(input: {
       payload: input.payload,
       receivedAt,
       webhookEventId,
+      providerEventId: input.providerEventId,
     });
     await prisma.providerWebhookEvent.update({
       where: {
@@ -173,6 +180,8 @@ const applyResendEvent = async (input: {
   receivedAt: Date;
   /** The stored event row; keys the suppression cause so a replay adds none. */
   webhookEventId: string;
+  /** The provider's event id, the last tie-break of the event order. */
+  providerEventId: string;
 }): Promise<{ effect: string; deliveryId: string | null }> => {
   const bounceType =
     typeof input.payload.data?.bounce?.type === "string"
@@ -215,15 +224,35 @@ const applyResendEvent = async (input: {
 
   const emailAddress = delivery?.emailAddress ?? recipient;
 
+  // Applied in the provider's order, not in arrival order: the event's own
+  // time, then how blocking it is, then its id
+  // (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  const key: ProviderEventKey = {
+    occurredAt: providerEventOccurredAt({
+      createdAt: input.payload.created_at,
+      receivedAt: input.receivedAt,
+    }),
+    rank: providerEventRank(effect) ?? 0,
+    eventId: input.providerEventId,
+  };
+
   if (effect.kind === "delivery_status") {
     if (!delivery) return { effect: "unmatched", deliveryId: null };
-    await prisma.emailDelivery.update({
-      where: { id: delivery.id },
-      data: {
+    if (effect.status === "delivered") {
+      await recordDeliveredEvent({
+        emailAddress: delivery.emailAddress,
+        deliveryId: delivery.id,
+        key,
+        webhookEventId: input.webhookEventId,
+      });
+    } else {
+      await recordProviderStatusEvent({
+        emailAddress: delivery.emailAddress,
+        deliveryId: delivery.id,
+        key,
         status: effect.status,
-        ...(effect.status === "delivered" ? { deliveredAt: input.receivedAt } : {}),
-      },
-    });
+      });
+    }
     return { effect: effect.status, deliveryId: delivery.id };
   }
 
@@ -239,19 +268,11 @@ const applyResendEvent = async (input: {
     delivery?.templateVersion.classification ?? null;
 
   if (effect.kind === "soft_bounce") {
-    if (delivery) {
-      await prisma.emailDelivery.update({
-        where: { id: delivery.id },
-        data: { status: "bounced", lastErrorKind: "soft_bounce" },
-      });
-    }
-    const outcome = await recordSoftBounce({
+    const outcome = await recordSoftBounceEvent({
       emailAddress,
       deliveryId: delivery?.id ?? null,
+      key,
       webhookEventId: input.webhookEventId,
-      sourceStream: classification === "marketing" ? "marketing" : "transactional",
-      sourceMessageId: providerMessageId,
-      now: input.receivedAt,
     });
     return {
       effect: outcome.suppressed ? "soft_bounce_suppressed" : "soft_bounce",
@@ -259,10 +280,15 @@ const applyResendEvent = async (input: {
     };
   }
 
+  // The status moves only for a later event; the cause below is recorded
+  // either way. A hard bounce or a complaint is true of the address whatever
+  // order it arrived in.
   if (delivery) {
-    await prisma.emailDelivery.update({
-      where: { id: delivery.id },
-      data: { status: effect.deliveryStatus },
+    await recordProviderStatusEvent({
+      emailAddress: delivery.emailAddress,
+      deliveryId: delivery.id,
+      key,
+      status: effect.deliveryStatus,
     });
   }
 
@@ -280,7 +306,7 @@ const applyResendEvent = async (input: {
     // the delivery at send; NULL for a message sent before they were recorded.
     sourceDomain: delivery?.sentDomain ?? null,
     providerAccount: delivery?.providerAccount ?? null,
-    occurredAt: input.receivedAt,
+    occurredAt: key.occurredAt,
     sourceEventKey: `webhook:${input.webhookEventId}`,
   };
 
@@ -301,7 +327,7 @@ const applyResendEvent = async (input: {
           }
         : null,
       webhookEventId: input.webhookEventId,
-      occurredAt: input.receivedAt,
+      occurredAt: key.occurredAt,
     });
   } else {
     await recordSuppression(suppression);

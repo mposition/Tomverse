@@ -4,15 +4,58 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v17 (2026-09-17).** 삭제 요청과 spam complaint가 suppression을 씁니다 —
-  삭제 접수는 marketing 분류 전체, 완료는 전역, complaint는 그 purpose의 opt-out까지.
-  0절 참조.
+- 개정: **v18 (2026-09-17).** provider 사건을 도착 순서가 아니라 사건 순서로 적용하고,
+  delivered가 그보다 이른 soft bounce를 풀며, 만료된 원인을 15분 runner가 해제로
+  기록합니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+### v18 (2026-09-17) — provider 사건 순서와 만료 기록(S1b-1d)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"사건 순서", "delivered 사건", "만료의 기록"을 구현합니다.
+
+1. **사건 시각** — payload의 `created_at`(ISO 8601, 수신보다 5분 넘게 미래가 아닐 때),
+   아니면 수신 시각입니다. 원인의 `occurredAt`도 이 값입니다.
+2. **순서 키** `(사건 시각, 종류 순위, provider 사건 id)` — 순위는 sent 0, delivered 1,
+   지연·soft bounce 2, hard bounce 3, complaint 4. delivery마다 마지막으로 상태를 바꾼
+   사건의 키(`providerEventAt`·`providerEventRank`·`providerEventId`)를 두고, **더 뒤인
+   사건만** 상태를 바꾸고, 바꿀 때 `lastErrorKind`를 그 상태에 맞게 다시 씁니다(soft
+   bounce면 `soft_bounce`, 아니면 비움). 모든 사건 적용은 주소 잠금 안에서 합니다. 기존
+   delivery의 키·`softBounceAt`·`deliveredAt`·상태는 migration이 보관 중인(90일) 처리된
+   `ProviderWebhookEvent`에서 같은 규칙으로 backfill합니다 — 배포 뒤 늦게 온 오래된 사건이
+   도착 순서로 정해졌던 기존 상태를 덮지 않도록.
+3. **hard bounce·complaint 원인은 순서와 무관하게 기록**합니다. 상태만 순서를 따릅니다.
+4. **soft bounce 원인은 사실에서 계산합니다.** delivery마다 가장 늦은 soft bounce 시각
+   (`softBounceAt`)을, 가장 늦은 delivered 시각(`deliveredAt`, 이제 사건 시각)을 둡니다.
+   연속은 **주소의 가장 늦은 delivered 이후**(같은 시각 포함) soft bounce가 있는 delivery이고,
+   5개 이상이면 시각순(같으면 delivery id순) **5번째가 넘은 시점**이 원인의 `occurredAt`,
+   거기서 24시간이 만료입니다. soft bounce와 delivered 사건마다 주소 잠금 안에서 이 기대
+   원인과 활성 원인을 맞춥니다 — 같은 delivery·같은 시각·같은 만료인 원인만 유지하고, 나머지는
+   해제(`delivered` 또는 `superseded`)한 뒤 기대 원인을 씁니다. 그다음 전역 entry가 soft
+   bounce이면 남은 활성 원인으로 다시 맞춥니다(가장 늦게 만료되는 soft bounce, 없으면 삭제). 처리 시점에 threshold를 넘은 사건으로 원인을 만들면 도착 순서에 따라
+   결과가 달라지기 때문입니다. 그래서 delivered는 **그보다 뒤에 기록된 원인도, 새 delivered
+   기준으로 연속이 모자라면** 해제합니다(설계 초안 C64의 "엄격히 이른 것만"을 순서 무관성
+   요구에 맞춰 좁힌 해석 — 늦게 처리된 오래된 delivered는 가장 늦은 delivered를 바꾸지 않으므로
+   이후 원인을 지우지 않습니다). 전역에 활성 원인이 남지 않으면 `soft_bounce` entry도 지웁니다.
+   이전과 달리 발송 수락(`sent`)은 연속을 끊지 않습니다. **delivery에 결속되지 않은 soft
+   bounce는 원인 계산에 쓰지 않습니다**(결속은 S1b-2의 `awaiting_delivery`).
+5. **만료 sweep** — 15분 runner가 만료된 soft bounce 원인(만료가 있는 유일한 이유)에
+   `releaseKind` `expired`·`releaseEvidence {kind: "expiry"}`를 쓰고, entry를 위와 같은 규칙으로
+   맞춥니다. 한 번에 원인 200행(만료 시각·id순), 주소마다 fence와 주소 잠금 안에서, 연결 대기와
+   실행을 합쳐 남은 20초 예산 안이며 2초 미만이 남으면 멈춥니다.
+6. **배포 중 공존** — 배포가 겹치는 동안 이전 build가 처리한 사건은 순서 키를 남기지 않고
+   delivered 해제도 하지 않습니다. 결과는 soft bounce 원인이 만료(24시간)까지 남는 **과차단**이나
+   관리 화면의 상태 표시 차이이며, 다음 사건에서 기대 원인으로 다시 맞춰집니다.
+7. **hard bounce 판정 정정** — Resend는 hard bounce를 `data.bounce.type` `Permanent`로,
+   soft bounce를 `Transient`, 판정 불가를 `Undetermined`로 보냅니다. 이전 판정은 `hard`만
+   영구로 읽어 **실제 영구 bounce를 모두 soft bounce로 처리**했습니다. 이제 `Permanent`와
+   `hard`가 영구이고 나머지는 soft입니다. 이미 soft로 기록된 과거 영구 bounce를 hard bounce
+   원인으로 되살리는 일은 별도 작업입니다(보관 중인 사건에서만 가능).
 
 ### v17 (2026-09-17) — privacy request와 complaint의 suppression(S1b-1c)
 
