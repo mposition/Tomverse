@@ -350,3 +350,174 @@ test("a database clock read that returns no row falls back to a Date rather than
   const { data } = createCall();
   assert.ok(data.createdAt instanceof Date);
 });
+
+// --- The system-actor writer -------------------------------------------------
+//
+// docs/policy/marketing-automation.md §6: system actions share this chain. The
+// system writer reaches the same append function, so the sequence above holds
+// for it too; what these add is what differs -- no session fields, the actor
+// marker, the required transaction -- and the reserved key both writers guard.
+
+let systemWriter: typeof import("../../lib/adminAudit.ts").writeSystemAuditLog;
+let RefusedError: typeof import("../../lib/adminAudit.ts").AuditWriteRefusedError;
+
+const loadSystemWriter = async () => {
+  if (!systemWriter) {
+    ({ writeSystemAuditLog: systemWriter, AuditWriteRefusedError: RefusedError } =
+      await import(mod("lib/adminAudit.ts")));
+  }
+};
+
+test("a system entry takes the same lock, clock and previous hash on the caller's transaction", async () => {
+  await loadSystemWriter();
+  const id = await systemWriter({
+    tx: recordingClient("caller-tx") as never,
+    systemActor: "marketing-retention",
+    action: "marketing_post.content_purged",
+    targetType: "MarketingPost",
+    targetId: "post-1",
+    summary: "  Purged content past its retention.  ",
+    metadata: { purgedCount: 1 },
+  });
+
+  assert.equal(id, "created-by-caller-tx");
+  assert.deepEqual(kinds(), ["executeRaw", "queryRaw", "findFirst", "create"]);
+  const [lock, clock] = world.calls;
+  assert.equal(
+    lock.kind === "executeRaw" && lock.sql,
+    "SELECT pg_advisory_xact_lock(hashtext('tomverse-admin-audit-chain'))"
+  );
+  assert.equal(
+    clock.kind === "queryRaw" && clock.sql,
+    'SELECT clock_timestamp() AS "createdAt"'
+  );
+
+  const metadata = { purgedCount: 1, systemActor: "marketing-retention" };
+  assert.deepEqual(createCall(), {
+    select: { id: true },
+    data: {
+      actorUserId: null,
+      actorEmail: null,
+      action: "marketing_post.content_purged",
+      targetType: "MarketingPost",
+      targetId: "post-1",
+      summary: "Purged content past its retention.",
+      metadata,
+      ipAddress: null,
+      userAgent: null,
+      previousHash: "previous-entry-hash",
+      entryHash: computeAdminAuditEntryHash(
+        {
+          previousHash: "previous-entry-hash",
+          actorUserId: null,
+          actorEmail: null,
+          action: "marketing_post.content_purged",
+          targetType: "MarketingPost",
+          targetId: "post-1",
+          summary: "Purged content past its retention.",
+          metadata,
+          ipAddress: null,
+          userAgent: null,
+          createdAt: DATABASE_NOW.toISOString(),
+        },
+        SECRET
+      ),
+      createdAt: DATABASE_NOW,
+    },
+  });
+  assert.equal(world.ipRequests.length, 0);
+});
+
+test("a system entry without metadata still carries its actor", async () => {
+  await loadSystemWriter();
+  await systemWriter({
+    tx: recordingClient("caller-tx") as never,
+    systemActor: "marketing-guard",
+    action: "marketing_post.guard_evaluated",
+    targetType: "MarketingPost",
+    summary: "Evaluated.",
+  });
+  assert.deepEqual(createCall().data.metadata, { systemActor: "marketing-guard" });
+});
+
+const refusedBeforeAnyStatement = async (write: () => Promise<unknown>) => {
+  await assert.rejects(write, (error: unknown) => error instanceof RefusedError);
+  assert.deepEqual(kinds(), [], "a refused entry must not lock, read or insert");
+};
+
+test("the system writer refuses to run without the caller's transaction", async () => {
+  await loadSystemWriter();
+  await refusedBeforeAnyStatement(() =>
+    systemWriter({
+      systemActor: "marketing-guard",
+      action: "x",
+      targetType: "X",
+      summary: "x",
+    } as never)
+  );
+});
+
+test("the system writer refuses an actor that is not listed", async () => {
+  await loadSystemWriter();
+  await refusedBeforeAnyStatement(() =>
+    systemWriter({
+      tx: recordingClient("caller-tx") as never,
+      systemActor: "marketing-intern" as never,
+      action: "x",
+      targetType: "X",
+      summary: "x",
+    })
+  );
+});
+
+test("the system writer refuses metadata that is not an object", async () => {
+  await loadSystemWriter();
+  await refusedBeforeAnyStatement(() =>
+    systemWriter({
+      tx: recordingClient("caller-tx") as never,
+      systemActor: "marketing-guard",
+      action: "x",
+      targetType: "X",
+      summary: "x",
+      metadata: ["not", "an", "object"] as never,
+    })
+  );
+});
+
+test("neither writer lets a caller set the actor marker itself", async () => {
+  await loadSystemWriter();
+  await refusedBeforeAnyStatement(() =>
+    systemWriter({
+      tx: recordingClient("caller-tx") as never,
+      systemActor: "marketing-guard",
+      action: "x",
+      targetType: "X",
+      summary: "x",
+      metadata: { systemActor: "marketing-publisher" },
+    })
+  );
+  await refusedBeforeAnyStatement(() =>
+    writer({
+      session,
+      action: "x",
+      targetType: "X",
+      summary: "x",
+      metadata: { systemActor: "marketing-publisher" },
+      tx: recordingClient("caller-tx") as never,
+    })
+  );
+});
+
+test("a nested key of the same name is ordinary metadata for the administrator writer", async () => {
+  await writer({
+    session,
+    action: "x",
+    targetType: "X",
+    summary: "x",
+    metadata: { detail: { systemActor: "free text" } },
+    tx: recordingClient("caller-tx") as never,
+  });
+  assert.deepEqual(createCall().data.metadata, {
+    detail: { systemActor: "free text" },
+  });
+});

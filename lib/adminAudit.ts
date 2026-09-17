@@ -8,6 +8,12 @@ import {
   adminAuditIntegrityKeys,
   computeAdminAuditEntryHash,
 } from "@/lib/adminAuditIntegrityCore";
+import {
+  SYSTEM_AUDIT_ACTOR_METADATA_KEY,
+  isSystemAuditActor,
+  metadataClaimsSystemActor,
+  type SystemAuditActor,
+} from "@/lib/adminAuditSystemActors";
 
 type AuditInput = {
   session: Session;
@@ -122,6 +128,26 @@ async function appendAuditChainEntry(
   return created.id;
 }
 
+/**
+ * Thrown when a writer is called in a way that would record the wrong actor or
+ * leave the entry outside the caller's transaction. A programming error, never
+ * a condition to retry.
+ */
+export class AuditWriteRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuditWriteRefusedError";
+  }
+}
+
+const refuseReservedMetadata = (metadata: unknown) => {
+  if (metadataClaimsSystemActor(metadata)) {
+    throw new AuditWriteRefusedError(
+      `Audit metadata may not set "${SYSTEM_AUDIT_ACTOR_METADATA_KEY}"; only writeSystemAuditLog records a system actor.`
+    );
+  }
+};
+
 export async function writeAdminAuditLog({
   session,
   request,
@@ -132,6 +158,8 @@ export async function writeAdminAuditLog({
   metadata,
   tx,
 }: AuditInput): Promise<string> {
+  // Checked before anything is read or locked: a refused entry costs nothing.
+  refuseReservedMetadata(metadata);
   const entry: AuditChainEntry = {
     actorUserId: session.user?.id || null,
     actorEmail: session.user?.email || null,
@@ -154,4 +182,76 @@ export async function writeAdminAuditLog({
   // transaction (docs/policy/email-product-news-redesign-draft.md, section 7.4).
   if (tx) return write(tx);
   return prisma.$transaction(write);
+}
+
+type SystemAuditInput = {
+  /**
+   * Required, unlike the administrator writer's. A system action has no
+   * request to fail and no person to ask, so its record has to commit or roll
+   * back with the change it describes (docs/policy/marketing-automation.md §6).
+   */
+  tx: Prisma.TransactionClient;
+  systemActor: SystemAuditActor;
+  action: string;
+  targetType: string;
+  targetId?: string | null;
+  summary: string;
+  /** An object, because the writer adds the actor marker to it. */
+  metadata?: Prisma.InputJsonObject | null;
+};
+
+/**
+ * Records an action taken by the system rather than by an administrator.
+ *
+ * Same chain, same lock, same hash as `writeAdminAuditLog` -- both go through
+ * `appendAuditChainEntry`. The entry has no actor id, email, IP or user agent;
+ * `metadata.systemActor` names which listed system actor wrote it
+ * (`lib/adminAuditSystemActors.ts`).
+ *
+ * Everything is checked at runtime as well as by the types, because callers
+ * reach this from jobs whose inputs are assembled at runtime.
+ */
+export async function writeSystemAuditLog({
+  tx,
+  systemActor,
+  action,
+  targetType,
+  targetId,
+  summary,
+  metadata,
+}: SystemAuditInput): Promise<string> {
+  if (!tx) {
+    throw new AuditWriteRefusedError(
+      "writeSystemAuditLog needs the caller's transaction."
+    );
+  }
+  if (!isSystemAuditActor(systemActor)) {
+    throw new AuditWriteRefusedError(
+      "writeSystemAuditLog was given a system actor that is not listed."
+    );
+  }
+  if (
+    metadata !== undefined &&
+    metadata !== null &&
+    (typeof metadata !== "object" || Array.isArray(metadata))
+  ) {
+    throw new AuditWriteRefusedError(
+      "writeSystemAuditLog metadata must be an object."
+    );
+  }
+  refuseReservedMetadata(metadata);
+
+  const entry: AuditChainEntry = {
+    actorUserId: null,
+    actorEmail: null,
+    action,
+    targetType,
+    targetId: targetId || null,
+    summary: safeSummary(summary),
+    metadata: { ...(metadata || {}), [SYSTEM_AUDIT_ACTOR_METADATA_KEY]: systemActor },
+    ipAddress: null,
+    userAgent: null,
+  };
+  const integritySecret = adminAuditIntegrityKeys(process.env)[0];
+  return appendAuditChainEntry(tx, entry, integritySecret);
 }
