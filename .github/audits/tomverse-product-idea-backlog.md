@@ -185,11 +185,11 @@ Native·Memory·MCP의 상대 순서는 그대로이며, 이 세 제품의 전�
 | --- | --- | --- | --- |
 | CONT-TITLE-01 | 원문 삭제 후 이어가기 대화명 안정화 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1423 병합 원격 확인 | 완료 범위: 사용자 저장 제목 유지, 삭제 전 별도 이름 저장 선택, 구분 가능한 fallback과 삭제 상태 표시. 재착수 후보에서 제외 |
 | CONT-EXPORT-01A | 이어가기 TXT 파일명·문서 제목 정합성 | 완료 / 병합·배포 사용자 확인(2026-09-15), develop #1422·main #1421 병합 원격 확인 | 완료 범위: 실제 표시 제목으로 안전한 `[대화창 이름].txt`와 TXT 내부 제목 생성. 원문 포함 01B와 구분하며 재착수 후보에서 제외 |
-| CONT-01 | 한국어 이어가기 seed 창·빈 발췌 개선 | 병행 P1 / 측정 도구 완료: 병합 사용자 확인(2026-09-15), develop #1447·main #1453 병합 원격 확인. 운영 측정 실행·C/B 정책 선택 대기, 제품 수정 미착수 | 운영 DB 읽기 전용 `npm run report:continuation-seed -- --database` 실행 → C/B 선택 → seed 규칙 수정·회귀. 예산 초과로 원문이 비는 사례 해결, 최신 문맥·누락 고지·매 turn 입력 비용의 정합성 |
-| CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | **완료** / develop #1465, #1484(B1 원인 수정) 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B1·B2·B3 통과, N2(시간 초과 안내)는 재현 어려워 건너뜀. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인. 근사 상한 성능 측정 미실행 | 실제 배포·운영 확인은 별도. 잔여: 근사 상한 측정(`npm run measure:continuation-source-search`, 테스트 DB 필요)과 잠정 3초 원문 조회 예산 확정, 같은 원문의 이어가기 둘이 같은 결과로 두 번 보이는 문제(N1 후속). native 메시지 위치 이동은 미구현 |
+| CONT-01 | 한국어 이어가기 seed 창·빈 발췌 개선 | 병행 P1 / 측정 도구 완료(develop #1447·main #1453). **fixture 후보 비교 완료(2026-09-17)**: 현재 규칙은 예산 넘는 한글 답변에서 seed 0개 재현, B6000·B8000은 빈 seed를 없애지만 한글 10교환 입력이 약 1.9·2.3배, C-head·C-tail은 예산을 지키지만 각각 끝의 결론·앞의 사실을 잃는 fixture가 있음. 운영 통계·C/B 선택 대기, 제품 수정 미착수 | 운영 DB 읽기 전용 `npm run report:continuation-seed -- --database` 실행(사람) → C/B 선택 → seed 규칙 수정·회귀. 측정표: [이어가기 측정 기록](./tomverse-continuation-measurement-2026-09-17.md) |
+| CONT-SEARCH-01 | 이어가기 원문 메시지 검색 통합 | **완료** / develop #1465, #1484(B1 원인 수정) 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B1·B2·B3 통과, N2(시간 초과 안내)는 재현 어려워 건너뜀. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인. 근사 상한 측정 완료(2026-09-17, 로컬 격리 DB: 단독 p95 0.51초, 10개 동시 p95 1.54초, 시간 초과 0/380 — 운영 시간 아님, [측정 기록](./tomverse-continuation-measurement-2026-09-17.md)) | 실제 배포·운영 확인은 별도. 잔여: 3초 원문 조회 예산 결정(권장: staging 전용 test DB 재측정 → 운영 `timed_out` 비율 관측), 같은 원문의 이어가기 둘이 같은 결과로 두 번 보이는 문제(N1 후속). native 메시지 위치 이동은 미구현 |
 | CONT-EXPORT-01B | 저장된 원문을 포함한 이어가기 TXT 다운로드 | **완료** / develop #1473·#1484·#1485 포함 빌드로 staging 검증 통과(2026-09-17, 서명 mposition, 기록 develop [#1506](https://github.com/mposition/Tomverse/pull/1506) 병합): B5·B6·N3·N4·N6 통과, 원문 **삭제** 경우의 B6은 미실행. main [#1508](https://github.com/mposition/Tomverse/pull/1508) 병합 원격 확인(2026-09-17, `d46c9f18`), 실제 배포 미확인 | 실제 배포·운영 확인은 별도. 후속(비차단): 잠긴 원문 거절 사유가 화면 맨 아래 토스트로 떠 동작하지 않는 것처럼 보임 → 메뉴 안 표시로 수정 중(`claude/to-develop/source-export-refusal-inline`, Codex REVISE 반영 중, 미병합), 두 다운로드 항목이 인접해 헷갈림(미착수) |
-| VOICE-MIX-01 | 한국어·영어 혼용 Voice 인식 정확도 개선 | 병행 P1 / 등록, 미착수 | 혼용 발화 기준 평가와 현재 STT 모델의 제한된 용어 힌트 비교 |
-| CACHE-01 | 전 공급자 Prompt Cache 계측·최적화 및 비용 정합성 점검 | 병행 P1 / 기존 논의 반영, 미착수 | 공급자·모델·경로별 자동/명시 캐시와 계측 공백 확인. 모든 호출에 강제로 캐시하지 않음 |
+| VOICE-MIX-01 | 한국어·영어 혼용 Voice 인식 정확도 개선 | 병행 P1 / **평가 준비 완료, develop [#1518](https://github.com/mposition/Tomverse/pull/1518) 열림(2026-09-17)**. 대본 dev 5·holdout 10, 허용 표기·의미·숫자 순서 정답지, 순서 정렬 기반 채점기(`voice-mix-scoring-v3`, 오류율·용어·의미·숫자 순서·구간 누락·번역 의심·힌트 삽입을 따로 보고), dev에서만 가져온 고정 힌트 문장, manifest와 정확히 같은 실행만 채점. Codex 4회(REVISE×3→APPROVE). 유료 호출 0 | 승인 요청: 녹음 40개 × 2 arm × 3회 = 240회(+파이프라인 10회), 추정 US$0.07~0.13, 상한 US$1.00 → 실제 발화 녹음·운영 모델 확인(사람) → 실행·기록 초안 → 판정 |
+| CACHE-01 | 전 공급자 Prompt Cache 계측·최적화 및 비용 정합성 점검 | 병행 P1 / **계측 조사 완료(2026-09-17)**, 구현 미착수. 명시 캐시는 Anthropic 직접 `chat_turn` 한 경로뿐, 나머지는 공급자 자동 캐시를 정산 경로에서만 반영. 공백 11건: 앱 데이터로 캐시 적중률을 보는 보고 없음, 경로 구분 불가(`source` 2종), 제목·probe·검증이 cache read를 버림, 기억 추출에 캐시 필드 없음, MiniMax 미가격 write 비가시, 비용 버킷 보정이 write 무시 등 | 캐시 적중률 읽기 전용 보고서(provider×model×source) → 보정 도구의 write 반영 → 보조 경로 cache read 전달(과금 계약 검토). [캐시·지연 조사](./tomverse-cache-latency-instrumentation-survey-2026-09-17.md) |
 | CREDIT-UX-01 | 비용 정보의 점진적 공개·정산 상세 정합성 | CHAT-01 하위 병행 P2 / 수정 후 등록(2026-09-15), UI·정책 결정 대기 | 중복 숫자는 축약하되 실행 전 비용/구매 크레딧 고지·정확한 잔량 접근 유지. 현재 견적과 완료 작업 정산 분리 |
 | CREDIT-CAP-01 | 작업 단위 지출 상한의 승인·서버 강제 계약 | 후속 P2 / 설계 후보·제품/청구 정책 결정 대기 | Memory 확인 패턴을 참고해 승인 금액·범위·변경/재시도 계약 확인. Agent 부분 실패 정산은 하위 AGENT-BILL-01로 구체화하며 공수 중복 집계하지 않음 |
 | AGENT-BILL-01 | Agent 산출 단위 부분 실패 정산·재개 과금 | CREDIT-CAP-01 하위 P2 / 수정 후 등록(2026-09-15), 유료 REVIEW-AGENT-01 출시 전 필수·정책 미승인 | 청구 가능한 결과 정의 → 동결 단가/승인 상한 → 원자적 정산·단위별 재과금 방지 → 실패 원가/유계 재시도·실제 정산 표시. 상세는 I |
@@ -1015,7 +1015,10 @@ download helper·continuation service는 09-11 분석 이후 변경이 없었고
 
 - **상위 작업·순위**: 투자 1순위 CHAT-01의 하위 병행 트랙입니다. 독립적인 대규모
   신규 개발로 계산하거나 이 하위 작업만으로 A의 주 개발 투자 순위를 변경하지 않습니다.
-- **상태**: 2026-09-11 사용자 요청으로 등록, 구현 미착수. Auto Chat UI의 준비
+- **상태**: 2026-09-11 사용자 요청으로 등록. **2026-09-17 검증 준비 조사 완료**, 구현 미착수 — [통합 검증 조사](./tomverse-chat-artifact-integration-survey-2026-09-17.md). Auto Chat UI의 준비
+  (2026-09-17 조사 요약: 파일 가능 조합은 OpenAI 5개 모델 검색 off·Anthropic 4·Google 3·gpt-5-4-mini이고, OpenAI는 검색 always에서 native 검색 강제로 불가.
+  활성·검색 가능한 `gemini-3-7-flash`가 능력 표에 없음. Auto는 파일 능력을 후보 선택에서 보지 않고, 미검증 모델로 라우팅되면
+  "다른 모델을 고르세요" 안내가 나감. Auto 파일 turn test는 어느 층에도 없음. 유료 없이 가능한 test 3종과 약 21회 실측 계획은 조사 문서 참조.)
   여부를 이번 목록 수정에서 새로 판정하지 않았습니다.
 - **UI 통합 착수 조건**: 기본 단일 답변·Auto 채팅 화면이 동작하고, 대화·메시지
   저장 및 스트림/파일 카드 데이터 계약이 정리되어 있을 것. Chat 전체 완성이나
@@ -1274,7 +1277,7 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 | 순서 | ID | 작업 | 우선순위·다음 완료 단위 |
 | --- | --- | --- | --- |
 | 1 | AEO-01 | 검색봇 접근·크롤 정책 관리 | 성장 P1 / 기존 robots·edge 검사 확장, 검색봇 및 비공개 경로 보호, 책임자·검토일 명시. 기존 staging Access 재개발 안 함 |
-| 단기 병행 | SEO-I18N-01 | 중국어 hreflang `zh-CN` → `zh-Hans` | 작은 병행 P1 / 채택·구현 미착수(2026-09-16). 본토 접속 차단은 사용자 보고. 공통 alternate 매핑 → HTML·sitemap 일치 및 자기/상호 참조 검증. `/zh` URL·내부 언어 키 유지. 상세 아래 |
+| 단기 병행 | SEO-I18N-01 | 중국어 hreflang `zh-CN` → `zh-Hans` | 작은 병행 P1 / **코드 완료, develop [#1516](https://github.com/mposition/Tomverse/pull/1516) 열림(auto-merge, 2026-09-17)**. `lib/seo.ts` 매핑 한 곳 변경. production build에서 `/`·`/zh`·`/en`·`/ko/compare-ai-models`·`/zh/ai-answer-review` alternate 8개 모두 `zh-Hans`→`/zh…`, `zh-CN` hreflang 0, canonical·`og:locale zh_CN` 유지, sitemap `zh-Hans` 40·`zh-CN` 0·자기 참조 누락 0 확인. 새 unit test 5건(옛 매핑에서 3건 실패 확인). 배포 후 공개 응답 확인 전 | develop 병합 → main 반영 → 공개 `/zh`·sitemap 응답 확인 |
 | 2 | AEO-02 | 가격·무료/유료 범위의 공개 정보 정합성 | 성장 P1 / /pricing 본문·기계 판독 정보가 실제 공개 가격·통화·청구 주기와 일치. 0 가격을 오류로 단정하지 않음 |
 | 3 | AEO-03 | AI 유입·인용·전환 기준선 | 성장 P1 / 1·2와 병행 가능. GA4 AI Assistant·GSC 전용 보고서 확인부터, 질의 표본과 인용/추천·가입/첫 사용 분리 |
 | 4 | AEO-04 | sitemap 변경일 정확성 | 성장 P1 / 실제 의미 있는 변경일과 연결, 신뢰할 날짜가 없으면 생략. 매 요청 현재 시각으로 바꾸지 않음 |
@@ -1323,7 +1326,7 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 - **제외**: `zh_CN` Open Graph는 별도 규격이므로 `zh_Hans`로 일괄 치환하지 않습니다.
   날짜·금액·이메일의 `zh-CN`, 브라우저 언어 입력, 내부/저장 locale 키, CN 차단·결제 시장도
   이번 변경 대상이 아닙니다. 현재 HTML lang `zh`는 유지 가능하며 스크립트 명시 강화는 별도 범위입니다.
-- **실행 상태**: 분석과 목록 등록만 수행했습니다. 제품 코드·정책·배포·차단 규칙은 바꾸지 않았습니다.
+- **실행 상태**: 2026-09-17 develop [#1516](https://github.com/mposition/Tomverse/pull/1516)로 구현(위 표 참조). 차단 규칙·Open Graph·URL은 바꾸지 않았습니다.
   공식 출처·공개 응답·요청 원문·검증 범위는
   [간체 중국어 hreflang 검토](./tomverse-chinese-hreflang-review-2026-09-16.md)에 보관합니다.
 
@@ -1336,10 +1339,10 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 
 | 이번 제안 내 순서 | ID | 작업 | 우선순위·다음 완료 단위 |
 | --- | --- | --- | --- |
-| 1 | CHAT-LATENCY-01 | 제품 작업 완료 시간 계측 보완 | CHAT-01 하위 P1 / 기존 dispatch·Review duration·이벤트의 coverage 확인 → 단일 Chat/다중 Review/첫 성공의 기준선. 신규 계측 플랫폼 전체 개발 아님 |
+| 1 | CHAT-LATENCY-01 | 제품 작업 완료 시간 계측 보완 | CHAT-01 하위 P1 / **계측 조사 완료(2026-09-17)**, 구현 미착수. TTFT 컬럼(`firstVisibleTokenAt`·`firstTokenMs`)은 있으나 어떤 호출도 값을 넘기지 않음, 유일한 turn 시간(`totalLatencyMs`)은 계측 모드 기본 off, 요청 수신·스트림 종료 시점·Chat 완료 로그·다중 모델 묶음 key·첫 성공 서버 표식 없음, 캐시된 Review 미기록 등 공백 12건. 다음: TTFT 배선과 Chat 완료 구조화 로그 → staging `observe` 기준선. [캐시·지연 조사](./tomverse-cache-latency-instrumentation-survey-2026-09-17.md) |
 | 1과 비개발 병행 | MARKET-KO-01 | 한국어 핵심 업무 시장·포지셔닝 검증 | 시장 검증 P1 / 한국어 문서 비교·검토 실무자라는 가설 하나 → 동일 업무 대안 비교 → 사실 기반 카피·시료·지원 실험. 한국어 1등 선언·7개 언어 축소 아님 |
 | 2 | CHAT-ONBOARD-01 | 신규 사용자 첫 성공 흐름 완성 | CHAT-01 하위 P1 / quick start·ModelFinder·starter의 중복/이탈 검증 → 첫 유효 답변·저장·후속 질문. starter staging 검증은 **통과**(2026-09-17, 서명 mposition, develop [#1510](https://github.com/mposition/Tomverse/pull/1510)); 후속 발견은 아래 "starter staging 검증 후속" |
-| 온보딩 연계 | HELP-NAV-01 | 원하는 작업을 설정·사용법으로 연결하는 도움말 도우미 | 병행 P2 / 승인된 도움말·설정 이동 규칙으로 자연어 질문 → 짧은 절차·근거·명시적 이동 버튼. 자유 생성·자동 실행 제외; 세부 범위는 아래 |
+| 온보딩 연계 | HELP-NAV-01 | 원하는 작업을 설정·사용법으로 연결하는 도움말 도우미 | 병행 P2 / **준비물 완료, develop [#1519](https://github.com/mposition/Tomverse/pull/1519) 열림(2026-09-17)**: 의도 12개·목적지 id·목적지별 접근 조건·기계 검사 가능한 금지 태그 등록부와 합성 정답지(dev 22·holdout 21). launcher·시트·매칭은 모바일 UI 안정화 후. Codex 3회(REVISE→REVISE→APPROVE); 세부 범위는 아래 |
 | 3 | REVIEW-RESULT-01 | 읽을 수 있는 Review 결과 페이지 | 후속 P2 / 소유자 비공개 결과 화면부터, 링크 공유는 버전·권한·미리보기·철회 정책 확정 후. Chat의 강제 3모델화·새 Artifacts 엔진 아님 |
 | 작은 독립 개선 | TRUST-01 | 공개 신뢰 정보의 의미·가시성 보완 | 병행 P2 / 이미 연결된 proof-metrics·상태 페이지의 설명·최신성·노출 확인. 별도 지표 플랫폼 아님 |
 
@@ -1387,10 +1390,10 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 | ID | 작업 | 우선순위·상태 | 다음 완료 단위 |
 | --- | --- | --- | --- |
 | STARTER-COMPARE-01 | "세 모델 답 나란히 비교" 카드가 로그인 1개 모델 계정에서 모델을 늘리지 않음 | CHAT-ONBOARD-01 하위 **P1** / 등록, 미착수, 제품 결정 대기 | 7개 locale이 "세 모델"을 약속하지만 seed가 모델을 바꾸지 않음(`suggestedModelIds` 미사용). 모델 3개로 맞춤(계약 §4 개정)·안내 표시·문구 축소 중 결정 → 로그인 1개/게스트 3개/이미 2개 상태 E2E. production flag 활성화 전 수정 권장 |
-| COMPOSER-REFLOW-01 | 페이지 확대·낮은 높이에서 보내기 버튼·카드·주의 문구에 닿지 못함 | CHAT-01 하위 **P1**(접근성) / 등록, 미착수 | Edge 300%에서 보내기 버튼이 화면 밖·스크롤 불가, 200%에서 카드 사라짐, 150%부터 "민감정보 입력 금지" 말줄임. composer 낮은 높이 규칙 부재 → 도달 경로·주의 문구 줄바꿈 → 137×300·568×320 기준을 계약과 spec에 추가. 계약 폭 320px 밖이라 기존 계약 위반은 아님 |
+| COMPOSER-REFLOW-01 | 페이지 확대·낮은 높이에서 보내기 버튼·카드·주의 문구에 닿지 못함 | CHAT-01 하위 **P1**(접근성) / **코드 완료, develop [#1517](https://github.com/mposition/Tomverse/pull/1517) 열림(auto-merge, 2026-09-17)**. 원인 네 개를 production build에서 측정해 수정: 빈 입력란이 두 줄 안내 문구 아래 한 줄 높이로 남아 자체 스크롤이 되어 드래그를 가져감(자동 높이를 폭·안내 문구 변경 때도 재계산), 주의 문구 말줄임(줄바꿈), 대화 영역이 0px까지 줄어듦(4rem 최소 높이), 모델 버튼 라벨 `nowrap`이 120px에서 화살표를 잘라냄(두 줄 허용). 계약에 275×493·206×370·137×247·568×320 page-zoom 절 추가, raw touch drag·중심점 hit-test 회귀 19건. Codex 3회(REVISE→REVISE→APPROVE). 실기기 Edge 확대 재확인 미실시 | develop 병합 확인 → staging에서 Edge 150/200/300% 실기기 확인(사람) → main 반영 |
 | CONT-TITLE-LOCALE-01 | 이어온 대화 제목이 새로고침 사이 한국어↔영어로 바뀜 | 병행 **P2**(버그) / 등록, 미착수 | locale 변경으로 목록 요청이 두 번 나가고 늦게 온 이전 locale 응답이 제목을 덮음(추정) → 표시 문자열을 렌더 시점에 만들거나 늦은 응답 폐기 → 응답 순서 역전 테스트. CONT-TITLE-01(완료)과 별개 결함 |
 | STARTER-LOCK-COPY-01 | 잠긴 카드를 누른 뒤 도착 화면이 그 기능을 말하지 않음 | CHAT-ONBOARD-01 하위 **P2** / 등록, 미착수 | 게스트 로그인 모달이 다중 모델용 고정 문구(사유 인자 없음, 분석 태그도 `guest_multi_model`), 요금제 페이지 플랜 목록에 이미지 생성 없음, 마케팅 헤더 "Review로 돌아가기"가 `/chat`으로 감 → 사유별 문구·플랜 경계 표시·CTA 이름 정정 |
-| MOBILE-KB-INSET-01 | 키보드가 열린 Edge에서 입력란 아래 약 100px 빈 띠 | CHAT-01 하위 **P2** / 등록, 미착수 | `resizes-content`와 keyboard inset padding의 이중 보정, safe-area 여백 중복 추정 → 실기기 원인 확정 → 두 viewport가 함께 줄어드는 조건 spec 추가 → 제거 |
+| MOBILE-KB-INSET-01 | 키보드가 열린 Edge에서 입력란 아래 약 100px 빈 띠 | CHAT-01 하위 **P2** / 재현·검토(2026-09-17), 수정 미착수. 에뮬레이션에서 layout viewport가 줄어든 상태에 URL 표시줄 56px을 visual viewport가 빼서 보고하는 경우를 만들면 shell padding 56px이 들어가지만 끝까지 스크롤한 상태의 빈 띠는 0px — 이 조건만으로는 재현되지 않음. 약 100px은 브라우저가 실제로 보고하는 `innerHeight`·`visualViewport.height`·`offsetTop` 값과 safe-area 이중 여백에 달려 있어 실기기 수치가 필요 | 실기기(Edge·Chrome·Samsung Internet)에서 키보드를 올린 상태의 세 값 관측(사람) → 그 값으로 spec 조건 작성 → 수정 |
 | STARTER-LAYOUT-01 | 카드 아래 안내 문장이 첫 화면에서 dock에 걸려 잘림, 한국어 라벨 단어 중간 줄바꿈 | CHAT-ONBOARD-01 하위 **P3** / 등록, 미착수 | 환영 영역 아래 여백·scroll-padding 부재, 라벨에 `break-keep` 없음 → `displayHeadingClass()` 관례를 카드에만 적용, 안내 문장 가시성 spec 추가 |
 | STARTER-FINDER-01 | 카드가 채운 문장이 Model Finder의 유료 모델·크레딧 안내를 띄움 | CHAT-ONBOARD-01 하위 **P3** / 결정 대기 | 키워드 매칭이라 직접 입력해도 같음, 카드 계약 위반 아님. 카드 초안에서 추천을 끌지 판단한 뒤에만 수정 |
 | STARTER-CHECKLIST-02 | starter staging 체크리스트·설정 감사 로그 공백 | 운영 **P3** / 등록, 미착수 | 전제 SHA를 #1460 이후로, E-3에 브라우저 페이지 확대 조건 추가, 음성 flag 읽는 실제 경로 명시(Admin 저장 경로에 없음) → `templateRevision`과 `_record-template.md` 함께 갱신. `app_settings` 감사 metadata의 변경 전후 값은 별도 결정 |
@@ -1402,7 +1405,7 @@ Chat 핵심 완성을 앞지르는 대규모 마케팅 개발이 아니라, 작�
 
 #### HELP-NAV-01 — 제품 내 도움말·설정 안내 도우미
 
-- **채택·상태**: 2026-09-17 사용자 제안을 제한된 안내 MVP로 수정 채택, 미착수.
+- **채택·상태**: 2026-09-17 사용자 제안을 제한된 안내 MVP로 수정 채택. 같은 날 등록부·정답지 준비물 완료(`lib/helpNavigationIntents.ts`, `docs/ops/help-nav/`), UI 미착수.
   오른쪽 하단은 데스크톱 진입점 후보이며 모바일은 composer·음성·키보드를 가리지 않는
   도움말 진입점/시트로 설계합니다. 자동 팝업이나 별도 범용 AI 채팅 제품은 만들지 않습니다.
 - **우선순위**: CHAT-ONBOARD-01 연계 **병행 P2**. 기존 주 투자 순위와 안전·데이터
@@ -1840,6 +1843,13 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   그 조합은 staging에서 검증한 develop 빌드와 같지 않습니다(PR 본문에 차이 명시). 건너뛴 범위
   (N2, N5 기억 추출 화면, B6 원문 삭제 경우)와 후속 결함 4건은 각 행에 남겼습니다. 주 투자
   순위와 다른 항목은 바꾸지 않았습니다.
+
+- 2026-09-17 (Claude 세션, 권장 순서 1~7 진행): 사용자 요청("아래 권장 순서로 자동으로 진행")에 따라
+  갱신했습니다. **코드 PR(develop, 병합 전)**: COMPOSER-REFLOW-01 [#1517](https://github.com/mposition/Tomverse/pull/1517), SEO-I18N-01 [#1516](https://github.com/mposition/Tomverse/pull/1516),
+  VOICE-MIX-01 평가 키트 [#1518](https://github.com/mposition/Tomverse/pull/1518), HELP-NAV-01 등록부 [#1519](https://github.com/mposition/Tomverse/pull/1519). 각 독립 검토는 Codex(APPROVE까지).
+  **측정·조사 기록(이 브랜치)**: 이어가기 검색 상한·seed fixture 비교, 캐시·지연 계측 조사, 파일 통합 검증 조사.
+  MOBILE-KB-INSET-01은 에뮬레이션 재현을 시도해 실기기 수치가 필요하다고 판단했습니다. 유료 호출·운영 DB 조회·
+  flag 변경·배포는 하지 않았습니다. 탐색 에이전트 조사 결과는 핵심 주장만 직접 대조했습니다. 주 투자 순위는 바꾸지 않았습니다.
 
 ## VOICE-MIX-01 — 한국어·영어 혼용 Voice 인식 정확도 개선
 
