@@ -399,3 +399,20 @@ test("at one instant the crossing delivery, and the entry, do not depend on arri
     JSON.stringify({ causes: 1, causeIsCrossing: true, entryIsCrossing: true, entryMatchesCause: true }),
   ]);
 });
+
+test("a spent budget does no sweep work", async () => {
+  const address = `${randomUUID()}@example.com`;
+  await recordSuppression({
+    emailAddress: address,
+    reason: "soft_bounce",
+    source: "provider_webhook",
+    expiresAt: new Date(Date.now() - 60_000),
+    occurredAt: new Date(Date.now() - 120_000),
+    sourceEventKey: `test:${randomUUID()}`,
+  });
+  for (const timeBudgetMs of [0, -1, 500]) {
+    const result = await releaseExpiredSuppressionCauses({ timeBudgetMs });
+    assert.deepEqual(result, { released: 0, entriesRemoved: 0, addresses: 0, exhausted: false });
+  }
+  assert.equal((await releaseExpiredSuppressionCauses({ timeBudgetMs: Number.NaN })).released, 1);
+});

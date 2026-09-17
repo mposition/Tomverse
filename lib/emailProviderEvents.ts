@@ -409,11 +409,17 @@ export async function releaseExpiredSuppressionCauses(options?: {
   // At most 200 whatever the caller asks: the pass has a fixed budget.
   const requested = Number(options?.limit ?? 200);
   const limit = Number.isFinite(requested) ? Math.min(Math.max(1, Math.floor(requested)), 200) : 200;
+  // A missing or non-finite budget is the default 20 seconds; a budget of zero or
+  // less is already spent, and so is anything under the one second the
+  // selection needs.
   const budget = Number(options?.timeBudgetMs ?? 20_000);
-  const deadline = Date.now() + (Number.isFinite(budget) && budget > 0 ? Math.min(budget, 20_000) : 20_000);
+  const deadline = Date.now() + (Number.isFinite(budget) ? Math.min(Math.max(budget, 0), 20_000) : 20_000);
+  const nothing = { released: 0, entriesRemoved: 0, addresses: 0, exhausted: false };
+  if (deadline - Date.now() < 1_000) return nothing;
 
   // The selection is inside the budget too: the connection wait and the query
   // are both bounded, the query by a statement timeout the database enforces.
+  // A quarter of what is left, at least one second -- never more than is left.
   const selectBudget = Math.max(1_000, Math.floor((deadline - Date.now()) / 4));
   const selectWait = Math.floor(selectBudget / 4);
   const due = await prisma.$transaction(
