@@ -38,9 +38,10 @@ v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처�
    - 주소가 없는 사건은 `unaddressed`로 셉니다.
 4. **entry** — 원인은 항상 추가하지만 entry는 **없거나 soft bounce일 때만** hard bounce로
    올립니다(`entriesRaised`). complaint·manual·privacy request·기존 hard bounce entry는 그대로
-   둡니다. 여러 사건이 한 entry를 올리면 사건 시각이 늦은 것이 남습니다.
-5. **멱등** — 같은 키로 쓰므로 다시 실행하면 `alreadyRecorded`로 건너뜁니다. 보고의 개수는
-   쓰기 전 상태 기준입니다.
+   둡니다. 쓰기는 **최신 사건부터** 하므로 한 주소의 entry에는 가장 최근 bounce가 남습니다.
+5. **멱등** — 같은 키로 쓰므로 다시 실행하면 `alreadyRecorded`로 건너뜁니다. 한 실행 안에서
+   같은 메일 id의 사건이 둘이면 쓰기 직전 재확인으로 하나만 씁니다(`duplicatesInRun`).
+   보고의 개수는 쓰기 전 상태 기준입니다.
 6. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
    창을 보여 줍니다).
 

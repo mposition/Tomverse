@@ -182,3 +182,28 @@ test("an address that has taken a delivery since the bounce is left alone", asyn
   assert.equal(report.recorded, 0);
   assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: revived } }), 0);
 });
+
+test("two bounces for one address leave two causes and the newest on the entry", async () => {
+  const dead = `${randomUUID()}@example.com`;
+  await storeBounce({ address: dead, type: "Permanent", daysAgo: 8 });
+  const newest = await storeBounce({ address: dead, type: "Permanent", daysAgo: 2 });
+  const report = await recoverPermanentBounces({ apply: true });
+  assert.equal(report.recorded, 2);
+  assert.equal(report.entriesRaised, 1);
+  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: dead, reason: "hard_bounce" } }), 2);
+  const entry = await prisma.suppressionEntry.findFirstOrThrow({ where: { emailAddress: dead } });
+  const newestMessage = (newest.payload as { data: { email_id: string } }).data.email_id;
+  assert.equal(entry.sourceMessageId, newestMessage);
+});
+
+test("two events naming one message in a run record one cause", async () => {
+  const dead = `${randomUUID()}@example.com`;
+  const messageId = `resend-${randomUUID()}`;
+  await storeBounce({ address: dead, type: "Permanent", messageId, daysAgo: 4 });
+  await storeBounce({ address: dead, type: "Permanent", messageId, daysAgo: 3 });
+  const report = await recoverPermanentBounces({ apply: true });
+  assert.equal(report.missing, 2, "both looked missing before the run wrote anything");
+  assert.equal(report.recorded, 1);
+  assert.equal(report.duplicatesInRun, 1);
+  assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: dead, reason: "hard_bounce" } }), 1);
+});

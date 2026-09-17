@@ -68,6 +68,8 @@ export type PermanentBounceRecoveryReport = {
   deliveredDuringRun: number;
   /** Apply only: soft or missing entries raised to a hard bounce. */
   entriesRaised: number;
+  /** Apply only: skipped at write time because this run had already recorded the message. */
+  duplicatesInRun: number;
   /** Receipt time of the oldest bounce event on file, so the window is visible. */
   oldestEventReceivedAt: string | null;
 };
@@ -147,6 +149,7 @@ export async function recoverPermanentBounces(input: {
     recorded: 0,
     deliveredDuringRun: 0,
     entriesRaised: 0,
+    duplicatesInRun: 0,
     oldestEventReceivedAt: null,
   };
   const planned: Planned[] = [];
@@ -264,9 +267,10 @@ export async function recoverPermanentBounces(input: {
 
   if (!input.apply) return report;
 
-  // Oldest bounce first, so where several raise one entry the latest one is
-  // what the entry ends up describing.
-  planned.sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+  // Newest bounce first: the first write for an address raises its entry, and
+  // later (older) ones find a hard bounce there and leave it -- so the entry
+  // describes the most recent bounce.
+  planned.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
   for (const item of planned) {
     const outcome = await prisma.$transaction(
       async (tx) => {
@@ -276,6 +280,19 @@ export async function recoverPermanentBounces(input: {
         if (await hasDeliverySince(tx, item.emailAddress, item.occurredAt)) {
           return "delivered" as const;
         }
+        // And again for the bounce itself: two events in this run can name one
+        // message, and the first one's cause is visible only now.
+        const recorded = await tx.suppressionCause.findFirst({
+          where: {
+            reason: "hard_bounce",
+            OR: [
+              { sourceEventKey: item.sourceEventKey },
+              ...(item.sourceMessageId ? [{ sourceMessageId: item.sourceMessageId }] : []),
+            ],
+          },
+          select: { id: true },
+        });
+        if (recorded) return "duplicate" as const;
         await markCauseWriter(tx);
         const written = await recordSuppressionCause(tx, {
           emailAddress: item.emailAddress,
@@ -335,6 +352,7 @@ export async function recoverPermanentBounces(input: {
       { timeout: 20_000 }
     );
     if (outcome === "delivered") report.deliveredDuringRun += 1;
+    if (outcome === "duplicate") report.duplicatesInRun += 1;
     if (outcome === "recorded" || outcome === "raised") report.recorded += 1;
     if (outcome === "raised") report.entriesRaised += 1;
   }
