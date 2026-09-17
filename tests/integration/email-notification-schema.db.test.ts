@@ -39,6 +39,20 @@ const reset = () =>
   `);
 
 /** Asserts the write fails, and that it fails for the stated reason. */
+const rejectsWithEither = async (names: string[], run: () => Promise<unknown>) => {
+  let message: string | null = null;
+  try {
+    await run();
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  }
+  assert.notEqual(message, null, `expected one of ${names.join(", ")} to reject the write`);
+  assert.ok(
+    names.some((name) => message!.includes(name)) || /Unique constraint failed/.test(message!),
+    `expected a unique violation; got: ${message!.slice(0, 300)}`
+  );
+};
+
 const rejects = async (name: string, run: () => Promise<unknown>) => {
   let message: string | null = null;
   try {
@@ -89,6 +103,9 @@ beforeEach(async () => {
       bodyHtml: "<p>s</p>",
       bodyText: "s",
       contentHash: "hash",
+      classification: "transactional",
+      purpose: null,
+      requiresUnsubscribe: false,
       status: "published",
       publishedAt: new Date(),
     },
@@ -372,20 +389,39 @@ test("a provider redelivering a webhook cannot record it twice", async () => {
   await prisma.providerWebhookEvent.create({
     data: {
       provider: "resend",
+      providerAccount: "transactional",
       providerEventId,
       eventType: "email.bounced",
       payload: {},
     },
   });
 
-  await rejects("ProviderWebhookEvent_provider_providerEventId_key", () =>
+  // Both the per-account unique and, until a later migration removes it, the
+  // older (provider, providerEventId) one refuse this row; which one the
+  // database names is not defined, so either is accepted here and the new
+  // index is checked in the catalogue.
+  const [index] = await prisma.$queryRaw<Array<{ indexdef: string }>>`
+    SELECT indexdef FROM pg_indexes WHERE indexname = 'ProviderWebhookEvent_account_event_key'
+  `;
+  assert.ok(index, "the per-account unique exists");
+  // PostgreSQL quotes an identifier only when it needs to: `provider` is lower
+  // case and comes back bare, the camel-case columns come back quoted.
+  assert.match(
+    index.indexdef,
+    /UNIQUE INDEX .*\(\s*"?provider"?,\s*"providerAccount",\s*"providerEventId"\s*\)/
+  );
+
+  await rejectsWithEither(["ProviderWebhookEvent_account_event_key", "ProviderWebhookEvent_provider_providerEventId_key"], () =>
     prisma.providerWebhookEvent.create({
       data: {
         provider: "resend",
+        providerAccount: "transactional",
         providerEventId,
         eventType: "email.bounced",
         payload: {},
       },
     })
   );
+
+
 });

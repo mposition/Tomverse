@@ -8,7 +8,11 @@ import {
 import { sweepExpiredCredentialDeliveries } from "@/lib/credentialEmailLane";
 import { drainStandardEmailDeliveries } from "@/lib/standardEmailLane";
 import { runDueCampaignWaves } from "@/lib/emailCampaignService";
-import { purgeExpiredWebhookEvents } from "@/lib/emailWebhookProcessing";
+import {
+  purgeExpiredWebhookEvents,
+  sweepProviderWebhookEvents,
+} from "@/lib/emailWebhookProcessing";
+import { releaseExpiredSuppressionCauses } from "@/lib/emailProviderEvents";
 import { reportOperationalIncident } from "@/lib/operationalMonitoring";
 import {
   completeScheduledJob,
@@ -199,6 +203,56 @@ export async function runNotificationDeliveryDrain(options?: {
         JSON.stringify({
           event: "email_webhook_purge_failed",
           reason: purgeError instanceof Error ? purgeError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
+    // Suppression causes past their expiry are released here, on the same tick
+    // (docs/policy/email-product-news-redesign-draft.md, section 7.4). Sends
+    // already ignore them; this keeps an address nobody mails again from
+    // holding causes that read as active. Counts only, never an address.
+    try {
+      const expired = await releaseExpiredSuppressionCauses();
+      if (expired.released > 0 || expired.entriesRemoved > 0) {
+        console.info(
+          JSON.stringify({
+            event: "email_suppression_causes_expired",
+            ...expired,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (expiryError) {
+      console.error(
+        JSON.stringify({
+          event: "email_suppression_expiry_failed",
+          reason: expiryError instanceof Error ? expiryError.name : "unknown",
+          at: new Date().toISOString(),
+        })
+      );
+    }
+
+    // Provider events the provider will not send again: failed ones with
+    // attempts left, ones waiting for their delivery to be recorded, and leases
+    // that expired (docs/policy/email-product-news-redesign-draft.md, section
+    // 7.4). Its own try, like the passes above; counts only, never an address.
+    try {
+      const webhooks = await sweepProviderWebhookEvents();
+      if (webhooks.claimed > 0 || webhooks.abandoned > 0 || webhooks.stale > 0) {
+        console.info(
+          JSON.stringify({
+            event: "email_webhook_sweep",
+            ...webhooks,
+            at: new Date().toISOString(),
+          })
+        );
+      }
+    } catch (sweepError) {
+      console.error(
+        JSON.stringify({
+          event: "email_webhook_sweep_failed",
+          reason: sweepError instanceof Error ? sweepError.name : "unknown",
           at: new Date().toISOString(),
         })
       );

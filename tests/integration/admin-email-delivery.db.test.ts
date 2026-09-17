@@ -173,7 +173,7 @@ test("classification narrows without needing to know template keys", async () =>
     parseDeliveryFilters({ classification: "legal" })
   );
   assert.equal(legal.rows.length, 1);
-  assert.equal(legal.rows[0].templateVersion.template.classification, "legal");
+  assert.equal(legal.rows[0].templateVersion.classification, "legal");
 });
 
 test("paging walks the whole list without repeating a row", async () => {
@@ -207,12 +207,13 @@ test("a suppression created by a privacy request cannot be lifted from here", as
   // to lift it is the privacy process that created it, not a button on an
   // operations screen -- so this is a refusal rather than an approval gate.
   const created = await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: "someone@example.com",
     reason: "privacy_request",
     source: "admin",
   });
 
-  const result = await removeSuppression({ id: created.id });
+  const result = await removeSuppression({ id: created.id! });
   assert.equal(result.removed, false);
   if (!result.removed) assert.equal(result.refusal, "unliftable");
 
@@ -225,13 +226,14 @@ test("lifting returns what it removed, so the audit entry can hold it", async ()
   // a row a concurrent lift already removed would be a record of something
   // that did not happen.
   const created = await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: "bounced@example.com",
     reason: "hard_bounce",
     source: "provider_webhook",
     sourceClassification: "transactional",
   });
 
-  const result = await removeSuppression({ id: created.id });
+  const result = await removeSuppression({ id: created.id! });
   assert.equal(result.removed, true);
   if (result.removed) {
     assert.equal(result.entry.emailAddress, "bounced@example.com");
@@ -242,7 +244,7 @@ test("lifting returns what it removed, so the audit entry can hold it", async ()
 
   // A second lift of the same id is not found, rather than a second audit
   // entry for one removal.
-  const again = await removeSuppression({ id: created.id });
+  const again = await removeSuppression({ id: created.id! });
   assert.equal(again.removed, false);
   if (!again.removed) assert.equal(again.refusal, "not_found");
 });

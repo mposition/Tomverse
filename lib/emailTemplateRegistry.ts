@@ -10,6 +10,7 @@ import {
   emailTemplateDefinition,
   type RenderedEmail,
 } from "@/lib/emailTemplateDefinitions";
+import { templateSendMetadata } from "@/lib/emailTemplateMetadataCore";
 
 /**
  * Reconciles the templates in code with the rows a delivery can point at.
@@ -131,7 +132,11 @@ export async function ensureTemplateVersion(input: {
     input.language
   );
   const contentHash = templateContentHash(rendered);
+  const sendMetadata = templateSendMetadata(definition);
 
+  // `update: {}` stays: this row is history, written once when the template was
+  // first registered. What a send is decided by is the version below, which
+  // carries its own copy of these three values.
   const template = await upsertSurvivingRace({
     upsert: () =>
       prisma.emailTemplate.upsert({
@@ -158,6 +163,10 @@ export async function ensureTemplateVersion(input: {
         templateId: template.id,
         language: input.language,
         contentHash,
+        // Part of the match, not only of the insert: a definition reclassified
+        // in code with its copy untouched must not keep resolving to the version
+        // published under the old classification.
+        ...sendMetadata,
         status: "published",
       },
       select: { id: true },
@@ -205,6 +214,7 @@ export async function ensureTemplateVersion(input: {
           bodyHtml: rendered.html,
           bodyText: rendered.text,
           contentHash,
+          ...sendMetadata,
           status: "published",
           publishedAt: new Date(),
         },

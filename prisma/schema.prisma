@@ -96,6 +96,7 @@ model User {
   assistantProfileImports              AssistantProfileImport[]
   assistantKnowledgeUploadReservations AssistantKnowledgeUploadReservation[]
   emailPreferences                     EmailPreference[]
+  emailPreferenceTransitions           EmailPreferenceTransition[]
   consentRecords                       ConsentRecord[]
   emailDeliveries                      EmailDelivery[]
   campaignRecipients                   EmailCampaignRecipient[]
@@ -4422,6 +4423,16 @@ model TemplateVersion {
   /// Over the three fields above. Detects an edit that bypassed the workflow.
   contentHash String
 
+  /// The send metadata this version was published under. Written once; a
+  /// trigger refuses any change, so a template reclassified in code becomes a
+  /// new version rather than an edited one. The drain compares these to the
+  /// definition it sends under and refuses a mismatch. `EmailTemplate` keeps
+  /// its copies for history only -- nothing decides a send from them.
+  /// Contract: docs/policy/email-notifications.md §10.2.
+  classification      String
+  purpose             String?
+  requiresUnsubscribe Boolean
+
   /// draft | published | retired
   status           String    @default("draft")
   publishedAt      DateTime?
@@ -4435,6 +4446,7 @@ model TemplateVersion {
 
   @@unique([templateId, version, language])
   @@index([templateId, status, language])
+  @@index([classification])
 }
 
 /// What a user currently receives. Mutable; the history lives in ConsentRecord.
@@ -4454,6 +4466,7 @@ model EmailPreference {
   enabled Boolean
 
   /// signup | preference_center | unsubscribe_link | admin | system_default
+  ///   | privacy_request | provider_complaint
   source String
 
   /// When the current enabled state began. Not the row's creation.
@@ -4518,6 +4531,7 @@ model ConsentRecord {
   policyVersion   EmailPolicyVersion @relation(fields: [policyVersionId], references: [id])
 
   /// signup_form | preference_center | unsubscribe_page | import | admin
+  ///   | provider_complaint
   capturedVia String
 
   /// Consent wording hash, screen identifier, request metadata. Never the raw
@@ -4546,6 +4560,71 @@ model ConsentRecord {
 /// code mean opposite things -- the first is ordinary, the second is either an
 /// account takeover in progress or proof we are misclassifying mail
 /// (docs/policy/email-notifications.md §13.3).
+/// One cause of a suppression, append-only. Written beside SuppressionEntry in
+/// the shadow deploy and not yet read by any send decision. Identity and
+/// provenance never change; a release is written once. A trigger carries entry
+/// writes from a build that does not write causes itself.
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
+model SuppressionCause {
+  id           String @id @default(cuid())
+  emailAddress String
+
+  /// global | classification | purpose
+  scope      String
+  /// "*" for global, the classification name ("marketing") or the purpose.
+  purposeKey String
+
+  /// hard_bounce | soft_bounce | complaint | unsubscribe | manual | privacy_request
+  reason String
+  source String
+
+  /// Stable per writer, so a retried event adds nothing: webhook:<eventId>,
+  /// softbounce:<deliveryId>, preference:<transitionId>, admin:<key>,
+  /// legacy:suppression:<entryId>, legacy-trigger:<entryId>:<uuid>.
+  sourceEventKey String
+
+  sourceStream         String?
+  sourceDomain         String?
+  sourceClassification String?
+  sourceDeliveryId     String?
+  sourceMessageId      String?
+  sourceRequestId      String?
+  providerAccount      String?
+  evidence             Json?
+
+  occurredAt DateTime
+  expiresAt  DateTime?
+
+  releasedAt      DateTime?
+  releaseKind     String?
+  releaseEvidence Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([emailAddress, scope, purposeKey, reason, sourceEventKey], map: "SuppressionCause_selector_reason_event_key")
+  @@index([emailAddress, releasedAt])
+  @@index([expiresAt])
+}
+
+/// Every change to a preference's enabled state, append-only. Gives a withdrawal
+/// that records no consent a stable id for the suppression cause it creates.
+/// Contract: docs/policy/email-product-news-redesign-draft.md, section 7.4.
+model EmailPreferenceTransition {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose         String
+  fromEnabled     Boolean
+  toEnabled       Boolean
+  /// signup | preference_center | unsubscribe_link | admin | system_default
+  ///   | consent_confirmation | privacy_request | provider_complaint
+  source          String
+  consentRecordId String?
+  occurredAt      DateTime @default(now())
+
+  @@index([userId, purpose, occurredAt])
+}
+
 model SuppressionEntry {
   id           String @id @default(cuid())
   emailAddress String
@@ -4732,6 +4811,32 @@ model EmailDelivery {
   sentAt      DateTime?
   deliveredAt DateTime?
 
+  /// The last provider event that moved this delivery's status, as its order
+  /// key (occurredAt, rank, provider event id). An event whose key is not later
+  /// leaves the status alone, so events processed out of order converge. All
+  /// three are set together or not at all
+  /// (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  providerEventAt   DateTime?
+  providerEventRank Int?
+  providerEventId   String?
+  /// When the latest soft bounce or deferral reported for this delivery
+  /// happened. deliveredAt is likewise the latest delivered event's own time.
+  softBounceAt      DateTime?
+
+  /// The EMAIL_UNSUBSCRIBE_KEYS version that signed the unsubscribe link in the
+  /// message as sent. NULL for mail with no link. Readiness refuses to lose a
+  /// version used within the last year
+  /// (docs/policy/email-notifications.md §11.4).
+  unsubscribeKeyVersion String?
+
+  /// The provider account (transactional | marketing) and the From address and
+  /// domain the message actually went out as, fixed at send. A webhook binds to
+  /// the delivery of its own account; a suppression cause records the domain
+  /// that was used, not what configuration says later.
+  providerAccount String?
+  sentFrom        String?
+  sentDomain      String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -4741,6 +4846,31 @@ model EmailDelivery {
   @@index([userId, createdAt])
   @@index([emailAddress, createdAt])
   @@index([status, snapshotPurgedAt])
+  @@index([unsubscribeKeyVersion, sentAt])
+  @@index([providerAccount, providerMessageId])
+}
+
+/// One inert unsubscribe token per key version, minted with that key the first
+/// time it signs a real link. Readiness decrypts each against the live keyring:
+/// a version dropped or changed while mail still depends on it is found before
+/// a recipient finds it. The token acts on nobody and is never sent to the
+/// endpoint. Contract: docs/policy/email-notifications.md §11.4.
+model EmailUnsubscribeKeyCanary {
+  id         String   @id @default(cuid())
+  keyVersion String   @unique
+  token      String
+  createdAt  DateTime @default(now())
+}
+
+/// The one-time adoption of the keyring as the guard for mail sent before key
+/// versions were recorded. At most one row (singleton unique + CHECK). Written
+/// by the first drain that finds such mail. Contract:
+/// docs/policy/email-notifications.md §11.4.
+model EmailUnsubscribeKeyAdoption {
+  id          String   @id @default(cuid())
+  keyVersions String[]
+  adoptedAt   DateTime @default(now())
+  singleton   Boolean  @default(true) @unique
 }
 
 /// Raw provider callbacks, stored before they are acted on.
@@ -4762,9 +4892,31 @@ model ProviderWebhookEvent {
 
   processingError String?
 
+  /// The claim of the worker applying the event: a random lease id, when it
+  /// started, and how many claims there have been. Every outcome a worker
+  /// records is fenced on its lease id, so one whose lease expired changes
+  /// nothing. Out of attempts after ten, the row is abandoned; processed and
+  /// abandoned never both hold
+  /// (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  processingLeaseId   String?
+  processingStartedAt DateTime?
+  processingAttempts  Int       @default(0)
+  abandonedAt         DateTime?
+
+  /// transactional | marketing -- the provider account whose endpoint and
+  /// signing secret the event came through. Event ids are unique per account,
+  /// and a message id is matched only within the account that sent it
+  /// (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56).
+  /// The default is for the previous build, which does not write the column
+  /// and only ever served the transactional account; it goes with the old
+  /// unique in a later migration.
+  providerAccount String @default("transactional")
+
   @@unique([provider, providerEventId])
+  @@unique([provider, providerAccount, providerEventId], map: "ProviderWebhookEvent_account_event_key")
   @@index([provider, eventType, receivedAt])
   @@index([processedAt])
+  @@index([provider, providerAccount, receivedAt], map: "ProviderWebhookEvent_provider_account_receivedAt_idx")
 }
 
 /// The one row that says a Tomverse Conversation was started from an imported

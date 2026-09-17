@@ -80,7 +80,7 @@ const deliverOne = async (emailAddress: string) => {
 };
 
 const webhook = (type: string, data: Record<string, unknown>) =>
-  processResendWebhook({
+  processResendWebhook({ providerAccount: "transactional",
     providerEventId: `msg_${randomUUID()}`,
     payload: { type, data },
   });
@@ -114,13 +114,13 @@ test("a redelivered webhook changes nothing the second time", async () => {
     data: { email_id: messageId, to: [address], bounce: { type: "Hard" } },
   };
 
-  const first = await processResendWebhook({ providerEventId, payload });
+  const first = await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
   assert.equal(first.handled, true);
 
   // Providers redeliver. The svix-id is stable across retries, so the second
   // one has to stop before touching anything -- otherwise every retry
   // re-applies a state change.
-  const second = await processResendWebhook({ providerEventId, payload });
+  const second = await processResendWebhook({ providerAccount: "transactional", providerEventId, payload });
   assert.deepEqual(second, { handled: false, reason: "duplicate" });
 
   assert.equal(await prisma.providerWebhookEvent.count(), 1);
@@ -134,7 +134,8 @@ test("a hard bounce suppresses the address permanently", async () => {
   await webhook("email.bounced", {
     email_id: messageId,
     to: [address],
-    bounce: { type: "Hard" },
+    // Resend's own value for a hard bounce.
+    bounce: { type: "Permanent" },
   });
 
   const entry = await prisma.suppressionEntry.findFirstOrThrow();
@@ -194,6 +195,7 @@ test("a complaint about marketing does not stop transactional mail", async () =>
   const address = `${randomUUID()}@example.com`;
 
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "complaint",
     source: "provider_webhook",
@@ -227,6 +229,7 @@ test("a complaint about marketing does not stop transactional mail", async () =>
 test("a hard-bounced address stops receiving even transactional mail", async () => {
   const address = `${randomUUID()}@example.com`;
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "provider_webhook",
@@ -262,6 +265,7 @@ test("suppression is checked at send time, not at enqueue time", async () => {
   // The address bounces after the message was queued. The decision that
   // matters is the one true when it goes out.
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "provider_webhook",
@@ -278,11 +282,13 @@ test("a permanent entry is not downgraded by a later transient one", async () =>
   const address = `${randomUUID()}@example.com`;
 
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "provider_webhook",
   });
   const downgrade = await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "soft_bounce",
     source: "provider_webhook",
@@ -300,6 +306,7 @@ test("a permanent entry is not downgraded by a later transient one", async () =>
 test("addresses are matched case-insensitively", async () => {
   const address = `${randomUUID()}@Example.COM`;
   await recordSuppression({
+    sourceEventKey: `test:${randomUUID()}`,
     emailAddress: address,
     reason: "hard_bounce",
     source: "admin",
@@ -330,9 +337,12 @@ test("an event we do not collect is recorded and does nothing", async () => {
 });
 
 test("an event for a message we never sent is handled, not retried forever", async () => {
-  const result = await webhook("email.delivered", {
-    email_id: "resend-unknown",
-    to: ["stranger@example.com"],
+  // Received long enough ago that it no longer waits for its delivery to be
+  // recorded: it settles as unmatched rather than retrying.
+  const result = await processResendWebhook({ providerAccount: "transactional",
+    providerEventId: `msg_${randomUUID()}`,
+    payload: { type: "email.delivered", data: { email_id: "resend-unknown", to: ["stranger@example.com"] } },
+    receivedAt: new Date(Date.now() - 20 * 60_000),
   });
 
   assert.deepEqual(result, { handled: true, effect: "unmatched", deliveryId: null });

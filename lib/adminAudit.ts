@@ -47,7 +47,7 @@ export async function writeAdminAuditLog({
   summary,
   metadata,
   tx,
-}: AuditInput) {
+}: AuditInput): Promise<string> {
   const actorUserId = session.user?.id || null;
   const actorEmail = session.user?.email || null;
   const normalizedTargetId = targetId || null;
@@ -91,7 +91,8 @@ export async function writeAdminAuditLog({
           integritySecret
         )
       : null;
-    await client.adminAuditLog.create({
+    const created = await client.adminAuditLog.create({
+      select: { id: true },
       data: {
         actorUserId,
         actorEmail,
@@ -107,11 +108,11 @@ export async function writeAdminAuditLog({
         createdAt,
       },
     });
+    return created.id;
   };
 
-  if (tx) {
-    await write(tx);
-    return;
-  }
-  await prisma.$transaction(write);
+  // The id is returned so a caller can name this entry as evidence in the same
+  // transaction (docs/policy/email-product-news-redesign-draft.md, section 7.4).
+  if (tx) return write(tx);
+  return prisma.$transaction(write);
 }

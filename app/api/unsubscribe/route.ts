@@ -38,15 +38,15 @@ const answer = (body: Record<string, unknown>, status = 200) =>
     headers: { "Cache-Control": "no-store" },
   });
 
-export async function POST(req: Request) {
-  const keyring = readUnsubscribeKeyring(process.env);
-  if (!keyring) {
-    return answer({ error: "Unsubscribe is not configured." }, 503);
-  }
-
-  // Unauthenticated by necessity, so bounded by origin. Generous enough that a
-  // mail client prefetching, a person clicking twice and the one-click header
-  // all get through; tight enough that the endpoint is not a free loop.
+/**
+ * The origin bound, charged only to requests that are not a valid token.
+ *
+ * Contract: docs/policy/email-notifications.md §11.3. Invalid tokens are the
+ * only thing worth throttling by origin -- guessing and replaying garbage --
+ * so they carry the original 20/minute, 200/day. Returns the 429 to send, or
+ * null to carry on to the ordinary refusal.
+ */
+const limitInvalid = async (req: Request) => {
   try {
     await consumeApiRateLimit(
       req,
@@ -54,10 +54,18 @@ export async function POST(req: Request) {
       "unsubscribe",
       { minute: 20, day: 200 }
     );
+    return null;
   } catch (error) {
     const limited = apiSecurityResponse(error);
     if (limited) return limited;
     throw error;
+  }
+};
+
+export async function POST(req: Request) {
+  const keyring = readUnsubscribeKeyring(process.env);
+  if (!keyring) {
+    return answer({ error: "Unsubscribe is not configured." }, 503);
   }
 
   const url = new URL(req.url);
@@ -73,10 +81,21 @@ export async function POST(req: Request) {
     if (form.get("all") === "1") all = true;
   }
 
-  if (!token) return answer({ error: "Invalid link." }, 400);
+  if (!token) {
+    const limited = await limitInvalid(req);
+    return limited ?? answer({ error: "Invalid link." }, 400);
+  }
 
+  // Opened before any rate limit, because the limit depends on the answer.
+  // Decryption is local and cheap -- no database -- so doing it first costs
+  // nothing an attacker could amplify.
   const read = readUnsubscribeToken(token, keyring);
   if (!read.valid) {
+    // Limited before anything is logged: a token naming a version that does not
+    // exist is free to forge, and logging it first would turn the origin limit
+    // into a log-amplification path.
+    const limited = await limitInvalid(req);
+    if (limited) return limited;
     if (read.reason === "unknown_key") {
       // Not a user error: somebody dropped a key version and every link of that
       // vintage is now dead. The recipient's remaining option is the spam
@@ -94,6 +113,26 @@ export async function POST(req: Request) {
   }
 
   const { userId, purpose, deliveryId } = read.payload;
+
+  // A valid token can only switch something off, so a valid request is
+  // processed rather than turned away by its origin: one corporate NAT or one
+  // mailbox provider's one-click fetcher carries many recipients, and a 429 on
+  // a real unsubscribe leaves the recipient the spam button. The bound that
+  // remains is per subject, so replaying one token is still not a free loop.
+  try {
+    await consumeApiRateLimit(
+      req,
+      `unsubscribe-subject:${userId}:${all ? "*" : purpose}`,
+      "unsubscribe-valid",
+      { minute: 30, day: 300 },
+      { skipIpBucket: true }
+    );
+  } catch (error) {
+    const limited = apiSecurityResponse(error);
+    if (limited) return limited;
+    throw error;
+  }
+
   const common = {
     userId,
     capturedVia: "unsubscribe_page" as const,

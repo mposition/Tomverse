@@ -57,6 +57,7 @@ type SaveError =
     | "COUNTRY_CONFLICT"
     | "COUNTRY_UNSUPPORTED"
     | "CONFIRMATION_UNAVAILABLE"
+    | "SUPPRESSED"
     | "SAVE_FAILED";
 
 const MARKETING_PURPOSES = new Set([
@@ -165,7 +166,8 @@ export function EmailNotificationSettings() {
                     code === "COUNTRY_REQUIRED" ||
                         code === "COUNTRY_CONFLICT" ||
                         code === "COUNTRY_UNSUPPORTED" ||
-                        code === "CONFIRMATION_UNAVAILABLE"
+                        code === "CONFIRMATION_UNAVAILABLE" ||
+                        code === "SUPPRESSED"
                         ? code
                         : "SAVE_FAILED"
                 );

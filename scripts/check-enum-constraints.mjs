@@ -412,7 +412,7 @@ const REGISTRY = {
   EmailPreference_source_check: {
     owner: "database",
     reason:
-      "Where a preference row came from: signup, preference_center, unsubscribe_link, admin, system_default. Written as literals at each write site in lib/emailPreferences.ts. It is audit provenance rather than a value anything branches on, which is why there is no runtime list to compare against -- and why a sixth value has to be argued for here before it can be written.",
+      "Where a preference row came from: signup, preference_center, unsubscribe_link, admin, system_default, privacy_request, provider_complaint. The last two are the deletion intake and the spam-complaint opt-out (docs/policy/email-product-news-redesign-draft.md, section 7.4). Written as literals at each write site in lib/emailPreferences.ts and its callers. It is audit provenance rather than a value anything branches on, which is why there is no runtime list to compare against -- and why a sixth value has to be argued for here before it can be written.",
   },
   ConsentRecord_action_check: {
     owner: "type_only",
@@ -422,7 +422,7 @@ const REGISTRY = {
   ConsentRecord_captured_via_check: {
     owner: "database",
     reason:
-      "Which surface captured the consent, kept because the evidence a regulator asks for is where and how, not only when. Written as a literal by each surface; there is no runtime list.",
+      "Which surface captured the consent, kept because the evidence a regulator asks for is where and how, not only when. provider_complaint is a withdrawal the complaint itself made, pinned to the delivery complained about (docs/policy/email-product-news-redesign-draft.md, section 7.4). Written as a literal by each surface; there is no runtime list.",
   },
   SuppressionEntry_scope_check: {
     owner: "database",
@@ -438,6 +438,36 @@ const REGISTRY = {
     owner: "type_only",
     reason:
       "SendClassification narrowed to the two streams a provider event can be attributed to. Nullable, because a manual or privacy-request entry has no originating stream to name -- and inventing one would make the provenance columns a report that always has an answer and is sometimes wrong.",
+  },
+  SuppressionCause_reason_check: {
+    owner: "type_only",
+    reason:
+      "The same six reasons as SuppressionEntry_reason_check (SuppressionReason in lib/emailSuppressionCore.ts). A cause is one event behind a suppression, so it names the same things; the two lists move together until entries are retired (docs/policy/email-product-news-redesign-draft.md, section 7.4).",
+  },
+  SuppressionCause_source_stream_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts, nullable for the same reason as SuppressionEntry_source_stream_check: a manual or privacy-request cause has no originating stream.",
+  },
+  SuppressionCause_provider_account_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts: the provider account is one per stream (A18). Nullable, because a cause carried from an entry written before accounts were recorded does not know which it was.",
+  },
+  EmailDelivery_provider_account_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts, fixed at send from the template version's classification. Nullable for rows never sent and rows from before the column existed.",
+  },
+  ProviderWebhookEvent_provider_account_check: {
+    owner: "type_only",
+    reason:
+      "SendingStream in lib/emailSendingIdentityCore.ts: the account whose webhook endpoint and signing secret an event came through (docs/policy/email-product-news-redesign-draft.md, section 7.4, C56). Not nullable -- the route knows its account before it stores anything, and events from before the column existed all came through the transactional endpoint.",
+  },
+  EmailPreferenceTransition_source_check: {
+    owner: "type_only",
+    reason:
+      "setPreference()'s source union in lib/emailPreferences.ts plus consent_confirmation, and two sources reserved for writers the redesign draft names -- privacy_request and provider_complaint (docs/policy/email-product-news-redesign-draft.md, section 7.4). A transition whose origin the code cannot name would be history nobody can read.",
   },
   EmailTemplate_classification_check: {
     owner: "type_only",

@@ -846,6 +846,26 @@ MARKETING_EMAIL_FROM=Tomverse <news@news.tomverse.app>
 두 스트림을 같은 도메인에 설정하면 `/api/ready`가 실패합니다
 (`STREAMS_SHARE_A_DOMAIN`).
 
+### 4.3 계정마다 webhook이 따로입니다
+
+계정이 둘이면 webhook도 둘입니다. 각 Resend 계정의 대시보드(Webhooks)에서 **자기
+경로**를 등록하고, 그 webhook의 signing secret을 **자기 변수**에 넣습니다.
+
+| 계정 | 등록할 URL | secret 변수 |
+|---|---|---|
+| transactional | `https://<host>/api/webhooks/email/resend/transactional` (기존 `/api/webhooks/email/resend`도 같은 계정으로 계속 받습니다) | `RESEND_WEBHOOK_SECRET` |
+| marketing | `https://<host>/api/webhooks/email/resend/marketing` | `MARKETING_RESEND_WEBHOOK_SECRET` |
+
+- marketing endpoint는 transactional secret을 **빌리지 않습니다.** 변수가 없으면 503을
+  돌려주므로 사건은 Resend에 쌓이고 버려지지 않습니다.
+- 사건은 받은 경로의 계정으로 저장되고, 메일 id는 **그 계정이 보낸 발송**에서만
+  찾습니다(docs/policy/email-product-news-redesign-draft.md 7.4, C56·C72).
+- 기존 transactional 등록 URL은 바꾸지 않아도 됩니다. 바꾸려면 새 경로를 먼저 추가하고
+  사건이 들어오는 것을 확인한 뒤 옛 경로를 지웁니다.
+- 계정이 하루 5통 이상 보냈는데 webhook이 0건이면 incident `EMAIL_WEBHOOK_SILENT_<계정>`이
+  올라옵니다 — Resend가 실패가 반복된 endpoint를 비활성화했을 가능성을 먼저 봅니다.
+- 두 secret 변수에 같은 값을 넣으면 두 endpoint가 모두 503입니다. 계정마다 자기 webhook의 secret을 넣습니다.
+
 ---
 
 ## 5. 대량 발신자 요건 (§14.2)

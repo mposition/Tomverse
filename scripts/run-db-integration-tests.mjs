@@ -238,7 +238,18 @@ run(
     "tests/integration/credential-email-lane.db.test.ts",
     "tests/integration/standard-email-lane.db.test.ts",
     "tests/integration/email-webhook-suppression.db.test.ts",
+    // Provider events applied in their own order, every permutation to one state,
+    // and the sweep that records expired causes as released.
+    "tests/integration/email-provider-event-order.db.test.ts",
+    // The stored event state machine: leases, retries, waiting for a delivery,
+    // and abandonment after ten attempts.
+    "tests/integration/email-webhook-processing-lease.db.test.ts",
+    // Recording the permanent bounces that were handled as soft ones.
+    "tests/integration/email-permanent-bounce-recovery.db.test.ts",
     "tests/integration/email-preferences-consent.db.test.ts",
+    // A deletion request and a spam complaint: the suppression and the preference
+    // withdrawal commit in one transaction, keyed so a retry records nothing new.
+    "tests/integration/email-privacy-complaint-suppression.db.test.ts",
     // The double opt-in against the tables: request, history and queued mail
     // commit together, and only the click turns a marketing purpose on.
     "tests/integration/email-consent-confirmation.db.test.ts",
@@ -287,6 +298,26 @@ run(
     // covers are lost or won by the database's own unique indexes, so a single
     // process proves nothing about either.
     "tests/integration/email-template-registry-race.db.test.ts",
+    // The send metadata on TemplateVersion: written once from the definition,
+    // refused by a trigger when edited, and compared by the drain. The trigger
+    // and the CHECKs exist only in the database.
+    "tests/integration/email-template-version-metadata.db.test.ts",
+    // Which unsubscribe requests the origin limit charges. The buckets are rows,
+    // so whether sixty valid one-clicks from one NAT all get through is a
+    // question only the table can answer.
+    "tests/integration/email-unsubscribe-rate-limit.db.test.ts",
+    // Which unsubscribe key versions recent mail still depends on: one canary
+    // per version however many sends race to store it, and the newest sentAt
+    // per version from rows only the table holds.
+    "tests/integration/email-unsubscribe-key-retention.db.test.ts",
+    // Suppression causes beside entries: this build's same-transaction cause,
+    // the trigger carrying an unmarked build's writes, and append-only causes.
+    // The trigger and the constraints exist only in the database.
+    "tests/integration/email-suppression-causes.db.test.ts",
+    // Deploy B: the read authority setting, the cutover under the exclusive
+    // fence, and lifting causes by the release matrix. The fence, the setting
+    // row and the audit row sharing a transaction are all database facts.
+    "tests/integration/email-suppression-authority.db.test.ts",
     // The marketing branches of the standard lane, which no transactional
     // message can reach: the jurisdiction re-check, the one-click headers and
     // the marketing sending stream.
