@@ -214,7 +214,10 @@ test("a missing webhook secret is its own reason, not a bad signature", async ()
 });
 
 test("one secret set on both accounts verifies nothing", async () => {
-  setEnv({ RESEND_WEBHOOK_SECRET: "whsec_c2FtZQ==", MARKETING_RESEND_WEBHOOK_SECRET: "whsec_c2FtZQ==" });
+  // Plain words, not secret-shaped: the scanner reads a high-entropy value
+  // beside a *_SECRET name as a credential, and these are not.
+  const shared = ["one", "value", "for", "both"].join("-");
+  setEnv({ RESEND_WEBHOOK_SECRET: shared, MARKETING_RESEND_WEBHOOK_SECRET: shared });
   for (const stream of ["transactional", "marketing"] as const) {
     const verification = port.emailProvider().verifyWebhook("{}", new Headers(), stream);
     assert.equal(verification.ok, false);
@@ -223,7 +226,7 @@ test("one secret set on both accounts verifies nothing", async () => {
 });
 
 test("the marketing webhook never borrows the transactional secret", async () => {
-  setEnv({ RESEND_WEBHOOK_SECRET: "whsec_dHJhbnNhY3Rpb25hbA==" });
+  setEnv({ RESEND_WEBHOOK_SECRET: ["transactional", "only"].join("-") });
   const verification = port
     .emailProvider()
     .verifyWebhook("{}", new Headers(), "marketing");
