@@ -48,9 +48,16 @@ export function AiDisclaimerNotice({ testId }: { testId?: string }) {
     <>
       <p
         data-testid={testId}
-        className="flex shrink-0 items-center justify-center gap-1.5 px-2 pb-[calc(0.4rem+env(safe-area-inset-bottom))] pt-1 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
+        className="flex shrink-0 flex-wrap items-center justify-center gap-x-1.5 px-2 pb-[calc(0.4rem+env(safe-area-inset-bottom))] pt-1 text-center text-[11px] leading-4 text-zinc-600 dark:text-zinc-300"
       >
-        <span className="min-w-0 truncate">{t("chat.aiDisclaimerShort")}</span>
+        {/* COMPOSER-REFLOW-01. Wrapped, never truncated. What a narrow line
+            cut off was the end of the sentence -- "do not enter sensitive
+            data", the one warning here that changes what the user types --
+            and it went at Edge's 150% page zoom already. The sentence still
+            wraps only when it does not fit, so a phone at default zoom keeps
+            one row; below that it takes the lines it needs and "Details"
+            moves under it instead of squeezing it. */}
+        <span className="min-w-0">{t("chat.aiDisclaimerShort")}</span>
         <button
           type="button"
           data-testid="chat-ai-disclaimer-details"

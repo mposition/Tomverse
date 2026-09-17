@@ -6,7 +6,7 @@
 - Applies to: Mobile chat shell and responsive compact layouts
 - Severity when violated: Release blocker
 - Owners: Product Design, Frontend, Accessibility, QA
-- Last reviewed: 2026-08-01
+- Last reviewed: 2026-09-17
 
 ## Purpose
 
@@ -215,6 +215,54 @@ Requirements:
 
 Landscape and keyboard-open viewports may compact the comparison rail, but not the composer's input row.
 
+## Page zoom and short screens (COMPOSER-REFLOW-01)
+
+Browser page zoom (Edge and Chrome "Default zoom") shrinks the layout viewport
+in CSS pixels, so a phone at 150%, 200% and 300% is a 275px, 206px and 137px
+wide screen, and only a few hundred pixels tall. These are narrower than the
+320px the responsive table guarantees, but they are how low-vision users read,
+and staging found the composer unusable there (2026-09-17). These hold at the
+viewports in the table below, which the regression tests pin, in addition to
+the 320–430px contract:
+
+- **Send is reachable with one vertical drag started on the empty textarea**,
+  the largest target in the dock at these sizes. The empty textarea has no
+  vertical overflow (`scrollHeight - clientHeight ≤ 1`), and it is refitted
+  when its width or its placeholder changes, not only when the draft changes.
+  A box one line tall under a two-line placeholder cuts the placeholder off and
+  becomes a scroller of its own that takes the drag meant for the shell. The
+  drag scrolls the shell, never the document.
+- **The safety notice is not truncated.** It wraps when it does not fit, and
+  "Details" stays inside the notice's box.
+- **The model button and its chevron stay inside the composer's clip box**
+  (pinned at 137px and 120px). The button's label may wrap to two lines rather
+  than setting the button's minimum width to the whole label, which pushed the
+  chevron past the composer's `overflow-hidden` edge.
+- **The conversation section keeps `MIN_CONVERSATION_AREA_REM`.** `min-h-0`
+  alone let it reach 0px when the header and the dock outgrew the screen,
+  leaving the starters, or the answers, nowhere to be drawn. The floor is a
+  `min-height`, so it adds nothing on a screen with room. The shell, which is
+  the composer's one scroll owner, scrolls past the section to the dock, and a
+  starter is reached by dragging inside the section.
+- **The floor never follows focus.** Anything that changes layout when a dock
+  control gains or loses focus moves that control between press and release,
+  so the release lands elsewhere. The test pins it for the tools button at
+  300%, and checks that a focused textarea is on screen there.
+
+| Viewport | Stands for |
+| --- | --- |
+| 275×493 | 150% page zoom on a ~390px phone |
+| 206×370 | 200% page zoom |
+| 137×247 | 300% page zoom, the maximum (the model button is also checked at 120px) |
+| 568×320 | A landscape phone |
+
+Reachability is measured as in the sidebar drawer contract: the control's
+centre point through `elementFromPoint`, after a real touch drag dispatched as
+touch points under mobile emulation, with the drag's start point hit-tested
+too. A starter card is the one exception: at 300% it is taller than the 4rem
+section, so its centre can never be on screen, and the test hit-tests the
+middle of the part of the card the section shows.
+
 ## Korean IME and 200% text scaling contract
 
 - Committed Korean text, in-flight composition text and the caret must all stay inside the visible box (`scrollHeight - clientHeight ≤ 1`, `scrollLeft = 0`).
@@ -237,6 +285,9 @@ Every change affecting the mobile composer must verify:
 - screenshots cover the 3-model and web-search partial-support state;
 - the composer is reachable through at most one scroll owner, and never through
   `document`, with the keyboard open;
+- at 150%, 200% and 300% page zoom and on a landscape phone, Send is reached by
+  one drag started on the empty input, the safety notice is not truncated, and
+  the conversation section keeps its floor;
 - every provider-banner fallback state is covered — no banner, a healthy
   replacement, a degraded replacement, and *no* replacement — because the last
   of those is the tallest the banner ever gets and is where the composer runs
