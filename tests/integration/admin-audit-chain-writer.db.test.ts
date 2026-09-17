@@ -168,3 +168,116 @@ test("a system entry rolls back with the change it describes", async () => {
   );
   assert.equal(await prisma.adminAuditLog.count(), 0);
 });
+
+// The database half of "the writer is the only way in"
+// (20260918090000_admin_audit_log_append_only). These writes deliberately go
+// around lib/adminAudit.ts -- tests are outside the static check's scan -- to
+// show that the triggers refuse them however they are spelled.
+
+const writeTwo = async () => {
+  await writeAdminAuditLog({
+    session,
+    action: "example.first",
+    targetType: "Example",
+    summary: "First.",
+  });
+  await writeAdminAuditLog({
+    session,
+    action: "example.second",
+    targetType: "Example",
+    summary: "Second.",
+  });
+  return prisma.adminAuditLog.findMany({
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+};
+
+test("an audit entry cannot be updated or deleted, by delegate or by SQL", async () => {
+  const [first] = await writeTwo();
+  await assert.rejects(
+    prisma.adminAuditLog.update({ where: { id: first.id }, data: { summary: "Rewritten." } }),
+    /append-only/
+  );
+  await assert.rejects(
+    prisma.adminAuditLog.deleteMany({ where: { id: first.id } }),
+    /append-only/
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`UPDATE "AdminAuditLog" SET "summary" = 'x' WHERE "id" = $1`, first.id),
+    /append-only/
+  );
+  await assert.rejects(
+    prisma.$executeRawUnsafe(`DELETE FROM "AdminAuditLog" WHERE "id" = $1`, first.id),
+    /append-only/
+  );
+  const report = await verifyAdminAuditIntegrity();
+  assert.equal(report.valid, true);
+  assert.equal(report.checkedEntries, 2);
+});
+
+test("a hashed entry that does not link to the chain head is refused", async () => {
+  const rows = await writeTwo();
+  const head = rows[rows.length - 1];
+  const base = {
+    action: "example.forged",
+    targetType: "Example",
+    summary: "Forged.",
+    entryHash: "f".repeat(64),
+  };
+
+  // Linking to an older entry forks the chain.
+  await assert.rejects(
+    prisma.adminAuditLog.create({ data: { ...base, previousHash: rows[0].entryHash } }),
+    /does not link to the chain head/
+  );
+  // Claiming to be the first entry when the chain already has a head.
+  await assert.rejects(
+    prisma.adminAuditLog.create({ data: { ...base, previousHash: null } }),
+    /does not link to the chain head/
+  );
+  // Linking to the head but dated before it.
+  await assert.rejects(
+    prisma.adminAuditLog.create({
+      data: {
+        ...base,
+        previousHash: head.entryHash,
+        createdAt: new Date(head.createdAt.getTime() - 60_000),
+      },
+    }),
+    /dated before the chain head/
+  );
+  // A previous hash with no entry hash.
+  await assert.rejects(
+    prisma.adminAuditLog.create({
+      data: { ...base, entryHash: null, previousHash: head.entryHash },
+    }),
+    /has a previousHash but no entryHash/
+  );
+
+  assert.equal(await prisma.adminAuditLog.count(), 2);
+});
+
+test("concurrent writers still produce one linear chain", async () => {
+  await Promise.all(
+    Array.from({ length: 6 }, (_, index) =>
+      writeAdminAuditLog({
+        session,
+        action: "example.concurrent",
+        targetType: "Example",
+        targetId: `example-${index}`,
+        summary: `Concurrent ${index}.`,
+      })
+    )
+  );
+  const report = await verifyAdminAuditIntegrity();
+  assert.equal(report.valid, true);
+  assert.equal(report.checkedEntries, 6);
+  assert.equal(report.linkageBreaks, 0);
+});
+
+test("an unhashed entry, as written without an integrity key, is still accepted", async () => {
+  await prisma.adminAuditLog.create({
+    data: { action: "example.unkeyed", targetType: "Example", summary: "No key." },
+  });
+  assert.equal(await prisma.adminAuditLog.count(), 1);
+});

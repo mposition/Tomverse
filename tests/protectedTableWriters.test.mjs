@@ -12,6 +12,7 @@ import {
   RUNTIME_SQL_ALLOWLIST,
   checkProtectedTableWriters,
   selectScannedPaths,
+  sourceFingerprint,
   sqlWithoutComments,
 } from "../scripts/check-protected-table-writers-core.mjs";
 
@@ -292,6 +293,78 @@ test("runtime-built SQL is inventoried however it is reached, in both directions
     ],
   }).filter((finding) => finding.path === entry.path);
   assert.equal(extra.length, 1, "one more use than reviewed is a finding");
+});
+
+test("round-2 review probes: assignment destructuring, destructured raw methods, internals", () => {
+  assertOneFinding(
+    "lib/assign-delegate.ts",
+    "let audit; ({ adminAuditLog: audit } = prisma); await audit.create({ data });",
+    "delegate-write"
+  );
+  const runtimeCases = {
+    "lib/assign-unsafe.ts": "let run; ({ $executeRawUnsafe: run } = tx); await run.call(tx, sql);",
+    "lib/destructured-tagged.ts":
+      "const { $executeRaw: run } = tx; const { raw } = Prisma; await run.call(tx, raw(sql));",
+    "lib/destructured-extends.ts":
+      "const { $extends: extend } = prisma; export const extended = extend.call(prisma, extension);",
+    "lib/reflect-tagged.ts": 'await Reflect.get(tx, "$executeRaw").call(tx, statement);',
+    "lib/internal-request.ts": "await prisma._request(args);",
+    "lib/internal-raw.ts": "await prisma.$executeRawInternal(tx, statement);",
+  };
+  for (const [path, text] of Object.entries(runtimeCases)) {
+    assertOneFinding(path, text, "runtime-sql");
+  }
+});
+
+test("a type-only driver import is not runtime SQL", () => {
+  assert.deepEqual(one("lib/types.ts", 'import type { Pool } from "pg"; export type P = Pool;'), []);
+  assert.deepEqual(one("lib/types2.ts", 'import { type Pool } from "pg"; export type P = Pool;'), []);
+});
+
+test("a database driver file is pinned by content", () => {
+  const entry = RUNTIME_SQL_ALLOWLIST.find((candidate) => candidate.sha256);
+  const original = readFileSync(resolve(ROOT, entry.path), "utf8");
+  assert.equal(sourceFingerprint(original), entry.sha256, "the pin matches the file as it stands");
+  assert.equal(
+    sourceFingerprint(original.split("\n").join("\r\n")),
+    entry.sha256,
+    "line endings do not change the pin"
+  );
+  const edited = checkProtectedTableWriters({
+    sources: [{ path: entry.path, text: `${original}\nawait client.query(getRepairSql());\n` }],
+  }).filter((finding) => finding.path === entry.path);
+  assert.equal(edited.length, 1);
+  assert.match(edited[0].detail, /changed since review/);
+});
+
+test("migration SQL: E-strings, numbered dollar tags and dynamic EXECUTE", () => {
+  assertOneFinding(
+    "prisma/migrations/20990101000000_e/migration.sql",
+    "SELECT E'foo\\'--bar'; DELETE FROM \"AdminAuditLog\";",
+    "raw-sql"
+  );
+  assertOneFinding(
+    "prisma/migrations/20990101000000_tag/migration.sql",
+    "SELECT $body1$--kept$body1$; DELETE FROM \"AdminAuditLog\";",
+    "raw-sql"
+  );
+  assertOneFinding(
+    "prisma/migrations/20990101000000_exec/migration.sql",
+    "DO $$ BEGIN EXECUTE 'DELETE FROM \"' || 'Admin' || 'AuditLog' || '\"'; END $$;",
+    "runtime-sql"
+  );
+  assert.deepEqual(
+    one(
+      "prisma/migrations/20990101000000_trigger/migration.sql",
+      'CREATE TRIGGER "t" BEFORE INSERT ON "Other" FOR EACH ROW EXECUTE FUNCTION "f"();'
+    ),
+    []
+  );
+  assert.equal(
+    sqlWithoutComments("SELECT E'a\\'-- not a comment'; -- gone"),
+    "SELECT E'a\\'-- not a comment';  "
+  );
+  assert.equal(sqlWithoutComments("SELECT $x1$ -- kept $x1$"), "SELECT $x1$ -- kept $x1$");
 });
 
 test("excluded trees are not scanned, and the self-exclusion is exact", () => {

@@ -65,19 +65,32 @@
  *    writes under any name), and imports of a database driver (`pg` and
  *    friends), which bypass Prisma entirely.
  *
- * ## What it still does not see
+ * ## What this check is for, and what enforces the rest
  *
- * A delegate or raw method reached through an object that was passed around
- * under an unrelated name and then indexed with a runtime key whose result is
- * stored before use (`const d = anything[key]; d.create()`), where no literal
- * of the name exists in the file. Rule 2 catches the name wherever it is
- * written literally; a name assembled from fragments in another file is the
- * residual, and code review of the runtime-sql inventory is its backstop.
+ * A text check over a general-purpose language cannot follow every alias: a
+ * client renamed and then indexed with a key assembled at run time
+ * (`const p = prisma; const d = p[key]; d.create()`) does not name the table,
+ * the delegate or a client-like receiver anywhere. Chasing each such spelling
+ * would never end, and it would still not be an authenticity control -- any
+ * code in the application can call the writer itself with invented content.
+ *
+ * So the work is split. This check catches the direct writes ordinary code
+ * actually contains and the specific evasions reviewed so far, and keeps every
+ * route to runtime-built SQL on a reviewed inventory. The database enforces
+ * the property for everything else: for AdminAuditLog, the
+ * 20260918090000_admin_audit_log_append_only migration refuses UPDATE and
+ * DELETE and makes every hashed INSERT take the chain lock and link to the
+ * current head, however the row arrived. A protected table added to this
+ * registry gets the same kind of trigger in its own migration; the marketing
+ * tables' triggers are part of S1c. Deliberately obfuscated code is a review
+ * finding, not something a gate can rule out.
  *
  * Tests are not scanned. Integration suites truncate and seed these tables by
  * design, and a fixture that had to go through the writer could only prove the
  * writer agrees with itself.
  */
+
+import { createHash } from "node:crypto";
 
 import ts from "typescript";
 
@@ -221,15 +234,24 @@ export const RAW_SQL_ALLOWLIST = [
     reason:
       "Drops the actorUserId foreign key so ON DELETE SET NULL can no longer rewrite hashed rows. Applied history.",
   },
+  {
+    path: "prisma/migrations/20260918090000_admin_audit_log_append_only/migration.sql",
+    table: "AdminAuditLog",
+    tableMentions: 7,
+    writeVerbs: 4,
+    reason:
+      "The append-only and chain-head triggers themselves: they name UPDATE, DELETE and INSERT to refuse or constrain them, and write nothing.",
+  },
 ];
 
 /** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
 export const RUNTIME_SQL_ALLOWLIST = [
   {
     path: "lib/prisma.ts",
+    sha256: "c3245196e95f7c9198b0d6834f221969eeede43b9bf59bf01c8d77000056bedc",
     count: 2,
     reason:
-      "The application's Prisma client, constructed over a pg Pool through @prisma/adapter-pg. It exports the client; it runs no SQL of its own.",
+      "The application's Prisma client, constructed over a pg Pool through @prisma/adapter-pg. It exports the client; it runs no SQL of its own. The pool is module-private and not exported (reviewed 2026-09-17).",
   },
   {
     path: "lib/accountDataAnonymisation.ts",
@@ -262,29 +284,49 @@ export const RUNTIME_SQL_ALLOWLIST = [
   },
   {
     path: "scripts/baseline-existing-database.mjs",
+    sha256: "43acecfde4250aad7a230a2219cf58863858636105c0e9d115607f49f7ff3b31",
     count: 1,
     reason:
-      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table.",
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table. Its queries read the catalogue and _prisma_migrations; the write is delegated to prisma migrate resolve (reviewed 2026-09-17).",
   },
   {
     path: "scripts/compare-schema-to-migrations.mjs",
+    sha256: "6ce2acc68f9e326b47e57d3cba5bf3ced3a9e8700d8e12f71b0efa9412ac01b4",
     count: 1,
-    reason: "Read-only catalogue comparison of a live schema against one built from migrations.",
+    reason: "Read-only catalogue comparison of a live schema against one built from migrations. Catalogue reads only (reviewed 2026-09-17).",
   },
   {
     path: "scripts/railway-restore-verify.mjs",
+    sha256: "adc050618773cd7ba5833393e5891f3ce7288e6915df7586b0dfc931c4721108",
     count: 1,
-    reason: "Read-only verification of an isolated restored database after a restore drill.",
+    reason: "Read-only verification of an isolated restored database after a restore drill. Catalogue and row-count reads only (reviewed 2026-09-17).",
   },
   {
     path: "scripts/require-direct-database-url.mjs",
+    sha256: "6b503d9306cb2d8644932f2fdb74f084f93b78578f10c573e9a9b24fdf933944",
     count: 1,
-    reason: "Pre-migration connectivity and advisory-lock probe on the direct database URL. No table writes.",
+    reason: "Pre-migration connectivity and advisory-lock probe on the direct database URL. No table writes. Advisory lock try/unlock and lock-holder reads only (reviewed 2026-09-17).",
   },
 ];
 
 const UNSAFE_RAW_MEMBERS = new Set(["$executeRawUnsafe", "$queryRawUnsafe"]);
 const TAGGED_RAW_MEMBERS = new Set(["$executeRaw", "$queryRaw"]);
+
+/**
+ * Client members that run SQL or change what the client does, however they
+ * are reached. A member access to a tagged raw method with an inline template
+ * is the one allowed form; every other way of getting hold of one of these --
+ * destructuring, a string key, Reflect.get -- is inventoried.
+ */
+const RUNTIME_SQL_MEMBERS = new Set([
+  ...UNSAFE_RAW_MEMBERS,
+  ...TAGGED_RAW_MEMBERS,
+  "$extends",
+  "$runCommandRaw",
+  "$executeRawInternal",
+  "_request",
+  "_executeRequest",
+]);
 
 /** Database drivers that reach Postgres without Prisma. */
 export const DATABASE_DRIVER_MODULES = new Set([
@@ -392,6 +434,7 @@ export const analyseSource = (path, text) => {
   const dynamicDelegateUses = [];
   const literals = [];
   const runtimeSql = [];
+  let importsDriver = false;
 
   const addRuntimeSql = (kind, node) =>
     runtimeSql.push({ kind, line: lineOf(sourceFile, node) });
@@ -409,7 +452,7 @@ export const analyseSource = (path, text) => {
         if (delegates.has(node.text)) {
           delegateNameLiterals.push({ delegate: node.text, line: lineOf(sourceFile, node) });
         }
-        if (UNSAFE_RAW_MEMBERS.has(node.text)) addRuntimeSql(`"${node.text}"`, node);
+        if (RUNTIME_SQL_MEMBERS.has(node.text)) addRuntimeSql(`"${node.text}"`, node);
       }
     }
 
@@ -428,7 +471,9 @@ export const analyseSource = (path, text) => {
       }
 
       if (name && UNSAFE_RAW_MEMBERS.has(name)) addRuntimeSql(name, node);
-      if (name === "$extends") addRuntimeSql("$extends", node);
+      if (name && RUNTIME_SQL_MEMBERS.has(name) && !UNSAFE_RAW_MEMBERS.has(name) && !TAGGED_RAW_MEMBERS.has(name)) {
+        addRuntimeSql(name, node);
+      }
       if (
         name === "raw" &&
         ts.isIdentifier(node.expression) &&
@@ -472,35 +517,77 @@ export const analyseSource = (path, text) => {
       }
     }
 
-    if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
-      const property = node.propertyName ?? node.name;
+    // Destructuring, both the declaration form (`const { a } = x`) and the
+    // assignment form (`({ a } = x)`), reads a member by name exactly as a
+    // property access does.
+    const destructured = (property, source, at) => {
       const name =
-        ts.isIdentifier(property) || ts.isStringLiteralLike(property) ? property.text : null;
+        property && (ts.isIdentifier(property) || ts.isStringLiteralLike(property))
+          ? property.text
+          : null;
       if (name && delegates.has(name)) {
         delegateUses.push({
           delegate: name,
           operation: "<destructured from its client>",
-          line: lineOf(sourceFile, node),
+          line: lineOf(sourceFile, at),
         });
       }
-      if (name && UNSAFE_RAW_MEMBERS.has(name)) addRuntimeSql(`destructured ${name}`, node);
-      if (property && ts.isComputedPropertyName(property)) {
-        const holder = node.parent.parent;
-        const source =
-          holder && (ts.isVariableDeclaration(holder) || ts.isParameter(holder))
-            ? holder.initializer
-            : undefined;
-        if (source && CLIENT_RECEIVER_PATTERN.test(receiverName(source) ?? "")) {
-          dynamicDelegateUses.push({
-            detail: "computed destructuring key on a client",
-            line: lineOf(sourceFile, node),
-          });
+      if (name && RUNTIME_SQL_MEMBERS.has(name)) addRuntimeSql(`destructured ${name}`, at);
+      if (name === "raw" && source && receiverName(source) === "Prisma") {
+        addRuntimeSql("destructured Prisma.raw", at);
+      }
+      if (
+        property &&
+        ts.isComputedPropertyName(property) &&
+        source &&
+        CLIENT_RECEIVER_PATTERN.test(receiverName(source) ?? "")
+      ) {
+        dynamicDelegateUses.push({
+          detail: "computed destructuring key on a client",
+          line: lineOf(sourceFile, at),
+        });
+      }
+    };
+
+    if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+      const holder = node.parent.parent;
+      const source =
+        holder && (ts.isVariableDeclaration(holder) || ts.isParameter(holder))
+          ? holder.initializer
+          : undefined;
+      destructured(node.propertyName ?? node.name, source, node);
+    }
+
+    if (ts.isObjectLiteralExpression(node)) {
+      let target = node;
+      while (ts.isParenthesizedExpression(target.parent)) target = target.parent;
+      const assignment = target.parent;
+      if (
+        assignment &&
+        ts.isBinaryExpression(assignment) &&
+        assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        assignment.left === target
+      ) {
+        for (const property of node.properties) {
+          if (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) {
+            destructured(property.name, assignment.right, property);
+          }
         }
       }
     }
 
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-      if (isDatabaseDriverModule(node.moduleSpecifier.text)) {
+      const clause = node.importClause;
+      const typeOnly =
+        clause &&
+        (clause.isTypeOnly ||
+          (!clause.name &&
+            clause.namedBindings &&
+            ts.isNamedImports(clause.namedBindings) &&
+            clause.namedBindings.elements.length > 0 &&
+            clause.namedBindings.elements.every((element) => element.isTypeOnly)));
+      if (!typeOnly && isDatabaseDriverModule(node.moduleSpecifier.text)) {
+        importsDriver = true;
         addRuntimeSql(`import ${node.moduleSpecifier.text}`, node);
       }
     }
@@ -512,7 +599,17 @@ export const analyseSource = (path, text) => {
         (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
       isDatabaseDriverModule(node.arguments[0].text)
     ) {
+      importsDriver = true;
       addRuntimeSql(`import ${node.arguments[0].text}`, node);
+    }
+
+    if (isReflectGet(node)) {
+      const [, key] = node.arguments;
+      if (key && ts.isStringLiteralLike(key) && RUNTIME_SQL_MEMBERS.has(key.text)) {
+        // Counted once here as well as by the literal rule: Reflect.get with a
+        // literal method name is the form a reviewer most needs to see.
+        addRuntimeSql(`Reflect.get ${key.text}`, node);
+      }
     }
 
     ts.forEachChild(node, visit);
@@ -525,6 +622,7 @@ export const analyseSource = (path, text) => {
     dynamicDelegateUses,
     literalText: literals.join("\n"),
     runtimeSql,
+    importsDriver,
   };
 };
 
@@ -567,10 +665,22 @@ export const sqlWithoutComments = (text) => {
     }
     if (char === "'" || char === '"') {
       const quote = char;
+      // E'...' strings take backslash escapes, so `E'\''` does not end at the
+      // second quote. An E that is the tail of an identifier is not a prefix.
+      const previous = text[index - 1] ?? "";
+      const escapeString =
+        quote === "'" &&
+        (previous === "E" || previous === "e") &&
+        !/[A-Za-z0-9_$]/.test(text[index - 2] ?? "");
       output += char;
       index += 1;
       while (index < text.length) {
         output += text[index];
+        if (escapeString && text[index] === "\\" && index + 1 < text.length) {
+          output += text[index + 1];
+          index += 2;
+          continue;
+        }
         if (text[index] === quote) {
           if (text[index + 1] === quote) {
             output += text[index + 1];
@@ -585,7 +695,9 @@ export const sqlWithoutComments = (text) => {
       continue;
     }
     if (char === "$") {
-      const tag = /^\$[A-Za-z_]*\$/.exec(text.slice(index));
+      // A dollar-quote tag is empty or an identifier (letters, digits after the
+      // first character, underscores). `$1` is a parameter, not a tag.
+      const tag = /^\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$/.exec(text.slice(index));
       if (tag) {
         const close = text.indexOf(tag[0], index + tag[0].length);
         const end = close === -1 ? text.length : close + tag[0].length;
@@ -618,18 +730,35 @@ export const rawSqlTableHits = (text) => {
 
 const keyOf = (...parts) => parts.join(" :: ");
 
+/** Content fingerprint that ignores line-ending differences between checkouts. */
+export const sourceFingerprint = (text) =>
+  createHash("sha256").update(text.split("\r\n").join("\n")).digest("hex");
+
 export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
   const rawSqlHits = new Map();
   const runtimeSqlByPath = new Map();
   const delegateNamesByPath = new Map();
+  const driverFingerprints = new Map();
 
   for (const { path, text } of sources) {
     if (isExcluded(path)) continue;
 
     if (path.endsWith(".sql")) {
-      for (const hit of rawSqlTableHits(sqlWithoutComments(text))) {
+      const sql = sqlWithoutComments(text);
+      for (const hit of rawSqlTableHits(sql)) {
         rawSqlHits.set(keyOf(path, hit.table), { path, ...hit });
+      }
+      // EXECUTE runs a statement assembled at run time, whose table name no
+      // text rule can see: inventoried like runtime SQL in code. EXECUTE
+      // FUNCTION / PROCEDURE in a trigger definition names a fixed function and
+      // is not counted.
+      const executes = sql.toLowerCase().match(/\bexecute\b(?!\s+(?:function|procedure)\b)/g) ?? [];
+      if (executes.length > 0) {
+        runtimeSqlByPath.set(
+          path,
+          executes.map(() => ({ kind: "EXECUTE", line: 0 }))
+        );
       }
       continue;
     }
@@ -665,6 +794,7 @@ export const checkProtectedTableWriters = ({ sources }) => {
     }
 
     if (analysis.runtimeSql.length > 0) runtimeSqlByPath.set(path, analysis.runtimeSql);
+    if (analysis.importsDriver) driverFingerprints.set(path, sourceFingerprint(text));
   }
 
   const scannedPaths = new Set(sources.map((source) => source.path));
@@ -735,6 +865,21 @@ export const checkProtectedTableWriters = ({ sources }) => {
         .join(", ")}`,
     });
   }
+  // A database driver reaches the database without Prisma, and what such a
+  // file does with it is ordinary code no rule here reads. So a driver file is
+  // pinned by content: any edit fails until the fingerprint is re-reviewed.
+  for (const [path, fingerprint] of driverFingerprints) {
+    const entry = allowedRuntime.get(path);
+    if (entry?.sha256 === fingerprint) continue;
+    findings.push({
+      rule: "runtime-sql",
+      path,
+      detail: entry?.sha256
+        ? `imports a database driver and changed since review: sha256 ${fingerprint}, allowlist says ${entry.sha256}`
+        : `imports a database driver; the allowlist entry needs sha256 ${fingerprint} after review`,
+    });
+  }
+
   for (const entry of RUNTIME_SQL_ALLOWLIST) {
     if (runtimeSqlByPath.has(entry.path)) continue;
     findings.push({
