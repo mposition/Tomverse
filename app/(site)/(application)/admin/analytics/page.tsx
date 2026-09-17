@@ -5,17 +5,20 @@ import { AdminMemoryRevocationPanel } from "@/components/admin/AdminMemoryRevoca
 import { AdminPackageImportPanel } from "@/components/admin/AdminPackageImportPanel";
 import { AdminPageTabs } from "@/components/admin/AdminPageTabs";
 import { AdminProductAnalyticsPanel } from "@/components/admin/AdminProductAnalyticsPanel";
+import { AdminUsageAnalyticsPanel } from "@/components/admin/AdminUsageAnalyticsPanel";
 import { LaunchFunnelPanel } from "@/components/admin/AdminRiskPanels";
 import { adminNavItemTabs, resolveAdminTab } from "@/lib/adminNavigation";
 import { getAssistantPackageImportMetrics } from "@/lib/assistantPackageImportMetrics";
 import { getAdminUserStats } from "@/lib/adminUsers";
+import { readUsageAnalytics } from "@/lib/adminUsageAnalytics";
+import { parseUsagePeriod } from "@/lib/adminUsageAnalyticsCore";
 import { prisma } from "@/lib/prisma";
 import { getProductAnalyticsDashboard } from "@/lib/productAnalyticsDashboard";
 
 const TABS = adminNavItemTabs("analytics");
 
 /**
- * Product analytics and import/memory metrics, as two separate tabs.
+ * Usage, product analytics, import/memory and AI Review metrics, as separate tabs.
  *
  * They answer different questions from different sources -- one is the consented
  * event ledger, the other is content-free import and memory telemetry -- and
@@ -41,6 +44,19 @@ export default async function AdminAnalyticsPage({
       query={query}
     />
   );
+
+  if (tab.id === "usage") {
+    // The first tab, because "how many people are actually using this" is the
+    // question an operator opens Analytics with. The period is in the URL like
+    // the tab, so a report can be linked and reloaded as the same report.
+    const report = await readUsageAnalytics(parseUsagePeriod(query.period));
+    return (
+      <div className="flex min-w-0 flex-col gap-5">
+        {tabs}
+        <AdminUsageAnalyticsPanel report={report} />
+      </div>
+    );
+  }
 
   if (tab.id === "imports") {
     const packageImports = await getAssistantPackageImportMetrics();

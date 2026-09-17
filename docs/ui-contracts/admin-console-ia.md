@@ -40,7 +40,7 @@ Six groups, seventeen entries. One page, one job.
 | --- | --- | --- | --- |
 | Command Center | Overview | `/admin/overview` | `summary`, `health` |
 | Command Center | Work queue | `/admin/work-queue` | `queue`, `approvals` |
-| Command Center | Analytics | `/admin/analytics` | `product`, `imports` |
+| Command Center | Analytics | `/admin/analytics` | `usage` (`&period=`), `product`, `imports` |
 | Customers | Users | `/admin/users` | — |
 | Customers | Support | `/admin/support` | `feedback`, `privacy` |
 | Revenue | Billing | `/admin/billing` | `plans`, `promotions` |

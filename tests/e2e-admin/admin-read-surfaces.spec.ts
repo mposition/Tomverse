@@ -152,10 +152,47 @@ test.describe("admin read surfaces", () => {
     ).toBeVisible();
   });
 
-  test("analytics renders the product funnel from seeded events", async ({
+  test("analytics opens on the usage report, with a period in the URL", async ({
     page,
   }) => {
     await page.goto("/admin/analytics");
+
+    await expect(consoleHeading(page)).toHaveText("Analytics");
+    // Streamed behind loading.tsx: wait for the one settled copy.
+    await expect(page.getByTestId("admin-usage-analytics")).toHaveCount(1);
+    const usage = page.locator("#main-content");
+    await expect(usage.getByTestId("admin-usage-analytics")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Who is using Tomverse" })
+    ).toBeVisible();
+    // Today is the default period and is marked as the current one.
+    await expect(
+      page.getByRole("link", { name: "Today", exact: true })
+    ).toHaveAttribute("aria-current", "page");
+    await expect(usage.getByTestId("admin-usage-models")).toBeVisible();
+    await expect(usage.getByTestId("admin-usage-activity")).toBeVisible();
+    await expect(usage.getByTestId("admin-usage-segments")).toBeVisible();
+    // A failed read renders a banner instead of the numbers; the seeded
+    // database must never take that path.
+    await expect(
+      page.getByText("The usage report could not be read.", { exact: false })
+    ).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Last 30 days", exact: true }).click();
+    await expect(page).toHaveURL(/tab=usage&period=last30/);
+    await expect(
+      page.getByRole("link", { name: "Last 30 days", exact: true })
+    ).toHaveAttribute("aria-current", "page");
+    // The product funnel belongs to its own tab and is not read here.
+    await expect(
+      page.getByRole("heading", { name: "Go-live funnel and activation" })
+    ).toHaveCount(0);
+  });
+
+  test("analytics renders the product funnel from seeded events", async ({
+    page,
+  }) => {
+    await page.goto("/admin/analytics?tab=product");
 
     await expect(consoleHeading(page)).toHaveText("Analytics");
     await expect(
