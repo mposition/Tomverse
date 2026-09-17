@@ -1,6 +1,6 @@
 # Railway cron 서비스: Config as Code → Infrastructure as Code 전환
 
-- 작성: 2026-09-17 (Claude). 상태: **저장소 준비 완료, Railway 적용 전**
+- 작성: 2026-09-17 (Claude). 상태: **완료** — staging·production 모두 IaC 적용과 설정 파일 연결 해제를 마쳤고, `railway.*.json` 5개는 삭제됐습니다(6절).
 - 기한: **2026-12-01** — Railway가 `railway.json`·`railway.toml`(Config as Code)을 읽지 않기 시작하는 날
   ([docs.railway.com/config-as-code](https://docs.railway.com/config-as-code))
 - 대상: cron 서비스 5개 × 환경 2개(staging, production). 웹 서비스 `Tomverse`는 **대상이 아닙니다.**
@@ -139,7 +139,7 @@ npm run railway:iac:plan
 `main`에 이 변경이 들어간 뒤 `npm run railway:iac:use-production`으로 바꾸고 4.1–4.4를 반복합니다.
 끝나면 `npm run railway:iac:use-staging`으로 되돌려 두는 편이 안전합니다.
 
-## 5. 두 환경을 마친 뒤 (별도 PR)
+## 5. 두 환경을 마친 뒤 (별도 PR) — 완료 2026-09-17
 
 - `railway.*.json` 5개를 **한 커밋에서 함께** 삭제. `tests/scheduledJobsCore.test.mjs`의 legacy 대조 테스트는 다섯 파일이 모두 있거나 모두 없어야 통과합니다. 하나만 먼저 지우면 실패합니다.
 - `README.md` "Scheduled Maintenance"와 코드 주석에서 JSON 파일 경로를 가리키는 문장 정리.
@@ -149,5 +149,5 @@ npm run railway:iac:plan
 
 | 환경 | plan 확인 | apply | 설정 파일 해제 | 확인 | 실행자 |
 |---|---|---|---|---|---|
-| staging | 2026-09-17 plan: 0 add / 5 change / 0 destroy (Claude, 읽기 전용) | 미기록 | 미기록 | 미기록 | |
-| production | 2026-09-17 plan: 0 add / 5 change / 0 destroy (Claude, 읽기 전용) | 미기록 | 미기록 | 미기록 | |
+| staging | 2026-09-17 plan: 0 add / 5 change / 0 destroy | 2026-09-17, 이후 plan `already up to date` | 2026-09-16 22:14–22:18Z 재배포 | 새 배포 5개 모두 `configFile` 없음, start·cron·restart가 직전 배포와 동일(배포 메타데이터, Claude 읽기 전용) | 운영자 |
+| production | 2026-09-17 plan: 0 add / 5 change / 0 destroy (main `aac84aab`) | 2026-09-17, 이후 plan `already up to date` | 2026-09-16 23:50Z 재배포 | 새 배포 5개 모두 `configFile` 없음, start·cron·restart가 직전 배포와 동일, branch `main` `aac84aab`(배포 메타데이터, Claude 읽기 전용) | 운영자 |
