@@ -226,7 +226,12 @@ const readWindowCounts = async (db: Db, start: Date, end: Date) => {
       WHERE "createdAt" >= ${start} AND "createdAt" < ${end}
     ) u
   `;
-  const aiReviewRuns = await db.comparisonReviewRun.count({
+  // main has no per-run AI Review telemetry table yet (ComparisonReviewRun is
+  // develop-only), so this counts stored review results: one row per distinct
+  // reviewed input, created when a review first completes. A failed run and a
+  // repeat of an already reviewed input are not in it, and the label says
+  // "completed" rather than "runs" for that reason.
+  const aiReviewRuns = await db.comparisonReview.count({
     where: { createdAt: { gte: start, lt: end } },
   });
   // Counted when the image finished, so a closed period does not change after
