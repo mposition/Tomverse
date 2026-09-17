@@ -267,9 +267,18 @@
       ],
       "guardViolations": [],
       "checkFailures": [],
-      "reviewConclusion": null,
-      "findings": [],
-      "nextAction": "awaiting the reviewer's verdict"
+      "reviewConclusion": "approve",
+      "findings": [
+        {
+          "location": "lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)",
+          "severity": "nit",
+          "basis": "judgement",
+          "claim": "The module captures primordials at import time for its byte/hash/decode path but the manifest field validators still use ambient `Number.isSafeInteger` and `RegExp.prototype.test`, so the stated capture discipline is not uniform (every reachable outcome is still fail-closed downstream, so this is defense-in-depth consistency only).",
+          "reproduction": "In a scratch ESM file: `import {proposePromptRefinerShadowStage} from '../lib/promptRefinerShadowAdmissionCore.ts';` then `Number.isSafeInteger = () => true;` and call it with the checked-in evidence but a manifest whose `journalTerminal.seq` is the string `\"33\"` (with `bundleDigest` recomputed as in tests/promptRefinerShadowAdmissionCore.test.mjs:64-71). Expected with captured intrinsics: `prompt_refiner_shadow_admission_journal_terminal_seq_integer`; actual: the strict integer check is bypassed and rejection falls through to `replay_invariant_or_terminal_head`. Contrast line 222, which uses INTRINSIC_NUMBER_IS_SAFE_INTEGER and is unaffected by the same patch.",
+          "disposition": "fix_requested"
+        }
+      ],
+      "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)); the author fixes it and the change is re-reviewed"
     }
   ],
   "changeDigest": "sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd",
@@ -371,13 +380,22 @@
   ],
   "guardViolations": [],
   "checkFailures": [],
-  "reviewConclusion": null,
-  "findings": [],
-  "nextAction": "hand the review prompt (round 1) to the claude reviewer; its verdict must name digest sha256:233c093240bebc27aaacfd1cd0001299bb9578c354c3487205b2ae0f6965afdd",
-  "status": "awaiting_review",
+  "reviewConclusion": "approve",
+  "findings": [
+    {
+      "location": "lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)",
+      "severity": "nit",
+      "basis": "judgement",
+      "claim": "The module captures primordials at import time for its byte/hash/decode path but the manifest field validators still use ambient `Number.isSafeInteger` and `RegExp.prototype.test`, so the stated capture discipline is not uniform (every reachable outcome is still fail-closed downstream, so this is defense-in-depth consistency only).",
+      "reproduction": "In a scratch ESM file: `import {proposePromptRefinerShadowStage} from '../lib/promptRefinerShadowAdmissionCore.ts';` then `Number.isSafeInteger = () => true;` and call it with the checked-in evidence but a manifest whose `journalTerminal.seq` is the string `\"33\"` (with `bundleDigest` recomputed as in tests/promptRefinerShadowAdmissionCore.test.mjs:64-71). Expected with captured intrinsics: `prompt_refiner_shadow_admission_journal_terminal_seq_integer`; actual: the strict integer check is bypassed and rejection falls through to `replay_invariant_or_terminal_head`. Contrast line 222, which uses INTRINSIC_NUMBER_IS_SAFE_INTEGER and is unaffected by the same patch.",
+      "disposition": "fix_requested"
+    }
+  ],
+  "nextAction": "approved, but a required check failed or a finding is open (open finding: lib/promptRefinerShadowAdmissionCore.ts:371-383 (exactDigest, exactInteger) vs :45-77 (captured primordials)); the author fixes it and the change is re-reviewed; package round 2 once the change is revised",
+  "status": "awaiting_revision",
   "failure": null,
   "holdReason": null,
-  "producedAt": "2026-09-17T00:19:34.649Z",
+  "producedAt": "2026-09-17T00:25:03.640Z",
   "packagedRounds": 2,
   "concludedAtRound": null,
   "lineage": [],
