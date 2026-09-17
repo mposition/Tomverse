@@ -47,6 +47,7 @@ const INTRINSIC_OBJECT_DEFINE_PROPERTY = Object.defineProperty;
 const INTRINSIC_REFLECT_APPLY = Reflect.apply;
 const INTRINSIC_ARRAY_IS_ARRAY = Array.isArray;
 const INTRINSIC_NUMBER_IS_SAFE_INTEGER = Number.isSafeInteger;
+const INTRINSIC_REGEXP_TEST = RegExp.prototype.test;
 const INTRINSIC_UINT8_ARRAY = Uint8Array;
 const INTRINSIC_UINT8_ARRAY_SET = Uint8Array.prototype.set;
 const INTRINSIC_TEXT_DECODER = TextDecoder;
@@ -63,6 +64,9 @@ const RAW_TYPED_ARRAY_TAG_GETTER = Object.getOwnPropertyDescriptor(
 const HASH_PROTOTYPE = Object.getPrototypeOf(createHash("sha256"));
 const INTRINSIC_HASH_UPDATE = HASH_PROTOTYPE.update;
 const INTRINSIC_HASH_DIGEST = HASH_PROTOTYPE.digest;
+const FULL_SHA_PATTERN = /^[a-f0-9]{40}$/;
+const HEX_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
+const PREFIXED_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
 
 if (
     typeof RAW_TYPED_ARRAY_BYTE_LENGTH_GETTER !== "function" ||
@@ -205,6 +209,10 @@ function fail(code: string): never {
     throw new Error(`prompt_refiner_shadow_admission_${code}`);
 }
 
+function matches(pattern: RegExp, value: string): boolean {
+    return INTRINSIC_REFLECT_APPLY(INTRINSIC_REGEXP_TEST, pattern, [value]);
+}
+
 function actualEvidenceByteLength(bytes: unknown, where: string): number {
     try {
         const byteLength = INTRINSIC_REFLECT_APPLY(
@@ -330,7 +338,7 @@ function decodeJson(bytes: EvidenceBytes, maximum: number, where: string) {
     } catch {
         return fail(`${where}_utf8`);
     }
-    if (text.charCodeAt(0) === 0xfeff) fail(`${where}_bom`);
+    if (text[0] === "\ufeff") fail(`${where}_bom`);
     let parsed: unknown;
     try {
         parsed = parseBenchmarkJson(text, maximum);
@@ -364,19 +372,19 @@ function decodeJournalBytes(bytes: EvidenceBytes, where: string): string {
     } catch {
         return fail(`${where}_utf8`);
     }
-    if (text.charCodeAt(0) === 0xfeff) fail(`${where}_bom`);
+    if (text[0] === "\ufeff") fail(`${where}_bom`);
     return text;
 }
 
 function exactDigest(value: unknown, where: string): string {
-    if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value)) {
+    if (typeof value !== "string" || !matches(HEX_DIGEST_PATTERN, value)) {
         fail(`${where}_digest`);
     }
     return value;
 }
 
 function exactInteger(value: unknown, where: string): number {
-    if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    if (!INTRINSIC_NUMBER_IS_SAFE_INTEGER(value) || (value as number) < 0) {
         fail(`${where}_integer`);
     }
     return value as number;
@@ -437,16 +445,16 @@ function parseManifest(bytes: EvidenceBytes): {
         candidate.journalSchemaVersion !==
             PROMPT_REFINER_SHADOW_JOURNAL_VERSION ||
         typeof candidate.sourceRef !== "string" ||
-        !/^[a-f0-9]{40}$/.test(candidate.sourceRef) ||
+        !matches(FULL_SHA_PATTERN, candidate.sourceRef) ||
         typeof candidate.sourceIdentityDigest !== "string" ||
-        !/^[a-f0-9]{64}$/.test(candidate.sourceIdentityDigest) ||
+        !matches(HEX_DIGEST_PATTERN, candidate.sourceIdentityDigest) ||
         typeof candidate.corpusDigest !== "string" ||
-        !/^[a-f0-9]{64}$/.test(candidate.corpusDigest) ||
+        !matches(HEX_DIGEST_PATTERN, candidate.corpusDigest) ||
         !INTRINSIC_ARRAY_IS_ARRAY(candidate.files) ||
         candidate.files.length !==
             INTERNAL_ADMISSION_EVIDENCE_FILES.length ||
         typeof candidate.bundleDigest !== "string" ||
-        !/^sha256:[a-f0-9]{64}$/.test(candidate.bundleDigest)
+        !matches(PREFIXED_DIGEST_PATTERN, candidate.bundleDigest)
     ) {
         fail("manifest_shape_or_version");
     }

@@ -257,6 +257,72 @@ test("captured freeze and private acknowledgements resist post-import ambient pa
     );
 });
 
+test("captured scalar validators resist post-import RegExp and Number patches", () => {
+    const originalTest = RegExp.prototype.test;
+    const originalSafeInteger = Number.isSafeInteger;
+    let validProposal;
+    let digestError;
+    let integerError;
+    try {
+        RegExp.prototype.test = function misleadingTest(value) {
+            if (
+                this.source === "^[a-f0-9]{40}$" ||
+                this.source === "^[a-f0-9]{64}$" ||
+                this.source === "^sha256:[a-f0-9]{64}$"
+            ) {
+                return true;
+            }
+            return Reflect.apply(originalTest, this, [value]);
+        };
+        Number.isSafeInteger = () => true;
+        validProposal = proposePromptRefinerShadowStage(checkedIn());
+
+        const invalidDigest = JSON.parse(
+            bytes(paths.manifest).toString("utf8")
+        );
+        invalidDigest.files[0].sha256 = "not-a-digest";
+        invalidDigest.bundleDigest = bundleDigest(invalidDigest);
+        try {
+            proposePromptRefinerShadowStage({
+                ...checkedIn(),
+                manifestBytes: Buffer.from(JSON.stringify(invalidDigest)),
+            });
+        } catch (error) {
+            digestError = error;
+        }
+
+        const invalidInteger = JSON.parse(
+            bytes(paths.manifest).toString("utf8")
+        );
+        invalidInteger.journalTerminal.seq = "33";
+        invalidInteger.bundleDigest = bundleDigest(invalidInteger);
+        try {
+            proposePromptRefinerShadowStage({
+                ...checkedIn(),
+                manifestBytes: Buffer.from(JSON.stringify(invalidInteger)),
+            });
+        } catch (error) {
+            integerError = error;
+        }
+    } finally {
+        RegExp.prototype.test = originalTest;
+        Number.isSafeInteger = originalSafeInteger;
+    }
+
+    assert.equal(
+        validProposal.proposalDigest,
+        PROMPT_REFINER_SHADOW_STAGE_PROPOSAL_DIGEST
+    );
+    assert.match(
+        digestError.message,
+        /prompt_refiner_shadow_admission_evidence_file_digest/
+    );
+    assert.match(
+        integerError.message,
+        /prompt_refiner_shadow_admission_journal_terminal_seq_integer/
+    );
+});
+
 test("private byte snapshots survive synchronous mutation before decode", async () => {
     const descriptor = Object.getOwnPropertyDescriptor(
         TextDecoder.prototype,
