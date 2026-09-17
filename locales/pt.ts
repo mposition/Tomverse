@@ -2270,4 +2270,99 @@ export const pt = {
             },
         },
     },
+    // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
+    helpGuide: {
+        menuItem: "Descobrir como fazer algo",
+        title: "O que você quer fazer?",
+        intro: "Escolha uma tarefa para ver onde ela é feita. Este guia só indica o caminho: não lê suas conversas ou arquivos e não altera nenhuma configuração.",
+        back: "Todas as tarefas",
+        close: "Fechar",
+        whereToGo: "Para onde ir",
+        opensInNewTab: "Abre em uma nova aba",
+        signInRequired: "Entre na sua conta para usar isto.",
+        signIn: "Entrar",
+        unavailable: "Indisponível no momento.",
+        stepUnavailable: "Indisponível no momento",
+        stepsTitle: "Etapas",
+        intents: {
+            importedConversations: {
+                label: "Trazer conversas de outra IA",
+                guide: "Importe conversas que você exportou de outro serviço de IA e continue uma delas aqui.",
+            },
+            manageMemory: {
+                label: "Ver ou apagar o que o Tomverse lembra",
+                guide: "As configurações de memória mostram o que sua conta lembra e permitem corrigir ou apagar.",
+            },
+            chooseModels: {
+                label: "Escolher ou comparar modelos de IA",
+                guide: "Escolha um modelo para uma resposta focada, ou até três para comparar respostas lado a lado.",
+            },
+            aiReview: {
+                label: "Comparar respostas com o AI Review",
+                guide: "Quando duas ou três respostas terminarem, abra o AI Review, confira os créditos estimados e execute.",
+            },
+            attachFiles: {
+                label: "Anexar arquivos ou Google Drive",
+                guide: "Adicione arquivos ou documentos do Google Drive a uma pergunta pela caixa de texto.",
+            },
+            projects: {
+                label: "Agrupar conversas em um projeto",
+                guide: "Crie um projeto e mova as conversas para ele pelo menu de cada conversa.",
+            },
+            lockOrShare: {
+                label: "Bloquear ou compartilhar uma conversa",
+                guide: "Bloqueie uma conversa salva com senha ou compartilhe um instantâneo limitado somente leitura.",
+            },
+            creditsAndPlan: {
+                label: "Entender créditos e planos",
+                guide: "Veja como os créditos funcionam, confira seu plano ou compare planos.",
+            },
+            billingAndRefund: {
+                label: "Reembolsos e cobrança",
+                guide: "Leia a política de reembolso e veja onde seu plano e sua cobrança são gerenciados.",
+            },
+            emailNotifications: {
+                label: "Escolher quais e-mails receber",
+                guide: "Nas configurações de e-mail você escolhe quais mensagens sua conta recebe.",
+            },
+            exportOrDeleteAccountData: {
+                label: "Baixar seus dados ou excluir a conta",
+                guide: "Nas configurações de dados da conta você baixa seus dados ou exclui sua conta.",
+            },
+            reportAProblem: {
+                label: "Relatar um problema",
+                guide: "Tente mais uma vez no menor escopo e depois envie um relato do que aconteceu.",
+            },
+        },
+        steps: {
+            import: "Importar conversas",
+            continue: "Continuar uma conversa importada",
+        },
+        destinations: {
+            settingsSection: {
+                externalImport: "Abrir importação de conversas",
+                memory: "Abrir configurações de memória",
+                emailNotifications: "Abrir configurações de e-mail",
+                accountData: "Abrir dados da conta",
+            },
+            settingsTab: {
+                plan: "Abrir plano e cobrança",
+            },
+            guideSection: {
+                modelsAndPanels: "Ler: modelos de IA e painéis",
+                aiReview: "Ler: usar o AI Review",
+                filesAndDrive: "Ler: arquivos e Google Drive",
+                projects: "Ler: usar projetos",
+                lockAndShare: "Ler: bloqueio e compartilhamento",
+                creditsAndPlans: "Ler: créditos e planos",
+                troubleshooting: "Ler: solução de problemas",
+            },
+            publicRoute: {
+                pricing: "Comparar planos",
+                refund: "Ler a política de reembolso",
+                helpCentre: "Abrir a central de ajuda",
+            },
+            feedback: "Escrever um relato",
+        },
+    },
 } satisfies typeof en;

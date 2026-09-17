@@ -24,6 +24,8 @@ import { isE2EFixtureMode } from "@/lib/e2eTestMode";
 import {
   getPublicAppSettings,
   isChatStarterEnabled,
+  isExternalContinuationEnabledCached,
+  isExternalImportEnabled,
   isImageGenerationEnabled,
   isPromptRefinerEnabled,
   isVoiceInputEnabled,
@@ -48,6 +50,8 @@ import {
 import { resolveWebSearchBackendReadiness } from "@/lib/webSearchBackendRuntime";
 import { GuestVerificationProvider } from "@/components/chat/GuestVerificationProvider";
 import { ChatPageClient } from "@/app/(site)/(application)/chat/ChatPageClient";
+import { HelpGuideAccessProvider } from "@/components/chat/HelpGuideAccess";
+import { HELP_FLAG_KEYS } from "@/lib/helpNavigationIntents";
 
 // The chat UI itself is a Client Component (state, storage, streaming), so
 // this Server Component exists for one reason: to hand it the guest default
@@ -111,6 +115,23 @@ export async function ReviewWorkspaceShell({
     after an operator pulled the switch. A read failure leaves it false.
   */
   let chatStarterEnabled = false;
+  /*
+    HELP-NAV-01. The flags the guided help reads, resolved here for the reason
+    the props above are: a Client Component cannot read AppSetting rows. Kept
+    out of the try block below so a failure here leaves only these off (the
+    guide then says "not available right now") without touching anything else.
+  */
+  const helpGuideEnabledFlagKeys: string[] = [];
+  try {
+    if (await isExternalImportEnabled()) helpGuideEnabledFlagKeys.push(HELP_FLAG_KEYS.externalImport);
+    if (await isExternalContinuationEnabledCached()) {
+      helpGuideEnabledFlagKeys.push(HELP_FLAG_KEYS.externalContinuation);
+    }
+  } catch (error) {
+    console.error("Failed to load help guide flags for chat:", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
   try {
     guestDefaultModelId = (await getPublicAppSettings()).guestDefaultModelId;
     imageGenerationEnabled = await isImageGenerationEnabled();
@@ -259,6 +280,7 @@ export async function ReviewWorkspaceShell({
     <GuestVerificationProvider
       siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY}
     >
+      <HelpGuideAccessProvider enabledFlagKeys={helpGuideEnabledFlagKeys}>
       <ChatPageClient
         guestDefaultModelId={guestDefaultModelId}
         imageGenerationEnabled={imageGenerationEnabled}
@@ -277,6 +299,7 @@ export async function ReviewWorkspaceShell({
         initialConversationId={initialConversationId}
         mountedSurface={mountedSurface}
       />
+      </HelpGuideAccessProvider>
     </GuestVerificationProvider>
   );
 }

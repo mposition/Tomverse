@@ -2270,4 +2270,99 @@ export const ko = {
             },
         },
     },
+    // HELP-NAV-01 guided help: pick a task, see where it is done. Directions only.
+    helpGuide: {
+        menuItem: "하고 싶은 작업 찾기",
+        title: "무엇을 하고 싶으세요?",
+        intro: "작업을 고르면 어디서 할 수 있는지 안내합니다. 길만 알려 드리며, 대화나 파일을 읽거나 설정을 바꾸지 않습니다.",
+        back: "전체 작업",
+        close: "닫기",
+        whereToGo: "이동할 곳",
+        opensInNewTab: "새 탭에서 열림",
+        signInRequired: "로그인하면 사용할 수 있습니다.",
+        signIn: "로그인",
+        unavailable: "지금은 사용할 수 없습니다.",
+        stepUnavailable: "지금은 사용할 수 없음",
+        stepsTitle: "단계",
+        intents: {
+            importedConversations: {
+                label: "다른 AI 대화 가져오기",
+                guide: "다른 AI 서비스에서 내보낸 대화를 가져온 뒤, 그중 하나를 여기서 이어갈 수 있습니다.",
+            },
+            manageMemory: {
+                label: "기억한 내용 보기·삭제",
+                guide: "메모리 설정에서 계정이 기억하는 내용을 확인하고 고치거나 삭제할 수 있습니다.",
+            },
+            chooseModels: {
+                label: "AI 모델 고르기·비교",
+                guide: "집중 답변은 모델 하나, 답변을 나란히 비교하려면 최대 세 모델을 고릅니다.",
+            },
+            aiReview: {
+                label: "AI Review로 답변 교차검토",
+                guide: "답변 두세 개가 완료되면 AI Review를 열고 예상 크레딧을 확인한 뒤 실행합니다.",
+            },
+            attachFiles: {
+                label: "파일·Google Drive 첨부",
+                guide: "입력창에서 질문에 파일이나 Google Drive 문서를 추가합니다.",
+            },
+            projects: {
+                label: "대화를 프로젝트로 묶기",
+                guide: "프로젝트를 만든 뒤 각 대화 메뉴에서 프로젝트로 옮깁니다.",
+            },
+            lockOrShare: {
+                label: "대화 잠그기·공유",
+                guide: "저장된 대화를 비밀번호로 잠그거나, 범위가 제한된 읽기 전용 스냅샷으로 공유합니다.",
+            },
+            creditsAndPlan: {
+                label: "크레딧과 플랜 이해하기",
+                guide: "크레딧이 어떻게 쓰이는지 보고, 내 플랜을 확인하거나 플랜을 비교합니다.",
+            },
+            billingAndRefund: {
+                label: "환불과 결제",
+                guide: "환불 정책을 읽고, 플랜과 결제를 관리하는 곳을 확인합니다.",
+            },
+            emailNotifications: {
+                label: "받을 이메일 선택",
+                guide: "이메일 설정에서 계정이 받을 메일을 고릅니다.",
+            },
+            exportOrDeleteAccountData: {
+                label: "내 데이터 다운로드·계정 삭제",
+                guide: "계정 데이터 설정에서 데이터를 다운로드하거나 계정을 삭제합니다.",
+            },
+            reportAProblem: {
+                label: "문제 신고",
+                guide: "가장 작은 범위로 한 번 다시 시도한 뒤, 무슨 일이 있었는지 신고합니다.",
+            },
+        },
+        steps: {
+            import: "대화 가져오기",
+            continue: "가져온 대화 이어가기",
+        },
+        destinations: {
+            settingsSection: {
+                externalImport: "대화 가져오기 열기",
+                memory: "메모리 설정 열기",
+                emailNotifications: "이메일 설정 열기",
+                accountData: "계정 데이터 설정 열기",
+            },
+            settingsTab: {
+                plan: "플랜·결제 열기",
+            },
+            guideSection: {
+                modelsAndPanels: "안내 읽기: AI 모델과 답변 패널",
+                aiReview: "안내 읽기: AI Review 사용법",
+                filesAndDrive: "안내 읽기: 파일과 Google Drive",
+                projects: "안내 읽기: 프로젝트 사용 방법",
+                lockAndShare: "안내 읽기: 잠금과 공유",
+                creditsAndPlans: "안내 읽기: 크레딧과 플랜",
+                troubleshooting: "안내 읽기: 문제 해결",
+            },
+            publicRoute: {
+                pricing: "플랜 비교하기",
+                refund: "환불 정책 읽기",
+                helpCentre: "도움말 센터 열기",
+            },
+            feedback: "신고 작성하기",
+        },
+    },
 } satisfies typeof en;

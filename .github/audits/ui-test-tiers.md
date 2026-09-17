@@ -42,7 +42,9 @@ browser coverage without rebuilding E2E" 항목이 이 문서의 존재와 workf
 있습니다. `npm run check:ui-tier-coverage`가 이 목록과 태그를 양방향으로
 맞춥니다.
 
-현재 실측: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
+현재 실측: 2026-09-17 기준 `CI=1 --grep=@ui-risk --list`가 desktop-chromium과 mobile-chromium 각 project에서 **63개 파일, 890 test**를 선택합니다(두 project 합계 1,780). +1 파일은 `help-guide.spec.ts`(HELP-NAV-01 선택형 안내, test 3건)이고, 나머지 +21 test는 2026-09-16 이후 develop에서 기존 태그 spec이 늘어난 몫입니다(develop `0fb27486` 기준으로 셈).
+
+이전 값: 2026-09-16 기준 `CI=1 --grep=@ui-risk --list`가
 desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**를
 선택합니다(두 project 합계 1,732). 파일 수는 그대로이고 +4는 전부
 `conversation-export.spec.ts`의 기존 `@ui-risk` describe 안입니다 — 대화 컨텍스트
@@ -118,6 +120,7 @@ desktop-chromium과 mobile-chromium 각 project에서 **62개 파일, 866 test**
 | `unsubscribe-link.spec.ts` |
 | `external-conversation-continuation.spec.ts` |
 | `conversation-export.spec.ts` |
+| `help-guide.spec.ts` |
 
 `voice-input-composer.spec.ts`는 음성 입력 기능과 함께 태그를 달고 합류했고,
 이 표는 따라오지 않아 `check:ui-tier-coverage`가 막았습니다. 태그 기준

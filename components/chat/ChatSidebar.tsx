@@ -28,8 +28,9 @@ import { createPortal } from "react-dom";
 import { useLanguage } from "@/components/LanguageProvider";
 import { NewConversationLauncher } from "@/components/chat/NewConversationLauncher";
 import Link from "next/link";
-import { AlertTriangle, ChevronDown, CircleHelp, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, CircleHelp, Compass, Crown, Download, Folder, FolderPlus, Image as ImageIcon, Link2Off, Lock, MessageSquare, MoreVertical, PanelLeftClose, PanelLeftOpen, Pencil, Pin, Search, Share2, SlidersHorizontal, Sparkles, Trash2, Unlock, X } from "lucide-react";
 import { FeedbackButton } from "@/components/chat/FeedbackButton";
+import { HelpGuideDialog } from "@/components/chat/HelpGuideDialog";
 import { UserUsageSummary } from "@/components/chat/UserUsageSummary";
 import { FeatureHelpPopover } from "@/components/chat/FeatureHelpPopover";
 import { chatHelpCopy } from "@/components/chat/chatHelpCopy";
@@ -411,6 +412,9 @@ export function ChatSidebar({
     const helpMenuRef = useRef<HTMLSpanElement | null>(null);
     const helpMenuPanelRef = useRef<HTMLSpanElement | null>(null);
     const [showHelpMenu, setShowHelpMenu] = useState(false);
+    // HELP-NAV-01 guided help, opened from the help menu below.
+    const [showHelpGuide, setShowHelpGuide] = useState(false);
+    const helpButtonRef = useRef<HTMLButtonElement | null>(null);
     const [sidebarTourStep, setSidebarTourStep] = useState<number | null>(null);
     const organizerPreference = useSyncExternalStore(
         subscribeOrganizerPreference,
@@ -1350,6 +1354,7 @@ export function ChatSidebar({
                 )}
                 <span ref={helpMenuRef} className="group/help relative inline-flex">
                     <button
+                        ref={helpButtonRef}
                         type="button"
                         aria-label={t("sidebar.helpAndGuides")}
                         aria-describedby={helpTooltipId}
@@ -1415,6 +1420,18 @@ export function ChatSidebar({
                                 <CircleHelp className="h-4 w-4 text-blue-500" aria-hidden="true" />
                                 {helpCopy.openFullGuide}
                             </Link>
+                            <button
+                                type="button"
+                                data-testid="sidebar-help-guide"
+                                onClick={() => {
+                                    setShowHelpMenu(false);
+                                    setShowHelpGuide(true);
+                                }}
+                                className="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            >
+                                <Compass className="h-4 w-4 text-blue-500" aria-hidden="true" />
+                                {t("helpGuide.menuItem")}
+                            </button>
                             <BuildInfoMenuItem
                                 menuItemClassName="flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
                                 iconClassName="h-4 w-4 text-blue-500"
@@ -1422,6 +1439,7 @@ export function ChatSidebar({
                         </span>
                     ) : null}
                 </span>
+                <HelpGuideDialog open={showHelpGuide} onClose={() => setShowHelpGuide(false)} returnFocusRef={helpButtonRef} />
                 </div>
             </div>
 
@@ -2609,6 +2627,7 @@ export function ChatSidebar({
                         currentPlan={displayedPlan}
                         attachmentCount={attachmentCount}
                         triggerTestId="sidebar-feedback-button"
+                        respondsToOpenRequests
                     />
                 </div>
             </div>
