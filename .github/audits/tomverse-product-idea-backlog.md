@@ -99,6 +99,12 @@ Memory 유료 평가·MCP·Review Agent/Task orchestrator·산출물 버전/편�
 기존 승인/의존성 조건을 유지합니다. SEC-OPS-01은 별도 운영 트랙이며 이번에 예약을 재개하거나
 운영 점검을 실행하지 않았습니다. 발견된 긴급 위험이 있으면 그때 영향을 근거로 재배치합니다.
 
+**중앙 추론 플랫폼 제안 추가(2026-09-17)**: 아래 L에 Tomverse Intelligence Platform을
+단계별 후보로 등록했습니다. 지금 병행 가능한 것은 INT-BOUNDARY-01의 작은 책임/계약
+설계이며 위 일곱 작업에 여덟 번째 구현을 동시에 추가하는 권고가 아닙니다. 기존 핵심
+담당과 Code 담당이 경계를 합의하고, 추출·Gateway·Memory 연결·외부 API는 각 조건 후에
+진행합니다. 주 투자 순위와 다른 세션이 기록한 기존 작업의 진행/완료 상태는 유지합니다.
+
 ### 확인 근거와 한계
 
 - 코드 분석: 원격 fetch → 새 분석 worktree → develop `de346b81` 조사 후, #1510 문서만
@@ -1683,7 +1689,58 @@ P3 검토로 남기며 다른 실제 소비처가 나타나기 전에 기존 이
   Genspark 공식 안내를 확인했으며 실제 경쟁 품질·production 실행 상태는 미확인입니다.
 - [실행 orchestrator·A2 추가 제안 상세 검토](./tomverse-task-orchestrator-strategy-review-2026-09-15.md).
 
+### L. 제품 간 추론·정보 연결 — Tomverse Intelligence Platform
+
+2026-09-17 첨부 토론은 **방향 채택, 구조·순서 보정 후 후보 등록**으로 판단했습니다.
+목표는 제품마다 공급자 연결을 중복 구현하지 않고 사용자가 승인한 정보를 필요한 제품으로
+안전하게 연결하는 것입니다. 공통 코드·계약·서버·DB는 별개 선택이며, 모든 호출을 중앙
+서버로 옮기거나 별도 플랫폼 제품을 지금 출시하는 뜻이 아닙니다.
+
+| ID | 우선순위·상태 | 다음 완료 단위·착수 조건 |
+| --- | --- | --- |
+| **INT-BOUNDARY-01** | **작은 병행 P1, 설계 후보** | 웹·Code의 호출/권한/과금/Memory 책임표, 식별자 필수/선택 범위, 데이터 흐름, 실제 공통 호출 한 경로를 정리하고 ADR 승인 요청. 플랫폼 전체 구현은 제외 |
+| **INT-CORE-01** | **조건부 P2**, CODE-01·CHAT-01 연계 | 경계 승인 후 제품 prompt와 저수준 연결부 분리. 최소 provider의 stream·usage/cache·오류·취소·dispatch 계약을 두 실제 소비자로 검증. Code 완료를 전면 추출에 종속시키지 않음 |
+| **INT-GATEWAY-01** | **조건부 P2**, 내부 실행 경계 | 두 소비자의 공통화 가치 확인 후 기존 registry·routing/trace·예약/정산을 adapter로 연결. 한 경로의 실패/중복/비용/지연·rollback 증거. 새 상시 서버와 Control Plane 서비스 분리는 선택 사항 |
+| **INT-MEMORY-01** | **조건부 P2**, MEMORY-01 연계 | provenance·권위·동의·소비 제품·철회 계약 설계. Release B 안전 근거와 제품 간 정책 승인 후 사용자가 선택한 저민감 항목 한 건 연결. 기억 전체 자동 공유/이관 금지 |
+| **INT-CODE-SYNC-01** | **후속 P3** | Code 내부 실사용과 INT-MEMORY-01 계약 후 선택적 동기화. 실제 전송 내용 확인·철회·오프라인/충돌·삭제 뒤 재등장 방지. 소스/diff/workspace 자동 전송 금지 |
+| **INT-API-01** | **후속 P3, 사업 검증** | 실제 외부 고객 업무·내부 재사용 증거·원가/공급자 계약/키 보관/지원 조건부터 검증. 충족 후 한 기능 비공개 베타 범위 결정. Managed/Enterprise 즉시 개발 아님 |
+
+- **지금 병행**: INT-BOUNDARY-01 설계만 권고합니다. 계약 → 최소 core 적합성 → 내부
+  호출 adapter 순으로 좁게 진행하고, 공통화를 Chat·Code 완성의 전면 선행 조건으로 두지 않습니다.
+  Memory 계약의 문서 검토는 병행 가능하지만 실제 동기화는 별도 승인/안전 조건 이후입니다.
+- **제품 키는 권한이 아님**: 현 웹 허용값은 `chat/review/studio`이고 `code`는 아직 없습니다.
+  호출의 tenant/product/subject 필드는 인증된 주체와 리소스 권한에 결속해야 합니다.
+  기존 개인 계정에 organization 권한 모델을 이미 갖췄다고 가정하거나 DB enum부터 늘리지 않습니다.
+- **과금·재시도**: 기존 정산 원장이 유일한 사용자 청구 권위로 남습니다. SDK/core/Gateway/
+  제품의 retry가 곱해지지 않도록 총 시도 예산과 실행 소유자를 정하며, 첫 토큰 후 fallback
+  금지·불확실 dispatch·취소·실패 중 usage 보존을 제품별로 유지합니다. quota 하나로 사용자
+  크레딧·동시 실행·운영 원가 한도를 합치지 않습니다.
+- **Memory는 만능 원장이 아님**: 선호/사실/사용자 결정의 참고 문맥, task 실행 상태,
+  권위 있는 정책을 구분합니다. 모델이 만든 policy 제안이나 높은 confidence를 system 지시로
+  승격하지 않습니다. 공유 동의는 진실성이나 실행 권한의 승인이 아닙니다.
+- **Code 기본 경로 보존**: 로컬 runtime → 사용자가 선택한 provider를 기본으로 유지합니다.
+  Tomverse 서버가 중계하지 않는다는 뜻이지 provider에도 코드가 전송되지 않는다는 뜻은 아닙니다.
+  요약도 민감할 수 있어 전송 내용·목적·수신 제품을 확인하고, 중앙 서비스 없이 기본 작업이
+  가능해야 합니다. 오프라인 사본의 즉시 회수를 약속하지 않습니다.
+- **저장소/배포는 후속 결정**: 웹의 순수 shared-packages 경계를 무너뜨리지 않습니다.
+  그 제약이 곧 독립 저장소 필수라는 뜻은 아니므로 순수 contracts와 서버/로컬 adapter를
+  분리해 소유 위치·버전 고정·호환성부터 정합니다. 검증 전 서비스·DB를 중복 구축하지 않습니다.
+- **중복 방지**: CACHE-01/CHAT-LATENCY-01 조사, MEMORY-01 안전 게이트,
+  CREDIT-CAP-01/AGENT-BILL-01 정산, TASK-ORCH-01 실행 원장, NATIVE-01 UI/API,
+  MCP-01 도구 실행 권한은 기존 담당 경계를 유지합니다. 새 플랫폼 이름으로 다시 만들지 않습니다.
+- **기준/한계**: 원격 동기화 후 별도 worktree에서 웹 develop `84e47898814ffed192e16c56fe8940317a0506d0`,
+  main `0e841cc01d39a790e0fe9238bc52479942becc04`, Code main
+  `85e13c552157402d4e33c8a9d5e346f321bca503`을 표적 조사했습니다. production/유료 호출/
+  미푸시 Code 개발 상태는 미확인이고 제품 코드·정책·런타임은 변경하지 않았습니다.
+- [상세 검토·완료 증거·설계 보정](./tomverse-intelligence-platform-review-2026-09-17.md) ·
+  [첨부 토론 원문 전체](./tomverse-intelligence-platform-proposal-original-2026-09-17.md).
+
 ### 목록 정정 기록
+
+- 2026-09-17: Chat·Review·Code·Studio의 공통 추론/승인된 정보 연결 제안을 최신 웹·Code와
+  대조해 L에 INT-BOUNDARY/CORE/GATEWAY/MEMORY/CODE-SYNC/API 여섯 후보로 나눴습니다.
+  작은 경계 설계만 병행 P1로 두고 독립 저장소·상시 서비스·외부 API 판매는 조건부 후속으로
+  보정했습니다. 주 투자 순위와 기존 완료 기록은 유지하고 제품 구현 없이 원문·검토·목록을 갱신했습니다.
 
 - 2026-09-17: Chat 시작 카탈로그 staging 검증(판정 통과, develop #1510)의 발견을 코드와
   대조해 F에 "starter staging 검증 후속" 여덟 항목을 추가했습니다. P1은 STARTER-COMPARE-01과
