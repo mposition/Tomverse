@@ -5,23 +5,30 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import {
+  DELEGATE_NAME_ALLOWLIST,
+  EXCLUDED_PREFIXES,
   PROTECTED_TABLES,
   RAW_SQL_ALLOWLIST,
-  UNSAFE_RAW_ALLOWLIST,
+  RUNTIME_SQL_ALLOWLIST,
   checkProtectedTableWriters,
+  selectScannedPaths,
+  sqlWithoutComments,
 } from "../scripts/check-protected-table-writers-core.mjs";
 
 // The protected-table writer check: positive and negative fixtures for each
 // rule, pinned as deliberately as each other. A check that fires on reads gets
-// switched off; one that misses an alias is decoration.
+// switched off; one that misses an alias is decoration. The bypass fixtures
+// below include every probe from the independent review that rejected the
+// first version.
 //
 // Contract: docs/policy/marketing-automation.md §6.
 
 const ROOT = resolve(import.meta.dirname, "..");
 
 const realAllowlistPaths = new Set([
+  ...DELEGATE_NAME_ALLOWLIST.map((entry) => entry.path),
   ...RAW_SQL_ALLOWLIST.map((entry) => entry.path),
-  ...UNSAFE_RAW_ALLOWLIST.map((entry) => entry.path),
+  ...RUNTIME_SQL_ALLOWLIST.map((entry) => entry.path),
 ]);
 
 /** Findings for fixture files only: the real allowlisted files are not in a fixture run. */
@@ -31,6 +38,48 @@ const check = (sources) =>
   );
 
 const one = (path, text) => check([{ path, text }]);
+
+const assertOneFinding = (path, text, rule) => {
+  const findings = one(path, text);
+  assert.equal(findings.length >= 1, true, `${path} should fail: ${text}`);
+  assert.ok(
+    findings.some((finding) => finding.rule === rule),
+    `${path} should fail with ${rule}, got ${JSON.stringify(findings)}`
+  );
+};
+
+test("the scan reaches root entry points and every JS/TS extension, and nothing excluded", () => {
+  const selected = selectScannedPaths([
+    "instrumentation.ts",
+    "proxy.ts",
+    "lib/bypass.mts",
+    "lib/bypass.cts",
+    "scripts/bypass.cjs",
+    "components/Bypass.jsx",
+    "apps/mobile/src/x.ts",
+    "prisma/migrations/1/migration.sql",
+    "scripts\\windows-style.mjs",
+    "tests/integration/x.db.test.ts",
+    "prisma/generated/prisma/client.ts",
+    "prisma/migrations-archive/1/migration.sql",
+    "docs/example.ts",
+    "README.md",
+    "scripts/check-protected-table-writers-core.mjs",
+    "scripts/check-protected-table-writers-bypass.mjs",
+  ]);
+  assert.deepEqual(selected, [
+    "instrumentation.ts",
+    "proxy.ts",
+    "lib/bypass.mts",
+    "lib/bypass.cts",
+    "scripts/bypass.cjs",
+    "components/Bypass.jsx",
+    "apps/mobile/src/x.ts",
+    "prisma/migrations/1/migration.sql",
+    "scripts/windows-style.mjs",
+    "scripts/check-protected-table-writers-bypass.mjs",
+  ]);
+});
 
 test("delegate writes are findings, in every spelling", () => {
   const cases = {
@@ -47,13 +96,51 @@ test("delegate writes are findings, in every spelling", () => {
     "app/k.tsx":
       "export default async function K() { await prisma.adminAuditLog.updateMany({}); return <div /> }",
     "scripts/l.mjs": "await prisma.adminAuditLog.createManyAndReturn({ data })",
+    "lib/m.mts": "await prisma.adminAuditLog.create({ data })",
+    "lib/n.ts": "const { adminAuditLog: audit } = prisma; await audit.create({ data });",
+    "lib/o.ts": "const { adminAuditLog } = tx; await adminAuditLog.create({ data });",
   };
   for (const [path, text] of Object.entries(cases)) {
-    const findings = one(path, text);
-    assert.equal(findings.length, 1, `${path}: ${text}`);
-    assert.equal(findings[0].rule, "delegate-write", path);
-    assert.equal(findings[0].table, "AdminAuditLog", path);
+    assertOneFinding(path, text, "delegate-write");
   }
+});
+
+test("a delegate reached by name at runtime is a finding", () => {
+  assertOneFinding(
+    "lib/named.ts",
+    'const model = "adminAuditLog"; await prisma[model].create({ data });',
+    "delegate-name"
+  );
+  assertOneFinding(
+    "lib/named.ts",
+    'const model = "adminAuditLog"; await prisma[model].create({ data });',
+    "dynamic-delegate"
+  );
+  assertOneFinding(
+    "lib/reflect.ts",
+    'await Reflect.get(prisma, "adminAuditLog").create({ data });',
+    "delegate-name"
+  );
+  assertOneFinding(
+    "lib/assembled.ts",
+    'const name = ["admin", "AuditLog"].join(""); await prisma[name].create({ data });',
+    "dynamic-delegate"
+  );
+  assertOneFinding(
+    "lib/helper.ts",
+    "export const write = (source, key, data) => source[key].create({ data });",
+    "dynamic-delegate"
+  );
+  assertOneFinding(
+    "lib/reflect-dynamic.ts",
+    "export const pick = (tx, key) => Reflect.get(tx, key);",
+    "dynamic-delegate"
+  );
+  assertOneFinding(
+    "lib/destructure-dynamic.ts",
+    "export const pick = (key) => { const { [key]: d } = prisma; return d; };",
+    "dynamic-delegate"
+  );
 });
 
 test("reads, the writer module and look-alikes are not findings", () => {
@@ -72,7 +159,6 @@ test("reads, the writer module and look-alikes are not findings", () => {
     []
   );
   assert.deepEqual(one("lib/adminAudit.ts", "await client.adminAuditLog.create({ data })"), []);
-  // An object key in a mock, a local of the same name, a type name and a comment.
   assert.deepEqual(
     one(
       "lib/lookalikes.ts",
@@ -80,7 +166,10 @@ test("reads, the writer module and look-alikes are not findings", () => {
         "const mock = { adminAuditLog: { create: async () => ({ id: '1' }) } };",
         "const adminAuditLog = rows; adminAuditLog.push(row);",
         "type Input = Prisma.AdminAuditLogCreateInput;",
+        'type Record = "feedback" | "adminAuditLog";',
         "// prisma.adminAuditLog.create is only called by lib/adminAudit.ts",
+        "const item = rows[index]; const cell = grid[row][column];",
+        "const { [FIELD]: removed, ...rest } = item.gold;",
       ].join("\n")
     ),
     []
@@ -101,15 +190,17 @@ test("raw SQL naming the table beside a write verb is a finding, in either order
       'await prisma.$executeRaw`ALTER TABLE "AdminAuditLog" DISABLE TRIGGER ALL`',
     "prisma/migrations/20990101000000_x/migration.sql":
       "UPDATE \"AdminAuditLog\" SET \"summary\" = '';",
+    "prisma/migrations/20990101000000_quoted/migration.sql":
+      "SELECT '-- literal'; DELETE FROM \"AdminAuditLog\";",
+    "prisma/migrations/20990101000000_dollar/migration.sql":
+      "CREATE FUNCTION f() RETURNS void AS $body$ DELETE FROM \"AdminAuditLog\"; $body$ LANGUAGE sql;",
   };
   for (const [path, text] of Object.entries(cases)) {
-    const findings = one(path, text);
-    assert.equal(findings.length, 1, path);
-    assert.equal(findings[0].rule, "raw-sql", path);
+    assertOneFinding(path, text, "raw-sql");
   }
 });
 
-test("a table name without a write verb, or only in comments, is not a raw SQL finding", () => {
+test("a table name without a write verb, or only in real comments, is not a raw SQL finding", () => {
   assert.deepEqual(
     one("lib/select.ts", 'await prisma.$queryRaw`SELECT count(*) FROM "AdminAuditLog"`'),
     []
@@ -121,11 +212,10 @@ test("a table name without a write verb, or only in comments, is not a raw SQL f
   assert.deepEqual(
     one(
       "prisma/migrations/20990101000000_y/migration.sql",
-      '-- never UPDATE "AdminAuditLog" here\n/* DELETE FROM "AdminAuditLog" */\nSELECT 1;'
+      '-- never UPDATE "AdminAuditLog" here\n/* DELETE /* nested */ FROM "AdminAuditLog" */\nSELECT 1;'
     ),
     []
   );
-  // An action name is not a verb: `update_started` has no word boundary.
   assert.deepEqual(
     one(
       "lib/action.ts",
@@ -135,40 +225,76 @@ test("a table name without a write verb, or only in comments, is not a raw SQL f
   );
 });
 
-test("runtime-built SQL is inventoried by file and count, in both directions", () => {
-  const added = one("lib/new.ts", "await tx.$executeRawUnsafe(sql, ...values)");
-  assert.equal(added.length, 1);
-  assert.equal(added[0].rule, "unsafe-raw");
+test("the SQL comment lexer keeps quotes, identifiers and dollar bodies", () => {
+  assert.equal(sqlWithoutComments("SELECT '--x' AS a; -- gone\nSELECT 1"), "SELECT '--x' AS a;  \nSELECT 1");
+  assert.equal(sqlWithoutComments('SELECT "a--b" FROM t'), 'SELECT "a--b" FROM t');
+  assert.equal(sqlWithoutComments("SELECT 'it''s /* not */ a comment'"), "SELECT 'it''s /* not */ a comment'");
+  assert.equal(sqlWithoutComments("$$ -- kept $$ x /* a /* b */ c */ y"), "$$ -- kept $$ x   y");
+});
 
-  const prismaRaw = one(
-    "lib/prisma-raw.ts",
-    "await tx.$queryRaw`SELECT ${Prisma.raw(column)}`"
+test("an allowlisted raw SQL file that gains a statement fails", () => {
+  const entry = RAW_SQL_ALLOWLIST.find((candidate) => candidate.path.endsWith(".sql"));
+  const original = readFileSync(resolve(ROOT, entry.path), "utf8");
+  const clean = checkProtectedTableWriters({
+    sources: [{ path: entry.path, text: original }],
+  }).filter((finding) => finding.path === entry.path);
+  assert.deepEqual(clean, [], "the recorded counts match the file as it stands");
+
+  const extended = checkProtectedTableWriters({
+    sources: [{ path: entry.path, text: `${original}\nDELETE FROM "AdminAuditLog";\n` }],
+  }).filter((finding) => finding.path === entry.path);
+  assert.equal(extended.length, 1);
+  assert.equal(extended[0].rule, "raw-sql");
+});
+
+test("runtime-built SQL is inventoried however it is reached, in both directions", () => {
+  const cases = {
+    "lib/new.ts": "await tx.$executeRawUnsafe(sql, ...values)",
+    "lib/prisma-raw.ts": "await tx.$queryRaw`SELECT ${Prisma.raw(column)}`",
+    "lib/prisma-raw-bracket.ts": 'await tx.$executeRaw(Prisma["raw"](sql))',
+    "lib/destructured.ts": "const { $executeRawUnsafe: run } = tx; await run.call(tx, sql);",
+    "lib/named-method.ts": 'await tx["$queryRawUnsafe"](sql)',
+    "lib/reflect-method.ts": 'await Reflect.get(tx, "$executeRawUnsafe").call(tx, sql)',
+    "lib/non-inline.ts": "const statement = build(); await tx.$executeRaw(statement);",
+    "lib/extends.ts": "export const extended = prisma.$extends({ model: {} });",
+    "lib/driver.ts": 'import { Pool } from "pg"; await new Pool().query(`DELETE FROM "${table}"`);',
+    "scripts/driver.cjs": 'const { Client } = require("pg");',
+    "scripts/driver-dynamic.mjs": 'const { default: postgres } = await import("postgres");',
+  };
+  for (const [path, text] of Object.entries(cases)) {
+    assertOneFinding(path, text, "runtime-sql");
+  }
+
+  assert.deepEqual(
+    one(
+      "lib/inline.ts",
+      [
+        'await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"k"}))`',
+        'await tx.$executeRaw(Prisma.sql`UPDATE "Other" SET "x" = ${value}`)',
+      ].join("\n")
+    ),
+    []
   );
-  assert.equal(prismaRaw.length, 1);
-  assert.equal(prismaRaw[0].rule, "unsafe-raw");
 
-  const [entry] = UNSAFE_RAW_ALLOWLIST;
+  const [entry] = RUNTIME_SQL_ALLOWLIST.filter((candidate) => candidate.count > 1);
+  const gone = checkProtectedTableWriters({
+    sources: [{ path: entry.path, text: "export const nothing = 1;" }],
+  }).filter((finding) => finding.path === entry.path);
+  assert.equal(gone.length, 1, "an entry whose uses are gone is a finding");
+  assert.match(gone[0].detail, /found 0/);
+
   const extra = checkProtectedTableWriters({
     sources: [
       {
         path: entry.path,
-        text: Array.from({ length: entry.count + 1 }, () => "await tx.$queryRawUnsafe(q);").join(
-          "\n"
-        ),
+        text: Array.from({ length: entry.count + 1 }, () => "await tx.$queryRawUnsafe(q);").join("\n"),
       },
     ],
   }).filter((finding) => finding.path === entry.path);
-  assert.equal(extra.length, 1, "one more call than reviewed is a finding");
-  assert.match(extra[0].detail, new RegExp(`allowlist says ${entry.count}`));
-
-  const gone = checkProtectedTableWriters({
-    sources: [{ path: entry.path, text: "export const nothing = 1;" }],
-  }).filter((finding) => finding.path === entry.path);
-  assert.equal(gone.length, 1, "an entry whose calls are gone is a finding");
-  assert.match(gone[0].detail, /found 0/);
+  assert.equal(extra.length, 1, "one more use than reviewed is a finding");
 });
 
-test("excluded trees are not scanned", () => {
+test("excluded trees are not scanned, and the self-exclusion is exact", () => {
   assert.deepEqual(
     one(
       "prisma/generated/prisma/internal/class.ts",
@@ -180,15 +306,28 @@ test("excluded trees are not scanned", () => {
     one("prisma/migrations-archive/1/migration.sql", 'INSERT INTO "AdminAuditLog" VALUES (1);'),
     []
   );
+  assertOneFinding(
+    "scripts/check-protected-table-writers-extra.mjs",
+    "await prisma.adminAuditLog.create({ data })",
+    "delegate-write"
+  );
 });
 
-test("a raw SQL allowlist entry that stops matching is reported", () => {
-  const [entry] = RAW_SQL_ALLOWLIST;
-  const findings = checkProtectedTableWriters({
-    sources: [{ path: entry.path, text: "export const unrelated = 'hello';" }],
-  }).filter((finding) => finding.path === entry.path);
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].rule, "stale-allowlist");
+test("every allowlist and exclusion entry carries a reason and a positive count", () => {
+  for (const entry of [
+    ...EXCLUDED_PREFIXES,
+    ...DELEGATE_NAME_ALLOWLIST,
+    ...RAW_SQL_ALLOWLIST,
+    ...RUNTIME_SQL_ALLOWLIST,
+  ]) {
+    assert.ok(typeof entry.reason === "string" && entry.reason.trim().length >= 20, JSON.stringify(entry));
+  }
+  for (const entry of [...DELEGATE_NAME_ALLOWLIST, ...RUNTIME_SQL_ALLOWLIST]) {
+    assert.ok(Number.isInteger(entry.count) && entry.count > 0, JSON.stringify(entry));
+  }
+  for (const entry of RAW_SQL_ALLOWLIST) {
+    assert.ok(entry.tableMentions > 0 && entry.writeVerbs > 0, JSON.stringify(entry));
+  }
 });
 
 test("account deletion's runtime SQL never names a protected table", () => {

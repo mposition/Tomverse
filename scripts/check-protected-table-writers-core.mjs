@@ -14,39 +14,65 @@
  * marketing tables (one store module per S1c of the marketing plan); adding
  * a table is one row here.
  *
- * ## Three rules
+ * ## What is scanned
  *
- * 1. **Delegate writes.** Outside a table's writer files, the Prisma delegate
+ * Every tracked or new (not ignored) source file in the repository with a
+ * JavaScript, TypeScript or SQL extension -- including the root server entry
+ * points (`instrumentation.ts`, `proxy.ts`) and `.mts`/`.cts`/`.cjs`/`.jsx` --
+ * minus the prefixes in EXCLUDED_PREFIXES, each with its reason. The file list
+ * comes from git and the runner fails if git cannot produce it: a scan that
+ * silently read nothing would pass.
+ *
+ * ## Rules
+ *
+ * 1. **delegate-write.** Outside a table's writer files, the Prisma delegate
  *    (`adminAuditLog`) may only be used for a read operation, and only as the
- *    object of an immediate member access. `.create`, `["update"]`, a computed
- *    member, and any use that lets the delegate escape -- assigned to a
- *    variable, destructured, passed as an argument, parenthesised -- are
- *    findings. An escaped delegate is not necessarily a write; it is a write
- *    this check can no longer see, which is the same thing to a reviewer.
+ *    object of an immediate member access. A write, a computed member, and any
+ *    use that lets the delegate escape -- assigned, destructured from the client
+ *    (`const { adminAuditLog: a } = prisma`), passed as an argument,
+ *    parenthesised -- is a finding. An escaped delegate is not necessarily a
+ *    write; it is a write this check can no longer see.
  *
- * 2. **Raw SQL mentions.** For each file, every string and template literal
- *    fragment is joined, and the file is a finding when that text names a
- *    protected table *and* contains a write verb anywhere, in either order.
- *    Joining the whole file is deliberate: a statement split across a helper,
- *    a constant and a template is still one statement to the database, and a
- *    line window was shown to miss exactly that. The price is false positives
- *    in files that name the table in prose; those are listed by path with a
- *    reason, and an entry that stops matching is itself a finding so the list
- *    cannot quietly outlive its files. Migration `.sql` files are read the
- *    same way with comments removed.
+ * 2. **delegate-name.** A string literal equal to a protected delegate name
+ *    outside the writer is counted per file against DELEGATE_NAME_ALLOWLIST.
+ *    That is how `prisma[name]` and `Reflect.get(prisma, name)` get their
+ *    name, so a new occurrence has to be reviewed. Type positions (a union of
+ *    record names) are not counted.
  *
- * 3. **Unsafe raw inventory.** `$executeRawUnsafe`, `$queryRawUnsafe` and
- *    `Prisma.raw` take SQL assembled at runtime, which rule 2 cannot read. Every
- *    call anywhere in the scanned trees is counted per file and must equal the
- *    reviewed allowlist -- more is a new call nobody reviewed, fewer is an
- *    entry that no longer describes the file.
+ * 3. **dynamic-delegate.** A computed member with a non-literal key, either on
+ *    a receiver named like a Prisma client (`prisma`, `tx`, `client`, `db`,
+ *    ...) or immediately followed by a Prisma write operation
+ *    (`x[key].create(`), and `Reflect.get` with a non-literal key on such a
+ *    receiver. The name may have been assembled at runtime, so no literal
+ *    rule can see it. None exist today; any new one fails.
  *
- * ## What it does not see
+ * 4. **raw-sql.** For each file, every string and template literal fragment
+ *    is joined; migration `.sql` files are read with real comments removed by
+ *    a lexer that respects quotes, quoted identifiers and dollar quoting. The
+ *    file is a finding when that text names a protected table *and* contains a
+ *    write verb anywhere, in either order -- a statement split across a
+ *    helper, a constant and a template is still one statement to the
+ *    database. A false positive is allowlisted with its exact number of table
+ *    mentions and write verbs, so adding a real statement to an allowlisted
+ *    file changes a count and fails, and an entry that stops matching fails.
  *
- * A delegate reached through a computed name on the client
- * (`prisma[modelName]`) when the name is not a literal. No such access exists
- * in the scanned trees today; if one is added, rule 1 reports the computed
- * member only when it follows the delegate, not when it produces it.
+ * 5. **runtime-sql.** Everything that runs SQL this check cannot read is
+ *    inventoried per file with a reviewed count, failing in both directions:
+ *    `$executeRawUnsafe` / `$queryRawUnsafe` however reached (member,
+ *    computed, destructured, or named by a string), `Prisma.raw` /
+ *    `Prisma["raw"]`, `$executeRaw` / `$queryRaw` called with anything but an
+ *    inline `Prisma.sql` template, `$extends` (a client extension can add
+ *    writes under any name), and imports of a database driver (`pg` and
+ *    friends), which bypass Prisma entirely.
+ *
+ * ## What it still does not see
+ *
+ * A delegate or raw method reached through an object that was passed around
+ * under an unrelated name and then indexed with a runtime key whose result is
+ * stored before use (`const d = anything[key]; d.create()`), where no literal
+ * of the name exists in the file. Rule 2 catches the name wherever it is
+ * written literally; a name assembled from fragments in another file is the
+ * residual, and code review of the runtime-sql inventory is its backstop.
  *
  * Tests are not scanned. Integration suites truncate and seed these tables by
  * design, and a fixture that had to go through the writer could only prove the
@@ -76,21 +102,43 @@ export const READ_OPERATIONS = new Set([
   "groupBy",
 ]);
 
-export const WRITE_VERB_PATTERN =
-  /\b(insert|update|delete|merge|upsert|copy|truncate|alter)\b/;
+/** Prisma delegate operations that can. Used to recognise `x[key].create(`. */
+export const WRITE_OPERATIONS = new Set([
+  "create",
+  "createMany",
+  "createManyAndReturn",
+  "update",
+  "updateMany",
+  "updateManyAndReturn",
+  "upsert",
+  "delete",
+  "deleteMany",
+]);
 
-export const SCANNED_DIRECTORIES = [
-  "app",
-  "components",
-  "lib",
-  "packages",
-  "prisma",
-  "scripts",
+/** Receivers whose computed members are treated as model lookups. */
+export const CLIENT_RECEIVER_PATTERN = /^(prisma|prismaClient|client|db|tx|trx|transaction)$/i;
+
+export const WRITE_VERB_PATTERN =
+  /\b(insert|update|delete|merge|upsert|copy|truncate|alter)\b/g;
+
+export const SCANNED_EXTENSIONS = [
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".sql",
 ];
 
-export const SCANNED_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs", ".sql"]);
-
 export const EXCLUDED_PREFIXES = [
+  {
+    prefix: "tests/",
+    reason:
+      "Test suites and fixtures seed and truncate these tables against disposable databases by design.",
+  },
   {
     prefix: "prisma/generated/",
     reason: "Generated Prisma client. Regenerated output, not a call site.",
@@ -100,42 +148,89 @@ export const EXCLUDED_PREFIXES = [
     reason:
       "Superseded migration history kept for reference. The live schema is built from prisma/migrations, which is scanned.",
   },
+  {
+    prefix: "docs/",
+    reason: "Documentation. Nothing here is imported or executed.",
+  },
+  {
+    path: "scripts/check-protected-table-writers-core.mjs",
+    reason:
+      "This check. It names the tables, delegates, verbs and raw methods it forbids, and opens no database connection. An exact path, not a prefix, so a similarly named file is still scanned.",
+  },
+  {
+    path: "scripts/check-protected-table-writers.mjs",
+    reason: "The runner. Reads files and prints findings; opens no database connection.",
+  },
+  {
+    prefix: "node_modules/",
+    reason: "Dependencies, not repository code.",
+  },
 ];
 
-/** Files that name a protected table beside a write verb and do not write it. */
+/** Non-type string literals equal to a protected delegate name, by file. */
+export const DELEGATE_NAME_ALLOWLIST = [
+  {
+    path: "app/api/admin/search/route.ts",
+    delegate: "adminAuditLog",
+    count: 1,
+    reason:
+      "adminSearchWhere(\"adminAuditLog\", query) picks the searchable fields for a read that is itself a literal prisma.adminAuditLog.findMany.",
+  },
+  {
+    path: "lib/accountDataExportDomains.ts",
+    delegate: "adminAuditLog",
+    count: 1,
+    reason: "The data-domain registry's domain key. No client is indexed with it.",
+  },
+];
+
+/**
+ * Files whose literals name a protected table beside a write verb and do not
+ * write it. Counts are exact: a new statement in the file changes one of them.
+ */
 export const RAW_SQL_ALLOWLIST = [
   {
     path: "lib/accountDataExportDomains.ts",
     table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 3,
     reason:
-      "The data-domain declaration names the model as prismaModel, and unrelated domains' prose says 'deleted with the account'. No SQL is built from this file.",
+      "The data-domain registry names the model as prismaModel and in prose, and other domains' prose uses delete and update. No SQL is built from this file.",
   },
   {
     path: "scripts/report-issue-backlog-core.mjs",
     table: "AdminAuditLog",
+    tableMentions: 2,
+    writeVerbs: 1,
     reason:
       "Issue probe prose describing what the audit log records. A report; it opens no database connection for this text.",
   },
   {
     path: "prisma/migrations/00000000000000_baseline/migration.sql",
     table: "AdminAuditLog",
-    reason: "The baseline creates the table and its constraints. Applied history.",
+    tableMentions: 7,
+    writeVerbs: 94,
+    reason:
+      "The baseline migration creates every table, including this one and its constraints. Applied history; an edit to it changes a count.",
   },
   {
     path: "prisma/migrations/20260826070000_admin_audit_actor_not_a_foreign_key/migration.sql",
     table: "AdminAuditLog",
+    tableMentions: 1,
+    writeVerbs: 1,
     reason:
       "Drops the actorUserId foreign key so ON DELETE SET NULL can no longer rewrite hashed rows. Applied history.",
   },
-  {
-    path: "scripts/check-protected-table-writers-core.mjs",
-    table: "AdminAuditLog",
-    reason: "This file. A check for a forbidden write has to name the table and the verbs.",
-  },
 ];
 
-/** Every call that runs SQL assembled at runtime, by file, with its reviewed count. */
-export const UNSAFE_RAW_ALLOWLIST = [
+/** Everything that runs SQL this check cannot read, by file, with its reviewed count. */
+export const RUNTIME_SQL_ALLOWLIST = [
+  {
+    path: "lib/prisma.ts",
+    count: 2,
+    reason:
+      "The application's Prisma client, constructed over a pg Pool through @prisma/adapter-pg. It exports the client; it runs no SQL of its own.",
+  },
   {
     path: "lib/accountDataAnonymisation.ts",
     count: 2,
@@ -165,19 +260,71 @@ export const UNSAFE_RAW_ALLOWLIST = [
     reason:
       "Local search benchmark: ANALYZE and EXPLAIN on ExternalMessage against a seeded database.",
   },
+  {
+    path: "scripts/baseline-existing-database.mjs",
+    count: 1,
+    reason:
+      "Pre-deploy migration-history reconciliation over pg: reads the schema and _prisma_migrations before prisma migrate resolve. Its SQL literals are in the file and name no protected table.",
+  },
+  {
+    path: "scripts/compare-schema-to-migrations.mjs",
+    count: 1,
+    reason: "Read-only catalogue comparison of a live schema against one built from migrations.",
+  },
+  {
+    path: "scripts/railway-restore-verify.mjs",
+    count: 1,
+    reason: "Read-only verification of an isolated restored database after a restore drill.",
+  },
+  {
+    path: "scripts/require-direct-database-url.mjs",
+    count: 1,
+    reason: "Pre-migration connectivity and advisory-lock probe on the direct database URL. No table writes.",
+  },
 ];
 
 const UNSAFE_RAW_MEMBERS = new Set(["$executeRawUnsafe", "$queryRawUnsafe"]);
+const TAGGED_RAW_MEMBERS = new Set(["$executeRaw", "$queryRaw"]);
+
+/** Database drivers that reach Postgres without Prisma. */
+export const DATABASE_DRIVER_MODULES = new Set([
+  "pg",
+  "pg-pool",
+  "postgres",
+  "@prisma/adapter-pg",
+  "@neondatabase/serverless",
+  "@vercel/postgres",
+  "mysql",
+  "mysql2",
+  "better-sqlite3",
+  "knex",
+  "kysely",
+]);
+
+const isDatabaseDriverModule = (specifier) =>
+  DATABASE_DRIVER_MODULES.has(specifier) ||
+  [...DATABASE_DRIVER_MODULES].some((name) => specifier.startsWith(`${name}/`)) ||
+  specifier === "drizzle-orm" ||
+  specifier.startsWith("drizzle-orm/");
 
 export const isExcluded = (path) =>
-  EXCLUDED_PREFIXES.some((entry) => path.startsWith(entry.prefix));
+  EXCLUDED_PREFIXES.some((entry) =>
+    entry.path ? path === entry.path : path.startsWith(entry.prefix)
+  );
 
-const scriptKindFor = (path) =>
-  path.endsWith(".tsx")
-    ? ts.ScriptKind.TSX
-    : path.endsWith(".ts")
-      ? ts.ScriptKind.TS
-      : ts.ScriptKind.JS;
+/** The repository paths this check reads, from a list of candidate paths. */
+export const selectScannedPaths = (paths) =>
+  paths
+    .map((path) => path.split("\\").join("/"))
+    .filter((path) => SCANNED_EXTENSIONS.some((extension) => path.endsWith(extension)))
+    .filter((path) => !isExcluded(path));
+
+const scriptKindFor = (path) => {
+  if (/\.(tsx)$/.test(path)) return ts.ScriptKind.TSX;
+  if (/\.(ts|mts|cts)$/.test(path)) return ts.ScriptKind.TS;
+  if (/\.(jsx)$/.test(path)) return ts.ScriptKind.JSX;
+  return ts.ScriptKind.JS;
+};
 
 const lineOf = (sourceFile, node) =>
   sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
@@ -191,9 +338,45 @@ const memberName = (node) => {
   return null;
 };
 
+const isMemberAccess = (node) =>
+  ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node);
+
+/** The last identifier of a receiver expression: `this.prisma` -> `prisma`. */
+const receiverName = (node) => {
+  let current = node;
+  while (ts.isParenthesizedExpression(current) || ts.isNonNullExpression(current)) {
+    current = current.expression;
+  }
+  if (ts.isIdentifier(current)) return current.text;
+  if (ts.isPropertyAccessExpression(current)) return current.name.text;
+  return null;
+};
+
+const isInTypePosition = (node) => {
+  for (let current = node.parent; current; current = current.parent) {
+    if (ts.isTypeNode(current)) return true;
+    if (ts.isStatement(current) || ts.isExpression(current)) return false;
+  }
+  return false;
+};
+
+const isReflectGet = (call) =>
+  ts.isCallExpression(call) &&
+  ts.isPropertyAccessExpression(call.expression) &&
+  ts.isIdentifier(call.expression.expression) &&
+  call.expression.expression.text === "Reflect" &&
+  call.expression.name.text === "get";
+
+const isInlinePrismaSql = (node) =>
+  node !== undefined &&
+  ts.isTaggedTemplateExpression(node) &&
+  ts.isPropertyAccessExpression(node.tag) &&
+  ts.isIdentifier(node.tag.expression) &&
+  node.tag.expression.text === "Prisma" &&
+  node.tag.name.text === "sql";
+
 /**
- * Walks one source file once and returns what all three rules need: delegate
- * uses, the joined literal text, and the unsafe raw calls.
+ * Walks one source file once and returns what the rules need.
  */
 export const analyseSource = (path, text) => {
   const sourceFile = ts.createSourceFile(
@@ -205,8 +388,13 @@ export const analyseSource = (path, text) => {
   );
   const delegates = new Set(PROTECTED_TABLES.map((entry) => entry.delegate));
   const delegateUses = [];
+  const delegateNameLiterals = [];
+  const dynamicDelegateUses = [];
   const literals = [];
-  const unsafeRawCalls = [];
+  const runtimeSql = [];
+
+  const addRuntimeSql = (kind, node) =>
+    runtimeSql.push({ kind, line: lineOf(sourceFile, node) });
 
   const visit = (node) => {
     if (
@@ -217,18 +405,21 @@ export const analyseSource = (path, text) => {
       ts.isTemplateTail(node)
     ) {
       literals.push(node.text);
+      if (ts.isStringLiteralLike(node) && !isInTypePosition(node)) {
+        if (delegates.has(node.text)) {
+          delegateNameLiterals.push({ delegate: node.text, line: lineOf(sourceFile, node) });
+        }
+        if (UNSAFE_RAW_MEMBERS.has(node.text)) addRuntimeSql(`"${node.text}"`, node);
+      }
     }
 
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+    if (isMemberAccess(node)) {
       const name = memberName(node);
+      const parent = node.parent;
 
       if (name && delegates.has(name)) {
-        const parent = node.parent;
         let operation;
-        if (
-          (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) &&
-          parent.expression === node
-        ) {
+        if (isMemberAccess(parent) && parent.expression === node) {
           operation = memberName(parent) ?? "<computed member>";
         } else {
           operation = `<escaped: ${ts.SyntaxKind[parent.kind]}>`;
@@ -236,120 +427,320 @@ export const analyseSource = (path, text) => {
         delegateUses.push({ delegate: name, operation, line: lineOf(sourceFile, node) });
       }
 
-      if (name && UNSAFE_RAW_MEMBERS.has(name)) {
-        unsafeRawCalls.push({ call: name, line: lineOf(sourceFile, node) });
-      } else if (
+      if (name && UNSAFE_RAW_MEMBERS.has(name)) addRuntimeSql(name, node);
+      if (name === "$extends") addRuntimeSql("$extends", node);
+      if (
         name === "raw" &&
-        ts.isPropertyAccessExpression(node) &&
         ts.isIdentifier(node.expression) &&
         node.expression.text === "Prisma"
       ) {
-        unsafeRawCalls.push({ call: "Prisma.raw", line: lineOf(sourceFile, node) });
+        addRuntimeSql("Prisma.raw", node);
       }
+      if (name && TAGGED_RAW_MEMBERS.has(name)) {
+        const isTag = ts.isTaggedTemplateExpression(parent) && parent.tag === node;
+        const isInlineCall =
+          ts.isCallExpression(parent) &&
+          parent.expression === node &&
+          isInlinePrismaSql(parent.arguments[0]);
+        if (!isTag && !isInlineCall) addRuntimeSql(`${name}(non-inline)`, node);
+      }
+
+      if (ts.isElementAccessExpression(node) && !ts.isStringLiteralLike(node.argumentExpression)) {
+        const onClient = CLIENT_RECEIVER_PATTERN.test(receiverName(node.expression) ?? "");
+        const followedByWrite =
+          isMemberAccess(parent) &&
+          parent.expression === node &&
+          WRITE_OPERATIONS.has(memberName(parent) ?? "");
+        if (onClient || followedByWrite) {
+          dynamicDelegateUses.push({
+            detail: onClient ? "computed member on a client" : "computed member before a write operation",
+            line: lineOf(sourceFile, node),
+          });
+        }
+      }
+    }
+
+    if (isReflectGet(node)) {
+      const [target, key] = node.arguments;
+      if (
+        target &&
+        key &&
+        !ts.isStringLiteralLike(key) &&
+        CLIENT_RECEIVER_PATTERN.test(receiverName(target) ?? "")
+      ) {
+        dynamicDelegateUses.push({ detail: "Reflect.get on a client", line: lineOf(sourceFile, node) });
+      }
+    }
+
+    if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)) {
+      const property = node.propertyName ?? node.name;
+      const name =
+        ts.isIdentifier(property) || ts.isStringLiteralLike(property) ? property.text : null;
+      if (name && delegates.has(name)) {
+        delegateUses.push({
+          delegate: name,
+          operation: "<destructured from its client>",
+          line: lineOf(sourceFile, node),
+        });
+      }
+      if (name && UNSAFE_RAW_MEMBERS.has(name)) addRuntimeSql(`destructured ${name}`, node);
+      if (property && ts.isComputedPropertyName(property)) {
+        const holder = node.parent.parent;
+        const source =
+          holder && (ts.isVariableDeclaration(holder) || ts.isParameter(holder))
+            ? holder.initializer
+            : undefined;
+        if (source && CLIENT_RECEIVER_PATTERN.test(receiverName(source) ?? "")) {
+          dynamicDelegateUses.push({
+            detail: "computed destructuring key on a client",
+            line: lineOf(sourceFile, node),
+          });
+        }
+      }
+    }
+
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      if (isDatabaseDriverModule(node.moduleSpecifier.text)) {
+        addRuntimeSql(`import ${node.moduleSpecifier.text}`, node);
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.arguments.length > 0 &&
+      ts.isStringLiteralLike(node.arguments[0]) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+      isDatabaseDriverModule(node.arguments[0].text)
+    ) {
+      addRuntimeSql(`import ${node.arguments[0].text}`, node);
     }
 
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
 
-  return { delegateUses, literalText: literals.join("\n"), unsafeRawCalls };
+  return {
+    delegateUses,
+    delegateNameLiterals,
+    dynamicDelegateUses,
+    literalText: literals.join("\n"),
+    runtimeSql,
+  };
 };
 
-/** SQL text with comments removed, for migration files. */
-export const sqlWithoutComments = (text) =>
-  text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+/**
+ * SQL with its comments removed and everything else kept.
+ *
+ * `--` and `/* ... *\/` start a comment only outside a string literal, a quoted
+ * identifier and a dollar-quoted body; block comments nest, as in PostgreSQL.
+ * Keeping string contents is deliberate: a write verb inside a function body
+ * is still a write.
+ */
+export const sqlWithoutComments = (text) => {
+  let output = "";
+  let index = 0;
+  while (index < text.length) {
+    const char = text[index];
+    const next = text[index + 1];
 
-/** Protected tables that the text names beside a write verb. */
+    if (char === "-" && next === "-") {
+      while (index < text.length && text[index] !== "\n") index += 1;
+      output += " ";
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      let depth = 1;
+      index += 2;
+      while (index < text.length && depth > 0) {
+        if (text[index] === "/" && text[index + 1] === "*") {
+          depth += 1;
+          index += 2;
+        } else if (text[index] === "*" && text[index + 1] === "/") {
+          depth -= 1;
+          index += 2;
+        } else {
+          index += 1;
+        }
+      }
+      output += " ";
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      const quote = char;
+      output += char;
+      index += 1;
+      while (index < text.length) {
+        output += text[index];
+        if (text[index] === quote) {
+          if (text[index + 1] === quote) {
+            output += text[index + 1];
+            index += 2;
+            continue;
+          }
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      continue;
+    }
+    if (char === "$") {
+      const tag = /^\$[A-Za-z_]*\$/.exec(text.slice(index));
+      if (tag) {
+        const close = text.indexOf(tag[0], index + tag[0].length);
+        const end = close === -1 ? text.length : close + tag[0].length;
+        output += text.slice(index, end);
+        index = end;
+        continue;
+      }
+    }
+    output += char;
+    index += 1;
+  }
+  return output;
+};
+
+const normaliseSqlText = (text) => text.toLowerCase().split('"').join("").split("`").join("");
+
+/** Per protected table: how often the text names it, and how many write verbs it holds. */
 export const rawSqlTableHits = (text) => {
-  const normalised = text.toLowerCase().replace(/["`]/g, "");
-  if (!WRITE_VERB_PATTERN.test(normalised)) return [];
-  return PROTECTED_TABLES.filter((entry) =>
-    new RegExp(`\\b${entry.table.toLowerCase()}\\b`).test(normalised)
-  ).map((entry) => entry.table);
+  const normalised = normaliseSqlText(text);
+  const writeVerbs = (normalised.match(WRITE_VERB_PATTERN) ?? []).length;
+  if (writeVerbs === 0) return [];
+  return PROTECTED_TABLES.map((entry) => ({
+    table: entry.table,
+    tableMentions: (
+      normalised.match(new RegExp(`\\b${entry.table.toLowerCase()}\\b`, "g")) ?? []
+    ).length,
+    writeVerbs,
+  })).filter((hit) => hit.tableMentions > 0);
 };
+
+const keyOf = (...parts) => parts.join(" :: ");
 
 export const checkProtectedTableWriters = ({ sources }) => {
   const findings = [];
-  const rawSqlHits = new Set();
-  const unsafeCounts = new Map();
+  const rawSqlHits = new Map();
+  const runtimeSqlByPath = new Map();
+  const delegateNamesByPath = new Map();
 
   for (const { path, text } of sources) {
     if (isExcluded(path)) continue;
 
     if (path.endsWith(".sql")) {
-      for (const table of rawSqlTableHits(sqlWithoutComments(text))) {
-        rawSqlHits.add(`${path}\u0000${table}`);
+      for (const hit of rawSqlTableHits(sqlWithoutComments(text))) {
+        rawSqlHits.set(keyOf(path, hit.table), { path, ...hit });
       }
       continue;
     }
 
-    const { delegateUses, literalText, unsafeRawCalls } = analyseSource(path, text);
+    const analysis = analyseSource(path, text);
+    const writerOf = (delegate) =>
+      PROTECTED_TABLES.find((entry) => entry.delegate === delegate);
 
-    for (const use of delegateUses) {
-      const protectedTable = PROTECTED_TABLES.find((entry) => entry.delegate === use.delegate);
+    for (const use of analysis.delegateUses) {
+      const protectedTable = writerOf(use.delegate);
       if (protectedTable.writers.includes(path)) continue;
       if (READ_OPERATIONS.has(use.operation)) continue;
       findings.push({
         rule: "delegate-write",
         path,
         line: use.line,
-        table: protectedTable.table,
-        detail: `${use.delegate}.${use.operation}`,
+        detail: `${protectedTable.table}: ${use.delegate}.${use.operation}`,
       });
     }
 
-    for (const table of rawSqlTableHits(literalText)) {
-      rawSqlHits.add(`${path}\u0000${table}`);
+    for (const literal of analysis.delegateNameLiterals) {
+      if (writerOf(literal.delegate).writers.includes(path)) continue;
+      const key = keyOf(path, literal.delegate);
+      delegateNamesByPath.set(key, [...(delegateNamesByPath.get(key) ?? []), literal.line]);
     }
 
-    if (unsafeRawCalls.length > 0) unsafeCounts.set(path, unsafeRawCalls);
+    for (const use of analysis.dynamicDelegateUses) {
+      findings.push({ rule: "dynamic-delegate", path, line: use.line, detail: use.detail });
+    }
+
+    for (const hit of rawSqlTableHits(analysis.literalText)) {
+      rawSqlHits.set(keyOf(path, hit.table), { path, ...hit });
+    }
+
+    if (analysis.runtimeSql.length > 0) runtimeSqlByPath.set(path, analysis.runtimeSql);
   }
 
-  const allowedRaw = new Set(
-    RAW_SQL_ALLOWLIST.map((entry) => `${entry.path}\u0000${entry.table}`)
+  const scannedPaths = new Set(sources.map((source) => source.path));
+  const missingNote = (path) => (scannedPaths.has(path) ? "" : " (file was not scanned)");
+
+  const allowedNames = new Map(
+    DELEGATE_NAME_ALLOWLIST.map((entry) => [keyOf(entry.path, entry.delegate), entry])
   );
-  for (const key of rawSqlHits) {
-    if (allowedRaw.has(key)) continue;
-    const [path, table] = key.split("\u0000");
+  for (const [key, lines] of delegateNamesByPath) {
+    const expected = allowedNames.get(key)?.count ?? 0;
+    if (lines.length === expected) continue;
+    const [path, delegate] = key.split(" :: ");
+    findings.push({
+      rule: "delegate-name",
+      path,
+      line: lines[0],
+      detail: `${lines.length} literal(s) naming ${delegate}, allowlist says ${expected} (lines ${lines.join(", ")})`,
+    });
+  }
+  for (const [key, entry] of allowedNames) {
+    if (delegateNamesByPath.has(key)) continue;
+    findings.push({
+      rule: "delegate-name",
+      path: entry.path,
+      detail: `allowlist says ${entry.count} literal(s) naming ${entry.delegate}, found 0${missingNote(entry.path)}; remove the entry`,
+    });
+  }
+
+  const allowedRaw = new Map(
+    RAW_SQL_ALLOWLIST.map((entry) => [keyOf(entry.path, entry.table), entry])
+  );
+  for (const [key, hit] of rawSqlHits) {
+    const entry = allowedRaw.get(key);
+    if (
+      entry &&
+      entry.tableMentions === hit.tableMentions &&
+      entry.writeVerbs === hit.writeVerbs
+    ) {
+      continue;
+    }
     findings.push({
       rule: "raw-sql",
-      path,
-      table,
-      detail: `string literals name ${table} beside a write verb`,
+      path: hit.path,
+      detail: entry
+        ? `${hit.table}: ${hit.tableMentions} mention(s) and ${hit.writeVerbs} write verb(s), allowlist says ${entry.tableMentions} and ${entry.writeVerbs}`
+        : `literals name ${hit.table} (${hit.tableMentions}) beside ${hit.writeVerbs} write verb(s)`,
     });
   }
-  const scannedPaths = new Set(sources.map((source) => source.path));
-  for (const entry of RAW_SQL_ALLOWLIST) {
-    if (rawSqlHits.has(`${entry.path}\u0000${entry.table}`)) continue;
+  for (const [key, entry] of allowedRaw) {
+    if (rawSqlHits.has(key)) continue;
     findings.push({
-      rule: "stale-allowlist",
+      rule: "raw-sql",
       path: entry.path,
-      table: entry.table,
-      detail: scannedPaths.has(entry.path)
-        ? "raw SQL allowlist entry no longer matches this file; remove it"
-        : "raw SQL allowlist entry names a file that was not scanned; remove or correct it",
+      detail: `allowlist entry for ${entry.table} no longer matches${missingNote(entry.path)}; remove it`,
     });
   }
 
-  const allowedUnsafe = new Map(UNSAFE_RAW_ALLOWLIST.map((entry) => [entry.path, entry]));
-  for (const [path, calls] of unsafeCounts) {
-    const expected = allowedUnsafe.get(path)?.count ?? 0;
-    if (calls.length === expected) continue;
+  const allowedRuntime = new Map(RUNTIME_SQL_ALLOWLIST.map((entry) => [entry.path, entry]));
+  for (const [path, uses] of runtimeSqlByPath) {
+    const expected = allowedRuntime.get(path)?.count ?? 0;
+    if (uses.length === expected) continue;
     findings.push({
-      rule: "unsafe-raw",
+      rule: "runtime-sql",
       path,
-      line: calls[0].line,
-      detail: `${calls.length} runtime-SQL call(s), allowlist says ${expected}: ${calls
-        .map((call) => `${call.call}@${call.line}`)
+      line: uses[0].line,
+      detail: `${uses.length} use(s), allowlist says ${expected}: ${uses
+        .map((use) => `${use.kind}@${use.line}`)
         .join(", ")}`,
     });
   }
-  for (const entry of UNSAFE_RAW_ALLOWLIST) {
-    if (unsafeCounts.has(entry.path)) continue;
+  for (const entry of RUNTIME_SQL_ALLOWLIST) {
+    if (runtimeSqlByPath.has(entry.path)) continue;
     findings.push({
-      rule: "unsafe-raw",
+      rule: "runtime-sql",
       path: entry.path,
-      detail: `allowlist says ${entry.count} runtime-SQL call(s), found 0; remove the entry`,
+      detail: `allowlist says ${entry.count} use(s), found 0${missingNote(entry.path)}; remove the entry`,
     });
   }
 
@@ -372,7 +763,6 @@ export const describeFindings = (findings) =>
     "",
     "For the audit log, record an administrator action with writeAdminAuditLog and a",
     "system action with writeSystemAuditLog, in the transaction of the change.",
-    "A false positive is listed in scripts/check-protected-table-writers-core.mjs with",
-    "its reason; a new runtime-SQL call is added to UNSAFE_RAW_ALLOWLIST with its count",
-    "and why its SQL cannot reach a protected table.",
+    "A reviewed exception goes in scripts/check-protected-table-writers-core.mjs with",
+    "its exact count and the reason it cannot reach a protected table.",
   ].join("\n");
