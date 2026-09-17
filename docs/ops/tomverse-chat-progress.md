@@ -1142,8 +1142,14 @@ evidence/approval/environment/expiry/execution manifest를 한 durable row에
 | C19–C20 Refiner·Planner·품질 평가 | **약 47%** (직전 약 44%, 동결 evidence 검증·proposal-only 상태 기계 반영) |
 | 구현 | content-free 과거 evidence bundle·strict untrusted verifier·현재 checkout 미검증 및 runtime 재검증 의무·deterministic proposal digest·기존 reservation 계약 provenance 결속 완료 |
 | 검증 | focused admission **19/19**, 기존 shadow **24/24**, Refiner·injection **59/59**, PLANNER-03 위반 0, typecheck·lint·문서/정책/encoding/data-domain·diff 검사를 모두 통과 |
-| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 digest `sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a`를 **approve**했다. 재현 가능한 선택적 nit 2건을 남긴 채 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종결했고, 두 nit은 exchange 밖 후속에서 보강했다. Linux 통합 CI는 다음 단계다. |
-| 공개 상태 | 변화 없음 — provider/API/Railway/유료 호출 0, stage writer·제품 caller·flag·성공 admission 없음 |
+| 독립 검토·통합 CI | Claude Code Max 최종 round 2는 digest `sha256:d7c97b83a25cbc6d79f558e7f3ec972137a3074f706500dc32f2208bf897594a`를 **approve**했다. 재현 가능한 선택적 nit 2건을 남긴 채 수정 상한을 소진해 exchange는 `on_hold (revisions_exhausted)`로 종결했고, 두 nit은 exchange 밖 후속에서 보강한 뒤 내부 감사 무결성·집중 회귀·전체 회귀의 3중 검증을 통과했다. PR #1515 최종 CI는 **12 success / 0 fail**이며 post-merge promotion PR 1건만 의도대로 skip됐다. |
+| 공개 상태 | PR **#1515**가 `develop`에 merge SHA `b7df3d6b9800e75f9dec1ce5bf79abab3458ffcd`로 병합됐지만 제품 활성화는 없다 — provider/API/Railway/유료 호출 0, stage writer·제품 caller·flag·성공 admission 없음 |
+
+PR #1515는 2026-09-17 03:34:09Z에 자동 병합됐다. 최종 required rollup을 포함한
+12개 검사는 모두 성공했고 실패는 0건이었다. 리뷰·일반 댓글·review thread도 각각
+0건이므로 미해결 검토 항목은 없다. 이 병합은 과거 synthetic evidence를 실행 불가
+proposal로 검증하는 경계만 통합했으며 provider/API 호출, 유료 실행 또는 제품 공개를
+발생시키지 않았다.
 
 최종 검토의 두 nit은 동작 결함이나 승인 차단 finding이 아니었다. 그래도 plain genuine
 Buffer/Uint8Array의 cap+1이 각 raw byte bound에서 먼저 거부됨을 직접 고정하고, focused
