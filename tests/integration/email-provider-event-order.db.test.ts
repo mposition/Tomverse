@@ -87,6 +87,9 @@ const send = (event: Event) =>
         ...(event.bounce ? { bounce: { type: event.bounce } } : {}),
       },
     },
+    // One fixed receipt time after every event, so no event time is disbelieved
+    // and nothing depends on when the suite runs beyond the hold's own expiry.
+    receivedAt: new Date(base + 60 * 60_000),
   });
 
 const permutations = <T>(list: T[]): T[][] =>
@@ -353,14 +356,46 @@ test("a soft bounce matched to no delivery never suppresses", async () => {
   assert.equal(await prisma.suppressionCause.count({ where: { emailAddress: address } }), 0);
 });
 
-test("a delivery whose status predates event keys is not rolled back by an older event", async () => {
-  const address = `${randomUUID()}@example.com`;
-  const messageId = await deliverOne(address);
-  await prisma.emailDelivery.updateMany({
-    data: { status: "delivered", deliveredAt: new Date(base + 20_000) },
-  });
-  await send({ id: "evt-old-sent", type: "email.sent", messageId, address, createdAt: second(5) });
-  const row = await prisma.emailDelivery.findFirstOrThrow();
-  assert.equal(row.status, "delivered");
-  assert.equal(row.providerEventId, null);
+test("at one instant the crossing delivery, and the entry, do not depend on arrival order", async () => {
+  const outcomes = new Set<string>();
+  for (const reverse of [false, true]) {
+    await reset();
+    const address = `${randomUUID()}@example.com`;
+    const events: Event[] = [];
+    for (let i = 0; i < SOFT_BOUNCE_SUPPRESSION_THRESHOLD + 1; i += 1) {
+      events.push({
+        id: `evt-bounce-${i}`,
+        type: "email.bounced",
+        bounce: "Transient",
+        messageId: await deliverOne(address),
+        address,
+        createdAt: second(4),
+      });
+    }
+    for (const event of reverse ? [...events].reverse() : events) await send(event);
+
+    const ids = (await prisma.emailDelivery.findMany({ select: { id: true } }))
+      .map((row) => row.id)
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const expected = ids[SOFT_BOUNCE_SUPPRESSION_THRESHOLD - 1];
+    const active = await prisma.suppressionCause.findMany({
+      where: { emailAddress: address, releasedAt: null },
+      select: { sourceDeliveryId: true, expiresAt: true },
+    });
+    const entry = await prisma.suppressionEntry.findFirstOrThrow({
+      where: { emailAddress: address },
+      select: { sourceDeliveryId: true, expiresAt: true },
+    });
+    outcomes.add(
+      JSON.stringify({
+        causes: active.length,
+        causeIsCrossing: active[0]?.sourceDeliveryId === expected,
+        entryIsCrossing: entry.sourceDeliveryId === expected,
+        entryMatchesCause: entry.expiresAt?.getTime() === active[0]?.expiresAt?.getTime(),
+      })
+    );
+  }
+  assert.deepEqual([...outcomes], [
+    JSON.stringify({ causes: 1, causeIsCrossing: true, entryIsCrossing: true, entryMatchesCause: true }),
+  ]);
 });
