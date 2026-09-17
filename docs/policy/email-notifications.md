@@ -4,14 +4,283 @@
 - 상태: **승인됨 (ADR).** 아키텍처·제공자·데이터 모델 결정이 확정되었습니다.
   marketing 계열은 **production 비활성**을 유지합니다(아래 결정 3).
 - 작성 범위: 규제 요구사항 조사 + 저장소 현황 조사 + 아키텍처 권고
-- 개정: **v12.1 (2026-09-16).** 피드백 처리 결과 답변은 transactional(주소만 있으면 발송),
-  접수·검토중은 동의 기반, 운영자는 한 건의 안내를 보류할 수 있음. 0절 참조.
+- 개정: **v21 (2026-09-17).** soft bounce로 잘못 처리된 영구 bounce를 보관 중인 사건에서
+  hard bounce 원인으로 기록하는 일회성 복구 절차를 둡니다. 0절 참조.
 - 법적 성격: **법률 자문이 아닙니다.** 21절의 질문 목록을 법률 담당자가 확인하기
   전에는 marketing 계열 기능을 production에서 활성화하지 않는 것을 전제로 씁니다.
 
 ---
 
 ## 0. 개정 이력
+
+v15~v21은 develop 문서의 번호를 그대로 씁니다. develop의 v14는 이 문서의 v12.1과 같은 개정이고, develop의 v13(Q4: 이메일은 야간 전송 제한 대상이 아님)은 main에 승격되지 않았습니다.
+
+### v21 (2026-09-17) — 잘못 분류된 영구 bounce 복구
+
+v18 7항의 정정 전까지 Resend의 `Permanent` bounce는 soft bounce로 처리되어, 없는 메일함에도
+최대 24시간 뒤 다시 발송했습니다. 원본 사건은 90일 보관되므로 그 안의 것은 복구할 수
+있습니다.
+
+1. **`npm run email:recover-permanent-bounces`** — 기본은 dry run(읽기만)이고 `--apply`가
+   씁니다. 출력은 개수뿐이며 주소·메일 id를 싣지 않습니다.
+2. **대상** — 실행 시각까지 받은(스냅샷) 처리된 `email.bounced` 사건 중 `data.bounce.type`이
+   정확히 **`Permanent`** 인 것만입니다. `hard`는 원래 올바르게 처리됐으므로 대상이 아닙니다.
+   이 사건 키(`webhook:<사건 행 id>`) **또는 같은 메일 id**로 `hard_bounce` 원인이 이미 있으면
+   `alreadyRecorded`입니다. 주소는 사건 계정 안에서 정확히 하나로 결속되는 delivery의 주소,
+   없으면 payload 수신자입니다. 원인은 정정된 handler와 같은 키·출처로 쓰고 `evidence`에
+   `recoveredFrom: permanent_bounce_misclassified_as_soft`를 남깁니다.
+3. **보수적 제외** — 살아 있는 메일함을 막는 것이 이 결함보다 나쁘기 때문입니다.
+   - provider 사건 시각(`created_at`)이 없거나 믿을 수 없는 사건은 쓰지 않습니다
+     (`indeterminateTime`) — 수신 시각으로는 이후 delivery와 선후를 판정할 수 없습니다.
+   - 같은 주소에 **bounce 5분 전 이후** delivered가 보고된 적이 있으면 쓰지 않습니다
+     (`deliveredSince`). 오래된 delivery 시각은 수신 시각이라 그 오차를 여유로 둡니다.
+   - 쓰기는 사건마다 fence와 주소 잠금 안에서 **그 검사를 다시 한 뒤**에만 합니다 —
+     delivered 기록도 같은 잠금을 잡으므로, 실행 중에 들어온 delivery를 봅니다
+     (`deliveredDuringRun`).
+   - 주소가 없는 사건은 `unaddressed`로 셉니다.
+4. **entry** — 원인은 항상 추가하지만 entry는 **없거나 soft bounce일 때만** hard bounce로
+   올립니다(`entriesRaised`). complaint·manual·privacy request·기존 hard bounce entry는 그대로
+   둡니다. 쓰기는 **최신 사건부터** 하므로 한 주소의 entry에는 가장 최근 bounce가 남습니다.
+5. **멱등** — 같은 키로 쓰므로 다시 실행하면 `alreadyRecorded`로 건너뜁니다. 한 실행 안에서
+   같은 메일 id의 사건이 둘이면 쓰기 직전 재확인으로 하나만 씁니다(`duplicatesInRun`).
+   보고의 개수는 쓰기 전 상태 기준입니다.
+6. 90일보다 오래된 사건은 purge되어 이 절차로 복구할 수 없습니다(`oldestEventReceivedAt`이
+   창을 보여 줍니다).
+
+### v20 (2026-09-17) — 계정별 webhook(S1b-2b)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"계정이 둘입니다(C56)", "delivery와의 결속(C72)", 계정별 침묵 incident(C67, C94)를
+구현합니다. 운영 절차는 docs/ops/email-sending-domains.md 4.3입니다.
+
+1. **endpoint** — `POST /api/webhooks/email/resend/transactional`과
+   `/api/webhooks/email/resend/marketing`. 각각 `RESEND_WEBHOOK_SECRET`,
+   `MARKETING_RESEND_WEBHOOK_SECRET`으로만 검증하고 서로의 secret을 빌리지 않습니다(없으면
+   503). **두 변수에 같은 secret이 들어 있으면 두 endpoint 모두 503**입니다 — 한 계정용으로
+   서명된 사건을 다른 계정의 것으로 기록할 수 있기 때문입니다. 기존
+   `/api/webhooks/email/resend`는 transactional 계정으로 계속 받습니다. 그 밖의 경로 조각은
+   404입니다. 처리 함수는 계정을 인자로 **반드시** 받습니다.
+2. **저장** — `ProviderWebhookEvent.providerAccount`(CHECK `transactional`·`marketing`,
+   NOT NULL)에 받은 계정을 남기고, 재전송 guard는 새 unique
+   `(provider, providerAccount, providerEventId)`(`ProviderWebhookEvent_account_event_key`)를
+   씁니다. **확장만 하는 배포입니다** — 배포가 겹치는 동안 이전 build는 이 컬럼 없이 쓰고
+   `(provider, providerEventId)`로 충돌을 판정하므로, 그 unique와 컬럼 default
+   `transactional`은 남깁니다(이전 build의 endpoint는 transactional뿐이라 default가 곧
+   사실이고, 기존 행의 backfill이기도 합니다). 옛 unique와 default 제거는 이전 build가 없어진
+   뒤의 별도 migration입니다. 두 unique가 함께 있는 동안 INSERT는 **충돌 대상을 지정하지 않은
+   `ON CONFLICT DO NOTHING`** 입니다 — 대상을 지정하면 다른 unique의 충돌(같은 새 사건의 동시
+   도착 포함)은 예외가 됩니다. 삽입되지 않았으면 그 계정의 행을 찾고, 없으면 **다른 계정에 같은
+   사건 id가 있는 것**이므로 `duplicate`로 응답하지 않고 incident
+   `EMAIL_WEBHOOK_EVENT_ID_COLLISION`과 함께 실패(provider 재시도)합니다. provider 사건 id는
+   계정을 넘어 고유하므로 실제로는 일어나지 않을 것으로 봅니다.
+3. **결속** — delivery는 `(providerAccount, providerMessageId)`로만 찾습니다. 다른 계정이
+   같은 메일 id를 보고하면 그 발송이 아닙니다 — 15분 대기 뒤 주소 기준으로 확정합니다.
+   **같은 계정에서 한 메일 id로 delivery가 둘 이상**이면 어느 쪽도 고르지 않고 주소 기준으로만
+   적용하며 incident `EMAIL_WEBHOOK_AMBIGUOUS_DELIVERY`를 올립니다. delivery가 없는 사건의
+   원인 `sourceStream`·`providerAccount`는 검증된 계정입니다.
+4. **침묵** — 15분 sweeper가 API key와 webhook secret이 **둘 다** 있는 계정마다, DB 시계
+   기준 지난 24시간에 `EmailDelivery.sentAt`이 있는 그 계정 발송이 **5건 이상**이고 그 계정의
+   Resend webhook 수신이 **0건**이면 계정별 incident `EMAIL_WEBHOOK_SILENT_TRANSACTIONAL`·
+   `EMAIL_WEBHOOK_SILENT_MARKETING`을 올립니다(cooldown이 code 단위라 한 계정이 다른 계정의
+   경보를 가리지 않도록). delivery 행이 없는 발송(운영자 알림, 관리자 테스트 메일)은 세지
+   않습니다.
+5. `(providerAccount, providerMessageId)` **partial unique는 이번에 두지 않습니다.**
+   기존 index로 조회하며, unique는 운영 데이터에 중복이 없음을 읽기 전용으로 확인한 뒤
+   별도 migration으로 둡니다 — 확인 없이 만들면 production migration이 실패할 수 있습니다.
+
+### v19 (2026-09-17) — webhook 재처리 상태기계(S1b-2a)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"webhook 재처리 상태기계"와 "아직 결속되지 않은 사건"을 구현합니다. 이전에는 적용에
+실패한 사건이 `processingError`만 남기고, 재전송은 unique 충돌로 `duplicate`가 되어
+**다시 적용되지 않았습니다.**
+
+1. **claim** — 사건 행은 무작위 `processingLeaseId`·`processingStartedAt`과 시도 횟수
+   +1을 한 조건부 UPDATE로 가져갑니다(새 사건은 행을 만들 때 claim한 상태). 조건은
+   미처리·미포기, 시도 10 미만, lease 없음 또는 60초 지남입니다.
+2. **fenced 기록** — 성공(`processedAt`, lease 비움), 실패(lease 비움, 오류 분류, 10번째면
+   같은 write에서 `abandonedAt`), 대기(아래)는 모두 `processingLeaseId = 내 lease`이고
+   미처리·미포기인 행에만 씁니다. lease를 잃은 worker의 기록은 버려집니다. 적용 자체는
+   원인 키와 사건 순서로 멱등입니다.
+3. **재전송** — 처리됐거나 포기된 사건은 `duplicate`(200). 미처리면 claim해서 다시
+   적용하고, 살아 있는 lease가 있으면 **409**(provider가 다시 보냄)입니다. 시도가 다 됐지만
+   아직 포기가 기록되지 않은 행은 `duplicate`로 흡수합니다.
+4. **delivery 대기** — 사건이 provider message id를 가졌는데 delivery가 없고 수신 후
+   **15분**이 지나지 않았으면 `awaiting_delivery`로 둡니다: lease를 비우고 claim이 올린
+   시도를 되돌리며, provider에는 200입니다. 15분이 지나면 주소 기준 효과로 확정합니다.
+   경계는 `receivedAt`과 DB `now()`이고, 새 행의 `receivedAt`·lease 시작도 DB 시계로
+   씁니다 — 앱 서버 시계가 어긋나도 lease가 곧바로 만료돼 보이거나 새 사건이 15분 지난
+   것으로 보이지 않도록.
+5. **sweeper** — 15분 runner가 시도가 다 됐고 lease가 없거나 만료된 행에 `abandonedAt`을
+   쓰고(오래된 순 최대 50건, incident `EMAIL_WEBHOOK_ABANDONED`), 미처리 행을 오래된
+   수신순으로 최대 50건 claim해 적용합니다. 20초는 **새 사건을 시작하는 기준**이며, 이미 시작한
+   사건은 자기 transaction timeout 안에서 끝까지 갑니다(초과는 사건 하나만큼). 수신 후
+   **1시간** 넘게 미처리인 행이 있으면 incident `EMAIL_WEBHOOK_BACKLOG`입니다.
+   재전송이 claim하지 못하면 행을 DB 시계로 다시 읽어 판정합니다 — 끝났거나 시도가 다
+   됐고 아무도 쥐지 않았으면 200, 살아 있는 lease면 시도 횟수와 무관하게 409입니다.
+   90일 보관 purge는 한 문장으로, 살아 있는 lease가 있는 행은 지우지 않습니다.
+   **효과와 기록은 한 transaction이 아닙니다.** lease가 만료된 뒤 늦게 끝난 worker의 효과는
+   남을 수 있지만(원인 키·사건 순서로 멱등이고 사실은 참), 행의 처리 기록은 먼저 커밋한
+   쪽의 것입니다. 새 index는 두지 않습니다(기존 `processedAt` index, 쓰기 잠금 회피).
+6. **CHECK** — `processedAt`과 `abandonedAt`은 함께 있을 수 없고, lease id와 시작 시각은
+   함께 있거나 함께 없으며, 시도는 0–10입니다.
+7. stream별 endpoint·secret, 계정 기준 delivery 결속, 계정별 침묵 incident는 S1b-2b입니다.
+
+### v18 (2026-09-17) — provider 사건 순서와 만료 기록(S1b-1d)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+"사건 순서", "delivered 사건", "만료의 기록"을 구현합니다.
+
+1. **사건 시각** — payload의 `created_at`(ISO 8601, 수신보다 5분 넘게 미래가 아닐 때),
+   아니면 수신 시각입니다. 원인의 `occurredAt`도 이 값입니다.
+2. **순서 키** `(사건 시각, 종류 순위, provider 사건 id)` — 순위는 sent 0, delivered 1,
+   지연·soft bounce 2, hard bounce 3, complaint 4. delivery마다 마지막으로 상태를 바꾼
+   사건의 키(`providerEventAt`·`providerEventRank`·`providerEventId`)를 두고, **더 뒤인
+   사건만** 상태를 바꾸고, 바꿀 때 `lastErrorKind`를 그 상태에 맞게 다시 씁니다(soft
+   bounce면 `soft_bounce`, 아니면 비움). 모든 사건 적용은 주소 잠금 안에서 합니다. 기존
+   delivery의 키·`softBounceAt`·`deliveredAt`·상태는 migration이 보관 중인(90일) 처리된
+   `ProviderWebhookEvent`에서 같은 규칙으로 backfill합니다 — 배포 뒤 늦게 온 오래된 사건이
+   도착 순서로 정해졌던 기존 상태를 덮지 않도록.
+3. **hard bounce·complaint 원인은 순서와 무관하게 기록**합니다. 상태만 순서를 따릅니다.
+4. **soft bounce 원인은 사실에서 계산합니다.** delivery마다 가장 늦은 soft bounce 시각
+   (`softBounceAt`)을, 가장 늦은 delivered 시각(`deliveredAt`, 이제 사건 시각)을 둡니다.
+   연속은 **주소의 가장 늦은 delivered 이후**(같은 시각 포함) soft bounce가 있는 delivery이고,
+   5개 이상이면 시각순(같으면 delivery id순) **5번째가 넘은 시점**이 원인의 `occurredAt`,
+   거기서 24시간이 만료입니다. soft bounce와 delivered 사건마다 주소 잠금 안에서 이 기대
+   원인과 활성 원인을 맞춥니다 — 같은 delivery·같은 시각·같은 만료인 원인만 유지하고, 나머지는
+   해제(`delivered` 또는 `superseded`)한 뒤 기대 원인을 씁니다. 그다음 전역 entry가 soft
+   bounce이면 남은 활성 원인으로 다시 맞춥니다(가장 늦게 만료되는 soft bounce, 없으면 삭제). 처리 시점에 threshold를 넘은 사건으로 원인을 만들면 도착 순서에 따라
+   결과가 달라지기 때문입니다. 그래서 delivered는 **그보다 뒤에 기록된 원인도, 새 delivered
+   기준으로 연속이 모자라면** 해제합니다(설계 초안 C64의 "엄격히 이른 것만"을 순서 무관성
+   요구에 맞춰 좁힌 해석 — 늦게 처리된 오래된 delivered는 가장 늦은 delivered를 바꾸지 않으므로
+   이후 원인을 지우지 않습니다). 전역에 활성 원인이 남지 않으면 `soft_bounce` entry도 지웁니다.
+   이전과 달리 발송 수락(`sent`)은 연속을 끊지 않습니다. **delivery에 결속되지 않은 soft
+   bounce는 원인 계산에 쓰지 않습니다**(결속은 S1b-2의 `awaiting_delivery`).
+5. **만료 sweep** — 15분 runner가 만료된 soft bounce 원인(만료가 있는 유일한 이유)에
+   `releaseKind` `expired`·`releaseEvidence {kind: "expiry"}`를 쓰고, entry를 위와 같은 규칙으로
+   맞춥니다. 한 번에 원인 200행(만료 시각·id순), 주소마다 fence와 주소 잠금 안에서, 연결 대기와
+   실행을 합쳐 남은 20초 예산 안이며 2초 미만이 남으면 멈춥니다.
+6. **배포 중 공존** — 배포가 겹치는 동안 이전 build가 처리한 사건은 순서 키를 남기지 않고
+   delivered 해제도 하지 않습니다. 결과는 soft bounce 원인이 만료(24시간)까지 남는 **과차단**이나
+   관리 화면의 상태 표시 차이이며, 다음 사건에서 기대 원인으로 다시 맞춰집니다.
+7. **hard bounce 판정 정정** — Resend는 hard bounce를 `data.bounce.type` `Permanent`로,
+   soft bounce를 `Transient`, 판정 불가를 `Undetermined`로 보냅니다. 이전 판정은 `hard`만
+   영구로 읽어 **실제 영구 bounce를 모두 soft bounce로 처리**했습니다. 이제 `Permanent`와
+   `hard`가 영구이고 나머지는 soft입니다. 이미 soft로 기록된 과거 영구 bounce를 hard bounce
+   원인으로 되살리는 일은 별도 작업입니다(보관 중인 사건에서만 가능).
+
+### v17 (2026-09-17) — privacy request와 complaint의 suppression(S1b-1c)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+privacy request 표와 "complaint는 목적 opt-out도 함께"를 구현합니다.
+
+1. **삭제 요청 접수** — 요청 행을 만드는 transaction 안에서 classification scope
+   `marketing` 원인(`privacy_request`, `privacy:<requestId>:intake`)을 쓰고, 계정의
+   marketing purpose를 모두 끕니다(preference `source`·전이 `source` `privacy_request`).
+   판정 기준이 아직 `entry`이면 entry는 분류 scope를 읽지 못하므로 marketing purpose마다
+   `privacy_request` purpose 원인·entry(`privacy:<requestId>:intake:<purpose>`)도 씁니다.
+2. **삭제 요청 갱신** — 갱신 **후** 상태가 `completed && !legalHold`이면 같은
+   transaction에서 전역 `privacy_request`(`privacy:<requestId>:completed`)를 씁니다.
+   legal hold 해제도 여기에 해당하고, 같은 상태를 다시 저장하면 새 원인이 없습니다.
+3. **entry의 `privacy_request`는 어떤 이유로도 덮어쓰지 않습니다.** 뒤이은 hard bounce는
+   자기 원인만 남깁니다 — entry가 승인으로 풀 수 있는 이유로 바뀌면 요청의 기록이
+   사라지기 때문입니다.
+4. **complaint** — 전역 complaint 원인과 한 transaction에서, delivery의
+   `TemplateVersion.purpose`가 끌 수 있는 purpose(security·billing 제외)이면 purpose
+   `unsubscribe` 원인(`webhook:<eventId>:purpose`)을 씁니다. delivery의 `userId` 계정이
+   있고 **현재 주소가 delivery 주소와 같을 때만** 그 purpose preference를 끄고
+   (`source` `provider_complaint`), 동의 철회 기록은 `capturedVia` `provider_complaint`,
+   delivery가 고정한 `policyVersionId`·`jurisdictionCountry`, `jurisdictionSource`
+   `delivery_pinned`입니다.
+5. **잠금 순서** — `setPreference`가 fence → User 행 → 주소 → preference 행 순서로
+   잡습니다(이전: preference 행 뒤에 주소). CHECK는 `EmailPreference_source_check`에
+   `privacy_request`·`provider_complaint`, `ConsentRecord_captured_via_check`에
+   `provider_complaint`를 더합니다(확장만).
+6. **재전달된 complaint는 preference를 다시 바꾸지 않습니다.** purpose 원인을 먼저 쓰고,
+   그 키가 이미 있으면(같은 사건) 철회를 건너뜁니다 — 사이에 다시 켠 preference를 되돌리지
+   않기 위해서입니다. 기본 preference 행은 transaction 전에 만들고(계정이 없으면 건너뜀),
+   계정 귀속은 User 행 잠금 안에서 판정하므로 삭제된 계정을 가리키는 complaint도 두 원인은
+   기록됩니다. 잠금 안에서 행을 만들면 잠금 없는 기존 생성 경로와 순서가 반대라 교착할 수 있습니다.
+7. **판정 기준이 `entry`여도 preference 켜기는 `privacy_request` 원인이 있으면 거절합니다**
+   (purpose·marketing 분류·전역). 삭제 접수의 분류 원인은 entry 판정에 보이지 않으므로,
+   켜기가 purpose entry를 지우면 발송이 다시 열리기 때문입니다. 그 밖의 이유는 v16과 같습니다.
+8. **끄기의 `ConsentRecord(withdrawn)`는 실제 동의(확인된 켜짐)가 있을 때만** 씁니다.
+   확인 없이 켜져 있던 행을 끄면 전이와 suppression만 남습니다.
+9. 삭제 접수의 요청 주소와 suppression 주소는 **잠근 User 행의 현재 주소**입니다.
+
+### v16 (2026-09-17) — suppression 판정 기준 전환(배포 B)
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md) 7.4의
+배포 B입니다. 배포 A가 원인을 entry 옆에 쌓았고, 이 배포는 **전환할 수 있게**만 합니다.
+설정을 바꾸기 전까지 동작은 v15와 같습니다.
+
+1. **판정 기준은 AppSetting `email.suppressionReadAuthority`** 입니다. 없거나
+   `causes`가 아니면 `entry`이고, 매 판정마다 읽고 캐시하지 않습니다. `causes`이면
+   활성 원인(해제되지 않고 만료되지 않은 것)을 전역·분류·purpose scope에서 읽습니다.
+2. **전환 fence** — suppression을 쓰거나 해제하는 모든 transaction(`recordSuppression`,
+   `removeSuppression`, 원인 해제, `setPreference`)이 첫 단계에서 공유 advisory 잠금을
+   잡고, 전환 작업이 같은 키를 배타로 잡습니다.
+3. **전환은 `npm run email:suppression-cutover`** — 배타 fence 안에서 entry와 활성
+   원인을 대조하고, **원인이 entry가 막는 발송을 허용하는 selector**(unsafe)가 0이어야
+   설정을 `causes`로 바꿉니다. 원인이 entry보다 더 막는 경우(stricter)는 세지 않습니다 —
+   entry의 병합이 한 영구 이유를 다른 이유로 덮어 잃어버린 기록이고, 그것을 지키는 것이
+   이 변경의 목적입니다. `--repair`는 unsafe selector에 entry의 이유를 원인으로
+   **추가**만 하고 해제하지 않습니다. **배포 B가 모든 인스턴스에 반영된 뒤에만** 실행합니다.
+4. **`causes`에서의 해제는 행위 × 원인 행렬**입니다. 관리자 1명은 manual·soft bounce,
+   승인(이중 또는 1인 예외)은 hard bounce·complaint까지, privacy request는 불가, 사용자의
+   unsubscribe는 preference 재활성화만 풉니다. 승인은 **요청 당시 활성 원인 id 집합**에
+   묶이고, 해제 transaction 안에서 집합이 달라졌으면 `approval_stale`로 거절합니다.
+   해제 감사 행과 원인 해제는 한 transaction이고, 승인 경로는 승인 id와 실행 시작 감사
+   id를 해제 작업에 넘깁니다(`AdminApprovalContext`). 남은 활성 원인이 있으면 entry는
+   지우지 않습니다 — 이전 build가 entry를 읽는 동안에도 막히도록.
+5. **`causes`에서 preference 켜기**는 그 purpose의 unsubscribe만 풀고, 같은 purpose·
+   marketing 분류·전역(soft bounce 제외)에 다른 활성 원인이 있으면 `suppressed`로
+   거절합니다.
+6. **판정 순서 정정** — manual·privacy request를 complaint 분기보다 먼저 봅니다. 기록이
+   여러 개일 때 transactional complaint가 먼저 허용으로 답해 운영자 보류를 넘던 순서였습니다.
+
+### v15 (2026-09-16) — 템플릿 metadata, 수신 거부 rate limit, key 보존
+
+제품 소식 이메일 재설계 초안(docs/policy/email-product-news-redesign-draft.md)의
+S1a 세 항목입니다. 셋 다 소유자 결정이 필요 없는 기계 보강입니다.
+
+1. **발송 판정 metadata는 `TemplateVersion`에 있습니다(10.2).**
+   `ensureTemplateVersion()`이 `EmailTemplate`을 `update: {}`로 upsert하므로, 코드에서
+   분류를 바꿔도 행은 옛 값으로 남았습니다. drain은 분류를 코드에서, 수신 거부
+   여부를 그 행에서 읽었으므로 **marketing으로 재분류된 템플릿이 수신 거부 링크 없이
+   나갈 수 있었습니다.**
+   - `classification`·`purpose`·`requiresUnsubscribe`를 각 version에 한 번 쓰고
+     trigger로 수정을 거부합니다. 같은 CHECK 두 개를 version에도 둡니다.
+   - registry는 이 셋을 조회 조건에 넣으므로, 본문이 같아도 metadata가 다르면 새
+     version을 만듭니다.
+   - drain과 webhook은 version 값을 씁니다. drain은 코드 정의와 **정확히** 비교해
+     다르면 `template_metadata_mismatch`로 실패 처리하고 incident를 올립니다.
+   - 기존 version은 **당시 `EmailTemplate` 값**으로 backfill했습니다. 현재 코드값을
+     복사하면 과거를 고쳐 쓰게 됩니다. 차이는
+     `npm run report:email-template-metadata`가 목록으로 보여 주고 고치지 않습니다.
+   - 배포 중 이전 build가 세 컬럼 없이 version을 insert해도 실패하지 않도록, 빈 값을
+     템플릿 행에서 채우는 **전환용 trigger**를 둡니다. 컬럼 추가·trigger·backfill·NOT
+     NULL은 한 문장(`DO` 블록)으로 원자적으로 실행합니다.
+2. **유효한 수신 거부 요청은 출처로 막지 않습니다(11.3).** IP당 20회/분 제한이 token을
+   읽기 전에 걸려, 한 NAT나 메일 사업자의 one-click 요청이 실제 수신 거부를 429로
+   만들 수 있었습니다. 이제 token을 먼저 열고, **유효하지 않은 요청만** 출처 제한을
+   받습니다. 유효한 token은 subject·purpose 단위로 30회/분·300회/일입니다.
+3. **1년 안에 발송된 메일이 쓰는 unsubscribe key는 지울 수 없습니다(11.4).** token은 만료되지
+   않지만 key version이 목록에 있을 때만 열립니다. 어떤 version으로 보냈는지 기록이
+   없었고 token도 보관하지 않으므로, 언제 지워도 되는지 알 수 없었습니다.
+   - `EmailDelivery.unsubscribeKeyVersion`에 실제 발송된 링크의 version을 남깁니다.
+   - version마다 **아무것도 끄지 않는 canary token**을 한 번 저장합니다.
+   - `/api/ready`의 `emailUnsubscribeKeyRetention`이 canary를 **복호화만** 해서,
+     **1년**(아래 11.4의 이전 버전 보존 기간) 안에 발송한 version이 빠졌거나 secret이
+     바뀌었거나 canary가 없으면 거부합니다. 지워도 되는 version은
+     `retirableVersions`로 보고합니다. 이 검사는 읽기만 합니다.
+   - **version 기록 이전에 나간 메일**은 어떤 key로 서명됐는지 알 수 없습니다. 그런
+     메일이 있으면 **drain이 한 번** 그때 목록에 있는 모든 version을 채택하고
+     (`EmailUnsubscribeKeyAdoption`, 단일 행), 이후 그 version들을 그 메일 기준으로
+     보존합니다. 채택 전 상태는 경고로만 보고합니다 — 이 코드가 배포되기 전의 일은
+     어떤 방법으로도 검증할 수 없고, 오류로 막으면 기록을 시작하는 배포 자체가 막히기
+     때문입니다.
+   - endpoint를 호출하는 end-to-end 점검은 이것과 별개입니다.
 
 ### v12 (2026-09-16) — 피드백 처리 결과 답변은 transactional
 
@@ -1665,11 +1934,18 @@ TemplateVersion:
   language           String   // 언어별 행
   subject, bodyHtml, bodyText
   contentHash        String   // 불변성 검증
+  classification     String   // v15. 이 version이 게시된 분류. trigger로 수정 불가
+  purpose            String?  // v15. 같은 규칙
+  requiresUnsubscribe Boolean // v15. 같은 규칙
   status             "draft" | "published" | "retired"
   publishedAt, publishedById
   @@unique([templateId, version, language])
 ```
 - **published 이후 수정 불가.** 고치려면 새 버전. `contentHash`가 이를 검증합니다.
+- **발송 판정은 version의 metadata를 씁니다(v15).** `EmailTemplate`의 세 필드는 처음
+  등록될 때 한 번 쓰이는 이력이고, 어떤 발송도 그 행으로 결정하지 않습니다. registry는
+  `contentHash`와 세 metadata를 함께 조회 조건으로 쓰고, drain은 코드 정의와 다르면
+  보내지 않습니다.
 
 **`EmailEvent`** (outbox)
 ```
@@ -1988,6 +2264,11 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
   끈다"입니다.
 - 처리 후 "되돌리기" 링크를 30분간 제공(오클릭 구제). **재구독을 유도하는 마케팅
   문구는 넣지 않습니다.**
+- **rate limit은 유효하지 않은 요청에만 출처 기준으로 겁니다(v15).** token을 먼저
+  열고(로컬 복호화, DB 없음), 실패한 요청만 출처당 20회/분·200회/일을 씁니다. 유효한
+  token은 끄기만 할 수 있으므로 출처로 막지 않고, subject·purpose 단위
+  30회/분·300회/일로만 묶습니다. 한 NAT나 메일 사업자 뒤의 수신자들이 서로를 막으면
+  안 됩니다.
 
 ### 11.4 unsubscribe token 보안
 
@@ -1997,6 +2278,7 @@ POST /api/unsubscribe            -> One-Click (RFC 8058)
 | 열거 불가 | payload에 `userId` 대신 **불투명 식별자**. 이메일 주소 평문 금지 |
 | 범위 제한 | `{ subjectId, purpose, deliveryId, version }`만 서명. **다른 사용자 설정 변경 불가** |
 | 만료 | **만료하지 않음.** CAN-SPAM은 최소 30일 동작을 요구하고, 오래된 메일에서 눌러도 동작해야 합니다. 대신 secret 회전 시 이전 버전 검증을 1년간 유지 |
+| key 보존 | **v15.** 발송마다 `EmailDelivery.unsubscribeKeyVersion`을 남기고, version마다 아무것도 끄지 않는 canary token을 저장합니다. readiness가 canary를 복호화해 **1년 안에 쓴 version이 빠졌거나 secret이 바뀌거나 canary가 없으면** 거부합니다. 회전은 version 이름을 새로 추가하는 방식만 안전합니다 |
 | 재사용 | 멱등. 이미 거부 상태면 같은 결과 |
 | 로그 유출 | **token은 URL 쿼리에 남습니다.** 접근 로그·Sentry·Referer에서 마스킹 필수 |
 | 권한 상승 불가 | token으로는 **끄기만** 가능. 켜기는 로그인 필요 |
