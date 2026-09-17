@@ -1055,6 +1055,32 @@ feedback의 Trace 검증, `errorReportToken`, `TraceErrorEvidence`, chat 오류
   marketing에 서명 키가 없으면 헤더 없이 보내는 대신 발송을 거부합니다(§11.3).
 - marketing은 위 suppression 경계 결정 전까지 production에서 비활성입니다.
 
+# 마케팅 자동화
+
+마케팅 게시·승인·채널 연결·Guard·마케팅 테이블, 그리고 시스템 actor 감사 기록을
+건드리기 전에 읽습니다.
+
+- `docs/policy/marketing-automation.md`
+
+절대 조건:
+
+- **사람 감사와 시스템 감사는 하나의 해시 체인입니다.** 두 writer 모두
+  `lib/adminAudit.ts`의 같은 append 함수를 지나며, 감사 테이블에 직접 쓰지
+  않습니다. 시스템 기록은 `writeSystemAuditLog()`만 쓰고, 호출자의
+  트랜잭션이 필수입니다.
+- **시스템 actor는 닫힌 목록입니다**(`lib/adminAuditSystemActors.ts`).
+  `metadata.systemActor`는 예약 키라서 두 writer 모두 호출자가 넣은 값을
+  거절합니다. "사람이 승인했는가"를 묻는 검사는 `auditRowActorKind()`로 판정하고
+  `unknown`을 사람으로 취급하지 않습니다.
+- **마케팅 변경 권한은 `marketing:write`이고 owner·ops만 갖습니다**
+  (`lib/adminAuthCore.ts`). 모든 변경 route가 권한과 step-up을 route 안에서
+  직접 검사합니다.
+- **마케팅 승인은 `AdminActionApproval`을 쓰지 않습니다.** 시스템 초안을 사람
+  1명이 승인하는 별도 계약입니다: docs/policy/marketing-automation.md §6.
+- **Instagram·TikTok은 자율 모드로 졸업하지 않습니다**(정책 문서의 O15).
+- 구현 단계와 각 단계의 대상 경로는 docs/policy/marketing-automation.md §14를 따르며, 새 경로는 그 단계의 PR이
+  이 절에 추가합니다.
+
 # AI Review (교차검토) 품질과 M5
 
 AI Review의 프롬프트·reviewer 패널·인용 검증·평가·운영 계측·항목 피드백,
